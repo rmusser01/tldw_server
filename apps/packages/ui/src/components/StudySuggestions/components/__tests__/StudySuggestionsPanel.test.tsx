@@ -57,6 +57,50 @@ const initialSnapshot = {
   }
 }
 
+const v2Snapshot = {
+  snapshot: {
+    id: 91,
+    service: "quiz",
+    activity_type: "quiz_attempt",
+    anchor_type: "quiz_attempt",
+    anchor_id: 404,
+    suggestion_type: "study_suggestions",
+    status: "active",
+    payload: {
+      summary: {
+        score: 8,
+        correct_count: 3,
+        total_count: 4
+      },
+      topics: [
+        {
+          id: "topic-local-1",
+          display_label: "Cardiovascular review",
+          topic_key: "cardio-001",
+          canonical_label: "Cardiovascular review",
+          evidence_reasons: ["topic_gap", "incorrect_answer"],
+          type: "grounded",
+          status: "weakness",
+          selected: true
+        }
+      ]
+    },
+    user_selection: {
+      selected_topic_ids: ["cardio-001"]
+    },
+    refreshed_from_snapshot_id: null,
+    created_at: "2026-04-05T18:00:00Z",
+    last_modified: "2026-04-05T18:00:00Z"
+  },
+  live_evidence: {
+    "cardio-001": {
+      source_available: true,
+      source_type: "note",
+      source_id: "note-9"
+    }
+  }
+}
+
 describe("StudySuggestionsPanel", () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -97,30 +141,36 @@ describe("StudySuggestionsPanel", () => {
     })
   })
 
-  it("sends current selected labels for renamed and manual topics, and selection toggles change the payload", async () => {
+  it("renders V2 snapshot topics through the current panel and keeps edited labels tied to the snapshot-local id", async () => {
     mocks.performAction.mockResolvedValue({
       disposition: "generated",
-      snapshot_id: 88,
-      selection_fingerprint: "snapshot_id=88|target_service=flashcards|target_type=deck|topics=acid base,renal physiology|action_kind=follow_up_flashcards|generator_version=v1",
+      snapshot_id: 91,
+      selection_fingerprint: "snapshot_id=91|target_service=flashcards|target_type=deck|topics=acid base,cardiovascular review|action_kind=follow_up_flashcards|generator_version=v1",
       target_service: "flashcards",
       target_type: "deck",
       target_id: "deck-12"
     })
 
-    render(<StudySuggestionsPanel anchorType="quiz_attempt" anchorId={101} />)
+    vi.mocked(useStudySuggestions).mockReturnValue({
+      status: "ready",
+      snapshot: v2Snapshot,
+      isLoading: false,
+      isRefreshing: false,
+      refresh: mocks.refresh,
+      performAction: mocks.performAction
+    } as never)
 
-    expect(screen.getByText("Weakness")).toBeInTheDocument()
-    expect(screen.getByText("Evidence: Grounded")).toBeInTheDocument()
+    render(<StudySuggestionsPanel anchorType="quiz_attempt" anchorId={404} />)
+
+    expect(screen.getByDisplayValue("Cardiovascular review")).toBeInTheDocument()
+    expect(screen.getByText("Evidence: Topic Gap, Incorrect Answer")).toBeInTheDocument()
 
     const firstTopicInput = screen.getByLabelText("Topic 1")
-    fireEvent.change(firstTopicInput, { target: { value: "  Renal physiology  " } })
+    fireEvent.change(firstTopicInput, { target: { value: "  Cardio review  " } })
+    expect(screen.getByDisplayValue("Cardio review")).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole("button", { name: /Add topic/i }))
     fireEvent.change(screen.getByLabelText("Topic 2"), { target: { value: "  Acid base  " } })
-
-    const firstToggle = screen.getByRole("button", { name: "Toggle selection for topic 1" })
-    expect(firstToggle).toHaveAttribute("aria-pressed", "true")
-    expect(firstToggle).toHaveTextContent("Selected")
 
     fireEvent.click(screen.getByRole("button", { name: "Create flashcards" }))
 
@@ -130,17 +180,17 @@ describe("StudySuggestionsPanel", () => {
           targetService: "flashcards",
           targetType: "deck",
           actionKind: "follow_up_flashcards",
-          selectedTopicIds: ["topic-1"],
-          selectedTopicEdits: [{ id: "topic-1", label: "Renal physiology" }],
+          selectedTopicIds: ["topic-local-1"],
+          selectedTopicEdits: [{ id: "topic-local-1", label: "Cardio review" }],
           manualTopicLabels: ["Acid base"],
           hasExplicitSelection: true
         })
       )
     })
 
+    const firstToggle = screen.getByRole("button", { name: "Toggle selection for topic 1" })
     fireEvent.click(firstToggle)
     expect(firstToggle).toHaveAttribute("aria-pressed", "false")
-    expect(firstToggle).toHaveTextContent("Excluded")
 
     fireEvent.click(screen.getByRole("button", { name: "Create flashcards" }))
 
@@ -156,13 +206,10 @@ describe("StudySuggestionsPanel", () => {
     })
 
     fireEvent.click(screen.getByRole("button", { name: "Toggle selection for topic 2" }))
-
-    await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Toggle selection for topic 2" })).toHaveAttribute(
-        "aria-pressed",
-        "false"
-      )
-    })
+    expect(screen.getByRole("button", { name: "Toggle selection for topic 2" })).toHaveAttribute(
+      "aria-pressed",
+      "false"
+    )
 
     fireEvent.click(screen.getByRole("button", { name: "Create flashcards" }))
 
@@ -176,6 +223,14 @@ describe("StudySuggestionsPanel", () => {
         })
       )
     })
+  })
+
+  it("keeps legacy snapshot topics rendering unchanged", async () => {
+    render(<StudySuggestionsPanel anchorType="quiz_attempt" anchorId={101} />)
+
+    expect(screen.getByDisplayValue("Renal basics")).toBeInTheDocument()
+    expect(screen.getByText("Weakness")).toBeInTheDocument()
+    expect(screen.getByText("Evidence: Grounded")).toBeInTheDocument()
   })
 
   it("shows Open existing when the follow-up action reuses an existing result", async () => {

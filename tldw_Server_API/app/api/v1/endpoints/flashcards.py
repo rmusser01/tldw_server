@@ -32,6 +32,10 @@ from tldw_Server_API.app.api.v1.schemas.flashcards import (
     FlashcardGenerateResponse,
     FlashcardListResponse,
     FlashcardNextReviewResponse,
+    FlashcardTemplate,
+    FlashcardTemplateCreate,
+    FlashcardTemplateListResponse,
+    FlashcardTemplateUpdate,
     FlashcardResetSchedulingRequest,
     FlashcardReviewRequest,
     FlashcardReviewResponse,
@@ -412,6 +416,15 @@ def _fetch_flashcard_or_404(card_uuid: str, db: CharactersRAGDB) -> dict:
     return card
 
 
+def _fetch_flashcard_template_or_404(template_id: int, db: CharactersRAGDB) -> FlashcardTemplate:
+    """Return a validated flashcard template or raise a 404 when it does not exist."""
+
+    template = db.get_flashcard_template(template_id)
+    if not template:
+        raise HTTPException(status_code=404, detail="Flashcard template not found")
+    return FlashcardTemplate.model_validate(template)
+
+
 def _build_assistant_context_snapshot(context: dict[str, Any]) -> dict[str, Any]:
     return {
         "context_type": context.get("context_type"),
@@ -662,12 +675,14 @@ def _get_flashcards_apkg_max_media_bytes() -> int:
 def create_deck(payload: DeckCreate, db: CharactersRAGDB = Depends(get_chacha_db_for_user)):
     try:
         _ensure_workspace_exists(db, payload.workspace_id)
+        review_prompt_side = payload.review_prompt_side if "review_prompt_side" in payload.model_fields_set else None
         deck_id = db.add_deck(
             payload.name,
             payload.description,
             payload.scheduler_settings.model_dump() if payload.scheduler_settings else None,
             scheduler_type=payload.scheduler_type,
             workspace_id=payload.workspace_id,
+            review_prompt_side=review_prompt_side,
         )
         # Return the exact deck row by id
         deck = db.get_deck(deck_id)
@@ -679,6 +694,7 @@ def create_deck(payload: DeckCreate, db: CharactersRAGDB = Depends(get_chacha_db
             "name": payload.name,
             "description": payload.description,
             "workspace_id": payload.workspace_id,
+            "review_prompt_side": payload.review_prompt_side,
             "created_at": None,
             "last_modified": None,
             "deleted": False,
@@ -733,6 +749,7 @@ def update_deck(
     expected_version = data.pop("expected_version", None)
     scheduler_settings = data.pop("scheduler_settings", None)
     scheduler_type = data.pop("scheduler_type", None)
+    review_prompt_side = data.pop("review_prompt_side", None)
     workspace_id = data.pop("workspace_id", ...)
     try:
         if workspace_id is not ...:
@@ -741,6 +758,7 @@ def update_deck(
             deck_id,
             name=data.get("name"),
             description=data.get("description"),
+            review_prompt_side=review_prompt_side,
             scheduler_settings=scheduler_settings,
             scheduler_type=scheduler_type,
             workspace_id=workspace_id,
@@ -2248,6 +2266,117 @@ def export_flashcards(
     except CharactersRAGDBError as e:
         logger.error(f"Failed to export flashcards: {e}")
         raise HTTPException(status_code=500, detail="Failed to export flashcards") from e
+
+
+@router.post("/templates", response_model=FlashcardTemplate)
+def create_flashcard_template(
+    payload: FlashcardTemplateCreate,
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+) -> FlashcardTemplate:
+    """Create a reusable flashcard authoring template for the current user."""
+
+    try:
+        template_id = db.add_flashcard_template(**payload.model_dump())
+        return _fetch_flashcard_template_or_404(template_id, db)
+    except InputError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except ConflictError as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
+    except CharactersRAGDBError as e:
+        logger.bind(template_name=payload.name, model_type=payload.model_type).error(
+            f"Failed to create flashcard template: {e}"
+        )
+        raise HTTPException(status_code=500, detail="Failed to create flashcard template") from e
+
+
+@router.get("/templates", response_model=FlashcardTemplateListResponse)
+def list_flashcard_templates(
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    limit: int = Query(100, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+) -> FlashcardTemplateListResponse:
+    """List flashcard authoring templates for the current user."""
+
+    try:
+        items = db.list_flashcard_templates(limit=limit, offset=offset)
+        return FlashcardTemplateListResponse(
+            items=items,
+            count=len(items),
+            total=db.count_flashcard_templates(),
+        )
+    except CharactersRAGDBError as e:
+        logger.bind(limit=limit, offset=offset).error(
+            f"Failed to list flashcard templates: {e}"
+        )
+        raise HTTPException(status_code=500, detail="Failed to list flashcard templates") from e
+
+
+@router.get("/templates/{template_id}", response_model=FlashcardTemplate)
+def get_flashcard_template(
+    template_id: int,
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+) -> FlashcardTemplate:
+    """Fetch a single flashcard authoring template by ID."""
+
+    try:
+        return _fetch_flashcard_template_or_404(template_id, db)
+    except CharactersRAGDBError as e:
+        logger.bind(template_id=template_id).error(
+            f"Failed to get flashcard template: {e}"
+        )
+        raise HTTPException(status_code=500, detail="Failed to get flashcard template") from e
+
+
+@router.patch("/templates/{template_id}", response_model=FlashcardTemplate)
+def update_flashcard_template(
+    template_id: int,
+    payload: FlashcardTemplateUpdate,
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+) -> FlashcardTemplate:
+    """Update a flashcard authoring template using optimistic locking when provided."""
+
+    data: dict[str, Any] = {}
+    expected_version: Optional[int] = None
+    try:
+        data = payload.model_dump(exclude_unset=True)
+        expected_version = data.pop("expected_version", None)
+        ok = db.update_flashcard_template(template_id, data, expected_version)
+        if not ok:
+            raise HTTPException(status_code=404, detail="Flashcard template not found or not updated")
+        return _fetch_flashcard_template_or_404(template_id, db)
+    except InputError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except ConflictError as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
+    except CharactersRAGDBError as e:
+        logger.bind(
+            template_id=template_id,
+            expected_version=expected_version,
+            updated_fields=sorted(data.keys()),
+        ).error(f"Failed to update flashcard template: {e}")
+        raise HTTPException(status_code=500, detail="Failed to update flashcard template") from e
+
+
+@router.delete("/templates/{template_id}")
+def delete_flashcard_template(
+    template_id: int,
+    expected_version: int = Query(..., ge=1),
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+) -> dict[str, bool]:
+    """Soft-delete a flashcard authoring template using optimistic locking."""
+
+    try:
+        ok = db.soft_delete_flashcard_template(template_id, expected_version)
+        if not ok:
+            raise HTTPException(status_code=404, detail="Flashcard template not found or already deleted")
+        return {"deleted": True}
+    except ConflictError as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
+    except CharactersRAGDBError as e:
+        logger.bind(template_id=template_id, expected_version=expected_version).error(
+            f"Failed to delete flashcard template: {e}"
+        )
+        raise HTTPException(status_code=500, detail="Failed to delete flashcard template") from e
 
 
 @router.get("/{card_uuid}", response_model=Flashcard)

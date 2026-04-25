@@ -147,8 +147,8 @@ async def test_chats_scope_enforces_conversation_and_character_filters():
         {"query": "hello", "by": "both", "limit": 10, "offset": 0},
         context=ctx_conversation,
     )
-    assert out_conversation["results"]
-    assert all(str(r.get("conversation_id")) == "conv_a" for r in out_conversation["results"])
+    assert out_conversation["results"]  # nosec B101
+    assert all(str(r.get("conversation_id")) == "conv_a" for r in out_conversation["results"])  # nosec B101
     with pytest.raises(PermissionError):
         await mod.execute_tool(
             "chats.get",
@@ -162,8 +162,8 @@ async def test_chats_scope_enforces_conversation_and_character_filters():
         {"query": "hello", "by": "both", "limit": 10, "offset": 0},
         context=ctx_character,
     )
-    assert out_character["results"]
-    assert all(str(r.get("conversation_id")) == "conv_b" for r in out_character["results"])
+    assert out_character["results"]  # nosec B101
+    assert all(str(r.get("conversation_id")) == "conv_b" for r in out_character["results"])  # nosec B101
     with pytest.raises(PermissionError):
         await mod.execute_tool(
             "chats.get",
@@ -184,15 +184,15 @@ async def test_chats_scope_enforces_message_branch_filters():
         {"query": "hello", "by": "message", "limit": 10, "offset": 0},
         context=ctx_character,
     )
-    assert out_character["results"]
-    assert all(str(r.get("conversation_id")) == "conv_b" for r in out_character["results"])
+    assert out_character["results"]  # nosec B101
+    assert all(str(r.get("conversation_id")) == "conv_b" for r in out_character["results"])  # nosec B101
 
     out_character_mismatch = await mod.execute_tool(
         "chats.search",
         {"query": "hello", "by": "message", "limit": 10, "offset": 0, "character_id": 1},
         context=ctx_character,
     )
-    assert out_character_mismatch["results"] == []
+    assert out_character_mismatch["results"] == []  # nosec B101
 
     ctx_conversation = SimpleNamespace(metadata={"persona_scope": {"explicit_ids": {"conversation_id": ["conv_a"]}}})
     out_conversation = await mod.execute_tool(
@@ -200,8 +200,8 @@ async def test_chats_scope_enforces_message_branch_filters():
         {"query": "hello", "by": "message", "limit": 10, "offset": 0},
         context=ctx_conversation,
     )
-    assert out_conversation["results"]
-    assert all(str(r.get("conversation_id")) == "conv_a" for r in out_conversation["results"])
+    assert out_conversation["results"]  # nosec B101
+    assert all(str(r.get("conversation_id")) == "conv_a" for r in out_conversation["results"])  # nosec B101
 
 
 @pytest.mark.asyncio
@@ -216,14 +216,14 @@ async def test_media_scope_enforces_media_search_and_get():
         {"query": "alpha", "limit": 10, "offset": 0},
         context=ctx,
     )
-    assert db.last_media_ids_filter == [2]
-    assert [int(r.get("id")) for r in out["results"]] == [2]
+    assert db.last_media_ids_filter == [2]  # nosec B101
+    assert [int(r.get("id")) for r in out["results"]] == [2]  # nosec B101
 
     with pytest.raises(PermissionError):
         await mod.execute_tool("media.get", {"media_id": 1, "retrieval": {"mode": "snippet"}}, context=ctx)
 
     allowed = await mod.execute_tool("media.get", {"media_id": 2, "retrieval": {"mode": "snippet"}}, context=ctx)
-    assert int(allowed["meta"]["id"]) == 2
+    assert int(allowed["meta"]["id"]) == 2  # nosec B101
 
 
 @pytest.mark.asyncio
@@ -238,13 +238,110 @@ async def test_notes_scope_enforces_notes_search_and_get():
         {"query": "note", "limit": 10, "offset": 0},
         context=ctx,
     )
-    assert [str(r.get("id")) for r in out["results"]] == ["n2"]
+    assert [str(r.get("id")) for r in out["results"]] == ["n2"]  # nosec B101
 
     with pytest.raises(PermissionError):
         await mod.execute_tool("notes.get", {"note_id": "n1", "retrieval": {"mode": "snippet"}}, context=ctx)
 
     allowed = await mod.execute_tool("notes.get", {"note_id": "n2", "retrieval": {"mode": "snippet"}}, context=ctx)
-    assert str(allowed["meta"]["id"]) == "n2"
+    assert str(allowed["meta"]["id"]) == "n2"  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_direct_characters_and_prompts_tools_honor_persona_scope():
+    from tldw_Server_API.app.core.MCP_unified.modules.base import ModuleConfig
+    from tldw_Server_API.app.core.MCP_unified.modules.implementations.characters_module import CharactersModule
+    from tldw_Server_API.app.core.MCP_unified.modules.implementations.prompts_module import PromptsModule
+
+    class _CharactersDbForScopeTests:
+        def search_character_cards(self, query, limit=10):
+            return [{"id": 1, "name": "Alice"}, {"id": 2, "name": "Bob"}]
+
+        def get_character_card_by_id(self, character_id):
+            return {"id": character_id, "name": f"char-{character_id}", "description": "desc", "version": 1}
+
+        def close_all_connections(self):
+            return None
+
+    class _PromptsDbForScopeTests:
+        def search_prompts(self, search_query, search_fields=None, page=1, results_per_page=10, include_deleted=False):
+            rows = [
+                {"id": 1, "name": "p1", "details": "desc", "version": 1},
+                {"id": 2, "name": "p2", "details": "desc", "version": 1},
+            ]
+            return rows, len(rows)
+
+        def get_prompt_by_id(self, prompt_id):
+            return {"id": prompt_id, "name": f"p{prompt_id}", "details": "desc", "version": 1}
+
+        def get_prompt_by_name(self, name):
+            prompt_id = 2 if str(name) == "2" else 1
+            return {"id": prompt_id, "name": str(name), "details": "desc", "version": 1}
+
+        def close_connection(self):
+            return None
+
+    ctx = RequestContext(
+        request_id="persona-direct-tools",
+        user_id="1",
+        metadata={
+            "persona_scope": {
+                "scope_snapshot_id": "snap-1",
+                "materialized_scope": {
+                    "explicit_ids": {
+                        "character_id": ["2"],
+                        "prompt_id": ["2"],
+                    }
+                },
+            }
+        },
+    )
+
+    characters = CharactersModule(ModuleConfig(name="characters"))
+    prompts = PromptsModule(ModuleConfig(name="prompts"))
+    characters._open_db = lambda _ctx: _CharactersDbForScopeTests()  # type: ignore[attr-defined]
+    prompts._open_db = lambda _ctx: _PromptsDbForScopeTests()  # type: ignore[attr-defined]
+
+    with pytest.raises(PermissionError, match="Character access denied by persona scope"):
+        await characters.execute_tool("characters.get", {"character_id": 1}, context=ctx)
+
+    with pytest.raises(PermissionError, match="Prompt access denied by persona scope"):
+        await prompts.execute_tool("prompts.get", {"prompt_id_or_name": "1"}, context=ctx)
+
+
+@pytest.mark.asyncio
+async def test_prompts_search_filters_out_of_scope_results():
+    from tldw_Server_API.app.core.MCP_unified.modules.base import ModuleConfig
+    from tldw_Server_API.app.core.MCP_unified.modules.implementations.prompts_module import PromptsModule
+
+    class _PromptsDbForScopeSearchTests:
+        def search_prompts(self, search_query, search_fields=None, page=1, results_per_page=10, include_deleted=False):
+            rows = [
+                {"id": 1, "name": "p1", "details": "desc 1", "version": 1},
+                {"id": 2, "name": "p2", "details": "desc 2", "version": 1},
+            ]
+            return rows, len(rows)
+
+        def close_connection(self):
+            return None
+
+    ctx = RequestContext(
+        request_id="persona-prompts-search",
+        user_id="1",
+        metadata={
+            "persona_scope": {
+                "scope_snapshot_id": "snap-1",
+                "materialized_scope": {"explicit_ids": {"prompt_id": ["2"]}},
+            }
+        },
+    )
+
+    prompts = PromptsModule(ModuleConfig(name="prompts"))
+    prompts._open_db = lambda _ctx: _PromptsDbForScopeSearchTests()  # type: ignore[attr-defined]
+
+    result = await prompts.execute_tool("prompts.search", {"query": "p"}, context=ctx)
+
+    assert [row["id"] for row in result["results"]] == [2]  # nosec B101
 
 
 class _ScopeBypassNotesModule(BaseModule):
@@ -505,28 +602,28 @@ async def test_knowledge_scope_propagates_filters_and_blocks_bypass():
             context=ctx,
         )
 
-        assert _ScopeBypassNotesModule.last_args is not None
-        assert _ScopeBypassNotesModule.last_args.get("note_ids_filter") == ["n2"]
-        assert _ScopeBypassMediaModule.last_args is not None
-        assert _ScopeBypassMediaModule.last_args.get("media_ids_filter") == ["2"]
-        assert _ScopeBypassChatsModule.last_args is not None
-        assert _ScopeBypassChatsModule.last_args.get("conversation_ids_filter") == ["conv_b"]
-        assert _ScopeBypassCharactersModule.last_args is not None
-        assert _ScopeBypassCharactersModule.last_args.get("character_ids_filter") == ["2"]
-        assert _ScopeBypassPromptsModule.last_args is not None
-        assert _ScopeBypassPromptsModule.last_args.get("prompt_ids_filter") == ["2"]
+        assert _ScopeBypassNotesModule.last_args is not None  # nosec B101
+        assert _ScopeBypassNotesModule.last_args.get("note_ids_filter") == ["n2"]  # nosec B101
+        assert _ScopeBypassMediaModule.last_args is not None  # nosec B101
+        assert _ScopeBypassMediaModule.last_args.get("media_ids_filter") == ["2"]  # nosec B101
+        assert _ScopeBypassChatsModule.last_args is not None  # nosec B101
+        assert _ScopeBypassChatsModule.last_args.get("conversation_ids_filter") == ["conv_b"]  # nosec B101
+        assert _ScopeBypassCharactersModule.last_args is not None  # nosec B101
+        assert _ScopeBypassCharactersModule.last_args.get("character_ids_filter") == ["2"]  # nosec B101
+        assert _ScopeBypassPromptsModule.last_args is not None  # nosec B101
+        assert _ScopeBypassPromptsModule.last_args.get("prompt_ids_filter") == ["2"]  # nosec B101
 
         uris = {str(item.get("uri")) for item in out.get("results", [])}
-        assert "notes://n1" not in uris
-        assert "media://1" not in uris
-        assert "chats://conv_a" not in uris
-        assert "characters://1" not in uris
-        assert "prompts://1" not in uris
-        assert "notes://n2" in uris
-        assert "media://2" in uris
-        assert "chats://conv_b" in uris
-        assert "characters://2" in uris
-        assert "prompts://2" in uris
+        assert "notes://n1" not in uris  # nosec B101
+        assert "media://1" not in uris  # nosec B101
+        assert "chats://conv_a" not in uris  # nosec B101
+        assert "characters://1" not in uris  # nosec B101
+        assert "prompts://1" not in uris  # nosec B101
+        assert "notes://n2" in uris  # nosec B101
+        assert "media://2" in uris  # nosec B101
+        assert "chats://conv_b" in uris  # nosec B101
+        assert "characters://2" in uris  # nosec B101
+        assert "prompts://2" in uris  # nosec B101
 
         with pytest.raises(PermissionError):
             await km.execute_tool("knowledge.get", {"source": "media", "id": 1}, context=ctx)
@@ -544,15 +641,15 @@ async def test_knowledge_scope_propagates_filters_and_blocks_bypass():
             await km.execute_tool("knowledge.get", {"source": "prompts", "id": 1}, context=ctx)
 
         allowed = await km.execute_tool("knowledge.get", {"source": "media", "id": 2}, context=ctx)
-        assert int(allowed["meta"]["id"]) == 2
+        assert int(allowed["meta"]["id"]) == 2  # nosec B101
 
         allowed_character = await km.execute_tool("knowledge.get", {"source": "characters", "id": 2}, context=ctx)
-        assert int(allowed_character["meta"]["id"]) == 2
+        assert int(allowed_character["meta"]["id"]) == 2  # nosec B101
 
         allowed_prompt = await km.execute_tool("knowledge.get", {"source": "prompts", "id": 2}, context=ctx)
-        assert int(allowed_prompt["meta"]["id"]) == 2
+        assert int(allowed_prompt["meta"]["id"]) == 2  # nosec B101
 
         allowed_prompt_by_name = await km.execute_tool("knowledge.get", {"source": "prompts", "id": "p2"}, context=ctx)
-        assert int(allowed_prompt_by_name["meta"]["id"]) == 2
+        assert int(allowed_prompt_by_name["meta"]["id"]) == 2  # nosec B101
     finally:
         await reset_module_registry()

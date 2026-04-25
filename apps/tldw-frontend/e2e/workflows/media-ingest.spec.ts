@@ -21,6 +21,7 @@ import {
   dismissQuickIngest,
   reopenQuickIngest,
   queueUrlAndStartProcessing,
+  startQueuedQuickIngestProcessing,
   assertQuickIngestCompletedResults,
   openQuickIngestDialog,
   queueFileForQuickIngest,
@@ -421,34 +422,136 @@ test.describe("Media Ingestion Workflow", () => {
       process.cwd(),
       "e2e/fixtures/media/quick-ingest-sample.mkv"
     )
-    const quickIngestFixtureName = path.basename(quickIngestFixtureFile)
+    const quickIngestFixtureUrl = "https://example.com/e2e/quick-ingest-source.html"
+    const createUniqueQuickIngestFixtureCopy = (): string => {
+      const fixture = path.parse(quickIngestFixtureFile)
+      const uniqueFixtureFile = path.join(
+        "/tmp",
+        `${fixture.name}-${generateTestId("quick-ingest-real-upload")}${fixture.ext}`
+      )
+      fs.copyFileSync(quickIngestFixtureFile, uniqueFixtureFile)
+      return uniqueFixtureFile
+    }
 
-    const buildQuickIngestFixtureUrl = (baseURL: string): string =>
-      new URL("/e2e/quick-ingest-source.html", baseURL).toString()
-
-    const holdFirstQuickIngestStatusInProcessing = async (
-      page: Parameters<typeof waitForConnection>[0]
+    const mockQuickIngestLifecycle = async (
+      page: Parameters<typeof waitForConnection>[0],
+      options: {
+        sourceUrl?: string
+        mediaId?: string
+        jobId?: number
+        batchId?: string
+        processingResponses?: number
+        completedResult?: Record<string, unknown>
+        queueResponse?: {
+          status: number
+          body: Record<string, unknown>
+        }
+        fallbackAddResponse?: {
+          status?: number
+          body: Record<string, unknown>
+        }
+      } = {}
     ) => {
-      let remainingSyntheticProcessingResponses = 1
-      await page.route("**/api/v1/media/ingest/jobs/*", async (route, request) => {
-        if (request.method().toUpperCase() !== "GET") {
-          await route.continue()
-          return
-        }
-        if (remainingSyntheticProcessingResponses <= 0) {
+      const sourceUrl = options.sourceUrl ?? quickIngestFixtureUrl
+      const mediaId = options.mediaId ?? "qi-media-e2e-101"
+      const jobId = options.jobId ?? 101
+      const batchId = options.batchId ?? "batch-e2e-quick-ingest"
+      const title = "Quick ingest source"
+      let remainingProcessingResponses = Math.max(0, options.processingResponses ?? 0)
+
+      await page.route("**/api/v1/media/ingest/jobs", async (route, request) => {
+        const url = new URL(request.url())
+        const isQueueSubmit =
+          request.method().toUpperCase() === "POST" &&
+          url.pathname.replace(/\/+$/, "") === "/api/v1/media/ingest/jobs"
+        if (!isQueueSubmit) {
           await route.continue()
           return
         }
 
-        remainingSyntheticProcessingResponses -= 1
+        if (options.queueResponse) {
+          await route.fulfill({
+            status: options.queueResponse.status,
+            contentType: "application/json",
+            body: JSON.stringify(options.queueResponse.body)
+          })
+          return
+        }
+
         await route.fulfill({
           status: 200,
           contentType: "application/json",
           body: JSON.stringify({
-            status: "processing"
+            batch_id: batchId,
+            job_ids: [jobId],
+            jobs: [
+              {
+                id: jobId,
+                status: "queued"
+              }
+            ]
           })
         })
       })
+
+      await page.route(`**/api/v1/media/ingest/jobs/${jobId}`, async (route, request) => {
+        if (request.method().toUpperCase() !== "GET") {
+          await route.continue()
+          return
+        }
+
+        if (remainingProcessingResponses > 0) {
+          remainingProcessingResponses -= 1
+          await route.fulfill({
+            status: 200,
+            contentType: "application/json",
+            body: JSON.stringify({
+              status: "processing",
+              progress_percent: 40,
+              progress_message: "Processing queued URL"
+            })
+          })
+          return
+        }
+
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            job_id: jobId,
+            status: "completed",
+            progress_percent: 100,
+            result: {
+              status: "Success",
+              media_id: mediaId,
+              source_url: sourceUrl,
+              title,
+              ...options.completedResult,
+            }
+          })
+        })
+      })
+
+      if (options.fallbackAddResponse) {
+        await page.route("**/api/v1/media/add", async (route, request) => {
+          const url = new URL(request.url())
+          const isFallbackAdd =
+            request.method().toUpperCase() === "POST" &&
+            url.pathname.replace(/\/+$/, "") === "/api/v1/media/add"
+          if (!isFallbackAdd) {
+            await route.continue()
+            return
+          }
+
+          await route.fulfill({
+            status: options.fallbackAddResponse?.status ?? 200,
+            contentType: "application/json",
+            body: JSON.stringify(options.fallbackAddResponse.body)
+          })
+        })
+      }
+
+      return { sourceUrl, mediaId, jobId, batchId, title }
     }
 
     test("quick ingest opens from the visible media page triggers without helper fallback", async ({
@@ -478,7 +581,7 @@ test.describe("Media Ingestion Workflow", () => {
       await assertNoCriticalErrors(diagnostics)
     })
 
-    test("quick ingest accepts a real .mkv upload through completion and reopen", async ({
+    test("quick ingest preserves terminal real .mkv upload results after reopen", async ({
       authedPage,
       serverInfo,
       diagnostics
@@ -486,65 +589,122 @@ test.describe("Media Ingestion Workflow", () => {
       test.setTimeout(180_000)
       skipIfServerUnavailable(serverInfo)
 
-      const mediaId = await ingestAndWaitForReady(authedPage, {
-        file: quickIngestFixtureFile
-      })
+      const uniqueFixtureFile = createUniqueQuickIngestFixtureCopy()
+      const uniqueFixtureName = path.basename(uniqueFixtureFile)
 
-      await dismissQuickIngest(authedPage)
-      const dialog = await reopenQuickIngest(authedPage)
-      await assertQuickIngestCompletedResults(dialog, {
-        mediaId,
-        fileName: quickIngestFixtureName
-      })
+      try {
+        const mediaId = await ingestAndWaitForReady(authedPage, {
+          file: uniqueFixtureFile
+        })
+
+        await dismissQuickIngest(authedPage)
+        const dialog = await reopenQuickIngest(authedPage)
+        await assertQuickIngestCompletedResults(dialog, {
+          mediaId,
+          fileName: uniqueFixtureName,
+          terminalState: "either"
+        })
+      } finally {
+        if (fs.existsSync(uniqueFixtureFile)) {
+          fs.unlinkSync(uniqueFixtureFile)
+        }
+      }
 
       await assertNoCriticalErrors(diagnostics)
     })
 
     test("quick ingest ingests deterministic local URL through completion and reopen", async ({
       authedPage,
-      baseURL,
       serverInfo,
       diagnostics
     }) => {
       test.setTimeout(180_000)
       skipIfServerUnavailable(serverInfo)
 
-      const ingestUrl = buildQuickIngestFixtureUrl(baseURL ?? "http://localhost:3000")
+      const {
+        sourceUrl: ingestUrl,
+        mediaId: expectedMediaId,
+        title,
+      } = await mockQuickIngestLifecycle(
+        authedPage,
+        {
+          mediaId: "qi-media-url-complete"
+        }
+      )
       const mediaId = await ingestAndWaitForReady(authedPage, { url: ingestUrl })
+      expect(mediaId).toBe(expectedMediaId)
 
       await dismissQuickIngest(authedPage)
       const dialog = await reopenQuickIngest(authedPage)
-      await assertQuickIngestCompletedResults(dialog, { mediaId, sourceUrl: ingestUrl })
+      await assertQuickIngestCompletedResults(dialog, {
+        mediaId,
+        sourceUrl: ingestUrl,
+        title,
+      })
+
+      await assertNoCriticalErrors(diagnostics)
+    })
+
+    test("quick ingest restores skipped duplicate URL results after reopen", async ({
+      authedPage,
+      serverInfo,
+      diagnostics
+    }) => {
+      test.setTimeout(180_000)
+      skipIfServerUnavailable(serverInfo)
+
+      const { sourceUrl: ingestUrl, title } = await mockQuickIngestLifecycle(authedPage, {
+        mediaId: "qi-media-url-duplicate",
+        completedResult: {
+          db_message: "Media 'Quick ingest source' already exists. Overwrite not enabled."
+        }
+      })
+
+      let dialog = await queueUrlAndStartProcessing(authedPage, ingestUrl)
+      await assertQuickIngestCompletedResults(dialog, {
+        sourceUrl: ingestUrl,
+        title,
+        terminalState: "skipped"
+      })
+
+      await dismissQuickIngest(authedPage)
+      dialog = await reopenQuickIngest(authedPage)
+      await assertQuickIngestCompletedResults(dialog, {
+        sourceUrl: ingestUrl,
+        title,
+        terminalState: "skipped"
+      })
 
       await assertNoCriticalErrors(diagnostics)
     })
 
     test("quick ingest falls back to /api/v1/media/add when queue endpoint returns recognized 429", async ({
       authedPage,
-      baseURL,
       serverInfo,
       diagnostics
     }) => {
       test.setTimeout(180_000)
       skipIfServerUnavailable(serverInfo)
 
-      await authedPage.route("**/api/v1/media/ingest/jobs", async (route, request) => {
-        const url = new URL(request.url())
-        const isQueueSubmit =
-          request.method().toUpperCase() === "POST" &&
-          url.pathname.replace(/\/+$/, "") === "/api/v1/media/ingest/jobs"
-        if (!isQueueSubmit) {
-          await route.continue()
-          return
-        }
-
-        await route.fulfill({
+      const { sourceUrl: ingestUrl, title } = await mockQuickIngestLifecycle(authedPage, {
+        queueResponse: {
           status: 429,
-          contentType: "application/json",
-          body: JSON.stringify({
+          body: {
             detail: "Concurrent job limit reached: queue is full."
-          })
-        })
+          }
+        },
+        fallbackAddResponse: {
+          body: {
+            results: [
+              {
+                status: "Success",
+                media_id: "qi-media-url-fallback",
+                source_url: quickIngestFixtureUrl,
+                title: "Quick ingest source"
+              }
+            ]
+          }
+        }
       })
 
       const fallbackAddRequest = authedPage.waitForRequest((request) => {
@@ -553,10 +713,12 @@ test.describe("Media Ingestion Workflow", () => {
         return url.pathname.replace(/\/+$/, "") === "/api/v1/media/add"
       })
 
-      const ingestUrl = buildQuickIngestFixtureUrl(baseURL ?? "http://localhost:3000")
       const dialog = await queueUrlAndStartProcessing(authedPage, ingestUrl)
       await fallbackAddRequest
-      await assertQuickIngestCompletedResults(dialog, { sourceUrl: ingestUrl })
+      await assertQuickIngestCompletedResults(dialog, {
+        sourceUrl: ingestUrl,
+        title,
+      })
       await expect(dialog).not.toContainText(/queue is full|concurrent job limit/i)
 
       await assertNoCriticalErrors(diagnostics)
@@ -564,7 +726,6 @@ test.describe("Media Ingestion Workflow", () => {
 
     test("quick ingest configure options stay reachable in constrained viewport without forced preset selection", async ({
       authedPage,
-      baseURL,
       serverInfo,
       diagnostics
     }) => {
@@ -572,9 +733,8 @@ test.describe("Media Ingestion Workflow", () => {
       skipIfServerUnavailable(serverInfo)
 
       await authedPage.setViewportSize({ width: 390, height: 720 })
-      const ingestUrl = buildQuickIngestFixtureUrl(baseURL ?? "http://localhost:3000")
       const dialog = await openQuickIngestDialog(authedPage)
-      await advanceQuickIngestToConfigureStep(dialog, ingestUrl)
+      await advanceQuickIngestToConfigureStep(dialog, quickIngestFixtureUrl)
 
       await expect(dialog).toContainText(
         "Presets are starting points. Adjust any settings below or in Advanced options to fit this run."
@@ -597,15 +757,16 @@ test.describe("Media Ingestion Workflow", () => {
 
     test("quick ingest can be dismissed during processing and resumed from the normal trigger", async ({
       authedPage,
-      baseURL,
       serverInfo,
       diagnostics
     }) => {
       test.setTimeout(180_000)
       skipIfServerUnavailable(serverInfo)
 
-      await holdFirstQuickIngestStatusInProcessing(authedPage)
-      const ingestUrl = buildQuickIngestFixtureUrl(baseURL ?? "http://localhost:3000")
+      const { sourceUrl: ingestUrl } = await mockQuickIngestLifecycle(authedPage, {
+        mediaId: "qi-media-url-resume",
+        processingResponses: 1
+      })
       const dialog = await queueUrlAndStartProcessing(authedPage, ingestUrl, {
         waitForState: "processing"
       })
@@ -621,14 +782,15 @@ test.describe("Media Ingestion Workflow", () => {
 
     test("quick ingest restores URL sessions across refresh for queued, processing, and completed states", async ({
       authedPage,
-      baseURL,
       serverInfo,
       diagnostics
     }) => {
       test.setTimeout(240_000)
       skipIfServerUnavailable(serverInfo)
 
-      const ingestUrl = buildQuickIngestFixtureUrl(baseURL ?? "http://localhost:3000")
+      const { sourceUrl: ingestUrl, title } = await mockQuickIngestLifecycle(authedPage, {
+        mediaId: "qi-media-url-refresh"
+      })
 
       let dialog = await openQuickIngestDialog(authedPage)
       await advanceQuickIngestToConfigureStep(dialog, ingestUrl, { proceedToConfigure: false })
@@ -636,18 +798,23 @@ test.describe("Media Ingestion Workflow", () => {
       dialog = await reopenQuickIngest(authedPage)
       await expect(dialog).toContainText(ingestUrl)
 
-      await holdFirstQuickIngestStatusInProcessing(authedPage)
-      dialog = await queueUrlAndStartProcessing(authedPage, ingestUrl, {
+      dialog = await startQueuedQuickIngestProcessing(dialog, {
         waitForState: "processing"
       })
       await authedPage.reload({ waitUntil: "domcontentloaded" })
       dialog = await reopenQuickIngest(authedPage)
       await expect(dialog).toContainText(/processing|completed/i)
-      await assertQuickIngestCompletedResults(dialog, { sourceUrl: ingestUrl })
+      await assertQuickIngestCompletedResults(dialog, {
+        sourceUrl: ingestUrl,
+        title,
+      })
 
       await authedPage.reload({ waitUntil: "domcontentloaded" })
       dialog = await reopenQuickIngest(authedPage)
-      await assertQuickIngestCompletedResults(dialog, { sourceUrl: ingestUrl })
+      await assertQuickIngestCompletedResults(dialog, {
+        sourceUrl: ingestUrl,
+        title,
+      })
 
       await assertNoCriticalErrors(diagnostics)
     })
@@ -674,7 +841,6 @@ test.describe("Media Ingestion Workflow", () => {
 
     test("quick ingest draft sessions reopen from the normal trigger and do not expose the queued CTA during processing", async ({
       authedPage,
-      baseURL,
       serverInfo,
       diagnostics
     }) => {
@@ -686,7 +852,10 @@ test.describe("Media Ingestion Workflow", () => {
       await waitForConnection(authedPage)
       await expect(processQueuedCta).toHaveCount(0)
 
-      const ingestUrl = buildQuickIngestFixtureUrl(baseURL ?? "http://localhost:3000")
+      const { sourceUrl: ingestUrl } = await mockQuickIngestLifecycle(authedPage, {
+        mediaId: "qi-media-url-draft",
+        processingResponses: 1
+      })
       let dialog = await openQuickIngestDialog(authedPage)
       await advanceQuickIngestToConfigureStep(dialog, ingestUrl, { proceedToConfigure: false })
       await dismissQuickIngest(authedPage)
@@ -695,8 +864,8 @@ test.describe("Media Ingestion Workflow", () => {
       await expect(dialog).toContainText(ingestUrl)
       await dismissQuickIngest(authedPage)
 
-      await holdFirstQuickIngestStatusInProcessing(authedPage)
-      dialog = await queueUrlAndStartProcessing(authedPage, ingestUrl, {
+      dialog = await reopenQuickIngest(authedPage)
+      dialog = await startQueuedQuickIngestProcessing(dialog, {
         waitForState: "processing"
       })
       await expect(dialog).toContainText(/processing/i)

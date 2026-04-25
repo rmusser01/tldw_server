@@ -128,6 +128,7 @@ def _validate_file_type(data: bytes, filename: Optional[str]) -> tuple[bool, str
 # Local Imports
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.schemas.character_schemas import (
+    CharacterWorldBookDetachDeletionResponse,
     CharacterCreate,
     CharacterExemplarDeletionResponse,
     CharacterExemplarIn,
@@ -150,6 +151,8 @@ from tldw_Server_API.app.api.v1.schemas.character_schemas import (
     CharacterVersionEntry,
     CharacterVersionListResponse,
     DeletionResponse,
+    WorldBookDeletionResponse,
+    WorldBookEntryDeletionResponse,
 )
 from tldw_Server_API.app.api.v1.schemas.world_book_schemas import (
     BulkEntryOperation,
@@ -2115,7 +2118,7 @@ async def update_world_book(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="An unexpected error occurred") from e
 
 
-@router.delete("/world-books/{world_book_id}", response_model=DeletionResponse,
+@router.delete("/world-books/{world_book_id}", response_model=WorldBookDeletionResponse,
                summary="Delete world book", tags=["World Books"])
 async def delete_world_book(
         world_book_id: int = FastAPIPath(..., description="World book ID", gt=0),
@@ -2144,9 +2147,9 @@ async def delete_world_book(
             )
 
         delete_type = "permanently deleted" if hard_delete else "soft-deleted"
-        return DeletionResponse(
+        return WorldBookDeletionResponse(
             message=f"World book '{book_name}' (ID: {world_book_id}) {delete_type}",
-            character_id=world_book_id  # Reusing field name from character deletion
+            world_book_id=world_book_id,
         )
 
     except HTTPException:
@@ -2426,7 +2429,7 @@ async def update_world_book_entry(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="An unexpected error occurred") from e
 
 
-@router.delete("/world-books/entries/{entry_id}", response_model=DeletionResponse,
+@router.delete("/world-books/entries/{entry_id}", response_model=WorldBookEntryDeletionResponse,
                summary="Delete world book entry", tags=["World Books"])
 async def delete_world_book_entry(
         entry_id: int = FastAPIPath(..., description="Entry ID", gt=0),
@@ -2444,9 +2447,9 @@ async def delete_world_book_entry(
                 detail=f"Entry with ID {entry_id} not found"
             )
 
-        return DeletionResponse(
+        return WorldBookEntryDeletionResponse(
             message=f"World book entry (ID: {entry_id}) deleted",
-            character_id=entry_id  # Reusing field name
+            entry_id=entry_id,
         )
 
     except HTTPException:
@@ -2527,7 +2530,7 @@ async def attach_world_book_to_character(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="An unexpected error occurred") from e
 
 
-@router.delete("/{character_id:int}/world-books/{world_book_id:int}", response_model=DeletionResponse,
+@router.delete("/{character_id:int}/world-books/{world_book_id:int}", response_model=CharacterWorldBookDetachDeletionResponse,
                summary="Detach world book from character", tags=["World Books"])
 async def detach_world_book_from_character(
         character_id: int = FastAPIPath(..., description="Character ID", gt=0),
@@ -2546,9 +2549,10 @@ async def detach_world_book_from_character(
                 detail=f"Attachment between character {character_id} and world book {world_book_id} not found"
             )
 
-        return DeletionResponse(
+        return CharacterWorldBookDetachDeletionResponse(
             message=f"World book {world_book_id} detached from character {character_id}",
-            character_id=world_book_id  # Reusing field name
+            world_book_id=world_book_id,
+            detached_from_character_id=character_id,
         )
 
     except HTTPException:

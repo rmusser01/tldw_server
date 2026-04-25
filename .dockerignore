@@ -14,6 +14,20 @@
 .claude/
 .codex/
 
+# Local env/secrets (never bake setup credentials into images)
+.env
+.env.*
+!.env.example
+.ENV
+.ENV.*
+!.ENV.example
+tldw_Server_API/Config_Files/.env
+tldw_Server_API/Config_Files/.env.*
+!tldw_Server_API/Config_Files/.env.example
+tldw_Server_API/Config_Files/.ENV
+tldw_Server_API/Config_Files/.ENV.*
+!tldw_Server_API/Config_Files/.ENV.example
+
 # Python/build outputs
 __pycache__/
 *.py[cod]

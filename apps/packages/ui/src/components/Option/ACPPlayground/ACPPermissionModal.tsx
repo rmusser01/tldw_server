@@ -29,23 +29,18 @@ export const ACPPermissionModal: React.FC<ACPPermissionModalProps> = ({
   const [showPolicyDetails, setShowPolicyDetails] = useState(false)
   const [now, setNow] = useState(Date.now())
   const currentPermission = pendingPermissions[0]
+  const currentRequestId = currentPermission?.request_id ?? null
 
   useEffect(() => {
-    if (!currentPermission) {
-      return
-    }
     const interval = setInterval(() => setNow(Date.now()), 1000)
     return () => clearInterval(interval)
-  }, [currentPermission?.request_id])
+  }, [])
 
   useEffect(() => {
-    if (!currentPermission) {
-      return
-    }
-    setNow(Date.now())
     setBatchApprove(false)
     setShowPolicyDetails(false)
-  }, [currentPermission?.request_id])
+    setNow(Date.now())
+  }, [currentRequestId])
 
   if (!currentPermission) {
     return null
@@ -97,6 +92,7 @@ export const ACPPermissionModal: React.FC<ACPPermissionModalProps> = ({
   return (
     <div
       role="dialog"
+      aria-modal="true"
       aria-label={t("playground:acp.permissionRequired", "Permission Required")}
       className="absolute bottom-4 right-4 z-50 w-[420px] max-w-[calc(100vw-2rem)] max-h-[80vh] overflow-y-auto rounded-xl border border-border bg-surface shadow-2xl p-5"
     >

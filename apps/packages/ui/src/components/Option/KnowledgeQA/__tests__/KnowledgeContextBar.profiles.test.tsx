@@ -256,8 +256,8 @@ describe("KnowledgeContextBar saved search profiles", () => {
   // -----------------------------------------------------------------------
   describe("max profiles limit", () => {
     it("disables save button and shows limit message when 5 profiles exist", () => {
-      const profiles = Array.from({ length: 5 }, (_, i) => ({
-        name: `Profile ${i + 1}`,
+      const profiles = Array.from({ length: 5 }, (_, index) => ({
+        name: `Profile ${index + 1}`,
         sources: ["media_db"] as string[],
         preset: "fast",
         enableWebFallback: true,

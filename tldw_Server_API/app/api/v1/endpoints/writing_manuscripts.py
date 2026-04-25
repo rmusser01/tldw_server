@@ -1355,10 +1355,6 @@ async def update_world_info(
 ) -> ManuscriptWorldInfoResponse:
     """Update a world-info entry with optimistic locking."""
     update_data: dict[str, Any] = {}
-    if _field_present(payload, "kind"):
-        if payload.kind is None:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="kind cannot be null")
-        update_data["kind"] = payload.kind
     if _field_present(payload, "name"):
         try:
             update_data["name"] = _require_non_empty_text(payload.name, "name")
@@ -2202,7 +2198,6 @@ async def analyze_scene(
         )
 
         text = scene.get("content_plain", "") or ""
-        pending_results: list[tuple[str, dict[str, Any], float | None]] = []
         results: list[ManuscriptAnalysisResponse] = []
         for analysis_type in payload.analysis_types:
             if analysis_type == "pacing":
@@ -2218,9 +2213,6 @@ async def analyze_scene(
                 result = {"error": f"Unknown analysis type: {analysis_type}"}
                 score = None
 
-            pending_results.append((analysis_type, result, score))
-
-        for analysis_type, result, score in pending_results:
             aid = helper.create_analysis(
                 scene["project_id"], "scene", scene_id, analysis_type,
                 result, score=score, provider=provider_override, model=model_override,
@@ -2270,7 +2262,6 @@ async def analyze_chapter(
             analyze_plot_holes as _analyze_plot_holes,
         )
 
-        pending_results: list[tuple[str, dict[str, Any], float | None]] = []
         results: list[ManuscriptAnalysisResponse] = []
         for analysis_type in payload.analysis_types:
             if analysis_type == "pacing":
@@ -2286,9 +2277,6 @@ async def analyze_chapter(
                 result = {"error": f"Unknown analysis type: {analysis_type}"}
                 score = None
 
-            pending_results.append((analysis_type, result, score))
-
-        for analysis_type, result, score in pending_results:
             aid = helper.create_analysis(
                 chapter["project_id"], "chapter", chapter_id, analysis_type,
                 result, score=score, provider=provider_override, model=model_override,

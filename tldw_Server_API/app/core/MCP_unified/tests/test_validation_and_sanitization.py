@@ -56,20 +56,20 @@ async def test_tool_name_strict_regex_blocks_invalid():
         "id": 1,
     }
     resp = await proto.process_request(req, ctx)
-    assert resp is not None and resp.error is not None
-    assert resp.error.code == -32603
-    assert "Invalid tool name" in (resp.error.message or "")
+    assert resp is not None and resp.error is not None  # nosec B101
+    assert resp.error.code == -32603  # nosec B101
+    assert "Invalid tool name" in (resp.error.message or "")  # nosec B101
 
 
-def test_deep_argument_sanitization_blocks_nested_patterns():
+@pytest.mark.asyncio
+async def test_deep_argument_sanitization_blocks_nested_patterns():
     mod = InlineSanitizeModule(ModuleConfig(name="inline"))
     # Safe case
     msg = os.urandom(4).hex()
-    import asyncio
-    out = asyncio.get_event_loop().run_until_complete(mod.execute_tool("echo_sanitize", {"message": msg}))
-    assert out == msg
+    out = await mod.execute_tool("echo_sanitize", {"message": msg})
+    assert out == msg  # nosec B101
     # Nested dangerous pattern should raise
     with pytest.raises(ValueError):
-        asyncio.get_event_loop().run_until_complete(
+        await (
             mod.execute_tool("echo_sanitize", {"message": "ok", "nested": {"bad": "/* injected */"}})
         )

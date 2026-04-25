@@ -15,7 +15,6 @@ import type {
   ACPSessionUsageResponse,
   ACPWSClientMessage,
   ACPWSServerMessage,
-  ACPStructuredError,
 } from "./types"
 import { shouldRetryACPWebSocketClose } from "./constants"
 import { resolveBrowserRequestTransport } from "@/services/tldw/request-core"
@@ -37,60 +36,6 @@ export interface ACPClientConfig {
 
 export class ACPRestClient {
   constructor(private config: ACPClientConfig) {}
-
-  private buildStructuredError(
-    response: Response,
-    rawBody: unknown
-  ): Error & Partial<ACPStructuredError> & { data?: Partial<ACPStructuredError>; status?: number } {
-    const payload =
-      rawBody && typeof rawBody === "object" && !Array.isArray(rawBody)
-        ? rawBody as Record<string, unknown>
-        : {}
-    const detail =
-      payload.detail && typeof payload.detail === "object" && !Array.isArray(payload.detail)
-        ? payload.detail as Record<string, unknown>
-        : payload
-
-    const message =
-      typeof detail.message === "string"
-        ? detail.message
-        : typeof detail.detail === "string"
-          ? detail.detail
-          : typeof payload.detail === "string"
-            ? payload.detail
-            : response.statusText || `HTTP ${response.status}`
-    const code =
-      typeof detail.code === "string"
-        ? detail.code
-        : typeof payload.error_code === "string"
-          ? payload.error_code
-          : typeof payload.code === "string"
-            ? payload.code
-            : undefined
-    const suggestions = Array.isArray(detail.suggestions)
-      ? detail.suggestions.filter(
-          (entry): entry is ACPStructuredError["suggestions"][number] =>
-            typeof entry === "object" &&
-            entry != null &&
-            typeof (entry as { action?: unknown }).action === "string"
-        )
-      : []
-
-    const error = new Error(message) as Error &
-      Partial<ACPStructuredError> & {
-        data?: Partial<ACPStructuredError>
-        status?: number
-      }
-    error.status = response.status
-    error.code = code
-    error.suggestions = suggestions
-    error.data = {
-      code,
-      message,
-      suggestions,
-    }
-    return error
-  }
 
   private buildQuery(params?: Record<string, string | number | boolean | null | undefined>): string {
     if (!params) {
@@ -130,16 +75,33 @@ export class ACPRestClient {
     })
 
     if (!response.ok) {
-      const rawBody = await response.text().catch(() => "")
-      let parsedBody: unknown = { detail: response.statusText }
-      if (rawBody.trim()) {
-        try {
-          parsedBody = JSON.parse(rawBody)
-        } catch {
-          parsedBody = { detail: rawBody }
-        }
+      const errorBody = await response.json().catch(() => ({ detail: response.statusText }))
+      const detail =
+        errorBody && typeof errorBody === "object" && "detail" in errorBody
+          ? errorBody.detail
+          : response.statusText
+      const requestError = new Error(
+        typeof detail === "string" && detail.trim().length > 0
+          ? detail
+          : `HTTP ${response.status}`
+      ) as Error & {
+        status?: number
+        code?: string
+        detail?: unknown
+        details?: unknown
       }
-      throw this.buildStructuredError(response, parsedBody)
+      requestError.status = response.status
+      requestError.code =
+        errorBody && typeof errorBody === "object"
+          ? typeof (errorBody as Record<string, unknown>).error_code === "string"
+            ? (errorBody as Record<string, unknown>).error_code as string
+            : typeof (errorBody as Record<string, unknown>).code === "string"
+              ? (errorBody as Record<string, unknown>).code as string
+              : undefined
+          : undefined
+      requestError.detail = detail
+      requestError.details = errorBody
+      throw requestError
     }
 
     return response.json()

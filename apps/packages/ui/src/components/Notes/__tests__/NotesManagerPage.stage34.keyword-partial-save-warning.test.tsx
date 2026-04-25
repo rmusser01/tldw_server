@@ -225,7 +225,7 @@ describe("NotesManagerPage stage 34 keyword partial save warnings", () => {
     })
     expect(mockMessageSuccess).toHaveBeenCalledWith("Note created")
     expect(mockMessageWarning).toHaveBeenCalledWith(
-      expect.stringContaining("1 keyword failed to attach (beta)")
+      expect.stringContaining("1 tag failed to attach (beta)")
     )
 
     fireEvent.change(contentInput, {
@@ -240,7 +240,7 @@ describe("NotesManagerPage stage 34 keyword partial save warnings", () => {
     })
     expect(mockMessageSuccess).toHaveBeenCalledWith("Note updated")
     expect(mockMessageWarning).toHaveBeenCalledWith(
-      expect.stringContaining("2 keywords failed to attach (beta, gamma)")
+      expect.stringContaining("2 tags failed to attach (beta, gamma)")
     )
   })
 })

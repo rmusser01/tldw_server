@@ -9,6 +9,7 @@ import {
   Switch,
 } from "antd"
 import React from "react"
+import { ChevronDown, ChevronUp } from "lucide-react"
 import { LabelWithHelp } from "@/components/Common/LabelWithHelp"
 
 type DictionaryEntryEditFormProps = {
@@ -28,31 +29,94 @@ export const DictionaryEntryEditForm: React.FC<DictionaryEntryEditFormProps> = (
   normalizeProbabilityValue,
   formatProbabilityFrequencyHint,
 }) => {
+  const advancedOptionsPanelId = React.useId()
+  const watchedProbability = Form.useWatch("probability", { form, preserve: true })
+  const watchedGroup = Form.useWatch("group", { form, preserve: true })
+  const watchedMaxReplacements = Form.useWatch("max_replacements", { form, preserve: true })
+  const watchedTimedEffects = Form.useWatch("timed_effects", { form, preserve: true })
+  const watchedCaseSensitive = Form.useWatch("case_sensitive", { form, preserve: true })
+
+  const toFiniteNumber = React.useCallback((value: unknown): number | null => {
+    const normalizedValue =
+      typeof value === "string" && value.trim() !== "" ? Number(value) : value
+
+    if (typeof normalizedValue !== "number" || !Number.isFinite(normalizedValue)) {
+      return null
+    }
+
+    return normalizedValue
+  }, [])
+
+  const hasNonDefaultAdvancedValues = React.useCallback((values: Record<string, any>) => {
+    const prob = toFiniteNumber(values?.probability)
+    const group = values?.group
+    const maxReplacements = toFiniteNumber(values?.max_replacements)
+    const sticky = toFiniteNumber(values?.timed_effects?.sticky)
+    const cooldown = toFiniteNumber(values?.timed_effects?.cooldown)
+    const delay = toFiniteNumber(values?.timed_effects?.delay)
+    const caseSensitive = values?.case_sensitive
+    return (
+      (prob !== null && prob !== 1) ||
+      (typeof group === "string" && group.trim() !== "") ||
+      (maxReplacements !== null && maxReplacements > 0) ||
+      (sticky !== null && sticky > 0) ||
+      (cooldown !== null && cooldown > 0) ||
+      (delay !== null && delay > 0) ||
+      caseSensitive === true
+    )
+  }, [toFiniteNumber])
+
+  const [advancedMode, setAdvancedMode] = React.useState(() =>
+    hasNonDefaultAdvancedValues(form.getFieldsValue(true))
+  )
+
+  React.useEffect(() => {
+    if (hasNonDefaultAdvancedValues(form.getFieldsValue(true))) {
+      setAdvancedMode(true)
+    }
+  }, [
+    form,
+    hasNonDefaultAdvancedValues,
+    watchedCaseSensitive,
+    watchedGroup,
+    watchedMaxReplacements,
+    watchedProbability,
+    watchedTimedEffects,
+  ])
+
   return (
     <Form layout="vertical" form={form} onFinish={onSubmit}>
       <Form.Item
         name="pattern"
         label={
           <LabelWithHelp
-            label="Pattern"
-            help="The text or regex pattern to match. For regex, use /pattern/flags format."
+            label="Find"
+            help="Text to find. For simple terms, just type them. For patterns, select Regex type and use /pattern/flags format."
           />
         }
         rules={[{ required: true }]}>
-        <Input placeholder="e.g., KCl or /hel+o/i" className="font-mono" />
+        <Input placeholder="e.g., gonna or /colour/i" className="font-mono" />
       </Form.Item>
       <Form.Item
         name="replacement"
         label={
           <LabelWithHelp
-            label="Replacement"
-            help="The text to replace matches with."
+            label="Replace with"
+            help="The text that will replace matches. For regex, you can use $1, $2 for capture groups."
           />
         }
         rules={[{ required: true }]}>
-        <Input placeholder="e.g., Potassium Chloride" />
+        <Input placeholder="e.g., going to or color" />
       </Form.Item>
-      <Form.Item name="type" label="Type" initialValue="literal">
+      <Form.Item
+        name="type"
+        label={
+          <LabelWithHelp
+            label="Match type"
+            help="Literal matches exact text. Regex allows pattern matching with regular expressions."
+          />
+        }
+        initialValue="literal">
         <Select
           options={[
             { label: "Literal (exact match)", value: "literal" },
@@ -77,109 +141,139 @@ export const DictionaryEntryEditForm: React.FC<DictionaryEntryEditFormProps> = (
         initialValue={true}>
         <Switch checkedChildren="On" unCheckedChildren="Off" />
       </Form.Item>
-      <Form.Item
-        name="probability"
-        label="Probability"
-        initialValue={1}
-        rules={[
-          {
-            type: "number",
-            min: 0,
-            max: 1,
-            message: "Probability must be between 0 and 1.",
-          },
-        ]}>
-        <InputNumber min={0} max={1} step={0.01} style={{ width: "100%" }} />
-      </Form.Item>
-      <Form.Item
-        noStyle
-        shouldUpdate={(prev, current) => prev.probability !== current.probability}>
-        {() => {
-          const probabilityValue = Number(
-            normalizeProbabilityValue(form.getFieldValue("probability"), 1).toFixed(2)
-          )
-          return (
-            <div className="mt-[-8px] mb-3">
-              <Slider
-                min={0}
-                max={1}
-                step={0.01}
-                value={probabilityValue}
-                onChange={(value) => {
-                  const nextValue = Array.isArray(value) ? value[0] : value
-                  form.setFieldValue(
-                    "probability",
-                    Number(normalizeProbabilityValue(nextValue, 1).toFixed(2))
-                  )
-                }}
-                aria-label="Probability slider"
+      <button
+        type="button"
+        className="flex items-center gap-1 text-xs text-text-muted hover:text-text mb-2"
+        onClick={() => setAdvancedMode((prev) => !prev)}
+        aria-expanded={advancedMode}
+        aria-controls={advancedOptionsPanelId}
+      >
+        {advancedMode ? "Simple mode" : "Advanced options"}
+        {advancedMode ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+      </button>
+      {advancedMode && (
+        <div id={advancedOptionsPanelId}>
+          <Form.Item
+            name="probability"
+            label={
+              <LabelWithHelp
+                label="Probability"
+                help="Chance of applying this replacement (0-1). Use 1 for always, 0.5 for 50% of the time."
               />
-              <div className="text-xs text-text-muted">
-                {formatProbabilityFrequencyHint(probabilityValue)}
-              </div>
-            </div>
-          )
-        }}
-      </Form.Item>
-      <Form.Item name="group" label="Group">
-        <AutoComplete
-          options={entryGroupOptions}
-          placeholder="e.g., medications"
-          filterOption={(inputValue, option) =>
-            String(option?.value || "")
-              .toLowerCase()
-              .includes(inputValue.toLowerCase())
-          }
-        />
-      </Form.Item>
-      <Form.Item
-        name="max_replacements"
-        label={
-          <LabelWithHelp
-            label="Max Replacements"
-            help="Probability controls whether this entry fires. Max replacements caps how many times it can apply per message."
-          />
-        }>
-        <InputNumber min={0} style={{ width: "100%" }} />
-      </Form.Item>
-      <div className="grid gap-3 sm:grid-cols-3">
-        <Form.Item
-          name={["timed_effects", "sticky"]}
-          label={
-            <LabelWithHelp
-              label="Sticky (seconds)"
-              help="Keep this replacement active for additional messages after it fires. Use 0 to disable."
+            }
+            rules={[
+              {
+                type: "number",
+                min: 0,
+                max: 1,
+                message: "Probability must be between 0 and 1.",
+              },
+            ]}>
+            <InputNumber min={0} max={1} step={0.01} style={{ width: "100%" }} />
+          </Form.Item>
+          <Form.Item
+            noStyle
+            shouldUpdate={(prev, current) => prev.probability !== current.probability}>
+            {() => {
+              const probabilityValue = Number(
+                normalizeProbabilityValue(form.getFieldValue("probability"), 1).toFixed(2)
+              )
+              return (
+                <div className="mt-[-8px] mb-3">
+                  <Slider
+                    min={0}
+                    max={1}
+                    step={0.01}
+                    value={probabilityValue}
+                    onChange={(value) => {
+                      const nextValue = Array.isArray(value) ? value[0] : value
+                      form.setFieldValue(
+                        "probability",
+                        Number(normalizeProbabilityValue(nextValue, 1).toFixed(2))
+                      )
+                    }}
+                    aria-label="Probability slider"
+                  />
+                  <div className="text-xs text-text-muted">
+                    {formatProbabilityFrequencyHint(probabilityValue)}
+                  </div>
+                </div>
+              )
+            }}
+          </Form.Item>
+          <Form.Item
+            name="group"
+            label={
+              <LabelWithHelp
+                label="Group"
+                help="Optional category for organizing entries (e.g., 'medications', 'abbreviations')."
+              />
+            }>
+            <AutoComplete
+              options={entryGroupOptions}
+              placeholder="e.g., medications"
+              filterOption={(inputValue, option) =>
+                String(option?.value || "")
+                  .toLowerCase()
+                  .includes(inputValue.toLowerCase())
+              }
             />
-          }
-          initialValue={0}>
-          <InputNumber min={0} style={{ width: "100%" }} />
-        </Form.Item>
-        <Form.Item
-          name={["timed_effects", "cooldown"]}
-          label={
-            <LabelWithHelp
-              label="Cooldown (seconds)"
-              help="Minimum wait time before this entry can fire again. Use 0 to disable."
-            />
-          }
-          initialValue={0}>
-          <InputNumber min={0} style={{ width: "100%" }} />
-        </Form.Item>
-        <Form.Item
-          name={["timed_effects", "delay"]}
-          label={
-            <LabelWithHelp
-              label="Delay (seconds)"
-              help="Wait time before this entry becomes eligible to run. Use 0 to disable."
-            />
-          }
-          initialValue={0}>
-          <InputNumber min={0} style={{ width: "100%" }} />
-        </Form.Item>
-      </div>
-      <Form.Item name="case_sensitive" label="Case Sensitive" valuePropName="checked">
-        <Switch checkedChildren="On" unCheckedChildren="Off" />
-      </Form.Item>
+          </Form.Item>
+          <Form.Item
+            name="max_replacements"
+            label={
+              <LabelWithHelp
+                label="Max Replacements"
+                help="Probability controls whether this entry fires. Max replacements caps how many times it can apply per message."
+              />
+            }>
+            <InputNumber min={0} style={{ width: "100%" }} />
+          </Form.Item>
+          <div className="grid gap-3 sm:grid-cols-3">
+            <Form.Item
+              name={["timed_effects", "sticky"]}
+              label={
+                <LabelWithHelp
+                  label="Sticky (seconds)"
+                  help="Keep this replacement active for additional messages after it fires. Use 0 to disable."
+                />
+              }>
+              <InputNumber min={0} style={{ width: "100%" }} />
+            </Form.Item>
+            <Form.Item
+              name={["timed_effects", "cooldown"]}
+              label={
+                <LabelWithHelp
+                  label="Cooldown (seconds)"
+                  help="Minimum wait time before this entry can fire again. Use 0 to disable."
+                />
+              }>
+              <InputNumber min={0} style={{ width: "100%" }} />
+            </Form.Item>
+            <Form.Item
+              name={["timed_effects", "delay"]}
+              label={
+                <LabelWithHelp
+                  label="Delay (seconds)"
+                  help="Wait time before this entry becomes eligible to run. Use 0 to disable."
+                />
+              }>
+              <InputNumber min={0} style={{ width: "100%" }} />
+            </Form.Item>
+          </div>
+          <Form.Item
+            name="case_sensitive"
+            label={
+              <LabelWithHelp
+                label="Case sensitive"
+                help="When off (default), matching ignores capitalization."
+              />
+            }
+            valuePropName="checked">
+            <Switch checkedChildren="On" unCheckedChildren="Off" />
+          </Form.Item>
+        </div>
+      )}
       <Button type="primary" htmlType="submit" loading={updatingEntry} className="w-full">
         Save Changes
       </Button>

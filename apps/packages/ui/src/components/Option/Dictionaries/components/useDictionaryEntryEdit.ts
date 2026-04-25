@@ -1,5 +1,6 @@
 import { useMutation } from "@tanstack/react-query"
 import React from "react"
+import { useTranslation } from "react-i18next"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import {
   getActiveFocusableElement,
@@ -42,6 +43,11 @@ export function useDictionaryEntryEdit({
 }: UseDictionaryEntryEditParams): UseDictionaryEntryEditResult {
   const [editingEntry, setEditingEntry] = React.useState<any | null>(null)
   const editEntryFocusReturnRef = React.useRef<HTMLElement | null>(null)
+  const { t } = useTranslation(["option"])
+  const localize = React.useCallback(
+    (key: string, fallback: string) => t(key, fallback),
+    [t]
+  )
 
   React.useEffect(() => {
     if (editingEntry) return
@@ -60,12 +66,19 @@ export function useDictionaryEntryEdit({
       await queryClient.invalidateQueries({ queryKey: allEntriesQueryKey })
       setEditingEntry(null)
       editEntryForm.resetFields()
-      notification.success({ message: "Entry updated" })
+      notification.success({
+        message: t("option:dictionaries.entryUpdated", "Entry updated")
+      })
     },
     onError: (error: any) => {
       notification.error({
-        message: "Update failed",
-        description: error?.message,
+        message: t("option:dictionaries.updateEntryFailedTitle", "Update failed"),
+        description:
+          error?.message ||
+          t(
+            "option:dictionaries.updateEntryFailedDescription",
+            "Unable to update entry."
+          ),
       })
     },
   })
@@ -97,7 +110,7 @@ export function useDictionaryEntryEdit({
       const entryType = values?.type === "regex" ? "regex" : "literal"
       const pattern = typeof values?.pattern === "string" ? values.pattern : ""
       if (entryType === "regex") {
-        const regexValidationError = validateRegexPattern(pattern)
+        const regexValidationError = validateRegexPattern(pattern, localize)
         if (regexValidationError) {
           editEntryForm.setFields([{ name: "pattern", errors: [regexValidationError] }])
           return
@@ -120,13 +133,18 @@ export function useDictionaryEntryEdit({
       try {
         await updateEntry({ entryId: editingEntry.id, data: payload })
       } catch (error: any) {
-        const message = error?.message || "Update failed"
+        const message =
+          error?.message ||
+          t(
+            "option:dictionaries.updateEntryFailedTitle",
+            "Update failed"
+          )
         if (/regex|pattern|dangerous/i.test(message)) {
           editEntryForm.setFields([{ name: "pattern", errors: [message] }])
         }
       }
     },
-    [editEntryForm, editingEntry?.id, updateEntry, validateRegexWithServer]
+    [editEntryForm, editingEntry?.id, localize, t, updateEntry, validateRegexWithServer]
   )
 
   return {

@@ -20,6 +20,10 @@ from loguru import logger
 
 from tldw_Server_API.app.core.Agent_Client_Protocol.event_bus import SessionEventBus
 from tldw_Server_API.app.core.Agent_Client_Protocol.events import AgentEvent, AgentEventKind
+from tldw_Server_API.app.core.Agent_Client_Protocol.policy_conditions import (
+    PolicyConditions,
+    evaluate_conditions,
+)
 from tldw_Server_API.app.core.Agent_Client_Protocol.permission_tiers import determine_permission_tier
 from tldw_Server_API.app.core.Agent_Client_Protocol.tool_gate import ToolGate, ToolGateResult
 
@@ -99,6 +103,19 @@ class GovernanceFilter:
         doc = getattr(self._snapshot, "resolved_policy_document", None)
         if not doc or not isinstance(doc, dict):
             return None
+
+        conditions = PolicyConditions.from_dict(doc.get("conditions"))
+        if not conditions.is_empty():
+            resource_labels = self._session_metadata.get("labels", {})
+            ancestry_chain = self._session_metadata.get("ancestry_chain", [])
+            source_ip = self._session_metadata.get("client_ip")
+            if not evaluate_conditions(
+                conditions,
+                resource_labels=resource_labels,
+                ancestry_chain=ancestry_chain,
+                source_ip=source_ip,
+            ):
+                return None  # Conditions failed, policy doesn't apply
 
         # 1. Check denied_tools (highest priority)
         for pattern in doc.get("denied_tools", []):

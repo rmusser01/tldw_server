@@ -208,7 +208,8 @@ describe("WorldBooksManager entry drawer stage-3 filtering and keyword index", (
     const user = userEvent.setup()
     render(<WorldBooksManager />)
 
-    await user.click(screen.getByRole("button", { name: "Manage entries" }))
+    // Select the world book to show detail panel with entries tab
+    await user.click(screen.getByText("Arcana"))
     await screen.findByRole("columnheader", { name: "Keywords" })
 
     await user.type(screen.getByLabelText("Search entries"), "wizard")
@@ -223,7 +224,8 @@ describe("WorldBooksManager entry drawer stage-3 filtering and keyword index", (
     const user = userEvent.setup()
     render(<WorldBooksManager />)
 
-    await user.click(screen.getByRole("button", { name: "Manage entries" }))
+    // Select the world book to show detail panel with entries tab
+    await user.click(screen.getByText("Arcana"))
     await screen.findByRole("columnheader", { name: "Keywords" })
 
     expect(screen.getByLabelText("Search entries")).toBeInTheDocument()

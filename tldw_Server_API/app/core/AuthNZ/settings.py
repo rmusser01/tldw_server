@@ -48,9 +48,11 @@ _SETTINGS_NONCRITICAL_EXCEPTIONS = (
 
 try:
     # Prefer centralized loader to honor project config precedence
+    from tldw_Server_API.app.core.config import get_tldw_env_file_path
     from tldw_Server_API.app.core.config import load_comprehensive_config
     from tldw_Server_API.app.core.config import settings as core_settings
 except _SETTINGS_IMPORT_EXCEPTIONS:
+    get_tldw_env_file_path = None  # Fallback if import graph changes
     load_comprehensive_config = None  # Fallback if import graph changes
     core_settings = None
 
@@ -99,7 +101,15 @@ SINGLE_USER_API_KEY_PLACEHOLDERS = {
     "change-me-in-production",
     "CHANGE-ME-to-a-secure-key-at-least-16-chars",
 }
-AUTHNZ_DEFAULT_ENV_FILE = Path(__file__).resolve().parents[3] / "Config_Files" / ".env"
+def _authnz_default_env_file() -> Path:
+    if get_tldw_env_file_path:
+        explicit_env_file = get_tldw_env_file_path()
+        if explicit_env_file:
+            return explicit_env_file
+    return Path(__file__).resolve().parents[3] / "Config_Files" / ".env"
+
+
+AUTHNZ_DEFAULT_ENV_FILE = _authnz_default_env_file()
 ENTERPRISE_SUPPORTED_PROFILES = {
     "enterprise",
     "enterprise-postgres",

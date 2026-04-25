@@ -17,6 +17,12 @@ import {
   Bookmark,
   Trash2,
 } from "lucide-react"
+import {
+  ALL_RAG_SOURCES,
+  getRagSourceDescription,
+  getRagSourceLabel,
+  isRagSource,
+} from "@/services/rag/sourceMetadata"
 import { AnswerModelMenu } from "./AnswerModelMenu"
 
 // ---------------------------------------------------------------------------
@@ -33,19 +39,28 @@ type SearchProfile = {
   enableWebFallback: boolean
 }
 
-const VALID_PRESET_KEYS: ReadonlySet<string> = new Set<RagPresetName>([
+const VALID_PRESET_KEYS: ReadonlySet<RagPresetName> = new Set([
   "fast",
   "balanced",
   "thorough",
   "custom",
 ])
-const VALID_SOURCE_KEYS: ReadonlySet<string> = new Set<RagSource>([
-  "media_db",
-  "notes",
-  "characters",
-  "chats",
-  "kanban",
-])
+
+function isSearchProfile(value: unknown): value is SearchProfile {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    typeof (value as SearchProfile).name === "string" &&
+    (value as SearchProfile).name.trim().length > 0 &&
+    Array.isArray((value as SearchProfile).sources) &&
+    (value as SearchProfile).sources.every(
+      (source): source is RagSource => isRagSource(source)
+    ) &&
+    typeof (value as SearchProfile).preset === "string" &&
+    VALID_PRESET_KEYS.has((value as SearchProfile).preset) &&
+    typeof (value as SearchProfile).enableWebFallback === "boolean"
+  )
+}
 
 function loadSavedProfiles(): SearchProfile[] {
   try {
@@ -53,23 +68,7 @@ function loadSavedProfiles(): SearchProfile[] {
     if (!raw) return []
     const parsed = JSON.parse(raw)
     if (!Array.isArray(parsed)) return []
-    return parsed
-      .filter(
-        (item: unknown): item is SearchProfile =>
-          typeof item === "object" &&
-          item !== null &&
-          typeof (item as SearchProfile).name === "string" &&
-          (item as SearchProfile).name.trim().length > 0 &&
-          Array.isArray((item as SearchProfile).sources) &&
-          (item as SearchProfile).sources.every(
-            (source): source is RagSource =>
-              typeof source === "string" && VALID_SOURCE_KEYS.has(source)
-          ) &&
-          typeof (item as SearchProfile).preset === "string" &&
-          VALID_PRESET_KEYS.has((item as SearchProfile).preset) &&
-          typeof (item as SearchProfile).enableWebFallback === "boolean"
-      )
-      .slice(0, MAX_SAVED_PROFILES)
+    return parsed.filter(isSearchProfile).slice(0, MAX_SAVED_PROFILES)
   } catch {
     return []
   }
@@ -156,29 +155,11 @@ const PRESET_COMPARISON_TOOLTIPS: Record<PresetKey, string> = {
   thorough: "Checks most sources, slowest but most thorough (~15-30s)",
 }
 
-const SOURCE_LABELS: Record<RagSource, string> = {
-  media_db: "Documents & Media",
-  notes: "Notes",
-  characters: "Story Characters",
-  chats: "Conversations",
-  kanban: "Task Boards",
-}
-
-const SOURCE_DESCRIPTIONS: Record<RagSource, string> = {
-  media_db: "Uploaded files, transcripts, and web pages",
-  notes: "Your personal notes and clips",
-  characters: "Character cards and persona definitions",
-  chats: "Previous chat conversations",
-  kanban: "Kanban board items and tasks",
-}
-
-const SOURCE_OPTIONS = [
-  { key: "media_db", label: "Documents & Media" },
-  { key: "notes", label: "Notes" },
-  { key: "characters", label: "Story Characters" },
-  { key: "chats", label: "Conversations" },
-  { key: "kanban", label: "Task Boards" },
-] as const
+const SOURCE_OPTIONS: Array<{ key: RagSource; label: string }> =
+  ALL_RAG_SOURCES.map((source) => ({
+    key: source,
+    label: getRagSourceLabel(source),
+  }))
 
 const MAX_VISIBLE_GRANULAR_RESULTS = 80
 
@@ -187,9 +168,9 @@ function summarizeSources(sources: RagSource[]): string {
     return "None selected"
   }
   if (sources.length === 1) {
-    return SOURCE_LABELS[sources[0]] || sources[0]
+    return getRagSourceLabel(sources[0])
   }
-  if (sources.length >= 5) {
+  if (sources.length >= ALL_RAG_SOURCES.length) {
     return "All sources"
   }
   return `${sources.length} selected`
@@ -652,7 +633,7 @@ export function KnowledgeContextBar({
                           <span className="flex flex-col">
                             <span>{option.label}</span>
                             <span className="text-[10px] text-text-muted font-normal leading-tight">
-                              {SOURCE_DESCRIPTIONS[option.key]}
+                              {getRagSourceDescription(option.key)}
                             </span>
                           </span>
                           <span className="h-4 w-4 shrink-0">
@@ -989,7 +970,7 @@ export function KnowledgeContextBar({
                       {profile.preset} &middot;{" "}
                       {profile.sources.length === 0
                         ? "no sources"
-                        : profile.sources.length >= 5
+                        : profile.sources.length >= ALL_RAG_SOURCES.length
                           ? "all sources"
                           : `${profile.sources.length} source${profile.sources.length === 1 ? "" : "s"}`}
                       {profile.enableWebFallback ? " &middot; web" : ""}

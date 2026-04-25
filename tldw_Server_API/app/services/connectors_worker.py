@@ -648,12 +648,12 @@ async def run_connectors_worker(stop_event: asyncio.Event | None = None) -> None
             await asyncio.sleep(poll_sleep)
 
 
-async def start_connectors_worker() -> asyncio.Task | None:
+async def start_connectors_worker(stop_event: asyncio.Event | None = None) -> asyncio.Task | None:
     enabled = env_flag_enabled("CONNECTORS_WORKER_ENABLED")
     if not enabled:
         return None
-    stop = asyncio.Event()
-    task = asyncio.create_task(run_connectors_worker(stop), name="connectors-worker")
+    managed_stop_event = stop_event or asyncio.Event()
+    task = asyncio.create_task(run_connectors_worker(managed_stop_event), name="connectors-worker")
     return task
 
 

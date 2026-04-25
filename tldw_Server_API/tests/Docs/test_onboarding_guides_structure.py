@@ -2,7 +2,15 @@ from pathlib import Path
 
 import pytest
 
-REQUIRED = ["## Prerequisites", "## Install", "## Run", "## Verify", "## Troubleshoot"]
+REQUIRED = [
+    "## Prepare",
+    "## Start",
+    "## Verify",
+    "## First Value",
+    "## Audio Path",
+    "## Troubleshoot",
+    "## Optional Add-ons",
+]
 
 
 def _require(condition: bool, message: str) -> None:
@@ -17,10 +25,15 @@ def test_each_profile_has_required_sections() -> None:
         "Docs/Getting_Started/Profile_Docker_Multi_User_Postgres.md",
     ]
     for guide in guides:
-        text = Path(guide).read_text()
+        text = Path(guide).read_text(encoding="utf-8")
+        positions = []
         for heading in REQUIRED:
             _require(heading in text, f"{guide} missing required heading: {heading}")
-        _require("## Optional Add-ons" in text, f"{guide} missing Optional Add-ons")
+            positions.append(text.index(heading))
+        _require(
+            positions == sorted(positions),
+            f"{guide} should present lifecycle headings in order",
+        )
         _require(
             "First-Time Audio Setup: CPU Systems" in text,
             f"{guide} should point to the CPU audio guide",
@@ -32,7 +45,7 @@ def test_each_profile_has_required_sections() -> None:
 
 
 def test_gpu_addon_is_legacy_pointer_to_hardware_guides() -> None:
-    text = Path("Docs/Getting_Started/GPU_STT_Addon.md").read_text()
+    text = Path("Docs/Getting_Started/GPU_STT_Addon.md").read_text(encoding="utf-8")
     _require("legacy pointer" in text, "GPU_STT_Addon should be marked as a legacy pointer")
     _require(
         "First-Time Audio Setup: GPU/Accelerated Systems" in text,
@@ -69,6 +82,6 @@ def test_first_time_audio_guides_have_core_sections() -> None:
         ],
     }
     for guide, required_content in guide_requirements.items():
-        text = Path(guide).read_text()
+        text = Path(guide).read_text(encoding="utf-8")
         for item in required_content:
             _require(item in text, f"{guide} missing expected content: {item}")

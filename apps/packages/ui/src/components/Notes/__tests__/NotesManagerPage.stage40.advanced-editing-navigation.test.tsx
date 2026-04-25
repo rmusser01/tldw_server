@@ -13,7 +13,8 @@ const {
   mockConfirmDanger,
   mockGetSetting,
   mockSetSetting,
-  mockClearSetting
+  mockClearSetting,
+  mockPromptModal
 } = vi.hoisted(() => ({
   mockBgRequest: vi.fn(),
   mockMessageSuccess: vi.fn(),
@@ -23,8 +24,14 @@ const {
   mockConfirmDanger: vi.fn(),
   mockGetSetting: vi.fn(),
   mockSetSetting: vi.fn(),
-  mockClearSetting: vi.fn()
+  mockClearSetting: vi.fn(),
+  mockPromptModal: vi.fn()
 }))
+
+vi.mock("@/components/Notes/notes-manager-utils", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/components/Notes/notes-manager-utils")>()
+  return { ...actual, promptModal: mockPromptModal }
+})
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -245,5 +252,60 @@ describe("NotesManagerPage stage 40 advanced editing and navigation", () => {
       expect(markdownTextarea.value).toContain("## New Section")
       expect(markdownTextarea.value).toContain("Added **bold**")
     })
+  })
+
+  it("restores the WYSIWYG selection before creating a link after prompt focus steals it", async () => {
+    renderPage()
+
+    const textarea = screen.getByPlaceholderText(
+      "Write your note here... (Markdown supported)"
+    ) as HTMLTextAreaElement
+    fireEvent.change(textarea, { target: { value: "Link target here" } })
+
+    fireEvent.click(screen.getByTestId("notes-input-mode-wysiwyg"))
+    const richEditor = await screen.findByTestId("notes-wysiwyg-editor")
+    ;(richEditor as HTMLDivElement).innerHTML = "<p>Link target here</p>"
+
+    const textNode = richEditor.querySelector("p")?.firstChild
+    expect(textNode?.nodeType).toBe(Node.TEXT_NODE)
+
+    const selection = window.getSelection()
+    const range = document.createRange()
+    range.setStart(textNode as Text, 0)
+    range.setEnd(textNode as Text, "Link target".length)
+    selection?.removeAllRanges()
+    selection?.addRange(range)
+
+    const selectionSnapshots: string[] = []
+    const docWithExec = document as Document & {
+      execCommand?: ReturnType<typeof vi.fn>
+    }
+    const originalExecCommand = docWithExec.execCommand
+    docWithExec.execCommand = vi.fn((command: string) => {
+      if (command === "createLink") {
+        selectionSnapshots.push(window.getSelection()?.toString() || "")
+      }
+      return true
+    })
+
+    mockPromptModal.mockImplementation(async () => {
+      window.getSelection()?.removeAllRanges()
+      return "https://example.com"
+    })
+
+    try {
+      fireEvent.click(screen.getByTestId("notes-toolbar-link"))
+
+      await waitFor(() => {
+        expect(docWithExec.execCommand).toHaveBeenCalledWith(
+          "createLink",
+          false,
+          "https://example.com"
+        )
+      })
+      expect(selectionSnapshots[0]).toBe("Link target")
+    } finally {
+      docWithExec.execCommand = originalExecCommand
+    }
   })
 })

@@ -241,7 +241,6 @@ def _extract_content_block(content: Any, *, _depth: int = 0, max_depth: int = 20
 def _strip_markdown_fences(text: str) -> str:
     """Remove ```json ... ``` wrapping if present."""
     text = text.strip()
-    had_fences = text.startswith("```")
     if text.startswith("```"):
         # Remove opening fence
         first_newline = text.find("\n")
@@ -249,6 +248,6 @@ def _strip_markdown_fences(text: str) -> str:
     if text.endswith("```"):
         text = text[:-3]
     text = text.strip()
-    if had_fences and text.startswith("json"):
+    if text.startswith("json"):
         text = text[4:].strip()
     return text

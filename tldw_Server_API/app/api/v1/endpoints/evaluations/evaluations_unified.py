@@ -103,6 +103,7 @@ from .evaluations_auth import (
     _apply_rate_limit_headers,
     check_evaluation_rate_limit,
     enforce_heavy_evaluations_admin,
+    get_evaluation_identity,
     get_eval_request_user,
     require_eval_permissions,
     sanitize_error_message,
@@ -405,6 +406,11 @@ from .evaluations_embeddings_abtest import abtest_router
 
 router.include_router(abtest_router)
 
+from tldw_Server_API.app.core.Evaluations.run_state import (
+    TERMINAL_RUN_STATUSES,
+    normalize_run_status,
+)
+
 
 @router.get("/embeddings/abtest/{test_id}/events")
 async def stream_embeddings_abtest_events(
@@ -421,7 +427,8 @@ async def stream_embeddings_abtest_events(
 
     from tldw_Server_API.app.core.Streaming.streams import SSEStream
 
-    svc = get_unified_evaluation_service_for_user(current_user.id)
+    identity = get_evaluation_identity(current_user)
+    svc = get_unified_evaluation_service_for_user(identity.user_scope)
 
     stream = SSEStream(
         # Use env-driven heartbeat defaults; standard labels for dashboards
@@ -433,11 +440,11 @@ async def stream_embeddings_abtest_events(
     async def _produce() -> None:
         last_payload = None
         while True:
-            row = svc.db.get_abtest(test_id, created_by=user_ctx)
+            row = svc.db.get_abtest(test_id, created_by=identity.created_by)
             if not row:
                 await stream.error("not_found", "A/B test not found")
                 return
-            status = row.get("status", "pending")
+            status = normalize_run_status(row.get("status"))
             stats = row.get("stats_json")
             payload = {"type": "status", "status": status}
             try:
@@ -449,7 +456,7 @@ async def stream_embeddings_abtest_events(
                 await stream.send_json(payload)
                 last_payload = payload
 
-            if status in ("completed", "failed", "canceled"):
+            if status in TERMINAL_RUN_STATUSES:
                 await stream.done()
                 return
             await _aio.sleep(1.0)
@@ -489,13 +496,14 @@ async def delete_embeddings_abtest(
     idempotency_key: Optional[str] = Header(default=None, alias="Idempotency-Key"),
 ):
     """Cancel/cleanup an embeddings A/B test."""
-    svc = get_unified_evaluation_service_for_user(current_user.id)
-    if not svc.db.get_abtest(test_id, created_by=user_ctx):
+    identity = get_evaluation_identity(current_user)
+    svc = get_unified_evaluation_service_for_user(identity.user_scope)
+    if not svc.db.get_abtest(test_id, created_by=identity.created_by):
         raise HTTPException(status_code=404, detail="A/B test not found")
     # Idempotency: if prior mapping exists, return canonical response without side effects
     try:
         if idempotency_key:
-            prior = svc.db.lookup_idempotency("emb_abtest_delete", idempotency_key, user_ctx)
+            prior = svc.db.lookup_idempotency("emb_abtest_delete", idempotency_key, identity.created_by)
             if prior:
                 logger.info(f"A/B test delete idempotent hit: {test_id}")
                 return Response(content=json.dumps({"status": "deleted", "test_id": test_id}), media_type='application/json', headers={"X-Idempotent-Replay": "true", "Idempotency-Key": idempotency_key})
@@ -506,20 +514,20 @@ async def delete_embeddings_abtest(
         from tldw_Server_API.app.core.Evaluations.embeddings_abtest_service import cleanup_abtest_resources
         cleanup_abtest_resources(
             svc.db,
-            str(current_user.id),
+            identity.user_scope,
             test_id,
             delete_db=True,
             delete_idempotency=True,
-            created_by=user_ctx,
+            created_by=identity.created_by,
         )
-        logger.info(f"A/B test deleted: {test_id} by {user_ctx}")
+        logger.info(f"A/B test deleted: {test_id} by {identity.created_by}")
     except _EVALS_NONCRITICAL_EXCEPTIONS as exc:
         logger.warning(f"A/B test cleanup failed for {test_id}: {exc}")
         raise HTTPException(status_code=500, detail="Failed to delete A/B test") from exc
-    log_evaluation_deleted(user_id=str(current_user.id), eval_id=test_id)
+    log_evaluation_deleted(user_id=identity.user_scope, eval_id=test_id)
     try:
         if idempotency_key:
-            svc.db.record_idempotency("emb_abtest_delete", idempotency_key, test_id, user_ctx)
+            svc.db.record_idempotency("emb_abtest_delete", idempotency_key, test_id, identity.created_by)
     except _EVALS_NONCRITICAL_EXCEPTIONS:
         pass
     return {"status": "deleted", "test_id": test_id}
@@ -543,10 +551,11 @@ async def export_embeddings_abtest(
 ):
     """Export AB test results (JSON or CSV). Admin-only."""
     enforce_heavy_evaluations_admin(principal)
-    svc = get_unified_evaluation_service_for_user(current_user.id)
-    if not svc.db.get_abtest(test_id, created_by=user_ctx):
+    identity = get_evaluation_identity(current_user)
+    svc = get_unified_evaluation_service_for_user(identity.user_scope)
+    if not svc.db.get_abtest(test_id, created_by=identity.created_by):
         raise HTTPException(status_code=404, detail="A/B test not found")
-    rows, total = svc.db.list_abtest_results(test_id, limit=100000, offset=0, created_by=user_ctx)
+    rows, total = svc.db.list_abtest_results(test_id, limit=100000, offset=0, created_by=identity.created_by)
     def _parse_json(value, default):
         if value is None:
             return default
@@ -588,11 +597,11 @@ async def export_embeddings_abtest(
         # Idempotency: record export mapping (best-effort)
         try:
             if idempotency_key:
-                svc.db.record_idempotency("emb_abtest_export_json", idempotency_key, f"{test_id}:json", user_ctx)
+                svc.db.record_idempotency("emb_abtest_export_json", idempotency_key, f"{test_id}:json", identity.created_by)
         except _EVALS_NONCRITICAL_EXCEPTIONS:
             pass
         log_evaluation_exported(
-            user_id=str(current_user.id),
+            user_id=identity.user_scope,
             eval_id=test_id,
             eval_type="embeddings_abtest",
             export_format="json",
@@ -612,11 +621,11 @@ async def export_embeddings_abtest(
         writer.writerow([r.get('result_id'), r.get('arm_id'), r.get('query_id'), r.get('ranked_ids'), r.get('latency_ms'), r.get('metrics_json')])
     try:
         if idempotency_key:
-            svc.db.record_idempotency("emb_abtest_export_csv", idempotency_key, f"{test_id}:csv", user_ctx)
+            svc.db.record_idempotency("emb_abtest_export_csv", idempotency_key, f"{test_id}:csv", identity.created_by)
     except _EVALS_NONCRITICAL_EXCEPTIONS:
         pass
     log_evaluation_exported(
-        user_id=str(current_user.id),
+        user_id=identity.user_scope,
         eval_id=test_id,
         eval_type="embeddings_abtest",
         export_format="csv",

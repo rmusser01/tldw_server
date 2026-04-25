@@ -209,6 +209,19 @@ def test_quickstart_redirect_defaults_when_config_parse_fails(monkeypatch) -> No
     assert response.headers["location"] == "/docs"
 
 
+def test_quickstart_redirect_reads_configured_ui_url(monkeypatch) -> None:
+    parser = configparser.ConfigParser()
+    parser.read_string("[UI]\nquickstart_url = /docs-static/Getting_Started/README.md\n")
+
+    monkeypatch.delenv("QUICKSTART_URL", raising=False)
+    monkeypatch.setattr(config_info.config_mod, "load_comprehensive_config", lambda: parser)
+
+    response = asyncio.run(config_info.get_quickstart_redirect())
+
+    assert response.status_code == 307
+    assert response.headers["location"] == "/docs-static/Getting_Started/README.md"
+
+
 def test_docs_info_persona_capability_stable_across_config_module_reload(
     monkeypatch, tmp_path: Path
 ) -> None:

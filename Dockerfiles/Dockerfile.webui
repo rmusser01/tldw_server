@@ -13,6 +13,7 @@ WORKDIR /app/apps
 # source changes do not invalidate the WebUI dependency layer.
 COPY apps/package.json /app/apps/package.json
 COPY apps/bun.lock /app/apps/bun.lock
+COPY apps/scripts /app/apps/scripts
 COPY apps/extension/package.json /app/apps/extension/package.json
 COPY apps/extension/scripts/wxt-prepare.mjs /app/apps/extension/scripts/wxt-prepare.mjs
 COPY apps/packages/voice-assistant-sdk/package.json /app/apps/packages/voice-assistant-sdk/package.json
@@ -40,8 +41,8 @@ ENV TLDW_INTERNAL_API_ORIGIN=${TLDW_INTERNAL_API_ORIGIN}
 
 WORKDIR /app/apps/tldw-frontend
 
-RUN bun /app/apps/tldw-frontend/scripts/validate-networking-config.mjs
-RUN bun run build
+RUN bun /app/apps/tldw-frontend/scripts/validate-networking-config.mjs \
+ && bun run build:prod
 
 
 FROM node:20-bookworm-slim AS runtime

@@ -1,9 +1,11 @@
 import React from 'react'
+import type { InputRef } from 'antd'
 import { Input, Typography, Select, Button, Tooltip, Popover, Spin } from 'antd'
 import {
   Plus as PlusIcon,
   Search as SearchIcon,
 } from 'lucide-react'
+import { QuestionCircleOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import NotesListPanel from '@/components/Notes/NotesListPanel'
 import CollapsibleSection from '@/components/Notes/CollapsibleSection'
@@ -117,6 +119,7 @@ export interface NotesSidebarProps {
   setPageSize: React.Dispatch<React.SetStateAction<number>>
   setSortOption: (option: NotesSortOption) => void
   setQueryInput: (value: string) => void
+  searchInputRef?: React.Ref<InputRef>
   setSelectedMoodboardId: (id: number | null) => void
   setSelectedNotebookId: (id: number | null) => void
   setSearchTipsQuery: (query: string) => void
@@ -244,6 +247,7 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
   setPageSize,
   setSortOption,
   setQueryInput,
+  searchInputRef,
   setSelectedMoodboardId,
   setSelectedNotebookId,
   setSearchTipsQuery,
@@ -282,6 +286,18 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
   onOpenHealth,
 }) => {
   const { t } = useTranslation(['option', 'common'])
+  const renderHelpButton = React.useCallback(
+    (label: string) => (
+      <button
+        type="button"
+        className="inline-flex items-center rounded-sm text-text-muted transition-colors hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+        aria-label={label}
+      >
+        <QuestionCircleOutlined className="text-[11px]" />
+      </button>
+    ),
+    []
+  )
 
   // Compute active filter count for badge
   const activeFilterCount =
@@ -356,10 +372,10 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
             </div>
 
             <div className="space-y-2">
-              {/* ---- Collapsible: View & Organize (always visible) ---- */}
+              {/* ---- Collapsible: Views (always visible) ---- */}
               <CollapsibleSection
                 title={t('option:notesSearch.viewOrganizeSectionTitle', {
-                  defaultValue: 'View & Organize'
+                  defaultValue: 'Views'
                 })}
                 defaultOpen
                 storageKey="view-organize"
@@ -373,7 +389,7 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                   >
                     {t('option:notesSearch.largeListPaginationHint', {
                       defaultValue:
-                        'Large collection detected. Using paginated list mode; virtualization is deferred for now.'
+                        'Showing notes in pages for faster loading.'
                     })}
                   </Typography.Text>
                 )}
@@ -441,6 +457,27 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                     })}
                   </Button>
                 </div>
+                <CollapsibleSection
+                  title={t('option:notesSearch.organizeSectionTitle', {
+                    defaultValue: 'Organize'
+                  })}
+                  titleAccessory={
+                    <Tooltip
+                      title={t('option:notesSearch.organizeHelpTooltip', {
+                        defaultValue: 'Collections group notes manually. Saved filters auto-group notes by tags.'
+                      })}
+                    >
+                      {renderHelpButton(
+                        t('option:notesSearch.organizeHelpLabel', {
+                          defaultValue: 'Organize help'
+                        })
+                      )}
+                    </Tooltip>
+                  }
+                  defaultOpen={false}
+                  storageKey="organize"
+                  testId="notes-section-organize"
+                >
                 {listMode === 'active' && listViewMode === 'moodboard' && (
                   <div
                     className="space-y-2 rounded border border-border bg-surface2 p-2"
@@ -536,7 +573,7 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                       className="block text-[11px] text-text-muted"
                     >
                       {t('option:notesSearch.notebookLabel', {
-                        defaultValue: 'Smart collection'
+                        defaultValue: 'Saved filter'
                       })}
                     </Typography.Text>
                     <div className="flex items-center gap-2">
@@ -560,7 +597,7 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                         }}
                         allowClear
                         placeholder={t('option:notesSearch.notebookAllOption', {
-                          defaultValue: 'All smart collections'
+                          defaultValue: 'All saved filters'
                         })}
                         options={notebookOptions.map((notebook) => ({
                           value: notebook.id,
@@ -599,16 +636,17 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                     >
                       {selectedNotebook
                         ? t('option:notesSearch.notebookHelperSelected', {
-                            defaultValue: 'Smart collection applies {{count}} keyword filters.',
+                            defaultValue: 'Saved filter applies {{count}} tag filters.',
                             count: selectedNotebook.keywords.length
                           })
                         : t('option:notesSearch.notebookHelperDefault', {
                             defaultValue:
-                              'Save current keyword filters as smart collections.'
+                              'Save current tag filters as saved filters.'
                           })}
                     </Typography.Text>
                   </div>
                 )}
+                </CollapsibleSection>
               </CollapsibleSection>
 
               {listMode === 'active' ? (
@@ -619,7 +657,7 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                       <Input
                         allowClear
                         placeholder={t('option:notesSearch.placeholder', {
-                          defaultValue: 'Search titles & content...'
+                          defaultValue: 'Search notes... (use quotes for exact match)'
                         })}
                         prefix={(<SearchIcon className="w-4 h-4 text-text-subtle" />)}
                         value={queryInput}
@@ -631,6 +669,7 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                           setQuery(queryInput)
                           setPage(1)
                         }}
+                        ref={searchInputRef}
                       />
                     </div>
                     <Select
@@ -712,7 +751,7 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                       mode="tags"
                       allowClear
                       placeholder={t('option:notesSearch.keywordsPlaceholder', {
-                        defaultValue: 'Filter by keyword'
+                        defaultValue: 'Filter by tag'
                       })}
                       className="w-full"
                       value={keywordTokens}
@@ -727,16 +766,29 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                       }))}
                     />
                     <div className="flex items-center justify-between gap-2">
-                      <Button
-                        size="small"
-                        onClick={openKeywordPicker}
-                        disabled={!isOnline}
-                        className="text-xs"
-                      >
-                        {t('option:notesSearch.keywordsBrowse', {
-                          defaultValue: 'Browse keywords'
-                        })}
-                      </Button>
+                      <div className="inline-flex items-center gap-1">
+                        <Button
+                          size="small"
+                          onClick={openKeywordPicker}
+                          disabled={!isOnline}
+                          className="text-xs"
+                        >
+                          {t('option:notesSearch.keywordsBrowse', {
+                            defaultValue: 'Browse tags'
+                          })}
+                        </Button>
+                        <Tooltip
+                          title={t('option:notesSearch.tagsHelpTooltip', {
+                            defaultValue: 'Tags help you organize and filter notes. Add tags in the editor, then filter here.'
+                          })}
+                        >
+                          {renderHelpButton(
+                            t('option:notesSearch.tagsHelpLabel', {
+                              defaultValue: 'Tags help'
+                            })
+                          )}
+                        </Tooltip>
+                      </div>
                       {availableKeywords.length > 0 && (
                         <Typography.Text
                           type="secondary"
@@ -953,10 +1005,10 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                         const membership = String(note.membership_source || 'manual')
                         const membershipLabel =
                           membership === 'both'
-                            ? t('option:notesSearch.moodboardMembershipBoth', { defaultValue: 'Manual + Smart' })
+                            ? t('option:notesSearch.moodboardMembershipBoth', { defaultValue: 'Pinned + Rule-matched' })
                             : membership === 'smart'
-                              ? t('option:notesSearch.moodboardMembershipSmart', { defaultValue: 'Smart' })
-                              : t('option:notesSearch.moodboardMembershipManual', { defaultValue: 'Manual' })
+                              ? t('option:notesSearch.moodboardMembershipSmart', { defaultValue: 'Rule-matched' })
+                              : t('option:notesSearch.moodboardMembershipManual', { defaultValue: 'Pinned' })
                         return (
                           <button
                             key={noteId}
@@ -1186,6 +1238,7 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
               <div className="mt-2 grid grid-cols-3 gap-2">
                 <Button
                   size="small"
+                  className={isMobileViewport ? 'min-h-[44px]' : undefined}
                   onClick={exportSelectedBulk}
                   data-testid="notes-bulk-export"
                 >
@@ -1195,17 +1248,19 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                 </Button>
                 <Button
                   size="small"
+                  className={isMobileViewport ? 'min-h-[44px]' : undefined}
                   onClick={() => {
                     void assignKeywordsToSelectedBulk()
                   }}
                   data-testid="notes-bulk-assign-keywords"
                 >
                   {t('option:notesSearch.bulkAssignKeywords', {
-                    defaultValue: 'Assign keywords'
+                    defaultValue: 'Assign tags'
                   })}
                 </Button>
                 <Button
                   size="small"
+                  className={isMobileViewport ? 'min-h-[44px]' : undefined}
                   danger
                   onClick={() => {
                     void deleteSelectedBulk()

@@ -184,7 +184,9 @@ describe("WorldBooksManager import/export stage-2 preview depth", () => {
     const user = userEvent.setup()
     render(<WorldBooksManager />)
 
-    await user.click(screen.getByRole("button", { name: "Open world book import modal" }))
+    // Open Tools dropdown then click Import JSON
+    await user.click(screen.getByRole("button", { name: "Tools" }))
+    await user.click(await screen.findByText("Import JSON"))
     await uploadJson(
       user,
       JSON.stringify({
@@ -229,7 +231,9 @@ describe("WorldBooksManager import/export stage-2 preview depth", () => {
 
       render(<WorldBooksManager />)
 
-      await user.click(screen.getByRole("button", { name: "Open world book import modal" }))
+      // Open Tools dropdown then click Import JSON
+      await user.click(screen.getByRole("button", { name: "Tools" }))
+      await user.click(await screen.findByText("Import JSON"))
       await uploadJson(
         user,
         JSON.stringify({

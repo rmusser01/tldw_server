@@ -18,9 +18,7 @@ const METRICS = [
 
 export function StoryPulseModal({ open, onClose }: StoryPulseModalProps) {
   const activeProjectId = useWritingPlaygroundStore((state) => state.activeProjectId)
-  const [analyzingChapterIds, setAnalyzingChapterIds] = useState<Set<string>>(
-    () => new Set()
-  )
+  const [analyzing, setAnalyzing] = useState<string | null>(null)
 
   const {
     data: structure,
@@ -52,22 +50,15 @@ export function StoryPulseModal({ open, onClose }: StoryPulseModalProps) {
   })()
 
   const handleAnalyze = async (chapterId: string) => {
-    setAnalyzingChapterIds((previous) => {
-      const next = new Set(previous)
-      next.add(chapterId)
-      return next
-    })
+    if (analyzing) return
+    setAnalyzing(chapterId)
     try {
       await analyzeChapter(chapterId, { analysis_types: ["pacing"] })
       await refetchAnalyses()
     } catch {
       message.error("Failed to analyze chapter")
     } finally {
-      setAnalyzingChapterIds((previous) => {
-        const next = new Set(previous)
-        next.delete(chapterId)
-        return next
-      })
+      setAnalyzing((current) => (current === chapterId ? null : current))
     }
   }
 
@@ -78,8 +69,8 @@ export function StoryPulseModal({ open, onClose }: StoryPulseModalProps) {
     <Modal title="Story Pulse" open={open} onCancel={onClose} footer={null} width={700}>
       {!activeProjectId ? (
         <Empty description="Select a project first" />
-      ) : isStructureLoading || (isStructureFetching && !structure) ? (
-        <div className="flex justify-center py-10">
+      ) : isStructureLoading || isStructureFetching ? (
+        <div className="flex justify-center py-6">
           <Spin size="small" />
         </div>
       ) : allChapters.length === 0 ? (
@@ -99,7 +90,8 @@ export function StoryPulseModal({ open, onClose }: StoryPulseModalProps) {
                     <Button
                       size="small"
                       type={analysis ? "default" : "primary"}
-                      loading={analyzingChapterIds.has(ch.id)}
+                      loading={analyzing === ch.id}
+                      disabled={Boolean(analyzing) && analyzing !== ch.id}
                       onClick={() => handleAnalyze(ch.id)}
                     >
                       {analysis ? (isStale ? "Re-analyze" : "Refresh") : "Analyze"}

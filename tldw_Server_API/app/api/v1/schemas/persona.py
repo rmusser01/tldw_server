@@ -19,7 +19,7 @@ PersonaExemplarSourceType = Literal["manual", "transcript_import", "character_se
 PersonaExemplarReviewAction = Literal["approve", "reject"]
 PersonaConfirmationMode = Literal["always", "destructive_only", "never"]
 PersonaSetupStatus = Literal["not_started", "in_progress", "completed"]
-PersonaSetupStep = Literal["persona", "voice", "commands", "safety", "test"]
+PersonaSetupStep = Literal["archetype", "persona", "voice", "commands", "safety", "test"]
 PersonaSetupTestType = Literal["dry_run", "live_session"]
 PersonaSetupEventType = Literal[
     "setup_started",
@@ -34,6 +34,14 @@ PersonaSetupEventType = Literal[
     "handoff_target_reached",
     "handoff_dismissed",
     "first_post_setup_action",
+    # First-run assistant setup extensions
+    "archetype_selected",
+    "archetype_changed",
+    "external_server_connected",
+    "external_server_failed",
+    "connection_test_initiated",
+    "setup_skipped",
+    "setup_resumed",
 ]
 
 
@@ -257,6 +265,7 @@ class PersonaSetupAnalyticsResponse(BaseModel):
 class PersonaProfileCreate(BaseModel):
     id: str | None = Field(default=None, min_length=1, max_length=200)
     name: str = Field(..., min_length=1, max_length=200)
+    archetype_key: str | None = Field(default=None, min_length=1, max_length=200)
     character_card_id: int | None = None
     mode: PersonaMode = "session_scoped"
     system_prompt: str | None = None
@@ -280,6 +289,7 @@ class PersonaProfileUpdate(BaseModel):
 class PersonaProfileResponse(BaseModel):
     id: str
     name: str
+    archetype_key: str | None = Field(default=None, min_length=1, max_length=200)
     character_card_id: int | None = None
     origin_character_id: int | None = None
     origin_character_name: str | None = None

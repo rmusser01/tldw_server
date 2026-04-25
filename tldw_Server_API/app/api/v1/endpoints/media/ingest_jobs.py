@@ -42,6 +42,7 @@ from tldw_Server_API.app.core.Logging.log_context import ensure_request_id, ensu
 from tldw_Server_API.app.core.Streaming.streams import SSEStream
 from tldw_Server_API.app.core.exceptions import BadRequestError
 from tldw_Server_API.app.core.testing import is_test_mode
+from tldw_Server_API.app.services.worker_startup_policy import worker_path_enabled
 from tldw_Server_API.app.services.app_lifecycle import assert_may_start_work
 
 router = APIRouter()
@@ -202,12 +203,26 @@ def _is_heavy_media_ingest_request(form_data: AddMediaForm) -> bool:
     return False
 
 
+def _heavy_media_ingest_worker_available() -> bool:
+    return worker_path_enabled(
+        "MEDIA_INGEST_HEAVY_JOBS_WORKER_ENABLED",
+        "media-ingest-heavy-jobs",
+        default_stable=False,
+        # Queue routing should still honor explicit route policy in tests so
+        # integration coverage can model a deployed heavy-worker path without
+        # auto-starting local workers.
+        test_mode=False,
+    )
+
+
 def _resolve_media_ingest_queue(form_data: AddMediaForm) -> str:
     default_queue = (os.getenv("MEDIA_INGEST_JOBS_DEFAULT_QUEUE") or "default").strip() or "default"
     route_heavy = _is_truthy(os.getenv("MEDIA_INGEST_JOBS_ROUTE_HEAVY", "true"))
     if not route_heavy:
         return default_queue
     if not _is_heavy_media_ingest_request(form_data):
+        return default_queue
+    if not _heavy_media_ingest_worker_available():
         return default_queue
     # Keep fallback within JobManager standard queue names unless explicitly overridden.
     heavy_queue = (os.getenv("MEDIA_INGEST_JOBS_HEAVY_QUEUE") or "low").strip() or "low"

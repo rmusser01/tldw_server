@@ -31,8 +31,56 @@ def _ensure_positive_int(value: Any, field: str) -> int:
     return parsed
 
 
+def _parse_bool_like(value: Any, field: str) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int) and value in {0, 1}:
+        return bool(value)
+    if isinstance(value, str):
+        token = value.strip().lower()
+        if token in {"1", "true", "yes", "y", "on"}:
+            return True
+        if token in {"0", "false", "no", "n", "off"}:
+            return False
+    raise ValueError(f"{field} must be a boolean-like value")
+
+
+def _bool_like_case_variants(token: str) -> set[str]:
+    variants = {""}
+    for char in token:
+        if char.isalpha():
+            variants = {prefix + variant for prefix in variants for variant in (char.lower(), char.upper())}
+        else:
+            variants = {prefix + char for prefix in variants}
+    return variants
+
+
+_BOOL_LIKE_STRING_TOKENS = tuple(
+    sorted(
+        {
+            variant
+            for token in ("1", "true", "yes", "y", "on", "0", "false", "no", "n", "off")
+            for variant in _bool_like_case_variants(token)
+        }
+    )
+)
+
+
 class KanbanModule(BaseModule):
     """Kanban MCP module exposing boards, lists, and cards."""
+
+    @staticmethod
+    def _bool_like_schema(description: str | None = None) -> dict[str, Any]:
+        schema: dict[str, Any] = {
+            "oneOf": [
+                {"type": "boolean"},
+                {"type": "integer", "enum": [0, 1]},
+                {"type": "string", "enum": list(_BOOL_LIKE_STRING_TOKENS)},
+            ],
+        }
+        if description:
+            schema["description"] = description
+        return schema
 
     async def on_initialize(self) -> None:
         logger.info(f"Initializing Kanban module: {self.name}")
@@ -439,10 +487,10 @@ class KanbanModule(BaseModule):
                         "board_id": {"type": "integer", "minimum": 1},
                         "statuses": {"type": "array", "items": {"type": "object"}},
                         "transitions": {"type": "array", "items": {"type": "object"}},
-                        "is_paused": {"type": "boolean"},
-                        "is_draining": {"type": "boolean"},
+                        "is_paused": self._bool_like_schema("Boolean-like value: true/false, yes/no, on/off, or 1/0."),
+                        "is_draining": self._bool_like_schema("Boolean-like value: true/false, yes/no, on/off, or 1/0."),
                         "default_lease_ttl_sec": {"type": "integer", "minimum": 1},
-                        "strict_projection": {"type": "boolean"},
+                        "strict_projection": self._bool_like_schema("Boolean-like value: true/false, yes/no, on/off, or 1/0."),
                         "metadata": {"type": "object"},
                     },
                     "required": ["board_id"],
@@ -1568,10 +1616,10 @@ class KanbanModule(BaseModule):
             "board_id": board_id,
             "statuses": args.get("statuses"),
             "transitions": args.get("transitions"),
-            "is_paused": bool(args.get("is_paused", False)),
-            "is_draining": bool(args.get("is_draining", False)),
+            "is_paused": _parse_bool_like(args.get("is_paused", False), "is_paused"),
+            "is_draining": _parse_bool_like(args.get("is_draining", False), "is_draining"),
             "default_lease_ttl_sec": int(args.get("default_lease_ttl_sec", 900)),
-            "strict_projection": bool(args.get("strict_projection", True)),
+            "strict_projection": _parse_bool_like(args.get("strict_projection", True), "strict_projection"),
         }
         if "metadata" in args:
             upsert_kwargs["metadata"] = args.get("metadata")

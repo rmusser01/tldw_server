@@ -29,7 +29,12 @@ const sidepanelFormSource = readFileSync(resolveSidepanelFormPath(), "utf8")
 describe("sidepanel queued request contract", () => {
   it("uses the shared queued request panel and orchestration hook", () => {
     expect(sidepanelFormSource).toContain('from "@/components/Common/ChatQueuePanel"')
-    expect(sidepanelFormSource).toContain('from "@/hooks/chat/useQueuedRequests"')
+    // Sidepanel now consumes the shared composer queue primitive, which
+    // wraps the lower-level `useQueuedRequests` internally (see
+    // Chat/composer/hooks/useComposerQueue.ts).
+    expect(sidepanelFormSource).toContain(
+      'from "@/components/Chat/composer/hooks/useComposerQueue"'
+    )
     expect(sidepanelFormSource).not.toContain("QueuedMessagesBanner")
   })
 
@@ -57,5 +62,11 @@ describe("sidepanel queued request contract", () => {
     expect(sidepanelFormSource).toContain("toolChoice:")
     expect(sidepanelFormSource).toContain("webSearch:")
     expect(sidepanelFormSource).toContain("useOCR:")
+  })
+
+  it("clears persisted drafts after send/queue success and resets file inputs with the DOM-event handler", () => {
+    expect(sidepanelFormSource).toContain("const { form, draftSaved, clearDraft } = useComposerText")
+    expect(sidepanelFormSource).toContain("clearDraft()")
+    expect(sidepanelFormSource).toContain("onChange={attachmentHandler.onFileInputChange}")
   })
 })

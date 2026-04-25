@@ -243,7 +243,8 @@ describe("WorldBooksManager accessibility stage-4 alerts, validation wiring, and
     const user = userEvent.setup()
     render(<WorldBooksManager />)
 
-    await user.click(screen.getByRole("button", { name: "Manage entries" }))
+    // Select the world book to show detail panel with entries tab
+    await user.click(screen.getByText("Arcana"))
     await user.click(screen.getByText("Keyword Index (1 conflicts)"))
 
     expect(

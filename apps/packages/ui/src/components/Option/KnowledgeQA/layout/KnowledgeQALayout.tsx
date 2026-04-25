@@ -10,6 +10,11 @@ import { KnowledgeReadyState } from "../empty/KnowledgeReadyState"
 import { AnswerWorkspace } from "../panels/AnswerWorkspace"
 import { useLayoutMode } from "../hooks/useLayoutMode"
 import { useMobile } from "@/hooks/useMediaQuery"
+import {
+  ALL_RAG_SOURCES,
+  getRagSourceLabel,
+  isRagSource,
+} from "@/services/rag/sourceMetadata"
 
 const LazyHistoryPane = React.lazy(() =>
   import("../history/HistoryPane").then((module) => ({ default: module.HistoryPane })),
@@ -46,24 +51,44 @@ const READY_STATE_ONBOARDING_SUGGESTIONS = [
   "Show me an example of a cited answer",
 ]
 
-function normalizeSourceSet(values: string[]): string {
-  return [...values].sort((left, right) => left.localeCompare(right)).join("|")
+function normalizeSourceSet(values: Array<string | null | undefined>): string {
+  return Array.from(
+    new Set(values.filter((value): value is typeof ALL_RAG_SOURCES[number] => isRagSource(value)))
+  )
+    .sort(
+      (left, right) =>
+        ALL_RAG_SOURCES.indexOf(left) -
+        ALL_RAG_SOURCES.indexOf(right)
+    )
+    .join("|")
 }
 
 function normalizeNumberSet(values: Array<number | null | undefined>): string {
-  return values
-    .filter((value): value is number => typeof value === "number" && Number.isFinite(value))
-    .map((value) => Math.round(value))
-    .sort((left, right) => left - right)
-    .join("|")
+  return dedupeNumberValues(values).join("|")
 }
 
 function normalizeStringSet(values: Array<string | null | undefined>): string {
-  return values
-    .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
-    .map((value) => value.trim())
-    .sort((left, right) => left.localeCompare(right))
-    .join("|")
+  return dedupeStringValues(values).join("|")
+}
+
+function dedupeNumberValues(values: Array<number | null | undefined>): number[] {
+  return Array.from(
+    new Set(
+      values
+        .filter((value): value is number => typeof value === "number" && Number.isFinite(value))
+        .map((value) => Math.round(value))
+    )
+  ).sort((left, right) => left - right)
+}
+
+function dedupeStringValues(values: Array<string | null | undefined>): string[] {
+  return Array.from(
+    new Set(
+      values
+        .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+        .map((value) => value.trim())
+    )
+  ).sort((left, right) => left.localeCompare(right))
 }
 
 function hasConversationId(item: { conversationId?: string }): boolean {
@@ -185,14 +210,14 @@ export function KnowledgeQALayout({ onExportClick }: KnowledgeQALayoutProps) {
   const scopeChangeDetails = useMemo<string[]>(() => {
     if (!lastSearchScope) return []
     const changes: string[] = []
-    const currentMediaScope = Array.from(new Set([
+    const currentMediaScope = dedupeNumberValues([
       ...(Array.isArray(settings.include_media_ids) ? settings.include_media_ids : []),
       ...pinnedSourceFilters.mediaIds,
-    ]))
-    const currentNoteScope = Array.from(new Set([
+    ])
+    const currentNoteScope = dedupeStringValues([
       ...(Array.isArray(settings.include_note_ids) ? settings.include_note_ids : []),
       ...pinnedSourceFilters.noteIds,
-    ]))
+    ])
     if (lastSearchScope.preset !== preset) {
       const presetLabels: Record<string, string> = {
         fast: "Fast",
@@ -205,8 +230,20 @@ export function KnowledgeQALayout({ onExportClick }: KnowledgeQALayoutProps) {
       )
     }
     if (normalizeSourceSet(lastSearchScope.sources) !== normalizeSourceSet(settings.sources)) {
-      const formatSources = (s: string[]) =>
-        s.length === 0 ? "None" : s.length >= 5 ? "All sources" : s.join(", ")
+      const formatSources = (sources: Array<string | null | undefined>) => {
+        const normalizedSources = Array.from(
+          new Set(
+            sources.filter((source): source is typeof ALL_RAG_SOURCES[number] => isRagSource(source))
+          )
+        ).sort(
+          (left, right) =>
+            ALL_RAG_SOURCES.indexOf(left) - ALL_RAG_SOURCES.indexOf(right)
+        )
+
+        if (normalizedSources.length === 0) return "None"
+        if (normalizedSources.length >= ALL_RAG_SOURCES.length) return "All sources"
+        return normalizedSources.map((source) => getRagSourceLabel(source)).join(", ")
+      }
       changes.push(
         `Sources: changed from '${formatSources(lastSearchScope.sources)}' to '${formatSources(settings.sources)}'`
       )
@@ -220,7 +257,7 @@ export function KnowledgeQALayout({ onExportClick }: KnowledgeQALayoutProps) {
       normalizeNumberSet(lastSearchScope.includeMediaIds ?? []) !==
       normalizeNumberSet(currentMediaScope)
     ) {
-      const prevCount = (lastSearchScope.includeMediaIds ?? []).length
+      const prevCount = dedupeNumberValues(lastSearchScope.includeMediaIds ?? []).length
       const currCount = currentMediaScope.length
       changes.push(
         `Document filters: changed from ${prevCount === 0 ? "all" : `${prevCount} selected`} to ${currCount === 0 ? "all" : `${currCount} selected`}`
@@ -230,7 +267,7 @@ export function KnowledgeQALayout({ onExportClick }: KnowledgeQALayoutProps) {
       normalizeStringSet(lastSearchScope.includeNoteIds ?? []) !==
       normalizeStringSet(currentNoteScope)
     ) {
-      const prevCount = (lastSearchScope.includeNoteIds ?? []).length
+      const prevCount = dedupeStringValues(lastSearchScope.includeNoteIds ?? []).length
       const currCount = currentNoteScope.length
       changes.push(
         `Note filters: changed from ${prevCount === 0 ? "all" : `${prevCount} selected`} to ${currCount === 0 ? "all" : `${currCount} selected`}`

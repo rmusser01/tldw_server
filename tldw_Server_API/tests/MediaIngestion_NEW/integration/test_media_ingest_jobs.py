@@ -155,6 +155,7 @@ def test_media_ingest_jobs_routes_audio_to_heavy_queue(
     monkeypatch.setenv("MEDIA_INGEST_JOBS_DEFAULT_QUEUE", "default")
     monkeypatch.setenv("MEDIA_INGEST_JOBS_HEAVY_QUEUE", "media-heavy")
     monkeypatch.setenv("MEDIA_INGEST_JOBS_ROUTE_HEAVY", "true")
+    monkeypatch.setenv("ROUTES_ENABLE", "media-ingest-heavy-jobs")
     monkeypatch.setenv("JOBS_ALLOWED_QUEUES", "media-heavy")
 
     resp = test_client.post(
@@ -162,6 +163,66 @@ def test_media_ingest_jobs_routes_audio_to_heavy_queue(
         data={
             "media_type": "audio",
             "urls": "https://example.com/audio-heavy.mp3",
+        },
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body.get("jobs")
+    job_id = int(body["jobs"][0]["id"])
+    assert _fetch_job_queue(job_id) == "media-heavy"
+
+
+def test_media_ingest_jobs_routes_audio_to_default_queue_when_heavy_worker_unavailable(
+    test_client,
+    auth_headers,
+    monkeypatch,
+    tmp_path,
+):
+    _set_jobs_db(monkeypatch, tmp_path)
+    monkeypatch.setenv("MEDIA_INGEST_JOBS_DEFAULT_QUEUE", "default")
+    monkeypatch.setenv("MEDIA_INGEST_JOBS_HEAVY_QUEUE", "media-heavy")
+    monkeypatch.setenv("MEDIA_INGEST_JOBS_ROUTE_HEAVY", "true")
+    monkeypatch.setenv("JOBS_ALLOWED_QUEUES", "default,media-heavy")
+    monkeypatch.delenv("ROUTES_ENABLE", raising=False)
+    monkeypatch.delenv("MEDIA_INGEST_HEAVY_JOBS_WORKER_ENABLED", raising=False)
+    monkeypatch.delenv("TLDW_WORKERS_SIDECAR_MODE", raising=False)
+
+    resp = test_client.post(
+        "/api/v1/media/ingest/jobs",
+        data={
+            "media_type": "video",
+            "urls": "https://example.com/video-default.mp4",
+        },
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body.get("jobs")
+    job_id = int(body["jobs"][0]["id"])
+    assert _fetch_job_queue(job_id) == "default"
+
+
+def test_media_ingest_jobs_keeps_heavy_queue_routing_in_sidecar_mode(
+    test_client,
+    auth_headers,
+    monkeypatch,
+    tmp_path,
+):
+    _set_jobs_db(monkeypatch, tmp_path)
+    monkeypatch.setenv("MEDIA_INGEST_JOBS_DEFAULT_QUEUE", "default")
+    monkeypatch.setenv("MEDIA_INGEST_JOBS_HEAVY_QUEUE", "media-heavy")
+    monkeypatch.setenv("MEDIA_INGEST_JOBS_ROUTE_HEAVY", "true")
+    monkeypatch.setenv("TLDW_WORKERS_SIDECAR_MODE", "true")
+    monkeypatch.setenv("MEDIA_INGEST_HEAVY_JOBS_WORKER_ENABLED", "true")
+    monkeypatch.setenv("JOBS_ALLOWED_QUEUES", "default,media-heavy")
+    monkeypatch.delenv("ROUTES_ENABLE", raising=False)
+
+    resp = test_client.post(
+        "/api/v1/media/ingest/jobs",
+        data={
+            "media_type": "video",
+            "urls": "https://example.com/video-sidecar.mp4",
         },
         headers=auth_headers,
     )
@@ -182,6 +243,7 @@ def test_media_ingest_jobs_routes_ocr_documents_to_heavy_queue_and_respects_disa
     monkeypatch.setenv("MEDIA_INGEST_JOBS_DEFAULT_QUEUE", "default")
     monkeypatch.setenv("MEDIA_INGEST_JOBS_HEAVY_QUEUE", "media-heavy")
     monkeypatch.setenv("MEDIA_INGEST_JOBS_ROUTE_HEAVY", "true")
+    monkeypatch.setenv("ROUTES_ENABLE", "media-ingest-heavy-jobs")
     monkeypatch.setenv("JOBS_ALLOWED_QUEUES", "media-heavy")
 
     heavy_resp = test_client.post(

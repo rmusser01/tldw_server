@@ -8,10 +8,12 @@ import dynamic from "next/dynamic"
 import { useRouter } from "next/router"
 import React from "react"
 import { BackendRecoveryUiProvider } from "@/components/Common/BackendRecoveryUiContext"
+import { FirstRunGate } from "@/components/PersonaGarden/FirstRunGate"
 import { AppProviders } from "@web/components/AppProviders"
 import ErrorBoundary from "@web/components/ErrorBoundary"
 import { ConfigurationGuard } from "@web/components/networking/ConfigurationGuard"
 import { ServerReadinessGate } from "@web/components/networking/ServerReadinessGate"
+import { hasEnvApiAuth } from "@web/lib/authStorage"
 import { loadTldwAuth, loadTldwClient } from "@web/lib/configured-auth-state"
 
 const OptionLayout = dynamic(
@@ -44,12 +46,6 @@ const PREFETCH_STEP_DELAY_MS = 250
 const PREFETCH_IDLE_TIMEOUT_MS = 2000
 const PREFETCH_FALLBACK_DELAY_MS = 1200
 const SLOW_EFFECTIVE_TYPES = new Set(["slow-2g", "2g"])
-
-const hasEnvAuth = () => {
-  const envApiKey = (process.env.NEXT_PUBLIC_X_API_KEY || "").trim()
-  const envBearer = (process.env.NEXT_PUBLIC_API_BEARER || "").trim()
-  return envApiKey.length > 0 || envBearer.length > 0
-}
 
 type ConfiguredAuthState = {
   hasConfig: boolean
@@ -130,7 +126,7 @@ export default function App({ Component, pageProps }: AppProps) {
 
     let cancelled = false
     const refreshAuthState = async () => {
-      const envAuthed = hasEnvAuth()
+      const envAuthed = hasEnvApiAuth()
       const configuredAuth = await getConfiguredAuthState()
       const authed = configuredAuth.hasConfig
         ? configuredAuth.authMode === "multi-user"
@@ -253,28 +249,48 @@ export default function App({ Component, pageProps }: AppProps) {
   }, [authResolved, isAuthenticated, isPublicAuthRoute, routePath, router])
 
   const hideShellNav = !authResolved || !isAuthenticated
+  const shouldBypassGates = isPublicAuthRoute || isSettingsRoute
+
+  const handleStartSetup = React.useCallback(() => {
+    void router.push("/persona")
+  }, [router])
+
+  const layoutProps = React.useMemo(
+    () => ({
+      hideHeader: hideShellNav,
+      hideSidebar: hideShellNav || isSettingsRoute,
+      allowNestedHideHeader: !isSettingsRoute
+    }),
+    [hideShellNav, isSettingsRoute]
+  )
+
+  const layoutContent = (
+    <OptionLayout {...layoutProps}>
+      <Component {...pageProps} />
+    </OptionLayout>
+  )
+
+  const gatedContent = isPublicAuthRoute ? (
+    <Component {...pageProps} />
+  ) : shouldBypassGates ? (
+    layoutContent
+  ) : (
+    <FirstRunGate onStartSetup={handleStartSetup}>
+      {layoutContent}
+    </FirstRunGate>
+  )
 
   return (
     <AppProviders>
-      <ServerReadinessGate>
       <ConfigurationGuard>
         <BackendRecoveryUiProvider routeRecoveryEnabled>
           <ErrorBoundary>
-            {isPublicAuthRoute ? (
-              <Component {...pageProps} />
-            ) : (
-              <OptionLayout
-                hideHeader={hideShellNav}
-                hideSidebar={hideShellNav || isSettingsRoute}
-                allowNestedHideHeader={!isSettingsRoute}
-              >
-                <Component {...pageProps} />
-              </OptionLayout>
-            )}
+            <ServerReadinessGate bypass={shouldBypassGates}>
+              {gatedContent}
+            </ServerReadinessGate>
           </ErrorBoundary>
         </BackendRecoveryUiProvider>
       </ConfigurationGuard>
-      </ServerReadinessGate>
     </AppProviders>
   )
 }

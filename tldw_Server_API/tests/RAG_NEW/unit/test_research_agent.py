@@ -233,6 +233,30 @@ async def test_research_loop_skips_duplicate_scrape_url_fetch(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_scrape_url_action_surfaces_shared_policy_block(monkeypatch):
+    import tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib as article_lib
+
+    async def _fake_scrape_article(target_url: str):  # noqa: ANN001
+        return {
+            "extraction_successful": False,
+            "url": target_url,
+            "error": "Blocked by outbound policy",
+            "policy_reason": "robots_unreachable",
+        }
+
+    monkeypatch.setattr(article_lib, "scrape_article", _fake_scrape_article)
+
+    registry = create_default_registry(enable_url_scraping=True)
+    out = await registry.execute(
+        "scrape_url",
+        {"url": "https://example.com/blocked"},
+    )
+
+    assert out.success is False
+    assert out.error == "Blocked by outbound policy"
+
+
+@pytest.mark.asyncio
 async def test_research_loop_skips_duplicate_web_search_signature(monkeypatch):
     import tldw_Server_API.app.core.Chat.chat_service as chat_service
     import tldw_Server_API.app.core.Web_Scraping.WebSearch_APIs as web_apis

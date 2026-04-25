@@ -248,3 +248,147 @@ def test_submit_media_ingest_jobs_returns_429_for_concurrent_job_limit(
 
     assert resp.status_code == 429, resp.text
     assert resp.json()["detail"] == "User 1 has reached the maximum concurrent job limit (5)"
+
+
+def test_submit_media_ingest_jobs_routes_heavy_request_to_default_queue_when_heavy_worker_unavailable(
+    media_ingest_jobs_client,
+    monkeypatch,
+    tmp_path,
+):
+    monkeypatch.setenv("JOBS_DB_PATH", str(tmp_path / "jobs.db"))
+    monkeypatch.setenv("MEDIA_INGEST_JOBS_DEFAULT_QUEUE", "default")
+    monkeypatch.setenv("MEDIA_INGEST_JOBS_HEAVY_QUEUE", "media-heavy")
+    monkeypatch.setenv("MEDIA_INGEST_JOBS_ROUTE_HEAVY", "true")
+    monkeypatch.delenv("MEDIA_INGEST_HEAVY_JOBS_WORKER_ENABLED", raising=False)
+    monkeypatch.delenv("ROUTES_ENABLE", raising=False)
+    monkeypatch.delenv("TLDW_WORKERS_SIDECAR_MODE", raising=False)
+
+    captured = []
+
+    from tldw_Server_API.app.core.Jobs import manager as jobs_manager
+
+    def fake_create_job(self, *, queue, **_kwargs):
+        captured.append(queue)
+        return {"id": 1, "uuid": "u1", "status": "queued"}
+
+    monkeypatch.setattr(jobs_manager.JobManager, "create_job", fake_create_job, raising=True)
+
+    resp = media_ingest_jobs_client.post(
+        "/api/v1/media/ingest/jobs",
+        data={
+            "media_type": "video",
+            "urls": "https://example.com/video-default.mp4",
+        },
+        headers={"X-API-KEY": "test-api-key-12345"},
+    )
+
+    assert resp.status_code == 200, resp.text
+    assert captured == ["default"]
+
+
+def test_submit_media_ingest_jobs_routes_heavy_request_to_default_queue_in_sidecar_mode_when_heavy_worker_disabled(
+    media_ingest_jobs_client,
+    monkeypatch,
+    tmp_path,
+):
+    monkeypatch.setenv("JOBS_DB_PATH", str(tmp_path / "jobs.db"))
+    monkeypatch.setenv("MEDIA_INGEST_JOBS_DEFAULT_QUEUE", "default")
+    monkeypatch.setenv("MEDIA_INGEST_JOBS_HEAVY_QUEUE", "media-heavy")
+    monkeypatch.setenv("MEDIA_INGEST_JOBS_ROUTE_HEAVY", "true")
+    monkeypatch.setenv("TLDW_WORKERS_SIDECAR_MODE", "true")
+    monkeypatch.delenv("MEDIA_INGEST_HEAVY_JOBS_WORKER_ENABLED", raising=False)
+    monkeypatch.delenv("ROUTES_ENABLE", raising=False)
+
+    captured = []
+
+    from tldw_Server_API.app.core.Jobs import manager as jobs_manager
+
+    def fake_create_job(self, *, queue, **_kwargs):
+        captured.append(queue)
+        return {"id": 1, "uuid": "u1", "status": "queued"}
+
+    monkeypatch.setattr(jobs_manager.JobManager, "create_job", fake_create_job, raising=True)
+
+    resp = media_ingest_jobs_client.post(
+        "/api/v1/media/ingest/jobs",
+        data={
+            "media_type": "video",
+            "urls": "https://example.com/video-sidecar.mp4",
+        },
+        headers={"X-API-KEY": "test-api-key-12345"},
+    )
+
+    assert resp.status_code == 200, resp.text
+    assert captured == ["default"]
+
+
+def test_submit_media_ingest_jobs_routes_heavy_request_to_heavy_queue_in_sidecar_mode_when_enabled(
+    media_ingest_jobs_client,
+    monkeypatch,
+    tmp_path,
+):
+    monkeypatch.setenv("JOBS_DB_PATH", str(tmp_path / "jobs.db"))
+    monkeypatch.setenv("MEDIA_INGEST_JOBS_DEFAULT_QUEUE", "default")
+    monkeypatch.setenv("MEDIA_INGEST_JOBS_HEAVY_QUEUE", "media-heavy")
+    monkeypatch.setenv("MEDIA_INGEST_JOBS_ROUTE_HEAVY", "true")
+    monkeypatch.setenv("TLDW_WORKERS_SIDECAR_MODE", "true")
+    monkeypatch.setenv("MEDIA_INGEST_HEAVY_JOBS_WORKER_ENABLED", "true")
+    monkeypatch.delenv("ROUTES_ENABLE", raising=False)
+
+    captured = []
+
+    from tldw_Server_API.app.core.Jobs import manager as jobs_manager
+
+    def fake_create_job(self, *, queue, **_kwargs):
+        captured.append(queue)
+        return {"id": 1, "uuid": "u1", "status": "queued"}
+
+    monkeypatch.setattr(jobs_manager.JobManager, "create_job", fake_create_job, raising=True)
+
+    resp = media_ingest_jobs_client.post(
+        "/api/v1/media/ingest/jobs",
+        data={
+            "media_type": "video",
+            "urls": "https://example.com/video-sidecar.mp4",
+        },
+        headers={"X-API-KEY": "test-api-key-12345"},
+    )
+
+    assert resp.status_code == 200, resp.text
+    assert captured == ["media-heavy"]
+
+
+def test_submit_media_ingest_jobs_routes_heavy_request_to_heavy_queue_when_route_enabled_in_test_mode(
+    media_ingest_jobs_client,
+    monkeypatch,
+    tmp_path,
+):
+    monkeypatch.setenv("JOBS_DB_PATH", str(tmp_path / "jobs.db"))
+    monkeypatch.setenv("MEDIA_INGEST_JOBS_DEFAULT_QUEUE", "default")
+    monkeypatch.setenv("MEDIA_INGEST_JOBS_HEAVY_QUEUE", "media-heavy")
+    monkeypatch.setenv("MEDIA_INGEST_JOBS_ROUTE_HEAVY", "true")
+    monkeypatch.setenv("ROUTES_ENABLE", "media-ingest-heavy-jobs")
+    monkeypatch.delenv("MEDIA_INGEST_HEAVY_JOBS_WORKER_ENABLED", raising=False)
+    monkeypatch.delenv("TLDW_WORKERS_SIDECAR_MODE", raising=False)
+
+    captured = []
+
+    from tldw_Server_API.app.core.Jobs import manager as jobs_manager
+
+    def fake_create_job(self, *, queue, **_kwargs):
+        captured.append(queue)
+        return {"id": 1, "uuid": "u1", "status": "queued"}
+
+    monkeypatch.setattr(jobs_manager.JobManager, "create_job", fake_create_job, raising=True)
+
+    resp = media_ingest_jobs_client.post(
+        "/api/v1/media/ingest/jobs",
+        data={
+            "media_type": "audio",
+            "urls": "https://example.com/audio-heavy.mp3",
+        },
+        headers={"X-API-KEY": "test-api-key-12345"},
+    )
+
+    assert resp.status_code == 200, resp.text
+    assert captured == ["media-heavy"]

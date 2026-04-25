@@ -434,6 +434,17 @@ class TestCharacterCardAddition:
         assert retrieved["tags"] == json.loads(tags_json_str)
         assert retrieved["extensions"] == json.loads(extensions_json_str)
 
+    def test_add_character_with_null_tags_in_json_string_skips_none_entries(self, db: CharactersRAGDB):
+        data = sample_card_data(
+            name="NullTagsJSONChar",
+            tags='["tag_json_str1", null, "tag_json_str2"]',  # type: ignore[arg-type]
+        )
+
+        card_id = db.add_character_card(data)
+        retrieved = db.get_character_card_by_id(card_id)
+
+        assert retrieved["tags"] == ["tag_json_str1", "tag_json_str2"]
+
     def test_add_character_with_invalid_string_for_json_field_becomes_none(self, db: CharactersRAGDB):
         invalid_json_str = "this is not a valid json array"
         data = sample_card_data(name="InvalidStringJSONChar", tags=invalid_json_str)  # type: ignore

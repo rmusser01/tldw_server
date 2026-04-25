@@ -8,7 +8,6 @@ from tldw_Server_API.app.core.DB_Management.media_db.errors import (
     SchemaError,
 )
 
-
 pytestmark = pytest.mark.unit
 
 
@@ -107,7 +106,7 @@ def test_invalidate_media_cache_uses_index_and_scan():
     cache.invalidate_media_cache(123, client=fake)
 
     # Both indexed and scanned keys should be removed
-    assert not any(k.startswith("cache:/api/v1/media/123:") for k in fake.kv.keys())
+    assert not any(k.startswith("cache:/api/v1/media/123:") for k in fake.kv)
 
 
 def test_etag_and_if_none_match_parsing():
@@ -156,3 +155,47 @@ def test_http_error_mapping_for_db_exceptions():
     exc = DatabaseError("db")
     http_exc = http_errors.map_db_error_to_http(exc)
     assert http_exc.status_code == 500
+
+
+def test_http_error_mapping_allows_safe_public_overrides():
+    conflict_exc = ConflictError(
+        entity="Media",
+        identifier=9,
+    )
+    conflict_http_exc = http_errors.map_db_error_to_http(
+        conflict_exc,
+        conflict_detail="Media was modified concurrently",
+    )
+
+    assert conflict_http_exc.status_code == 409
+    assert conflict_http_exc.detail == "Media was modified concurrently"
+
+    input_exc = InputError("Cannot update keywords: Media ID 9 not found or deleted.")
+    input_http_exc = http_errors.map_db_error_to_http(
+        input_exc,
+        input_status=404,
+        input_detail="Media not found or deleted",
+    )
+
+    assert input_http_exc.status_code == 404
+    assert input_http_exc.detail == "Media not found or deleted"
+
+
+def test_http_error_mapping_logs_database_errors_with_context(monkeypatch):
+    logged_calls = []
+
+    def _fake_error(message, *args, **kwargs):
+        logged_calls.append((message, args, kwargs))
+
+    monkeypatch.setattr(http_errors.logger, "error", _fake_error)
+
+    http_exc = http_errors.map_db_error_to_http(
+        DatabaseError("write failed"),
+        default_detail="Database error moving media to trash",
+        log_context="delete_media_item media_id=42",
+    )
+
+    assert http_exc.status_code == 500
+    assert http_exc.detail == "Database error moving media to trash"
+    assert logged_calls
+    assert "delete_media_item media_id=42" in logged_calls[0][0]

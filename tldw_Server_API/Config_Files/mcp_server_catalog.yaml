@@ -1,0 +1,53 @@
+catalog:
+  - key: github
+    name: GitHub
+    description: Repositories, issues, PRs, and code search
+    url_template: https://api.github.com
+    auth_type: bearer
+    category: development
+    logo_key: github
+    suggested_for:
+      - research_assistant
+      - project_manager
+
+  - key: slack
+    name: Slack
+    description: Channels, messages, and team communication
+    url_template: https://slack.com/api
+    auth_type: bearer
+    category: communication
+    logo_key: slack
+    suggested_for:
+      - project_manager
+
+  - key: arxiv
+    name: arXiv
+    description: Academic paper search and retrieval
+    url_template: https://export.arxiv.org/api
+    auth_type: none
+    category: research
+    logo_key: arxiv
+    suggested_for:
+      - research_assistant
+      - study_buddy
+
+  - key: zotero
+    name: Zotero
+    description: Reference management and bibliography
+    url_template: https://api.zotero.org
+    auth_type: bearer
+    category: research
+    logo_key: zotero
+    suggested_for:
+      - research_assistant
+
+  - key: notion
+    name: Notion
+    description: Notes, docs, and knowledge base
+    url_template: https://api.notion.com/v1
+    auth_type: bearer
+    category: productivity
+    logo_key: notion
+    suggested_for:
+      - project_manager
+      - writing_coach

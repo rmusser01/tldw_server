@@ -523,6 +523,7 @@ def test_convert_remediation_questions_creates_new_deck_with_scheduler_settings(
         json={
             "question_ids": question_ids,
             "create_deck_name": "Quiz Remediation Deck",
+            "create_deck_review_prompt_side": "back",
             "create_deck_scheduler_type": "fsrs",
             "create_deck_scheduler_settings": {
                 "sm2_plus": {
@@ -551,6 +552,7 @@ def test_convert_remediation_questions_creates_new_deck_with_scheduler_settings(
     payload = response.json()
     created_deck = quizzes_db.get_deck(payload["target_deck"]["id"])
     assert created_deck is not None
+    assert created_deck["review_prompt_side"] == "back"
     assert created_deck["scheduler_type"] == "fsrs"
     scheduler_settings = json.loads(created_deck["scheduler_settings_json"])
     assert scheduler_settings["sm2_plus"]["new_steps_minutes"] == [1, 5, 15]
@@ -558,6 +560,66 @@ def test_convert_remediation_questions_creates_new_deck_with_scheduler_settings(
     assert scheduler_settings["fsrs"]["target_retention"] == pytest.approx(0.95)
     assert scheduler_settings["fsrs"]["maximum_interval_days"] == 1825
     assert scheduler_settings["fsrs"]["enable_fuzz"] is True
+
+
+def test_convert_remediation_questions_rejects_null_review_prompt_side(
+    client_with_quizzes_db: TestClient,
+    quizzes_db: CharactersRAGDB,
+):
+    attempt_id, question_ids = _create_attempt_with_missed_questions(quizzes_db)
+
+    response = client_with_quizzes_db.post(
+        f"/api/v1/quizzes/attempts/{attempt_id}/remediation-conversions/convert",
+        json={
+            "question_ids": question_ids,
+            "create_deck_name": "Quiz Remediation Deck",
+            "create_deck_review_prompt_side": None,
+            "replace_active": False,
+        },
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 422
+
+
+def test_convert_remediation_questions_preserves_orientation_when_omitted_and_allows_front_override(
+    client_with_quizzes_db: TestClient,
+    quizzes_db: CharactersRAGDB,
+):
+    attempt_id, question_ids = _create_attempt_with_missed_questions(quizzes_db)
+    deck_id = quizzes_db.add_deck("Quiz Orientation Deck", review_prompt_side="back")
+    quizzes_db.soft_delete_deck_by_id(deck_id)
+
+    omitted_response = client_with_quizzes_db.post(
+        f"/api/v1/quizzes/attempts/{attempt_id}/remediation-conversions/convert",
+        json={
+            "question_ids": question_ids,
+            "create_deck_name": "Quiz Orientation Deck",
+            "replace_active": False,
+        },
+        headers=AUTH_HEADERS,
+    )
+    assert omitted_response.status_code == 200
+    omitted_deck = quizzes_db.get_deck(deck_id)
+    assert omitted_deck is not None
+    assert omitted_deck["review_prompt_side"] == "back"
+
+    quizzes_db.soft_delete_deck_by_id(deck_id)
+    attempt_id_front, question_ids_front = _create_attempt_with_missed_questions(quizzes_db)
+    explicit_front_response = client_with_quizzes_db.post(
+        f"/api/v1/quizzes/attempts/{attempt_id_front}/remediation-conversions/convert",
+        json={
+            "question_ids": question_ids_front,
+            "create_deck_name": "Quiz Orientation Deck",
+            "create_deck_review_prompt_side": "front",
+            "replace_active": False,
+        },
+        headers=AUTH_HEADERS,
+    )
+    assert explicit_front_response.status_code == 200
+    explicit_front_deck = quizzes_db.get_deck(deck_id)
+    assert explicit_front_deck is not None
+    assert explicit_front_deck["review_prompt_side"] == "front"
 
 
 def test_convert_remediation_questions_returns_mixed_results_without_replace_active(

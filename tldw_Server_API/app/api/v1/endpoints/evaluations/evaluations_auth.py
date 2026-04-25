@@ -31,6 +31,10 @@ from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import (
     verify_jwt_and_fetch_user,
 )
 from tldw_Server_API.app.core.exceptions import InactiveUserError
+from tldw_Server_API.app.core.Evaluations.identity import (
+    EvaluationIdentity,
+    evaluations_identity_from_user,
+)
 from tldw_Server_API.app.core.testing import is_explicit_pytest_runtime
 
 security = HTTPBearer(auto_error=False)
@@ -275,6 +279,11 @@ async def get_eval_request_user(
         token=token,
         legacy_token_header=legacy_token_header,
     )
+
+
+def get_evaluation_identity(current_user: User) -> EvaluationIdentity:
+    """Return the canonical evaluations identity for the authenticated user."""
+    return evaluations_identity_from_user(current_user)
 
 
 def require_eval_permissions(*permissions: str):

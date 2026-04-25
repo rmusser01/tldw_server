@@ -229,7 +229,9 @@ describe("WorldBooksManager statistics stage-3 global statistics view", () => {
     const user = userEvent.setup()
     render(<WorldBooksManager />)
 
-    await user.click(screen.getByRole("button", { name: "Open global statistics modal" }))
+    // Open Tools dropdown then click Global Statistics
+    await user.click(screen.getByRole("button", { name: "Tools" }))
+    await user.click(await screen.findByText("Global Statistics"))
 
     await waitFor(() => {
       expect(screen.getByText("Global World Book Statistics")).toBeInTheDocument()
@@ -245,7 +247,9 @@ describe("WorldBooksManager statistics stage-3 global statistics view", () => {
     const user = userEvent.setup()
     render(<WorldBooksManager />)
 
-    await user.click(screen.getByRole("button", { name: "Open global statistics modal" }))
+    // Open Tools dropdown then click Global Statistics
+    await user.click(screen.getByRole("button", { name: "Tools" }))
+    await user.click(await screen.findByText("Global Statistics"))
     await user.click(await screen.findByRole("button", { name: "Open conflict keyword dragon in Arcana" }))
 
     await waitFor(() => {

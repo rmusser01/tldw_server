@@ -3,7 +3,7 @@
  *
  * Tests the Flashcards workspace page lifecycle:
  * - Page loads with expected elements (tabs or offline banner)
- * - Tab switching between Study, Manage, and Transfer
+ * - Tab switching between Study, Manage, Templates, and Transfer
  * - Export button fires GET /api/v1/flashcards/export (requires server)
  * - Keyboard shortcuts help button opens modal
  *
@@ -30,7 +30,12 @@ type SeededCard = {
   tags: string[];
 };
 
-async function createFlashcardDeck(name: string): Promise<SeededDeck> {
+async function createFlashcardDeck(
+  name: string,
+  options?: {
+    reviewPromptSide?: 'front' | 'back';
+  }
+): Promise<SeededDeck> {
   const response = await fetchWithApiKey(
     `${TEST_CONFIG.serverUrl}/api/v1/flashcards/decks`,
     TEST_CONFIG.apiKey,
@@ -42,6 +47,7 @@ async function createFlashcardDeck(name: string): Promise<SeededDeck> {
       body: JSON.stringify({
         name,
         description: 'E2E flashcard tag suggestion deck',
+        review_prompt_side: options?.reviewPromptSide ?? 'front',
       }),
     }
   );
@@ -112,11 +118,15 @@ test.describe('Flashcards', () => {
 
       expect(online || offlineVisible || unsupportedVisible).toBe(true);
 
-      // If online, all three tabs should be present
+      // If online, the core tabs should be present
       if (online) {
         await expect(flashcards.studyTab).toBeVisible();
         await expect(flashcards.manageTab).toBeVisible();
+        await expect(flashcards.templatesTab).toBeVisible();
         await expect(flashcards.transferTab).toBeVisible();
+        if (await flashcards.schedulerTab.isVisible().catch(() => false)) {
+          await expect(flashcards.schedulerTab).toBeVisible();
+        }
         await expect(flashcards.testWithQuizButton).toBeVisible();
       }
 
@@ -131,10 +141,18 @@ test.describe('Flashcards', () => {
       const online = await flashcards.isOnline();
       if (!online) return;
 
-      for (const tab of ['manage', 'transfer', 'study'] as const) {
+      const tabs = ['manage', 'templates', 'transfer', 'study'] as const;
+      const schedulerVisible = await flashcards.schedulerTab.isVisible().catch(() => false);
+      const tabsToVisit = schedulerVisible ? [...tabs, 'scheduler' as const] : [...tabs];
+
+      for (const tab of tabsToVisit) {
         await flashcards.switchToTab(tab);
         if (tab === 'manage') {
           await expect(flashcards.manageTopBar).toBeVisible({ timeout: 10_000 });
+        } else if (tab === 'templates') {
+          await expect(flashcards.templatesTab).toHaveAttribute('aria-selected', 'true');
+        } else if (tab === 'scheduler') {
+          await expect(authedPage.getByPlaceholder('Search decks')).toBeVisible({ timeout: 10_000 });
         } else if (tab === 'transfer') {
           await expect(flashcards.importButton).toBeVisible({ timeout: 10_000 });
           await expect(flashcards.exportButton).toBeVisible({ timeout: 10_000 });
@@ -172,6 +190,116 @@ test.describe('Flashcards', () => {
       const hasActiveCard = await flashcards.reviewActiveCard.isVisible().catch(() => false);
       const hasEmptyCard = await flashcards.reviewEmptyCard.isVisible().catch(() => false);
       expect(hasActiveCard || hasEmptyCard).toBe(true);
+
+      await assertNoCriticalErrors(diagnostics);
+    });
+
+    test('should flip the review prompt side for a selected deck', async ({
+      authedPage,
+      serverInfo,
+      diagnostics,
+    }) => {
+      skipIfServerUnavailable(serverInfo);
+
+      const runId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const deck = await createFlashcardDeck(`E2E Review Orientation ${runId}`);
+      const front = `Front prompt ${runId}`;
+      const back = `Back answer ${runId}`;
+
+      await createFlashcardCard({
+        deckId: deck.id,
+        front,
+        back,
+      });
+
+      flashcards = new FlashcardsPage(authedPage);
+      await flashcards.gotoPath(`/flashcards?tab=review&deck_id=${deck.id}`);
+      await flashcards.assertPageReady();
+
+      expect(await flashcards.isOnline()).toBe(true);
+
+      await expect(flashcards.reviewDeckSelect).toBeVisible({ timeout: 10_000 });
+
+      await expect(flashcards.reviewActiveCard).toBeVisible({ timeout: 10_000 });
+      await expect(
+        flashcards.reviewActiveCard.getByText('Front', { exact: true })
+      ).toBeVisible({ timeout: 10_000 });
+      await expect(flashcards.reviewActiveCard.getByText(front, { exact: true })).toBeVisible({
+        timeout: 10_000,
+      });
+
+      await expect(flashcards.reviewPromptSideToggle).toBeVisible({ timeout: 10_000 });
+      await flashcards.reviewPromptSideBackOption.click({ force: true });
+
+      await expect(
+        flashcards.reviewActiveCard.getByText('Back', { exact: true })
+      ).toBeVisible({ timeout: 10_000 });
+      await expect(flashcards.reviewActiveCard.getByText(back, { exact: true })).toBeVisible({
+        timeout: 10_000,
+      });
+
+      await flashcards.reviewShowAnswerButton.click();
+      await expect(
+        flashcards.reviewActiveCard.getByText('Front', { exact: true })
+      ).toBeVisible({ timeout: 10_000 });
+      await expect(flashcards.reviewActiveCard.getByText(front, { exact: true })).toBeVisible({
+        timeout: 10_000,
+      });
+
+      await assertNoCriticalErrors(diagnostics);
+    });
+  });
+
+  // =========================================================================
+  // Templates Tab
+  // =========================================================================
+
+  test.describe('Templates Tab', () => {
+    test('should open the Templates tab and expose creation or load-state affordances', async ({
+      authedPage,
+      diagnostics,
+    }) => {
+      flashcards = new FlashcardsPage(authedPage);
+      await flashcards.gotoPath('/flashcards?tab=templates');
+      await flashcards.assertPageReady();
+
+      const online = await flashcards.isOnline();
+      if (!online) return;
+
+      await expect(flashcards.templatesTab).toHaveAttribute('aria-selected', 'true');
+
+      const templatesEmptyState = authedPage.getByText('No templates yet');
+
+      await expect
+        .poll(
+          async () => {
+            const createVisible = await flashcards.templatesCreateButton
+              .isVisible()
+              .catch(() => false);
+            const loadErrorVisible = await flashcards.templatesErrorAlert
+              .isVisible()
+              .catch(() => false);
+            const emptyVisible = await templatesEmptyState.isVisible().catch(() => false);
+            return createVisible || loadErrorVisible || emptyVisible;
+          },
+          { timeout: 15_000 }
+        )
+        .toBe(true);
+
+      const createVisible = await flashcards.templatesCreateButton.isVisible().catch(() => false);
+      const loadErrorVisible = await flashcards.templatesErrorAlert.isVisible().catch(() => false);
+      const emptyVisible = await templatesEmptyState.isVisible().catch(() => false);
+
+      expect(createVisible || loadErrorVisible || emptyVisible).toBe(true);
+
+      if (createVisible) {
+        await flashcards.templatesCreateButton.click();
+        await expect(authedPage.getByText('Template name')).toBeVisible({ timeout: 10_000 });
+      } else if (emptyVisible) {
+        await expect(templatesEmptyState).toBeVisible({ timeout: 10_000 });
+      } else {
+        await expect(flashcards.templatesErrorAlert).toBeVisible({ timeout: 10_000 });
+      }
 
       await assertNoCriticalErrors(diagnostics);
     });

@@ -22,11 +22,12 @@ import sqlite3
 import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
 from loguru import logger
-from tldw_Server_API.app.core.DB_Management.db_path_utils import resolve_trusted_database_path
+from tldw_Server_API.app.core.DB_Management.db_path_utils import ensure_trusted_database_parent_dir
 from tldw_Server_API.app.core.DB_Management.sqlite_policy import (
     begin_immediate_if_needed,
     configure_sqlite_connection,
@@ -309,15 +310,17 @@ class ActivationRun:
 
 class GuardianDB:
     def __init__(self, db_path: str) -> None:
-        self.db_path = str(resolve_trusted_database_path(db_path, label="guardian database"))
+        if db_path == ":memory:":
+            self.db_path = db_path
+        else:
+            resolved_db_path = ensure_trusted_database_parent_dir(
+                Path(db_path),
+                label="guardian database",
+            )
+            self.db_path = str(resolved_db_path)
         self._lock = threading.RLock()
-        try:
-            self._ensure_schema()
-            self._migrate_schema()
-        except sqlite3.OperationalError as exc:
-            if "unable to open database file" in str(exc).lower():
-                raise ValueError("GuardianDB parent directory must already exist") from exc
-            raise
+        self._ensure_schema()
+        self._migrate_schema()
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path, timeout=10, isolation_level=None)

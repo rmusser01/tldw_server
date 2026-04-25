@@ -1,8 +1,10 @@
 import React from "react"
-import { Button, Checkbox, Input, Modal, Typography } from "antd"
+import { Button, Checkbox, Input, Modal, Select, Typography } from "antd"
 
 import KeywordPickerModal from "@/components/Notes/KeywordPickerModal"
 import NotesGraphModal from "@/components/Notes/NotesGraphModal"
+
+import { useTutorialStore } from "@/store/tutorials"
 
 import type {
   ImportDuplicateStrategy,
@@ -12,7 +14,11 @@ import type {
   KeywordRenameDraft,
   PendingImportFile,
 } from "./notes-manager-types"
-import { toKeywordTestIdSegment } from "./notes-manager-utils"
+import {
+  NOTES_TUTORIAL_SHOWN_STORAGE_KEY,
+  notesUiStorage,
+  toKeywordTestIdSegment
+} from "./notes-manager-utils"
 
 type TranslationFn = (
   key: string,
@@ -134,7 +140,7 @@ const NotesManagerOverlays: React.FC<NotesManagerOverlaysProps> = ({
         cancelText={t("common:cancel", { defaultValue: "Cancel" })}
         destroyOnHidden
         title={t("option:notesSearch.assistKeywordsReviewTitle", {
-          defaultValue: "Review suggested keywords",
+          defaultValue: "Review suggested tags",
         })}
       >
         <div
@@ -146,7 +152,7 @@ const NotesManagerOverlays: React.FC<NotesManagerOverlaysProps> = ({
             className="block text-xs text-text-muted"
           >
             {t("option:notesSearch.assistKeywordsReviewHelp", {
-              defaultValue: "Select which suggested keywords to add to this note.",
+              defaultValue: "Select which suggested tags to add to this note.",
             })}
           </Typography.Text>
           <div className="flex items-center gap-2">
@@ -224,7 +230,7 @@ const NotesManagerOverlays: React.FC<NotesManagerOverlaysProps> = ({
         open={kw.keywordManagerOpen}
         onCancel={kw.closeKeywordManager}
         title={t("option:notesSearch.keywordManagerTitle", {
-          defaultValue: "Manage keywords",
+          defaultValue: "Manage tags",
         })}
         destroyOnHidden
         footer={[
@@ -239,7 +245,7 @@ const NotesManagerOverlays: React.FC<NotesManagerOverlaysProps> = ({
             className="block text-xs text-text-muted"
           >
             {t("option:notesSearch.keywordManagerHelp", {
-              defaultValue: "Rename, merge, or delete keywords from one place.",
+              defaultValue: "Rename, merge, or delete tags from one place.",
             })}
           </Typography.Text>
           <Input
@@ -247,7 +253,7 @@ const NotesManagerOverlays: React.FC<NotesManagerOverlaysProps> = ({
             value={kw.keywordManagerQuery}
             onChange={(event) => kw.setKeywordManagerQuery(event.target.value)}
             placeholder={t("option:notesSearch.keywordManagerSearchPlaceholder", {
-              defaultValue: "Filter keywords",
+              defaultValue: "Filter tags",
             })}
             data-testid="notes-keyword-manager-search"
           />
@@ -255,13 +261,13 @@ const NotesManagerOverlays: React.FC<NotesManagerOverlaysProps> = ({
             {kw.keywordManagerLoading ? (
               <Typography.Text type="secondary" className="text-xs text-text-muted">
                 {t("option:notesSearch.keywordManagerLoading", {
-                  defaultValue: "Loading keywords...",
+                  defaultValue: "Loading tags...",
                 })}
               </Typography.Text>
             ) : kw.keywordManagerVisibleItems.length === 0 ? (
               <Typography.Text type="secondary" className="text-xs text-text-muted">
                 {t("option:notesSearch.keywordManagerEmpty", {
-                  defaultValue: "No keywords found.",
+                  defaultValue: "No tags found.",
                 })}
               </Typography.Text>
             ) : (
@@ -351,7 +357,7 @@ const NotesManagerOverlays: React.FC<NotesManagerOverlaysProps> = ({
         confirmLoading={kw.keywordManagerActionLoading}
         destroyOnHidden
         title={t("option:notesSearch.keywordManagerRenameTitle", {
-          defaultValue: "Rename keyword",
+          defaultValue: "Rename tag",
         })}
       >
         <div className="space-y-2">
@@ -360,7 +366,7 @@ const NotesManagerOverlays: React.FC<NotesManagerOverlaysProps> = ({
             className="block text-xs text-text-muted"
           >
             {t("option:notesSearch.keywordManagerRenameHelp", {
-              defaultValue: "Choose a new name for this keyword.",
+              defaultValue: "Choose a new name for this tag.",
             })}
           </Typography.Text>
           <Input
@@ -392,9 +398,10 @@ const NotesManagerOverlays: React.FC<NotesManagerOverlaysProps> = ({
         })}
         cancelText={t("common:cancel", { defaultValue: "Cancel" })}
         confirmLoading={kw.keywordManagerActionLoading}
+        okButtonProps={{ danger: true }}
         destroyOnHidden
         title={t("option:notesSearch.keywordManagerMergeTitle", {
-          defaultValue: "Merge keyword",
+          defaultValue: "Merge tag",
         })}
       >
         <div className="space-y-2">
@@ -404,7 +411,17 @@ const NotesManagerOverlays: React.FC<NotesManagerOverlaysProps> = ({
           >
             {t("option:notesSearch.keywordManagerMergeHelp", {
               defaultValue:
-                "Move all links from the source keyword to the selected target keyword.",
+                "Move all links from the source tag to the selected target tag.",
+            })}
+          </Typography.Text>
+          <Typography.Text
+            type="danger"
+            className="block text-xs"
+            data-testid="notes-keyword-merge-warning"
+          >
+            {t("option:notesSearch.keywordManagerMergeWarning", {
+              defaultValue:
+                "This will permanently combine these tags. The source tag will be deleted. This cannot be undone.",
             })}
           </Typography.Text>
           <div className="text-xs text-text-muted">
@@ -416,34 +433,32 @@ const NotesManagerOverlays: React.FC<NotesManagerOverlaysProps> = ({
               {kw.keywordMergeDraft?.source.keyword ?? ""}
             </span>
           </div>
-          <select
-            className="w-full rounded-md border border-border bg-surface px-2 py-1.5 text-sm text-text"
-            value={kw.keywordMergeDraft?.targetKeywordId ?? ""}
-            onChange={(event) => {
-              const parsed = Number(event.target.value)
+          <Select
+            className="w-full"
+            showSearch
+            allowClear
+            optionFilterProp="label"
+            placeholder={t("option:notesSearch.keywordManagerMergeTargetPlaceholder", {
+              defaultValue: "Select target tag",
+            })}
+            value={kw.keywordMergeDraft?.targetKeywordId ?? undefined}
+            onChange={(value: number | undefined) => {
               kw.setKeywordMergeDraft((current) =>
                 current
                   ? {
                       ...current,
                       targetKeywordId:
-                        Number.isFinite(parsed) && parsed > 0 ? parsed : null,
+                        value != null && Number.isFinite(value) && value > 0 ? value : null,
                     }
                   : current,
               )
             }}
+            options={kw.keywordMergeTargetOptions.map((item) => ({
+              value: item.id,
+              label: `${item.keyword} (${item.noteCount})`,
+            }))}
             data-testid="notes-keyword-manager-merge-target"
-          >
-            <option value="">
-              {t("option:notesSearch.keywordManagerMergeTargetPlaceholder", {
-                defaultValue: "Select target keyword",
-              })}
-            </option>
-            {kw.keywordMergeTargetOptions.map((item) => (
-              <option key={`keyword-merge-target-${item.id}`} value={item.id}>
-                {item.keyword} ({item.noteCount})
-              </option>
-            ))}
-          </select>
+          />
         </div>
       </Modal>
 
@@ -509,6 +524,17 @@ const NotesManagerOverlays: React.FC<NotesManagerOverlaysProps> = ({
                 })}
               </option>
             </select>
+            {imp.importDuplicateStrategy === 'overwrite' && (
+              <Typography.Text
+                type="danger"
+                className="block mt-1 text-xs"
+                data-testid="notes-import-overwrite-warning"
+              >
+                {t("option:notesSearch.importOverwriteWarning", {
+                  defaultValue: "Warning: Existing notes with matching IDs will be permanently replaced. This cannot be undone.",
+                })}
+              </Typography.Text>
+            )}
           </div>
           <div
             className="rounded border border-border bg-surface2 px-2 py-2 text-xs text-text-muted"
@@ -528,7 +554,14 @@ const NotesManagerOverlays: React.FC<NotesManagerOverlaysProps> = ({
                   {`${file.format.toUpperCase()} · ${file.detectedNotes} note${file.detectedNotes === 1 ? "" : "s"} detected`}
                 </div>
                 {file.parseError && (
-                  <div className="mt-1 text-[11px] text-warn">{file.parseError}</div>
+                  <div className="mt-1 text-[11px] text-warn">
+                    {file.parseError}
+                    <span className="block mt-0.5 text-text-muted">
+                      {t("option:notesSearch.importParseErrorHint", {
+                        defaultValue: "Check that JSON files match the tldw export format, or use plain Markdown (.md) files.",
+                      })}
+                    </span>
+                  </div>
                 )}
               </div>
             ))}
@@ -555,24 +588,54 @@ const NotesManagerOverlays: React.FC<NotesManagerOverlaysProps> = ({
         })}
         destroyOnHidden
       >
-        <div className="space-y-2 text-sm text-text" data-testid="notes-shortcuts-modal">
+        <div className="space-y-4 text-sm text-text" data-testid="notes-shortcuts-modal">
           <div>
-            <strong>Ctrl/Cmd + S</strong>:{" "}
-            {t("option:notesSearch.shortcutSaveDescription", {
-              defaultValue: "Save the current note.",
-            })}
+            <div className="text-[11px] uppercase tracking-[0.08em] text-text-muted mb-1">
+              {t("option:notesSearch.shortcutGroupGeneral", { defaultValue: "General" })}
+            </div>
+            <div className="space-y-1">
+              <div><strong>Ctrl/Cmd + S</strong>: {t("option:notesSearch.shortcutSaveDescription", { defaultValue: "Save the current note." })}</div>
+              <div><strong>Alt + N</strong>: {t("option:notesSearch.shortcutNewNoteDescription", { defaultValue: "Create a new note." })}</div>
+              <div><strong>Ctrl/Cmd + K</strong>: {t("option:notesSearch.shortcutFocusSearchDescription", { defaultValue: "Focus the search input." })}</div>
+              <div><strong>Ctrl/Cmd + Shift + E/S/P</strong>: {t("option:notesSearch.shortcutEditorModesDescription", { defaultValue: "Switch editor mode (Edit / Split / Preview)." })}</div>
+              <div><strong>?</strong>: {t("option:notesSearch.shortcutOpenHelpDescription", { defaultValue: "Open keyboard shortcut help." })}</div>
+              <div><strong>Esc</strong>: {t("option:notesSearch.shortcutCloseDialogDescription", { defaultValue: "Close the current dialog." })}</div>
+            </div>
           </div>
           <div>
-            <strong>?</strong>:{" "}
-            {t("option:notesSearch.shortcutOpenHelpDescription", {
-              defaultValue: "Open keyboard shortcut help.",
-            })}
+            <div className="text-[11px] uppercase tracking-[0.08em] text-text-muted mb-1">
+              {t("option:notesSearch.shortcutGroupEditing", { defaultValue: "Editing" })}
+            </div>
+            <div className="space-y-1">
+              <div><strong>[[</strong>: {t("option:notesSearch.shortcutWikilinkDescription", { defaultValue: "Start a note link — type a note title to search, then select." })}</div>
+              <div><strong>Ctrl/Cmd + B</strong>: {t("option:notesSearch.shortcutBoldDescription", { defaultValue: "Bold text (Markdown mode)." })}</div>
+              <div><strong>Ctrl/Cmd + I</strong>: {t("option:notesSearch.shortcutItalicDescription", { defaultValue: "Italic text (Markdown mode)." })}</div>
+            </div>
           </div>
           <div>
-            <strong>Esc</strong>:{" "}
-            {t("option:notesSearch.shortcutCloseDialogDescription", {
-              defaultValue: "Close the current dialog.",
-            })}
+            <div className="text-[11px] uppercase tracking-[0.08em] text-text-muted mb-1">
+              {t("option:notesSearch.shortcutGroupSearch", { defaultValue: "Search" })}
+            </div>
+            <div className="space-y-1">
+              <div><strong>Ctrl/Cmd + F</strong>: {t("option:notesSearch.shortcutBrowserFindDescription", { defaultValue: "Find text in the current note (browser find)." })}</div>
+              <div><strong>{'"exact phrase"'}</strong>: {t("option:notesSearch.shortcutExactMatchDescription", { defaultValue: "Search for an exact phrase in the notes search box." })}</div>
+            </div>
+          </div>
+          <div className="border-t border-border pt-3">
+            <button
+              type="button"
+              className="text-xs text-primary hover:underline"
+              data-testid="notes-restart-tutorial"
+              onClick={() => {
+                void notesUiStorage.remove(NOTES_TUTORIAL_SHOWN_STORAGE_KEY).catch(() => undefined)
+                setShortcutHelpOpen(false)
+                useTutorialStore.getState().startTutorial('notes-basics')
+              }}
+            >
+              {t("option:notesSearch.restartTutorialAction", {
+                defaultValue: "Restart tutorial",
+              })}
+            </button>
           </div>
         </div>
       </Modal>

@@ -308,7 +308,7 @@ class ChatsModule(BaseModule):
                     query,
                     character_id=effective_character_id,
                     limit=max_fetch,
-                    client_id=None,  # MCP operates with a synthetic client_id; fetch full tenant scope explicitly.
+                    client_id=getattr(context, "client_id", None),
                 )
                 filtered_convs: list[dict[str, Any]] = []
                 for conv in convs:

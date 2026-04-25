@@ -171,6 +171,32 @@ describe("ACPRestClient", () => {
     expect(message.policy_snapshot_fingerprint).toBe("snapshot-123")
     expect(message.provenance_summary?.source_kinds).toEqual(["capability_mapping"])
   })
+
+  it("preserves status and code metadata on request errors", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 409,
+      statusText: "Conflict",
+      json: async () => ({
+        detail: "Session already exists",
+        error_code: "duplicate_session"
+      }),
+    })
+    vi.stubGlobal("fetch", fetchMock)
+
+    const client = createClient()
+
+    await expect(client.getAvailableAgents()).rejects.toMatchObject({
+      message: "Session already exists",
+      status: 409,
+      code: "duplicate_session",
+      detail: "Session already exists",
+      details: {
+        detail: "Session already exists",
+        error_code: "duplicate_session"
+      }
+    })
+  })
 })
 
 describe("ACPWebSocketClient", () => {

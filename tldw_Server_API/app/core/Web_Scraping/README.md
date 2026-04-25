@@ -7,6 +7,7 @@
   - Article extraction: Async scraping via Trafi­latura, Playwright, and BeautifulSoup with cookies and custom headers.
   - Enhanced scraper service: Concurrent job queue with rate limiting, progress tracking, cookie storage, and content deduplication.
   - Web search orchestration: Subquery generation (LLM), provider calls, normalization, optional user review, relevance analysis (LLM), and final-answer aggregation.
+  - Shared outbound-policy mode: one `compat|strict` rollout surface for scrape and websearch data-plane callers, with async scrape paths using robots-aware policy and provider paths staying on raw egress-only policy.
   - Browser-like headers and UA profiles for provider and site requests.
   - Egress/SSRF policy checks for all outbound HTTP requests.
 - Inputs/Outputs:
@@ -50,7 +51,7 @@
 - Configuration
   - Web search: Provider keys/URLs under `search_engines` in `Config_Files/config.txt` (e.g., `google_search_api_key`, `google_search_engine_id`, `brave_search_api_key`, `searx_search_api_url`, `serper_search_api_key`, `tavily_search_api_key`).
   - Relevance/aggregation tuning in `Web-Scraping` config section (e.g., `relevance_llm_timeout_s`, `relevance_jitter_ms`).
-  - Enhanced scraper (section `web_scraper`): `max_rps`, `max_rpm`, `max_rph`, `connector_limit`, `connector_limit_per_host`, `web_scraper_respect_robots`, `web_crawl_max_pages`, `web_crawl_include_external`, `web_crawl_keywords`, `web_crawl_enable_keyword_scorer`, `web_crawl_allowed_domains`, `web_crawl_blocked_domains`.
+  - Enhanced scraper (section `web_scraper`): `max_rps`, `max_rpm`, `max_rph`, `connector_limit`, `connector_limit_per_host`, `web_scraper_respect_robots`, `web_outbound_policy_mode`, `web_crawl_max_pages`, `web_crawl_include_external`, `web_crawl_keywords`, `web_crawl_enable_keyword_scorer`, `web_crawl_allowed_domains`, `web_crawl_blocked_domains`.
   - Preflight analyzers (optional): `web_scraper_preflight_analyzers`, `web_scraper_preflight_timeout_s`, `web_scraper_preflight_scan_depth`, `web_scraper_preflight_find_all_waf`, `web_scraper_preflight_impersonate`, `web_scraper_preflight_include_results`.
 - Concurrency & Performance
   - Web search Phase 1 is executed in a thread pool to avoid blocking the event loop — tldw_Server_API/app/api/v1/endpoints/research.py:321
@@ -59,7 +60,10 @@
   - Provider adapters and parsers populate `processing_error` on failures; endpoint wraps unexpected exceptions as HTTP 500.
   - Aggregation returns a safe fallback when the final-answer LLM is not configured.
 - Security
-  - Centralized egress/SSRF policy enforced before all outbound requests: `evaluate_url_policy` — tldw_Server_API/app/core/Security/egress.py:146
+  - Raw host/IP/port enforcement still lives in `app/core/Security/egress.py`.
+  - Scrape and websearch callers now route through the shared helper in `app/core/Web_Scraping/outbound_policy.py`.
+  - `compat` keeps the legacy fail-open behavior for scrape-path robots fetch failures; `strict` blocks scrape-path requests when robots cannot be fetched.
+  - Provider API calls remain raw egress-only in this wave; robots checks are not synthesized for provider endpoints.
   - Browser-like headers help reduce bot detection; robots.txt honoring is configurable.
 - Observability
   - Scrape metrics are emitted via Metrics Manager (`scrape_fetch_total`, `scrape_fetch_latency_seconds`, `scrape_content_length_bytes`, `scrape_playwright_fallback_total`, `scrape_blocked_by_robots_total`) with backend/outcome labels.
@@ -87,7 +91,7 @@
   - `ua_profiles.py`: UA/header profiles; helper for browser-like headers.
   - `filters.py`, `scoring.py`, `url_utils.py`, `scraper_router.py`: Crawl heuristics, filters, and routing utilities.
 - Extension Points
-  - Add a provider by implementing `search_web_<provider>` and `parse_<provider>_results` to append standardized items into `web_search_results_dict` and enforcing `evaluate_url_policy` before HTTP.
+  - Add a provider by implementing `search_web_<provider>` and `parse_<provider>_results` to append standardized items into `web_search_results_dict`, and use `decide_web_outbound_policy_sync(..., respect_robots=False, ...)` before provider HTTP.
   - Add a scraping strategy by extending `EnhancedWebScraper` and exposing it via `WebScrapingService` and the optional endpoints.
 - Tests
   - Headers shape: tldw_Server_API/tests/Web_Scraping/test_websearch_headers.py:1

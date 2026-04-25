@@ -1,3 +1,9 @@
+import {
+  completedIngestJobIndicatesFailure,
+  extractCompletedIngestJobError,
+  extractCompletedIngestJobTerminalData,
+} from "@/services/tldw/ingest-job-results"
+
 export const TERMINAL_INGEST_JOB_STATUSES = new Set([
   "completed",
   "failed",
@@ -182,7 +188,26 @@ export const pollTrackedIngestJobs = async <TMeta, TResult>(
       options.tracker.clearJob(jobId)
 
       if (status === "completed") {
-        results.push(options.mapCompleted(item, response.data?.result || response.data, response))
+        if (completedIngestJobIndicatesFailure(response.data)) {
+          results.push(
+            options.mapFailure(item, {
+              status: "failed",
+              data: extractCompletedIngestJobTerminalData(response.data),
+              error:
+                extractCompletedIngestJobError(response.data) ||
+                "Ingest completed with an error result.",
+              response
+            })
+          )
+        } else {
+          results.push(
+            options.mapCompleted(
+              item,
+              extractCompletedIngestJobTerminalData(response.data),
+              response
+            )
+          )
+        }
         continue
       }
       if (status === "cancelled") {
@@ -283,9 +308,19 @@ export const pollSingleIngestJob = async (
       continue
     }
     if (status === "completed") {
+      if (completedIngestJobIndicatesFailure(response.data)) {
+        return {
+          terminalStatus: "failed",
+          data: extractCompletedIngestJobTerminalData(response.data),
+          error:
+            extractCompletedIngestJobError(response.data) ||
+            "Ingest completed with an error result.",
+          response
+        }
+      }
       return {
         terminalStatus: "completed",
-        data: response.data?.result || response.data,
+        data: extractCompletedIngestJobTerminalData(response.data),
         response
       }
     }

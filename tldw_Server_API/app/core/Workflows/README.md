@@ -77,4 +77,4 @@ Related Schemas
   - Use IANA timezones in cron; invalid expressions return 422.
   - Streaming endpoints require proper client handling (SSE); in tests some streaming paths may be skipped.
   - Secrets are in‑memory only; never persisted to DB—expect `None` after engine cleanup.
-  - `stt_transcribe` uses the same STT model parsing as the audio REST API (`parse_transcription_model`), so model strings like `parakeet-mlx`, `parakeet-onnx`, or `qwen2audio-*` route to the expected providers. When `language` is omitted in the step config, the adapter passes `selected_source_lang=None` to `speech_to_text`, allowing the backend to auto-detect language (consistent with `/api/v1/audio/transcriptions`).
+  - `stt_transcribe` uses the same STT model parsing as the audio REST API (`parse_transcription_model`), so model strings like `parakeet-mlx`, `parakeet-tdt-0.6b-v3-onnx`, `parakeet-onnx`, or `qwen2audio-*` route to the expected providers. When `language` is omitted in the step config, the adapter passes `selected_source_lang=None` to `speech_to_text`, allowing the backend to auto-detect language (consistent with `/api/v1/audio/transcriptions`).

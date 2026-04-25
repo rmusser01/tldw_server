@@ -13,6 +13,7 @@ export type PersonaSetupProgressItem = {
 }
 
 export const PERSONA_SETUP_STEPS: PersonaSetupStep[] = [
+  "archetype",
   "persona",
   "voice",
   "commands",
@@ -21,6 +22,7 @@ export const PERSONA_SETUP_STEPS: PersonaSetupStep[] = [
 ]
 
 const PERSONA_SETUP_LABELS: Record<PersonaSetupStep, string> = {
+  archetype: "Pick a starting point",
   persona: "Choose persona",
   voice: "Voice defaults",
   commands: "Starter commands",
@@ -29,6 +31,7 @@ const PERSONA_SETUP_LABELS: Record<PersonaSetupStep, string> = {
 }
 
 const COMPLETED_SUMMARIES: Record<PersonaSetupStep, string> = {
+  archetype: "Archetype selected",
   persona: "Persona selected",
   voice: "Voice defaults saved",
   commands: "Starter commands selected",
@@ -37,6 +40,7 @@ const COMPLETED_SUMMARIES: Record<PersonaSetupStep, string> = {
 }
 
 const CURRENT_SUMMARIES: Record<PersonaSetupStep, string> = {
+  archetype: "Choose an archetype to get started",
   persona: "Choose or create a persona",
   voice: "Save assistant defaults",
   commands: "Pick starter commands",
@@ -60,7 +64,7 @@ export function buildPersonaSetupProgress(
   setup: PersonaSetupState | null | undefined
 ): PersonaSetupProgressItem[] {
   const status = setup?.status ?? "not_started"
-  const currentStep = setup?.current_step ?? "persona"
+  const currentStep = setup?.current_step ?? "archetype"
   const completedSteps = new Set<PersonaSetupStep>(
     Array.isArray(setup?.completed_steps) ? setup.completed_steps : []
   )

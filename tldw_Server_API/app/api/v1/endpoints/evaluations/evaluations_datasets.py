@@ -10,6 +10,7 @@ from loguru import logger
 
 from tldw_Server_API.app.api.v1.endpoints.evaluations.evaluations_auth import (
     create_error_response,
+    get_evaluation_identity,
     get_eval_request_user,
     require_eval_permissions,
     sanitize_error_message,
@@ -75,13 +76,13 @@ async def create_dataset(
     response: Response = ...,
 ):
     try:
-        svc = get_unified_evaluation_service_for_user(current_user.id)
-        stable_user_id = getattr(current_user, "id_str", None) or str(current_user.id)
+        identity = get_evaluation_identity(current_user)
+        svc = get_unified_evaluation_service_for_user(identity.user_scope)
         if idempotency_key:
             try:
-                existing_id = svc.db.lookup_idempotency("dataset", idempotency_key, user_id)
+                existing_id = svc.db.lookup_idempotency("dataset", idempotency_key, identity.created_by)
                 if existing_id:
-                    existing = await svc.get_dataset(existing_id, created_by=stable_user_id)
+                    existing = await svc.get_dataset(existing_id, created_by=identity.created_by)
                     if existing:
                         try:
                             if response is not None:
@@ -97,13 +98,13 @@ async def create_dataset(
             samples=[model_dump_compat(s) for s in dataset_request.samples],
             description=dataset_request.description or "",
             metadata=model_dump_compat(dataset_request.metadata) if dataset_request.metadata else None,
-            created_by=stable_user_id,
+            created_by=identity.created_by,
         )
-        row = await svc.get_dataset(dataset_id, created_by=stable_user_id)
+        row = await svc.get_dataset(dataset_id, created_by=identity.created_by)
         normalized = _normalize_dataset_payload(row)
         try:
             if idempotency_key:
-                svc.db.record_idempotency("dataset", idempotency_key, dataset_id, user_id)
+                svc.db.record_idempotency("dataset", idempotency_key, dataset_id, identity.created_by)
         except _UNIFIED_EVAL_NONCRITICAL_EXCEPTIONS as e:
             logger.warning(f"Failed to record idempotency key for dataset {dataset_id}: {e}")
         return DatasetResponse(**normalized)
@@ -128,9 +129,9 @@ async def list_datasets(
     current_user: User = Depends(get_eval_request_user),
 ):
     try:
-        svc = get_unified_evaluation_service_for_user(current_user.id)
-        stable_user_id = getattr(current_user, "id_str", None) or str(current_user.id)
-        items, has_more = svc.db.list_datasets(limit=limit, offset=offset, created_by=stable_user_id)
+        identity = get_evaluation_identity(current_user)
+        svc = get_unified_evaluation_service_for_user(identity.user_scope)
+        items, has_more = svc.db.list_datasets(limit=limit, offset=offset, created_by=identity.created_by)
         resp = [DatasetResponse(**_normalize_dataset_payload(r)) for r in items]
         first_id = resp[0].id if resp else None
         last_id = resp[-1].id if resp else None
@@ -158,11 +159,11 @@ async def get_dataset(
     current_user: User = Depends(get_eval_request_user),
 ):
     try:
-        svc = get_unified_evaluation_service_for_user(current_user.id)
-        stable_user_id = getattr(current_user, "id_str", None) or str(current_user.id)
+        identity = get_evaluation_identity(current_user)
+        svc = get_unified_evaluation_service_for_user(identity.user_scope)
         row = svc.db.get_dataset(
             dataset_id,
-            created_by=stable_user_id,
+            created_by=identity.created_by,
             include_samples=include_samples,
             sample_limit=limit,
             sample_offset=offset,
@@ -197,9 +198,13 @@ async def delete_dataset(
     current_user: User = Depends(get_eval_request_user),
 ) -> Response:
     try:
-        svc = get_unified_evaluation_service_for_user(current_user.id)
-        stable_user_id = getattr(current_user, "id_str", None) or str(current_user.id)
-        ok = await svc.delete_dataset(dataset_id, deleted_by=stable_user_id, created_by=stable_user_id)
+        identity = get_evaluation_identity(current_user)
+        svc = get_unified_evaluation_service_for_user(identity.user_scope)
+        ok = await svc.delete_dataset(
+            dataset_id,
+            deleted_by=identity.created_by,
+            created_by=identity.created_by,
+        )
         if not ok:
             raise create_error_response(
                 message="Dataset not found",

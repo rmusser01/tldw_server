@@ -12,8 +12,9 @@ from __future__ import annotations
 import hashlib
 import json
 import threading
+from collections.abc import Generator
 from configparser import ConfigParser
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -34,7 +35,10 @@ from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBack
 from tldw_Server_API.app.core.DB_Management.backends.query_utils import (
     prepare_backend_statement,
 )
-from tldw_Server_API.app.core.DB_Management.content_backend import get_content_backend
+from tldw_Server_API.app.core.DB_Management.content_backend import (
+    backend_target_key,
+    get_content_backend,
+)
 
 DEFAULT_ANALYTICS_DB_PATH = "Databases/Analytics.db"
 
@@ -86,6 +90,8 @@ class AnalyticsDatabase:
     as the content backend, analytics automatically use the same backend to
     ensure all large-scale deployments avoid SQLite.
     """
+
+    _bootstrapped_backend_targets: set[str] = set()
 
     _SCHEMA_SQLITE = """
     CREATE TABLE IF NOT EXISTS search_analytics (
@@ -364,8 +370,12 @@ class AnalyticsDatabase:
         self._lock = threading.RLock()
         self._local = threading.local()
 
-        self.backend = self._resolve_backend(db_path=db_path, backend=backend, config=config)
-        self.backend_type = self.backend.backend_type
+        self._backend, self._uses_shared_content_backend = self._resolve_backend(
+            db_path=db_path,
+            backend=backend,
+            config=config,
+        )
+        self._backend_refresh_suspended = False
         self._db_identifier = self._describe_backend()
 
         if self.backend_type == BackendType.SQLITE:
@@ -378,7 +388,10 @@ class AnalyticsDatabase:
             self.backend_type.value,
             self._db_identifier,
         )
-        self._initialize_database()
+        if self._backend.backend_type == BackendType.POSTGRESQL:
+            self._ensure_bootstrap_for_backend(self._backend)
+        else:
+            self._initialize_database()
 
     def _load_config(self) -> ConfigParser | None:
         try:
@@ -386,6 +399,36 @@ class AnalyticsDatabase:
             return cfg if isinstance(cfg, ConfigParser) else None
         except Exception:  # noqa: BLE001 - best-effort config loading
             return None
+
+    @property
+    def backend(self) -> DatabaseBackend:
+        pinned_backend = getattr(self._local, "backend_pin", None)
+        if pinned_backend is not None:
+            return pinned_backend
+        if not self._uses_shared_content_backend:
+            return self._backend
+        if self._backend_refresh_suspended:
+            return self._backend
+        current_key = self._backend_target_key(self._backend)
+        refreshed_backend, uses_shared_backend = self._resolve_backend(
+            db_path=self.db_path,
+            backend=None,
+            config=None,
+        )
+        self._uses_shared_content_backend = uses_shared_backend
+        self._backend = refreshed_backend
+        refreshed_key = self._backend_target_key(refreshed_backend)
+        if (
+            uses_shared_backend
+            and refreshed_backend.backend_type == BackendType.POSTGRESQL
+            and refreshed_key != current_key
+        ):
+            self._ensure_bootstrap_for_backend(refreshed_backend)
+        return self._backend
+
+    @property
+    def backend_type(self) -> BackendType:
+        return self.backend.backend_type
 
     def _describe_backend(self) -> str:
         if self.backend_type == BackendType.SQLITE:
@@ -403,27 +446,57 @@ class AnalyticsDatabase:
         db_path: str,
         backend: DatabaseBackend | None,
         config: ConfigParser | None,
-    ) -> DatabaseBackend:
+    ) -> tuple[DatabaseBackend, bool]:
         if backend is not None:
-            return backend
+            return backend, False
 
         parser = config or self._load_config()
         if parser is not None:
             candidate: DatabaseBackend | None = get_content_backend(parser)
             if candidate and candidate.backend_type == BackendType.POSTGRESQL:
-                return candidate
+                return candidate, True
 
         sqlite_config = DatabaseConfig(
             backend_type=BackendType.SQLITE,
             sqlite_path=str(Path(db_path).expanduser()),
         )
-        return DatabaseBackendFactory.create_backend(sqlite_config)
+        return DatabaseBackendFactory.create_backend(sqlite_config), False
+
+    def _backend_target_key(self, backend: DatabaseBackend | None) -> str | None:
+        return backend_target_key(backend)
+
+    def _mark_backend_bootstrapped(self, backend: DatabaseBackend | None) -> None:
+        key = self._backend_target_key(backend)
+        if key:
+            type(self)._bootstrapped_backend_targets.add(key)
+
+    def _ensure_bootstrap_for_backend(self, backend: DatabaseBackend) -> None:
+        if backend.backend_type != BackendType.POSTGRESQL:
+            return
+        key = self._backend_target_key(backend)
+        if key in type(self)._bootstrapped_backend_targets:
+            return
+        previous_suspend = self._backend_refresh_suspended
+        self._backend_refresh_suspended = True
+        try:
+            self._backend = backend
+            self._db_identifier = self._describe_backend()
+            self._initialize_database()
+        finally:
+            self._backend_refresh_suspended = previous_suspend
+        if key:
+            type(self)._bootstrapped_backend_targets.add(key)
 
     def _initialize_database(self) -> None:
-        schema = self._SCHEMA_SQLITE if self.backend_type == BackendType.SQLITE else self._SCHEMA_POSTGRES
         try:
-            with self.backend.transaction() as conn:
-                self.backend.create_tables(schema, connection=conn)
+            with self.transaction() as conn:
+                backend = self.backend
+                schema = (
+                    self._SCHEMA_SQLITE
+                    if backend.backend_type == BackendType.SQLITE
+                    else self._SCHEMA_POSTGRES
+                )
+                backend.create_tables(schema, connection=conn)
                 for statement in self._INDEX_STATEMENTS:
                     self._execute(conn, statement)
             logger.info("Analytics database initialized at {}", self._db_identifier)
@@ -490,9 +563,20 @@ class AnalyticsDatabase:
         return [dict(r) for r in rows]
 
     @contextmanager
-    def transaction(self):
-        with self.backend.transaction() as conn:
-            yield conn
+    def transaction(self) -> Generator[Any, None, None]:
+        """Pin the resolved backend for the lifetime of a transaction."""
+        backend = self.backend
+        previous_backend = getattr(self._local, "backend_pin", None)
+        self._local.backend_pin = backend
+        try:
+            with backend.transaction() as conn:
+                yield conn
+        finally:
+            if previous_backend is None:
+                with suppress(AttributeError):
+                    del self._local.backend_pin
+            else:
+                self._local.backend_pin = previous_backend
 
     def record_search(self, search_data: dict[str, Any]) -> None:
         try:

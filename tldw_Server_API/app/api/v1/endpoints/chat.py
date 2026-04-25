@@ -117,6 +117,7 @@ from tldw_Server_API.app.api.v1.schemas.chat_validators import (
 from tldw_Server_API.app.core.Audit.unified_audit_service import (
     AuditContext,
     AuditEventType,
+    MandatoryAuditWriteError,
 )
 from tldw_Server_API.app.core.Character_Chat.modules.character_utils import (
     map_sender_to_role,
@@ -162,6 +163,7 @@ from tldw_Server_API.app.core.Chat.chat_service import (
     resolve_provider_and_model,
     resolve_provider_api_key,
     is_model_known_for_provider,
+    write_mandatory_moderation_audit,
 )
 
 # Backward-compatible re-exports for legacy tests patching these symbols on the endpoint module.
@@ -350,6 +352,14 @@ delete_chat_grammar = chat_grammars.delete_chat_grammar
 def _chat_connectors_enabled() -> bool:
     """Feature flag for chat connectors v2 (email/issue/wiki exports)."""
     return _shared_env_flag_enabled("CHAT_CONNECTORS_V2_ENABLED")
+
+
+def _mandatory_audit_unavailable_detail() -> dict[str, str]:
+    """Return the standardized chat-module payload for mandatory audit failures."""
+    return {
+        "error_code": "mandatory_audit_unavailable",
+        "message": "Mandatory audit persistence is currently unavailable",
+    }
 
 # Load configuration values from config
 import contextlib
@@ -2552,20 +2562,19 @@ async def create_chat_completion(
                             with contextlib.suppress(_CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS):
                                 metrics.track_moderation_input(str(req_user_id or client_id), inj_mod['action'], category=(inj_mod.get('category') or "default"))
                             # Audit moderation decision
-                            try:
-                                if audit_service and context:
-                                    _schedule_audit_background_task(
-                                        audit_service.log_event(
-                                            event_type=AuditEventType.SECURITY_VIOLATION,
-                                            context=context,
-                                            action="moderation.input",
-                                            result=("failure" if inj_mod['blocked'] else "success"),
-                                            metadata={"phase": "input", "action": inj_mod['action'], "pattern": inj_mod.get('pattern'), "category": inj_mod.get('category')},
-                                        ),
-                                        task_name="chat.command.moderation.input.audit",
-                                    )
-                            except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
-                                pass
+                            await write_mandatory_moderation_audit(
+                                audit_service=audit_service,
+                                audit_context=context,
+                                audit_event_type=AuditEventType.SECURITY_VIOLATION,
+                                action="moderation.input",
+                                result=("failure" if inj_mod['blocked'] else "success"),
+                                metadata={"phase": "input", "action": inj_mod['action'], "pattern": inj_mod.get('pattern'), "category": inj_mod.get('category')},
+                            )
+                        except MandatoryAuditWriteError as exc:
+                            raise HTTPException(
+                                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                                detail=_mandatory_audit_unavailable_detail(),
+                            ) from exc
                         except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as _mod_err:
                             logger.debug(f"Slash command moderation step skipped due to error: {_mod_err}")
 
@@ -2639,6 +2648,15 @@ async def create_chat_completion(
                                     request_data.messages.append(sys_msg)
                                 except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as inj_err:
                                     logger.debug(f"Failed to append system injection message: {inj_err}")
+        except HTTPException as _cmd_err:
+            detail = getattr(_cmd_err, "detail", None)
+            if (
+                _cmd_err.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
+                and isinstance(detail, dict)
+                and detail.get("error_code") == "mandatory_audit_unavailable"
+            ):
+                raise
+            logger.debug(f"Slash command handling skipped due to error: {_cmd_err}")
         except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as _cmd_err:
             logger.debug(f"Slash command handling skipped due to error: {_cmd_err}")
 
@@ -3045,6 +3063,11 @@ async def create_chat_completion(
                 dependent_user_id=_dep_user_id,
                 chat_type=input_moderation_chat_type,
             )
+        except MandatoryAuditWriteError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=_mandatory_audit_unavailable_detail(),
+            ) from exc
         except HTTPException:
             raise
         except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as e:
@@ -4228,6 +4251,11 @@ async def create_chat_completion(
                 detail=safe_detail
             ) from e_chat
 
+        except MandatoryAuditWriteError as e_chat:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=_mandatory_audit_unavailable_detail(),
+            ) from e_chat
         except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as e_chat:
             # Do not leak raw HTTPException details from underlying call sites.
             # For unexpected HTTPException from lower layers (e.g., provider shims),
@@ -4238,6 +4266,7 @@ async def create_chat_completion(
                 if e_chat.status_code in (
                     status.HTTP_402_PAYMENT_REQUIRED,
                     status.HTTP_429_TOO_MANY_REQUESTS,
+                    status.HTTP_503_SERVICE_UNAVAILABLE,
                 ):
                     raise
                 raise HTTPException(

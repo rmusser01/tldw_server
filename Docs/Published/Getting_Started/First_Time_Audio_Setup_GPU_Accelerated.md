@@ -17,8 +17,8 @@ Important: the stock Docker quickstart is not a turnkey GPU-enabled audio profil
 
 | Hardware | Recommended STT | Fallback STT | Recommended TTS | Why |
 | --- | --- | --- | --- | --- |
-| NVIDIA | faster-whisper | `parakeet-onnx` | `supertonic` | best first-run accelerated STT path in current repo, with a simpler local TTS path |
-| Apple Silicon | `parakeet-mlx` | `parakeet-onnx` | `supertonic` | makes MLX the primary speech acceleration path while keeping TTS local-first |
+| NVIDIA | faster-whisper | `parakeet-tdt-0.6b-v3-onnx` | `supertonic` | best first-run accelerated STT path in current repo, with a simpler local TTS path |
+| Apple Silicon | `parakeet-mlx` | `parakeet-tdt-0.6b-v3-onnx` | `supertonic` | makes MLX the primary speech acceleration path while keeping TTS local-first |
 
 Alternatives:
 
@@ -27,9 +27,9 @@ Alternatives:
 
 Important current-repo realities:
 
-- current config defaults still ship with explicit STT defaults of `parakeet-onnx`
+- current config defaults still ship with explicit STT defaults of `parakeet-tdt-0.6b-v3-onnx`; the shorter `parakeet-onnx` alias remains supported for older configs
 - current `/setup` bundle docs may recommend a different first-run STT path for some hardware classes
-- the stock Docker profile does not expose GPU runtime configuration for the main app container by default
+- Stock Docker CPU/default audio works with bundled dependencies, but the stock Docker profile is not a ready-made GPU-accelerated audio path. Host-side config or model edits require a rebuild, `Dockerfiles/docker-compose.host-storage.yml`, or a custom image path.
 
 ## Choose Your Hardware Lane First
 
@@ -113,8 +113,9 @@ If your server is already running, skip to [Step 2](#step-2-configure-accelerate
 ```bash
 git clone https://github.com/rmusser01/tldw_server.git
 cd tldw_server
-make quickstart-install
-make quickstart-local
+make install-local
+make setup-local-single
+make start-local-single
 ```
 
 ### Option B: Manual / Local Python Setup
@@ -155,16 +156,17 @@ Set `AUTH_MODE=single_user` and `SINGLE_USER_API_KEY=...`, then:
 
 ```bash
 docker compose --env-file tldw_Server_API/Config_Files/.env \
-  -f Dockerfiles/docker-compose.yml \
+  -f Dockerfiles/docker-compose.single-user.yml \
   -f Dockerfiles/docker-compose.webui.yml \
   up -d --build
 ```
 
 Important Docker note:
 
+- stock Docker CPU/default audio works with bundled dependencies
 - the default compose profile is not a ready-made accelerated audio profile
 - the app service does not declare GPU runtime reservations in the stock compose file
-- host-side `Config_Files` and `models/` changes are not visible inside the container until rebuild/customization
+- host-side `Config_Files` and `models/` changes require a rebuild, `Dockerfiles/docker-compose.host-storage.yml`, or a custom image path
 
 For accelerated audio, local/manual or `make` is the recommended first path.
 
@@ -172,7 +174,7 @@ For accelerated audio, local/manual or `make` is the recommended first path.
 
 ## NVIDIA: faster-whisper first
 
-Edit [config.txt](/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/config.txt):
+Edit [config.txt](../../../tldw_Server_API/Config_Files/config.txt):
 
 ```ini
 [STT-Settings]
@@ -185,7 +187,7 @@ Notes:
 
 - `whisper-1` is the simplest OpenAI-compatible starting point and maps to the faster-whisper Whisper path.
 - If your GPU is smaller and `whisper-1` is too heavy, switch both defaults to a smaller faster-whisper model such as `medium`.
-- If accelerated Whisper setup becomes unstable, fall back to `parakeet-onnx`.
+- If accelerated Whisper setup becomes unstable, fall back to `parakeet-tdt-0.6b-v3-onnx`.
 
 ## Apple Silicon: `parakeet-mlx` first
 
@@ -195,7 +197,7 @@ Install the MLX STT extras in your active environment:
 pip install -e '.[STT_Parakeet_MLX]'
 ```
 
-Then edit [config.txt](/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/config.txt):
+Then edit [config.txt](../../../tldw_Server_API/Config_Files/config.txt):
 
 ```ini
 [STT-Settings]
@@ -205,14 +207,14 @@ default_transcriber = parakeet
 nemo_model_variant = mlx
 ```
 
-## Accelerated fallback: `parakeet-onnx`
+## Accelerated fallback: `parakeet-tdt-0.6b-v3-onnx`
 
 If your accelerated path is not stable yet, use:
 
 ```ini
 [STT-Settings]
-default_batch_transcription_model = parakeet-onnx
-default_streaming_transcription_model = parakeet-onnx
+default_batch_transcription_model = parakeet-tdt-0.6b-v3-onnx
+default_streaming_transcription_model = parakeet-tdt-0.6b-v3-onnx
 default_transcriber = parakeet
 nemo_model_variant = onnx
 ```
@@ -231,7 +233,7 @@ python Helper_Scripts/TTS_Installers/install_tts_supertonic.py
 
 ### 3B. Enable the provider
 
-Edit [tts_providers_config.yaml](/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/tts_providers_config.yaml):
+Edit [tts_providers_config.yaml](../../../tldw_Server_API/Config_Files/tts_providers_config.yaml):
 
 ```yaml
 providers:
@@ -253,7 +255,7 @@ providers:
 
 ### 3C. Make it the default TTS provider
 
-Edit [config.txt](/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/config.txt):
+Edit [config.txt](../../../tldw_Server_API/Config_Files/config.txt):
 
 ```ini
 [TTS-Settings]
@@ -267,23 +269,43 @@ Restart the server after changes.
 
 Verify the accelerated lane you intended, then verify real TTS and STT.
 
+Choose one reusable auth header before running the commands.
+
+Single-user auth mode:
+
+```bash
+AUTH_HEADER=(-H "X-API-KEY: $SINGLE_USER_API_KEY")
+```
+
+Multi-user auth mode:
+
+```bash
+JWT=$(
+  curl -sS -X POST http://127.0.0.1:8000/api/v1/auth/login \
+    -H "Content-Type: application/x-www-form-urlencoded" \
+    -d "username=$ADMIN_USERNAME" \
+    -d "password=$ADMIN_PASSWORD" | jq -r '.access_token'
+)
+AUTH_HEADER=(-H "Authorization: Bearer $JWT")
+```
+
 ### 4A. TTS health and voice catalog
 
 ```bash
 curl -sS http://127.0.0.1:8000/api/v1/audio/health \
-  -H "X-API-KEY: $SINGLE_USER_API_KEY"
+  "${AUTH_HEADER[@]}"
 ```
 
 ```bash
 curl -sS http://127.0.0.1:8000/api/v1/audio/voices/catalog \
-  -H "X-API-KEY: $SINGLE_USER_API_KEY" | jq '.supertonic'
+  "${AUTH_HEADER[@]}" | jq '.supertonic'
 ```
 
 ### 4B. Generate a short test file with TTS
 
 ```bash
 curl -sS -X POST http://127.0.0.1:8000/api/v1/audio/speech \
-  -H "X-API-KEY: $SINGLE_USER_API_KEY" \
+  "${AUTH_HEADER[@]}" \
   -H "Content-Type: application/json" \
   -d '{
         "model": "tts-supertonic-1",
@@ -309,7 +331,7 @@ STT readiness:
 
 ```bash
 curl -sS "http://127.0.0.1:8000/api/v1/audio/transcriptions/health?model=whisper-1&warm=true" \
-  -H "X-API-KEY: $SINGLE_USER_API_KEY"
+  "${AUTH_HEADER[@]}"
 ```
 
 You want to see Whisper reported as usable and warm initialization succeeding.
@@ -320,7 +342,7 @@ STT readiness:
 
 ```bash
 curl -sS "http://127.0.0.1:8000/api/v1/audio/transcriptions/health?model=parakeet-mlx" \
-  -H "X-API-KEY: $SINGLE_USER_API_KEY"
+  "${AUTH_HEADER[@]}"
 ```
 
 You want to see:
@@ -335,7 +357,7 @@ You want to see:
 
 ```bash
 curl -sS -X POST http://127.0.0.1:8000/api/v1/audio/transcriptions \
-  -H "X-API-KEY: $SINGLE_USER_API_KEY" \
+  "${AUTH_HEADER[@]}" \
   -F "file=@accelerated_audio_smoke.wav" \
   -F "model=whisper-1"
 ```
@@ -344,7 +366,7 @@ curl -sS -X POST http://127.0.0.1:8000/api/v1/audio/transcriptions \
 
 ```bash
 curl -sS -X POST http://127.0.0.1:8000/api/v1/audio/transcriptions \
-  -H "X-API-KEY: $SINGLE_USER_API_KEY" \
+  "${AUTH_HEADER[@]}" \
   -F "file=@accelerated_audio_smoke.wav" \
   -F "model=parakeet-mlx"
 ```
@@ -361,7 +383,7 @@ Use `pocket_tts` instead of `supertonic` if local voice cloning matters more tha
 
 Use:
 
-- [PocketTTS Voice Cloning Guide](/Users/macbook-dev/Documents/GitHub/tldw_server2/Docs/User_Guides/WebUI_Extension/PocketTTS_Voice_Cloning_Guide.md)
+- [PocketTTS Voice Cloning Guide](../User_Guides/WebUI_Extension/PocketTTS_Voice_Cloning_Guide.md)
 
 Tradeoff:
 
@@ -372,7 +394,7 @@ Tradeoff:
 
 After the basic accelerated stack works, move to:
 
-- [QWEN3_TTS_SETUP.md](/Users/macbook-dev/Documents/GitHub/tldw_server2/Docs/STT-TTS/QWEN3_TTS_SETUP.md)
+- [QWEN3_TTS_SETUP.md](../../../Docs/STT-TTS/QWEN3_TTS_SETUP.md)
 
 Treat it as the advanced upgrade path, not the baseline.
 
@@ -382,7 +404,7 @@ Treat it as the advanced upgrade path, not the baseline.
 
 - verify `nvidia-smi` on the host first
 - keep `whisper-1` only if your card can handle it; otherwise switch to `medium`
-- if the accelerated Whisper path is still unstable, switch to `parakeet-onnx` and get speech working first
+- if the accelerated Whisper path is still unstable, switch to `parakeet-tdt-0.6b-v3-onnx` and get speech working first
 
 ### Apple Silicon path fails on `parakeet-mlx`
 
@@ -393,11 +415,11 @@ pip install -e '.[STT_Parakeet_MLX]'
 ```
 
 - verify the config really says `parakeet-mlx`
-- if MLX still does not initialize, fall back to `parakeet-onnx`
+- if MLX still does not initialize, fall back to `parakeet-tdt-0.6b-v3-onnx`
 
 ### The server is using the wrong STT model
 
-- make the defaults explicit in [config.txt](/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/config.txt)
+- make the defaults explicit in [config.txt](../../../tldw_Server_API/Config_Files/config.txt)
 - do not rely on implicit provider selection if you care which backend is used
 - verify with `/api/v1/audio/transcriptions/health?model=...`
 
@@ -415,6 +437,6 @@ That can happen today.
 
 Use `/setup` when you want guided provisioning, then manually set:
 
-- your STT defaults in [config.txt](/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/config.txt)
-- your TTS provider in [config.txt](/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/config.txt)
-- your enabled provider block in [tts_providers_config.yaml](/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/tts_providers_config.yaml)
+- your STT defaults in [config.txt](../../../tldw_Server_API/Config_Files/config.txt)
+- your TTS provider in [config.txt](../../../tldw_Server_API/Config_Files/config.txt)
+- your enabled provider block in [tts_providers_config.yaml](../../../tldw_Server_API/Config_Files/tts_providers_config.yaml)

@@ -18,6 +18,7 @@ import { useAntdMessage } from "@/hooks/useAntdMessage"
 import {
   useDecksQuery,
   useCreateFlashcardMutation,
+  useCreateFlashcardTemplateMutation,
   useCreateDeckMutation,
   useDebouncedFormField,
   type UseFlashcardQueriesOptions
@@ -28,6 +29,8 @@ import { FlashcardImageInsertButton } from "./FlashcardImageInsertButton"
 import { FlashcardDeckReferenceSection } from "./FlashcardDeckReferenceSection"
 import { FlashcardTagPicker } from "./FlashcardTagPicker"
 import { DeckSchedulerSettingsEditor } from "./DeckSchedulerSettingsEditor"
+import { FlashcardTemplateValueModal } from "./FlashcardTemplateValueModal"
+import { FlashcardSaveTemplateModal } from "./FlashcardSaveTemplateModal"
 import { normalizeFlashcardTemplateFields } from "../utils/template-helpers"
 import { formatDeckDisplayName } from "../utils/deck-display"
 import { normalizeOptionalFlashcardTags } from "../utils/tag-normalization"
@@ -42,7 +45,7 @@ import {
   getFlashcardFieldLimitState,
   getUtf8ByteLength
 } from "../utils/field-byte-limit"
-import type { FlashcardCreate, Deck } from "@/services/flashcards"
+import type { FlashcardCreate, Deck, FlashcardTemplateCreate } from "@/services/flashcards"
 import { useDeckSchedulerDraft } from "../hooks/useDeckSchedulerDraft"
 import { formatSchedulerSummary } from "../utils/scheduler-settings"
 
@@ -108,6 +111,7 @@ export const FlashcardCreateDrawer: React.FC<
   const extraPreview = useDebouncedFormField(form, "extra")
   const notesPreview = useDebouncedFormField(form, "notes")
   const tagsValue = useDebouncedFormField(form, "tags")
+  const selectedTags = Form.useWatch("tags", form) as string[] | undefined
   const frontValue = Form.useWatch("front", form) as string | undefined
   const backValue = Form.useWatch("back", form) as string | undefined
   const textAreaRefs = React.useRef<Record<EditableTextField, TextAreaRef | null>>({
@@ -135,6 +139,9 @@ export const FlashcardCreateDrawer: React.FC<
   // Inline deck creation state
   const [showInlineCreate, setShowInlineCreate] = React.useState(false)
   const [inlineDeckName, setInlineDeckName] = React.useState("")
+  const [templateValueModalOpen, setTemplateValueModalOpen] = React.useState(false)
+  const [saveTemplateModalOpen, setSaveTemplateModalOpen] = React.useState(false)
+  const [saveTemplateInitialValues, setSaveTemplateInitialValues] = React.useState<Partial<FlashcardTemplateCreate> | null>(null)
   const inlineSchedulerDraft = useDeckSchedulerDraft()
 
   // Queries and mutations - use props if provided, otherwise fetch
@@ -151,6 +158,7 @@ export const FlashcardCreateDrawer: React.FC<
   )
 
   const createMutation = useCreateFlashcardMutation()
+  const createTemplateMutation = useCreateFlashcardTemplateMutation()
   const createDeckMutation = useCreateDeckMutation()
   const isClozeTemplate = selectedModelType === "cloze"
   const frontByteLength = getUtf8ByteLength(frontValue)
@@ -213,6 +221,9 @@ export const FlashcardCreateDrawer: React.FC<
       form.resetFields()
       setShowPreview(false)
       setShowInlineCreate(false)
+      setTemplateValueModalOpen(false)
+      setSaveTemplateModalOpen(false)
+      setSaveTemplateInitialValues(null)
       setInlineDeckName("")
       inlineSchedulerDraft.resetToDefaults()
     }
@@ -335,7 +346,58 @@ export const FlashcardCreateDrawer: React.FC<
     [handleInsertImage, message, t]
   )
 
+  const handleApplyTemplateDraft = React.useCallback(
+    (
+      draft: Pick<FlashcardCreate, "deck_id" | "tags" | "model_type" | "front" | "back" | "notes" | "extra">
+    ) => {
+      form.setFieldsValue(
+        normalizeFlashcardTemplateFields({
+          deck_id: draft.deck_id ?? undefined,
+          tags: draft.tags ?? undefined,
+          model_type: draft.model_type,
+          front: draft.front ?? "",
+          back: draft.back ?? "",
+          notes: draft.notes ?? "",
+          extra: draft.extra ?? ""
+        })
+      )
+      setTemplateValueModalOpen(false)
+    },
+    [form]
+  )
+
+  const handleOpenSaveTemplate = React.useCallback(() => {
+    const currentValues = form.getFieldsValue(["model_type", "front", "back", "notes", "extra"])
+    setSaveTemplateInitialValues({
+      model_type: (currentValues.model_type as FlashcardTemplateCreate["model_type"] | undefined) ?? "basic",
+      front_template: String(currentValues.front ?? ""),
+      back_template: currentValues.back == null ? null : String(currentValues.back),
+      notes_template: currentValues.notes == null ? null : String(currentValues.notes),
+      extra_template: currentValues.extra == null ? null : String(currentValues.extra),
+      placeholder_definitions: []
+    })
+    setSaveTemplateModalOpen(true)
+  }, [form])
+
+  const handleSaveTemplate = React.useCallback(
+    async (values: FlashcardTemplateCreate) => {
+      try {
+        await createTemplateMutation.mutateAsync(values)
+        message.success(
+          t("common:created", {
+            defaultValue: "Created"
+          })
+        )
+      } catch (error: unknown) {
+        message.error(error instanceof Error ? error.message : "Failed to save template")
+        throw error
+      }
+    },
+    [createTemplateMutation, message, t]
+  )
+
   return (
+    <>
     <Drawer
       placement="right"
       styles={{ wrapper: { width: FLASHCARDS_DRAWER_WIDTH_PX } }}
@@ -491,11 +553,24 @@ export const FlashcardCreateDrawer: React.FC<
             </Text>
           )}
 
-          {/* Card template */}
+          <div className="mb-3 flex flex-wrap gap-2">
+            <Button size="small" onClick={() => setTemplateValueModalOpen(true)}>
+              {t("option:flashcards.applyTemplate", {
+                defaultValue: "Apply template"
+              })}
+            </Button>
+            <Button size="small" onClick={handleOpenSaveTemplate}>
+              {t("option:flashcards.saveAsTemplate", {
+                defaultValue: "Save as template"
+              })}
+            </Button>
+          </div>
+
+          {/* Card model */}
           <Form.Item
             name="model_type"
             label={t("option:flashcards.modelType", {
-              defaultValue: "Card template"
+              defaultValue: "Card model"
             })}
           >
             <Select
@@ -823,6 +898,27 @@ export const FlashcardCreateDrawer: React.FC<
         />
       </Form>
     </Drawer>
+    {templateValueModalOpen ? (
+      <FlashcardTemplateValueModal
+        open={templateValueModalOpen}
+        onClose={() => setTemplateValueModalOpen(false)}
+        onApply={handleApplyTemplateDraft}
+        draftDefaults={{
+          deck_id: selectedDeckId,
+          tags: normalizeOptionalFlashcardTags(selectedTags)
+        }}
+      />
+    ) : null}
+    {saveTemplateModalOpen ? (
+      <FlashcardSaveTemplateModal
+        open={saveTemplateModalOpen}
+        onClose={() => setSaveTemplateModalOpen(false)}
+        initialValues={saveTemplateInitialValues}
+        onSave={handleSaveTemplate}
+        isSaving={createTemplateMutation.isPending}
+      />
+    ) : null}
+    </>
   )
 }
 

@@ -69,6 +69,50 @@ const buildSnapshot = (id: number, label: string) => ({
   }
 })
 
+const buildSnapshotV2 = (id: number) => ({
+  snapshot: {
+    id,
+    service: "quiz",
+    activity_type: "quiz_attempt",
+    anchor_type: "quiz_attempt",
+    anchor_id: 101,
+    suggestion_type: "study_suggestions",
+    status: "active",
+    payload: {
+      summary: {
+        score: 8,
+        correct_count: 3,
+        total_count: 4
+      },
+      topics: [
+        {
+          id: "topic-local-1",
+          display_label: "Cardiovascular review",
+          topic_key: "cardio-001",
+          canonical_label: "Cardiovascular review",
+          evidence_reasons: ["topic_gap", "incorrect_answer"],
+          type: "grounded",
+          status: "weakness",
+          selected: true
+        }
+      ]
+    },
+    user_selection: {
+      selected_topic_ids: ["cardio-001"]
+    },
+    refreshed_from_snapshot_id: null,
+    created_at: "2026-04-05T18:00:00Z",
+    last_modified: "2026-04-05T18:00:00Z"
+  },
+  live_evidence: {
+    "cardio-001": {
+      source_available: true,
+      source_type: "note",
+      source_id: "note-9"
+    }
+  }
+})
+
 describe("useStudySuggestions", () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -253,5 +297,46 @@ describe("useStudySuggestions", () => {
 
     expect(getStudySuggestionAnchorStatus).toHaveBeenCalledTimes(1)
     expect(getStudySuggestionSnapshot).not.toHaveBeenCalled()
+  })
+
+  it("preserves V2 snapshot topic fields in the hook response", async () => {
+    vi.mocked(getStudySuggestionAnchorStatus).mockResolvedValue({
+      anchor_type: "quiz_attempt",
+      anchor_id: 404,
+      status: "ready",
+      job_id: null,
+      snapshot_id: 91
+    })
+    vi.mocked(getStudySuggestionSnapshot).mockResolvedValue(buildSnapshotV2(91))
+
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false }
+      }
+    })
+
+    const { result } = renderHook(() => useStudySuggestions("quiz_attempt", 404), {
+      wrapper: buildWrapper(queryClient)
+    })
+
+    await waitFor(() => {
+      expect(result.current.snapshot?.snapshot.id).toBe(91)
+    })
+
+    const snapshot = result.current.snapshot
+    const topic =
+      snapshot &&
+      snapshot.snapshot.payload &&
+      typeof snapshot.snapshot.payload === "object" &&
+      !Array.isArray(snapshot.snapshot.payload)
+        ? (snapshot.snapshot.payload as { topics?: Array<Record<string, unknown>> }).topics?.[0]
+        : null
+
+    expect(topic).toMatchObject({
+      id: "topic-local-1",
+      topic_key: "cardio-001",
+      canonical_label: "Cardiovascular review",
+      evidence_reasons: ["topic_gap", "incorrect_answer"]
+    })
   })
 })

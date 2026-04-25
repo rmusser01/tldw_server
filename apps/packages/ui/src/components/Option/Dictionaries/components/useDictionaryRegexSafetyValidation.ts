@@ -1,4 +1,5 @@
 import React from "react"
+import { useTranslation } from "react-i18next"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import {
   buildTimedEffectsPayload,
@@ -17,6 +18,12 @@ type UseDictionaryRegexSafetyValidationState = {
 export function useDictionaryRegexSafetyValidation({
   dictionaryName,
 }: UseDictionaryRegexSafetyValidationParams): UseDictionaryRegexSafetyValidationState {
+  const { t } = useTranslation(["option"])
+  const localize = React.useCallback(
+    (key: string, fallback: string) => t(key, fallback),
+    [t]
+  )
+
   const validateRegexWithServer = React.useCallback(
     async (entryDraft: any): Promise<string | null> => {
       const type = entryDraft?.type === "regex" ? "regex" : "literal"
@@ -28,10 +35,13 @@ export function useDictionaryRegexSafetyValidation({
         typeof entryDraft?.replacement === "string" ? entryDraft.replacement : ""
 
       if (!pattern.trim()) {
-        return "Pattern is required."
+        return localize(
+          "option:dictionaries.validation.patternRequired",
+          "Pattern is required."
+        )
       }
 
-      const clientRegexError = validateRegexPattern(pattern)
+      const clientRegexError = validateRegexPattern(pattern, localize)
       if (clientRegexError) {
         return clientRegexError
       }
@@ -79,11 +89,14 @@ export function useDictionaryRegexSafetyValidation({
       } catch (error: any) {
         return (
           error?.message ||
-          "Unable to validate regex pattern safety with server."
+          localize(
+            "option:dictionaries.validation.regexServerUnavailable",
+            "Unable to validate regex pattern safety with server."
+          )
         )
       }
     },
-    [dictionaryName]
+    [dictionaryName, localize]
   )
 
   return { validateRegexWithServer }

@@ -40,21 +40,53 @@ async def test_chats_get_window_selection_budget():
             "retrieval": {
                 "mode": "chunk_with_siblings",
                 "max_tokens": 25,
-                "chars_per_token": 1,
+                "chars_per_token": 1,  # nosec B105
                 "loc": {"message_id": "m3"},
             },
         },
         context=None,
     )
 
-    assert isinstance(out, dict)
-    assert out["meta"]["loc"]["message_id"] == "m3"
+    assert isinstance(out, dict)  # nosec B101
+    assert out["meta"]["loc"]["message_id"] == "m3"  # nosec B101
     attachments = out["attachments"]
     # Ensure anchor present
     ids = [m.get("id") for m in attachments]
-    assert "m3" in ids
+    assert "m3" in ids  # nosec B101
     # With greedy left/right and budget=25, we expect two messages: m2 and m3 (10 + 12)
-    assert set(ids) <= {"m2", "m3", "m4"}
+    assert set(ids) <= {"m2", "m3", "m4"}  # nosec B101
     # Combined token length <= 25
     total_chars = sum(len(m.get("content") or "") for m in attachments)
-    assert total_chars <= 25
+    assert total_chars <= 25  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_chats_title_search_uses_request_client_scope():
+    from types import SimpleNamespace
+
+    class _FakeSearchDb(FakeChatsDB):
+        def __init__(self) -> None:
+            super().__init__()
+            self.last_title_search = None
+
+        def search_conversations_by_title(self, query, character_id=None, limit=10, client_id=None):
+            self.last_title_search = {
+                "query": query,
+                "character_id": character_id,
+                "limit": limit,
+                "client_id": client_id,
+            }
+            return [{"id": "c1", "title": "Hello", "created_at": None, "last_modified": None, "version": 1, "character_id": 3}]
+
+    db = _FakeSearchDb()
+    mod = ChatsModule(ModuleConfig(name="chats"))
+    mod._open_db = lambda ctx: db  # type: ignore[attr-defined]
+
+    out = await mod.execute_tool(
+        "chats.search",
+        {"query": "hello", "by": "title", "limit": 5},
+        context=SimpleNamespace(client_id="tenant-7", metadata={}),
+    )
+
+    assert out["results"][0]["conversation_id"] == "c1"  # nosec B101
+    assert db.last_title_search["client_id"] == "tenant-7"  # nosec B101

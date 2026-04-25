@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import threading
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -35,9 +35,14 @@ from tldw_Server_API.app.core.StudySuggestions.actions import (
     finalize_generation_link,
     find_generation_link_by_fingerprint,
     is_pending_generation_target_id,
+    normalize_selected_topics,
     release_generation_link_reservation,
     reserve_generation_link,
+    resolve_lineage_equivalent_topic_selection,
+    resolve_selected_topic_identity_groups,
     resolve_selected_topic_labels,
+    resolve_selected_topic_normalization_version,
+    resolve_selected_topic_semantic_keys,
     soft_delete_deck,
 )
 from tldw_Server_API.app.core.StudySuggestions import snapshot_service
@@ -85,6 +90,164 @@ def _serialize_job(job: dict[str, object]) -> dict[str, object]:
         "id": int(job["id"]),
         "status": str(job.get("status") or "queued"),
     }
+
+
+def _is_generation_link_target_live(note_db: CharactersRAGDB, generation_link: dict[str, Any]) -> bool:
+    """Return whether a persisted generation link still points at a launchable target."""
+
+    target_service = str(generation_link.get("target_service") or "").strip().lower()
+    target_type = str(generation_link.get("target_type") or "").strip().lower()
+    target_id = str(generation_link.get("target_id") or "").strip()
+    if not target_id or is_pending_generation_target_id(target_id):
+        return False
+    if target_service == "quiz" and target_type == "quiz":
+        try:
+            quiz_id = int(target_id)
+        except (TypeError, ValueError):
+            return False
+        return note_db.get_quiz(quiz_id) is not None
+    if target_service == "flashcards" and target_type == "deck":
+        try:
+            deck_id = int(target_id)
+        except (TypeError, ValueError):
+            return False
+        deck = note_db.get_deck(deck_id)
+        return bool(deck) and not bool(deck.get("deleted"))
+    return False
+
+
+def _iter_refreshed_ancestor_snapshots(
+    note_db: CharactersRAGDB,
+    snapshot_row: dict[str, Any],
+) -> Iterator[dict[str, Any]]:
+    """Yield refreshed ancestor snapshots from newest parent to oldest reachable ancestor."""
+
+    seen_ids: set[int] = set()
+    parent_id = snapshot_row.get("refreshed_from_snapshot_id")
+    while parent_id is not None:
+        try:
+            ancestor_snapshot = note_db.get_suggestion_snapshot(int(parent_id))
+        except (TypeError, ValueError):
+            break
+        if not ancestor_snapshot:
+            break
+        ancestor_id = int(ancestor_snapshot["id"])
+        if ancestor_id in seen_ids:
+            break
+        seen_ids.add(ancestor_id)
+        yield ancestor_snapshot
+        parent_id = ancestor_snapshot.get("refreshed_from_snapshot_id")
+
+
+def _find_live_generation_link_in_refreshed_lineage(
+    note_db: CharactersRAGDB,
+    snapshot_row: dict[str, Any],
+    *,
+    target_service: str,
+    target_type: str,
+    requested_identity_groups: list[frozenset[str]],
+    action_kind: str,
+    generator_version: str | None,
+) -> dict[str, Any] | None:
+    """Find a reusable live generation link in refreshed ancestor snapshots."""
+
+    if not requested_identity_groups:
+        return None
+
+    for ancestor_snapshot in _iter_refreshed_ancestor_snapshots(note_db, snapshot_row):
+        lineage_selection = resolve_lineage_equivalent_topic_selection(
+            ancestor_snapshot,
+            requested_identity_groups=requested_identity_groups,
+        )
+        if lineage_selection is None:
+            continue
+        selected_topics, normalization_version = lineage_selection
+        current_fingerprint, legacy_fingerprint = _build_selection_fingerprint_variants(
+            snapshot_id=int(ancestor_snapshot["id"]),
+            target_service=target_service,
+            target_type=target_type,
+            selected_topics=selected_topics,
+            action_kind=action_kind,
+            generator_version=generator_version,
+            normalization_version=normalization_version,
+        )
+        candidates = _list_generation_link_candidates(
+            note_db,
+            snapshot_id=int(ancestor_snapshot["id"]),
+            target_service=target_service,
+            target_type=target_type,
+            selection_fingerprint=current_fingerprint,
+            legacy_selection_fingerprint=legacy_fingerprint,
+        )
+        for existing_link, _matched_fingerprint in candidates:
+            if _is_generation_link_target_live(note_db, existing_link):
+                return existing_link
+    return None
+
+
+def _build_selection_fingerprint_variants(
+    *,
+    snapshot_id: int,
+    target_service: str,
+    target_type: str,
+    selected_topics: list[str],
+    action_kind: str,
+    generator_version: str | None,
+    normalization_version: str,
+) -> tuple[str, str | None]:
+    """Build current and legacy-compatible selection fingerprints for one action."""
+
+    selection_fingerprint = build_selection_fingerprint(
+        snapshot_id=snapshot_id,
+        target_service=target_service,
+        target_type=target_type,
+        selected_topics=selected_topics,
+        action_kind=action_kind,
+        generator_version=generator_version,
+        normalization_version=normalization_version,
+    )
+    legacy_selection_fingerprint = build_selection_fingerprint(
+        snapshot_id=snapshot_id,
+        target_service=target_service,
+        target_type=target_type,
+        selected_topics=selected_topics,
+        action_kind=action_kind,
+        generator_version=generator_version,
+        normalization_version=normalization_version,
+        include_normalization_version=False,
+    )
+    return selection_fingerprint, (
+        legacy_selection_fingerprint if legacy_selection_fingerprint != selection_fingerprint else None
+    )
+
+
+def _list_generation_link_candidates(
+    note_db: CharactersRAGDB,
+    *,
+    snapshot_id: int,
+    target_service: str,
+    target_type: str,
+    selection_fingerprint: str,
+    legacy_selection_fingerprint: str | None,
+) -> list[tuple[dict[str, Any], str]]:
+    """Return matching generation links for current and legacy fingerprints."""
+
+    candidates: list[tuple[dict[str, Any], str]] = []
+    seen_fingerprints: set[str] = set()
+    for fingerprint in (selection_fingerprint, legacy_selection_fingerprint):
+        if not fingerprint or fingerprint in seen_fingerprints:
+            continue
+        seen_fingerprints.add(fingerprint)
+        existing_link = find_generation_link_by_fingerprint(
+            note_db,
+            snapshot_id=snapshot_id,
+            target_service=target_service,
+            target_type=target_type,
+            selection_fingerprint=fingerprint,
+        )
+        if existing_link:
+            candidates.append((existing_link, fingerprint))
+    return candidates
 
 
 def _resolve_quiz_sources(
@@ -342,20 +505,23 @@ def refresh_suggestion_snapshot(
     if not snapshot_row:
         raise HTTPException(status_code=404, detail="Suggestion snapshot not found")
 
-    job = jm.create_job(
-        domain=STUDY_SUGGESTIONS_DOMAIN,
-        queue=study_suggestions_jobs_queue(),
-        job_type=STUDY_SUGGESTIONS_REFRESH_JOB_TYPE,
-        payload=build_study_suggestions_job_payload(
+    try:
+        job = jm.create_job(
+            domain=STUDY_SUGGESTIONS_DOMAIN,
+            queue=study_suggestions_jobs_queue(),
             job_type=STUDY_SUGGESTIONS_REFRESH_JOB_TYPE,
-            anchor_type=str(snapshot_row["anchor_type"]),
-            anchor_id=int(snapshot_row["anchor_id"]),
-            snapshot_id=int(snapshot_row["id"]),
-        ),
-        owner_user_id=str(current_user.id),
-        priority=5,
-        max_retries=1,
-    )
+            payload=build_study_suggestions_job_payload(
+                job_type=STUDY_SUGGESTIONS_REFRESH_JOB_TYPE,
+                anchor_type=str(snapshot_row["anchor_type"]),
+                anchor_id=int(snapshot_row["anchor_id"]),
+                snapshot_id=int(snapshot_row["id"]),
+            ),
+            owner_user_id=str(current_user.id),
+            priority=5,
+            max_retries=1,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return SuggestionJobAcceptedResponse.model_validate({"job": _serialize_job(job)})
 
 
@@ -363,7 +529,7 @@ def _prepare_action(
     db: CharactersRAGDB,
     snapshot_id: int,
     payload: SuggestionActionRequest,
-) -> tuple[dict[str, Any], dict[str, str], list[str], str, bool]:
+) -> tuple[dict[str, Any], dict[str, str], list[str], str, bool, str | None]:
     """Synchronous pre-dispatch phase: validate, deduplicate, and reserve."""
 
     snapshot_row = db.get_suggestion_snapshot(snapshot_id)
@@ -385,26 +551,69 @@ def _prepare_action(
         manual_topic_labels=payload.manual_topic_labels,
         has_explicit_selection=payload.has_explicit_selection,
     )
-    selection_fingerprint = build_selection_fingerprint(
+    semantic_selected_topics = resolve_selected_topic_semantic_keys(
+        snapshot_row,
+        selected_topic_ids=payload.selected_topic_ids,
+        manual_topic_labels=payload.manual_topic_labels,
+        has_explicit_selection=payload.has_explicit_selection,
+    )
+    normalized_manual_topic_labels = normalize_selected_topics(payload.manual_topic_labels or [])
+    normalization_version = resolve_selected_topic_normalization_version(
+        snapshot_row,
+        selected_topic_ids=payload.selected_topic_ids,
+        has_explicit_selection=payload.has_explicit_selection,
+    )
+    requested_identity_groups = resolve_selected_topic_identity_groups(
+        snapshot_row,
+        selected_topic_ids=payload.selected_topic_ids,
+        has_explicit_selection=payload.has_explicit_selection,
+    )
+    selection_fingerprint, legacy_selection_fingerprint = _build_selection_fingerprint_variants(
         snapshot_id=snapshot_id,
         target_service=action_contract["target_service"],
         target_type=action_contract["target_type"],
-        selected_topics=selected_topics,
+        selected_topics=semantic_selected_topics,
         action_kind=action_contract["action_kind"],
         generator_version=payload.generator_version,
+        normalization_version=normalization_version,
     )
     pending_reservation_created = False
 
-    existing_link = find_generation_link_by_fingerprint(
+    existing_candidates = _list_generation_link_candidates(
         db,
         snapshot_id=snapshot_id,
         target_service=action_contract["target_service"],
         target_type=action_contract["target_type"],
         selection_fingerprint=selection_fingerprint,
+        legacy_selection_fingerprint=legacy_selection_fingerprint,
     )
-    if existing_link and is_pending_generation_target_id(existing_link.get("target_id")) and not payload.force_regenerate:
+    pending_existing = next(
+        (
+            (existing_link, matched_fingerprint)
+            for existing_link, matched_fingerprint in existing_candidates
+            if is_pending_generation_target_id(existing_link.get("target_id"))
+        ),
+        None,
+    )
+    live_existing = next(
+        (
+            (existing_link, matched_fingerprint)
+            for existing_link, matched_fingerprint in existing_candidates
+            if not is_pending_generation_target_id(existing_link.get("target_id"))
+            and _is_generation_link_target_live(db, existing_link)
+        ),
+        None,
+    )
+    stale_existing = [
+        (existing_link, matched_fingerprint)
+        for existing_link, matched_fingerprint in existing_candidates
+        if not is_pending_generation_target_id(existing_link.get("target_id"))
+        and not _is_generation_link_target_live(db, existing_link)
+    ]
+    if pending_existing and not payload.force_regenerate:
         raise HTTPException(status_code=409, detail="Study suggestion action already in progress")
-    if existing_link and not payload.force_regenerate:
+    if live_existing and not payload.force_regenerate:
+        existing_link, _matched_existing_fingerprint = live_existing
         raise _EarlyReturn(
             SuggestionActionResponse.model_validate(
                 {
@@ -417,7 +626,46 @@ def _prepare_action(
                 }
             )
         )
+
+    ancestor_link = _find_live_generation_link_in_refreshed_lineage(
+        db,
+        snapshot_row,
+        target_service=action_contract["target_service"],
+        target_type=action_contract["target_type"],
+        requested_identity_groups=[] if normalized_manual_topic_labels else requested_identity_groups,
+        action_kind=action_contract["action_kind"],
+        generator_version=payload.generator_version,
+    )
+    if ancestor_link and not payload.force_regenerate:
+        raise _EarlyReturn(
+            SuggestionActionResponse.model_validate(
+                {
+                    "disposition": "opened_existing",
+                    "snapshot_id": snapshot_id,
+                    "selection_fingerprint": selection_fingerprint,
+                    "target_service": action_contract["target_service"],
+                    "target_type": action_contract["target_type"],
+                    "target_id": str(ancestor_link["target_id"]),
+                }
+            )
+    )
+
     if not payload.force_regenerate:
+        for _existing_link, matched_existing_fingerprint in stale_existing:
+            try:
+                db.soft_delete_suggestion_generation_link(
+                    snapshot_id=snapshot_id,
+                    target_service=action_contract["target_service"],
+                    target_type=action_contract["target_type"],
+                    selection_fingerprint=matched_existing_fingerprint,
+                )
+            except Exception as exc:  # pragma: no cover - defensive cleanup path
+                logger.warning(
+                    "Failed to retire stale study suggestion generation link for snapshot_id={} fingerprint={}: {}",
+                    snapshot_id,
+                    matched_existing_fingerprint,
+                    exc,
+                )
         try:
             reserve_generation_link(
                 db,
@@ -428,16 +676,35 @@ def _prepare_action(
             )
             pending_reservation_created = True
         except Exception:
-            existing_link = find_generation_link_by_fingerprint(
+            existing_candidates = _list_generation_link_candidates(
                 db,
                 snapshot_id=snapshot_id,
                 target_service=action_contract["target_service"],
                 target_type=action_contract["target_type"],
                 selection_fingerprint=selection_fingerprint,
+                legacy_selection_fingerprint=legacy_selection_fingerprint,
             )
-            if existing_link and is_pending_generation_target_id(existing_link.get("target_id")):
+            pending_existing = next(
+                (
+                    (existing_link, matched_fingerprint)
+                    for existing_link, matched_fingerprint in existing_candidates
+                    if is_pending_generation_target_id(existing_link.get("target_id"))
+                ),
+                None,
+            )
+            live_existing = next(
+                (
+                    (existing_link, matched_fingerprint)
+                    for existing_link, matched_fingerprint in existing_candidates
+                    if not is_pending_generation_target_id(existing_link.get("target_id"))
+                    and _is_generation_link_target_live(db, existing_link)
+                ),
+                None,
+            )
+            if pending_existing:
                 raise HTTPException(status_code=409, detail="Study suggestion action already in progress")
-            if existing_link and not payload.force_regenerate:
+            if live_existing and not payload.force_regenerate:
+                existing_link, _matched_existing_fingerprint = live_existing
                 raise _EarlyReturn(
                     SuggestionActionResponse.model_validate(
                         {
@@ -452,7 +719,26 @@ def _prepare_action(
                 )
             raise
 
-    return snapshot_row, action_contract, selected_topics, selection_fingerprint, pending_reservation_created
+    retired_selection_fingerprint = (
+        next(
+            (
+                matched_fingerprint
+                for _existing_link, matched_fingerprint in existing_candidates
+                if matched_fingerprint != selection_fingerprint
+            ),
+            None,
+        )
+        if existing_candidates
+        else None
+    )
+    return (
+        snapshot_row,
+        action_contract,
+        selected_topics,
+        selection_fingerprint,
+        pending_reservation_created,
+        retired_selection_fingerprint,
+    )
 
 
 def _finalize_action(
@@ -462,9 +748,18 @@ def _finalize_action(
     generated: dict[str, str],
     selection_fingerprint: str,
     pending_reservation_created: bool,
+    force_regenerate: bool,
+    retired_selection_fingerprint: str | None,
 ) -> None:
     """Synchronous post-dispatch phase: persist the generation link."""
 
+    if retired_selection_fingerprint:
+        db.soft_delete_suggestion_generation_link(
+            snapshot_id=snapshot_id,
+            target_service=str(generated["target_service"]),
+            target_type=str(generated["target_type"]),
+            selection_fingerprint=retired_selection_fingerprint,
+        )
     if pending_reservation_created:
         finalize_generation_link(
             db,
@@ -473,6 +768,14 @@ def _finalize_action(
             target_type=str(generated["target_type"]),
             selection_fingerprint=selection_fingerprint,
             final_target_id=str(generated["target_id"]),
+        )
+    elif force_regenerate:
+        db.replace_suggestion_generation_link(
+            snapshot_id=snapshot_id,
+            target_service=str(generated["target_service"]),
+            target_type=str(generated["target_type"]),
+            target_id=str(generated["target_id"]),
+            selection_fingerprint=selection_fingerprint,
         )
     else:
         db.create_suggestion_generation_link(
@@ -499,7 +802,14 @@ async def trigger_suggestion_action(
     media_db: Any = Depends(get_media_db_for_user),
 ) -> SuggestionActionResponse:
     try:
-        snapshot_row, action_contract, selected_topics, selection_fingerprint, pending_reservation_created = (
+        (
+            snapshot_row,
+            action_contract,
+            selected_topics,
+            selection_fingerprint,
+            pending_reservation_created,
+            retired_selection_fingerprint,
+        ) = (
             await asyncio.to_thread(_prepare_action, db, snapshot_id, payload)
         )
     except _EarlyReturn as early:
@@ -522,6 +832,8 @@ async def trigger_suggestion_action(
             generated=generated,
             selection_fingerprint=selection_fingerprint,
             pending_reservation_created=pending_reservation_created,
+            force_regenerate=payload.force_regenerate,
+            retired_selection_fingerprint=retired_selection_fingerprint,
         )
     except HTTPException:
         if pending_reservation_created:

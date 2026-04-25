@@ -15,6 +15,13 @@ PocketTTS note:
 - `pocket_tts_cpp` only exposes streaming when the local CLI probe proves the install is truly incremental; otherwise the adapter fails closed.
 - This page documents public request inputs only. Provider-internal `extra_params` keys are intentionally omitted.
 
+OmniVoice note:
+
+- `omnivoice` is a first-class local provider backed by a managed loopback sidecar runtime.
+- Requests that explicitly resolve to OmniVoice and omit `voice` normalize to `voice: "auto"`.
+- Explicit caller-provided voices are preserved, including `custom:<voice_id>` selections.
+- Setup/install details for the dedicated runtime live in `Docs/STT-TTS/TTS-SETUP-GUIDE.md`.
+
 1. Client pattern (Python)
 
   Non‑streaming usage (stream: false), handling JSON errors vs audio:

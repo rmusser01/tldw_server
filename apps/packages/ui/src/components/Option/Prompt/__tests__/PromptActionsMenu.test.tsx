@@ -21,7 +21,13 @@ vi.mock("antd", () => ({
           .map((item: any) => (
             <button
               key={item.key}
-              data-testid={`menu-item-${item.key}`}
+              data-testid={
+                React.isValidElement(item.label) &&
+                item.label.props &&
+                typeof item.label.props["data-testid"] === "string"
+                  ? undefined
+                  : `menu-item-${item.key}`
+              }
               onClick={item.onClick}
             >
               {item.label}
@@ -147,6 +153,46 @@ describe("PromptActionsMenu", () => {
     expect(useInChatItem).toBeInTheDocument()
     await user.click(useInChatItem)
     expect(onUseInChat).toHaveBeenCalledTimes(1)
+  })
+
+  it("shows retry sync action when onRetrySync handler is provided", async () => {
+    const user = userEvent.setup()
+    const onRetrySync = vi.fn()
+
+    render(
+      <PromptActionsMenu
+        promptId="p-retry"
+        syncStatus="pending"
+        onEdit={vi.fn()}
+        onDuplicate={vi.fn()}
+        onUseInChat={vi.fn()}
+        onDelete={vi.fn()}
+        onRetrySync={onRetrySync}
+        onPushToServer={vi.fn()}
+      />
+    )
+
+    const retrySyncItem = screen.getByTestId("menu-item-retrySync")
+    expect(retrySyncItem).toBeInTheDocument()
+
+    await user.click(retrySyncItem)
+    expect(onRetrySync).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not show retry sync action when onRetrySync is not provided", () => {
+    render(
+      <PromptActionsMenu
+        promptId="p-no-retry"
+        syncStatus="pending"
+        onEdit={vi.fn()}
+        onDuplicate={vi.fn()}
+        onUseInChat={vi.fn()}
+        onDelete={vi.fn()}
+        onPushToServer={vi.fn()}
+      />
+    )
+
+    expect(screen.queryByTestId("menu-item-retrySync")).not.toBeInTheDocument()
   })
 
   it("uses characters-like action button spacing classes", () => {

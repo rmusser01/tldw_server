@@ -32,3 +32,14 @@ export function plainTextToTipTapJson(text: string): JSONContent {
   })
   return { type: "doc", content }
 }
+
+/** Resolve the TipTap document for a session payload. */
+export function resolveTipTapDocument(
+  prompt: string,
+  promptRich: JSONContent | null | undefined,
+): JSONContent {
+  if (promptRich && promptRich.type === "doc") {
+    return promptRich
+  }
+  return plainTextToTipTapJson(prompt)
+}

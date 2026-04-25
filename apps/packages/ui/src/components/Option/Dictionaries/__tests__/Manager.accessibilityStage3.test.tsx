@@ -478,6 +478,9 @@ describe("DictionariesManager accessibility stage-3", () => {
     render(<DictionariesManager />)
 
     expect(
+      screen.getByRole("button", { name: "Validate dictionary Valid Dictionary" })
+    ).toBeInTheDocument()
+    expect(
       screen.getByRole("button", { name: "Edit dictionary Valid Dictionary" })
     ).toBeInTheDocument()
     expect(
@@ -494,6 +497,9 @@ describe("DictionariesManager accessibility stage-3", () => {
     ).toBeInTheDocument()
     expect(
       screen.getByRole("button", { name: "View statistics for Valid Dictionary" })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Version history for Valid Dictionary" })
     ).toBeInTheDocument()
     expect(
       screen.getByRole("button", { name: "Duplicate dictionary Valid Dictionary" })
@@ -513,6 +519,7 @@ describe("DictionariesManager accessibility stage-3", () => {
       name: "Advanced options"
     })
     expect(advancedToggle).toHaveAttribute("aria-expanded", "false")
+    expect(advancedToggle).toHaveAttribute("aria-controls")
 
     await user.click(advancedToggle)
 
@@ -522,6 +529,11 @@ describe("DictionariesManager accessibility stage-3", () => {
         "true"
       )
     })
+
+    const expandedToggle = screen.getByRole("button", { name: "Simple mode" })
+    const advancedPanelId = expandedToggle.getAttribute("aria-controls")
+    expect(advancedPanelId).toBeTruthy()
+    expect(document.getElementById(advancedPanelId || "")).not.toBeNull()
   }, 60000)
 
   it("keeps status icon color tokens at WCAG AA non-text contrast on light/dark surfaces", () => {

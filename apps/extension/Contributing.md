@@ -20,10 +20,14 @@ This document is for contributors working on the browser extension codebase.
   - Dev (Edge): `bun run dev:edge`
   - Type-check: `bun run compile`
   - Build all: `bun run build`
+  - Force production artifacts: `bun run build:prod`
+  - Force development artifacts: `bun run build:dev`
+  - Browser-specific production build: `bun run build:chrome:prod`
   - Zip bundles: `bun run zip`
+  - Force production zip bundle: `bun run zip:prod`
   - Docs: `bun run docs:dev`, `docs:build`, `docs:preview`
 
-WXT outputs unpacked bundles under `.output/<browser>-mv3/` which you can load as extensions in your browser.
+Default artifact profile follows the checked-out branch: `main` builds production artifacts, every other branch builds development artifacts. Exported unpacked installs live under `build/<browser>-mv3` for production and `build/<browser>-mv3-dev` for development. WXT’s internal `.output/<browser>-mv3` roots stay stable for tooling and automated tests.
 
 ## Configuring tldw_server for Development
 
@@ -64,6 +68,11 @@ For easier local dev and CI, you can provide the tldw_server API key via Vite/WX
   - `bun run compile`
 
 Note: some e2e specs build the extension before running tests. Make sure your local Node/Bun/WXT versions satisfy the prerequisites above.
+
+For release-like local verification on a feature branch, prefer the explicit production entrypoints instead of the branch-aware defaults:
+
+- `bun run build:chrome:prod`
+- `bun run zip:prod`
 
 ## Offline Mode & Quick Ingest (for contributors)
 

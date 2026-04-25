@@ -74,3 +74,47 @@ def test_voice_registry_db_uses_shared_trusted_path(monkeypatch, tmp_path) -> No
     expected_calls = [(input_path, "voice registry db")]
     if calls != expected_calls:
         pytest.fail(f"expected VoiceRegistryDB trusted-path call {expected_calls!r}, got {calls!r}")
+
+
+def test_guardian_db_uses_trusted_parent_dir_helper(monkeypatch, tmp_path) -> None:
+    from tldw_Server_API.app.core.DB_Management import Guardian_DB as guardian_mod
+
+    calls = []
+    safe_path = tmp_path / "safe-guardian.db"
+    input_path = tmp_path / "guardian" / "input-guardian.db"
+
+    monkeypatch.setattr(
+        guardian_mod,
+        "ensure_trusted_database_parent_dir",
+        lambda db_path, **kwargs: calls.append((db_path, kwargs["label"])) or safe_path,
+    )
+
+    db = guardian_mod.GuardianDB(str(input_path))
+
+    if db.db_path != str(safe_path):
+        pytest.fail("expected GuardianDB to store the trusted parent helper result")
+    expected_calls = [(Path(input_path), "guardian database")]
+    if calls != expected_calls:
+        pytest.fail(f"expected GuardianDB helper call {expected_calls!r}, got {calls!r}")
+
+
+def test_personalization_db_uses_trusted_parent_exists_helper(monkeypatch, tmp_path) -> None:
+    from tldw_Server_API.app.core.DB_Management import Personalization_DB as personalization_mod
+
+    calls = []
+    safe_path = tmp_path / "safe-personalization.db"
+    input_path = tmp_path / "personalization" / "input-personalization.db"
+
+    monkeypatch.setattr(
+        personalization_mod,
+        "require_trusted_database_parent_exists",
+        lambda db_path, **kwargs: calls.append((db_path, kwargs["label"])) or safe_path,
+    )
+
+    db = personalization_mod.PersonalizationDB(str(input_path))
+
+    if db.db_path != str(safe_path):
+        pytest.fail("expected PersonalizationDB to store the trusted parent helper result")
+    expected_calls = [(str(input_path), "personalization database")]
+    if calls != expected_calls:
+        pytest.fail(f"expected PersonalizationDB helper call {expected_calls!r}, got {calls!r}")

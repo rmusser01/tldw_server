@@ -190,6 +190,12 @@ export const PromptListTable: React.FC<PromptListTableProps> = (props) => {
 
   return (
     <div className="relative" data-testid={tableShellTestId}>
+      {/* Screen reader announcement for selection changes */}
+      <div role="status" aria-live="polite" aria-atomic="true" className="sr-only">
+        {selectedIds.length > 0
+          ? `${selectedIds.length} prompt${selectedIds.length === 1 ? "" : "s"} selected`
+          : "0 prompts selected"}
+      </div>
       <div className="overflow-x-auto pb-1" data-testid={scrollContainerTestId}>
         <Table<PromptRowVM>
           className={tableClassName}

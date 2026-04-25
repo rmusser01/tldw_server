@@ -654,6 +654,111 @@ describe("QuickIngestWizardModal — full wizard flow integration", () => {
     expect(onClose).toHaveBeenCalledTimes(1)
   })
 
+  it("Step 5 — renders skipped duplicates separately and includes them in the summary", async () => {
+    const user = userEvent.setup()
+    render(<WizardTestHarness onClose={onClose} />)
+
+    const textarea = screen.getByPlaceholderText(/https:\/\/example\.com/i)
+    await user.type(textarea, "https://example.com/article")
+    await user.click(screen.getByRole("button", { name: /Add URLs to queue/i }))
+
+    await waitFor(() => {
+      expect(screen.getByText("https://example.com/article")).toBeTruthy()
+    })
+
+    await user.click(screen.getByText(/Configure 1 items/i))
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", { name: /standard preset/i })
+      ).toBeTruthy()
+    })
+
+    await user.click(screen.getByText("Next"))
+
+    await waitFor(() => {
+      expect(screen.getByText("Ready to Process")).toBeTruthy()
+    })
+
+    await user.click(screen.getByText("Start Processing"))
+
+    await waitFor(() => {
+      expect(screen.getByRole("list")).toBeTruthy()
+    })
+
+    expect(ctxRef).not.toBeNull()
+
+    ctxRef!.setResults([
+      {
+        id: "test-success-1",
+        status: "ok",
+        outcome: "ingested",
+        url: "https://example.com/article",
+        type: "web",
+        title: "Fresh Article",
+      },
+      {
+        id: "test-skipped-1",
+        status: "ok",
+        outcome: "skipped",
+        url: "https://example.com/duplicate",
+        type: "web",
+        title: "Existing Article",
+        message: "This item already exists in your library. Use the ‘Deep’ preset to overwrite.",
+      },
+      {
+        id: "test-error-1",
+        status: "error",
+        outcome: "failed",
+        url: "https://example.com/error",
+        type: "web",
+        title: "Broken Article",
+        error: "Upload failed",
+      },
+    ])
+
+    ctxRef!.updateProcessingState({
+      status: "complete",
+      perItemProgress: [
+        {
+          id: "test-success-1",
+          status: "complete",
+          progressPercent: 100,
+          currentStage: "done",
+          estimatedRemaining: 0,
+        },
+        {
+          id: "test-skipped-1",
+          status: "complete",
+          progressPercent: 100,
+          currentStage: "done",
+          estimatedRemaining: 0,
+        },
+        {
+          id: "test-error-1",
+          status: "failed",
+          progressPercent: 100,
+          currentStage: "failed",
+          estimatedRemaining: 0,
+          error: "Upload failed",
+        },
+      ],
+      elapsed: 2.5,
+    })
+
+    ctxRef!.goNext()
+
+    await waitFor(() => {
+      expect(screen.getByTestId("wizard-results-step")).toBeTruthy()
+    })
+
+    expect(screen.getByText("Skipped (1)")).toBeTruthy()
+    expect(screen.getByText("Existing Article")).toBeTruthy()
+    expect(
+      screen.getByText(/1 succeeded.*1 skipped.*1 failed/i)
+    ).toBeTruthy()
+  })
+
   // -------------------------------------------------------------------------
   // Full flow with multiple items
   // -------------------------------------------------------------------------

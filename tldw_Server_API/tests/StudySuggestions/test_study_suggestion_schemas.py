@@ -1,6 +1,9 @@
+from dataclasses import fields
+
 import pytest
 from pydantic import ValidationError
 
+from tldw_Server_API.app.core.StudySuggestions.types import RankedTopic, TopicCandidate
 from tldw_Server_API.app.api.v1.schemas.study_suggestions import (
     SuggestionActionResponse,
     SuggestionRefreshRequest,
@@ -77,3 +80,10 @@ def test_action_response_requires_known_disposition_and_target_service():
             target_type="quiz",
             target_id="quiz-9",
         )
+
+
+@pytest.mark.parametrize("topic_type", [TopicCandidate, RankedTopic])
+def test_topic_types_expose_v2_identity_fields(topic_type):
+    field_names = {field.name for field in fields(topic_type)}
+
+    assert {"topic_key", "normalization_version", "source_count", "evidence_reasons"} <= field_names  # nosec B101

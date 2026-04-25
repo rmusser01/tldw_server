@@ -17,6 +17,7 @@ import {
   useUpdateFlashcardMutation,
   useResetFlashcardSchedulingMutation,
   useDeleteFlashcardMutation,
+  useRecentFlashcardReviewSessionsQuery,
   useFlashcardShortcuts,
   useDebouncedFormField,
   useDueCountsQuery,
@@ -200,6 +201,10 @@ describe("ReviewTab cram mode", () => {
     vi.mocked(useReviewFlashcardMutation).mockReturnValue({
       mutateAsync: reviewMutateAsync
     } as any)
+    vi.mocked(useRecentFlashcardReviewSessionsQuery).mockReturnValue({
+      data: [],
+      isLoading: false
+    } as any)
     vi.mocked(useFlashcardAssistantQuery).mockReturnValue({
       data: null,
       isLoading: false,
@@ -282,5 +287,39 @@ describe("ReviewTab cram mode", () => {
         screen.getByText("1 cards practiced in this cram session")
       ).toBeInTheDocument()
     })
+  })
+
+  it("keeps cram queue progression unchanged when the prompt side flips", async () => {
+    render(
+      <ReviewTab
+        onNavigateToCreate={() => {}}
+        onNavigateToImport={() => {}}
+        reviewDeckId={1}
+        onReviewDeckChange={() => {}}
+        isActive
+      />
+    )
+
+    fireEvent.click(screen.getByText("Cram"))
+    fireEvent.click(screen.getByText("Back first"))
+
+    await waitFor(() => {
+      expect(screen.getByText("Back")).toBeInTheDocument()
+    })
+    expect(screen.getByText("Cram back")).toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId("flashcards-review-show-answer"))
+    fireEvent.click(screen.getByTestId("flashcards-review-rate-3"))
+
+    expect(reviewMutateAsync).not.toHaveBeenCalled()
+    expect(messageSpies.success).toHaveBeenCalledWith(
+      "Practice saved. Scheduling unchanged."
+    )
+    await waitFor(() => {
+      expect(
+        screen.getByText("1 cards practiced in this cram session")
+      ).toBeInTheDocument()
+    })
+    expect(screen.getByTestId("flashcards-review-empty-card")).toBeInTheDocument()
   })
 })

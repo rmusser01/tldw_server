@@ -757,8 +757,8 @@ async def _validate_provider_http(
             err_type = err_body.get("error", {}).get("type", "")
             if err_type in ("invalid_request_error", "overloaded_error"):
                 return True, None
-        except (KeyError, ValueError, TypeError):
-            pass
+        except (AttributeError, KeyError, TypeError, ValueError) as exc:
+            logger.debug(f"Anthropic provider validation response was not JSON: {exc}")
         return True, None
     if resp.status_code in (401, 403):
         return False, f"Authentication failed (HTTP {resp.status_code})"

@@ -18,10 +18,12 @@ import {
   Gauge,
   SlidersHorizontal,
 } from "lucide-react"
+import { useTranslation } from "react-i18next"
 import { useKnowledgeQA } from "../KnowledgeQAProvider"
 import { useServerCapabilities } from "@/hooks/useServerCapabilities"
 import { cn } from "@/libs/utils"
 import type { RagSettings, RagTextChunkMethod } from "@/services/rag/unified-rag"
+import { getRagSourceOptions } from "@/services/rag/sourceMetadata"
 
 // Section configuration
 type SectionConfig = {
@@ -157,14 +159,6 @@ const SETTING_ENUM_OPTIONS: Partial<Record<RagKey, string[]>> = {
   sensitivity_level: ["public", "internal", "confidential", "restricted"],
 }
 
-const SOURCE_OPTIONS = [
-  { value: "media_db", label: "Your Documents" },
-  { value: "notes", label: "Your Notes" },
-  { value: "characters", label: "Characters & Profiles" },
-  { value: "chats", label: "Conversations" },
-  { value: "kanban", label: "Boards" },
-] as const
-
 const AUTO_OPTION_EXCLUDED_KEYS = new Set<RagKey>(["query"])
 
 const AUTO_OPTION_KEYS = (settings: RagSettings): RagKey[] =>
@@ -173,9 +167,14 @@ const AUTO_OPTION_KEYS = (settings: RagSettings): RagKey[] =>
     .sort((a, b) => a.localeCompare(b))
 
 export function ExpertSettings() {
+  const { t } = useTranslation(["sidepanel"])
   const { settings, updateSetting } = useKnowledgeQA()
   const [openSections, setOpenSections] = useState<Set<string>>(
     new Set(SECTIONS.filter((s) => s.defaultOpen).map((s) => s.id))
+  )
+  const sourceOptions = useMemo(
+    () => getRagSourceOptions((key, fallback) => t(key, fallback)),
+    [t]
   )
 
   const toggleSection = (id: string) => {
@@ -619,7 +618,7 @@ function AutoOptionRow({
       )
       control = (
         <div className="w-60 space-y-2 rounded-md border border-border bg-surface p-2">
-          {SOURCE_OPTIONS.map((source) => (
+          {sourceOptions.map((source) => (
             <label key={source.value} className="flex items-center gap-2 text-sm">
               <input
                 type="checkbox"

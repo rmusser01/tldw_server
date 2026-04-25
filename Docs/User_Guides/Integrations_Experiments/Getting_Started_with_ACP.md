@@ -73,9 +73,11 @@ enable = tools, jobs, acp
 runner_command = go
 runner_args = ["run", "./cmd/tldw-agent-acp"]
 runner_cwd = ../tldw-agent
-runner_env = HOME=/absolute/path/to/.tldw-agent-home,PYTHONUNBUFFERED=1
+runner_env = HOME=./acp_runner_home,PYTHONUNBUFFERED=1
 startup_timeout_ms = 10000
 ```
+
+Relative `HOME` values in `runner_env` are resolved against `tldw_Server_API/Config_Files`.
 
 Install ACP dependencies:
 
@@ -464,7 +466,7 @@ Then restart tldw_server.
    ```bash
    echo $ANTHROPIC_API_KEY
    ```
-4. Check the HOME environment in `runner_env` points to the config directory
+4. Check the HOME environment in `runner_env` points to the config directory. Relative values resolve from `tldw_Server_API/Config_Files`.
 
 ### WebSocket Connection Fails
 

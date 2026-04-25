@@ -9,6 +9,7 @@ import { processInChunks } from "@/utils/chunk-processing"
 import {
   deleteFlashcard,
   getFlashcard,
+  type DeckReviewPromptSide,
   type Deck,
   type FlashcardCreate
 } from "@/services/flashcards"
@@ -144,6 +145,7 @@ export const ImageOcclusionTransferPanel: React.FC<ImageOcclusionTransferPanelPr
       defaultValue: "Image Occlusion"
     })
   )
+  const [reviewPromptSide, setReviewPromptSide] = React.useState<DeckReviewPromptSide>("front")
   const [tagsInput, setTagsInput] = React.useState("")
   const [drafts, setDrafts] = React.useState<ImageOcclusionDraft[]>([])
   const [error, setError] = React.useState<string | null>(null)
@@ -201,6 +203,7 @@ export const ImageOcclusionTransferPanel: React.FC<ImageOcclusionTransferPanelPr
       }
       const createdDeck = await createDeckMutation.mutateAsync({
         name,
+        review_prompt_side: reviewPromptSide,
         scheduler_type: schedulerSettings.scheduler_type,
         scheduler_settings: schedulerSettings.scheduler_settings
       })
@@ -213,7 +216,7 @@ export const ImageOcclusionTransferPanel: React.FC<ImageOcclusionTransferPanelPr
         defaultValue: "Enter a deck name."
       })
     )
-  }, [createDeckMutation, decks, newDeckName, schedulerDraft, t, targetDeckId])
+  }, [createDeckMutation, decks, newDeckName, reviewPromptSide, schedulerDraft, t, targetDeckId])
 
   const updateDraft = React.useCallback((id: string, patch: Partial<ImageOcclusionDraft>) => {
     setDrafts((current) =>
@@ -464,6 +467,8 @@ export const ImageOcclusionTransferPanel: React.FC<ImageOcclusionTransferPanelPr
           <NewDeckConfigurationFields
             deckName={newDeckName}
             onDeckNameChange={setNewDeckName}
+            reviewPromptSide={reviewPromptSide}
+            onReviewPromptSideChange={setReviewPromptSide}
             schedulerDraft={schedulerDraft}
             nameTestId="flashcards-occlusion-new-deck-name"
           />

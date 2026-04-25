@@ -4,7 +4,6 @@ import { RotateCcw } from "lucide-react"
 import type {
   ThemeDefinition,
   ThemeColorTokens,
-  ThemeRgbTokenKey,
   ThemeTypography,
   ThemeShape,
   ThemeLayout,
@@ -13,6 +12,7 @@ import type {
 import { getBuiltinPresets } from "@/themes/presets"
 import { applyThemeTokens, clearThemeTokens } from "@/themes/apply-theme"
 import { generateThemeId } from "@/themes/validation"
+import { rgbTripleToHex } from "@/themes/conversion"
 import {
   defaultTypography,
   defaultShape,
@@ -26,7 +26,7 @@ import { ColorTokenRow } from "./ColorTokenRow"
 // ---------------------------------------------------------------------------
 
 /** The 17 RGB color token keys rendered via ColorPicker rows. */
-const TOKEN_KEYS: ThemeRgbTokenKey[] = [
+const TOKEN_KEYS: (keyof ThemeColorTokens)[] = [
   "bg", "surface", "surface2", "elevated",
   "primary", "primaryStrong", "accent",
   "success", "warn", "danger", "muted",
@@ -118,7 +118,8 @@ export function ThemeAdvancedEditor({
   editingTheme,
   activeTheme,
 }: ThemeAdvancedEditorProps) {
-  const isEditing = Boolean(editingTheme?.id)
+  const editingThemeId = editingTheme?.id?.trim() ?? ""
+  const isEditing = editingThemeId.length > 0
 
   const defaultPreset = getBuiltinPresets()[0]
   const initialPalette = editingTheme?.palette ?? defaultPreset.palette
@@ -172,7 +173,7 @@ export function ThemeAdvancedEditor({
 
   // ---- Build current theme for live preview ----
   const currentTheme = useMemo((): ThemeDefinition => ({
-    id: editingTheme?.id || "",
+    id: editingThemeId,
     name: name.trim() || "Untitled",
     version: 1,
     builtin: false,
@@ -182,7 +183,17 @@ export function ThemeAdvancedEditor({
     layout,
     components,
     basePresetId: editingTheme?.basePresetId,
-  }), [name, lightTokens, darkTokens, typography, shape, layout, components, editingTheme])
+  }), [
+    components,
+    darkTokens,
+    editingTheme?.basePresetId,
+    editingThemeId,
+    layout,
+    lightTokens,
+    name,
+    shape,
+    typography,
+  ])
 
   // Live-preview: apply tokens on every change
   useEffect(() => {
@@ -294,7 +305,7 @@ export function ThemeAdvancedEditor({
       return
     }
     const theme: ThemeDefinition = {
-      id: editingTheme?.id || generateThemeId(name),
+      id: editingThemeId || generateThemeId(name.trim()),
       name: name.trim(),
       description: description.trim() || undefined,
       version: 1,
@@ -308,7 +319,20 @@ export function ThemeAdvancedEditor({
     }
     onSave(theme)
     onClose()
-  }, [name, description, lightTokens, darkTokens, typography, shape, layout, components, editingTheme, onSave, onClose])
+  }, [
+    components,
+    darkTokens,
+    description,
+    editingTheme?.basePresetId,
+    editingThemeId,
+    layout,
+    lightTokens,
+    name,
+    onClose,
+    onSave,
+    shape,
+    typography,
+  ])
 
   // ---- Cancel (revert) ----
   const handleCancel = useCallback(() => {
@@ -325,14 +349,14 @@ export function ThemeAdvancedEditor({
 
   // ---- Delete ----
   const handleDelete = useCallback(() => {
-    if (editingTheme?.id && onDelete) {
+    if (editingTheme && editingThemeId && onDelete) {
       Modal.confirm({
         title: "Delete theme?",
         content: `"${editingTheme.name}" will be permanently removed.`,
         okText: "Delete",
         okType: "danger",
         onOk: () => {
-          onDelete(editingTheme.id)
+          onDelete(editingThemeId)
           // Restore the original theme (undo live preview of the deleted theme)
           const original = originalThemeRef.current
           const restoreTarget = original ?? activeTheme
@@ -346,7 +370,7 @@ export function ThemeAdvancedEditor({
         },
       })
     }
-  }, [editingTheme, onDelete, isDark, activeTheme, onClose])
+  }, [editingTheme, editingThemeId, onDelete, isDark, activeTheme, onClose])
 
   // ---- Reset button shared component ----
   const ResetButton = useCallback(

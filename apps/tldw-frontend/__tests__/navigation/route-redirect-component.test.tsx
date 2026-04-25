@@ -94,4 +94,46 @@ describe('RouteRedirect telemetry', () => {
     await user.tab();
     expect(openSettings).toHaveFocus();
   });
+
+  it('redirects even when route prefetch does not settle', async () => {
+    mockRouter.asPath = '/audio';
+    mockRouter.pathname = '/audio';
+    mockPrefetch.mockImplementation(() => new Promise<void>(() => {}));
+
+    render(<RouteRedirect to="/speech" preserveParams={false} />);
+
+    await waitFor(() => {
+      expect(mockTrackRouteAliasRedirect).toHaveBeenCalledWith({
+        sourcePath: '/audio',
+        destinationPath: '/speech',
+        preserveParams: false,
+      });
+    });
+
+    expect(mockPrefetch).toHaveBeenCalledWith('/speech');
+
+    await waitFor(() => {
+      expect(mockReplace).toHaveBeenCalledWith('/speech');
+    });
+  });
+
+  it('redirects even when alias telemetry storage does not settle', async () => {
+    mockRouter.asPath = '/audio';
+    mockRouter.pathname = '/audio';
+    mockTrackRouteAliasRedirect.mockImplementation(() => new Promise<void>(() => {}));
+
+    render(<RouteRedirect to="/speech" preserveParams={false} />);
+
+    await waitFor(() => {
+      expect(mockTrackRouteAliasRedirect).toHaveBeenCalledWith({
+        sourcePath: '/audio',
+        destinationPath: '/speech',
+        preserveParams: false,
+      });
+    });
+
+    await waitFor(() => {
+      expect(mockReplace).toHaveBeenCalledWith('/speech');
+    });
+  });
 });

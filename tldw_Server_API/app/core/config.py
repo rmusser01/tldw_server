@@ -98,6 +98,7 @@ _CONFIG_SOURCE_METADATA: dict[str, Any] = {
 # True are buffered and flushed once initialization completes.
 _LOGGER_READY = False
 _STARTUP_LOG_BUFFER: list[tuple[str, str, dict[str, Any]]] = []
+_ENV_FILE_ENV_VAR = "TLDW_ENV_FILE"
 
 
 def _buffered_log(level: str, message: str, **kwargs: Any) -> None:
@@ -134,6 +135,62 @@ def _flush_startup_logs() -> None:
     _STARTUP_LOG_BUFFER = []
 
 
+def _resolve_path(path: Path) -> Path:
+    try:
+        return path.expanduser().resolve()
+    except _CONFIG_NONCRITICAL_EXCEPTIONS:
+        return path.expanduser()
+
+
+def get_tldw_env_file_path() -> Path | None:
+    """Return the explicit runtime .env path selected by TLDW_ENV_FILE."""
+    raw_path = os.getenv(_ENV_FILE_ENV_VAR)
+    if not raw_path or not raw_path.strip():
+        return None
+    return _resolve_path(Path(raw_path.strip()))
+
+
+def _candidate_env_paths(project_root: Path, repo_root: Path | None = None) -> list[Path]:
+    """Return .env candidates in load precedence order.
+
+    `TLDW_ENV_FILE` is an explicit user/runtime selection. It must be loaded
+    before canonical repo paths because python-dotenv uses override=False.
+    """
+    candidates: list[Path] = []
+    explicit_env_file = get_tldw_env_file_path()
+    if explicit_env_file:
+        candidates.append(explicit_env_file)
+
+    candidates.extend(
+        [
+            project_root / 'Config_Files' / '.env',
+            project_root / 'Config_Files' / '.ENV',
+            project_root / '.env',
+            project_root / '.ENV',
+        ]
+    )
+    if repo_root is not None:
+        candidates.extend(
+            [
+                repo_root / 'Config_Files' / '.env',
+                repo_root / 'Config_Files' / '.ENV',
+                repo_root / '.env',
+                repo_root / '.ENV',
+            ]
+        )
+
+    resolved_candidates: list[Path] = []
+    seen: set[str] = set()
+    for path in candidates:
+        resolved = _resolve_path(path)
+        key = str(resolved)
+        if key in seen:
+            continue
+        resolved_candidates.append(resolved)
+        seen.add(key)
+    return resolved_candidates
+
+
 def _load_env_files_early() -> None:
     """Load .env files before any environment reads.
 
@@ -144,12 +201,10 @@ def _load_env_files_early() -> None:
     try:
         current_file_path = Path(__file__).resolve()
         project_root = current_file_path.parent.parent.parent
-        candidate_env_paths = [
-            project_root / 'Config_Files' / '.env',
-            project_root / 'Config_Files' / '.ENV',
-            project_root / '.env',
-            project_root / '.ENV',
-        ]
+        candidate_env_paths = _candidate_env_paths(
+            project_root,
+            project_root.parent,
+        )
         loaded_any = False
         for p in candidate_env_paths:
             try:
@@ -235,6 +290,8 @@ def get_config_value(
     parser = _load_config_parser()
     return parser.get(section, key, fallback=default)
 
+
+ACTUAL_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 
 _INGESTION_SOURCE_ALLOWED_ROOT_SECTION = "Files"
 _INGESTION_SOURCE_ALLOWED_ROOT_KEY = "ingestion_source_allowed_roots"
@@ -714,10 +771,6 @@ def load_settings():
         This function may load .env files, consult on-disk config files, emit startup warnings, and create filesystem directories (for the main SQLite database and the user data base directory) as needed.
     """
 
-    # Determine Actual Project Root based on the location of this file
-    # config.py is in project_root/tldw_server_api/app/core/config.py
-    # ACTUAL_PROJECT_ROOT will be /project_root/
-    ACTUAL_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
     _log_info(f"Determined ACTUAL_PROJECT_ROOT for database paths: {ACTUAL_PROJECT_ROOT}")
 
     # Ensure .env files are loaded before reading any environment variables
@@ -1987,18 +2040,9 @@ def load_comprehensive_config():
     project_root = current_file_path.parent.parent.parent
 
     # Load .env/.ENV files if they exist (API keys should be here).
-    # Prefer Config_Files/.env (canonical) before root-level fallbacks.
+    # Prefer TLDW_ENV_FILE when set, then canonical repo paths before fallbacks.
     repo_root = project_root.parent
-    candidate_env_paths = [
-        project_root / 'Config_Files' / '.env',
-        project_root / 'Config_Files' / '.ENV',
-        project_root / '.env',
-        project_root / '.ENV',
-        repo_root / 'Config_Files' / '.env',
-        repo_root / 'Config_Files' / '.ENV',
-        repo_root / '.env',
-        repo_root / '.ENV',
-    ]
+    candidate_env_paths = _candidate_env_paths(project_root, repo_root)
     loaded_any_env = False
     for p in candidate_env_paths:
         try:
@@ -2331,6 +2375,36 @@ def rag_low_confidence_behavior(default: str = "continue") -> str:
             v = default
     s = str(v).strip().lower()
     return s if s in ("continue", "ask", "decline") else default
+
+
+def web_outbound_policy_mode(default: str = "compat") -> str:
+    """Return the web outbound-policy mode with env-over-config precedence.
+
+    Accepted values are ``compat`` and ``strict``. Invalid or missing values
+    fall back to ``default``.
+    """
+    v = os.getenv("WEB_OUTBOUND_POLICY_MODE")
+    if v is None:
+        try:
+            cp = load_comprehensive_config()
+            v = default
+            if cp:
+                has_section = getattr(cp, "has_section", None)
+                for section_name in ("Web-Scraper", "Web-Scraping"):
+                    if callable(has_section) and not has_section(section_name):
+                        continue
+                    candidate = cp.get(
+                        section_name,
+                        "web_outbound_policy_mode",
+                        fallback=None,
+                    )
+                    if candidate is not None and str(candidate).strip():
+                        v = candidate
+                        break
+        except _CONFIG_NONCRITICAL_EXCEPTIONS:
+            v = default
+    s = str(v).strip().lower()
+    return s if s in ("compat", "strict") else default
 
 
 def rag_agentic_cache_backend(default: str = "memory") -> str:
@@ -3921,19 +3995,19 @@ def load_and_log_configs():
             config_parser_object.get(
                 'STT-Settings',
                 'default_batch_transcription_model',
-                fallback='parakeet-onnx',
+                fallback='parakeet-tdt-0.6b-v3-onnx',
             ).strip()
-            or 'parakeet-onnx'
+            or 'parakeet-tdt-0.6b-v3-onnx'
         )
         default_streaming_transcription_model = (
             config_parser_object.get(
                 'STT-Settings',
                 'default_streaming_transcription_model',
-                fallback='parakeet-onnx',
+                fallback='parakeet-tdt-0.6b-v3-onnx',
             ).strip()
-            or 'parakeet-onnx'
+            or 'parakeet-tdt-0.6b-v3-onnx'
         )
-        nemo_model_variant = config_parser_object.get('STT-Settings', 'nemo_model_variant', fallback='standard')
+        nemo_model_variant = config_parser_object.get('STT-Settings', 'nemo_model_variant', fallback='onnx')
         nemo_device = config_parser_object.get('STT-Settings', 'nemo_device', fallback='cuda')
         nemo_cache_dir = config_parser_object.get('STT-Settings', 'nemo_cache_dir', fallback='./models/nemo')
         # STT custom vocabulary (optional)
@@ -4352,6 +4426,7 @@ def load_and_log_configs():
         web_scraper_respect_robots = _as_bool(
             _env_or_cfg('WEB_SCRAPER_RESPECT_ROBOTS', 'Web-Scraper', 'web_scraper_respect_robots', 'true'), True
         )
+        web_outbound_policy_mode_value = web_outbound_policy_mode()
         # Optional scorers configuration
         web_crawl_enable_keyword = _as_bool(
             _env_or_cfg('WEB_CRAWL_ENABLE_KEYWORD_SCORER', 'Web-Scraper', 'web_crawl_enable_keyword_scorer', 'false'), False
@@ -5024,6 +5099,7 @@ def load_and_log_configs():
             'web_crawl_allowed_domains': web_crawl_allowed_domains,
             'web_crawl_blocked_domains': web_crawl_blocked_domains,
             'web_scraper_respect_robots': web_scraper_respect_robots,
+            'web_outbound_policy_mode': web_outbound_policy_mode_value,
             # Scorers
             'web_crawl_enable_keyword_scorer': web_crawl_enable_keyword,
             'web_crawl_keywords': web_crawl_keywords,
@@ -5306,6 +5382,72 @@ def clear_config_cache() -> None:
     default_api_endpoint = "openai"
     object.__setattr__(settings, "_data", None)
     object.__setattr__(loaded_config_data, "_data", None)
+# ---------------------------------------------------------------------------
+# Startup config validation
+# ---------------------------------------------------------------------------
+
+_PLACEHOLDER_LITERALS = frozenset({
+    "FIXME", "TODO", "TBD", "CHANGE_ME", "CHANGE-ME",
+    "PLACEHOLDER", "NONE", "NULL", "N/A", "NA",
+})
+
+
+def validate_config() -> list[str]:
+    """Validate the loaded configuration and return a list of warnings.
+
+    Call this during lifespan startup. Warnings are logged but do not
+    prevent startup. Returns the list so tests can assert on it.
+    """
+    warnings: list[str] = []
+    cfg = dict(loaded_config_data)
+
+    def _iter_scalar_values(prefix: str, value: Any):
+        if isinstance(value, MutableMapping):
+            for key, child in value.items():
+                child_prefix = f"{prefix}.{key}" if prefix else str(key)
+                yield from _iter_scalar_values(child_prefix, child)
+            return
+        if isinstance(value, list | tuple):
+            for index, child in enumerate(value):
+                child_prefix = f"{prefix}[{index}]"
+                yield from _iter_scalar_values(child_prefix, child)
+            return
+        yield prefix, value
+
+    validation_values = dict(_iter_scalar_values("", cfg))
+    validation_values.update({
+        "Database.pg_connection_string": get_config_value("Database", "pg_connection_string", default=""),
+        "Image-Generation.swarmui_base_url": get_config_value("Image-Generation", "swarmui_base_url", default=""),
+    })
+
+    # Check for placeholder values in any config key
+    for key, value in validation_values.items():
+        if isinstance(value, str) and value.strip().upper() in _PLACEHOLDER_LITERALS:
+            msg = f"Config key '{key}' has placeholder value '{value}' — set a real value or leave empty"
+            warnings.append(msg)
+
+    # Check critical URL values parse correctly
+    url_rules = {
+        "embedding_config.embedding_api_url": ("http://", "https://"),
+        "Database.pg_connection_string": ("postgres://", "postgresql://", "postgres+", "postgresql+"),
+        "Image-Generation.swarmui_base_url": ("http://", "https://"),
+    }
+    for key, allowed_prefixes in url_rules.items():
+        val = validation_values.get(key, "")
+        if val and not isinstance(val, str):
+            warnings.append(f"Config key '{key}' should be a string, got {type(val).__name__}")
+        elif isinstance(val, str) and val and not val.startswith(allowed_prefixes):
+            warnings.append(f"Config key '{key}' has unexpected URL scheme")
+
+    for w in warnings:
+        logger.warning("Config validation: {}", w)
+
+    if not warnings:
+        logger.info("Config validation passed — no issues found")
+
+    return warnings
+
+
 # --- Optional: Export individual variables if needed for backward compatibility (less recommended) ---
 # SINGLE_USER_MODE = settings["SINGLE_USER_MODE"]
 # SINGLE_USER_FIXED_ID = settings["SINGLE_USER_FIXED_ID"]

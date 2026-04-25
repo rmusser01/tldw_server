@@ -4,7 +4,7 @@ import {
   findUnavailableChatModel,
   normalizeChatModelId
 } from "@/utils/chat-model-availability"
-import { useQueuedRequests } from "@/hooks/chat/useQueuedRequests"
+import { useComposerQueue } from "@/components/Chat/composer/hooks/useComposerQueue"
 import {
   IMAGE_GENERATION_ASSISTANT_MESSAGE_TYPE,
   IMAGE_GENERATION_USER_MESSAGE_TYPE
@@ -114,7 +114,6 @@ export function usePlaygroundQueueManagement(
     selectedModel,
     chatMode,
     webSearch,
-    compareMode,
     compareModeActive,
     compareSelectedModels,
     selectedSystemPrompt,
@@ -132,8 +131,6 @@ export function usePlaygroundQueueManagement(
     conversationTokenCount,
     resolvedMaxContext,
     estimateTokensForText,
-    characterContextTokenEstimate,
-    pinnedSourceTokenEstimate,
     currentContextSnapshot,
     setLastSubmittedContext,
     setSelectedModel,
@@ -395,13 +392,78 @@ export function usePlaygroundQueueManagement(
     ]
   )
 
-  const queuedRequestActions = useQueuedRequests({
+  const resolveConversationId = React.useCallback(
+    () => historyId ?? serverChatId ?? null,
+    [historyId, serverChatId]
+  )
+
+  const handleEnqueueBlocked = React.useCallback(() => {
+    notificationApi.warning({
+      message: t(
+        "playground:composer.queue.attachmentsNeedManualRepairTitle",
+        "Queue needs a simpler draft"
+      ),
+      description: t(
+        "playground:composer.queue.attachmentsNeedManualRepairBody",
+        "Queued requests currently support text, images, and tab mentions. Clear attached files/context before queueing this draft."
+      )
+    })
+  }, [notificationApi, t])
+
+  const handleEnqueueSuccess = React.useCallback(
+    (isStreamingAtEnqueue: boolean) => {
+      form.reset()
+      clearSelectedDocuments()
+      clearUploadedFiles()
+      textAreaFocus()
+      notificationApi.info({
+        message: t(
+          "playground:composer.queue.requestQueued",
+          "Request queued"
+        ),
+        description: isStreamingAtEnqueue
+          ? t(
+              "playground:composer.queue.requestQueuedWhileBusy",
+              "We'll run it after the current response finishes."
+            )
+          : t(
+              "playground:composer.queue.requestQueuedWhileOffline",
+              "We'll send it when your tldw server reconnects."
+            )
+      })
+    },
+    [
+      clearSelectedDocuments,
+      clearUploadedFiles,
+      form,
+      notificationApi,
+      t,
+      textAreaFocus
+    ]
+  )
+
+  const cancelCurrentAndRunDisabledReasonText =
+    isSending && serverChatId
+      ? t(
+          "playground:composer.queue.cancelAndRunDisabled",
+          "Cancel current & run now is not available for server-backed turns yet."
+        )
+      : null
+
+  const queue = useComposerQueue({
     isConnectionReady,
     isStreaming: isSending,
-    queue: queuedMessages,
-    setQueue: setQueuedMessages,
+    queuedMessages,
+    setQueuedMessages,
     sendQueuedRequest,
-    stopStreamingRequest
+    stopStreamingRequest,
+    resolveConversationId,
+    buildQueuedDocuments,
+    buildQueuedRequestSnapshot,
+    isQueuedDispatchBlocked: isQueuedDispatchBlockedByComposerState,
+    onEnqueueBlocked: handleEnqueueBlocked,
+    onEnqueueSuccess: handleEnqueueSuccess,
+    cancelCurrentAndRunDisabledReasonText
   })
 
   const queueSubmission = React.useCallback(
@@ -414,23 +476,8 @@ export function usePlaygroundQueueManagement(
       image: string
       intent: SubmissionIntent
     }) => {
-      if (isQueuedDispatchBlockedByComposerState) {
-        notificationApi.warning({
-          message: t(
-            "playground:composer.queue.attachmentsNeedManualRepairTitle",
-            "Queue needs a simpler draft"
-          ),
-          description: t(
-            "playground:composer.queue.attachmentsNeedManualRepairBody",
-            "Queued requests currently support text, images, and tab mentions. Clear attached files/context before queueing this draft."
-          )
-        })
-        return null
-      }
-
       const documents = buildQueuedDocuments()
-      const queuedItem = queuedRequestActions.enqueue({
-        conversationId: historyId ?? serverChatId ?? null,
+      return queue.enqueue({
         promptText,
         image: intent.isImageCommand ? "" : image,
         attachments: documents,
@@ -441,115 +488,13 @@ export function usePlaygroundQueueManagement(
             : undefined,
           isImageCommand: intent.isImageCommand
         },
-        snapshot: buildQueuedRequestSnapshot()
+        blockedReason: isQueuedDispatchBlockedByComposerState
+          ? "draft-attachments-conflict"
+          : null
       })
-
-      form.reset()
-      clearSelectedDocuments()
-      clearUploadedFiles()
-      textAreaFocus()
-      notificationApi.info({
-        message: t("playground:composer.queue.requestQueued", "Request queued"),
-        description: isSending
-          ? t(
-              "playground:composer.queue.requestQueuedWhileBusy",
-              "We'll run it after the current response finishes."
-            )
-          : t(
-              "playground:composer.queue.requestQueuedWhileOffline",
-              "We'll send it when your tldw server reconnects."
-            )
-      })
-      return queuedItem
     },
-    [
-      buildQueuedDocuments,
-      buildQueuedRequestSnapshot,
-      clearSelectedDocuments,
-      clearUploadedFiles,
-      form,
-      historyId,
-      isQueuedDispatchBlockedByComposerState,
-      isSending,
-      notificationApi,
-      queuedRequestActions,
-      serverChatId,
-      t,
-      textAreaFocus
-    ]
+    [buildQueuedDocuments, isQueuedDispatchBlockedByComposerState, queue]
   )
-
-  const cancelCurrentAndRunDisabledReason =
-    isSending && serverChatId
-      ? t(
-          "playground:composer.queue.cancelAndRunDisabled",
-          "Cancel current & run now is not available for server-backed turns yet."
-        )
-      : null
-
-  const handleRunQueuedRequest = React.useCallback(
-    async (requestId: string) => {
-      if (isSending && cancelCurrentAndRunDisabledReason) {
-        return
-      }
-      await queuedRequestActions.runNow(requestId)
-      if (!isSending && isConnectionReady) {
-        await queuedRequestActions.flushNext()
-      }
-    },
-    [
-      cancelCurrentAndRunDisabledReason,
-      isConnectionReady,
-      isSending,
-      queuedRequestActions
-    ]
-  )
-
-  const handleRunNextQueuedRequest = React.useCallback(async () => {
-    const next = queuedMessages[0]
-    if (!next) return
-    if (isSending && cancelCurrentAndRunDisabledReason) {
-      return
-    }
-    if (next.status === "blocked") {
-      await handleRunQueuedRequest(next.id)
-      return
-    }
-    await queuedRequestActions.flushNext()
-  }, [
-    cancelCurrentAndRunDisabledReason,
-    handleRunQueuedRequest,
-    isSending,
-    queuedMessages,
-    queuedRequestActions
-  ])
-
-  // Auto-drain queued requests
-  const autoDrainingQueuedRequestsRef = React.useRef(false)
-  React.useEffect(() => {
-    const next = queuedMessages[0]
-    if (
-      autoDrainingQueuedRequestsRef.current ||
-      !next ||
-      !isConnectionReady ||
-      isSending ||
-      next.status !== "queued" ||
-      isQueuedDispatchBlockedByComposerState
-    ) {
-      return
-    }
-
-    autoDrainingQueuedRequestsRef.current = true
-    void queuedRequestActions.flushNext().finally(() => {
-      autoDrainingQueuedRequestsRef.current = false
-    })
-  }, [
-    isConnectionReady,
-    isQueuedDispatchBlockedByComposerState,
-    isSending,
-    queuedMessages,
-    queuedRequestActions
-  ])
 
   const validateSelectedChatModelsAvailability = React.useCallback(
     (modelsToCheck: string[]) => {
@@ -573,11 +518,11 @@ export function usePlaygroundQueueManagement(
   return {
     availableChatModelIds,
     isQueuedDispatchBlockedByComposerState,
-    queuedRequestActions,
+    queuedRequestActions: queue.queuedRequestActions,
     queueSubmission,
-    cancelCurrentAndRunDisabledReason,
-    handleRunQueuedRequest,
-    handleRunNextQueuedRequest,
+    cancelCurrentAndRunDisabledReason: queue.cancelCurrentAndRunDisabledReason,
+    handleRunQueuedRequest: queue.handleRunQueuedRequest,
+    handleRunNextQueuedRequest: queue.handleRunNextQueuedRequest,
     validateSelectedChatModelsAvailability,
     validateQueuedRequest,
     buildQueuedDocuments,

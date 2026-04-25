@@ -1178,7 +1178,7 @@ async def test_start_recipe_run_jobs_worker_returns_task_when_enabled(monkeypatc
     started = asyncio.Event()
     finished = asyncio.Event()
 
-    async def _fake_run():
+    async def _fake_run(_stop_event: asyncio.Event | None = None):
         started.set()
         try:
             await asyncio.sleep(60)
@@ -1199,3 +1199,55 @@ async def test_start_recipe_run_jobs_worker_returns_task_when_enabled(monkeypatc
     with pytest.raises(asyncio.CancelledError):
         await task
     assert finished.is_set()
+
+
+@pytest.mark.asyncio
+async def test_run_recipe_run_jobs_worker_stops_sdk_when_stop_event_is_set(monkeypatch) -> None:
+    import tldw_Server_API.app.core.Evaluations.recipe_runs_jobs_worker as worker
+
+    stop_event = asyncio.Event()
+    observed = {"stopped": False}
+
+    class _FakeWorkerSDK:
+        def __init__(self, _jm, _cfg) -> None:
+            pass
+
+        def stop(self) -> None:
+            observed["stopped"] = True
+
+        async def run(self, *, handler) -> None:
+            while not observed["stopped"]:
+                await asyncio.sleep(0)
+
+    monkeypatch.setattr(worker, "WorkerSDK", _FakeWorkerSDK)
+
+    task = asyncio.create_task(worker.run_recipe_run_jobs_worker(stop_event))
+    await asyncio.sleep(0)
+    stop_event.set()
+    await asyncio.wait_for(task, timeout=1)
+
+    assert observed["stopped"] is True
+
+
+@pytest.mark.asyncio
+async def test_start_recipe_run_jobs_worker_forwards_caller_owned_stop_event(monkeypatch) -> None:
+    import tldw_Server_API.app.core.Evaluations.recipe_runs_jobs_worker as worker
+
+    observed: dict[str, object] = {}
+    stop_event = asyncio.Event()
+
+    async def _fake_run(stop_event_arg: asyncio.Event | None = None) -> None:
+        observed["stop_event"] = stop_event_arg
+        await stop_event_arg.wait()
+
+    monkeypatch.setenv("EVALUATIONS_RECIPE_RUN_JOBS_WORKER_ENABLED", "true")
+    monkeypatch.setattr(worker, "run_recipe_run_jobs_worker", _fake_run)
+
+    task = await worker.start_recipe_run_jobs_worker(stop_event=stop_event)
+    assert task is not None
+    await asyncio.sleep(0)
+
+    assert observed["stop_event"] is stop_event
+
+    stop_event.set()
+    await asyncio.wait_for(task, timeout=1)

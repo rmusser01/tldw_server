@@ -276,8 +276,11 @@ def validate_file_path(file_path: str, allowed_dir: Optional[Path] = None) -> Pa
             raise InvalidStoragePathError("File size exceeds maximum allowed size")
 
         return path
-    except (InvalidStoragePathError, OSError) as e:
-        # Log the error internally but don't expose the path in the error message
+    except InvalidStoragePathError as e:
+        logger.exception(f"Path validation failed: {e}")
+        raise
+    except OSError as e:
+        # Log the error internally but don't expose the path in the external message.
         logger.exception(f"Path validation failed: {e}")
         raise InvalidStoragePathError(
             f"Invalid file path: {str(e).replace(file_path, '[REDACTED]')}"

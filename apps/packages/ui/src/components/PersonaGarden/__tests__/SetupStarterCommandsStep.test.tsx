@@ -60,6 +60,24 @@ describe("SetupStarterCommandsStep", () => {
     expect(onCreateFromTemplate).toHaveBeenCalledWith("notes-search")
   })
 
+  it("does not create a starter command again when an already-selected template is unchecked", () => {
+    const onCreateFromTemplate = vi.fn()
+
+    render(
+      <SetupStarterCommandsStep
+        saving={false}
+        defaultCommands={[{ template_key: "notes-search" }]}
+        onCreateFromTemplate={onCreateFromTemplate}
+        onCreateMcpStarter={vi.fn()}
+        onSkip={vi.fn()}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Search Notes" }))
+
+    expect(onCreateFromTemplate).not.toHaveBeenCalled()
+  })
+
   it("creates an MCP-backed starter command from an explicit tool and phrase", () => {
     const onCreateMcpStarter = vi.fn()
 

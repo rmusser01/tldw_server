@@ -12,7 +12,7 @@ const _origin =
     ? resolvePublicApiOrigin(_env, window.location.origin)
     : resolvePublicApiOrigin(_env)
 
-const HEALTH_URL = `${_origin}/health`
+const HEALTH_URL = `${_origin}/api/v1/health`
 const MAX_WAIT_MS = 15_000
 const RETRY_INTERVAL_MS = 2_000
 
@@ -32,13 +32,20 @@ async function checkHealth(): Promise<boolean> {
   }
 }
 
-export const ServerReadinessGate: React.FC<{ children: React.ReactNode }> = ({
-  children
-}) => {
+export const ServerReadinessGate: React.FC<{
+  children: React.ReactNode
+  bypass?: boolean
+}> = ({ children, bypass = false }) => {
   const [gate, setGate] = React.useState<GateState>("checking")
 
   React.useEffect(() => {
     if (typeof window === "undefined") return
+    if (bypass) {
+      setGate((current) => (current === "ready" ? current : "checking"))
+      return
+    }
+
+    setGate((current) => (current === "ready" ? current : "checking"))
 
     let cancelled = false
     let retryTimer: number | undefined
@@ -70,9 +77,9 @@ export const ServerReadinessGate: React.FC<{ children: React.ReactNode }> = ({
       cancelled = true
       if (retryTimer) window.clearTimeout(retryTimer)
     }
-  }, [])
+  }, [bypass])
 
-  if (gate === "ready" || gate === "timeout") {
+  if (bypass || gate === "ready" || gate === "timeout") {
     return <>{children}</>
   }
 

@@ -20,6 +20,7 @@ import {
 } from "antd"
 import type { MenuProps } from "antd"
 import type { TextAreaRef } from "antd/es/input/TextArea"
+import type { JSONContent } from "@tiptap/react"
 import { useQuery } from "@tanstack/react-query"
 import { useTranslation } from "react-i18next"
 import { useStorage } from "@plasmohq/storage/hook"
@@ -87,7 +88,7 @@ import {
 import { buildDiagnosticsSummary } from "./writing-diagnostics-utils"
 import { WritingPlaygroundActiveSessionGuard } from "./WritingPlaygroundActiveSessionGuard"
 import { ManuscriptTreePanel } from "./ManuscriptTreePanel"
-import { plainTextToTipTapJson } from "./writing-tiptap-utils"
+import { resolveTipTapDocument } from "./writing-tiptap-utils"
 import { WritingPlaygroundShell } from "./WritingPlaygroundShell"
 import { WritingPlaygroundLibraryPanel } from "./WritingPlaygroundLibraryPanel"
 import { WritingPlaygroundEditorPanel } from "./WritingPlaygroundEditorPanel"
@@ -114,6 +115,11 @@ import {
   applyPlaceholderAtRange,
   applyTextAtRange
 } from "./writing-editor-actions-utils"
+import {
+  createTextareaEditorAdapter,
+  type WritingEditorAdapter,
+  type WritingEditorSelection
+} from "./writing-editor-adapter"
 import {
   useWritingSessionManagement,
   useWritingTemplateLibrary,
@@ -143,6 +149,7 @@ import {
   PREDICT_SYSTEM_PROMPT,
   resolveGenerationPlan,
   applyFimTemplate,
+  getPromptRichFromPayload,
   WRITING_SPEECH_PREFS_STORAGE_KEY,
   type EditorViewMode,
   type GenerationHistoryEntry,
@@ -199,7 +206,7 @@ export const WritingPlayground = () => {
 
   // --- Local-only state (not managed by hooks) ---
   const [libraryView, setLibraryView] = React.useState<"sessions" | "manuscript">("sessions")
-  const [tipTapContent, setTipTapContent] = React.useState<any>(null)
+  const [tipTapContent, setTipTapContent] = React.useState<JSONContent | null>(null)
   const editorTextChangedByTipTap = React.useRef(false)
   const [editorView, setEditorView] = React.useState<EditorViewMode>("edit")
   const [searchOpen, setSearchOpen] = React.useState(false)
@@ -237,6 +244,9 @@ export const WritingPlayground = () => {
   const generationCancelledRef = React.useRef(false)
   const speechUtteranceRef = React.useRef<SpeechSynthesisUtterance | null>(null)
   const editorRef = React.useRef<TextAreaRef | null>(null)
+  const activeEditorAdapterRef = React.useRef<WritingEditorAdapter | null>(null)
+  const pendingEditorSelectionRef =
+    React.useRef<WritingEditorSelection | null>(null)
   const previewRef = React.useRef<HTMLDivElement | null>(null)
   const isSyncingScrollRef = React.useRef(false)
 
@@ -298,13 +308,67 @@ export const WritingPlayground = () => {
     canCreateSession, canRenameSession
   } = sessionMgmt
 
+  const textareaEditorAdapter = React.useMemo(
+    () => createTextareaEditorAdapter(editorRef),
+    []
+  )
+
+  const applyPendingEditorSelection = React.useCallback(
+    (adapter: WritingEditorAdapter | null) => {
+      const pendingSelection = pendingEditorSelectionRef.current
+      if (!adapter || !pendingSelection) return
+      if (
+        adapter === textareaEditorAdapter &&
+        !editorRef.current?.resizableTextArea?.textArea
+      ) {
+        return
+      }
+      adapter.focus()
+      adapter.setSelection(pendingSelection)
+      pendingEditorSelectionRef.current = null
+    },
+    [textareaEditorAdapter]
+  )
+
+  const setActiveEditorAdapter = React.useCallback(
+    (adapter: WritingEditorAdapter | null) => {
+      activeEditorAdapterRef.current = adapter
+      applyPendingEditorSelection(adapter)
+    },
+    [applyPendingEditorSelection]
+  )
+
   // Sync TipTap content when editorText changes from an external source (e.g. session load, undo/redo, generate)
   React.useEffect(() => {
-    if (editorMode === "tiptap" && !editorTextChangedByTipTap.current) {
-      setTipTapContent(plainTextToTipTapJson(editorText))
+    if (editorMode !== "tiptap") {
+      setActiveEditorAdapter(textareaEditorAdapter)
+      setTipTapContent(null)
+      editorTextChangedByTipTap.current = false
+      return
+    }
+
+    if (!editorTextChangedByTipTap.current) {
+      setTipTapContent(
+        resolveTipTapDocument(
+          editorText,
+          getPromptRichFromPayload(activeSessionDetail?.payload)
+        )
+      )
     }
     editorTextChangedByTipTap.current = false
-  }, [editorText])  // eslint-disable-line react-hooks/exhaustive-deps
+  }, [
+    activeSessionDetail?.id,
+    activeSessionDetail?.payload,
+    editorMode,
+    editorText,
+    setActiveEditorAdapter,
+    textareaEditorAdapter
+  ])
+
+  React.useEffect(() => {
+    if (editorMode === "tiptap" || editorView === "preview") return
+    applyPendingEditorSelection(activeEditorAdapterRef.current)
+  }, [applyPendingEditorSelection, editorMode, editorView])
 
   const settingsDisabled = isGenerating || !activeSessionDetail
 
@@ -806,13 +870,8 @@ export const WritingPlayground = () => {
       )
       return
     }
-    const editorEl = editorRef.current?.resizableTextArea?.textArea
-    const selectionStart = editorEl?.selectionStart ?? 0
-    const selectionEnd = editorEl?.selectionEnd ?? 0
     const selectedText =
-      selectionEnd > selectionStart
-        ? editorText.slice(selectionStart, selectionEnd)
-        : ""
+      getCurrentEditorAdapter()?.getSelectedText(editorText) ?? ""
     const sourceText = selectedText.trim().length > 0 ? selectedText : editorText
     const utteranceText = markdownToText(sourceText).trim()
     if (!utteranceText) {
@@ -846,7 +905,7 @@ export const WritingPlayground = () => {
     setIsSpeaking(true)
     setIsSpeechPaused(false)
     window.speechSynthesis.speak(utterance)
-  }, [editorText, speechRate, speechVoiceURI, speechVoices, t])
+  }, [editorText, getCurrentEditorAdapter, speechRate, speechVoiceURI, speechVoices, t])
 
   // --- Speech effects ---
   React.useEffect(() => {
@@ -910,19 +969,21 @@ export const WritingPlayground = () => {
     [deleteSessionMutation, t]
   )
 
+  const getCurrentEditorAdapter = React.useCallback((): WritingEditorAdapter | null => {
+    return activeEditorAdapterRef.current
+  }, [])
+
   const focusEditorSelection = React.useCallback(
     (start: number, end: number) => {
+      pendingEditorSelectionRef.current = { start, end }
       if (editorView === "preview") {
         setEditorView("edit")
       }
       window.setTimeout(() => {
-        const editorEl = editorRef.current?.resizableTextArea?.textArea
-        if (!editorEl) return
-        editorEl.focus()
-        editorEl.setSelectionRange(start, end)
+        applyPendingEditorSelection(getCurrentEditorAdapter())
       }, 0)
     },
-    [editorView]
+    [applyPendingEditorSelection, editorView, getCurrentEditorAdapter]
   )
 
   const syncScroll = React.useCallback((source: "editor" | "preview") => {
@@ -944,54 +1005,54 @@ export const WritingPlayground = () => {
 
   const insertPlaceholder = React.useCallback(
     (placeholder: "{predict}" | "{fill}") => {
-      const editorEl = editorRef.current?.resizableTextArea?.textArea
       const currentValue = editorText
-      if (!editorEl) {
+      const selection = getCurrentEditorAdapter()?.getSelection()
+      if (!selection) {
         applyPromptValue(currentValue + placeholder, {
           start: currentValue.length + placeholder.length,
           end: currentValue.length + placeholder.length
         })
         return
       }
-      const start = editorEl.selectionStart ?? currentValue.length
-      const end = editorEl.selectionEnd ?? currentValue.length
+      const start = selection.start
+      const end = selection.end
       const { nextValue, cursor } = applyPlaceholderAtRange(currentValue, start, end, placeholder)
       applyPromptValue(nextValue, { start: cursor, end: cursor })
     },
-    [applyPromptValue, editorText]
+    [applyPromptValue, editorText, getCurrentEditorAdapter]
   )
 
   const fillSelectionAtCursor = React.useCallback(() => {
-    const editorEl = editorRef.current?.resizableTextArea?.textArea
     const currentValue = editorText
-    const start = editorEl?.selectionStart ?? currentValue.length
-    const end = editorEl?.selectionEnd ?? currentValue.length
+    const selection = getCurrentEditorAdapter()?.getSelection()
+    const start = selection?.start ?? currentValue.length
+    const end = selection?.end ?? currentValue.length
     if (end <= start) {
       message.info(t("option:writingPlayground.fillSelectionRequired", "Select text to replace with {fill}."))
       return
     }
     const { nextValue, cursor } = applyPlaceholderAtRange(currentValue, start, end, "{fill}")
     applyPromptValue(nextValue, { start: cursor, end: cursor })
-  }, [applyPromptValue, editorText, t])
+  }, [applyPromptValue, editorText, getCurrentEditorAdapter, t])
 
   const insertTokenTextAtCursor = React.useCallback(
     (tokenText: string) => {
-      const editorEl = editorRef.current?.resizableTextArea?.textArea
       const currentValue = editorText
-      if (!editorEl) {
+      const selection = getCurrentEditorAdapter()?.getSelection()
+      if (!selection) {
         applyPromptValue(currentValue + tokenText, {
           start: currentValue.length + tokenText.length,
           end: currentValue.length + tokenText.length
         })
         return
       }
-      const start = editorEl.selectionStart ?? currentValue.length
-      const end = editorEl.selectionEnd ?? currentValue.length
+      const start = selection.start
+      const end = selection.end
       const { nextValue, cursor } = applyTextAtRange(currentValue, start, end, tokenText)
       applyPromptValue(nextValue, { start: cursor, end: cursor })
       message.success(t("option:writingPlayground.tokenInspectorInsertSuccess", "Token text inserted."))
     },
-    [applyPromptValue, editorText, t]
+    [applyPromptValue, editorText, getCurrentEditorAdapter, t]
   )
 
   const insertTemplateBlock = React.useCallback(
@@ -1020,17 +1081,17 @@ export const WritingPlayground = () => {
         )
         return
       }
-      const editorEl = editorRef.current?.resizableTextArea?.textArea
       const currentValue = editorText
-      const start = editorEl?.selectionStart ?? currentValue.length
-      const end = editorEl?.selectionEnd ?? currentValue.length
+      const selection = getCurrentEditorAdapter()?.getSelection()
+      const start = selection?.start ?? currentValue.length
+      const end = selection?.end ?? currentValue.length
       const selected = currentValue.slice(start, end)
       const nextValue =
         currentValue.slice(0, start) + block.prefix + selected + block.suffix + currentValue.slice(end)
       const cursor = start + block.prefix.length + selected.length
       applyPromptValue(nextValue, { start: cursor, end: cursor })
     },
-    [applyPromptValue, editorText, effectiveTemplate, t]
+    [applyPromptValue, editorText, effectiveTemplate, getCurrentEditorAdapter, t]
   )
 
   // =====================================================================
@@ -1095,14 +1156,28 @@ export const WritingPlayground = () => {
       }
       if (event.key !== "Enter") return
       if (!event.ctrlKey && !event.metaKey) return
+      const activeElement = document.activeElement
       const editorEl = editorRef.current?.resizableTextArea?.textArea
-      if (!editorEl || document.activeElement !== editorEl) return
+      const isPlainEditorFocused = Boolean(editorEl && activeElement === editorEl)
+      const isTipTapFocused =
+        activeElement instanceof HTMLElement &&
+        Boolean(activeElement.closest(".ProseMirror"))
+      const isEditorFocused =
+        editorMode === "tiptap" ? editorView !== "preview" && isTipTapFocused : isPlainEditorFocused
+      if (!isEditorFocused) return
       event.preventDefault()
       void handleGenerate()
     }
     window.addEventListener("keydown", handleKeyDown)
     return () => { window.removeEventListener("keydown", handleKeyDown) }
-  }, [handleCancelGeneration, handleGenerate, isGenerating, settings.token_streaming])
+  }, [
+    editorMode,
+    editorView,
+    handleCancelGeneration,
+    handleGenerate,
+    isGenerating,
+    settings.token_streaming
+  ])
 
   // =====================================================================
   // Search & replace (unique)
@@ -2204,9 +2279,6 @@ export const WritingPlayground = () => {
                         value={editorMode}
                         onChange={(value) => {
                           setEditorMode(value as "plain" | "tiptap")
-                          if (value === "tiptap" && editorText) {
-                            setTipTapContent(plainTextToTipTapJson(editorText))
-                          }
                         }}
                         options={[
                           { value: "plain", label: "Plain" },
@@ -2286,7 +2358,10 @@ export const WritingPlayground = () => {
                           onContentChange={(json, plain) => {
                             editorTextChangedByTipTap.current = true
                             setTipTapContent(json)
-                            setEditorText(plain)
+                            applyPromptValue(plain, { promptRich: json })
+                          }}
+                          onAdapterReady={(adapter) => {
+                            setActiveEditorAdapter(adapter)
                           }}
                           editable={!isGenerating}
                           placeholder={t("option:writingPlayground.editorPlaceholder", "Start writing your prompt...")}
@@ -2309,11 +2384,30 @@ export const WritingPlayground = () => {
                     {editorView === "split" && (
                       <div className="flex flex-1 flex-col gap-4 lg:flex-row">
                         <div className={cn("flex-1", isGenerating && "ring-2 ring-primary/50 ring-offset-1 animate-pulse rounded-md")}>
-                          <Dropdown menu={{ items: editorMenuItems }} trigger={["contextMenu"]}>
-                            <div>
-                              <Input.TextArea ref={editorRef} value={editorText} onChange={handlePromptChange} onScroll={() => syncScroll("editor")} placeholder={t("option:writingPlayground.editorPlaceholder", "Start writing your prompt...")} autoSize={{ minRows: 12 }} disabled={isGenerating} className="!resize-y" />
-                            </div>
-                          </Dropdown>
+                          {editorMode === "tiptap" ? (
+                            <React.Suspense fallback={<div className="p-4 text-sm text-gray-400">Loading editor...</div>}>
+                              <LazyWritingTipTapEditor
+                                content={tipTapContent}
+                                onContentChange={(json, plain) => {
+                                  editorTextChangedByTipTap.current = true
+                                  setTipTapContent(json)
+                                  applyPromptValue(plain, { promptRich: json })
+                                }}
+                                onAdapterReady={(adapter) => {
+                                  setActiveEditorAdapter(adapter)
+                                }}
+                                editable={!isGenerating}
+                                placeholder={t("option:writingPlayground.editorPlaceholder", "Start writing your prompt...")}
+                                className={cn("flex-1 transition-all", isGenerating && "ring-2 ring-primary/50 ring-offset-1 animate-pulse rounded-md")}
+                              />
+                            </React.Suspense>
+                          ) : (
+                            <Dropdown menu={{ items: editorMenuItems }} trigger={["contextMenu"]}>
+                              <div>
+                                <Input.TextArea ref={editorRef} value={editorText} onChange={handlePromptChange} onScroll={() => syncScroll("editor")} placeholder={t("option:writingPlayground.editorPlaceholder", "Start writing your prompt...")} autoSize={{ minRows: 12 }} disabled={isGenerating} className="!resize-y" />
+                              </div>
+                            </Dropdown>
+                          )}
                         </div>
                         <div ref={previewRef} className="flex-1 overflow-y-auto rounded-md border border-border bg-surface p-4" onScroll={() => syncScroll("preview")}>
                           {editorText.trim() ? (<MarkdownPreview content={editorText} size="sm" />) : (<Paragraph type="secondary" className="!mb-0 italic">{t("option:writingPlayground.editorEmptyPreview", "Nothing to preview yet.")}</Paragraph>)}

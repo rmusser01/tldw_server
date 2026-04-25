@@ -13,7 +13,7 @@ import type {
 } from "../TldwApiClient"
 import {
   clonePresentationVisualStyleSnapshot,
-} from "../TldwApiClient"
+} from "../presentation-style"
 
 const toOptionalString = (value: unknown): string | null => {
   if (typeof value !== "string") return null

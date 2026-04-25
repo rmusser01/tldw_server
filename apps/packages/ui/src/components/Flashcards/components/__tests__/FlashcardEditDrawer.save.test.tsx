@@ -112,6 +112,7 @@ describe("FlashcardEditDrawer save handling", () => {
             id: 1,
             name: "Deck 1",
             description: null,
+            review_prompt_side: "front",
             deleted: false,
             client_id: "1",
             version: 1,
@@ -157,6 +158,7 @@ describe("FlashcardEditDrawer save handling", () => {
             id: 1,
             name: "Deck 1",
             description: null,
+            review_prompt_side: "front",
             deleted: false,
             client_id: "1",
             version: 1,
@@ -168,7 +170,7 @@ describe("FlashcardEditDrawer save handling", () => {
     )
 
     await waitFor(() => {
-      expect(screen.getByText("Card template")).toBeInTheDocument()
+      expect(screen.getByText("Card model")).toBeInTheDocument()
     })
 
     fireEvent.click(screen.getByRole("button", { name: "Save" }))
@@ -198,6 +200,7 @@ describe("FlashcardEditDrawer save handling", () => {
             id: 1,
             name: "Deck 1",
             description: null,
+            review_prompt_side: "front",
             deleted: false,
             client_id: "1",
             version: 1,

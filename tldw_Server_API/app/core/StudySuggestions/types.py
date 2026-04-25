@@ -29,16 +29,39 @@ class NormalizedTopicLabel:
 
 
 @dataclass(slots=True)
+class ResolvedTopicLabel:
+    namespace: str
+    canonical_slug: str
+    canonical_label: str
+    semantic_label: str
+    topic_key: str
+    normalization_version: str
+    raw_labels: list[str] = field(default_factory=list)
+    evidence_reasons: list[str] = field(default_factory=list)
+    source_count: int = 0
+
+
+@dataclass(slots=True)
 class TopicCandidate:
     canonical_label: str
+    semantic_label: str
     raw_labels: list[str]
     evidence_class: EvidenceClass
+    topic_key: str | None = None
+    normalization_version: str | None = None
+    source_count: int = 0
+    evidence_reasons: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)
 class RankedTopic:
     canonical_label: str
+    semantic_label: str
     raw_labels: list[str]
     evidence_class: EvidenceClass
     rank_reason: RankReason
     adjacency_is_source_aware: bool
+    topic_key: str | None = None
+    normalization_version: str | None = None
+    source_count: int = 0
+    evidence_reasons: list[str] = field(default_factory=list)

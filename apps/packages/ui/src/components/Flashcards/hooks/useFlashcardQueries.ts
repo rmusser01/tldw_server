@@ -10,12 +10,17 @@ import {
   updateFlashcardsBulk,
   createDeck,
   updateDeck,
+  createFlashcardTemplate,
+  deleteFlashcardTemplate,
+  getFlashcardTemplate,
   updateFlashcard,
   deleteFlashcard,
   resetFlashcardScheduling,
   reviewFlashcard,
   getNextReviewCard,
   getFlashcardAssistant,
+  listFlashcardTemplates,
+  updateFlashcardTemplate,
   respondFlashcardAssistant,
   generateFlashcards,
   getFlashcard,
@@ -30,6 +35,8 @@ import {
   type Deck,
   type DeckUpdate,
   type Flashcard,
+  type FlashcardTemplateCreate,
+  type FlashcardTemplateUpdate,
   type StudyAssistantContextResponse,
   type StudyAssistantRespondRequest,
   type FlashcardBulkUpdateItem,
@@ -680,12 +687,14 @@ export function useCreateDeckMutation() {
     mutationFn: (params: {
       name: string
       description?: string
+      review_prompt_side?: Deck["review_prompt_side"]
       scheduler_type?: Deck["scheduler_type"]
       scheduler_settings?: Deck["scheduler_settings"]
     }) =>
       createDeck({
         name: params.name.trim(),
         description: params.description?.trim() || undefined,
+        review_prompt_side: params.review_prompt_side,
         scheduler_type: params.scheduler_type,
         scheduler_settings: params.scheduler_settings
       }),
@@ -722,6 +731,79 @@ export function useUpdateDeckMutation() {
     },
     onError: (error) => {
       console.error("Failed to update flashcard deck:", error)
+    }
+  })
+}
+
+export function useFlashcardTemplatesQuery(options?: UseFlashcardQueriesOptions) {
+  const { flashcardsEnabled } = useFlashcardsEnabled()
+
+  return useQuery({
+    queryKey: ["flashcards:templates"],
+    queryFn: () => listFlashcardTemplates({}),
+    enabled: options?.enabled ?? flashcardsEnabled
+  })
+}
+
+export function useFlashcardTemplateQuery(
+  templateId: number | null | undefined,
+  options?: UseFlashcardQueriesOptions
+) {
+  const { flashcardsEnabled } = useFlashcardsEnabled()
+
+  return useQuery({
+    queryKey: ["flashcards:templates", templateId ?? null],
+    queryFn: () => getFlashcardTemplate(templateId!),
+    enabled: (options?.enabled ?? flashcardsEnabled) && templateId != null
+  })
+}
+
+export function useCreateFlashcardTemplateMutation() {
+  const qc = useQueryClient()
+
+  return useMutation({
+    mutationKey: ["flashcards:template:create"],
+    mutationFn: (payload: FlashcardTemplateCreate) => createFlashcardTemplate(payload),
+    onSuccess: async (template) => {
+      qc.setQueryData(["flashcards:templates", template.id], template)
+      await qc.invalidateQueries({ queryKey: ["flashcards:templates"] })
+    },
+    onError: (error) => {
+      console.error("Failed to create flashcard template:", error)
+    }
+  })
+}
+
+export function useUpdateFlashcardTemplateMutation() {
+  const qc = useQueryClient()
+
+  return useMutation({
+    mutationKey: ["flashcards:template:update"],
+    mutationFn: (params: { templateId: number; update: FlashcardTemplateUpdate }) =>
+      updateFlashcardTemplate(params.templateId, params.update),
+    onSuccess: async (template) => {
+      qc.setQueryData(["flashcards:templates", template.id], template)
+      await qc.invalidateQueries({ queryKey: ["flashcards:templates"] })
+    },
+    onError: (error) => {
+      console.error("Failed to update flashcard template:", error)
+    }
+  })
+}
+
+export function useDeleteFlashcardTemplateMutation() {
+  const qc = useQueryClient()
+
+  return useMutation({
+    mutationKey: ["flashcards:template:delete"],
+    mutationFn: (params: { templateId: number; expectedVersion: number }) =>
+      deleteFlashcardTemplate(params.templateId, params.expectedVersion),
+    onSuccess: async (_result, variables) => {
+      qc.removeQueries({ queryKey: ["flashcards:templates", variables.templateId] })
+      await qc.invalidateQueries({ queryKey: ["flashcards:templates"] })
+    },
+    onError: (error) => {
+      console.error("Failed to delete flashcard template:", error)
     }
   })
 }

@@ -1,5 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import React from "react"
+import { useTranslation } from "react-i18next"
 import { useAntdNotification } from "@/hooks/useAntdNotification"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import {
@@ -34,23 +35,42 @@ export function useDictionaryEntryCreate({
 }: UseDictionaryEntryCreateParams): DictionaryEntryCreateState {
   const qc = useQueryClient()
   const notification = useAntdNotification()
+  const { t } = useTranslation(["option", "common"])
   const [advancedMode, setAdvancedMode] = React.useState(false)
   const [regexError, setRegexError] = React.useState<string | null>(null)
   const [regexServerError, setRegexServerError] = React.useState<string | null>(null)
+  const localize = React.useCallback(
+    (key: string, fallback: string) => t(key, fallback),
+    [t]
+  )
 
   const { mutate: addEntry, isPending: adding } = useMutation({
     mutationFn: (value: any) => tldwClient.addDictionaryEntry(dictionaryId, value),
-    onSuccess: () => {
+    onSuccess: (_data, variables) => {
       qc.invalidateQueries({ queryKey: ["tldw:listDictionaryEntries", dictionaryId] })
       qc.invalidateQueries({ queryKey: allEntriesQueryKey })
+      const patternPreview =
+        variables?.pattern ||
+        t("option:dictionaries.entryLabelFallback", "Entry")
+      notification.success({
+        message: t("option:dictionaries.entryAdded", {
+          defaultValue: 'Entry "{{pattern}}" added',
+          pattern: patternPreview
+        })
+      })
       form.resetFields()
       setRegexError(null)
       setRegexServerError(null)
     },
     onError: (error: any) => {
-      const message = error?.message || "Failed to add entry."
+      const message =
+        error?.message ||
+        t("option:dictionaries.addEntryFailedDescription", "Failed to add entry.")
       setRegexServerError(message)
-      notification.error({ message: "Add entry failed", description: message })
+      notification.error({
+        message: t("option:dictionaries.addEntryFailedTitle", "Add entry failed"),
+        description: message
+      })
     },
   })
 
@@ -60,7 +80,7 @@ export function useDictionaryEntryCreate({
       setRegexServerError(null)
       if (entryType === "regex") {
         const pattern = form.getFieldValue("pattern")
-        const error = validateRegexPattern(pattern)
+        const error = validateRegexPattern(pattern, localize)
         if (error) {
           setRegexError(error)
           return
@@ -95,13 +115,13 @@ export function useDictionaryEntryCreate({
       setRegexServerError(null)
       const entryType = form.getFieldValue("type") || "literal"
       if (entryType === "regex") {
-        const error = validateRegexPattern(patternValue)
+        const error = validateRegexPattern(patternValue, localize)
         setRegexError(error)
       } else {
         setRegexError(null)
       }
     },
-    [form]
+    [form, localize]
   )
 
   const handleAddEntryReplacementChange = React.useCallback(() => {
@@ -112,13 +132,13 @@ export function useDictionaryEntryCreate({
     (value: string) => {
       const pattern = form.getFieldValue("pattern")
       if (value === "regex" && pattern) {
-        setRegexError(validateRegexPattern(pattern))
+        setRegexError(validateRegexPattern(pattern, localize))
       } else {
         setRegexError(null)
       }
       setRegexServerError(null)
     },
-    [form]
+    [form, localize]
   )
 
   const toggleAdvancedMode = React.useCallback(() => {

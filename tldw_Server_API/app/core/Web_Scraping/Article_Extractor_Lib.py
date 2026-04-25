@@ -24,7 +24,6 @@ import math
 import os
 import random
 import re
-import sys
 import tempfile
 import time
 from collections import OrderedDict
@@ -55,7 +54,6 @@ from tldw_Server_API.app.core.DB_Management.DB_Manager import ingest_article_to_
 from tldw_Server_API.app.core.DB_Management.media_db.api import managed_media_database
 from tldw_Server_API.app.core.http_client import afetch
 from tldw_Server_API.app.core.http_client import fetch as http_fetch
-from tldw_Server_API.app.core.testing import is_test_mode as _is_test_mode
 from tldw_Server_API.app.core.testing import is_truthy as _is_truthy
 
 #
@@ -71,6 +69,11 @@ from tldw_Server_API.app.core.Web_Scraping.filters import (
     URLPatternFilter,
 )
 from tldw_Server_API.app.core.Web_Scraping.handlers import resolve_handler
+from tldw_Server_API.app.core.Web_Scraping.outbound_policy import (
+    WebOutboundPolicyDecision,
+    decide_web_outbound_policy,
+    decide_web_outbound_policy_sync,
+)
 from tldw_Server_API.app.core.Web_Scraping.scraper_router import ScraperRouter
 from tldw_Server_API.app.core.Web_Scraping.ua_profiles import (
     build_browser_headers,
@@ -2710,34 +2713,42 @@ def _as_bool(value: Any, default: bool = False) -> bool:
     return default
 
 
+def _record_robot_policy_block(url: str, reason: str) -> None:
+    if not reason.startswith("robots_"):
+        return
+    try:
+        parsed = urlparse(url)
+        increment_counter("scrape_blocked_by_robots_total", labels={"domain": parsed.netloc})
+    except _ARTICLE_EXTRACTOR_NONCRITICAL_EXCEPTIONS:
+        increment_counter("scrape_blocked_by_robots_total", labels={})
+
+
+def _blocked_article_result(
+    url: str,
+    decision: WebOutboundPolicyDecision,
+) -> dict[str, Any]:
+    _record_robot_policy_block(url, decision.reason)
+    if decision.reason.startswith("robots_"):
+        error = "Blocked by outbound policy"
+    else:
+        error = f"Egress denied: {decision.reason}"
+    return {
+        "url": url,
+        "title": "N/A",
+        "author": "N/A",
+        "date": "N/A",
+        "content": "",
+        "extraction_successful": False,
+        "error": error,
+        "policy_reason": decision.reason,
+        "policy_mode": decision.mode,
+        "policy_stage": decision.stage,
+        "policy_source": decision.source,
+    }
+
+
 async def scrape_article(url: str, custom_cookies: Optional[list[dict[str, Any]]] = None) -> dict[str, Any]:
     logging.info(f"Scraping article from URL: {url}")
-    # Enforce centralized egress/SSRF policy before any network access
-    try:
-        from tldw_Server_API.app.core.Security.egress import evaluate_url_policy
-        pol = evaluate_url_policy(url)
-        if not getattr(pol, 'allowed', False):
-            logging.error(f"Egress denied for scrape target: {getattr(pol, 'reason', 'blocked')}")
-            return {
-                "url": url,
-                "title": "N/A",
-                "author": "N/A",
-                "date": "N/A",
-                "content": "",
-                "extraction_successful": False,
-                "error": f"Egress denied: {getattr(pol, 'reason', 'blocked')}"
-            }
-    except _ARTICLE_EXTRACTOR_NONCRITICAL_EXCEPTIONS as _e:
-        logging.error(f"Egress policy evaluation failed: {_e}")
-        return {
-            "url": url,
-            "title": "N/A",
-            "author": "N/A",
-            "date": "N/A",
-            "content": "",
-            "extraction_successful": False,
-            "error": "Egress policy evaluation failed. Please contact system administrator."
-        }
     # Resolve scraper plan via router (configurable via YAML)
     ws_cfg: dict[str, Any] = {}
     try:
@@ -2787,6 +2798,38 @@ async def scrape_article(url: str, custom_cookies: Optional[list[dict[str, Any]]
             backend_choice = default_backend.lower().strip() or "auto"
             if backend_choice not in {"auto", "curl", "httpx", "playwright"}:
                 backend_choice = "auto"
+
+    preflight_payload = None
+
+    def _attach_preflight(result: dict[str, Any]) -> dict[str, Any]:
+        if preflight_payload and isinstance(result, dict):
+            result.setdefault("preflight_analysis", preflight_payload)
+        return result
+
+    effective_ua = ua_headers.get("User-Agent", web_scraping_user_agent)
+    try:
+        decision = await decide_web_outbound_policy(
+            url,
+            respect_robots=bool(getattr(plan, "respect_robots", True)),
+            user_agent=effective_ua,
+            source="article_extract",
+            stage="pre_fetch",
+            config={"web_scraper": ws_cfg},
+        )
+    except _ARTICLE_EXTRACTOR_NONCRITICAL_EXCEPTIONS as exc:
+        logging.error(f"Outbound policy evaluation failed: {exc}")
+        return _attach_preflight({
+            "url": url,
+            "title": "N/A",
+            "author": "N/A",
+            "date": "N/A",
+            "content": "",
+            "extraction_successful": False,
+            "error": "Outbound policy evaluation failed. Please contact system administrator.",
+        })
+
+    if not decision.allowed:
+        return _attach_preflight(_blocked_article_result(url, decision))
 
     preflight_analysis = None
     preflight_notes: list[str] = []
@@ -2851,30 +2894,6 @@ async def scrape_article(url: str, custom_cookies: Optional[list[dict[str, Any]]
                 "notes": preflight_notes,
             },
         }
-
-    def _attach_preflight(result: dict[str, Any]) -> dict[str, Any]:
-        if preflight_payload and isinstance(result, dict):
-            result.setdefault("preflight_analysis", preflight_payload)
-        return result
-
-    # robots.txt enforcement (fail open if error)
-    effective_ua = ua_headers.get("User-Agent", web_scraping_user_agent)
-    if getattr(plan, "respect_robots", True) and not await is_allowed_by_robots_async(url, effective_ua):
-        logging.warning("Robots policy disallows fetching this URL; skipping fetch")
-        try:
-            parsed = urlparse(url)
-            increment_counter("scrape_blocked_by_robots_total", labels={"domain": parsed.netloc})
-        except _ARTICLE_EXTRACTOR_NONCRITICAL_EXCEPTIONS:
-            increment_counter("scrape_blocked_by_robots_total", labels={})
-        return _attach_preflight({
-            "url": url,
-            "title": "N/A",
-            "author": "N/A",
-            "date": "N/A",
-            "content": "",
-            "extraction_successful": False,
-            "error": "Blocked by robots policy",
-        })
 
     if backend_choice != "playwright" and preflight_method != "playwright":
         # First try lightweight HTTP path (curl/httpx) before Playwright
@@ -3096,14 +3115,25 @@ def scrape_article_blocking(url: str, custom_cookies: Optional[list[dict[str, An
     then extracts article content via trafilatura and converts to display text.
     """
     try:
-        # Egress guard
         try:
-            from tldw_Server_API.app.core.Security.egress import evaluate_url_policy
-            pol = evaluate_url_policy(url)
-            if not getattr(pol, 'allowed', False):
-                return {"url": url, "title": "N/A", "author": "N/A", "date": "N/A", "content": "", "extraction_successful": False, "error": f"Egress denied: {getattr(pol, 'reason', 'blocked')}"}
-        except _ARTICLE_EXTRACTOR_NONCRITICAL_EXCEPTIONS as _e:
-            return {"url": url, "title": "N/A", "author": "N/A", "date": "N/A", "content": "", "extraction_successful": False, "error": f"Egress policy evaluation failed: {_e}"}
+            decision = decide_web_outbound_policy_sync(
+                url,
+                respect_robots=False,
+                source="article_extract_blocking",
+                stage="pre_fetch",
+            )
+            if not decision.allowed:
+                return _blocked_article_result(url, decision)
+        except _ARTICLE_EXTRACTOR_NONCRITICAL_EXCEPTIONS as exc:
+            return {
+                "url": url,
+                "title": "N/A",
+                "author": "N/A",
+                "date": "N/A",
+                "content": "",
+                "extraction_successful": False,
+                "error": "Outbound policy evaluation failed",
+            }
 
         headers = {"User-Agent": web_scraping_user_agent}
         # If cookies are provided in Playwright-style dicts, reduce to name->value and set Cookie header
@@ -3442,27 +3472,19 @@ def scrape_by_url_level(base_url: str, level: int) -> list:
 def scrape_from_sitemap(sitemap_url: str) -> list:
     """Scrape articles from a sitemap URL."""
     try:
-        # Egress guard
-        _allow_in_tests = (
-            bool(os.getenv("PYTEST_CURRENT_TEST"))
-            or "pytest" in sys.modules
-            or _is_test_mode()
-        )
         try:
-            from tldw_Server_API.app.core.Security.egress import evaluate_url_policy
-            pol = evaluate_url_policy(sitemap_url)
-            if not getattr(pol, 'allowed', False):
-                if _allow_in_tests:
-                    logging.warning(f"Egress denied for sitemap in test mode; proceeding: {getattr(pol, 'reason', 'blocked')}")
-                else:
-                    logging.error(f"Egress denied for sitemap: {getattr(pol, 'reason', 'blocked')}")
-                    return []
-        except _ARTICLE_EXTRACTOR_NONCRITICAL_EXCEPTIONS as _e:
-            if _allow_in_tests:
-                logging.warning(f"Egress policy evaluation failed in test mode; proceeding: {_e}")
-            else:
-                logging.error(f"Egress policy evaluation failed: {_e}")
+            decision = decide_web_outbound_policy_sync(
+                sitemap_url,
+                respect_robots=False,
+                source="sitemap_scrape",
+                stage="pre_fetch",
+            )
+            if not decision.allowed:
+                logging.error(f"Sitemap blocked by outbound policy: {decision.reason}")
                 return []
+        except _ARTICLE_EXTRACTOR_NONCRITICAL_EXCEPTIONS as exc:
+            logging.error(f"Outbound policy evaluation failed: {exc}")
+            return []
 
         try:
             resp = http_fetch(method="GET", url=sitemap_url, timeout=10)
@@ -3515,15 +3537,18 @@ def collect_internal_links(base_url: str) -> set:
     visited = set()
     to_visit = {base_url}
 
-    # Egress guard
     try:
-        from tldw_Server_API.app.core.Security.egress import evaluate_url_policy
-        pol = evaluate_url_policy(base_url)
-        if not getattr(pol, 'allowed', False):
-            logging.error(f"Egress denied for base URL: {getattr(pol, 'reason', 'blocked')}")
+        decision = decide_web_outbound_policy_sync(
+            base_url,
+            respect_robots=False,
+            source="collect_internal_links",
+            stage="pre_fetch",
+        )
+        if not decision.allowed:
+            logging.error(f"Base URL blocked by outbound policy: {decision.reason}")
             return visited
-    except _ARTICLE_EXTRACTOR_NONCRITICAL_EXCEPTIONS as _e:
-        logging.error(f"Egress policy evaluation failed: {_e}")
+    except _ARTICLE_EXTRACTOR_NONCRITICAL_EXCEPTIONS as exc:
+        logging.error(f"Outbound policy evaluation failed: {exc}")
         return visited
 
     while to_visit:

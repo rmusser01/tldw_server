@@ -3,6 +3,7 @@
  * Extracted from index.tsx to reduce component file size.
  */
 
+import type { JSONContent } from "@tiptap/react"
 import type { ChatMessage } from "@/services/tldw/TldwApiClient"
 import type {
   WritingTemplateResponse,
@@ -30,6 +31,7 @@ export type SessionUsageMap = Record<string, SessionUsage>
 
 export type WritingSessionPayload = Record<string, unknown> & {
   prompt?: string
+  prompt_rich?: JSONContent
   settings?: WritingSessionSettings
   template_name?: string | null
   templateName?: string | null
@@ -952,6 +954,16 @@ export const getPromptFromPayload = (payload?: Record<string, unknown> | null): 
   return typeof prompt === "string" ? prompt : ""
 }
 
+export const getPromptRichFromPayload = (
+  payload?: Record<string, unknown> | null
+): JSONContent | null => {
+  if (!isRecord(payload)) return null
+  const promptRich = payload.prompt_rich
+  return isRecord(promptRich) && promptRich.type === "doc"
+    ? (promptRich as JSONContent)
+    : null
+}
+
 export const getTemplateNameFromPayload = (
   payload?: Record<string, unknown> | null
 ): string | null => {
@@ -984,10 +996,11 @@ export const mergePayloadIntoSession = (
   settings: WritingSessionSettings,
   templateName: string | null,
   themeName: string | null,
-  chatMode: boolean
+  chatMode: boolean,
+  options?: { promptRich?: JSONContent | null }
 ): WritingSessionPayload => {
   const base = isRecord(payload) ? payload : {}
-  return {
+  const next: WritingSessionPayload = {
     ...base,
     prompt,
     settings,
@@ -995,6 +1008,14 @@ export const mergePayloadIntoSession = (
     theme_name: themeName,
     chat_mode: chatMode
   }
+  if (options && Object.prototype.hasOwnProperty.call(options, "promptRich")) {
+    if (options.promptRich) {
+      next.prompt_rich = options.promptRich
+    } else {
+      delete next.prompt_rich
+    }
+  }
+  return next
 }
 
 export const areSettingsEqual = (

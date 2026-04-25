@@ -108,6 +108,8 @@ from tldw_Server_API.app.core.Character_Chat.constants import (
     THROTTLE_CACHE_MAX_KEYS,
     THROTTLE_STALE_SECONDS,
 )
+
+MAX_STREAM_PERSIST_USAGE_BYTES = 4_096
 from tldw_Server_API.app.core.testing import is_truthy
 from tldw_Server_API.app.core.Character_Chat.modules.character_generation_presets import (
     resolve_character_generation_settings,
@@ -533,6 +535,253 @@ def _validate_and_truncate_tool_calls(tool_calls: Any) -> Optional[list]:
         return None
 
     return tool_calls
+
+
+def _build_stream_persist_fingerprint(
+    chat_id: str,
+    assistant_content: str,
+    user_message_id: str | None,
+    speaker_character_id: int | None,
+    ranking: int | None,
+) -> str:
+    """Build a deterministic fingerprint for streamed persist retries."""
+    payload = {
+        "chat_id": chat_id,
+        "assistant_content": assistant_content.strip(),
+        "user_message_id": user_message_id,
+        "speaker_character_id": speaker_character_id,
+        "ranking": ranking,
+    }
+    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()
+
+
+def _load_existing_stream_persist_message_by_id(
+    db: CharactersRAGDB,
+    chat_id: str,
+    assistant_message_id: str,
+    *,
+    assistant_content: str,
+    parent_message_id: str | None,
+    speaker_name: str,
+) -> tuple[str, dict[str, Any]] | None:
+    """Return an existing persisted assistant message by stable message id."""
+    message = db.get_message_by_id(assistant_message_id)
+    if not message:
+        return None
+    if str(message.get("conversation_id") or "").strip() != str(chat_id).strip():
+        raise ConflictError("assistant_message_id already exists in another conversation")
+    if message.get("deleted"):
+        raise ConflictError("assistant_message_id references a deleted message")
+    existing_sender = str(message.get("sender") or "").strip()
+    if existing_sender and existing_sender != speaker_name:
+        raise ConflictError("assistant_message_id already exists for a different speaker")
+    if str(message.get("content") or "") != assistant_content:
+        raise ConflictError("assistant_message_id already exists for different content")
+    existing_parent_message_id = str(message.get("parent_message_id") or "").strip() or None
+    expected_parent_message_id = str(parent_message_id or "").strip() or None
+    if existing_parent_message_id != expected_parent_message_id:
+        raise ConflictError("assistant_message_id already exists for a different parent message")
+    metadata = db.get_message_metadata(assistant_message_id) or {}
+    extra = metadata.get("extra") or {}
+    return assistant_message_id, extra
+
+
+def _find_existing_stream_persist_message(
+    db: CharactersRAGDB,
+    chat_id: str,
+    fingerprint: str,
+) -> tuple[str, dict[str, Any]] | None:
+    """Find a previously persisted assistant turn for the same streamed payload."""
+    candidate_messages = [
+        message
+        for message in (
+            db.get_messages_for_conversation(
+                chat_id,
+                limit=100,
+                offset=0,
+                order_by_timestamp="DESC",
+            )
+            or []
+        )
+        if not message.get("deleted") and message.get("sender") != "user"
+    ]
+    if not candidate_messages:
+        return None
+
+    message_ids = [str(message["id"]) for message in candidate_messages]
+    load_metadata_map = getattr(db, "get_message_metadata_map", None)
+    metadata_by_message_id = (
+        load_metadata_map(message_ids)
+        if callable(load_metadata_map)
+        else {}
+    ) or {}
+
+    for message in candidate_messages:
+        message_id = str(message["id"])
+        metadata = metadata_by_message_id.get(message_id)
+        if metadata is None:
+            metadata = db.get_message_metadata(message_id) or {}
+        extra = metadata.get("extra") or {}
+        if extra.get("stream_persist_fingerprint") == fingerprint:
+            return message_id, extra
+    return None
+
+
+def _build_persist_validation_degraded_detail(assistant_message_id: str) -> dict[str, Any]:
+    """Build the structured 503 detail used when persistence succeeds but validation degrades."""
+    return {
+        "code": "persist_validation_degraded",
+        "saved": True,
+        "assistant_message_id": assistant_message_id,
+    }
+
+
+def _build_stream_persist_metadata_extra(
+    *,
+    speaker_character_id: int | None,
+    speaker_character_name: str,
+    turn_taking_mode: str,
+    validation_degraded: bool,
+    persist_fingerprint: str | None,
+    mood_label: str | None,
+    mood_confidence: float | None,
+    mood_topic: str | None,
+    usage: dict[str, Any] | None,
+) -> dict[str, Any]:
+    metadata_extra: dict[str, Any] = {
+        "speaker_character_id": speaker_character_id,
+        "speaker_character_name": speaker_character_name,
+        "turn_taking_mode": turn_taking_mode,
+        "persist_validation_degraded": validation_degraded,
+    }
+    if persist_fingerprint:
+        metadata_extra["stream_persist_fingerprint"] = persist_fingerprint
+    if isinstance(mood_label, str):
+        trimmed_label = mood_label.strip()
+        if trimmed_label:
+            metadata_extra["mood_label"] = trimmed_label
+    if mood_confidence is not None:
+        metadata_extra["mood_confidence"] = float(mood_confidence)
+    if isinstance(mood_topic, str):
+        trimmed_topic = mood_topic.strip()
+        if trimmed_topic:
+            metadata_extra["mood_topic"] = trimmed_topic
+    if usage is not None:
+        metadata_extra["usage"] = usage
+    return metadata_extra
+
+
+def _validate_stream_persist_usage(usage: Any) -> dict[str, int] | None:
+    """Validate and normalize persisted usage metadata."""
+    if usage is None:
+        return None
+    if not isinstance(usage, Mapping):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Invalid usage. Expected object",
+        )
+
+    normalized: dict[str, int] = {}
+    for key in (
+        "prompt_tokens",
+        "completion_tokens",
+        "total_tokens",
+        "input_tokens",
+        "output_tokens",
+    ):
+        value = usage.get(key)
+        if value is None:
+            continue
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Invalid usage.{key}. Expected non-negative integer",
+            )
+        normalized[key] = value
+
+    encoded = json.dumps(normalized, sort_keys=True).encode("utf-8")
+    if len(encoded) > MAX_STREAM_PERSIST_USAGE_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"usage exceeds {MAX_STREAM_PERSIST_USAGE_BYTES} bytes",
+        )
+    return normalized or None
+
+
+def _try_store_stream_persist_metadata(
+    db: CharactersRAGDB,
+    *,
+    assistant_message_id: str,
+    tool_calls: Any,
+    metadata_extra: dict[str, Any],
+) -> None:
+    try:
+        validated_tool_calls = _validate_and_truncate_tool_calls(tool_calls)
+        stored = db.add_message_metadata(
+            assistant_message_id,
+            tool_calls=validated_tool_calls,
+            extra=metadata_extra,
+        )
+        if not stored:
+            logger.debug(
+                "Non-fatal: failed to persist metadata for message {}",
+                assistant_message_id,
+            )
+    except _CHAR_CHAT_SESSIONS_NONCRITICAL_EXCEPTIONS as exc:
+        logger.debug(
+            "Non-fatal: failed to persist metadata for message {}: {}",
+            assistant_message_id,
+            exc,
+        )
+
+
+def _update_chat_rating_after_stream_persist(
+    db: CharactersRAGDB,
+    *,
+    chat_id: str,
+    chat_rating: int | float | None,
+) -> None:
+    if chat_rating is None:
+        return
+    try:
+        conv_for_update = db.get_conversation_by_id(chat_id)
+        if conv_for_update:
+            db.update_conversation(
+                chat_id,
+                {"rating": chat_rating},
+                conv_for_update.get('version', 1),
+            )
+    except _CHAR_CHAT_SESSIONS_NONCRITICAL_EXCEPTIONS as exc:
+        logger.warning(
+            "Failed to update chat rating for chat_id={} rating={} error={}",
+            chat_id,
+            chat_rating,
+            exc,
+            exc_info=True,
+        )
+
+
+def _apply_stream_persist_side_effects(
+    db: CharactersRAGDB,
+    *,
+    chat_id: str,
+    assistant_message_id: str,
+    tool_calls: Any,
+    metadata_extra: dict[str, Any],
+    chat_rating: int | float | None,
+) -> None:
+    _try_store_stream_persist_metadata(
+        db,
+        assistant_message_id=assistant_message_id,
+        tool_calls=tool_calls,
+        metadata_extra=metadata_extra,
+    )
+    _update_chat_rating_after_stream_persist(
+        db,
+        chat_id=chat_id,
+        chat_rating=chat_rating,
+    )
+
 
 # Legacy local SSE helpers removed — unified streams handle normalization
 
@@ -6093,16 +6342,20 @@ async def persist_streamed_assistant_message(
             char_card = db.get_character_card_by_id(conversation.get("character_id")) or {}
             resolved_speaker_name = str(char_card.get("name") or "Assistant").strip() or "Assistant"
         resolved_turn_mode = str(turn_context.get("turn_taking_mode") or "single").strip() or "single"
-
-        # Enforce message cap (+1 assistant)
-        try:
-            current_count = db.count_messages_for_conversation(chat_id)
-            limiter = get_character_rate_limiter()
-            await limiter.check_message_limit(chat_id, current_count + 1)
-        except HTTPException:
-            raise
-        except _CHAR_CHAT_SESSIONS_NONCRITICAL_EXCEPTIONS:
-            logger.debug("Non-fatal: message cap check skipped in persist endpoint")
+        requested_assistant_message_id = (
+            body.assistant_message_id.strip()
+            if isinstance(body.assistant_message_id, str)
+            else ""
+        ) or None
+        persist_fingerprint = None
+        if not requested_assistant_message_id and getattr(body, "user_message_id", None):
+            persist_fingerprint = _build_stream_persist_fingerprint(
+                chat_id,
+                body.assistant_content,
+                body.user_message_id,
+                resolved_speaker_id,
+                body.ranking if getattr(body, "ranking", None) is not None else None,
+            )
 
         # Validate optional parent message belongs to this conversation
         if getattr(body, "user_message_id", None):
@@ -6118,69 +6371,136 @@ async def persist_streamed_assistant_message(
                     detail="Parent message must belong to the same conversation"
                 )
 
-        # Persist assistant response via Character_Chat guardrails
-        assistant_msg_id = post_message_to_conversation(
-            db=db,
-            conversation_id=chat_id,
-            character_name=resolved_speaker_name,
-            message_content=body.assistant_content,
-            is_user_message=False,
-            parent_message_id=body.user_message_id,
-            ranking=body.ranking if getattr(body, "ranking", None) is not None else None,
+        existing_persist = None
+        if requested_assistant_message_id:
+            existing_persist = _load_existing_stream_persist_message_by_id(
+                db,
+                chat_id,
+                requested_assistant_message_id,
+                assistant_content=body.assistant_content,
+                parent_message_id=body.user_message_id,
+                speaker_name=resolved_speaker_name,
+            )
+        elif persist_fingerprint is not None:
+            existing_persist = _find_existing_stream_persist_message(db, chat_id, persist_fingerprint)
+        if existing_persist is not None:
+            existing_id, existing_extra = existing_persist
+            _apply_stream_persist_side_effects(
+                db,
+                chat_id=chat_id,
+                assistant_message_id=existing_id,
+                tool_calls=getattr(body, "tool_calls", None),
+                metadata_extra=_build_stream_persist_metadata_extra(
+                    speaker_character_id=resolved_speaker_id,
+                    speaker_character_name=resolved_speaker_name,
+                    turn_taking_mode=resolved_turn_mode,
+                    validation_degraded=existing_extra.get("persist_validation_degraded") is True,
+                    persist_fingerprint=persist_fingerprint,
+                    mood_label=body.mood_label,
+                    mood_confidence=body.mood_confidence,
+                    mood_topic=body.mood_topic,
+                    usage=_validate_stream_persist_usage(getattr(body, "usage", None)),
+                ),
+                chat_rating=getattr(body, "chat_rating", None),
+            )
+            if existing_extra.get("persist_validation_degraded"):
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail=_build_persist_validation_degraded_detail(existing_id),
+                )
+            return CharacterChatStreamPersistResponse(
+                chat_id=chat_id,
+                assistant_message_id=existing_id,
+                saved=True,
+            )
+
+        # Enforce message cap (+1 assistant)
+        validation_degraded: Exception | None = None
+        try:
+            current_count = db.count_messages_for_conversation(chat_id)
+            limiter = get_character_rate_limiter()
+            await limiter.check_message_limit(chat_id, current_count + 1)
+        except HTTPException:
+            raise
+        except _CHAR_CHAT_SESSIONS_NONCRITICAL_EXCEPTIONS as exc:
+            validation_degraded = exc
+            logger.debug("Non-fatal: message cap check degraded in persist endpoint: {}", exc)
+
+        metadata_extra = _build_stream_persist_metadata_extra(
+            speaker_character_id=resolved_speaker_id,
+            speaker_character_name=resolved_speaker_name,
+            turn_taking_mode=resolved_turn_mode,
+            validation_degraded=validation_degraded is not None,
+            persist_fingerprint=persist_fingerprint,
+            mood_label=body.mood_label,
+            mood_confidence=body.mood_confidence,
+            mood_topic=body.mood_topic,
+            usage=_validate_stream_persist_usage(getattr(body, "usage", None)),
         )
+
+        # Persist assistant response via Character_Chat guardrails
+        try:
+            assistant_msg_id = post_message_to_conversation(
+                db=db,
+                conversation_id=chat_id,
+                character_name=resolved_speaker_name,
+                message_content=body.assistant_content,
+                is_user_message=False,
+                message_id=requested_assistant_message_id,
+                parent_message_id=body.user_message_id,
+                ranking=body.ranking if getattr(body, "ranking", None) is not None else None,
+            )
+        except ConflictError:
+            if not requested_assistant_message_id:
+                raise
+            existing_persist = _load_existing_stream_persist_message_by_id(
+                db,
+                chat_id,
+                requested_assistant_message_id,
+                assistant_content=body.assistant_content,
+                parent_message_id=body.user_message_id,
+                speaker_name=resolved_speaker_name,
+            )
+            if existing_persist is None:
+                raise
+            existing_id, existing_extra = existing_persist
+            _apply_stream_persist_side_effects(
+                db,
+                chat_id=chat_id,
+                assistant_message_id=existing_id,
+                tool_calls=getattr(body, "tool_calls", None),
+                metadata_extra=metadata_extra,
+                chat_rating=getattr(body, "chat_rating", None),
+            )
+            if existing_extra.get("persist_validation_degraded"):
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail=_build_persist_validation_degraded_detail(existing_id),
+                )
+            return CharacterChatStreamPersistResponse(
+                chat_id=chat_id,
+                assistant_message_id=existing_id,
+                saved=True,
+            )
         if not assistant_msg_id:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to persist assistant message"
             )
-        # Persist metadata: tool_calls and usage
-        try:
-            metadata_extra: dict[str, Any] = {
-                "speaker_character_id": resolved_speaker_id,
-                "speaker_character_name": resolved_speaker_name,
-                "turn_taking_mode": resolved_turn_mode,
-            }
-            if isinstance(body.mood_label, str):
-                mood_label = body.mood_label.strip()
-                if mood_label:
-                    metadata_extra["mood_label"] = mood_label
-            if body.mood_confidence is not None:
-                metadata_extra["mood_confidence"] = float(body.mood_confidence)
-            if isinstance(body.mood_topic, str):
-                mood_topic = body.mood_topic.strip()
-                if mood_topic:
-                    metadata_extra["mood_topic"] = mood_topic
-            if getattr(body, 'usage', None) is not None:
-                metadata_extra["usage"] = body.usage
-            validated_tool_calls = _validate_and_truncate_tool_calls(getattr(body, 'tool_calls', None))
-            db.add_message_metadata(
-                assistant_msg_id,
-                tool_calls=validated_tool_calls,
-                extra=metadata_extra,
-            )
-        except _CHAR_CHAT_SESSIONS_NONCRITICAL_EXCEPTIONS as exc:
-            logger.debug(
-                f"Non-fatal: failed to persist metadata for message {assistant_msg_id}: {exc}"
-            )
+        _apply_stream_persist_side_effects(
+            db,
+            chat_id=chat_id,
+            assistant_message_id=assistant_msg_id,
+            tool_calls=getattr(body, "tool_calls", None),
+            metadata_extra=metadata_extra,
+            chat_rating=getattr(body, "chat_rating", None),
+        )
 
-        # Optionally update chat rating
-        if getattr(body, 'chat_rating', None) is not None:
-            try:
-                conv_for_update = db.get_conversation_by_id(chat_id)
-                if conv_for_update:
-                    db.update_conversation(
-                        chat_id,
-                        {"rating": body.chat_rating},
-                        conv_for_update.get('version', 1),
-                    )
-            except _CHAR_CHAT_SESSIONS_NONCRITICAL_EXCEPTIONS as e:
-                logger.warning(
-                    "Failed to update chat rating for chat_id={} rating={} error={}",
-                    chat_id,
-                    getattr(body, "chat_rating", None),
-                    e,
-                    exc_info=True,
-                )
+        if validation_degraded is not None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=_build_persist_validation_degraded_detail(assistant_msg_id),
+            )
 
         return CharacterChatStreamPersistResponse(chat_id=chat_id, assistant_message_id=assistant_msg_id, saved=True)
     except HTTPException:

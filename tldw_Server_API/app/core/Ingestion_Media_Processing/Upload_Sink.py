@@ -4,6 +4,7 @@
 #
 import copy
 import html
+import importlib
 import mimetypes
 import os
 import stat
@@ -18,10 +19,6 @@ try:
     import puremagic  # type: ignore
 except ImportError:  # puremagic is optional; fall back to alternate MIME detection
     puremagic = None
-try:
-    import magic as _python_magic  # type: ignore
-except ImportError:
-    _python_magic = None
 try:
     import yara  # type: ignore
 except ImportError:  # yara rules are optional; disable malware scanning if missing
@@ -56,6 +53,39 @@ if puremagic is not None:
             *_UPLOAD_SINK_NONCRITICAL_EXCEPTIONS,
             _puremagic_error,
         )
+
+_python_magic = None
+_python_magic_loaded = False
+
+
+def _get_python_magic_module():
+    """Resolve python-magic lazily and skip it on Windows.
+
+    The Windows CI runner has shown access violations while importing `magic`
+    during module import. Keep the fallback optional and avoid that crash path.
+    """
+    global _python_magic, _python_magic_loaded
+
+    if _python_magic is not None:
+        return _python_magic
+    if _python_magic_loaded:
+        return None
+
+    _python_magic_loaded = True
+    if os.name == "nt":
+        logging.info(
+            "Skipping python-magic fallback on Windows; relying on puremagic or extension guesses."
+        )
+        return None
+
+    try:
+        _python_magic = importlib.import_module("magic")
+    except ImportError:
+        _python_magic = None
+    except _UPLOAD_SINK_NONCRITICAL_EXCEPTIONS as exc:
+        logging.warning(f"Failed to import python-magic fallback: {exc}")
+        _python_magic = None
+    return _python_magic
 
 
 class FileValidationError(Exception):
@@ -383,13 +413,14 @@ class FileValidator:
         # Optional python-magic fallback when puremagic is unavailable
         self.python_magic_available = False
         self._python_magic_mime = None
-        if not self.magic_available and _python_magic is not None:
+        python_magic_module = _get_python_magic_module()
+        if not self.magic_available and python_magic_module is not None:
             try:
                 # Respect configured magic file if provided
                 if MAGIC_FILE_PATH:
-                    self._python_magic_mime = _python_magic.Magic(mime=True, magic_file=MAGIC_FILE_PATH)
+                    self._python_magic_mime = python_magic_module.Magic(mime=True, magic_file=MAGIC_FILE_PATH)
                 else:
-                    self._python_magic_mime = _python_magic.Magic(mime=True)
+                    self._python_magic_mime = python_magic_module.Magic(mime=True)
                 self.python_magic_available = True
                 logging.info("python-magic is available and will be used for MIME detection fallback.")
             except _UPLOAD_SINK_NONCRITICAL_EXCEPTIONS as e:
