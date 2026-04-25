@@ -1,0 +1,47 @@
+from __future__ import annotations
+
+import pytest
+
+from tldw_Server_API.app.api.v1.endpoints import persona as persona_ep
+from tldw_Server_API.app.core import config as config_module
+
+pytestmark = pytest.mark.unit
+
+
+def test_persona_int_setting_invalid_value_falls_back(monkeypatch):
+    monkeypatch.setattr(config_module, "settings", {"PERSONA_MAX_TOOL_STEPS": "not-a-number"}, raising=False)
+
+    assert persona_ep._get_persona_max_tool_steps() == 3
+
+
+def test_persona_int_setting_does_not_swallow_unexpected_settings_shape(monkeypatch):
+    monkeypatch.setattr(config_module, "settings", object(), raising=False)
+
+    with pytest.raises(AttributeError):
+        persona_ep._get_persona_max_tool_steps()
+
+
+def test_persona_ws_auth_interval_keeps_disable_zero_and_clamp_behavior(monkeypatch):
+    monkeypatch.setattr(
+        config_module,
+        "settings",
+        {"PERSONA_WS_AUTH_REVALIDATE_INTERVAL_S": "0"},
+        raising=False,
+    )
+    assert persona_ep._get_persona_ws_auth_revalidate_interval_s() == 0.0
+
+    monkeypatch.setattr(
+        config_module,
+        "settings",
+        {"PERSONA_WS_AUTH_REVALIDATE_INTERVAL_S": "0.1"},
+        raising=False,
+    )
+    assert persona_ep._get_persona_ws_auth_revalidate_interval_s() == 0.5
+
+    monkeypatch.setattr(
+        config_module,
+        "settings",
+        {"PERSONA_WS_AUTH_REVALIDATE_INTERVAL_S": "999"},
+        raising=False,
+    )
+    assert persona_ep._get_persona_ws_auth_revalidate_interval_s() == 300.0

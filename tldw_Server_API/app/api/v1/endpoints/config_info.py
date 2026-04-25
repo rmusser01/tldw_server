@@ -384,12 +384,12 @@ async def get_quickstart_redirect():
         # 2/3) Config file
         if not url:
             try:
-                cfg = load_comprehensive_config()
+                cfg = config_mod.load_comprehensive_config()
                 if cfg.has_section('UI') and cfg.has_option('UI', 'quickstart_url'):
                     url = cfg.get('UI', 'quickstart_url').strip()
                 elif cfg.has_section('Docs') and cfg.has_option('Docs', 'quickstart_url'):
                     url = cfg.get('Docs', 'quickstart_url').strip()
-            except (KeyError, OSError, ValueError) as e:
+            except (configparser.Error, OSError, ValueError) as e:
                 logger.warning(f"Quickstart redirect: could not read config, using default. Error: {e}")
 
         # 4) Default

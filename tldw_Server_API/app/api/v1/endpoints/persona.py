@@ -263,7 +263,7 @@ def _get_persona_max_tool_steps() -> int:
         from tldw_Server_API.app.core.config import settings as _app_settings
 
         value = int(_app_settings.get("PERSONA_MAX_TOOL_STEPS", 3))
-    except Exception:  # noqa: BLE001
+    except (TypeError, ValueError):
         value = 3
     return max(1, min(value, 20))
 
@@ -273,7 +273,7 @@ def _get_persona_memory_top_k() -> int:
         from tldw_Server_API.app.core.config import settings as _app_settings
 
         value = int(_app_settings.get("PERSONA_MEMORY_TOP_K", 3))
-    except Exception:  # noqa: BLE001
+    except (TypeError, ValueError):
         value = 3
     return max(1, min(value, 10))
 
@@ -283,7 +283,7 @@ def _get_persona_state_hint_max_chars() -> int:
         from tldw_Server_API.app.core.config import settings as _app_settings
 
         value = int(_app_settings.get("PERSONA_STATE_HINT_MAX_CHARS", 1024))
-    except Exception:  # noqa: BLE001
+    except (TypeError, ValueError):
         value = 1024
     return max(128, min(value, 8192))
 
@@ -293,7 +293,7 @@ def _get_persona_state_hint_per_doc_max_chars() -> int:
         from tldw_Server_API.app.core.config import settings as _app_settings
 
         value = int(_app_settings.get("PERSONA_STATE_HINT_PER_DOC_MAX_CHARS", 384))
-    except Exception:  # noqa: BLE001
+    except (TypeError, ValueError):
         value = 384
     return max(64, min(value, 2048))
 
@@ -303,7 +303,7 @@ def _get_persona_state_doc_max_chars() -> int:
         from tldw_Server_API.app.core.config import settings as _app_settings
 
         value = int(_app_settings.get("PERSONA_STATE_DOC_MAX_CHARS", 50_000))
-    except Exception:  # noqa: BLE001
+    except (TypeError, ValueError):
         value = 50_000
     return max(256, min(value, 1_000_000))
 
@@ -313,7 +313,7 @@ def _get_persona_state_history_max_entries() -> int:
         from tldw_Server_API.app.core.config import settings as _app_settings
 
         value = int(_app_settings.get("PERSONA_STATE_HISTORY_MAX_ENTRIES", 200))
-    except Exception:  # noqa: BLE001
+    except (TypeError, ValueError):
         value = 200
     return max(1, min(value, 2000))
 
@@ -323,7 +323,7 @@ def _get_persona_allowed_audio_formats() -> set[str]:
         from tldw_Server_API.app.core.config import settings as _app_settings
 
         raw = str(_app_settings.get("PERSONA_AUDIO_ALLOWED_FORMATS", "pcm16,wav,mp3,opus"))
-    except Exception:  # noqa: BLE001
+    except (TypeError, ValueError):
         raw = "pcm16,wav,mp3,opus"
     parts = [p.strip().lower() for p in raw.split(",") if p.strip()]
     return set(parts) if parts else {"pcm16"}
@@ -334,7 +334,7 @@ def _get_persona_audio_chunk_max_bytes() -> int:
         from tldw_Server_API.app.core.config import settings as _app_settings
 
         value = int(_app_settings.get("PERSONA_AUDIO_CHUNK_MAX_BYTES", 1_048_576))
-    except Exception:  # noqa: BLE001
+    except (TypeError, ValueError):
         value = 1_048_576
     return max(1024, min(value, 8_388_608))
 
@@ -344,7 +344,7 @@ def _get_persona_audio_chunks_per_minute() -> int:
         from tldw_Server_API.app.core.config import settings as _app_settings
 
         value = int(_app_settings.get("PERSONA_AUDIO_CHUNKS_PER_MINUTE", 120))
-    except Exception:  # noqa: BLE001
+    except (TypeError, ValueError):
         value = 120
     return max(1, min(value, 1200))
 
@@ -354,7 +354,7 @@ def _get_persona_tts_chunk_size_bytes() -> int:
         from tldw_Server_API.app.core.config import settings as _app_settings
 
         value = int(_app_settings.get("PERSONA_TTS_CHUNK_SIZE_BYTES", 8192))
-    except Exception:  # noqa: BLE001
+    except (TypeError, ValueError):
         value = 8192
     return max(256, min(value, 65536))
 
@@ -364,7 +364,7 @@ def _get_persona_tts_max_chunks() -> int:
         from tldw_Server_API.app.core.config import settings as _app_settings
 
         value = int(_app_settings.get("PERSONA_TTS_MAX_CHUNKS", 16))
-    except Exception:  # noqa: BLE001
+    except (TypeError, ValueError):
         value = 16
     return max(1, min(value, 256))
 
@@ -374,7 +374,7 @@ def _get_persona_tts_max_total_bytes() -> int:
         from tldw_Server_API.app.core.config import settings as _app_settings
 
         value = int(_app_settings.get("PERSONA_TTS_MAX_TOTAL_BYTES", 131072))
-    except Exception:  # noqa: BLE001
+    except (TypeError, ValueError):
         value = 131072
     return max(1024, min(value, 2_097_152))
 
@@ -384,7 +384,7 @@ def _get_persona_tts_max_in_flight_chunks() -> int:
         from tldw_Server_API.app.core.config import settings as _app_settings
 
         value = int(_app_settings.get("PERSONA_TTS_MAX_IN_FLIGHT_CHUNKS", 4))
-    except Exception:  # noqa: BLE001
+    except (TypeError, ValueError):
         value = 4
     return max(1, min(value, 32))
 
@@ -399,7 +399,7 @@ def _get_persona_ws_auth_revalidate_interval_s() -> float:
         from tldw_Server_API.app.core.config import settings as _app_settings
 
         value = float(_app_settings.get("PERSONA_WS_AUTH_REVALIDATE_INTERVAL_S", 15.0))
-    except Exception:  # noqa: BLE001
+    except (TypeError, ValueError):
         value = 15.0
     if value <= 0:
         return 0.0
@@ -413,7 +413,7 @@ def _get_persona_rbac_flags() -> tuple[bool, bool]:
 
         allow_export = bool(_app_settings.get("PERSONA_RBAC_ALLOW_EXPORT", False))
         allow_delete = bool(_app_settings.get("PERSONA_RBAC_ALLOW_DELETE", False))
-    except Exception:  # noqa: BLE001
+    except (TypeError, ValueError):
         allow_export = False
         allow_delete = False
     return allow_export, allow_delete
@@ -6654,7 +6654,7 @@ async def persona_stream(
             raw = await stream.receive_text()
             try:
                 msg = json.loads(raw)
-            except Exception:  # noqa: BLE001
+            except json.JSONDecodeError:
                 msg = {"type": "unknown", "raw": raw}
 
             mtype = msg.get("type") or msg.get("event") or "unknown"
