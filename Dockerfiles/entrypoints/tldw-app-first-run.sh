@@ -54,6 +54,49 @@ sys.stdout.write(
 PY
 }
 
+load_env_file() {
+  if [ ! -f "$ENV_FILE" ]; then
+    return
+  fi
+
+  parsed_env_file="$(mktemp "${TMPDIR:-/tmp}/tldw-env.XXXXXX")"
+  if python - "$ENV_FILE" > "$parsed_env_file" <<'PY'
+import re
+import sys
+
+from dotenv import dotenv_values
+
+path = sys.argv[1]
+key_re = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+try:
+    values = dotenv_values(path, interpolate=False)
+except Exception as exc:
+    print(f"[entrypoint] Failed to parse env file {path}: {exc}", file=sys.stderr)
+    sys.exit(1)
+
+for key, value in values.items():
+    if not key_re.match(key):
+        print(f"[entrypoint] Invalid env key in {path}: {key!r}", file=sys.stderr)
+        sys.exit(1)
+    value = "" if value is None else str(value)
+    if "\n" in value or "\r" in value:
+        print(f"[entrypoint] Refusing env value with newline for key {key}", file=sys.stderr)
+        sys.exit(1)
+    print(f"{key}={value}")
+PY
+  then
+    while IFS= read -r assignment || [ -n "$assignment" ]; do
+      [ -n "$assignment" ] || continue
+      export "$assignment"
+    done < "$parsed_env_file"
+    rm -f "$parsed_env_file"
+  else
+    rm -f "$parsed_env_file"
+    exit 1
+  fi
+}
+
 upsert_env() {
   key="$1"
   value="$2"
@@ -168,10 +211,7 @@ EOF
 
 ensure_env_file
 
-set -a
-# shellcheck source=/dev/null
-. "$ENV_FILE"
-set +a
+load_env_file
 
 if [ -n "$incoming_auth_mode" ]; then
   AUTH_MODE="$incoming_auth_mode"

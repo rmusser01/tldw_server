@@ -341,6 +341,7 @@ def test_multi_user_entrypoint_derives_postgres_urls_with_runtime_quoting() -> N
     script = Path("Dockerfiles/entrypoints/tldw-app-first-run.sh").read_text(encoding="utf-8")
 
     for expected in (
+        "load_env_file()",
         "TLDW_DATABASE_URL_OVERRIDE",
         "TLDW_JOBS_DB_URL_OVERRIDE",
         "from urllib.parse import quote",
@@ -355,6 +356,46 @@ def test_multi_user_entrypoint_derives_postgres_urls_with_runtime_quoting() -> N
         "quote(" in script,
         "entrypoint should URL-quote structured Postgres credentials before deriving DATABASE_URL",
     )
+    _require('. "$ENV_FILE"' not in script, "entrypoint should not shell-source env files")
+
+
+def test_entrypoint_loads_env_file_with_literal_dollar_signs(tmp_path: Path) -> None:
+    env_file = tmp_path / ".env"
+    marker_dir = tmp_path / "markers"
+    marker_dir.mkdir()
+    env_file.write_text(
+        "\n".join(
+            (
+                "AUTH_MODE=multi_user",
+                "POSTGRES_USER=tldw_user",
+                "POSTGRES_DB=tldw_users",
+                "POSTGRES_PASSWORD=abc$def:ghi/with#chars%",
+                "ADMIN_USERNAME=admin",
+                "ADMIN_PASSWORD=Admin$Dollar1!",
+                "MCP_JWT_SECRET=mcp_jwt_secret_for_entrypoint_test_32_chars",
+                "MCP_API_KEY_SALT=mcp_api_salt_for_entrypoint_test_32_chars",
+                "BYOK_ENCRYPTION_KEY=byok_secret_for_entrypoint_test_32_chars",
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    env = {
+        **os.environ,
+        "TLDW_ENV_FILE": str(env_file),
+        "TLDW_AUTH_MARKER_DIR": str(marker_dir),
+    }
+    result = subprocess.run(  # nosec B603
+        ["/bin/sh", "Dockerfiles/entrypoints/tldw-app-first-run.sh", "true"],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "unbound variable" not in result.stderr
 
 
 def test_multi_user_entrypoint_ignores_stale_env_database_url_when_structured_postgres_exists() -> None:
