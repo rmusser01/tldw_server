@@ -108,6 +108,19 @@ def test_verify_targets_use_first_value() -> None:
         _require("--first-value" in block, f"{target} should pass --first-value")
 
 
+def test_start_local_single_uses_plain_uvicorn_without_reload() -> None:
+    """Local start should run uvicorn directly without development reload."""
+    text = _read_makefile()
+    block = _target_block(text, "start-local-single")
+
+    _require(
+        "uvicorn tldw_Server_API.app.main:app" in block
+        or "-m uvicorn tldw_Server_API.app.main:app" in block,
+        "start-local-single should run plain uvicorn for the FastAPI app",
+    )
+    _require("--reload" not in block, "start-local-single should not use --reload")
+
+
 def test_quickstart_install_is_install_only_and_does_not_start_local_server() -> None:
     """The local install alias should install dependencies only."""
     text = _read_makefile()
@@ -130,6 +143,15 @@ def test_quickstart_local_installs_before_setup_and_start() -> None:
         "install-local setup-local-single start-local-single" in quickstart_local,
         "quickstart-local should install before setup/start",
     )
+
+
+def test_quickstart_local_is_setup_plus_start_alias() -> None:
+    """Local quickstart should chain setup and start in order."""
+    text = _read_makefile()
+    quickstart_local = _target_block(text, "quickstart-local")
+
+    _require("setup-local-single" in quickstart_local, "quickstart-local should include setup-local-single")
+    _require("start-local-single" in quickstart_local, "quickstart-local should include start-local-single")
 
 
 def test_setup_docker_multi_uses_shell_env_for_admin_bootstrap_secrets() -> None:
