@@ -14,6 +14,12 @@ _PROVIDER_ENV_EXAMPLES = [
     "ANTHROPIC_API_KEY=sk-ant-...",
     "OPENROUTER_API_KEY=sk-or-...",
 ]
+_FIRST_VALUE_TITLE = "tldw onboarding verification"
+_FIRST_VALUE_UNIQUE_PHRASE = "tldw-onboarding-verification-unique"
+_FIRST_VALUE_SAMPLE = (
+    f"# {_FIRST_VALUE_TITLE}\n\n"
+    f"This sample verifies ingest and search with {_FIRST_VALUE_UNIQUE_PHRASE}.\n"
+)
 
 
 def _url(base_url: str, path: str) -> str:
@@ -62,6 +68,50 @@ def _request(
         return {"url": url, "ok": False, "error": str(exc)}
 
 
+def _response_summary(response: dict[str, Any]) -> dict[str, Any]:
+    summary: dict[str, Any] = {
+        "url": response.get("url"),
+        "status_code": response.get("status_code"),
+        "ok": bool(response.get("ok")),
+    }
+    if "error" in response:
+        summary["error"] = "request_failed"
+    return summary
+
+
+def _auth_action_summary(action: dict[str, Any]) -> dict[str, Any]:
+    summary = _response_summary(action)
+    if "status" in action:
+        summary["status"] = action["status"]
+    return summary
+
+
+def _search_body_has_sample(body: Any) -> bool:
+    needles = (_FIRST_VALUE_TITLE.lower(), _FIRST_VALUE_UNIQUE_PHRASE.lower())
+
+    def contains_sample(value: Any, depth: int = 0) -> bool:
+        if depth > 8:
+            return False
+        if isinstance(value, str):
+            normalized = value.lower()
+            return any(needle in normalized for needle in needles)
+        if isinstance(value, dict):
+            return any(contains_sample(item, depth + 1) for item in value.values())
+        if isinstance(value, list):
+            return any(contains_sample(item, depth + 1) for item in value)
+        return False
+
+    if not isinstance(body, (dict, list)):
+        return False
+    if isinstance(body, dict):
+        results = body.get("results")
+        if results == [] or results == {}:
+            return False
+        if isinstance(results, (list, dict)):
+            return contains_sample(results)
+    return contains_sample(body)
+
+
 def _headers_for_profile(profile: SetupProfile, env_values: dict[str, str]) -> dict[str, str]:
     if profile.auth_mode != "single_user":
         return {}
@@ -94,14 +144,15 @@ def _login_multi_user(
     )
     body = response.get("body")
     token = body.get("access_token") if isinstance(body, dict) else None
+    summary = _response_summary(response)
     action = {
         "status": "ok" if response.get("ok") and token else "error",
         "ok": bool(response.get("ok") and token),
-        "url": response.get("url"),
-        "status_code": response.get("status_code"),
+        "url": summary.get("url"),
+        "status_code": summary.get("status_code"),
     }
     if not response.get("ok"):
-        action["error"] = response.get("error") or body
+        action["error"] = summary.get("error", "login_failed")
     if not token and response.get("ok"):
         action["error"] = "login response did not include an access token"
     headers = {"Authorization": f"Bearer {token}"} if token else {}
@@ -165,7 +216,7 @@ def _provider_check(base_url: str, headers: dict[str, str], timeout: float) -> d
 
 
 def _first_value_check(base_url: str, headers: dict[str, str], timeout: float) -> dict[str, Any]:
-    sample = b"# tldw onboarding verification\n\nThis sample verifies ingest and search.\n"
+    sample = _FIRST_VALUE_SAMPLE.encode("utf-8")
     ingest = _request(
         "POST",
         base_url,
@@ -173,7 +224,7 @@ def _first_value_check(base_url: str, headers: dict[str, str], timeout: float) -
         headers=headers,
         data={
             "media_type": "document",
-            "title": "tldw onboarding verification",
+            "title": _FIRST_VALUE_TITLE,
             "keywords": "onboarding,verification",
             "perform_analysis": "false",
             "perform_chunking": "true",
@@ -186,14 +237,17 @@ def _first_value_check(base_url: str, headers: dict[str, str], timeout: float) -
         base_url,
         "/api/v1/media/search",
         headers=headers,
-        json_body={"query": "onboarding verification", "fields": ["title", "content"]},
+        json_body={"query": _FIRST_VALUE_UNIQUE_PHRASE, "fields": ["title", "content"]},
         timeout=timeout,
     )
+    matched = bool(search.get("ok") and _search_body_has_sample(search.get("body")))
+    search_summary = _response_summary(search)
+    search_summary["matched"] = matched
     return {
         "ingest": "ok" if ingest.get("ok") else "error",
-        "search": "ok" if search.get("ok") else "error",
-        "ok": bool(ingest.get("ok") and search.get("ok")),
-        "details": {"ingest": ingest, "search": search},
+        "search": "ok" if matched else "error",
+        "ok": bool(ingest.get("ok") and matched),
+        "details": {"ingest": _response_summary(ingest), "search": search_summary},
     }
 
 
@@ -218,7 +272,14 @@ def run_profile_checks(
         "docs": _request("GET", base_url, "/docs", timeout=timeout),
         "quickstart": _request("GET", base_url, "/api/v1/config/quickstart", timeout=timeout),
     }
-    actions.append({"endpoints": endpoint_results})
+    actions.append(
+        {
+            "endpoints": {
+                key: _response_summary(value)
+                for key, value in endpoint_results.items()
+            }
+        }
+    )
 
     headers = _headers_for_profile(profile, env_values)
     auth_checks: dict[str, Any] = {}
@@ -227,7 +288,7 @@ def run_profile_checks(
         auth_checks["login"] = login_action
         headers = login_headers
     auth_checks["me"] = _request("GET", base_url, "/api/v1/auth/me", headers=headers, timeout=timeout)
-    actions.append({"auth": auth_checks})
+    actions.append({"auth": {key: _auth_action_summary(value) for key, value in auth_checks.items()}})
 
     provider = _provider_check(base_url, headers, timeout)
     actions.append({"chat": provider})
@@ -244,7 +305,7 @@ def run_profile_checks(
     if profile.includes_webui and webui_url:
         webui_result = _request("GET", webui_url, "/", timeout=timeout)
         webui_ok = bool(webui_result.get("ok"))
-        actions.append({"webui": webui_result})
+        actions.append({"webui": _response_summary(webui_result)})
 
     endpoints_ok = all(result.get("ok") for result in endpoint_results.values())
     auth_ok = all(result.get("ok") for result in auth_checks.values())

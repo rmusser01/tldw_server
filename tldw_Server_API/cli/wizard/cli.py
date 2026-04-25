@@ -773,7 +773,7 @@ def verify(
             "facts": facts,
             "actions": check_result.get("actions", []),
             "notes": check_result.get("notes", []),
-            "check_provider": True,
+            "check_provider": bool(check_provider),
             "dry_run": False,
             "paths": {"env": str(env_path)},
         }

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from typer.testing import CliRunner
@@ -32,8 +33,21 @@ def test_docker_profile_verify_does_not_spawn_ephemeral_server(monkeypatch) -> N
 
     assert result.exit_code == 0, result.output
     payload = assert_wizard_json(result.output, command="verify", status="ok")
+    assert payload.get("check_provider") is False
     actions = payload.get("actions") or []
     assert_action_field(actions, "server", "profile", "docker-single-webui")
+
+
+def test_verify_invalid_profile_json_exits_2() -> None:
+    result = runner.invoke(
+        wizard_cli.app,
+        ["verify", "--profile", "does-not-exist", "--dry-run", "--json"],
+    )
+
+    assert result.exit_code == 2, result.output
+    payload = assert_wizard_json(result.output, command="verify", status="error")
+    actions = payload.get("actions") or []
+    assert_action_field(actions, "profile", "valid", False)
 
 
 def test_verify_first_value_reports_provider_missing(monkeypatch, tmp_path: Path) -> None:
@@ -116,3 +130,119 @@ def test_provider_check_reports_configured_when_any_provider_entry_is_configured
 
     assert result["status"] == "provider_configured"
     assert result["configured"] == 1
+
+
+def test_first_value_empty_search_results_fail_without_raw_body(monkeypatch) -> None:
+    def fake_request(method, _base_url, path, **_kwargs):
+        if path == "/api/v1/media/add":
+            return {
+                "url": "http://127.0.0.1:8000/api/v1/media/add",
+                "status_code": 200,
+                "ok": True,
+                "body": {"id": 1, "secret": "SECRET_SHOULD_NOT_LEAK"},
+            }
+        if path == "/api/v1/media/search":
+            return {
+                "url": "http://127.0.0.1:8000/api/v1/media/search",
+                "status_code": 200,
+                "ok": True,
+                "body": {"results": []},
+            }
+        raise AssertionError(f"unexpected request {method} {path}")
+
+    monkeypatch.setattr(profile_verify, "_request", fake_request)
+
+    result = profile_verify._first_value_check("http://127.0.0.1:8000", {}, 5.0)
+
+    assert result["ok"] is False
+    assert result["search"] == "error"
+    assert result["details"]["search"]["matched"] is False
+    assert "body" not in result["details"]["ingest"]
+    assert "body" not in result["details"]["search"]
+
+
+def test_first_value_matching_search_results_pass(monkeypatch) -> None:
+    def fake_request(method, _base_url, path, **_kwargs):
+        if path == "/api/v1/media/add":
+            return {
+                "url": "http://127.0.0.1:8000/api/v1/media/add",
+                "status_code": 200,
+                "ok": True,
+                "body": {"id": 1},
+            }
+        if path == "/api/v1/media/search":
+            return {
+                "url": "http://127.0.0.1:8000/api/v1/media/search",
+                "status_code": 200,
+                "ok": True,
+                "body": {
+                    "results": [
+                        {
+                            "title": "tldw onboarding verification",
+                            "content": "contains tldw-onboarding-verification-unique",
+                        }
+                    ]
+                },
+            }
+        raise AssertionError(f"unexpected request {method} {path}")
+
+    monkeypatch.setattr(profile_verify, "_request", fake_request)
+
+    result = profile_verify._first_value_check("http://127.0.0.1:8000", {}, 5.0)
+
+    assert result["ok"] is True
+    assert result["search"] == "ok"
+    assert result["details"]["search"]["matched"] is True
+
+
+def test_profile_checks_do_not_emit_raw_response_bodies(monkeypatch, tmp_path: Path) -> None:
+    env_path = tmp_path / ".env"
+    env_path.write_text("AUTH_MODE=single_user\nSINGLE_USER_API_KEY=tldw_test.key\n", encoding="utf-8")
+
+    def fake_request(method, _base_url, path, **_kwargs):
+        response = {
+            "url": f"http://127.0.0.1:8000{path}",
+            "status_code": 200,
+            "ok": True,
+            "body": {"debug": "SECRET_SHOULD_NOT_LEAK"},
+        }
+        if path == "/api/v1/llm/providers":
+            response["body"] = {
+                "total_configured": 0,
+                "providers": [
+                    {
+                        "name": "openai",
+                        "is_configured": False,
+                        "debug": "SECRET_SHOULD_NOT_LEAK",
+                    }
+                ],
+            }
+        if path == "/api/v1/media/search":
+            response["body"] = {
+                "results": [
+                    {
+                        "title": "tldw onboarding verification",
+                        "content": "tldw-onboarding-verification-unique SECRET_SHOULD_NOT_LEAK",
+                    }
+                ]
+            }
+        return response
+
+    monkeypatch.setattr(profile_verify, "_request", fake_request)
+
+    result = profile_verify.run_profile_checks(
+        profile=profile_verify.SetupProfile(
+            name="local-single",
+            auth_mode="single_user",
+            docker=False,
+            includes_webui=False,
+            includes_postgres=False,
+        ),
+        base_url="http://127.0.0.1:8000",
+        webui_url=None,
+        env_path=env_path,
+        first_value=True,
+        timeout=5.0,
+    )
+
+    assert "SECRET_SHOULD_NOT_LEAK" not in json.dumps(result["actions"])
