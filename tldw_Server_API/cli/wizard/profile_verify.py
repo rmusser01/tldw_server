@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 from typing import Any
+from urllib.parse import SplitResult, urlsplit
 
 import httpx
 
@@ -25,6 +26,19 @@ _FIRST_VALUE_SAMPLE = (
 
 def _url(base_url: str, path: str) -> str:
     return f"{base_url.rstrip('/')}/{path.lstrip('/')}"
+
+
+def _sanitize_url_userinfo(value: Any) -> Any:
+    if not isinstance(value, str):
+        return value
+    try:
+        parsed = urlsplit(value)
+    except ValueError:
+        return value
+    if not parsed.netloc or "@" not in parsed.netloc:
+        return value
+    _, hostinfo = parsed.netloc.rsplit("@", 1)
+    return SplitResult(parsed.scheme, hostinfo, parsed.path, parsed.query, parsed.fragment).geturl()
 
 
 def _response_body(response: httpx.Response) -> Any:
@@ -71,7 +85,7 @@ def _request(
 
 def _response_summary(response: dict[str, Any]) -> dict[str, Any]:
     summary: dict[str, Any] = {
-        "url": response.get("url"),
+        "url": _sanitize_url_userinfo(response.get("url")),
         "status_code": response.get("status_code"),
         "ok": bool(response.get("ok")),
     }
@@ -88,14 +102,13 @@ def _auth_action_summary(action: dict[str, Any]) -> dict[str, Any]:
 
 
 def _search_body_has_sample(body: Any) -> bool:
-    needles = (_FIRST_VALUE_TITLE.lower(), _FIRST_VALUE_UNIQUE_PHRASE.lower())
+    needle = _FIRST_VALUE_UNIQUE_PHRASE.lower()
 
     def contains_sample(value: Any, depth: int = 0) -> bool:
         if depth > 8:
             return False
         if isinstance(value, str):
-            normalized = value.lower()
-            return any(needle in normalized for needle in needles)
+            return needle in value.lower()
         if isinstance(value, dict):
             return any(contains_sample(item, depth + 1) for item in value.values())
         if isinstance(value, list):
@@ -145,7 +158,7 @@ def _login_multi_user(
     response = _request(
         "POST",
         base_url,
-        "/api/v1/login",
+        "/api/v1/auth/login",
         data={"username": username, "password": password},
         timeout=timeout,
     )
@@ -293,7 +306,7 @@ def run_profile_checks(
         login_action, login_headers = _login_multi_user(base_url, env_values, timeout)
         auth_checks["login"] = login_action
         headers = login_headers
-    auth_checks["me"] = _request("GET", base_url, "/api/v1/me", headers=headers, timeout=timeout)
+    auth_checks["me"] = _request("GET", base_url, "/api/v1/auth/me", headers=headers, timeout=timeout)
     actions.append({"auth": {key: _auth_action_summary(value) for key, value in auth_checks.items()}})
 
     provider_ok = True

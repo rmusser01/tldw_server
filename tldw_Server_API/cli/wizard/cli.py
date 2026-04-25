@@ -741,8 +741,8 @@ def verify(
         facts.update(
             {
                 "profile": setup_profile.name,
-                "base_url": resolved_base_url,
-                "webui_url": resolved_webui_url,
+                "base_url": profile_verify._sanitize_url_userinfo(resolved_base_url),
+                "webui_url": profile_verify._sanitize_url_userinfo(resolved_webui_url),
             }
         )
         if dry_run:

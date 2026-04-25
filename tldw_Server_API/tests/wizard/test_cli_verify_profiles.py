@@ -7,6 +7,7 @@ from typer.testing import CliRunner
 
 from tldw_Server_API.cli.wizard import cli as wizard_cli
 from tldw_Server_API.cli.wizard import profile_verify
+from tldw_Server_API.app.api.v1.endpoints import auth as auth_endpoint
 from tldw_Server_API.tests.wizard.helpers import assert_action_field, assert_wizard_json
 
 runner = CliRunner()
@@ -48,6 +49,31 @@ def test_verify_invalid_profile_json_exits_2() -> None:
     payload = assert_wizard_json(result.output, command="verify", status="error")
     actions = payload.get("actions") or []
     assert_action_field(actions, "profile", "valid", False)
+
+
+def test_verify_profile_dry_run_sanitizes_url_userinfo() -> None:
+    result = runner.invoke(
+        wizard_cli.app,
+        [
+            "verify",
+            "--profile",
+            "docker-single-webui",
+            "--base-url",
+            "http://user:pass@127.0.0.1:8000",
+            "--webui-url",
+            "http://web:secret@127.0.0.1:8080",
+            "--dry-run",
+            "--json",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = assert_wizard_json(result.output, command="verify", status="ok")
+    encoded = json.dumps(payload)
+    assert "user:pass" not in encoded
+    assert "web:secret" not in encoded
+    assert payload.get("facts", {}).get("base_url") == "http://127.0.0.1:8000"
+    assert payload.get("facts", {}).get("webui_url") == "http://127.0.0.1:8080"
 
 
 def test_verify_first_value_reports_provider_missing(monkeypatch, tmp_path: Path) -> None:
@@ -195,6 +221,33 @@ def test_first_value_matching_search_results_pass(monkeypatch) -> None:
     assert result["details"]["search"]["matched"] is True
 
 
+def test_first_value_title_only_search_results_fail(monkeypatch) -> None:
+    def fake_request(method, _base_url, path, **_kwargs):
+        if path == "/api/v1/media/add":
+            return {
+                "url": "http://127.0.0.1:8000/api/v1/media/add",
+                "status_code": 200,
+                "ok": True,
+                "body": {"id": 1},
+            }
+        if path == "/api/v1/media/search":
+            return {
+                "url": "http://127.0.0.1:8000/api/v1/media/search",
+                "status_code": 200,
+                "ok": True,
+                "body": {"results": [{"title": "tldw onboarding verification"}]},
+            }
+        raise AssertionError(f"unexpected request {method} {path}")
+
+    monkeypatch.setattr(profile_verify, "_request", fake_request)
+
+    result = profile_verify._first_value_check("http://127.0.0.1:8000", {}, 5.0)
+
+    assert result["ok"] is False
+    assert result["search"] == "error"
+    assert result["details"]["search"]["matched"] is False
+
+
 def test_profile_checks_do_not_emit_raw_response_bodies(monkeypatch, tmp_path: Path) -> None:
     env_path = tmp_path / ".env"
     env_path.write_text("AUTH_MODE=single_user\nSINGLE_USER_API_KEY=tldw_test.key\n", encoding="utf-8")
@@ -250,6 +303,7 @@ def test_profile_checks_do_not_emit_raw_response_bodies(monkeypatch, tmp_path: P
 
 
 def test_profile_checks_uses_api_v1_login_and_me_routes_with_process_env(monkeypatch, tmp_path: Path) -> None:
+    assert auth_endpoint.router.prefix == "/auth"
     env_path = tmp_path / ".env"
     env_path.write_text(
         "AUTH_MODE=multi_user\nADMIN_USERNAME=file_admin\nADMIN_PASSWORD=file_pass\n",
@@ -261,10 +315,10 @@ def test_profile_checks_uses_api_v1_login_and_me_routes_with_process_env(monkeyp
 
     def fake_request(method, _base_url, path, **kwargs):
         seen["paths"].append(path)
-        if path == "/api/v1/login":
+        if path == "/api/v1/auth/login":
             seen["login_data"] = kwargs.get("data")
             return {
-                "url": "http://127.0.0.1:8000/api/v1/login",
+                "url": "http://127.0.0.1:8000/api/v1/auth/login",
                 "status_code": 200,
                 "ok": True,
                 "body": {"access_token": "jwt.token"},
@@ -295,10 +349,10 @@ def test_profile_checks_uses_api_v1_login_and_me_routes_with_process_env(monkeyp
     )
 
     assert result["status"] == "ok"
-    assert "/api/v1/login" in seen["paths"]
-    assert "/api/v1/me" in seen["paths"]
-    assert "/api/v1/auth/login" not in seen["paths"]
-    assert "/api/v1/auth/me" not in seen["paths"]
+    assert "/api/v1/auth/login" in seen["paths"]
+    assert "/api/v1/auth/me" in seen["paths"]
+    assert "/api/v1/login" not in seen["paths"]
+    assert "/api/v1/me" not in seen["paths"]
     assert seen["login_data"] == {"username": "process_admin", "password": "process_pass"}
 
 
@@ -393,7 +447,7 @@ def test_single_user_header_uses_process_env_over_env_file(monkeypatch, tmp_path
     seen_headers: dict[str, str] = {}
 
     def fake_request(method, _base_url, path, **kwargs):
-        if path == "/api/v1/me":
+        if path == "/api/v1/auth/me":
             seen_headers.update(kwargs.get("headers") or {})
         return {
             "url": f"http://127.0.0.1:8000{path}",
@@ -422,3 +476,15 @@ def test_single_user_header_uses_process_env_over_env_file(monkeypatch, tmp_path
 
     assert result["status"] == "ok"
     assert seen_headers == {"X-API-KEY": "process.key"}
+
+
+def test_response_summary_sanitizes_url_userinfo() -> None:
+    result = profile_verify._response_summary(
+        {
+            "url": "http://user:pass@127.0.0.1:8000/health",
+            "status_code": 200,
+            "ok": True,
+        }
+    )
+
+    assert result["url"] == "http://127.0.0.1:8000/health"
