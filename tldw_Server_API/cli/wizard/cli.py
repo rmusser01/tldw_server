@@ -17,6 +17,7 @@ import typer
 from loguru import logger
 from tldw_Server_API.app.core.testing import is_truthy
 
+from . import profiles as profile_utils
 from .utils import detect as detect_utils
 from .utils import env as env_utils
 from .utils import files as files_utils
@@ -368,6 +369,11 @@ def _stop_process(proc: subprocess.Popen, timeout: float = 5.0) -> None:
 def init(
     default: bool = typer.Option(False, "--default", help="Apply safe defaults without prompting"),
     install_dir: Path = typer.Option(Path.cwd(), "--install-dir", help="Installation directory (default: CWD)"),
+    profile: str | None = typer.Option(None, "--profile", help="Public setup profile"),
+    env_file: Path | None = typer.Option(None, "--env-file", help="Explicit env file path"),
+    admin_username: str | None = typer.Option(None, "--admin-username", help="Initial multi-user admin username"),
+    admin_password: str | None = typer.Option(None, "--admin-password", help="Initial multi-user admin password"),
+    admin_email: str | None = typer.Option(None, "--admin-email", help="Initial multi-user admin email"),
     non_interactive: bool = typer.Option(False, "--non-interactive", help="Run without prompts using env vars"),
     debug: bool = typer.Option(False, "--debug", help="Verbose logging"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Preview actions without writing"),
@@ -392,15 +398,36 @@ def init(
     }
 
     # Plan actions (skeleton)
-    env_path = base / ".env"
+    setup_profile = profile_utils.normalize_profile(profile) if profile else None
+    env_path = (
+        profile_utils.resolve_env_path(
+            profile=setup_profile,
+            start_dir=base,
+            explicit_env_file=env_file,
+        )
+        if setup_profile
+        else base / ".env"
+    )
     actions = []
     if not env_path.exists():
         actions.append({"create": str(env_path)})
     actions.append({"ensure_gitignore": [".env", ".env.local", "wizard.log"]})
 
     existing_env = env_utils.load_env(env_path)
-    auth_mode = os.getenv("AUTH_MODE") or existing_env.get("AUTH_MODE") or ("single_user" if default or yes else "")
     updates: dict[str, str | None] = {}
+    if setup_profile:
+        updates.update(
+            profile_utils.build_profile_env(
+                profile=setup_profile,
+                existing_env=existing_env,
+                admin_username=admin_username,
+                admin_password=admin_password,
+                admin_email=admin_email,
+            )
+        )
+        auth_mode = updates["AUTH_MODE"]
+    else:
+        auth_mode = os.getenv("AUTH_MODE") or existing_env.get("AUTH_MODE") or ("single_user" if default or yes else "")
     initializer_action: dict[str, Any] | None = None
     validation_action: dict[str, Any] | None = None
     if auth_mode:
@@ -415,7 +442,7 @@ def init(
             existing_key = env_utils.generate_single_user_api_key()
         updates["SINGLE_USER_API_KEY"] = existing_key
     if auth_mode == "multi_user":
-        db_url = _resolve_database_url(env_path)
+        db_url = updates.get("DATABASE_URL") or _resolve_database_url(env_path)
         if not db_url:
             result = {
                 "command": "init",
@@ -472,9 +499,9 @@ def init(
             "status": "ok",
             "facts": facts,
             "actions": actions,
+            "paths": {"env": str(env_path)},
             "notes": [
                 "dry-run only; no changes made",
-                "this is a scaffold; future steps will initialize DBs and verify endpoints",
             ],
         }
         _emit(result, json_out)

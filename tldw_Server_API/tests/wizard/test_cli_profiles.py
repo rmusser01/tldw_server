@@ -4,8 +4,14 @@ from pathlib import Path
 
 import pytest
 from cryptography.fernet import Fernet
+from typer.testing import CliRunner
 
+from tldw_Server_API.cli.wizard.cli import app
 from tldw_Server_API.cli.wizard import profiles
+from tldw_Server_API.tests.wizard.helpers import assert_action_field, assert_wizard_json
+
+
+runner = CliRunner()
 
 
 def test_normalize_profile_accepts_public_names() -> None:
@@ -141,3 +147,58 @@ def test_placeholder_secret_values_are_regenerated(key: str, placeholder: str) -
 
     assert defaults[key]
     assert defaults[key] != placeholder
+
+
+def test_init_profile_writes_repo_env_path_in_dry_run(tmp_path: Path, monkeypatch) -> None:
+    repo = tmp_path / "repo"
+    (repo / "tldw_Server_API" / "Config_Files").mkdir(parents=True)
+    (repo / "pyproject.toml").write_text("[project]\nname='tldw-server'\n", encoding="utf-8")
+    monkeypatch.chdir(repo)
+
+    result = runner.invoke(
+        app,
+        ["init", "--profile", "docker-single-webui", "--dry-run", "--json"],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = assert_wizard_json(result.output, command="init", status="ok")
+    assert payload["paths"]["env"].endswith("tldw_Server_API/Config_Files/.env")
+    actions = payload.get("actions") or []
+    set_env = next(action["set_env"] for action in actions if "set_env" in action)
+    assert_action_field(actions, "set_env", "AUTH_MODE", "single_user")
+    assert str(set_env["SINGLE_USER_API_KEY"]).startswith("*")
+
+
+def test_init_multi_user_profile_requires_admin_password_or_generates_recovery_note(
+    tmp_path: Path, monkeypatch
+) -> None:
+    repo = tmp_path / "repo"
+    (repo / "tldw_Server_API" / "Config_Files").mkdir(parents=True)
+    (repo / "pyproject.toml").write_text("[project]\nname='tldw-server'\n", encoding="utf-8")
+    monkeypatch.chdir(repo)
+
+    result = runner.invoke(
+        app,
+        [
+            "init",
+            "--profile",
+            "docker-multi-postgres",
+            "--admin-username",
+            "admin",
+            "--admin-password",
+            "CorrectHorseBatteryStaple1!",
+            "--admin-email",
+            "admin@example.com",
+            "--dry-run",
+            "--json",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = assert_wizard_json(result.output, command="init", status="ok")
+    actions = payload.get("actions") or []
+    set_env = next(action["set_env"] for action in actions if "set_env" in action)
+    assert_action_field(actions, "set_env", "AUTH_MODE", "multi_user")
+    assert str(set_env["SESSION_ENCRYPTION_KEY"]).startswith("*")
+    assert_action_field(actions, "set_env", "ADMIN_USERNAME", "admin")
+    assert str(set_env["ADMIN_PASSWORD"]).startswith("*")
