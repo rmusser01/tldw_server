@@ -57,9 +57,6 @@ from tldw_Server_API.app.core.RAG.rag_service.database_retrievers import (
     RetrievalConfig,
 )
 from tldw_Server_API.app.core.RAG.rag_service.generation import generate_streaming_response
-from tldw_Server_API.app.core.RAG.rag_service.post_retrieval_coordinator import (
-    coordinate_standard_result_evidence,
-)
 from tldw_Server_API.app.core.RAG.rag_service.request_bundle import (
     ResolvedRequestBundle,
     build_request_bundle,
@@ -1143,11 +1140,9 @@ async def unified_search_endpoint(
                 )
         else:
             # Execute unified pipeline with all parameters from request
-            resolved_request = standard_bundle.resolved_request
             kwargs = dict(standard_bundle.pipeline_kwargs)
             _sync_retriever_overrides_to_pipeline()
             result = await unified_rag_pipeline(**kwargs)
-            result = coordinate_standard_result_evidence(result, resolved_request)
 
         # Convert to response format
         response = rag_result_to_response(rag_result_from_unified_search_result(result))

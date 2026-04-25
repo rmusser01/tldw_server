@@ -1,7 +1,10 @@
-import pytest
-from fastapi import BackgroundTasks
+import inspect
 from pathlib import Path
 
+import pytest
+from fastapi import BackgroundTasks
+
+from tldw_Server_API.app.api.v1.endpoints import rag_unified
 import tldw_Server_API.app.api.v1.endpoints.rag_unified as rag_ep
 from tldw_Server_API.app.core.RAG.rag_service.request_bundle import ResolvedRequestBundle
 from tldw_Server_API.app.core.RAG.rag_service.request_resolution import ResolvedRAGRequest
@@ -10,6 +13,13 @@ from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import UnifiedSea
 
 
 pytestmark = pytest.mark.unit
+
+
+def test_standard_endpoint_does_not_import_core_evidence_coordinator():
+    source = inspect.getsource(rag_unified)
+
+    assert "coordinate_standard_result_evidence" not in source  # nosec B101
+    assert "post_retrieval_coordinator" not in source  # nosec B101
 
 
 def test_rag_endpoint_no_longer_exports_transitional_shim_helpers() -> None:
@@ -23,7 +33,7 @@ def test_rag_endpoint_no_longer_exports_transitional_shim_helpers() -> None:
         "convert_result_to_response",
     )
     for shim_name in shim_names:
-        assert not hasattr(rag_ep, shim_name), f"transitional shim still exported: {shim_name}"
+        assert not hasattr(rag_ep, shim_name), f"transitional shim still exported: {shim_name}"  # nosec B101
 
 
 def test_rag_service_readme_documents_current_standard_path_flow() -> None:
@@ -41,11 +51,11 @@ def test_rag_service_readme_documents_current_standard_path_flow() -> None:
         "(retrieval + generation) -> post_retrieval_coordinator.coordinate_standard_result_evidence "
         "-> response_mapping.rag_result_to_response"
     )
-    assert expected_flow in readme_text
+    assert expected_flow in readme_text  # nosec B101
 
 
 @pytest.mark.asyncio
-async def test_unified_search_standard_path_delegates_to_core_coordinate_helper(
+async def test_unified_search_standard_path_maps_core_result_directly(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     resolved_request = ResolvedRAGRequest(
@@ -70,11 +80,6 @@ async def test_unified_search_standard_path_delegates_to_core_coordinate_helper(
         query="standard delegation",
         metadata={"phase": "standard"},
     )
-    coordinated_result = UnifiedSearchResult(
-        documents=[{"id": "doc-coordinated", "content": "coordinated"}],
-        query="standard delegation",
-        metadata={"phase": "coordinated"},
-    )
     bundle = ResolvedRequestBundle(
         resolved_request=resolved_request,
         retrieval_plan=retrieval_plan,
@@ -89,12 +94,6 @@ async def test_unified_search_standard_path_delegates_to_core_coordinate_helper(
     async def fake_unified_rag_pipeline(**kwargs):  # noqa: ANN003, ARG001
         return standard_result
 
-    def fake_coordinate_standard_result_evidence(result, request_contract):  # noqa: ANN001
-        captured["called"] = True
-        captured["result"] = result
-        captured["request_contract"] = request_contract
-        return coordinated_result
-
     def fake_rag_result_from_unified_search_result(result):  # noqa: ANN001
         captured["mapping_input"] = result
         return {"mapped": True}
@@ -108,7 +107,6 @@ async def test_unified_search_standard_path_delegates_to_core_coordinate_helper(
 
     monkeypatch.setattr(rag_ep, "_build_standard_request_bundle", fake_build_standard_request_bundle)
     monkeypatch.setattr(rag_ep, "unified_rag_pipeline", fake_unified_rag_pipeline)
-    monkeypatch.setattr(rag_ep, "coordinate_standard_result_evidence", fake_coordinate_standard_result_evidence)
     monkeypatch.setattr(rag_ep, "rag_result_from_unified_search_result", fake_rag_result_from_unified_search_result)
     monkeypatch.setattr(rag_ep, "rag_result_to_response", fake_rag_result_to_response)
     monkeypatch.setattr(rag_ep, "_log_rag_queries_for_org", fake_log_rag_queries_for_org)
@@ -122,8 +120,5 @@ async def test_unified_search_standard_path_delegates_to_core_coordinate_helper(
         chacha_db=type("DBStub", (), {"db_path": "notes.db"})(),
     )
 
-    assert captured["called"] is True
-    assert captured["result"] is standard_result
-    assert captured["request_contract"] is resolved_request
-    assert captured["mapping_input"] is coordinated_result
-    assert response == {"ok": True, "payload": {"mapped": True}}
+    assert captured["mapping_input"] is standard_result  # nosec B101
+    assert response == {"ok": True, "payload": {"mapped": True}}  # nosec B101
