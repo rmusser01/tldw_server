@@ -703,8 +703,8 @@ def verify(
     dry_run: bool = typer.Option(False, "--dry-run", help="Preview actions without writing"),
     profile: str | None = typer.Option(None, "--profile", help="Public setup profile"),
     env_file: Path | None = typer.Option(None, "--env-file", help="Explicit env file path"),
-    base_url: str | None = typer.Option(None, "--base-url", help="API base URL"),
-    webui_url: str | None = typer.Option(None, "--webui-url", help="WebUI base URL"),
+    base_url: str | None = typer.Option(None, "--base-url", help="API base URL for --profile verification"),
+    webui_url: str | None = typer.Option(None, "--webui-url", help="WebUI base URL for --profile verification"),
     first_value: bool = typer.Option(False, "--first-value", help="Run first ingest/search checks"),
 ):
     """Run verification checks (Stage 4)."""

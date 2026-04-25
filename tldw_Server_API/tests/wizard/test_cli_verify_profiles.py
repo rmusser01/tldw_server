@@ -488,3 +488,22 @@ def test_response_summary_sanitizes_url_userinfo() -> None:
     )
 
     assert result["url"] == "http://127.0.0.1:8000/health"
+
+
+def test_provider_check_sanitizes_url_userinfo(monkeypatch) -> None:
+    def fake_request(_method, _base_url, path, **_kwargs):
+        assert path == "/api/v1/llm/providers"
+        return {
+            "url": "http://user:pass@127.0.0.1:8000/api/v1/llm/providers",
+            "status_code": 200,
+            "ok": True,
+            "body": {"providers": [{"name": "openai", "is_configured": True}]},
+        }
+
+    monkeypatch.setattr(profile_verify, "_request", fake_request)
+
+    result = profile_verify._provider_check("http://user:pass@127.0.0.1:8000", {}, 5.0)
+    encoded = json.dumps(result)
+
+    assert "user:pass" not in encoded
+    assert result["url"] == "http://127.0.0.1:8000/api/v1/llm/providers"

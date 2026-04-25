@@ -211,7 +211,7 @@ def _configured_provider_count(body: Any) -> int:
 def _provider_check(base_url: str, headers: dict[str, str], timeout: float) -> dict[str, Any]:
     response = _request("GET", base_url, "/api/v1/llm/providers", headers=headers, timeout=timeout)
     result: dict[str, Any] = {
-        "url": response.get("url"),
+        "url": _sanitize_url_userinfo(response.get("url")),
         "status_code": response.get("status_code"),
     }
     if not response.get("ok"):
