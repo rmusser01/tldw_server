@@ -5,6 +5,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import SplitResult, urlsplit
 
 from loguru import logger
 
@@ -124,13 +125,34 @@ def mask_value(value: str) -> str:
     return "*" * (len(value) - 4) + value[-4:]
 
 
+def _mask_url_credentials(value: str) -> str:
+    try:
+        parsed = urlsplit(value)
+    except ValueError:
+        return value
+    if not parsed.scheme or not parsed.netloc or parsed.password is None:
+        return value
+
+    username = parsed.username or ""
+    host = parsed.hostname or ""
+    if not host:
+        return value
+
+    credentials = f"{username}:********" if username else "********"
+    if ":" in host and not host.startswith("["):
+        host = f"[{host}]"
+    port = f":{parsed.port}" if parsed.port is not None else ""
+    netloc = f"{credentials}@{host}{port}"
+    return SplitResult(parsed.scheme, netloc, parsed.path, parsed.query, parsed.fragment).geturl()
+
+
 def mask_env_values(values: dict[str, str]) -> dict[str, str]:
     masked: dict[str, str] = {}
     for key, value in values.items():
         if is_sensitive_key(key):
             masked[key] = mask_value(value)
         else:
-            masked[key] = value
+            masked[key] = _mask_url_credentials(value)
     return masked
 
 

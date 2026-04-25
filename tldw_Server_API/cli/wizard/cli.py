@@ -398,7 +398,19 @@ def init(
     }
 
     # Plan actions (skeleton)
-    setup_profile = profile_utils.normalize_profile(profile) if profile else None
+    try:
+        setup_profile = profile_utils.normalize_profile(profile) if profile else None
+    except ValueError as exc:
+        result = {
+            "command": "init",
+            "status": "error",
+            "facts": facts,
+            "actions": [{"profile": {"valid": False, "reason": str(exc)}}],
+            "notes": [str(exc)],
+        }
+        _emit(result, json_out)
+        raise typer.Exit(2) from exc
+
     env_path = (
         profile_utils.resolve_env_path(
             profile=setup_profile,
@@ -406,7 +418,7 @@ def init(
             explicit_env_file=env_file,
         )
         if setup_profile
-        else base / ".env"
+        else (env_file.expanduser().resolve() if env_file is not None else base / ".env")
     )
     actions = []
     if not env_path.exists():

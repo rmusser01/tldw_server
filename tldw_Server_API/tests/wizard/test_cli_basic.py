@@ -23,6 +23,16 @@ def test_init_dry_run_json():
     assert "actions" in data
 
 
+def test_init_dry_run_honors_env_file_without_profile(tmp_path):
+    env_path = tmp_path / "custom.env"
+
+    result = runner.invoke(app, ["init", "--env-file", str(env_path), "--dry-run", "--json"])  # type: ignore[arg-type]
+
+    assert result.exit_code == 0, result.output
+    data = assert_wizard_json(result.output, command="init", status="ok")
+    assert data["paths"]["env"] == str(env_path)
+
+
 def test_auth_single_user_json():
     result = runner.invoke(app, ["auth", "--mode", "single_user", "--json", "--dry-run"])  # type: ignore[arg-type]
     assert result.exit_code == 0, result.output

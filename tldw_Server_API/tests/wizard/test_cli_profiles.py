@@ -195,6 +195,7 @@ def test_init_multi_user_profile_requires_admin_password_or_generates_recovery_n
     )
 
     assert result.exit_code == 0, result.output
+    assert "TestPassword123!" not in result.output
     payload = assert_wizard_json(result.output, command="init", status="ok")
     actions = payload.get("actions") or []
     set_env = next(action["set_env"] for action in actions if "set_env" in action)
@@ -202,3 +203,17 @@ def test_init_multi_user_profile_requires_admin_password_or_generates_recovery_n
     assert str(set_env["SESSION_ENCRYPTION_KEY"]).startswith("*")
     assert_action_field(actions, "set_env", "ADMIN_USERNAME", "admin")
     assert str(set_env["ADMIN_PASSWORD"]).startswith("*")
+
+
+def test_init_invalid_profile_returns_json_error() -> None:
+    result = runner.invoke(
+        app,
+        ["init", "--profile", "does-not-exist", "--dry-run", "--json"],
+    )
+
+    assert result.exit_code == 2, result.output
+    payload = assert_wizard_json(result.output, command="init", status="error")
+    actions = payload.get("actions") or []
+    assert_action_field(actions, "profile", "valid", False)
+    assert "Unsupported setup profile" in actions[0]["profile"]["reason"]
+    assert "Unsupported setup profile" in payload["notes"][0]
