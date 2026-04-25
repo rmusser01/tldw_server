@@ -24,6 +24,7 @@ PUBLIC_ONBOARDING_DOCS = [
     Path("Docs/Getting_Started/README.md"),
     Path("Docs/Getting_Started/QUICKSTART.md"),
     Path("Docs/Getting_Started/Profile_Docker_Multi_User_Postgres.md"),
+    Path("Docs/Deployment/setup-wizard-guide.md"),
     Path("Docs/Published/Getting_Started/README.md"),
     Path("Docs/Published/Getting_Started/Profile_Docker_Multi_User_Postgres.md"),
     Path("Dockerfiles/README.md"),
@@ -36,6 +37,38 @@ AUDIO_DOCS = [
     Path("Docs/Published/Getting_Started/First_Time_Audio_Setup_CPU.md"),
     Path("Docs/Published/Getting_Started/First_Time_Audio_Setup_GPU_Accelerated.md"),
 ]
+
+AUDIO_VERIFICATION_COMMANDS_BY_DOC = {
+    Path("Docs/Getting_Started/First_Time_Audio_Setup_CPU.md"): (
+        "/api/v1/audio/voices/catalog",
+        "/api/v1/audio/speech",
+        "/api/v1/audio/transcriptions/health",
+        "/api/v1/audio/transcriptions",
+    ),
+    Path("Docs/Getting_Started/First_Time_Audio_Setup_GPU_Accelerated.md"): (
+        "/api/v1/audio/voices/catalog",
+        "/api/v1/audio/speech",
+        "/api/v1/audio/transcriptions/health",
+        "/api/v1/audio/transcriptions",
+    ),
+    Path("Docs/Published/Getting_Started/First_Time_Audio_Setup_CPU.md"): (
+        "/api/v1/audio/voices/catalog",
+        "/api/v1/audio/speech",
+        "/api/v1/audio/transcriptions/health",
+        "/api/v1/audio/transcriptions",
+    ),
+    Path("Docs/Published/Getting_Started/First_Time_Audio_Setup_GPU_Accelerated.md"): (
+        "/api/v1/audio/voices/catalog",
+        "/api/v1/audio/speech",
+        "/api/v1/audio/transcriptions/health",
+        "/api/v1/audio/transcriptions",
+    ),
+    Path("Docs/Deployment/setup-wizard-guide.md"): (
+        "/api/v1/audio/voices/catalog",
+        "/api/v1/audio/transcriptions",
+        "/api/v1/audio/speech",
+    ),
+}
 
 PROFILE_DOCS_WITH_PUBLISHED = [
     *PROFILE_DOCS,
@@ -145,25 +178,28 @@ def test_multi_user_external_postgres_docs_use_override_vars() -> None:
         assert "TLDW_JOBS_DB_URL_OVERRIDE" in text, f"{path} missing jobs DB override var"
 
 
+def _curl_command_blocks(text: str) -> list[str]:
+    blocks = []
+    for fence in text.split("```")[1::2]:
+        _, _, code = fence.partition("\n")
+        if "curl " in code:
+            blocks.append(code)
+    return blocks
+
+
 def test_audio_verification_examples_cover_bearer_auth_for_all_audio_endpoints() -> None:
-    command_markers = (
-        "curl -sS -X POST http://127.0.0.1:8000/api/v1/audio/speech",
-        'curl -sS "http://127.0.0.1:8000/api/v1/audio/transcriptions/health',
-        "curl -sS -X POST http://127.0.0.1:8000/api/v1/audio/transcriptions",
-    )
-    for path in AUDIO_DOCS:
+    for path, endpoints in AUDIO_VERIFICATION_COMMANDS_BY_DOC.items():
         text = path.read_text(encoding="utf-8")
+        command_blocks = _curl_command_blocks(text)
         assert "AUTH_HEADER" in text, f"{path} should define a reusable auth header"
         assert "Authorization: Bearer" in text, f"{path} should show bearer-token auth"
-        for marker in command_markers:
-            position = text.find(marker)
-            assert position >= 0, f"{path} missing audio verification command: {marker}"
-            while position >= 0:
-                window = text[max(0, position - 1200) : position + 1800]
-                assert "AUTH_HEADER" in window, (
-                    f"{path} should use reusable auth guidance near {marker}"
+        for endpoint in endpoints:
+            matching_blocks = [block for block in command_blocks if endpoint in block]
+            assert matching_blocks, f"{path} missing audio verification command: {endpoint}"
+            for block in matching_blocks:
+                assert "AUTH_HEADER" in block, (
+                    f"{path} should use reusable auth guidance near {endpoint}"
                 )
-                position = text.find(marker, position + len(marker))
 
 
 def test_profile_first_value_examples_are_provider_independent() -> None:

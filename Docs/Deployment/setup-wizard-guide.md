@@ -21,8 +21,16 @@ The public onboarding docs present three peer profiles. Use one profile end-to-e
 | Profile | Prepare | Start | Verify |
 | --- | --- | --- | --- |
 | Docker single-user + WebUI | `make setup-docker-single` | `make start-docker-single` | `make verify-docker-single` |
-| Docker multi-user + Postgres | `ADMIN_USERNAME=admin ADMIN_PASSWORD='replace-with-a-long-password' make setup-docker-multi` | `make start-docker-multi` | `make verify-docker-multi` |
+| Docker multi-user + Postgres | Generate admin vars, then `make setup-docker-multi` | `make start-docker-multi` | `make verify-docker-multi` |
 | Local single-user | `make install-local` then `make setup-local-single` | `make start-local-single` | `make verify-local-single` |
+
+For Docker multi-user prepare, keep the generated variables in the same shell so later login checks can reuse them:
+
+```bash
+export ADMIN_USERNAME=admin
+export ADMIN_PASSWORD="$(python3 -c 'import secrets; print(secrets.token_urlsafe(24))')"
+make setup-docker-multi
+```
 
 `make quickstart` remains the shortest alias for Docker single-user + WebUI. It is not the multi-user or local start command.
 
@@ -157,13 +165,12 @@ The bundle stage is only considered healthy after verification succeeds. Use the
 - Review guided prerequisite items if the report is `partial` or `failed`.
 - Keep a note of the selected bundle id if you plan to reproduce the same setup on another machine.
 
-For API-level verification after the setup UI completes:
+For API-level verification after the setup UI completes, choose one reusable auth header first.
 
 Single-user auth mode:
 
 ```bash
-curl -s http://127.0.0.1:8000/api/v1/audio/voices/catalog \
-  -H "X-API-KEY: $SINGLE_USER_API_KEY" | jq
+AUTH_HEADER=(-H "X-API-KEY: $SINGLE_USER_API_KEY")
 ```
 
 Multi-user auth mode:
@@ -175,21 +182,24 @@ JWT=$(
     -d "username=$ADMIN_USERNAME" \
     -d "password=$ADMIN_PASSWORD" | jq -r '.access_token'
 )
+AUTH_HEADER=(-H "Authorization: Bearer $JWT")
+```
 
+```bash
 curl -s http://127.0.0.1:8000/api/v1/audio/voices/catalog \
-  -H "Authorization: Bearer $JWT" | jq
+  "${AUTH_HEADER[@]}" | jq
 ```
 
 ```bash
 curl -sS -X POST http://127.0.0.1:8000/api/v1/audio/transcriptions \
-  -H "X-API-KEY: $SINGLE_USER_API_KEY" \
+  "${AUTH_HEADER[@]}" \
   -F "file=@sample.wav" \
   -F "model=whisper-1"
 ```
 
 ```bash
 curl -sS -X POST http://127.0.0.1:8000/api/v1/audio/speech \
-  -H "X-API-KEY: $SINGLE_USER_API_KEY" \
+  "${AUTH_HEADER[@]}" \
   -H "Content-Type: application/json" \
   -d '{
         "model": "kokoro",
