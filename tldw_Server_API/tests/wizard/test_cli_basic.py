@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from typer.testing import CliRunner
 
 from tldw_Server_API.cli.wizard import cli as wizard_cli
@@ -82,3 +84,29 @@ def test_init_multi_user_missing_database_url_errors():
         assert_wizard_error(payload, action_key="validate_database_url")
         actions = payload.get("actions") or []
         assert_action_fields(actions, "validate_database_url", {"present": False, "valid": False})
+
+
+def test_init_local_initializer_uses_resolved_env_file_values(tmp_path, monkeypatch):
+    env_path = tmp_path / "custom.env"
+    env_path.write_text(
+        "AUTH_MODE=multi_user\nDATABASE_URL=postgresql://custom_user:secret@localhost:5432/custom_db\n",
+        encoding="utf-8",
+    )
+    seen: dict[str, str] = {}
+
+    def fake_run(_cmd, *, check, env=None):
+        assert check is False
+        assert env is not None
+        seen.update(env)
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(wizard_cli.subprocess, "run", fake_run)
+
+    result = runner.invoke(
+        app,
+        ["init", "--env-file", str(env_path), "--yes", "--no-format", "--json"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert seen["AUTH_MODE"] == "multi_user"
+    assert seen["DATABASE_URL"] == "postgresql://custom_user:secret@localhost:5432/custom_db"

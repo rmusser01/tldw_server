@@ -133,16 +133,12 @@ def _mask_url_credentials(value: str) -> str:
     if not parsed.scheme or not parsed.netloc or parsed.password is None:
         return value
 
-    username = parsed.username or ""
-    host = parsed.hostname or ""
-    if not host:
+    if "@" not in parsed.netloc:
         return value
-
+    userinfo, hostinfo = parsed.netloc.rsplit("@", 1)
+    username = userinfo.split(":", 1)[0]
     credentials = f"{username}:********" if username else "********"
-    if ":" in host and not host.startswith("["):
-        host = f"[{host}]"
-    port = f":{parsed.port}" if parsed.port is not None else ""
-    netloc = f"{credentials}@{host}{port}"
+    netloc = f"{credentials}@{hostinfo}"
     return SplitResult(parsed.scheme, netloc, parsed.path, parsed.query, parsed.fragment).geturl()
 
 

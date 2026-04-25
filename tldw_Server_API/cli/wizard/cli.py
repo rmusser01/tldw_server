@@ -50,8 +50,12 @@ def _emit(result: dict[str, Any], use_json: bool) -> None:
                 typer.echo(f"{k.capitalize()}: {result[k]}")
 
 
-def _resolve_database_url(env_path: Path) -> str | None:
-    value = os.getenv("DATABASE_URL") or env_utils.load_env(env_path).get("DATABASE_URL")
+def _resolve_database_url(env_path: Path, *, prefer_env_file: bool = False) -> str | None:
+    env_values = env_utils.load_env(env_path)
+    if prefer_env_file:
+        value = env_values.get("DATABASE_URL") or os.getenv("DATABASE_URL")
+    else:
+        value = os.getenv("DATABASE_URL") or env_values.get("DATABASE_URL")
     if value is None:
         return None
     trimmed = value.strip()
@@ -365,6 +369,13 @@ def _stop_process(proc: subprocess.Popen, timeout: float = 5.0) -> None:
         proc.kill()
 
 
+def _build_initializer_env(env_path: Path, updates: dict[str, str | None]) -> dict[str, str]:
+    env = os.environ.copy()
+    env.update(env_utils.load_env(env_path))
+    env.update({key: str(value) for key, value in updates.items() if value is not None})
+    return env
+
+
 @app.command()
 def init(
     default: bool = typer.Option(False, "--default", help="Apply safe defaults without prompting"),
@@ -439,7 +450,10 @@ def init(
         )
         auth_mode = updates["AUTH_MODE"]
     else:
-        auth_mode = os.getenv("AUTH_MODE") or existing_env.get("AUTH_MODE") or ("single_user" if default or yes else "")
+        if env_file is not None:
+            auth_mode = existing_env.get("AUTH_MODE") or os.getenv("AUTH_MODE") or ("single_user" if default or yes else "")
+        else:
+            auth_mode = os.getenv("AUTH_MODE") or existing_env.get("AUTH_MODE") or ("single_user" if default or yes else "")
     initializer_action: dict[str, Any] | None = None
     validation_action: dict[str, Any] | None = None
     if auth_mode:
@@ -454,7 +468,10 @@ def init(
             existing_key = env_utils.generate_single_user_api_key()
         updates["SINGLE_USER_API_KEY"] = existing_key
     if auth_mode == "multi_user":
-        db_url = updates.get("DATABASE_URL") or _resolve_database_url(env_path)
+        db_url = updates.get("DATABASE_URL") or _resolve_database_url(
+            env_path,
+            prefer_env_file=env_file is not None,
+        )
         if not db_url:
             result = {
                 "command": "init",
@@ -479,7 +496,13 @@ def init(
         validation_action = {"validate_database_url": {"present": True, "valid": True, "reason": None}}
         updates["DATABASE_URL"] = db_url
         cmd = [sys.executable, "-m", "tldw_Server_API.app.core.AuthNZ.initialize"]
-        if dry_run:
+        if setup_profile and setup_profile.docker:
+            initializer_action = {
+                "command": "AuthNZ initializer",
+                "status": "deferred_to_docker",
+                "reason": "Docker profiles initialize AuthNZ inside the container.",
+            }
+        elif dry_run:
             if yes:
                 initializer_action = {"command": " ".join(cmd), "status": "would_run"}
             elif non_interactive or not sys.stdin.isatty():
@@ -488,13 +511,13 @@ def init(
                 initializer_action = {"command": " ".join(cmd), "status": "would_prompt"}
         else:
             if yes:
-                proc = subprocess.run(cmd, check=False)
+                proc = subprocess.run(cmd, check=False, env=_build_initializer_env(env_path, updates))
                 initializer_action = {"command": " ".join(cmd), "returncode": proc.returncode}
             elif non_interactive or not sys.stdin.isatty():
                 initializer_action = {"command": " ".join(cmd), "status": "skipped_non_interactive"}
             else:
                 if typer.confirm("Run AuthNZ initializer now?", default=False):
-                    proc = subprocess.run(cmd, check=False)
+                    proc = subprocess.run(cmd, check=False, env=_build_initializer_env(env_path, updates))
                     initializer_action = {"command": " ".join(cmd), "returncode": proc.returncode}
                 else:
                     initializer_action = {"command": "AuthNZ initializer", "status": "skipped"}

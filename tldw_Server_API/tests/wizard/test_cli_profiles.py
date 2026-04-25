@@ -196,6 +196,7 @@ def test_init_multi_user_profile_requires_admin_password_or_generates_recovery_n
 
     assert result.exit_code == 0, result.output
     assert "TestPassword123!" not in result.output
+    assert "CorrectHorseBatteryStaple1!" not in result.output
     payload = assert_wizard_json(result.output, command="init", status="ok")
     actions = payload.get("actions") or []
     set_env = next(action["set_env"] for action in actions if "set_env" in action)
@@ -217,3 +218,40 @@ def test_init_invalid_profile_returns_json_error() -> None:
     assert_action_field(actions, "profile", "valid", False)
     assert "Unsupported setup profile" in actions[0]["profile"]["reason"]
     assert "Unsupported setup profile" in payload["notes"][0]
+
+
+def test_init_docker_multi_profile_defers_initializer_for_yes(
+    tmp_path: Path, monkeypatch
+) -> None:
+    repo = tmp_path / "repo"
+    env_path = tmp_path / "custom.env"
+    (repo / "tldw_Server_API" / "Config_Files").mkdir(parents=True)
+    (repo / "pyproject.toml").write_text("[project]\nname='tldw-server'\n", encoding="utf-8")
+
+    def fail_run(*_args, **_kwargs):
+        raise AssertionError("docker profile must not run local AuthNZ initializer")
+
+    monkeypatch.setattr("tldw_Server_API.cli.wizard.cli.subprocess.run", fail_run)
+
+    result = runner.invoke(
+        app,
+        [
+            "init",
+            "--install-dir",
+            str(repo),
+            "--profile",
+            "docker-multi-postgres",
+            "--env-file",
+            str(env_path),
+            "--yes",
+            "--no-format",
+            "--json",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = assert_wizard_json(result.output, command="init", status="ok")
+    actions = payload.get("actions") or []
+    initializer = next(action["authnz_initializer"] for action in actions if "authnz_initializer" in action)
+    assert initializer["status"] == "deferred_to_docker"
+    assert "inside the container" in initializer["reason"]
