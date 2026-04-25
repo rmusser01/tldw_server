@@ -2851,6 +2851,8 @@ async def lifespan(app: FastAPI):
     reading_digest_jobs_task = None
     study_pack_jobs_task = None
     study_suggestions_jobs_task = None
+    vn_asset_jobs_task = None
+    vn_asset_generation_jobs_task = None
     companion_reflection_jobs_task = None
     reminder_jobs_task = None
     admin_backup_jobs_task = None
@@ -2885,6 +2887,8 @@ async def lifespan(app: FastAPI):
     reading_digest_jobs_stop_event = None
     study_pack_jobs_stop_event = None
     study_suggestions_jobs_stop_event = None
+    vn_asset_jobs_stop_event = None
+    vn_asset_generation_jobs_stop_event = None
     companion_reflection_jobs_stop_event = None
     reminder_jobs_stop_event = None
     admin_backup_jobs_stop_event = None
@@ -3172,6 +3176,65 @@ async def lifespan(app: FastAPI):
             logger.info("Study-pack Jobs worker disabled by flag (STUDY_PACK_JOBS_WORKER_ENABLED)")
     except _STARTUP_GUARD_EXCEPTIONS as e:
         logger.warning(f"Failed to start Study-pack Jobs worker: {e}")
+
+    # VN asset generation Jobs worker
+    try:
+        import asyncio as _asyncio
+
+        _enabled = _should_start_worker("VN_ASSET_JOBS_WORKER_ENABLED", "vn-assets", default_stable=False)
+        if _enabled:
+            from tldw_Server_API.app.services.vn_asset_jobs_worker import (
+                run_vn_asset_jobs_worker as _run_vn_asset_jobs,
+            )
+
+            vn_asset_jobs_stop_event = _asyncio.Event()
+            vn_asset_jobs_task = _asyncio.create_task(_run_vn_asset_jobs(vn_asset_jobs_stop_event))
+            logger.info("VN asset Jobs worker started with explicit stop_event signal")
+            _register_owned_job_poller(
+                app,
+                owned_job_pollers,
+                name="vn_asset_jobs_task",
+                task=vn_asset_jobs_task,
+                stop_event=vn_asset_jobs_stop_event,
+            )
+        else:
+            logger.info("VN asset Jobs worker disabled by flag (VN_ASSET_JOBS_WORKER_ENABLED)")
+    except _STARTUP_GUARD_EXCEPTIONS as e:
+        logger.warning(f"Failed to start VN asset Jobs worker: {e}")
+
+    # VN asset child image-generation Jobs worker
+    try:
+        import asyncio as _asyncio
+
+        _enabled = _should_start_worker(
+            "VN_ASSET_GENERATION_JOBS_WORKER_ENABLED",
+            "vn-assets-generation",
+            default_stable=False,
+        )
+        if _enabled:
+            from tldw_Server_API.app.services.vn_asset_jobs_worker import (
+                run_vn_asset_generation_jobs_worker as _run_vn_asset_generation_jobs,
+            )
+
+            vn_asset_generation_jobs_stop_event = _asyncio.Event()
+            vn_asset_generation_jobs_task = _asyncio.create_task(
+                _run_vn_asset_generation_jobs(vn_asset_generation_jobs_stop_event)
+            )
+            logger.info("VN asset generation Jobs worker started with explicit stop_event signal")
+            _register_owned_job_poller(
+                app,
+                owned_job_pollers,
+                name="vn_asset_generation_jobs_task",
+                task=vn_asset_generation_jobs_task,
+                stop_event=vn_asset_generation_jobs_stop_event,
+            )
+        else:
+            logger.info(
+                "VN asset generation Jobs worker disabled by flag "
+                "(VN_ASSET_GENERATION_JOBS_WORKER_ENABLED)"
+            )
+    except _STARTUP_GUARD_EXCEPTIONS as e:
+        logger.warning(f"Failed to start VN asset generation Jobs worker: {e}")
 
     # Study-suggestions Jobs worker
     try:
@@ -4125,6 +4188,13 @@ async def lifespan(app: FastAPI):
                 study_suggestions_jobs_stop_event,
                 5.0,
             ),
+            ("vn_asset_jobs_task", vn_asset_jobs_task, vn_asset_jobs_stop_event, 5.0),
+            (
+                "vn_asset_generation_jobs_task",
+                vn_asset_generation_jobs_task,
+                vn_asset_generation_jobs_stop_event,
+                5.0,
+            ),
             ("privilege_snapshot_task", privilege_snapshot_task, privilege_snapshot_stop_event, 5.0),
             ("audio_jobs_task", audio_jobs_task, audio_jobs_stop_event, 5.0),
             ("audiobook_jobs_task", audiobook_jobs_task, audiobook_jobs_stop_event, 5.0),
@@ -4731,6 +4801,29 @@ async def lifespan(app: FastAPI):
                     study_suggestions_jobs_task.cancel()
             else:
                 study_suggestions_jobs_task.cancel()
+        if "vn_asset_jobs_task" in locals() and _should_run_late_stop("vn_asset_jobs_task", vn_asset_jobs_task):
+            if "vn_asset_jobs_stop_event" in locals() and vn_asset_jobs_stop_event:
+                try:
+                    vn_asset_jobs_stop_event.set()
+                    await _asyncio.wait_for(vn_asset_jobs_task, timeout=5.0)
+                    logger.info("VN asset Jobs worker stopped via stop_event")
+                except _STARTUP_GUARD_EXCEPTIONS:
+                    vn_asset_jobs_task.cancel()
+            else:
+                vn_asset_jobs_task.cancel()
+        if (
+            "vn_asset_generation_jobs_task" in locals()
+            and _should_run_late_stop("vn_asset_generation_jobs_task", vn_asset_generation_jobs_task)
+        ):
+            if "vn_asset_generation_jobs_stop_event" in locals() and vn_asset_generation_jobs_stop_event:
+                try:
+                    vn_asset_generation_jobs_stop_event.set()
+                    await _asyncio.wait_for(vn_asset_generation_jobs_task, timeout=5.0)
+                    logger.info("VN asset generation Jobs worker stopped via stop_event")
+                except _STARTUP_GUARD_EXCEPTIONS:
+                    vn_asset_generation_jobs_task.cancel()
+            else:
+                vn_asset_generation_jobs_task.cancel()
         if "companion_reflection_jobs_task" in locals() and _should_run_late_stop("companion_reflection_jobs_task", companion_reflection_jobs_task):
             if "companion_reflection_jobs_stop_event" in locals() and companion_reflection_jobs_stop_event:
                 try:
@@ -7969,6 +8062,17 @@ else:
     _include_if_enabled("llamacpp", llamacpp_public_router, prefix="", tags=["llamacpp"])
     _include_if_enabled("web-scraping", web_scraping_router, tags=["web-scraping"])
     _include_if_enabled("web-scraping", web_scraping_router, prefix=f"{API_V1_PREFIX}", tags=["web-scraping"])
+
+if not _ULTRA_MINIMAL_APP:
+    try:
+        from tldw_Server_API.app.api.v1.endpoints.vn_assets import router as vn_assets_router
+
+        if _MINIMAL_TEST_APP:
+            include_router_idempotent(app, vn_assets_router, prefix=f"{API_V1_PREFIX}", tags=["vn-assets"])
+        else:
+            _include_if_enabled("vn-assets", vn_assets_router, prefix=f"{API_V1_PREFIX}", tags=["vn-assets"])
+    except _IMPORT_EXCEPTIONS as _vn_assets_import_err:
+        logger.debug(f"Skipping VN assets router: {_vn_assets_import_err}")
 
 # Register control-plane metrics endpoints (works in both minimal and full modes)
 if _shared_env_flag_enabled("ENABLE_ADMIN_E2E_TEST_MODE"):

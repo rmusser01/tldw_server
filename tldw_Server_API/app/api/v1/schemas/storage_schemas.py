@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 FileCategory = Literal["tts_audio", "stt_audio", "image", "voice_clone", "mindmap", "spreadsheet"]
 
 # Source features
-SourceFeature = Literal["tts", "stt", "image_gen", "voice_studio", "mindmap", "data_tables", "export"]
+SourceFeature = Literal["tts", "stt", "image_gen", "voice_studio", "mindmap", "data_tables", "export", "vn_assets"]
 
 # Retention policies
 RetentionPolicy = Literal["user_default", "permanent", "transient", "custom"]
