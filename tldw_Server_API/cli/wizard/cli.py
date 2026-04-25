@@ -561,7 +561,11 @@ def init(
         }
         _emit(result, json_out)
         raise typer.Exit(0)
-    env_utils.ensure_env(env_path, updates=updates)
+    env_utils.ensure_env(
+        env_path,
+        updates=updates,
+        raw_values=profile_utils.profile_uses_structured_postgres(setup_profile),
+    )
 
     # Ensure .gitignore entries
     files_utils.ensure_gitignore(base / ".gitignore", entries=[".env", ".env.local", "wizard.log"])

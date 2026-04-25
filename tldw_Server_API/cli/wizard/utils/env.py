@@ -67,8 +67,12 @@ def _format_env_value(value: str) -> str:
     return f"\"{escaped}\""
 
 
-def _format_env_line(key: str, value: str, export: bool = False) -> str:
+def _format_env_line(key: str, value: str, export: bool = False, raw_values: bool = False) -> str:
     prefix = "export " if export else ""
+    if raw_values:
+        if "\n" in value or "\r" in value:
+            raise ValueError(f"Env value for {key} cannot contain newline characters in raw mode")
+        return f"{prefix}{key}={value}"
     return f"{prefix}{key}={_format_env_value(value)}"
 
 
@@ -183,6 +187,7 @@ def ensure_env(
     updates: dict[str, str | None] | None = None,
     defaults: dict[str, str | None] | None = None,
     dry_run: bool = False,
+    raw_values: bool = False,
 ) -> EnvUpdateResult:
     """Create or update a .env file idempotently with backups."""
     updates = updates or {}
@@ -213,19 +218,26 @@ def ensure_env(
         if last_index.get(entry.key) != idx:
             continue
         if entry.key in updates_clean:
-            rendered.append(_format_env_line(entry.key, str(updates_clean[entry.key]), export=entry.export))
+            rendered.append(
+                _format_env_line(
+                    entry.key,
+                    str(updates_clean[entry.key]),
+                    export=entry.export,
+                    raw_values=raw_values,
+                )
+            )
             updated_keys.append(entry.key)
             continue
         rendered.append(entry.raw)
 
     for key, value in updates_clean.items():
         if key not in existing_keys:
-            rendered.append(_format_env_line(key, str(value)))
+            rendered.append(_format_env_line(key, str(value), raw_values=raw_values))
             added_keys.append(key)
 
     for key, value in defaults_clean.items():
         if key not in existing_keys and key not in updates_clean:
-            rendered.append(_format_env_line(key, str(value)))
+            rendered.append(_format_env_line(key, str(value), raw_values=raw_values))
             added_keys.append(key)
 
     new_content = "\n".join(rendered).rstrip("\n") + "\n" if rendered else ""

@@ -64,26 +64,42 @@ load_env_file() {
 import re
 import sys
 
-from dotenv import dotenv_values
-
 path = sys.argv[1]
 key_re = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 try:
-    values = dotenv_values(path, interpolate=False)
+    env_file = open(path, encoding="utf-8", newline="")
+except Exception as exc:
+    print(f"[entrypoint] Failed to open env file {path}: {exc}", file=sys.stderr)
+    sys.exit(1)
+
+try:
+    with env_file:
+        for line_number, raw_line in enumerate(env_file, start=1):
+            line = raw_line.rstrip("\n")
+            if "\r" in line:
+                print(
+                    f"[entrypoint] Refusing env line with carriage return at {path}:{line_number}",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+            if not line.strip() or line.lstrip().startswith("#"):
+                continue
+            if "=" not in line:
+                print(f"[entrypoint] Invalid env line in {path}:{line_number}", file=sys.stderr)
+                sys.exit(1)
+
+            key, value = line.split("=", 1)
+            if not key_re.match(key):
+                print(f"[entrypoint] Invalid env key in {path}:{line_number}: {key!r}", file=sys.stderr)
+                sys.exit(1)
+            if "\n" in value:
+                print(f"[entrypoint] Refusing env value with newline for key {key}", file=sys.stderr)
+                sys.exit(1)
+            print(f"{key}={value}")
 except Exception as exc:
     print(f"[entrypoint] Failed to parse env file {path}: {exc}", file=sys.stderr)
     sys.exit(1)
-
-for key, value in values.items():
-    if not key_re.match(key):
-        print(f"[entrypoint] Invalid env key in {path}: {key!r}", file=sys.stderr)
-        sys.exit(1)
-    value = "" if value is None else str(value)
-    if "\n" in value or "\r" in value:
-        print(f"[entrypoint] Refusing env value with newline for key {key}", file=sys.stderr)
-        sys.exit(1)
-    print(f"{key}={value}")
 PY
   then
     while IFS= read -r assignment || [ -n "$assignment" ]; do

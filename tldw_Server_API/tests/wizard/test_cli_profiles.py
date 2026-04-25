@@ -381,3 +381,47 @@ def test_init_docker_multi_profile_clears_stale_database_urls(
     assert written_env["POSTGRES_PASSWORD"]
     assert written_env["DATABASE_URL"] == ""
     assert written_env["JOBS_DB_URL"] == ""
+
+
+def test_init_docker_multi_profile_writes_raw_env_values_for_compose(
+    tmp_path: Path, monkeypatch
+) -> None:
+    repo = tmp_path / "repo"
+    env_path = tmp_path / "custom.env"
+    admin_secret = _literal("Admin ", "#", "$Dollar", "1!")
+    postgres_secret = _literal("abc", "#def", "$ghi")
+    (repo / "tldw_Server_API" / "Config_Files").mkdir(parents=True)
+    (repo / "pyproject.toml").write_text("[project]\nname='tldw-server'\n", encoding="utf-8")
+    env_path.write_text(f"POSTGRES_PASSWORD={postgres_secret}\n", encoding="utf-8")
+
+    def fail_run(*_args, **_kwargs):
+        raise AssertionError("docker profile must not run local AuthNZ initializer")
+
+    monkeypatch.setattr("tldw_Server_API.cli.wizard.cli.subprocess.run", fail_run)
+
+    result = runner.invoke(
+        app,
+        [
+            "init",
+            "--install-dir",
+            str(repo),
+            "--profile",
+            "docker-multi-postgres",
+            "--env-file",
+            str(env_path),
+            "--admin-username",
+            "admin",
+            "--admin-password",
+            admin_secret,
+            "--yes",
+            "--no-format",
+            "--json",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    content = env_path.read_text(encoding="utf-8")
+    assert f"POSTGRES_PASSWORD={postgres_secret}\n" in content
+    assert f"ADMIN_PASSWORD={admin_secret}\n" in content
+    assert f'POSTGRES_PASSWORD="{postgres_secret}"' not in content
+    assert f'ADMIN_PASSWORD="{admin_secret}"' not in content

@@ -361,6 +361,8 @@ def test_multi_user_entrypoint_derives_postgres_urls_with_runtime_quoting() -> N
         "entrypoint should URL-quote structured Postgres credentials before deriving DATABASE_URL",
     )
     _require('. "$ENV_FILE"' not in script, "entrypoint should not shell-source env files")
+    _require("dotenv_values" not in script, "entrypoint should not use dotenv parsing for raw Compose env files")
+    _require('line.split("=", 1)' in script, "entrypoint should parse raw env lines as KEY=rest")
 
 
 def test_entrypoint_loads_env_file_with_literal_dollar_signs(tmp_path: Path) -> None:
@@ -394,6 +396,44 @@ def test_entrypoint_loads_env_file_with_literal_dollar_signs(tmp_path: Path) -> 
     )
 
     assert result.returncode == 0, result.stderr
+    assert "unbound variable" not in result.stderr
+
+
+def test_entrypoint_loads_raw_env_file_values_without_dotenv_rewriting(tmp_path: Path) -> None:
+    env_file = tmp_path / ".env"
+    marker_dir = tmp_path / "markers"
+    marker_dir.mkdir()
+    postgres_secret = _literal("abc ", "#def", "$ghi")
+    admin_secret = _literal("Admin ", "#", "$Dollar", "1!")
+    env_file.write_text(
+        "\n".join(
+            (
+                "AUTH_MODE=multi_user",
+                "POSTGRES_USER=tldw_user",
+                "POSTGRES_DB=tldw_users",
+                f"POSTGRES_PASSWORD={postgres_secret}",
+                "ADMIN_USERNAME=admin",
+                f"ADMIN_PASSWORD={admin_secret}",
+                "MCP_JWT_SECRET=mcp_jwt_secret_for_entrypoint_test_32_chars",
+                "MCP_API_KEY_SALT=mcp_api_salt_for_entrypoint_test_32_chars",
+                "BYOK_ENCRYPTION_KEY=byok_secret_for_entrypoint_test_32_chars",
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(  # nosec B603
+        ["/bin/sh", "Dockerfiles/entrypoints/tldw-app-first-run.sh", "/usr/bin/env"],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=_entrypoint_process_env(env_file, marker_dir),
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert f"POSTGRES_PASSWORD={postgres_secret}\n" in result.stdout
+    assert f"ADMIN_PASSWORD={admin_secret}\n" in result.stdout
     assert "unbound variable" not in result.stderr
 
 
@@ -674,15 +714,17 @@ def test_multi_user_compose_raw_env_file_preserves_dollar_signs(tmp_path: Path) 
         pytest.skip("docker compose is not available")
 
     env_file = tmp_path / "compose.env"
+    postgres_secret = _literal("abc ", "#def", "$ghi")
+    admin_secret = _literal("Admin ", "#", "$Dollar", "1!")
     env_file.write_text(
         "\n".join(
             (
                 "AUTH_MODE=multi_user",
                 "POSTGRES_USER=tldw_user",
                 "POSTGRES_DB=tldw_users",
-                "POSTGRES_PASSWORD=abc$def:ghi/with#chars%",
+                f"POSTGRES_PASSWORD={postgres_secret}",
                 "ADMIN_USERNAME=admin",
-                "ADMIN_PASSWORD=Admin$Dollar1!",
+                f"ADMIN_PASSWORD={admin_secret}",
                 "JWT_SECRET_KEY=jwt_secret_key_for_compose_config_32_chars",
                 "SESSION_ENCRYPTION_KEY=session_secret_for_compose_config_32_chars",
                 "MCP_JWT_SECRET=mcp_jwt_secret_for_compose_config_32_chars",
@@ -704,5 +746,11 @@ def test_multi_user_compose_raw_env_file_preserves_dollar_signs(tmp_path: Path) 
     )
 
     assert result.returncode == 0, result.stderr
-    assert "Admin$$Dollar1!" in result.stdout
-    assert "abc$$def:ghi/with#chars%" in result.stdout
+    config = yaml.safe_load(result.stdout)
+    app_env = config["services"]["app"]["environment"]
+    postgres_env = config["services"]["postgres"]["environment"]
+    assert app_env["ADMIN_PASSWORD"] == _literal("Admin ", "#", "$$Dollar", "1!")
+    assert app_env["POSTGRES_PASSWORD"] == _literal("abc ", "#def", "$$ghi")
+    assert postgres_env["POSTGRES_PASSWORD"] == _literal("abc ", "#def", "$$ghi")
+    assert '"' not in app_env["ADMIN_PASSWORD"]
+    assert '"' not in app_env["POSTGRES_PASSWORD"]
