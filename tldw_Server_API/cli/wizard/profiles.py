@@ -7,6 +7,8 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
+from cryptography.fernet import Fernet
+
 from tldw_Server_API.cli.wizard.utils import env as env_utils
 
 
@@ -77,6 +79,7 @@ def resolve_env_path(
     start_dir: Path | None = None,
     explicit_env_file: Path | None = None,
 ) -> Path:
+    del profile  # Reserved for later profile-specific env placement.
     if explicit_env_file is not None:
         return explicit_env_file.expanduser().resolve()
     repo_root = resolve_repo_root(start_dir)
@@ -89,13 +92,29 @@ def _secret_token() -> str:
     return secrets.token_urlsafe(32)
 
 
+def _fernet_key() -> str:
+    return Fernet.generate_key().decode("ascii")
+
+
 def _byok_key() -> str:
     return base64.urlsafe_b64encode(os.urandom(32)).decode("ascii")
 
 
+def _is_placeholder(value: str | None) -> bool:
+    if value is None:
+        return True
+    normalized = value.strip().lower()
+    return (
+        normalized == ""
+        or normalized in {"change-me", "changeme", "default", "test-key"}
+        or normalized.startswith("change_me")
+        or normalized.startswith("replace-with-")
+    )
+
+
 def _existing_or_generated(existing_env: Mapping[str, str], key: str, generator: Callable[[], str]) -> str:
     value = existing_env.get(key)
-    if value and not value.startswith("CHANGE_ME"):
+    if not _is_placeholder(value):
         return value
     return generator()
 
@@ -122,7 +141,7 @@ def build_profile_env(
         existing_env.get("DATABASE_URL") or "postgresql://tldw_user:TestPassword123!@postgres:5432/tldw_users"
     )
     values["JWT_SECRET_KEY"] = _existing_or_generated(existing_env, "JWT_SECRET_KEY", _secret_token)
-    values["SESSION_ENCRYPTION_KEY"] = _existing_or_generated(existing_env, "SESSION_ENCRYPTION_KEY", _secret_token)
+    values["SESSION_ENCRYPTION_KEY"] = _existing_or_generated(existing_env, "SESSION_ENCRYPTION_KEY", _fernet_key)
     values["MCP_JWT_SECRET"] = _existing_or_generated(existing_env, "MCP_JWT_SECRET", _secret_token)
     values["MCP_API_KEY_SALT"] = _existing_or_generated(existing_env, "MCP_API_KEY_SALT", _secret_token)
     values["BYOK_ENCRYPTION_KEY"] = _existing_or_generated(existing_env, "BYOK_ENCRYPTION_KEY", _byok_key)

@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from cryptography.fernet import Fernet
 
 from tldw_Server_API.cli.wizard import profiles
 
@@ -11,6 +12,13 @@ def test_normalize_profile_accepts_public_names() -> None:
     assert profiles.normalize_profile("docker-single-webui").name == "docker-single-webui"
     assert profiles.normalize_profile("docker-multi-postgres").auth_mode == "multi_user"
     assert profiles.normalize_profile("local-single").auth_mode == "single_user"
+
+
+def test_normalize_profile_accepts_aliases() -> None:
+    assert profiles.normalize_profile("docker-single").name == "docker-single-webui"
+    assert profiles.normalize_profile("docker-webui").name == "docker-single-webui"
+    assert profiles.normalize_profile("docker-multi").name == "docker-multi-postgres"
+    assert profiles.normalize_profile("local").name == "local-single"
 
 
 def test_normalize_profile_rejects_unknown_name() -> None:
@@ -79,3 +87,47 @@ def test_multi_user_defaults_include_required_secrets() -> None:
         assert defaults[key]
     assert defaults["AUTH_MODE"] == "multi_user"
     assert defaults["DATABASE_URL"].startswith("postgresql://")
+
+
+def test_multi_user_session_key_is_fernet_compatible() -> None:
+    defaults = profiles.build_profile_env(
+        profile=profiles.normalize_profile("docker-multi-postgres"),
+        existing_env={},
+    )
+
+    Fernet(defaults["SESSION_ENCRYPTION_KEY"])
+
+
+@pytest.mark.parametrize(
+    "key",
+    (
+        "SINGLE_USER_API_KEY",
+        "JWT_SECRET_KEY",
+        "SESSION_ENCRYPTION_KEY",
+        "MCP_JWT_SECRET",
+        "MCP_API_KEY_SALT",
+        "BYOK_ENCRYPTION_KEY",
+    ),
+)
+@pytest.mark.parametrize(
+    "placeholder",
+    (
+        "",
+        "change-me",
+        "changeme",
+        "default",
+        "test-key",
+        "CHANGE_ME_SECRET",
+        "replace-with-real-secret",
+    ),
+)
+def test_placeholder_secret_values_are_regenerated(key: str, placeholder: str) -> None:
+    profile = profiles.normalize_profile("local-single" if key == "SINGLE_USER_API_KEY" else "docker-multi-postgres")
+
+    defaults = profiles.build_profile_env(
+        profile=profile,
+        existing_env={key: placeholder},
+    )
+
+    assert defaults[key]
+    assert defaults[key] != placeholder
