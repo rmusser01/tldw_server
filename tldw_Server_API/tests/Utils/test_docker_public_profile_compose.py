@@ -381,24 +381,117 @@ def test_entrypoint_loads_env_file_with_literal_dollar_signs(tmp_path: Path) -> 
         encoding="utf-8",
     )
 
-    env = {
-        **os.environ,
-        "TLDW_ENV_FILE": str(env_file),
-        "TLDW_AUTH_MARKER_DIR": str(marker_dir),
-    }
     result = subprocess.run(  # nosec B603
         ["/bin/sh", "Dockerfiles/entrypoints/tldw-app-first-run.sh", "true"],
         check=False,
         capture_output=True,
         text=True,
-        env=env,
+        env=_entrypoint_process_env(env_file, marker_dir),
     )
 
     assert result.returncode == 0, result.stderr
     assert "unbound variable" not in result.stderr
 
 
-def test_multi_user_entrypoint_ignores_stale_env_database_url_when_structured_postgres_exists() -> None:
+def _entrypoint_process_env(env_file: Path, marker_dir: Path) -> dict[str, str]:
+    env = {**os.environ}
+    for key in (
+        "AUTH_MODE",
+        "SINGLE_USER_API_KEY",
+        "DATABASE_URL",
+        "JOBS_DB_URL",
+        "TLDW_DATABASE_URL_OVERRIDE",
+        "TLDW_JOBS_DB_URL_OVERRIDE",
+    ):
+        env.pop(key, None)
+    env["TLDW_ENV_FILE"] = str(env_file)
+    env["TLDW_AUTH_MARKER_DIR"] = str(marker_dir)
+    return env
+
+
+def _write_entrypoint_env(path: Path, extra_lines: tuple[str, ...] = ()) -> None:
+    path.write_text(
+        "\n".join(
+            (
+                "AUTH_MODE=multi_user",
+                "POSTGRES_USER=tldw_user",
+                "POSTGRES_DB=tldw_users",
+                "POSTGRES_PASSWORD=abc$def:ghi/with#chars%",
+                "ADMIN_USERNAME=admin",
+                "ADMIN_PASSWORD=Admin$Dollar1!",
+                "MCP_JWT_SECRET=mcp_jwt_secret_for_entrypoint_test_32_chars",
+                "MCP_API_KEY_SALT=mcp_api_salt_for_entrypoint_test_32_chars",
+                "BYOK_ENCRYPTION_KEY=byok_secret_for_entrypoint_test_32_chars",
+                *extra_lines,
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
+def _run_entrypoint_with_env(env_file: Path, marker_dir: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(  # nosec B603
+        ["/bin/sh", "Dockerfiles/entrypoints/tldw-app-first-run.sh", "true"],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=_entrypoint_process_env(env_file, marker_dir),
+    )
+
+
+def test_multi_user_entrypoint_rejects_stale_env_database_urls(tmp_path: Path) -> None:
+    env_file = tmp_path / ".env"
+    marker_dir = tmp_path / "markers"
+    marker_dir.mkdir()
+    _write_entrypoint_env(
+        env_file,
+        (
+            "DATABASE_URL=sqlite:///./Databases/users.db",
+            "JOBS_DB_URL=sqlite:///./Databases/jobs.db",
+        ),
+    )
+
+    result = _run_entrypoint_with_env(env_file, marker_dir)
+
+    assert result.returncode != 0
+    assert "ERROR: Multi-user mode refuses DATABASE_URL from the docker env file." in result.stderr
+    assert "TLDW_DATABASE_URL_OVERRIDE" in result.stderr
+
+
+def test_multi_user_entrypoint_rejects_stale_env_jobs_database_url(tmp_path: Path) -> None:
+    env_file = tmp_path / ".env"
+    marker_dir = tmp_path / "markers"
+    marker_dir.mkdir()
+    _write_entrypoint_env(env_file, ("JOBS_DB_URL=sqlite:///./Databases/jobs.db",))
+
+    result = _run_entrypoint_with_env(env_file, marker_dir)
+
+    assert result.returncode != 0
+    assert "ERROR: Multi-user mode refuses JOBS_DB_URL from the docker env file." in result.stderr
+    assert "TLDW_JOBS_DB_URL_OVERRIDE" in result.stderr
+
+
+def test_multi_user_entrypoint_accepts_explicit_database_url_overrides(tmp_path: Path) -> None:
+    env_file = tmp_path / ".env"
+    marker_dir = tmp_path / "markers"
+    marker_dir.mkdir()
+    _write_entrypoint_env(
+        env_file,
+        (
+            "DATABASE_URL=sqlite:///./Databases/users.db",
+            "JOBS_DB_URL=sqlite:///./Databases/jobs.db",
+            "TLDW_DATABASE_URL_OVERRIDE=postgresql://override_user:override_pass@postgres:5432/override_db",
+            "TLDW_JOBS_DB_URL_OVERRIDE=postgresql://override_user:override_pass@postgres:5432/override_jobs",
+        ),
+    )
+
+    result = _run_entrypoint_with_env(env_file, marker_dir)
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_multi_user_entrypoint_rejects_stale_env_database_url_when_structured_postgres_exists() -> None:
     script = Path("Dockerfiles/entrypoints/tldw-app-first-run.sh").read_text(encoding="utf-8")
 
     _require(
@@ -409,6 +502,13 @@ def test_multi_user_entrypoint_ignores_stale_env_database_url_when_structured_po
         'DATABASE_URL="$TLDW_DATABASE_URL_OVERRIDE"' in script,
         "entrypoint should expose an explicit advanced database URL override",
     )
+    for expected in (
+        "ERROR: Multi-user mode refuses DATABASE_URL from the docker env file.",
+        "ERROR: Multi-user mode refuses JOBS_DB_URL from the docker env file.",
+        "Remove DATABASE_URL from the docker-multi-postgres env file",
+        "Remove JOBS_DB_URL from the docker-multi-postgres env file",
+    ):
+        _require(expected in script, f"entrypoint should include stale URL rejection message {expected}")
     _require(
         '[ -z "$incoming_database_url" ]' not in script,
         "entrypoint should not let stale env-file DATABASE_URL block structured Postgres derivation",

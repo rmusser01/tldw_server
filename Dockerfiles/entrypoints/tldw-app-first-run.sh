@@ -236,6 +236,29 @@ AUTH_MODE="${AUTH_MODE:-single_user}"
 database_url_derived=0
 jobs_db_url_derived=0
 if [ "$AUTH_MODE" = "multi_user" ]; then
+  if [ -n "${DATABASE_URL:-}" ] && [ -z "${TLDW_DATABASE_URL_OVERRIDE:-}" ]; then
+    echo "" >&2
+    echo "======================================================================" >&2
+    echo "  ERROR: Multi-user mode refuses DATABASE_URL from the docker env file." >&2
+    echo "" >&2
+    echo "  Remove DATABASE_URL from the docker-multi-postgres env file, or set" >&2
+    echo "  TLDW_DATABASE_URL_OVERRIDE to intentionally use an external database." >&2
+    echo "======================================================================" >&2
+    echo "" >&2
+    exit 1
+  fi
+  if [ -n "${JOBS_DB_URL:-}" ] && [ -z "${TLDW_JOBS_DB_URL_OVERRIDE:-}" ]; then
+    echo "" >&2
+    echo "======================================================================" >&2
+    echo "  ERROR: Multi-user mode refuses JOBS_DB_URL from the docker env file." >&2
+    echo "" >&2
+    echo "  Remove JOBS_DB_URL from the docker-multi-postgres env file, or set" >&2
+    echo "  TLDW_JOBS_DB_URL_OVERRIDE to intentionally use an external jobs database." >&2
+    echo "======================================================================" >&2
+    echo "" >&2
+    exit 1
+  fi
+
   if [ -n "${TLDW_DATABASE_URL_OVERRIDE:-}" ]; then
     DATABASE_URL="$TLDW_DATABASE_URL_OVERRIDE"
   elif [ -n "${POSTGRES_PASSWORD:-}" ]; then
