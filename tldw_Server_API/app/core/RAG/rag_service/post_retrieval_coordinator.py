@@ -6,6 +6,7 @@ from typing import Any, Sequence
 
 from .evidence_models import DerivedEvidence, RetrievedEvidence
 from .request_resolution import ResolvedRAGRequest
+from .retrieval_plan import RetrievalPlan
 
 
 class PostRetrievalCoordinator:
@@ -47,6 +48,7 @@ def coordinate_standard_result_evidence(
     result: Any,
     resolved_request: ResolvedRAGRequest,
     *,
+    retrieval_plan: RetrievalPlan | None = None,
     coordinator: PostRetrievalCoordinator | None = None,
 ) -> Any:
     """Coordinate standard-path evidence without changing API result shape."""
@@ -56,6 +58,15 @@ def coordinate_standard_result_evidence(
     else:
         result_metadata = dict(getattr(result, "metadata", None) or {})
         result_documents = list(getattr(result, "documents", None) or [])
+
+    if retrieval_plan is not None:
+        result_metadata["retrieval_plan"] = {
+            "query": retrieval_plan.query,
+            "sources": list(retrieval_plan.sources),
+            "search_mode": retrieval_plan.search_mode,
+            "top_k": retrieval_plan.top_k,
+            "index_namespace": retrieval_plan.index_namespace,
+        }
 
     coordinator_instance = coordinator or PostRetrievalCoordinator()
     coordinated = coordinator_instance.derive_evidence(

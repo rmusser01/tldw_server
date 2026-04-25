@@ -5194,6 +5194,23 @@ async def unified_rag_pipeline(
         except (AttributeError, TypeError, ValueError):
             gated_generation = False
 
+        if not enable_generation:
+            retrieval_only_result = build_retrieval_only_result(
+                resolved_request=resolved_request,
+                retrieval_plan=retrieval_plan,
+                retrieval_result=RetrievedEvidence(
+                    documents=list(result.documents or []),
+                    metadata=dict(result.metadata or {}),
+                ),
+            )
+            retrieval_only_result = coordinate_standard_result_evidence(
+                retrieval_only_result,
+                resolved_request,
+                retrieval_plan=retrieval_plan,
+            )
+            result.documents = list(retrieval_only_result.documents)
+            result.metadata.update(dict(retrieval_only_result.metadata or {}))
+
         if enable_generation and not gated_generation and not result.cache_hit:
             generation_start = time.time()
             try:
@@ -5419,10 +5436,12 @@ async def unified_rag_pipeline(
                             return coordinate_standard_result_evidence(
                                 generation_result,
                                 resolved_request,
+                                retrieval_plan=retrieval_plan,
                             )
                         generation_result = coordinate_standard_result_evidence(
                             generation_result,
                             resolved_request,
+                            retrieval_plan=retrieval_plan,
                         )
                         result.generated_answer = generation_result.generated_answer
                         result.metadata.update(dict(generation_result.metadata or {}))

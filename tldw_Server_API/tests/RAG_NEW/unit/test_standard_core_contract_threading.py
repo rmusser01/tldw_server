@@ -67,8 +67,9 @@ async def test_unified_pipeline_reuses_resolved_request_and_plan(monkeypatch):
             "metadata": {"generation": "ok"},
         }
 
-    def fake_coordinate(result, resolved_request, *, coordinator=None):
+    def fake_coordinate(result, resolved_request, *, retrieval_plan=None, coordinator=None):
         seen["coordinator_resolved"] = resolved_request
+        seen["coordinator_plan"] = retrieval_plan
         return result
 
     monkeypatch.setattr(unified_pipeline, "execute_retrieval_phase", fake_retrieval_phase)
@@ -91,6 +92,7 @@ async def test_unified_pipeline_reuses_resolved_request_and_plan(monkeypatch):
     assert seen["generation_resolved"] is resolved
     assert seen["generation_plan"] is plan
     assert seen["coordinator_resolved"] is resolved
+    assert seen["coordinator_plan"] is plan
 
 
 @pytest.mark.asyncio
@@ -107,13 +109,14 @@ async def test_unified_pipeline_builds_single_legacy_resolved_request(monkeypatc
         seen["generation_plan"] = kwargs["retrieval_plan"]
         return {"answer": "legacy answer", "sources": [], "metadata": {}}
 
+    def fake_coordinate(result, resolved_request, *, retrieval_plan=None, coordinator=None):
+        seen["coordinator_resolved"] = resolved_request
+        seen["coordinator_plan"] = retrieval_plan
+        return result
+
     monkeypatch.setattr(unified_pipeline, "execute_retrieval_phase", fake_retrieval_phase)
     monkeypatch.setattr(unified_pipeline, "execute_generation_phase", fake_generation_phase)
-    monkeypatch.setattr(
-        unified_pipeline,
-        "coordinate_standard_result_evidence",
-        lambda result, resolved_request, *, coordinator=None: result,
-    )
+    monkeypatch.setattr(unified_pipeline, "coordinate_standard_result_evidence", fake_coordinate)
 
     result = await unified_pipeline.unified_rag_pipeline(
         query="legacy query",
@@ -125,5 +128,69 @@ async def test_unified_pipeline_builds_single_legacy_resolved_request(monkeypatc
     assert result["answer"] == "legacy answer"
     assert seen["retrieval_resolved"] is seen["generation_resolved"]
     assert seen["retrieval_plan"] is seen["generation_plan"]
+    assert seen["coordinator_resolved"] is seen["retrieval_resolved"]
+    assert seen["coordinator_plan"] is seen["retrieval_plan"]
     assert seen["retrieval_resolved"].query == "legacy query"
     assert seen["retrieval_plan"].top_k == 5
+
+
+@pytest.mark.asyncio
+async def test_unified_pipeline_coordinates_retrieval_only_result(monkeypatch):
+    resolved = _resolved_request()
+    resolved.payload["enable_generation"] = False
+    plan = _retrieval_plan()
+    seen = {}
+
+    async def fake_retrieval_phase(**kwargs):
+        seen["retrieval_resolved"] = kwargs["resolved_request"]
+        seen["retrieval_plan"] = kwargs["retrieval_plan"]
+        return SimpleNamespace(
+            documents=[{"id": "doc-1", "content": "retrieved only"}],
+            metadata={"retrieval": "ok"},
+        )
+
+    async def fake_generation_phase(**kwargs):
+        raise AssertionError("generation phase should not run")
+
+    real_build_retrieval_only_result = unified_pipeline.build_retrieval_only_result
+
+    def fake_build_retrieval_only_result(**kwargs):
+        seen["retrieval_only_resolved"] = kwargs["resolved_request"]
+        seen["retrieval_only_plan"] = kwargs["retrieval_plan"]
+        return real_build_retrieval_only_result(**kwargs)
+
+    def fake_coordinate(result, resolved_request, *, retrieval_plan=None, coordinator=None):
+        seen["coordinator_resolved"] = resolved_request
+        seen["coordinator_plan"] = retrieval_plan
+        seen["coordinator_result"] = result
+        return result
+
+    monkeypatch.setattr(unified_pipeline, "execute_retrieval_phase", fake_retrieval_phase)
+    monkeypatch.setattr(unified_pipeline, "execute_generation_phase", fake_generation_phase)
+    monkeypatch.setattr(
+        unified_pipeline,
+        "build_retrieval_only_result",
+        fake_build_retrieval_only_result,
+    )
+    monkeypatch.setattr(unified_pipeline, "coordinate_standard_result_evidence", fake_coordinate)
+
+    result = await unified_pipeline.unified_rag_pipeline(
+        query=resolved.query,
+        sources=list(plan.sources),
+        top_k=plan.top_k,
+        search_mode=plan.search_mode,
+        enable_generation=False,
+        enable_reranking=False,
+        resolved_request=resolved,
+        retrieval_plan=plan,
+    )
+
+    assert result.query == resolved.query
+    assert result.documents[0]["id"] == "doc-1"
+    assert seen["retrieval_resolved"] is resolved
+    assert seen["retrieval_plan"] is plan
+    assert seen["retrieval_only_resolved"] is resolved
+    assert seen["retrieval_only_plan"] is plan
+    assert seen["coordinator_resolved"] is resolved
+    assert seen["coordinator_plan"] is plan
+    assert seen["coordinator_result"].metadata["retrieval_plan"]["top_k"] == plan.top_k
