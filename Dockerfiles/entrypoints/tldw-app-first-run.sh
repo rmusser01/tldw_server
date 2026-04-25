@@ -230,7 +230,7 @@ if [ "$process_env_multi_user" = "0" ]; then
   ensure_env_file
 fi
 
-if [ -f "$ENV_FILE" ] && ! { [ "$process_env_multi_user" = "1" ] && { [ -n "${POSTGRES_PASSWORD:-}" ] || [ -n "$incoming_database_url_override" ]; }; }; then
+if [ -f "$ENV_FILE" ]; then
   load_env_file
 fi
 
