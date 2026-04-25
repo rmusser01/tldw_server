@@ -12,6 +12,7 @@ from loguru import logger
 from .files import atomic_write
 
 _ENV_KEY_RE = re.compile(r"^\s*(export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$")
+_RAW_ENV_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _SENSITIVE_TOKENS = ("KEY", "SECRET", "TOKEN", "PASSWORD")
 
 
@@ -86,6 +87,15 @@ def _parse_line(line: str) -> ParsedEnvLine:
     return ParsedEnvLine(raw=line, key=key, value=value, export=export_prefix)
 
 
+def _parse_raw_line(line: str) -> ParsedEnvLine:
+    if not line.strip() or line.lstrip().startswith("#") or "=" not in line:
+        return ParsedEnvLine(raw=line, key=None, value=None, export=False)
+    key, value = line.split("=", 1)
+    if not _RAW_ENV_KEY_RE.match(key):
+        return ParsedEnvLine(raw=line, key=None, value=None, export=False)
+    return ParsedEnvLine(raw=line, key=key, value=value, export=False)
+
+
 def _backup_env(path: Path, content: str) -> Path:
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
     backup = path.with_name(f"{path.name}.{timestamp}.bak")
@@ -104,13 +114,17 @@ def _chmod_600(path: Path) -> None:
         logger.debug(f"chmod on {path} ignored: {exc}")
 
 
-def load_env(path: Path) -> dict[str, str]:
+def load_env(path: Path, *, raw_values: bool = False) -> dict[str, str]:
     if not path.exists():
         return {}
     content = path.read_text(encoding="utf-8")
     values: dict[str, str] = {}
-    for line in content.splitlines():
-        parsed = _parse_line(line)
+    for line_number, line in enumerate(content.splitlines(), start=1):
+        if raw_values and "\r" in line:
+            raise ValueError(f"Invalid carriage return in env file {path}:{line_number}")
+        parsed = _parse_raw_line(line) if raw_values else _parse_line(line)
+        if raw_values and parsed.key is None and line.strip() and not line.lstrip().startswith("#"):
+            raise ValueError(f"Invalid raw env line in {path}:{line_number}")
         if parsed.key:
             values[parsed.key] = parsed.value or ""
     return values
@@ -186,12 +200,14 @@ def ensure_env(
     *,
     updates: dict[str, str | None] | None = None,
     defaults: dict[str, str | None] | None = None,
+    remove_keys: set[str] | frozenset[str] | tuple[str, ...] | list[str] | None = None,
     dry_run: bool = False,
     raw_values: bool = False,
 ) -> EnvUpdateResult:
     """Create or update a .env file idempotently with backups."""
     updates = updates or {}
     defaults = defaults or {}
+    remove_keys_set = set(remove_keys or ())
     updates_clean = {k: v for k, v in updates.items() if v is not None}
     defaults_clean = {k: v for k, v in defaults.items() if v not in (None, "")}
 
@@ -199,7 +215,7 @@ def ensure_env(
     existed = path.exists()
     content = path.read_text(encoding="utf-8") if existed else ""
     lines = content.splitlines() if content else []
-    parsed = [_parse_line(line) for line in lines]
+    parsed = [_parse_raw_line(line) if raw_values else _parse_line(line) for line in lines]
 
     last_index: dict[str, int] = {}
     for idx, entry in enumerate(parsed):
@@ -216,6 +232,9 @@ def ensure_env(
             rendered.append(entry.raw)
             continue
         if last_index.get(entry.key) != idx:
+            continue
+        if entry.key in remove_keys_set:
+            updated_keys.append(entry.key)
             continue
         if entry.key in updates_clean:
             rendered.append(

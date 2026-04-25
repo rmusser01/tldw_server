@@ -98,8 +98,8 @@ def test_multi_user_defaults_include_required_secrets() -> None:
     ):
         assert defaults[key]
     assert defaults["AUTH_MODE"] == "multi_user"
-    assert defaults["DATABASE_URL"] == ""
-    assert defaults["JOBS_DB_URL"] == ""
+    assert "DATABASE_URL" not in defaults
+    assert "JOBS_DB_URL" not in defaults
     assert defaults["POSTGRES_USER"] == "tldw_user"
     assert defaults["POSTGRES_DB"] == "tldw_users"
     assert "TestPassword123!" not in "\n".join(defaults.values())
@@ -119,8 +119,8 @@ def test_multi_user_defaults_preserve_existing_postgres_credentials() -> None:
     assert defaults["POSTGRES_USER"] == "custom_user"
     assert defaults["POSTGRES_PASSWORD"] == pg_value
     assert defaults["POSTGRES_DB"] == "custom_db"
-    assert defaults["DATABASE_URL"] == ""
-    assert defaults["JOBS_DB_URL"] == ""
+    assert "DATABASE_URL" not in defaults
+    assert "JOBS_DB_URL" not in defaults
 
 
 def test_multi_user_defaults_url_quote_reserved_postgres_credentials() -> None:
@@ -247,8 +247,8 @@ def test_init_multi_user_profile_masks_admin_password_in_dry_run(
     assert_action_field(actions, "set_env", "ADMIN_USERNAME", "admin")
     assert str(set_env["ADMIN_PASSWORD"]).startswith("*")
     assert str(set_env["POSTGRES_PASSWORD"]).startswith("*")
-    assert set_env["DATABASE_URL"] == ""
-    assert set_env["JOBS_DB_URL"] == ""
+    assert "DATABASE_URL" not in set_env
+    assert "JOBS_DB_URL" not in set_env
 
 
 def test_init_multi_user_profile_reads_admin_env_and_masks_password(
@@ -334,8 +334,8 @@ def test_init_docker_multi_profile_defers_initializer_for_yes(
     assert "inside the container" in initializer["reason"]
     written_env = profiles.env_utils.load_env(env_path)
     assert written_env["POSTGRES_PASSWORD"]
-    assert written_env["DATABASE_URL"] == ""
-    assert written_env["JOBS_DB_URL"] == ""
+    assert "DATABASE_URL" not in written_env
+    assert "JOBS_DB_URL" not in written_env
 
 
 def test_init_docker_multi_profile_clears_stale_database_urls(
@@ -378,9 +378,12 @@ def test_init_docker_multi_profile_clears_stale_database_urls(
 
     assert result.exit_code == 0, result.output
     written_env = profiles.env_utils.load_env(env_path)
+    content = env_path.read_text(encoding="utf-8")
     assert written_env["POSTGRES_PASSWORD"]
-    assert written_env["DATABASE_URL"] == ""
-    assert written_env["JOBS_DB_URL"] == ""
+    assert "DATABASE_URL" not in written_env
+    assert "JOBS_DB_URL" not in written_env
+    assert "DATABASE_URL=" not in content
+    assert "JOBS_DB_URL=" not in content
 
 
 def test_init_docker_multi_profile_writes_raw_env_values_for_compose(
@@ -389,7 +392,7 @@ def test_init_docker_multi_profile_writes_raw_env_values_for_compose(
     repo = tmp_path / "repo"
     env_path = tmp_path / "custom.env"
     admin_secret = _literal("Admin ", "#", "$Dollar", "1!")
-    postgres_secret = _literal("abc", "#def", "$ghi")
+    postgres_secret = _literal("abc ", "#def", "$ghi")
     (repo / "tldw_Server_API" / "Config_Files").mkdir(parents=True)
     (repo / "pyproject.toml").write_text("[project]\nname='tldw-server'\n", encoding="utf-8")
     env_path.write_text(f"POSTGRES_PASSWORD={postgres_secret}\n", encoding="utf-8")
@@ -425,3 +428,44 @@ def test_init_docker_multi_profile_writes_raw_env_values_for_compose(
     assert f"ADMIN_PASSWORD={admin_secret}\n" in content
     assert f'POSTGRES_PASSWORD="{postgres_secret}"' not in content
     assert f'ADMIN_PASSWORD="{admin_secret}"' not in content
+
+
+def test_env_utils_load_env_raw_values_preserves_comment_chars_and_spaces(tmp_path: Path) -> None:
+    env_path = tmp_path / ".env"
+    secret = _literal("abc ", "#def", "$ghi")
+    env_path.write_text(
+        f"# full-line comment\n\nPOSTGRES_PASSWORD={secret}\nADMIN_USERNAME=admin\n",
+        encoding="utf-8",
+    )
+
+    values = profiles.env_utils.load_env(env_path, raw_values=True)
+
+    assert values["POSTGRES_PASSWORD"] == secret
+    assert values["ADMIN_USERNAME"] == "admin"
+
+
+def test_init_without_profile_writes_env_without_profile_guard_crash(tmp_path: Path, monkeypatch) -> None:
+    repo = tmp_path / "repo"
+    (repo / "tldw_Server_API" / "Config_Files").mkdir(parents=True)
+    (repo / "pyproject.toml").write_text("[project]\nname='tldw-server'\n", encoding="utf-8")
+
+    def fail_run(*_args, **_kwargs):
+        raise AssertionError("non-interactive init should not run local AuthNZ initializer")
+
+    monkeypatch.setattr("tldw_Server_API.cli.wizard.cli.subprocess.run", fail_run)
+
+    result = runner.invoke(
+        app,
+        [
+            "init",
+            "--install-dir",
+            str(repo),
+            "--default",
+            "--non-interactive",
+            "--no-format",
+            "--json",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert (repo / ".env").exists()

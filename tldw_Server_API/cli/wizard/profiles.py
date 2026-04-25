@@ -176,10 +176,7 @@ def build_profile_env(
     values["POSTGRES_USER"] = postgres_user
     values["POSTGRES_DB"] = postgres_db
     values["POSTGRES_PASSWORD"] = postgres_password
-    if profile_uses_structured_postgres(profile):
-        values["DATABASE_URL"] = ""
-        values["JOBS_DB_URL"] = ""
-    else:
+    if not profile_uses_structured_postgres(profile):
         database_url = build_postgres_database_url(user=postgres_user, password=postgres_password, db=postgres_db)
         values["DATABASE_URL"] = database_url
         values["JOBS_DB_URL"] = database_url

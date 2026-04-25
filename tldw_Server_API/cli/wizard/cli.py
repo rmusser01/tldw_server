@@ -438,7 +438,10 @@ def init(
         actions.append({"create": str(env_path)})
     actions.append({"ensure_gitignore": [".env", ".env.local", "wizard.log"]})
 
-    existing_env = env_utils.load_env(env_path)
+    uses_structured_postgres = bool(
+        setup_profile and profile_utils.profile_uses_structured_postgres(setup_profile)
+    )
+    existing_env = env_utils.load_env(env_path, raw_values=uses_structured_postgres)
     updates: dict[str, str | None] = {}
     if setup_profile:
         updates.update(
@@ -477,9 +480,6 @@ def init(
             existing_key = env_utils.generate_single_user_api_key()
         updates["SINGLE_USER_API_KEY"] = existing_key
     if auth_mode == "multi_user":
-        uses_structured_postgres = bool(
-            setup_profile and profile_utils.profile_uses_structured_postgres(setup_profile)
-        )
         if uses_structured_postgres:
             db_url = profile_utils.build_postgres_database_url(
                 user=updates.get("POSTGRES_USER") or "tldw_user",
@@ -564,7 +564,8 @@ def init(
     env_utils.ensure_env(
         env_path,
         updates=updates,
-        raw_values=profile_utils.profile_uses_structured_postgres(setup_profile),
+        remove_keys={"DATABASE_URL", "JOBS_DB_URL"} if uses_structured_postgres else None,
+        raw_values=uses_structured_postgres,
     )
 
     # Ensure .gitignore entries
