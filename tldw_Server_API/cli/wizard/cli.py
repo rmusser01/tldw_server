@@ -765,6 +765,7 @@ def verify(
             webui_url=resolved_webui_url,
             env_path=env_path,
             first_value=first_value,
+            check_provider=bool(check_provider),
             timeout=5.0,
         )
         result = {

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
@@ -121,6 +122,12 @@ def _headers_for_profile(profile: SetupProfile, env_values: dict[str, str]) -> d
     return {"X-API-KEY": key}
 
 
+def _env_values_for_profile(env_path: Path) -> dict[str, str]:
+    env_values = env_utils.load_env(env_path)
+    env_values.update(os.environ)
+    return env_values
+
+
 def _login_multi_user(
     base_url: str,
     env_values: dict[str, str],
@@ -138,7 +145,7 @@ def _login_multi_user(
     response = _request(
         "POST",
         base_url,
-        "/api/v1/auth/login",
+        "/api/v1/login",
         data={"username": username, "password": password},
         timeout=timeout,
     )
@@ -195,9 +202,7 @@ def _provider_check(base_url: str, headers: dict[str, str], timeout: float) -> d
         "status_code": response.get("status_code"),
     }
     if not response.get("ok"):
-        result.update({"status": "endpoint_failed", "ok": False})
-        if "error" in response:
-            result["error"] = response["error"]
+        result.update({"status": "endpoint_failed", "ok": False, "error": "request_failed"})
         return result
 
     configured = _configured_provider_count(response.get("body"))
@@ -258,9 +263,10 @@ def run_profile_checks(
     webui_url: str | None,
     env_path: Path,
     first_value: bool,
+    check_provider: bool,
     timeout: float = 5.0,
 ) -> dict[str, Any]:
-    env_values = env_utils.load_env(env_path)
+    env_values = _env_values_for_profile(env_path)
     actions: list[dict[str, Any]] = [
         {"server": {"mode": "existing", "profile": profile.name}},
     ]
@@ -287,13 +293,20 @@ def run_profile_checks(
         login_action, login_headers = _login_multi_user(base_url, env_values, timeout)
         auth_checks["login"] = login_action
         headers = login_headers
-    auth_checks["me"] = _request("GET", base_url, "/api/v1/auth/me", headers=headers, timeout=timeout)
+    auth_checks["me"] = _request("GET", base_url, "/api/v1/me", headers=headers, timeout=timeout)
     actions.append({"auth": {key: _auth_action_summary(value) for key, value in auth_checks.items()}})
 
-    provider = _provider_check(base_url, headers, timeout)
-    actions.append({"chat": provider})
-    if provider.get("status") == "provider_missing":
-        notes.append("No provider key configured; chat verification skipped.")
+    provider_ok = True
+    if check_provider:
+        provider = _provider_check(base_url, headers, timeout)
+        provider_ok = bool(provider.get("ok"))
+        actions.append({"chat": provider})
+        if provider.get("status") == "provider_missing":
+            notes.append("No provider key configured; chat verification skipped.")
+        elif provider.get("status") == "endpoint_failed":
+            notes.append("Provider endpoint failed during verification.")
+    else:
+        notes.append("Provider verification skipped; pass --check-provider to check chat provider configuration.")
 
     first_value_ok = True
     if first_value:
@@ -309,7 +322,7 @@ def run_profile_checks(
 
     endpoints_ok = all(result.get("ok") for result in endpoint_results.values())
     auth_ok = all(result.get("ok") for result in auth_checks.values())
-    status = "ok" if endpoints_ok and auth_ok and first_value_ok and webui_ok else "error"
+    status = "ok" if endpoints_ok and auth_ok and provider_ok and first_value_ok and webui_ok else "error"
     if not endpoints_ok:
         notes.append("One or more API endpoints failed checks.")
     if not auth_ok:

@@ -13,7 +13,7 @@ runner = CliRunner()
 
 
 def test_docker_profile_verify_does_not_spawn_ephemeral_server(monkeypatch) -> None:
-    def fake_run_checks(*, profile, base_url, webui_url, env_path, first_value, timeout):
+    def fake_run_checks(*, profile, base_url, webui_url, env_path, first_value, check_provider, timeout):
         return {
             "status": "ok",
             "actions": [
@@ -54,7 +54,7 @@ def test_verify_first_value_reports_provider_missing(monkeypatch, tmp_path: Path
     env_path = tmp_path / ".env"
     env_path.write_text("AUTH_MODE=single_user\nSINGLE_USER_API_KEY=tldw_test.key\n", encoding="utf-8")
 
-    def fake_run_checks(*, profile, base_url, webui_url, env_path, first_value, timeout):
+    def fake_run_checks(*, profile, base_url, webui_url, env_path, first_value, check_provider, timeout):
         return {
             "status": "ok",
             "actions": [
@@ -242,7 +242,183 @@ def test_profile_checks_do_not_emit_raw_response_bodies(monkeypatch, tmp_path: P
         webui_url=None,
         env_path=env_path,
         first_value=True,
+        check_provider=True,
         timeout=5.0,
     )
 
     assert "SECRET_SHOULD_NOT_LEAK" not in json.dumps(result["actions"])
+
+
+def test_profile_checks_uses_api_v1_login_and_me_routes_with_process_env(monkeypatch, tmp_path: Path) -> None:
+    env_path = tmp_path / ".env"
+    env_path.write_text(
+        "AUTH_MODE=multi_user\nADMIN_USERNAME=file_admin\nADMIN_PASSWORD=file_pass\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("ADMIN_USERNAME", "process_admin")
+    monkeypatch.setenv("ADMIN_PASSWORD", "process_pass")
+    seen: dict[str, object] = {"paths": [], "login_data": None}
+
+    def fake_request(method, _base_url, path, **kwargs):
+        seen["paths"].append(path)
+        if path == "/api/v1/login":
+            seen["login_data"] = kwargs.get("data")
+            return {
+                "url": "http://127.0.0.1:8000/api/v1/login",
+                "status_code": 200,
+                "ok": True,
+                "body": {"access_token": "jwt.token"},
+            }
+        return {
+            "url": f"http://127.0.0.1:8000{path}",
+            "status_code": 200,
+            "ok": True,
+            "body": {},
+        }
+
+    monkeypatch.setattr(profile_verify, "_request", fake_request)
+
+    result = profile_verify.run_profile_checks(
+        profile=profile_verify.SetupProfile(
+            name="docker-multi-postgres",
+            auth_mode="multi_user",
+            docker=True,
+            includes_webui=False,
+            includes_postgres=True,
+        ),
+        base_url="http://127.0.0.1:8000",
+        webui_url=None,
+        env_path=env_path,
+        first_value=False,
+        check_provider=False,
+        timeout=5.0,
+    )
+
+    assert result["status"] == "ok"
+    assert "/api/v1/login" in seen["paths"]
+    assert "/api/v1/me" in seen["paths"]
+    assert "/api/v1/auth/login" not in seen["paths"]
+    assert "/api/v1/auth/me" not in seen["paths"]
+    assert seen["login_data"] == {"username": "process_admin", "password": "process_pass"}
+
+
+def test_profile_checks_check_provider_false_skips_provider_probe(monkeypatch, tmp_path: Path) -> None:
+    env_path = tmp_path / ".env"
+    env_path.write_text("AUTH_MODE=single_user\nSINGLE_USER_API_KEY=file.key\n", encoding="utf-8")
+    seen_paths: list[str] = []
+
+    def fake_request(method, _base_url, path, **_kwargs):
+        seen_paths.append(path)
+        if path == "/api/v1/llm/providers":
+            raise AssertionError("provider endpoint should not be probed")
+        return {
+            "url": f"http://127.0.0.1:8000{path}",
+            "status_code": 200,
+            "ok": True,
+            "body": {},
+        }
+
+    monkeypatch.setattr(profile_verify, "_request", fake_request)
+
+    result = profile_verify.run_profile_checks(
+        profile=profile_verify.SetupProfile(
+            name="local-single",
+            auth_mode="single_user",
+            docker=False,
+            includes_webui=False,
+            includes_postgres=False,
+        ),
+        base_url="http://127.0.0.1:8000",
+        webui_url=None,
+        env_path=env_path,
+        first_value=False,
+        check_provider=False,
+        timeout=5.0,
+    )
+
+    assert result["status"] == "ok"
+    assert "/api/v1/llm/providers" not in seen_paths
+    assert not any("chat" in action for action in result["actions"])
+    assert "Provider verification skipped; pass --check-provider to check chat provider configuration." in result["notes"]
+
+
+def test_provider_endpoint_failure_is_fatal_and_sanitized_when_checked(monkeypatch, tmp_path: Path) -> None:
+    env_path = tmp_path / ".env"
+    env_path.write_text("AUTH_MODE=single_user\nSINGLE_USER_API_KEY=file.key\n", encoding="utf-8")
+
+    def fake_request(method, _base_url, path, **_kwargs):
+        if path == "/api/v1/llm/providers":
+            return {
+                "url": "http://127.0.0.1:8000/api/v1/llm/providers",
+                "ok": False,
+                "error": "SECRET_SHOULD_NOT_LEAK connection exploded",
+            }
+        return {
+            "url": f"http://127.0.0.1:8000{path}",
+            "status_code": 200,
+            "ok": True,
+            "body": {},
+        }
+
+    monkeypatch.setattr(profile_verify, "_request", fake_request)
+
+    result = profile_verify.run_profile_checks(
+        profile=profile_verify.SetupProfile(
+            name="local-single",
+            auth_mode="single_user",
+            docker=False,
+            includes_webui=False,
+            includes_postgres=False,
+        ),
+        base_url="http://127.0.0.1:8000",
+        webui_url=None,
+        env_path=env_path,
+        first_value=False,
+        check_provider=True,
+        timeout=5.0,
+    )
+
+    assert result["status"] == "error"
+    actions_json = json.dumps(result["actions"])
+    assert "SECRET_SHOULD_NOT_LEAK" not in actions_json
+    assert_action_field(result["actions"], "chat", "status", "endpoint_failed")
+    assert_action_field(result["actions"], "chat", "error", "request_failed")
+    assert "Provider endpoint failed during verification." in result["notes"]
+
+
+def test_single_user_header_uses_process_env_over_env_file(monkeypatch, tmp_path: Path) -> None:
+    env_path = tmp_path / ".env"
+    env_path.write_text("AUTH_MODE=single_user\nSINGLE_USER_API_KEY=file.key\n", encoding="utf-8")
+    monkeypatch.setenv("SINGLE_USER_API_KEY", "process.key")
+    seen_headers: dict[str, str] = {}
+
+    def fake_request(method, _base_url, path, **kwargs):
+        if path == "/api/v1/me":
+            seen_headers.update(kwargs.get("headers") or {})
+        return {
+            "url": f"http://127.0.0.1:8000{path}",
+            "status_code": 200,
+            "ok": True,
+            "body": {},
+        }
+
+    monkeypatch.setattr(profile_verify, "_request", fake_request)
+
+    result = profile_verify.run_profile_checks(
+        profile=profile_verify.SetupProfile(
+            name="local-single",
+            auth_mode="single_user",
+            docker=False,
+            includes_webui=False,
+            includes_postgres=False,
+        ),
+        base_url="http://127.0.0.1:8000",
+        webui_url=None,
+        env_path=env_path,
+        first_value=False,
+        check_provider=False,
+        timeout=5.0,
+    )
+
+    assert result["status"] == "ok"
+    assert seen_headers == {"X-API-KEY": "process.key"}
