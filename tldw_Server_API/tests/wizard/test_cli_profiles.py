@@ -119,10 +119,27 @@ def test_multi_user_defaults_preserve_existing_postgres_credentials() -> None:
         },
     )
 
-    expected_url = f"postgresql://custom_user:{pg_value}@postgres:5432/custom_db"
+    expected_url = "postgresql://custom_user:ExistingPostgresPassword1%21@postgres:5432/custom_db"
     assert defaults["POSTGRES_USER"] == "custom_user"
     assert defaults["POSTGRES_PASSWORD"] == pg_value
     assert defaults["POSTGRES_DB"] == "custom_db"
+    assert defaults["DATABASE_URL"] == expected_url
+    assert defaults["JOBS_DB_URL"] == expected_url
+
+
+def test_multi_user_defaults_url_quote_reserved_postgres_credentials() -> None:
+    pg_value = _literal("abc", "@def", ":ghi", "/with", "#chars", "%")
+    defaults = profiles.build_profile_env(
+        profile=profiles.normalize_profile("docker-multi-postgres"),
+        existing_env={
+            "POSTGRES_USER": "custom:user",
+            "POSTGRES_PASSWORD": pg_value,
+            "POSTGRES_DB": "custom/db #1",
+        },
+    )
+
+    expected_url = "postgresql://custom%3Auser:abc%40def%3Aghi%2Fwith%23chars%25@postgres:5432/custom%2Fdb%20%231"
+    assert defaults["POSTGRES_PASSWORD"] == pg_value
     assert defaults["DATABASE_URL"] == expected_url
     assert defaults["JOBS_DB_URL"] == expected_url
 

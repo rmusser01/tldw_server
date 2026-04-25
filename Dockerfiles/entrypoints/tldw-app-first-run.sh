@@ -11,6 +11,7 @@ RUN_AUTH_INIT_ON_START="${TLDW_RUN_AUTH_INIT_ON_START:-1}"
 incoming_auth_mode="${AUTH_MODE:-}"
 incoming_api_key="${SINGLE_USER_API_KEY:-}"
 incoming_database_url="${DATABASE_URL:-}"
+incoming_jobs_db_url="${JOBS_DB_URL:-}"
 
 generate_key() {
   if command -v openssl >/dev/null 2>&1; then
@@ -28,6 +29,41 @@ is_invalid_key() {
       ;;
   esac
   [ "${#key}" -lt 16 ]
+}
+
+env_file_has_nonempty_key() {
+  key="$1"
+  [ -f "$ENV_FILE" ] || return 1
+  awk -v k="$key" '
+    $0 ~ ("^[[:space:]]*(export[[:space:]]+)?" k "[[:space:]]*=") {
+      value = $0
+      sub(/^[^=]*=/, "", value)
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
+      if (value != "" && value != "\"\"") found = 1
+    }
+    END { exit found ? 0 : 1 }
+  ' "$ENV_FILE"
+}
+
+derive_postgres_database_url() {
+  python - <<'PY'
+import os
+import sys
+from urllib.parse import quote
+
+password = os.getenv("POSTGRES_PASSWORD") or ""
+if not password:
+    sys.exit(1)
+
+host = os.getenv("POSTGRES_HOST") or "postgres"
+port = os.getenv("POSTGRES_PORT") or "5432"
+user = os.getenv("POSTGRES_USER") or "tldw_user"
+db = os.getenv("POSTGRES_DB") or "tldw_users"
+
+sys.stdout.write(
+    f"postgresql://{quote(user, safe='')}:{quote(password, safe='')}@{host}:{port}/{quote(db, safe='')}"
+)
+PY
 }
 
 upsert_env() {
@@ -142,6 +178,11 @@ EOF
   echo "[entrypoint] Created $ENV_FILE with generated SINGLE_USER_API_KEY."
 }
 
+env_file_had_database_url=0
+if env_file_has_nonempty_key "DATABASE_URL"; then
+  env_file_had_database_url=1
+fi
+
 ensure_env_file
 
 set -a
@@ -158,15 +199,34 @@ fi
 if [ -n "$incoming_database_url" ]; then
   DATABASE_URL="$incoming_database_url"
 fi
+if [ -n "$incoming_jobs_db_url" ]; then
+  JOBS_DB_URL="$incoming_jobs_db_url"
+fi
 
 AUTH_MODE="${AUTH_MODE:-single_user}"
+if [ "$AUTH_MODE" = "multi_user" ] && \
+  [ -z "$incoming_database_url" ] && \
+  [ "$env_file_had_database_url" = "0" ] && \
+  [ -n "${POSTGRES_PASSWORD:-}" ]; then
+  DATABASE_URL="$(derive_postgres_database_url)"
+fi
 DATABASE_URL="${DATABASE_URL:-sqlite:///./Databases/users.db}"
+if [ "$AUTH_MODE" = "multi_user" ] && [ -z "${JOBS_DB_URL:-}" ]; then
+  JOBS_DB_URL="$DATABASE_URL"
+fi
+export DATABASE_URL
+if [ -n "${JOBS_DB_URL:-}" ]; then
+  export JOBS_DB_URL
+fi
 
 # Derive mode-specific marker so switching AUTH_MODE re-triggers init.
 AUTH_MARKER_FILE="${AUTH_MARKER_DIR}/.authnz_initialized_${AUTH_MODE}"
 
 upsert_env "AUTH_MODE" "$AUTH_MODE"
 upsert_env "DATABASE_URL" "$DATABASE_URL"
+if [ -n "${JOBS_DB_URL:-}" ]; then
+  upsert_env "JOBS_DB_URL" "$JOBS_DB_URL"
+fi
 
 if [ "$AUTH_MODE" = "single_user" ]; then
   current_key="${SINGLE_USER_API_KEY:-}"

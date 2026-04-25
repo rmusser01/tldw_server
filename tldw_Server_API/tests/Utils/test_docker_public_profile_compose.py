@@ -182,8 +182,13 @@ def test_multi_user_compose_exposes_required_auth_env() -> None:
     env = "\n".join(app["environment"])
     for key in (
         "AUTH_MODE=${AUTH_MODE:-multi_user}",
-        "DATABASE_URL=postgresql://${POSTGRES_USER:-tldw_user}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-tldw_users}",
-        "JOBS_DB_URL=postgresql://${POSTGRES_USER:-tldw_user}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-tldw_users}",
+        "DATABASE_URL=${DATABASE_URL:-}",
+        "JOBS_DB_URL=${JOBS_DB_URL:-}",
+        "POSTGRES_HOST=${POSTGRES_HOST:-postgres}",
+        "POSTGRES_PORT=${POSTGRES_PORT:-5432}",
+        "POSTGRES_USER=${POSTGRES_USER:-tldw_user}",
+        "POSTGRES_DB=${POSTGRES_DB:-tldw_users}",
+        "POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}",
         "JWT_SECRET_KEY=${JWT_SECRET_KEY:?JWT_SECRET_KEY is required}",
         "SESSION_ENCRYPTION_KEY=${SESSION_ENCRYPTION_KEY:?SESSION_ENCRYPTION_KEY is required}",
         "ADMIN_USERNAME=${ADMIN_USERNAME:?ADMIN_USERNAME is required}",
@@ -201,12 +206,16 @@ def test_multi_user_compose_requires_single_postgres_password_source() -> None:
 
     _require("TestPassword123!" not in compose_text, "public multi-user compose should not embed a known password")
     _require(
+        "postgresql://" not in app_env,
+        "compose should not construct app DB URLs with raw POSTGRES_PASSWORD interpolation",
+    )
+    _require(
         "POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}" in postgres_env,
         "postgres should require the shared POSTGRES_PASSWORD",
     )
     _require(
-        "${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}" in app_env,
-        "app database URLs should derive from the shared POSTGRES_PASSWORD",
+        "POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}" in app_env,
+        "app should receive the shared POSTGRES_PASSWORD for runtime URL quoting",
     )
 
 
@@ -296,3 +305,38 @@ def test_multi_user_entrypoint_distinguishes_user_probe_failure() -> None:
         "return False" not in script,
         "entrypoint user probe should not convert exceptions into false",
     )
+
+
+def test_multi_user_entrypoint_derives_postgres_urls_with_runtime_quoting() -> None:
+    script = Path("Dockerfiles/entrypoints/tldw-app-first-run.sh").read_text(encoding="utf-8")
+
+    for expected in (
+        "from urllib.parse import quote",
+        "POSTGRES_PASSWORD",
+        "POSTGRES_HOST",
+        "POSTGRES_PORT",
+        "POSTGRES_DB",
+        "JOBS_DB_URL",
+    ):
+        _require(expected in script, f"entrypoint should derive Postgres URLs using {expected}")
+    _require(
+        "quote(" in script,
+        "entrypoint should URL-quote structured Postgres credentials before deriving DATABASE_URL",
+    )
+
+
+def test_dockerignore_excludes_public_setup_env_secrets() -> None:
+    dockerignore = Path(".dockerignore").read_text(encoding="utf-8")
+    patterns = {
+        line.strip()
+        for line in dockerignore.splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    }
+
+    for expected in (
+        ".env",
+        ".env.*",
+        "tldw_Server_API/Config_Files/.env",
+        "tldw_Server_API/Config_Files/.env.*",
+    ):
+        _require(expected in patterns, f".dockerignore should exclude {expected} from image build context")

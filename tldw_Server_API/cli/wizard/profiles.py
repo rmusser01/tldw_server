@@ -6,6 +6,7 @@ import secrets
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import quote
 
 from cryptography.fernet import Fernet
 
@@ -133,6 +134,13 @@ def _existing_or_generated(existing_env: Mapping[str, str], key: str, generator:
     return generator()
 
 
+def _postgres_url(*, user: str, password: str, db: str, host: str = "postgres", port: str = "5432") -> str:
+    return (
+        f"postgresql://{quote(user, safe='')}:{quote(password, safe='')}"
+        f"@{host}:{port}/{quote(db, safe='')}"
+    )
+
+
 def build_profile_env(
     *,
     profile: SetupProfile,
@@ -154,7 +162,7 @@ def build_profile_env(
     postgres_user = existing_env.get("POSTGRES_USER") or "tldw_user"
     postgres_db = existing_env.get("POSTGRES_DB") or "tldw_users"
     postgres_password = _existing_or_generated(existing_env, "POSTGRES_PASSWORD", _postgres_password)
-    database_url = f"postgresql://{postgres_user}:{postgres_password}@postgres:5432/{postgres_db}"
+    database_url = _postgres_url(user=postgres_user, password=postgres_password, db=postgres_db)
     values["POSTGRES_USER"] = postgres_user
     values["POSTGRES_DB"] = postgres_db
     values["POSTGRES_PASSWORD"] = postgres_password
