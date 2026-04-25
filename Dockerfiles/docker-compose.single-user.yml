@@ -10,7 +10,6 @@ services:
       context: ..
       dockerfile: Dockerfiles/Dockerfile.prod
     image: tldw-server:prod
-    container_name: tldw-app
     ports:
       - "8000:8000"
     environment:
@@ -19,6 +18,7 @@ services:
       - tldw_production=${tldw_production:-false}
       - DATABASE_URL=${DATABASE_URL:-sqlite:///./Databases/users.db}
       - JOBS_DB_URL=${JOBS_DB_URL:-}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379}
       - UVICORN_WORKERS=${UVICORN_WORKERS:-2}
       - LOG_LEVEL=${LOG_LEVEL:-info}
     volumes:
@@ -35,9 +35,6 @@ services:
 
   redis:
     image: redis:7-alpine
-    container_name: tldw-redis
-    ports:
-      - "6379:6379"
     command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]

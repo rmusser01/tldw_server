@@ -61,7 +61,6 @@ def test_single_user_compose_app_contract() -> None:
         "app should build from the production Dockerfile at repo root",
     )
     _require_equal(app["image"], "tldw-server:prod", "app image should match the production tag")
-    _require_equal(app["container_name"], "tldw-app", "app container name should be stable")
     _require_equal(app["ports"], ["8000:8000"], "app should publish API port 8000")
     _require_equal(
         app["depends_on"]["redis"]["condition"],
@@ -76,6 +75,7 @@ def test_single_user_compose_app_contract() -> None:
         "tldw_production=${tldw_production:-false}",
         "DATABASE_URL=${DATABASE_URL:-sqlite:///./Databases/users.db}",
         "JOBS_DB_URL=${JOBS_DB_URL:-}",
+        "REDIS_URL=${REDIS_URL:-redis://redis:6379}",
         "UVICORN_WORKERS=${UVICORN_WORKERS:-2}",
         "LOG_LEVEL=${LOG_LEVEL:-info}",
     ):
@@ -103,8 +103,7 @@ def test_single_user_compose_redis_contract() -> None:
     redis = _compose("Dockerfiles/docker-compose.single-user.yml")["services"]["redis"]
 
     _require_equal(redis["image"], "redis:7-alpine", "redis image should use alpine Redis 7")
-    _require_equal(redis["container_name"], "tldw-redis", "redis container name should be stable")
-    _require_equal(redis["ports"], ["6379:6379"], "redis should publish port 6379")
+    _require("ports" not in redis, "single-user Redis should stay internal-only")
     _require_equal(
         redis["command"],
         "redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru",
@@ -127,6 +126,16 @@ def test_single_user_compose_declares_only_required_volumes() -> None:
     volumes = _compose("Dockerfiles/docker-compose.single-user.yml")["volumes"]
 
     _require_equal(set(volumes), {"app-data", "redis_data"}, "single-user compose should only define required volumes")
+
+
+def test_single_user_compose_does_not_pin_container_names() -> None:
+    services = _compose("Dockerfiles/docker-compose.single-user.yml")["services"]
+
+    for service_name, service in services.items():
+        _require(
+            "container_name" not in service,
+            f"{service_name} should not set container_name so COMPOSE_PROJECT_NAME isolation works",
+        )
 
 
 def test_webui_overlay_depends_on_app_health() -> None:
