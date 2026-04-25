@@ -292,3 +292,46 @@ def resolve_rag_request(
         user_id=resolved_storage_user_id,
         feedback_user_id=resolved_feedback_user_id,
     )
+
+
+def resolve_legacy_standard_pipeline_request(
+    *,
+    query: str,
+    search_mode: str,
+    top_k: int,
+    sources: Optional[list[str]] = None,
+    min_score: float = 0.0,
+    index_namespace: Optional[str] = None,
+    rag_profile: Optional[str] = None,
+    user_id: Optional[str] = None,
+    feedback_user_id: Optional[str] = None,
+    enable_generation: bool = True,
+    include_sources: bool = True,
+    include_metadata: bool = True,
+    metadata: Optional[dict[str, Any]] = None,
+) -> ResolvedRAGRequest:
+    """Resolve legacy ``unified_rag_pipeline`` kwargs into the standard contract."""
+
+    payload = dict(metadata or {})
+    payload.update(
+        {
+            "query": query,
+            "strategy": "standard",
+            "sources": list(sources or ["media_db"]),
+            "search_mode": search_mode,
+            "top_k": top_k,
+            "min_score": min_score,
+            "enable_generation": enable_generation,
+            "include_sources": include_sources,
+            "include_metadata": include_metadata,
+        }
+    )
+    return ResolvedRAGRequest(
+        query=query,
+        strategy="standard",
+        payload=payload,
+        index_namespace=index_namespace,
+        rag_profile=rag_profile,
+        user_id=user_id,
+        feedback_user_id=feedback_user_id or user_id,
+    )

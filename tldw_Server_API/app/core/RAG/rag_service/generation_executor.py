@@ -2,20 +2,27 @@ from __future__ import annotations
 
 from typing import Any, Awaitable, Callable
 
+from .request_resolution import ResolvedRAGRequest
 from .result_model import RAGResult
+from .retrieval_plan import RetrievalPlan
 
 
 async def execute_generation_phase(
     *,
-    resolved_request: Any,
+    resolved_request: ResolvedRAGRequest,
+    retrieval_plan: RetrievalPlan,
     derived_evidence: Any,
     generate_answer_fn: Callable[..., Awaitable[Any]],
     generation_context: str,
 ) -> RAGResult:
+    generation_query = resolved_request.query
+    source_documents = derived_evidence.documents
+    generation_prompt = (resolved_request.payload or {}).get("generation_prompt")
+
     answer_payload = await generate_answer_fn(
-        query=resolved_request.query,
+        query=generation_query,
         context=generation_context,
-        generation_prompt=(resolved_request.payload or {}).get("generation_prompt"),
+        generation_prompt=generation_prompt,
         max_generation_tokens=(resolved_request.payload or {}).get("max_generation_tokens"),
     )
     if isinstance(answer_payload, dict):
@@ -32,8 +39,8 @@ async def execute_generation_phase(
     metadata.update(answer_metadata)
 
     return RAGResult(
-        query=resolved_request.query,
-        documents=list(derived_evidence.documents),
+        query=generation_query,
+        documents=list(source_documents),
         generated_answer=generated_answer,
         metadata=metadata,
         chunk_citations=list(derived_evidence.citations),

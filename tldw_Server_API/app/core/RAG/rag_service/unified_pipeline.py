@@ -325,6 +325,14 @@ def otel_span(name: str, *args, **kwargs):
 import contextlib
 
 from .metrics_collector import MetricsCollector, QueryMetrics
+from .evidence_models import RetrievedEvidence
+from .post_retrieval_coordinator import coordinate_standard_result_evidence
+from .request_resolution import (
+    ResolvedRAGRequest,
+    resolve_legacy_standard_pipeline_request,
+)
+from .result_model import RAGResult
+from .retrieval_plan import build_retrieval_plan
 from .types import DataSource, Document
 
 try:
@@ -1072,6 +1080,41 @@ class UnifiedSearchResult:
 UnifiedPipelineResult = Any
 
 
+def build_retrieval_only_result(
+    *,
+    resolved_request: ResolvedRAGRequest,
+    retrieval_plan: RetrievalPlan,
+    retrieval_result: RetrievedEvidence,
+) -> RAGResult:
+    metadata = dict(retrieval_result.metadata or {})
+    metadata.setdefault(
+        "retrieval_plan",
+        {
+            "query": retrieval_plan.query,
+            "sources": list(retrieval_plan.sources),
+            "search_mode": retrieval_plan.search_mode,
+            "top_k": retrieval_plan.top_k,
+            "index_namespace": retrieval_plan.index_namespace,
+        },
+    )
+    return RAGResult(
+        query=resolved_request.query,
+        documents=list(retrieval_result.documents),
+        metadata=metadata,
+    )
+
+
+def _callable_accepts_keyword(fn: Callable[..., Any], keyword: str) -> bool:
+    try:
+        parameters = inspect.signature(fn).parameters
+    except (TypeError, ValueError):
+        return True
+    return keyword in parameters or any(
+        parameter.kind is inspect.Parameter.VAR_KEYWORD
+        for parameter in parameters.values()
+    )
+
+
 _CANONICAL_SOURCE_TO_DATASOURCE: dict[str, DataSource] = {
     "media_db": DataSource.MEDIA_DB,
     "notes": DataSource.NOTES,
@@ -1342,6 +1385,7 @@ async def unified_rag_pipeline(
     # ========== INDEXING / NAMESPACE ==========
     index_namespace: Optional[str] = None,
     retrieval_plan: Optional[RetrievalPlan] = None,
+    resolved_request: Optional[ResolvedRAGRequest] = None,
 
     # ========== QUICK WINS ==========
     highlight_results: bool = False,
@@ -1531,6 +1575,34 @@ async def unified_rag_pipeline(
             reranking_strategy="hybrid"
         )
     """
+
+    request_metadata: dict[str, Any] = {}
+    inbound_metadata = kwargs.get("metadata")
+    if isinstance(inbound_metadata, dict):
+        request_metadata.update(inbound_metadata)
+    if generation_prompt is not None:
+        request_metadata["generation_prompt"] = generation_prompt
+    request_metadata["max_generation_tokens"] = max_generation_tokens
+
+    if resolved_request is None:
+        resolved_request = resolve_legacy_standard_pipeline_request(
+            query=query,
+            search_mode=search_mode,
+            top_k=top_k,
+            sources=sources,
+            min_score=min_score,
+            index_namespace=index_namespace,
+            rag_profile=rag_profile,
+            user_id=user_id,
+            feedback_user_id=feedback_user_id,
+            enable_generation=enable_generation,
+            include_sources=bool(kwargs.get("include_sources", True)),
+            include_metadata=bool(kwargs.get("include_metadata", True)),
+            metadata=request_metadata,
+        )
+
+    if retrieval_plan is None:
+        retrieval_plan = build_retrieval_plan(resolved_request)
 
     retrieval_query = query
     retrieval_sources = sources
@@ -2929,19 +3001,11 @@ async def unified_rag_pipeline(
                             index_namespace=retrieval_index_namespace,
                             collection_names=_execution_collection_names(),
                         )
-                    elif (
-                        retrieval_index_namespace is not None
-                        and effective_retrieval_plan.index_namespace != retrieval_index_namespace
-                    ):
-                        effective_retrieval_plan = replace(
-                            effective_retrieval_plan,
-                            index_namespace=retrieval_index_namespace,
-                        )
 
                     retrieved_evidence = await _resilient_call(
                         "retrieval",
                         execute_retrieval_phase,
-                        resolved_request=SimpleNamespace(query=retrieval_query, user_id=user_id),
+                        resolved_request=resolved_request,
                         retrieval_plan=effective_retrieval_plan,
                         retriever=retriever,
                         retrieval_config=config,
@@ -5333,22 +5397,32 @@ async def unified_rag_pipeline(
                                 max_tokens=max_generation_tokens,
                             )
 
-                        generation_result = await execute_generation_phase(
-                            resolved_request=SimpleNamespace(
-                                query=query,
-                                payload={
-                                    "generation_prompt": generation_prompt,
-                                    "max_generation_tokens": max_generation_tokens,
-                                },
-                            ),
-                            derived_evidence=SimpleNamespace(
+                        resolved_request.payload["generation_prompt"] = generation_prompt
+                        resolved_request.payload["max_generation_tokens"] = max_generation_tokens
+                        generation_phase_kwargs: dict[str, Any] = {
+                            "resolved_request": resolved_request,
+                            "retrieval_plan": retrieval_plan,
+                            "derived_evidence": SimpleNamespace(
                                 documents=list(context_docs),
                                 metadata=dict(result.metadata),
                                 citations=list((result.metadata or {}).get("chunk_citations", []) or []),
                                 verification_report=(result.metadata or {}).get("verification_report"),
                             ),
-                            generate_answer_fn=_generate_standard_answer,
-                            generation_context=context,
+                            "generate_answer_fn": _generate_standard_answer,
+                            "generation_context": context,
+                        }
+                        if not _callable_accepts_keyword(execute_generation_phase, "retrieval_plan"):
+                            generation_phase_kwargs.pop("retrieval_plan")
+
+                        generation_result = await execute_generation_phase(**generation_phase_kwargs)
+                        if isinstance(generation_result, dict):
+                            return coordinate_standard_result_evidence(
+                                generation_result,
+                                resolved_request,
+                            )
+                        generation_result = coordinate_standard_result_evidence(
+                            generation_result,
+                            resolved_request,
                         )
                         result.generated_answer = generation_result.generated_answer
                         result.metadata.update(dict(generation_result.metadata or {}))

@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, Sequence
 
 from .evidence_models import DerivedEvidence, RetrievedEvidence
+from .request_resolution import ResolvedRAGRequest
 
 
 class PostRetrievalCoordinator:
@@ -12,7 +13,7 @@ class PostRetrievalCoordinator:
 
     def derive_evidence(
         self,
-        resolved_request: Any,
+        resolved_request: ResolvedRAGRequest,
         retrieved_evidence: RetrievedEvidence,
         *,
         enable_citations: bool,
@@ -44,17 +45,23 @@ class PostRetrievalCoordinator:
 
 def coordinate_standard_result_evidence(
     result: Any,
-    resolved_request: Any,
+    resolved_request: ResolvedRAGRequest,
     *,
     coordinator: PostRetrievalCoordinator | None = None,
 ) -> Any:
     """Coordinate standard-path evidence without changing API result shape."""
-    result_metadata = dict(getattr(result, "metadata", None) or {})
+    if isinstance(result, dict):
+        result_metadata = dict(result.get("metadata") or {})
+        result_documents = list(result.get("documents") or result.get("sources") or [])
+    else:
+        result_metadata = dict(getattr(result, "metadata", None) or {})
+        result_documents = list(getattr(result, "documents", None) or [])
+
     coordinator_instance = coordinator or PostRetrievalCoordinator()
     coordinated = coordinator_instance.derive_evidence(
         resolved_request,
         RetrievedEvidence(
-            documents=list(getattr(result, "documents", None) or []),
+            documents=result_documents,
             metadata=result_metadata,
         ),
         enable_citations=bool(result_metadata.get("chunk_citations")),
@@ -62,6 +69,20 @@ def coordinate_standard_result_evidence(
         derived_documents=None,
         derived_from_document_ids=None,
     )
+    if isinstance(result, dict):
+        result["documents"] = list(coordinated.documents)
+        updated_metadata = dict(coordinated.metadata)
+        if coordinated.citations:
+            updated_metadata["chunk_citations"] = list(coordinated.citations)
+        if coordinated.verification_report is not None:
+            updated_metadata["verification_report"] = coordinated.verification_report
+        if coordinated.derived_from_document_ids:
+            updated_metadata["derived_from_document_ids"] = list(
+                coordinated.derived_from_document_ids
+            )
+        result["metadata"] = updated_metadata
+        return result
+
     result.documents = list(coordinated.documents)
     updated_metadata = dict(coordinated.metadata)
     if coordinated.citations:
