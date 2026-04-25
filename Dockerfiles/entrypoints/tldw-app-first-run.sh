@@ -263,17 +263,15 @@ sys.stdout.write('1' if asyncio.run(check()) else '0')
 " 2>/dev/null || echo "0")
 
       if [ "$has_users" = "0" ]; then
-        echo ""
-        echo "======================================================================"
-        echo "  WARNING: Multi-user mode with no admin user configured!"
-        echo ""
-        echo "  Set ADMIN_USERNAME and ADMIN_PASSWORD env vars to create"
-        echo "  the first admin user automatically, or run:"
-        echo ""
-        echo "  docker compose exec app python -m \\"
-        echo "    tldw_Server_API.app.core.AuthNZ.create_admin"
-        echo "======================================================================"
-        echo ""
+        echo "" >&2
+        echo "======================================================================" >&2
+        echo "  ERROR: Multi-user mode has no admin user and no admin bootstrap env." >&2
+        echo "" >&2
+        echo "  Set ADMIN_USERNAME and ADMIN_PASSWORD in tldw_Server_API/Config_Files/.env" >&2
+        echo "  before starting the public docker-multi-postgres profile." >&2
+        echo "======================================================================" >&2
+        echo "" >&2
+        exit 1
       fi
     fi
   fi

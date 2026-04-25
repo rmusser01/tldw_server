@@ -165,3 +165,94 @@ def test_webui_overlay_publishes_localhost_only() -> None:
         ["127.0.0.1:8080:3000"],
         "WebUI should publish port 8080 on localhost only",
     )
+
+
+def test_multi_user_compose_mounts_postgres_18_volume_at_parent_dir() -> None:
+    compose = _compose("Dockerfiles/docker-compose.multi-user-postgres.yml")
+    postgres = compose["services"]["postgres"]
+    _require_equal(postgres["image"], "postgres:18-bookworm", "postgres should use Postgres 18 Bookworm")
+    _require(
+        "postgres_data:/var/lib/postgresql" in postgres["volumes"],
+        "postgres should mount postgres_data at the Postgres 18 parent data directory",
+    )
+
+
+def test_multi_user_compose_exposes_required_auth_env() -> None:
+    app = _compose("Dockerfiles/docker-compose.multi-user-postgres.yml")["services"]["app"]
+    env = "\n".join(app["environment"])
+    for key in (
+        "AUTH_MODE=${AUTH_MODE:-multi_user}",
+        "DATABASE_URL=${DATABASE_URL:-postgresql://tldw_user:TestPassword123!@postgres:5432/tldw_users}",
+        "JWT_SECRET_KEY=${JWT_SECRET_KEY:?JWT_SECRET_KEY is required}",
+        "SESSION_ENCRYPTION_KEY=${SESSION_ENCRYPTION_KEY:?SESSION_ENCRYPTION_KEY is required}",
+        "ADMIN_USERNAME=${ADMIN_USERNAME:?ADMIN_USERNAME is required}",
+        "ADMIN_PASSWORD=${ADMIN_PASSWORD:?ADMIN_PASSWORD is required}",
+    ):
+        _require(key in env, f"multi-user app environment should include {key}")
+
+
+def test_multi_user_compose_publishes_api_localhost_only() -> None:
+    app = _compose("Dockerfiles/docker-compose.multi-user-postgres.yml")["services"]["app"]
+
+    _require_equal(
+        app["ports"],
+        ["127.0.0.1:8000:8000"],
+        "multi-user app should publish API port 8000 on localhost only",
+    )
+
+
+def test_multi_user_compose_postgres_and_redis_stay_internal_only() -> None:
+    services = _compose("Dockerfiles/docker-compose.multi-user-postgres.yml")["services"]
+
+    for service_name in ("postgres", "redis"):
+        _require(
+            "ports" not in services[service_name],
+            f"multi-user {service_name} should not publish host ports by default",
+        )
+
+
+def test_multi_user_compose_does_not_pin_container_names() -> None:
+    services = _compose("Dockerfiles/docker-compose.multi-user-postgres.yml")["services"]
+
+    for service_name, service in services.items():
+        _require(
+            "container_name" not in service,
+            f"multi-user service {service_name} should not set container_name "
+            "so COMPOSE_PROJECT_NAME isolation works",
+        )
+
+
+def test_multi_user_compose_app_includes_redis_url() -> None:
+    app = _compose("Dockerfiles/docker-compose.multi-user-postgres.yml")["services"]["app"]
+    env = "\n".join(app["environment"])
+
+    _require(
+        "REDIS_URL=${REDIS_URL:-redis://redis:6379}" in env,
+        "multi-user app should point at internal Redis by default",
+    )
+
+
+def test_multi_user_compose_app_waits_for_postgres_and_redis_health() -> None:
+    app = _compose("Dockerfiles/docker-compose.multi-user-postgres.yml")["services"]["app"]
+
+    _require_equal(
+        app["depends_on"]["postgres"]["condition"],
+        "service_healthy",
+        "multi-user app should wait for postgres health",
+    )
+    _require_equal(
+        app["depends_on"]["redis"]["condition"],
+        "service_healthy",
+        "multi-user app should wait for redis health",
+    )
+
+
+def test_multi_user_entrypoint_errors_when_no_admin_env_and_no_users() -> None:
+    script = Path("Dockerfiles/entrypoints/tldw-app-first-run.sh").read_text(encoding="utf-8")
+    error_message = "ERROR: Multi-user mode has no admin user and no admin bootstrap env."
+    branch_start = script.index('if [ "$has_users" = "0" ]; then')
+    branch_end = script.index("\n      fi", branch_start)
+    no_users_branch = script[branch_start:branch_end]
+
+    _require(error_message in no_users_branch, "entrypoint should explain missing admin bootstrap")
+    _require("exit 1" in no_users_branch, "entrypoint should exit when no users and no admin env exist")
