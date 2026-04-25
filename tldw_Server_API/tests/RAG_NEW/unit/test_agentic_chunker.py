@@ -553,12 +553,15 @@ def test_open_section_anchor_and_table_heuristic():
 
 
 def test_get_media_db_for_structure_uses_shared_factory(monkeypatch):
-    import tldw_Server_API.app.core.RAG.rag_service.agentic_chunker as ac
+    import tldw_Server_API.app.core.RAG.rag_service.agentic_execution as ae
 
     captured: dict[str, object] = {}
 
-    monkeypatch.setattr(ac, "_STRUCT_DB", None)
-    monkeypatch.setattr(ac, "create_media_database", lambda client_id, **kwargs: captured.update({"client_id": client_id, **kwargs}) or "db-sentinel")
+    monkeypatch.setattr(ae, "_STRUCT_DB", None)
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.DB_Management.media_db.api.create_media_database",
+        lambda client_id, **kwargs: captured.update({"client_id": client_id, **kwargs}) or "db-sentinel",
+    )
     monkeypatch.setattr(
         "tldw_Server_API.app.core.config.load_comprehensive_config",
         lambda: {"stub": True},
@@ -568,7 +571,7 @@ def test_get_media_db_for_structure_uses_shared_factory(monkeypatch):
         lambda _cfg: "backend-sentinel",
     )
 
-    db = ac._get_media_db_for_structure()
+    db = ae._get_media_db_for_structure()
 
     assert db == "db-sentinel"
     assert captured == {

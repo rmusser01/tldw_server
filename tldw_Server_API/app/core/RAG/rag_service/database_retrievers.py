@@ -698,6 +698,12 @@ class MediaDBRetriever(BaseRetriever):
             if not validated_path:
                 return None
             return create_media_database("rag_service", db_path=validated_path)
+        except MediaDatabaseError as exc:
+            message = str(exc).lower()
+            if "no such column" in message or "schema" in message:
+                logger.debug("Skipping Media DB adapter attach for incompatible schema: {}", exc)
+                return None
+            raise
         except (
             AttributeError,
             OSError,

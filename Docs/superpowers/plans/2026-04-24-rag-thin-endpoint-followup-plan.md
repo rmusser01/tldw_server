@@ -1,6 +1,6 @@
 # RAG Thin Endpoint Follow-Up Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Preserve the current `dev` RAG fixes, then finish the RAG thin-endpoint follow-up by moving standard, agentic, and streaming orchestration into core-owned modules.
 
@@ -68,7 +68,7 @@ Modify:
 - Modify: `tldw_Server_API/tests/RAG_NEW/unit/test_agentic_chunker_db_error_fallback.py`
 - Modify: `tldw_Server_API/tests/RAG_NEW/test_unified_pipeline.py`
 
-- [ ] **Step 1: Confirm the local comparison refs**
+- [x] **Step 1: Confirm the local comparison refs**
 
 Run:
 
@@ -88,7 +88,7 @@ merge-base prints a commit hash.
 diff lists the branch RAG changes; review the four baseline files before editing.
 ```
 
-- [ ] **Step 2: Restore the outbound policy regression test from current `dev`**
+- [x] **Step 2: Restore the outbound policy regression test from current `dev`**
 
 In `tldw_Server_API/tests/RAG_NEW/unit/test_research_agent.py`, restore this test body if it is absent:
 
@@ -117,7 +117,7 @@ async def test_scrape_url_action_surfaces_shared_policy_block(monkeypatch):
     assert out.error == "Blocked by outbound policy"
 ```
 
-- [ ] **Step 3: Add analytics backend refresh regression tests**
+- [x] **Step 3: Add analytics backend refresh regression tests**
 
 Create `tldw_Server_API/tests/RAG_NEW/unit/test_analytics_db_dev_reconciliation.py`:
 
@@ -200,7 +200,7 @@ def test_analytics_database_tracks_bootstrap_per_backend_target(monkeypatch, tmp
     assert len(db._bootstrapped_backend_targets) == 1
 ```
 
-- [ ] **Step 4: Restore the structure-DB failure fallback regression test**
+- [x] **Step 4: Restore the structure-DB failure fallback regression test**
 
 Create or restore `tldw_Server_API/tests/RAG_NEW/unit/test_agentic_chunker_db_error_fallback.py`:
 
@@ -237,7 +237,7 @@ def test_open_section_falls_back_to_heuristics_on_database_error(monkeypatch):
     assert "Important result text" in section["content"]
 ```
 
-- [ ] **Step 5: Verify rerank debug snapshots remain explicitly opt-in**
+- [x] **Step 5: Verify rerank debug snapshots remain explicitly opt-in**
 
 In `tldw_Server_API/tests/RAG_NEW/test_unified_pipeline.py`, keep or restore these test names and assertions:
 
@@ -281,7 +281,7 @@ async def test_rerank_snapshots_include_truncated_content_when_explicitly_enable
     assert "reranked_documents" in result.metadata
 ```
 
-- [ ] **Step 6: Run the new and restored tests before porting**
+- [x] **Step 6: Run the new and restored tests before porting**
 
 Run:
 
@@ -301,7 +301,7 @@ At least one assertion fails on this branch before the current-dev code is porte
 The failures point to missing analytics backend refresh/bootstrap behavior, missing outbound policy handling, missing structure-DB fallback wiring, or rerank debug snapshot leakage.
 ```
 
-- [ ] **Step 7: Port the analytics hardening from current `dev`**
+- [x] **Step 7: Port the analytics hardening from current `dev`**
 
 In `tldw_Server_API/app/core/RAG/rag_service/analytics_db.py`, port the current-`dev` behavior from `09560db87`:
 
@@ -349,7 +349,7 @@ class AnalyticsDatabase:
 
 Keep the existing table/index creation SQL from the current branch; move that SQL into `_bootstrap_backend_schema(self, backend)` if the current branch does not already expose the helper. All analytics read/write methods must use `self.backend`, not `self._backend`, so shared content backends refresh during runtime.
 
-- [ ] **Step 8: Re-run the Phase 0 focused tests**
+- [x] **Step 8: Re-run the Phase 0 focused tests**
 
 Run:
 
@@ -368,7 +368,7 @@ Expected:
 All selected tests pass.
 ```
 
-- [ ] **Step 9: Run the Phase 0 branch-vs-`dev` checkpoint**
+- [x] **Step 9: Run the Phase 0 branch-vs-`dev` checkpoint**
 
 Run:
 
@@ -390,7 +390,7 @@ The structure-DB failure fallback test is present.
 The rerank debug snapshot opt-in tests are present.
 ```
 
-- [ ] **Step 10: Commit Phase 0**
+- [x] **Step 10: Commit Phase 0**
 
 Run:
 
@@ -423,7 +423,7 @@ Expected:
 - Modify: `tldw_Server_API/app/core/RAG/rag_service/generation_executor.py`
 - Modify: `tldw_Server_API/app/core/RAG/rag_service/post_retrieval_coordinator.py`
 
-- [ ] **Step 1: Write the contract identity tests**
+- [x] **Step 1: Write the contract identity tests**
 
 Create `tldw_Server_API/tests/RAG_NEW/unit/test_standard_core_contract_threading.py`:
 
@@ -557,7 +557,7 @@ async def test_unified_pipeline_builds_single_legacy_resolved_request(monkeypatc
 
 These constructors match the current local definitions of `ResolvedRAGRequest` and `RetrievalPlan`.
 
-- [ ] **Step 2: Run the contract tests to verify failure**
+- [x] **Step 2: Run the contract tests to verify failure**
 
 Run:
 
@@ -571,7 +571,7 @@ Expected:
 FAIL: the current pipeline rebuilds or omits canonical contract objects before all standard core phases see them.
 ```
 
-- [ ] **Step 3: Add a legacy compatibility resolver at the pipeline boundary**
+- [x] **Step 3: Add a legacy compatibility resolver at the pipeline boundary**
 
 In `tldw_Server_API/app/core/RAG/rag_service/request_resolution.py`, add a helper that converts legacy `unified_rag_pipeline` keyword arguments into the same `ResolvedRAGRequest` type used by endpoint requests:
 
@@ -619,7 +619,7 @@ def resolve_legacy_standard_pipeline_request(
 
 Do not create `SimpleNamespace` request contracts in executors.
 
-- [ ] **Step 4: Update `unified_pipeline.py` to own standard orchestration**
+- [x] **Step 4: Update `unified_pipeline.py` to own standard orchestration**
 
 In `tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py`, add `resolved_request` next to the existing internal `retrieval_plan` parameter:
 
@@ -707,7 +707,7 @@ return coordinate_standard_result_evidence(result, resolved_request)
 
 Preserve the public return shape.
 
-- [ ] **Step 5: Update standard executors to accept canonical objects**
+- [x] **Step 5: Update standard executors to accept canonical objects**
 
 In `retrieval_executor.py`, make `execute_retrieval_phase` require `resolved_request` and `retrieval_plan` keyword arguments:
 
@@ -744,7 +744,7 @@ async def execute_generation_phase(
 
 Remove fallback construction of request-like objects inside these executors. Compatibility belongs in `resolve_legacy_standard_pipeline_request`.
 
-- [ ] **Step 6: Run the standard contract tests**
+- [x] **Step 6: Run the standard contract tests**
 
 Run:
 
@@ -758,7 +758,7 @@ Expected:
 All tests in test_standard_core_contract_threading.py pass.
 ```
 
-- [ ] **Step 7: Run existing standard RAG tests**
+- [x] **Step 7: Run existing standard RAG tests**
 
 Run:
 
@@ -777,7 +777,7 @@ Expected:
 All selected standard pipeline tests pass.
 ```
 
-- [ ] **Step 8: Run the Phase 1 branch-vs-`dev` checkpoint**
+- [x] **Step 8: Run the Phase 1 branch-vs-`dev` checkpoint**
 
 Run:
 
@@ -796,7 +796,7 @@ Expected:
 The diff is limited to the planned standard-core contract threading and previously approved branch work.
 ```
 
-- [ ] **Step 9: Commit Phase 1**
+- [x] **Step 9: Commit Phase 1**
 
 Run:
 
@@ -825,7 +825,7 @@ Expected:
 - Modify: `tldw_Server_API/tests/RAG_NEW/unit/test_rag_endpoint_contract_cleanup.py`
 - Modify: `Docs/RAG/ARCHITECTURE_REVIEW.md`
 
-- [ ] **Step 1: Write the endpoint-boundary regression test**
+- [x] **Step 1: Write the endpoint-boundary regression test**
 
 In `tldw_Server_API/tests/RAG_NEW/unit/test_rag_endpoint_contract_cleanup.py`, add:
 
@@ -844,7 +844,7 @@ def test_standard_endpoint_does_not_import_core_evidence_coordinator():
 
 This test guards the endpoint boundary by source inspection because the regression was architectural: the endpoint was doing core post-retrieval work.
 
-- [ ] **Step 2: Run the endpoint cleanup test to verify failure**
+- [x] **Step 2: Run the endpoint cleanup test to verify failure**
 
 Run:
 
@@ -860,7 +860,7 @@ Expected:
 FAIL before endpoint imports and post-processing are removed.
 ```
 
-- [ ] **Step 3: Remove standard post-processing from the endpoint**
+- [x] **Step 3: Remove standard post-processing from the endpoint**
 
 In `tldw_Server_API/app/api/v1/endpoints/rag_unified.py`:
 
@@ -889,7 +889,7 @@ return rag_result_to_response(rag_result_from_unified_search_result(core_result)
 
 The endpoint must only validate, resolve, delegate, and map.
 
-- [ ] **Step 4: Update architecture review notes**
+- [x] **Step 4: Update architecture review notes**
 
 In `Docs/RAG/ARCHITECTURE_REVIEW.md`, add a short entry under the RAG review record:
 
@@ -901,7 +901,7 @@ In `Docs/RAG/ARCHITECTURE_REVIEW.md`, add a short entry under the RAG review rec
 - Current-`dev` RAG fixes were reconciled before this refactor: analytics backend bootstrap, shared outbound policy handling, structure-DB fallback, and rerank debug snapshot gating.
 ```
 
-- [ ] **Step 5: Run endpoint and contract tests**
+- [x] **Step 5: Run endpoint and contract tests**
 
 Run:
 
@@ -918,7 +918,7 @@ Expected:
 All selected endpoint-boundary and standard contract tests pass.
 ```
 
-- [ ] **Step 6: Commit Phase 1 endpoint cleanup**
+- [x] **Step 6: Commit Phase 1 endpoint cleanup**
 
 Run:
 
@@ -948,7 +948,7 @@ Expected:
 - Modify: `tldw_Server_API/tests/RAG_NEW/unit/test_agentic_execution.py`
 - Modify: `tldw_Server_API/tests/RAG_NEW/unit/test_agentic_chunker_db_error_fallback.py`
 
-- [ ] **Step 1: Write the import-boundary and fallback tests**
+- [x] **Step 1: Write the import-boundary and fallback tests**
 
 Create `tldw_Server_API/tests/RAG_NEW/unit/test_agentic_shell_ownership.py`:
 
@@ -998,7 +998,7 @@ def test_open_section_uses_core_structure_db_resolver_and_falls_back(monkeypatch
     assert "Result text" in result["content"]
 ```
 
-- [ ] **Step 2: Run the agentic ownership tests to verify failure**
+- [x] **Step 2: Run the agentic ownership tests to verify failure**
 
 Run:
 
@@ -1012,7 +1012,7 @@ Expected:
 FAIL before AgenticConfig and the structure-DB resolver are owned by agentic_execution.py without reverse shell imports.
 ```
 
-- [ ] **Step 3: Move `AgenticConfig` into `agentic_execution.py`**
+- [x] **Step 3: Move `AgenticConfig` into `agentic_execution.py`**
 
 In `tldw_Server_API/app/core/RAG/rag_service/agentic_execution.py`, define the config near the other public agentic core types:
 
@@ -1055,7 +1055,7 @@ class AgenticConfig:
 
 The moved type preserves the current constructor compatibility for existing API and tests.
 
-- [ ] **Step 4: Move the structure-DB resolver into `agentic_execution.py`**
+- [x] **Step 4: Move the structure-DB resolver into `agentic_execution.py`**
 
 In `agentic_execution.py`, own the resolver and catch database lookup errors inside core:
 
@@ -1082,7 +1082,7 @@ def _lookup_section_from_structure_index(document_id: str, section_title: str) -
 
 Keep existing method names and database calls where they differ locally. The invariant is that `AgenticToolbox.open_section()` first attempts the core resolver and then falls back to heuristic section extraction when the resolver returns `None` or raises a database-layer exception.
 
-- [ ] **Step 5: Turn `agentic_chunker.py` into a compatibility shell**
+- [x] **Step 5: Turn `agentic_chunker.py` into a compatibility shell**
 
 In `tldw_Server_API/app/core/RAG/rag_service/agentic_chunker.py`, remove owned definitions that now live in core execution and re-export them:
 
@@ -1104,7 +1104,7 @@ __all__ = [
 
 Keep chunking-only helpers in `agentic_chunker.py` if they are not part of execution/toolbox ownership. Do not import `agentic_chunker.py` from `agentic_execution.py`.
 
-- [ ] **Step 6: Update tests to patch the core resolver**
+- [x] **Step 6: Update tests to patch the core resolver**
 
 In `tldw_Server_API/tests/RAG_NEW/unit/test_agentic_execution.py` and `tldw_Server_API/tests/RAG_NEW/unit/test_agentic_chunker_db_error_fallback.py`, patch:
 
@@ -1120,7 +1120,7 @@ monkeypatch.setattr(agentic_chunker, "_get_media_db_for_structure", fake_resolve
 
 The shell re-export exists for import compatibility; core tests must target the core module.
 
-- [ ] **Step 7: Run agentic unit tests**
+- [x] **Step 7: Run agentic unit tests**
 
 Run:
 
@@ -1138,7 +1138,7 @@ Expected:
 All selected agentic ownership and fallback tests pass.
 ```
 
-- [ ] **Step 8: Run agentic API and streaming parity tests**
+- [x] **Step 8: Run agentic API and streaming parity tests**
 
 Run:
 
@@ -1155,7 +1155,7 @@ Expected:
 All selected agentic integration and stream parity tests pass, or tests are skipped only for declared local-service prerequisites.
 ```
 
-- [ ] **Step 9: Run the Phase 2 branch-vs-`dev` checkpoint**
+- [x] **Step 9: Run the Phase 2 branch-vs-`dev` checkpoint**
 
 Run:
 
@@ -1173,7 +1173,7 @@ Expected:
 The diff shows agentic execution owning config/toolbox/resolver behavior and agentic_chunker.py retaining only compatibility-shell or chunking responsibilities.
 ```
 
-- [ ] **Step 10: Commit Phase 2**
+- [x] **Step 10: Commit Phase 2**
 
 Run:
 
@@ -1206,7 +1206,7 @@ Expected:
 - Modify: `tldw_Server_API/tests/RAG_NEW/unit/test_rag_endpoint_contract_cleanup.py`
 - Modify: `tldw_Server_API/tests/RAG_NEW/unit/test_rag_stream_parity.py`
 
-- [ ] **Step 1: Write streaming executor unit tests**
+- [x] **Step 1: Write streaming executor unit tests**
 
 Create `tldw_Server_API/tests/RAG_NEW/unit/test_streaming_executor.py`:
 
@@ -1294,7 +1294,7 @@ async def test_stream_rag_events_emits_structured_error():
 
 The event type assertions define the stable core stream boundary.
 
-- [ ] **Step 2: Write endpoint streaming delegation test**
+- [x] **Step 2: Write endpoint streaming delegation test**
 
 In `tldw_Server_API/tests/RAG_NEW/unit/test_rag_endpoint_contract_cleanup.py`, add:
 
@@ -1316,7 +1316,7 @@ def test_streaming_endpoint_delegates_event_generation_to_core():
 
 The invariant is that the streaming endpoint frames core events; it does not run standard or agentic orchestration inline.
 
-- [ ] **Step 3: Run streaming tests to verify failure**
+- [x] **Step 3: Run streaming tests to verify failure**
 
 Run:
 
@@ -1333,7 +1333,7 @@ Expected:
 FAIL before streaming_executor.py exists and before the endpoint delegates stream event generation.
 ```
 
-- [ ] **Step 4: Add `streaming_executor.py`**
+- [x] **Step 4: Add `streaming_executor.py`**
 
 Create `tldw_Server_API/app/core/RAG/rag_service/streaming_executor.py`:
 
@@ -1413,7 +1413,7 @@ async def stream_rag_events(
 
 Keep provider, DB, auth, and cancellation objects inside `extra_context` so the endpoint can pass dependencies without the executor depending on FastAPI types.
 
-- [ ] **Step 5: Update the endpoint to frame core stream events**
+- [x] **Step 5: Update the endpoint to frame core stream events**
 
 In `tldw_Server_API/app/api/v1/endpoints/rag_unified.py`, import:
 
@@ -1440,7 +1440,7 @@ return StreamingResponse(
 
 The endpoint must not contain branching logic for standard vs agentic stream orchestration.
 
-- [ ] **Step 6: Run streaming executor tests**
+- [x] **Step 6: Run streaming executor tests**
 
 Run:
 
@@ -1457,7 +1457,7 @@ Expected:
 All selected streaming executor and endpoint delegation tests pass.
 ```
 
-- [ ] **Step 7: Run existing streaming parity tests**
+- [x] **Step 7: Run existing streaming parity tests**
 
 Run:
 
@@ -1474,7 +1474,7 @@ Expected:
 All selected streaming parity and agentic API tests pass, or tests are skipped only for declared local-service prerequisites.
 ```
 
-- [ ] **Step 8: Run the Phase 3 branch-vs-`dev` checkpoint**
+- [x] **Step 8: Run the Phase 3 branch-vs-`dev` checkpoint**
 
 Run:
 
@@ -1493,7 +1493,7 @@ Expected:
 The diff shows a new core streaming executor and endpoint changes limited to NDJSON framing plus dependency passing.
 ```
 
-- [ ] **Step 9: Commit Phase 3**
+- [x] **Step 9: Commit Phase 3**
 
 Run:
 
@@ -1522,7 +1522,7 @@ Expected:
 
 - Modify: `Docs/RAG/ARCHITECTURE_REVIEW.md`
 
-- [ ] **Step 1: Update the review record**
+- [x] **Step 1: Update the review record**
 
 In `Docs/RAG/ARCHITECTURE_REVIEW.md`, append:
 
@@ -1536,7 +1536,7 @@ In `Docs/RAG/ARCHITECTURE_REVIEW.md`, append:
 - Endpoint responsibilities are now validation, dependency resolution, core delegation, response mapping, and HTTP stream framing.
 ```
 
-- [ ] **Step 2: Run focused RAG regression tests**
+- [x] **Step 2: Run focused RAG regression tests**
 
 Run:
 
@@ -1562,7 +1562,7 @@ Expected:
 All selected focused tests pass.
 ```
 
-- [ ] **Step 3: Run broader RAG tests**
+- [x] **Step 3: Run broader RAG tests**
 
 Run:
 
@@ -1576,7 +1576,7 @@ Expected:
 All RAG_NEW tests pass, or environment-dependent tests are skipped with declared skip reasons.
 ```
 
-- [ ] **Step 4: Run security validation on touched code**
+- [x] **Step 4: Run security validation on touched code**
 
 Run:
 
@@ -1594,7 +1594,7 @@ Expected:
 Bandit completes successfully and reports no new high or medium findings in touched code.
 ```
 
-- [ ] **Step 5: Run final branch-vs-`dev` review**
+- [x] **Step 5: Run final branch-vs-`dev` review**
 
 Run:
 
@@ -1613,7 +1613,7 @@ The diff contains the planned reconciliation tests, standard core ownership, age
 No current-dev regression tests are deleted.
 ```
 
-- [ ] **Step 6: Check formatting and whitespace**
+- [x] **Step 6: Check formatting and whitespace**
 
 Run:
 
@@ -1627,7 +1627,7 @@ Expected:
 No output.
 ```
 
-- [ ] **Step 7: Commit final review record**
+- [x] **Step 7: Commit final review record**
 
 Run:
 
@@ -1642,7 +1642,7 @@ Expected:
 [codex/rag-module-review <hash>] docs: record rag thin endpoint follow-up
 ```
 
-- [ ] **Step 8: Capture final status**
+- [x] **Step 8: Capture final status**
 
 Run:
 

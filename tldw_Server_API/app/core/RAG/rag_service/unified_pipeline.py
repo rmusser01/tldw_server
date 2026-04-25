@@ -1667,6 +1667,12 @@ async def unified_rag_pipeline(
             retrieval_min_score = float(retrieval_plan.min_score)
         retrieval_index_namespace = _planned_index_namespace(retrieval_plan)
 
+    query_expansion_corpus = (
+        retrieval_plan.index_namespace
+        if retrieval_plan is not None and retrieval_plan.index_namespace is not None
+        else index_namespace
+    )
+
     def _retrieval_plan_for(query_text: str) -> Optional[RetrievalPlan]:
         if retrieval_plan is None:
             return None
@@ -2520,7 +2526,7 @@ async def unified_rag_pipeline(
                         cached = rc.get(
                             retrieval_query,
                             intent=intent_label,
-                            corpus=retrieval_index_namespace,
+                            corpus=query_expansion_corpus,
                         )
                         if cached:
                             cached_rewrites = [c for c in cached if isinstance(c, str) and c.strip()]
@@ -2531,11 +2537,11 @@ async def unified_rag_pipeline(
                 strategies = (expansion_strategies or ["acronym", "synonym"]).copy()
                 expanded_variants: list[str] = []
                 if multi_strategy_expansion:
-                    if retrieval_index_namespace:
+                    if query_expansion_corpus:
                         expanded = await multi_strategy_expansion(
                             retrieval_query,
                             strategies=strategies,
-                            corpus=retrieval_index_namespace,
+                            corpus=query_expansion_corpus,
                         )
                     else:
                         # Avoid passing None to preserve expected call signature in tests
@@ -3021,17 +3027,53 @@ async def unified_rag_pipeline(
                             collection_names["kanban"] = f"user_{user_key}_kanban_embeddings"
                         return collection_names
 
-                    effective_retrieval_plan = _retrieval_plan_for(retrieval_query)
-                    if effective_retrieval_plan is None:
-                        effective_retrieval_plan = RetrievalPlan(
-                            query=retrieval_query,
-                            sources=tuple(str(source) for source in retrieval_sources),
-                            search_mode=str(retrieval_search_mode),
-                            top_k=int(retrieval_top_k),
-                            min_score=float(retrieval_min_score),
-                            index_namespace=retrieval_index_namespace,
-                            collection_names=_execution_collection_names(),
+                    def _effective_retrieval_plan_for_query(
+                        query_text: str,
+                        *,
+                        top_k_override: Optional[int] = None,
+                    ) -> RetrievalPlan:
+                        plan = _retrieval_plan_for(query_text)
+                        if plan is None:
+                            plan = RetrievalPlan(
+                                query=query_text,
+                                sources=tuple(str(source) for source in retrieval_sources),
+                                search_mode=str(retrieval_search_mode),
+                                top_k=int(retrieval_top_k),
+                                min_score=float(retrieval_min_score),
+                                index_namespace=retrieval_index_namespace,
+                                collection_names=_execution_collection_names(),
+                            )
+                        if top_k_override is not None:
+                            try:
+                                return replace(plan, top_k=max(1, int(top_k_override)))
+                            except (TypeError, ValueError):
+                                return plan
+                        return plan
+
+                    async def _execute_retrieval_variant(
+                        component: str,
+                        query_text: str,
+                        *,
+                        retrieval_cfg: Optional[Any] = None,
+                        top_k_override: Optional[int] = None,
+                    ) -> list[Document]:
+                        evidence = await _resilient_call(
+                            component,
+                            execute_retrieval_phase,
+                            resolved_request=resolved_request,
+                            retrieval_plan=_effective_retrieval_plan_for_query(
+                                query_text,
+                                top_k_override=top_k_override,
+                            ),
+                            retriever=retriever,
+                            retrieval_config=retrieval_cfg or config,
+                            allowed_media_ids=include_media_ids,
+                            allowed_note_ids=include_note_ids,
                         )
+                        evidence_docs = getattr(evidence, "documents", None)
+                        return list(evidence_docs or [])
+
+                    effective_retrieval_plan = _effective_retrieval_plan_for_query(retrieval_query)
 
                     retrieved_evidence = await _resilient_call(
                         "retrieval",
@@ -3126,34 +3168,18 @@ async def unified_rag_pipeline(
                             exp_docs: list[Document] = []
                             for eq in extra_queries:
                                 try:
-                                    if retrieval_search_mode == "hybrid" and hybrid_supported and rh is not None:
-                                        eq_docs = await _resilient_call(
-                                            "retrieval_expansion",
-                                            rh,
-                                            query=eq,
-                                            alpha=hybrid_alpha,
-                                            index_namespace=retrieval_index_namespace,
-                                            allowed_media_ids=include_media_ids,
-                                        )
-                                    else:
-                                        try:
-                                            exp_cfg = replace(
-                                                config,
-                                                max_results=max(1, int(retrieval_top_k or 1)),
-                                            )
-                                        except TypeError:
-                                            exp_cfg = config
-                                        eq_docs = await _resilient_call(
-                                            "retrieval_expansion",
-                                            retriever.retrieve,
-                                            query=eq,
-                                            sources=data_sources,
-                                            config=exp_cfg,
-                                            index_namespace=retrieval_index_namespace,
-                                            retrieval_plan=_retrieval_plan_for(eq),
-                                            allowed_media_ids=include_media_ids,
-                                            allowed_note_ids=include_note_ids,
-                                        )
+                                    try:
+                                        expansion_top_k = max(1, int(retrieval_top_k or 1))
+                                        exp_cfg = replace(config, max_results=expansion_top_k)
+                                    except (TypeError, ValueError):
+                                        expansion_top_k = None
+                                        exp_cfg = config
+                                    eq_docs = await _execute_retrieval_variant(
+                                        "retrieval_expansion",
+                                        eq,
+                                        retrieval_cfg=exp_cfg,
+                                        top_k_override=expansion_top_k,
+                                    )
                                     if eq_docs:
                                         exp_docs.extend(eq_docs)
                                 except (
@@ -3225,28 +3251,11 @@ async def unified_rag_pipeline(
                             if prf_meta.get("enabled") and prf_query and prf_query != retrieval_query:
                                 remaining_slots = max(0, retrieval_top_k - len(result.documents))
                                 if remaining_slots > 0:
-                                    # Use the same retrieval path as the primary call
-                                    if retrieval_search_mode == "hybrid" and hybrid_supported and rh is not None:
-                                        prf_docs = await _resilient_call(
-                                            "retrieval_prf",
-                                            rh,
-                                            query=prf_query,
-                                            alpha=hybrid_alpha,
-                                            index_namespace=retrieval_index_namespace,
-                                            allowed_media_ids=include_media_ids,
-                                        )
-                                    else:
-                                        prf_docs = await _resilient_call(
-                                            "retrieval_prf",
-                                            retriever.retrieve,
-                                            query=prf_query,
-                                            sources=data_sources,
-                                            config=config,
-                                            index_namespace=retrieval_index_namespace,
-                                            retrieval_plan=_retrieval_plan_for(prf_query),
-                                            allowed_media_ids=include_media_ids,
-                                            allowed_note_ids=include_note_ids,
-                                        )
+                                    prf_docs = await _execute_retrieval_variant(
+                                        "retrieval_prf",
+                                        prf_query,
+                                        top_k_override=remaining_slots,
+                                    )
                                     prf_docs = prf_docs or []
                                     existing_ids = {d.id for d in result.documents}
                                     added = 0
@@ -3365,16 +3374,11 @@ async def unified_rag_pipeline(
                                         sq_cfg = replace(config, max_results=subquery_max_results)
                                     except TypeError:
                                         sq_cfg = config
-                                    res = await _resilient_call(
+                                    res = await _execute_retrieval_variant(
                                         "retrieval_decomposition",
-                                        retriever.retrieve,
-                                        query=sq,
-                                        sources=data_sources,
-                                        config=sq_cfg,
-                                        index_namespace=retrieval_index_namespace,
-                                        retrieval_plan=_retrieval_plan_for(sq),
-                                        allowed_media_ids=include_media_ids,
-                                        allowed_note_ids=include_note_ids,
+                                        sq,
+                                        retrieval_cfg=sq_cfg,
+                                        top_k_override=subquery_max_results,
                                     )
                                     return res if isinstance(res, list) else []
 
@@ -3756,12 +3760,8 @@ async def unified_rag_pipeline(
                 if followups:
                     # Run in parallel
                     tasks = [
-                        retriever.retrieve(
-                            query=fq,
-                            sources=data_sources,
-                            config=config,
-                            index_namespace=index_namespace,
-                        ) for fq in followups
+                        _execute_retrieval_variant("retrieval_followup", fq)
+                        for fq in followups
                     ]
                     try:
                         follow_results = await asyncio.gather(*tasks)
