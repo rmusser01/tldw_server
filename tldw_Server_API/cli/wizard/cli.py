@@ -5,7 +5,8 @@ import difflib
 import json
 import os
 import socket
-import subprocess
+# The wizard starts fixed Python module commands with shell=False.
+import subprocess  # nosec B404
 import sys
 import time
 from datetime import datetime, timezone
@@ -17,6 +18,7 @@ import typer
 from loguru import logger
 from tldw_Server_API.app.core.testing import is_truthy
 
+from . import profile_verify
 from . import profiles as profile_utils
 from .utils import detect as detect_utils
 from .utils import env as env_utils
@@ -358,7 +360,7 @@ def _start_ephemeral_server(port: int, env: dict[str, str]) -> subprocess.Popen:
         "--log-level",
         "warning",
     ]
-    return subprocess.Popen(cmd, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return subprocess.Popen(cmd, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)  # nosec B603
 
 
 def _stop_process(proc: subprocess.Popen, timeout: float = 5.0) -> None:
@@ -518,13 +520,13 @@ def init(
                 initializer_action = {"command": " ".join(cmd), "status": "would_prompt"}
         else:
             if yes:
-                proc = subprocess.run(cmd, check=False, env=_build_initializer_env(env_path, updates))
+                proc = subprocess.run(cmd, check=False, env=_build_initializer_env(env_path, updates))  # nosec
                 initializer_action = {"command": " ".join(cmd), "returncode": proc.returncode}
             elif non_interactive or not sys.stdin.isatty():
                 initializer_action = {"command": " ".join(cmd), "status": "skipped_non_interactive"}
             else:
                 if typer.confirm("Run AuthNZ initializer now?", default=False):
-                    proc = subprocess.run(cmd, check=False, env=_build_initializer_env(env_path, updates))
+                    proc = subprocess.run(cmd, check=False, env=_build_initializer_env(env_path, updates))  # nosec
                     initializer_action = {"command": " ".join(cmd), "returncode": proc.returncode}
                 else:
                     initializer_action = {"command": "AuthNZ initializer", "status": "skipped"}
@@ -658,13 +660,13 @@ def auth(
                 notes.append("Non-interactive session; skipping AuthNZ initializer prompt.")
         else:
             if yes:
-                proc = subprocess.run(cmd, check=False)
+                proc = subprocess.run(cmd, check=False)  # nosec B603
                 initializer_action = {"command": " ".join(cmd), "returncode": proc.returncode}
                 if proc.returncode != 0:
                     notes.append("AuthNZ initializer failed; see output for details.")
             elif sys.stdin.isatty():
                 if typer.confirm("Run AuthNZ initializer now?", default=False):
-                    proc = subprocess.run(cmd, check=False)
+                    proc = subprocess.run(cmd, check=False)  # nosec B603
                     initializer_action = {"command": " ".join(cmd), "returncode": proc.returncode}
                     if proc.returncode != 0:
                         notes.append("AuthNZ initializer failed; see output for details.")
@@ -699,6 +701,11 @@ def verify(
     json_out: bool = typer.Option(False, "--json", help="Emit machine-readable JSON output"),
     check_provider: bool = typer.Option(False, "--check-provider", help="Attempt provider checks (offline/mock in scaffold)"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Preview actions without writing"),
+    profile: str | None = typer.Option(None, "--profile", help="Public setup profile"),
+    env_file: Path | None = typer.Option(None, "--env-file", help="Explicit env file path"),
+    base_url: str | None = typer.Option(None, "--base-url", help="API base URL"),
+    webui_url: str | None = typer.Option(None, "--webui-url", help="WebUI base URL"),
+    first_value: bool = typer.Option(False, "--first-value", help="Run first ingest/search checks"),
 ):
     """Run verification checks (Stage 4)."""
     facts: dict[str, Any] = {
@@ -707,6 +714,73 @@ def verify(
     }
     notes: list[str] = []
     actions: list[dict[str, Any]] = []
+
+    if profile:
+        try:
+            setup_profile = profile_utils.normalize_profile(profile)
+        except ValueError as exc:
+            result = {
+                "command": "verify",
+                "status": "error",
+                "facts": facts,
+                "actions": [{"profile": {"valid": False, "reason": str(exc)}}],
+                "notes": [str(exc)],
+                "check_provider": bool(check_provider),
+                "dry_run": dry_run,
+            }
+            _emit(result, json_out)
+            raise typer.Exit(2) from exc
+
+        env_path = profile_utils.resolve_env_path(
+            profile=setup_profile,
+            start_dir=Path.cwd(),
+            explicit_env_file=env_file,
+        )
+        resolved_base_url = base_url or setup_profile.default_base_url
+        resolved_webui_url = webui_url if webui_url is not None else setup_profile.default_webui_url
+        facts.update(
+            {
+                "profile": setup_profile.name,
+                "base_url": resolved_base_url,
+                "webui_url": resolved_webui_url,
+            }
+        )
+        if dry_run:
+            result = {
+                "command": "verify",
+                "status": "ok",
+                "facts": facts,
+                "actions": [{"server": {"mode": "dry_run", "profile": setup_profile.name}}],
+                "notes": ["dry-run only; skipping profile probes."],
+                "check_provider": bool(check_provider),
+                "dry_run": True,
+                "paths": {"env": str(env_path)},
+            }
+            _emit(result, json_out)
+            raise typer.Exit(0)
+
+        check_result = profile_verify.run_profile_checks(
+            profile=setup_profile,
+            base_url=resolved_base_url,
+            webui_url=resolved_webui_url,
+            env_path=env_path,
+            first_value=first_value,
+            timeout=5.0,
+        )
+        result = {
+            "command": "verify",
+            "status": check_result.get("status", "error"),
+            "facts": facts,
+            "actions": check_result.get("actions", []),
+            "notes": check_result.get("notes", []),
+            "check_provider": True,
+            "dry_run": False,
+            "paths": {"env": str(env_path)},
+        }
+        _emit(result, json_out)
+        if result["status"] != "ok":
+            raise typer.Exit(2)
+        raise typer.Exit(0)
 
     env_port = os.getenv("TLDW_SERVER_PORT")
     preferred_port = int(env_port) if env_port and env_port.isdigit() else 8000
