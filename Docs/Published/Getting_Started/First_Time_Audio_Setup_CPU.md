@@ -165,7 +165,7 @@ Important Docker note:
 
 ## Step 2: Set the CPU STT Defaults
 
-Edit [config.txt](/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/config.txt) and make the STT defaults explicit:
+Edit [config.txt](../../../tldw_Server_API/Config_Files/config.txt) and make the STT defaults explicit:
 
 ```ini
 [STT-Settings]
@@ -220,7 +220,7 @@ This path currently assumes:
 
 ### 3B. Enable the provider
 
-Edit [tts_providers_config.yaml](/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/tts_providers_config.yaml):
+Edit [tts_providers_config.yaml](../../../tldw_Server_API/Config_Files/tts_providers_config.yaml):
 
 ```yaml
 providers:
@@ -242,7 +242,7 @@ providers:
 
 ### 3C. Make `supertonic` the default TTS provider
 
-Edit [config.txt](/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/config.txt):
+Edit [config.txt](../../../tldw_Server_API/Config_Files/config.txt):
 
 ```ini
 [TTS-Settings]
@@ -368,7 +368,7 @@ Choose `pocket_tts` instead of `supertonic` if you specifically need local voice
 
 Use:
 
-- [PocketTTS Voice Cloning Guide](/Users/macbook-dev/Documents/GitHub/tldw_server2/Docs/User_Guides/WebUI_Extension/PocketTTS_Voice_Cloning_Guide.md)
+- [PocketTTS Voice Cloning Guide](../User_Guides/WebUI_Extension/PocketTTS_Voice_Cloning_Guide.md)
 
 Important tradeoff:
 
@@ -382,7 +382,7 @@ Use `qwen3_tts` after the basic CPU stack already works.
 
 Use:
 
-- [QWEN3_TTS_SETUP.md](/Users/macbook-dev/Documents/GitHub/tldw_server2/Docs/STT-TTS/QWEN3_TTS_SETUP.md)
+- [QWEN3_TTS_SETUP.md](../../../Docs/STT-TTS/QWEN3_TTS_SETUP.md)
 
 Treat it as a second-step upgrade, not the first-run baseline.
 
@@ -396,7 +396,7 @@ Treat it as a second-step upgrade, not the first-run baseline.
 
 ### Supertonic does not appear in `/audio/health`
 
-- confirm `providers.supertonic.enabled: true` in [tts_providers_config.yaml](/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/tts_providers_config.yaml)
+- confirm `providers.supertonic.enabled: true` in [tts_providers_config.yaml](../../../tldw_Server_API/Config_Files/tts_providers_config.yaml)
 - confirm the asset directories exist:
   - `models/supertonic/onnx`
   - `models/supertonic/voice_styles`
@@ -410,7 +410,7 @@ Treat it as a second-step upgrade, not the first-run baseline.
 
 ### STT health shows the wrong model/provider
 
-- re-open [config.txt](/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/config.txt)
+- re-open [config.txt](../../../tldw_Server_API/Config_Files/config.txt)
 - make sure both `default_batch_transcription_model` and `default_streaming_transcription_model` are set to `parakeet-onnx`
 - make sure `default_transcriber = parakeet`
 - restart the server

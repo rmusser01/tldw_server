@@ -79,3 +79,17 @@ def test_public_docs_use_new_profile_commands() -> None:
         "make verify-local-single",
     ):
         assert command in readme
+
+
+def test_readme_resources_list_peer_profiles_in_order() -> None:
+    readme = Path("README.md").read_text(encoding="utf-8")
+    _, separator, resources = readme.partition("## Documentation & Resources")
+    assert separator == "## Documentation & Resources"
+
+    expected_order = [
+        "Docker Single-User + WebUI Profile",
+        "Docker Multi-User + Postgres Profile",
+        "Local Single-User Profile",
+    ]
+    positions = [resources.index(label) for label in expected_order]
+    assert positions == sorted(positions)
