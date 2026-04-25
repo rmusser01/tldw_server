@@ -48,7 +48,9 @@ from tldw_Server_API.app.api.v1.schemas.kanban_schemas import (
     SearchResultCard,
 )
 from tldw_Server_API.app.core.DB_Management.Kanban_DB import (
+    InputError as KanbanInputError,
     KanbanDB,
+    KanbanDBError,
 )
 from tldw_Server_API.app.core.DB_Management.kanban_vector_search import (
     KanbanVectorSearch,
@@ -462,7 +464,7 @@ async def search_cards_get(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Invalid label_ids format: {str(e)}"
         ) from e
-    except Exception as e:
+    except (KanbanDBError, KanbanInputError) as e:
         raise _handle_error(e) from e
 @router.post(
     "/search",
@@ -494,7 +496,7 @@ async def search_cards_post(
             offset=request.offset,
         )
 
-    except Exception as e:
+    except (KanbanDBError, KanbanInputError) as e:
         raise _handle_error(e) from e
 @router.get(
     "/search/status",

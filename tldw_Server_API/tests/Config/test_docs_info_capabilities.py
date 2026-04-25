@@ -195,6 +195,20 @@ def test_docs_info_endpoint_returns_placeholder_api_key(monkeypatch, tmp_path: P
     assert "test-key" not in payload["examples"]["javascript"]
 
 
+def test_quickstart_redirect_defaults_when_config_parse_fails(monkeypatch) -> None:
+    monkeypatch.delenv("QUICKSTART_URL", raising=False)
+
+    def _raise_parse_error():
+        raise configparser.Error("malformed config")
+
+    monkeypatch.setattr(config_info.config_mod, "load_comprehensive_config", _raise_parse_error)
+
+    response = asyncio.run(config_info.get_quickstart_redirect())
+
+    assert response.status_code == 307
+    assert response.headers["location"] == "/docs"
+
+
 def test_quickstart_redirect_reads_configured_ui_url(monkeypatch) -> None:
     parser = configparser.ConfigParser()
     parser.read_string("[UI]\nquickstart_url = /docs-static/Getting_Started/README.md\n")
