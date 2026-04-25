@@ -43,6 +43,8 @@ The desired end state is:
 - Additive or deprecation-marked API cleanup is allowed if it directly reduces endpoint-local orchestration.
 - Maintain the existing review worktree isolation.
 - Keep changes incremental and phaseable; no big-bang rewrite.
+- Treat current `dev` as the integration baseline, not the earlier review snapshot.
+- Before Phase 1, port or explicitly re-verify any `dev`-side RAG changes that landed after the review branch diverged.
 
 ## Current Problems
 
@@ -52,6 +54,7 @@ The prior refactor materially improved the architecture, but the remaining weak 
 2. `agentic_execution.py` still depends back on `agentic_chunker.py`, leaving agentic ownership muddy.
 3. `/api/v1/rag/search/stream` still owns too much business logic in the endpoint.
 4. Cleanup tests still focus more on exposed helper names and behavior parity than on delegation to stable core execution boundaries.
+5. The review branch is already diverged from current `dev` in live RAG code, including `analytics_db.py`, `unified_pipeline.py`-adjacent behavior, and RAG test coverage. The next plan must account for that drift explicitly rather than assuming the review branch is the only source of truth.
 
 ## Target Architecture
 
@@ -124,6 +127,27 @@ The endpoint should only translate stable internal events into the existing NDJS
 
 Use a sequential core-first extraction.
 
+### Phase 0: `dev` Reconciliation Gate
+
+#### Objective
+
+Reconcile the review branch with current `dev` RAG deltas before further architectural cleanup.
+
+#### Required Changes
+
+- Diff current review-branch RAG scope against current `dev`.
+- Port or explicitly re-verify `dev`-side RAG changes that matter to the same ownership seams, especially:
+  - [`analytics_db.py`](/Users/appledev/Documents/GitHub/tldw_server/.worktrees/rag-module-review/tldw_Server_API/app/core/RAG/rag_service/analytics_db.py)
+  - [`unified_pipeline.py`](/Users/appledev/Documents/GitHub/tldw_server/.worktrees/rag-module-review/tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py)
+  - [`agentic_chunker.py`](/Users/appledev/Documents/GitHub/tldw_server/.worktrees/rag-module-review/tldw_Server_API/app/core/RAG/rag_service/agentic_chunker.py)
+  - RAG tests that were added, restored, or tightened on `dev`
+- Record any intentionally deferred `dev`-side differences so later phases do not silently regress them.
+
+#### Success Criteria
+
+- The follow-up implementation starts from a branch state that is explicitly reconciled against current `dev` RAG changes.
+- Any remaining branch-vs-`dev` differences are deliberate, documented, and covered by tests.
+
 ### Phase 1: Standard Core Contract Threading
 
 #### Objective
@@ -142,6 +166,7 @@ Make the standard path consume `ResolvedRAGRequest` and `RetrievalPlan` as first
 - The standard endpoint path builds one request bundle and hands it off once.
 - Core retrieval, generation, and post-retrieval coordination all see the same canonical request and plan objects.
 - The endpoint no longer coordinates standard evidence after the pipeline returns.
+- A branch-vs-`dev` checkpoint confirms Phase 1 did not drop newer `dev`-side RAG behavior in the same files.
 
 ### Phase 2: Agentic Shell Untangling
 
@@ -155,12 +180,15 @@ Make core agentic execution independent from the chunker compatibility shell.
 - Replace reverse lookups or patch seams that point back through [`agentic_chunker.py`](/Users/appledev/Documents/GitHub/tldw_server/.worktrees/rag-module-review/tldw_Server_API/app/core/RAG/rag_service/agentic_chunker.py) with core-owned seams.
 - Make both standard and streaming agentic paths call the same core execution-context builder.
 - Reduce `agentic_chunker.py` to compatibility-only behavior or remove its ownership role from the main execution path.
+- Preserve and explicitly test the structure-DB failure fallback path currently guarded on `dev`, so retiring shell ownership does not drop heuristic fallback behavior when structure lookup fails.
 
 #### Success Criteria
 
 - `agentic_execution.py` no longer imports runtime ownership back from `agentic_chunker.py`.
 - Standard and streaming agentic flows share the same core execution-context builder.
 - Tests pin multiple config knobs across both paths, not just one flag.
+- The agentic structure-DB error path still falls back to heuristics and is covered by an explicit regression test.
+- A branch-vs-`dev` checkpoint confirms Phase 2 did not drop active `dev` agentic safeguards or tests.
 
 ### Phase 3: Streaming Executor Extraction
 
@@ -179,6 +207,7 @@ Move streaming execution ownership out of the endpoint into core.
 - `/search/stream` no longer contains large inline business-logic blocks for retrieval/generation orchestration.
 - Streaming behavior remains externally compatible.
 - A stable core stream-event boundary exists and is tested.
+- A branch-vs-`dev` checkpoint confirms Phase 3 did not regress newer `dev` streaming or adjacent RAG behavior.
 
 ## Testing Strategy
 
@@ -189,6 +218,7 @@ Tests should pin delegation and ownership boundaries, not just output shape.
 - Standard-path tests proving the same `ResolvedRAGRequest` and `RetrievalPlan` objects flow through retrieval, generation, and post-retrieval coordination.
 - Endpoint-level test proving `/rag/search` delegates standard evidence coordination to the core helper.
 - Response mapping tests proving endpoint code uses core mapping directly.
+- A reconciliation check against current `dev` for touched standard-path files after the phase lands.
 
 ### Phase 2 Tests
 
@@ -196,12 +226,15 @@ Tests should pin delegation and ownership boundaries, not just output shape.
 - Parity tests proving standard and streaming agentic paths use the same builder.
 - Tests covering multiple agentic config knobs across both paths.
 - Tests proving `agentic_execution.py` no longer depends back on `agentic_chunker.py`.
+- Explicit regression test for structure-DB lookup failure falling back to heuristics.
+- A reconciliation check against current `dev` for touched agentic files and tests after the phase lands.
 
 ### Phase 3 Tests
 
 - Endpoint-level tests proving streaming delegates to the core streaming executor.
 - Stream-event contract tests that pin event ordering and event translation at the endpoint boundary.
 - Parity tests ensuring the streaming path still honors canonical request bundle resolution.
+- A reconciliation check against current `dev` for touched streaming/RAG transport files after the phase lands.
 
 ### Compatibility Tests
 
@@ -213,6 +246,17 @@ Retain explicit compatibility coverage for:
 - batch resume
 - agentic standard vs streaming parity
 
+### Phase Checkpoints
+
+After each phase, run a focused branch-vs-`dev` review for the touched RAG files before starting the next phase. At minimum, compare:
+
+- [`rag_unified.py`](/Users/appledev/Documents/GitHub/tldw_server/.worktrees/rag-module-review/tldw_Server_API/app/api/v1/endpoints/rag_unified.py)
+- [`unified_pipeline.py`](/Users/appledev/Documents/GitHub/tldw_server/.worktrees/rag-module-review/tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py)
+- [`agentic_chunker.py`](/Users/appledev/Documents/GitHub/tldw_server/.worktrees/rag-module-review/tldw_Server_API/app/core/RAG/rag_service/agentic_chunker.py)
+- [`agentic_execution.py`](/Users/appledev/Documents/GitHub/tldw_server/.worktrees/rag-module-review/tldw_Server_API/app/core/RAG/rag_service/agentic_execution.py)
+- [`analytics_db.py`](/Users/appledev/Documents/GitHub/tldw_server/.worktrees/rag-module-review/tldw_Server_API/app/core/RAG/rag_service/analytics_db.py)
+- RAG tests changed in that phase
+
 ## Risks
 
 ### Risk 1: Hidden reliance on ad hoc request shapes
@@ -223,6 +267,16 @@ Mitigation:
 
 - add request-object identity tests before removing reconstruction
 - migrate standard path first before touching agentic and streaming
+
+### Risk 1b: Review branch drift from current `dev`
+
+The review branch is no longer a complete proxy for the current application state. `dev` has already landed RAG-adjacent fixes and tests after the branch split.
+
+Mitigation:
+
+- add the explicit Phase 0 `dev` reconciliation gate
+- run branch-vs-`dev` checkpoints after every phase
+- treat restored `dev` tests as part of the living contract unless deliberately replaced
 
 ### Risk 2: Compatibility seams hidden inside agentic shell behavior
 
