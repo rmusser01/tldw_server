@@ -1,4 +1,5 @@
 import inspect
+import json
 from pathlib import Path
 
 import pytest
@@ -30,6 +31,65 @@ def test_streaming_endpoint_delegates_event_generation_to_core():
     assert "yield json.dumps" in source  # nosec B101
     assert "unified_rag_pipeline(" not in stream_source  # nosec B101
     assert "agentic_rag_pipeline(" not in stream_source  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_streaming_endpoint_frames_core_events_as_ndjson(monkeypatch: pytest.MonkeyPatch) -> None:
+    resolved_request = ResolvedRAGRequest(
+        query="stream framing",
+        strategy="standard",
+        payload={"query": "stream framing", "strategy": "standard", "enable_generation": True},
+        index_namespace=None,
+        rag_profile=None,
+        user_id="1",
+        feedback_user_id="1",
+    )
+    retrieval_plan = RetrievalPlan(
+        query="stream framing",
+        sources=("media_db",),
+        search_mode="hybrid",
+        top_k=3,
+        min_score=0.0,
+        index_namespace=None,
+    )
+    bundle = ResolvedRequestBundle(
+        resolved_request=resolved_request,
+        retrieval_plan=retrieval_plan,
+        pipeline_kwargs={"query": "stream framing"},
+    )
+
+    def fake_build_standard_request_bundle(*args, **kwargs):  # noqa: ANN002, ANN003, ARG001
+        return bundle
+
+    async def fake_log_rag_queries_for_org(*args, **kwargs):  # noqa: ANN002, ANN003, ARG001
+        return None
+
+    async def fake_stream_rag_events(**kwargs):  # noqa: ANN003, ARG001
+        yield {"type": "first", "value": 1}
+        yield {"type": "second", "value": 2}
+
+    monkeypatch.setattr(rag_ep, "_build_standard_request_bundle", fake_build_standard_request_bundle)
+    monkeypatch.setattr(rag_ep, "_log_rag_queries_for_org", fake_log_rag_queries_for_org)
+    monkeypatch.setattr(rag_ep, "stream_rag_events", fake_stream_rag_events)
+
+    response = await rag_ep.unified_search_stream_endpoint(
+        request_raw=object(),
+        request=rag_ep.UnifiedRAGRequest(query="stream framing", enable_generation=True),
+        current_user=type("UserStub", (), {"id": 1, "username": "tester"})(),
+        media_db=type("DBStub", (), {"db_path": "media.db"})(),
+        chacha_db=type("DBStub", (), {"db_path": "notes.db"})(),
+    )
+
+    raw_chunks = []
+    async for chunk in response.body_iterator:
+        raw_chunks.append(chunk.decode() if isinstance(chunk, bytes) else chunk)
+    events = [json.loads(line) for line in "".join(raw_chunks).splitlines()]
+
+    assert response.media_type == "application/x-ndjson"  # nosec B101
+    assert events == [  # nosec B101
+        {"type": "first", "value": 1},
+        {"type": "second", "value": 2},
+    ]
 
 
 def test_rag_endpoint_no_longer_exports_transitional_shim_helpers() -> None:

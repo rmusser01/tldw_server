@@ -8,6 +8,8 @@ from tldw_Server_API.app.core.RAG.rag_service.streaming_executor import stream_r
 from tldw_Server_API.app.core.RAG.rag_service.types import DataSource, Document
 from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import UnifiedSearchResult
 
+_PUBLIC_STREAM_ERROR = "Search failed due to an internal error."
+
 
 def _resolved_request(strategy: str = "standard") -> ResolvedRAGRequest:
     return ResolvedRAGRequest(
@@ -43,6 +45,15 @@ def _retrieval_plan() -> RetrievalPlan:
     )
 
 
+async def _fake_generate_streaming_response(context: Any, **kwargs: Any) -> Any:  # noqa: ARG001
+    async def _gen():
+        yield "answer text"
+
+    context.stream_generator = _gen()
+    context.metadata = {"streaming": True}
+    return context
+
+
 @pytest.mark.asyncio
 async def test_stream_rag_events_wraps_standard_stream_result_in_order():
     async def fake_standard_pipeline(**kwargs: Any) -> UnifiedSearchResult:
@@ -59,21 +70,13 @@ async def test_stream_rag_events_wraps_standard_stream_result_in_order():
             query=str(kwargs.get("query", "")),
         )
 
-    async def fake_generate_streaming_response(context: Any, **kwargs: Any) -> Any:  # noqa: ARG001
-        async def _gen():
-            yield "answer text"
-
-        context.stream_generator = _gen()
-        context.metadata = {"streaming": True}
-        return context
-
     events = [
         event
         async for event in stream_rag_events(
             resolved_request=_resolved_request("standard"),
             retrieval_plan=_retrieval_plan(),
             standard_pipeline=fake_standard_pipeline,
-            extra_context={"generate_streaming_response": fake_generate_streaming_response},
+            extra_context={"generate_streaming_response": _fake_generate_streaming_response},
         )
     ]
 
@@ -90,7 +93,10 @@ async def test_stream_rag_events_wraps_standard_stream_result_in_order():
 
 @pytest.mark.asyncio
 async def test_stream_rag_events_emits_structured_error():
-    async def failing_standard_pipeline(**kwargs: Any) -> UnifiedSearchResult:  # noqa: ARG001
+    async def empty_standard_pipeline(**kwargs: Any) -> UnifiedSearchResult:
+        return UnifiedSearchResult(documents=[], query=str(kwargs.get("query", "")))
+
+    async def failing_generate_streaming_response(context: Any, **kwargs: Any) -> Any:  # noqa: ARG001
         raise RuntimeError("stream failed")
 
     events = [
@@ -98,9 +104,65 @@ async def test_stream_rag_events_emits_structured_error():
         async for event in stream_rag_events(
             resolved_request=_resolved_request("standard"),
             retrieval_plan=_retrieval_plan(),
-            standard_pipeline=failing_standard_pipeline,
+            standard_pipeline=empty_standard_pipeline,
+            extra_context={"generate_streaming_response": failing_generate_streaming_response},
         )
     ]
 
-    assert [event["type"] for event in events] == ["error"]  # nosec B101
-    assert events[0]["message"] == "stream failed"  # nosec B101
+    assert [event["type"] for event in events] == ["contexts", "reasoning", "error"]  # nosec B101
+    assert events[2] == {"type": "error", "message": _PUBLIC_STREAM_ERROR}  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_stream_rag_events_continues_when_standard_prefetch_fails():
+    async def failing_standard_pipeline(**kwargs: Any) -> UnifiedSearchResult:  # noqa: ARG001
+        raise RuntimeError("retrieval backend unavailable")
+
+    events = [
+        event
+        async for event in stream_rag_events(
+            resolved_request=_resolved_request("standard"),
+            retrieval_plan=_retrieval_plan(),
+            standard_pipeline=failing_standard_pipeline,
+            extra_context={"generate_streaming_response": _fake_generate_streaming_response},
+        )
+    ]
+
+    assert [event["type"] for event in events] == ["contexts", "reasoning", "delta"]  # nosec B101
+    assert events[0]["contexts"] == []  # nosec B101
+    assert events[-1]["text"] == "answer text"  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_stream_rag_events_continues_when_agentic_prefetch_fails():
+    async def standard_pipeline(**kwargs: Any) -> UnifiedSearchResult:
+        return UnifiedSearchResult(
+            documents=[
+                Document(
+                    id="standard-doc",
+                    content="Standard context",
+                    metadata={"title": "Standard"},
+                    source=DataSource.MEDIA_DB,
+                    score=0.7,
+                )
+            ],
+            query=str(kwargs.get("query", "")),
+        )
+
+    async def failing_agentic_pipeline(**kwargs: Any) -> UnifiedSearchResult:  # noqa: ARG001
+        raise RuntimeError("agentic backend unavailable")
+
+    events = [
+        event
+        async for event in stream_rag_events(
+            resolved_request=_resolved_request("agentic"),
+            retrieval_plan=_retrieval_plan(),
+            standard_pipeline=standard_pipeline,
+            agentic_pipeline=failing_agentic_pipeline,
+            extra_context={"generate_streaming_response": _fake_generate_streaming_response},
+        )
+    ]
+
+    assert [event["type"] for event in events] == ["contexts", "reasoning", "delta"]  # nosec B101
+    assert events[0]["contexts"][0]["id"] == "standard-doc"  # nosec B101
+    assert events[-1]["text"] == "answer text"  # nosec B101

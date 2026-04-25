@@ -25,6 +25,7 @@ from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import (
 RAGStreamEvent = dict[str, Any]
 PipelineCallable = Callable[..., Awaitable[Any]]
 GenerationCallable = Callable[..., Awaitable[Any]]
+_PUBLIC_STREAM_ERROR_MESSAGE = "Search failed due to an internal error."
 
 _EXTRA_CONTROL_KEYS = {
     "build_agentic_execution_context",
@@ -432,30 +433,47 @@ async def stream_rag_events(
             sync_retriever_overrides()
 
         docs: list[Any] = []
-        async for item in _prefetch_documents(
-            resolved_request=resolved_request,
-            retrieval_plan=retrieval_plan,
-            standard_pipeline=standard_pipeline,
-            pipeline_kwargs=pipeline_kwargs,
-            payload=payload,
-        ):
-            if isinstance(item, list):
-                docs = item
-            else:
-                yield item
-
-        if str(resolved_request.strategy).strip().lower() == "agentic":
-            docs, agentic_events = await _run_agentic_prefetch(
+        try:
+            async for item in _prefetch_documents(
                 resolved_request=resolved_request,
                 retrieval_plan=retrieval_plan,
-                agentic_pipeline=agentic_pipeline,
+                standard_pipeline=standard_pipeline,
                 pipeline_kwargs=pipeline_kwargs,
                 payload=payload,
-                request_defaults=request_defaults,
-                context_builder=context_builder,
+            ):
+                if isinstance(item, list):
+                    docs = item
+                else:
+                    yield item
+        except asyncio.CancelledError:
+            raise
+        except Exception as prefetch_error:  # noqa: BLE001 - retrieval prefetch is best-effort for streaming
+            logger.debug(
+                "RAG streaming standard prefetch failed; continuing with empty contexts",
+                exc_info=prefetch_error,
             )
-            for event in agentic_events:
-                yield event
+            docs = []
+
+        if str(resolved_request.strategy).strip().lower() == "agentic":
+            try:
+                docs, agentic_events = await _run_agentic_prefetch(
+                    resolved_request=resolved_request,
+                    retrieval_plan=retrieval_plan,
+                    agentic_pipeline=agentic_pipeline,
+                    pipeline_kwargs=pipeline_kwargs,
+                    payload=payload,
+                    request_defaults=request_defaults,
+                    context_builder=context_builder,
+                )
+                for event in agentic_events:
+                    yield event
+            except asyncio.CancelledError:
+                raise
+            except Exception as agentic_error:  # noqa: BLE001 - agentic streaming prefetch is best-effort
+                logger.debug(
+                    "Agentic streaming prefetch failed; continuing standard stream",
+                    exc_info=agentic_error,
+                )
 
         for event in _context_events(
             docs=docs,
@@ -476,6 +494,5 @@ async def stream_rag_events(
         logger.exception("RAG streaming failed")
         yield {
             "type": "error",
-            "message": str(exc),
-            "error_type": exc.__class__.__name__,
+            "message": _PUBLIC_STREAM_ERROR_MESSAGE,
         }
