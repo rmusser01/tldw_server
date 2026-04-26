@@ -286,7 +286,7 @@ async def generate_document_insights(
     provider = (DEFAULT_LLM_PROVIDER or "openai").strip().lower()
     api_key, _debug = resolve_provider_api_key(provider, prefer_module_keys_in_tests=True)
     if provider_requires_api_key(provider) and not api_key:
-        logger.error("No API key available for provider '{}'", provider)
+        logger.error("No API key available for configured provider")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="LLM provider configuration error",
