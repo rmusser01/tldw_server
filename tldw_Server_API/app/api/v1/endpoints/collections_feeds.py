@@ -539,14 +539,14 @@ async def update_feed_subscription(
     try:
         source = db.update_source(feed_id, patch)
     except _COLLECTIONS_FEEDS_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error(f"collections_feeds_update_source_failed: {exc}")
+        logger.error("collections_feeds_update_source_failed")
         raise HTTPException(status_code=400, detail="feed_update_failed") from exc
     if payload.tags is not None:
         try:
             db.set_source_tags(feed_id, [t for t in payload.tags if t])
             source = db.get_source(feed_id)
-        except _COLLECTIONS_FEEDS_NONCRITICAL_EXCEPTIONS as exc:
-            logger.error(f"collections_feeds_update_tags_failed: {exc}")
+        except _COLLECTIONS_FEEDS_NONCRITICAL_EXCEPTIONS:
+            logger.error("collections_feeds_update_tags_failed")
 
     job = _load_job(db, settings)
     if job and any(value is not None for value in (payload.schedule_expr, payload.timezone, payload.active)):
@@ -578,8 +578,8 @@ async def update_feed_subscription(
                 db.set_job_history(int(job.id), next_run_at=next_run)
                 job = db.get_job(int(job.id))
             _sync_job_schedule(db, job, current_user=current_user)
-        except _COLLECTIONS_FEEDS_NONCRITICAL_EXCEPTIONS as exc:
-            logger.error(f"collections_feeds_update_job_failed: {exc}")
+        except _COLLECTIONS_FEEDS_NONCRITICAL_EXCEPTIONS:
+            logger.error("collections_feeds_update_job_failed")
 
     response = _to_feed_response(source, job_row=job, settings=settings)
     if activity_patch:
