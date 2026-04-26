@@ -18,11 +18,21 @@ import uuid
 
 import pytest
 import numpy as np
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from tldw_Server_API.app.api.v1.endpoints import audio as audio_endpoints
+from tldw_Server_API.app.api.v1.endpoints.audio.audio import router as audio_router
+from tldw_Server_API.app.api.v1.endpoints.audio.audio_jobs import router as audio_jobs_router
+from tldw_Server_API.app.api.v1.endpoints.outputs import router as outputs_router
+from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 
 # TTS integration tests hit /api/v1/audio routes. Opt this suite into mounting
 # audio and audio-jobs routers even when pytest uses the minimal test app.
+os.environ.setdefault("TEST_MODE", "true")
+os.environ.setdefault("AUTH_MODE", "single_user")
+os.environ.setdefault("SINGLE_USER_API_KEY", "test-api-key-1234567890")
+os.environ.setdefault("SINGLE_USER_FIXED_ID", "1")
+os.environ.setdefault("MINIMAL_TEST_APP", "1")
 os.environ.setdefault("MINIMAL_TEST_INCLUDE_AUDIO", "1")
 os.environ.setdefault("MINIMAL_TEST_INCLUDE_AUDIO_JOBS", "1")
 
@@ -64,13 +74,44 @@ def pytest_configure(config):
 def test_env_vars(monkeypatch):
     """Set up test environment variables without polluting global state."""
     monkeypatch.setenv("TEST_MODE", "true")
+    monkeypatch.setenv("AUTH_MODE", "single_user")
+    monkeypatch.setenv("SINGLE_USER_API_KEY", "test-api-key-1234567890")
+    monkeypatch.setenv("SINGLE_USER_FIXED_ID", "1")
+    monkeypatch.setenv("MINIMAL_TEST_APP", "1")
+    monkeypatch.setenv("MINIMAL_TEST_INCLUDE_AUDIO", "1")
+    monkeypatch.setenv("MINIMAL_TEST_INCLUDE_AUDIO_JOBS", "1")
     monkeypatch.setenv("TTS_DEFAULT_PROVIDER", "openai")
     monkeypatch.setenv("TTS_DEFAULT_MODEL", "tts-1")
     monkeypatch.setenv("TTS_DEFAULT_VOICE", "alloy")
     # Ensure TTS providers considered configured in tests
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test-123")
     monkeypatch.setenv("ELEVENLABS_API_KEY", "el-test-123")
+    reset_settings()
     yield
+    reset_settings()
+
+
+def create_tts_test_app() -> FastAPI:
+    """Build the narrow app surface needed by TTS endpoint tests."""
+    app = FastAPI()
+    app.include_router(audio_router, prefix="/api/v1/audio", tags=["audio"])
+    app.include_router(audio_jobs_router, prefix="/api/v1/audio", tags=["audio-jobs"])
+    app.include_router(outputs_router, prefix="/api/v1", tags=["outputs"])
+    return app
+
+
+@pytest.fixture
+def tts_test_app(test_env_vars) -> Generator[FastAPI, None, None]:
+    """Create a lightweight FastAPI app after pytest has activated test env."""
+    from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import reset_media_db_cache
+
+    reset_media_db_cache()
+    app = create_tts_test_app()
+    try:
+        yield app
+    finally:
+        app.dependency_overrides.clear()
+        reset_media_db_cache()
 
 # =====================================================================
 # Audio Generation Fixtures
@@ -376,20 +417,19 @@ def invalid_requests():
 # =====================================================================
 
 @pytest.fixture
-def test_client(test_env_vars, bypass_api_limits):
+def test_client(tts_test_app, bypass_api_limits):
     """Create a test client for the FastAPI app with auth override."""
-    from tldw_Server_API.app.main import app
     from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 
     async def _override_user():
         return User(id=1, username="tester", email="t@example.com", is_active=True)
 
-    app.dependency_overrides[get_request_user] = _override_user
+    tts_test_app.dependency_overrides[get_request_user] = _override_user
     try:
-        with bypass_api_limits(app), TestClient(app) as client:
+        with bypass_api_limits(tts_test_app), TestClient(tts_test_app) as client:
             yield client
     finally:
-        app.dependency_overrides.pop(get_request_user, None)
+        tts_test_app.dependency_overrides.pop(get_request_user, None)
 
 @pytest.fixture
 def auth_headers():

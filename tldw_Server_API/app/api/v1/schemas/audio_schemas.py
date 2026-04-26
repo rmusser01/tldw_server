@@ -108,8 +108,8 @@ class OpenAISpeechRequest(BaseModel):
         description=(
             "Base64-encoded audio data for voice cloning/reference. Supported by PocketTTS, NeuTTS, "
             "OmniVoice, Higgs (3-10s), Chatterbox (5-20s), VibeVoice, and IndexTTS2 models. "
-            "OmniVoice cloning also requires `extra_params.reference_text`, whether the reference "
-            "audio is uploaded directly here or loaded from a stored `custom:<voice_id>` voice."
+            "For OmniVoice, `extra_params.reference_text` is optional but recommended; if omitted, "
+            "the runtime may auto-transcribe the reference audio."
         ),
     )
     reference_duration_min: Optional[float] = Field(
@@ -122,8 +122,8 @@ class OpenAISpeechRequest(BaseModel):
         default=None,
         description=(
             "Provider-specific parameters passed through to adapters (e.g., stability, clarity, cfg_scale). "
-            "For OmniVoice cloning, include `reference_text` describing the spoken transcript of the "
-            "reference audio."
+            "For OmniVoice cloning, `reference_text` can be supplied to avoid runtime auto-transcription "
+            "of the reference audio."
         ),
     )
 
@@ -134,7 +134,7 @@ class VoiceEncodeRequest(BaseModel):
     provider: str = Field(default="neutts", description="Target provider for encoding artifacts")
     reference_text: Optional[str] = Field(
         default=None,
-        description="Reference text associated with the stored audio (required for NeuTTS and OmniVoice)",
+        description="Reference text associated with the stored audio (required for NeuTTS; optional for OmniVoice)",
     )
     force: bool = Field(
         default=False,

@@ -3668,7 +3668,7 @@ export const PlaygroundForm = ({
   } = useActionBarVisibility({ externalPinSources })
   const [composerOptionsExpanded, setComposerOptionsExpanded] = useStorage(
     "playgroundComposerOptionsExpanded",
-    false
+    true
   )
   const shouldCompactComposerTextarea =
     !composerFocusWithin &&

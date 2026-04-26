@@ -319,7 +319,6 @@ entries:
     editable_by: [user]
     sensitivity: public
     ui: toggle
-
   - key: preferences.ui.theme_migration_version
     label: Theme Migration Version
     description: Internal marker tracking theme-preference migrations that have been applied to this user. Set automatically by the app; not user-editable.
