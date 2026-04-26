@@ -206,11 +206,7 @@ async def get_media_file(
                 detail="File not found on storage (may have been deleted)",
             )
     except StorageError as e:
-        logger.error(
-            "Storage error checking file existence for {}: {}",
-            storage_path,
-            e,
-        )
+        logger.error("Storage error checking file existence")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error accessing file storage",
