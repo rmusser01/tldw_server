@@ -345,8 +345,8 @@ def _sync_job_schedule(db: WatchlistsDatabase, job_row, *, current_user: User) -
                 },
             )
             return
-    except _COLLECTIONS_FEEDS_NONCRITICAL_EXCEPTIONS as exc:
-        logger.debug(f"Collections feeds schedule update failed: {exc}")
+    except _COLLECTIONS_FEEDS_NONCRITICAL_EXCEPTIONS:
+        logger.debug("Collections feeds schedule update failed")
     if not job_row.wf_schedule_id and job_row.schedule_expr:
         _register_schedule(db, job_row, current_user=current_user)
     try:
