@@ -14,9 +14,13 @@ pytestmark = pytest.mark.unit
 class _LoggerStub:
     def __init__(self) -> None:
         self.debugs: list[tuple[str, tuple[object, ...], dict[str, object]]] = []
+        self.warnings: list[tuple[str, tuple[object, ...], dict[str, object]]] = []
 
     def debug(self, message: str, *args: object, **kwargs: object) -> None:
         self.debugs.append((message, args, kwargs))
+
+    def warning(self, message: str, *args: object, **kwargs: object) -> None:
+        self.warnings.append((message, args, kwargs))
 
 
 def _request() -> SimpleNamespace:
@@ -172,3 +176,22 @@ def test_resolve_media_source_text_document_fallback_log_is_sanitized(monkeypatc
     assert "/private/slides-documents.db" not in rendered
     assert "exploded" not in rendered
     assert "99" not in rendered
+
+
+async def test_slides_health_backend_failure_log_is_sanitized(monkeypatch):
+    class _RaisingSlidesDB:
+        def list_presentations(self, **_kwargs):
+            raise RuntimeError("slides db exploded at /private/slides-health.db")
+
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(slides_ep, "logger", logger_stub)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await slides_ep.slides_health(db=_RaisingSlidesDB())
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "slides_db_unavailable"
+    assert logger_stub.warnings == [("slides health check failed", (), {})]
+    rendered = " ".join([logger_stub.warnings[0][0], *(str(arg) for arg in logger_stub.warnings[0][1])])
+    assert "/private/slides-health.db" not in rendered
+    assert "exploded" not in rendered

@@ -2418,6 +2418,6 @@ async def slides_health(db: SlidesDatabase = Depends(get_slides_db_for_user)) ->
     try:
         _ = db.list_presentations(limit=1, offset=0, include_deleted=True, sort_column="created_at", sort_direction="DESC")
     except _SLIDES_NONCRITICAL_EXCEPTIONS as exc:
-        logger.warning("slides health check failed: {}", exc)
+        logger.warning("slides health check failed")
         raise HTTPException(status_code=500, detail="slides_db_unavailable") from exc
     return SlidesHealthResponse(service="slides", status="ok")
