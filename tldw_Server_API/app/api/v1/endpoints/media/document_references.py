@@ -1668,12 +1668,8 @@ async def get_document_references(
                             "Enriched references with arXiv for media_id={}",
                             media_id,
                         )
-        except REFERENCE_ENRICH_EXCEPTIONS as e:
-            logger.warning(
-                "Failed to enrich references for media_id={}: {}",
-                media_id,
-                e,
-            )
+        except REFERENCE_ENRICH_EXCEPTIONS:
+            logger.warning("Failed to enrich references")
             # Continue without enrichment
 
     enriched_count = sum(

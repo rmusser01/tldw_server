@@ -907,6 +907,41 @@ async def test_references_endpoint_skips_enrichment_when_all_providers_in_cooldo
 
 
 @pytest.mark.asyncio
+async def test_references_endpoint_sanitizes_enrichment_failure_log(mock_user, mock_db, monkeypatch):
+    content = "References\\n" "[1] Smith, J. (2020). Example Paper. https://doi.org/10.1234/abcd\\n"
+    mock_db.get_media_by_id = MagicMock(return_value={"id": 1, "content": content})
+    app.dependency_overrides[get_request_user] = lambda: mock_user
+    app.dependency_overrides[get_media_db_for_user] = lambda: mock_db
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(refs_mod, "logger", logger_stub, raising=True)
+
+    with (
+        patch.object(refs_mod, "get_cached_response", return_value=None),
+        patch.object(refs_mod, "_is_provider_cooldown", return_value=False),
+        patch.object(
+            refs_mod,
+            "_enrich_with_semantic_scholar",
+            new=AsyncMock(side_effect=RuntimeError("enrichment failed at /private/provider.key")),
+        ),
+    ):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.get("/api/v1/media/1/references?enrich=true")
+
+    assert response.status_code == 200
+    assert response.json()["enrichment_source"] is None
+    assert [args[0] for args, _kwargs in logger_stub.warning_calls if args] == [
+        "Failed to enrich references"
+    ]
+    assert all(not kwargs.get("exc_info") for _args, kwargs in logger_stub.warning_calls)
+    rendered_calls = repr(logger_stub.warning_calls)
+    assert "media_id" not in rendered_calls
+    assert "enrichment failed" not in rendered_calls
+    assert "/private/provider.key" not in rendered_calls
+
+    app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
 async def test_enrich_with_semantic_scholar_caps_external_calls_at_five():
     refs = [ReferenceEntry(raw_text=f"Ref {i}", doi=f"10.1234/{i}") for i in range(7)]
     call_count = 0
