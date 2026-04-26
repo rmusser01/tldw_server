@@ -1,0 +1,49 @@
+# docker-compose.single-user.yml for local single-user tldw_server deployments.
+#
+# Usage (from repo root):
+#   docker compose --env-file tldw_Server_API/Config_Files/.env \
+#     -f Dockerfiles/docker-compose.single-user.yml up -d --build
+
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: Dockerfiles/Dockerfile.prod
+    image: tldw-server:prod
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      - AUTH_MODE=${AUTH_MODE:-single_user}
+      - SINGLE_USER_API_KEY=${SINGLE_USER_API_KEY:-change-me}
+      - tldw_production=${tldw_production:-false}
+      - DATABASE_URL=${DATABASE_URL:-sqlite:///./Databases/users.db}
+      - JOBS_DB_URL=${JOBS_DB_URL:-}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379}
+      - UVICORN_WORKERS=${UVICORN_WORKERS:-2}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+    volumes:
+      - app-data:/app/Databases
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sys, urllib.request; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/ready', timeout=3).status == 200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - redis_data:/data
+
+volumes:
+  app-data:
+  redis_data:

@@ -42,15 +42,19 @@ jobs:
           gen_from_requirements() {
             local req="$1"
             local req_dir req_file out_file
+            local pyproject_args=()
             req_dir="$(dirname "$req")"
             req_file="$(basename "$req")"
             out_file="$repo_root/sbom-python.cdx.json"
+            if [ -f "$repo_root/pyproject.toml" ]; then
+              pyproject_args=(--pyproject "$repo_root/pyproject.toml")
+            fi
             echo "Generating Python SBOM from ${req}"
 
-            # Try modern CLI first: cyclonedx-py requirements -i <file>
+            # Try modern CLI first: cyclonedx-py requirements <file>
             if command -v cyclonedx-py >/dev/null 2>&1; then
               echo "Using cyclonedx-py"
-              if (cd "$req_dir" && cyclonedx-py requirements -i "$req_file" -o "$out_file"); then
+              if (cd "$req_dir" && cyclonedx-py requirements "$req_file" "${pyproject_args[@]}" -o "$out_file"); then
                 return 0
               fi
               echo "cyclonedx-py failed; will try fallbacks"
@@ -59,7 +63,7 @@ jobs:
             # Module invocation for modern CLI (avoid depending on CLI binary layout)
             if python -c "import importlib.util, sys; sys.exit(0 if importlib.util.find_spec('cyclonedx_py') else 1)" >/dev/null 2>&1; then
               echo "Using python -m cyclonedx_py"
-              if (cd "$req_dir" && python -m cyclonedx_py requirements -i "$req_file" -o "$out_file"); then
+              if (cd "$req_dir" && python -m cyclonedx_py requirements "$req_file" "${pyproject_args[@]}" -o "$out_file"); then
                 return 0
               fi
               echo "python -m cyclonedx_py failed; trying legacy CLI"
@@ -86,12 +90,44 @@ jobs:
             return 1
           }
 
+          gen_from_pyproject() {
+            local project_file="$1"
+            local tmp_req
+            tmp_req="$(mktemp)"
+            python - "$project_file" "$tmp_req" <<'PY'
+          import sys
+          import tomllib
+          from pathlib import Path
+
+          project_file = Path(sys.argv[1])
+          out_file = Path(sys.argv[2])
+          data = tomllib.loads(project_file.read_text(encoding="utf-8"))
+          dependencies = data.get("project", {}).get("dependencies", [])
+          out_file.write_text("\n".join(dependencies) + "\n", encoding="utf-8")
+          PY
+
+            if [ ! -s "$tmp_req" ]; then
+              echo "No project dependencies found in ${project_file}" >&2
+              rm -f "$tmp_req"
+              return 1
+            fi
+
+            if gen_from_requirements "$tmp_req"; then
+              rm -f "$tmp_req"
+              return 0
+            fi
+            rm -f "$tmp_req"
+            return 1
+          }
+
           if [ -f "$repo_root/tldw_Server_API/requirements.txt" ]; then
             gen_from_requirements "$repo_root/tldw_Server_API/requirements.txt"
           elif [ -f "$repo_root/requirements.txt" ]; then
             gen_from_requirements "$repo_root/requirements.txt"
+          elif [ -f "$repo_root/pyproject.toml" ]; then
+            gen_from_pyproject "$repo_root/pyproject.toml"
           else
-            echo "No requirements file found; cannot generate SBOM" >&2
+            echo "No requirements file or pyproject.toml found; cannot generate SBOM" >&2
             exit 1
           fi
 

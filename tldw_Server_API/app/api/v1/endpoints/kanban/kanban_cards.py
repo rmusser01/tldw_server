@@ -549,7 +549,7 @@ async def bulk_move_cards(
             moved_count=result["moved_count"],
             cards=[CardResponse(**c) for c in result["cards"]]
         )
-    except Exception as e:
+    except (NotFoundError, InputError, ConflictError, KanbanDBError) as e:
         raise _handle_error(e) from e
 @router.post(
     "/cards/bulk-archive",
@@ -573,7 +573,7 @@ async def bulk_archive_cards(
             success=result["success"],
             archived_count=result.get("archived_count", 0)
         )
-    except Exception as e:
+    except (NotFoundError, InputError, ConflictError, KanbanDBError) as e:
         raise _handle_error(e) from e
 @router.post(
     "/cards/bulk-unarchive",
@@ -597,7 +597,7 @@ async def bulk_unarchive_cards(
             success=result["success"],
             unarchived_count=result.get("unarchived_count", 0)
         )
-    except Exception as e:
+    except (NotFoundError, InputError, ConflictError, KanbanDBError) as e:
         raise _handle_error(e) from e
 @router.post(
     "/cards/bulk-delete",
@@ -621,7 +621,7 @@ async def bulk_delete_cards(
             success=result["success"],
             deleted_count=result["deleted_count"]
         )
-    except Exception as e:
+    except (NotFoundError, InputError, ConflictError, KanbanDBError) as e:
         raise _handle_error(e) from e
 @router.post(
     "/cards/bulk-label",
@@ -651,7 +651,7 @@ async def bulk_label_cards(
             success=result["success"],
             updated_count=result["updated_count"]
         )
-    except Exception as e:
+    except (NotFoundError, InputError, ConflictError, KanbanDBError) as e:
         raise _handle_error(e) from e
 # =============================================================================
 # Card Filtering Endpoint (Phase 3)
@@ -719,7 +719,7 @@ async def get_filtered_cards(
                 has_more=(offset + len(cards)) < total
             )
         )
-    except Exception as e:
+    except (NotFoundError, InputError, ConflictError, KanbanDBError) as e:
         raise _handle_error(e) from e
 # =============================================================================
 # Enhanced Card Copy Endpoint (Phase 3)
@@ -760,5 +760,5 @@ async def copy_card_with_checklists(
         )
         logger.info(f"Copied card {card_id} to {request.target_list_id} with checklists={request.copy_checklists}")
         return CardResponse(**card)
-    except Exception as e:
+    except (NotFoundError, InputError, ConflictError, KanbanDBError) as e:
         raise _handle_error(e) from e

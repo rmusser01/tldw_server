@@ -31856,16 +31856,17 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 t_default = 1 if t.get("is_default") else 0
 
                 row = conn.execute(
-                    "SELECT version FROM writing_templates WHERE name = ? AND deleted = 0",
+                    "SELECT id, version FROM writing_templates WHERE name = ?",
                     (t_name,),
                 ).fetchone()
                 if row is not None:
-                    cur_ver = int(row[0] if isinstance(row, (list, tuple)) else row["version"])
+                    template_id = int(row[0] if isinstance(row, (list, tuple)) else row["id"])
+                    cur_ver = int(row[1] if isinstance(row, (list, tuple)) else row["version"])
                     conn.execute(
                         "UPDATE writing_templates SET payload_json=?, schema_version=?, "
-                        "version_parent_id=?, is_default=?, last_modified=?, version=?, client_id=? "
-                        "WHERE name=? AND deleted=0",
-                        (t_payload, t_schema, t_vp, t_default, now, cur_ver + 1, self.client_id, t_name),
+                        "version_parent_id=?, is_default=?, deleted=0, last_modified=?, version=?, client_id=? "
+                        "WHERE id=?",
+                        (t_payload, t_schema, t_vp, t_default, now, cur_ver + 1, self.client_id, template_id),
                     )
                 else:
                     conn.execute(
@@ -31888,17 +31889,18 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 th_order = int(th.get("order_index") or 0)
 
                 row = conn.execute(
-                    "SELECT version FROM writing_themes WHERE name = ? AND deleted = 0",
+                    "SELECT id, version FROM writing_themes WHERE name = ?",
                     (th_name,),
                 ).fetchone()
                 if row is not None:
-                    cur_ver = int(row[0] if isinstance(row, (list, tuple)) else row["version"])
+                    theme_id = int(row[0] if isinstance(row, (list, tuple)) else row["id"])
+                    cur_ver = int(row[1] if isinstance(row, (list, tuple)) else row["version"])
                     conn.execute(
                         "UPDATE writing_themes SET class_name=?, css=?, schema_version=?, "
-                        "version_parent_id=?, is_default=?, order_index=?, last_modified=?, "
-                        "version=?, client_id=? WHERE name=? AND deleted=0",
+                        "version_parent_id=?, is_default=?, order_index=?, deleted=0, last_modified=?, "
+                        "version=?, client_id=? WHERE id=?",
                         (th_class, th_css, th_schema, th_vp, th_default, th_order, now,
-                         cur_ver + 1, self.client_id, th_name),
+                         cur_ver + 1, self.client_id, theme_id),
                     )
                 else:
                     conn.execute(

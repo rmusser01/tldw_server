@@ -7,6 +7,7 @@ canonical error response format for Phase 3.1 migration.
 Response format (target for all error responses)::
 
     {
+        "detail": "Human-readable description",
         "error": {
             "code": "internal_server_error",
             "message": "Human-readable description",
@@ -68,6 +69,7 @@ async def global_unhandled_exception_handler(
         status_code=500,
         headers={"X-Request-ID": request_id},
         content={
+            "detail": "Internal server error",
             "error": {
                 "code": "internal_server_error",
                 "message": "Internal server error",
@@ -93,6 +95,7 @@ async def client_disconnect_handler(
         status_code=499,
         headers={"X-Request-ID": request_id},
         content={
+            "detail": "Client disconnected",
             "error": {
                 "code": "client_disconnected",
                 "message": "Client disconnected",

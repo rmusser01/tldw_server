@@ -11,6 +11,9 @@ RUN_AUTH_INIT_ON_START="${TLDW_RUN_AUTH_INIT_ON_START:-1}"
 incoming_auth_mode="${AUTH_MODE:-}"
 incoming_api_key="${SINGLE_USER_API_KEY:-}"
 incoming_database_url="${DATABASE_URL:-}"
+incoming_jobs_db_url="${JOBS_DB_URL:-}"
+incoming_database_url_override="${TLDW_DATABASE_URL_OVERRIDE:-}"
+incoming_jobs_db_url_override="${TLDW_JOBS_DB_URL_OVERRIDE:-}"
 
 generate_key() {
   if command -v openssl >/dev/null 2>&1; then
@@ -30,6 +33,86 @@ is_invalid_key() {
   [ "${#key}" -lt 16 ]
 }
 
+derive_postgres_database_url() {
+  python - <<'PY'
+import os
+import sys
+from urllib.parse import quote
+
+password = os.getenv("POSTGRES_PASSWORD") or ""
+if not password:
+    sys.exit(1)
+
+host = os.getenv("POSTGRES_HOST") or "postgres"
+port = os.getenv("POSTGRES_PORT") or "5432"
+user = os.getenv("POSTGRES_USER") or "tldw_user"
+db = os.getenv("POSTGRES_DB") or "tldw_users"
+
+sys.stdout.write(
+    f"postgresql://{quote(user, safe='')}:{quote(password, safe='')}@{host}:{port}/{quote(db, safe='')}"
+)
+PY
+}
+
+load_env_file() {
+  if [ ! -f "$ENV_FILE" ]; then
+    return
+  fi
+
+  parsed_env_file="$(mktemp "${TMPDIR:-/tmp}/tldw-env.XXXXXX")"
+  if python - "$ENV_FILE" > "$parsed_env_file" <<'PY'
+import re
+import sys
+
+path = sys.argv[1]
+key_re = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+try:
+    env_file = open(path, encoding="utf-8", newline="")
+except Exception as exc:
+    print(f"[entrypoint] Failed to open env file {path}: {exc}", file=sys.stderr)
+    sys.exit(1)
+
+try:
+    with env_file:
+        for line_number, raw_line in enumerate(env_file, start=1):
+            line = raw_line.rstrip("\n")
+            if "\r" in line:
+                print(
+                    f"[entrypoint] Refusing env line with carriage return at {path}:{line_number}",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+            if not line.strip() or line.lstrip().startswith("#"):
+                continue
+            if "=" not in line:
+                print(f"[entrypoint] Invalid env line in {path}:{line_number}", file=sys.stderr)
+                sys.exit(1)
+
+            key, value = line.split("=", 1)
+            if not key_re.match(key):
+                print(f"[entrypoint] Invalid env key in {path}:{line_number}: {key!r}", file=sys.stderr)
+                sys.exit(1)
+            if "\n" in value:
+                print(f"[entrypoint] Refusing env value with newline for key {key}", file=sys.stderr)
+                sys.exit(1)
+            print(f"{key}={value}")
+except Exception as exc:
+    print(f"[entrypoint] Failed to parse env file {path}: {exc}", file=sys.stderr)
+    sys.exit(1)
+PY
+  then
+    while IFS= read -r assignment || [ -n "$assignment" ]; do
+      [ -n "$assignment" ] || continue
+      export "$assignment"
+    done < "$parsed_env_file"
+    rm -f "$parsed_env_file"
+  else
+    rm -f "$parsed_env_file"
+    exit 1
+  fi
+}
+
 upsert_env() {
   key="$1"
   value="$2"
@@ -44,11 +127,7 @@ upsert_env() {
       END { if (!updated) print k "=" v }
     ' "$ENV_FILE" > "$tmp_file"
   else
-    {
-      echo "AUTH_MODE=single_user"
-      echo "SINGLE_USER_API_KEY=$value"
-      echo "DATABASE_URL=sqlite:///./Databases/users.db"
-    } > "$tmp_file"
+    echo "$key=$value" > "$tmp_file"
   fi
   mv "$tmp_file" "$ENV_FILE"
   chmod 600 "$ENV_FILE"
@@ -142,12 +221,18 @@ EOF
   echo "[entrypoint] Created $ENV_FILE with generated SINGLE_USER_API_KEY."
 }
 
-ensure_env_file
+process_env_multi_user=0
+if [ "$incoming_auth_mode" = "multi_user" ]; then
+  process_env_multi_user=1
+fi
 
-set -a
-# shellcheck source=/dev/null
-. "$ENV_FILE"
-set +a
+if [ "$process_env_multi_user" = "0" ]; then
+  ensure_env_file
+fi
+
+if [ -f "$ENV_FILE" ]; then
+  load_env_file
+fi
 
 if [ -n "$incoming_auth_mode" ]; then
   AUTH_MODE="$incoming_auth_mode"
@@ -158,15 +243,89 @@ fi
 if [ -n "$incoming_database_url" ]; then
   DATABASE_URL="$incoming_database_url"
 fi
+if [ -n "$incoming_jobs_db_url" ]; then
+  JOBS_DB_URL="$incoming_jobs_db_url"
+fi
+if [ -n "$incoming_database_url_override" ]; then
+  TLDW_DATABASE_URL_OVERRIDE="$incoming_database_url_override"
+fi
+if [ -n "$incoming_jobs_db_url_override" ]; then
+  TLDW_JOBS_DB_URL_OVERRIDE="$incoming_jobs_db_url_override"
+fi
 
 AUTH_MODE="${AUTH_MODE:-single_user}"
-DATABASE_URL="${DATABASE_URL:-sqlite:///./Databases/users.db}"
+database_url_derived=0
+jobs_db_url_derived=0
+if [ "$AUTH_MODE" = "multi_user" ]; then
+  if [ -n "${DATABASE_URL:-}" ] && [ -z "${TLDW_DATABASE_URL_OVERRIDE:-}" ]; then
+    echo "" >&2
+    echo "======================================================================" >&2
+    echo "  ERROR: Multi-user mode refuses DATABASE_URL from the docker env file." >&2
+    echo "" >&2
+    echo "  Remove DATABASE_URL from the docker-multi-postgres env file, or set" >&2
+    echo "  TLDW_DATABASE_URL_OVERRIDE to intentionally use an external database." >&2
+    echo "======================================================================" >&2
+    echo "" >&2
+    exit 1
+  fi
+  if [ -n "${JOBS_DB_URL:-}" ] && [ -z "${TLDW_JOBS_DB_URL_OVERRIDE:-}" ]; then
+    echo "" >&2
+    echo "======================================================================" >&2
+    echo "  ERROR: Multi-user mode refuses JOBS_DB_URL from the docker env file." >&2
+    echo "" >&2
+    echo "  Remove JOBS_DB_URL from the docker-multi-postgres env file, or set" >&2
+    echo "  TLDW_JOBS_DB_URL_OVERRIDE to intentionally use an external jobs database." >&2
+    echo "======================================================================" >&2
+    echo "" >&2
+    exit 1
+  fi
+
+  if [ -n "${TLDW_DATABASE_URL_OVERRIDE:-}" ]; then
+    DATABASE_URL="$TLDW_DATABASE_URL_OVERRIDE"
+    database_url_derived=1
+  elif [ -n "${POSTGRES_PASSWORD:-}" ]; then
+    DATABASE_URL="$(derive_postgres_database_url)"
+    database_url_derived=1
+  else
+    echo "" >&2
+    echo "======================================================================" >&2
+    echo "  ERROR: Multi-user mode requires POSTGRES_PASSWORD or TLDW_DATABASE_URL_OVERRIDE." >&2
+    echo "" >&2
+    echo "  Set POSTGRES_PASSWORD for the bundled docker-multi-postgres profile," >&2
+    echo "  or set TLDW_DATABASE_URL_OVERRIDE for an external database." >&2
+    echo "======================================================================" >&2
+    echo "" >&2
+    exit 1
+  fi
+
+  if [ -n "${TLDW_JOBS_DB_URL_OVERRIDE:-}" ]; then
+    JOBS_DB_URL="$TLDW_JOBS_DB_URL_OVERRIDE"
+    jobs_db_url_derived=1
+  elif [ "$database_url_derived" = "1" ]; then
+    JOBS_DB_URL="$DATABASE_URL"
+    jobs_db_url_derived=1
+  else
+    JOBS_DB_URL="$DATABASE_URL"
+    jobs_db_url_derived=1
+  fi
+else
+  DATABASE_URL="${DATABASE_URL:-sqlite:///./Databases/users.db}"
+fi
+export DATABASE_URL
+if [ -n "${JOBS_DB_URL:-}" ]; then
+  export JOBS_DB_URL
+fi
 
 # Derive mode-specific marker so switching AUTH_MODE re-triggers init.
 AUTH_MARKER_FILE="${AUTH_MARKER_DIR}/.authnz_initialized_${AUTH_MODE}"
 
 upsert_env "AUTH_MODE" "$AUTH_MODE"
-upsert_env "DATABASE_URL" "$DATABASE_URL"
+if [ "$database_url_derived" = "0" ]; then
+  upsert_env "DATABASE_URL" "$DATABASE_URL"
+fi
+if [ -n "${JOBS_DB_URL:-}" ] && [ "$jobs_db_url_derived" = "0" ]; then
+  upsert_env "JOBS_DB_URL" "$JOBS_DB_URL"
+fi
 
 if [ "$AUTH_MODE" = "single_user" ]; then
   current_key="${SINGLE_USER_API_KEY:-}"
@@ -245,11 +404,13 @@ if [ "$RUN_AUTH_INIT_ON_START" != "0" ] && [ "$should_run_auth_init" = "1" ]; th
         --password "$ADMIN_PASSWORD" \
         ${ADMIN_EMAIL:+--email "$ADMIN_EMAIL"} \
         --non-interactive 2>&1 || {
-          echo "[first-run] WARNING: Admin user creation returned non-zero (see above)." >&2
+          echo "[first-run] ERROR: Admin bootstrap failed; refusing to continue startup." >&2
+          exit 1
         }
     else
-      # Check if any users exist; warn if not
-      has_users=$(python -c "
+      # Check whether users exist; fail separately if account state cannot be verified.
+      probe_err="$(mktemp)"
+      if has_users=$(python -c "
 import asyncio, sys
 async def check():
     try:
@@ -257,23 +418,38 @@ async def check():
         db = await get_users_db()
         users = await db.list_users(limit=1)
         return len(users) > 0
-    except Exception:
-        return False
+    except Exception as exc:
+        print(f'[first-run] Failed to verify existing users: {exc}', file=sys.stderr)
+        sys.exit(1)
 sys.stdout.write('1' if asyncio.run(check()) else '0')
-" 2>/dev/null || echo "0")
+" 2>"$probe_err"); then
+        rm -f "$probe_err"
+      else
+        echo "" >&2
+        echo "======================================================================" >&2
+        echo "  ERROR: Could not verify whether existing multi-user accounts exist." >&2
+        echo "" >&2
+        echo "  Check DATABASE_URL and database connectivity before retrying startup." >&2
+        if [ -s "$probe_err" ]; then
+          echo "" >&2
+          sed 's/^/  /' "$probe_err" >&2
+        fi
+        echo "======================================================================" >&2
+        echo "" >&2
+        rm -f "$probe_err"
+        exit 1
+      fi
 
       if [ "$has_users" = "0" ]; then
-        echo ""
-        echo "======================================================================"
-        echo "  WARNING: Multi-user mode with no admin user configured!"
-        echo ""
-        echo "  Set ADMIN_USERNAME and ADMIN_PASSWORD env vars to create"
-        echo "  the first admin user automatically, or run:"
-        echo ""
-        echo "  docker compose exec app python -m \\"
-        echo "    tldw_Server_API.app.core.AuthNZ.create_admin"
-        echo "======================================================================"
-        echo ""
+        echo "" >&2
+        echo "======================================================================" >&2
+        echo "  ERROR: Multi-user mode has no admin user and no admin bootstrap env." >&2
+        echo "" >&2
+        echo "  Set ADMIN_USERNAME and ADMIN_PASSWORD in tldw_Server_API/Config_Files/.env" >&2
+        echo "  before starting the public docker-multi-postgres profile." >&2
+        echo "======================================================================" >&2
+        echo "" >&2
+        exit 1
       fi
     fi
   fi

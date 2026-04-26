@@ -21,7 +21,7 @@ import threading
 import time
 from contextlib import asynccontextmanager, contextmanager, suppress
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -30,7 +30,7 @@ from fastapi.routing import APIRoute
 from loguru import logger
 from starlette import status as _starlette_status
 from starlette.requests import ClientDisconnect
-from starlette.responses import FileResponse
+from starlette.responses import FileResponse, Response
 from starlette.staticfiles import StaticFiles
 
 from tldw_Server_API.app.core.startup_logging import (
@@ -58,6 +58,13 @@ from tldw_Server_API.app.core.DB_Management.backends.pg_rls_policies import (
     ensure_chacha_rls,
     ensure_prompt_studio_rls,
 )
+
+if TYPE_CHECKING:
+    from tldw_Server_API.app.services.shutdown_coordinator import (
+        ShutdownComponent,
+        ShutdownCoordinator,
+    )
+    from tldw_Server_API.app.services.shutdown_legacy_adapters import LegacyShutdownContext
 
 # Backward-compat for Starlette variants that expose 413 as
 # HTTP_413_REQUEST_ENTITY_TOO_LARGE instead of HTTP_413_CONTENT_TOO_LARGE.
@@ -263,6 +270,7 @@ def _register_owned_job_poller(
         publish_inventory=_publish_shutdown_job_poller_inventory,
     )
 
+
 def _replace_owned_job_poller_inventory(
     app: FastAPI,
     handles: list[_ManagedJobPoller],
@@ -362,6 +370,7 @@ async def _quiesce_owned_job_pollers_for_shutdown(
         monotonic=time.monotonic,
         asyncio_module=asyncio,
     )
+
 
 _early_os.environ.setdefault("MCP_INHERIT_GLOBAL_LOGGER", "1")
 try:
@@ -560,7 +569,7 @@ class _StderrInterceptor:
             ("DEBUG:", "debug"),
         ):
             if text.startswith(prefix):
-                msg = text[len(prefix):].lstrip()
+                msg = text[len(prefix) :].lstrip()
                 level = lvl
                 break
         try:
@@ -638,11 +647,13 @@ class _StderrInterceptor:
         fn = getattr(self._stream, "fileno", None)
         if fn is None:
             import io
+
             raise io.UnsupportedOperation("fileno")
         return fn()
 
     def __getattr__(self, name):
         return getattr(self._stream, name)
+
 
 def _redirect_external_loggers() -> None:
     """Ensure third-party loggers route through our Loguru interceptor."""
@@ -703,6 +714,7 @@ def _unwrap_stderr(stream):
     if isinstance(stream, _StderrInterceptor):
         return stream._stream
     return stream
+
 
 # Reset Loguru and configure a single, thread-safe sink
 logger.remove()
@@ -1128,7 +1140,9 @@ else:
     _full_audio_import_enabled = True
     if _in_pytest_cmd and not _env_flag_enabled("MINIMAL_TEST_INCLUDE_AUDIO"):
         _full_audio_import_enabled = False
-        logger.info("Skipping audio endpoint imports in pytest full startup (set MINIMAL_TEST_INCLUDE_AUDIO=1 to enable)")
+        logger.info(
+            "Skipping audio endpoint imports in pytest full startup (set MINIMAL_TEST_INCLUDE_AUDIO=1 to enable)"
+        )
 
     # Audio Endpoint (includes WebSocket streaming transcription)
     if _full_audio_import_enabled:
@@ -1309,6 +1323,7 @@ else:
     from tldw_Server_API.app.api.v1.endpoints.notes import router as notes_router
     from tldw_Server_API.app.api.v1.endpoints.slides import router as slides_router
     from tldw_Server_API.app.api.v1.endpoints.translate import router as translate_router
+
     try:
         from tldw_Server_API.app.api.v1.endpoints.web_clipper import router as web_clipper_router
 
@@ -1391,9 +1406,7 @@ else:
 
         _HAS_CHAT_WORKFLOWS = True
     except _IMPORT_EXCEPTIONS as _chat_wf_import_err:
-        logger.warning(
-            f"Chat workflows endpoints unavailable; skipping import: {_chat_wf_import_err}"
-        )
+        logger.warning(f"Chat workflows endpoints unavailable; skipping import: {_chat_wf_import_err}")
         _HAS_CHAT_WORKFLOWS = False
 # Legacy RAG Endpoint (Deprecated)
 # from tldw_Server_API.app.api.v1.endpoints.rag import router as retrieval_agent_router
@@ -1411,6 +1424,7 @@ elif _MINIMAL_TEST_APP:
     from tldw_Server_API.app.api.v1.endpoints.privileges import router as privileges_router
     from tldw_Server_API.app.api.v1.endpoints.research import router as research_router
     from tldw_Server_API.app.api.v1.endpoints.research_runs import router as research_runs_router
+
     try:
         from tldw_Server_API.app.api.v1.endpoints.setup import router as setup_router
     except _IMPORT_EXCEPTIONS as _setup_min_import_err:
@@ -1522,6 +1536,7 @@ else:
     # Users Endpoint (NEW)
     # Chatbooks Endpoint
     from tldw_Server_API.app.api.v1.endpoints.chatbooks import router as chatbooks_router
+
     # Sharing Endpoint
     from tldw_Server_API.app.api.v1.endpoints.sharing import router as sharing_router
     from tldw_Server_API.app.api.v1.endpoints.consent import router as consent_router
@@ -1561,6 +1576,7 @@ else:
     from tldw_Server_API.app.api.v1.endpoints.setup import router as setup_router
     from tldw_Server_API.app.api.v1.endpoints.shared_keys_scoped import router as shared_keys_scoped_router
     from tldw_Server_API.app.api.v1.endpoints.user_keys import router as user_keys_router
+
     try:
         from tldw_Server_API.app.api.v1.endpoints.users import router as users_router
     except _IMPORT_EXCEPTIONS as _users_import_err:
@@ -2169,10 +2185,7 @@ def _fail_on_duplicate_route_method_pairs(app: FastAPI, *, context: str) -> None
     if not duplicates:
         return
 
-    sample = "; ".join(
-        f"{method} {path} ({first} vs {second})"
-        for path, method, first, second in duplicates[:10]
-    )
+    sample = "; ".join(f"{method} {path} ({first} vs {second})" for path, method, first, second in duplicates[:10])
     message = (
         f"Duplicate route registrations detected during {context}: "
         f"{len(duplicates)} duplicate (path, method) pairs. Sample: {sample}"
@@ -2300,10 +2313,7 @@ def _apply_runtime_cors_headers(request: Request, response: Any) -> Any:
         response.headers.setdefault("Vary", "Origin")
     if _cors_allow_credentials:
         response.headers.setdefault("Access-Control-Allow-Credentials", "true")
-    response.headers.setdefault(
-        "Access-Control-Expose-Headers",
-        "X-Request-ID, traceparent, X-Trace-Id"
-    )
+    response.headers.setdefault("Access-Control-Expose-Headers", "X-Request-ID, traceparent, X-Trace-Id")
     return response
 
 
@@ -2324,18 +2334,24 @@ def _run_startup_config_validation() -> None:
         from tldw_Server_API.app.core.config import validate_config
 
         validate_config()
-    except (_STARTUP_GUARD_EXCEPTIONS + _IMPORT_EXCEPTIONS) as _vc_e:
+    except _STARTUP_GUARD_EXCEPTIONS + _IMPORT_EXCEPTIONS as _vc_e:
         logger.warning(f"Config validation could not run: {_vc_e}")
 
 
 @app.exception_handler(Exception)
-async def _global_unhandled_exception_handler(request, exc):
+async def _global_unhandled_exception_handler(
+    request: Request,
+    exc: Exception,
+) -> Response:
     response = await _global_handler(request, exc)
     return _apply_runtime_cors_headers(request, response)
 
 
 @app.exception_handler(ClientDisconnect)
-async def _client_disconnect_exception_handler(request: Request, exc: ClientDisconnect):
+async def _client_disconnect_exception_handler(
+    request: Request,
+    exc: ClientDisconnect,
+) -> Response:
     response = await _client_disconnect_handler(request, exc)
     return _apply_runtime_cors_headers(request, response)
 
@@ -2548,6 +2564,7 @@ else:
     _env_allowed_origins_set = os.getenv("ALLOWED_ORIGINS") is not None
     try:
         from tldw_Server_API.app.core.AuthNZ.settings import get_settings as _get_cors_settings
+
         _cors_auth_mode = _get_cors_settings().AUTH_MODE
     except Exception:
         _cors_auth_mode = os.getenv("AUTH_MODE", "single_user")
@@ -2566,9 +2583,7 @@ else:
                 origins.append(_origin)
                 _auto_added.append(_origin)
         if _auto_added:
-            logger.info(
-                f"CORS single-user auto-detect: added localhost origins {_auto_added}"
-            )
+            logger.info(f"CORS single-user auto-detect: added localhost origins {_auto_added}")
         else:
             logger.info("CORS single-user auto-detect: all common localhost origins already present.")
     elif str(_cors_auth_mode) == "multi_user" and not origins:
@@ -2677,14 +2692,10 @@ from tldw_Server_API.app.core.testing import (
 
 _TEST_FLAGS_SET = _shared_is_test_mode() or _test_env_flag_enabled("TESTING")
 _EXPLICIT_PYTEST_RUNTIME = _is_explicit_pytest_runtime()
-_TEST_MODE = _EXPLICIT_PYTEST_RUNTIME and (
-    _TEST_FLAGS_SET or bool(_env_os.getenv("PYTEST_CURRENT_TEST"))
-)
+_TEST_MODE = _EXPLICIT_PYTEST_RUNTIME and (_TEST_FLAGS_SET or bool(_env_os.getenv("PYTEST_CURRENT_TEST")))
 
 if _TEST_FLAGS_SET and not _EXPLICIT_PYTEST_RUNTIME:
-    logger.warning(
-        "Test flags are set without explicit pytest runtime; startup guard will reject this configuration."
-    )
+    logger.warning("Test flags are set without explicit pytest runtime; startup guard will reject this configuration.")
 
 if _TEST_MODE:
     logger.info("TEST_MODE detected: Skipping non-essential middlewares (security headers, metrics, usage logging)")
@@ -2955,7 +2966,9 @@ elif _MINIMAL_TEST_APP:
     include_router_idempotent(app, chat_loop_router, prefix=f"{API_V1_PREFIX}")
     include_router_idempotent(app, conversations_alias_router, prefix=f"{API_V1_PREFIX}/chats", tags=["chat"])
     include_router_idempotent(app, character_router, prefix=f"{API_V1_PREFIX}/characters", tags=["characters"])
-    include_router_idempotent(app, character_memory_router, prefix=f"{API_V1_PREFIX}/characters", tags=["character-memory"])
+    include_router_idempotent(
+        app, character_memory_router, prefix=f"{API_V1_PREFIX}/characters", tags=["character-memory"]
+    )
     include_router_idempotent(
         app, character_chat_sessions_router, prefix=f"{API_V1_PREFIX}/chats", tags=["character-chat-sessions"]
     )
@@ -3208,7 +3221,9 @@ elif _MINIMAL_TEST_APP:
 
         app.include_router(scheduled_tasks_control_plane_router, prefix=f"{API_V1_PREFIX}", tags=["scheduled-tasks"])
     except _IMPORT_EXCEPTIONS as _scheduled_tasks_cp_min_err:
-        logger.debug(f"Skipping scheduled tasks control plane router in minimal test app: {_scheduled_tasks_cp_min_err}")
+        logger.debug(
+            f"Skipping scheduled tasks control plane router in minimal test app: {_scheduled_tasks_cp_min_err}"
+        )
     try:
         from tldw_Server_API.app.api.v1.endpoints.notifications import router as notifications_router
 
@@ -3364,9 +3379,7 @@ elif _MINIMAL_TEST_APP:
     _minimal_audio_jobs_enabled = route_enabled("audio-jobs")
     if _in_pytest_cmd and not _env_flag_enabled("MINIMAL_TEST_INCLUDE_AUDIO_JOBS"):
         _minimal_audio_jobs_enabled = False
-        logger.info(
-            "Skipping audio-jobs router in minimal test app (set MINIMAL_TEST_INCLUDE_AUDIO_JOBS=1 to enable)"
-        )
+        logger.info("Skipping audio-jobs router in minimal test app (set MINIMAL_TEST_INCLUDE_AUDIO_JOBS=1 to enable)")
 
     if _minimal_audio_jobs_enabled:
         try:
@@ -3607,9 +3620,7 @@ elif _MINIMAL_TEST_APP:
 
         app.include_router(_chat_wf_router, prefix="", tags=["chat-workflows"])
     except _IMPORT_EXCEPTIONS as _chat_wf_min_err:
-        logger.debug(
-            f"Skipping chat workflows router in minimal test app: {_chat_wf_min_err}"
-        )
+        logger.debug(f"Skipping chat workflows router in minimal test app: {_chat_wf_min_err}")
     try:
         from tldw_Server_API.app.api.v1.endpoints.scheduler_workflows import router as _sch_wf_router
 
@@ -3781,13 +3792,21 @@ else:
     if "acp_router" in locals() and acp_router is not None:
         _include_if_enabled("acp", acp_router, prefix=f"{API_V1_PREFIX}", tags=["acp"], default_stable=False)
     if "acp_schedules_router" in locals() and acp_schedules_router is not None:
-        _include_if_enabled("acp", acp_schedules_router, prefix=f"{API_V1_PREFIX}", tags=["acp-schedules"], default_stable=False)
+        _include_if_enabled(
+            "acp", acp_schedules_router, prefix=f"{API_V1_PREFIX}", tags=["acp-schedules"], default_stable=False
+        )
     if "acp_triggers_router" in locals() and acp_triggers_router is not None:
-        _include_if_enabled("acp", acp_triggers_router, prefix=f"{API_V1_PREFIX}", tags=["acp-triggers"], default_stable=False)
+        _include_if_enabled(
+            "acp", acp_triggers_router, prefix=f"{API_V1_PREFIX}", tags=["acp-triggers"], default_stable=False
+        )
     if "acp_permissions_router" in locals() and acp_permissions_router is not None:
-        _include_if_enabled("acp", acp_permissions_router, prefix=f"{API_V1_PREFIX}", tags=["acp-permissions"], default_stable=False)
+        _include_if_enabled(
+            "acp", acp_permissions_router, prefix=f"{API_V1_PREFIX}", tags=["acp-permissions"], default_stable=False
+        )
     if "acp_multiplex_router" in locals() and acp_multiplex_router is not None:
-        _include_if_enabled("acp", acp_multiplex_router, prefix=f"{API_V1_PREFIX}", tags=["acp-multiplex"], default_stable=False)
+        _include_if_enabled(
+            "acp", acp_multiplex_router, prefix=f"{API_V1_PREFIX}", tags=["acp-multiplex"], default_stable=False
+        )
     if "character_router" in locals():
         _include_if_enabled("characters", character_router, prefix=f"{API_V1_PREFIX}/characters", tags=["characters"])
     if "character_memory_router" in locals():
@@ -3795,9 +3814,7 @@ else:
             "character-memory", character_memory_router, prefix=f"{API_V1_PREFIX}/characters", tags=["character-memory"]
         )
     if "workspaces_router" in locals():
-        _include_if_enabled(
-            "workspaces", workspaces_router, prefix=f"{API_V1_PREFIX}/workspaces", tags=["workspaces"]
-        )
+        _include_if_enabled("workspaces", workspaces_router, prefix=f"{API_V1_PREFIX}/workspaces", tags=["workspaces"])
     if "character_chat_sessions_router" in locals():
         _include_if_enabled(
             "character-chat-sessions",
@@ -3836,7 +3853,9 @@ else:
     if _HAS_SLACK and "slack_router" in locals():
         _include_if_enabled("slack", slack_router, prefix=f"{API_V1_PREFIX}", tags=["slack"], default_stable=False)
     if _HAS_DISCORD and "discord_router" in locals():
-        _include_if_enabled("discord", discord_router, prefix=f"{API_V1_PREFIX}", tags=["discord"], default_stable=False)
+        _include_if_enabled(
+            "discord", discord_router, prefix=f"{API_V1_PREFIX}", tags=["discord"], default_stable=False
+        )
     if _HAS_TELEGRAM and "telegram_router" in locals():
         _include_if_enabled(
             "telegram", telegram_router, prefix=f"{API_V1_PREFIX}", tags=["telegram"], default_stable=False
@@ -3957,13 +3976,11 @@ else:
     except _IMPORT_EXCEPTIONS as _e:
         logger.warning(f"Notifications endpoint not available: {_e}")
     _reading_import_enabled = True
-    if (
-        _EXPLICIT_PYTEST_RUNTIME
-        and _MINIMAL_TEST_APP
-        and not _test_env_flag_enabled("MINIMAL_TEST_INCLUDE_READING")
-    ):
+    if _EXPLICIT_PYTEST_RUNTIME and _MINIMAL_TEST_APP and not _test_env_flag_enabled("MINIMAL_TEST_INCLUDE_READING"):
         _reading_import_enabled = False
-        logger.info("Skipping reading endpoint imports in pytest startup (set MINIMAL_TEST_INCLUDE_READING=1 to enable)")
+        logger.info(
+            "Skipping reading endpoint imports in pytest startup (set MINIMAL_TEST_INCLUDE_READING=1 to enable)"
+        )
     if _reading_import_enabled:
         try:
             from tldw_Server_API.app.api.v1.endpoints.reading import router as _reading_router
@@ -3985,39 +4002,23 @@ else:
         )  # /api/v1/notes/graph
     _include_if_enabled("notes", notes_router, prefix=f"{API_V1_PREFIX}/notes", tags=["notes"])
     if _HAS_WEB_CLIPPER:
-        _include_if_enabled("web-clipper", web_clipper_router, prefix=f"{API_V1_PREFIX}/web-clipper", tags=["web-clipper"])
+        _include_if_enabled(
+            "web-clipper", web_clipper_router, prefix=f"{API_V1_PREFIX}/web-clipper", tags=["web-clipper"]
+        )
     _include_if_enabled("translation", translate_router, prefix=f"{API_V1_PREFIX}", tags=["translation"])
     _include_if_enabled("slides", slides_router, prefix=f"{API_V1_PREFIX}", tags=["slides"])
     _include_if_enabled("prompts", prompt_router, prefix=f"{API_V1_PREFIX}/prompts", tags=["prompts"])
     # Kanban Board endpoints
     if _HAS_KANBAN:
-        _include_if_enabled(
-            "kanban", kanban_boards_router, prefix=f"{API_V1_PREFIX}/kanban", tags=["kanban"]
-        )
-        _include_if_enabled(
-            "kanban", kanban_lists_router, prefix=f"{API_V1_PREFIX}/kanban", tags=["kanban"]
-        )
-        _include_if_enabled(
-            "kanban", kanban_cards_router, prefix=f"{API_V1_PREFIX}/kanban", tags=["kanban"]
-        )
-        _include_if_enabled(
-            "kanban", kanban_labels_router, prefix=f"{API_V1_PREFIX}/kanban", tags=["kanban"]
-        )
-        _include_if_enabled(
-            "kanban", kanban_checklists_router, prefix=f"{API_V1_PREFIX}/kanban", tags=["kanban"]
-        )
-        _include_if_enabled(
-            "kanban", kanban_comments_router, prefix=f"{API_V1_PREFIX}/kanban", tags=["kanban"]
-        )
-        _include_if_enabled(
-            "kanban", kanban_search_router, prefix=f"{API_V1_PREFIX}/kanban", tags=["kanban"]
-        )
-        _include_if_enabled(
-            "kanban", kanban_links_router, prefix=f"{API_V1_PREFIX}/kanban", tags=["kanban"]
-        )
-        _include_if_enabled(
-            "kanban", kanban_workflow_router, prefix=f"{API_V1_PREFIX}/kanban", tags=["kanban"]
-        )
+        _include_if_enabled("kanban", kanban_boards_router, prefix=f"{API_V1_PREFIX}/kanban", tags=["kanban"])
+        _include_if_enabled("kanban", kanban_lists_router, prefix=f"{API_V1_PREFIX}/kanban", tags=["kanban"])
+        _include_if_enabled("kanban", kanban_cards_router, prefix=f"{API_V1_PREFIX}/kanban", tags=["kanban"])
+        _include_if_enabled("kanban", kanban_labels_router, prefix=f"{API_V1_PREFIX}/kanban", tags=["kanban"])
+        _include_if_enabled("kanban", kanban_checklists_router, prefix=f"{API_V1_PREFIX}/kanban", tags=["kanban"])
+        _include_if_enabled("kanban", kanban_comments_router, prefix=f"{API_V1_PREFIX}/kanban", tags=["kanban"])
+        _include_if_enabled("kanban", kanban_search_router, prefix=f"{API_V1_PREFIX}/kanban", tags=["kanban"])
+        _include_if_enabled("kanban", kanban_links_router, prefix=f"{API_V1_PREFIX}/kanban", tags=["kanban"])
+        _include_if_enabled("kanban", kanban_workflow_router, prefix=f"{API_V1_PREFIX}/kanban", tags=["kanban"])
     if _HAS_READING_HIGHLIGHTS:
         _include_if_enabled(
             "reading-highlights", reading_highlights_router, prefix=f"{API_V1_PREFIX}", tags=["reading-highlights"]
@@ -4155,9 +4156,7 @@ else:
     _include_if_enabled(
         "flashcards", flashcards_router, prefix=f"{API_V1_PREFIX}", tags=["flashcards"], default_stable=True
     )
-    _include_if_enabled(
-        "quizzes", quizzes_router, prefix=f"{API_V1_PREFIX}", tags=["quizzes"], default_stable=True
-    )
+    _include_if_enabled("quizzes", quizzes_router, prefix=f"{API_V1_PREFIX}", tags=["quizzes"], default_stable=True)
     _include_if_enabled(
         "study-suggestions",
         study_suggestions_router,
@@ -4171,8 +4170,11 @@ else:
         )
     if "manuscripts_router" in locals() and manuscripts_router is not None:
         _include_if_enabled(
-            "manuscripts", manuscripts_router, prefix=f"{API_V1_PREFIX}/writing/manuscripts",
-            tags=["manuscripts"], default_stable=True
+            "manuscripts",
+            manuscripts_router,
+            prefix=f"{API_V1_PREFIX}/writing/manuscripts",
+            tags=["manuscripts"],
+            default_stable=True,
         )
     from tldw_Server_API.app.api.v1.endpoints.persona import (
         router as persona_router,
@@ -4240,7 +4242,7 @@ else:
         include_router_idempotent(
             app, archetype_router, prefix=f"{API_V1_PREFIX}/persona/archetypes", tags=["persona-archetypes"]
         )
-    except (_STARTUP_GUARD_EXCEPTIONS + _IMPORT_EXCEPTIONS) as _arch_full_err:
+    except _STARTUP_GUARD_EXCEPTIONS + _IMPORT_EXCEPTIONS as _arch_full_err:
         logger.debug("Archetype router unavailable in full app: {}", _arch_full_err)
     _include_if_enabled("mcp-unified", mcp_unified_router, prefix=f"{API_V1_PREFIX}", tags=["mcp-unified"])
     _include_if_enabled("chatbooks", chatbooks_router, prefix=f"{API_V1_PREFIX}", tags=["chatbooks"])

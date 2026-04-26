@@ -2,6 +2,7 @@
 # Description: Configuration settings for the tldw server application.
 #
 from __future__ import annotations
+
 # Imports
 import configparser
 import contextlib
@@ -85,6 +86,7 @@ def _int_env_or_cfg(
         return int(cfg_text)
     return default
 
+
 # Config.txt adapter cache + metadata
 _CONFIG_PARSER_CACHE: Optional[configparser.ConfigParser] = None
 _CONFIG_SOURCE_METADATA: dict[str, Any] = {
@@ -98,6 +100,7 @@ _CONFIG_SOURCE_METADATA: dict[str, Any] = {
 # True are buffered and flushed once initialization completes.
 _LOGGER_READY = False
 _STARTUP_LOG_BUFFER: list[tuple[str, str, dict[str, Any]]] = []
+_ENV_FILE_ENV_VAR = "TLDW_ENV_FILE"
 
 
 def _buffered_log(level: str, message: str, **kwargs: Any) -> None:
@@ -134,6 +137,62 @@ def _flush_startup_logs() -> None:
     _STARTUP_LOG_BUFFER = []
 
 
+def _resolve_path(path: Path) -> Path:
+    try:
+        return path.expanduser().resolve()
+    except _CONFIG_NONCRITICAL_EXCEPTIONS:
+        return path.expanduser()
+
+
+def get_tldw_env_file_path() -> Path | None:
+    """Return the explicit runtime .env path selected by TLDW_ENV_FILE."""
+    raw_path = os.getenv(_ENV_FILE_ENV_VAR)
+    if not raw_path or not raw_path.strip():
+        return None
+    return _resolve_path(Path(raw_path.strip()))
+
+
+def _candidate_env_paths(project_root: Path, repo_root: Path | None = None) -> list[Path]:
+    """Return .env candidates in load precedence order.
+
+    `TLDW_ENV_FILE` is an explicit user/runtime selection. It must be loaded
+    before canonical repo paths because python-dotenv uses override=False.
+    """
+    candidates: list[Path] = []
+    explicit_env_file = get_tldw_env_file_path()
+    if explicit_env_file:
+        candidates.append(explicit_env_file)
+
+    candidates.extend(
+        [
+            project_root / "Config_Files" / ".env",
+            project_root / "Config_Files" / ".ENV",
+            project_root / ".env",
+            project_root / ".ENV",
+        ]
+    )
+    if repo_root is not None:
+        candidates.extend(
+            [
+                repo_root / "Config_Files" / ".env",
+                repo_root / "Config_Files" / ".ENV",
+                repo_root / ".env",
+                repo_root / ".ENV",
+            ]
+        )
+
+    resolved_candidates: list[Path] = []
+    seen: set[str] = set()
+    for path in candidates:
+        resolved = _resolve_path(path)
+        key = str(resolved)
+        if key in seen:
+            continue
+        resolved_candidates.append(resolved)
+        seen.add(key)
+    return resolved_candidates
+
+
 def _load_env_files_early() -> None:
     """Load .env files before any environment reads.
 
@@ -144,12 +203,10 @@ def _load_env_files_early() -> None:
     try:
         current_file_path = Path(__file__).resolve()
         project_root = current_file_path.parent.parent.parent
-        candidate_env_paths = [
-            project_root / 'Config_Files' / '.env',
-            project_root / 'Config_Files' / '.ENV',
-            project_root / '.env',
-            project_root / '.ENV',
-        ]
+        candidate_env_paths = _candidate_env_paths(
+            project_root,
+            project_root.parent,
+        )
         loaded_any = False
         for p in candidate_env_paths:
             try:
@@ -191,9 +248,7 @@ def _load_config_parser(*, reload: bool = False) -> configparser.ConfigParser:
     config_parser = configparser.ConfigParser()
 
     if not config_path_obj.exists():
-        _log_warning(
-            f"Config file not found at {str(config_path_obj)}; using empty config"
-        )
+        _log_warning(f"Config file not found at {str(config_path_obj)}; using empty config")
         _record_config_source(config_path_obj, loaded=False)
         _CONFIG_PARSER_CACHE = config_parser
         return config_parser
@@ -301,6 +356,7 @@ def get_config_source_metadata() -> dict[str, Any]:
     """Return cached config source metadata for logging/diagnostics."""
     return dict(_CONFIG_SOURCE_METADATA)
 
+
 # Local Imports
 # Local Imports
 #
@@ -311,6 +367,7 @@ def get_config_source_metadata() -> dict[str, Any]:
 # --- Constants ---
 # Client ID used by the Server API itself when writing to sync logs
 SERVER_CLIENT_ID = "SERVER_API_V1"
+
 
 # --- CORS Configuration ---
 # List of allowed origins for CORS (env override supported)
@@ -324,6 +381,7 @@ def _parse_allowed_origins_env(raw: str):
         pass
     # Fallback: comma-separated list
     return [s.strip() for s in raw.split(",") if s.strip()]
+
 
 _DEFAULT_ALLOWED_ORIGINS = [
     # Common local origins
@@ -356,9 +414,7 @@ if _ENV_ALLOWED is None:
     ALLOWED_ORIGINS = list(_DEFAULT_ALLOWED_ORIGINS)
     _ALLOWED_ORIGINS_SOURCE = "default"
 elif not str(_ENV_ALLOWED).strip():
-    _log_warning(
-        "ALLOWED_ORIGINS is set but empty; falling back to default local origins for compatibility."
-    )
+    _log_warning("ALLOWED_ORIGINS is set but empty; falling back to default local origins for compatibility.")
     ALLOWED_ORIGINS = list(_DEFAULT_ALLOWED_ORIGINS)
     _ALLOWED_ORIGINS_SOURCE = "default(empty-env)"
 else:
@@ -369,6 +425,7 @@ else:
 def get_default_allowed_origins() -> list[str]:
     """Return the built-in local/loopback CORS origins used for self-hosted browser access."""
     return list(_DEFAULT_ALLOWED_ORIGINS)
+
 
 # --- API Configuration ---
 # API version prefix for all endpoints
@@ -387,8 +444,8 @@ DEFAULT_PORT = 8000
 DEFAULT_DB_TYPE = "sqlite3"
 
 # --- File Validation/YARA Settings ---
-YARA_RULES_PATH: Optional[str] = None # e.g., "/app/yara_rules/index.yar"
-MAGIC_FILE_PATH: Optional[str] = os.getenv("MAGIC_FILE_PATH", None) # e.g., "/app/magic.mgc"
+YARA_RULES_PATH: Optional[str] = None  # e.g., "/app/yara_rules/index.yar"
+MAGIC_FILE_PATH: Optional[str] = os.getenv("MAGIC_FILE_PATH", None)  # e.g., "/app/magic.mgc"
 
 # --- Chunking Settings ---
 global_default_chunk_language = "en"
@@ -399,18 +456,15 @@ APP_CONFIG = {
     "OPENAI_API_KEY": os.getenv("OPENAI_API_KEY", ""),
     "KOKORO_ONNX_MODEL_PATH_DEFAULT": "models/kokoro/onnx/model.onnx",
     "KOKORO_ONNX_VOICES_JSON_DEFAULT": "models/kokoro/voices",
-    "KOKORO_DEVICE_DEFAULT": "cpu", # or "cuda"
+    "KOKORO_DEVICE_DEFAULT": "cpu",  # or "cuda"
     "ELEVENLABS_API_KEY": os.getenv("ELEVENLABS_API_KEY", ""),
-    "local_kokoro_default_onnx": { # Specific overrides for this backend_id
-        "KOKORO_DEVICE": "cuda:0"
-    },
+    "local_kokoro_default_onnx": {"KOKORO_DEVICE": "cuda:0"},  # Specific overrides for this backend_id
     "global_tts_settings": {
         # shared settings
-    }
+    },
 }
 
-DATABASE_CONFIG = {
-    }
+DATABASE_CONFIG = {}
 
 RAG_SEARCH_CONFIG = {
     "fts_top_k": 10,
@@ -444,7 +498,6 @@ RAG_SERVICE_CONFIG = {
     "num_workers": 4,  # Limited for multi-user server
     "log_level": "INFO",
     "log_performance_metrics": True,
-
     # Cache configuration
     "cache": {
         "enable_cache": True,
@@ -452,9 +505,8 @@ RAG_SERVICE_CONFIG = {
         "cache_ttl": 3600,  # 1 hour
         "cache_search_results": True,
         "cache_embeddings": True,
-        "cache_llm_responses": False  # Don't cache LLM responses by default
+        "cache_llm_responses": False,  # Don't cache LLM responses by default
     },
-
     # Retriever configuration
     "retriever": {
         "fts_top_k": 10,
@@ -464,9 +516,8 @@ RAG_SERVICE_CONFIG = {
         "web_search_top_k": 5,
         "enable_re_ranking": True,
         "re_ranking_model": "flashrank",
-        "timeout_seconds": 30
+        "timeout_seconds": 30,
     },
-
     # Processor configuration
     "processor": {
         "enable_reranking": True,
@@ -477,9 +528,9 @@ RAG_SERVICE_CONFIG = {
         "max_context_length": 4096,
         "context_padding_tokens": 100,
         "enable_metadata_filtering": True,
-        "token_counter": "tiktoken"
+        # Tokenizer backend name, not a password.
+        "token_counter": "tiktoken",  # nosec B105
     },
-
     # Generator configuration
     "generator": {
         "default_model": "gpt-3.5-turbo",
@@ -490,15 +541,14 @@ RAG_SERVICE_CONFIG = {
         "enable_citations": True,
         "citation_style": "inline",
         "enable_fallback": True,
-        "fallback_behavior": "simple_answer"
-    }
+        "fallback_behavior": "simple_answer",
+    },
 }
 
 # Configuration for speaker diarization (config-level defaults)
 DIARIZATION_CONFIG = {
     # Backend selection
     "backend": "embedding",  # embedding | nemo_multitalk
-
     # VAD (Voice Activity Detection) settings
     "vad_backend": "silero_hub",  # silero_hub | onnx_silero
     "vad_threshold": 0.5,  # Silero VAD confidence threshold
@@ -508,42 +558,36 @@ DIARIZATION_CONFIG = {
     "enable_torch_hub_fetch": True,
     "speech_pad_ms": 400,  # Padding around speech segments in milliseconds
     "onnx_model_path": "models/silero_vad/silero_vad_v6.onnx",
-
     # Segmentation settings
     "segment_duration": 30.0,  # Maximum segment duration in seconds
     "segment_overlap": 0.5,
     "min_segment_duration": 1.0,
     "max_segment_duration": 3.0,
-
     # Embedding model settings
     "embedding_model": "speechbrain/spkrec-ecapa-voxceleb",
     "embedding_batch_size": 32,
     "embedding_device": "auto",  # auto, cpu, cuda, or cuda:0
     "embedding_local_only": False,
-
     # Clustering settings
     "clustering_method": "spectral",  # spectral or agglomerative
     "similarity_threshold": 0.85,
     "min_speakers": 1,
     "max_speakers": 10,
-
     # Post-processing settings
     "merge_threshold": 0.5,  # Threshold for merging adjacent segments
     "min_speaker_duration": 3.0,  # Minimum total speaker duration in seconds
     "detect_overlapping_speech": False,
     "overlap_confidence_threshold": 0.7,
-
     # Performance / memory settings
     "num_threads": 4,  # Number of threads for processing
     "memory_efficient": False,
     "max_memory_mb": 2048,
-    "use_auth_token": None,  # HuggingFace auth token if needed
+    # Placeholder for optional user-supplied token.
+    "use_auth_token": None,  # nosec B105
     "cache_dir": None,  # Directory for model cache
-
     # Output settings
     "include_embeddings": False,  # Include embeddings in output
     "include_vad_scores": False,  # Include VAD scores in output
-
     # NeMo multitalk (Parakeet + Sortformer diarization)
     "nemo_multitalk_asr_model": "nvidia/multitalker-parakeet-streaming-0.6b-v1",
     "nemo_multitalk_diar_model": "nvidia/diar_streaming_sortformer_4spk-v2.1",
@@ -563,9 +607,9 @@ def load_tts_config() -> dict[str, Any]:
     """
     current_file_path = Path(__file__).resolve()
     candidate_paths = [
-        current_file_path.parent / 'TTS' / 'tts_providers_config.yaml',
-        current_file_path.parent.parent / 'Config_Files' / 'tts_providers_config.yaml',
-        Path.cwd() / 'tldw_Server_API' / 'Config_Files' / 'tts_providers_config.yaml',
+        current_file_path.parent / "TTS" / "tts_providers_config.yaml",
+        current_file_path.parent.parent / "Config_Files" / "tts_providers_config.yaml",
+        Path.cwd() / "tldw_Server_API" / "Config_Files" / "tts_providers_config.yaml",
     ]
     tts_config_path = None
     for p in candidate_paths:
@@ -582,7 +626,7 @@ def load_tts_config() -> dict[str, Any]:
         return _get_default_tts_config()
 
     try:
-        with open(tts_config_path, encoding='utf-8') as f:
+        with open(tts_config_path, encoding="utf-8") as f:
             tts_config = yaml.safe_load(f)
 
         # Validate and process the configuration
@@ -594,6 +638,7 @@ def load_tts_config() -> dict[str, Any]:
         _log_error(f"Error loading TTS configuration: {e}")
         _log_info("Falling back to default TTS configuration")
         return _get_default_tts_config()
+
 
 def _process_tts_config(tts_config: dict[str, Any]) -> dict[str, Any]:
     """
@@ -608,38 +653,39 @@ def _process_tts_config(tts_config: dict[str, Any]) -> dict[str, Any]:
     processed = {}
 
     # Extract provider priority
-    if 'provider_priority' in tts_config:
-        processed['provider_priority'] = tts_config['provider_priority']
+    if "provider_priority" in tts_config:
+        processed["provider_priority"] = tts_config["provider_priority"]
 
     # Process provider configurations
-    if 'providers' in tts_config:
-        for provider_name, provider_config in tts_config['providers'].items():
-            processed[f'{provider_name}_config'] = provider_config
+    if "providers" in tts_config:
+        for provider_name, provider_config in tts_config["providers"].items():
+            processed[f"{provider_name}_config"] = provider_config
 
             # Enable/disable flags
-            processed[f'{provider_name}_enabled'] = provider_config.get('enabled', True)
+            processed[f"{provider_name}_enabled"] = provider_config.get("enabled", True)
 
     # Extract voice mappings
-    if 'voice_mappings' in tts_config:
-        processed['voice_mappings'] = tts_config['voice_mappings']
+    if "voice_mappings" in tts_config:
+        processed["voice_mappings"] = tts_config["voice_mappings"]
 
     # Extract format preferences
-    if 'format_preferences' in tts_config:
-        processed['format_preferences'] = tts_config['format_preferences']
+    if "format_preferences" in tts_config:
+        processed["format_preferences"] = tts_config["format_preferences"]
 
     # Extract performance settings
-    if 'performance' in tts_config:
-        processed.update(tts_config['performance'])
+    if "performance" in tts_config:
+        processed.update(tts_config["performance"])
 
     # Extract fallback settings
-    if 'fallback' in tts_config:
-        processed.update(tts_config['fallback'])
+    if "fallback" in tts_config:
+        processed.update(tts_config["fallback"])
 
     # Extract logging settings
-    if 'logging' in tts_config:
-        processed['tts_logging'] = tts_config['logging']
+    if "logging" in tts_config:
+        processed["tts_logging"] = tts_config["logging"]
 
     return processed
+
 
 def _get_default_tts_config() -> dict[str, Any]:
     """
@@ -649,17 +695,18 @@ def _get_default_tts_config() -> dict[str, Any]:
         Default configuration dictionary
     """
     return {
-        'provider_priority': ['openai', 'kokoro'],
-        'openai_enabled': True,
-        'kokoro_enabled': True,
-        'higgs_enabled': False,
-        'dia_enabled': False,
-        'chatterbox_enabled': False,
-        'max_concurrent_generations': 4,
-        'fallback_enabled': True,
-        'max_attempts': 3,
-        'retry_delay_ms': 1000
+        "provider_priority": ["openai", "kokoro"],
+        "openai_enabled": True,
+        "kokoro_enabled": True,
+        "higgs_enabled": False,
+        "dia_enabled": False,
+        "chatterbox_enabled": False,
+        "max_concurrent_generations": 4,
+        "fallback_enabled": True,
+        "max_attempts": 3,
+        "retry_delay_ms": 1000,
     }
+
 
 def load_openai_mappings() -> dict:
     # Determine path relative to this file.
@@ -676,10 +723,8 @@ def load_openai_mappings() -> dict:
     except _CONFIG_NONCRITICAL_EXCEPTIONS as e:
         _log_debug(f"Failed to load OpenAI TTS mappings from {mapping_path}: {e}")
         # Fallback to a default or raise an error
-        return {
-            "models": {"tts-1": "openai_official_tts-1"},
-            "voices": {"alloy": "alloy"}
-        }
+        return {"models": {"tts-1": "openai_official_tts-1"}, "voices": {"alloy": "alloy"}}
+
 
 _openai_mappings = load_openai_mappings()
 
@@ -688,17 +733,19 @@ openai_tts_mappings = {
         "tts-1": "openai_official_tts-1",
         "tts-1-hd": "openai_official_tts-1-hd",
         "eleven_monolingual_v1": "elevenlabs_english_v1",
-        "kokoro": "local_kokoro_default_onnx"
+        "kokoro": "local_kokoro_default_onnx",
     },
     "voices": {
-        "alloy": "alloy", "echo": "echo", "fable": "fable",
-        "onyx": "onyx", "nova": "nova", "shimmer": "shimmer",
-
+        "alloy": "alloy",
+        "echo": "echo",
+        "fable": "fable",
+        "onyx": "onyx",
+        "nova": "nova",
+        "shimmer": "shimmer",
         "RachelEL": "21m00Tcm4TlvDq8ikWAM",
-
         "k_bella": "af_bella",
-        "k_adam" : "am_v0adam"
-    }
+        "k_adam": "am_v0adam",
+    },
 }
 
 
@@ -728,7 +775,7 @@ def load_settings():
     # --- Single-User Settings ---
     # Use a fixed ID for the single user's database path and cache key
     # Default to 1 for single-user mode (0 is typically reserved for system/admin)
-    single_user_fixed_id = int(os.getenv("SINGLE_USER_FIXED_ID", "1")) # Default to user ID 1
+    single_user_fixed_id = int(os.getenv("SINGLE_USER_FIXED_ID", "1"))  # Default to user ID 1
     # API Key for accessing the single-user instance
     # Check both SINGLE_USER_API_KEY (AuthNZ standard) and API_KEY (legacy) environment variables
     single_user_api_key = os.getenv("SINGLE_USER_API_KEY") or os.getenv("API_KEY")
@@ -745,8 +792,9 @@ def load_settings():
     except _CONFIG_NONCRITICAL_EXCEPTIONS as e:
         _log_error(f"Error loading comprehensive_config: {e}", exc_info=True)
         comprehensive_config = {}
+
     def _redis_section_get(key: str, default: Optional[str] = None) -> Optional[str]:
-        section = comprehensive_config.get('Redis') or {}
+        section = comprehensive_config.get("Redis") or {}
         try:
             if hasattr(section, "get"):
                 return section.get(key, fallback=default)  # type: ignore[arg-type]
@@ -756,6 +804,7 @@ def load_settings():
         if isinstance(section, dict):
             return section.get(key, default)
         return default
+
     def _to_bool(value: Optional[str], default: bool = False) -> bool:
         if value is None:
             return default
@@ -802,13 +851,13 @@ def load_settings():
         return s if s else default
 
     # Load from comprehensive config first, allowing env overrides
-    redis_host = os.getenv("REDIS_HOST") or _redis_section_get('redis_host', 'localhost') or 'localhost'
-    redis_port_raw = os.getenv("REDIS_PORT") or _redis_section_get('redis_port', '6379') or '6379'
-    redis_db_raw = os.getenv("REDIS_DB") or _redis_section_get('redis_db', '0') or '0'
-    cache_ttl_raw = os.getenv("CACHE_TTL") or _redis_section_get('cache_ttl', '300') or '300'
+    redis_host = os.getenv("REDIS_HOST") or _redis_section_get("redis_host", "localhost") or "localhost"
+    redis_port_raw = os.getenv("REDIS_PORT") or _redis_section_get("redis_port", "6379") or "6379"
+    redis_db_raw = os.getenv("REDIS_DB") or _redis_section_get("redis_db", "0") or "0"
+    cache_ttl_raw = os.getenv("CACHE_TTL") or _redis_section_get("cache_ttl", "300") or "300"
     redis_enabled_env = os.getenv("REDIS_ENABLED")
     # Enable Redis by default on localhost so integration tests attempt connection
-    redis_enabled = _to_bool(redis_enabled_env, _to_bool(_redis_section_get('redis_enabled', 'true'), True))
+    redis_enabled = _to_bool(redis_enabled_env, _to_bool(_redis_section_get("redis_enabled", "true"), True))
 
     try:
         redis_port = int(str(redis_port_raw))
@@ -823,7 +872,7 @@ def load_settings():
     except _CONFIG_NONCRITICAL_EXCEPTIONS:
         cache_ttl = 300
 
-    config_redis_url = _redis_section_get('redis_url')
+    config_redis_url = _redis_section_get("redis_url")
     redis_url_env = os.getenv("REDIS_URL")
 
     if redis_url_env:
@@ -849,7 +898,9 @@ def load_settings():
     tts_history_store_failed = _env_or_cfg_bool("TTS_HISTORY_STORE_FAILED", "tts_history_store_failed", True)
     tts_history_hash_key = _env_or_cfg_str("TTS_HISTORY_HASH_KEY", "tts_history_hash_key", None)
     tts_history_retention_days = _env_or_cfg_int("TTS_HISTORY_RETENTION_DAYS", "tts_history_retention_days", 90)
-    tts_history_max_rows_per_user = _env_or_cfg_int("TTS_HISTORY_MAX_ROWS_PER_USER", "tts_history_max_rows_per_user", 10000)
+    tts_history_max_rows_per_user = _env_or_cfg_int(
+        "TTS_HISTORY_MAX_ROWS_PER_USER", "tts_history_max_rows_per_user", 10000
+    )
     tts_history_purge_interval_hours = _env_or_cfg_int(
         "TTS_HISTORY_PURGE_INTERVAL_HOURS",
         "tts_history_purge_interval_hours",
@@ -867,14 +918,14 @@ def load_settings():
         config_user_db_base_dir = str(config_user_db_base_dir).strip() or None
     env_user_db_base_dir = os.getenv("USER_DB_BASE_DIR")
     user_data_base_dir_str = (
-        config_user_db_base_dir
-        or env_user_db_base_dir
-        or str(default_user_data_base_dir.resolve())
+        config_user_db_base_dir or env_user_db_base_dir or str(default_user_data_base_dir.resolve())
     )
     user_data_base_dir = Path(user_data_base_dir_str)
 
     # Main/central SQLite database: ACTUAL_PROJECT_ROOT/Databases/user_databases/<SINGLE_USER_FIXED_ID>/tldw.db
-    default_main_db_path = (ACTUAL_PROJECT_ROOT / "Databases" / "user_databases" / f"{single_user_fixed_id}" / "tldw.db").resolve()
+    default_main_db_path = (
+        ACTUAL_PROJECT_ROOT / "Databases" / "user_databases" / f"{single_user_fixed_id}" / "tldw.db"
+    ).resolve()
     default_database_url = f"sqlite:///{default_main_db_path}"
     database_url = os.getenv("DATABASE_URL", default_database_url)
 
@@ -964,36 +1015,38 @@ def load_settings():
         with contextlib.suppress(_CONFIG_NONCRITICAL_EXCEPTIONS):
             single_user_api_key = os.getenv("SINGLE_USER_API_KEY") or os.getenv("API_KEY")
 
-
     content_backend_mode = os.getenv("TLDW_CONTENT_DB_BACKEND", "sqlite").strip().lower()
 
     # Character-Chat rate limiting knobs from config.txt (env will still override later)
     try:
         _cp = load_comprehensive_config()
+
         def _cc_int(key: str, fb: int) -> int:
             try:
-                return int(str(_cp.get('Character-Chat', key, fallback=str(fb))))
+                return int(str(_cp.get("Character-Chat", key, fallback=str(fb))))
             except _CONFIG_NONCRITICAL_EXCEPTIONS:
                 return fb
+
         def _cc_bool_present(key: str) -> tuple[bool, bool]:
             try:
-                if _cp.has_section('Character-Chat') and _cp.has_option('Character-Chat', key):
-                    raw = str(_cp.get('Character-Chat', key)).strip().lower()
+                if _cp.has_section("Character-Chat") and _cp.has_option("Character-Chat", key):
+                    raw = str(_cp.get("Character-Chat", key)).strip().lower()
                     return True, is_truthy(raw)
             except _CONFIG_NONCRITICAL_EXCEPTIONS:
                 pass
             return False, False
-        _character_rate_limit_ops = _cc_int('CHARACTER_RATE_LIMIT_OPS', 100)
-        _character_rate_limit_window = _cc_int('CHARACTER_RATE_LIMIT_WINDOW', 3600)
-        _max_characters_per_user = _cc_int('MAX_CHARACTERS_PER_USER', 1000)
-        _max_character_import_size_mb = _cc_int('MAX_CHARACTER_IMPORT_SIZE_MB', 10)
+
+        _character_rate_limit_ops = _cc_int("CHARACTER_RATE_LIMIT_OPS", 100)
+        _character_rate_limit_window = _cc_int("CHARACTER_RATE_LIMIT_WINDOW", 3600)
+        _max_characters_per_user = _cc_int("MAX_CHARACTERS_PER_USER", 1000)
+        _max_character_import_size_mb = _cc_int("MAX_CHARACTER_IMPORT_SIZE_MB", 10)
         # Optional chat-specific knobs if present
-        _max_chats_per_user = _cc_int('MAX_CHATS_PER_USER', 100000)
-        _max_messages_per_chat = _cc_int('MAX_MESSAGES_PER_CHAT', 1000)
-        _max_messages_per_chat_soft = _cc_int('MAX_MESSAGES_PER_CHAT_SOFT', _max_messages_per_chat)
-        _max_chat_completions_per_minute = _cc_int('MAX_CHAT_COMPLETIONS_PER_MINUTE', 20)
-        _max_message_sends_per_minute = _cc_int('MAX_MESSAGE_SENDS_PER_MINUTE', 60)
-        _has_char_rl_enabled, _char_rl_enabled_bool = _cc_bool_present('CHARACTER_RATE_LIMIT_ENABLED')
+        _max_chats_per_user = _cc_int("MAX_CHATS_PER_USER", 100000)
+        _max_messages_per_chat = _cc_int("MAX_MESSAGES_PER_CHAT", 1000)
+        _max_messages_per_chat_soft = _cc_int("MAX_MESSAGES_PER_CHAT_SOFT", _max_messages_per_chat)
+        _max_chat_completions_per_minute = _cc_int("MAX_CHAT_COMPLETIONS_PER_MINUTE", 20)
+        _max_message_sends_per_minute = _cc_int("MAX_MESSAGE_SENDS_PER_MINUTE", 60)
+        _has_char_rl_enabled, _char_rl_enabled_bool = _cc_bool_present("CHARACTER_RATE_LIMIT_ENABLED")
     except _CONFIG_NONCRITICAL_EXCEPTIONS:
         _character_rate_limit_ops = 100
         _character_rate_limit_window = 3600
@@ -1017,9 +1070,9 @@ def load_settings():
 
     def _sbx_get(key: str, fallback: Optional[str] = None) -> Optional[str]:
         try:
-            if cp and hasattr(cp, "has_section") and cp.has_section('Sandbox'):
+            if cp and hasattr(cp, "has_section") and cp.has_section("Sandbox"):
                 # type: ignore[no-untyped-call]
-                return cp.get('Sandbox', key, fallback=fallback)  # type: ignore[arg-type]
+                return cp.get("Sandbox", key, fallback=fallback)  # type: ignore[arg-type]
         except _CONFIG_NONCRITICAL_EXCEPTIONS:
             pass
         return fallback
@@ -1047,21 +1100,23 @@ def load_settings():
             try:
                 if raw_env.strip().startswith("["):
                     import json as _json
+
                     vals = _json.loads(raw_env)
                     return [str(v).strip() for v in vals if str(v).strip()]
             except _CONFIG_NONCRITICAL_EXCEPTIONS:
                 pass
-            return [s.strip() for s in raw_env.split(',') if s.strip()]
+            return [s.strip() for s in raw_env.split(",") if s.strip()]
         raw_cfg = _sbx_get(cfg_key, None)
         if raw_cfg is not None:
             try:
                 if raw_cfg.strip().startswith("["):
                     import json as _json
+
                     vals = _json.loads(raw_cfg)
                     return [str(v).strip() for v in vals if str(v).strip()]
             except _CONFIG_NONCRITICAL_EXCEPTIONS:
                 pass
-            return [s.strip() for s in str(raw_cfg).split(',') if s.strip()]
+            return [s.strip() for s in str(raw_cfg).split(",") if s.strip()]
         return default
 
     SANDBOX_DEFAULT_RUNTIME = _sbx_env_or_cfg("SANDBOX_DEFAULT_RUNTIME", "default_runtime", "docker").lower()
@@ -1077,13 +1132,17 @@ def load_settings():
     SANDBOX_ACTIVE_MAX_PER_USER = _sbx_int("SANDBOX_ACTIVE_MAX_PER_USER", "active_max_per_user", 0)
     SANDBOX_ACTIVE_MAX_PER_PERSONA = _sbx_int("SANDBOX_ACTIVE_MAX_PER_PERSONA", "active_max_per_persona", 0)
     SANDBOX_ACTIVE_MAX_PER_WORKSPACE = _sbx_int("SANDBOX_ACTIVE_MAX_PER_WORKSPACE", "active_max_per_workspace", 0)
-    SANDBOX_ACTIVE_MAX_PER_WORKSPACE_GROUP = _sbx_int("SANDBOX_ACTIVE_MAX_PER_WORKSPACE_GROUP", "active_max_per_workspace_group", 0)
+    SANDBOX_ACTIVE_MAX_PER_WORKSPACE_GROUP = _sbx_int(
+        "SANDBOX_ACTIVE_MAX_PER_WORKSPACE_GROUP", "active_max_per_workspace_group", 0
+    )
     SANDBOX_SESSION_DELETE_DRAIN_TIMEOUT_SEC = _sbx_int(
         "SANDBOX_SESSION_DELETE_DRAIN_TIMEOUT_SEC",
         "session_delete_drain_timeout_sec",
         10,
     )
-    SANDBOX_ARTIFACT_JANITOR_INTERVAL_SEC = _sbx_int("SANDBOX_ARTIFACT_JANITOR_INTERVAL_SEC", "artifact_janitor_interval_sec", 30)
+    SANDBOX_ARTIFACT_JANITOR_INTERVAL_SEC = _sbx_int(
+        "SANDBOX_ARTIFACT_JANITOR_INTERVAL_SEC", "artifact_janitor_interval_sec", 30
+    )
     SANDBOX_ARTIFACT_RECONCILE_INTERVAL_SEC = _sbx_int(
         "SANDBOX_ARTIFACT_RECONCILE_INTERVAL_SEC",
         "artifact_reconcile_interval_sec",
@@ -1102,22 +1161,28 @@ def load_settings():
     SANDBOX_QUEUE_MAX_PER_USER = _sbx_int("SANDBOX_QUEUE_MAX_PER_USER", "queue_max_per_user", 0)
     SANDBOX_QUEUE_MAX_PER_PERSONA = _sbx_int("SANDBOX_QUEUE_MAX_PER_PERSONA", "queue_max_per_persona", 0)
     SANDBOX_QUEUE_MAX_PER_WORKSPACE = _sbx_int("SANDBOX_QUEUE_MAX_PER_WORKSPACE", "queue_max_per_workspace", 0)
-    SANDBOX_QUEUE_MAX_PER_WORKSPACE_GROUP = _sbx_int("SANDBOX_QUEUE_MAX_PER_WORKSPACE_GROUP", "queue_max_per_workspace_group", 0)
+    SANDBOX_QUEUE_MAX_PER_WORKSPACE_GROUP = _sbx_int(
+        "SANDBOX_QUEUE_MAX_PER_WORKSPACE_GROUP", "queue_max_per_workspace_group", 0
+    )
     SANDBOX_RUN_CLAIM_LEASE_SEC = _sbx_int("SANDBOX_RUN_CLAIM_LEASE_SEC", "run_claim_lease_sec", 30)
     # WebSocket server poll timeout (seconds) for sandbox log streams
     # Tests may override to a smaller value (e.g., 1) via env to speed disconnects
     SANDBOX_WS_POLL_TIMEOUT_SEC = _sbx_int("SANDBOX_WS_POLL_TIMEOUT_SEC", "ws_poll_timeout_sec", 30)
     SANDBOX_WS_MAX_CONNECTIONS_TOTAL = _sbx_int("SANDBOX_WS_MAX_CONNECTIONS_TOTAL", "ws_max_connections_total", 1024)
-    SANDBOX_WS_MAX_CONNECTIONS_PER_USER = _sbx_int("SANDBOX_WS_MAX_CONNECTIONS_PER_USER", "ws_max_connections_per_user", 64)
-    SANDBOX_WS_MAX_CONNECTIONS_PER_PERSONA = _sbx_int("SANDBOX_WS_MAX_CONNECTIONS_PER_PERSONA", "ws_max_connections_per_persona", 32)
-    SANDBOX_WS_MAX_CONNECTIONS_PER_SESSION = _sbx_int("SANDBOX_WS_MAX_CONNECTIONS_PER_SESSION", "ws_max_connections_per_session", 16)
+    SANDBOX_WS_MAX_CONNECTIONS_PER_USER = _sbx_int(
+        "SANDBOX_WS_MAX_CONNECTIONS_PER_USER", "ws_max_connections_per_user", 64
+    )
+    SANDBOX_WS_MAX_CONNECTIONS_PER_PERSONA = _sbx_int(
+        "SANDBOX_WS_MAX_CONNECTIONS_PER_PERSONA", "ws_max_connections_per_persona", 32
+    )
+    SANDBOX_WS_MAX_CONNECTIONS_PER_SESSION = _sbx_int(
+        "SANDBOX_WS_MAX_CONNECTIONS_PER_SESSION", "ws_max_connections_per_session", 16
+    )
     SANDBOX_WS_MAX_CONNECTIONS_PER_RUN = _sbx_int("SANDBOX_WS_MAX_CONNECTIONS_PER_RUN", "ws_max_connections_per_run", 8)
     # Optional: signed WS URLs for log_stream_url issuance
     SANDBOX_WS_SIGNED_URL_TTL_SEC = _sbx_int("SANDBOX_WS_SIGNED_URL_TTL_SEC", "ws_signed_url_ttl_sec", 60)
     SANDBOX_WS_SIGNED_URLS = is_truthy(
-        os.getenv("SANDBOX_WS_SIGNED_URLS")
-        or _sbx_get("ws_signed_urls", "false")
-        or "false"
+        os.getenv("SANDBOX_WS_SIGNED_URLS") or _sbx_get("ws_signed_urls", "false") or "false"
     )
     SANDBOX_WS_SIGNING_SECRET = os.getenv("SANDBOX_WS_SIGNING_SECRET") or _sbx_get("ws_signing_secret", None)
     # Test-only helper: when true, the WS endpoint will publish synthetic
@@ -1129,7 +1194,9 @@ def load_settings():
         or "false"
     )
     # Advertise spec 1.1 support by default (backward-compatible with 1.0)
-    SANDBOX_SUPPORTED_SPEC_VERSIONS = _sbx_list("SANDBOX_SUPPORTED_SPEC_VERSIONS", "supported_spec_versions", ["1.0", "1.1"])
+    SANDBOX_SUPPORTED_SPEC_VERSIONS = _sbx_list(
+        "SANDBOX_SUPPORTED_SPEC_VERSIONS", "supported_spec_versions", ["1.0", "1.1"]
+    )
     SANDBOX_ENABLE_EXECUTION = is_truthy(
         os.getenv("SANDBOX_ENABLE_EXECUTION") or _sbx_get("enable_execution", "false") or "false"
     )
@@ -1138,18 +1205,26 @@ def load_settings():
     )
     SANDBOX_IDEMPOTENCY_TTL_SEC = _sbx_int("SANDBOX_IDEMPOTENCY_TTL_SEC", "idempotency_ttl_sec", 600)
     # Default timeouts and cancel grace
-    SANDBOX_DEFAULT_STARTUP_TIMEOUT_SEC = _sbx_int("SANDBOX_DEFAULT_STARTUP_TIMEOUT_SEC", "default_startup_timeout_sec", 20)
+    SANDBOX_DEFAULT_STARTUP_TIMEOUT_SEC = _sbx_int(
+        "SANDBOX_DEFAULT_STARTUP_TIMEOUT_SEC", "default_startup_timeout_sec", 20
+    )
     SANDBOX_DEFAULT_EXEC_TIMEOUT_SEC = _sbx_int("SANDBOX_DEFAULT_EXEC_TIMEOUT_SEC", "default_exec_timeout_sec", 60)
     SANDBOX_CANCEL_GRACE_SECONDS = _sbx_int("SANDBOX_CANCEL_GRACE_SECONDS", "cancel_grace_seconds", 5)
     # Artifact caps (MB)
-    SANDBOX_MAX_ARTIFACT_BYTES_PER_RUN_MB = _sbx_int("SANDBOX_MAX_ARTIFACT_BYTES_PER_RUN_MB", "max_artifact_bytes_per_run_mb", 32)
-    SANDBOX_MAX_ARTIFACT_BYTES_PER_USER_MB = _sbx_int("SANDBOX_MAX_ARTIFACT_BYTES_PER_USER_MB", "max_artifact_bytes_per_user_mb", 128)
+    SANDBOX_MAX_ARTIFACT_BYTES_PER_RUN_MB = _sbx_int(
+        "SANDBOX_MAX_ARTIFACT_BYTES_PER_RUN_MB", "max_artifact_bytes_per_run_mb", 32
+    )
+    SANDBOX_MAX_ARTIFACT_BYTES_PER_USER_MB = _sbx_int(
+        "SANDBOX_MAX_ARTIFACT_BYTES_PER_USER_MB", "max_artifact_bytes_per_user_mb", 128
+    )
     # Security hardening knobs
     SANDBOX_ULIMIT_NOFILE = _sbx_int("SANDBOX_ULIMIT_NOFILE", "ulimit_nofile", 1024)
     SANDBOX_ULIMIT_NPROC = _sbx_int("SANDBOX_ULIMIT_NPROC", "ulimit_nproc", 512)
     # Optional: path to seccomp JSON and AppArmor profile name
     SANDBOX_DOCKER_SECCOMP = os.getenv("SANDBOX_DOCKER_SECCOMP") or _sbx_get("docker_seccomp", None)
-    SANDBOX_DOCKER_APPARMOR_PROFILE = os.getenv("SANDBOX_DOCKER_APPARMOR_PROFILE") or _sbx_get("docker_apparmor_profile", None)
+    SANDBOX_DOCKER_APPARMOR_PROFILE = os.getenv("SANDBOX_DOCKER_APPARMOR_PROFILE") or _sbx_get(
+        "docker_apparmor_profile", None
+    )
     # Store backend (sqlite|memory) and path
     # Default to in-memory store for MVP to align with PRD (can be overridden to 'sqlite')
     SANDBOX_STORE_BACKEND = _sbx_env_or_cfg("SANDBOX_STORE_BACKEND", "store_backend", "memory").lower()
@@ -1160,22 +1235,19 @@ def load_settings():
         "APP_MODE_STR": single_user_mode_str,
         "SINGLE_USER_MODE": single_user_mode,
         "LOG_LEVEL": log_level,
-        "PROJECT_ROOT": ACTUAL_PROJECT_ROOT, # Centralized project root definition
+        "PROJECT_ROOT": ACTUAL_PROJECT_ROOT,  # Centralized project root definition
         "CONTENT_DB_BACKEND": content_backend_mode,
-
         # Single User
         "SINGLE_USER_FIXED_ID": single_user_fixed_id,
         "SINGLE_USER_API_KEY": single_user_api_key,
-
         # Multi User / Auth
         "JWT_SECRET_KEY": jwt_secret_key,
         "JWT_ALGORITHM": jwt_algorithm,
         "ACCESS_TOKEN_EXPIRE_MINUTES": access_token_expire_minutes,
         "DATABASE_URL": database_url,
-        "USER_DB_BASE_DIR": user_data_base_dir, # Renamed for clarity (was user_db_base_dir)
+        "USER_DB_BASE_DIR": user_data_base_dir,  # Renamed for clarity (was user_db_base_dir)
         "USERS_DB_CONFIGURED": users_db_configured,
         "SERVER_CLIENT_ID": SERVER_CLIENT_ID,
-
         # Redis Configuration
         "REDIS_HOST": redis_host,
         "REDIS_PORT": redis_port,
@@ -1193,17 +1265,10 @@ def load_settings():
         "MAX_MESSAGES_PER_CHAT_SOFT": _max_messages_per_chat_soft,
         "MAX_CHAT_COMPLETIONS_PER_MINUTE": _max_chat_completions_per_minute,
         "MAX_MESSAGE_SENDS_PER_MINUTE": _max_message_sends_per_minute,
-
         # Chat Configuration - Load from config file with default
-        "CHAT_DICT_MAX_TOKENS": int(
-            comprehensive_config.get('Chat-Dictionaries', {}).get('max_tokens', '5000')
-        ),
-
+        "CHAT_DICT_MAX_TOKENS": int(comprehensive_config.get("Chat-Dictionaries", {}).get("max_tokens", "5000")),
         # Web Scraping Configuration - Load from config file with default
-        "STEALTH_WAIT_MS": int(
-            comprehensive_config.get('Web-Scraping', {}).get('stealth_wait_ms', '5000')
-        ),
-
+        "STEALTH_WAIT_MS": int(comprehensive_config.get("Web-Scraping", {}).get("stealth_wait_ms", "5000")),
         # Merge relevant parts from comprehensive_config
         # Embedding Config: support both 'embedding_config' and 'Embeddings' sections
         "EMBEDDING_CONFIG": (
@@ -1211,29 +1276,32 @@ def load_settings():
             or comprehensive_config.get("Embeddings")
             or comprehensive_config.get("EMBEDDINGS")
             or {
-                'embedding_provider': 'openai', # Fallback defaults
-                'embedding_model': 'text-embedding-3-small',
-                'onnx_model_path': "./Models/onnx_models/text-embedding-3-small.onnx",
-                'model_dir': "./Models",
-                'embedding_api_url': "http://localhost:8080/v1/embeddings",
-                'embedding_api_key': '',
-                'chunk_size': 400,
-                'chunk_overlap': 200
+                "embedding_provider": "openai",  # Fallback defaults
+                "embedding_model": "text-embedding-3-small",
+                "onnx_model_path": "./Models/onnx_models/text-embedding-3-small.onnx",
+                "model_dir": "./Models",
+                "embedding_api_url": "http://localhost:8080/v1/embeddings",
+                "embedding_api_key": "",
+                "chunk_size": 400,
+                "chunk_overlap": 200,
             }
         ),
         # HuggingFace remote code allowlist (wildcards supported via fnmatch)
         # HuggingFace remote code allowlist (wildcards supported via fnmatch)
         # Precedence: ENV > config.txt (Embeddings.trusted_hf_remote_code_models) > default
-        "TRUSTED_HF_REMOTE_CODE_MODELS": (lambda _env_val, _cfg: (
-            [s.strip() for s in _env_val.split(",") if s.strip()] if _env_val is not None else (
-                [s.strip() for s in str(_cfg).split(",") if s.strip()] if _cfg is not None else ["*stella*"]
+        "TRUSTED_HF_REMOTE_CODE_MODELS": (
+            lambda _env_val, _cfg: (
+                [s.strip() for s in _env_val.split(",") if s.strip()]
+                if _env_val is not None
+                else ([s.strip() for s in str(_cfg).split(",") if s.strip()] if _cfg is not None else ["*stella*"])
             )
-        ))(
+        )(
             os.getenv("TRUSTED_HF_REMOTE_CODE_MODELS"),
             (
-                (comprehensive_config.get('embedding_config') or {}).get('trusted_hf_remote_code_models')
-                if isinstance(comprehensive_config, dict) else None
-            )
+                (comprehensive_config.get("embedding_config") or {}).get("trusted_hf_remote_code_models")
+                if isinstance(comprehensive_config, dict)
+                else None
+            ),
         ),
         # Sandbox settings (code interpreter)
         "SANDBOX_DEFAULT_RUNTIME": SANDBOX_DEFAULT_RUNTIME,
@@ -1267,27 +1335,36 @@ def load_settings():
         "SANDBOX_DEFAULT_EXEC_TIMEOUT_SEC": SANDBOX_DEFAULT_EXEC_TIMEOUT_SEC,
         "SANDBOX_CANCEL_GRACE_SECONDS": SANDBOX_CANCEL_GRACE_SECONDS,
         "SANDBOX_ENABLE_EXECUTION": SANDBOX_ENABLE_EXECUTION,
-
         # Notes/Auto-Title configuration
         # Enable LLM-backed title generation and choose default strategy
         # Precedence: ENV > config.txt [Notes] > defaults
-        "NOTES_TITLE_LLM_ENABLED": (lambda _env, _cp: (
-            # env override first
-            is_truthy(_env) if _env is not None else (
-                is_truthy(_cp.get('Notes', 'title_llm_enabled', fallback='false'))
-                if _cp and hasattr(_cp, 'get') and _cp.has_section('Notes') else False
+        "NOTES_TITLE_LLM_ENABLED": (
+            lambda _env, _cp: (
+                # env override first
+                is_truthy(_env)
+                if _env is not None
+                else (
+                    is_truthy(_cp.get("Notes", "title_llm_enabled", fallback="false"))
+                    if _cp and hasattr(_cp, "get") and _cp.has_section("Notes")
+                    else False
+                )
             )
-        ))(
-            os.getenv('NOTES_TITLE_LLM_ENABLED') or os.getenv('NOTE_TITLE_LLM_ENABLED'),
+        )(
+            os.getenv("NOTES_TITLE_LLM_ENABLED") or os.getenv("NOTE_TITLE_LLM_ENABLED"),
             load_comprehensive_config(),
         ),
-        "NOTES_TITLE_DEFAULT_STRATEGY": (lambda _env, _cp: (
-            _env.strip().lower() if isinstance(_env, str) else (
-                str(_cp.get('Notes', 'title_default_strategy', fallback='heuristic')).strip().lower()
-                if _cp and hasattr(_cp, 'get') and _cp.has_section('Notes') else 'heuristic'
+        "NOTES_TITLE_DEFAULT_STRATEGY": (
+            lambda _env, _cp: (
+                _env.strip().lower()
+                if isinstance(_env, str)
+                else (
+                    str(_cp.get("Notes", "title_default_strategy", fallback="heuristic")).strip().lower()
+                    if _cp and hasattr(_cp, "get") and _cp.has_section("Notes")
+                    else "heuristic"
+                )
             )
-        ))(
-            os.getenv('NOTES_TITLE_DEFAULT_STRATEGY') or os.getenv('NOTE_TITLE_DEFAULT_STRATEGY'),
+        )(
+            os.getenv("NOTES_TITLE_DEFAULT_STRATEGY") or os.getenv("NOTE_TITLE_DEFAULT_STRATEGY"),
             load_comprehensive_config(),
         ),
         "SANDBOX_BACKGROUND_EXECUTION": SANDBOX_BACKGROUND_EXECUTION,
@@ -1301,23 +1378,13 @@ def load_settings():
         "SANDBOX_STORE_DB_PATH": SANDBOX_STORE_DB_PATH,
         "SANDBOX_RUN_CLAIM_LEASE_SEC": SANDBOX_RUN_CLAIM_LEASE_SEC,
         # Email ingestion/search rollout controls
-        "EMAIL_NATIVE_PERSIST_ENABLED": is_truthy(
-            os.getenv("EMAIL_NATIVE_PERSIST_ENABLED", "true")
-        ),
-        "EMAIL_OPERATOR_SEARCH_ENABLED": is_truthy(
-            os.getenv("EMAIL_OPERATOR_SEARCH_ENABLED", "true")
-        ),
+        "EMAIL_NATIVE_PERSIST_ENABLED": is_truthy(os.getenv("EMAIL_NATIVE_PERSIST_ENABLED", "true")),
+        "EMAIL_OPERATOR_SEARCH_ENABLED": is_truthy(os.getenv("EMAIL_OPERATOR_SEARCH_ENABLED", "true")),
         "EMAIL_MEDIA_SEARCH_DELEGATION_MODE": (
-            lambda raw_mode: (
-                raw_mode if raw_mode in {"opt_in", "auto_email"} else "opt_in"
-            )
-        )(
-            str(os.getenv("EMAIL_MEDIA_SEARCH_DELEGATION_MODE", "opt_in")).strip().lower()
-        ),
+            lambda raw_mode: (raw_mode if raw_mode in {"opt_in", "auto_email"} else "opt_in")
+        )(str(os.getenv("EMAIL_MEDIA_SEARCH_DELEGATION_MODE", "opt_in")).strip().lower()),
         "GOVERNANCE_ROLLOUT_MODE": resolve_governance_rollout_mode(),
-        "EMAIL_GMAIL_CONNECTOR_ENABLED": is_truthy(
-            os.getenv("EMAIL_GMAIL_CONNECTOR_ENABLED", "false")
-        ),
+        "EMAIL_GMAIL_CONNECTOR_ENABLED": is_truthy(os.getenv("EMAIL_GMAIL_CONNECTOR_ENABLED", "false")),
         # --- HYDE/doc2query (per-chunk) feature flags ---
         "HYDE_ENABLED": is_truthy(os.getenv("HYDE_ENABLED", "false")),
         "HYDE_QUESTIONS_PER_CHUNK": int(os.getenv("HYDE_QUESTIONS_PER_CHUNK", "0")),
@@ -1343,488 +1410,925 @@ def load_settings():
         "TTS_HISTORY_MAX_ROWS_PER_USER": tts_history_max_rows_per_user,
         "TTS_HISTORY_PURGE_INTERVAL_HOURS": tts_history_purge_interval_hours,
         # You can continue to merge other specific keys or whole sections
-        "COMPREHENSIVE_CONFIG_RAW": comprehensive_config, # Store the raw one if needed elsewhere
+        "COMPREHENSIVE_CONFIG_RAW": comprehensive_config,  # Store the raw one if needed elsewhere
         # Audit export streaming threshold (opt-in via env/config.txt)
         "AUDIT_EXPORT_STREAM_AUTO_MAX_ROWS": audit_stream_auto_max_rows,
         "AUDIT_STORAGE_MODE": audit_storage_mode,
         "AUDIT_SHARED_DB_PATH": audit_shared_db_path,
         "AUDIT_STORAGE_ROLLBACK": audit_storage_rollback,
         "AUDIT_ETL_USER_SUBPATH": audit_etl_user_subpath,
-
         # Ephemeral cleanup worker (evals/rag pipeline ephemeral collections)
         "EPHEMERAL_CLEANUP_ENABLED": os.getenv("EPHEMERAL_CLEANUP_ENABLED", "false").lower() == "true",
         "EPHEMERAL_CLEANUP_INTERVAL_SEC": int(os.getenv("EPHEMERAL_CLEANUP_INTERVAL_SEC", "1800")),
-
         # Ingestion-time claims (factual statements) - env overrides config.txt [Claims]
-        **(lambda: (
-            (lambda _cp: (
-                (lambda _env: (
-                    {
-                        "ENABLE_INGESTION_CLAIMS": (
-                            (_env.get("ENABLE_INGESTION_CLAIMS").lower() == "true") if _env.get("ENABLE_INGESTION_CLAIMS") is not None else (
-                                (_cp.getboolean('Claims', 'ENABLE_INGESTION_CLAIMS', fallback=False) if _cp else False)
+        **(
+            lambda: (
+                (
+                    lambda _cp: (
+                        (
+                            lambda _env: (
+                                {
+                                    "ENABLE_INGESTION_CLAIMS": (
+                                        (_env.get("ENABLE_INGESTION_CLAIMS").lower() == "true")
+                                        if _env.get("ENABLE_INGESTION_CLAIMS") is not None
+                                        else (
+                                            (
+                                                _cp.getboolean("Claims", "ENABLE_INGESTION_CLAIMS", fallback=False)
+                                                if _cp
+                                                else False
+                                            )
+                                        )
+                                    ),
+                                    "CLAIM_EXTRACTOR_MODE": (
+                                        _env.get("CLAIM_EXTRACTOR_MODE")
+                                        if _env.get("CLAIM_EXTRACTOR_MODE") is not None
+                                        else (
+                                            _cp.get("Claims", "CLAIM_EXTRACTOR_MODE", fallback="heuristic")
+                                            if _cp
+                                            else "heuristic"
+                                        )
+                                    ),
+                                    "CLAIMS_MAX_PER_CHUNK": (
+                                        int(_env.get("CLAIMS_MAX_PER_CHUNK"))
+                                        if _env.get("CLAIMS_MAX_PER_CHUNK") is not None
+                                        else (_cp.getint("Claims", "CLAIMS_MAX_PER_CHUNK", fallback=3) if _cp else 3)
+                                    ),
+                                    "CLAIMS_EMBED": (
+                                        (_env.get("CLAIMS_EMBED").lower() == "true")
+                                        if _env.get("CLAIMS_EMBED") is not None
+                                        else (
+                                            _cp.getboolean("Claims", "CLAIMS_EMBED", fallback=False) if _cp else False
+                                        )
+                                    ),
+                                    "CLAIMS_EMBED_MODEL_ID": (
+                                        _env.get("CLAIMS_EMBED_MODEL_ID")
+                                        if _env.get("CLAIMS_EMBED_MODEL_ID") is not None
+                                        else (_cp.get("Claims", "CLAIMS_EMBED_MODEL_ID", fallback="") if _cp else "")
+                                    ),
+                                    "CLAIMS_CLUSTER_METHOD": (
+                                        _env.get("CLAIMS_CLUSTER_METHOD")
+                                        if _env.get("CLAIMS_CLUSTER_METHOD") is not None
+                                        else (
+                                            _cp.get("Claims", "CLAIMS_CLUSTER_METHOD", fallback="embeddings")
+                                            if _cp
+                                            else "embeddings"
+                                        )
+                                    ),
+                                    "CLAIMS_CLUSTER_SIMILARITY_THRESHOLD": (
+                                        float(_env.get("CLAIMS_CLUSTER_SIMILARITY_THRESHOLD"))
+                                        if _env.get("CLAIMS_CLUSTER_SIMILARITY_THRESHOLD") is not None
+                                        else (
+                                            float(
+                                                _cp.get(
+                                                    "Claims", "CLAIMS_CLUSTER_SIMILARITY_THRESHOLD", fallback="0.85"
+                                                )
+                                            )
+                                            if _cp
+                                            else 0.85
+                                        )
+                                    ),
+                                    "CLAIMS_CLUSTER_BATCH_SIZE": (
+                                        int(_env.get("CLAIMS_CLUSTER_BATCH_SIZE"))
+                                        if _env.get("CLAIMS_CLUSTER_BATCH_SIZE") is not None
+                                        else (
+                                            int(_cp.getint("Claims", "CLAIMS_CLUSTER_BATCH_SIZE", fallback=200))
+                                            if _cp
+                                            else 200
+                                        )
+                                    ),
+                                    # Claims LLM selection (provider + optional knobs)
+                                    "CLAIMS_LLM_PROVIDER": (
+                                        _env.get("CLAIMS_LLM_PROVIDER")
+                                        if _env.get("CLAIMS_LLM_PROVIDER") is not None
+                                        else (_cp.get("Claims", "CLAIMS_LLM_PROVIDER", fallback="") if _cp else "")
+                                    ),
+                                    "CLAIMS_LLM_MODEL": (
+                                        _env.get("CLAIMS_LLM_MODEL")
+                                        if _env.get("CLAIMS_LLM_MODEL") is not None
+                                        else (_cp.get("Claims", "CLAIMS_LLM_MODEL", fallback="") if _cp else "")
+                                    ),
+                                    "CLAIMS_LLM_TEMPERATURE": (
+                                        (
+                                            float(_env.get("CLAIMS_LLM_TEMPERATURE"))
+                                            if _env.get("CLAIMS_LLM_TEMPERATURE") is not None
+                                            else (
+                                                float(_cp.get("Claims", "CLAIMS_LLM_TEMPERATURE", fallback="0.1"))
+                                                if _cp
+                                                else 0.1
+                                            )
+                                        )
+                                    ),
+                                    "CLAIMS_JOB_BUDGET_ENABLED": (
+                                        (_env.get("CLAIMS_JOB_BUDGET_ENABLED").lower() == "true")
+                                        if _env.get("CLAIMS_JOB_BUDGET_ENABLED") is not None
+                                        else (
+                                            _cp.getboolean("Claims", "CLAIMS_JOB_BUDGET_ENABLED", fallback=False)
+                                            if _cp
+                                            else False
+                                        )
+                                    ),
+                                    "CLAIMS_JOB_MAX_COST_USD": (
+                                        float(_env.get("CLAIMS_JOB_MAX_COST_USD"))
+                                        if _env.get("CLAIMS_JOB_MAX_COST_USD") is not None
+                                        else (
+                                            float(
+                                                (
+                                                    _cp.get("Claims", "CLAIMS_JOB_MAX_COST_USD", fallback="0")
+                                                    if _cp
+                                                    else "0"
+                                                )
+                                                or 0
+                                            )
+                                        )
+                                    ),
+                                    "CLAIMS_JOB_MAX_TOKENS": (
+                                        int(_env.get("CLAIMS_JOB_MAX_TOKENS"))
+                                        if _env.get("CLAIMS_JOB_MAX_TOKENS") is not None
+                                        else (
+                                            int(
+                                                (
+                                                    _cp.get("Claims", "CLAIMS_JOB_MAX_TOKENS", fallback="0")
+                                                    if _cp
+                                                    else "0"
+                                                )
+                                                or 0
+                                            )
+                                        )
+                                    ),
+                                    "CLAIMS_JOB_BUDGET_STRICT": (
+                                        (_env.get("CLAIMS_JOB_BUDGET_STRICT").lower() == "true")
+                                        if _env.get("CLAIMS_JOB_BUDGET_STRICT") is not None
+                                        else (
+                                            _cp.getboolean("Claims", "CLAIMS_JOB_BUDGET_STRICT", fallback=False)
+                                            if _cp
+                                            else False
+                                        )
+                                    ),
+                                    # Optional: allow local NER model name in config for users who want NER
+                                    "CLAIMS_LOCAL_NER_MODEL": (
+                                        _env.get("CLAIMS_LOCAL_NER_MODEL")
+                                        if _env.get("CLAIMS_LOCAL_NER_MODEL") is not None
+                                        else (
+                                            _cp.get("Claims", "CLAIMS_LOCAL_NER_MODEL", fallback="en_core_web_sm")
+                                            if _cp
+                                            else "en_core_web_sm"
+                                        )
+                                    ),
+                                    "CLAIMS_EXTRACTOR_LANGUAGE_DEFAULT": (
+                                        _env.get("CLAIMS_EXTRACTOR_LANGUAGE_DEFAULT")
+                                        if _env.get("CLAIMS_EXTRACTOR_LANGUAGE_DEFAULT") is not None
+                                        else (
+                                            _cp.get("Claims", "CLAIMS_EXTRACTOR_LANGUAGE_DEFAULT", fallback="en")
+                                            if _cp
+                                            else "en"
+                                        )
+                                    ),
+                                    "CLAIMS_LOCAL_NER_MODEL_MAP": (
+                                        _env.get("CLAIMS_LOCAL_NER_MODEL_MAP")
+                                        if _env.get("CLAIMS_LOCAL_NER_MODEL_MAP") is not None
+                                        else (
+                                            _cp.get("Claims", "CLAIMS_LOCAL_NER_MODEL_MAP", fallback="") if _cp else ""
+                                        )
+                                    ),
+                                    "CLAIMS_PROMPT_VALIDATION_MODE": (
+                                        _env.get("CLAIMS_PROMPT_VALIDATION_MODE")
+                                        if _env.get("CLAIMS_PROMPT_VALIDATION_MODE") is not None
+                                        else (
+                                            _cp.get("Claims", "CLAIMS_PROMPT_VALIDATION_MODE", fallback="warning")
+                                            if _cp
+                                            else "warning"
+                                        )
+                                    ),
+                                    "CLAIMS_PROMPT_VALIDATION_STRICT": (
+                                        (_env.get("CLAIMS_PROMPT_VALIDATION_STRICT").lower() == "true")
+                                        if _env.get("CLAIMS_PROMPT_VALIDATION_STRICT") is not None
+                                        else (
+                                            _cp.getboolean("Claims", "CLAIMS_PROMPT_VALIDATION_STRICT", fallback=False)
+                                            if _cp
+                                            else False
+                                        )
+                                    ),
+                                    "CLAIMS_CONTEXT_WINDOW_CHARS": (
+                                        _safe_int(
+                                            _env.get("CLAIMS_CONTEXT_WINDOW_CHARS"),
+                                            (
+                                                int(_cp.getint("Claims", "CLAIMS_CONTEXT_WINDOW_CHARS", fallback=0))
+                                                if _cp
+                                                else 0
+                                            ),
+                                        )
+                                    ),
+                                    "CLAIMS_EXTRACTION_PASSES": (
+                                        _safe_int(
+                                            _env.get("CLAIMS_EXTRACTION_PASSES"),
+                                            (
+                                                int(_cp.getint("Claims", "CLAIMS_EXTRACTION_PASSES", fallback=1))
+                                                if _cp
+                                                else 1
+                                            ),
+                                        )
+                                    ),
+                                }
                             )
-                        ),
-                        "CLAIM_EXTRACTOR_MODE": (
-                            _env.get("CLAIM_EXTRACTOR_MODE") if _env.get("CLAIM_EXTRACTOR_MODE") is not None else (
-                                _cp.get('Claims', 'CLAIM_EXTRACTOR_MODE', fallback='heuristic') if _cp else 'heuristic'
-                            )
-                        ),
-                        "CLAIMS_MAX_PER_CHUNK": (
-                            int(_env.get("CLAIMS_MAX_PER_CHUNK")) if _env.get("CLAIMS_MAX_PER_CHUNK") is not None else (
-                                _cp.getint('Claims', 'CLAIMS_MAX_PER_CHUNK', fallback=3) if _cp else 3
-                            )
-                        ),
-                        "CLAIMS_EMBED": (
-                            (_env.get("CLAIMS_EMBED").lower() == "true") if _env.get("CLAIMS_EMBED") is not None else (
-                                _cp.getboolean('Claims', 'CLAIMS_EMBED', fallback=False) if _cp else False
-                            )
-                        ),
-                        "CLAIMS_EMBED_MODEL_ID": (
-                            _env.get("CLAIMS_EMBED_MODEL_ID") if _env.get("CLAIMS_EMBED_MODEL_ID") is not None else (
-                                _cp.get('Claims', 'CLAIMS_EMBED_MODEL_ID', fallback='') if _cp else ''
-                            )
-                        ),
-                        "CLAIMS_CLUSTER_METHOD": (
-                            _env.get("CLAIMS_CLUSTER_METHOD") if _env.get("CLAIMS_CLUSTER_METHOD") is not None else (
-                                _cp.get('Claims', 'CLAIMS_CLUSTER_METHOD', fallback='embeddings') if _cp else 'embeddings'
-                            )
-                        ),
-                        "CLAIMS_CLUSTER_SIMILARITY_THRESHOLD": (
-                            float(_env.get("CLAIMS_CLUSTER_SIMILARITY_THRESHOLD")) if _env.get("CLAIMS_CLUSTER_SIMILARITY_THRESHOLD") is not None else (
-                                float(_cp.get('Claims', 'CLAIMS_CLUSTER_SIMILARITY_THRESHOLD', fallback='0.85')) if _cp else 0.85
-                            )
-                        ),
-                        "CLAIMS_CLUSTER_BATCH_SIZE": (
-                            int(_env.get("CLAIMS_CLUSTER_BATCH_SIZE")) if _env.get("CLAIMS_CLUSTER_BATCH_SIZE") is not None else (
-                                int(_cp.getint('Claims', 'CLAIMS_CLUSTER_BATCH_SIZE', fallback=200)) if _cp else 200
-                            )
-                        ),
-                        # Claims LLM selection (provider + optional knobs)
-                        "CLAIMS_LLM_PROVIDER": (
-                            _env.get("CLAIMS_LLM_PROVIDER") if _env.get("CLAIMS_LLM_PROVIDER") is not None else (
-                                _cp.get('Claims', 'CLAIMS_LLM_PROVIDER', fallback='') if _cp else ''
-                            )
-                        ),
-                        "CLAIMS_LLM_MODEL": (
-                            _env.get("CLAIMS_LLM_MODEL") if _env.get("CLAIMS_LLM_MODEL") is not None else (
-                                _cp.get('Claims', 'CLAIMS_LLM_MODEL', fallback='') if _cp else ''
-                            )
-                        ),
-                        "CLAIMS_LLM_TEMPERATURE": (
-                            (float(_env.get("CLAIMS_LLM_TEMPERATURE")) if _env.get("CLAIMS_LLM_TEMPERATURE") is not None else (
-                                float(_cp.get('Claims', 'CLAIMS_LLM_TEMPERATURE', fallback='0.1')) if _cp else 0.1
-                            ))
-                        ),
-                        "CLAIMS_JOB_BUDGET_ENABLED": (
-                            (_env.get("CLAIMS_JOB_BUDGET_ENABLED").lower() == "true") if _env.get("CLAIMS_JOB_BUDGET_ENABLED") is not None else (
-                                _cp.getboolean('Claims', 'CLAIMS_JOB_BUDGET_ENABLED', fallback=False) if _cp else False
-                            )
-                        ),
-                        "CLAIMS_JOB_MAX_COST_USD": (
-                            float(_env.get("CLAIMS_JOB_MAX_COST_USD")) if _env.get("CLAIMS_JOB_MAX_COST_USD") is not None else (
-                                float((_cp.get('Claims', 'CLAIMS_JOB_MAX_COST_USD', fallback='0') if _cp else '0') or 0)
-                            )
-                        ),
-                        "CLAIMS_JOB_MAX_TOKENS": (
-                            int(_env.get("CLAIMS_JOB_MAX_TOKENS")) if _env.get("CLAIMS_JOB_MAX_TOKENS") is not None else (
-                                int((_cp.get('Claims', 'CLAIMS_JOB_MAX_TOKENS', fallback='0') if _cp else '0') or 0)
-                            )
-                        ),
-                        "CLAIMS_JOB_BUDGET_STRICT": (
-                            (_env.get("CLAIMS_JOB_BUDGET_STRICT").lower() == "true") if _env.get("CLAIMS_JOB_BUDGET_STRICT") is not None else (
-                                _cp.getboolean('Claims', 'CLAIMS_JOB_BUDGET_STRICT', fallback=False) if _cp else False
-                            )
-                        ),
-                        # Optional: allow local NER model name in config for users who want NER
-                        "CLAIMS_LOCAL_NER_MODEL": (
-                            _env.get("CLAIMS_LOCAL_NER_MODEL") if _env.get("CLAIMS_LOCAL_NER_MODEL") is not None else (
-                                _cp.get('Claims', 'CLAIMS_LOCAL_NER_MODEL', fallback='en_core_web_sm') if _cp else 'en_core_web_sm'
-                            )
-                        ),
-                        "CLAIMS_EXTRACTOR_LANGUAGE_DEFAULT": (
-                            _env.get("CLAIMS_EXTRACTOR_LANGUAGE_DEFAULT")
-                            if _env.get("CLAIMS_EXTRACTOR_LANGUAGE_DEFAULT") is not None else (
-                                _cp.get('Claims', 'CLAIMS_EXTRACTOR_LANGUAGE_DEFAULT', fallback='en') if _cp else 'en'
-                            )
-                        ),
-                        "CLAIMS_LOCAL_NER_MODEL_MAP": (
-                            _env.get("CLAIMS_LOCAL_NER_MODEL_MAP")
-                            if _env.get("CLAIMS_LOCAL_NER_MODEL_MAP") is not None else (
-                                _cp.get('Claims', 'CLAIMS_LOCAL_NER_MODEL_MAP', fallback='') if _cp else ''
-                            )
-                        ),
-                        "CLAIMS_PROMPT_VALIDATION_MODE": (
-                            _env.get("CLAIMS_PROMPT_VALIDATION_MODE")
-                            if _env.get("CLAIMS_PROMPT_VALIDATION_MODE") is not None else (
-                                _cp.get('Claims', 'CLAIMS_PROMPT_VALIDATION_MODE', fallback='warning') if _cp else 'warning'
-                            )
-                        ),
-                        "CLAIMS_PROMPT_VALIDATION_STRICT": (
-                            (_env.get("CLAIMS_PROMPT_VALIDATION_STRICT").lower() == "true") if _env.get("CLAIMS_PROMPT_VALIDATION_STRICT") is not None else (
-                                _cp.getboolean('Claims', 'CLAIMS_PROMPT_VALIDATION_STRICT', fallback=False) if _cp else False
-                            )
-                        ),
-                        "CLAIMS_CONTEXT_WINDOW_CHARS": (
-                            _safe_int(
-                                _env.get("CLAIMS_CONTEXT_WINDOW_CHARS"),
-                                int(_cp.getint('Claims', 'CLAIMS_CONTEXT_WINDOW_CHARS', fallback=0)) if _cp else 0,
-                            )
-                        ),
-                        "CLAIMS_EXTRACTION_PASSES": (
-                            _safe_int(
-                                _env.get("CLAIMS_EXTRACTION_PASSES"),
-                                int(_cp.getint('Claims', 'CLAIMS_EXTRACTION_PASSES', fallback=1)) if _cp else 1,
-                            )
-                        ),
-                    }
-                ))({
-                    k: os.getenv(k) for k in [
-                        "ENABLE_INGESTION_CLAIMS", "CLAIM_EXTRACTOR_MODE", "CLAIMS_MAX_PER_CHUNK",
-                        "CLAIMS_EMBED", "CLAIMS_EMBED_MODEL_ID", "CLAIMS_CLUSTER_METHOD",
-                        "CLAIMS_CLUSTER_SIMILARITY_THRESHOLD", "CLAIMS_CLUSTER_BATCH_SIZE",
-                        "CLAIMS_LLM_PROVIDER", "CLAIMS_LLM_TEMPERATURE", "CLAIMS_JOB_BUDGET_ENABLED",
-                        "CLAIMS_JOB_MAX_COST_USD", "CLAIMS_JOB_MAX_TOKENS", "CLAIMS_JOB_BUDGET_STRICT",
-                        "CLAIMS_LOCAL_NER_MODEL", "CLAIMS_EXTRACTOR_LANGUAGE_DEFAULT", "CLAIMS_LOCAL_NER_MODEL_MAP",
-                        "CLAIMS_PROMPT_VALIDATION_MODE", "CLAIMS_PROMPT_VALIDATION_STRICT",
-                        "CLAIMS_CONTEXT_WINDOW_CHARS", "CLAIMS_EXTRACTION_PASSES"
-                    ]
-                })
-            ))(load_comprehensive_config())
-        ))(),
-
+                        )(
+                            {
+                                k: os.getenv(k)
+                                for k in [
+                                    "ENABLE_INGESTION_CLAIMS",
+                                    "CLAIM_EXTRACTOR_MODE",
+                                    "CLAIMS_MAX_PER_CHUNK",
+                                    "CLAIMS_EMBED",
+                                    "CLAIMS_EMBED_MODEL_ID",
+                                    "CLAIMS_CLUSTER_METHOD",
+                                    "CLAIMS_CLUSTER_SIMILARITY_THRESHOLD",
+                                    "CLAIMS_CLUSTER_BATCH_SIZE",
+                                    "CLAIMS_LLM_PROVIDER",
+                                    "CLAIMS_LLM_TEMPERATURE",
+                                    "CLAIMS_JOB_BUDGET_ENABLED",
+                                    "CLAIMS_JOB_MAX_COST_USD",
+                                    "CLAIMS_JOB_MAX_TOKENS",
+                                    "CLAIMS_JOB_BUDGET_STRICT",
+                                    "CLAIMS_LOCAL_NER_MODEL",
+                                    "CLAIMS_EXTRACTOR_LANGUAGE_DEFAULT",
+                                    "CLAIMS_LOCAL_NER_MODEL_MAP",
+                                    "CLAIMS_PROMPT_VALIDATION_MODE",
+                                    "CLAIMS_PROMPT_VALIDATION_STRICT",
+                                    "CLAIMS_CONTEXT_WINDOW_CHARS",
+                                    "CLAIMS_EXTRACTION_PASSES",
+                                ]
+                            }
+                        )
+                    )
+                )(load_comprehensive_config())
+            )
+        )(),
         # Claims periodic rebuild worker
         "CLAIMS_REBUILD_ENABLED": os.getenv("CLAIMS_REBUILD_ENABLED", "false").lower() == "true",
         "CLAIMS_REBUILD_INTERVAL_SEC": int(os.getenv("CLAIMS_REBUILD_INTERVAL_SEC", "3600")),
         # Policy: missing | all | stale (stale requires CLAIMS_STALE_DAYS)
         "CLAIMS_REBUILD_POLICY": os.getenv("CLAIMS_REBUILD_POLICY", "missing"),
         "CLAIMS_STALE_DAYS": int(os.getenv("CLAIMS_STALE_DAYS", "7")),
-
         # Claims monitoring (alerts/config)
-        **(lambda: (
-            (lambda _cp, _env: (
-                (lambda raw_cost: (
+        **(
+            lambda: (
+                (
+                    lambda _cp, _env: (
+                        (
+                            lambda raw_cost: (
+                                {
+                                    "CLAIMS_MONITORING_ENABLED": (
+                                        (_env.get("CLAIMS_MONITORING_ENABLED").lower() == "true")
+                                        if _env.get("CLAIMS_MONITORING_ENABLED") is not None
+                                        else (
+                                            _cp.getboolean(
+                                                "ClaimsMonitoring", "CLAIMS_MONITORING_ENABLED", fallback=False
+                                            )
+                                            if _cp
+                                            else False
+                                        )
+                                    ),
+                                    "CLAIMS_ALERT_THRESHOLD_DEFAULT": (
+                                        float(_env.get("CLAIMS_ALERT_THRESHOLD_DEFAULT"))
+                                        if _env.get("CLAIMS_ALERT_THRESHOLD_DEFAULT") is not None
+                                        else (
+                                            float(
+                                                _cp.get(
+                                                    "ClaimsMonitoring", "CLAIMS_ALERT_THRESHOLD_DEFAULT", fallback="0.2"
+                                                )
+                                            )
+                                            if _cp
+                                            else 0.2
+                                        )
+                                    ),
+                                    "CLAIMS_REBUILD_MAX_QUEUE_ALERT": (
+                                        int(_env.get("CLAIMS_REBUILD_MAX_QUEUE_ALERT"))
+                                        if _env.get("CLAIMS_REBUILD_MAX_QUEUE_ALERT") is not None
+                                        else (
+                                            int(
+                                                _cp.get(
+                                                    "ClaimsMonitoring",
+                                                    "CLAIMS_REBUILD_MAX_QUEUE_ALERT",
+                                                    fallback="1000",
+                                                )
+                                            )
+                                            if _cp
+                                            else 1000
+                                        )
+                                    ),
+                                    "CLAIMS_REBUILD_HEARTBEAT_WARN_SEC": (
+                                        int(_env.get("CLAIMS_REBUILD_HEARTBEAT_WARN_SEC"))
+                                        if _env.get("CLAIMS_REBUILD_HEARTBEAT_WARN_SEC") is not None
+                                        else (
+                                            int(
+                                                _cp.get(
+                                                    "ClaimsMonitoring",
+                                                    "CLAIMS_REBUILD_HEARTBEAT_WARN_SEC",
+                                                    fallback="600",
+                                                )
+                                            )
+                                            if _cp
+                                            else 600
+                                        )
+                                    ),
+                                    "CLAIMS_ALERTS_SCHEDULER_ENABLED": (
+                                        (_env.get("CLAIMS_ALERTS_SCHEDULER_ENABLED").lower() == "true")
+                                        if _env.get("CLAIMS_ALERTS_SCHEDULER_ENABLED") is not None
+                                        else (
+                                            _cp.getboolean(
+                                                "ClaimsMonitoring", "CLAIMS_ALERTS_SCHEDULER_ENABLED", fallback=False
+                                            )
+                                            if _cp
+                                            else False
+                                        )
+                                    ),
+                                    "CLAIMS_ALERTS_EVAL_INTERVAL_SEC": (
+                                        int(_env.get("CLAIMS_ALERTS_EVAL_INTERVAL_SEC"))
+                                        if _env.get("CLAIMS_ALERTS_EVAL_INTERVAL_SEC") is not None
+                                        else (
+                                            int(
+                                                _cp.get(
+                                                    "ClaimsMonitoring",
+                                                    "CLAIMS_ALERTS_EVAL_INTERVAL_SEC",
+                                                    fallback="300",
+                                                )
+                                            )
+                                            if _cp
+                                            else 300
+                                        )
+                                    ),
+                                    "CLAIMS_ALERTS_WINDOW_SEC": (
+                                        int(_env.get("CLAIMS_ALERTS_WINDOW_SEC"))
+                                        if _env.get("CLAIMS_ALERTS_WINDOW_SEC") is not None
+                                        else (
+                                            int(
+                                                _cp.get("ClaimsMonitoring", "CLAIMS_ALERTS_WINDOW_SEC", fallback="3600")
+                                            )
+                                            if _cp
+                                            else 3600
+                                        )
+                                    ),
+                                    "CLAIMS_ALERTS_BASELINE_SEC": (
+                                        int(_env.get("CLAIMS_ALERTS_BASELINE_SEC"))
+                                        if _env.get("CLAIMS_ALERTS_BASELINE_SEC") is not None
+                                        else (
+                                            int(
+                                                _cp.get(
+                                                    "ClaimsMonitoring", "CLAIMS_ALERTS_BASELINE_SEC", fallback="86400"
+                                                )
+                                            )
+                                            if _cp
+                                            else 86400
+                                        )
+                                    ),
+                                    "CLAIMS_ALERT_EMAIL_DIGEST_ENABLED": (
+                                        (_env.get("CLAIMS_ALERT_EMAIL_DIGEST_ENABLED").lower() == "true")
+                                        if _env.get("CLAIMS_ALERT_EMAIL_DIGEST_ENABLED") is not None
+                                        else (
+                                            _cp.getboolean(
+                                                "ClaimsMonitoring", "CLAIMS_ALERT_EMAIL_DIGEST_ENABLED", fallback=False
+                                            )
+                                            if _cp
+                                            else False
+                                        )
+                                    ),
+                                    "CLAIMS_ALERT_EMAIL_DIGEST_INTERVAL_SEC": (
+                                        int(_env.get("CLAIMS_ALERT_EMAIL_DIGEST_INTERVAL_SEC"))
+                                        if _env.get("CLAIMS_ALERT_EMAIL_DIGEST_INTERVAL_SEC") is not None
+                                        else (
+                                            int(
+                                                _cp.get(
+                                                    "ClaimsMonitoring",
+                                                    "CLAIMS_ALERT_EMAIL_DIGEST_INTERVAL_SEC",
+                                                    fallback="86400",
+                                                )
+                                            )
+                                            if _cp
+                                            else 86400
+                                        )
+                                    ),
+                                    "CLAIMS_ALERT_EMAIL_DIGEST_MAX_EVENTS": (
+                                        int(_env.get("CLAIMS_ALERT_EMAIL_DIGEST_MAX_EVENTS"))
+                                        if _env.get("CLAIMS_ALERT_EMAIL_DIGEST_MAX_EVENTS") is not None
+                                        else (
+                                            int(
+                                                _cp.get(
+                                                    "ClaimsMonitoring",
+                                                    "CLAIMS_ALERT_EMAIL_DIGEST_MAX_EVENTS",
+                                                    fallback="500",
+                                                )
+                                            )
+                                            if _cp
+                                            else 500
+                                        )
+                                    ),
+                                    "CLAIMS_ADAPTIVE_THROTTLE_ENABLED": (
+                                        (_env.get("CLAIMS_ADAPTIVE_THROTTLE_ENABLED").lower() == "true")
+                                        if _env.get("CLAIMS_ADAPTIVE_THROTTLE_ENABLED") is not None
+                                        else (
+                                            _cp.getboolean(
+                                                "ClaimsMonitoring", "CLAIMS_ADAPTIVE_THROTTLE_ENABLED", fallback=False
+                                            )
+                                            if _cp
+                                            else False
+                                        )
+                                    ),
+                                    "CLAIMS_ADAPTIVE_THROTTLE_LATENCY_MS": (
+                                        float(_env.get("CLAIMS_ADAPTIVE_THROTTLE_LATENCY_MS"))
+                                        if _env.get("CLAIMS_ADAPTIVE_THROTTLE_LATENCY_MS") is not None
+                                        else (
+                                            float(
+                                                (
+                                                    _cp.get(
+                                                        "ClaimsMonitoring",
+                                                        "CLAIMS_ADAPTIVE_THROTTLE_LATENCY_MS",
+                                                        fallback="0",
+                                                    )
+                                                    if _cp
+                                                    else "0"
+                                                )
+                                                or 0
+                                            )
+                                        )
+                                    ),
+                                    "CLAIMS_ADAPTIVE_THROTTLE_ERROR_RATE": (
+                                        float(_env.get("CLAIMS_ADAPTIVE_THROTTLE_ERROR_RATE"))
+                                        if _env.get("CLAIMS_ADAPTIVE_THROTTLE_ERROR_RATE") is not None
+                                        else (
+                                            float(
+                                                (
+                                                    _cp.get(
+                                                        "ClaimsMonitoring",
+                                                        "CLAIMS_ADAPTIVE_THROTTLE_ERROR_RATE",
+                                                        fallback="0",
+                                                    )
+                                                    if _cp
+                                                    else "0"
+                                                )
+                                                or 0
+                                            )
+                                        )
+                                    ),
+                                    "CLAIMS_ADAPTIVE_THROTTLE_BUDGET_RATIO": (
+                                        float(_env.get("CLAIMS_ADAPTIVE_THROTTLE_BUDGET_RATIO"))
+                                        if _env.get("CLAIMS_ADAPTIVE_THROTTLE_BUDGET_RATIO") is not None
+                                        else (
+                                            float(
+                                                (
+                                                    _cp.get(
+                                                        "ClaimsMonitoring",
+                                                        "CLAIMS_ADAPTIVE_THROTTLE_BUDGET_RATIO",
+                                                        fallback="0",
+                                                    )
+                                                    if _cp
+                                                    else "0"
+                                                )
+                                                or 0
+                                            )
+                                        )
+                                    ),
+                                    "CLAIMS_PROVIDER_COST_MULTIPLIERS": _safe_json_dict(raw_cost),
+                                }
+                            )
+                        )(
+                            _env.get("CLAIMS_PROVIDER_COST_MULTIPLIERS")
+                            if _env.get("CLAIMS_PROVIDER_COST_MULTIPLIERS") is not None
+                            else (
+                                _cp.get("ClaimsMonitoring", "CLAIMS_PROVIDER_COST_MULTIPLIERS", fallback="")
+                                if _cp
+                                else ""
+                            )
+                        )
+                    )
+                )(
+                    load_comprehensive_config(),
                     {
-                        "CLAIMS_MONITORING_ENABLED": (
-                            (_env.get("CLAIMS_MONITORING_ENABLED").lower() == "true") if _env.get("CLAIMS_MONITORING_ENABLED") is not None else (
-                                _cp.getboolean('ClaimsMonitoring', 'CLAIMS_MONITORING_ENABLED', fallback=False) if _cp else False
-                            )
-                        ),
-                        "CLAIMS_ALERT_THRESHOLD_DEFAULT": (
-                            float(_env.get("CLAIMS_ALERT_THRESHOLD_DEFAULT")) if _env.get("CLAIMS_ALERT_THRESHOLD_DEFAULT") is not None else (
-                                float(_cp.get('ClaimsMonitoring', 'CLAIMS_ALERT_THRESHOLD_DEFAULT', fallback='0.2')) if _cp else 0.2
-                            )
-                        ),
-                        "CLAIMS_REBUILD_MAX_QUEUE_ALERT": (
-                            int(_env.get("CLAIMS_REBUILD_MAX_QUEUE_ALERT")) if _env.get("CLAIMS_REBUILD_MAX_QUEUE_ALERT") is not None else (
-                                int(_cp.get('ClaimsMonitoring', 'CLAIMS_REBUILD_MAX_QUEUE_ALERT', fallback='1000')) if _cp else 1000
-                            )
-                        ),
-                        "CLAIMS_REBUILD_HEARTBEAT_WARN_SEC": (
-                            int(_env.get("CLAIMS_REBUILD_HEARTBEAT_WARN_SEC")) if _env.get("CLAIMS_REBUILD_HEARTBEAT_WARN_SEC") is not None else (
-                                int(_cp.get('ClaimsMonitoring', 'CLAIMS_REBUILD_HEARTBEAT_WARN_SEC', fallback='600')) if _cp else 600
-                            )
-                        ),
-                        "CLAIMS_ALERTS_SCHEDULER_ENABLED": (
-                            (_env.get("CLAIMS_ALERTS_SCHEDULER_ENABLED").lower() == "true") if _env.get("CLAIMS_ALERTS_SCHEDULER_ENABLED") is not None else (
-                                _cp.getboolean('ClaimsMonitoring', 'CLAIMS_ALERTS_SCHEDULER_ENABLED', fallback=False) if _cp else False
-                            )
-                        ),
-                        "CLAIMS_ALERTS_EVAL_INTERVAL_SEC": (
-                            int(_env.get("CLAIMS_ALERTS_EVAL_INTERVAL_SEC")) if _env.get("CLAIMS_ALERTS_EVAL_INTERVAL_SEC") is not None else (
-                                int(_cp.get('ClaimsMonitoring', 'CLAIMS_ALERTS_EVAL_INTERVAL_SEC', fallback='300')) if _cp else 300
-                            )
-                        ),
-                        "CLAIMS_ALERTS_WINDOW_SEC": (
-                            int(_env.get("CLAIMS_ALERTS_WINDOW_SEC")) if _env.get("CLAIMS_ALERTS_WINDOW_SEC") is not None else (
-                                int(_cp.get('ClaimsMonitoring', 'CLAIMS_ALERTS_WINDOW_SEC', fallback='3600')) if _cp else 3600
-                            )
-                        ),
-                        "CLAIMS_ALERTS_BASELINE_SEC": (
-                            int(_env.get("CLAIMS_ALERTS_BASELINE_SEC")) if _env.get("CLAIMS_ALERTS_BASELINE_SEC") is not None else (
-                                int(_cp.get('ClaimsMonitoring', 'CLAIMS_ALERTS_BASELINE_SEC', fallback='86400')) if _cp else 86400
-                            )
-                        ),
-                        "CLAIMS_ALERT_EMAIL_DIGEST_ENABLED": (
-                            (_env.get("CLAIMS_ALERT_EMAIL_DIGEST_ENABLED").lower() == "true") if _env.get("CLAIMS_ALERT_EMAIL_DIGEST_ENABLED") is not None else (
-                                _cp.getboolean('ClaimsMonitoring', 'CLAIMS_ALERT_EMAIL_DIGEST_ENABLED', fallback=False) if _cp else False
-                            )
-                        ),
-                        "CLAIMS_ALERT_EMAIL_DIGEST_INTERVAL_SEC": (
-                            int(_env.get("CLAIMS_ALERT_EMAIL_DIGEST_INTERVAL_SEC")) if _env.get("CLAIMS_ALERT_EMAIL_DIGEST_INTERVAL_SEC") is not None else (
-                                int(_cp.get('ClaimsMonitoring', 'CLAIMS_ALERT_EMAIL_DIGEST_INTERVAL_SEC', fallback='86400')) if _cp else 86400
-                            )
-                        ),
-                        "CLAIMS_ALERT_EMAIL_DIGEST_MAX_EVENTS": (
-                            int(_env.get("CLAIMS_ALERT_EMAIL_DIGEST_MAX_EVENTS")) if _env.get("CLAIMS_ALERT_EMAIL_DIGEST_MAX_EVENTS") is not None else (
-                                int(_cp.get('ClaimsMonitoring', 'CLAIMS_ALERT_EMAIL_DIGEST_MAX_EVENTS', fallback='500')) if _cp else 500
-                            )
-                        ),
-                        "CLAIMS_ADAPTIVE_THROTTLE_ENABLED": (
-                            (_env.get("CLAIMS_ADAPTIVE_THROTTLE_ENABLED").lower() == "true") if _env.get("CLAIMS_ADAPTIVE_THROTTLE_ENABLED") is not None else (
-                                _cp.getboolean('ClaimsMonitoring', 'CLAIMS_ADAPTIVE_THROTTLE_ENABLED', fallback=False) if _cp else False
-                            )
-                        ),
-                        "CLAIMS_ADAPTIVE_THROTTLE_LATENCY_MS": (
-                            float(_env.get("CLAIMS_ADAPTIVE_THROTTLE_LATENCY_MS")) if _env.get("CLAIMS_ADAPTIVE_THROTTLE_LATENCY_MS") is not None else (
-                                float((_cp.get('ClaimsMonitoring', 'CLAIMS_ADAPTIVE_THROTTLE_LATENCY_MS', fallback='0') if _cp else '0') or 0)
-                            )
-                        ),
-                        "CLAIMS_ADAPTIVE_THROTTLE_ERROR_RATE": (
-                            float(_env.get("CLAIMS_ADAPTIVE_THROTTLE_ERROR_RATE")) if _env.get("CLAIMS_ADAPTIVE_THROTTLE_ERROR_RATE") is not None else (
-                                float((_cp.get('ClaimsMonitoring', 'CLAIMS_ADAPTIVE_THROTTLE_ERROR_RATE', fallback='0') if _cp else '0') or 0)
-                            )
-                        ),
-                        "CLAIMS_ADAPTIVE_THROTTLE_BUDGET_RATIO": (
-                            float(_env.get("CLAIMS_ADAPTIVE_THROTTLE_BUDGET_RATIO")) if _env.get("CLAIMS_ADAPTIVE_THROTTLE_BUDGET_RATIO") is not None else (
-                                float((_cp.get('ClaimsMonitoring', 'CLAIMS_ADAPTIVE_THROTTLE_BUDGET_RATIO', fallback='0') if _cp else '0') or 0)
-                            )
-                        ),
-                        "CLAIMS_PROVIDER_COST_MULTIPLIERS": _safe_json_dict(raw_cost),
-                    }
-                ))(
-                    _env.get("CLAIMS_PROVIDER_COST_MULTIPLIERS") if _env.get("CLAIMS_PROVIDER_COST_MULTIPLIERS") is not None else (
-                        _cp.get('ClaimsMonitoring', 'CLAIMS_PROVIDER_COST_MULTIPLIERS', fallback='') if _cp else ''
-                    )
+                        k: os.getenv(k)
+                        for k in [
+                            "CLAIMS_MONITORING_ENABLED",
+                            "CLAIMS_ALERT_THRESHOLD_DEFAULT",
+                            "CLAIMS_REBUILD_MAX_QUEUE_ALERT",
+                            "CLAIMS_REBUILD_HEARTBEAT_WARN_SEC",
+                            "CLAIMS_ALERTS_SCHEDULER_ENABLED",
+                            "CLAIMS_ALERTS_EVAL_INTERVAL_SEC",
+                            "CLAIMS_ALERTS_WINDOW_SEC",
+                            "CLAIMS_ALERTS_BASELINE_SEC",
+                            "CLAIMS_ALERT_EMAIL_DIGEST_ENABLED",
+                            "CLAIMS_ALERT_EMAIL_DIGEST_INTERVAL_SEC",
+                            "CLAIMS_ALERT_EMAIL_DIGEST_MAX_EVENTS",
+                            "CLAIMS_ADAPTIVE_THROTTLE_ENABLED",
+                            "CLAIMS_ADAPTIVE_THROTTLE_LATENCY_MS",
+                            "CLAIMS_ADAPTIVE_THROTTLE_ERROR_RATE",
+                            "CLAIMS_ADAPTIVE_THROTTLE_BUDGET_RATIO",
+                            "CLAIMS_PROVIDER_COST_MULTIPLIERS",
+                        ]
+                    },
                 )
-            ))(load_comprehensive_config(), {
-                k: os.getenv(k) for k in [
-                    "CLAIMS_MONITORING_ENABLED",
-                    "CLAIMS_ALERT_THRESHOLD_DEFAULT",
-                    "CLAIMS_REBUILD_MAX_QUEUE_ALERT",
-                    "CLAIMS_REBUILD_HEARTBEAT_WARN_SEC",
-                    "CLAIMS_ALERTS_SCHEDULER_ENABLED",
-                    "CLAIMS_ALERTS_EVAL_INTERVAL_SEC",
-                    "CLAIMS_ALERTS_WINDOW_SEC",
-                    "CLAIMS_ALERTS_BASELINE_SEC",
-                    "CLAIMS_ALERT_EMAIL_DIGEST_ENABLED",
-                    "CLAIMS_ALERT_EMAIL_DIGEST_INTERVAL_SEC",
-                    "CLAIMS_ALERT_EMAIL_DIGEST_MAX_EVENTS",
-                    "CLAIMS_ADAPTIVE_THROTTLE_ENABLED",
-                    "CLAIMS_ADAPTIVE_THROTTLE_LATENCY_MS",
-                    "CLAIMS_ADAPTIVE_THROTTLE_ERROR_RATE",
-                    "CLAIMS_ADAPTIVE_THROTTLE_BUDGET_RATIO",
-                    "CLAIMS_PROVIDER_COST_MULTIPLIERS",
-                ]
-            })
-        ))(),
-
+            )
+        )(),
         # Contextual retrieval defaults (parent/siblings) - from env or config.txt [RAG] section
-        "RAG_CONTEXTUAL_DEFAULTS": (lambda: (
-            # Build contextual defaults from env first, then config.txt [RAG] section
-            (lambda _envs, _cfg: {
-                "include_parent_document": (
-                    (_envs.get("RAG_INCLUDE_PARENT_DOCUMENT").lower() == "true") if _envs.get("RAG_INCLUDE_PARENT_DOCUMENT") is not None else (
-                        str(_cfg.get('include_parent_document', 'false')).lower() == 'true'
-                    )
-                ),
-                "parent_max_tokens": (
-                    _int_env_or_cfg(
-                        _envs.get("RAG_PARENT_MAX_TOKENS"),
-                        _cfg.get("parent_max_tokens", "1200"),
-                        1200,
-                    )
-                ),
-                "include_sibling_chunks": (
-                    (_envs.get("RAG_INCLUDE_SIBLING_CHUNKS").lower() == "true") if _envs.get("RAG_INCLUDE_SIBLING_CHUNKS") is not None else (
-                        str(_cfg.get('include_sibling_chunks', 'false')).lower() == 'true'
-                    )
-                ),
-                "sibling_window": (
-                    _int_env_or_cfg(
-                        _envs.get("RAG_SIBLING_WINDOW"),
-                        _cfg.get("sibling_window", "1"),
-                        1,
-                    )
-                ),
-            })(
-                {
-                    "RAG_INCLUDE_PARENT_DOCUMENT": os.getenv("RAG_INCLUDE_PARENT_DOCUMENT"),
-                    "RAG_PARENT_MAX_TOKENS": os.getenv("RAG_PARENT_MAX_TOKENS"),
-                    "RAG_INCLUDE_SIBLING_CHUNKS": os.getenv("RAG_INCLUDE_SIBLING_CHUNKS"),
-                    "RAG_SIBLING_WINDOW": os.getenv("RAG_SIBLING_WINDOW"),
-                },
-                (lambda _cp: (
-                    (lambda d: d)(
-                        {k: (_cp.get('RAG', k, fallback=None) if _cp and hasattr(_cp, 'get') and _cp.has_section('RAG') else None)
-                         for k in ['include_parent_document', 'parent_max_tokens', 'include_sibling_chunks', 'sibling_window']}
-                    )
-                ))(load_comprehensive_config())
+        "RAG_CONTEXTUAL_DEFAULTS": (
+            lambda: (
+                # Build contextual defaults from env first, then config.txt [RAG] section
+                (
+                    lambda _envs, _cfg: {
+                        "include_parent_document": (
+                            (_envs.get("RAG_INCLUDE_PARENT_DOCUMENT").lower() == "true")
+                            if _envs.get("RAG_INCLUDE_PARENT_DOCUMENT") is not None
+                            else (str(_cfg.get("include_parent_document", "false")).lower() == "true")
+                        ),
+                        "parent_max_tokens": (
+                            _int_env_or_cfg(
+                                _envs.get("RAG_PARENT_MAX_TOKENS"),
+                                _cfg.get("parent_max_tokens", "1200"),
+                                1200,
+                            )
+                        ),
+                        "include_sibling_chunks": (
+                            (_envs.get("RAG_INCLUDE_SIBLING_CHUNKS").lower() == "true")
+                            if _envs.get("RAG_INCLUDE_SIBLING_CHUNKS") is not None
+                            else (str(_cfg.get("include_sibling_chunks", "false")).lower() == "true")
+                        ),
+                        "sibling_window": (
+                            _int_env_or_cfg(
+                                _envs.get("RAG_SIBLING_WINDOW"),
+                                _cfg.get("sibling_window", "1"),
+                                1,
+                            )
+                        ),
+                    }
+                )(
+                    {
+                        "RAG_INCLUDE_PARENT_DOCUMENT": os.getenv("RAG_INCLUDE_PARENT_DOCUMENT"),
+                        "RAG_PARENT_MAX_TOKENS": os.getenv("RAG_PARENT_MAX_TOKENS"),
+                        "RAG_INCLUDE_SIBLING_CHUNKS": os.getenv("RAG_INCLUDE_SIBLING_CHUNKS"),
+                        "RAG_SIBLING_WINDOW": os.getenv("RAG_SIBLING_WINDOW"),
+                    },
+                    (
+                        lambda _cp: (
+                            (lambda d: d)(
+                                {
+                                    k: (
+                                        _cp.get("RAG", k, fallback=None)
+                                        if _cp and hasattr(_cp, "get") and _cp.has_section("RAG")
+                                        else None
+                                    )
+                                    for k in [
+                                        "include_parent_document",
+                                        "parent_max_tokens",
+                                        "include_sibling_chunks",
+                                        "sibling_window",
+                                    ]
+                                }
+                            )
+                        )
+                    )(load_comprehensive_config()),
+                )
             )
-        ))(),
+        )(),
         "IMPLICIT_FEEDBACK_ENABLED": implicit_feedback_enabled(default=True),
-
         # RAG FlashRank reranker cache/model configuration
-        "RAG_FLASHRANK_CACHE_DIR": (lambda _env, _cp: (
-            _env if _env is not None else (
-                _cp.get('RAG', 'flashrank_cache_dir', fallback=None) if _cp and hasattr(_cp, 'get') and _cp.has_section('RAG') else None
+        "RAG_FLASHRANK_CACHE_DIR": (
+            lambda _env, _cp: (
+                _env
+                if _env is not None
+                else (
+                    _cp.get("RAG", "flashrank_cache_dir", fallback=None)
+                    if _cp and hasattr(_cp, "get") and _cp.has_section("RAG")
+                    else None
+                )
             )
-        ))(os.getenv('RAG_FLASHRANK_CACHE_DIR'), load_comprehensive_config()),
-        "RAG_FLASHRANK_MODEL_NAME": (lambda _env, _cp: (
-            _env if _env is not None else (
-                _cp.get('RAG', 'flashrank_model_name', fallback=None) if _cp and hasattr(_cp, 'get') and _cp.has_section('RAG') else None
+        )(os.getenv("RAG_FLASHRANK_CACHE_DIR"), load_comprehensive_config()),
+        "RAG_FLASHRANK_MODEL_NAME": (
+            lambda _env, _cp: (
+                _env
+                if _env is not None
+                else (
+                    _cp.get("RAG", "flashrank_model_name", fallback=None)
+                    if _cp and hasattr(_cp, "get") and _cp.has_section("RAG")
+                    else None
+                )
             )
-        ))(os.getenv('RAG_FLASHRANK_MODEL_NAME'), load_comprehensive_config()),
-
+        )(os.getenv("RAG_FLASHRANK_MODEL_NAME"), load_comprehensive_config()),
         # RAG LLM reranker configuration (provider/model)
-        "RAG_LLM_RERANKER_PROVIDER": (lambda _env, _cp: (
-            _env if _env is not None else (
-                _cp.get('RAG', 'llm_reranker_provider', fallback=None) if _cp and hasattr(_cp, 'get') and _cp.has_section('RAG') else None
+        "RAG_LLM_RERANKER_PROVIDER": (
+            lambda _env, _cp: (
+                _env
+                if _env is not None
+                else (
+                    _cp.get("RAG", "llm_reranker_provider", fallback=None)
+                    if _cp and hasattr(_cp, "get") and _cp.has_section("RAG")
+                    else None
+                )
             )
-        ))(os.getenv('RAG_LLM_RERANKER_PROVIDER'), load_comprehensive_config()),
-        "RAG_LLM_RERANKER_MODEL": (lambda _env, _cp: (
-            _env if _env is not None else (
-                _cp.get('RAG', 'llm_reranker_model', fallback=None) if _cp and hasattr(_cp, 'get') and _cp.has_section('RAG') else None
+        )(os.getenv("RAG_LLM_RERANKER_PROVIDER"), load_comprehensive_config()),
+        "RAG_LLM_RERANKER_MODEL": (
+            lambda _env, _cp: (
+                _env
+                if _env is not None
+                else (
+                    _cp.get("RAG", "llm_reranker_model", fallback=None)
+                    if _cp and hasattr(_cp, "get") and _cp.has_section("RAG")
+                    else None
+                )
             )
-        ))(os.getenv('RAG_LLM_RERANKER_MODEL'), load_comprehensive_config()),
-
+        )(os.getenv("RAG_LLM_RERANKER_MODEL"), load_comprehensive_config()),
         # RAG llama.cpp (GGUF) reranker configuration
-        "RAG_LLAMA_RERANKER_BIN": (lambda _env, _cp: (
-            _env if _env is not None else (
-                _cp.get('RAG', 'llama_reranker_binary', fallback=None) if _cp and hasattr(_cp, 'get') and _cp.has_section('RAG') else None
+        "RAG_LLAMA_RERANKER_BIN": (
+            lambda _env, _cp: (
+                _env
+                if _env is not None
+                else (
+                    _cp.get("RAG", "llama_reranker_binary", fallback=None)
+                    if _cp and hasattr(_cp, "get") and _cp.has_section("RAG")
+                    else None
+                )
             )
-        ))(os.getenv('RAG_LLAMA_RERANKER_BIN'), load_comprehensive_config()),
-        "RAG_LLAMA_RERANKER_MODEL": (lambda _env, _cp: (
-            _env if _env is not None else (
-                _cp.get('RAG', 'llama_reranker_model', fallback=None) if _cp and hasattr(_cp, 'get') and _cp.has_section('RAG') else None
+        )(os.getenv("RAG_LLAMA_RERANKER_BIN"), load_comprehensive_config()),
+        "RAG_LLAMA_RERANKER_MODEL": (
+            lambda _env, _cp: (
+                _env
+                if _env is not None
+                else (
+                    _cp.get("RAG", "llama_reranker_model", fallback=None)
+                    if _cp and hasattr(_cp, "get") and _cp.has_section("RAG")
+                    else None
+                )
             )
-        ))(os.getenv('RAG_LLAMA_RERANKER_MODEL'), load_comprehensive_config()),
-        "RAG_LLAMA_RERANKER_NGL": (lambda _env, _cp: (
-            int(_env) if _env is not None else (
-                int(_cp.get('RAG', 'llama_reranker_ngl', fallback='0')) if _cp and hasattr(_cp, 'get') and _cp.has_section('RAG') else 0
+        )(os.getenv("RAG_LLAMA_RERANKER_MODEL"), load_comprehensive_config()),
+        "RAG_LLAMA_RERANKER_NGL": (
+            lambda _env, _cp: (
+                int(_env)
+                if _env is not None
+                else (
+                    int(_cp.get("RAG", "llama_reranker_ngl", fallback="0"))
+                    if _cp and hasattr(_cp, "get") and _cp.has_section("RAG")
+                    else 0
+                )
             )
-        ))(os.getenv('RAG_LLAMA_RERANKER_NGL'), load_comprehensive_config()),
-        "RAG_LLAMA_RERANKER_SEP": (lambda _env, _cp: (
-            _env if _env is not None else (
-                _cp.get('RAG', 'llama_reranker_separator', fallback='<#sep#>') if _cp and hasattr(_cp, 'get') and _cp.has_section('RAG') else '<#sep#>'
+        )(os.getenv("RAG_LLAMA_RERANKER_NGL"), load_comprehensive_config()),
+        "RAG_LLAMA_RERANKER_SEP": (
+            lambda _env, _cp: (
+                _env
+                if _env is not None
+                else (
+                    _cp.get("RAG", "llama_reranker_separator", fallback="<#sep#>")
+                    if _cp and hasattr(_cp, "get") and _cp.has_section("RAG")
+                    else "<#sep#>"
+                )
             )
-        ))(os.getenv('RAG_LLAMA_RERANKER_SEP'), load_comprehensive_config()),
-        "RAG_LLAMA_RERANKER_OUTPUT": (lambda _env, _cp: (
-            _env if _env is not None else (
-                _cp.get('RAG', 'llama_reranker_output', fallback='json+') if _cp and hasattr(_cp, 'get') and _cp.has_section('RAG') else 'json+'
+        )(os.getenv("RAG_LLAMA_RERANKER_SEP"), load_comprehensive_config()),
+        "RAG_LLAMA_RERANKER_OUTPUT": (
+            lambda _env, _cp: (
+                _env
+                if _env is not None
+                else (
+                    _cp.get("RAG", "llama_reranker_output", fallback="json+")
+                    if _cp and hasattr(_cp, "get") and _cp.has_section("RAG")
+                    else "json+"
+                )
             )
-        ))(os.getenv('RAG_LLAMA_RERANKER_OUTPUT'), load_comprehensive_config()),
-        "RAG_LLAMA_RERANKER_POOLING": (lambda _env, _cp: (
-            _env if _env is not None else (
-                _cp.get('RAG', 'llama_reranker_pooling', fallback='last') if _cp and hasattr(_cp, 'get') and _cp.has_section('RAG') else 'last'
+        )(os.getenv("RAG_LLAMA_RERANKER_OUTPUT"), load_comprehensive_config()),
+        "RAG_LLAMA_RERANKER_POOLING": (
+            lambda _env, _cp: (
+                _env
+                if _env is not None
+                else (
+                    _cp.get("RAG", "llama_reranker_pooling", fallback="last")
+                    if _cp and hasattr(_cp, "get") and _cp.has_section("RAG")
+                    else "last"
+                )
             )
-        ))(os.getenv('RAG_LLAMA_RERANKER_POOLING'), load_comprehensive_config()),
-        "RAG_LLAMA_RERANKER_NORMALIZE": (lambda _env, _cp: (
-            int(_env) if _env is not None else (
-                int(_cp.get('RAG', 'llama_reranker_normalize', fallback='-1')) if _cp and hasattr(_cp, 'get') and _cp.has_section('RAG') else -1
+        )(os.getenv("RAG_LLAMA_RERANKER_POOLING"), load_comprehensive_config()),
+        "RAG_LLAMA_RERANKER_NORMALIZE": (
+            lambda _env, _cp: (
+                int(_env)
+                if _env is not None
+                else (
+                    int(_cp.get("RAG", "llama_reranker_normalize", fallback="-1"))
+                    if _cp and hasattr(_cp, "get") and _cp.has_section("RAG")
+                    else -1
+                )
             )
-        ))(os.getenv('RAG_LLAMA_RERANKER_NORMALIZE'), load_comprehensive_config()),
-        "RAG_LLAMA_RERANKER_MAX_DOC_CHARS": (lambda _env, _cp: (
-            int(_env) if _env is not None else (
-                int(_cp.get('RAG', 'llama_reranker_max_doc_chars', fallback='2000')) if _cp and hasattr(_cp, 'get') and _cp.has_section('RAG') else 2000
+        )(os.getenv("RAG_LLAMA_RERANKER_NORMALIZE"), load_comprehensive_config()),
+        "RAG_LLAMA_RERANKER_MAX_DOC_CHARS": (
+            lambda _env, _cp: (
+                int(_env)
+                if _env is not None
+                else (
+                    int(_cp.get("RAG", "llama_reranker_max_doc_chars", fallback="2000"))
+                    if _cp and hasattr(_cp, "get") and _cp.has_section("RAG")
+                    else 2000
+                )
             )
-        ))(os.getenv('RAG_LLAMA_RERANKER_MAX_DOC_CHARS'), load_comprehensive_config()),
-        "RAG_LLAMA_RERANKER_TEMPLATE_MODE": (lambda _env, _cp: (
-            _env if _env is not None else (
-                _cp.get('RAG', 'llama_reranker_template_mode', fallback='auto') if _cp and hasattr(_cp, 'get') and _cp.has_section('RAG') else 'auto'
+        )(os.getenv("RAG_LLAMA_RERANKER_MAX_DOC_CHARS"), load_comprehensive_config()),
+        "RAG_LLAMA_RERANKER_TEMPLATE_MODE": (
+            lambda _env, _cp: (
+                _env
+                if _env is not None
+                else (
+                    _cp.get("RAG", "llama_reranker_template_mode", fallback="auto")
+                    if _cp and hasattr(_cp, "get") and _cp.has_section("RAG")
+                    else "auto"
+                )
             )
-        ))(os.getenv('RAG_LLAMA_RERANKER_TEMPLATE_MODE'), load_comprehensive_config()),
-        "RAG_LLAMA_RERANKER_QUERY_PREFIX": (lambda _env, _cp: (
-            _env if _env is not None else (
-                _cp.get('RAG', 'llama_reranker_query_prefix', fallback=None) if _cp and hasattr(_cp, 'get') and _cp.has_section('RAG') else None
+        )(os.getenv("RAG_LLAMA_RERANKER_TEMPLATE_MODE"), load_comprehensive_config()),
+        "RAG_LLAMA_RERANKER_QUERY_PREFIX": (
+            lambda _env, _cp: (
+                _env
+                if _env is not None
+                else (
+                    _cp.get("RAG", "llama_reranker_query_prefix", fallback=None)
+                    if _cp and hasattr(_cp, "get") and _cp.has_section("RAG")
+                    else None
+                )
             )
-        ))(os.getenv('RAG_LLAMA_RERANKER_QUERY_PREFIX'), load_comprehensive_config()),
-        "RAG_LLAMA_RERANKER_DOC_PREFIX": (lambda _env, _cp: (
-            _env if _env is not None else (
-                _cp.get('RAG', 'llama_reranker_doc_prefix', fallback=None) if _cp and hasattr(_cp, 'get') and _cp.has_section('RAG') else None
+        )(os.getenv("RAG_LLAMA_RERANKER_QUERY_PREFIX"), load_comprehensive_config()),
+        "RAG_LLAMA_RERANKER_DOC_PREFIX": (
+            lambda _env, _cp: (
+                _env
+                if _env is not None
+                else (
+                    _cp.get("RAG", "llama_reranker_doc_prefix", fallback=None)
+                    if _cp and hasattr(_cp, "get") and _cp.has_section("RAG")
+                    else None
+                )
             )
-        ))(os.getenv('RAG_LLAMA_RERANKER_DOC_PREFIX'), load_comprehensive_config()),
-
+        )(os.getenv("RAG_LLAMA_RERANKER_DOC_PREFIX"), load_comprehensive_config()),
         # Transformers cross-encoder reranker defaults
-        "RAG_TRANSFORMERS_RERANKER_MODEL": (lambda _env, _cp: (
-            _env if _env is not None else (
-                _cp.get('RAG', 'transformers_reranker_model', fallback=None) if _cp and hasattr(_cp, 'get') and _cp.has_section('RAG') else None
+        "RAG_TRANSFORMERS_RERANKER_MODEL": (
+            lambda _env, _cp: (
+                _env
+                if _env is not None
+                else (
+                    _cp.get("RAG", "transformers_reranker_model", fallback=None)
+                    if _cp and hasattr(_cp, "get") and _cp.has_section("RAG")
+                    else None
+                )
             )
-        ))(os.getenv('RAG_TRANSFORMERS_RERANKER_MODEL'), load_comprehensive_config()),
-
+        )(os.getenv("RAG_TRANSFORMERS_RERANKER_MODEL"), load_comprehensive_config()),
         # RAG HyDE configuration (provider/model)
-        "RAG_HYDE_PROVIDER": (lambda _env, _cp: (
-            _env if _env is not None else (
-                _cp.get('RAG', 'hyde_provider', fallback=None) if _cp and hasattr(_cp, 'get') and _cp.has_section('RAG') else None
+        "RAG_HYDE_PROVIDER": (
+            lambda _env, _cp: (
+                _env
+                if _env is not None
+                else (
+                    _cp.get("RAG", "hyde_provider", fallback=None)
+                    if _cp and hasattr(_cp, "get") and _cp.has_section("RAG")
+                    else None
+                )
             )
-        ))(os.getenv('RAG_HYDE_PROVIDER'), load_comprehensive_config()),
-        "RAG_HYDE_MODEL": (lambda _env, _cp: (
-            _env if _env is not None else (
-                _cp.get('RAG', 'hyde_model', fallback=None) if _cp and hasattr(_cp, 'get') and _cp.has_section('RAG') else None
+        )(os.getenv("RAG_HYDE_PROVIDER"), load_comprehensive_config()),
+        "RAG_HYDE_MODEL": (
+            lambda _env, _cp: (
+                _env
+                if _env is not None
+                else (
+                    _cp.get("RAG", "hyde_model", fallback=None)
+                    if _cp and hasattr(_cp, "get") and _cp.has_section("RAG")
+                    else None
+                )
             )
-        ))(os.getenv('RAG_HYDE_MODEL'), load_comprehensive_config()),
-
+        )(os.getenv("RAG_HYDE_MODEL"), load_comprehensive_config()),
         # RAG default LLM (used for general lightweight tasks like query expansion/gap analysis)
-        "RAG_DEFAULT_LLM_PROVIDER": (lambda _env, _cp: (
-            _env if _env is not None else (
-                _cp.get('RAG', 'default_llm_provider', fallback=None) if _cp and hasattr(_cp, 'get') and _cp.has_section('RAG') else None
+        "RAG_DEFAULT_LLM_PROVIDER": (
+            lambda _env, _cp: (
+                _env
+                if _env is not None
+                else (
+                    _cp.get("RAG", "default_llm_provider", fallback=None)
+                    if _cp and hasattr(_cp, "get") and _cp.has_section("RAG")
+                    else None
+                )
             )
-        ))(os.getenv('RAG_DEFAULT_LLM_PROVIDER'), load_comprehensive_config()),
-        "RAG_DEFAULT_LLM_MODEL": (lambda _env, _cp: (
-            _env if _env is not None else (
-                _cp.get('RAG', 'default_llm_model', fallback=None) if _cp and hasattr(_cp, 'get') and _cp.has_section('RAG') else None
+        )(os.getenv("RAG_DEFAULT_LLM_PROVIDER"), load_comprehensive_config()),
+        "RAG_DEFAULT_LLM_MODEL": (
+            lambda _env, _cp: (
+                _env
+                if _env is not None
+                else (
+                    _cp.get("RAG", "default_llm_model", fallback=None)
+                    if _cp and hasattr(_cp, "get") and _cp.has_section("RAG")
+                    else None
+                )
             )
-        ))(os.getenv('RAG_DEFAULT_LLM_MODEL'), load_comprehensive_config()),
-
+        )(os.getenv("RAG_DEFAULT_LLM_MODEL"), load_comprehensive_config()),
         # RAG default FTS level ('media' or 'chunk')
-        "RAG_DEFAULT_FTS_LEVEL": (lambda _env, _cp: (
-            (_env.lower() if isinstance(_env, str) else None) if _env is not None else (
-                _cp.get('RAG', 'default_fts_level', fallback='media').lower() if _cp and hasattr(_cp, 'get') and _cp.has_section('RAG') else 'media'
+        "RAG_DEFAULT_FTS_LEVEL": (
+            lambda _env, _cp: (
+                (_env.lower() if isinstance(_env, str) else None)
+                if _env is not None
+                else (
+                    _cp.get("RAG", "default_fts_level", fallback="media").lower()
+                    if _cp and hasattr(_cp, "get") and _cp.has_section("RAG")
+                    else "media"
+                )
             )
-        ))(os.getenv('RAG_DEFAULT_FTS_LEVEL'), load_comprehensive_config()),
-
+        )(os.getenv("RAG_DEFAULT_FTS_LEVEL"), load_comprehensive_config()),
         # --- Feature Flags: Personalization & Persona Agent ---
         # Personalization
-        "PERSONALIZATION_ENABLED": (lambda _cp: (
-            _cp.getboolean('personalization', 'enabled', fallback=True) if _cp and hasattr(_cp, 'has_section') and _cp.has_section('personalization') else True
-        ))(load_comprehensive_config()),
-        "PERSONALIZATION_ALPHA": (lambda _cp: (
-            float(_cp.get('personalization', 'alpha', fallback='0.2')) if _cp and _cp.has_section('personalization') else 0.2
-        ))(load_comprehensive_config()),
-        "PERSONALIZATION_BETA": (lambda _cp: (
-            float(_cp.get('personalization', 'beta', fallback='0.6')) if _cp and _cp.has_section('personalization') else 0.6
-        ))(load_comprehensive_config()),
-        "PERSONALIZATION_GAMMA": (lambda _cp: (
-            float(_cp.get('personalization', 'gamma', fallback='0.2')) if _cp and _cp.has_section('personalization') else 0.2
-        ))(load_comprehensive_config()),
-        "PERSONALIZATION_RECENCY_HALF_LIFE_DAYS": (lambda _cp: (
-            int(_cp.get('personalization', 'recency_half_life_days', fallback='14')) if _cp and _cp.has_section('personalization') else 14
-        ))(load_comprehensive_config()),
-
+        "PERSONALIZATION_ENABLED": (
+            lambda _cp: (
+                _cp.getboolean("personalization", "enabled", fallback=True)
+                if _cp and hasattr(_cp, "has_section") and _cp.has_section("personalization")
+                else True
+            )
+        )(load_comprehensive_config()),
+        "PERSONALIZATION_ALPHA": (
+            lambda _cp: (
+                float(_cp.get("personalization", "alpha", fallback="0.2"))
+                if _cp and _cp.has_section("personalization")
+                else 0.2
+            )
+        )(load_comprehensive_config()),
+        "PERSONALIZATION_BETA": (
+            lambda _cp: (
+                float(_cp.get("personalization", "beta", fallback="0.6"))
+                if _cp and _cp.has_section("personalization")
+                else 0.6
+            )
+        )(load_comprehensive_config()),
+        "PERSONALIZATION_GAMMA": (
+            lambda _cp: (
+                float(_cp.get("personalization", "gamma", fallback="0.2"))
+                if _cp and _cp.has_section("personalization")
+                else 0.2
+            )
+        )(load_comprehensive_config()),
+        "PERSONALIZATION_RECENCY_HALF_LIFE_DAYS": (
+            lambda _cp: (
+                int(_cp.get("personalization", "recency_half_life_days", fallback="14"))
+                if _cp and _cp.has_section("personalization")
+                else 14
+            )
+        )(load_comprehensive_config()),
         # Persona Agent and RBAC
-        "PERSONA_ENABLED": (lambda _cp: (
-            _cp.getboolean('persona', 'enabled', fallback=True) if _cp and hasattr(_cp, 'has_section') and _cp.has_section('persona') else True
-        ))(load_comprehensive_config()),
-        "PERSONA_DEFAULT_PERSONA": (lambda _cp: (
-            _cp.get('persona', 'default_persona', fallback='Research Assistant') if _cp and _cp.has_section('persona') else 'Research Assistant'
-        ))(load_comprehensive_config()),
-        "PERSONA_VOICE": (lambda _cp: (
-            _cp.get('persona', 'voice', fallback='default') if _cp and _cp.has_section('persona') else 'default'
-        ))(load_comprehensive_config()),
-        "PERSONA_STT": (lambda _cp: (
-            _cp.get('persona', 'stt', fallback='faster_whisper') if _cp and _cp.has_section('persona') else 'faster_whisper'
-        ))(load_comprehensive_config()),
-        "PERSONA_MAX_TOOL_STEPS": (lambda _cp: (
-            int(_cp.get('persona', 'max_tool_steps', fallback='3')) if _cp and _cp.has_section('persona') else 3
-        ))(load_comprehensive_config()),
-        "PERSONA_MEMORY_READ_MODE": (lambda _env, _cp: (
-            str(_env).strip().lower() if _env is not None else (
-                _cp.get('persona', 'persona_memory_read_mode', fallback='legacy_only').strip().lower()
-                if _cp and _cp.has_section('persona') else 'legacy_only'
+        "PERSONA_ENABLED": (
+            lambda _cp: (
+                _cp.getboolean("persona", "enabled", fallback=True)
+                if _cp and hasattr(_cp, "has_section") and _cp.has_section("persona")
+                else True
             )
-        ))(os.getenv('PERSONA_MEMORY_READ_MODE'), load_comprehensive_config()),
-        "PERSONA_MEMORY_WRITE_MODE": (lambda _env, _cp: (
-            str(_env).strip().lower() if _env is not None else (
-                _cp.get('persona', 'persona_memory_write_mode', fallback='legacy_only').strip().lower()
-                if _cp and _cp.has_section('persona') else 'legacy_only'
+        )(load_comprehensive_config()),
+        "PERSONA_DEFAULT_PERSONA": (
+            lambda _cp: (
+                _cp.get("persona", "default_persona", fallback="Research Assistant")
+                if _cp and _cp.has_section("persona")
+                else "Research Assistant"
             )
-        ))(os.getenv('PERSONA_MEMORY_WRITE_MODE'), load_comprehensive_config()),
-        "PERSONA_RBAC_ALLOW_EXPORT": (lambda _cp: (
-            _cp.getboolean('persona.rbac', 'allow_export', fallback=False) if _cp and _cp.has_section('persona.rbac') else False
-        ))(load_comprehensive_config()),
-        "PERSONA_RBAC_ALLOW_DELETE": (lambda _cp: (
-            _cp.getboolean('persona.rbac', 'allow_delete', fallback=False) if _cp and _cp.has_section('persona.rbac') else False
-        ))(load_comprehensive_config()),
+        )(load_comprehensive_config()),
+        "PERSONA_VOICE": (
+            lambda _cp: (
+                _cp.get("persona", "voice", fallback="default") if _cp and _cp.has_section("persona") else "default"
+            )
+        )(load_comprehensive_config()),
+        "PERSONA_STT": (
+            lambda _cp: (
+                _cp.get("persona", "stt", fallback="faster_whisper")
+                if _cp and _cp.has_section("persona")
+                else "faster_whisper"
+            )
+        )(load_comprehensive_config()),
+        "PERSONA_MAX_TOOL_STEPS": (
+            lambda _cp: (
+                int(_cp.get("persona", "max_tool_steps", fallback="3")) if _cp and _cp.has_section("persona") else 3
+            )
+        )(load_comprehensive_config()),
+        "PERSONA_MEMORY_READ_MODE": (
+            lambda _env, _cp: (
+                str(_env).strip().lower()
+                if _env is not None
+                else (
+                    _cp.get("persona", "persona_memory_read_mode", fallback="legacy_only").strip().lower()
+                    if _cp and _cp.has_section("persona")
+                    else "legacy_only"
+                )
+            )
+        )(os.getenv("PERSONA_MEMORY_READ_MODE"), load_comprehensive_config()),
+        "PERSONA_MEMORY_WRITE_MODE": (
+            lambda _env, _cp: (
+                str(_env).strip().lower()
+                if _env is not None
+                else (
+                    _cp.get("persona", "persona_memory_write_mode", fallback="legacy_only").strip().lower()
+                    if _cp and _cp.has_section("persona")
+                    else "legacy_only"
+                )
+            )
+        )(os.getenv("PERSONA_MEMORY_WRITE_MODE"), load_comprehensive_config()),
+        "PERSONA_RBAC_ALLOW_EXPORT": (
+            lambda _cp: (
+                _cp.getboolean("persona.rbac", "allow_export", fallback=False)
+                if _cp and _cp.has_section("persona.rbac")
+                else False
+            )
+        )(load_comprehensive_config()),
+        "PERSONA_RBAC_ALLOW_DELETE": (
+            lambda _cp: (
+                _cp.getboolean("persona.rbac", "allow_delete", fallback=False)
+                if _cp and _cp.has_section("persona.rbac")
+                else False
+            )
+        )(load_comprehensive_config()),
     }
     # Only include explicit Character-Chat CHARACTER_RATE_LIMIT_ENABLED if present in config.txt
     try:
@@ -1855,6 +2359,7 @@ def load_settings():
     if isinstance(existing_local_llm_cfg, dict):
         config_dict["local_llm"] = existing_local_llm_cfg
     else:
+
         def _parse_float(value: Optional[str], default: Optional[float] = None) -> Optional[float]:
             if value is None or str(value).strip() == "":
                 return default
@@ -1937,6 +2442,7 @@ def load_settings():
         # when SINGLE_USER_API_KEY is required.
         try:
             import sys as _sys
+
             _in_test = is_explicit_pytest_runtime() or is_test_mode() or ("pytest" in _sys.modules)
         except _CONFIG_NONCRITICAL_EXCEPTIONS:
             _in_test = False
@@ -1950,10 +2456,17 @@ def load_settings():
             _log_warning(_msg)
         else:
             _log_error(_msg)
-    if not config_dict["SINGLE_USER_MODE"] and config_dict["JWT_SECRET_KEY"] == "a_very_insecure_default_secret_key_for_dev_only":
-        _log_critical("SECURITY WARNING: Using default JWT_SECRET_KEY in multi-user mode. Set a strong JWT_SECRET_KEY environment variable!")
+    if (
+        not config_dict["SINGLE_USER_MODE"]
+        and config_dict["JWT_SECRET_KEY"] == "a_very_insecure_default_secret_key_for_dev_only"
+    ):
+        _log_critical(
+            "SECURITY WARNING: Using default JWT_SECRET_KEY in multi-user mode. Set a strong JWT_SECRET_KEY environment variable!"
+        )
     if not config_dict["SINGLE_USER_MODE"] and not config_dict["USERS_DB_CONFIGURED"]:
-         _log_warning("Multi-user mode enabled (APP_MODE=multi), but USERS_DB_ENABLED is not 'true'. User authentication will likely fail.")
+        _log_warning(
+            "Multi-user mode enabled (APP_MODE=multi), but USERS_DB_ENABLED is not 'true'. User authentication will likely fail."
+        )
 
     # Create necessary directories if they don't exist
     # Ensure main SQLite database directory exists
@@ -1963,7 +2476,7 @@ def load_settings():
         main_db_file_path = Path(main_db_file_path_str)
         # Ensure the path is absolute if it was constructed from env var and relative
         if not main_db_file_path.is_absolute():
-             main_db_file_path = ACTUAL_PROJECT_ROOT / main_db_file_path
+            main_db_file_path = ACTUAL_PROJECT_ROOT / main_db_file_path
         main_db_file_path.parent.mkdir(parents=True, exist_ok=True)
         _log_info(f"Ensured main SQLite database directory exists: {main_db_file_path.parent}")
 
@@ -1985,18 +2498,9 @@ def load_comprehensive_config():
     project_root = current_file_path.parent.parent.parent
 
     # Load .env/.ENV files if they exist (API keys should be here).
-    # Prefer Config_Files/.env (canonical) before root-level fallbacks.
+    # Prefer TLDW_ENV_FILE when set, then canonical repo paths before fallbacks.
     repo_root = project_root.parent
-    candidate_env_paths = [
-        project_root / 'Config_Files' / '.env',
-        project_root / 'Config_Files' / '.ENV',
-        project_root / '.env',
-        project_root / '.ENV',
-        repo_root / 'Config_Files' / '.env',
-        repo_root / 'Config_Files' / '.ENV',
-        repo_root / '.env',
-        repo_root / '.ENV',
-    ]
+    candidate_env_paths = _candidate_env_paths(project_root, repo_root)
     loaded_any_env = False
     for p in candidate_env_paths:
         try:
@@ -2024,7 +2528,7 @@ def load_comprehensive_config():
     # Propagate selected RAG rollout flags from config.txt into process env when unset.
     # This lets modules that consult os.getenv read file-backed defaults.
     try:
-        if hasattr(config_parser, 'has_section') and config_parser.has_section('RAG'):
+        if hasattr(config_parser, "has_section") and config_parser.has_section("RAG"):
             # Helper to set env only if missing
             def _env_default(key: str, value: Optional[str]):
                 if value is None:
@@ -2034,97 +2538,86 @@ def load_comprehensive_config():
 
             # Structure index
             _env_default(
-                'RAG_ENABLE_STRUCTURE_INDEX',
-                config_parser.get('RAG', 'enable_structure_index', fallback='true')
+                "RAG_ENABLE_STRUCTURE_INDEX", config_parser.get("RAG", "enable_structure_index", fallback="true")
             )
             # Strict extractive mode
-            _env_default(
-                'RAG_STRICT_EXTRACTIVE',
-                config_parser.get('RAG', 'strict_extractive', fallback='false')
-            )
+            _env_default("RAG_STRICT_EXTRACTIVE", config_parser.get("RAG", "strict_extractive", fallback="false"))
             # Hard citations requirement
             _env_default(
-                'RAG_REQUIRE_HARD_CITATIONS',
-                config_parser.get('RAG', 'require_hard_citations', fallback='false')
+                "RAG_REQUIRE_HARD_CITATIONS", config_parser.get("RAG", "require_hard_citations", fallback="false")
             )
             # Low-confidence behavior
             _env_default(
-                'RAG_LOW_CONFIDENCE_BEHAVIOR',
-                config_parser.get('RAG', 'low_confidence_behavior', fallback='continue')
+                "RAG_LOW_CONFIDENCE_BEHAVIOR", config_parser.get("RAG", "low_confidence_behavior", fallback="continue")
             )
             # Agentic cache backend + TTL
             _env_default(
-                'RAG_AGENTIC_CACHE_BACKEND',
-                config_parser.get('RAG', 'agentic_cache_backend', fallback='memory')
+                "RAG_AGENTIC_CACHE_BACKEND", config_parser.get("RAG", "agentic_cache_backend", fallback="memory")
             )
+            _env_default("RAG_AGENTIC_CACHE_TTL_SEC", config_parser.get("RAG", "agentic_cache_ttl_sec", fallback="600"))
             _env_default(
-                'RAG_AGENTIC_CACHE_TTL_SEC',
-                config_parser.get('RAG', 'agentic_cache_ttl_sec', fallback='600')
-            )
-            _env_default(
-                'IMPLICIT_FEEDBACK_ENABLED',
-                str(implicit_feedback_enabled(default=True, config_parser=config_parser)).lower()
+                "IMPLICIT_FEEDBACK_ENABLED",
+                str(implicit_feedback_enabled(default=True, config_parser=config_parser)).lower(),
             )
 
         # Search-Agent defaults used by unified RAG endpoint/router.
-        if hasattr(config_parser, 'has_section') and config_parser.has_section('Search-Agent'):
+        if hasattr(config_parser, "has_section") and config_parser.has_section("Search-Agent"):
             _env_default(
-                'SEARCH_QUERY_CLASSIFICATION',
-                config_parser.get('Search-Agent', 'search_query_classification', fallback='false')
+                "SEARCH_QUERY_CLASSIFICATION",
+                config_parser.get("Search-Agent", "search_query_classification", fallback="false"),
             )
             _env_default(
-                'SEARCH_DEFAULT_MODE',
-                config_parser.get('Search-Agent', 'search_default_mode', fallback='balanced')
+                "SEARCH_DEFAULT_MODE", config_parser.get("Search-Agent", "search_default_mode", fallback="balanced")
             )
             _env_default(
-                'SEARCH_QUERY_REFORMULATION',
-                config_parser.get('Search-Agent', 'search_query_reformulation', fallback='true')
+                "SEARCH_QUERY_REFORMULATION",
+                config_parser.get("Search-Agent", "search_query_reformulation", fallback="true"),
             )
             _env_default(
-                'SEARCH_RESEARCH_LOOP',
-                config_parser.get('Search-Agent', 'search_research_loop', fallback='false')
+                "SEARCH_RESEARCH_LOOP", config_parser.get("Search-Agent", "search_research_loop", fallback="false")
             )
             _env_default(
-                'SEARCH_DISCUSSIONS_ENABLED',
-                config_parser.get('Search-Agent', 'search_discussions_enabled', fallback='false')
+                "SEARCH_DISCUSSIONS_ENABLED",
+                config_parser.get("Search-Agent", "search_discussions_enabled", fallback="false"),
             )
             _env_default(
-                'SEARCH_DISCUSSION_PLATFORMS',
-                config_parser.get('Search-Agent', 'search_discussion_platforms', fallback='reddit,stackoverflow,hackernews')
+                "SEARCH_DISCUSSION_PLATFORMS",
+                config_parser.get(
+                    "Search-Agent", "search_discussion_platforms", fallback="reddit,stackoverflow,hackernews"
+                ),
             )
             _env_default(
-                'SEARCH_PROGRESS_STREAMING',
-                config_parser.get('Search-Agent', 'search_progress_streaming', fallback='false')
+                "SEARCH_PROGRESS_STREAMING",
+                config_parser.get("Search-Agent", "search_progress_streaming", fallback="false"),
             )
             _env_default(
-                'SEARCH_URL_SCRAPING',
-                config_parser.get('Search-Agent', 'search_url_scraping', fallback='true')
+                "SEARCH_URL_SCRAPING", config_parser.get("Search-Agent", "search_url_scraping", fallback="true")
             )
             _env_default(
-                'SEARCH_CLASSIFIER_PROVIDER',
-                config_parser.get('Search-Agent', 'search_classifier_provider', fallback=None)
+                "SEARCH_CLASSIFIER_PROVIDER",
+                config_parser.get("Search-Agent", "search_classifier_provider", fallback=None),
             )
             _env_default(
-                'SEARCH_CLASSIFIER_MODEL',
-                config_parser.get('Search-Agent', 'search_classifier_model', fallback=None)
+                "SEARCH_CLASSIFIER_MODEL", config_parser.get("Search-Agent", "search_classifier_model", fallback=None)
             )
             _env_default(
-                'SEARCH_MAX_ITERATIONS_SPEED',
-                config_parser.get('Search-Agent', 'search_max_iterations_speed', fallback='0')
+                "SEARCH_MAX_ITERATIONS_SPEED",
+                config_parser.get("Search-Agent", "search_max_iterations_speed", fallback="0"),
             )
             _env_default(
-                'SEARCH_MAX_ITERATIONS_BALANCED',
-                config_parser.get('Search-Agent', 'search_max_iterations_balanced', fallback='0')
+                "SEARCH_MAX_ITERATIONS_BALANCED",
+                config_parser.get("Search-Agent", "search_max_iterations_balanced", fallback="0"),
             )
             _env_default(
-                'SEARCH_MAX_ITERATIONS_QUALITY',
-                config_parser.get('Search-Agent', 'search_max_iterations_quality', fallback='0')
+                "SEARCH_MAX_ITERATIONS_QUALITY",
+                config_parser.get("Search-Agent", "search_max_iterations_quality", fallback="0"),
             )
     except _CONFIG_NONCRITICAL_EXCEPTIONS as _rag_env_err:
         _log_debug(f"RAG env propagation skipped: {_rag_env_err}")
 
     # Propagate Streaming flags from config.txt into process env when unset.
     try:
+
         def _env_default(name: str, value: Optional[str]):
             if value is None:
                 return
@@ -2132,118 +2625,121 @@ def load_comprehensive_config():
                 os.environ[name] = str(value)
 
         # Unified streaming switch (affects chat and selected SSE endpoints)
-        if hasattr(config_parser, 'has_section') and config_parser.has_section('Streaming'):
-            _env_default('STREAMS_UNIFIED', config_parser.get('Streaming', 'streams_unified', fallback=None))
+        if hasattr(config_parser, "has_section") and config_parser.has_section("Streaming"):
+            _env_default("STREAMS_UNIFIED", config_parser.get("Streaming", "streams_unified", fallback=None))
 
         # Chat streaming channel maxsize (bound the in-memory channel used when queueing is enabled)
         maxsize_val: Optional[str] = None
-        if hasattr(config_parser, 'has_section') and config_parser.has_section('Chat-Module'):
+        if hasattr(config_parser, "has_section") and config_parser.has_section("Chat-Module"):
             try:
-                maxsize_val = config_parser.get('Chat-Module', 'chat_stream_channel_maxsize', fallback=None)
+                maxsize_val = config_parser.get("Chat-Module", "chat_stream_channel_maxsize", fallback=None)
             except _CONFIG_NONCRITICAL_EXCEPTIONS:
                 maxsize_val = None
-        if (not maxsize_val) and hasattr(config_parser, 'has_section') and config_parser.has_section('Streaming'):
+        if (not maxsize_val) and hasattr(config_parser, "has_section") and config_parser.has_section("Streaming"):
             try:
-                maxsize_val = config_parser.get('Streaming', 'chat_stream_channel_maxsize', fallback=None)
+                maxsize_val = config_parser.get("Streaming", "chat_stream_channel_maxsize", fallback=None)
             except _CONFIG_NONCRITICAL_EXCEPTIONS:
                 maxsize_val = None
-        _env_default('CHAT_STREAM_CHANNEL_MAXSIZE', maxsize_val)
+        _env_default("CHAT_STREAM_CHANNEL_MAXSIZE", maxsize_val)
 
         # Chat streaming metadata injection (adds tldw_* IDs to SSE chunks)
         meta_val: Optional[str] = None
-        if hasattr(config_parser, 'has_section') and config_parser.has_section('Chat-Module'):
+        if hasattr(config_parser, "has_section") and config_parser.has_section("Chat-Module"):
             try:
-                meta_val = config_parser.get('Chat-Module', 'chat_stream_include_metadata', fallback=None)
+                meta_val = config_parser.get("Chat-Module", "chat_stream_include_metadata", fallback=None)
             except _CONFIG_NONCRITICAL_EXCEPTIONS:
                 meta_val = None
-        if (not meta_val) and hasattr(config_parser, 'has_section') and config_parser.has_section('Streaming'):
+        if (not meta_val) and hasattr(config_parser, "has_section") and config_parser.has_section("Streaming"):
             try:
-                meta_val = config_parser.get('Streaming', 'chat_stream_include_metadata', fallback=None)
+                meta_val = config_parser.get("Streaming", "chat_stream_include_metadata", fallback=None)
             except _CONFIG_NONCRITICAL_EXCEPTIONS:
                 meta_val = None
-        _env_default('CHAT_STREAM_INCLUDE_METADATA', meta_val)
+        _env_default("CHAT_STREAM_INCLUDE_METADATA", meta_val)
     except _CONFIG_NONCRITICAL_EXCEPTIONS as _stream_env_err:
         _log_debug(f"Streaming env propagation skipped: {_stream_env_err}")
 
     # Propagate HTTP client settings from config.txt into env (if unset)
     try:
-        if hasattr(config_parser, 'has_section') and config_parser.has_section('HTTP'):
+        if hasattr(config_parser, "has_section") and config_parser.has_section("HTTP"):
+
             def _env_default_http(name: str, opt: str):
                 try:
-                    v = config_parser.get('HTTP', opt, fallback=None)
+                    v = config_parser.get("HTTP", opt, fallback=None)
                 except _CONFIG_NONCRITICAL_EXCEPTIONS:
                     v = None
                 if v is not None and os.getenv(name) is None:
                     os.environ[name] = str(v)
 
             # Core timeouts
-            _env_default_http('HTTP_CONNECT_TIMEOUT', 'connect_timeout')
-            _env_default_http('HTTP_READ_TIMEOUT', 'read_timeout')
-            _env_default_http('HTTP_WRITE_TIMEOUT', 'write_timeout')
-            _env_default_http('HTTP_POOL_TIMEOUT', 'pool_timeout')
+            _env_default_http("HTTP_CONNECT_TIMEOUT", "connect_timeout")
+            _env_default_http("HTTP_READ_TIMEOUT", "read_timeout")
+            _env_default_http("HTTP_WRITE_TIMEOUT", "write_timeout")
+            _env_default_http("HTTP_POOL_TIMEOUT", "pool_timeout")
 
             # Retries & backoff
-            _env_default_http('HTTP_RETRY_ATTEMPTS', 'retry_attempts')
-            _env_default_http('HTTP_BACKOFF_BASE_MS', 'backoff_base_ms')
-            _env_default_http('HTTP_BACKOFF_CAP_S', 'backoff_cap_s')
+            _env_default_http("HTTP_RETRY_ATTEMPTS", "retry_attempts")
+            _env_default_http("HTTP_BACKOFF_BASE_MS", "backoff_base_ms")
+            _env_default_http("HTTP_BACKOFF_CAP_S", "backoff_cap_s")
 
             # Connection limits
-            _env_default_http('HTTP_MAX_CONNECTIONS', 'max_connections')
-            _env_default_http('HTTP_MAX_KEEPALIVE_CONNECTIONS', 'max_keepalive_connections')
+            _env_default_http("HTTP_MAX_CONNECTIONS", "max_connections")
+            _env_default_http("HTTP_MAX_KEEPALIVE_CONNECTIONS", "max_keepalive_connections")
 
             # trust_env and default UA
-            _env_default_http('HTTP_TRUST_ENV', 'trust_env')
-            _env_default_http('HTTP_DEFAULT_USER_AGENT', 'default_user_agent')
+            _env_default_http("HTTP_TRUST_ENV", "trust_env")
+            _env_default_http("HTTP_DEFAULT_USER_AGENT", "default_user_agent")
 
             # Optional JSON and transport flags
-            _env_default_http('HTTP_JSON_MAX_BYTES', 'json_max_bytes')
-            _env_default_http('HTTP3_ENABLED', 'http3_enabled')
+            _env_default_http("HTTP_JSON_MAX_BYTES", "json_max_bytes")
+            _env_default_http("HTTP3_ENABLED", "http3_enabled")
 
             # Proxy allowlist
-            _env_default_http('PROXY_ALLOWLIST', 'proxy_allowlist')
+            _env_default_http("PROXY_ALLOWLIST", "proxy_allowlist")
 
             # TLS enforcement and pins
-            _env_default_http('HTTP_ENFORCE_TLS_MIN', 'enforce_tls_min_version')
-            _env_default_http('HTTP_TLS_MIN_VERSION', 'tls_min_version')
-            _env_default_http('HTTP_CERT_PINS', 'cert_pins')
+            _env_default_http("HTTP_ENFORCE_TLS_MIN", "enforce_tls_min_version")
+            _env_default_http("HTTP_TLS_MIN_VERSION", "tls_min_version")
+            _env_default_http("HTTP_CERT_PINS", "cert_pins")
 
             # Allow or disable following redirects globally for simple GET/HEAD fetches
-            _env_default_http('HTTP_ALLOW_REDIRECTS', 'allow_redirects')
+            _env_default_http("HTTP_ALLOW_REDIRECTS", "allow_redirects")
             # Maximum redirect hops before erroring (default inherited in http_client)
             try:
-                v = config_parser.get('HTTP', 'max_redirects', fallback=None)
+                v = config_parser.get("HTTP", "max_redirects", fallback=None)
             except _CONFIG_NONCRITICAL_EXCEPTIONS:
                 v = None
-            if v is not None and os.getenv('HTTP_MAX_REDIRECTS') is None:
-                os.environ['HTTP_MAX_REDIRECTS'] = str(v)
+            if v is not None and os.getenv("HTTP_MAX_REDIRECTS") is None:
+                os.environ["HTTP_MAX_REDIRECTS"] = str(v)
             # Cross-host redirects (default: disabled)
-            _env_default_http('HTTP_ALLOW_CROSS_HOST_REDIRECTS', 'allow_cross_host_redirects')
+            _env_default_http("HTTP_ALLOW_CROSS_HOST_REDIRECTS", "allow_cross_host_redirects")
             # Scheme downgrade (https -> http) (default: disabled)
-            _env_default_http('HTTP_ALLOW_SCHEME_DOWNGRADE', 'allow_scheme_downgrade')
+            _env_default_http("HTTP_ALLOW_SCHEME_DOWNGRADE", "allow_scheme_downgrade")
     except _CONFIG_NONCRITICAL_EXCEPTIONS as _http_env_err:
         _log_debug(f"HTTP env propagation skipped: {_http_env_err}")
 
     # Propagate system log file settings from config.txt into env (if unset)
     try:
-        if hasattr(config_parser, 'has_section') and config_parser.has_section('Logging'):
+        if hasattr(config_parser, "has_section") and config_parser.has_section("Logging"):
+
             def _env_default_logging(name: str, opt: str):
                 try:
-                    v = config_parser.get('Logging', opt, fallback=None)
+                    v = config_parser.get("Logging", opt, fallback=None)
                 except _CONFIG_NONCRITICAL_EXCEPTIONS:
                     v = None
                 if v is not None and os.getenv(name) is None:
                     os.environ[name] = str(v)
 
-            _env_default_logging('SYSTEM_LOG_FILE_PATH', 'system_log_file_path')
-            _env_default_logging('SYSTEM_LOG_FILE_MAX_ENTRIES', 'system_log_file_max_entries')
+            _env_default_logging("SYSTEM_LOG_FILE_PATH", "system_log_file_path")
+            _env_default_logging("SYSTEM_LOG_FILE_MAX_ENTRIES", "system_log_file_max_entries")
     except _CONFIG_NONCRITICAL_EXCEPTIONS as _log_env_err:
         _log_debug(f"System log env propagation skipped: {_log_env_err}")
 
     # Propagate egress policy settings from config.txt into env (if unset)
-    if hasattr(config_parser, 'has_section') and config_parser.has_section('Egress'):
+    if hasattr(config_parser, "has_section") and config_parser.has_section("Egress"):
+
         def _env_default_egress(name: str, opt: str):
             try:
-                v = config_parser.get('Egress', opt, fallback=None)
+                v = config_parser.get("Egress", opt, fallback=None)
             except _CONFIG_NONCRITICAL_EXCEPTIONS:
                 v = None
             if v is None:
@@ -2255,19 +2751,19 @@ def load_comprehensive_config():
                 os.environ[name] = v_str
 
         # Global allow/deny lists
-        _env_default_egress('EGRESS_ALLOWLIST', 'egress_allowlist')
-        _env_default_egress('EGRESS_DENYLIST', 'egress_denylist')
+        _env_default_egress("EGRESS_ALLOWLIST", "egress_allowlist")
+        _env_default_egress("EGRESS_DENYLIST", "egress_denylist")
 
         # Workflows-specific allow/deny overrides
-        _env_default_egress('WORKFLOWS_EGRESS_ALLOWLIST', 'workflows_allowlist')
-        _env_default_egress('WORKFLOWS_EGRESS_DENYLIST', 'workflows_denylist')
+        _env_default_egress("WORKFLOWS_EGRESS_ALLOWLIST", "workflows_allowlist")
+        _env_default_egress("WORKFLOWS_EGRESS_DENYLIST", "workflows_denylist")
 
         # Port and profile controls
-        _env_default_egress('WORKFLOWS_EGRESS_ALLOWED_PORTS', 'allowed_ports')
-        _env_default_egress('WORKFLOWS_EGRESS_PROFILE', 'profile')
+        _env_default_egress("WORKFLOWS_EGRESS_ALLOWED_PORTS", "allowed_ports")
+        _env_default_egress("WORKFLOWS_EGRESS_PROFILE", "profile")
 
         # Private IP blocking toggle
-        _env_default_egress('WORKFLOWS_EGRESS_BLOCK_PRIVATE', 'block_private')
+        _env_default_egress("WORKFLOWS_EGRESS_BLOCK_PRIVATE", "block_private")
 
     return config_parser
 
@@ -2409,17 +2905,13 @@ def implicit_feedback_enabled(
             try:
                 cp = load_comprehensive_config()
             except (FileNotFoundError, configparser.Error) as exc:
-                _log_debug(
-                    f"implicit_feedback_enabled: config load failed, falling back to default={default}: {exc}"
-                )
+                _log_debug(f"implicit_feedback_enabled: config load failed, falling back to default={default}: {exc}")
                 cp = None
         if cp is not None:
             try:
                 v = cp.get("RAG", "implicit_feedback_enabled", fallback=str(default))
             except (configparser.Error, AttributeError, TypeError, ValueError) as exc:
-                _log_debug(
-                    f"implicit_feedback_enabled: config read failed, falling back to default={default}: {exc}"
-                )
+                _log_debug(f"implicit_feedback_enabled: config read failed, falling back to default={default}: {exc}")
                 v = str(default)
         else:
             v = str(default)
@@ -2649,9 +3141,7 @@ def _resolve_run_first_provider_allowlist(
     try:
         cp = load_comprehensive_config()
         if cp and cp.has_section(config_section):
-            return _split_run_first_provider_allowlist(
-                cp.get(config_section, config_key, fallback="")
-            )
+            return _split_run_first_provider_allowlist(cp.get(config_section, config_key, fallback=""))
     except _CONFIG_NONCRITICAL_EXCEPTIONS as exc:
         _log_warning(
             f"_resolve_run_first_provider_allowlist: unable to read "
@@ -2706,10 +3196,7 @@ def resolve_run_first_cohort_label(
 
     rollout_mode_name = str(rollout_mode or "").strip().lower()
     if rollout_mode_name == "gated":
-        if (
-            not eligible
-            and str(ineligible_reason or "").strip() == "provider_not_in_rollout_allowlist"
-        ):
+        if not eligible and str(ineligible_reason or "").strip() == "provider_not_in_rollout_allowlist":
             return "out_of_cohort"
         return "gated"
     if rollout_mode_name == "default_on":
@@ -2719,6 +3206,8 @@ def resolve_run_first_cohort_label(
             return "out_of_cohort"
         return "default_on"
     return "override_off"
+
+
 def resolve_chat_run_first_rollout_mode(
     raw_mode: Optional[str] = None,
     *,
@@ -2975,7 +3464,11 @@ def rg_policy_path() -> str:
         return resolved
     try:
         cp = load_comprehensive_config()
-        p = cp.get("ResourceGovernor", "policy_path", fallback=rg_policy_path_default()) if cp else rg_policy_path_default()
+        p = (
+            cp.get("ResourceGovernor", "policy_path", fallback=rg_policy_path_default())
+            if cp
+            else rg_policy_path_default()
+        )
         resolved = resolve_repo_relative_path(p)
         try:
             if not Path(resolved).exists():
@@ -3082,9 +3575,7 @@ def get_cors_runtime_diagnostics() -> dict[str, Any]:
     """Return effective CORS values with source attribution for startup diagnostics."""
     disable_cors, disable_cors_source = _resolve_disable_cors_value_and_source()
     allow_credentials, allow_credentials_source = _resolve_cors_allow_credentials_value_and_source()
-    allowed_origins, allowed_origins_source, allowed_origins_fallback = resolve_runtime_allowed_origins(
-        ALLOWED_ORIGINS
-    )
+    allowed_origins, allowed_origins_source, allowed_origins_fallback = resolve_runtime_allowed_origins(ALLOWED_ORIGINS)
 
     try:
         _load_config_parser()
@@ -3151,10 +3642,10 @@ def load_comprehensive_config_with_tts():
             merged_tts = self.tts_config.copy()
 
             # Add API keys if available
-            if self.config_parser.has_option('API', 'openai_api_key'):
-                merged_tts['openai_api_key'] = self.config_parser.get('API', 'openai_api_key')
-            if self.config_parser.has_option('API', 'elevenlabs_api_key'):
-                merged_tts['elevenlabs_api_key'] = self.config_parser.get('API', 'elevenlabs_api_key')
+            if self.config_parser.has_option("API", "openai_api_key"):
+                merged_tts["openai_api_key"] = self.config_parser.get("API", "openai_api_key")
+            if self.config_parser.has_option("API", "elevenlabs_api_key"):
+                merged_tts["elevenlabs_api_key"] = self.config_parser.get("API", "elevenlabs_api_key")
 
             return merged_tts
 
@@ -3164,6 +3655,7 @@ def load_comprehensive_config_with_tts():
 # ----------------------------
 # API Route Toggle Helpers
 # ----------------------------
+
 
 @lru_cache(maxsize=1)
 def _route_toggle_policy() -> dict:
@@ -3228,11 +3720,11 @@ def _route_toggle_policy() -> dict:
     cfg_experimental_extra: set[str] = set()
     try:
         cp = load_comprehensive_config()
-        if cp and cp.has_section('API-Routes'):
-            cfg_stable_only = cp.getboolean('API-Routes', 'stable_only', fallback=False)
-            cfg_disable = _parse_list(cp.get('API-Routes', 'disable', fallback=''))
-            cfg_enable = _parse_list(cp.get('API-Routes', 'enable', fallback=''))
-            cfg_experimental_extra = _parse_list(cp.get('API-Routes', 'experimental_routes', fallback=''))
+        if cp and cp.has_section("API-Routes"):
+            cfg_stable_only = cp.getboolean("API-Routes", "stable_only", fallback=False)
+            cfg_disable = _parse_list(cp.get("API-Routes", "disable", fallback=""))
+            cfg_enable = _parse_list(cp.get("API-Routes", "enable", fallback=""))
+            cfg_experimental_extra = _parse_list(cp.get("API-Routes", "experimental_routes", fallback=""))
     except _CONFIG_NONCRITICAL_EXCEPTIONS as _e:
         _log_debug(f"Route policy: unable to read config.txt [API-Routes]: {_e}")
 
@@ -3250,20 +3742,20 @@ def _route_toggle_policy() -> dict:
         allow_env_overrides = False
 
     if allow_env_overrides:
-        env_stable_only = os.getenv('ROUTES_STABLE_ONLY')
+        env_stable_only = os.getenv("ROUTES_STABLE_ONLY")
         if env_stable_only is not None:
             cfg_stable_only = is_truthy(env_stable_only)
 
-        cfg_disable |= _parse_list(os.getenv('ROUTES_DISABLE'))
-        cfg_enable |= _parse_list(os.getenv('ROUTES_ENABLE'))
-        default_experimental |= _parse_list(os.getenv('ROUTES_EXPERIMENTAL'))
+        cfg_disable |= _parse_list(os.getenv("ROUTES_DISABLE"))
+        cfg_enable |= _parse_list(os.getenv("ROUTES_ENABLE"))
+        default_experimental |= _parse_list(os.getenv("ROUTES_EXPERIMENTAL"))
     default_experimental |= cfg_experimental_extra
 
     return {
-        'stable_only': cfg_stable_only,
-        'disable': cfg_disable,
-        'enable': cfg_enable,
-        'experimental': default_experimental,
+        "stable_only": cfg_stable_only,
+        "disable": cfg_disable,
+        "enable": cfg_enable,
+        "experimental": default_experimental,
     }
 
 
@@ -3287,14 +3779,14 @@ def route_enabled(route_key: str, *, default_stable: bool = True) -> bool:
     # Expand aliases so a single key can control a family of routes.
     # Example: enabling "mcp" should enable both "mcp-unified" and "mcp-catalogs".
     try:
-        enable = set(policy.get('enable', set()))
-        disable = set(policy.get('disable', set()))
-        if 'mcp' in enable:
-            enable |= {'mcp-unified', 'mcp-catalogs'}
-        if 'mcp' in disable:
-            disable |= {'mcp-unified', 'mcp-catalogs'}
+        enable = set(policy.get("enable", set()))
+        disable = set(policy.get("disable", set()))
+        if "mcp" in enable:
+            enable |= {"mcp-unified", "mcp-catalogs"}
+        if "mcp" in disable:
+            disable |= {"mcp-unified", "mcp-catalogs"}
         # Reassign expanded sets for downstream checks
-        policy = {**policy, 'enable': enable, 'disable': disable}
+        policy = {**policy, "enable": enable, "disable": disable}
     except _CONFIG_NONCRITICAL_EXCEPTIONS:
         # On any unexpected structure, fall back to original policy
         pass
@@ -3332,17 +3824,18 @@ def route_enabled(route_key: str, *, default_stable: bool = True) -> bool:
         pass
 
     # Explicit allow/deny take precedence
-    if key in policy['enable']:
+    if key in policy["enable"]:
         return True
-    if key in policy['disable']:
+    if key in policy["disable"]:
         return False
 
     # Stable-only gate: exclude experimental by default when enabled
-    if policy['stable_only'] and key in policy['experimental']:
+    if policy["stable_only"] and key in policy["experimental"]:
         return False
 
     # Fallback default behavior: stable routes are enabled unless explicitly disabled
     return bool(default_stable)
+
 
 def load_and_log_configs():
     _log_debug("load_and_log_configs(): Loading and logging configurations...")
@@ -3355,177 +3848,205 @@ def load_and_log_configs():
             _log_error("Comprehensive config object is None, cannot proceed")  # Changed to logger
             return None
         # API Keys - Check environment variables first, then config file
-        anthropic_api_key = os.getenv('ANTHROPIC_API_KEY') or config_parser_object.get('API', 'anthropic_api_key', fallback=None)
+        anthropic_api_key = os.getenv("ANTHROPIC_API_KEY") or config_parser_object.get(
+            "API", "anthropic_api_key", fallback=None
+        )
         # logging.debug(
         #     f"Loaded Anthropic API Key: {anthropic_api_key[:5]}...{anthropic_api_key[-5:] if anthropic_api_key else None}")
 
-        cohere_api_key = os.getenv('COHERE_API_KEY') or config_parser_object.get('API', 'cohere_api_key', fallback=None)
+        cohere_api_key = os.getenv("COHERE_API_KEY") or config_parser_object.get("API", "cohere_api_key", fallback=None)
         # logging.debug(
         #     f"Loaded Cohere API Key: {cohere_api_key[:5]}...{cohere_api_key[-5:] if cohere_api_key else None}")
 
-        groq_api_key = os.getenv('GROQ_API_KEY') or config_parser_object.get('API', 'groq_api_key', fallback=None)
+        groq_api_key = os.getenv("GROQ_API_KEY") or config_parser_object.get("API", "groq_api_key", fallback=None)
         # logging.debug(f"Loaded Groq API Key: {groq_api_key[:5]}...{groq_api_key[-5:] if groq_api_key else None}")
 
-        openai_api_key = os.getenv('OPENAI_API_KEY') or config_parser_object.get('API', 'openai_api_key', fallback=None)
+        openai_api_key = os.getenv("OPENAI_API_KEY") or config_parser_object.get("API", "openai_api_key", fallback=None)
         # logging.debug(
         #     f"Loaded OpenAI API Key: {openai_api_key[:5]}...{openai_api_key[-5:] if openai_api_key else None}")
 
-        huggingface_api_key = os.getenv('HUGGINGFACE_API_KEY') or config_parser_object.get('API', 'huggingface_api_key', fallback=None)
+        huggingface_api_key = os.getenv("HUGGINGFACE_API_KEY") or config_parser_object.get(
+            "API", "huggingface_api_key", fallback=None
+        )
         # logging.debug(
         #     f"Loaded HuggingFace API Key: {huggingface_api_key[:5]}...{huggingface_api_key[-5:] if huggingface_api_key else None}")
 
-        openrouter_api_key = os.getenv('OPENROUTER_API_KEY') or config_parser_object.get('API', 'openrouter_api_key', fallback=None)
+        openrouter_api_key = os.getenv("OPENROUTER_API_KEY") or config_parser_object.get(
+            "API", "openrouter_api_key", fallback=None
+        )
         # logging.debug(
         #     f"Loaded OpenRouter API Key: {openrouter_api_key[:5]}...{openrouter_api_key[-5:] if openrouter_api_key else None}")
 
-        deepseek_api_key = os.getenv('DEEPSEEK_API_KEY') or config_parser_object.get('API', 'deepseek_api_key', fallback=None)
+        deepseek_api_key = os.getenv("DEEPSEEK_API_KEY") or config_parser_object.get(
+            "API", "deepseek_api_key", fallback=None
+        )
         # logging.debug(
         #     f"Loaded DeepSeek API Key: {deepseek_api_key[:5]}...{deepseek_api_key[-5:] if deepseek_api_key else None}")
 
-        qwen_api_key = os.getenv('QWEN_API_KEY') or config_parser_object.get('API', 'qwen_api_key', fallback=None)
+        qwen_api_key = os.getenv("QWEN_API_KEY") or config_parser_object.get("API", "qwen_api_key", fallback=None)
         # logging.debug(
         #     f"Loaded Qwen API Key: {qwen_api_key[:5]}...{qwen_api_key[-5:] if qwen_api_key else None}")
 
-        mistral_api_key = os.getenv('MISTRAL_API_KEY') or config_parser_object.get('API', 'mistral_api_key', fallback=None)
+        mistral_api_key = os.getenv("MISTRAL_API_KEY") or config_parser_object.get(
+            "API", "mistral_api_key", fallback=None
+        )
         # logging.debug(
         #     f"Loaded Mistral API Key: {mistral_api_key[:5]}...{mistral_api_key[-5:] if mistral_api_key else None}")
 
-        google_api_key = os.getenv('GOOGLE_API_KEY') or config_parser_object.get('API', 'google_api_key', fallback=None)
+        google_api_key = os.getenv("GOOGLE_API_KEY") or config_parser_object.get("API", "google_api_key", fallback=None)
         # logging.debug(
         #     f"Loaded Google API Key: {google_api_key[:5]}...{google_api_key[-5:] if google_api_key else None}")
 
-        elevenlabs_api_key = os.getenv('ELEVENLABS_API_KEY') or config_parser_object.get('API', 'elevenlabs_api_key', fallback=None)
+        elevenlabs_api_key = os.getenv("ELEVENLABS_API_KEY") or config_parser_object.get(
+            "API", "elevenlabs_api_key", fallback=None
+        )
         # logging.debug(
         #     f"Loaded elevenlabs API Key: {elevenlabs_api_key[:5]}...{elevenlabs_api_key[-5:] if elevenlabs_api_key else None}")
 
         # LLM API Settings - streaming / temperature / top_p / min_p
         # Anthropic
-        anthropic_model = config_parser_object.get('API', 'anthropic_model', fallback='claude-sonnet-4.5')
-        anthropic_streaming = config_parser_object.get('API', 'anthropic_streaming', fallback='False')
-        anthropic_temperature = config_parser_object.get('API', 'anthropic_temperature', fallback='0.7')
-        anthropic_top_p = config_parser_object.get('API', 'anthropic_top_p', fallback='0.95')
-        anthropic_top_k = config_parser_object.get('API', 'anthropic_top_k', fallback='100')
-        anthropic_max_tokens = config_parser_object.get('API', 'anthropic_max_tokens', fallback='4096')
-        anthropic_api_timeout = config_parser_object.get('API', 'anthropic_api_timeout', fallback='90')
-        anthropic_api_retries = config_parser_object.get('API', 'anthropic_api_retry', fallback='3')
-        anthropic_api_retry_delay = config_parser_object.get('API', 'anthropic_api_retry_delay', fallback='5')
+        anthropic_model = config_parser_object.get("API", "anthropic_model", fallback="claude-sonnet-4.5")
+        anthropic_streaming = config_parser_object.get("API", "anthropic_streaming", fallback="False")
+        anthropic_temperature = config_parser_object.get("API", "anthropic_temperature", fallback="0.7")
+        anthropic_top_p = config_parser_object.get("API", "anthropic_top_p", fallback="0.95")
+        anthropic_top_k = config_parser_object.get("API", "anthropic_top_k", fallback="100")
+        anthropic_max_tokens = config_parser_object.get("API", "anthropic_max_tokens", fallback="4096")
+        anthropic_api_timeout = config_parser_object.get("API", "anthropic_api_timeout", fallback="90")
+        anthropic_api_retries = config_parser_object.get("API", "anthropic_api_retry", fallback="3")
+        anthropic_api_retry_delay = config_parser_object.get("API", "anthropic_api_retry_delay", fallback="5")
 
         # Cohere
-        cohere_streaming = config_parser_object.get('API', 'cohere_streaming', fallback='False')
-        cohere_temperature = config_parser_object.get('API', 'cohere_temperature', fallback='0.7')
-        cohere_max_p = config_parser_object.get('API', 'cohere_max_p', fallback='0.95')
-        cohere_top_k = config_parser_object.get('API', 'cohere_top_k', fallback='100')
-        cohere_model = config_parser_object.get('API', 'cohere_model', fallback='command-r-plus')
-        cohere_max_tokens = config_parser_object.get('API', 'cohere_max_tokens', fallback='4096')
-        cohere_api_timeout = config_parser_object.get('API', 'cohere_api_timeout', fallback='90')
-        cohere_api_retries = config_parser_object.get('API', 'cohere_api_retry', fallback='3')
-        cohere_api_retry_delay = config_parser_object.get('API', 'cohere_api_retry_delay', fallback='5')
+        cohere_streaming = config_parser_object.get("API", "cohere_streaming", fallback="False")
+        cohere_temperature = config_parser_object.get("API", "cohere_temperature", fallback="0.7")
+        cohere_max_p = config_parser_object.get("API", "cohere_max_p", fallback="0.95")
+        cohere_top_k = config_parser_object.get("API", "cohere_top_k", fallback="100")
+        cohere_model = config_parser_object.get("API", "cohere_model", fallback="command-r-plus")
+        cohere_max_tokens = config_parser_object.get("API", "cohere_max_tokens", fallback="4096")
+        cohere_api_timeout = config_parser_object.get("API", "cohere_api_timeout", fallback="90")
+        cohere_api_retries = config_parser_object.get("API", "cohere_api_retry", fallback="3")
+        cohere_api_retry_delay = config_parser_object.get("API", "cohere_api_retry_delay", fallback="5")
 
         # Deepseek
-        deepseek_streaming = config_parser_object.get('API', 'deepseek_streaming', fallback='False')
-        deepseek_temperature = config_parser_object.get('API', 'deepseek_temperature', fallback='0.7')
-        deepseek_top_p = config_parser_object.get('API', 'deepseek_top_p', fallback='0.95')
-        deepseek_min_p = config_parser_object.get('API', 'deepseek_min_p', fallback='0.05')
-        deepseek_model = config_parser_object.get('API', 'deepseek_model', fallback='deepseek-chat')
-        deepseek_max_tokens = config_parser_object.get('API', 'deepseek_max_tokens', fallback='4096')
-        deepseek_api_timeout = config_parser_object.get('API', 'deepseek_api_timeout', fallback='90')
-        deepseek_api_retries = config_parser_object.get('API', 'deepseek_api_retry', fallback='3')
-        deepseek_api_retry_delay = config_parser_object.get('API', 'deepseek_api_retry_delay', fallback='5')
+        deepseek_streaming = config_parser_object.get("API", "deepseek_streaming", fallback="False")
+        deepseek_temperature = config_parser_object.get("API", "deepseek_temperature", fallback="0.7")
+        deepseek_top_p = config_parser_object.get("API", "deepseek_top_p", fallback="0.95")
+        deepseek_min_p = config_parser_object.get("API", "deepseek_min_p", fallback="0.05")
+        deepseek_model = config_parser_object.get("API", "deepseek_model", fallback="deepseek-chat")
+        deepseek_max_tokens = config_parser_object.get("API", "deepseek_max_tokens", fallback="4096")
+        deepseek_api_timeout = config_parser_object.get("API", "deepseek_api_timeout", fallback="90")
+        deepseek_api_retries = config_parser_object.get("API", "deepseek_api_retry", fallback="3")
+        deepseek_api_retry_delay = config_parser_object.get("API", "deepseek_api_retry_delay", fallback="5")
 
         # Qwen (DashScope-compatible)
-        qwen_model = config_parser_object.get('API', 'qwen_model', fallback='qwen-plus')
-        qwen_streaming = config_parser_object.get('API', 'qwen_streaming', fallback='True')
-        qwen_temperature = config_parser_object.get('API', 'qwen_temperature', fallback='0.7')
-        qwen_top_p = config_parser_object.get('API', 'qwen_top_p', fallback='0.8')
-        qwen_max_tokens = config_parser_object.get('API', 'qwen_max_tokens', fallback='4096')
-        qwen_api_timeout = config_parser_object.get('API', 'qwen_api_timeout', fallback='90')
-        qwen_api_retries = config_parser_object.get('API', 'qwen_api_retry', fallback='3')
-        qwen_api_retry_delay = config_parser_object.get('API', 'qwen_api_retry_delay', fallback='1')
-        qwen_api_region = config_parser_object.get('API', 'qwen_api_region', fallback='sg')
+        qwen_model = config_parser_object.get("API", "qwen_model", fallback="qwen-plus")
+        qwen_streaming = config_parser_object.get("API", "qwen_streaming", fallback="True")
+        qwen_temperature = config_parser_object.get("API", "qwen_temperature", fallback="0.7")
+        qwen_top_p = config_parser_object.get("API", "qwen_top_p", fallback="0.8")
+        qwen_max_tokens = config_parser_object.get("API", "qwen_max_tokens", fallback="4096")
+        qwen_api_timeout = config_parser_object.get("API", "qwen_api_timeout", fallback="90")
+        qwen_api_retries = config_parser_object.get("API", "qwen_api_retry", fallback="3")
+        qwen_api_retry_delay = config_parser_object.get("API", "qwen_api_retry_delay", fallback="1")
+        qwen_api_region = config_parser_object.get("API", "qwen_api_region", fallback="sg")
         qwen_api_base_url = config_parser_object.get(
-            'API', 'qwen_api_base_url', fallback='https://dashscope-intl.aliyuncs.com/compatible-mode/v1'
+            "API", "qwen_api_base_url", fallback="https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
         )
 
         # Groq
-        groq_model = config_parser_object.get('API', 'groq_model', fallback='llama3-70b-8192')
-        groq_streaming = config_parser_object.get('API', 'groq_streaming', fallback='False')
-        groq_temperature = config_parser_object.get('API', 'groq_temperature', fallback='0.7')
-        groq_top_p = config_parser_object.get('API', 'groq_top_p', fallback='0.95')
-        groq_max_tokens = config_parser_object.get('API', 'groq_max_tokens', fallback='4096')
-        groq_api_timeout = config_parser_object.get('API', 'groq_api_timeout', fallback='90')
-        groq_api_retries = config_parser_object.get('API', 'groq_api_retry', fallback='3')
-        groq_api_retry_delay = config_parser_object.get('API', 'groq_api_retry_delay', fallback='5')
+        groq_model = config_parser_object.get("API", "groq_model", fallback="llama3-70b-8192")
+        groq_streaming = config_parser_object.get("API", "groq_streaming", fallback="False")
+        groq_temperature = config_parser_object.get("API", "groq_temperature", fallback="0.7")
+        groq_top_p = config_parser_object.get("API", "groq_top_p", fallback="0.95")
+        groq_max_tokens = config_parser_object.get("API", "groq_max_tokens", fallback="4096")
+        groq_api_timeout = config_parser_object.get("API", "groq_api_timeout", fallback="90")
+        groq_api_retries = config_parser_object.get("API", "groq_api_retry", fallback="3")
+        groq_api_retry_delay = config_parser_object.get("API", "groq_api_retry_delay", fallback="5")
 
         # Google
-        google_model = config_parser_object.get('API', 'google_model', fallback='gemini-2.5-flash')
-        google_streaming = config_parser_object.get('API', 'google_streaming', fallback='False')
-        google_temperature = config_parser_object.get('API', 'google_temperature', fallback='0.7')
-        google_top_p = config_parser_object.get('API', 'google_top_p', fallback='0.95')
-        google_min_p = config_parser_object.get('API', 'google_min_p', fallback='0.05')
-        google_max_tokens = config_parser_object.get('API', 'google_max_tokens', fallback='4096')
-        google_api_timeout = config_parser_object.get('API', 'google_api_timeout', fallback='90')
-        google_api_retries = config_parser_object.get('API', 'google_api_retry', fallback='3')
-        google_api_retry_delay = config_parser_object.get('API', 'google_api_retry_delay', fallback='5')
+        google_model = config_parser_object.get("API", "google_model", fallback="gemini-2.5-flash")
+        google_streaming = config_parser_object.get("API", "google_streaming", fallback="False")
+        google_temperature = config_parser_object.get("API", "google_temperature", fallback="0.7")
+        google_top_p = config_parser_object.get("API", "google_top_p", fallback="0.95")
+        google_min_p = config_parser_object.get("API", "google_min_p", fallback="0.05")
+        google_max_tokens = config_parser_object.get("API", "google_max_tokens", fallback="4096")
+        google_api_timeout = config_parser_object.get("API", "google_api_timeout", fallback="90")
+        google_api_retries = config_parser_object.get("API", "google_api_retry", fallback="3")
+        google_api_retry_delay = config_parser_object.get("API", "google_api_retry_delay", fallback="5")
 
         # HuggingFace
-        huggingface_use_router_url_format = config_parser_object.getboolean('API', 'huggingface_use_router_url_format', fallback=False)
-        huggingface_router_base_url = config_parser_object.get('API', 'huggingface_router_base_url', fallback='https://router.huggingface.co/hf-inference')
-        huggingface_api_base_url = config_parser_object.get('API', 'huggingface_api_base_url', fallback='https://router.huggingface.co/hf-inference/models')
-        huggingface_api_chat_path = config_parser_object.get('API', 'huggingface_api_chat_path', fallback='v1/chat/completions')
-        huggingface_model = config_parser_object.get('API', 'huggingface_model', fallback='/Qwen/Qwen3-235B-A22B')
-        huggingface_streaming = config_parser_object.get('API', 'huggingface_streaming', fallback='False')
-        huggingface_temperature = config_parser_object.get('API', 'huggingface_temperature', fallback='0.7')
-        huggingface_top_p = config_parser_object.get('API', 'huggingface_top_p', fallback='0.95')
-        huggingface_min_p = config_parser_object.get('API', 'huggingface_min_p', fallback='0.05')
-        huggingface_max_tokens = config_parser_object.get('API', 'huggingface_max_tokens', fallback='4096')
-        huggingface_api_timeout = config_parser_object.get('API', 'huggingface_api_timeout', fallback='90')
-        huggingface_api_retries = config_parser_object.get('API', 'huggingface_api_retry', fallback='3')
-        huggingface_api_retry_delay = config_parser_object.get('API', 'huggingface_api_retry_delay', fallback='5')
+        huggingface_use_router_url_format = config_parser_object.getboolean(
+            "API", "huggingface_use_router_url_format", fallback=False
+        )
+        huggingface_router_base_url = config_parser_object.get(
+            "API", "huggingface_router_base_url", fallback="https://router.huggingface.co/hf-inference"
+        )
+        huggingface_api_base_url = config_parser_object.get(
+            "API", "huggingface_api_base_url", fallback="https://router.huggingface.co/hf-inference/models"
+        )
+        huggingface_api_chat_path = config_parser_object.get(
+            "API", "huggingface_api_chat_path", fallback="v1/chat/completions"
+        )
+        huggingface_model = config_parser_object.get("API", "huggingface_model", fallback="/Qwen/Qwen3-235B-A22B")
+        huggingface_streaming = config_parser_object.get("API", "huggingface_streaming", fallback="False")
+        huggingface_temperature = config_parser_object.get("API", "huggingface_temperature", fallback="0.7")
+        huggingface_top_p = config_parser_object.get("API", "huggingface_top_p", fallback="0.95")
+        huggingface_min_p = config_parser_object.get("API", "huggingface_min_p", fallback="0.05")
+        huggingface_max_tokens = config_parser_object.get("API", "huggingface_max_tokens", fallback="4096")
+        huggingface_api_timeout = config_parser_object.get("API", "huggingface_api_timeout", fallback="90")
+        huggingface_api_retries = config_parser_object.get("API", "huggingface_api_retry", fallback="3")
+        huggingface_api_retry_delay = config_parser_object.get("API", "huggingface_api_retry_delay", fallback="5")
 
         # Mistral
-        mistral_model = config_parser_object.get('API', 'mistral_model', fallback='mistral-large-latest')
-        mistral_streaming = config_parser_object.get('API', 'mistral_streaming', fallback='False')
-        mistral_temperature = config_parser_object.get('API', 'mistral_temperature', fallback='0.7')
-        mistral_top_p = config_parser_object.get('API', 'mistral_top_p', fallback='0.95')
-        mistral_max_tokens = config_parser_object.get('API', 'mistral_max_tokens', fallback='4096')
-        mistral_api_timeout = config_parser_object.get('API', 'mistral_api_timeout', fallback='90')
-        mistral_api_retries = config_parser_object.get('API', 'mistral_api_retry', fallback='3')
-        mistral_api_retry_delay = config_parser_object.get('API', 'mistral_api_retry_delay', fallback='5')
+        mistral_model = config_parser_object.get("API", "mistral_model", fallback="mistral-large-latest")
+        mistral_streaming = config_parser_object.get("API", "mistral_streaming", fallback="False")
+        mistral_temperature = config_parser_object.get("API", "mistral_temperature", fallback="0.7")
+        mistral_top_p = config_parser_object.get("API", "mistral_top_p", fallback="0.95")
+        mistral_max_tokens = config_parser_object.get("API", "mistral_max_tokens", fallback="4096")
+        mistral_api_timeout = config_parser_object.get("API", "mistral_api_timeout", fallback="90")
+        mistral_api_retries = config_parser_object.get("API", "mistral_api_retry", fallback="3")
+        mistral_api_retry_delay = config_parser_object.get("API", "mistral_api_retry_delay", fallback="5")
 
         # OpenAI
-        openai_model = config_parser_object.get('API', 'openai_model', fallback='gpt-4o')
-        openai_streaming = config_parser_object.get('API', 'openai_streaming', fallback='False')
-        openai_temperature = config_parser_object.get('API', 'openai_temperature', fallback='0.7')
-        openai_top_p = config_parser_object.get('API', 'openai_top_p', fallback='0.95')
-        openai_max_tokens = config_parser_object.get('API', 'openai_max_tokens', fallback='4096')
-        openai_api_timeout = config_parser_object.get('API', 'openai_api_timeout', fallback='90')
-        openai_api_retries = config_parser_object.get('API', 'openai_api_retry', fallback='3')
-        openai_api_retry_delay = config_parser_object.get('API', 'openai_api_retry_delay', fallback='5')
+        openai_model = config_parser_object.get("API", "openai_model", fallback="gpt-4o")
+        openai_streaming = config_parser_object.get("API", "openai_streaming", fallback="False")
+        openai_temperature = config_parser_object.get("API", "openai_temperature", fallback="0.7")
+        openai_top_p = config_parser_object.get("API", "openai_top_p", fallback="0.95")
+        openai_max_tokens = config_parser_object.get("API", "openai_max_tokens", fallback="4096")
+        openai_api_timeout = config_parser_object.get("API", "openai_api_timeout", fallback="90")
+        openai_api_retries = config_parser_object.get("API", "openai_api_retry", fallback="3")
+        openai_api_retry_delay = config_parser_object.get("API", "openai_api_retry_delay", fallback="5")
 
         # OpenRouter
-        openrouter_model = config_parser_object.get('API', 'openrouter_model', fallback='z-ai/glm-4.6')
-        openrouter_streaming = config_parser_object.get('API', 'openrouter_streaming', fallback='False')
-        openrouter_temperature = config_parser_object.get('API', 'openrouter_temperature', fallback='0.7')
-        openrouter_top_p = config_parser_object.get('API', 'openrouter_top_p', fallback='0.95')
-        openrouter_min_p = config_parser_object.get('API', 'openrouter_min_p', fallback='0.05')
-        openrouter_top_k = config_parser_object.get('API', 'openrouter_top_k', fallback='100')
-        openrouter_max_tokens = config_parser_object.get('API', 'openrouter_max_tokens', fallback='4096')
-        openrouter_api_timeout = config_parser_object.get('API', 'openrouter_api_timeout', fallback='90')
-        openrouter_api_retries = config_parser_object.get('API', 'openrouter_api_retry', fallback='3')
-        openrouter_api_retry_delay = config_parser_object.get('API', 'openrouter_api_retry_delay', fallback='5')
+        openrouter_model = config_parser_object.get("API", "openrouter_model", fallback="z-ai/glm-4.6")
+        openrouter_streaming = config_parser_object.get("API", "openrouter_streaming", fallback="False")
+        openrouter_temperature = config_parser_object.get("API", "openrouter_temperature", fallback="0.7")
+        openrouter_top_p = config_parser_object.get("API", "openrouter_top_p", fallback="0.95")
+        openrouter_min_p = config_parser_object.get("API", "openrouter_min_p", fallback="0.05")
+        openrouter_top_k = config_parser_object.get("API", "openrouter_top_k", fallback="100")
+        openrouter_max_tokens = config_parser_object.get("API", "openrouter_max_tokens", fallback="4096")
+        openrouter_api_timeout = config_parser_object.get("API", "openrouter_api_timeout", fallback="90")
+        openrouter_api_retries = config_parser_object.get("API", "openrouter_api_retry", fallback="3")
+        openrouter_api_retry_delay = config_parser_object.get("API", "openrouter_api_retry_delay", fallback="5")
 
         # Bedrock
-        bedrock_api_key = os.getenv('BEDROCK_API_KEY') or os.getenv('AWS_BEARER_TOKEN_BEDROCK') or config_parser_object.get('API', 'bedrock_api_key', fallback=None)
-        bedrock_region = os.getenv('BEDROCK_REGION') or config_parser_object.get('API', 'bedrock_region', fallback='us-west-2')
-        bedrock_runtime_endpoint = os.getenv('BEDROCK_RUNTIME_ENDPOINT') or config_parser_object.get('API', 'bedrock_runtime_endpoint', fallback=None)
-        bedrock_model = os.getenv('BEDROCK_MODEL') or config_parser_object.get('API', 'bedrock_model', fallback=None)
-        bedrock_streaming = config_parser_object.get('API', 'bedrock_streaming', fallback='False')
-        bedrock_temperature = config_parser_object.get('API', 'bedrock_temperature', fallback='0.7')
-        bedrock_top_p = config_parser_object.get('API', 'bedrock_top_p', fallback='')
-        bedrock_max_tokens = config_parser_object.get('API', 'bedrock_max_tokens', fallback='')
-        bedrock_api_timeout = config_parser_object.get('API', 'bedrock_api_timeout', fallback='90')
-        bedrock_api_retries = config_parser_object.get('API', 'bedrock_api_retry', fallback='3')
-        bedrock_api_retry_delay = config_parser_object.get('API', 'bedrock_api_retry_delay', fallback='5')
+        bedrock_api_key = (
+            os.getenv("BEDROCK_API_KEY")
+            or os.getenv("AWS_BEARER_TOKEN_BEDROCK")
+            or config_parser_object.get("API", "bedrock_api_key", fallback=None)
+        )
+        bedrock_region = os.getenv("BEDROCK_REGION") or config_parser_object.get(
+            "API", "bedrock_region", fallback="us-west-2"
+        )
+        bedrock_runtime_endpoint = os.getenv("BEDROCK_RUNTIME_ENDPOINT") or config_parser_object.get(
+            "API", "bedrock_runtime_endpoint", fallback=None
+        )
+        bedrock_model = os.getenv("BEDROCK_MODEL") or config_parser_object.get("API", "bedrock_model", fallback=None)
+        bedrock_streaming = config_parser_object.get("API", "bedrock_streaming", fallback="False")
+        bedrock_temperature = config_parser_object.get("API", "bedrock_temperature", fallback="0.7")
+        bedrock_top_p = config_parser_object.get("API", "bedrock_top_p", fallback="")
+        bedrock_max_tokens = config_parser_object.get("API", "bedrock_max_tokens", fallback="")
+        bedrock_api_timeout = config_parser_object.get("API", "bedrock_api_timeout", fallback="90")
+        bedrock_api_retries = config_parser_object.get("API", "bedrock_api_retry", fallback="3")
+        bedrock_api_retry_delay = config_parser_object.get("API", "bedrock_api_retry_delay", fallback="5")
 
         # Logging Checks for model loads
         # logging.debug(f"Loaded Anthropic Model: {anthropic_model}")
@@ -3538,112 +4059,132 @@ def load_and_log_configs():
         # logging.debug(f"Loaded Mistral Model: {mistral_model}")
 
         # Local-Models
-        kobold_api_ip = config_parser_object.get('Local-API', 'kobold_api_IP', fallback='http://127.0.0.1:5000/api/v1/generate')
-        kobold_openai_api_IP = config_parser_object.get('Local-API', 'kobold_openai_api_IP', fallback='http://127.0.0.1:5001/v1/chat/completions')
-        kobold_api_key = config_parser_object.get('Local-API', 'kobold_api_key', fallback='')
-        kobold_streaming = config_parser_object.get('Local-API', 'kobold_streaming', fallback='False')
-        kobold_temperature = config_parser_object.get('Local-API', 'kobold_temperature', fallback='0.7')
-        kobold_top_p = config_parser_object.get('Local-API', 'kobold_top_p', fallback='0.95')
-        kobold_top_k = config_parser_object.get('Local-API', 'kobold_top_k', fallback='100')
-        kobold_max_tokens = config_parser_object.get('Local-API', 'kobold_max_tokens', fallback='4096')
-        kobold_api_timeout = config_parser_object.get('Local-API', 'kobold_api_timeout', fallback='90')
-        kobold_api_retries = config_parser_object.get('Local-API', 'kobold_api_retry', fallback='3')
-        kobold_api_retry_delay = config_parser_object.get('Local-API', 'kobold_api_retry_delay', fallback='5')
+        kobold_api_ip = config_parser_object.get(
+            "Local-API", "kobold_api_IP", fallback="http://127.0.0.1:5000/api/v1/generate"
+        )
+        kobold_openai_api_IP = config_parser_object.get(
+            "Local-API", "kobold_openai_api_IP", fallback="http://127.0.0.1:5001/v1/chat/completions"
+        )
+        kobold_api_key = config_parser_object.get("Local-API", "kobold_api_key", fallback="")
+        kobold_streaming = config_parser_object.get("Local-API", "kobold_streaming", fallback="False")
+        kobold_temperature = config_parser_object.get("Local-API", "kobold_temperature", fallback="0.7")
+        kobold_top_p = config_parser_object.get("Local-API", "kobold_top_p", fallback="0.95")
+        kobold_top_k = config_parser_object.get("Local-API", "kobold_top_k", fallback="100")
+        kobold_max_tokens = config_parser_object.get("Local-API", "kobold_max_tokens", fallback="4096")
+        kobold_api_timeout = config_parser_object.get("Local-API", "kobold_api_timeout", fallback="90")
+        kobold_api_retries = config_parser_object.get("Local-API", "kobold_api_retry", fallback="3")
+        kobold_api_retry_delay = config_parser_object.get("Local-API", "kobold_api_retry_delay", fallback="5")
 
-        llama_api_IP = config_parser_object.get('Local-API', 'llama_api_IP', fallback='http://127.0.0.1:8080/v1/chat/completions')
-        llama_api_key = config_parser_object.get('Local-API', 'llama_api_key', fallback='')
-        llama_streaming = config_parser_object.get('Local-API', 'llama_streaming', fallback='False')
-        llama_temperature = config_parser_object.get('Local-API', 'llama_temperature', fallback='0.7')
-        llama_top_p = config_parser_object.get('Local-API', 'llama_top_p', fallback='0.95')
-        llama_min_p = config_parser_object.get('Local-API', 'llama_min_p', fallback='0.05')
-        llama_top_k = config_parser_object.get('Local-API', 'llama_top_k', fallback='100')
-        llama_max_tokens = config_parser_object.get('Local-API', 'llama_max_tokens', fallback='4096')
-        llama_api_timeout = config_parser_object.get('Local-API', 'llama_api_timeout', fallback='90')
-        llama_api_retries = config_parser_object.get('Local-API', 'llama_api_retry', fallback='3')
-        llama_api_retry_delay = config_parser_object.get('Local-API', 'llama_api_retry_delay', fallback='5')
+        llama_api_IP = config_parser_object.get(
+            "Local-API", "llama_api_IP", fallback="http://127.0.0.1:8080/v1/chat/completions"
+        )
+        llama_api_key = config_parser_object.get("Local-API", "llama_api_key", fallback="")
+        llama_streaming = config_parser_object.get("Local-API", "llama_streaming", fallback="False")
+        llama_temperature = config_parser_object.get("Local-API", "llama_temperature", fallback="0.7")
+        llama_top_p = config_parser_object.get("Local-API", "llama_top_p", fallback="0.95")
+        llama_min_p = config_parser_object.get("Local-API", "llama_min_p", fallback="0.05")
+        llama_top_k = config_parser_object.get("Local-API", "llama_top_k", fallback="100")
+        llama_max_tokens = config_parser_object.get("Local-API", "llama_max_tokens", fallback="4096")
+        llama_api_timeout = config_parser_object.get("Local-API", "llama_api_timeout", fallback="90")
+        llama_api_retries = config_parser_object.get("Local-API", "llama_api_retry", fallback="3")
+        llama_api_retry_delay = config_parser_object.get("Local-API", "llama_api_retry_delay", fallback="5")
 
-        ooba_api_IP = config_parser_object.get('Local-API', 'ooba_api_IP', fallback='http://127.0.0.1:5000/v1/chat/completions')
-        ooba_api_key = config_parser_object.get('Local-API', 'ooba_api_key', fallback='')
-        ooba_streaming = config_parser_object.get('Local-API', 'ooba_streaming', fallback='False')
-        ooba_temperature = config_parser_object.get('Local-API', 'ooba_temperature', fallback='0.7')
-        ooba_top_p = config_parser_object.get('Local-API', 'ooba_top_p', fallback='0.95')
-        ooba_min_p = config_parser_object.get('Local-API', 'ooba_min_p', fallback='0.05')
-        ooba_top_k = config_parser_object.get('Local-API', 'ooba_top_k', fallback='100')
-        ooba_max_tokens = config_parser_object.get('Local-API', 'ooba_max_tokens', fallback='4096')
-        ooba_api_timeout = config_parser_object.get('Local-API', 'ooba_api_timeout', fallback='90')
-        ooba_api_retries = config_parser_object.get('Local-API', 'ooba_api_retry', fallback='3')
-        ooba_api_retry_delay = config_parser_object.get('Local-API', 'ooba_api_retry_delay', fallback='5')
+        ooba_api_IP = config_parser_object.get(
+            "Local-API", "ooba_api_IP", fallback="http://127.0.0.1:5000/v1/chat/completions"
+        )
+        ooba_api_key = config_parser_object.get("Local-API", "ooba_api_key", fallback="")
+        ooba_streaming = config_parser_object.get("Local-API", "ooba_streaming", fallback="False")
+        ooba_temperature = config_parser_object.get("Local-API", "ooba_temperature", fallback="0.7")
+        ooba_top_p = config_parser_object.get("Local-API", "ooba_top_p", fallback="0.95")
+        ooba_min_p = config_parser_object.get("Local-API", "ooba_min_p", fallback="0.05")
+        ooba_top_k = config_parser_object.get("Local-API", "ooba_top_k", fallback="100")
+        ooba_max_tokens = config_parser_object.get("Local-API", "ooba_max_tokens", fallback="4096")
+        ooba_api_timeout = config_parser_object.get("Local-API", "ooba_api_timeout", fallback="90")
+        ooba_api_retries = config_parser_object.get("Local-API", "ooba_api_retry", fallback="3")
+        ooba_api_retry_delay = config_parser_object.get("Local-API", "ooba_api_retry_delay", fallback="5")
 
-        tabby_api_IP = config_parser_object.get('Local-API', 'tabby_api_IP', fallback='http://127.0.0.1:5000/api/v1/generate')
-        tabby_api_key = config_parser_object.get('Local-API', 'tabby_api_key', fallback=None)
-        tabby_model = config_parser_object.get('models', 'tabby_model', fallback=None)
-        tabby_streaming = config_parser_object.get('Local-API', 'tabby_streaming', fallback='False')
-        tabby_temperature = config_parser_object.get('Local-API', 'tabby_temperature', fallback='0.7')
-        tabby_top_p = config_parser_object.get('Local-API', 'tabby_top_p', fallback='0.95')
-        tabby_top_k = config_parser_object.get('Local-API', 'tabby_top_k', fallback='100')
-        tabby_min_p = config_parser_object.get('Local-API', 'tabby_min_p', fallback='0.05')
-        tabby_max_tokens = config_parser_object.get('Local-API', 'tabby_max_tokens', fallback='4096')
-        tabby_api_timeout = config_parser_object.get('Local-API', 'tabby_api_timeout', fallback='90')
-        tabby_api_retries = config_parser_object.get('Local-API', 'tabby_api_retry', fallback='3')
-        tabby_api_retry_delay = config_parser_object.get('Local-API', 'tabby_api_retry_delay', fallback='5')
+        tabby_api_IP = config_parser_object.get(
+            "Local-API", "tabby_api_IP", fallback="http://127.0.0.1:5000/api/v1/generate"
+        )
+        tabby_api_key = config_parser_object.get("Local-API", "tabby_api_key", fallback=None)
+        tabby_model = config_parser_object.get("models", "tabby_model", fallback=None)
+        tabby_streaming = config_parser_object.get("Local-API", "tabby_streaming", fallback="False")
+        tabby_temperature = config_parser_object.get("Local-API", "tabby_temperature", fallback="0.7")
+        tabby_top_p = config_parser_object.get("Local-API", "tabby_top_p", fallback="0.95")
+        tabby_top_k = config_parser_object.get("Local-API", "tabby_top_k", fallback="100")
+        tabby_min_p = config_parser_object.get("Local-API", "tabby_min_p", fallback="0.05")
+        tabby_max_tokens = config_parser_object.get("Local-API", "tabby_max_tokens", fallback="4096")
+        tabby_api_timeout = config_parser_object.get("Local-API", "tabby_api_timeout", fallback="90")
+        tabby_api_retries = config_parser_object.get("Local-API", "tabby_api_retry", fallback="3")
+        tabby_api_retry_delay = config_parser_object.get("Local-API", "tabby_api_retry_delay", fallback="5")
 
-        vllm_api_url = config_parser_object.get('Local-API', 'vllm_api_IP', fallback='http://127.0.0.1:500/api/v1/chat/completions')
-        vllm_api_key = config_parser_object.get('Local-API', 'vllm_api_key', fallback=None)
-        vllm_model = config_parser_object.get('Local-API', 'vllm_model', fallback=None)
-        vllm_streaming = config_parser_object.get('Local-API', 'vllm_streaming', fallback='False')
-        vllm_temperature = config_parser_object.get('Local-API', 'vllm_temperature', fallback='0.7')
-        vllm_top_p = config_parser_object.get('Local-API', 'vllm_top_p', fallback='0.95')
-        vllm_top_k = config_parser_object.get('Local-API', 'vllm_top_k', fallback='100')
-        vllm_min_p = config_parser_object.get('Local-API', 'vllm_min_p', fallback='0.05')
-        vllm_max_tokens = config_parser_object.get('Local-API', 'vllm_max_tokens', fallback='4096')
-        vllm_api_timeout = config_parser_object.get('Local-API', 'vllm_api_timeout', fallback='90')
-        vllm_api_retries = config_parser_object.get('Local-API', 'vllm_api_retry', fallback='3')
-        vllm_api_retry_delay = config_parser_object.get('Local-API', 'vllm_api_retry_delay', fallback='5')
+        vllm_api_url = config_parser_object.get(
+            "Local-API", "vllm_api_IP", fallback="http://127.0.0.1:500/api/v1/chat/completions"
+        )
+        vllm_api_key = config_parser_object.get("Local-API", "vllm_api_key", fallback=None)
+        vllm_model = config_parser_object.get("Local-API", "vllm_model", fallback=None)
+        vllm_streaming = config_parser_object.get("Local-API", "vllm_streaming", fallback="False")
+        vllm_temperature = config_parser_object.get("Local-API", "vllm_temperature", fallback="0.7")
+        vllm_top_p = config_parser_object.get("Local-API", "vllm_top_p", fallback="0.95")
+        vllm_top_k = config_parser_object.get("Local-API", "vllm_top_k", fallback="100")
+        vllm_min_p = config_parser_object.get("Local-API", "vllm_min_p", fallback="0.05")
+        vllm_max_tokens = config_parser_object.get("Local-API", "vllm_max_tokens", fallback="4096")
+        vllm_api_timeout = config_parser_object.get("Local-API", "vllm_api_timeout", fallback="90")
+        vllm_api_retries = config_parser_object.get("Local-API", "vllm_api_retry", fallback="3")
+        vllm_api_retry_delay = config_parser_object.get("Local-API", "vllm_api_retry_delay", fallback="5")
 
-        ollama_api_url = config_parser_object.get('Local-API', 'ollama_api_IP', fallback='http://127.0.0.1:11434/api/generate')
-        ollama_api_key = config_parser_object.get('Local-API', 'ollama_api_key', fallback=None)
-        ollama_model = config_parser_object.get('Local-API', 'ollama_model', fallback=None)
-        ollama_streaming = config_parser_object.get('Local-API', 'ollama_streaming', fallback='False')
-        ollama_temperature = config_parser_object.get('Local-API', 'ollama_temperature', fallback='0.7')
-        ollama_top_p = config_parser_object.get('Local-API', 'ollama_top_p', fallback='0.95')
-        ollama_max_tokens = config_parser_object.get('Local-API', 'ollama_max_tokens', fallback='4096')
-        ollama_api_timeout = config_parser_object.get('Local-API', 'ollama_api_timeout', fallback='90')
-        ollama_api_retries = config_parser_object.get('Local-API', 'ollama_api_retry', fallback='3')
-        ollama_api_retry_delay = config_parser_object.get('Local-API', 'ollama_api_retry_delay', fallback='5')
+        ollama_api_url = config_parser_object.get(
+            "Local-API", "ollama_api_IP", fallback="http://127.0.0.1:11434/api/generate"
+        )
+        ollama_api_key = config_parser_object.get("Local-API", "ollama_api_key", fallback=None)
+        ollama_model = config_parser_object.get("Local-API", "ollama_model", fallback=None)
+        ollama_streaming = config_parser_object.get("Local-API", "ollama_streaming", fallback="False")
+        ollama_temperature = config_parser_object.get("Local-API", "ollama_temperature", fallback="0.7")
+        ollama_top_p = config_parser_object.get("Local-API", "ollama_top_p", fallback="0.95")
+        ollama_max_tokens = config_parser_object.get("Local-API", "ollama_max_tokens", fallback="4096")
+        ollama_api_timeout = config_parser_object.get("Local-API", "ollama_api_timeout", fallback="90")
+        ollama_api_retries = config_parser_object.get("Local-API", "ollama_api_retry", fallback="3")
+        ollama_api_retry_delay = config_parser_object.get("Local-API", "ollama_api_retry_delay", fallback="5")
 
-        aphrodite_api_url = config_parser_object.get('Local-API', 'aphrodite_api_IP', fallback='http://127.0.0.1:8080/v1/chat/completions')
-        aphrodite_api_key = config_parser_object.get('Local-API', 'aphrodite_api_key', fallback='')
-        aphrodite_model = config_parser_object.get('Local-API', 'aphrodite_model', fallback='')
-        aphrodite_max_tokens = config_parser_object.get('Local-API', 'aphrodite_max_tokens', fallback='4096')
-        aphrodite_streaming = config_parser_object.get('Local-API', 'aphrodite_streaming', fallback='False')
-        aphrodite_api_timeout = config_parser_object.get('Local-API', 'aphrodite_api_timeout', fallback='90')
-        aphrodite_api_retries = config_parser_object.get('Local-API', 'aphrodite_api_retry', fallback='3')
-        aphrodite_api_retry_delay = config_parser_object.get('Local-API', 'aphrodite_api_retry_delay', fallback='5')
+        aphrodite_api_url = config_parser_object.get(
+            "Local-API", "aphrodite_api_IP", fallback="http://127.0.0.1:8080/v1/chat/completions"
+        )
+        aphrodite_api_key = config_parser_object.get("Local-API", "aphrodite_api_key", fallback="")
+        aphrodite_model = config_parser_object.get("Local-API", "aphrodite_model", fallback="")
+        aphrodite_max_tokens = config_parser_object.get("Local-API", "aphrodite_max_tokens", fallback="4096")
+        aphrodite_streaming = config_parser_object.get("Local-API", "aphrodite_streaming", fallback="False")
+        aphrodite_api_timeout = config_parser_object.get("Local-API", "aphrodite_api_timeout", fallback="90")
+        aphrodite_api_retries = config_parser_object.get("Local-API", "aphrodite_api_retry", fallback="3")
+        aphrodite_api_retry_delay = config_parser_object.get("Local-API", "aphrodite_api_retry_delay", fallback="5")
 
-        custom_openai_api_key = config_parser_object.get('API', 'custom_openai_api_key', fallback=None)
-        custom_openai_api_ip = config_parser_object.get('API', 'custom_openai_api_ip', fallback=None)
-        custom_openai_api_model = config_parser_object.get('API', 'custom_openai_api_model', fallback=None)
-        custom_openai_api_streaming = config_parser_object.get('API', 'custom_openai_api_streaming', fallback='False')
-        custom_openai_api_temperature = config_parser_object.get('API', 'custom_openai_api_temperature', fallback='0.7')
-        custom_openai_api_top_p = config_parser_object.get('API', 'custom_openai_api_top_p', fallback='0.95')
-        custom_openai_api_min_p = config_parser_object.get('API', 'custom_openai_api_min_p', fallback='0.05')
-        custom_openai_api_max_tokens = config_parser_object.get('API', 'custom_openai_api_max_tokens', fallback='4096')
-        custom_openai_api_timeout = config_parser_object.get('API', 'custom_openai_api_timeout', fallback='90')
-        custom_openai_api_retries = config_parser_object.get('API', 'custom_openai_api_retry', fallback='3')
-        custom_openai_api_retry_delay = config_parser_object.get('API', 'custom_openai_api_retry_delay', fallback='5')
+        custom_openai_api_key = config_parser_object.get("API", "custom_openai_api_key", fallback=None)
+        custom_openai_api_ip = config_parser_object.get("API", "custom_openai_api_ip", fallback=None)
+        custom_openai_api_model = config_parser_object.get("API", "custom_openai_api_model", fallback=None)
+        custom_openai_api_streaming = config_parser_object.get("API", "custom_openai_api_streaming", fallback="False")
+        custom_openai_api_temperature = config_parser_object.get("API", "custom_openai_api_temperature", fallback="0.7")
+        custom_openai_api_top_p = config_parser_object.get("API", "custom_openai_api_top_p", fallback="0.95")
+        custom_openai_api_min_p = config_parser_object.get("API", "custom_openai_api_min_p", fallback="0.05")
+        custom_openai_api_max_tokens = config_parser_object.get("API", "custom_openai_api_max_tokens", fallback="4096")
+        custom_openai_api_timeout = config_parser_object.get("API", "custom_openai_api_timeout", fallback="90")
+        custom_openai_api_retries = config_parser_object.get("API", "custom_openai_api_retry", fallback="3")
+        custom_openai_api_retry_delay = config_parser_object.get("API", "custom_openai_api_retry_delay", fallback="5")
 
         # 2nd Custom OpenAI API
-        custom_openai2_api_key = config_parser_object.get('API', 'custom_openai2_api_key', fallback=None)
-        custom_openai2_api_ip = config_parser_object.get('API', 'custom_openai2_api_ip', fallback=None)
-        custom_openai2_api_model = config_parser_object.get('API', 'custom_openai2_api_model', fallback=None)
-        custom_openai2_api_streaming = config_parser_object.get('API', 'custom_openai2_api_streaming', fallback='False')
-        custom_openai2_api_temperature = config_parser_object.get('API', 'custom_openai2_api_temperature', fallback='0.7')
-        custom_openai2_api_top_p = config_parser_object.get('API', 'custom_openai2_api_top_p', fallback='0.95')
-        custom_openai2_api_min_p = config_parser_object.get('API', 'custom_openai2_api_min_p', fallback='0.05')
-        custom_openai2_api_max_tokens = config_parser_object.get('API', 'custom_openai2_api_max_tokens', fallback='4096')
-        custom_openai2_api_timeout = config_parser_object.get('API', 'custom_openai2_api_timeout', fallback='90')
-        custom_openai2_api_retries = config_parser_object.get('API', 'custom_openai2_api_retry', fallback='3')
-        custom_openai2_api_retry_delay = config_parser_object.get('API', 'custom_openai2_api_retry_delay', fallback='5')
+        custom_openai2_api_key = config_parser_object.get("API", "custom_openai2_api_key", fallback=None)
+        custom_openai2_api_ip = config_parser_object.get("API", "custom_openai2_api_ip", fallback=None)
+        custom_openai2_api_model = config_parser_object.get("API", "custom_openai2_api_model", fallback=None)
+        custom_openai2_api_streaming = config_parser_object.get("API", "custom_openai2_api_streaming", fallback="False")
+        custom_openai2_api_temperature = config_parser_object.get(
+            "API", "custom_openai2_api_temperature", fallback="0.7"
+        )
+        custom_openai2_api_top_p = config_parser_object.get("API", "custom_openai2_api_top_p", fallback="0.95")
+        custom_openai2_api_min_p = config_parser_object.get("API", "custom_openai2_api_min_p", fallback="0.05")
+        custom_openai2_api_max_tokens = config_parser_object.get(
+            "API", "custom_openai2_api_max_tokens", fallback="4096"
+        )
+        custom_openai2_api_timeout = config_parser_object.get("API", "custom_openai2_api_timeout", fallback="90")
+        custom_openai2_api_retries = config_parser_object.get("API", "custom_openai2_api_retry", fallback="3")
+        custom_openai2_api_retry_delay = config_parser_object.get("API", "custom_openai2_api_retry_delay", fallback="5")
 
         # Logging Checks for Local API IP loads
         # logging.debug(f"Loaded Kobold API IP: {kobold_api_ip}")
@@ -3653,166 +4194,232 @@ def load_and_log_configs():
         # logging.debug(f"Loaded VLLM API URL: {vllm_api_url}")
 
         # Retrieve default API choices from the configuration file
-        default_api = config_parser_object.get('API', 'default_api', fallback='openai')
+        default_api = config_parser_object.get("API", "default_api", fallback="openai")
 
         # Retrieve LLM API settings from the configuration file
-        local_api_retries = config_parser_object.get('Local-API', 'Settings', fallback='3')
-        local_api_retry_delay = config_parser_object.get('Local-API', 'local_api_retry_delay', fallback='5')
+        local_api_retries = config_parser_object.get("Local-API", "Settings", fallback="3")
+        local_api_retry_delay = config_parser_object.get("Local-API", "local_api_retry_delay", fallback="5")
 
         # Retrieve output paths from the configuration file
-        output_path = config_parser_object.get('Paths', 'output_path', fallback='results')
+        output_path = config_parser_object.get("Paths", "output_path", fallback="results")
         _buffered_log("TRACE", f"Output path set to: {output_path}")
 
         # Save video transcripts
-        save_video_transcripts = config_parser_object.get('Paths', 'save_video_transcripts', fallback='True')
+        save_video_transcripts = config_parser_object.get("Paths", "save_video_transcripts", fallback="True")
 
         # Retrieve logging settings from the configuration file
-        config_parser_object.get('Logging', 'log_level', fallback='INFO')
-        config_parser_object.get('Logging', 'log_file', fallback='./Logs/tldw_logs.json')
-        config_parser_object.get('Logging', 'log_metrics_file', fallback='./Logs/tldw_metrics_logs.json')
+        config_parser_object.get("Logging", "log_level", fallback="INFO")
+        config_parser_object.get("Logging", "log_file", fallback="./Logs/tldw_logs.json")
+        config_parser_object.get("Logging", "log_metrics_file", fallback="./Logs/tldw_metrics_logs.json")
 
         # Retrieve processing choice from the configuration file
-        processing_choice = config_parser_object.get('Processing', 'processing_choice', fallback='cpu')
+        processing_choice = config_parser_object.get("Processing", "processing_choice", fallback="cpu")
         _buffered_log("TRACE", f"Processing choice set to: {processing_choice}")
 
         # [Chunking]
         # # Chunking Defaults
         # #
         # # Default Chunking Options for each media type
-        chunking_method = config_parser_object.get('Chunking', 'chunking_method', fallback='words')
-        chunk_max_size = config_parser_object.get('Chunking', 'chunk_max_size', fallback='400')
-        chunk_overlap = config_parser_object.get('Chunking', 'chunk_overlap', fallback='200')
-        adaptive_chunking = config_parser_object.get('Chunking', 'adaptive_chunking', fallback='False')
-        chunking_multi_level = config_parser_object.get('Chunking', 'chunking_multi_level', fallback='False')
-        chunk_language = config_parser_object.get('Chunking', 'chunk_language', fallback='en')
+        chunking_method = config_parser_object.get("Chunking", "chunking_method", fallback="words")
+        chunk_max_size = config_parser_object.get("Chunking", "chunk_max_size", fallback="400")
+        chunk_overlap = config_parser_object.get("Chunking", "chunk_overlap", fallback="200")
+        adaptive_chunking = config_parser_object.get("Chunking", "adaptive_chunking", fallback="False")
+        chunking_multi_level = config_parser_object.get("Chunking", "chunking_multi_level", fallback="False")
+        chunk_language = config_parser_object.get("Chunking", "chunk_language", fallback="en")
         #
         # Article Chunking
-        article_chunking_method = config_parser_object.get('Chunking', 'article_chunking_method', fallback='words')
-        article_chunk_max_size = config_parser_object.get('Chunking', 'article_chunk_max_size', fallback='400')
-        article_chunk_overlap = config_parser_object.get('Chunking', 'article_chunk_overlap', fallback='200')
-        article_adaptive_chunking = config_parser_object.get('Chunking', 'article_adaptive_chunking', fallback='False')
-        article_chunking_multi_level = config_parser_object.get('Chunking', 'article_chunking_multi_level', fallback='False')
-        article_language = config_parser_object.get('Chunking', 'article_language', fallback='english')
+        article_chunking_method = config_parser_object.get("Chunking", "article_chunking_method", fallback="words")
+        article_chunk_max_size = config_parser_object.get("Chunking", "article_chunk_max_size", fallback="400")
+        article_chunk_overlap = config_parser_object.get("Chunking", "article_chunk_overlap", fallback="200")
+        article_adaptive_chunking = config_parser_object.get("Chunking", "article_adaptive_chunking", fallback="False")
+        article_chunking_multi_level = config_parser_object.get(
+            "Chunking", "article_chunking_multi_level", fallback="False"
+        )
+        article_language = config_parser_object.get("Chunking", "article_language", fallback="english")
         #
         # Audio file Chunking
-        audio_chunking_method = config_parser_object.get('Chunking', 'audio_chunking_method', fallback='words')
-        audio_chunk_max_size = config_parser_object.get('Chunking', 'audio_chunk_max_size', fallback='400')
-        audio_chunk_overlap = config_parser_object.get('Chunking', 'audio_chunk_overlap', fallback='200')
-        audio_adaptive_chunking = config_parser_object.get('Chunking', 'audio_adaptive_chunking', fallback='False')
-        audio_chunking_multi_level = config_parser_object.get('Chunking', 'audio_chunking_multi_level', fallback='False')
-        audio_language = config_parser_object.get('Chunking', 'audio_language', fallback='english')
+        audio_chunking_method = config_parser_object.get("Chunking", "audio_chunking_method", fallback="words")
+        audio_chunk_max_size = config_parser_object.get("Chunking", "audio_chunk_max_size", fallback="400")
+        audio_chunk_overlap = config_parser_object.get("Chunking", "audio_chunk_overlap", fallback="200")
+        audio_adaptive_chunking = config_parser_object.get("Chunking", "audio_adaptive_chunking", fallback="False")
+        audio_chunking_multi_level = config_parser_object.get(
+            "Chunking", "audio_chunking_multi_level", fallback="False"
+        )
+        audio_language = config_parser_object.get("Chunking", "audio_language", fallback="english")
         #
         # Book Chunking
-        book_chunking_method = config_parser_object.get('Chunking', 'book_chunking_method', fallback='words')
-        book_chunk_max_size = config_parser_object.get('Chunking', 'book_chunk_max_size', fallback='400')
-        book_chunk_overlap = config_parser_object.get('Chunking', 'book_chunk_overlap', fallback='200')
-        book_adaptive_chunking = config_parser_object.get('Chunking', 'book_adaptive_chunking', fallback='False')
-        book_chunking_multi_level = config_parser_object.get('Chunking', 'book_chunking_multi_level', fallback='False')
-        book_language = config_parser_object.get('Chunking', 'book_language', fallback='english')
+        book_chunking_method = config_parser_object.get("Chunking", "book_chunking_method", fallback="words")
+        book_chunk_max_size = config_parser_object.get("Chunking", "book_chunk_max_size", fallback="400")
+        book_chunk_overlap = config_parser_object.get("Chunking", "book_chunk_overlap", fallback="200")
+        book_adaptive_chunking = config_parser_object.get("Chunking", "book_adaptive_chunking", fallback="False")
+        book_chunking_multi_level = config_parser_object.get("Chunking", "book_chunking_multi_level", fallback="False")
+        book_language = config_parser_object.get("Chunking", "book_language", fallback="english")
         #
         # Document Chunking
-        document_chunking_method = config_parser_object.get('Chunking', 'document_chunking_method', fallback='words')
-        document_chunk_max_size = config_parser_object.get('Chunking', 'document_chunk_max_size', fallback='400')
-        document_chunk_overlap = config_parser_object.get('Chunking', 'document_chunk_overlap', fallback='200')
-        document_adaptive_chunking = config_parser_object.get('Chunking', 'document_adaptive_chunking', fallback='False')
-        document_chunking_multi_level = config_parser_object.get('Chunking', 'document_chunking_multi_level', fallback='False')
-        document_language = config_parser_object.get('Chunking', 'document_language', fallback='english')
+        document_chunking_method = config_parser_object.get("Chunking", "document_chunking_method", fallback="words")
+        document_chunk_max_size = config_parser_object.get("Chunking", "document_chunk_max_size", fallback="400")
+        document_chunk_overlap = config_parser_object.get("Chunking", "document_chunk_overlap", fallback="200")
+        document_adaptive_chunking = config_parser_object.get(
+            "Chunking", "document_adaptive_chunking", fallback="False"
+        )
+        document_chunking_multi_level = config_parser_object.get(
+            "Chunking", "document_chunking_multi_level", fallback="False"
+        )
+        document_language = config_parser_object.get("Chunking", "document_language", fallback="english")
         #
         # Mediawiki Article Chunking
-        mediawiki_article_chunking_method = config_parser_object.get('Chunking', 'mediawiki_article_chunking_method', fallback='words')
-        mediawiki_article_chunk_max_size = config_parser_object.get('Chunking', 'mediawiki_article_chunk_max_size', fallback='400')
-        mediawiki_article_chunk_overlap = config_parser_object.get('Chunking', 'mediawiki_article_chunk_overlap', fallback='200')
-        mediawiki_article_adaptive_chunking = config_parser_object.get('Chunking', 'mediawiki_article_adaptive_chunking', fallback='False')
-        mediawiki_article_chunking_multi_level = config_parser_object.get('Chunking', 'mediawiki_article_chunking_multi_level', fallback='False')
-        mediawiki_article_language = config_parser_object.get('Chunking', 'mediawiki_article_language', fallback='english')
+        mediawiki_article_chunking_method = config_parser_object.get(
+            "Chunking", "mediawiki_article_chunking_method", fallback="words"
+        )
+        mediawiki_article_chunk_max_size = config_parser_object.get(
+            "Chunking", "mediawiki_article_chunk_max_size", fallback="400"
+        )
+        mediawiki_article_chunk_overlap = config_parser_object.get(
+            "Chunking", "mediawiki_article_chunk_overlap", fallback="200"
+        )
+        mediawiki_article_adaptive_chunking = config_parser_object.get(
+            "Chunking", "mediawiki_article_adaptive_chunking", fallback="False"
+        )
+        mediawiki_article_chunking_multi_level = config_parser_object.get(
+            "Chunking", "mediawiki_article_chunking_multi_level", fallback="False"
+        )
+        mediawiki_article_language = config_parser_object.get(
+            "Chunking", "mediawiki_article_language", fallback="english"
+        )
         #
         # Mediawiki Dump Chunking
-        mediawiki_dump_chunking_method = config_parser_object.get('Chunking', 'mediawiki_dump_chunking_method', fallback='words')
-        mediawiki_dump_chunk_max_size = config_parser_object.get('Chunking', 'mediawiki_dump_chunk_max_size', fallback='400')
-        mediawiki_dump_chunk_overlap = config_parser_object.get('Chunking', 'mediawiki_dump_chunk_overlap', fallback='200')
-        mediawiki_dump_adaptive_chunking = config_parser_object.get('Chunking', 'mediawiki_dump_adaptive_chunking', fallback='False')
-        mediawiki_dump_chunking_multi_level = config_parser_object.get('Chunking', 'mediawiki_dump_chunking_multi_level', fallback='False')
-        mediawiki_dump_language = config_parser_object.get('Chunking', 'mediawiki_dump_language', fallback='english')
+        mediawiki_dump_chunking_method = config_parser_object.get(
+            "Chunking", "mediawiki_dump_chunking_method", fallback="words"
+        )
+        mediawiki_dump_chunk_max_size = config_parser_object.get(
+            "Chunking", "mediawiki_dump_chunk_max_size", fallback="400"
+        )
+        mediawiki_dump_chunk_overlap = config_parser_object.get(
+            "Chunking", "mediawiki_dump_chunk_overlap", fallback="200"
+        )
+        mediawiki_dump_adaptive_chunking = config_parser_object.get(
+            "Chunking", "mediawiki_dump_adaptive_chunking", fallback="False"
+        )
+        mediawiki_dump_chunking_multi_level = config_parser_object.get(
+            "Chunking", "mediawiki_dump_chunking_multi_level", fallback="False"
+        )
+        mediawiki_dump_language = config_parser_object.get("Chunking", "mediawiki_dump_language", fallback="english")
         #
         # Obsidian Note Chunking
-        obsidian_note_chunking_method = config_parser_object.get('Chunking', 'obsidian_note_chunking_method', fallback='words')
-        obsidian_note_chunk_max_size = config_parser_object.get('Chunking', 'obsidian_note_chunk_max_size', fallback='400')
-        obsidian_note_chunk_overlap = config_parser_object.get('Chunking', 'obsidian_note_chunk_overlap', fallback='200')
-        obsidian_note_adaptive_chunking = config_parser_object.get('Chunking', 'obsidian_note_adaptive_chunking', fallback='False')
-        obsidian_note_chunking_multi_level = config_parser_object.get('Chunking', 'obsidian_note_chunking_multi_level', fallback='False')
-        obsidian_note_language = config_parser_object.get('Chunking', 'obsidian_note_language', fallback='english')
+        obsidian_note_chunking_method = config_parser_object.get(
+            "Chunking", "obsidian_note_chunking_method", fallback="words"
+        )
+        obsidian_note_chunk_max_size = config_parser_object.get(
+            "Chunking", "obsidian_note_chunk_max_size", fallback="400"
+        )
+        obsidian_note_chunk_overlap = config_parser_object.get(
+            "Chunking", "obsidian_note_chunk_overlap", fallback="200"
+        )
+        obsidian_note_adaptive_chunking = config_parser_object.get(
+            "Chunking", "obsidian_note_adaptive_chunking", fallback="False"
+        )
+        obsidian_note_chunking_multi_level = config_parser_object.get(
+            "Chunking", "obsidian_note_chunking_multi_level", fallback="False"
+        )
+        obsidian_note_language = config_parser_object.get("Chunking", "obsidian_note_language", fallback="english")
         #
         # Podcast Chunking
-        podcast_chunking_method = config_parser_object.get('Chunking', 'podcast_chunking_method', fallback='words')
-        podcast_chunk_max_size = config_parser_object.get('Chunking', 'podcast_chunk_max_size', fallback='400')
-        podcast_chunk_overlap = config_parser_object.get('Chunking', 'podcast_chunk_overlap', fallback='200')
-        podcast_adaptive_chunking = config_parser_object.get('Chunking', 'podcast_adaptive_chunking', fallback='False')
-        podcast_chunking_multi_level = config_parser_object.get('Chunking', 'podcast_chunking_multi_level', fallback='False')
-        podcast_language = config_parser_object.get('Chunking', 'podcast_language', fallback='english')
+        podcast_chunking_method = config_parser_object.get("Chunking", "podcast_chunking_method", fallback="words")
+        podcast_chunk_max_size = config_parser_object.get("Chunking", "podcast_chunk_max_size", fallback="400")
+        podcast_chunk_overlap = config_parser_object.get("Chunking", "podcast_chunk_overlap", fallback="200")
+        podcast_adaptive_chunking = config_parser_object.get("Chunking", "podcast_adaptive_chunking", fallback="False")
+        podcast_chunking_multi_level = config_parser_object.get(
+            "Chunking", "podcast_chunking_multi_level", fallback="False"
+        )
+        podcast_language = config_parser_object.get("Chunking", "podcast_language", fallback="english")
         #
         # Text Chunking
-        text_chunking_method = config_parser_object.get('Chunking', 'text_chunking_method', fallback='words')
-        text_chunk_max_size = config_parser_object.get('Chunking', 'text_chunk_max_size', fallback='400')
-        text_chunk_overlap = config_parser_object.get('Chunking', 'text_chunk_overlap', fallback='200')
-        text_adaptive_chunking = config_parser_object.get('Chunking', 'text_adaptive_chunking', fallback='False')
-        text_chunking_multi_level = config_parser_object.get('Chunking', 'text_chunking_multi_level', fallback='False')
-        text_language = config_parser_object.get('Chunking', 'text_language', fallback='english')
+        text_chunking_method = config_parser_object.get("Chunking", "text_chunking_method", fallback="words")
+        text_chunk_max_size = config_parser_object.get("Chunking", "text_chunk_max_size", fallback="400")
+        text_chunk_overlap = config_parser_object.get("Chunking", "text_chunk_overlap", fallback="200")
+        text_adaptive_chunking = config_parser_object.get("Chunking", "text_adaptive_chunking", fallback="False")
+        text_chunking_multi_level = config_parser_object.get("Chunking", "text_chunking_multi_level", fallback="False")
+        text_language = config_parser_object.get("Chunking", "text_language", fallback="english")
         #
         # Video Transcription Chunking
-        video_chunking_method = config_parser_object.get('Chunking', 'video_chunking_method', fallback='words')
-        video_chunk_max_size = config_parser_object.get('Chunking', 'video_chunk_max_size', fallback='400')
-        video_chunk_overlap = config_parser_object.get('Chunking', 'video_chunk_overlap', fallback='200')
-        video_adaptive_chunking = config_parser_object.get('Chunking', 'video_adaptive_chunking', fallback='False')
-        video_chunking_multi_level = config_parser_object.get('Chunking', 'video_chunking_multi_level', fallback='False')
-        video_language = config_parser_object.get('Chunking', 'video_language', fallback='english')
+        video_chunking_method = config_parser_object.get("Chunking", "video_chunking_method", fallback="words")
+        video_chunk_max_size = config_parser_object.get("Chunking", "video_chunk_max_size", fallback="400")
+        video_chunk_overlap = config_parser_object.get("Chunking", "video_chunk_overlap", fallback="200")
+        video_adaptive_chunking = config_parser_object.get("Chunking", "video_adaptive_chunking", fallback="False")
+        video_chunking_multi_level = config_parser_object.get(
+            "Chunking", "video_chunking_multi_level", fallback="False"
+        )
+        video_language = config_parser_object.get("Chunking", "video_language", fallback="english")
         #
         # Proposition Chunking Defaults
-        proposition_engine = config_parser_object.get('Chunking', 'proposition_engine', fallback='heuristic')
-        proposition_prompt_profile = config_parser_object.get('Chunking', 'proposition_prompt_profile', fallback='generic')
-        proposition_aggressiveness = config_parser_object.get('Chunking', 'proposition_aggressiveness', fallback='1')
-        proposition_min_proposition_length = config_parser_object.get('Chunking', 'proposition_min_proposition_length', fallback='15')
+        proposition_engine = config_parser_object.get("Chunking", "proposition_engine", fallback="heuristic")
+        proposition_prompt_profile = config_parser_object.get(
+            "Chunking", "proposition_prompt_profile", fallback="generic"
+        )
+        proposition_aggressiveness = config_parser_object.get("Chunking", "proposition_aggressiveness", fallback="1")
+        proposition_min_proposition_length = config_parser_object.get(
+            "Chunking", "proposition_min_proposition_length", fallback="15"
+        )
         #
 
         # Retrieve Embedding model settings from the configuration file
         # Default to Qwen3-Embedding-4B-GGUF if not specified
-        embedding_model = config_parser_object.get('Embeddings', 'embedding_model', fallback='Qwen/Qwen3-Embedding-4B-GGUF')
+        embedding_model = config_parser_object.get(
+            "Embeddings", "embedding_model", fallback="Qwen/Qwen3-Embedding-4B-GGUF"
+        )
         _buffered_log("TRACE", f"Embedding model set to: {embedding_model}")
-        embedding_provider = config_parser_object.get('Embeddings', 'embedding_provider', fallback='huggingface')
+        embedding_provider = config_parser_object.get("Embeddings", "embedding_provider", fallback="huggingface")
         # Note: duplicate line removed - embedding_model already retrieved above
-        onnx_model_path = config_parser_object.get('Embeddings', 'onnx_model_path', fallback="./App_Function_Libraries/onnx_models/text-embedding-3-small.onnx")
-        model_dir = config_parser_object.get('Embeddings', 'model_dir', fallback="./App_Function_Libraries/onnx_models")
-        embedding_api_url = config_parser_object.get('Embeddings', 'embedding_api_url', fallback="http://localhost:8080/v1/embeddings")
-        embedding_api_key = config_parser_object.get('Embeddings', 'embedding_api_key', fallback='')
+        onnx_model_path = config_parser_object.get(
+            "Embeddings", "onnx_model_path", fallback="./App_Function_Libraries/onnx_models/text-embedding-3-small.onnx"
+        )
+        model_dir = config_parser_object.get("Embeddings", "model_dir", fallback="./App_Function_Libraries/onnx_models")
+        embedding_api_url = config_parser_object.get(
+            "Embeddings", "embedding_api_url", fallback="http://localhost:8080/v1/embeddings"
+        )
+        embedding_api_key = config_parser_object.get("Embeddings", "embedding_api_key", fallback="")
         # Fallback model if primary model fails
-        embedding_fallback_model = config_parser_object.get('Embeddings', 'embedding_fallback_model', fallback='sentence-transformers/all-MiniLM-L6-v2')
+        embedding_fallback_model = config_parser_object.get(
+            "Embeddings", "embedding_fallback_model", fallback="sentence-transformers/all-MiniLM-L6-v2"
+        )
         # Auto-generate embeddings on upload
-        auto_generate_embeddings = config_parser_object.get('Embeddings', 'auto_generate_on_upload', fallback='false').lower() == 'true'
-        chunk_size = config_parser_object.get('Embeddings', 'chunk_size', fallback=400)
-        overlap = config_parser_object.get('Embeddings', 'overlap', fallback=200)
+        auto_generate_embeddings = (
+            config_parser_object.get("Embeddings", "auto_generate_on_upload", fallback="false").lower() == "true"
+        )
+        chunk_size = config_parser_object.get("Embeddings", "chunk_size", fallback=400)
+        overlap = config_parser_object.get("Embeddings", "overlap", fallback=200)
         # Contextual chunking defaults for embeddings
-        enable_contextual_chunking_cfg = config_parser_object.get('Embeddings', 'enable_contextual_chunking', fallback='false')
+        enable_contextual_chunking_cfg = config_parser_object.get(
+            "Embeddings", "enable_contextual_chunking", fallback="false"
+        )
         try:
-            enable_contextual_chunking_flag = str(enable_contextual_chunking_cfg).strip().lower() in {"true","1","yes","on"}
+            enable_contextual_chunking_flag = str(enable_contextual_chunking_cfg).strip().lower() in {
+                "true",
+                "1",
+                "yes",
+                "on",
+            }
         except _CONFIG_NONCRITICAL_EXCEPTIONS:
             enable_contextual_chunking_flag = False
         # Allow contextual LLM model in Embeddings (fallback to Claims section for backward compat)
-        contextual_llm_model_cfg = config_parser_object.get('Embeddings', 'contextual_llm_model', fallback=None)
-        contextual_llm_provider_cfg = config_parser_object.get('Embeddings', 'contextual_llm_provider', fallback=None)
+        contextual_llm_model_cfg = config_parser_object.get("Embeddings", "contextual_llm_model", fallback=None)
+        contextual_llm_provider_cfg = config_parser_object.get("Embeddings", "contextual_llm_provider", fallback=None)
         # Temperature for contextualization LLM
         contextual_llm_temperature_cfg = None
         try:
-            _temp_val = config_parser_object.get('Embeddings', 'contextual_llm_temperature', fallback='')
-            if _temp_val is not None and str(_temp_val).strip() != '':
+            _temp_val = config_parser_object.get("Embeddings", "contextual_llm_temperature", fallback="")
+            if _temp_val is not None and str(_temp_val).strip() != "":
                 contextual_llm_temperature_cfg = float(_temp_val)
         except _CONFIG_NONCRITICAL_EXCEPTIONS:
             contextual_llm_temperature_cfg = None
         if not contextual_llm_model_cfg:
-            contextual_llm_model_cfg = config_parser_object.get('Claims', 'contextual_llm_model', fallback=None)
+            contextual_llm_model_cfg = config_parser_object.get("Claims", "contextual_llm_model", fallback=None)
         # Window size: allow None to lock full-doc behavior
-        context_window_size_cfg = config_parser_object.get('Embeddings', 'context_window_size', fallback=None)
+        context_window_size_cfg = config_parser_object.get("Embeddings", "context_window_size", fallback=None)
         if context_window_size_cfg is None:
             # Fallback to chunking section if not specified under Embeddings
-            context_window_size_cfg = config_parser_object.get('Chunking', 'context_window_size', fallback=None)
+            context_window_size_cfg = config_parser_object.get("Chunking", "context_window_size", fallback=None)
+
         def _parse_optional_int(val):
             if val is None:
                 return None
@@ -3823,106 +4430,155 @@ def load_and_log_configs():
                 return int(s)
             except _CONFIG_NONCRITICAL_EXCEPTIONS:
                 return None
+
         context_window_size_val = _parse_optional_int(context_window_size_cfg)
         # Strategy/budget
-        context_strategy_cfg = config_parser_object.get('Embeddings', 'context_strategy', fallback='auto')
-        context_strategy_val = str(context_strategy_cfg).strip().lower() if context_strategy_cfg else 'auto'
-        context_token_budget_cfg = config_parser_object.get('Embeddings', 'context_token_budget', fallback='6000')
+        context_strategy_cfg = config_parser_object.get("Embeddings", "context_strategy", fallback="auto")
+        context_strategy_val = str(context_strategy_cfg).strip().lower() if context_strategy_cfg else "auto"
+        context_token_budget_cfg = config_parser_object.get("Embeddings", "context_token_budget", fallback="6000")
         try:
             context_token_budget_val = int(str(context_token_budget_cfg).strip())
         except _CONFIG_NONCRITICAL_EXCEPTIONS:
             context_token_budget_val = 6000
 
         # Prompts - FIXME
-        config_parser_object.get('Prompts', 'prompt_path', fallback='Databases/prompts.db')
+        config_parser_object.get("Prompts", "prompt_path", fallback="Databases/prompts.db")
 
         # Chat Dictionaries
-        enable_chat_dictionaries = config_parser_object.get('Chat-Dictionaries', 'enable_chat_dictionaries', fallback='False')
-        post_gen_replacement = config_parser_object.get('Chat-Dictionaries', 'post_gen_replacement', fallback='False')
-        post_gen_replacement_dict = config_parser_object.get('Chat-Dictionaries', 'post_gen_replacement_dict', fallback='')
-        chat_dict_chat_prompts = config_parser_object.get('Chat-Dictionaries', 'chat_dictionary_chat_prompts', fallback='')
-        chat_dict_rag_prompts = config_parser_object.get('Chat-Dictionaries', 'chat_dictionary_RAG_prompts', fallback='')
-        chat_dict_replacement_strategy = config_parser_object.get('Chat-Dictionaries', 'chat_dictionary_replacement_strategy', fallback='character_lore_first')
-        chat_dict_max_tokens = config_parser_object.get('Chat-Dictionaries', 'chat_dictionary_max_tokens', fallback='1000')
-        default_rag_prompt = config_parser_object.get('Chat-Dictionaries', 'default_rag_prompt', fallback='')
+        enable_chat_dictionaries = config_parser_object.get(
+            "Chat-Dictionaries", "enable_chat_dictionaries", fallback="False"
+        )
+        post_gen_replacement = config_parser_object.get("Chat-Dictionaries", "post_gen_replacement", fallback="False")
+        post_gen_replacement_dict = config_parser_object.get(
+            "Chat-Dictionaries", "post_gen_replacement_dict", fallback=""
+        )
+        chat_dict_chat_prompts = config_parser_object.get(
+            "Chat-Dictionaries", "chat_dictionary_chat_prompts", fallback=""
+        )
+        chat_dict_rag_prompts = config_parser_object.get(
+            "Chat-Dictionaries", "chat_dictionary_RAG_prompts", fallback=""
+        )
+        chat_dict_replacement_strategy = config_parser_object.get(
+            "Chat-Dictionaries", "chat_dictionary_replacement_strategy", fallback="character_lore_first"
+        )
+        chat_dict_max_tokens = config_parser_object.get(
+            "Chat-Dictionaries", "chat_dictionary_max_tokens", fallback="1000"
+        )
+        default_rag_prompt = config_parser_object.get("Chat-Dictionaries", "default_rag_prompt", fallback="")
         rag_default_llm_provider = os.getenv("RAG_DEFAULT_LLM_PROVIDER") or (
-            config_parser_object.get('RAG', 'default_llm_provider', fallback=None)
-            if config_parser_object.has_section('RAG') else None
+            config_parser_object.get("RAG", "default_llm_provider", fallback=None)
+            if config_parser_object.has_section("RAG")
+            else None
         )
         rag_default_llm_model = os.getenv("RAG_DEFAULT_LLM_MODEL") or (
-            config_parser_object.get('RAG', 'default_llm_model', fallback=None)
-            if config_parser_object.has_section('RAG') else None
+            config_parser_object.get("RAG", "default_llm_model", fallback=None)
+            if config_parser_object.has_section("RAG")
+            else None
         )
 
         # Auto-Save Values
-        save_character_chats = config_parser_object.get('Auto-Save', 'save_character_chats', fallback='False')
-        save_rag_chats = config_parser_object.get('Auto-Save', 'save_rag_chats', fallback='False')
+        save_character_chats = config_parser_object.get("Auto-Save", "save_character_chats", fallback="False")
+        save_rag_chats = config_parser_object.get("Auto-Save", "save_rag_chats", fallback="False")
 
         # Media Processing Limits
-        max_audio_file_size_mb = int(config_parser_object.get('Media-Processing', 'max_audio_file_size_mb', fallback='500'))
-        max_pdf_file_size_mb = int(config_parser_object.get('Media-Processing', 'max_pdf_file_size_mb', fallback='50'))
-        max_video_file_size_mb = int(config_parser_object.get('Media-Processing', 'max_video_file_size_mb', fallback='1000'))
-        max_epub_file_size_mb = int(config_parser_object.get('Media-Processing', 'max_epub_file_size_mb', fallback='100'))
-        max_document_file_size_mb = int(config_parser_object.get('Media-Processing', 'max_document_file_size_mb', fallback='50'))
-        max_code_file_size_mb = int(config_parser_object.get('Media-Processing', 'max_code_file_size_mb', fallback=str(max_document_file_size_mb)))
+        max_audio_file_size_mb = int(
+            config_parser_object.get("Media-Processing", "max_audio_file_size_mb", fallback="500")
+        )
+        max_pdf_file_size_mb = int(config_parser_object.get("Media-Processing", "max_pdf_file_size_mb", fallback="50"))
+        max_video_file_size_mb = int(
+            config_parser_object.get("Media-Processing", "max_video_file_size_mb", fallback="1000")
+        )
+        max_epub_file_size_mb = int(
+            config_parser_object.get("Media-Processing", "max_epub_file_size_mb", fallback="100")
+        )
+        max_document_file_size_mb = int(
+            config_parser_object.get("Media-Processing", "max_document_file_size_mb", fallback="50")
+        )
+        max_code_file_size_mb = int(
+            config_parser_object.get(
+                "Media-Processing", "max_code_file_size_mb", fallback=str(max_document_file_size_mb)
+            )
+        )
         # Processing timeouts
-        pdf_conversion_timeout_seconds = int(config_parser_object.get('Media-Processing', 'pdf_conversion_timeout_seconds', fallback='300'))
-        audio_processing_timeout_seconds = int(config_parser_object.get('Media-Processing', 'audio_processing_timeout_seconds', fallback='600'))
-        video_processing_timeout_seconds = int(config_parser_object.get('Media-Processing', 'video_processing_timeout_seconds', fallback='1200'))
+        pdf_conversion_timeout_seconds = int(
+            config_parser_object.get("Media-Processing", "pdf_conversion_timeout_seconds", fallback="300")
+        )
+        audio_processing_timeout_seconds = int(
+            config_parser_object.get("Media-Processing", "audio_processing_timeout_seconds", fallback="600")
+        )
+        video_processing_timeout_seconds = int(
+            config_parser_object.get("Media-Processing", "video_processing_timeout_seconds", fallback="1200")
+        )
         # Archive processing limits
-        max_archive_internal_files = int(config_parser_object.get('Media-Processing', 'max_archive_internal_files', fallback='100'))
-        max_archive_uncompressed_size_mb = int(config_parser_object.get('Media-Processing', 'max_archive_uncompressed_size_mb', fallback='200'))
-        max_archive_nesting_depth = int(config_parser_object.get('Media-Processing', 'max_archive_nesting_depth', fallback='2'))
+        max_archive_internal_files = int(
+            config_parser_object.get("Media-Processing", "max_archive_internal_files", fallback="100")
+        )
+        max_archive_uncompressed_size_mb = int(
+            config_parser_object.get("Media-Processing", "max_archive_uncompressed_size_mb", fallback="200")
+        )
+        max_archive_nesting_depth = int(
+            config_parser_object.get("Media-Processing", "max_archive_nesting_depth", fallback="2")
+        )
         max_archive_member_uncompressed_size_mb = int(
             config_parser_object.get(
-                'Media-Processing',
-                'max_archive_member_uncompressed_size_mb',
-                fallback='100',
+                "Media-Processing",
+                "max_archive_member_uncompressed_size_mb",
+                fallback="100",
             )
         )
         sanitize_html_uploads = is_truthy(
             config_parser_object.get(
-                'Media-Processing',
-                'sanitize_html_uploads',
-                fallback='true',
+                "Media-Processing",
+                "sanitize_html_uploads",
+                fallback="true",
             )
         )
         sanitize_xml_uploads = is_truthy(
             config_parser_object.get(
-                'Media-Processing',
-                'sanitize_xml_uploads',
-                fallback='true',
+                "Media-Processing",
+                "sanitize_xml_uploads",
+                fallback="true",
             )
         )
         sanitize_email_html_bodies = is_truthy(
             config_parser_object.get(
-                'Media-Processing',
-                'sanitize_email_html_bodies',
-                fallback='true',
+                "Media-Processing",
+                "sanitize_email_html_bodies",
+                fallback="true",
             )
         )
         validate_email_archive_contents = is_truthy(
             config_parser_object.get(
-                'Media-Processing',
-                'validate_email_archive_contents',
-                fallback='true',
+                "Media-Processing",
+                "validate_email_archive_contents",
+                fallback="true",
             )
         )
         # Transcription settings
-        audio_transcription_buffer_size_mb = int(config_parser_object.get('Media-Processing', 'audio_transcription_buffer_size_mb', fallback='10'))
+        audio_transcription_buffer_size_mb = int(
+            config_parser_object.get("Media-Processing", "audio_transcription_buffer_size_mb", fallback="10")
+        )
         # General settings
-        uuid_generation_length = int(config_parser_object.get('Media-Processing', 'uuid_generation_length', fallback='8'))
+        uuid_generation_length = int(
+            config_parser_object.get("Media-Processing", "uuid_generation_length", fallback="8")
+        )
         # Kept video storage limits
-        kept_video_max_files = int(config_parser_object.get('Media-Processing', 'kept_video_max_files', fallback='5'))
-        kept_video_max_storage_mb = int(config_parser_object.get('Media-Processing', 'kept_video_max_storage_mb', fallback='500'))
-        kept_video_retention_hours = int(config_parser_object.get('Media-Processing', 'kept_video_retention_hours', fallback='2'))
+        kept_video_max_files = int(config_parser_object.get("Media-Processing", "kept_video_max_files", fallback="5"))
+        kept_video_max_storage_mb = int(
+            config_parser_object.get("Media-Processing", "kept_video_max_storage_mb", fallback="500")
+        )
+        kept_video_retention_hours = int(
+            config_parser_object.get("Media-Processing", "kept_video_retention_hours", fallback="2")
+        )
 
         # Local API Timeout
-        local_api_timeout = config_parser_object.get('Local-API', 'local_api_timeout', fallback='90')
+        local_api_timeout = config_parser_object.get("Local-API", "local_api_timeout", fallback="90")
 
         # STT Settings
-        raw_default_stt_provider = config_parser_object.get('STT-Settings', 'default_stt_provider', fallback='faster-whisper')
-        raw_default_transcriber = config_parser_object.get('STT-Settings', 'default_transcriber', fallback='')
+        raw_default_stt_provider = config_parser_object.get(
+            "STT-Settings", "default_stt_provider", fallback="faster-whisper"
+        )
+        raw_default_transcriber = config_parser_object.get("STT-Settings", "default_transcriber", fallback="")
 
         def _normalize_stt_provider_name(name: str) -> str:
             """
@@ -3947,30 +4603,40 @@ def load_and_log_configs():
         default_transcriber = tmp_default_transcriber or default_stt_provider
         default_batch_transcription_model = (
             config_parser_object.get(
-                'STT-Settings',
-                'default_batch_transcription_model',
-                fallback='parakeet-onnx',
+                "STT-Settings",
+                "default_batch_transcription_model",
+                fallback="parakeet-tdt-0.6b-v3-onnx",
             ).strip()
-            or 'parakeet-onnx'
+            or "parakeet-tdt-0.6b-v3-onnx"
         )
         default_streaming_transcription_model = (
             config_parser_object.get(
-                'STT-Settings',
-                'default_streaming_transcription_model',
-                fallback='parakeet-onnx',
+                "STT-Settings",
+                "default_streaming_transcription_model",
+                fallback="parakeet-tdt-0.6b-v3-onnx",
             ).strip()
-            or 'parakeet-onnx'
+            or "parakeet-tdt-0.6b-v3-onnx"
         )
-        nemo_model_variant = config_parser_object.get('STT-Settings', 'nemo_model_variant', fallback='standard')
-        nemo_device = config_parser_object.get('STT-Settings', 'nemo_device', fallback='cuda')
-        nemo_cache_dir = config_parser_object.get('STT-Settings', 'nemo_cache_dir', fallback='./models/nemo')
+        nemo_model_variant = config_parser_object.get("STT-Settings", "nemo_model_variant", fallback="onnx")
+        nemo_device = config_parser_object.get("STT-Settings", "nemo_device", fallback="cuda")
+        nemo_cache_dir = config_parser_object.get("STT-Settings", "nemo_cache_dir", fallback="./models/nemo")
         # STT custom vocabulary (optional)
-        stt_custom_vocab_terms_file = config_parser_object.get('STT-Settings', 'custom_vocab_terms_file', fallback='')
-        stt_custom_vocab_replacements_file = config_parser_object.get('STT-Settings', 'custom_vocab_replacements_file', fallback='')
-        stt_custom_vocab_initial_prompt_enable = config_parser_object.get('STT-Settings', 'custom_vocab_initial_prompt_enable', fallback='True')
-        stt_custom_vocab_postprocess_enable = config_parser_object.get('STT-Settings', 'custom_vocab_postprocess_enable', fallback='True')
-        stt_custom_vocab_prompt_template = config_parser_object.get('STT-Settings', 'custom_vocab_prompt_template', fallback='')
-        stt_custom_vocab_case_sensitive = config_parser_object.get('STT-Settings', 'custom_vocab_case_sensitive', fallback='False')
+        stt_custom_vocab_terms_file = config_parser_object.get("STT-Settings", "custom_vocab_terms_file", fallback="")
+        stt_custom_vocab_replacements_file = config_parser_object.get(
+            "STT-Settings", "custom_vocab_replacements_file", fallback=""
+        )
+        stt_custom_vocab_initial_prompt_enable = config_parser_object.get(
+            "STT-Settings", "custom_vocab_initial_prompt_enable", fallback="True"
+        )
+        stt_custom_vocab_postprocess_enable = config_parser_object.get(
+            "STT-Settings", "custom_vocab_postprocess_enable", fallback="True"
+        )
+        stt_custom_vocab_prompt_template = config_parser_object.get(
+            "STT-Settings", "custom_vocab_prompt_template", fallback=""
+        )
+        stt_custom_vocab_case_sensitive = config_parser_object.get(
+            "STT-Settings", "custom_vocab_case_sensitive", fallback="False"
+        )
 
         # Diarization Settings (optional; overrides DIARIZATION_CONFIG when present)
         def _get_bool(section: str, key: str, default: bool) -> bool:
@@ -4040,38 +4706,38 @@ def load_and_log_configs():
                 return None
 
         # Parakeet MLX settings
-        mlx_model_id = _get_str('STT-Settings', 'mlx_model_id', 'mlx-community/parakeet-tdt-0.6b-v3')
-        mlx_cache_dir = _get_str('STT-Settings', 'mlx_cache_dir', '') or ''
+        mlx_model_id = _get_str("STT-Settings", "mlx_model_id", "mlx-community/parakeet-tdt-0.6b-v3")
+        mlx_cache_dir = _get_str("STT-Settings", "mlx_cache_dir", "") or ""
         parakeet_onnx_model_id = (
-            _get_str('STT-Settings', 'parakeet_onnx_model_id', 'istupakov/parakeet-tdt-0.6b-v3-onnx')
-            or 'istupakov/parakeet-tdt-0.6b-v3-onnx'
+            _get_str("STT-Settings", "parakeet_onnx_model_id", "istupakov/parakeet-tdt-0.6b-v3-onnx")
+            or "istupakov/parakeet-tdt-0.6b-v3-onnx"
         )
-        parakeet_onnx_revision = _get_str('STT-Settings', 'parakeet_onnx_revision', None)
-        mlx_chunk_duration = _get_float('STT-Settings', 'mlx_chunk_duration', 30.0)
-        mlx_overlap_duration = _get_float('STT-Settings', 'mlx_overlap_duration', 5.0)
-        buffered_chunk_duration = _get_float('STT-Settings', 'buffered_chunk_duration', mlx_chunk_duration)
-        buffered_total_buffer = _to_optional_float(_get_str('STT-Settings', 'buffered_total_buffer', None))
-        buffered_merge_algo = _get_str('STT-Settings', 'buffered_merge_algo', 'middle') or 'middle'
+        parakeet_onnx_revision = _get_str("STT-Settings", "parakeet_onnx_revision", None)
+        mlx_chunk_duration = _get_float("STT-Settings", "mlx_chunk_duration", 30.0)
+        mlx_overlap_duration = _get_float("STT-Settings", "mlx_overlap_duration", 5.0)
+        buffered_chunk_duration = _get_float("STT-Settings", "buffered_chunk_duration", mlx_chunk_duration)
+        buffered_total_buffer = _to_optional_float(_get_str("STT-Settings", "buffered_total_buffer", None))
+        buffered_merge_algo = _get_str("STT-Settings", "buffered_merge_algo", "middle") or "middle"
         streaming_fallback_to_whisper = _get_bool(
-            'STT-Settings',
-            'streaming_fallback_to_whisper',
+            "STT-Settings",
+            "streaming_fallback_to_whisper",
             default=False,
         )
 
-        mlx_decoding_mode = _get_str('STT-Settings', 'mlx_decoding_mode', '') or ''
-        mlx_beam_size = _to_optional_int(_get_str('STT-Settings', 'mlx_beam_size', None))
-        mlx_length_penalty = _to_optional_float(_get_str('STT-Settings', 'mlx_length_penalty', None))
-        mlx_patience = _to_optional_float(_get_str('STT-Settings', 'mlx_patience', None))
-        mlx_duration_reward = _to_optional_float(_get_str('STT-Settings', 'mlx_duration_reward', None))
-        mlx_sentence_max_words = _to_optional_int(_get_str('STT-Settings', 'mlx_sentence_max_words', None))
-        mlx_sentence_silence_gap = _to_optional_float(_get_str('STT-Settings', 'mlx_sentence_silence_gap', None))
-        mlx_sentence_max_duration = _to_optional_float(_get_str('STT-Settings', 'mlx_sentence_max_duration', None))
-        mlx_stream_context_left = _get_int('STT-Settings', 'mlx_stream_context_left', 256)
-        mlx_stream_context_right = _get_int('STT-Settings', 'mlx_stream_context_right', 256)
-        mlx_stream_depth = _get_int('STT-Settings', 'mlx_stream_depth', 1)
+        mlx_decoding_mode = _get_str("STT-Settings", "mlx_decoding_mode", "") or ""
+        mlx_beam_size = _to_optional_int(_get_str("STT-Settings", "mlx_beam_size", None))
+        mlx_length_penalty = _to_optional_float(_get_str("STT-Settings", "mlx_length_penalty", None))
+        mlx_patience = _to_optional_float(_get_str("STT-Settings", "mlx_patience", None))
+        mlx_duration_reward = _to_optional_float(_get_str("STT-Settings", "mlx_duration_reward", None))
+        mlx_sentence_max_words = _to_optional_int(_get_str("STT-Settings", "mlx_sentence_max_words", None))
+        mlx_sentence_silence_gap = _to_optional_float(_get_str("STT-Settings", "mlx_sentence_silence_gap", None))
+        mlx_sentence_max_duration = _to_optional_float(_get_str("STT-Settings", "mlx_sentence_max_duration", None))
+        mlx_stream_context_left = _get_int("STT-Settings", "mlx_stream_context_left", 256)
+        mlx_stream_context_right = _get_int("STT-Settings", "mlx_stream_context_right", 256)
+        mlx_stream_depth = _get_int("STT-Settings", "mlx_stream_depth", 1)
         mlx_stream_keep_original_attention = _get_bool(
-            'STT-Settings',
-            'mlx_stream_keep_original_attention',
+            "STT-Settings",
+            "mlx_stream_keep_original_attention",
             default=False,
         )
 
@@ -4098,61 +4764,135 @@ def load_and_log_configs():
             return _get_str(section, key, default)
 
         # VibeVoice-ASR settings (local inference + optional vLLM HTTP path)
-        vibevoice_enabled = _get_bool('STT-Settings', 'vibevoice_enabled', default=False)
-        vibevoice_model_id = _get_str('STT-Settings', 'vibevoice_model_id', 'microsoft/VibeVoice-ASR') or 'microsoft/VibeVoice-ASR'
-        vibevoice_device = _get_str('STT-Settings', 'vibevoice_device', 'cuda') or 'cuda'
-        vibevoice_dtype = _get_str('STT-Settings', 'vibevoice_dtype', 'bfloat16') or 'bfloat16'
-        vibevoice_cache_dir = _get_str('STT-Settings', 'vibevoice_cache_dir', './models/vibevoice') or './models/vibevoice'
-        vibevoice_allow_download = _get_bool('STT-Settings', 'vibevoice_allow_download', default=True)
-        vibevoice_vllm_enabled = _get_bool('STT-Settings', 'vibevoice_vllm_enabled', default=False)
-        vibevoice_vllm_base_url = _get_str('STT-Settings', 'vibevoice_vllm_base_url', '') or ''
-        vibevoice_vllm_model_id = _get_str('STT-Settings', 'vibevoice_vllm_model_id', vibevoice_model_id) or vibevoice_model_id
-        vibevoice_vllm_api_key = _get_str('STT-Settings', 'vibevoice_vllm_api_key', None)
-        vibevoice_vllm_timeout_seconds = _get_int('STT-Settings', 'vibevoice_vllm_timeout_seconds', 600)
+        vibevoice_enabled = _get_bool("STT-Settings", "vibevoice_enabled", default=False)
+        vibevoice_model_id = (
+            _get_str("STT-Settings", "vibevoice_model_id", "microsoft/VibeVoice-ASR") or "microsoft/VibeVoice-ASR"
+        )
+        vibevoice_device = _get_str("STT-Settings", "vibevoice_device", "cuda") or "cuda"
+        vibevoice_dtype = _get_str("STT-Settings", "vibevoice_dtype", "bfloat16") or "bfloat16"
+        vibevoice_cache_dir = (
+            _get_str("STT-Settings", "vibevoice_cache_dir", "./models/vibevoice") or "./models/vibevoice"
+        )
+        vibevoice_allow_download = _get_bool("STT-Settings", "vibevoice_allow_download", default=True)
+        vibevoice_vllm_enabled = _get_bool("STT-Settings", "vibevoice_vllm_enabled", default=False)
+        vibevoice_vllm_base_url = _get_str("STT-Settings", "vibevoice_vllm_base_url", "") or ""
+        vibevoice_vllm_model_id = (
+            _get_str("STT-Settings", "vibevoice_vllm_model_id", vibevoice_model_id) or vibevoice_model_id
+        )
+        vibevoice_vllm_api_key = _get_str("STT-Settings", "vibevoice_vllm_api_key", None)
+        vibevoice_vllm_timeout_seconds = _get_int("STT-Settings", "vibevoice_vllm_timeout_seconds", 600)
 
         diarization_config = dict(DIARIZATION_CONFIG)
-        if config_parser_object.has_section('Diarization'):
+        if config_parser_object.has_section("Diarization"):
             # Backend and VAD behavior
-            diarization_config['backend'] = _get_str('Diarization', 'backend', diarization_config.get('backend')) or diarization_config.get('backend')
-            diarization_config['vad_backend'] = _get_str('Diarization', 'vad_backend', diarization_config.get('vad_backend')) or diarization_config.get('vad_backend')
-            diarization_config['vad_threshold'] = _get_float('Diarization', 'vad_threshold', diarization_config.get('vad_threshold', 0.5))
-            diarization_config['vad_min_speech_duration'] = _get_float('Diarization', 'vad_min_speech_duration', diarization_config.get('vad_min_speech_duration', 0.25))
-            diarization_config['vad_min_silence_duration'] = _get_float('Diarization', 'vad_min_silence_duration', diarization_config.get('vad_min_silence_duration', 0.25))
-            diarization_config['allow_vad_fallback'] = _get_bool('Diarization', 'allow_vad_fallback', diarization_config.get('allow_vad_fallback', True))
-            diarization_config['enable_torch_hub_fetch'] = _get_bool('Diarization', 'enable_torch_hub_fetch', diarization_config.get('enable_torch_hub_fetch', True))
-            diarization_config['onnx_model_path'] = _get_str('Diarization', 'onnx_model_path', diarization_config.get('onnx_model_path'))
+            diarization_config["backend"] = _get_str(
+                "Diarization", "backend", diarization_config.get("backend")
+            ) or diarization_config.get("backend")
+            diarization_config["vad_backend"] = _get_str(
+                "Diarization", "vad_backend", diarization_config.get("vad_backend")
+            ) or diarization_config.get("vad_backend")
+            diarization_config["vad_threshold"] = _get_float(
+                "Diarization", "vad_threshold", diarization_config.get("vad_threshold", 0.5)
+            )
+            diarization_config["vad_min_speech_duration"] = _get_float(
+                "Diarization", "vad_min_speech_duration", diarization_config.get("vad_min_speech_duration", 0.25)
+            )
+            diarization_config["vad_min_silence_duration"] = _get_float(
+                "Diarization", "vad_min_silence_duration", diarization_config.get("vad_min_silence_duration", 0.25)
+            )
+            diarization_config["allow_vad_fallback"] = _get_bool(
+                "Diarization", "allow_vad_fallback", diarization_config.get("allow_vad_fallback", True)
+            )
+            diarization_config["enable_torch_hub_fetch"] = _get_bool(
+                "Diarization", "enable_torch_hub_fetch", diarization_config.get("enable_torch_hub_fetch", True)
+            )
+            diarization_config["onnx_model_path"] = _get_str(
+                "Diarization", "onnx_model_path", diarization_config.get("onnx_model_path")
+            )
 
             # NeMo multitalk settings
-            diarization_config['nemo_multitalk_asr_model'] = _get_str('Diarization', 'nemo_multitalk_asr_model', diarization_config.get('nemo_multitalk_asr_model')) or diarization_config.get('nemo_multitalk_asr_model')
-            diarization_config['nemo_multitalk_diar_model'] = _get_str('Diarization', 'nemo_multitalk_diar_model', diarization_config.get('nemo_multitalk_diar_model')) or diarization_config.get('nemo_multitalk_diar_model')
-            diarization_config['nemo_multitalk_device'] = _get_str('Diarization', 'nemo_multitalk_device', diarization_config.get('nemo_multitalk_device')) or diarization_config.get('nemo_multitalk_device')
-            diarization_config['nemo_multitalk_cache_dir'] = _get_str('Diarization', 'nemo_multitalk_cache_dir', diarization_config.get('nemo_multitalk_cache_dir')) or diarization_config.get('nemo_multitalk_cache_dir')
-            diarization_config['nemo_multitalk_max_speakers'] = _get_int('Diarization', 'nemo_multitalk_max_speakers', diarization_config.get('nemo_multitalk_max_speakers', 4))
-            diarization_config['nemo_multitalk_disable_cuda_graphs'] = _get_bool('Diarization', 'nemo_multitalk_disable_cuda_graphs', diarization_config.get('nemo_multitalk_disable_cuda_graphs', True))
+            diarization_config["nemo_multitalk_asr_model"] = _get_str(
+                "Diarization", "nemo_multitalk_asr_model", diarization_config.get("nemo_multitalk_asr_model")
+            ) or diarization_config.get("nemo_multitalk_asr_model")
+            diarization_config["nemo_multitalk_diar_model"] = _get_str(
+                "Diarization", "nemo_multitalk_diar_model", diarization_config.get("nemo_multitalk_diar_model")
+            ) or diarization_config.get("nemo_multitalk_diar_model")
+            diarization_config["nemo_multitalk_device"] = _get_str(
+                "Diarization", "nemo_multitalk_device", diarization_config.get("nemo_multitalk_device")
+            ) or diarization_config.get("nemo_multitalk_device")
+            diarization_config["nemo_multitalk_cache_dir"] = _get_str(
+                "Diarization", "nemo_multitalk_cache_dir", diarization_config.get("nemo_multitalk_cache_dir")
+            ) or diarization_config.get("nemo_multitalk_cache_dir")
+            diarization_config["nemo_multitalk_max_speakers"] = _get_int(
+                "Diarization", "nemo_multitalk_max_speakers", diarization_config.get("nemo_multitalk_max_speakers", 4)
+            )
+            diarization_config["nemo_multitalk_disable_cuda_graphs"] = _get_bool(
+                "Diarization",
+                "nemo_multitalk_disable_cuda_graphs",
+                diarization_config.get("nemo_multitalk_disable_cuda_graphs", True),
+            )
 
             # Segmentation
-            diarization_config['segment_duration'] = _get_float('Diarization', 'segment_duration', diarization_config.get('segment_duration', 30.0))
-            diarization_config['segment_overlap'] = _get_float('Diarization', 'segment_overlap', diarization_config.get('segment_overlap', 0.5))
-            diarization_config['min_segment_duration'] = _get_float('Diarization', 'min_segment_duration', diarization_config.get('min_segment_duration', 1.0))
-            diarization_config['max_segment_duration'] = _get_float('Diarization', 'max_segment_duration', diarization_config.get('max_segment_duration', 3.0))
+            diarization_config["segment_duration"] = _get_float(
+                "Diarization", "segment_duration", diarization_config.get("segment_duration", 30.0)
+            )
+            diarization_config["segment_overlap"] = _get_float(
+                "Diarization", "segment_overlap", diarization_config.get("segment_overlap", 0.5)
+            )
+            diarization_config["min_segment_duration"] = _get_float(
+                "Diarization", "min_segment_duration", diarization_config.get("min_segment_duration", 1.0)
+            )
+            diarization_config["max_segment_duration"] = _get_float(
+                "Diarization", "max_segment_duration", diarization_config.get("max_segment_duration", 3.0)
+            )
 
             # Embeddings & clustering
-            diarization_config['embedding_model'] = _get_str('Diarization', 'embedding_model', diarization_config.get('embedding_model')) or diarization_config.get('embedding_model')
-            diarization_config['embedding_device'] = _get_str('Diarization', 'embedding_device', diarization_config.get('embedding_device')) or diarization_config.get('embedding_device')
-            diarization_config['embedding_local_only'] = _get_bool('Diarization', 'embedding_local_only', diarization_config.get('embedding_local_only', False))
-            diarization_config['embedding_batch_size'] = _get_int('Diarization', 'embedding_batch_size', diarization_config.get('embedding_batch_size', 32))
-            diarization_config['clustering_method'] = _get_str('Diarization', 'clustering_method', diarization_config.get('clustering_method')) or diarization_config.get('clustering_method')
-            diarization_config['similarity_threshold'] = _get_float('Diarization', 'similarity_threshold', diarization_config.get('similarity_threshold', 0.85))
-            diarization_config['min_speakers'] = _get_int('Diarization', 'min_speakers', diarization_config.get('min_speakers', 1))
-            diarization_config['max_speakers'] = _get_int('Diarization', 'max_speakers', diarization_config.get('max_speakers', 10))
+            diarization_config["embedding_model"] = _get_str(
+                "Diarization", "embedding_model", diarization_config.get("embedding_model")
+            ) or diarization_config.get("embedding_model")
+            diarization_config["embedding_device"] = _get_str(
+                "Diarization", "embedding_device", diarization_config.get("embedding_device")
+            ) or diarization_config.get("embedding_device")
+            diarization_config["embedding_local_only"] = _get_bool(
+                "Diarization", "embedding_local_only", diarization_config.get("embedding_local_only", False)
+            )
+            diarization_config["embedding_batch_size"] = _get_int(
+                "Diarization", "embedding_batch_size", diarization_config.get("embedding_batch_size", 32)
+            )
+            diarization_config["clustering_method"] = _get_str(
+                "Diarization", "clustering_method", diarization_config.get("clustering_method")
+            ) or diarization_config.get("clustering_method")
+            diarization_config["similarity_threshold"] = _get_float(
+                "Diarization", "similarity_threshold", diarization_config.get("similarity_threshold", 0.85)
+            )
+            diarization_config["min_speakers"] = _get_int(
+                "Diarization", "min_speakers", diarization_config.get("min_speakers", 1)
+            )
+            diarization_config["max_speakers"] = _get_int(
+                "Diarization", "max_speakers", diarization_config.get("max_speakers", 10)
+            )
 
             # Post-processing and memory
-            diarization_config['merge_threshold'] = _get_float('Diarization', 'merge_threshold', diarization_config.get('merge_threshold', 0.5))
-            diarization_config['min_speaker_duration'] = _get_float('Diarization', 'min_speaker_duration', diarization_config.get('min_speaker_duration', 3.0))
-            diarization_config['detect_overlapping_speech'] = _get_bool('Diarization', 'detect_overlapping_speech', diarization_config.get('detect_overlapping_speech', False))
-            diarization_config['overlap_confidence_threshold'] = _get_float('Diarization', 'overlap_confidence_threshold', diarization_config.get('overlap_confidence_threshold', 0.7))
-            diarization_config['memory_efficient'] = _get_bool('Diarization', 'memory_efficient', diarization_config.get('memory_efficient', False))
-            diarization_config['max_memory_mb'] = _get_int('Diarization', 'max_memory_mb', diarization_config.get('max_memory_mb', 2048))
+            diarization_config["merge_threshold"] = _get_float(
+                "Diarization", "merge_threshold", diarization_config.get("merge_threshold", 0.5)
+            )
+            diarization_config["min_speaker_duration"] = _get_float(
+                "Diarization", "min_speaker_duration", diarization_config.get("min_speaker_duration", 3.0)
+            )
+            diarization_config["detect_overlapping_speech"] = _get_bool(
+                "Diarization", "detect_overlapping_speech", diarization_config.get("detect_overlapping_speech", False)
+            )
+            diarization_config["overlap_confidence_threshold"] = _get_float(
+                "Diarization",
+                "overlap_confidence_threshold",
+                diarization_config.get("overlap_confidence_threshold", 0.7),
+            )
+            diarization_config["memory_efficient"] = _get_bool(
+                "Diarization", "memory_efficient", diarization_config.get("memory_efficient", False)
+            )
+            diarization_config["max_memory_mb"] = _get_int(
+                "Diarization", "max_memory_mb", diarization_config.get("max_memory_mb", 2048)
+            )
 
         # TTS Settings
         _tts_placeholder_literals = {
@@ -4170,19 +4910,27 @@ def load_and_log_configs():
         }
 
         def _get_tts_setting(option: str, fallback: str) -> str:
-            raw = config_parser_object.get('TTS-Settings', option, fallback=fallback)
+            raw = config_parser_object.get("TTS-Settings", option, fallback=fallback)
             value = str(raw).strip()
             return fallback if value.upper() in _tts_placeholder_literals else value
 
-        local_tts_device = _get_tts_setting('local_tts_device', 'cpu')
-        default_tts_provider = _get_tts_setting('default_tts_provider', 'openai')
-        tts_voice = _get_tts_setting('default_tts_voice', 'shimmer')
+        local_tts_device = _get_tts_setting("local_tts_device", "cpu")
+        default_tts_provider = _get_tts_setting("default_tts_provider", "openai")
+        tts_voice = _get_tts_setting("default_tts_voice", "shimmer")
         tts_history_enabled = _env_or_cfg_bool("TTS_HISTORY_ENABLED", "TTS-Settings", "tts_history_enabled", True)
-        tts_history_store_text = _env_or_cfg_bool("TTS_HISTORY_STORE_TEXT", "TTS-Settings", "tts_history_store_text", True)
-        tts_history_store_failed = _env_or_cfg_bool("TTS_HISTORY_STORE_FAILED", "TTS-Settings", "tts_history_store_failed", True)
+        tts_history_store_text = _env_or_cfg_bool(
+            "TTS_HISTORY_STORE_TEXT", "TTS-Settings", "tts_history_store_text", True
+        )
+        tts_history_store_failed = _env_or_cfg_bool(
+            "TTS_HISTORY_STORE_FAILED", "TTS-Settings", "tts_history_store_failed", True
+        )
         tts_history_hash_key = _env_or_cfg_str("TTS_HISTORY_HASH_KEY", "TTS-Settings", "tts_history_hash_key", None)
-        tts_history_retention_days = _env_or_cfg_int("TTS_HISTORY_RETENTION_DAYS", "TTS-Settings", "tts_history_retention_days", 90)
-        tts_history_max_rows_per_user = _env_or_cfg_int("TTS_HISTORY_MAX_ROWS_PER_USER", "TTS-Settings", "tts_history_max_rows_per_user", 10000)
+        tts_history_retention_days = _env_or_cfg_int(
+            "TTS_HISTORY_RETENTION_DAYS", "TTS-Settings", "tts_history_retention_days", 90
+        )
+        tts_history_max_rows_per_user = _env_or_cfg_int(
+            "TTS_HISTORY_MAX_ROWS_PER_USER", "TTS-Settings", "tts_history_max_rows_per_user", 10000
+        )
         tts_history_purge_interval_hours = _env_or_cfg_int(
             "TTS_HISTORY_PURGE_INTERVAL_HOURS",
             "TTS-Settings",
@@ -4190,150 +4938,228 @@ def load_and_log_configs():
             24,
         )
         # Open AI TTS
-        default_openai_tts_model = _get_tts_setting('default_openai_tts_model', 'tts-1-hd')
-        default_openai_tts_voice = _get_tts_setting('default_openai_tts_voice', 'shimmer')
-        default_openai_tts_speed = _get_tts_setting('default_openai_tts_speed', '1')
-        default_openai_tts_output_format = _get_tts_setting('default_openai_tts_output_format', 'mp3')
-        config_parser_object.get('TTS-Settings', 'default_openai_tts_streaming', fallback='False')
+        default_openai_tts_model = _get_tts_setting("default_openai_tts_model", "tts-1-hd")
+        default_openai_tts_voice = _get_tts_setting("default_openai_tts_voice", "shimmer")
+        default_openai_tts_speed = _get_tts_setting("default_openai_tts_speed", "1")
+        default_openai_tts_output_format = _get_tts_setting("default_openai_tts_output_format", "mp3")
+        config_parser_object.get("TTS-Settings", "default_openai_tts_streaming", fallback="False")
         # Google TTS
-        default_google_tts_model = _get_tts_setting('default_google_tts_model', 'en-US')
-        default_google_tts_voice = _get_tts_setting('default_google_tts_voice', 'en-US-Neural2-A')
-        default_google_tts_speed = _get_tts_setting('default_google_tts_speed', '1')
+        default_google_tts_model = _get_tts_setting("default_google_tts_model", "en-US")
+        default_google_tts_voice = _get_tts_setting("default_google_tts_voice", "en-US-Neural2-A")
+        default_google_tts_speed = _get_tts_setting("default_google_tts_speed", "1")
         # ElevenLabs TTS
-        default_eleven_tts_model = _get_tts_setting('default_eleven_tts_model', 'eleven_monolingual_v1')
-        default_eleven_tts_voice = _get_tts_setting('default_eleven_tts_voice', 'pNInz6obpgDQGcFmaJgB')
-        default_eleven_tts_language_code = _get_tts_setting('default_eleven_tts_language_code', 'en')
-        default_eleven_tts_voice_stability = _get_tts_setting('default_eleven_tts_voice_stability', '0.5')
-        default_eleven_tts_voice_similiarity_boost = _get_tts_setting('default_eleven_tts_voice_similiarity_boost', '0.75')
-        default_eleven_tts_voice_style = _get_tts_setting('default_eleven_tts_voice_style', '0.0')
-        default_eleven_tts_voice_use_speaker_boost = _get_tts_setting('default_eleven_tts_voice_use_speaker_boost', 'true')
-        default_eleven_tts_output_format = _get_tts_setting('default_eleven_tts_output_format', 'mp3_44100_128')
+        default_eleven_tts_model = _get_tts_setting("default_eleven_tts_model", "eleven_monolingual_v1")
+        default_eleven_tts_voice = _get_tts_setting("default_eleven_tts_voice", "pNInz6obpgDQGcFmaJgB")
+        default_eleven_tts_language_code = _get_tts_setting("default_eleven_tts_language_code", "en")
+        default_eleven_tts_voice_stability = _get_tts_setting("default_eleven_tts_voice_stability", "0.5")
+        default_eleven_tts_voice_similiarity_boost = _get_tts_setting(
+            "default_eleven_tts_voice_similiarity_boost", "0.75"
+        )
+        default_eleven_tts_voice_style = _get_tts_setting("default_eleven_tts_voice_style", "0.0")
+        default_eleven_tts_voice_use_speaker_boost = _get_tts_setting(
+            "default_eleven_tts_voice_use_speaker_boost", "true"
+        )
+        default_eleven_tts_output_format = _get_tts_setting("default_eleven_tts_output_format", "mp3_44100_128")
         # AllTalk TTS
-        alltalk_api_ip = config_parser_object.get('TTS-Settings', 'alltalk_api_ip', fallback='http://127.0.0.1:7851/v1/audio/speech')
-        default_alltalk_tts_model = config_parser_object.get('TTS-Settings', 'default_alltalk_tts_model', fallback='alltalk_model')
-        default_alltalk_tts_voice = config_parser_object.get('TTS-Settings', 'default_alltalk_tts_voice', fallback='alloy')
-        default_alltalk_tts_speed = config_parser_object.get('TTS-Settings', 'default_alltalk_tts_speed', fallback=1.0)
-        default_alltalk_tts_output_format = config_parser_object.get('TTS-Settings', 'default_alltalk_tts_output_format', fallback='mp3')
+        alltalk_api_ip = config_parser_object.get(
+            "TTS-Settings", "alltalk_api_ip", fallback="http://127.0.0.1:7851/v1/audio/speech"
+        )
+        default_alltalk_tts_model = config_parser_object.get(
+            "TTS-Settings", "default_alltalk_tts_model", fallback="alltalk_model"
+        )
+        default_alltalk_tts_voice = config_parser_object.get(
+            "TTS-Settings", "default_alltalk_tts_voice", fallback="alloy"
+        )
+        default_alltalk_tts_speed = config_parser_object.get("TTS-Settings", "default_alltalk_tts_speed", fallback=1.0)
+        default_alltalk_tts_output_format = config_parser_object.get(
+            "TTS-Settings", "default_alltalk_tts_output_format", fallback="mp3"
+        )
 
         # Kokoro TTS
-        config_parser_object.get('TTS-Settings', 'kokoro_model_path', fallback='Databases/kokoro_models')
-        default_kokoro_tts_model = config_parser_object.get('TTS-Settings', 'default_kokoro_tts_model', fallback='pht')
-        default_kokoro_tts_voice = config_parser_object.get('TTS-Settings', 'default_kokoro_tts_voice', fallback='sky')
-        default_kokoro_tts_speed = config_parser_object.get('TTS-Settings', 'default_kokoro_tts_speed', fallback=1.0)
-        default_kokoro_tts_output_format = config_parser_object.get('TTS-Settings', 'default_kokoro_tts_output_format', fallback='wav')
-
+        config_parser_object.get("TTS-Settings", "kokoro_model_path", fallback="Databases/kokoro_models")
+        default_kokoro_tts_model = config_parser_object.get("TTS-Settings", "default_kokoro_tts_model", fallback="pht")
+        default_kokoro_tts_voice = config_parser_object.get("TTS-Settings", "default_kokoro_tts_voice", fallback="sky")
+        default_kokoro_tts_speed = config_parser_object.get("TTS-Settings", "default_kokoro_tts_speed", fallback=1.0)
+        default_kokoro_tts_output_format = config_parser_object.get(
+            "TTS-Settings", "default_kokoro_tts_output_format", fallback="wav"
+        )
 
         # Self-hosted OpenAI API TTS
-        default_openai_api_tts_model = config_parser_object.get('TTS-Settings', 'default_openai_api_tts_model', fallback='tts-1-hd')
-        default_openai_api_tts_voice = config_parser_object.get('TTS-Settings', 'default_openai_api_tts_voice', fallback='shimmer')
-        default_openai_api_tts_speed = config_parser_object.get('TTS-Settings', 'default_openai_api_tts_speed', fallback='1')
-        default_openai_api_tts_output_format = config_parser_object.get('TTS-Settings', 'default_openai_tts_api_output_format', fallback='mp3')
-        default_openai_api_tts_streaming = config_parser_object.get('TTS-Settings', 'default_openai_tts_streaming', fallback='False')
-
+        default_openai_api_tts_model = config_parser_object.get(
+            "TTS-Settings", "default_openai_api_tts_model", fallback="tts-1-hd"
+        )
+        default_openai_api_tts_voice = config_parser_object.get(
+            "TTS-Settings", "default_openai_api_tts_voice", fallback="shimmer"
+        )
+        default_openai_api_tts_speed = config_parser_object.get(
+            "TTS-Settings", "default_openai_api_tts_speed", fallback="1"
+        )
+        default_openai_api_tts_output_format = config_parser_object.get(
+            "TTS-Settings", "default_openai_tts_api_output_format", fallback="mp3"
+        )
+        default_openai_api_tts_streaming = config_parser_object.get(
+            "TTS-Settings", "default_openai_tts_streaming", fallback="False"
+        )
 
         # Search Engines
-        search_provider_default = config_parser_object.get('Search-Engines', 'search_provider_default', fallback='google')
-        search_language_query = config_parser_object.get('Search-Engines', 'search_language_query', fallback='en')
-        search_language_results = config_parser_object.get('Search-Engines', 'search_language_results', fallback='en')
-        search_language_analysis = config_parser_object.get('Search-Engines', 'search_language_analysis', fallback='en')
+        search_provider_default = config_parser_object.get(
+            "Search-Engines", "search_provider_default", fallback="google"
+        )
+        search_language_query = config_parser_object.get("Search-Engines", "search_language_query", fallback="en")
+        search_language_results = config_parser_object.get("Search-Engines", "search_language_results", fallback="en")
+        search_language_analysis = config_parser_object.get("Search-Engines", "search_language_analysis", fallback="en")
         search_default_max_queries = 10
-        search_enable_subquery = config_parser_object.get('Search-Engines', 'search_enable_subquery', fallback='True')
-        search_enable_subquery_count_max = config_parser_object.get('Search-Engines', 'search_enable_subquery_count_max', fallback=5)
-        search_result_rerank = config_parser_object.get('Search-Engines', 'search_result_rerank', fallback='True')
-        search_result_max = config_parser_object.get('Search-Engines', 'search_result_max', fallback=10)
-        search_result_max_per_query = config_parser_object.get('Search-Engines', 'search_result_max_per_query', fallback=10)
-        search_result_blacklist = config_parser_object.get('Search-Engines', 'search_result_blacklist', fallback='')
-        search_result_display_type = config_parser_object.get('Search-Engines', 'search_result_display_type', fallback='list')
-        search_result_display_metadata = config_parser_object.get('Search-Engines', 'search_result_display_metadata', fallback='False')
-        search_result_save_to_db = config_parser_object.get('Search-Engines', 'search_result_save_to_db', fallback='True')
-        search_result_analysis_tone = config_parser_object.get('Search-Engines', 'search_result_analysis_tone', fallback='')
-        relevance_analysis_llm = config_parser_object.get('Search-Engines', 'relevance_analysis_llm', fallback='False')
-        final_answer_llm = config_parser_object.get('Search-Engines', 'final_answer_llm', fallback='False')
+        search_enable_subquery = config_parser_object.get("Search-Engines", "search_enable_subquery", fallback="True")
+        search_enable_subquery_count_max = config_parser_object.get(
+            "Search-Engines", "search_enable_subquery_count_max", fallback=5
+        )
+        search_result_rerank = config_parser_object.get("Search-Engines", "search_result_rerank", fallback="True")
+        search_result_max = config_parser_object.get("Search-Engines", "search_result_max", fallback=10)
+        search_result_max_per_query = config_parser_object.get(
+            "Search-Engines", "search_result_max_per_query", fallback=10
+        )
+        search_result_blacklist = config_parser_object.get("Search-Engines", "search_result_blacklist", fallback="")
+        search_result_display_type = config_parser_object.get(
+            "Search-Engines", "search_result_display_type", fallback="list"
+        )
+        search_result_display_metadata = config_parser_object.get(
+            "Search-Engines", "search_result_display_metadata", fallback="False"
+        )
+        search_result_save_to_db = config_parser_object.get(
+            "Search-Engines", "search_result_save_to_db", fallback="True"
+        )
+        search_result_analysis_tone = config_parser_object.get(
+            "Search-Engines", "search_result_analysis_tone", fallback=""
+        )
+        relevance_analysis_llm = config_parser_object.get("Search-Engines", "relevance_analysis_llm", fallback="False")
+        final_answer_llm = config_parser_object.get("Search-Engines", "final_answer_llm", fallback="False")
         # Search Engine Specifics
-        baidu_search_api_key = config_parser_object.get('Search-Engines', 'search_engine_api_key_baidu', fallback='')
+        baidu_search_api_key = config_parser_object.get("Search-Engines", "search_engine_api_key_baidu", fallback="")
         # Bing Search Settings
-        bing_search_api_key = config_parser_object.get('Search-Engines', 'search_engine_api_key_bing', fallback='')
-        bing_country_code = config_parser_object.get('Search-Engines', 'search_engine_country_code_bing', fallback='us')
-        bing_search_api_url = config_parser_object.get('Search-Engines', 'search_engine_api_url_bing', fallback='')
+        bing_search_api_key = config_parser_object.get("Search-Engines", "search_engine_api_key_bing", fallback="")
+        bing_country_code = config_parser_object.get("Search-Engines", "search_engine_country_code_bing", fallback="us")
+        bing_search_api_url = config_parser_object.get("Search-Engines", "search_engine_api_url_bing", fallback="")
         # Brave Search Settings
-        brave_search_api_key = config_parser_object.get('Search-Engines', 'search_engine_api_key_brave_regular', fallback='')
-        brave_search_ai_api_key = config_parser_object.get('Search-Engines', 'search_engine_api_key_brave_ai', fallback='')
-        brave_country_code = config_parser_object.get('Search-Engines', 'search_engine_country_code_brave', fallback='us')
+        brave_search_api_key = config_parser_object.get(
+            "Search-Engines", "search_engine_api_key_brave_regular", fallback=""
+        )
+        brave_search_ai_api_key = config_parser_object.get(
+            "Search-Engines", "search_engine_api_key_brave_ai", fallback=""
+        )
+        brave_country_code = config_parser_object.get(
+            "Search-Engines", "search_engine_country_code_brave", fallback="us"
+        )
         # DuckDuckGo Search Settings
-        duckduckgo_search_api_key = config_parser_object.get('Search-Engines', 'search_engine_api_key_duckduckgo', fallback='')
+        duckduckgo_search_api_key = config_parser_object.get(
+            "Search-Engines", "search_engine_api_key_duckduckgo", fallback=""
+        )
         # Google Search Settings
-        google_search_api_url = config_parser_object.get('Search-Engines', 'search_engine_api_url_google', fallback='')
-        google_search_api_key = config_parser_object.get('Search-Engines', 'search_engine_api_key_google', fallback='')
-        google_search_engine_id = config_parser_object.get('Search-Engines', 'search_engine_id_google', fallback='')
-        google_simp_trad_chinese = config_parser_object.get('Search-Engines', 'enable_traditional_chinese', fallback='0')
-        limit_google_search_to_country = config_parser_object.get('Search-Engines', 'limit_google_search_to_country', fallback='0')
-        google_search_country = config_parser_object.get('Search-Engines', 'google_search_country', fallback='us')
-        google_search_country_code = config_parser_object.get('Search-Engines', 'google_search_country_code', fallback='us')
-        google_filter_setting = config_parser_object.get('Search-Engines', 'google_filter_setting', fallback='1')
-        google_user_geolocation = config_parser_object.get('Search-Engines', 'google_user_geolocation', fallback='')
-        google_ui_language = config_parser_object.get('Search-Engines', 'google_ui_language', fallback='en')
-        google_limit_search_results_to_language = config_parser_object.get('Search-Engines', 'google_limit_search_results_to_language', fallback='')
-        google_default_search_results = config_parser_object.get('Search-Engines', 'google_default_search_results', fallback='10')
-        google_safe_search = config_parser_object.get('Search-Engines', 'google_safe_search', fallback='active')
-        google_enable_site_search = config_parser_object.get('Search-Engines', 'google_enable_site_search', fallback='0')
-        google_site_search_include = config_parser_object.get('Search-Engines', 'google_site_search_include', fallback='')
-        google_site_search_exclude = config_parser_object.get('Search-Engines', 'google_site_search_exclude', fallback='')
-        google_sort_results_by = config_parser_object.get('Search-Engines', 'google_sort_results_by', fallback='relevance')
+        google_search_api_url = config_parser_object.get("Search-Engines", "search_engine_api_url_google", fallback="")
+        google_search_api_key = config_parser_object.get("Search-Engines", "search_engine_api_key_google", fallback="")
+        google_search_engine_id = config_parser_object.get("Search-Engines", "search_engine_id_google", fallback="")
+        google_simp_trad_chinese = config_parser_object.get(
+            "Search-Engines", "enable_traditional_chinese", fallback="0"
+        )
+        limit_google_search_to_country = config_parser_object.get(
+            "Search-Engines", "limit_google_search_to_country", fallback="0"
+        )
+        google_search_country = config_parser_object.get("Search-Engines", "google_search_country", fallback="us")
+        google_search_country_code = config_parser_object.get(
+            "Search-Engines", "google_search_country_code", fallback="us"
+        )
+        google_filter_setting = config_parser_object.get("Search-Engines", "google_filter_setting", fallback="1")
+        google_user_geolocation = config_parser_object.get("Search-Engines", "google_user_geolocation", fallback="")
+        google_ui_language = config_parser_object.get("Search-Engines", "google_ui_language", fallback="en")
+        google_limit_search_results_to_language = config_parser_object.get(
+            "Search-Engines", "google_limit_search_results_to_language", fallback=""
+        )
+        google_default_search_results = config_parser_object.get(
+            "Search-Engines", "google_default_search_results", fallback="10"
+        )
+        google_safe_search = config_parser_object.get("Search-Engines", "google_safe_search", fallback="active")
+        google_enable_site_search = config_parser_object.get(
+            "Search-Engines", "google_enable_site_search", fallback="0"
+        )
+        google_site_search_include = config_parser_object.get(
+            "Search-Engines", "google_site_search_include", fallback=""
+        )
+        google_site_search_exclude = config_parser_object.get(
+            "Search-Engines", "google_site_search_exclude", fallback=""
+        )
+        google_sort_results_by = config_parser_object.get(
+            "Search-Engines", "google_sort_results_by", fallback="relevance"
+        )
         # Kagi Search Settings
-        kagi_search_api_key = config_parser_object.get('Search-Engines', 'search_engine_api_key_kagi', fallback='')
+        kagi_search_api_key = config_parser_object.get("Search-Engines", "search_engine_api_key_kagi", fallback="")
         # Searx Search Settings
-        search_engine_searx_api = config_parser_object.get('Search-Engines', 'search_engine_searx_api', fallback='')
+        search_engine_searx_api = config_parser_object.get("Search-Engines", "search_engine_searx_api", fallback="")
         # Tavily Search Settings
-        tavily_search_api_key = config_parser_object.get('Search-Engines', 'search_engine_api_key_tavily', fallback='')
+        tavily_search_api_key = config_parser_object.get("Search-Engines", "search_engine_api_key_tavily", fallback="")
         # Serper Search Settings
-        serper_search_api_key = config_parser_object.get('Search-Engines', 'search_engine_api_key_serper', fallback='')
-        serper_search_api_url = config_parser_object.get('Search-Engines', 'search_engine_api_url_serper', fallback='https://google.serper.dev/search')
+        serper_search_api_key = config_parser_object.get("Search-Engines", "search_engine_api_key_serper", fallback="")
+        serper_search_api_url = config_parser_object.get(
+            "Search-Engines", "search_engine_api_url_serper", fallback="https://google.serper.dev/search"
+        )
         # Exa Search Settings
-        exa_search_api_key = config_parser_object.get('Search-Engines', 'search_engine_api_key_exa', fallback='')
-        exa_search_api_url = config_parser_object.get('Search-Engines', 'search_engine_api_url_exa', fallback='https://api.exa.ai/search')
+        exa_search_api_key = config_parser_object.get("Search-Engines", "search_engine_api_key_exa", fallback="")
+        exa_search_api_url = config_parser_object.get(
+            "Search-Engines", "search_engine_api_url_exa", fallback="https://api.exa.ai/search"
+        )
         # Firecrawl Search Settings
-        firecrawl_api_key = config_parser_object.get('Search-Engines', 'search_engine_api_key_firecrawl', fallback='')
-        firecrawl_search_api_url = config_parser_object.get('Search-Engines', 'search_engine_api_url_firecrawl', fallback='https://api.firecrawl.dev/v2/search')
+        firecrawl_api_key = config_parser_object.get("Search-Engines", "search_engine_api_key_firecrawl", fallback="")
+        firecrawl_search_api_url = config_parser_object.get(
+            "Search-Engines", "search_engine_api_url_firecrawl", fallback="https://api.firecrawl.dev/v2/search"
+        )
         # Yandex Search Settings
-        yandex_search_api_key = config_parser_object.get('Search-Engines', 'search_engine_api_key_yandex', fallback='')
-        yandex_search_engine_id = config_parser_object.get('Search-Engines', 'search_engine_id_yandex', fallback='')
+        yandex_search_api_key = config_parser_object.get("Search-Engines", "search_engine_api_key_yandex", fallback="")
+        yandex_search_engine_id = config_parser_object.get("Search-Engines", "search_engine_id_yandex", fallback="")
 
         # Prompts
-        sub_question_generation_prompt = config_parser_object.get('Prompts', 'sub_question_generation_prompt', fallback='')
-        search_result_relevance_eval_prompt = config_parser_object.get('Prompts', 'search_result_relevance_eval_prompt', fallback='')
-        analyze_search_results_prompt = config_parser_object.get('Prompts', 'analyze_search_results_prompt', fallback='')
+        sub_question_generation_prompt = config_parser_object.get(
+            "Prompts", "sub_question_generation_prompt", fallback=""
+        )
+        search_result_relevance_eval_prompt = config_parser_object.get(
+            "Prompts", "search_result_relevance_eval_prompt", fallback=""
+        )
+        analyze_search_results_prompt = config_parser_object.get(
+            "Prompts", "analyze_search_results_prompt", fallback=""
+        )
 
         # Web Scraper settings
-        web_scraper_api_key = config_parser_object.get('Web-Scraper', 'web_scraper_api_key', fallback='')
-        web_scraper_api_url = config_parser_object.get('Web-Scraper', 'web_scraper_api_url', fallback='')
-        web_scraper_api_timeout = config_parser_object.get('Web-Scraper', 'web_scraper_api_timeout', fallback='90')
-        web_scraper_api_retries = config_parser_object.get('Web-Scraper', 'web_scraper_api_retries', fallback='3')
-        web_scraper_api_retry_delay = config_parser_object.get('Web-Scraper', 'web_scraper_api_retry_delay', fallback='5')
-        web_scraper_retry_count = config_parser_object.get('Web-Scraper', 'web_scraper_retry_count', fallback='3')
-        web_scraper_retry_timeout = config_parser_object.get('Web-Scraper', 'web_scraper_retry_timeout', fallback='5')
-        web_scraper_stealth_playwright = config_parser_object.get('Web-Scraper', 'web_scraper_stealth_playwright', fallback='False')
+        web_scraper_api_key = config_parser_object.get("Web-Scraper", "web_scraper_api_key", fallback="")
+        web_scraper_api_url = config_parser_object.get("Web-Scraper", "web_scraper_api_url", fallback="")
+        web_scraper_api_timeout = config_parser_object.get("Web-Scraper", "web_scraper_api_timeout", fallback="90")
+        web_scraper_api_retries = config_parser_object.get("Web-Scraper", "web_scraper_api_retries", fallback="3")
+        web_scraper_api_retry_delay = config_parser_object.get(
+            "Web-Scraper", "web_scraper_api_retry_delay", fallback="5"
+        )
+        web_scraper_retry_count = config_parser_object.get("Web-Scraper", "web_scraper_retry_count", fallback="3")
+        web_scraper_retry_timeout = config_parser_object.get("Web-Scraper", "web_scraper_retry_timeout", fallback="5")
+        web_scraper_stealth_playwright = config_parser_object.get(
+            "Web-Scraper", "web_scraper_stealth_playwright", fallback="False"
+        )
         custom_scrapers_yaml_path = (
-            os.getenv('WEB_SCRAPER_CUSTOM_SCRAPERS_YAML_PATH')
-            or os.getenv('CUSTOM_SCRAPERS_YAML_PATH')
+            os.getenv("WEB_SCRAPER_CUSTOM_SCRAPERS_YAML_PATH")
+            or os.getenv("CUSTOM_SCRAPERS_YAML_PATH")
             or config_parser_object.get(
-                'Web-Scraper',
-                'custom_scrapers_yaml_path',
-                fallback='tldw_Server_API/Config_Files/custom_scrapers.yaml',
+                "Web-Scraper",
+                "custom_scrapers_yaml_path",
+                fallback="tldw_Server_API/Config_Files/custom_scrapers.yaml",
             )
         )
         web_scraper_default_backend = (
-            os.getenv('WEB_SCRAPER_HTTP_BACKEND')
-            or os.getenv('WEB_SCRAPER_DEFAULT_BACKEND')
+            os.getenv("WEB_SCRAPER_HTTP_BACKEND")
+            or os.getenv("WEB_SCRAPER_DEFAULT_BACKEND")
             or config_parser_object.get(
-            'Web-Scraper',
-            'web_scraper_default_backend',
-            fallback='auto',
+                "Web-Scraper",
+                "web_scraper_default_backend",
+                fallback="auto",
             )
         )
-        web_scraper_ua_mode = os.getenv('WEB_SCRAPER_UA_MODE') or config_parser_object.get(
-            'Web-Scraper',
-            'web_scraper_ua_mode',
-            fallback='fixed',
+        web_scraper_ua_mode = os.getenv("WEB_SCRAPER_UA_MODE") or config_parser_object.get(
+            "Web-Scraper",
+            "web_scraper_ua_mode",
+            fallback="fixed",
         )
 
         # Web Scraper crawl flags (env overrides config.txt)
@@ -4363,33 +5189,38 @@ def load_and_log_configs():
             except _CONFIG_NONCRITICAL_EXCEPTIONS:
                 return d
 
-        web_crawl_strategy = _env_or_cfg('WEB_CRAWL_STRATEGY', 'Web-Scraper', 'web_crawl_strategy', 'default')
+        web_crawl_strategy = _env_or_cfg("WEB_CRAWL_STRATEGY", "Web-Scraper", "web_crawl_strategy", "default")
         web_crawl_include_external = _as_bool(
-            _env_or_cfg('WEB_CRAWL_INCLUDE_EXTERNAL', 'Web-Scraper', 'web_crawl_include_external', 'false'), False
+            _env_or_cfg("WEB_CRAWL_INCLUDE_EXTERNAL", "Web-Scraper", "web_crawl_include_external", "false"), False
         )
         web_crawl_score_threshold = _as_float(
-            _env_or_cfg('WEB_CRAWL_SCORE_THRESHOLD', 'Web-Scraper', 'web_crawl_score_threshold', '0.0'), 0.0
+            _env_or_cfg("WEB_CRAWL_SCORE_THRESHOLD", "Web-Scraper", "web_crawl_score_threshold", "0.0"), 0.0
         )
         web_crawl_max_pages = _as_int(
-            _env_or_cfg('WEB_CRAWL_MAX_PAGES', 'Web-Scraper', 'web_crawl_max_pages', '100'), 100
+            _env_or_cfg("WEB_CRAWL_MAX_PAGES", "Web-Scraper", "web_crawl_max_pages", "100"), 100
         )
         # Optional allow/block domain lists (CSV). Env overrides config.txt.
-        web_crawl_allowed_domains = _env_or_cfg('WEB_CRAWL_ALLOWED_DOMAINS', 'Web-Scraper', 'web_crawl_allowed_domains', '')
-        web_crawl_blocked_domains = _env_or_cfg('WEB_CRAWL_BLOCKED_DOMAINS', 'Web-Scraper', 'web_crawl_blocked_domains', '')
+        web_crawl_allowed_domains = _env_or_cfg(
+            "WEB_CRAWL_ALLOWED_DOMAINS", "Web-Scraper", "web_crawl_allowed_domains", ""
+        )
+        web_crawl_blocked_domains = _env_or_cfg(
+            "WEB_CRAWL_BLOCKED_DOMAINS", "Web-Scraper", "web_crawl_blocked_domains", ""
+        )
         # Optional robots-respect flag (bool). Env overrides config.txt.
         web_scraper_respect_robots = _as_bool(
-            _env_or_cfg('WEB_SCRAPER_RESPECT_ROBOTS', 'Web-Scraper', 'web_scraper_respect_robots', 'true'), True
+            _env_or_cfg("WEB_SCRAPER_RESPECT_ROBOTS", "Web-Scraper", "web_scraper_respect_robots", "true"), True
         )
         web_outbound_policy_mode_value = web_outbound_policy_mode()
         # Optional scorers configuration
         web_crawl_enable_keyword = _as_bool(
-            _env_or_cfg('WEB_CRAWL_ENABLE_KEYWORD_SCORER', 'Web-Scraper', 'web_crawl_enable_keyword_scorer', 'false'), False
+            _env_or_cfg("WEB_CRAWL_ENABLE_KEYWORD_SCORER", "Web-Scraper", "web_crawl_enable_keyword_scorer", "false"),
+            False,
         )
-        web_crawl_keywords = _env_or_cfg('WEB_CRAWL_KEYWORDS', 'Web-Scraper', 'web_crawl_keywords', '')
+        web_crawl_keywords = _env_or_cfg("WEB_CRAWL_KEYWORDS", "Web-Scraper", "web_crawl_keywords", "")
         web_crawl_enable_domain_map = _as_bool(
-            _env_or_cfg('WEB_CRAWL_ENABLE_DOMAIN_MAP', 'Web-Scraper', 'web_crawl_enable_domain_map', 'false'), False
+            _env_or_cfg("WEB_CRAWL_ENABLE_DOMAIN_MAP", "Web-Scraper", "web_crawl_enable_domain_map", "false"), False
         )
-        web_crawl_domain_map = _env_or_cfg('WEB_CRAWL_DOMAIN_MAP', 'Web-Scraper', 'web_crawl_domain_map', '')
+        web_crawl_domain_map = _env_or_cfg("WEB_CRAWL_DOMAIN_MAP", "Web-Scraper", "web_crawl_domain_map", "")
 
         def _section_items_dict(section_name: str) -> dict[str, Any]:
             try:
@@ -4405,548 +5236,548 @@ def load_and_log_configs():
         stt_vnext_items = dict(vars(stt_vnext_config))
 
         return_dict = {
-            'anthropic_api': {
-                'api_key': anthropic_api_key,
-                'model': anthropic_model,
-                'streaming': anthropic_streaming,
-                'temperature': anthropic_temperature,
-                'top_p': anthropic_top_p,
-                'top_k': anthropic_top_k,
-                'max_tokens': anthropic_max_tokens,
-                'api_timeout': anthropic_api_timeout,
-                'api_retries': anthropic_api_retries,
-                'api_retry_delay': anthropic_api_retry_delay
+            "anthropic_api": {
+                "api_key": anthropic_api_key,
+                "model": anthropic_model,
+                "streaming": anthropic_streaming,
+                "temperature": anthropic_temperature,
+                "top_p": anthropic_top_p,
+                "top_k": anthropic_top_k,
+                "max_tokens": anthropic_max_tokens,
+                "api_timeout": anthropic_api_timeout,
+                "api_retries": anthropic_api_retries,
+                "api_retry_delay": anthropic_api_retry_delay,
             },
-            'cohere_api': {
-                'api_key': cohere_api_key,
-                'model': cohere_model,
-                'streaming': cohere_streaming,
-                'temperature': cohere_temperature,
-                'max_p': cohere_max_p,
-                'top_k': cohere_top_k,
-                'max_tokens': cohere_max_tokens,
-                'api_timeout': cohere_api_timeout,
-                'api_retries': cohere_api_retries,
-                'api_retry_delay': cohere_api_retry_delay
+            "cohere_api": {
+                "api_key": cohere_api_key,
+                "model": cohere_model,
+                "streaming": cohere_streaming,
+                "temperature": cohere_temperature,
+                "max_p": cohere_max_p,
+                "top_k": cohere_top_k,
+                "max_tokens": cohere_max_tokens,
+                "api_timeout": cohere_api_timeout,
+                "api_retries": cohere_api_retries,
+                "api_retry_delay": cohere_api_retry_delay,
             },
-            'deepseek_api': {
-                'api_key': deepseek_api_key,
-                'model': deepseek_model,
-                'streaming': deepseek_streaming,
-                'temperature': deepseek_temperature,
-                'top_p': deepseek_top_p,
-                'min_p': deepseek_min_p,
-                'max_tokens': deepseek_max_tokens,
-                'api_timeout': deepseek_api_timeout,
-                'api_retries': deepseek_api_retries,
-                'api_retry_delay': deepseek_api_retry_delay
+            "deepseek_api": {
+                "api_key": deepseek_api_key,
+                "model": deepseek_model,
+                "streaming": deepseek_streaming,
+                "temperature": deepseek_temperature,
+                "top_p": deepseek_top_p,
+                "min_p": deepseek_min_p,
+                "max_tokens": deepseek_max_tokens,
+                "api_timeout": deepseek_api_timeout,
+                "api_retries": deepseek_api_retries,
+                "api_retry_delay": deepseek_api_retry_delay,
             },
-            'qwen_api': {
-                'api_key': qwen_api_key,
-                'model': qwen_model,
-                'streaming': qwen_streaming,
-                'temperature': qwen_temperature,
-                'top_p': qwen_top_p,
-                'max_tokens': qwen_max_tokens,
-                'api_timeout': qwen_api_timeout,
-                'api_retries': qwen_api_retries,
-                'api_retry_delay': qwen_api_retry_delay,
-                'region': qwen_api_region,
-                'api_base_url': qwen_api_base_url
+            "qwen_api": {
+                "api_key": qwen_api_key,
+                "model": qwen_model,
+                "streaming": qwen_streaming,
+                "temperature": qwen_temperature,
+                "top_p": qwen_top_p,
+                "max_tokens": qwen_max_tokens,
+                "api_timeout": qwen_api_timeout,
+                "api_retries": qwen_api_retries,
+                "api_retry_delay": qwen_api_retry_delay,
+                "region": qwen_api_region,
+                "api_base_url": qwen_api_base_url,
             },
-            'google_api': {
-                'api_key': google_api_key,
-                'model': google_model,
-                'streaming': google_streaming,
-                'temperature': google_temperature,
-                'top_p': google_top_p,
-                'min_p': google_min_p,
-                'max_tokens': google_max_tokens,
-                'api_timeout': google_api_timeout,
-                'api_retries': google_api_retries,
-                'api_retry_delay': google_api_retry_delay
+            "google_api": {
+                "api_key": google_api_key,
+                "model": google_model,
+                "streaming": google_streaming,
+                "temperature": google_temperature,
+                "top_p": google_top_p,
+                "min_p": google_min_p,
+                "max_tokens": google_max_tokens,
+                "api_timeout": google_api_timeout,
+                "api_retries": google_api_retries,
+                "api_retry_delay": google_api_retry_delay,
             },
-            'groq_api': {
-                'api_key': groq_api_key,
-                'model': groq_model,
-                'streaming': groq_streaming,
-                'temperature': groq_temperature,
-                'top_p': groq_top_p,
-                'max_tokens': groq_max_tokens,
-                'api_timeout': groq_api_timeout,
-                'api_retries': groq_api_retries,
-                'api_retry_delay': groq_api_retry_delay
+            "groq_api": {
+                "api_key": groq_api_key,
+                "model": groq_model,
+                "streaming": groq_streaming,
+                "temperature": groq_temperature,
+                "top_p": groq_top_p,
+                "max_tokens": groq_max_tokens,
+                "api_timeout": groq_api_timeout,
+                "api_retries": groq_api_retries,
+                "api_retry_delay": groq_api_retry_delay,
             },
-            'huggingface_api': {
-                'huggingface_use_router_url_format': huggingface_use_router_url_format,
-                'huggingface_router_base_url': huggingface_router_base_url,
-                'api_base_url': huggingface_api_base_url,
-                'api_chat_path': huggingface_api_chat_path,
-                'api_key': huggingface_api_key,
-                'model': huggingface_model,
-                'streaming': huggingface_streaming,
-                'temperature': huggingface_temperature,
-                'top_p': huggingface_top_p,
-                'min_p': huggingface_min_p,
-                'max_tokens': huggingface_max_tokens,
-                'api_timeout': huggingface_api_timeout,
-                'api_retries': huggingface_api_retries,
-                'api_retry_delay': huggingface_api_retry_delay
+            "huggingface_api": {
+                "huggingface_use_router_url_format": huggingface_use_router_url_format,
+                "huggingface_router_base_url": huggingface_router_base_url,
+                "api_base_url": huggingface_api_base_url,
+                "api_chat_path": huggingface_api_chat_path,
+                "api_key": huggingface_api_key,
+                "model": huggingface_model,
+                "streaming": huggingface_streaming,
+                "temperature": huggingface_temperature,
+                "top_p": huggingface_top_p,
+                "min_p": huggingface_min_p,
+                "max_tokens": huggingface_max_tokens,
+                "api_timeout": huggingface_api_timeout,
+                "api_retries": huggingface_api_retries,
+                "api_retry_delay": huggingface_api_retry_delay,
             },
-            'mistral_api': {
-                'api_key': mistral_api_key,
-                'model': mistral_model,
-                'streaming': mistral_streaming,
-                'temperature': mistral_temperature,
-                'top_p': mistral_top_p,
-                'max_tokens': mistral_max_tokens,
-                'api_timeout': mistral_api_timeout,
-                'api_retries': mistral_api_retries,
-                'api_retry_delay': mistral_api_retry_delay
+            "mistral_api": {
+                "api_key": mistral_api_key,
+                "model": mistral_model,
+                "streaming": mistral_streaming,
+                "temperature": mistral_temperature,
+                "top_p": mistral_top_p,
+                "max_tokens": mistral_max_tokens,
+                "api_timeout": mistral_api_timeout,
+                "api_retries": mistral_api_retries,
+                "api_retry_delay": mistral_api_retry_delay,
             },
-            'openrouter_api': {
-                'api_key': openrouter_api_key,
-                'model': openrouter_model,
-                'streaming': openrouter_streaming,
-                'temperature': openrouter_temperature,
-                'top_p': openrouter_top_p,
-                'min_p': openrouter_min_p,
-                'top_k': openrouter_top_k,
-                'max_tokens': openrouter_max_tokens,
-                'api_timeout': openrouter_api_timeout,
-                'api_retries': openrouter_api_retries,
-                'api_retry_delay': openrouter_api_retry_delay
+            "openrouter_api": {
+                "api_key": openrouter_api_key,
+                "model": openrouter_model,
+                "streaming": openrouter_streaming,
+                "temperature": openrouter_temperature,
+                "top_p": openrouter_top_p,
+                "min_p": openrouter_min_p,
+                "top_k": openrouter_top_k,
+                "max_tokens": openrouter_max_tokens,
+                "api_timeout": openrouter_api_timeout,
+                "api_retries": openrouter_api_retries,
+                "api_retry_delay": openrouter_api_retry_delay,
             },
-            'bedrock_api': {
-                'api_key': bedrock_api_key,
-                'region': bedrock_region,
-                'runtime_endpoint': bedrock_runtime_endpoint,
-                'model': bedrock_model,
-                'streaming': bedrock_streaming,
-                'temperature': bedrock_temperature,
-                'top_p': bedrock_top_p,
-                'max_tokens': bedrock_max_tokens,
-                'api_timeout': bedrock_api_timeout,
-                'api_retries': bedrock_api_retries,
-                'api_retry_delay': bedrock_api_retry_delay
+            "bedrock_api": {
+                "api_key": bedrock_api_key,
+                "region": bedrock_region,
+                "runtime_endpoint": bedrock_runtime_endpoint,
+                "model": bedrock_model,
+                "streaming": bedrock_streaming,
+                "temperature": bedrock_temperature,
+                "top_p": bedrock_top_p,
+                "max_tokens": bedrock_max_tokens,
+                "api_timeout": bedrock_api_timeout,
+                "api_retries": bedrock_api_retries,
+                "api_retry_delay": bedrock_api_retry_delay,
             },
-            'openai_api': {
-                'api_key': openai_api_key,
-                'model': openai_model,
-                'streaming': openai_streaming,
-                'temperature': openai_temperature,
-                'top_p': openai_top_p,
-                'max_tokens': openai_max_tokens,
-                'api_timeout': openai_api_timeout,
-                'api_retries': openai_api_retries,
-                'api_retry_delay': openai_api_retry_delay
+            "openai_api": {
+                "api_key": openai_api_key,
+                "model": openai_model,
+                "streaming": openai_streaming,
+                "temperature": openai_temperature,
+                "top_p": openai_top_p,
+                "max_tokens": openai_max_tokens,
+                "api_timeout": openai_api_timeout,
+                "api_retries": openai_api_retries,
+                "api_retry_delay": openai_api_retry_delay,
             },
-            'elevenlabs_api': {
-                'api_key': elevenlabs_api_key,
+            "elevenlabs_api": {
+                "api_key": elevenlabs_api_key,
             },
-            'alltalk_api': {
-                'api_ip': alltalk_api_ip,
-                'default_alltalk_tts_model': default_alltalk_tts_model,
-                'default_alltalk_tts_voice': default_alltalk_tts_voice,
-                'default_alltalk_tts_speed': default_alltalk_tts_speed,
-                'default_alltalk_tts_output_format': default_alltalk_tts_output_format,
+            "alltalk_api": {
+                "api_ip": alltalk_api_ip,
+                "default_alltalk_tts_model": default_alltalk_tts_model,
+                "default_alltalk_tts_voice": default_alltalk_tts_voice,
+                "default_alltalk_tts_speed": default_alltalk_tts_speed,
+                "default_alltalk_tts_output_format": default_alltalk_tts_output_format,
             },
-            'llama_api': {
-                'api_ip': llama_api_IP,
-                'api_key': llama_api_key,
-                'streaming': llama_streaming,
-                'temperature': llama_temperature,
-                'top_p': llama_top_p,
-                'min_p': llama_min_p,
-                'top_k': llama_top_k,
-                'max_tokens': llama_max_tokens,
-                'api_timeout': llama_api_timeout,
-                'api_retries': llama_api_retries,
-                'api_retry_delay': llama_api_retry_delay
+            "llama_api": {
+                "api_ip": llama_api_IP,
+                "api_key": llama_api_key,
+                "streaming": llama_streaming,
+                "temperature": llama_temperature,
+                "top_p": llama_top_p,
+                "min_p": llama_min_p,
+                "top_k": llama_top_k,
+                "max_tokens": llama_max_tokens,
+                "api_timeout": llama_api_timeout,
+                "api_retries": llama_api_retries,
+                "api_retry_delay": llama_api_retry_delay,
             },
-            'ooba_api': {
-                'api_ip': ooba_api_IP,
-                'api_key': ooba_api_key,
-                'streaming': ooba_streaming,
-                'temperature': ooba_temperature,
-                'top_p': ooba_top_p,
-                'min_p': ooba_min_p,
-                'top_k': ooba_top_k,
-                'max_tokens': ooba_max_tokens,
-                'api_timeout': ooba_api_timeout,
-                'api_retries': ooba_api_retries,
-                'api_retry_delay': ooba_api_retry_delay
+            "ooba_api": {
+                "api_ip": ooba_api_IP,
+                "api_key": ooba_api_key,
+                "streaming": ooba_streaming,
+                "temperature": ooba_temperature,
+                "top_p": ooba_top_p,
+                "min_p": ooba_min_p,
+                "top_k": ooba_top_k,
+                "max_tokens": ooba_max_tokens,
+                "api_timeout": ooba_api_timeout,
+                "api_retries": ooba_api_retries,
+                "api_retry_delay": ooba_api_retry_delay,
             },
-            'kobold_api': {
-                'api_ip': kobold_api_ip,
-                'api_streaming_ip': kobold_openai_api_IP,
-                'api_key': kobold_api_key,
-                'streaming': kobold_streaming,
-                'temperature': kobold_temperature,
-                'top_p': kobold_top_p,
-                'top_k': kobold_top_k,
-                'max_tokens': kobold_max_tokens,
-                'api_timeout': kobold_api_timeout,
-                'api_retries': kobold_api_retries,
-                'api_retry_delay': kobold_api_retry_delay
+            "kobold_api": {
+                "api_ip": kobold_api_ip,
+                "api_streaming_ip": kobold_openai_api_IP,
+                "api_key": kobold_api_key,
+                "streaming": kobold_streaming,
+                "temperature": kobold_temperature,
+                "top_p": kobold_top_p,
+                "top_k": kobold_top_k,
+                "max_tokens": kobold_max_tokens,
+                "api_timeout": kobold_api_timeout,
+                "api_retries": kobold_api_retries,
+                "api_retry_delay": kobold_api_retry_delay,
             },
-            'tabby_api': {
-                'api_ip': tabby_api_IP,
-                'api_key': tabby_api_key,
-                'model': tabby_model,
-                'streaming': tabby_streaming,
-                'temperature': tabby_temperature,
-                'top_p': tabby_top_p,
-                'top_k': tabby_top_k,
-                'min_p': tabby_min_p,
-                'max_tokens': tabby_max_tokens,
-                'api_timeout': tabby_api_timeout,
-                'api_retries': tabby_api_retries,
-                'api_retry_delay': tabby_api_retry_delay
+            "tabby_api": {
+                "api_ip": tabby_api_IP,
+                "api_key": tabby_api_key,
+                "model": tabby_model,
+                "streaming": tabby_streaming,
+                "temperature": tabby_temperature,
+                "top_p": tabby_top_p,
+                "top_k": tabby_top_k,
+                "min_p": tabby_min_p,
+                "max_tokens": tabby_max_tokens,
+                "api_timeout": tabby_api_timeout,
+                "api_retries": tabby_api_retries,
+                "api_retry_delay": tabby_api_retry_delay,
             },
-            'vllm_api': {
-                'api_ip': vllm_api_url,
-                'api_key': vllm_api_key,
-                'model': vllm_model,
-                'streaming': vllm_streaming,
-                'temperature': vllm_temperature,
-                'top_p': vllm_top_p,
-                'top_k': vllm_top_k,
-                'min_p': vllm_min_p,
-                'max_tokens': vllm_max_tokens,
-                'api_timeout': vllm_api_timeout,
-                'api_retries': vllm_api_retries,
-                'api_retry_delay': vllm_api_retry_delay
+            "vllm_api": {
+                "api_ip": vllm_api_url,
+                "api_key": vllm_api_key,
+                "model": vllm_model,
+                "streaming": vllm_streaming,
+                "temperature": vllm_temperature,
+                "top_p": vllm_top_p,
+                "top_k": vllm_top_k,
+                "min_p": vllm_min_p,
+                "max_tokens": vllm_max_tokens,
+                "api_timeout": vllm_api_timeout,
+                "api_retries": vllm_api_retries,
+                "api_retry_delay": vllm_api_retry_delay,
             },
-            'ollama_api': {
-                'api_url': ollama_api_url,
-                'api_key': ollama_api_key,
-                'model': ollama_model,
-                'streaming': ollama_streaming,
-                'temperature': ollama_temperature,
-                'top_p': ollama_top_p,
-                'max_tokens': ollama_max_tokens,
-                'api_timeout': ollama_api_timeout,
-                'api_retries': ollama_api_retries,
-                'api_retry_delay': ollama_api_retry_delay
+            "ollama_api": {
+                "api_url": ollama_api_url,
+                "api_key": ollama_api_key,
+                "model": ollama_model,
+                "streaming": ollama_streaming,
+                "temperature": ollama_temperature,
+                "top_p": ollama_top_p,
+                "max_tokens": ollama_max_tokens,
+                "api_timeout": ollama_api_timeout,
+                "api_retries": ollama_api_retries,
+                "api_retry_delay": ollama_api_retry_delay,
             },
-            'aphrodite_api': {
-                'api_ip': aphrodite_api_url,
-                'api_key': aphrodite_api_key,
-                'model': aphrodite_model,
-                'max_tokens': aphrodite_max_tokens,
-                'streaming': aphrodite_streaming,
-                'api_timeout': aphrodite_api_timeout,
-                'api_retries': aphrodite_api_retries,
-                'api_retry_delay': aphrodite_api_retry_delay
+            "aphrodite_api": {
+                "api_ip": aphrodite_api_url,
+                "api_key": aphrodite_api_key,
+                "model": aphrodite_model,
+                "max_tokens": aphrodite_max_tokens,
+                "streaming": aphrodite_streaming,
+                "api_timeout": aphrodite_api_timeout,
+                "api_retries": aphrodite_api_retries,
+                "api_retry_delay": aphrodite_api_retry_delay,
             },
-            'custom_openai_api': {
-                'api_ip': custom_openai_api_ip,
-                'api_key': custom_openai_api_key,
-                'streaming': custom_openai_api_streaming,
-                'model': custom_openai_api_model,
-                'temperature': custom_openai_api_temperature,
-                'max_tokens': custom_openai_api_max_tokens,
-                'top_p': custom_openai_api_top_p,
-                'min_p': custom_openai_api_min_p,
-                'api_timeout': custom_openai_api_timeout,
-                'api_retries': custom_openai_api_retries,
-                'api_retry_delay': custom_openai_api_retry_delay
+            "custom_openai_api": {
+                "api_ip": custom_openai_api_ip,
+                "api_key": custom_openai_api_key,
+                "streaming": custom_openai_api_streaming,
+                "model": custom_openai_api_model,
+                "temperature": custom_openai_api_temperature,
+                "max_tokens": custom_openai_api_max_tokens,
+                "top_p": custom_openai_api_top_p,
+                "min_p": custom_openai_api_min_p,
+                "api_timeout": custom_openai_api_timeout,
+                "api_retries": custom_openai_api_retries,
+                "api_retry_delay": custom_openai_api_retry_delay,
             },
-            'custom_openai_api_2': {
-                'api_ip': custom_openai2_api_ip,
-                'api_key': custom_openai2_api_key,
-                'streaming': custom_openai2_api_streaming,
-                'model': custom_openai2_api_model,
-                'temperature': custom_openai2_api_temperature,
-                'max_tokens': custom_openai2_api_max_tokens,
-                'top_p': custom_openai2_api_top_p,
-                'min_p': custom_openai2_api_min_p,
-                'api_timeout': custom_openai2_api_timeout,
-                'api_retries': custom_openai2_api_retries,
-                'api_retry_delay': custom_openai2_api_retry_delay
+            "custom_openai_api_2": {
+                "api_ip": custom_openai2_api_ip,
+                "api_key": custom_openai2_api_key,
+                "streaming": custom_openai2_api_streaming,
+                "model": custom_openai2_api_model,
+                "temperature": custom_openai2_api_temperature,
+                "max_tokens": custom_openai2_api_max_tokens,
+                "top_p": custom_openai2_api_top_p,
+                "min_p": custom_openai2_api_min_p,
+                "api_timeout": custom_openai2_api_timeout,
+                "api_retries": custom_openai2_api_retries,
+                "api_retry_delay": custom_openai2_api_retry_delay,
             },
-            'llm_api_settings': {
-                'default_api': default_api,
-                'local_api_timeout': local_api_timeout,
-                'local_api_retries': local_api_retries,
-                'local_api_retry_delay': local_api_retry_delay,
+            "llm_api_settings": {
+                "default_api": default_api,
+                "local_api_timeout": local_api_timeout,
+                "local_api_retries": local_api_retries,
+                "local_api_retry_delay": local_api_retry_delay,
             },
-            'output_path': output_path,
-            'system_preferences': {
-                'save_video_transcripts': save_video_transcripts,
+            "output_path": output_path,
+            "system_preferences": {
+                "save_video_transcripts": save_video_transcripts,
             },
-            'processing_choice': processing_choice,
-            'media_processing': {
-                'max_audio_file_size_mb': max_audio_file_size_mb,
-                'max_pdf_file_size_mb': max_pdf_file_size_mb,
-                'max_video_file_size_mb': max_video_file_size_mb,
-                'max_epub_file_size_mb': max_epub_file_size_mb,
-                'max_document_file_size_mb': max_document_file_size_mb,
-                'max_code_file_size_mb': max_code_file_size_mb,
-                'pdf_conversion_timeout_seconds': pdf_conversion_timeout_seconds,
-                'audio_processing_timeout_seconds': audio_processing_timeout_seconds,
-                'video_processing_timeout_seconds': video_processing_timeout_seconds,
-                'max_archive_internal_files': max_archive_internal_files,
-                'max_archive_uncompressed_size_mb': max_archive_uncompressed_size_mb,
-                'max_archive_nesting_depth': max_archive_nesting_depth,
-                'max_archive_member_uncompressed_size_mb': max_archive_member_uncompressed_size_mb,
-                'sanitize_html_uploads': sanitize_html_uploads,
-                'sanitize_xml_uploads': sanitize_xml_uploads,
-                'sanitize_email_html_bodies': sanitize_email_html_bodies,
-                'validate_email_archive_contents': validate_email_archive_contents,
-                'audio_transcription_buffer_size_mb': audio_transcription_buffer_size_mb,
-                'uuid_generation_length': uuid_generation_length,
-                'kept_video_max_files': kept_video_max_files,
-                'kept_video_max_storage_mb': kept_video_max_storage_mb,
-                'kept_video_retention_hours': kept_video_retention_hours,
+            "processing_choice": processing_choice,
+            "media_processing": {
+                "max_audio_file_size_mb": max_audio_file_size_mb,
+                "max_pdf_file_size_mb": max_pdf_file_size_mb,
+                "max_video_file_size_mb": max_video_file_size_mb,
+                "max_epub_file_size_mb": max_epub_file_size_mb,
+                "max_document_file_size_mb": max_document_file_size_mb,
+                "max_code_file_size_mb": max_code_file_size_mb,
+                "pdf_conversion_timeout_seconds": pdf_conversion_timeout_seconds,
+                "audio_processing_timeout_seconds": audio_processing_timeout_seconds,
+                "video_processing_timeout_seconds": video_processing_timeout_seconds,
+                "max_archive_internal_files": max_archive_internal_files,
+                "max_archive_uncompressed_size_mb": max_archive_uncompressed_size_mb,
+                "max_archive_nesting_depth": max_archive_nesting_depth,
+                "max_archive_member_uncompressed_size_mb": max_archive_member_uncompressed_size_mb,
+                "sanitize_html_uploads": sanitize_html_uploads,
+                "sanitize_xml_uploads": sanitize_xml_uploads,
+                "sanitize_email_html_bodies": sanitize_email_html_bodies,
+                "validate_email_archive_contents": validate_email_archive_contents,
+                "audio_transcription_buffer_size_mb": audio_transcription_buffer_size_mb,
+                "uuid_generation_length": uuid_generation_length,
+                "kept_video_max_files": kept_video_max_files,
+                "kept_video_max_storage_mb": kept_video_max_storage_mb,
+                "kept_video_retention_hours": kept_video_retention_hours,
             },
-            'chat_dictionaries': {
-                'enable_chat_dictionaries': enable_chat_dictionaries,
-                'post_gen_replacement': post_gen_replacement,
-                'post_gen_replacement_dict': post_gen_replacement_dict,
-                'chat_dict_chat_prompts': chat_dict_chat_prompts,
-                'chat_dict_RAG_prompts': chat_dict_rag_prompts,
-                'chat_dict_replacement_strategy': chat_dict_replacement_strategy,
-                'chat_dict_max_tokens': chat_dict_max_tokens,
-                'default_rag_prompt': default_rag_prompt
+            "chat_dictionaries": {
+                "enable_chat_dictionaries": enable_chat_dictionaries,
+                "post_gen_replacement": post_gen_replacement,
+                "post_gen_replacement_dict": post_gen_replacement_dict,
+                "chat_dict_chat_prompts": chat_dict_chat_prompts,
+                "chat_dict_RAG_prompts": chat_dict_rag_prompts,
+                "chat_dict_replacement_strategy": chat_dict_replacement_strategy,
+                "chat_dict_max_tokens": chat_dict_max_tokens,
+                "default_rag_prompt": default_rag_prompt,
             },
-            'chunking_config': {
-                'chunking_method': chunking_method,
-                'chunk_max_size': chunk_max_size,
-                'adaptive_chunking': adaptive_chunking,
-                'multi_level': chunking_multi_level,
-                'chunk_language': chunk_language,
-                'chunk_overlap': chunk_overlap,
-                'article_chunking_method': article_chunking_method,
-                'article_chunk_max_size': article_chunk_max_size,
-                'article_chunk_overlap': article_chunk_overlap,
-                'article_adaptive_chunking': article_adaptive_chunking,
-                'article_chunking_multi_level': article_chunking_multi_level,
-                'article_language': article_language,
-                'audio_chunking_method': audio_chunking_method,
-                'audio_chunk_max_size': audio_chunk_max_size,
-                'audio_chunk_overlap': audio_chunk_overlap,
-                'audio_adaptive_chunking': audio_adaptive_chunking,
-                'audio_chunking_multi_level': audio_chunking_multi_level,
-                'audio_language': audio_language,
-                'book_chunking_method': book_chunking_method,
-                'book_chunk_max_size': book_chunk_max_size,
-                'book_chunk_overlap': book_chunk_overlap,
-                'book_adaptive_chunking': book_adaptive_chunking,
-                'book_chunking_multi_level': book_chunking_multi_level,
-                'book_language': book_language,
-                'document_chunking_method': document_chunking_method,
-                'document_chunk_max_size': document_chunk_max_size,
-                'document_chunk_overlap': document_chunk_overlap,
-                'document_adaptive_chunking': document_adaptive_chunking,
-                'document_chunking_multi_level': document_chunking_multi_level,
-                'document_language': document_language,
-                'mediawiki_article_chunking_method': mediawiki_article_chunking_method,
-                'mediawiki_article_chunk_max_size': mediawiki_article_chunk_max_size,
-                'mediawiki_article_chunk_overlap': mediawiki_article_chunk_overlap,
-                'mediawiki_article_adaptive_chunking': mediawiki_article_adaptive_chunking,
-                'mediawiki_article_chunking_multi_level': mediawiki_article_chunking_multi_level,
-                'mediawiki_article_language': mediawiki_article_language,
-                'mediawiki_dump_chunking_method': mediawiki_dump_chunking_method,
-                'mediawiki_dump_chunk_max_size': mediawiki_dump_chunk_max_size,
-                'mediawiki_dump_chunk_overlap': mediawiki_dump_chunk_overlap,
-                'mediawiki_dump_adaptive_chunking': mediawiki_dump_adaptive_chunking,
-                'mediawiki_dump_chunking_multi_level': mediawiki_dump_chunking_multi_level,
-                'mediawiki_dump_language': mediawiki_dump_language,
-                'obsidian_note_chunking_method': obsidian_note_chunking_method,
-                'obsidian_note_chunk_max_size': obsidian_note_chunk_max_size,
-                'obsidian_note_chunk_overlap': obsidian_note_chunk_overlap,
-                'obsidian_note_adaptive_chunking': obsidian_note_adaptive_chunking,
-                'obsidian_note_chunking_multi_level': obsidian_note_chunking_multi_level,
-                'obsidian_note_language': obsidian_note_language,
-                'podcast_chunking_method': podcast_chunking_method,
-                'podcast_chunk_max_size': podcast_chunk_max_size,
-                'podcast_chunk_overlap': podcast_chunk_overlap,
-                'podcast_adaptive_chunking': podcast_adaptive_chunking,
-                'podcast_chunking_multi_level': podcast_chunking_multi_level,
-                'podcast_language': podcast_language,
-                'text_chunking_method': text_chunking_method,
-                'text_chunk_max_size': text_chunk_max_size,
-                'text_chunk_overlap': text_chunk_overlap,
-                'text_adaptive_chunking': text_adaptive_chunking,
-                'text_chunking_multi_level': text_chunking_multi_level,
-                'text_language': text_language,
-                'video_chunking_method': video_chunking_method,
-                'video_chunk_max_size': video_chunk_max_size,
-                'video_chunk_overlap': video_chunk_overlap,
-                'video_adaptive_chunking': video_adaptive_chunking,
-                'video_chunking_multi_level': video_chunking_multi_level,
-                'video_language': video_language,
+            "chunking_config": {
+                "chunking_method": chunking_method,
+                "chunk_max_size": chunk_max_size,
+                "adaptive_chunking": adaptive_chunking,
+                "multi_level": chunking_multi_level,
+                "chunk_language": chunk_language,
+                "chunk_overlap": chunk_overlap,
+                "article_chunking_method": article_chunking_method,
+                "article_chunk_max_size": article_chunk_max_size,
+                "article_chunk_overlap": article_chunk_overlap,
+                "article_adaptive_chunking": article_adaptive_chunking,
+                "article_chunking_multi_level": article_chunking_multi_level,
+                "article_language": article_language,
+                "audio_chunking_method": audio_chunking_method,
+                "audio_chunk_max_size": audio_chunk_max_size,
+                "audio_chunk_overlap": audio_chunk_overlap,
+                "audio_adaptive_chunking": audio_adaptive_chunking,
+                "audio_chunking_multi_level": audio_chunking_multi_level,
+                "audio_language": audio_language,
+                "book_chunking_method": book_chunking_method,
+                "book_chunk_max_size": book_chunk_max_size,
+                "book_chunk_overlap": book_chunk_overlap,
+                "book_adaptive_chunking": book_adaptive_chunking,
+                "book_chunking_multi_level": book_chunking_multi_level,
+                "book_language": book_language,
+                "document_chunking_method": document_chunking_method,
+                "document_chunk_max_size": document_chunk_max_size,
+                "document_chunk_overlap": document_chunk_overlap,
+                "document_adaptive_chunking": document_adaptive_chunking,
+                "document_chunking_multi_level": document_chunking_multi_level,
+                "document_language": document_language,
+                "mediawiki_article_chunking_method": mediawiki_article_chunking_method,
+                "mediawiki_article_chunk_max_size": mediawiki_article_chunk_max_size,
+                "mediawiki_article_chunk_overlap": mediawiki_article_chunk_overlap,
+                "mediawiki_article_adaptive_chunking": mediawiki_article_adaptive_chunking,
+                "mediawiki_article_chunking_multi_level": mediawiki_article_chunking_multi_level,
+                "mediawiki_article_language": mediawiki_article_language,
+                "mediawiki_dump_chunking_method": mediawiki_dump_chunking_method,
+                "mediawiki_dump_chunk_max_size": mediawiki_dump_chunk_max_size,
+                "mediawiki_dump_chunk_overlap": mediawiki_dump_chunk_overlap,
+                "mediawiki_dump_adaptive_chunking": mediawiki_dump_adaptive_chunking,
+                "mediawiki_dump_chunking_multi_level": mediawiki_dump_chunking_multi_level,
+                "mediawiki_dump_language": mediawiki_dump_language,
+                "obsidian_note_chunking_method": obsidian_note_chunking_method,
+                "obsidian_note_chunk_max_size": obsidian_note_chunk_max_size,
+                "obsidian_note_chunk_overlap": obsidian_note_chunk_overlap,
+                "obsidian_note_adaptive_chunking": obsidian_note_adaptive_chunking,
+                "obsidian_note_chunking_multi_level": obsidian_note_chunking_multi_level,
+                "obsidian_note_language": obsidian_note_language,
+                "podcast_chunking_method": podcast_chunking_method,
+                "podcast_chunk_max_size": podcast_chunk_max_size,
+                "podcast_chunk_overlap": podcast_chunk_overlap,
+                "podcast_adaptive_chunking": podcast_adaptive_chunking,
+                "podcast_chunking_multi_level": podcast_chunking_multi_level,
+                "podcast_language": podcast_language,
+                "text_chunking_method": text_chunking_method,
+                "text_chunk_max_size": text_chunk_max_size,
+                "text_chunk_overlap": text_chunk_overlap,
+                "text_adaptive_chunking": text_adaptive_chunking,
+                "text_chunking_multi_level": text_chunking_multi_level,
+                "text_language": text_language,
+                "video_chunking_method": video_chunking_method,
+                "video_chunk_max_size": video_chunk_max_size,
+                "video_chunk_overlap": video_chunk_overlap,
+                "video_adaptive_chunking": video_adaptive_chunking,
+                "video_chunking_multi_level": video_chunking_multi_level,
+                "video_language": video_language,
                 # Proposition-specific
-                'proposition_engine': proposition_engine,
-                'proposition_prompt_profile': proposition_prompt_profile,
-                'proposition_aggressiveness': proposition_aggressiveness,
-                'proposition_min_proposition_length': proposition_min_proposition_length,
+                "proposition_engine": proposition_engine,
+                "proposition_prompt_profile": proposition_prompt_profile,
+                "proposition_aggressiveness": proposition_aggressiveness,
+                "proposition_min_proposition_length": proposition_min_proposition_length,
             },
-            'embedding_config': {
-                'embedding_provider': embedding_provider,
-                'embedding_model': embedding_model,
-                'embedding_fallback_model': embedding_fallback_model,
-                'auto_generate_on_upload': auto_generate_embeddings,
-                'onnx_model_path': onnx_model_path,
-                'model_dir': model_dir,
-                'embedding_api_url': embedding_api_url,
-                'embedding_api_key': embedding_api_key,
-                'chunk_size': chunk_size,
-                'chunk_overlap': overlap,
+            "embedding_config": {
+                "embedding_provider": embedding_provider,
+                "embedding_model": embedding_model,
+                "embedding_fallback_model": embedding_fallback_model,
+                "auto_generate_on_upload": auto_generate_embeddings,
+                "onnx_model_path": onnx_model_path,
+                "model_dir": model_dir,
+                "embedding_api_url": embedding_api_url,
+                "embedding_api_key": embedding_api_key,
+                "chunk_size": chunk_size,
+                "chunk_overlap": overlap,
                 # Contextual chunking defaults for embeddings
-                'enable_contextual_chunking': enable_contextual_chunking_flag,
-                'contextual_llm_model': contextual_llm_model_cfg,
-                'contextual_llm_provider': contextual_llm_provider_cfg,
-                'contextual_llm_temperature': contextual_llm_temperature_cfg,
-                'context_window_size': context_window_size_val,  # None means full-doc by default
-                'context_strategy': context_strategy_val,        # auto|full|window|outline_window
-                'context_token_budget': context_token_budget_val,
+                "enable_contextual_chunking": enable_contextual_chunking_flag,
+                "contextual_llm_model": contextual_llm_model_cfg,
+                "contextual_llm_provider": contextual_llm_provider_cfg,
+                "contextual_llm_temperature": contextual_llm_temperature_cfg,
+                "context_window_size": context_window_size_val,  # None means full-doc by default
+                "context_strategy": context_strategy_val,  # auto|full|window|outline_window
+                "context_token_budget": context_token_budget_val,
             },
-            'auto-save': {
-                'save_character_chats': save_character_chats,
-                'save_rag_chats': save_rag_chats,
+            "auto-save": {
+                "save_character_chats": save_character_chats,
+                "save_rag_chats": save_rag_chats,
             },
-            'default_api': default_api,
-            'RAG_DEFAULT_LLM_PROVIDER': rag_default_llm_provider,
-            'RAG_DEFAULT_LLM_MODEL': rag_default_llm_model,
-            'local_api_timeout': local_api_timeout,
-            'STT_Settings': {
-                'default_stt_provider': default_stt_provider,
-                'default_transcriber': default_transcriber,
-                'default_batch_transcription_model': default_batch_transcription_model,
-                'default_streaming_transcription_model': default_streaming_transcription_model,
-                'nemo_model_variant': nemo_model_variant,
-                'nemo_device': nemo_device,
-                'nemo_cache_dir': nemo_cache_dir,
-                'streaming_fallback_to_whisper': streaming_fallback_to_whisper,
-                'parakeet_onnx_model_id': parakeet_onnx_model_id,
-                'parakeet_onnx_revision': parakeet_onnx_revision,
-                'mlx_model_id': mlx_model_id,
-                'mlx_cache_dir': mlx_cache_dir,
-                'mlx_chunk_duration': mlx_chunk_duration,
-                'mlx_overlap_duration': mlx_overlap_duration,
-                'buffered_chunk_duration': buffered_chunk_duration,
-                'buffered_total_buffer': buffered_total_buffer,
-                'buffered_merge_algo': buffered_merge_algo,
-                'mlx_decoding_mode': mlx_decoding_mode,
-                'mlx_beam_size': mlx_beam_size,
-                'mlx_length_penalty': mlx_length_penalty,
-                'mlx_patience': mlx_patience,
-                'mlx_duration_reward': mlx_duration_reward,
-                'mlx_sentence_max_words': mlx_sentence_max_words,
-                'mlx_sentence_silence_gap': mlx_sentence_silence_gap,
-                'mlx_sentence_max_duration': mlx_sentence_max_duration,
-                'mlx_stream_context_left': mlx_stream_context_left,
-                'mlx_stream_context_right': mlx_stream_context_right,
-                'mlx_stream_depth': mlx_stream_depth,
-                'mlx_stream_keep_original_attention': mlx_stream_keep_original_attention,
+            "default_api": default_api,
+            "RAG_DEFAULT_LLM_PROVIDER": rag_default_llm_provider,
+            "RAG_DEFAULT_LLM_MODEL": rag_default_llm_model,
+            "local_api_timeout": local_api_timeout,
+            "STT_Settings": {
+                "default_stt_provider": default_stt_provider,
+                "default_transcriber": default_transcriber,
+                "default_batch_transcription_model": default_batch_transcription_model,
+                "default_streaming_transcription_model": default_streaming_transcription_model,
+                "nemo_model_variant": nemo_model_variant,
+                "nemo_device": nemo_device,
+                "nemo_cache_dir": nemo_cache_dir,
+                "streaming_fallback_to_whisper": streaming_fallback_to_whisper,
+                "parakeet_onnx_model_id": parakeet_onnx_model_id,
+                "parakeet_onnx_revision": parakeet_onnx_revision,
+                "mlx_model_id": mlx_model_id,
+                "mlx_cache_dir": mlx_cache_dir,
+                "mlx_chunk_duration": mlx_chunk_duration,
+                "mlx_overlap_duration": mlx_overlap_duration,
+                "buffered_chunk_duration": buffered_chunk_duration,
+                "buffered_total_buffer": buffered_total_buffer,
+                "buffered_merge_algo": buffered_merge_algo,
+                "mlx_decoding_mode": mlx_decoding_mode,
+                "mlx_beam_size": mlx_beam_size,
+                "mlx_length_penalty": mlx_length_penalty,
+                "mlx_patience": mlx_patience,
+                "mlx_duration_reward": mlx_duration_reward,
+                "mlx_sentence_max_words": mlx_sentence_max_words,
+                "mlx_sentence_silence_gap": mlx_sentence_silence_gap,
+                "mlx_sentence_max_duration": mlx_sentence_max_duration,
+                "mlx_stream_context_left": mlx_stream_context_left,
+                "mlx_stream_context_right": mlx_stream_context_right,
+                "mlx_stream_depth": mlx_stream_depth,
+                "mlx_stream_keep_original_attention": mlx_stream_keep_original_attention,
                 # VibeVoice-ASR settings
-                'vibevoice_enabled': vibevoice_enabled,
-                'vibevoice_model_id': vibevoice_model_id,
-                'vibevoice_device': vibevoice_device,
-                'vibevoice_dtype': vibevoice_dtype,
-                'vibevoice_cache_dir': vibevoice_cache_dir,
-                'vibevoice_allow_download': vibevoice_allow_download,
+                "vibevoice_enabled": vibevoice_enabled,
+                "vibevoice_model_id": vibevoice_model_id,
+                "vibevoice_device": vibevoice_device,
+                "vibevoice_dtype": vibevoice_dtype,
+                "vibevoice_cache_dir": vibevoice_cache_dir,
+                "vibevoice_allow_download": vibevoice_allow_download,
                 # Optional vLLM HTTP path for VibeVoice-ASR
-                'vibevoice_vllm_enabled': vibevoice_vllm_enabled,
-                'vibevoice_vllm_base_url': vibevoice_vllm_base_url,
-                'vibevoice_vllm_model_id': vibevoice_vllm_model_id,
-                'vibevoice_vllm_api_key': vibevoice_vllm_api_key,
-                'vibevoice_vllm_timeout_seconds': vibevoice_vllm_timeout_seconds,
+                "vibevoice_vllm_enabled": vibevoice_vllm_enabled,
+                "vibevoice_vllm_base_url": vibevoice_vllm_base_url,
+                "vibevoice_vllm_model_id": vibevoice_vllm_model_id,
+                "vibevoice_vllm_api_key": vibevoice_vllm_api_key,
+                "vibevoice_vllm_timeout_seconds": vibevoice_vllm_timeout_seconds,
                 # Custom vocabulary settings
-                'custom_vocab_terms_file': stt_custom_vocab_terms_file,
-                'custom_vocab_replacements_file': stt_custom_vocab_replacements_file,
-                'custom_vocab_initial_prompt_enable': stt_custom_vocab_initial_prompt_enable,
-                'custom_vocab_postprocess_enable': stt_custom_vocab_postprocess_enable,
-                'custom_vocab_prompt_template': stt_custom_vocab_prompt_template,
-                'custom_vocab_case_sensitive': stt_custom_vocab_case_sensitive,
+                "custom_vocab_terms_file": stt_custom_vocab_terms_file,
+                "custom_vocab_replacements_file": stt_custom_vocab_replacements_file,
+                "custom_vocab_initial_prompt_enable": stt_custom_vocab_initial_prompt_enable,
+                "custom_vocab_postprocess_enable": stt_custom_vocab_postprocess_enable,
+                "custom_vocab_prompt_template": stt_custom_vocab_prompt_template,
+                "custom_vocab_case_sensitive": stt_custom_vocab_case_sensitive,
                 **stt_vnext_items,
             },
             # Also provide with hyphen for backward compatibility
-            'STT-Settings': {
-                'default_stt_provider': default_stt_provider,
-                'default_transcriber': default_transcriber,
-                'default_batch_transcription_model': default_batch_transcription_model,
-                'default_streaming_transcription_model': default_streaming_transcription_model,
-                'nemo_model_variant': nemo_model_variant,
-                'nemo_device': nemo_device,
-                'nemo_cache_dir': nemo_cache_dir,
-                'streaming_fallback_to_whisper': streaming_fallback_to_whisper,
-                'parakeet_onnx_model_id': parakeet_onnx_model_id,
-                'parakeet_onnx_revision': parakeet_onnx_revision,
-                'mlx_model_id': mlx_model_id,
-                'mlx_cache_dir': mlx_cache_dir,
-                'mlx_chunk_duration': mlx_chunk_duration,
-                'mlx_overlap_duration': mlx_overlap_duration,
-                'buffered_chunk_duration': buffered_chunk_duration,
-                'buffered_total_buffer': buffered_total_buffer,
-                'buffered_merge_algo': buffered_merge_algo,
-                'mlx_decoding_mode': mlx_decoding_mode,
-                'mlx_beam_size': mlx_beam_size,
-                'mlx_length_penalty': mlx_length_penalty,
-                'mlx_patience': mlx_patience,
-                'mlx_duration_reward': mlx_duration_reward,
-                'mlx_sentence_max_words': mlx_sentence_max_words,
-                'mlx_sentence_silence_gap': mlx_sentence_silence_gap,
-                'mlx_sentence_max_duration': mlx_sentence_max_duration,
-                'mlx_stream_context_left': mlx_stream_context_left,
-                'mlx_stream_context_right': mlx_stream_context_right,
-                'mlx_stream_depth': mlx_stream_depth,
-                'mlx_stream_keep_original_attention': mlx_stream_keep_original_attention,
+            "STT-Settings": {
+                "default_stt_provider": default_stt_provider,
+                "default_transcriber": default_transcriber,
+                "default_batch_transcription_model": default_batch_transcription_model,
+                "default_streaming_transcription_model": default_streaming_transcription_model,
+                "nemo_model_variant": nemo_model_variant,
+                "nemo_device": nemo_device,
+                "nemo_cache_dir": nemo_cache_dir,
+                "streaming_fallback_to_whisper": streaming_fallback_to_whisper,
+                "parakeet_onnx_model_id": parakeet_onnx_model_id,
+                "parakeet_onnx_revision": parakeet_onnx_revision,
+                "mlx_model_id": mlx_model_id,
+                "mlx_cache_dir": mlx_cache_dir,
+                "mlx_chunk_duration": mlx_chunk_duration,
+                "mlx_overlap_duration": mlx_overlap_duration,
+                "buffered_chunk_duration": buffered_chunk_duration,
+                "buffered_total_buffer": buffered_total_buffer,
+                "buffered_merge_algo": buffered_merge_algo,
+                "mlx_decoding_mode": mlx_decoding_mode,
+                "mlx_beam_size": mlx_beam_size,
+                "mlx_length_penalty": mlx_length_penalty,
+                "mlx_patience": mlx_patience,
+                "mlx_duration_reward": mlx_duration_reward,
+                "mlx_sentence_max_words": mlx_sentence_max_words,
+                "mlx_sentence_silence_gap": mlx_sentence_silence_gap,
+                "mlx_sentence_max_duration": mlx_sentence_max_duration,
+                "mlx_stream_context_left": mlx_stream_context_left,
+                "mlx_stream_context_right": mlx_stream_context_right,
+                "mlx_stream_depth": mlx_stream_depth,
+                "mlx_stream_keep_original_attention": mlx_stream_keep_original_attention,
                 # VibeVoice-ASR settings
-                'vibevoice_enabled': vibevoice_enabled,
-                'vibevoice_model_id': vibevoice_model_id,
-                'vibevoice_device': vibevoice_device,
-                'vibevoice_dtype': vibevoice_dtype,
-                'vibevoice_cache_dir': vibevoice_cache_dir,
-                'vibevoice_allow_download': vibevoice_allow_download,
+                "vibevoice_enabled": vibevoice_enabled,
+                "vibevoice_model_id": vibevoice_model_id,
+                "vibevoice_device": vibevoice_device,
+                "vibevoice_dtype": vibevoice_dtype,
+                "vibevoice_cache_dir": vibevoice_cache_dir,
+                "vibevoice_allow_download": vibevoice_allow_download,
                 # Optional vLLM HTTP path for VibeVoice-ASR
-                'vibevoice_vllm_enabled': vibevoice_vllm_enabled,
-                'vibevoice_vllm_base_url': vibevoice_vllm_base_url,
-                'vibevoice_vllm_model_id': vibevoice_vllm_model_id,
-                'vibevoice_vllm_api_key': vibevoice_vllm_api_key,
-                'vibevoice_vllm_timeout_seconds': vibevoice_vllm_timeout_seconds,
+                "vibevoice_vllm_enabled": vibevoice_vllm_enabled,
+                "vibevoice_vllm_base_url": vibevoice_vllm_base_url,
+                "vibevoice_vllm_model_id": vibevoice_vllm_model_id,
+                "vibevoice_vllm_api_key": vibevoice_vllm_api_key,
+                "vibevoice_vllm_timeout_seconds": vibevoice_vllm_timeout_seconds,
                 # Custom vocabulary settings
-                'custom_vocab_terms_file': stt_custom_vocab_terms_file,
-                'custom_vocab_replacements_file': stt_custom_vocab_replacements_file,
-                'custom_vocab_initial_prompt_enable': stt_custom_vocab_initial_prompt_enable,
-                'custom_vocab_postprocess_enable': stt_custom_vocab_postprocess_enable,
-                'custom_vocab_prompt_template': stt_custom_vocab_prompt_template,
-                'custom_vocab_case_sensitive': stt_custom_vocab_case_sensitive,
+                "custom_vocab_terms_file": stt_custom_vocab_terms_file,
+                "custom_vocab_replacements_file": stt_custom_vocab_replacements_file,
+                "custom_vocab_initial_prompt_enable": stt_custom_vocab_initial_prompt_enable,
+                "custom_vocab_postprocess_enable": stt_custom_vocab_postprocess_enable,
+                "custom_vocab_prompt_template": stt_custom_vocab_prompt_template,
+                "custom_vocab_case_sensitive": stt_custom_vocab_case_sensitive,
                 **stt_vnext_items,
             },
-            'diarization': diarization_config,
-            'tts_settings': {
-                'default_tts_provider': default_tts_provider,
-                'tts_voice': tts_voice,
-                'local_tts_device': local_tts_device,
-                'tts_history_enabled': tts_history_enabled,
-                'tts_history_store_text': tts_history_store_text,
-                'tts_history_store_failed': tts_history_store_failed,
-                'tts_history_hash_key': tts_history_hash_key,
-                'tts_history_retention_days': tts_history_retention_days,
-                'tts_history_max_rows_per_user': tts_history_max_rows_per_user,
-                'tts_history_purge_interval_hours': tts_history_purge_interval_hours,
+            "diarization": diarization_config,
+            "tts_settings": {
+                "default_tts_provider": default_tts_provider,
+                "tts_voice": tts_voice,
+                "local_tts_device": local_tts_device,
+                "tts_history_enabled": tts_history_enabled,
+                "tts_history_store_text": tts_history_store_text,
+                "tts_history_store_failed": tts_history_store_failed,
+                "tts_history_hash_key": tts_history_hash_key,
+                "tts_history_retention_days": tts_history_retention_days,
+                "tts_history_max_rows_per_user": tts_history_max_rows_per_user,
+                "tts_history_purge_interval_hours": tts_history_purge_interval_hours,
                 # OpenAI
-                'default_openai_tts_voice': default_openai_tts_voice,
-                'default_openai_tts_speed': default_openai_tts_speed,
-                'default_openai_tts_model': default_openai_tts_model,
-                'default_openai_tts_output_format': default_openai_tts_output_format,
+                "default_openai_tts_voice": default_openai_tts_voice,
+                "default_openai_tts_speed": default_openai_tts_speed,
+                "default_openai_tts_model": default_openai_tts_model,
+                "default_openai_tts_output_format": default_openai_tts_output_format,
                 # Google
-                'default_google_tts_model': default_google_tts_model,
-                'default_google_tts_voice': default_google_tts_voice,
-                'default_google_tts_speed': default_google_tts_speed,
+                "default_google_tts_model": default_google_tts_model,
+                "default_google_tts_voice": default_google_tts_voice,
+                "default_google_tts_speed": default_google_tts_speed,
                 # ElevenLabs
-                'default_eleven_tts_model': default_eleven_tts_model,
-                'default_eleven_tts_voice': default_eleven_tts_voice,
-                'default_eleven_tts_language_code': default_eleven_tts_language_code,
-                'default_eleven_tts_voice_stability': default_eleven_tts_voice_stability,
-                'default_eleven_tts_voice_similiarity_boost': default_eleven_tts_voice_similiarity_boost,
-                'default_eleven_tts_voice_style': default_eleven_tts_voice_style,
-                'default_eleven_tts_voice_use_speaker_boost': default_eleven_tts_voice_use_speaker_boost,
-                'default_eleven_tts_output_format': default_eleven_tts_output_format,
+                "default_eleven_tts_model": default_eleven_tts_model,
+                "default_eleven_tts_voice": default_eleven_tts_voice,
+                "default_eleven_tts_language_code": default_eleven_tts_language_code,
+                "default_eleven_tts_voice_stability": default_eleven_tts_voice_stability,
+                "default_eleven_tts_voice_similiarity_boost": default_eleven_tts_voice_similiarity_boost,
+                "default_eleven_tts_voice_style": default_eleven_tts_voice_style,
+                "default_eleven_tts_voice_use_speaker_boost": default_eleven_tts_voice_use_speaker_boost,
+                "default_eleven_tts_output_format": default_eleven_tts_output_format,
                 # Open Source / Self-Hosted TTS
                 # GPT SoVITS
                 # 'default_gpt_tts_model': default_gpt_tts_model,
@@ -4954,158 +5785,166 @@ def load_and_log_configs():
                 # 'default_gpt_tts_speed': default_gpt_tts_speed,
                 # 'default_gpt_tts_output_format': default_gpt_tts_output_format
                 # AllTalk
-                'alltalk_api_ip': alltalk_api_ip,
-                'default_alltalk_tts_model': default_alltalk_tts_model,
-                'default_alltalk_tts_voice': default_alltalk_tts_voice,
-                'default_alltalk_tts_speed': default_alltalk_tts_speed,
-                'default_alltalk_tts_output_format': default_alltalk_tts_output_format,
+                "alltalk_api_ip": alltalk_api_ip,
+                "default_alltalk_tts_model": default_alltalk_tts_model,
+                "default_alltalk_tts_voice": default_alltalk_tts_voice,
+                "default_alltalk_tts_speed": default_alltalk_tts_speed,
+                "default_alltalk_tts_output_format": default_alltalk_tts_output_format,
                 # Kokoro
-                'default_kokoro_tts_model': default_kokoro_tts_model,
-                'default_kokoro_tts_voice': default_kokoro_tts_voice,
-                'default_kokoro_tts_speed': default_kokoro_tts_speed,
-                'default_kokoro_tts_output_format': default_kokoro_tts_output_format,
+                "default_kokoro_tts_model": default_kokoro_tts_model,
+                "default_kokoro_tts_voice": default_kokoro_tts_voice,
+                "default_kokoro_tts_speed": default_kokoro_tts_speed,
+                "default_kokoro_tts_output_format": default_kokoro_tts_output_format,
                 # Self-hosted OpenAI API
-                'default_openai_api_tts_model': default_openai_api_tts_model,
-                'default_openai_api_tts_voice': default_openai_api_tts_voice,
-                'default_openai_api_tts_speed': default_openai_api_tts_speed,
-                'default_openai_api_tts_output_format': default_openai_api_tts_output_format,
-                'default_openai_api_tts_streaming': default_openai_api_tts_streaming,
+                "default_openai_api_tts_model": default_openai_api_tts_model,
+                "default_openai_api_tts_voice": default_openai_api_tts_voice,
+                "default_openai_api_tts_speed": default_openai_api_tts_speed,
+                "default_openai_api_tts_output_format": default_openai_api_tts_output_format,
+                "default_openai_api_tts_streaming": default_openai_api_tts_streaming,
             },
-            'search_settings': {
-                'default_search_provider': search_provider_default,
-                'search_language_query': search_language_query,
-                'search_language_results': search_language_results,
-                'search_language_analysis': search_language_analysis,
-                'search_default_max_queries': search_default_max_queries,
-                'search_enable_subquery': search_enable_subquery,
-                'search_enable_subquery_count_max': search_enable_subquery_count_max,
-                'search_result_rerank': search_result_rerank,
-                'search_result_max': search_result_max,
-                'search_result_max_per_query': search_result_max_per_query,
-                'search_result_blacklist': search_result_blacklist,
-                'search_result_display_type': search_result_display_type,
-                'search_result_display_metadata': search_result_display_metadata,
-                'search_result_save_to_db': search_result_save_to_db,
-                'search_result_analysis_tone': search_result_analysis_tone,
-                'relevance_analysis_llm': relevance_analysis_llm,
-                'final_answer_llm': final_answer_llm,
+            "search_settings": {
+                "default_search_provider": search_provider_default,
+                "search_language_query": search_language_query,
+                "search_language_results": search_language_results,
+                "search_language_analysis": search_language_analysis,
+                "search_default_max_queries": search_default_max_queries,
+                "search_enable_subquery": search_enable_subquery,
+                "search_enable_subquery_count_max": search_enable_subquery_count_max,
+                "search_result_rerank": search_result_rerank,
+                "search_result_max": search_result_max,
+                "search_result_max_per_query": search_result_max_per_query,
+                "search_result_blacklist": search_result_blacklist,
+                "search_result_display_type": search_result_display_type,
+                "search_result_display_metadata": search_result_display_metadata,
+                "search_result_save_to_db": search_result_save_to_db,
+                "search_result_analysis_tone": search_result_analysis_tone,
+                "relevance_analysis_llm": relevance_analysis_llm,
+                "final_answer_llm": final_answer_llm,
             },
-            'search_engines': {
-                'baidu_search_api_key': baidu_search_api_key,
-                'bing_search_api_key': bing_search_api_key,
-                'bing_country_code': bing_country_code,
-                'bing_search_api_url': bing_search_api_url,
-                'brave_search_api_key': brave_search_api_key,
-                'brave_search_ai_api_key': brave_search_ai_api_key,
-                'brave_country_code': brave_country_code,
-                'duckduckgo_search_api_key': duckduckgo_search_api_key,
-                'google_search_api_url': google_search_api_url,
-                'google_search_api_key': google_search_api_key,
-                'google_search_engine_id': google_search_engine_id,
-                'google_simp_trad_chinese': google_simp_trad_chinese,
-                'limit_google_search_to_country': limit_google_search_to_country,
-                'google_search_country': google_search_country,
-                'google_search_country_code': google_search_country_code,
-                'google_search_filter_setting': google_filter_setting,
-                'google_user_geolocation': google_user_geolocation,
-                'google_ui_language': google_ui_language,
-                'google_limit_search_results_to_language': google_limit_search_results_to_language,
-                'google_site_search_include': google_site_search_include,
-                'google_site_search_exclude': google_site_search_exclude,
-                'google_sort_results_by': google_sort_results_by,
-                'google_default_search_results': google_default_search_results,
-                'google_safe_search': google_safe_search,
-                'google_enable_site_search' : google_enable_site_search,
-                'kagi_search_api_key': kagi_search_api_key,
-                'searx_search_api_url': search_engine_searx_api,
-                'tavily_search_api_key': tavily_search_api_key,
-                'serper_search_api_key': serper_search_api_key,
-                'serper_search_api_url': serper_search_api_url,
-                'exa_search_api_key': exa_search_api_key,
-                'exa_search_api_url': exa_search_api_url,
-                'firecrawl_api_key': firecrawl_api_key,
-                'firecrawl_search_api_url': firecrawl_search_api_url,
-                'yandex_search_api_key': yandex_search_api_key,
-                'yandex_search_engine_id': yandex_search_engine_id
+            "search_engines": {
+                "baidu_search_api_key": baidu_search_api_key,
+                "bing_search_api_key": bing_search_api_key,
+                "bing_country_code": bing_country_code,
+                "bing_search_api_url": bing_search_api_url,
+                "brave_search_api_key": brave_search_api_key,
+                "brave_search_ai_api_key": brave_search_ai_api_key,
+                "brave_country_code": brave_country_code,
+                "duckduckgo_search_api_key": duckduckgo_search_api_key,
+                "google_search_api_url": google_search_api_url,
+                "google_search_api_key": google_search_api_key,
+                "google_search_engine_id": google_search_engine_id,
+                "google_simp_trad_chinese": google_simp_trad_chinese,
+                "limit_google_search_to_country": limit_google_search_to_country,
+                "google_search_country": google_search_country,
+                "google_search_country_code": google_search_country_code,
+                "google_search_filter_setting": google_filter_setting,
+                "google_user_geolocation": google_user_geolocation,
+                "google_ui_language": google_ui_language,
+                "google_limit_search_results_to_language": google_limit_search_results_to_language,
+                "google_site_search_include": google_site_search_include,
+                "google_site_search_exclude": google_site_search_exclude,
+                "google_sort_results_by": google_sort_results_by,
+                "google_default_search_results": google_default_search_results,
+                "google_safe_search": google_safe_search,
+                "google_enable_site_search": google_enable_site_search,
+                "kagi_search_api_key": kagi_search_api_key,
+                "searx_search_api_url": search_engine_searx_api,
+                "tavily_search_api_key": tavily_search_api_key,
+                "serper_search_api_key": serper_search_api_key,
+                "serper_search_api_url": serper_search_api_url,
+                "exa_search_api_key": exa_search_api_key,
+                "exa_search_api_url": exa_search_api_url,
+                "firecrawl_api_key": firecrawl_api_key,
+                "firecrawl_search_api_url": firecrawl_search_api_url,
+                "yandex_search_api_key": yandex_search_api_key,
+                "yandex_search_engine_id": yandex_search_engine_id,
             },
-            'prompts': {
-                'sub_question_generation_prompt': sub_question_generation_prompt,
-                'search_result_relevance_eval_prompt': search_result_relevance_eval_prompt,
-                'analyze_search_results_prompt': analyze_search_results_prompt,
+            "prompts": {
+                "sub_question_generation_prompt": sub_question_generation_prompt,
+                "search_result_relevance_eval_prompt": search_result_relevance_eval_prompt,
+                "analyze_search_results_prompt": analyze_search_results_prompt,
             },
-            'web_scraper':{
-                'web_scraper_api_key': web_scraper_api_key,
-                'web_scraper_api_url': web_scraper_api_url,
-                'web_scraper_api_timeout': web_scraper_api_timeout,
-                'web_scraper_api_retries': web_scraper_api_retries,
-                'web_scraper_api_retry_delay': web_scraper_api_retry_delay,
-                'web_scraper_retry_count': web_scraper_retry_count,
-            'web_scraper_retry_timeout': web_scraper_retry_timeout,
-            'web_scraper_stealth_playwright': web_scraper_stealth_playwright,
-            'custom_scrapers_yaml_path': custom_scrapers_yaml_path,
-            'web_scraper_default_backend': web_scraper_default_backend,
-            'web_scraper_ua_mode': web_scraper_ua_mode,
-            # Crawl feature flags
-            'web_crawl_strategy': web_crawl_strategy,
-            'web_crawl_include_external': web_crawl_include_external,
-            'web_crawl_score_threshold': web_crawl_score_threshold,
-            'web_crawl_max_pages': web_crawl_max_pages,
-            'web_crawl_allowed_domains': web_crawl_allowed_domains,
-            'web_crawl_blocked_domains': web_crawl_blocked_domains,
-            'web_scraper_respect_robots': web_scraper_respect_robots,
-            'web_outbound_policy_mode': web_outbound_policy_mode_value,
-            # Scorers
-            'web_crawl_enable_keyword_scorer': web_crawl_enable_keyword,
-            'web_crawl_keywords': web_crawl_keywords,
-            'web_crawl_enable_domain_map': web_crawl_enable_domain_map,
-            'web_crawl_domain_map': web_crawl_domain_map,
+            "web_scraper": {
+                "web_scraper_api_key": web_scraper_api_key,
+                "web_scraper_api_url": web_scraper_api_url,
+                "web_scraper_api_timeout": web_scraper_api_timeout,
+                "web_scraper_api_retries": web_scraper_api_retries,
+                "web_scraper_api_retry_delay": web_scraper_api_retry_delay,
+                "web_scraper_retry_count": web_scraper_retry_count,
+                "web_scraper_retry_timeout": web_scraper_retry_timeout,
+                "web_scraper_stealth_playwright": web_scraper_stealth_playwright,
+                "custom_scrapers_yaml_path": custom_scrapers_yaml_path,
+                "web_scraper_default_backend": web_scraper_default_backend,
+                "web_scraper_ua_mode": web_scraper_ua_mode,
+                # Crawl feature flags
+                "web_crawl_strategy": web_crawl_strategy,
+                "web_crawl_include_external": web_crawl_include_external,
+                "web_crawl_score_threshold": web_crawl_score_threshold,
+                "web_crawl_max_pages": web_crawl_max_pages,
+                "web_crawl_allowed_domains": web_crawl_allowed_domains,
+                "web_crawl_blocked_domains": web_crawl_blocked_domains,
+                "web_scraper_respect_robots": web_scraper_respect_robots,
+                "web_outbound_policy_mode": web_outbound_policy_mode_value,
+                # Scorers
+                "web_crawl_enable_keyword_scorer": web_crawl_enable_keyword,
+                "web_crawl_keywords": web_crawl_keywords,
+                "web_crawl_enable_domain_map": web_crawl_enable_domain_map,
+                "web_crawl_domain_map": web_crawl_domain_map,
             },
-            'Redis': dict(config_parser_object.items('Redis')) if config_parser_object.has_section('Redis') else {},
-            'Web-Scraping': dict(config_parser_object.items('Web-Scraping')) if config_parser_object.has_section('Web-Scraping') else {}
+            "Redis": dict(config_parser_object.items("Redis")) if config_parser_object.has_section("Redis") else {},
+            "Web-Scraping": (
+                dict(config_parser_object.items("Web-Scraping"))
+                if config_parser_object.has_section("Web-Scraping")
+                else {}
+            ),
         }
         # Assemble minimal RAG config section (vector store + pgvector params)
         try:
             rag_section = {}
-            if config_parser_object.has_section('RAG'):
-                rag_section['vector_store_type'] = config_parser_object.get('RAG', 'vector_store_type', fallback='chromadb')
-                rag_section['distance_metric'] = config_parser_object.get('RAG', 'distance_metric', fallback='cosine')
-                rag_section['collection_prefix'] = config_parser_object.get('RAG', 'collection_prefix', fallback='unified')
+            if config_parser_object.has_section("RAG"):
+                rag_section["vector_store_type"] = config_parser_object.get(
+                    "RAG", "vector_store_type", fallback="chromadb"
+                )
+                rag_section["distance_metric"] = config_parser_object.get("RAG", "distance_metric", fallback="cosine")
+                rag_section["collection_prefix"] = config_parser_object.get(
+                    "RAG", "collection_prefix", fallback="unified"
+                )
                 # PGVector connection params under [RAG]
-                rag_section['pgvector'] = {
-                    'host': config_parser_object.get('RAG', 'pgvector_host', fallback='localhost'),
-                    'port': config_parser_object.getint('RAG', 'pgvector_port', fallback=5432),
-                    'database': config_parser_object.get('RAG', 'pgvector_database', fallback='postgres'),
-                    'user': config_parser_object.get('RAG', 'pgvector_user', fallback='postgres'),
-                    'password': config_parser_object.get('RAG', 'pgvector_password', fallback=''),
-                    'sslmode': config_parser_object.get('RAG', 'pgvector_sslmode', fallback='prefer'),
-                    'dsn': (config_parser_object.get('RAG', 'pgvector_dsn', fallback='') or None),
+                rag_section["pgvector"] = {
+                    "host": config_parser_object.get("RAG", "pgvector_host", fallback="localhost"),
+                    "port": config_parser_object.getint("RAG", "pgvector_port", fallback=5432),
+                    "database": config_parser_object.get("RAG", "pgvector_database", fallback="postgres"),
+                    "user": config_parser_object.get("RAG", "pgvector_user", fallback="postgres"),
+                    "password": config_parser_object.get("RAG", "pgvector_password", fallback=""),
+                    "sslmode": config_parser_object.get("RAG", "pgvector_sslmode", fallback="prefer"),
+                    "dsn": (config_parser_object.get("RAG", "pgvector_dsn", fallback="") or None),
                     # Pool configuration (psycopg_pool)
-                    'pool_min_size': config_parser_object.getint('RAG', 'pgvector_pool_min_size', fallback=1),
-                    'pool_max_size': config_parser_object.getint('RAG', 'pgvector_pool_max_size', fallback=5),
-                    'pool_size': config_parser_object.getint('RAG', 'pgvector_pool_size', fallback=5),
+                    "pool_min_size": config_parser_object.getint("RAG", "pgvector_pool_min_size", fallback=1),
+                    "pool_max_size": config_parser_object.getint("RAG", "pgvector_pool_max_size", fallback=5),
+                    "pool_size": config_parser_object.getint("RAG", "pgvector_pool_size", fallback=5),
                     # HNSW tuning
-                    'hnsw_ef_search': config_parser_object.getint('RAG', 'pgvector_hnsw_ef_search', fallback=64),
+                    "hnsw_ef_search": config_parser_object.getint("RAG", "pgvector_hnsw_ef_search", fallback=64),
                 }
-            return_dict['RAG'] = rag_section
+            return_dict["RAG"] = rag_section
         except _CONFIG_NONCRITICAL_EXCEPTIONS:
             # Non-fatal: keep defaults
             pass
 
         # Optional OCR section for backend preferences and defaults
         try:
-            if config_parser_object.has_section('OCR'):
+            if config_parser_object.has_section("OCR"):
                 ocr_section = {}
-                backend_priority = config_parser_object.get('OCR', 'backend_priority', fallback='')
+                backend_priority = config_parser_object.get("OCR", "backend_priority", fallback="")
                 if backend_priority:
-                    ocr_section['backend_priority'] = backend_priority
-                page_conc = config_parser_object.get('OCR', 'page_concurrency_default', fallback='')
+                    ocr_section["backend_priority"] = backend_priority
+                page_conc = config_parser_object.get("OCR", "page_concurrency_default", fallback="")
                 if page_conc:
-                    ocr_section['page_concurrency_default'] = int(page_conc)
-                sglang_timeout = config_parser_object.get('OCR', 'sglang_timeout', fallback='')
+                    ocr_section["page_concurrency_default"] = int(page_conc)
+                sglang_timeout = config_parser_object.get("OCR", "sglang_timeout", fallback="")
                 if sglang_timeout:
-                    ocr_section['sglang_timeout'] = int(sglang_timeout)
+                    ocr_section["sglang_timeout"] = int(sglang_timeout)
                 if ocr_section:
-                    return_dict['OCR'] = ocr_section
+                    return_dict["OCR"] = ocr_section
         except _CONFIG_NONCRITICAL_EXCEPTIONS:
             pass
 
@@ -5116,6 +5955,7 @@ def load_and_log_configs():
 
 
 # --- Lazy Configuration Proxies ---
+
 
 class _LazyMapping(MutableMapping[str, Any]):
     """MutableMapping proxy that materializes its data on first access."""
@@ -5243,7 +6083,7 @@ def _config_loader():
     if data is None:
         data = {}
     global default_api_endpoint
-    default_api_endpoint = data.get('default_api', 'openai')
+    default_api_endpoint = data.get("default_api", "openai")
     return data
 
 
@@ -5285,6 +6125,7 @@ def legacy_get(key: str, default: Any = None) -> Any:
 
     return default
 
+
 def get_stt_config() -> dict[str, Any]:
     """
     Return the canonical STT configuration export as a plain dict.
@@ -5313,6 +6154,7 @@ def get_stt_config() -> dict[str, Any]:
         stt_section = cfg.get("STT-Settings")
     return dict(stt_section) if isinstance(stt_section, MutableMapping) else {}
 
+
 _LOGGER_READY = True
 _flush_startup_logs()
 
@@ -5336,14 +6178,26 @@ def clear_config_cache() -> None:
     default_api_endpoint = "openai"
     object.__setattr__(settings, "_data", None)
     object.__setattr__(loaded_config_data, "_data", None)
+
+
 # ---------------------------------------------------------------------------
 # Startup config validation
 # ---------------------------------------------------------------------------
 
-_PLACEHOLDER_LITERALS = frozenset({
-    "FIXME", "TODO", "TBD", "CHANGE_ME", "CHANGE-ME",
-    "PLACEHOLDER", "NONE", "NULL", "N/A", "NA",
-})
+_PLACEHOLDER_LITERALS = frozenset(
+    {
+        "FIXME",
+        "TODO",
+        "TBD",
+        "CHANGE_ME",
+        "CHANGE-ME",
+        "PLACEHOLDER",
+        "NONE",
+        "NULL",
+        "N/A",
+        "NA",
+    }
+)
 
 
 def validate_config() -> list[str]:
@@ -5369,29 +6223,42 @@ def validate_config() -> list[str]:
         yield prefix, value
 
     validation_values = dict(_iter_scalar_values("", cfg))
-    validation_values.update({
-        "Database.pg_connection_string": get_config_value("Database", "pg_connection_string", default=""),
-        "Image-Generation.swarmui_base_url": get_config_value("Image-Generation", "swarmui_base_url", default=""),
-    })
+    validation_values.setdefault(
+        "Database.pg_connection_string",
+        get_config_value("Database", "pg_connection_string", default=""),
+    )
+    validation_values.setdefault(
+        "Image-Generation.swarmui_base_url",
+        get_config_value("Image-Generation", "swarmui_base_url", default=""),
+    )
 
     # Check for placeholder values in any config key
     for key, value in validation_values.items():
         if isinstance(value, str) and value.strip().upper() in _PLACEHOLDER_LITERALS:
-            msg = f"Config key '{key}' has placeholder value '{value}' — set a real value or leave empty"
+            msg = f"Config key '{key}' has placeholder value '{value}' - " "set a real value or leave empty"
             warnings.append(msg)
 
     # Check critical URL values parse correctly
     url_rules = {
-        "embedding_config.embedding_api_url": ("http://", "https://"),
-        "Database.pg_connection_string": ("postgres://", "postgresql://", "postgres+", "postgresql+"),
-        "Image-Generation.swarmui_base_url": ("http://", "https://"),
+        "embedding_config.embedding_api_url": {"http", "https"},
+        "Database.pg_connection_string": {
+            "postgres",
+            "postgresql",
+            "postgresql+asyncpg",
+            "postgresql+psycopg",
+            "postgresql+psycopg2",
+        },
+        "Image-Generation.swarmui_base_url": {"http", "https"},
     }
-    for key, allowed_prefixes in url_rules.items():
+    for key, allowed_schemes in url_rules.items():
         val = validation_values.get(key, "")
         if val and not isinstance(val, str):
             warnings.append(f"Config key '{key}' should be a string, got {type(val).__name__}")
-        elif isinstance(val, str) and val and not val.startswith(allowed_prefixes):
-            warnings.append(f"Config key '{key}' has unexpected URL scheme")
+        elif isinstance(val, str) and val:
+            scheme = urlparse(val).scheme
+            if scheme not in allowed_schemes:
+                safe_scheme = scheme or "<missing>"
+                warnings.append(f"Config key '{key}' has unexpected URL scheme: {safe_scheme}")
 
     for w in warnings:
         logger.warning("Config validation: {}", w)

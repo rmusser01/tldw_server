@@ -49,26 +49,30 @@ async def test_handle_abtest_job_invokes_runner(monkeypatch):
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_handle_abtest_job_preserves_string_owner_scope(monkeypatch):
-    called = {}
+async def test_handle_abtest_job_preserves_string_owner_scope_for_bindings(monkeypatch):
+    captured = {}
 
     async def _fake_run_abtest_full(db, config, test_id, user_id, media_db):
-        called["db"] = db
-        called["config"] = config
-        called["test_id"] = test_id
-        called["user_id"] = user_id
-        called["media_db"] = media_db
+        captured["db"] = db
+        captured["config"] = config
+        captured["test_id"] = test_id
+        captured["run_user_id"] = user_id
+        captured["media_db"] = media_db
 
     class _Svc:
         def __init__(self):
             self.db = object()
 
-    def _get_service(user_id):
-        called["service_user"] = user_id
+    def _service_for_user(user_id):
+        captured["service_user_id"] = user_id
         return _Svc()
 
-    monkeypatch.setattr(worker, "get_unified_evaluation_service_for_user", _get_service)
-    monkeypatch.setattr(worker, "_build_media_db", lambda user_id: {"user_id": user_id})
+    def _build_media_db(user_id):
+        captured["media_db_user_id"] = user_id
+        return {"user_id": user_id}
+
+    monkeypatch.setattr(worker, "get_unified_evaluation_service_for_user", _service_for_user)
+    monkeypatch.setattr(worker, "_build_media_db", _build_media_db)
     monkeypatch.setattr(worker, "run_abtest_full", _fake_run_abtest_full)
 
     payload = {
@@ -89,6 +93,7 @@ async def test_handle_abtest_job_preserves_string_owner_scope(monkeypatch):
 
     result = await worker.handle_abtest_job(job)
     assert result["test_id"] == "abtest_tenant"
-    assert called["service_user"] == "tenant-user"
-    assert called["user_id"] == "tenant-user"
-    assert called["media_db"] == {"user_id": "tenant-user"}
+    assert captured["service_user_id"] == "tenant-user"
+    assert captured["media_db_user_id"] == "tenant-user"
+    assert captured["run_user_id"] == "tenant-user"
+    assert captured["media_db"] == {"user_id": "tenant-user"}

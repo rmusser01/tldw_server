@@ -2906,6 +2906,20 @@ export const SidepanelForm = ({
                               <>
                                 {!streaming ? (
                                   <>
+                                    <Tooltip
+                                      title={t("playground:actions.upload", "Attach image")}
+                                    >
+                                      <button
+                                        type="button"
+                                        onClick={openUploadDialog}
+                                        data-testid="chat-attach-image"
+                                        className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-md border border-border p-1 text-text-muted transition-colors hover:bg-surface2 hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+                                        aria-label="Attach image"
+                                        title={t("playground:actions.upload", "Attach image")}
+                                      >
+                                        <ImageIcon className="h-4 w-4" />
+                                      </button>
+                                    </Tooltip>
                                     <div className="flex items-center gap-1">
                                       <Tooltip
                                         title={

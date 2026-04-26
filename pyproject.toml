@@ -724,7 +724,6 @@ ignore = [
     "TRY002", # raise-vanilla-class — project raises Exception in some valid contexts
     "TRY003", # wants custom exception classes for every raise ValueError("msg")
     "TRY004", # type-check-without-type-error — ValueError vs TypeError is debatable
-    "TRY203", # useless-try-except — sometimes try/except/raise is for clarity
     "TRY300", # try-consider-else — opinionated, return in try is idiomatic Python
     "TRY301", # abstract raise to inner function — impractical
     "TRY401", # verbose log message — debatable

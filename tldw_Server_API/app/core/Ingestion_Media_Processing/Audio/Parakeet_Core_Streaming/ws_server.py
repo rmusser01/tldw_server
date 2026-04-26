@@ -134,7 +134,8 @@ async def websocket_parakeet_core(
                         config.language = str(cfg.get("language") or "") or None
                     except _PARAKEET_WS_NONCRITICAL_EXCEPTIONS:
                         config.language = None
-                # Normalize model + variant, supporting forms like "parakeet-onnx"
+                # Normalize model + variant, supporting forms like
+                # "parakeet-tdt-0.6b-v3-onnx" and "parakeet-onnx".
                 variant_override = cfg.get("variant") or cfg.get("model_variant")
                 if ("model" in cfg) or (variant_override is not None):
                     raw_model = str(cfg.get("model") or config.model)

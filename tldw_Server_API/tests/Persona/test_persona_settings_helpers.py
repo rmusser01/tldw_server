@@ -22,6 +22,13 @@ def test_persona_int_setting_invalid_value_logs_fallback(monkeypatch):
     assert any("PERSONA_MAX_TOOL_STEPS" in str(arg) for _, args, _ in debug_calls for arg in args)
 
 
+def test_persona_int_setting_does_not_swallow_unexpected_settings_shape(monkeypatch):
+    monkeypatch.setattr(config_module, "settings", object(), raising=False)
+
+    with pytest.raises(AttributeError):
+        persona_ep._get_persona_max_tool_steps()
+
+
 def test_persona_ws_auth_interval_invalid_value_logs_and_falls_back(monkeypatch):
     debug_calls = []
 

@@ -249,7 +249,7 @@ agent_command = claude
 agent_args = ["code"]
 ```
 
-`agent_command` must be the downstream coding agent executable (`claude`, `codex`, `opencode`, etc).  
+`agent_command` must be the downstream coding agent executable (`claude`, `codex`, `opencode`, etc).
 Do not set it to `tldw-agent-acp` (that recursively launches the runner and fails with `resource temporarily unavailable`).
 
 ### Required Env

@@ -40,6 +40,7 @@ def client(tmp_path, monkeypatch):
 
     fastapi_app.dependency_overrides[get_request_user] = override_user
     fastapi_app.dependency_overrides[get_chacha_db_for_user] = override_db
+    fastapi_app.state.manuscript_db = db
 
     with TestClient(fastapi_app) as c:
         yield c
@@ -609,6 +610,37 @@ def test_plot_event_patch_allows_nullable_scene_links(client: TestClient):
     assert updated["version"] == 2
 
 
+def test_deleted_project_hides_plot_events_collection(client: TestClient):
+    project = _create_project(client, "Plot Event Collection Boundary")
+    project_id = project["id"]
+
+    plot_line_resp = client.post(
+        f"{PREFIX}/projects/{project_id}/plot-lines",
+        json={"title": "Main Quest"},
+    )
+    assert plot_line_resp.status_code == 201, plot_line_resp.text
+    plot_line_id = plot_line_resp.json()["id"]
+
+    event_resp = client.post(
+        f"{PREFIX}/plot-lines/{plot_line_id}/events",
+        json={"title": "Dragon Appears", "event_type": "plot"},
+    )
+    assert event_resp.status_code == 201, event_resp.text
+
+    project_state = client.get(f"{PREFIX}/projects/{project_id}")
+    assert project_state.status_code == 200, project_state.text
+
+    delete_resp = client.delete(
+        f"{PREFIX}/projects/{project_id}",
+        headers={"expected-version": str(project_state.json()["version"])},
+    )
+    assert delete_resp.status_code == 204, delete_resp.text
+
+    list_resp = client.get(f"{PREFIX}/plot-lines/{plot_line_id}/events")
+    assert list_resp.status_code == 200, list_resp.text
+    assert list_resp.json() == []
+
+
 def test_plot_hole_create_rejects_whitespace_title(client: TestClient):
     project = _create_project(client, "Plot Hole Create Validation")
     project_id = project["id"]
@@ -721,6 +753,97 @@ def test_deleted_project_hides_project_scoped_lists(client: TestClient):
     assert client.get(f"{PREFIX}/projects/{project_id}/world-info").json() == []
     assert client.get(f"{PREFIX}/projects/{project_id}/plot-lines").json() == []
     assert client.get(f"{PREFIX}/projects/{project_id}/plot-holes").json() == []
+
+
+def test_deleted_project_rejects_scene_links_and_reorder(client: TestClient):
+    project = _create_project(client, "Deleted Project Write Boundary")
+    project_id = project["id"]
+
+    chapter = _create_chapter(client, project_id)
+    scene = _create_scene(client, chapter["id"])
+    scene_id = scene["id"]
+
+    character = client.post(
+        f"{PREFIX}/projects/{project_id}/characters",
+        json={"name": "Aldric", "role": "protagonist"},
+    ).json()
+    world_info = client.post(
+        f"{PREFIX}/projects/{project_id}/world-info",
+        json={"kind": "location", "name": "Keep"},
+    ).json()
+
+    project_state = client.get(f"{PREFIX}/projects/{project_id}")
+    assert project_state.status_code == 200, project_state.text
+
+    delete_resp = client.delete(
+        f"{PREFIX}/projects/{project_id}",
+        headers={"expected-version": str(project_state.json()["version"])},
+    )
+    assert delete_resp.status_code == 204, delete_resp.text
+
+    chapter_create_resp = client.post(
+        f"{PREFIX}/projects/{project_id}/chapters",
+        json={"title": "Afterlife Chapter"},
+    )
+    assert chapter_create_resp.status_code == 404, chapter_create_resp.text
+
+    char_link_resp = client.post(
+        f"{PREFIX}/scenes/{scene_id}/characters",
+        json={"character_id": character["id"]},
+    )
+    assert char_link_resp.status_code == 404, char_link_resp.text
+
+    world_link_resp = client.post(
+        f"{PREFIX}/scenes/{scene_id}/world-info",
+        json={"world_info_id": world_info["id"]},
+    )
+    assert world_link_resp.status_code == 404, world_link_resp.text
+
+    reorder_resp = client.post(
+        f"{PREFIX}/projects/{project_id}/reorder",
+        json={
+            "entity_type": "scenes",
+            "items": [{"id": scene_id, "sort_order": 1.0, "version": scene["version"]}],
+        },
+    )
+    assert reorder_resp.status_code == 404, reorder_resp.text
+
+
+def test_deleted_project_rejects_scene_update_without_mutation(client: TestClient):
+    project = _create_project(client, "Deleted Project Scene Update Boundary")
+    project_id = project["id"]
+
+    chapter = _create_chapter(client, project_id)
+    scene = _create_scene(client, chapter["id"], title="Original Scene Title")
+    scene_id = scene["id"]
+    original_version = scene["version"]
+
+    project_state = client.get(f"{PREFIX}/projects/{project_id}")
+    assert project_state.status_code == 200, project_state.text
+
+    delete_resp = client.delete(
+        f"{PREFIX}/projects/{project_id}",
+        headers={"expected-version": str(project_state.json()["version"])},
+    )
+    assert delete_resp.status_code == 204, delete_resp.text
+
+    update_resp = client.patch(
+        f"{PREFIX}/scenes/{scene_id}",
+        json={"title": "Mutated After Delete"},
+        headers={"expected-version": str(original_version)},
+    )
+    assert update_resp.status_code == 409, update_resp.text
+
+    with client.app.state.manuscript_db.transaction() as conn:
+        row = conn.execute(
+            "SELECT title, version, deleted FROM manuscript_scenes WHERE id = ?",
+            (scene_id,),
+        ).fetchone()
+
+    assert row is not None
+    assert row["title"] == "Original Scene Title"
+    assert row["version"] == original_version
+    assert row["deleted"] == 0
 
 
 # -----------------------------------------------------------------------

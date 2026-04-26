@@ -1,0 +1,71 @@
+# docker-compose.multi-user-postgres.yml for local multi-user tldw_server deployments.
+#
+# Usage (from repo root):
+#   TLDW_ENV_FILE="$PWD/tldw_Server_API/Config_Files/.env" docker compose \
+#     -f Dockerfiles/docker-compose.multi-user-postgres.yml up -d --build
+
+x-tldw-env-file: &tldw-env-file
+  path: ${TLDW_ENV_FILE:-../tldw_Server_API/Config_Files/.env}
+  required: true
+  format: raw
+
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: Dockerfiles/Dockerfile.prod
+    image: tldw-server:prod
+    ports:
+      - "127.0.0.1:8000:8000"
+    env_file:
+      - *tldw-env-file
+    environment:
+      - "AUTH_MODE=multi_user"
+      - "POSTGRES_HOST=postgres"
+      - "POSTGRES_PORT=5432"
+      - "REDIS_URL=redis://redis:6379"
+      - "tldw_production=${tldw_production:-false}"
+      - "UVICORN_WORKERS=${UVICORN_WORKERS:-2}"
+      - "LOG_LEVEL=${LOG_LEVEL:-info}"
+    volumes:
+      - app-data:/app/Databases
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sys, urllib.request; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/ready', timeout=3).status == 200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  postgres:
+    image: postgres:18-bookworm
+    restart: unless-stopped
+    env_file:
+      - *tldw-env-file
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    volumes:
+      - postgres_data:/var/lib/postgresql
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - redis_data:/data
+
+volumes:
+  app-data:
+  postgres_data:
+  redis_data:
