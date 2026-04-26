@@ -5,9 +5,9 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
-import sys
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
@@ -49,10 +49,13 @@ from tldw_Server_API.app.api.v1.schemas.setup_schemas import (
 )
 from tldw_Server_API.app.core.AuthNZ.permissions import SYSTEM_CONFIGURE
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
-from tldw_Server_API.app.core.Setup import install_manager, setup_manager
-from tldw_Server_API.app.core.Setup import audio_pack_service
-from tldw_Server_API.app.core.Setup import audio_profile_service
-from tldw_Server_API.app.core.Setup import audio_readiness_store
+from tldw_Server_API.app.core.Setup import (
+    audio_pack_service,
+    audio_profile_service,
+    audio_readiness_store,
+    install_manager,
+    setup_manager,
+)
 from tldw_Server_API.app.core.Setup.audio_bundle_catalog import (
     get_audio_bundle_catalog,
 )
@@ -145,7 +148,7 @@ def _normalize_audio_pack_name(pack_name: str) -> str:
 
 
 def _raise_audio_bundle_lookup_not_found(exc: KeyError) -> None:
-    raise HTTPException(status.HTTP_404_NOT_FOUND, detail=_AUDIO_BUNDLE_LOOKUP_DETAIL) from exc
+    raise HTTPException(status.HTTP_404_NOT_FOUND, detail=AUDIO_BUNDLE_NOT_FOUND_DETAIL) from exc
 
 
 @router.get("/status", openapi_extra={"security": []}, response_model=SetupStatusResponse)
@@ -378,6 +381,7 @@ async def _get_omnivoice_setup_status(
     *,
     allow_completed_when_disabled: bool = False,
 ) -> dict[str, Any]:
+    """Return OmniVoice setup status through the shared setup availability guard."""
     _ensure_audio_installer_available(allow_completed_when_disabled=allow_completed_when_disabled)
     return await asyncio.to_thread(install_manager.get_omnivoice_setup_status)
 
@@ -387,6 +391,7 @@ async def _execute_omnivoice_setup_action(
     *,
     allow_completed_when_disabled: bool = False,
 ) -> dict[str, Any]:
+    """Run an OmniVoice setup action and map setup/runtime failures to safe HTTP errors."""
     _ensure_audio_installer_available(allow_completed_when_disabled=allow_completed_when_disabled)
 
     try:

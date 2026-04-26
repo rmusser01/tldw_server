@@ -5,6 +5,7 @@ Each adapter provides a unified interface for different TTS engines.
 """
 
 from importlib import import_module
+from typing import Any
 
 __all__ = [
     "TTSAdapter",
@@ -17,7 +18,7 @@ __all__ = [
 ]
 
 
-def __getattr__(name: str):
+def __getattr__(name: str) -> Any:
     if name not in __all__:
         submodule_name = f"{__name__}.{name}"
         try:

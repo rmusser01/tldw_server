@@ -24,16 +24,12 @@ from loguru import logger
 
 from tldw_Server_API.app.api.v1.endpoints.audio import audio_health
 from tldw_Server_API.app.core.config import load_and_log_configs, load_tts_config
-from tldw_Server_API.app.core.Setup import audio_profile_service
-from tldw_Server_API.app.core.Setup import audio_readiness_store
-from tldw_Server_API.app.core.Setup import setup_manager
+from tldw_Server_API.app.core.Setup import audio_profile_service, audio_readiness_store, setup_manager
 from tldw_Server_API.app.core.Setup.audio_bundle_catalog import (
     AUDIO_BUNDLE_CATALOG_VERSION,
-    AudioBundle,
-    AudioResourceProfile,
+    DEFAULT_AUDIO_RESOURCE_PROFILE,
     AudioBundleStep,
     AutomationTier,
-    DEFAULT_AUDIO_RESOURCE_PROFILE,
     build_audio_selection_key,
     get_audio_bundle_catalog,
 )
@@ -1338,6 +1334,7 @@ def _install_vibevoice(variants: list[str]) -> None:
 
 
 def _install_omnivoice() -> None:
+    """Install the OmniVoice sidecar runtime and require provider config patching."""
     from Helper_Scripts.TTS_Installers import install_tts_omnivoice_sidecar as installer
 
     _ensure_downloads_allowed("OmniVoice sidecar runtime")
@@ -1487,6 +1484,7 @@ def _resolve_hf_revision(repo_id: str) -> str | None:
     )
 
 def _resolve_hf_cache_root() -> Path:
+    """Resolve the Hugging Face hub cache root using standard environment overrides."""
     cache_override = os.getenv("HF_HUB_CACHE")
     if cache_override:
         return Path(cache_override).expanduser()
@@ -1499,6 +1497,7 @@ def _resolve_hf_cache_root() -> Path:
 
 
 def _hf_repo_cache_dir(repo_id: str, *, repo_type: str = "models") -> Path:
+    """Return the expected local Hugging Face cache directory for a repository."""
     normalized_repo = str(repo_id).strip().replace("/", "--")
     return _resolve_hf_cache_root() / f"{repo_type}--{normalized_repo}"
 
@@ -1524,14 +1523,42 @@ def _snapshot_repo(repo_id: str) -> Path:
 
 
 def _get_omnivoice_provider_config() -> dict[str, Any]:
+    """Load the OmniVoice provider block from TTS provider configuration."""
     config = load_tts_config() or {}
     provider_cfg = config.get(f"{OMNIVOICE_PROVIDER_KEY}_config")
     return provider_cfg if isinstance(provider_cfg, dict) else {}
 
 
+def _strip_sidecar_error_detail(payload: Any) -> Any:
+    """Return a shallow copy of sidecar health metadata without raw error text."""
+    if not isinstance(payload, dict):
+        return payload
+    sanitized = dict(payload)
+    sanitized.pop("last_error", None)
+    return sanitized
+
+
+def _sanitize_omnivoice_status_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Remove raw sidecar error detail from an OmniVoice setup status payload."""
+    sanitized = dict(payload)
+    sanitized["sidecar"] = _strip_sidecar_error_detail(sanitized.get("sidecar"))
+    return sanitized
+
+
+def _sanitize_omnivoice_action_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Remove raw sidecar error detail from an OmniVoice setup action payload."""
+    sanitized = dict(payload)
+    sanitized["health"] = _strip_sidecar_error_detail(sanitized.get("health"))
+    omnivoice_status = sanitized.get("omnivoice")
+    if isinstance(omnivoice_status, dict):
+        sanitized["omnivoice"] = _sanitize_omnivoice_status_payload(omnivoice_status)
+    return sanitized
+
+
 def _resolve_omnivoice_runtime_paths(
     provider_cfg: dict[str, Any] | None = None,
 ) -> dict[str, Path]:
+    """Resolve OmniVoice runtime paths from provider config with installer defaults."""
     from Helper_Scripts.TTS_Installers import install_tts_omnivoice_sidecar as installer
 
     repo_root = Path(__file__).resolve().parents[4]
@@ -1568,6 +1595,7 @@ def _resolve_omnivoice_runtime_paths(
 
 
 def get_omnivoice_setup_status() -> dict[str, Any]:
+    """Report OmniVoice install, weight-cache, and sidecar readiness for setup UIs."""
     provider_cfg = _get_omnivoice_provider_config()
     extra_params = provider_cfg.get("extra_params") if isinstance(provider_cfg.get("extra_params"), dict) else {}
     runtime_paths = _resolve_omnivoice_runtime_paths(provider_cfg)
@@ -1613,7 +1641,7 @@ def get_omnivoice_setup_status() -> dict[str, Any]:
     except Exception:  # noqa: BLE001
         logger.debug("OmniVoice setup status could not inspect live sidecar state", exc_info=True)
 
-    return {
+    return _sanitize_omnivoice_status_payload({
         "provider": OMNIVOICE_PROVIDER_KEY,
         "enabled": bool(provider_cfg.get("enabled", False)),
         "runtime": str(provider_cfg.get("runtime") or "sidecar"),
@@ -1629,16 +1657,17 @@ def get_omnivoice_setup_status() -> dict[str, Any]:
         "runtime_path": str(runtime_paths["runtime_dir"]),
         "logs_path": str(runtime_paths["logs_dir"]),
         "sidecar": sidecar,
-    }
+    })
 
 
 def predownload_omnivoice_assets() -> dict[str, Any]:
+    """Prefetch configured OmniVoice model weights and return setup action metadata."""
     provider_cfg = _get_omnivoice_provider_config()
     extra_params = provider_cfg.get("extra_params") if isinstance(provider_cfg.get("extra_params"), dict) else {}
     model_id = str(extra_params.get("model_id") or "k2-fsa/OmniVoice")
     snapshot_path = _snapshot_repo(model_id)
     omnivoice_status = get_omnivoice_setup_status()
-    return {
+    return _sanitize_omnivoice_action_payload({
         "success": True,
         "provider": OMNIVOICE_PROVIDER_KEY,
         "action": "predownload",
@@ -1647,10 +1676,11 @@ def predownload_omnivoice_assets() -> dict[str, Any]:
         "snapshot_path": str(snapshot_path),
         "health": None,
         "omnivoice": omnivoice_status,
-    }
+    })
 
 
 async def warmup_omnivoice_sidecar_async() -> dict[str, Any]:
+    """Start the OmniVoice sidecar, request model warmup, and return action metadata."""
     from tldw_Server_API.app.core.TTS.adapters.omnivoice_sidecar_protocol import build_sidecar_auth_headers
     from tldw_Server_API.app.core.TTS.adapters.omnivoice_sidecar_supervisor import create_sidecar_async_client
     from tldw_Server_API.app.core.TTS.tts_service_v2 import get_tts_service_v2
@@ -1673,7 +1703,7 @@ async def warmup_omnivoice_sidecar_async() -> dict[str, Any]:
 
     health = response.json()
     omnivoice_status = get_omnivoice_setup_status()
-    return {
+    return _sanitize_omnivoice_action_payload({
         "success": bool(health.get("ready", False)),
         "provider": OMNIVOICE_PROVIDER_KEY,
         "action": "warmup",
@@ -1682,7 +1712,7 @@ async def warmup_omnivoice_sidecar_async() -> dict[str, Any]:
         "snapshot_path": None,
         "health": health,
         "omnivoice": omnivoice_status,
-    }
+    })
 
 
 def _run_subprocess(command: list[str]) -> None:
