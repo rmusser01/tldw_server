@@ -9,10 +9,24 @@ import pytest
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
-from tldw_Server_API.app.core.DB_Management.Kanban_DB import KanbanDB
+from tldw_Server_API.app.api.v1.endpoints.kanban import kanban_workflow
+from tldw_Server_API.app.core.DB_Management.Kanban_DB import KanbanDB, KanbanDBError
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 
 pytestmark = pytest.mark.integration
+
+
+def test_workflow_http_error_sanitizes_kanban_db_error_message():
+    http_error = kanban_workflow._workflow_http_error(
+        KanbanDBError("kanban backend exploded at /private/kanban.db"),
+        operation="test workflow operation",
+    )
+
+    assert http_error.status_code == 500
+    assert http_error.detail == {
+        "code": "kanban_db_error",
+        "message": "Workflow database error",
+    }
 
 
 @pytest.fixture()

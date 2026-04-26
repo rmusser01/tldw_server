@@ -13,6 +13,7 @@ from cachetools import LRUCache  # Assuming cachetools is available
 from fastapi import Depends, HTTPException, Request, status
 from loguru import logger
 
+from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.config import settings
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
@@ -283,7 +284,12 @@ async def get_prompts_db_for_user(
     managed via the prompts_interop layer.
     """
     start_prompts_pending_close_worker()
-    assert _user_db_instances is not None and _user_db_locks is not None
+    if _user_db_instances is None or _user_db_locks is None:
+        logger.error("Prompts DB caches are not initialized.")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Prompts DB cache unavailable.",
+        )
     # More robust check for User object and its id
     if not isinstance(current_user, User) or not hasattr(current_user, 'id') or not isinstance(current_user.id, int):
         logger.error(
@@ -384,13 +390,19 @@ async def get_prompts_db_for_user(
         except (DatabaseError, SchemaError, InputError, ConflictError) as e:
             log_path_str = str(db_path) if db_path else f"directory for user_id {user_id}"
             logger.error(f"Failed to initialize PromptsDatabase for user {user_id} at {log_path_str}: {e}", exc_info=True)
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Could not initialize prompts database for user: {str(e)}"
+            raise map_db_error_to_http(
+                e,
+                default_detail="Prompts DB unavailable",
+                input_status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                conflict_status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                conflict_detail="Prompts DB unavailable",
             ) from e
         except OSError as e:
             logger.error(f"Failed to get PromptsDatabase path for user {user_id}: {e}", exc_info=True)
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)) from e
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Prompts DB unavailable",
+            ) from e
         except Exception as e:
             log_path_str = str(db_path) if db_path else f"directory for user_id {user_id}"
             logger.error(f"Unexpected error initializing PromptsDatabase for user {user_id} at {log_path_str}: {e}", exc_info=True)

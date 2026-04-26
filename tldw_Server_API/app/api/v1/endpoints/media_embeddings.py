@@ -269,7 +269,7 @@ async def get_media_content(media_id: int, db: Any) -> dict[str, Any]:
         logger.error(f"Error retrieving media content: {e}")
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error retrieving media content: {str(e)}"
+            detail="Error retrieving media content"
         ) from e
 
 
@@ -524,11 +524,11 @@ async def generate_embeddings_for_media(
                         metadata=request_metadata,
                     )
                 except Exception as exc:
-                    logger.error(f"Fallback embedding generation failed: {exc}")
+                    logger.error(f"Fallback embedding generation failed: {exc}", exc_info=True)
                     return {
                         "status": "error",
-                        "message": f"Failed to generate embeddings: {exc}",
-                        "error": str(exc),
+                        "message": "Failed to generate embeddings",
+                        "error": "Embedding generation failed",
                         "embedding_count": 0,
                         "chunks_processed": len(chunks),
                     }
@@ -589,11 +589,11 @@ async def generate_embeddings_for_media(
         }
 
     except _MEDIA_EMBEDDINGS_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Error generating embeddings: {e}")
+        logger.error(f"Error generating embeddings: {e}", exc_info=True)
         return {
             "status": "error",
-            "message": f"Failed to generate embeddings: {str(e)}",
-            "error": str(e),
+            "message": "Failed to generate embeddings",
+            "error": "Embedding generation failed",
             "embedding_count": 0,
             "chunks_processed": 0,
         }
@@ -662,7 +662,7 @@ async def get_embeddings_status(
         logger.error(f"Error checking embeddings status: {e}")
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error checking embeddings status: {str(e)}"
+            detail="Error checking embeddings status"
         ) from e
 
 
@@ -754,7 +754,7 @@ async def generate_embeddings(
         logger.error(f"Error generating embeddings: {e}")
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error generating embeddings: {str(e)}"
+            detail="Error generating embeddings"
         ) from e
 
 
@@ -1006,7 +1006,7 @@ async def delete_embeddings(
         logger.error(f"Error deleting embeddings: {e}")
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error deleting embeddings: {str(e)}"
+            detail="Error deleting embeddings"
         ) from e
 
 

@@ -893,6 +893,46 @@ async def test_audio_chat_ws_overlap_starts_tts_before_final_llm_message(monkeyp
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+async def test_audio_chat_ws_overlap_warning_sanitizes_internal_message(monkeypatch: pytest.MonkeyPatch) -> None:
+    audio_payload = base64.b64encode(b"abc").decode("ascii")
+    ws = DummyWebSocket(
+        [
+            {
+                "type": "config",
+                "stt": {"model": "parakeet"},
+                "llm": {"provider": "stub", "model": "stub-model"},
+                "tts": {"voice": "af_heart", "format": "pcm"},
+            },
+            {"type": "audio", "data": audio_payload},
+            {"type": "commit"},
+            {"type": "stop"},
+        ]
+    )
+
+    class _WarningRealtimeService(_DummyRealtimeCapableTTSService):
+        async def open_realtime_session(self, *args: Any, **kwargs: Any) -> Any:  # noqa: ARG002
+            return SimpleNamespace(
+                session=self.session,
+                provider="stub-realtime",
+                warning=RuntimeError("tts provider degraded at /private/tts/cache"),
+            )
+
+    async def _get_tts_service():
+        return _WarningRealtimeService()
+
+    monkeypatch.setattr(audio, "get_tts_service", _get_tts_service)
+
+    await audio.websocket_audio_chat_stream(ws, token=None)
+
+    warnings = [message for message in ws.sent_json if message.get("type") == "warning"]
+    assert warnings
+    assert warnings[-1]["message"] == "Realtime TTS session warning"
+    assert "tts provider degraded" not in str(warnings)
+    assert "/private/tts/cache" not in str(warnings)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_audio_chat_ws_interrupt_cancels_inflight_turn(monkeypatch: pytest.MonkeyPatch) -> None:
     audio_payload = base64.b64encode(b"abc").decode("ascii")
     ws = DummyWebSocket(

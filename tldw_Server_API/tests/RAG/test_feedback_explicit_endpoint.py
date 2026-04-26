@@ -8,7 +8,7 @@ from fastapi import status
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit
 from tldw_Server_API.app.api.v1.endpoints import feedback as feedback_endpoint
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, CharactersRAGDBError
 from tldw_Server_API.app.core.RAG.rag_service.analytics_system import UnifiedFeedbackSystem
 
 
@@ -259,6 +259,26 @@ def test_list_feedback_not_found_for_missing_conversation(feedback_setup):
     assert resp.status_code == status.HTTP_404_NOT_FOUND
 
 
+@pytest.mark.integration
+def test_list_feedback_returns_500_for_db_error(feedback_setup, monkeypatch):
+    client, _db, conversation_id, _message_id = feedback_setup
+
+    class _FailingFeedbackStore:
+        async def get_conversation_feedback(self, _conversation_id: str):
+            raise CharactersRAGDBError("feedback query failed")
+
+    class _FailingFeedbackSystem:
+        def __init__(self, chacha_db):
+            self.user_feedback = _FailingFeedbackStore()
+
+    monkeypatch.setattr(feedback_endpoint, "UnifiedFeedbackSystem", _FailingFeedbackSystem)
+
+    resp = client.get("/api/v1/feedback", params={"conversation_id": conversation_id})
+
+    assert resp.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+    assert resp.json()["detail"] == "Failed to list feedback"
+
+
 # ---------------------------------------------------------------------------
 # DELETE  /api/v1/feedback/{feedback_id}
 # ---------------------------------------------------------------------------
@@ -302,6 +322,29 @@ def test_delete_feedback_not_found(feedback_setup):
 
     resp = client.delete("/api/v1/feedback/fb_nonexistent")
     assert resp.status_code == status.HTTP_404_NOT_FOUND
+
+
+@pytest.mark.integration
+def test_delete_feedback_returns_500_for_db_error(feedback_setup, monkeypatch):
+    client, _db, conversation_id, _message_id = feedback_setup
+
+    class _FailingFeedbackStore:
+        async def get_feedback_by_id(self, _feedback_id: str):
+            return {"conversation_id": conversation_id}
+
+        async def delete_feedback(self, _feedback_id: str):
+            raise CharactersRAGDBError("delete feedback failed")
+
+    class _FailingFeedbackSystem:
+        def __init__(self, chacha_db):
+            self.user_feedback = _FailingFeedbackStore()
+
+    monkeypatch.setattr(feedback_endpoint, "UnifiedFeedbackSystem", _FailingFeedbackSystem)
+
+    resp = client.delete("/api/v1/feedback/fb_problem")
+
+    assert resp.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+    assert resp.json()["detail"] == "Failed to delete feedback"
 
 
 # ---------------------------------------------------------------------------
@@ -351,6 +394,32 @@ def test_patch_feedback_not_found(feedback_setup):
         json={"user_notes": "Won't work"},
     )
     assert resp.status_code == status.HTTP_404_NOT_FOUND
+
+
+@pytest.mark.integration
+def test_patch_feedback_returns_500_for_db_error(feedback_setup, monkeypatch):
+    client, _db, conversation_id, _message_id = feedback_setup
+
+    class _FailingFeedbackStore:
+        async def get_feedback_by_id(self, _feedback_id: str):
+            return {"conversation_id": conversation_id}
+
+        async def merge_feedback_update(self, _feedback_id: str, *, issues=None, user_notes=None):
+            raise CharactersRAGDBError("update feedback failed")
+
+    class _FailingFeedbackSystem:
+        def __init__(self, chacha_db):
+            self.user_feedback = _FailingFeedbackStore()
+
+    monkeypatch.setattr(feedback_endpoint, "UnifiedFeedbackSystem", _FailingFeedbackSystem)
+
+    resp = client.patch(
+        "/api/v1/feedback/fb_problem",
+        json={"user_notes": "Won't work"},
+    )
+
+    assert resp.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+    assert resp.json()["detail"] == "Failed to update feedback"
 
 
 @pytest.mark.integration

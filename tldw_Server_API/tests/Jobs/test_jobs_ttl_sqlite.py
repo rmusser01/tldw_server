@@ -136,3 +136,36 @@ def test_ttl_sweep_fail(monkeypatch, tmp_path):
         row = rows[0]
         assert row["queued"] == 0
         assert row["processing"] == 0
+
+
+def test_ttl_sweep_sanitizes_generic_failure(monkeypatch, tmp_path):
+
+
+    monkeypatch.chdir(tmp_path)
+    _set_env(monkeypatch)
+
+    from tldw_Server_API.app.core.AuthNZ.settings import get_settings, reset_settings
+    reset_settings()
+    from tldw_Server_API.app.main import app
+
+    def boom(self, **_kwargs):
+        raise RuntimeError("jobs ttl backend exploded")
+
+    monkeypatch.setattr(JobManager, "apply_ttl_policies", boom)
+
+    headers = {"X-API-KEY": get_settings().SINGLE_USER_API_KEY}
+    with TestClient(app, headers=headers) as client:
+        r = client.post(
+            "/api/v1/jobs/ttl/sweep",
+            json={
+                "age_seconds": 3600,
+                "runtime_seconds": 3600,
+                "action": "cancel",
+                "domain": "chatbooks",
+                "queue": "default",
+                "job_type": "export",
+            },
+            headers={**headers, "X-Confirm": "true"},
+        )
+        assert r.status_code == 500
+        assert r.json()["detail"] == "TTL sweep failed"

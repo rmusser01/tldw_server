@@ -471,3 +471,63 @@ def test_clone_session_returns_conflict_when_active_runs_exist(monkeypatch) -> N
             "session_id": "sess-clone-busy",
         }
     }
+
+
+def test_create_snapshot_sanitizes_oserror(monkeypatch) -> None:
+    from tldw_Server_API.app.api.v1.endpoints import sandbox as sb
+
+    monkeypatch.setattr(sb, "_require_session_owner", lambda session_id, current_user: "1")
+
+    def _raise_oserror(session_id: str) -> dict[str, Any]:
+        _ = session_id
+        raise OSError("snapshot path exploded")
+
+    monkeypatch.setattr(sb._service, "create_snapshot", _raise_oserror)
+
+    with _client(monkeypatch) as client:
+        response = client.post("/api/v1/sandbox/sessions/sess-snapshot-error/snapshot")
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == "Failed to create snapshot"
+
+
+def test_restore_snapshot_sanitizes_oserror(monkeypatch) -> None:
+    from tldw_Server_API.app.api.v1.endpoints import sandbox as sb
+
+    monkeypatch.setattr(sb, "_require_session_owner", lambda session_id, current_user: "1")
+
+    def _raise_oserror(session_id: str, snapshot_id: str) -> bool:
+        _ = (session_id, snapshot_id)
+        raise OSError("snapshot restore exploded")
+
+    monkeypatch.setattr(sb._service, "restore_snapshot", _raise_oserror)
+
+    with _client(monkeypatch) as client:
+        response = client.post(
+            "/api/v1/sandbox/sessions/sess-restore-error/restore",
+            json={"snapshot_id": "snap-123"},
+        )
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == "Failed to restore snapshot"
+
+
+def test_clone_session_sanitizes_oserror(monkeypatch) -> None:
+    from tldw_Server_API.app.api.v1.endpoints import sandbox as sb
+
+    monkeypatch.setattr(sb, "_require_session_owner", lambda session_id, current_user: "1")
+
+    def _raise_oserror(session_id: str, new_name: str | None = None):
+        _ = (session_id, new_name)
+        raise OSError("session clone exploded")
+
+    monkeypatch.setattr(sb._service, "clone_session", _raise_oserror)
+
+    with _client(monkeypatch) as client:
+        response = client.post(
+            "/api/v1/sandbox/sessions/sess-clone-error/clone",
+            json={"new_session_name": "copy"},
+        )
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == "Failed to clone session"

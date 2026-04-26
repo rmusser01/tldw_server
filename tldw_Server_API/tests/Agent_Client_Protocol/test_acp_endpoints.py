@@ -248,6 +248,114 @@ def test_acp_session_cancel_and_close(client_user_only, stub_runner_client):
     assert stub_runner_client.closed == ["session-123"]
 
 
+def test_acp_session_prompt_sanitizes_runtime_errors(client_user_only, monkeypatch):
+    import tldw_Server_API.app.api.v1.endpoints.agent_client_protocol as acp_endpoints
+
+    class ErrorRunnerClient(StubRunnerClient):
+        async def prompt(self, session_id: str, prompt):
+            _ = (session_id, prompt)
+            raise ACPResponseError("prompt backend exploded")
+
+    async def _get_runner_client():
+        return ErrorRunnerClient()
+
+    monkeypatch.setattr(acp_endpoints, "get_runner_client", _get_runner_client)
+
+    resp = client_user_only.post(
+        "/api/v1/acp/sessions/prompt",
+        json={"session_id": "session-123", "prompt": [{"role": "user", "content": "hi"}]},
+    )
+
+    assert resp.status_code == 502
+    assert resp.json()["detail"] == "ACP prompt failed"
+
+
+def test_acp_session_cancel_sanitizes_runtime_errors(client_user_only, monkeypatch):
+    import tldw_Server_API.app.api.v1.endpoints.agent_client_protocol as acp_endpoints
+
+    class ErrorRunnerClient(StubRunnerClient):
+        async def cancel(self, session_id: str) -> None:
+            _ = session_id
+            raise ACPResponseError("cancel backend exploded")
+
+    async def _get_runner_client():
+        return ErrorRunnerClient()
+
+    monkeypatch.setattr(acp_endpoints, "get_runner_client", _get_runner_client)
+
+    resp = client_user_only.post(
+        "/api/v1/acp/sessions/cancel",
+        json={"session_id": "session-123"},
+    )
+
+    assert resp.status_code == 502
+    assert resp.json()["detail"] == "ACP session cancel failed"
+
+
+def test_acp_session_close_sanitizes_runtime_errors(client_user_only, monkeypatch):
+    import tldw_Server_API.app.api.v1.endpoints.agent_client_protocol as acp_endpoints
+
+    class ErrorRunnerClient(StubRunnerClient):
+        async def close_session(self, session_id: str) -> None:
+            _ = session_id
+            raise ACPResponseError("close backend exploded")
+
+    async def _get_runner_client():
+        return ErrorRunnerClient()
+
+    monkeypatch.setattr(acp_endpoints, "get_runner_client", _get_runner_client)
+
+    resp = client_user_only.post(
+        "/api/v1/acp/sessions/close",
+        json={"session_id": "session-123"},
+    )
+
+    assert resp.status_code == 502
+    assert resp.json()["detail"] == "ACP session close failed"
+
+
+def test_acp_session_teardown_sanitizes_runtime_errors(client_user_only, monkeypatch):
+    import tldw_Server_API.app.api.v1.endpoints.agent_client_protocol as acp_endpoints
+
+    class ErrorRunnerClient(StubRunnerClient):
+        async def close_session(self, session_id: str) -> None:
+            _ = session_id
+            raise ACPResponseError("teardown backend exploded at /private/acp.sock")
+
+    async def _get_runner_client():
+        return ErrorRunnerClient()
+
+    monkeypatch.setattr(acp_endpoints, "get_runner_client", _get_runner_client)
+
+    resp = client_user_only.post("/api/v1/acp/sessions/session-teardown-sanitize/teardown")
+
+    assert resp.status_code == 502
+    detail = resp.json()["detail"]
+    assert detail["status"] == "teardown_failed"
+    assert detail["error"] == "ACP session teardown failed"
+
+
+def test_acp_session_reconcile_sanitizes_runtime_errors(client_user_only, monkeypatch):
+    import tldw_Server_API.app.api.v1.endpoints.agent_client_protocol as acp_endpoints
+
+    class ErrorRunnerClient(StubRunnerClient):
+        async def close_session(self, session_id: str) -> None:
+            _ = session_id
+            raise ACPResponseError("reconcile backend exploded at /private/acp.sock")
+
+    async def _get_runner_client():
+        return ErrorRunnerClient()
+
+    monkeypatch.setattr(acp_endpoints, "get_runner_client", _get_runner_client)
+
+    resp = client_user_only.post("/api/v1/acp/sessions/session-reconcile-sanitize/reconcile")
+
+    assert resp.status_code == 502
+    detail = resp.json()["detail"]
+    assert detail["status"] == "reconcile_failed"
+    assert detail["error"] == "ACP session reconcile failed"
+
+
 def test_acp_session_updates(client_user_only, stub_runner_client):
     resp = client_user_only.get("/api/v1/acp/sessions/session-123/updates")
     assert resp.status_code == 200
@@ -284,7 +392,7 @@ def test_acp_session_new_error(client_user_only, monkeypatch, tmp_path):
         json={"cwd": str(tmp_path)},
     )
     assert resp.status_code == 502
-    assert resp.json()["detail"] == "boom"
+    assert resp.json()["detail"] == "Failed to create ACP session"
 
 
 def test_acp_session_prompt_denied_for_unowned_session(client_user_only, stub_runner_client):
@@ -480,3 +588,62 @@ def test_acp_session_fork_rejects_non_bootstrappable_source(client_user_only, mo
     assert fork_resp.status_code == 409
     assert fork_resp.json()["detail"] == "fork_not_resumable"
     assert runner.create_session_calls == []
+
+
+def test_acp_session_fork_sanitizes_create_session_errors(client_user_only, monkeypatch, tmp_path):
+    import asyncio
+
+    import tldw_Server_API.app.api.v1.endpoints.agent_client_protocol as acp_endpoints
+    from tldw_Server_API.app.core.DB_Management.ACP_Sessions_DB import ACPSessionsDB
+    from tldw_Server_API.app.services.admin_acp_sessions_service import ACPSessionStore
+
+    class ErrorForkRunner:
+        agent_capabilities = {"promptCapabilities": {"image": False}}
+
+        async def create_session(self, *args, **kwargs):
+            _ = (args, kwargs)
+            raise ACPResponseError("fork backend exploded")
+
+        async def verify_session_access(self, session_id: str, user_id: int) -> bool:
+            return session_id == "source-session" and user_id == 1
+
+        def has_websocket_connections(self, session_id: str) -> bool:
+            return False
+
+    runner = ErrorForkRunner()
+    _db = ACPSessionsDB(db_path=str(tmp_path / "fork_error_test.db"))
+    store = ACPSessionStore(db=_db)
+
+    async def _seed() -> None:
+        await store.register_session(
+            session_id="source-session",
+            user_id=1,
+            agent_type="codex",
+            name="Source Session",
+            cwd="/tmp/project",
+            mcp_servers=[{"name": "filesystem"}],
+        )
+        await store.record_prompt(
+            "source-session",
+            [{"role": "user", "content": "Seed question"}],
+            {"content": "Seed answer"},
+        )
+
+    asyncio.run(_seed())
+
+    async def _get_runner_client():
+        return runner
+
+    async def _get_store():
+        return store
+
+    monkeypatch.setattr(acp_endpoints, "get_runner_client", _get_runner_client)
+    monkeypatch.setattr(acp_endpoints, "get_acp_session_store", _get_store)
+
+    fork_resp = client_user_only.post(
+        "/api/v1/acp/sessions/source-session/fork",
+        json={"message_index": 1, "name": "Forked Session"},
+    )
+
+    assert fork_resp.status_code == 502
+    assert fork_resp.json()["detail"] == "Failed to create forked ACP session"

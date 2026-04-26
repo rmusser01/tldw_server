@@ -13,6 +13,7 @@ from pydantic import ValidationError
 
 # Database and authentication dependencies
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
+from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 
 # Schemas
 from tldw_Server_API.app.api.v1.schemas.chat_conversation_schemas import (
@@ -391,18 +392,16 @@ async def send_message(
     except ConflictError as e:
         # Optimistic lock or state conflict during creation
         logger.warning(f"Conflict sending message to chat {chat_id}: {e}")
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e)) from e
-    except InputError as e:
-        # Map DB validation errors to appropriate HTTP codes
-        msg = str(e)
-        status_code = status.HTTP_400_BAD_REQUEST
-        if "exceeds maximum size" in msg.lower():
-            status_code = status.HTTP_413_CONTENT_TOO_LARGE
-        logger.warning(f"Input error sending message to chat {chat_id}: {e}")
-        raise HTTPException(status_code=status_code, detail=msg) from e
-    except CharactersRAGDBError as e:
-        logger.error(f"DB error sending message to chat {chat_id}: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)) from e
+        raise map_db_error_to_http(e) from e
+    except InputError as exc:
+        logger.warning(f"Input error sending message to chat {chat_id}: {exc}")
+        raise map_db_error_to_http(
+            exc,
+            default_detail="Failed to send message",
+            payload_too_large_substrings=("exceeds maximum size",),
+        ) from exc
+    except CharactersRAGDBError as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to send message") from exc
     except _CHARACTER_MESSAGES_NONCRITICAL_EXCEPTIONS as e:
         logger.error(f"Error sending message to chat {chat_id}: {e}", exc_info=True)
         raise HTTPException(
@@ -910,10 +909,9 @@ async def edit_message(
         raise
     except ConflictError as e:
         logger.warning(f"Conflict editing message {message_id}: {e}")
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e)) from e
-    except CharactersRAGDBError as e:
-        logger.error(f"DB error editing message {message_id}: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)) from e
+        raise map_db_error_to_http(e) from e
+    except CharactersRAGDBError as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to edit message") from exc
     except _CHARACTER_MESSAGES_NONCRITICAL_EXCEPTIONS as e:
         logger.error(f"Error editing message {message_id}: {e}", exc_info=True)
         raise HTTPException(
@@ -994,10 +992,9 @@ async def delete_message(
         raise
     except ConflictError as e:
         logger.warning(f"Conflict deleting message {message_id}: {e}")
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e)) from e
-    except CharactersRAGDBError as e:
-        logger.error(f"DB error deleting message {message_id}: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)) from e
+        raise map_db_error_to_http(e) from e
+    except CharactersRAGDBError as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to delete message") from exc
     except _CHARACTER_MESSAGES_NONCRITICAL_EXCEPTIONS as e:
         logger.error(f"Error deleting message {message_id}: {e}", exc_info=True)
         raise HTTPException(

@@ -39,7 +39,6 @@ router = APIRouter()
 _RUNTIME_ALERT_ID_PREFIX = "alert:"
 
 
-
 def _resolve_monitoring_alerts_db_path() -> str:
     """Resolve the monitoring alerts DB path the same way the monitoring service does.
 
@@ -52,6 +51,7 @@ def _resolve_monitoring_alerts_db_path() -> str:
         return str(db_p)
     try:
         from tldw_Server_API.app.core.Utils.Utils import get_project_root as _gpr
+
         return str((Path(_gpr()).resolve() / db_p).resolve())
     except Exception:
         # Fallback: walk parents of this file looking for repo root markers
@@ -156,7 +156,7 @@ def _warn_if_overlay_identity_has_no_runtime_row(
         logger.info("monitoring admin overlay mutation for overlay-only identity {}", alert_identity)
         return
 
-    raw_alert_id = alert_identity[len(_RUNTIME_ALERT_ID_PREFIX):]
+    raw_alert_id = alert_identity[len(_RUNTIME_ALERT_ID_PREFIX) :]
     try:
         alert_id = int(raw_alert_id)
     except ValueError:
@@ -175,9 +175,7 @@ def _warn_if_overlay_identity_has_no_runtime_row(
 
 async def _emit_overlay_identity_diagnostic(alert_identity: str) -> None:
     try:
-        monitoring_db = TopicMonitoringDB(
-            _resolve_monitoring_alerts_db_path()
-        )
+        monitoring_db = TopicMonitoringDB(_resolve_monitoring_alerts_db_path())
         await asyncio.to_thread(
             _warn_if_overlay_identity_has_no_runtime_row,
             alert_identity,
@@ -185,8 +183,8 @@ async def _emit_overlay_identity_diagnostic(alert_identity: str) -> None:
         )
     except asyncio.CancelledError:
         raise
-    except _MONITORING_NONCRITICAL_EXCEPTIONS as exc:
-        logger.debug("monitoring overlay diagnostic skipped for {}: {}", alert_identity, exc)
+    except _MONITORING_NONCRITICAL_EXCEPTIONS:
+        logger.debug("monitoring overlay diagnostic skipped")
 
 
 @router.on_event("startup")
@@ -211,7 +209,7 @@ async def list_alert_rules(
     except asyncio.CancelledError:
         raise
     except _MONITORING_NONCRITICAL_EXCEPTIONS as exc:
-        logger.exception("Failed to list admin alert rules")
+        logger.error("Failed to list admin alert rules")
         raise HTTPException(status_code=500, detail="Failed to list alert rules") from exc
 
 
@@ -254,12 +252,7 @@ async def create_alert_rule(
     except asyncio.CancelledError:
         raise
     except _MONITORING_NONCRITICAL_EXCEPTIONS as exc:
-        logger.exception(
-            "Failed to create admin alert rule metric={} operator={} severity={}",
-            payload.metric,
-            payload.operator,
-            payload.severity,
-        )
+        logger.error("Failed to create admin alert rule")
         raise HTTPException(status_code=500, detail="Failed to create alert rule") from exc
 
 
@@ -294,7 +287,7 @@ async def delete_alert_rule(
     except asyncio.CancelledError:
         raise
     except _MONITORING_NONCRITICAL_EXCEPTIONS as exc:
-        logger.exception("Failed to delete admin alert rule rule_id={}", rule_id)
+        logger.error("Failed to delete admin alert rule")
         raise HTTPException(status_code=500, detail="Failed to delete alert rule") from exc
 
 
@@ -317,9 +310,7 @@ async def assign_alert(
         actor_id = _principal_actor_id(principal)
         event_action = "assigned" if payload.assigned_to_user_id is not None else "unassigned"
         audit_action = (
-            "monitoring.alert.assign"
-            if payload.assigned_to_user_id is not None
-            else "monitoring.alert.unassign"
+            "monitoring.alert.assign" if payload.assigned_to_user_id is not None else "monitoring.alert.unassign"
         )
         state = await repo.upsert_alert_state(
             alert_identity=alert_identity,
@@ -348,11 +339,7 @@ async def assign_alert(
     except asyncio.CancelledError:
         raise
     except _MONITORING_NONCRITICAL_EXCEPTIONS as exc:
-        logger.exception(
-            "Failed to assign monitoring alert alert_identity={} assigned_to_user_id={}",
-            alert_identity,
-            payload.assigned_to_user_id,
-        )
+        logger.error("Failed to assign monitoring alert")
         raise HTTPException(status_code=500, detail="Failed to assign alert") from exc
 
 
@@ -395,11 +382,7 @@ async def snooze_alert(
     except asyncio.CancelledError:
         raise
     except _MONITORING_NONCRITICAL_EXCEPTIONS as exc:
-        logger.exception(
-            "Failed to snooze monitoring alert alert_identity={} snoozed_until={}",
-            alert_identity,
-            payload.snoozed_until.isoformat(),
-        )
+        logger.error("Failed to snooze monitoring alert")
         raise HTTPException(status_code=500, detail="Failed to snooze alert") from exc
 
 
@@ -442,11 +425,7 @@ async def escalate_alert(
     except asyncio.CancelledError:
         raise
     except _MONITORING_NONCRITICAL_EXCEPTIONS as exc:
-        logger.exception(
-            "Failed to escalate monitoring alert alert_identity={} severity={}",
-            alert_identity,
-            payload.severity,
-        )
+        logger.error("Failed to escalate monitoring alert")
         raise HTTPException(status_code=500, detail="Failed to escalate alert") from exc
 
 
@@ -470,9 +449,5 @@ async def list_alert_history(
     except asyncio.CancelledError:
         raise
     except _MONITORING_NONCRITICAL_EXCEPTIONS as exc:
-        logger.exception(
-            "Failed to list admin alert history alert_identity={} limit={}",
-            alert_identity,
-            limit,
-        )
+        logger.error("Failed to list admin alert history")
         raise HTTPException(status_code=500, detail="Failed to list alert history") from exc

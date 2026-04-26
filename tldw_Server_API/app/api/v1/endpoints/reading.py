@@ -314,7 +314,7 @@ def _raise_for_tts_error(exc: Exception) -> None:
     if isinstance(exc, TTSValidationError):
         raise HTTPException(status_code=400, detail=str(exc))
     if isinstance(exc, TTSProviderNotConfiguredError):
-        raise HTTPException(status_code=503, detail=f"TTS service unavailable: {str(exc)}")
+        raise HTTPException(status_code=503, detail="TTS service unavailable")
     if isinstance(exc, TTSAuthenticationError):
         raise HTTPException(status_code=502, detail="TTS provider authentication failed")
     if isinstance(exc, TTSRateLimitError):
@@ -322,7 +322,7 @@ def _raise_for_tts_error(exc: Exception) -> None:
     if isinstance(exc, TTSQuotaExceededError):
         raise HTTPException(status_code=402, detail="TTS quota exceeded")
     if isinstance(exc, TTSError):
-        raise HTTPException(status_code=500, detail=f"TTS error: {str(exc)}")
+        raise HTTPException(status_code=500, detail="TTS generation failed")
     raise HTTPException(status_code=500, detail="TTS generation failed")
 
 

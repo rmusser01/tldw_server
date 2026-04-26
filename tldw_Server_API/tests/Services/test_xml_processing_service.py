@@ -102,5 +102,53 @@ async def test_process_xml_task_cleans_temp_file_on_parse_error(monkeypatch, tmp
         )
 
     assert exc_info.value.status_code == 400
-    assert "Invalid XML" in str(exc_info.value.detail)
+    assert exc_info.value.detail == "Invalid XML"
+    assert "mismatched tag" not in str(exc_info.value.detail)
+    assert "line" not in str(exc_info.value.detail)
+    assert not temp_path.exists()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_process_xml_task_sanitizes_unexpected_processing_error(monkeypatch, tmp_path):
+    temp_path = tmp_path / "xml-chunking-error.xml"
+
+    monkeypatch.delenv("APP_ENV", raising=False)
+    monkeypatch.setenv("PLACEHOLDER_SERVICES_ENABLED", "1")
+    monkeypatch.setattr(
+        _placeholder_guard,
+        "get_settings",
+        lambda: SimpleNamespace(PLACEHOLDER_SERVICES_ENABLED=True),
+    )
+    monkeypatch.setattr(
+        xml_processing_service.tempfile,
+        "NamedTemporaryFile",
+        lambda suffix, delete: _NamedTempFileStub(temp_path),
+    )
+
+    def raise_chunking_error(_text, _opts):
+        raise RuntimeError("chunker leaked /private/xml/cache/token")
+
+    monkeypatch.setattr(
+        xml_processing_service,
+        "improved_chunking_process",
+        raise_chunking_error,
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await xml_processing_service.process_xml_task(
+            file_bytes=b"<root><child>ok</child></root>",
+            filename="sample.xml",
+            title=None,
+            author=None,
+            keywords=[],
+            system_prompt=None,
+            custom_prompt=None,
+            auto_summarize=False,
+            api_name=None,
+            api_key=None,
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "Failed to process XML file"
     assert not temp_path.exists()

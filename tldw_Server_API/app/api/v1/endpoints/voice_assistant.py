@@ -1628,13 +1628,13 @@ async def voice_command_dry_run(
     except ImportError as exc:
         raise HTTPException(
             status_code=501,
-            detail=f"Voice assistant module not available: {exc}",
+            detail="Voice assistant module not available",
         ) from exc
     except Exception as exc:
         logger.error("Voice command dry-run failed: {}", exc)
         raise HTTPException(
             status_code=500,
-            detail=f"Dry-run failed: {exc}",
+            detail="Dry-run failed",
         ) from exc
 
 

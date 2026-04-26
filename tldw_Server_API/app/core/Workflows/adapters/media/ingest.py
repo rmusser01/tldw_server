@@ -197,8 +197,8 @@ async def run_media_ingest_adapter(config: dict[str, Any], context: dict[str, An
                     try:
                         from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
                         _mdb_path = str(DatabasePaths.get_media_db_path(DatabasePaths.get_single_user_id()))
-                    except _MEDIA_INGEST_NONCRITICAL_EXCEPTIONS as exc:
-                        logger.error(f"Failed to resolve Media DB path for workflow indexing: {exc}")
+                    except _MEDIA_INGEST_NONCRITICAL_EXCEPTIONS:
+                        logger.exception("Failed to resolve Media DB path for workflow indexing")
                         raise
                     title = (config.get("metadata", {}) or {}).get("title") or resolved_path.name
                     keywords = (config.get("metadata", {}) or {}).get("tags") or []
@@ -469,8 +469,8 @@ async def run_media_ingest_adapter(config: dict[str, Any], context: dict[str, An
                                 for chunk in iter(lambda: f.read(65536), b""):
                                     h.update(chunk)
                             sha256 = h.hexdigest()
-                        except _MEDIA_INGEST_NONCRITICAL_EXCEPTIONS as e:
-                            logger.debug(f"Media ingest adapter: failed to compute sha256 for {fp}: {e}")
+                        except _MEDIA_INGEST_NONCRITICAL_EXCEPTIONS:
+                            logger.debug("Media ingest adapter: failed to compute sha256")
                         context["add_artifact"](
                             type="download",
                             uri=f"file://{fp}",
@@ -611,8 +611,8 @@ async def run_process_media_adapter(config: dict[str, Any], context: dict[str, A
             return {"error": "missing_or_invalid_file_uri"}
         try:
             resolved_path = resolve_workflow_file_uri(file_uri, context, config)
-        except AdapterError as e:
-            return {"error": str(e)}
+        except AdapterError:
+            return {"error": "file_access_denied"}
         try:
             from tldw_Server_API.app.core.Ingestion_Media_Processing.PDF.PDF_Processing_Lib import process_pdf_task
             fb = resolved_path.read_bytes()
@@ -631,8 +631,9 @@ async def run_process_media_adapter(config: dict[str, Any], context: dict[str, A
                 max_chunk_size=chunk_opts.get("max_size"),
                 chunk_overlap=chunk_opts.get("overlap"),
             )
-        except _MEDIA_INGEST_NONCRITICAL_EXCEPTIONS as e:
-            return {"error": f"pdf_process_error:{e}"}
+        except _MEDIA_INGEST_NONCRITICAL_EXCEPTIONS:
+            logger.exception("PDF process media failed")
+            return {"error": "pdf_process_error"}
         # Map to a simple shape
         out = {
             "kind": "pdf",
@@ -650,8 +651,8 @@ async def run_process_media_adapter(config: dict[str, Any], context: dict[str, A
         # In workflows, we return a placeholder summary; full streaming is endpoint-only
         try:
             resolved_path = resolve_workflow_file_uri(file_uri, context, config)
-        except AdapterError as e:
-            return {"error": str(e)}
+        except AdapterError:
+            return {"error": "file_access_denied"}
         try:
             content = resolved_path.read_text(errors="ignore")
         except _MEDIA_INGEST_NONCRITICAL_EXCEPTIONS:

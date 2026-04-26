@@ -330,8 +330,8 @@ class OllamaHandler(BaseLLMHandler):
                 self.logger.warning(f"No process found with PID {pid}")
                 return f"No process found with PID {pid}"
             except _OLLAMA_NONCRITICAL_EXCEPTIONS as e:
-                self.logger.exception(f"Error stopping Ollama server PID {pid}: {e}")
-                return f"Error stopping Ollama server PID {pid}: {e}"
+                self.logger.error(f"Error stopping Ollama server PID {pid}")
+                return f"Error stopping Ollama server PID {pid}"
         elif port:
             if not PSUTIL_AVAILABLE:
                 return "Cannot stop by port: psutil not available. Please provide PID instead."
@@ -352,8 +352,8 @@ class OllamaHandler(BaseLLMHandler):
                 else:
                     return f"No Ollama server found listening on port {port}"
             except _OLLAMA_PSUTIL_EXCEPTIONS as e:
-                self.logger.exception(f"Error stopping Ollama server on port {port}: {e}")
-                return f"Error stopping Ollama server on port {port}: {e}"
+                self.logger.error(f"Error stopping Ollama server on port {port}")
+                return f"Error stopping Ollama server on port {port}"
         else:
             # General stop command `ollama stop` - this might not exist or work as expected for `ollama serve`
             # `ollama ps` and then finding the server PID might be more reliable if `ollama stop` isn't for `serve`

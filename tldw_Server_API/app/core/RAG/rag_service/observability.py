@@ -240,8 +240,8 @@ class Tracer:
             try:
                 trace.set_tracer_provider(TracerProvider())
                 self.otel_tracer = trace.get_tracer(__name__)
-            except (AttributeError, RuntimeError, TypeError, ValueError) as e:
-                logger.warning(f"Failed to initialize OpenTelemetry tracer: {e}")
+            except (AttributeError, RuntimeError, TypeError, ValueError):
+                logger.warning("Failed to initialize OpenTelemetry tracer")
 
     @contextmanager
     def span(self, operation: str, attributes: Optional[dict[str, Any]] = None):
@@ -262,7 +262,7 @@ class Tracer:
             span.status = "ok"
         except Exception as e:
             span.status = "error"
-            span.attributes["error"] = str(e)
+            span.attributes["error"] = "span_failed"
             span.attributes["error_type"] = type(e).__name__
             raise
         finally:
@@ -308,8 +308,8 @@ class Tracer:
                     for key, value in attributes.items():
                         otel_span.set_attribute(key, str(value))
                 span.attributes["otel_span"] = otel_span
-            except (AttributeError, RuntimeError, TypeError, ValueError) as e:
-                logger.debug(f"Failed to create OpenTelemetry span: {e}")
+            except (AttributeError, RuntimeError, TypeError, ValueError):
+                logger.debug("Failed to create OpenTelemetry span")
 
         return span
 
@@ -331,8 +331,8 @@ class Tracer:
                 if span.status == "error":
                     otel_span.set_status(Status(StatusCode.ERROR))
                 otel_span.end()
-            except (AttributeError, RuntimeError, TypeError, ValueError) as e:
-                logger.debug(f"Failed to end OpenTelemetry span: {e}")
+            except (AttributeError, RuntimeError, TypeError, ValueError):
+                logger.debug("Failed to end OpenTelemetry span")
 
     def add_event(self, span: TraceSpan, name: str, attributes: Optional[dict[str, Any]] = None):
         """Add event to span."""
@@ -435,8 +435,8 @@ class PerformanceMonitor:
 
         except ImportError:
             return {"error": "psutil not available"}
-        except (AttributeError, OSError, RuntimeError, TypeError, ValueError, psutil.Error) as e:
-            return {"error": str(e)}
+        except (AttributeError, OSError, RuntimeError, TypeError, ValueError, psutil.Error):
+            return {"error": "memory_usage_unavailable"}
 
 
 class AlertManager:
@@ -540,10 +540,10 @@ class AlertManager:
                 for handler in self.alert_handlers:
                     try:
                         handler(alert)
-                    except (AttributeError, ConnectionError, OSError, RuntimeError, TimeoutError, TypeError, ValueError) as e:
-                        logger.error(f"Alert handler failed: {e}")
+                    except (AttributeError, ConnectionError, OSError, RuntimeError, TimeoutError, TypeError, ValueError):
+                        logger.error("Alert handler failed")
 
-                logger.warning(f"Alert triggered: {alert.message}")
+                logger.warning("Alert triggered")
 
     def clear_alert(self, alert_id: str):
         """Clear an active alert."""
@@ -616,10 +616,10 @@ class ObservabilitySystem:
             )
             metrics.set_meter_provider(meter_provider)
 
-            logger.info(f"OpenTelemetry configured with endpoint: {endpoint}")
+            logger.info("OpenTelemetry configured")
 
-        except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
-            logger.error(f"Failed to setup OpenTelemetry: {e}")
+        except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
+            logger.error("Failed to setup OpenTelemetry")
 
     def _setup_default_alerts(self):
         """Setup default alert rules."""
@@ -675,8 +675,8 @@ class ObservabilitySystem:
                 # Wait before next iteration
                 await asyncio.sleep(60)  # Check every minute
 
-            except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
-                logger.error(f"Monitoring loop error: {e}")
+            except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
+                logger.error("Monitoring loop error")
                 await asyncio.sleep(60)
 
     def _calculate_error_rate(self) -> float:
@@ -806,7 +806,8 @@ async def observe_pipeline(context: Any, **kwargs) -> Any:
 
         if span:
             span.status = "error"
-            span.attributes["error"] = str(e)
+            span.attributes["error"] = "rag_pipeline_failed"
+            span.attributes["error_type"] = type(e).__name__
 
         raise
 

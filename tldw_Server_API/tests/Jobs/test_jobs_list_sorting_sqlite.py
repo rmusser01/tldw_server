@@ -52,3 +52,21 @@ def test_jobs_list_sorting_sqlite(monkeypatch, tmp_path):
         assert r3.status_code == 200
         ids_prio = [row["id"] for row in r3.json()]
         assert ids_prio[0] == b["id"]
+
+
+def test_jobs_list_sanitizes_generic_failure(monkeypatch, tmp_path):
+    _set_env(monkeypatch, tmp_path)
+    from tldw_Server_API.app.core.AuthNZ.settings import get_settings, reset_settings
+    reset_settings()
+    from tldw_Server_API.app.main import app
+
+    def boom(self, **_kwargs):
+        raise RuntimeError("jobs list backend exploded")
+
+    monkeypatch.setattr(JobManager, "list_jobs", boom)
+
+    headers = {"X-API-KEY": get_settings().SINGLE_USER_API_KEY}
+    with TestClient(app, headers=headers) as client:
+        r = client.get("/api/v1/jobs/list", params={"domain": "d", "limit": 10})
+        assert r.status_code == 500
+        assert r.json()["detail"] == "List failed"

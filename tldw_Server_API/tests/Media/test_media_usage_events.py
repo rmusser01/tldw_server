@@ -50,6 +50,96 @@ def test_ebooks_process_usage_event_logged(client_with_single_user, quota_servic
     assert any(e[0] == "media.process.ebook" for e in usage_logger.events)
 
 
+def test_ebooks_process_sanitizes_worker_failure(
+    client_with_single_user,
+    quota_service_stub,
+    monkeypatch,
+):
+    client, _ = client_with_single_user
+
+    import tldw_Server_API.app.api.v1.endpoints.media as media_mod
+
+    def _fail_process_epub(**_kwargs):
+        raise RuntimeError("ebook parser failed at /private/book.epub")
+
+    monkeypatch.setattr(media_mod.books, "process_epub", _fail_process_epub)
+
+    files = [
+        ("files", ("sample.epub", b"fake", "application/epub+zip")),
+    ]
+
+    response = client.post("/api/v1/media/process-ebooks", files=files)
+
+    assert response.status_code == 207, response.text
+    payload = response.json()
+    result = payload["results"][0]
+    assert result["status"] == "Error"
+    assert result["error"] == "Ebook processing failed"
+    assert "ebook parser failed" not in response.text
+    assert "/private/book.epub" not in response.text
+
+
+def test_ebooks_process_sanitizes_url_download_failure(
+    client_with_single_user,
+    quota_service_stub,
+    monkeypatch,
+):
+    client, _ = client_with_single_user
+
+    from tldw_Server_API.app.api.v1.endpoints.media import process_ebooks as process_ebooks_mod
+
+    async def _fail_download_url_async(*_args, **_kwargs):
+        raise RuntimeError("ebook download failed at /private/cache/book.epub")
+
+    monkeypatch.setattr(process_ebooks_mod, "core_download_url_async", _fail_download_url_async)
+
+    response = client.post(
+        "/api/v1/media/process-ebooks",
+        data={
+            "urls": "https://example.com/book.epub",
+            "perform_chunking": "false",
+            "perform_analysis": "false",
+        },
+    )
+
+    assert response.status_code == 207, response.text
+    payload = response.json()
+    result = payload["results"][0]
+    assert result["status"] == "Error"
+    assert result["error"] == "Download/preparation failed"
+    assert "ebook download failed" not in response.text
+    assert "/private/cache/book.epub" not in response.text
+
+
+def test_ebooks_process_sanitizes_task_execution_failure(
+    client_with_single_user,
+    quota_service_stub,
+    monkeypatch,
+):
+    client, _ = client_with_single_user
+
+    from tldw_Server_API.app.api.v1.endpoints.media import process_ebooks as process_ebooks_mod
+
+    def _fail_process_single_ebook(**_kwargs):
+        raise RuntimeError("executor failed at /private/cache/book.epub")
+
+    monkeypatch.setattr(process_ebooks_mod, "_process_single_ebook", _fail_process_single_ebook)
+
+    files = [
+        ("files", ("sample.epub", b"fake", "application/epub+zip")),
+    ]
+
+    response = client.post("/api/v1/media/process-ebooks", files=files)
+
+    assert response.status_code == 207, response.text
+    payload = response.json()
+    result = payload["results"][0]
+    assert result["status"] == "Error"
+    assert result["error"] == "Ebook processing failed"
+    assert "executor failed" not in response.text
+    assert "/private/cache/book.epub" not in response.text
+
+
 def test_documents_process_usage_event_logged(client_with_single_user, quota_service_stub, monkeypatch):
 
 
@@ -74,6 +164,71 @@ def test_documents_process_usage_event_logged(client_with_single_user, quota_ser
     r = client.post("/api/v1/media/process-documents", files=files)
     assert r.status_code == 200, r.text
     assert any(e[0] == "media.process.document" for e in usage_logger.events)
+
+
+def test_documents_process_sanitizes_worker_failure(
+    client_with_single_user,
+    quota_service_stub,
+    monkeypatch,
+):
+    client, _ = client_with_single_user
+
+    import tldw_Server_API.app.api.v1.endpoints.media as media_mod
+
+    def _fail_process_document_content(**_kwargs):
+        raise RuntimeError("document parser failed at /private/doc.txt")
+
+    monkeypatch.setattr(
+        media_mod.docs,
+        "process_document_content",
+        _fail_process_document_content,
+    )
+
+    files = [
+        ("files", ("note.txt", b"hi", "text/plain")),
+    ]
+
+    response = client.post("/api/v1/media/process-documents", files=files)
+
+    assert response.status_code == 207, response.text
+    payload = response.json()
+    result = payload["results"][0]
+    assert result["status"] == "Error"
+    assert result["error"] == "Document processing failed"
+    assert "document parser failed" not in response.text
+    assert "/private/doc.txt" not in response.text
+
+
+def test_documents_process_sanitizes_url_download_failure(
+    client_with_single_user,
+    quota_service_stub,
+    monkeypatch,
+):
+    client, _ = client_with_single_user
+
+    from tldw_Server_API.app.api.v1.endpoints.media import process_documents as process_documents_mod
+
+    async def _fail_download_url_async(*_args, **_kwargs):
+        raise RuntimeError("document download failed at /private/cache/doc.txt")
+
+    monkeypatch.setattr(process_documents_mod, "core_download_url_async", _fail_download_url_async)
+
+    response = client.post(
+        "/api/v1/media/process-documents",
+        data={
+            "urls": "https://example.com/doc.txt",
+            "perform_chunking": "false",
+            "perform_analysis": "false",
+        },
+    )
+
+    assert response.status_code == 207, response.text
+    payload = response.json()
+    result = payload["results"][0]
+    assert result["status"] == "Error"
+    assert result["error"] == "Download/preparation failed"
+    assert "document download failed" not in response.text
+    assert "/private/cache/doc.txt" not in response.text
 
 
 def test_pdfs_process_usage_event_logged(client_with_single_user, quota_service_stub, monkeypatch):
@@ -112,3 +267,96 @@ def test_pdfs_process_usage_event_logged(client_with_single_user, quota_service_
     assert captured_kwargs.get("ocr_backend") == "hunyuan"
     assert captured_kwargs.get("ocr_output_format") == "json"
     assert captured_kwargs.get("ocr_prompt_preset") == "json"
+
+
+def test_pdfs_process_sanitizes_processor_failure(
+    client_with_single_user,
+    quota_service_stub,
+    monkeypatch,
+):
+    client, _ = client_with_single_user
+
+    import tldw_Server_API.app.api.v1.endpoints.media as media_mod
+
+    async def _fail_process_pdf_task(**_kwargs):
+        raise RuntimeError("pdf parser failed at /private/paper.pdf")
+
+    monkeypatch.setattr(media_mod.pdf_lib, "process_pdf_task", _fail_process_pdf_task)
+
+    files = [
+        ("files", ("paper.pdf", b"%PDF-1.4\n", "application/pdf")),
+    ]
+
+    response = client.post("/api/v1/media/process-pdfs", files=files)
+
+    assert response.status_code == 207, response.text
+    payload = response.json()
+    result = payload["results"][0]
+    assert result["status"] == "Error"
+    assert result["error"] == "PDF processing failed"
+    assert "pdf parser failed" not in response.text
+    assert "/private/paper.pdf" not in response.text
+
+
+def test_pdfs_process_sanitizes_url_download_failure(
+    client_with_single_user,
+    quota_service_stub,
+    monkeypatch,
+):
+    client, _ = client_with_single_user
+
+    from tldw_Server_API.app.api.v1.endpoints.media import process_pdfs as process_pdfs_mod
+
+    async def _fail_download_url_async(*_args, **_kwargs):
+        raise RuntimeError("pdf download failed at /private/cache/paper.pdf")
+
+    monkeypatch.setattr(process_pdfs_mod, "core_download_url_async", _fail_download_url_async)
+
+    response = client.post(
+        "/api/v1/media/process-pdfs",
+        data={
+            "urls": "https://example.com/paper.pdf",
+            "perform_chunking": "false",
+            "perform_analysis": "false",
+        },
+    )
+
+    assert response.status_code == 207, response.text
+    payload = response.json()
+    result = payload["results"][0]
+    assert result["status"] == "Error"
+    assert result["error"] == "Download/preparation failed"
+    assert "pdf download failed" not in response.text
+    assert "/private/cache/paper.pdf" not in response.text
+
+
+def test_pdfs_process_sanitizes_prepared_file_read_failure(
+    client_with_single_user,
+    quota_service_stub,
+    monkeypatch,
+):
+    client, _ = client_with_single_user
+
+    from tldw_Server_API.app.api.v1.endpoints.media import process_pdfs as process_pdfs_mod
+
+    def _fail_read_bytes(_self):
+        raise RuntimeError("prepared read failed at /private/cache/paper.pdf")
+
+    monkeypatch.setattr(process_pdfs_mod.Path, "read_bytes", _fail_read_bytes)
+
+    files = [
+        ("files", ("paper.pdf", b"%PDF-1.4\n", "application/pdf")),
+    ]
+    response = client.post(
+        "/api/v1/media/process-pdfs",
+        data={"perform_chunking": "false"},
+        files=files,
+    )
+
+    assert response.status_code == 207, response.text
+    payload = response.json()
+    result = payload["results"][0]
+    assert result["status"] == "Error"
+    assert result["error"] == "Failed to read prepared file"
+    assert "prepared read failed" not in response.text
+    assert "/private/cache/paper.pdf" not in response.text

@@ -867,9 +867,9 @@ def import_bundle(
                                 "Rollback failed for {}: {}", restored_ds, rollback_exc
                             )
                             rollback_failures.append(
-                                f"{restored_ds}: {rollback_exc}"
+                                f"{restored_ds}: rollback operation failed"
                             )
-                detail = f"restore_failed:{ds}: {exc}"
+                detail = f"restore_failed:{ds}: restore operation failed"
                 if isinstance(exc, sqlite3.Error) and _sqlite_error_is_busy(exc):
                     detail = (
                         f"restore_failed:{ds}: target database is busy/locked; "

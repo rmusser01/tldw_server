@@ -102,7 +102,7 @@ def _workflow_http_error(
         log.exception("Workflow request failed with Kanban DB error")
         return HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"code": "kanban_db_error", "message": str(exc)},
+            detail={"code": "kanban_db_error", "message": "Workflow database error"},
         )
 
     log.exception("Workflow request failed with unexpected error")

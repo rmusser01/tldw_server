@@ -343,7 +343,7 @@ async def append_blocklist_line(
     if not ok:
         if state.get("conflict"):
             raise HTTPException(status_code=status.HTTP_412_PRECONDITION_FAILED, detail="Version conflict")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=state.get("error", "Unknown error"))
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to append blocklist line")
     version = str(state.get("version", ""))
     items = state.get("items") or []
     # New index is last
@@ -381,6 +381,8 @@ async def delete_blocklist_item(
             raise HTTPException(status_code=status.HTTP_412_PRECONDITION_FAILED, detail="Version conflict")
         detail = state.get("error", "Unknown error")
         code = status.HTTP_400_BAD_REQUEST if detail == "index out of range" else status.HTTP_500_INTERNAL_SERVER_ERROR
+        if code == status.HTTP_500_INTERNAL_SERVER_ERROR:
+            detail = "Failed to delete blocklist line"
         raise HTTPException(status_code=code, detail=detail)
     version = str(state.get("version", ""))
     items = state.get("items") or []

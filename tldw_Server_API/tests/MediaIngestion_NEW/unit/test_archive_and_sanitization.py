@@ -135,6 +135,61 @@ def test_email_html_body_is_sanitized_before_text_conversion():
 
 
 @pytest.mark.unit
+def test_email_task_sanitizes_parse_failure(monkeypatch):
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Email import (
+        Email_Processing_Lib as email_lib,
+    )
+
+    def _fail_parse(*_args, **_kwargs):
+        raise RuntimeError("email parser exploded at /private/email/source.eml")
+
+    monkeypatch.setattr(email_lib, "parse_eml_bytes", _fail_parse)
+
+    result = email_lib.process_email_task(
+        file_bytes=b"not an email",
+        filename="source.eml",
+        perform_chunking=False,
+        perform_analysis=False,
+    )
+
+    assert result["status"] == "Error"
+    assert result["error"] == "Email processing failed"
+    assert "email parser exploded" not in str(result)
+    assert "/private/email/source.eml" not in str(result)
+
+
+@pytest.mark.unit
+def test_email_task_sanitizes_chunking_failure(monkeypatch):
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Email import (
+        Email_Processing_Lib as email_lib,
+    )
+
+    monkeypatch.setattr(
+        email_lib,
+        "parse_eml_bytes",
+        lambda *_args, **_kwargs: ("hello world", {"title": "Email"}, []),
+    )
+
+    def _fail_chunking(*_args, **_kwargs):
+        raise RuntimeError("email chunker exploded at /private/email/chunks")
+
+    monkeypatch.setattr(email_lib, "improved_chunking_process", _fail_chunking)
+
+    result = email_lib.process_email_task(
+        file_bytes=b"email",
+        filename="source.eml",
+        perform_chunking=True,
+        perform_analysis=False,
+    )
+
+    assert result["status"] == "Success"
+    assert result["warnings"] == ["Chunking failed"]
+    assert result["chunks"][0]["metadata"]["error"] == "Email chunking failed"
+    assert "email chunker exploded" not in str(result)
+    assert "/private/email/chunks" not in str(result)
+
+
+@pytest.mark.unit
 def test_email_archive_rejects_oversized_member(tmp_path: Path):
     from tldw_Server_API.app.core.Ingestion_Media_Processing.Email import (
         Email_Processing_Lib as email_lib,

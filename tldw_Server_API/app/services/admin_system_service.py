@@ -1113,8 +1113,13 @@ async def debug_resolve_permissions(user_id: int, db) -> dict:
             "permission_count": len(normalized_permissions),
         }
     except Exception as exc:
-        logger.warning(f"Failed to resolve permissions for user {user_id}: {exc}")
-        return {"user_id": user_id, "roles": [], "effective_permissions": [], "error": str(exc)[:200]}
+        logger.warning(f"Failed to resolve permissions for user {user_id}")
+        return {
+            "user_id": user_id,
+            "roles": [],
+            "effective_permissions": [],
+            "error": "Failed to resolve permissions.",
+        }
 
 
 async def debug_decode_token(token: str) -> dict:
@@ -1155,7 +1160,7 @@ async def debug_decode_token(token: str) -> dict:
             "subject": payload.get("sub"),
         }
     except Exception as exc:
-        return {"decoded": False, "signature_verified": False, "error": str(exc)[:200]}
+        return {"decoded": False, "signature_verified": False, "error": "Failed to decode token."}
 
 
 async def debug_validate_token(token: str) -> dict:

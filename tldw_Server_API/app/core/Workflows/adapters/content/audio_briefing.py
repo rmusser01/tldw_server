@@ -143,8 +143,8 @@ async def _persona_pre_summarize_items(
             rewritten = _strip_reasoning_blocks(extract_openai_content(response) or "").strip()
             if rewritten:
                 normalized["summary"] = rewritten
-        except _BRIEFING_NONCRITICAL_EXCEPTIONS as exc:
-            logger.warning(f"Persona pre-summarization failed for '{title}': {exc}")
+        except _BRIEFING_NONCRITICAL_EXCEPTIONS:
+            logger.warning("Persona pre-summarization failed", exc_info=True)
         rewritten_items.append(normalized)
 
     return rewritten_items
@@ -364,6 +364,6 @@ Write the complete script now."""
             "voice_assignments": voice_assignments,
         }
 
-    except _BRIEFING_NONCRITICAL_EXCEPTIONS as e:
-        logger.exception(f"Audio briefing compose error: {e}")
-        return {"text": "", "script": "", "sections": [], "error": str(e)}
+    except _BRIEFING_NONCRITICAL_EXCEPTIONS:
+        logger.exception("Audio briefing compose error")
+        return {"text": "", "script": "", "sections": [], "error": "audio_briefing_compose_error"}

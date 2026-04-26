@@ -957,7 +957,7 @@ async def llm_health():
     except _LLM_PROVIDERS_NONCRITICAL_EXCEPTIONS as e:
         logger.error(f"LLM health check error: {e}")
         health["status"] = "unhealthy"
-        health["error"] = str(e)
+        health["error"] = "LLM health check failed"
 
     return health
 
@@ -2107,7 +2107,7 @@ async def get_llm_providers(include_deprecated: bool = False):
         logger.error(f"Error in get_llm_providers endpoint: {e}", exc_info=True)
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to retrieve LLM providers: {str(e)}"
+            detail="Failed to retrieve LLM providers"
         ) from e
 
 
@@ -2188,7 +2188,7 @@ async def get_models_metadata(
         logger.error(f"Error getting models metadata: {e}", exc_info=True)
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to retrieve model metadata: {str(e)}"
+            detail="Failed to retrieve model metadata"
         ) from e
 
 @router.get("/llm/providers/{provider_name}",
@@ -2226,7 +2226,7 @@ async def get_provider_details(provider_name: str, include_deprecated: bool = Fa
         logger.error(f"Error getting provider details for {provider_name}: {e}", exc_info=True)
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to retrieve provider details: {str(e)}"
+            detail="Failed to retrieve provider details"
         ) from e
 
 @router.get("/llm/models",
@@ -2302,7 +2302,7 @@ async def get_all_models(
         logger.error(f"Error getting all models: {e}", exc_info=True)
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to retrieve models: {str(e)}"
+            detail="Failed to retrieve models"
         ) from e
 
 # End of llm_providers.py

@@ -53,15 +53,15 @@ async def run_audio_diarize_adapter(config: dict[str, Any], context: dict[str, A
     if audio_uri:
         try:
             audio_path = resolve_workflow_file_uri(audio_uri, context, config)
-        except Exception as e:
-            return {"error": f"invalid_audio_uri:{e}", "segments": [], "speakers": []}
+        except Exception:
+            return {"error": "invalid_audio_uri", "segments": [], "speakers": []}
     elif audio_path:
         if isinstance(audio_path, str):
             audio_path = _tmpl(audio_path, context) or audio_path
         try:
             audio_path = resolve_workflow_file_path(audio_path, context, config)
-        except Exception as e:
-            return {"error": f"audio_access_denied:{e}", "segments": [], "speakers": []}
+        except Exception:
+            return {"error": "audio_access_denied", "segments": [], "speakers": []}
     else:
         # Try to get from previous step
         prev = context.get("prev") or context.get("last") or {}
@@ -158,8 +158,8 @@ async def run_audio_diarize_adapter(config: dict[str, Any], context: dict[str, A
                         "total_duration": result.get("duration", 0),
                     }
 
-            except Exception as e:
-                logger.debug(f"Whisper diarization fallback failed: {e}")
+            except Exception:
+                logger.debug("Whisper diarization fallback failed")
 
             return {
                 "error": "diarization_unavailable",
@@ -168,6 +168,6 @@ async def run_audio_diarize_adapter(config: dict[str, Any], context: dict[str, A
                 "message": "Install pyannote-audio for speaker diarization",
             }
 
-    except Exception as e:
-        logger.exception(f"Audio diarize adapter error: {e}")
-        return {"error": f"diarization_error:{e}", "segments": [], "speakers": []}
+    except Exception:
+        logger.exception("Audio diarize adapter error")
+        return {"error": "diarization_error", "segments": [], "speakers": []}

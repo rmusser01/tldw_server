@@ -560,7 +560,7 @@ async def list_vector_store_users(current_user: User = Depends(get_request_user)
                 'batch_count': batch_count
             })
     except _VECTORSTORE_NONCRITICAL_EXCEPTIONS as e:
-        raise HTTPException(status_code=500, detail=f"Failed to scan user directories: {e}") from e
+        raise HTTPException(status_code=500, detail="Failed to list vector store users") from e
 
     return { 'data': users }
 
@@ -1141,7 +1141,7 @@ async def vector_stores_health(current_user: User = Depends(get_request_user)):
         try:
             return await fn()  # type: ignore[misc]
         except _VECTORSTORE_NONCRITICAL_EXCEPTIONS as e:
-            return {"ok": False, "error": str(e)}
+            return {"ok": False, "error": "Vector store health check failed"}
     return {"ok": True}
 
 
@@ -1469,9 +1469,11 @@ async def upsert_vectors_batch(
             logger.warning(f"Failed to persist batch failure: {_e}")
         raise
     except _VECTORSTORE_NONCRITICAL_EXCEPTIONS as e:
-        _BATCH_STATUS[batch_id].update({"status": "failed", "error": str(e)})
+        logger.error(f"Vector batch upsert failed for batch {batch_id}: {e}", exc_info=True)
+        safe_error = "Vector batch upsert failed"
+        _BATCH_STATUS[batch_id].update({"status": "failed", "error": safe_error})
         try:
-            db_update_batch(batch_id, user_id=uid, status='failed', error=str(e))
+            db_update_batch(batch_id, user_id=uid, status='failed', error=safe_error)
         except _VECTORSTORE_NONCRITICAL_EXCEPTIONS as _e:
             logger.warning(f"Failed to persist batch failure: {_e}")
         raise
@@ -1788,7 +1790,10 @@ async def create_store_from_media(
             vecs = await loop.run_in_executor(None, embed_fn, subtexts, app_config, model_id)
         except _VECTORSTORE_NONCRITICAL_EXCEPTIONS as e:
             db_update_batch(batch_id, user_id=uid, status='failed', error=str(e))
-            raise HTTPException(500, detail=f"Embedding failed: {e}") from e
+            raise HTTPException(
+                500,
+                detail="Failed to generate embeddings for media content",
+            ) from e
         # Prepare corresponding slice metadata
         slice_ids = ids[start:start+step]
         slice_docs = subtexts

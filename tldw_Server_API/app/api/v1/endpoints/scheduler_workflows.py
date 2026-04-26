@@ -181,7 +181,7 @@ async def admin_rescan(
     try:
         await svc._rescan_once()  # type: ignore[attr-defined]
     except Exception as e:
-        logger.warning(f"Admin rescan failed: {e}")
+        logger.warning("Admin rescan failed")
         raise HTTPException(status_code=500, detail="Rescan failed") from e
     jobs = 0
     try:

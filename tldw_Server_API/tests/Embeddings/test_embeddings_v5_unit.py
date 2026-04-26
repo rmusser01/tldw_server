@@ -68,7 +68,7 @@ def setup():
         data = SetupData()
         data.client = client
         # Set CSRF token in both cookie and header for double-submit pattern
-        csrf_token = "test-csrf-token-12345"
+        csrf_token = "test-csrf-token-12345"  # nosec B105
         client.cookies.set("csrf_token", csrf_token)
         data.auth_headers = {
             "Authorization": "Bearer test-api-key",
@@ -117,7 +117,8 @@ class TestCriticalSecurity:
             return setup.regular_user
 
         async def override_regular_principal(request: Request) -> AuthPrincipal:  # type: ignore[override]
-            principal = AuthPrincipal(
+            # token_type is a test principal label, not a secret.
+            principal = AuthPrincipal(  # nosec B106
                 kind="user",
                 user_id=setup.regular_user.id,
                 api_key_id=None,
@@ -157,7 +158,8 @@ class TestCriticalSecurity:
             return setup.admin_user
 
         async def override_admin_principal(request: Request) -> AuthPrincipal:  # type: ignore[override]
-            principal = AuthPrincipal(
+            # token_type is a test principal label, not a secret.
+            principal = AuthPrincipal(  # nosec B106
                 kind="user",
                 user_id=setup.admin_user.id,
                 api_key_id=None,
@@ -894,6 +896,131 @@ async def test_batch_rate_limit_maps_to_429(monkeypatch):
 
     assert exc.value.status_code == 429
     assert exc.value.headers.get("Retry-After") == "3"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_batch_generic_provider_error_is_sanitized(monkeypatch):
+    import tldw_Server_API.app.api.v1.endpoints.embeddings_v5_production_enhanced as mod
+
+    async def fake_create_embeddings_with_circuit_breaker(
+        texts,
+        provider,
+        model_id,
+        config,
+        metadata=None,
+        dimensions=None,
+    ):
+        _ = (texts, provider, model_id, config, metadata, dimensions)
+        raise RuntimeError("backend leaked /private/embedding-provider path")
+
+    monkeypatch.setattr(
+        mod,
+        "create_embeddings_with_circuit_breaker",
+        fake_create_embeddings_with_circuit_breaker,
+        raising=True,
+    )
+    monkeypatch.setattr(mod.embedding_cache, "get", AsyncMock(return_value=None))
+    monkeypatch.setattr(mod.embedding_cache, "set", AsyncMock())
+    monkeypatch.setattr(mod.connection_manager, "remove_provider", AsyncMock())
+
+    with pytest.raises(HTTPException) as exc:
+        await mod.create_embeddings_batch_async(
+            ["a"],
+            provider="huggingface",
+            model_id="sentence-transformers/all-MiniLM-L6-v2",
+        )
+
+    assert exc.value.status_code == 503
+    assert exc.value.detail == "Embedding service error"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_mlx_adapter_runtime_error_is_sanitized(monkeypatch):
+    import tldw_Server_API.app.api.v1.endpoints.embeddings_v5_production_enhanced as mod
+
+    class FakeBreaker:
+        async def call_async(self, func, *args, **kwargs):
+            return await func(*args, **kwargs)
+
+    class FakeAdapter:
+        def embed(self, payload):
+            _ = payload
+            raise RuntimeError("mlx cache exploded at /private/models")
+
+    class FakeRegistry:
+        def get_adapter(self, name):
+            assert name == "mlx"
+            return FakeAdapter()
+
+    monkeypatch.setattr(mod, "get_or_create_circuit_breaker", lambda provider: FakeBreaker())
+    monkeypatch.setattr(mod, "get_embeddings_registry", lambda: FakeRegistry())
+
+    with pytest.raises(HTTPException) as exc:
+        await mod.create_embeddings_with_circuit_breaker(
+            ["a"],
+            provider="mlx",
+            model_id="mlx/test-model",
+            config={"model_name_or_path": "mlx/test-model"},
+        )
+
+    assert exc.value.status_code == 502
+    assert exc.value.detail == "MLX embeddings error"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("provider", "model_id", "status_code", "expected_detail"),
+    [
+        ("cohere", "embed-english-v3.0", 502, "Cohere embeddings error"),
+        ("google", "text-embedding-004", 503, "Google embeddings error"),
+    ],
+)
+async def test_provider_http_error_body_is_sanitized(
+    monkeypatch,
+    provider,
+    model_id,
+    status_code,
+    expected_detail,
+):
+    import tldw_Server_API.app.api.v1.endpoints.embeddings_v5_production_enhanced as mod
+
+    class FakeBreaker:
+        async def call_async(self, func, *args, **kwargs):
+            return await func(*args, **kwargs)
+
+    class FakeResponse:
+        text = "upstream leaked token and /private/provider/path"
+
+        def __init__(self, status_code):
+            self.status_code = status_code
+
+        def json(self):
+            return {}
+
+        async def aclose(self):
+            return None
+
+    async def fake_afetch(**kwargs):
+        _ = kwargs
+        return FakeResponse(status_code)
+
+    monkeypatch.setattr(mod, "get_or_create_circuit_breaker", lambda selected: FakeBreaker())
+    monkeypatch.setattr(mod.connection_manager, "get_session", AsyncMock(return_value=object()))
+    monkeypatch.setattr(mod, "_http_afetch", fake_afetch)
+
+    with pytest.raises(HTTPException) as exc:
+        await mod.create_embeddings_with_circuit_breaker(
+            ["a"],
+            provider=provider,
+            model_id=model_id,
+            config={"api_key": "fake-provider-key", "model_name_or_path": model_id},
+        )
+
+    assert exc.value.status_code == status_code
+    assert exc.value.detail == expected_detail
 
 
 @pytest.mark.unit

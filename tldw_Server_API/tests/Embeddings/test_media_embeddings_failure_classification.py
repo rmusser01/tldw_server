@@ -97,3 +97,39 @@ async def test_generation_failure_can_fall_back_and_succeed(monkeypatch, tmp_pat
         ("huggingface", media_embeddings.FALLBACK_EMBEDDING_MODEL),
     ]
     assert stores == [media_embeddings.FALLBACK_EMBEDDING_MODEL]
+
+
+@pytest.mark.asyncio
+async def test_generation_failure_sanitizes_fallback_failure(monkeypatch, tmp_path):
+    async def fake_create_embeddings_batch_async(*, texts, provider, model_id, metadata):
+        if provider == "primary-provider":
+            raise RuntimeError("primary provider exploded at /private/provider")
+        raise RuntimeError("fallback provider exploded at /private/fallback")
+
+    monkeypatch.setattr(
+        embeddings_v5_production_enhanced,
+        "create_embeddings_batch_async",
+        fake_create_embeddings_batch_async,
+        raising=True,
+    )
+    monkeypatch.setattr(media_embeddings, "chunk_media_content", lambda *_args, **_kwargs: [{"text": "hello", "index": 0, "start": 0, "end": 5}])
+    monkeypatch.setattr(media_embeddings, "_user_embedding_config", lambda: {"USER_DB_BASE_DIR": str(tmp_path / "user-db")})
+
+    result = await media_embeddings.generate_embeddings_for_media(
+        media_id=11,
+        media_content={
+            "media_item": {"title": "Doc", "author": "Author", "metadata": {}},
+            "content": {"content": "hello"},
+        },
+        embedding_model="primary-model",
+        embedding_provider="primary-provider",
+        chunk_size=1000,
+        chunk_overlap=200,
+        user_id="tenant-3",
+    )
+
+    assert result["status"] == "error"
+    assert result["message"] == "Failed to generate embeddings"
+    assert result["error"] == "Embedding generation failed"
+    assert "provider exploded" not in str(result)
+    assert "/private/" not in str(result)

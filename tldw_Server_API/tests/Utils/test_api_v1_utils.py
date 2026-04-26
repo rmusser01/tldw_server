@@ -82,8 +82,8 @@ class _FakeRedis:
 
 
 def test_build_cache_key_is_stable_and_drops_token():
-    params1 = {"page": "1", "token": "secret"}
-    params2 = {"token": "secret", "page": "1"}
+    params1 = {"page": "1", "token": "secret"}  # nosec B105 - cache-key test fixture, not a credential
+    params2 = {"token": "secret", "page": "1"}  # nosec B105 - cache-key test fixture, not a credential
 
     key1 = cache.build_cache_key("/api/v1/media", params1)
     key2 = cache.build_cache_key("/api/v1/media", params2)
@@ -181,6 +181,153 @@ def test_http_error_mapping_for_db_exceptions():
     exc = DatabaseError("db")
     http_exc = http_errors.map_db_error_to_http(exc)
     assert http_exc.status_code == 500
+
+
+def test_http_error_mapping_can_promote_matching_input_errors_to_413():
+    http_exc = http_errors.map_db_error_to_http(
+        ChaChaInputError("Attachment exceeds maximum size"),
+        payload_too_large_substrings=("exceeds maximum size",),
+    )
+
+    assert http_exc.status_code == 413
+    assert http_exc.detail == "Attachment exceeds maximum size"
+
+
+def test_http_error_mapping_keeps_non_matching_input_errors_at_400():
+    http_exc = http_errors.map_db_error_to_http(
+        ChaChaInputError("Attachment metadata is invalid"),
+        payload_too_large_substrings=("exceeds maximum size",),
+    )
+
+    assert http_exc.status_code == 400
+    assert http_exc.detail == "Attachment metadata is invalid"
+
+
+def test_http_error_mapping_can_promote_matching_input_errors_to_404():
+    http_exc = http_errors.map_db_error_to_http(
+        ChaChaInputError("Dictionary revision not found"),
+        not_found_substrings=("not found",),
+    )
+
+    assert http_exc.status_code == 404
+    assert http_exc.detail == "Dictionary revision not found"
+
+
+def test_http_error_mapping_keeps_non_matching_not_found_input_errors_at_400():
+    http_exc = http_errors.map_db_error_to_http(
+        ChaChaInputError("Revision must be positive"),
+        not_found_substrings=("not found",),
+    )
+
+    assert http_exc.status_code == 400
+    assert http_exc.detail == "Revision must be positive"
+
+
+def test_http_error_mapping_can_use_sanitized_input_detail_attribute():
+    http_exc = http_errors.map_db_error_to_http(
+        PromptsInputError("raw prompt failure", safe_message="sanitized prompt failure"),
+        input_detail_attr="safe_message",
+    )
+
+    assert http_exc.status_code == 400
+    assert http_exc.detail == "sanitized prompt failure"
+
+
+def test_http_error_mapping_falls_back_to_string_when_input_detail_attribute_missing():
+    http_exc = http_errors.map_db_error_to_http(
+        ChaChaInputError("raw chacha failure"),
+        input_detail_attr="safe_message",
+    )
+
+    assert http_exc.status_code == 400
+    assert http_exc.detail == "raw chacha failure"
+
+
+def test_http_error_mapping_can_force_input_error_status_code():
+    http_exc = http_errors.map_db_error_to_http(
+        ChaChaInputError("Project not found"),
+        input_status_code=404,
+    )
+
+    assert http_exc.status_code == 404
+    assert http_exc.detail == "Project not found"
+
+
+def test_http_error_mapping_can_force_database_error_status_code():
+    http_exc = http_errors.map_db_error_to_http(
+        CharactersRAGDBError("Import backend unavailable"),
+        default_detail="Import backend unavailable",
+        database_status_code=400,
+    )
+
+    assert http_exc.status_code == 400
+    assert http_exc.detail == "Import backend unavailable"
+
+
+def test_http_error_mapping_can_force_conflict_error_status_code():
+    http_exc = http_errors.map_db_error_to_http(
+        ChaChaConflictError("clip not found"),
+        conflict_status_code=404,
+    )
+
+    assert http_exc.status_code == 404
+    assert http_exc.detail == "clip not found"
+
+
+def test_http_error_mapping_can_override_conflict_error_detail():
+    http_exc = http_errors.map_db_error_to_http(
+        ChaChaConflictError("stale write"),
+        conflict_detail="Conflict during deletion",
+    )
+
+    assert http_exc.status_code == 409
+    assert http_exc.detail == "Conflict during deletion"
+
+
+@pytest.mark.parametrize(
+    ("exc", "expected_status"),
+    [
+        (UnifiedInputError("bad"), 400),
+        (UnifiedConflictError("conflict"), 409),
+        (UnifiedNotFoundError("missing"), 404),
+        (UnifiedSchemaError("schema"), 500),
+        (KanbanInputError("bad"), 400),
+        (KanbanConflictError("conflict"), 409),
+        (KanbanNotFoundError("missing"), 404),
+        (ChaChaInputError("bad"), 400),
+        (ChaChaConflictError("conflict"), 409),
+        (ChaChaSchemaError("schema"), 500),
+        (PromptsInputError("bad"), 400),
+        (PromptsConflictError("conflict"), 409),
+        (PromptsSchemaError("schema"), 500),
+        (MeetingsInputError("bad"), 400),
+        (MeetingsSchemaError("schema"), 500),
+        (SlidesInputError("bad"), 400),
+        (SlidesConflictError("conflict"), 409),
+        (SlidesSchemaError("schema"), 500),
+    ],
+)
+def test_http_error_mapping_handles_cross_module_db_errors(exc, expected_status):
+    http_exc = http_errors.map_db_error_to_http(exc, default_detail="db fallback")
+    assert http_exc.status_code == expected_status
+
+
+@pytest.mark.parametrize(
+    "exc",
+    [
+        UnifiedDatabaseError("db"),
+        BackendDatabaseError("db"),
+        KanbanDBError("db"),
+        CharactersRAGDBError("db"),
+        PromptsDatabaseError("db"),
+        MeetingsDatabaseError("db"),
+        SlidesDatabaseError("db"),
+    ],
+)
+def test_http_error_mapping_uses_default_detail_for_database_base_errors(exc):
+    http_exc = http_errors.map_db_error_to_http(exc, default_detail="db fallback")
+    assert http_exc.status_code == 500
+    assert http_exc.detail == "db fallback"
 
 
 def test_http_error_mapping_allows_safe_public_overrides():

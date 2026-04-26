@@ -457,7 +457,7 @@ async def process_text_for_chunking_json(
     except Exception as e:
         logger.error(f"Unexpected error during chunking process for '{request_data.file_name}': {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                            detail=f"An internal error occurred during text chunking: {type(e).__name__}") from e
+                            detail="An internal error occurred during text chunking") from e
 
     if not chunk_results:
         logger.info(f"Chunking produced no results for '{request_data.file_name}'. Returning empty list.")
@@ -646,7 +646,7 @@ async def process_file_for_chunking(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(ve)) from ve
     except Exception as e:
         logger.error(f"Unexpected error during chunking file '{file.filename}': {e}", exc_info=True)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Internal error during file chunking: {type(e).__name__}") from e
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal error during file chunking") from e
 
     # Convert chunk_results to ChunkedContentResponse objects
     chunked_responses = [

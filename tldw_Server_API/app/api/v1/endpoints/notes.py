@@ -1123,7 +1123,7 @@ async def notes_health() -> dict[str, Any]:
             health["status"] = "degraded"
     except _NOTES_NONCRITICAL_EXCEPTIONS as e:
         health["status"] = "unhealthy"
-        health["error"] = str(e)
+        health["error"] = "Notes health check failed"
         if base_dir:
             storage_info["base_dir"] = str(base_dir)
 

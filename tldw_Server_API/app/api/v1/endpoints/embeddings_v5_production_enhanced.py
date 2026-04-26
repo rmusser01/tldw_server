@@ -377,6 +377,9 @@ DEFAULT_CACHE_CLEANUP_INTERVAL = 300
 DEFAULT_CONNECTION_POOL_SIZE = 20
 DEFAULT_REQUEST_TIMEOUT = 30
 DEFAULT_MAX_RETRIES = 3
+EMBEDDING_SERVICE_FAILED_DETAIL = "Embedding service error"
+EMBEDDING_MODEL_WARMUP_FAILED_DETAIL = "Warmup failed"
+EMBEDDING_MODEL_DOWNLOAD_FAILED_DETAIL = "Download failed"
 
 # Allow overriding via settings/env
 def _cfg_int(name: str, default_val: int) -> int:
@@ -1913,11 +1916,7 @@ async def create_embeddings_with_circuit_breaker(
                 try:
                     status_code = int(getattr(resp, "status_code", 0))
                     if status_code >= 400:
-                        try:
-                            detail = resp.text
-                        except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS:
-                            detail = ""
-                        raise HTTPException(status_code=status_code, detail=f"Cohere error: {detail}")
+                        raise HTTPException(status_code=status_code, detail="Cohere embeddings error")
                     data = resp.json()
                 finally:
                     close = getattr(resp, "aclose", None)
@@ -1961,11 +1960,7 @@ async def create_embeddings_with_circuit_breaker(
                 try:
                     status_code = int(getattr(resp, "status_code", 0))
                     if status_code >= 400:
-                        try:
-                            detail = resp.text
-                        except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS:
-                            detail = ""
-                        raise HTTPException(status_code=status_code, detail=f"Google Embeddings error: {detail}")
+                        raise HTTPException(status_code=status_code, detail="Google embeddings error")
                     data = resp.json()
                 finally:
                     close = getattr(resp, "aclose", None)
@@ -2009,7 +2004,7 @@ async def create_embeddings_with_circuit_breaker(
                 except HTTPException:
                     raise
                 except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS as exc:
-                    raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"MLX embeddings error: {exc}") from exc
+                    raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="MLX embeddings error") from exc
             else:
                 raise ValueError(f"Unknown provider: {provider}")
 
@@ -2183,7 +2178,7 @@ async def create_embeddings_batch_async(
 
                     raise HTTPException(
                         status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                        detail=f"Embedding service error: {str(e)}"
+                        detail=EMBEDDING_SERVICE_FAILED_DETAIL,
                     ) from e
 
         if len(all_new_embeddings) != len(uncached_texts):
@@ -3268,7 +3263,7 @@ async def bump_job_priority(
             "ttl_seconds": int(req.ttl_seconds or 600),
         }
     except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS as e:
-        raise HTTPException(status_code=500, detail=f"Failed to set priority override: {e}") from e
+        raise HTTPException(status_code=500, detail="Failed to set priority override") from e
     finally:
         try:
             if client is not None:
@@ -3328,7 +3323,10 @@ async def warmup_model(
         raise
     except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS as e:
         logger.error(f"Warmup failed for {provider}:{payload.model}: {e}")
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Warmup failed: {e}") from e
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=EMBEDDING_MODEL_WARMUP_FAILED_DETAIL,
+        ) from e
 
 
 @router.post(
@@ -3358,7 +3356,10 @@ async def download_model(
         raise
     except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS as e:
         logger.error(f"Download failed for {provider}:{payload.model}: {e}")
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Download failed: {e}") from e
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=EMBEDDING_MODEL_DOWNLOAD_FAILED_DETAIL,
+        ) from e
 
 @router.delete(
     "/embeddings/cache",
@@ -3820,7 +3821,7 @@ async def list_dlq_items(
     except HTTPException:
         raise
     except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS as e:
-        raise HTTPException(status_code=500, detail=f"Failed to list DLQ items: {e}") from e
+        raise HTTPException(status_code=500, detail="Failed to list DLQ items") from e
     finally:
         try:
             if client is not None:
@@ -3923,7 +3924,7 @@ async def requeue_dlq_item(
         raise
     except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS as e:
         dlq_requeue_errors_total.labels(queue_name=dlq_stream, error_type=type(e).__name__).inc()
-        raise HTTPException(status_code=500, detail=f"Failed to requeue DLQ item: {e}") from e
+        raise HTTPException(status_code=500, detail="Failed to requeue DLQ item") from e
     finally:
         await ensure_async_client_closed(client)
 
@@ -4500,7 +4501,7 @@ async def schedule_reembed(
             job_type=str(root_row.get("job_type")),
         )
     except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS as e:
-        raise HTTPException(status_code=500, detail=f"Failed to schedule re-embed: {e}") from e
+        raise HTTPException(status_code=500, detail="Failed to schedule re-embed") from e
 
 
 # ---------------------------------------------------------------------------

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from importlib import import_module
 from pathlib import Path
+from typing import Any
 
 import pytest
 from fastapi import FastAPI
@@ -83,6 +84,23 @@ def client(db: CharactersRAGDB, jobs_db_path: Path):
 
 def _jobs_manager(jobs_db_path: Path) -> JobManager:
     return JobManager(db_path=jobs_db_path)
+
+
+class _LoggerStub:
+    def __init__(self) -> None:
+        self.warnings: list[str] = []
+
+    def warning(self, message: str, *args: Any, **kwargs: Any) -> None:
+        self.warnings.append(message.format(*args) if args else message)
+
+
+class _FailingJobManager:
+    def create_job(self, **kwargs: Any) -> None:
+        raise RuntimeError("study suggestions backend exploded at /private/study-jobs.db")
+
+
+def _test_user() -> User:
+    return User(id=1, username="tester", email="t@example.com", is_active=True, roles=["admin"], is_admin=True)
 
 
 def _create_snapshot(
@@ -330,6 +348,42 @@ def test_submit_attempt_enqueues_study_suggestions_refresh_job(
     assert job["job_type"] == jobs_mod.STUDY_SUGGESTIONS_REFRESH_JOB_TYPE  # nosec B101
     assert job["payload"]["anchor_type"] == "quiz_attempt"  # nosec B101
     assert int(job["payload"]["anchor_id"]) == attempt_id  # nosec B101
+
+
+def test_quiz_suggestions_enqueue_failure_log_is_sanitized(monkeypatch):
+    _endpoints_mod, quizzes_mod, _flashcards_mod, _snapshot_service_mod, _jobs_mod, _actions_mod = _load_modules()
+    logger = _LoggerStub()
+    monkeypatch.setattr(quizzes_mod, "logger", logger)
+
+    quizzes_mod._enqueue_study_suggestions_refresh(
+        jm=_FailingJobManager(),
+        current_user=_test_user(),
+        anchor_type="quiz_attempt",
+        anchor_id=101,
+    )
+
+    assert logger.warnings == ["Study-suggestions refresh enqueue skipped"]  # nosec B101
+    warning_text = "\n".join(logger.warnings)
+    assert "study suggestions backend exploded" not in warning_text  # nosec B101
+    assert "/private/study-jobs.db" not in warning_text  # nosec B101
+
+
+def test_flashcard_suggestions_enqueue_failure_log_is_sanitized(monkeypatch):
+    _endpoints_mod, _quizzes_mod, flashcards_mod, _snapshot_service_mod, _jobs_mod, _actions_mod = _load_modules()
+    logger = _LoggerStub()
+    monkeypatch.setattr(flashcards_mod, "logger", logger)
+
+    flashcards_mod._enqueue_study_suggestions_refresh(
+        jm=_FailingJobManager(),
+        current_user=_test_user(),
+        anchor_type="flashcard_review_session",
+        anchor_id=202,
+    )
+
+    assert logger.warnings == ["Study-suggestions refresh enqueue skipped"]  # nosec B101
+    warning_text = "\n".join(logger.warnings)
+    assert "study suggestions backend exploded" not in warning_text  # nosec B101
+    assert "/private/study-jobs.db" not in warning_text  # nosec B101
 
 
 def test_review_session_end_completes_session_and_enqueues_suggestions(

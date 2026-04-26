@@ -157,7 +157,7 @@ class RAGHealthChecker:
             return ComponentHealth(
                 name="vector_store",
                 status=HealthStatus.UNHEALTHY,
-                message=f"Connection failed: {str(e)}",
+                message="Vector store connection failed",
                 response_time=response_time,
                 last_check=time.time()
             )
@@ -194,7 +194,7 @@ class RAGHealthChecker:
             return ComponentHealth(
                 name="database",
                 status=HealthStatus.UNHEALTHY,
-                message=f"Connection failed: {str(e)}",
+                message="Database connection failed",
                 response_time=response_time,
                 last_check=time.time()
             )
@@ -236,7 +236,7 @@ class RAGHealthChecker:
             return ComponentHealth(
                 name="embeddings",
                 status=HealthStatus.UNHEALTHY,
-                message=f"Service check failed: {str(e)}",
+                message="Embedding service check failed",
                 response_time=response_time,
                 last_check=time.time()
             )
@@ -290,7 +290,7 @@ class RAGHealthChecker:
             return ComponentHealth(
                 name="search_index",
                 status=HealthStatus.UNHEALTHY,
-                message=f"Index check failed: {str(e)}",
+                message="Search index check failed",
                 response_time=response_time,
                 last_check=time.time()
             )

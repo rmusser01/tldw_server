@@ -10,6 +10,7 @@ from starlette.requests import Request
 
 import tldw_Server_API.app.api.v1.endpoints.audio.audio_tts as audio_tts
 from tldw_Server_API.app.api.v1.schemas.audio_schemas import OpenAISpeechRequest
+from tldw_Server_API.app.core.AuthNZ.exceptions import StorageError
 from tldw_Server_API.app.core.TTS.tts_exceptions import TTSAuthenticationError
 
 
@@ -86,6 +87,14 @@ def _patch_audio_shim(monkeypatch, resolve_tts_byok):
     monkeypatch.setattr(audio_tts, "_audio_shim_attr", _shim_attr, raising=True)
 
 
+class _SuccessfulTTSService:
+    def generate_speech(self, *args, **kwargs):  # noqa: ARG002
+        async def _gen():
+            yield b"generated audio"
+
+        return _gen()
+
+
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_audio_speech_openai_oauth_auth_failure_retries_once(monkeypatch):
@@ -116,6 +125,46 @@ async def test_audio_speech_openai_oauth_auth_failure_retries_once(monkeypatch):
     assert response.body == b"recovered audio"
     assert tts_service.calls == 2
     assert force_flags[:2] == [False, True]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_audio_speech_download_link_sanitizes_storage_error(monkeypatch):
+    async def _resolve_tts_byok(*args, **kwargs):
+        _ = args, kwargs
+        return (1, {}, None)
+
+    async def _raise_storage_error(**kwargs):
+        _ = kwargs
+        raise StorageError("storage backend exploded at /private/generated/audio.mp3")
+
+    shim_map = {
+        "_sanitize_speech_request": lambda *args, **kwargs: "kitten_tts",
+        "_resolve_tts_byok": _resolve_tts_byok,
+        "save_and_register_tts_audio": _raise_storage_error,
+    }
+
+    def _shim_attr(name: str):
+        if name not in shim_map:
+            raise NameError(name)
+        return shim_map[name]
+
+    monkeypatch.setattr(audio_tts, "_audio_shim_attr", _shim_attr, raising=True)
+    request_data = _request_data()
+    request_data.return_download_link = True
+
+    with pytest.raises(HTTPException) as exc_info:
+        await audio_tts.create_speech(
+            request_data,
+            _make_request(),
+            tts_service=_SuccessfulTTSService(),
+            current_user=SimpleNamespace(id=1),
+            media_db=None,
+            usage_log=SimpleNamespace(log_event=lambda *args, **kwargs: None),
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "Failed to store generated speech audio"
 
 
 @pytest.mark.unit

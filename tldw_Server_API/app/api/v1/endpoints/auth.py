@@ -1985,12 +1985,6 @@ async def list_user_sessions(
 
     except _AUTH_NONCRITICAL_EXCEPTIONS as e:
         logger.error(f"Failed to list user sessions: {e}")
-        # In test mode, surface the underlying error to aid debugging
-        if _is_test_mode():
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to retrieve sessions: {e}"
-            ) from e
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to retrieve sessions"

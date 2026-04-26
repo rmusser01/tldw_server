@@ -41,6 +41,7 @@ from tldw_Server_API.app.api.v1.API_Deps.kanban_deps import (
     kanban_rate_limit,
 )
 from tldw_Server_API.app.api.v1.endpoints.kanban._kanban_utils import resolve_limit_offset
+from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.api.v1.schemas.kanban_schemas import (
     PaginationInfo,
     SearchRequest,
@@ -48,7 +49,6 @@ from tldw_Server_API.app.api.v1.schemas.kanban_schemas import (
     SearchResultCard,
 )
 from tldw_Server_API.app.core.DB_Management.Kanban_DB import (
-    InputError as KanbanInputError,
     KanbanDB,
     KanbanDBError,
 )
@@ -464,7 +464,9 @@ async def search_cards_get(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Invalid label_ids format: {str(e)}"
         ) from e
-    except (KanbanDBError, KanbanInputError) as e:
+    except KanbanDBError as e:
+        raise map_db_error_to_http(e, default_detail="Failed to search cards") from e
+    except Exception as e:
         raise _handle_error(e) from e
 @router.post(
     "/search",
@@ -495,8 +497,9 @@ async def search_cards_post(
             limit=request.limit,
             offset=request.offset,
         )
-
-    except (KanbanDBError, KanbanInputError) as e:
+    except KanbanDBError as e:
+        raise map_db_error_to_http(e, default_detail="Failed to search cards") from e
+    except Exception as e:
         raise _handle_error(e) from e
 @router.get(
     "/search/status",

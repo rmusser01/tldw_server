@@ -60,7 +60,8 @@ async def _override_regular_user():
 
 def _principal_override(user_id: int, is_admin: bool):
     async def _override(request: Request):
-        principal = AuthPrincipal(
+        # token_type is a test principal label, not a secret.
+        principal = AuthPrincipal(  # nosec B106
             kind="user",
             user_id=user_id,
             api_key_id=None,
@@ -179,6 +180,62 @@ def test_download_requires_admin_and_invokes_backend(restore_embedding_settings)
             r = client.post("/api/v1/embeddings/models/download", json={"model": "sentence-transformers/all-MiniLM-L6-v2"}, headers=_csrf_headers())
             assert r.status_code == 200
             assert r.json().get("downloaded") is True
+    finally:
+        os.environ.pop("TESTING", None)
+        app.dependency_overrides.pop(get_request_user, None)
+        app.dependency_overrides.pop(auth_deps.get_auth_principal, None)
+
+
+def test_warmup_sanitizes_unexpected_backend_error(restore_embedding_settings):
+    os.environ["TESTING"] = "true"
+    try:
+        settings["ALLOWED_EMBEDDING_PROVIDERS"] = ["openai"]
+        settings["ALLOWED_EMBEDDING_MODELS"] = ["text-embedding-3-small"]
+
+        app.dependency_overrides[get_request_user] = _override_admin_user
+        app.dependency_overrides[auth_deps.get_auth_principal] = _principal_override(2, True)
+        client = _client()
+
+        with patch(
+            'tldw_Server_API.app.api.v1.endpoints.embeddings_v5_production_enhanced.create_embeddings_batch_async',
+            new=AsyncMock(side_effect=RuntimeError("backend leaked /private/model-cache path"))
+        ):
+            r = client.post(
+                "/api/v1/embeddings/models/warmup",
+                json={"model": "text-embedding-3-small"},
+                headers=_csrf_headers(),
+            )
+
+        assert r.status_code == 502
+        assert r.json()["detail"] == "Warmup failed"
+    finally:
+        os.environ.pop("TESTING", None)
+        app.dependency_overrides.pop(get_request_user, None)
+        app.dependency_overrides.pop(auth_deps.get_auth_principal, None)
+
+
+def test_download_sanitizes_unexpected_backend_error(restore_embedding_settings):
+    os.environ["TESTING"] = "true"
+    try:
+        settings["ALLOWED_EMBEDDING_PROVIDERS"] = ["openai"]
+        settings["ALLOWED_EMBEDDING_MODELS"] = ["text-embedding-3-small"]
+
+        app.dependency_overrides[get_request_user] = _override_admin_user
+        app.dependency_overrides[auth_deps.get_auth_principal] = _principal_override(2, True)
+        client = _client()
+
+        with patch(
+            'tldw_Server_API.app.api.v1.endpoints.embeddings_v5_production_enhanced.create_embeddings_batch_async',
+            new=AsyncMock(side_effect=RuntimeError("backend leaked /private/model-cache path"))
+        ):
+            r = client.post(
+                "/api/v1/embeddings/models/download",
+                json={"model": "text-embedding-3-small"},
+                headers=_csrf_headers(),
+            )
+
+        assert r.status_code == 502
+        assert r.json()["detail"] == "Download failed"
     finally:
         os.environ.pop("TESTING", None)
         app.dependency_overrides.pop(get_request_user, None)

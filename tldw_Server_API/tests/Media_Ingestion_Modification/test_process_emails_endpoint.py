@@ -31,6 +31,41 @@ def test_process_emails_endpoint_basic(client_user_only):
     assert md.get("email", {}).get("subject") == "Test Email"
 
 
+def test_process_emails_sanitizes_processor_failure(client_user_only, monkeypatch):
+    from tldw_Server_API.app.api.v1.endpoints.media import process_emails as process_emails_mod
+
+    def fail_process_email_task(**_kwargs):
+        raise RuntimeError("email parser failed at /private/mail.eml")
+
+    monkeypatch.setattr(
+        process_emails_mod.email_lib,
+        "process_email_task",
+        fail_process_email_task,
+    )
+
+    content = (
+        b"From: Alice <alice@example.com>\r\n"
+        b"To: Bob <bob@example.com>\r\n"
+        b"Subject: Test Email\r\n"
+        b"MIME-Version: 1.0\r\n"
+        b"Content-Type: text/plain; charset=utf-8\r\n\r\n"
+        b"Hello Bob, this is a test.\r\n"
+    )
+    files = {
+        "files": ("test.eml", BytesIO(content), "message/rfc822"),
+    }
+
+    response = client_user_only.post("/api/v1/media/process-emails", files=files)
+
+    assert response.status_code == 207, response.text
+    payload = response.json()
+    result = payload["results"][0]
+    assert result["status"] == "Error"
+    assert result["error"] == "Email processing failed"
+    assert "email parser failed" not in response.text
+    assert "/private/mail.eml" not in response.text
+
+
 def _build_zip_of_emls() -> bytes:
 
 

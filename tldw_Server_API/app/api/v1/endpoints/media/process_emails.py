@@ -332,7 +332,7 @@ async def process_emails_endpoint(
                             "input_ref": pf.get("original_filename"),
                             "processing_source": str(pf.get("path")),
                             "media_type": "email",
-                            "error": f"Processing failed: {exc}",
+                            "error": "Email processing failed",
                             "metadata": {},
                             "content": None,
                             "chunks": None,

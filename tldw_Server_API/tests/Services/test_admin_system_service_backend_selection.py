@@ -240,6 +240,35 @@ async def test_debug_decode_token_reports_decoded_without_claiming_signature_val
 
 @pytest.mark.asyncio
 @pytest.mark.unit
+async def test_debug_decode_token_sanitizes_decode_failures() -> None:
+    result = await svc.debug_decode_token("header.payload.signature")
+
+    assert result["decoded"] is False
+    assert result["signature_verified"] is False
+    assert result["error"] == "Failed to decode token."
+    assert "Expecting value" not in result["error"]
+    assert "header" not in result["error"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_debug_resolve_permissions_sanitizes_backend_failures() -> None:
+    class _FailingDebugDb:
+        async def execute(self, *_args, **_kwargs):
+            raise RuntimeError("permission DB failed at /private/admin-permissions.db")
+
+    result = await svc.debug_resolve_permissions(42, _FailingDebugDb())
+
+    assert result["user_id"] == 42
+    assert result["roles"] == []
+    assert result["effective_permissions"] == []
+    assert result["error"] == "Failed to resolve permissions."
+    assert "permission DB failed" not in result["error"]
+    assert "/private/admin-permissions.db" not in result["error"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
 async def test_get_system_stats_postgres_backend_selection_uses_fetchrow() -> None:
     db = _PostgresDbWithSqliteTraps()
 

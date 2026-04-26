@@ -58,3 +58,62 @@ async def test_enhanced_webscraping_persist_with_mocked_db_path(tmp_path: Path, 
     assert res["total_articles"] == 2
     assert isinstance(res.get("media_ids"), list)
     assert len(res["media_ids"]) == 2
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_enhanced_webscraping_persist_sanitizes_storage_failure(
+    tmp_path: Path,
+    monkeypatch,
+):
+    import tldw_Server_API.app.services.enhanced_web_scraping_service as svc_mod
+
+    class _FailingDB:
+        def add_media_with_keywords(self, **_kwargs):
+            raise RuntimeError("storage backend exploded at /private/db/media.sqlite")
+
+    class _FailingDBContext:
+        def __enter__(self):
+            return _FailingDB()
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    monkeypatch.setattr(
+        svc_mod,
+        "get_user_media_db_path",
+        lambda _user_id: str(tmp_path / "media_test.db"),
+    )
+    monkeypatch.setattr(
+        svc_mod,
+        "managed_media_database",
+        lambda **_kwargs: _FailingDBContext(),
+    )
+
+    result = {
+        "method": "Individual URLs",
+        "articles": [
+            {
+                "url": "https://example.com/a",
+                "title": "Article A",
+                "author": "Alice",
+                "date": "2024-10-01",
+                "content": "Hello world from article A.",
+                "extraction_successful": True,
+                "summary": "Summary A",
+                "method": "enhanced",
+            },
+        ],
+    }
+
+    res = await WebScrapingService()._store_persistent(
+        result=result,
+        keywords="foo,bar",
+        user_id=7,
+    )
+
+    assert res["status"] == "persist-ok"
+    assert res["media_ids"] == []
+    assert res["errors"] == ["Storage failed for article"]
+    assert "storage backend exploded" not in str(res)
+    assert "/private/db/media.sqlite" not in str(res)

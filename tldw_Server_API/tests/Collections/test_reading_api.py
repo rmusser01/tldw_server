@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
@@ -574,3 +575,27 @@ def test_reading_summarize_and_tts(reading_app, monkeypatch):
         )
         assert r.status_code == 200, r.text
         assert r.content == b"audiodata"
+
+
+def test_reading_tts_sanitizes_generic_tts_error():
+    from tldw_Server_API.app.api.v1.endpoints import reading as reading_endpoint
+
+    with pytest.raises(HTTPException) as excinfo:
+        reading_endpoint._raise_for_tts_error(
+            reading_endpoint.TTSError("provider backend exploded"),
+        )
+
+    assert excinfo.value.status_code == 500
+    assert excinfo.value.detail == "TTS generation failed"
+
+
+def test_reading_tts_sanitizes_provider_not_configured_error():
+    from tldw_Server_API.app.api.v1.endpoints import reading as reading_endpoint
+
+    with pytest.raises(HTTPException) as excinfo:
+        reading_endpoint._raise_for_tts_error(
+            reading_endpoint.TTSProviderNotConfiguredError("tts provider secret path missing"),
+        )
+
+    assert excinfo.value.status_code == 503
+    assert excinfo.value.detail == "TTS service unavailable"

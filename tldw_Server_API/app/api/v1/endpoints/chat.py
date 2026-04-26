@@ -230,6 +230,7 @@ from tldw_Server_API.app.api.v1.schemas.chat_dictionary_schemas import (
     ValidateDictionaryResponse,
     ValidationIssue,
 )
+from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
     ResolvedByokCredentials,
     record_byok_missing_credentials,
@@ -652,6 +653,21 @@ def _schedule_audit_background_task(awaitable: Any, *, task_name: str) -> asynci
 
     task.add_done_callback(_consume)
     return task
+
+
+def _build_chat_error_audit_metadata(
+    e_chat: BaseException,
+    *,
+    provider: Any,
+    model: Any,
+) -> dict[str, Any]:
+    """Build chat error audit metadata without persisting raw exception text."""
+    return {
+        "error_type": type(e_chat).__name__,
+        "error_message": "Chat completion failed",
+        "provider": provider,
+        "model": model,
+    }
 
 
 def _extract_text_from_message_content(content: Any) -> str:
@@ -4307,12 +4323,11 @@ async def create_chat_completion(
                     context=context,
                     action="chat_error",
                     result="failure",
-                    metadata={
-                        "error_type": type(e_chat).__name__,
-                        "error_message": str(e_chat),
-                        "provider": provider,
-                        "model": model
-                    }
+                    metadata=_build_chat_error_audit_metadata(
+                        e_chat,
+                        provider=provider,
+                        model=model,
+                    )
                 )
             # Determine status robustly across possible module/class identity mismatches
             if is_chat_lib_error:
@@ -5252,7 +5267,7 @@ async def list_chat_conversations(
         return ConversationListResponse(items=items, pagination=pagination)
     except InputError as exc:
         _record_search_outcome("validation")
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        raise map_db_error_to_http(exc) from exc
     except HTTPException as exc:
         if 400 <= exc.status_code < 500:
             _record_search_outcome("validation")
@@ -5457,10 +5472,8 @@ async def update_chat_conversation(
             external_ref=updated.get("external_ref"),
             version=updated.get("version") or payload.version + 1,
         )
-    except ConflictError as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-    except InputError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except (ConflictError, InputError) as exc:
+        raise map_db_error_to_http(exc) from exc
     except HTTPException:
         raise
     except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as exc:

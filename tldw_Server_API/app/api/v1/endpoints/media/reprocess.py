@@ -12,6 +12,7 @@ from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.api.v1.endpoints import media_embeddings as embeddings_endpoint
 from tldw_Server_API.app.api.v1.schemas.media_request_models import ReprocessMediaRequest
 from tldw_Server_API.app.api.v1.schemas.media_response_models import ReprocessMediaResponse
+from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.api.v1.utils.rag_cache import invalidate_rag_caches
 from tldw_Server_API.app.core.AuthNZ.permissions import MEDIA_UPDATE
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
@@ -19,12 +20,13 @@ from tldw_Server_API.app.core.Chunking import improved_chunking_process
 from tldw_Server_API.app.core.Chunking.chunker import Chunker
 from tldw_Server_API.app.core.Chunking.templates import TemplateClassifier
 from tldw_Server_API.app.core.config import settings
+from tldw_Server_API.app.core.DB_Management.DB_Manager import mark_media_as_processed
 from tldw_Server_API.app.core.DB_Management.media_db.errors import (
     ConflictError,
     DatabaseError,
     InputError,
 )
-from tldw_Server_API.app.core.DB_Management.DB_Manager import mark_media_as_processed
+from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
 from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import (
     apply_chunking_template_if_any,
     prepare_chunking_options_dict,
@@ -121,12 +123,8 @@ def _delete_embeddings_for_media(media_id: int, user_id: str) -> None:
     collection = manager.get_or_create_collection(collection_name)
     try:
         collection.delete(where={"media_id": str(media_id)})
-    except Exception as exc:
-        logger.warning(
-            'Where-delete failed for media {} embeddings, falling back to id delete: {}',
-            media_id,
-            exc,
-        )
+    except Exception:
+        logger.warning("Where-delete failed for media embeddings, falling back to id delete")
         data = collection.get(where={"media_id": str(media_id)}, include=["metadatas"], limit=100000)
         ids = (data or {}).get("ids") or []
         if ids:
@@ -136,8 +134,8 @@ def _delete_embeddings_for_media(media_id: int, user_id: str) -> None:
         remaining_ids = (remaining or {}).get("ids") or []
         if remaining_ids:
             collection.delete(ids=remaining_ids)
-    except Exception as exc:
-        logger.warning("Failed to verify embeddings delete for media {}: {}", media_id, exc)
+    except Exception:
+        logger.warning("Failed to verify embeddings delete")
 
 
 async def _generate_embeddings(
@@ -175,22 +173,15 @@ async def _generate_embeddings(
                 context="media.reprocess",
             )
         else:
-            error_detail = str(
-                result.get("error") or result.get("message") or "Embedding generation failed"
-            )
+            error_detail = str(result.get("error") or result.get("message") or "Embedding generation failed")
             raise RuntimeError(error_detail)
         invalidate_rag_caches(None, namespaces=cache_namespaces, media_id=media_id)
-    except Exception as exc:
-        error_detail = f"{type(exc).__name__}: {exc}"
-        logger.error("Embeddings regeneration failed for media {}: {}", media_id, error_detail)
+    except Exception:
+        logger.error("Embeddings regeneration failed")
         try:
-            db.mark_embeddings_error(media_id, error_detail)
-        except Exception as update_exc:
-            logger.error(
-                'Failed to mark embeddings error for media {}: {}',
-                media_id,
-                update_exc,
-            )
+            db.mark_embeddings_error(media_id, "Embeddings regeneration failed")
+        except Exception:
+            logger.error("Failed to mark embeddings error")
         raise
 
 
@@ -253,8 +244,7 @@ async def reprocess_media_item(
         chunk_options = chunk_options or {}
 
         use_hier = bool(
-            chunk_options.get("hierarchical")
-            or isinstance(chunk_options.get("hierarchical_template"), dict)
+            chunk_options.get("hierarchical") or isinstance(chunk_options.get("hierarchical_template"), dict)
         )
         try:
             if use_hier:
@@ -265,17 +255,18 @@ async def reprocess_media_item(
                     max_size=chunk_options.get("max_size") or 500,
                     overlap=chunk_options.get("overlap") or 200,
                     language=chunk_options.get("language"),
-                    template=chunk_options.get("hierarchical_template")
-                    if isinstance(chunk_options.get("hierarchical_template"), dict)
-                    else None,
+                    template=(
+                        chunk_options.get("hierarchical_template")
+                        if isinstance(chunk_options.get("hierarchical_template"), dict)
+                        else None
+                    ),
                 )
             else:
                 raw_chunks = improved_chunking_process(content, chunk_options)
         except Exception as exc:
             logger.error(
-                'Chunking failed for media {}: {}',
+                "Chunking failed for media {}",
                 media_id,
-                exc,
                 exc_info=True,
             )
             raise HTTPException(
@@ -286,17 +277,13 @@ async def reprocess_media_item(
         normalized_chunks = _normalize_chunks(raw_chunks)
         try:
             db.clear_unvectorized_chunks(media_id)
-        except (InputError, ConflictError) as exc:
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-        except DatabaseError as exc:
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+        except (InputError, ConflictError, DatabaseError) as exc:
+            raise map_db_error_to_http(exc, default_detail="Failed to update media chunks") from exc
         if normalized_chunks:
             try:
                 db.process_unvectorized_chunks(media_id, normalized_chunks)
-            except (InputError, ConflictError) as exc:
-                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-            except DatabaseError as exc:
-                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+            except (InputError, ConflictError, DatabaseError) as exc:
+                raise map_db_error_to_http(exc, default_detail="Failed to update media chunks") from exc
         chunks_created = len(normalized_chunks)
 
         try:
@@ -305,10 +292,8 @@ async def reprocess_media_item(
                 chunking_status="completed",
                 reset_vector_processing=bool(payload.generate_embeddings),
             )
-        except (ConflictError, InputError) as exc:
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-        except DatabaseError as exc:
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+        except (InputError, ConflictError, DatabaseError) as exc:
+            raise map_db_error_to_http(exc, default_detail="Failed to update media reprocess state") from exc
     elif payload.generate_embeddings:
         try:
             db.update_media_reprocess_state(
@@ -316,10 +301,8 @@ async def reprocess_media_item(
                 chunking_status=None,
                 reset_vector_processing=True,
             )
-        except (ConflictError, InputError) as exc:
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-        except DatabaseError as exc:
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+        except (InputError, ConflictError, DatabaseError) as exc:
+            raise map_db_error_to_http(exc, default_detail="Failed to update media reprocess state") from exc
 
     cache_namespaces: list[str] = []
     try:

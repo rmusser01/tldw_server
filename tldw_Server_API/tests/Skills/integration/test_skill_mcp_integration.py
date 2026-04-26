@@ -15,6 +15,7 @@ from tldw_Server_API.app.core.Skills.context_integration import (
     get_skills_context_text,
     handle_skill_tool_call,
 )
+from tldw_Server_API.app.core.Skills.exceptions import SkillsError
 from tldw_Server_API.app.core.Skills.skills_service import SkillsService
 
 pytestmark = pytest.mark.integration
@@ -138,6 +139,25 @@ class TestHandleSkillToolCall:
 
         assert result["success"] is False
         assert "not found" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_sanitizes_backend_errors(self, monkeypatch, temp_env):
+        env = temp_env
+
+        async def fail_get_skill(self, name):
+            raise SkillsError("skills backend exploded at /private/skills-context-cache")
+
+        monkeypatch.setattr(SkillsService, "get_skill", fail_get_skill)
+
+        result = await handle_skill_tool_call(
+            skill_name="summarize",
+            args="",
+            user_id=env["user_id"],
+            base_path=env["base_path"],
+            db=env["db"],
+        )
+
+        assert result == {"success": False, "error": "skill_execution_failed"}
 
 
 class TestAddSkillToolToToolsList:

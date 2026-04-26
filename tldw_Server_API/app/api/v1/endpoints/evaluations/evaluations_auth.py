@@ -61,7 +61,7 @@ def _evals_test_mode_bypass_enabled() -> bool:
 def sanitize_error_message(error: Exception, context: str = "") -> str:
     """Return a safe error string while logging details."""
     with contextlib.suppress(Exception):
-        logger.error(f"Error in {context}: {type(error).__name__}: {str(error)}")
+        logger.error("Error in {}: {}", context, type(error).__name__)
     mapping = {
         "FileNotFoundError": "The requested resource was not found",
         "PermissionError": "Permission denied for this operation",
@@ -195,7 +195,7 @@ async def verify_api_key(
                 }},
             ) from e
         except Exception as exc:
-            logger.error(f"Unexpected error decoding JWT for evaluations auth: {exc}")
+            logger.error("Unexpected error decoding JWT for evaluations auth")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail={"error": {
@@ -227,7 +227,7 @@ async def verify_api_key(
                 }},
             ) from exc
         except Exception as exc:
-            logger.error(f"Unexpected error verifying JWT for evaluations auth: {exc}")
+            logger.error("Unexpected error verifying JWT for evaluations auth")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail={"error": {
@@ -375,8 +375,8 @@ async def _apply_rate_limit_headers(limiter, user_id: str, response: Response, m
         reset_val = int(meta.get("reset_seconds") or 60) if isinstance(meta, dict) else 60
         response.headers["RateLimit-Reset"] = str(reset_val)
         response.headers["X-RateLimit-Reset"] = str(reset_val)
-    except Exception as rate_limit_header_error:
-        logger.debug("Failed to populate rate limit response headers", exc_info=rate_limit_header_error)
+    except Exception:
+        logger.debug("Failed to populate rate limit response headers")
 
 
 def enforce_heavy_evaluations_admin(principal: Optional[AuthPrincipal]) -> None:

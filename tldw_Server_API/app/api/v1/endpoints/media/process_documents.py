@@ -271,7 +271,7 @@ async def process_documents_endpoint(
                             error,
                             exc_info=False,
                         )
-                        err_detail = f"Download/preparation failed: {str(error)}"
+                        err_detail = "Download/preparation failed"
                         batch_result["results"].append(
                             {
                                 "status": "Error",
@@ -441,9 +441,7 @@ async def process_documents_endpoint(
                         res,
                         exc_info=res,
                     )
-                    error_detail = (
-                        f"Task execution failed: {type(res).__name__}: {res}"
-                    )
+                    error_detail = "Document processing failed"
                     results.append(
                         {
                             "status": "Error",

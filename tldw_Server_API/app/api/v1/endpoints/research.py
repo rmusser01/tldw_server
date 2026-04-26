@@ -97,7 +97,7 @@ def _get_phase1_fatal_error(phase1: dict[str, Any]) -> HTTPException | None:
     if not error_message:
         return None
 
-    return HTTPException(status_code=502, detail=f"Websearch failed: {error_message}")
+    return HTTPException(status_code=502, detail="Websearch failed")
 
 #
 #########################################################################################################################
@@ -162,7 +162,10 @@ async def arxiv_search_endpoint(
         raise
     except Exception as e:
         logger.error(f"Unexpected error during arXiv search execution: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"An unexpected error occurred while searching arXiv: {str(e)}") from e
+        raise HTTPException(
+            status_code=500,
+            detail="An unexpected error occurred while searching arXiv",
+        ) from e
 
     total_pages_calculated = math.ceil(
         total_results_from_api / search_params.results_per_page) if search_params.results_per_page > 0 else 0
@@ -212,7 +215,8 @@ def process_and_ingest_arxiv_paper(paper_id, additional_keywords):
 
         return f"arXiv paper '{title}' ingested successfully."
     except Exception as e:
-        return f"Error processing arXiv paper: {str(e)}"
+        logger.error(f"Error processing arXiv paper {paper_id}: {e}", exc_info=True)
+        return "Error processing arXiv paper"
 #
 # End of arxiv_search_endpoint
 ###########################################################################
@@ -279,8 +283,10 @@ async def semantic_scholar_search_endpoint(
         raise
     except Exception as e:
         logger.error(f"Unexpected error during Semantic Scholar search execution: {e}", exc_info=True)
-        raise HTTPException(status_code=500,
-                            detail=f"An unexpected error occurred while searching Semantic Scholar: {str(e)}") from e
+        raise HTTPException(
+            status_code=500,
+            detail="An unexpected error occurred while searching Semantic Scholar",
+        ) from e
 
     total_results_api = api_response_data.get("total", 0)
     actual_offset_api = api_response_data.get("offset", 0)  # S2 returns the actual offset used
@@ -448,7 +454,7 @@ async def websearch_endpoint(
         raise HTTPException(status_code=422, detail=f"Websearch configuration error: {str(e)}") from e
     except Exception as e:
         logger.error(f"websearch endpoint failed: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Websearch failed: {str(e)}") from e
+        raise HTTPException(status_code=500, detail="Websearch failed") from e
 
 
 #

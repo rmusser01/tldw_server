@@ -543,6 +543,7 @@ def test_snapshot_import_replace_rolls_back_when_db_import_fails_after_soft_dele
     )
 
     assert resp.status_code == 500, resp.text
+    assert resp.json()["detail"] == "Unexpected error while processing writing snapshot import"
     sessions = client.get("/api/v1/writing/sessions").json()["sessions"]
     templates = client.get("/api/v1/writing/templates").json()["templates"]
     themes = client.get("/api/v1/writing/themes").json()["themes"]
@@ -731,7 +732,7 @@ def test_get_wordcloud_returns_failed_result(client_with_writing_db: TestClient,
     assert payload["id"]
     assert payload["status"] == "failed"
     assert payload["cached"] is False
-    assert payload["error"] == "wordcloud failed"
+    assert payload["error"] == "Wordcloud generation failed"
     assert payload["result"] is None
 
     get_resp = client.get(f"/api/v1/writing/wordclouds/{payload['id']}")
@@ -740,7 +741,7 @@ def test_get_wordcloud_returns_failed_result(client_with_writing_db: TestClient,
     assert fetched["id"] == payload["id"]
     assert fetched["status"] == "failed"
     assert fetched["cached"] is False
-    assert fetched["error"] == "wordcloud failed"
+    assert fetched["error"] == "Wordcloud generation failed"
     assert fetched["result"] is None
 
 

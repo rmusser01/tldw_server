@@ -432,10 +432,7 @@ async def get_add_media_form(
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=(
-                "Internal server error during form processing: "
-                f"{type(exc).__name__}"
-            ),
+            detail="Internal server error during form processing",
         ) from exc
 
 

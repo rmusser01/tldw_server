@@ -118,6 +118,19 @@ def _encode_silence_base64(duration_sec: float = 0.1, sr: int = 16000) -> str:
     return base64.b64encode(buf.getvalue()).decode("ascii")
 
 
+def test_map_tts_provider_not_configured_sanitizes_detail():
+    from tldw_Server_API.app.core.Streaming import speech_chat_service
+    from tldw_Server_API.app.core.TTS.tts_exceptions import TTSProviderNotConfiguredError
+
+    mapped = speech_chat_service._map_tts_exception(
+        TTSProviderNotConfiguredError("provider config missing at /private/tts/config.json")
+    )
+
+    assert mapped.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
+    assert mapped.detail == "TTS service unavailable"
+    assert "/private/tts/config.json" not in str(mapped.detail)
+
+
 @pytest.mark.asyncio
 async def test_run_speech_chat_turn_happy_path(monkeypatch):
     # Stub STT to return fixed transcript

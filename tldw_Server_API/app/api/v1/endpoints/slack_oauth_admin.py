@@ -147,10 +147,9 @@ async def slack_oauth_callback_impl(
         },
     )
     if not bool(token_payload.get("ok")):
-        provider_error = coerce_nonempty_string(token_payload.get("error")) or "token_exchange_failed"
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Slack OAuth token exchange failed: {provider_error}",
+            detail="Slack OAuth token exchange failed",
         )
 
     access_token = coerce_nonempty_string(token_payload.get("access_token"))

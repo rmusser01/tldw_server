@@ -15,6 +15,9 @@ class _StubDB:
 
         return {"id": 555, **kwargs}
 
+    def update_optimization(self, optimization_id: int, updates: dict):
+        return {"id": optimization_id, **updates}
+
 
 @pytest.fixture
 def override_db_dependency(monkeypatch):

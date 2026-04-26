@@ -85,3 +85,19 @@ def test_process_and_ingest_arxiv_paper_uses_media_repository_api(
         "author": "Ada Lovelace, Alan Turing",
     }
     assert isinstance(ingestion_date, str)
+
+
+@pytest.mark.unit
+def test_process_and_ingest_arxiv_paper_sanitizes_fetch_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _fail_fetch(_paper_id):
+        raise RuntimeError("arxiv fetch exploded at /private/research/cache.xml")
+
+    monkeypatch.setattr(research, "fetch_arxiv_xml", _fail_fetch)
+
+    message = research.process_and_ingest_arxiv_paper("1234.5678", "ml,rag")
+
+    assert message == "Error processing arXiv paper"
+    assert "arxiv fetch exploded" not in message
+    assert "/private/research/cache.xml" not in message

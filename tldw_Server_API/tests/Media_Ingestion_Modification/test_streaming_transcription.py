@@ -195,6 +195,68 @@ class TestStreamingTranscription:
         assert result['is_final'] == True
 
     @pytest.mark.asyncio
+    async def test_process_audio_chunk_sanitizes_internal_error(self):
+        """Processing errors should not expose backend exception details."""
+        from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Streaming_Parakeet import (
+            ParakeetStreamingTranscriber,
+            StreamingConfig
+        )
+
+        config = StreamingConfig(chunk_duration=0.1)
+        transcriber = ParakeetStreamingTranscriber(config)
+
+        class FailingBuffer:
+            def add(self, _audio_array):
+                raise RuntimeError("chunk buffer failed at /private/audio/buffer.raw")
+
+        transcriber.buffer = FailingBuffer()
+        audio_data = np.random.randn(16000).astype(np.float32).tobytes()
+
+        result = await transcriber.process_audio_chunk(audio_data)
+
+        assert result == {"type": "error", "message": "Audio chunk processing failed"}
+        assert "chunk buffer failed" not in str(result)
+        assert "/private/audio/buffer.raw" not in str(result)
+
+    @pytest.mark.asyncio
+    async def test_create_streaming_generator_sanitizes_runtime_error(
+        self,
+        monkeypatch,
+    ):
+        """Streaming generator errors should not expose backend exception details."""
+        from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import (
+            Audio_Streaming_Parakeet as parakeet_streaming,
+        )
+
+        class FailingTranscriber:
+            def __init__(self, _config):
+                pass
+
+            def initialize(self):
+                pass
+
+            async def flush(self):
+                return None
+
+            async def process_audio_chunk(self, _audio_b64):
+                raise RuntimeError(
+                    "stream processor failed at /private/audio/stream.raw"
+                )
+
+        monkeypatch.setattr(
+            parakeet_streaming,
+            "ParakeetStreamingTranscriber",
+            FailingTranscriber,
+        )
+
+        generator = parakeet_streaming.create_streaming_generator(lambda: b"audio")
+        result = [chunk async for chunk in generator]
+
+        assert result == ["[Error: Streaming transcription failed]"]
+        assert "stream processor failed" not in str(result)
+        assert "/private/audio/stream.raw" not in str(result)
+
+    @pytest.mark.asyncio
     async def test_voice_activity_detection(self):
         """Test voice activity detection (if implemented)."""
         # Note: Voice activity detection is not implemented in the current code
@@ -654,6 +716,11 @@ class TestStreamingIntegration:
 
         monkeypatch.setattr(unified, "_ParakeetCoreAdapter", None)
         monkeypatch.setattr(unified, "ParakeetStreamingTranscriber", _ErrorStubTranscriber)
+        monkeypatch.setattr(
+            unified,
+            "_is_transcription_error_message",
+            lambda text: isinstance(text, str) and text.startswith("[Transcription error]"),
+        )
 
         frames = [
             json.dumps({"type": "config", "model": "parakeet", "sample_rate": 16000}),

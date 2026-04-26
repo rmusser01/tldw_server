@@ -7,6 +7,7 @@ import os
 import pytest
 from fastapi.testclient import TestClient
 
+from tldw_Server_API.app.main import app
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.api.v1.endpoints import audio as audio_endpoints
 
@@ -15,13 +16,13 @@ pytestmark = pytest.mark.integration
 
 
 @pytest.fixture()
-def client_with_user(tts_test_app, bypass_api_limits):
+def client_with_user(bypass_api_limits):
     async def override_user():
         return User(id=1, username="tester", email="t@e.com", is_active=True, is_admin=True)
-    tts_test_app.dependency_overrides[get_request_user] = override_user
-    with bypass_api_limits(tts_test_app), TestClient(tts_test_app) as client:
+    app.dependency_overrides[get_request_user] = override_user
+    with bypass_api_limits(app), TestClient(app) as client:
         yield client
-    tts_test_app.dependency_overrides.clear()
+    app.dependency_overrides.clear()
 
 
 def test_tts_health_path_exists(client_with_user: TestClient):
@@ -31,26 +32,9 @@ def test_tts_health_path_exists(client_with_user: TestClient):
     assert resp.status_code in (404, 405)
 
 
-def _configured_provider_key(raw_value: str, *, placeholder_prefixes: tuple[str, ...]) -> str:
-    value = raw_value.strip()
-    if not value:
-        return ""
-    if any(value.startswith(prefix) for prefix in placeholder_prefixes):
-        return ""
-    return value
-
-
 @pytest.mark.requires_llm
 def test_tts_generate_when_configured(client_with_user: TestClient):
-    openai_key = _configured_provider_key(
-        os.getenv("OPENAI_API_KEY", ""),
-        placeholder_prefixes=("sk-test-",),
-    )
-    elevenlabs_key = _configured_provider_key(
-        os.getenv("ELEVENLABS_API_KEY", ""),
-        placeholder_prefixes=("el-test-",),
-    )
-    if not openai_key and not elevenlabs_key:
+    if not os.getenv("OPENAI_API_KEY") and not os.getenv("ELEVENLABS_API_KEY"):
         pytest.skip("No TTS providers configured")
     # Attempt a small generation (may still fail depending on provider config)
     payload = {

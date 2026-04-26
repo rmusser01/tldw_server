@@ -51,6 +51,59 @@ def test_process_code_js_codechunk(client_with_single_user):
     assert payload["results"][0]["status"] in ("Success", "Warning")
 
 
+def test_process_code_sanitizes_read_failure(client_with_single_user, monkeypatch):
+    from tldw_Server_API.app.api.v1.endpoints.media import process_code as process_code_mod
+
+    client, _ = client_with_single_user
+
+    def fail_read_text_safe(_path):
+        raise RuntimeError("read failed at /private/source.py")
+
+    monkeypatch.setattr(process_code_mod, "read_text_safe", fail_read_text_safe)
+
+    files = [("files", ("script.py", b"print('hi')\n", "text/x-python"))]
+    response = client.post(
+        "/api/v1/media/process-code",
+        files=files,
+        data={"perform_chunking": "false"},
+    )
+
+    assert response.status_code == 207, response.text
+    payload = response.json()
+    result = payload["results"][0]
+    assert result["status"] == "Error"
+    assert result["error"] == "Failed to read code file"
+    assert "read failed" not in response.text
+    assert "/private/source.py" not in response.text
+
+
+def test_process_code_sanitizes_url_download_failure(client_with_single_user, monkeypatch):
+    from tldw_Server_API.app.api.v1.endpoints.media import process_code as process_code_mod
+
+    client, _ = client_with_single_user
+
+    async def fail_download_url_async(*_args, **_kwargs):
+        raise RuntimeError("download failed at /private/cache/snippet.py")
+
+    monkeypatch.setattr(process_code_mod, "download_url_async", fail_download_url_async)
+
+    response = client.post(
+        "/api/v1/media/process-code",
+        data={
+            "urls": "https://example.com/snippet.py",
+            "perform_chunking": "false",
+        },
+    )
+
+    assert response.status_code == 207, response.text
+    payload = response.json()
+    result = payload["results"][0]
+    assert result["status"] == "Error"
+    assert result["error"] == "Download/preparation failed"
+    assert "download failed" not in response.text
+    assert "/private/cache/snippet.py" not in response.text
+
+
 @pytest.mark.asyncio
 async def test_save_uploaded_files_extension_candidates_tar_gz(tmp_path, monkeypatch):
     # Call internal helper to validate multi-suffix support (.tar.gz)

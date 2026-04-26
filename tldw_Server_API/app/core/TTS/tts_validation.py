@@ -668,6 +668,14 @@ class TTSInputValidator:
                 voice = (request.voice or "").strip()
                 is_clone_voice = voice.lower() == "clone"
                 is_custom_voice = voice.startswith("custom:")
+                ref_text = None
+                if isinstance(extras, dict):
+                    ref_text = (
+                        extras.get("reference_text")
+                        or extras.get("ref_text")
+                        or extras.get("voice_reference_text")
+                    )
+                clone_requested = bool(request.voice_reference) or is_clone_voice or is_custom_voice
                 if is_clone_voice and not request.voice_reference:
                     raise TTSInvalidVoiceReferenceError(
                         "OmniVoice clone requests require voice_reference",
@@ -676,6 +684,11 @@ class TTSInputValidator:
                 if is_custom_voice and not request.voice_reference:
                     raise TTSInvalidVoiceReferenceError(
                         "OmniVoice custom: voices require a resolved voice_reference before provider validation",
+                        provider=provider,
+                    )
+                if clone_requested and not (isinstance(ref_text, str) and ref_text.strip()):
+                    raise TTSInvalidInputError(
+                        "OmniVoice cloning requires reference_text",
                         provider=provider,
                     )
                 duration_limits = PROVIDER_REQUIREMENTS.get("omnivoice", {}).get("duration", {})

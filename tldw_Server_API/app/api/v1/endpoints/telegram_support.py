@@ -4,9 +4,10 @@ import asyncio
 import inspect
 import secrets
 import uuid
+from collections.abc import Awaitable
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any, Awaitable, Callable
+from typing import Any, Callable
 
 from fastapi import HTTPException, Request, status
 from fastapi.responses import JSONResponse
@@ -14,12 +15,12 @@ from loguru import logger
 from pydantic import ValidationError
 
 from tldw_Server_API.app.api.v1.schemas.telegram_schemas import (
+    TELEGRAM_WEBHOOK_SECRET_MIN_LENGTH,
     TelegramBotConfigResponse,
     TelegramBotConfigUpdate,
     TelegramLinkedActorListResponse,
     TelegramLinkedActorRevokeResponse,
     TelegramWebhookUpdate,
-    TELEGRAM_WEBHOOK_SECRET_MIN_LENGTH,
 )
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
@@ -518,10 +519,7 @@ def _normalize_bot_config_payload(payload: dict[str, Any] | None) -> dict[str, A
     }
     if isinstance(payload, dict):
         merged.update(payload)
-    merged["bot_username"] = (
-        _normalize_telegram_bot_username(merged.get("bot_username"))
-        or _DEFAULT_BOT_USERNAME
-    )
+    merged["bot_username"] = _normalize_telegram_bot_username(merged.get("bot_username")) or _DEFAULT_BOT_USERNAME
     merged["enabled"] = bool(merged.get("enabled"))
     return merged
 
@@ -556,8 +554,8 @@ def _decrypt_telegram_payload(encrypted_blob: str | None) -> dict[str, Any] | No
         return None
     try:
         payload = decrypt_byok_payload(loads_envelope(encrypted_blob))
-    except Exception as exc:
-        logger.warning("Failed to decrypt Telegram bot config payload: {}", exc)
+    except Exception:
+        logger.warning("Failed to decrypt Telegram bot config payload")
         return None
     return payload if isinstance(payload, dict) else None
 
@@ -770,9 +768,7 @@ def _telegram_webhook_error(
 
 
 def _coerce_valid_webhook_secret_header(request: Request) -> str | None:
-    webhook_secret = _coerce_nonempty_string(
-        request.headers.get("X-Telegram-Bot-Api-Secret-Token")
-    )
+    webhook_secret = _coerce_nonempty_string(request.headers.get("X-Telegram-Bot-Api-Secret-Token"))
     if not webhook_secret:
         return None
     if len(webhook_secret) < TELEGRAM_WEBHOOK_SECRET_MIN_LENGTH:
@@ -826,8 +822,7 @@ async def _resolve_webhook_scope_from_secret(
         matches.append(
             TelegramWebhookContext(
                 scope=TelegramScope(scope_type=scope_type, scope_id=scope_id),
-                bot_username=_normalize_telegram_bot_username(payload.get("bot_username"))
-                or _DEFAULT_BOT_USERNAME,
+                bot_username=_normalize_telegram_bot_username(payload.get("bot_username")) or _DEFAULT_BOT_USERNAME,
             )
         )
         if len(matches) > 1:

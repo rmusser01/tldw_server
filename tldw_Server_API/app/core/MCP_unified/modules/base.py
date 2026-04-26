@@ -183,7 +183,7 @@ class BaseModule(ABC):
                 logger.error(f"Module initialization failed: {self.name} - {str(e)}")
                 self._health = ModuleHealth(
                     status=HealthStatus.UNHEALTHY,
-                    message=f"Initialization failed: {str(e)}"
+                    message="Initialization failed"
                 )
                 raise
             finally:
@@ -268,7 +268,7 @@ class BaseModule(ABC):
             logger.error(f"Health check failed for {self.name}: {str(e)}")
             self._health = ModuleHealth(
                 status=HealthStatus.UNHEALTHY,
-                message=f"Health check error: {str(e)}",
+                message="Health check error",
                 last_check=datetime.utcnow(),
             )
 

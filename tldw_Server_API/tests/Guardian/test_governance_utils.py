@@ -11,6 +11,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
+import tldw_Server_API.app.core.Moderation.governance_utils as governance_module
 from tldw_Server_API.app.core.Moderation.governance_utils import (
     chat_type_matches,
     is_schedule_active,
@@ -115,6 +116,18 @@ class TestScheduleTimezone:
         """Invalid timezone should fail-open (treat as active via UTC)."""
         assert is_schedule_active(None, None, None, "Invalid/Timezone") is True
 
+    def test_invalid_timezone_log_sanitizes_input_details(self):
+        messages: list[str] = []
+        sink_id = governance_module.logger.add(lambda message: messages.append(str(message)), level="DEBUG")
+        try:
+            is_schedule_active(None, None, "mon", "Private/Timezone")
+        finally:
+            governance_module.logger.remove(sink_id)
+
+        joined = "\n".join(messages)
+        assert "Invalid schedule_timezone" in joined
+        assert "Private/Timezone" not in joined
+
     def test_valid_timezone(self):
         """Valid timezone should be used without error."""
         result = is_schedule_active(None, None, None, "America/New_York")
@@ -133,6 +146,23 @@ class TestScheduleMalformed:
     def test_only_start_time(self):
         """Only start set, no end -> fail-open."""
         assert is_schedule_active("09:00", None, None, "UTC") is True
+
+    def test_schedule_evaluation_log_sanitizes_exception_details(self, monkeypatch):
+        def fail_get_tz(_timezone):
+            raise RuntimeError("schedule backend failed at /private/governance-schedule.db")
+
+        monkeypatch.setattr(governance_module, "_get_tz", fail_get_tz)
+
+        messages: list[str] = []
+        sink_id = governance_module.logger.add(lambda message: messages.append(str(message)), level="DEBUG")
+        try:
+            assert is_schedule_active("09:00", "17:00", None, "UTC") is True
+        finally:
+            governance_module.logger.remove(sink_id)
+
+        joined = "\n".join(messages)
+        assert "Schedule evaluation error, failing open" in joined
+        assert "governance-schedule.db" not in joined
 
 
 # ── chat_type_matches ──────────────────────────────────────────

@@ -6,8 +6,13 @@ from fastapi import Depends, HTTPException, Query, WebSocket, status
 from loguru import logger
 from starlette.requests import Request as StarletteRequest
 
+from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
-from tldw_Server_API.app.core.DB_Management.Meetings_DB import MeetingsDatabase
+from tldw_Server_API.app.core.DB_Management.Meetings_DB import (
+    MeetingsDatabase,
+    MeetingsDatabaseError,
+    SchemaError,
+)
 
 
 async def get_meetings_db_for_user(
@@ -21,6 +26,9 @@ async def get_meetings_db_for_user(
         )
     try:
         return MeetingsDatabase.for_user(user_id=current_user.id)
+    except (MeetingsDatabaseError, SchemaError) as exc:
+        logger.error(f"Failed to init Meetings DB for user {current_user.id}: {exc}")
+        raise map_db_error_to_http(exc, default_detail="Meetings DB unavailable") from exc
     except Exception as exc:
         logger.error(f"Failed to init Meetings DB for user {current_user.id}: {exc}")
         raise HTTPException(status_code=500, detail="Meetings DB unavailable") from exc
@@ -96,6 +104,9 @@ async def get_meetings_db_for_websocket(
         )
     try:
         return MeetingsDatabase.for_user(user_id=current_user.id)
+    except (MeetingsDatabaseError, SchemaError) as exc:
+        logger.error(f"Failed to init Meetings DB for websocket user {current_user.id}: {exc}")
+        raise map_db_error_to_http(exc, default_detail="Meetings DB unavailable") from exc
     except Exception as exc:
         logger.error(f"Failed to init Meetings DB for websocket user {current_user.id}: {exc}")
         raise HTTPException(status_code=500, detail="Meetings DB unavailable") from exc

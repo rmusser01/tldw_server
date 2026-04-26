@@ -184,7 +184,7 @@ async def upsert_org_shared_key(
                 credential_fields["base_url"]
             )
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail="Invalid provider credential fields") from exc
 
     try:
         await test_provider_credentials(
@@ -194,7 +194,7 @@ async def upsert_org_shared_key(
             model=None,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail="Provider credential validation failed") from exc
     except ChatAPIError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
     except Exception as exc:
@@ -302,7 +302,7 @@ async def test_org_shared_key(
                 credential_fields["base_url"]
             )
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail="Invalid provider credential fields") from exc
 
     try:
         model_used = await test_provider_credentials(
@@ -312,7 +312,7 @@ async def test_org_shared_key(
             model=payload.model,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail="Provider credential validation failed") from exc
     except ChatAPIError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
     except Exception as exc:
@@ -400,7 +400,7 @@ async def upsert_team_shared_key(
                 credential_fields["base_url"]
             )
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail="Invalid provider credential fields") from exc
 
     try:
         await test_provider_credentials(
@@ -410,7 +410,7 @@ async def upsert_team_shared_key(
             model=None,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail="Provider credential validation failed") from exc
     except ChatAPIError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
     except Exception as exc:
@@ -518,7 +518,7 @@ async def test_team_shared_key(
                 credential_fields["base_url"]
             )
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail="Invalid provider credential fields") from exc
 
     try:
         model_used = await test_provider_credentials(
@@ -528,7 +528,7 @@ async def test_team_shared_key(
             model=payload.model,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail="Provider credential validation failed") from exc
     except ChatAPIError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
     except Exception as exc:

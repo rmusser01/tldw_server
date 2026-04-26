@@ -57,7 +57,7 @@ def _resolve_export_path_for_user(user_id: int, path_value: str) -> PathlibPath:
     try:
         base_resolved = base_dir.resolve(strict=False)
     except Exception as exc:
-        logger.error("files: failed to resolve temp outputs base dir for user {}: {}", user_id, exc)
+        logger.error("files: failed to resolve temp outputs base dir")
         raise HTTPException(status_code=500, detail="storage_unavailable") from exc
 
     candidate = PathlibPath(path_value)
@@ -149,7 +149,7 @@ async def get_reference_images(
     try:
         items = await list_reference_image_candidates(media_db, user_id=current_user.id)
     except ReferenceImageOperationalError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        raise HTTPException(status_code=503, detail="reference_image_storage_unavailable") from exc
     return ReferenceImageListResponse(
         items=[
             ReferenceImageListItem(

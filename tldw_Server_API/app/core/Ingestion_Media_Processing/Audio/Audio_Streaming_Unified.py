@@ -2875,6 +2875,7 @@ async def handle_unified_websocket(
                     vad_status = "enabled"
         except _AUDIO_UNIFIED_NONCRITICAL_EXCEPTIONS as e:
             error_msg = f"Failed to initialize {config.model} model: {str(e)}"
+            safe_model_error = "Streaming model initialization failed"
             logger.exception(error_msg)
             # Emit structured warning about model/variant unavailability before fallback attempts
             with contextlib.suppress(_AUDIO_UNIFIED_NONCRITICAL_EXCEPTIONS):
@@ -2886,7 +2887,7 @@ async def handle_unified_websocket(
                     "details": {
                         "model": config.model,
                         "variant": getattr(config, 'model_variant', None),
-                        "error": str(e),
+                        "error": safe_model_error,
                     },
                 })
 
@@ -2942,6 +2943,7 @@ async def handle_unified_websocket(
                         "active_model": "whisper"
                     })
                 except _AUDIO_UNIFIED_NONCRITICAL_EXCEPTIONS as fallback_error:
+                    safe_fallback_error = "Streaming fallback initialization failed"
                     logger.error(f"Fallback to Whisper also failed: {fallback_error}")
                     # Send standardized error and close with mapped code (1011)
                     await stream.error(
@@ -2950,8 +2952,8 @@ async def handle_unified_websocket(
                         data={
                             "model": config.model,
                             "variant": getattr(config, 'model_variant', None),
-                            "original_error": str(e),
-                            "fallback_error": str(fallback_error),
+                            "original_error": safe_model_error,
+                            "fallback_error": safe_fallback_error,
                             "suggestion": "Install nemo_toolkit[asr] for Parakeet/Canary or ensure faster-whisper is installed",
                         },
                     )
@@ -2971,7 +2973,7 @@ async def handle_unified_websocket(
                     data={
                         "model": config.model,
                         "variant": getattr(config, 'model_variant', None),
-                        "error": str(e),
+                        "error": safe_model_error,
                         "fallback_enabled": fallback_enabled,
                         "suggestion": suggestion,
                     },
@@ -3024,7 +3026,7 @@ async def handle_unified_websocket(
                     "type": "warning",
                     "state": "diarization_unavailable",
                     "message": "Diarization disabled: initialization failed",
-                    "details": str(diar_err),
+                    "details": "Diarization initialization failed",
                 })
                 diarizer = None
 
@@ -3045,7 +3047,7 @@ async def handle_unified_websocket(
                     "type": "warning",
                     "state": "insights_unavailable",
                     "message": "Live insights disabled: initialization failed",
-                    "details": str(insight_err)
+                    "details": "Live insights initialization failed"
                 })
                 insights_engine = None
         elif insights_settings and not insights_settings.enabled:
@@ -3200,7 +3202,7 @@ async def handle_unified_websocket(
                         "model": getattr(config, "model", None),
                         "variant": getattr(config, "model_variant", None),
                         "language": getattr(config, "language", None),
-                        "raw_error": text_field,
+                        "raw_error": "Transcription provider returned an error",
                     },
                 )
                 return False
@@ -3351,7 +3353,7 @@ async def handle_unified_websocket(
                     # Let disconnect bubble to the outer handler for graceful shutdown
                     raise
                 logger.error(f"Error processing message: {e}")
-                await stream.error("internal_error", f"Processing error: {str(e)}")
+                await stream.error("internal_error", "Streaming audio processing failed")
 
     except asyncio.TimeoutError:
         await stream.error("idle_timeout", "Configuration timeout")
@@ -3360,7 +3362,7 @@ async def handle_unified_websocket(
     except _AUDIO_UNIFIED_NONCRITICAL_EXCEPTIONS as e:
         logger.error(f"WebSocket handler error: {e}")
         try:
-            await stream.error("internal_error", f"Server error: {str(e)}")
+            await stream.error("internal_error", "Streaming server error")
         except _AUDIO_UNIFIED_NONCRITICAL_EXCEPTIONS as send_err:
             logger.debug(f"Failed to send error frame on websocket: error={send_err}")
     finally:

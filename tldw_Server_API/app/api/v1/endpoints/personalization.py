@@ -79,7 +79,7 @@ async def personalization_opt_in(
         log.log_event("personalization.opt-in", metadata={"enabled": prof.enabled})
         return prof
     except Exception as e:
-        logger.warning(f"Opt-in failed: {e}")
+        logger.warning("Opt-in failed")
         raise HTTPException(status_code=500, detail="Failed to update personalization profile") from e
 
 
@@ -101,7 +101,7 @@ async def personalization_purge(
             purged_at=datetime.now(timezone.utc),
         )
     except Exception as e:
-        logger.warning(f"Purge failed: {e}")
+        logger.warning("Purge failed")
         raise HTTPException(status_code=500, detail="Failed to purge personalization data") from e
 
 

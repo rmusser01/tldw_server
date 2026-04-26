@@ -9,8 +9,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Any
+from unittest import mock
 
 import pytest
+from fastapi import HTTPException
 
 
 # ---------------------------------------------------------------------------
@@ -770,6 +772,75 @@ class TestReportScheduleListUpdateDelete:
 
         with pytest.raises(ValueError, match="not_found"):
             service.mark_report_schedule_sent(schedule_id="nonexistent")
+
+
+class TestAdminOpsScheduleErrorSanitization:
+    """Direct endpoint tests for narrow report-schedule fallback sanitization."""
+
+    @pytest.mark.asyncio
+    async def test_get_report_schedules_sanitizes_backend_error(self, monkeypatch):
+        from tldw_Server_API.app.api.v1.endpoints.admin import admin_ops
+
+        monkeypatch.setattr(
+            "tldw_Server_API.app.api.v1.endpoints.admin.admin_ops._require_platform_admin",
+            lambda _: None,
+        )
+
+        def _raise_schedules() -> list[dict[str, Any]]:
+            raise OSError("report schedules backend exploded")
+
+        monkeypatch.setattr(admin_ops, "svc_list_report_schedules", _raise_schedules)
+
+        with pytest.raises(HTTPException) as exc_info:
+            await admin_ops.get_report_schedules(principal=mock.MagicMock())
+
+        assert exc_info.value.status_code == 500
+        assert exc_info.value.detail == "Failed to list report schedules"
+
+
+class TestAdminOpsDigestErrorSanitization:
+    """Direct endpoint tests for digest preference fallback sanitization."""
+
+    @pytest.mark.asyncio
+    async def test_get_digest_preference_sanitizes_backend_error(self, monkeypatch):
+        from tldw_Server_API.app.api.v1.endpoints.admin import admin_ops
+
+        def _raise_pref(*, user_id: str) -> dict[str, Any] | None:
+            _ = user_id
+            raise OSError("digest preference backend exploded")
+
+        monkeypatch.setattr(admin_ops, "svc_get_digest_preference", _raise_pref)
+
+        with pytest.raises(HTTPException) as exc_info:
+            await admin_ops.get_digest_preference(
+                principal=mock.MagicMock(user_id="user_42"),
+            )
+
+        assert exc_info.value.status_code == 500
+        assert exc_info.value.detail == "Failed to get digest preference"
+
+    @pytest.mark.asyncio
+    async def test_set_digest_preference_sanitizes_backend_error(self, monkeypatch):
+        from tldw_Server_API.app.api.v1.endpoints.admin import admin_ops
+
+        class _Request:
+            async def json(self) -> dict[str, Any]:
+                return {"email": "user42@example.com", "frequency": "weekly"}
+
+        def _raise_pref(*, user_id: str, email: str, frequency: str) -> dict[str, Any]:
+            _ = (user_id, email, frequency)
+            raise OSError("digest preference write exploded")
+
+        monkeypatch.setattr(admin_ops, "svc_set_digest_preference", _raise_pref)
+
+        with pytest.raises(HTTPException) as exc_info:
+            await admin_ops.set_digest_preference(
+                request=_Request(),
+                principal=mock.MagicMock(user_id="user_42"),
+            )
+
+        assert exc_info.value.status_code == 500
+        assert exc_info.value.detail == "Failed to set digest preference"
 
 
 # ═══════════════════════════════════════════════════════════════════════════

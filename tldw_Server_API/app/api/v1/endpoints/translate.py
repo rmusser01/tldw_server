@@ -114,10 +114,10 @@ async def translate_text(
 
         # Check for error response
         if isinstance(result, str) and result.startswith("Error:"):
-            logger.error("Translation failed: {}", result)
+            logger.error("Translation failed")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Translation failed: {result}",
+                detail="Translation failed",
             )
 
         # Clean up the result (remove any leading/trailing whitespace)
@@ -139,10 +139,10 @@ async def translate_text(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error("Unexpected translation error: {}", e, exc_info=True)
+        logger.error("Unexpected translation error", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Translation failed: {str(e)}",
+            detail="Translation failed",
         ) from e
 
 

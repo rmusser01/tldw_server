@@ -126,6 +126,81 @@ class TestGetAllDependencies:
         assert embeddings_item["status"] == "degraded"
         assert embeddings_item["error"] == "Provider timeout"
 
+    @pytest.mark.asyncio
+    async def test_check_dep_sanitizes_backend_failure(self):
+        """Unexpected dependency probe failures should not expose backend details."""
+        from tldw_Server_API.app.api.v1.endpoints.admin import admin_ops
+
+        async def _raise_probe_error():
+            raise RuntimeError("dependency backend exploded at /private/admin-deps.db")
+
+        result = await admin_ops._check_dep("AuthNZ Database", _raise_probe_error)
+
+        assert result["name"] == "AuthNZ Database"
+        assert result["status"] == "degraded"
+        assert result["error"] == "AuthNZ Database health check failed"
+        assert result["metadata"] == {}
+
+    @pytest.mark.asyncio
+    async def test_chacha_health_sanitizes_snapshot_failure(self, monkeypatch):
+        """ChaChaNotes probe failures should not expose DB paths or backend details."""
+        from tldw_Server_API.app.api.v1.API_Deps import ChaCha_Notes_DB_Deps
+        from tldw_Server_API.app.api.v1.endpoints.admin import admin_ops
+
+        def _raise_snapshot_error():
+            raise RuntimeError("chacha db exploded at /private/chacha.db")
+
+        monkeypatch.setattr(ChaCha_Notes_DB_Deps, "get_chacha_health_snapshot", _raise_snapshot_error)
+
+        result = await admin_ops._check_chacha_notes()
+
+        assert result == {"status": "unhealthy", "error": "ChaChaNotes health check failed"}
+
+    @pytest.mark.asyncio
+    async def test_workflows_health_sanitizes_engine_failure(self, monkeypatch):
+        """Workflow probe failures should not expose scheduler backend details."""
+        from tldw_Server_API.app.api.v1.endpoints.admin import admin_ops
+        from tldw_Server_API.app.core.Workflows import engine
+
+        def _raise_instance_error():
+            raise RuntimeError("workflow engine exploded at /private/workflows.db")
+
+        monkeypatch.setattr(engine.WorkflowScheduler, "instance", staticmethod(_raise_instance_error))
+
+        result = await admin_ops._check_workflows_engine()
+
+        assert result == {"status": "degraded", "error": "Workflows engine health check failed"}
+
+    @pytest.mark.asyncio
+    async def test_embeddings_health_sanitizes_service_failure(self, monkeypatch):
+        """Embedding probe failures should not expose provider/backend details."""
+        from tldw_Server_API.app.api.v1.endpoints.admin import admin_ops
+        from tldw_Server_API.app.core.Embeddings import async_embeddings
+
+        async def _raise_embedding_service_error():
+            raise RuntimeError("embedding service exploded at /private/embeddings.db")
+
+        monkeypatch.setattr(async_embeddings, "get_embedding_service", _raise_embedding_service_error, raising=False)
+
+        result = await admin_ops._check_embeddings_service()
+
+        assert result == {"status": "degraded", "error": "Embeddings service health check failed"}
+
+    @pytest.mark.asyncio
+    async def test_metrics_health_sanitizes_registry_failure(self, monkeypatch):
+        """Metrics probe failures should not expose registry backend details."""
+        from tldw_Server_API.app.api.v1.endpoints.admin import admin_ops
+        from tldw_Server_API.app.core.Metrics import metrics_manager
+
+        def _raise_metrics_error():
+            raise RuntimeError("metrics registry exploded at /private/metrics.db")
+
+        monkeypatch.setattr(metrics_manager, "get_metrics_registry", _raise_metrics_error)
+
+        result = await admin_ops._check_metrics_registry()
+
+        assert result == {"status": "degraded", "error": "Metrics registry health check failed"}
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # 2. GET /admin/dependencies/{name}/uptime — uptime % math + sparkline

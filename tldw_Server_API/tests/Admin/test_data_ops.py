@@ -2,11 +2,21 @@ from __future__ import annotations
 
 import os
 import uuid
+from typing import Any
 
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.main import app
+
+
+class _LoggerStub:
+    def __init__(self) -> None:
+        self.error_records: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = []
+
+    def error(self, message: str, *args: Any, **kwargs: Any) -> None:
+        self.error_records.append((message, args, kwargs))
 
 
 def _setup_env(tmp_path):
@@ -55,6 +65,81 @@ async def _seed_authnz_data() -> int:
         '{"ok": true}',
     )
     return int(user_id)
+
+
+@pytest.mark.asyncio
+async def test_list_backups_sanitizes_generic_failure_log(monkeypatch):
+    from tldw_Server_API.app.api.v1.endpoints.admin import admin_data_ops
+
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(admin_data_ops, "logger", logger_stub)
+
+    def _raise_list_backup_items(**_kwargs):
+        raise RuntimeError("backup list backend exploded at /private/backups.db")
+
+    monkeypatch.setattr(admin_data_ops, "svc_list_backup_items", _raise_list_backup_items)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await admin_data_ops.list_backups(
+            dataset=None,
+            user_id=None,
+            limit=100,
+            offset=0,
+            principal=object(),
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "Failed to list backups"
+    assert logger_stub.error_records == [("Failed to list backups", (), {})]
+
+
+@pytest.mark.asyncio
+async def test_create_backup_sanitizes_generic_failure_log(monkeypatch):
+    from tldw_Server_API.app.api.v1.endpoints.admin import admin_data_ops
+
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(admin_data_ops, "logger", logger_stub)
+
+    def _raise_create_backup_snapshot(**_kwargs):
+        raise RuntimeError("backup create backend exploded at /private/backups.db")
+
+    monkeypatch.setattr(admin_data_ops, "svc_create_backup_snapshot", _raise_create_backup_snapshot)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await admin_data_ops.create_backup(
+            admin_data_ops.BackupCreateRequest(dataset="authnz", backup_type="full"),
+            request=object(),
+            principal=object(),
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "Failed to create backup"
+    assert logger_stub.error_records == [("Failed to create backup", (), {})]
+
+
+@pytest.mark.asyncio
+async def test_restore_backup_sanitizes_generic_failure_log(monkeypatch):
+    from tldw_Server_API.app.api.v1.endpoints.admin import admin_data_ops
+
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(admin_data_ops, "logger", logger_stub)
+
+    def _raise_restore_backup_snapshot(**_kwargs):
+        raise RuntimeError("backup restore backend exploded at /private/backups.db")
+
+    monkeypatch.setattr(admin_data_ops, "svc_restore_backup_snapshot", _raise_restore_backup_snapshot)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await admin_data_ops.restore_backup(
+            "backup.db",
+            admin_data_ops.BackupRestoreRequest(dataset="authnz", confirm=True),
+            request=object(),
+            principal=object(),
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "Failed to restore backup"
+    assert logger_stub.error_records == [("Failed to restore backup", (), {})]
 
 
 @pytest.mark.asyncio

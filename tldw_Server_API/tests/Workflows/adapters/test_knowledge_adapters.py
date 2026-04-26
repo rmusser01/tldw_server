@@ -572,6 +572,36 @@ async def test_collections_adapter_cancelled(monkeypatch):
     assert result.get("__status__") == "cancelled"
 
 
+@pytest.mark.asyncio
+async def test_collections_adapter_sanitizes_backend_errors(monkeypatch):
+    """Test collections fallback hides backend exception details."""
+    monkeypatch.delenv("TEST_MODE", raising=False)
+
+    from tldw_Server_API.app.core.Workflows.adapters.knowledge import crud as knowledge_crud
+    from tldw_Server_API.app.core.Workflows.adapters.knowledge import run_collections_adapter
+
+    class BrokenReadingService:
+        def __init__(self, user_id):
+            raise RuntimeError("collections token at /private/collections-cache.db")
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Collections.reading_service.ReadingService",
+        BrokenReadingService,
+    )
+
+    messages: list[str] = []
+    sink_id = knowledge_crud.logger.add(lambda message: messages.append(str(message)), level="ERROR")
+    try:
+        result = await run_collections_adapter({"action": "list"}, {"user_id": "1"})
+    finally:
+        knowledge_crud.logger.remove(sink_id)
+
+    assert result == {"error": "collections_error"}
+    joined = "\n".join(messages)
+    assert "Collections adapter error" in joined
+    assert "collections-cache.db" not in joined
+
+
 # =============================================================================
 # Chunking Adapter Tests
 # =============================================================================
@@ -1050,6 +1080,38 @@ async def test_claims_extract_adapter_cancelled(monkeypatch):
     assert result.get("__status__") == "cancelled"
 
 
+@pytest.mark.asyncio
+async def test_claims_extract_adapter_sanitizes_backend_errors(monkeypatch):
+    """Test claims fallback hides backend exception details."""
+    monkeypatch.delenv("TEST_MODE", raising=False)
+
+    from tldw_Server_API.app.core.Workflows.adapters.knowledge import crud as knowledge_crud
+
+    class BrokenMediaDBContext:
+        def __enter__(self):
+            raise RuntimeError("claims token at /private/claims-media.db")
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    monkeypatch.setattr(knowledge_crud, "_workflow_media_db", lambda _user_id: BrokenMediaDBContext())
+
+    messages: list[str] = []
+    sink_id = knowledge_crud.logger.add(lambda message: messages.append(str(message)), level="ERROR")
+    try:
+        result = await knowledge_crud.run_claims_extract_adapter(
+            {"action": "search", "query": "climate"},
+            {"user_id": "1"},
+        )
+    finally:
+        knowledge_crud.logger.remove(sink_id)
+
+    assert result == {"error": "claims_extract_error"}
+    joined = "\n".join(messages)
+    assert "Claims extract adapter error" in joined
+    assert "claims-media.db" not in joined
+
+
 # =============================================================================
 # Voice Intent Adapter Tests
 # =============================================================================
@@ -1300,6 +1362,40 @@ async def test_voice_intent_adapter_output_structure(monkeypatch):
         assert field in result, f"Missing field: {field}"
 
 
+@pytest.mark.asyncio
+async def test_voice_intent_adapter_sanitizes_parser_errors(monkeypatch):
+    """Test voice intent fallback hides parser exception details."""
+    monkeypatch.delenv("TEST_MODE", raising=False)
+
+    from tldw_Server_API.app.core.Workflows.adapters.knowledge import crud as knowledge_crud
+    from tldw_Server_API.app.core.Workflows.adapters.knowledge import run_voice_intent_adapter
+
+    class BrokenParser:
+        llm_enabled = True
+
+        async def parse(self, text, user_id, context=None):
+            raise RuntimeError("voice token at /private/voice-intent-cache")
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.VoiceAssistant.intent_parser.get_intent_parser",
+        lambda: BrokenParser(),
+    )
+
+    messages: list[str] = []
+    sink_id = knowledge_crud.logger.add(lambda message: messages.append(str(message)), level="ERROR")
+    try:
+        result = await run_voice_intent_adapter({"text": "search notes"}, {"user_id": "1"})
+    finally:
+        knowledge_crud.logger.remove(sink_id)
+
+    assert result["error"] == "voice_intent_error"
+    assert result["intent"] == ""
+    assert result["confidence"] == 0.0
+    joined = "\n".join(messages)
+    assert "Voice intent adapter error" in joined
+    assert "voice-intent-cache" not in joined
+
+
 # =============================================================================
 # Production Mode Tests (with mocked services)
 # =============================================================================
@@ -1380,6 +1476,30 @@ async def test_chunking_adapter_production_mode(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_claims_extract_factory_uses_current_claims_extractor(monkeypatch):
+    """Test workflow claims factory uses the current LLMBased extractor path."""
+    monkeypatch.delenv("TEST_MODE", raising=False)
+
+    import tldw_Server_API.app.core.Claims_Extraction.claims_service as claims_service
+    import tldw_Server_API.app.core.Workflows.adapters.knowledge.crud as crud_mod
+
+    calls: list[str | None] = []
+
+    def fake_analyze(api_endpoint, *_args, **_kwargs):
+        calls.append(api_endpoint)
+        return '{"claims":[{"text":"The sky is blue."}]}'
+
+    monkeypatch.setattr(claims_service, "_fva_claims_analyze_call", fake_analyze)
+
+    extractor = crud_mod._create_workflow_claim_extractor("custom-provider")
+    claims = await extractor.extract("The sky is blue.", max_claims=1)
+
+    assert calls == ["custom-provider"]
+    assert len(claims) == 1
+    assert claims[0].text == "The sky is blue."
+
+
+@pytest.mark.asyncio
 async def test_claims_extract_adapter_production_extract(monkeypatch):
     """Test claims extract adapter extract in production mode."""
     monkeypatch.delenv("TEST_MODE", raising=False)
@@ -1399,8 +1519,8 @@ async def test_claims_extract_adapter_production_extract(monkeypatch):
     mock_extractor = MagicMock()
     mock_extractor.extract = AsyncMock(return_value=mock_claims)
 
-    import tldw_Server_API.app.core.Claims_Extraction.claims_engine as claims_mod
-    monkeypatch.setattr(claims_mod, "LLMClaimExtractor", lambda **kwargs: mock_extractor)
+    import tldw_Server_API.app.core.Workflows.adapters.knowledge.crud as crud_mod
+    monkeypatch.setattr(crud_mod, "_create_workflow_claim_extractor", lambda _api_name: mock_extractor)
 
     # Mock DatabasePaths
     from pathlib import Path
@@ -1430,12 +1550,12 @@ async def test_claims_extract_adapter_production_extract(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_notes_adapter_handles_exception(monkeypatch):
-    """Test notes adapter handles exceptions gracefully."""
+    """Test notes adapter hides backend exception details."""
     monkeypatch.delenv("TEST_MODE", raising=False)
 
     # Mock to raise exception
     def mock_raise(*args, **kwargs):
-        raise Exception("Database connection failed")
+        raise RuntimeError("Database connection failed at /private/notes.db")
 
     import tldw_Server_API.app.core.Notes.Notes_Library as notes_lib
     monkeypatch.setattr(notes_lib, "NotesInteropService", mock_raise)
@@ -1452,18 +1572,17 @@ async def test_notes_adapter_handles_exception(monkeypatch):
 
     result = await run_notes_adapter(config, context)
 
-    assert "error" in result
-    assert "notes_error" in result["error"]
+    assert result == {"error": "notes_error"}
 
 
 @pytest.mark.asyncio
 async def test_prompts_adapter_handles_exception(monkeypatch):
-    """Test prompts adapter handles exceptions gracefully."""
+    """Test prompts adapter hides backend exception details."""
     monkeypatch.delenv("TEST_MODE", raising=False)
 
     # Mock to raise exception
     def mock_init(*args, **kwargs):
-        raise Exception("Prompts DB initialization failed")
+        raise RuntimeError("Prompts DB initialization failed at /private/prompts.db")
 
     import tldw_Server_API.app.core.Prompt_Management.Prompts_Interop as prompts_interop
     monkeypatch.setattr(prompts_interop, "is_initialized", lambda: False)
@@ -1476,19 +1595,18 @@ async def test_prompts_adapter_handles_exception(monkeypatch):
 
     result = await run_prompts_adapter(config, context)
 
-    assert "error" in result
-    assert "prompts_error" in result["error"]
+    assert result == {"error": "prompts_error"}
 
 
 @pytest.mark.asyncio
 async def test_chunking_adapter_handles_exception(monkeypatch):
-    """Test chunking adapter handles exceptions gracefully."""
+    """Test chunking adapter hides backend exception details."""
     monkeypatch.delenv("TEST_MODE", raising=False)
 
     # Mock to raise exception
     def mock_chunker():
         m = MagicMock()
-        m.chunk_text.side_effect = Exception("Chunking failed")
+        m.chunk_text.side_effect = RuntimeError("Chunking failed at /private/chunks.cache")
         return m
 
     import tldw_Server_API.app.core.Chunking as chunking_mod
@@ -1501,8 +1619,7 @@ async def test_chunking_adapter_handles_exception(monkeypatch):
 
     result = await run_chunking_adapter(config, context)
 
-    assert "error" in result
-    assert "chunking_error" in result["error"]
+    assert result == {"error": "chunking_error"}
 
 
 # =============================================================================
@@ -1582,7 +1699,7 @@ async def test_collections_adapter_missing_user_id(monkeypatch):
     # Mock DatabasePaths to raise exception
     import tldw_Server_API.app.core.DB_Management.db_path_utils as db_utils
     def mock_raise():
-        raise Exception("No single user")
+        raise RuntimeError("No single user")
     monkeypatch.setattr(db_utils.DatabasePaths, "get_single_user_id", mock_raise)
 
     from tldw_Server_API.app.core.Workflows.adapters.knowledge import run_collections_adapter

@@ -721,6 +721,28 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
           </button>
         )}
 
+        <Upload
+          accept="image/*"
+          showUploadList={false}
+          beforeUpload={(file) => {
+            onImageUpload(file)
+            return false
+          }}
+        >
+          <button
+            type="button"
+            data-testid="chat-attach-image"
+            className="flex items-center gap-2 px-3 py-2 sm:px-2 sm:py-1 rounded text-sm font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-focus transition-colors min-h-[44px] sm:min-h-0 text-text-muted hover:bg-surface2 hover:text-text"
+            aria-label={t("sidepanel:controlRow.attachImage", "Attach image")}
+            title={t("sidepanel:controlRow.attachImage", "Attach image")}
+          >
+            <ImageIcon className="size-3.5" />
+            <span className="hidden sm:inline">
+              {t("sidepanel:controlRow.attach", "Attach")}
+            </span>
+          </button>
+        </Upload>
+
         {/* More Tools Menu */}
         <div className="relative">
           <Popover

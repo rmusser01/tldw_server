@@ -101,7 +101,12 @@ export const PlaygroundAttachmentButton: React.FC<PlaygroundAttachmentButtonProp
               size={isMobileViewport ? "lg" : "sm"}
               shape={isProMode ? "rounded" : "pill"}
               iconOnly={!isProMode}
-              ariaLabel="Attach image"
+              ariaLabel={
+                t(
+                  "playground:actions.attachImage",
+                  "Attach image"
+                ) as string
+              }
               title={
                 t(
                   "playground:actions.attachImage",

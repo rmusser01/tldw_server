@@ -38,6 +38,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.errors import (
 )
 from tldw_Server_API.app.core.DB_Management.scope_context import get_scope
 from tldw_Server_API.app.core.testing import env_flag_enabled, is_test_mode
+from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 
 #######################################################################################################################
 
@@ -220,16 +221,13 @@ def _get_or_create_media_db_factory(current_user: User) -> MediaDbFactory:
         except (DatabaseError, SchemaError) as e:
             log_path = db_path or f"directory for user_id {user_id}"
             logger.error(f"Failed to initialize database for user {user_id} at {log_path}: {e}", exc_info=True)
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Could not initialize database for user: {e}"
-            ) from e
+            raise map_db_error_to_http(e, default_detail="Media DB unavailable") from e
         except OSError as e:
             logger.error(f"Failed to get DB path for user {user_id}: {e}", exc_info=True)
             raise HTTPException(
-                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                 detail=str(e)
-             ) from e
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Media DB unavailable",
+            ) from e
         except Exception as e:
             log_path = db_path or f"directory for user_id {user_id}"
             logger.error(f"Unexpected error initializing database for user {user_id} at {log_path}: {e}", exc_info=True)

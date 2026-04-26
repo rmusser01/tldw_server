@@ -36,6 +36,26 @@ from tldw_Server_API.app.core.Workflows.adapters.integration._config import (
 )
 
 
+_SAFE_ADAPTER_ERROR_PREFIXES = ("invalid_", "missing_")
+
+
+def _safe_adapter_error_message(exc: AdapterError) -> str:
+    message = str(exc).strip()
+    if message.startswith(_SAFE_ADAPTER_ERROR_PREFIXES) and all(ch.isalnum() or ch == "_" for ch in message):
+        return message
+    return "adapter_error"
+
+
+def _safe_kanban_error_detail(exc: Exception) -> str:
+    if isinstance(exc, InputError):
+        return "Invalid kanban request"
+    if isinstance(exc, NotFoundError):
+        return "Kanban resource not found"
+    if isinstance(exc, ConflictError):
+        return "Kanban conflict"
+    return "Kanban operation failed"
+
+
 @registry.register(
     "kanban",
     category="integration",
@@ -517,9 +537,13 @@ async def run_kanban_adapter(config: dict[str, Any], context: dict[str, Any]) ->
         return {"error": f"unsupported_action:{action}"}
 
     except AdapterError as exc:
-        return {"error": str(exc) or "adapter_error"}
+        return {"error": _safe_adapter_error_message(exc)}
     except (InputError, ConflictError, NotFoundError, KanbanDBError) as exc:
-        return {"error": "kanban_error", "error_type": exc.__class__.__name__, "detail": str(exc)}
+        return {
+            "error": "kanban_error",
+            "error_type": exc.__class__.__name__,
+            "detail": _safe_kanban_error_detail(exc),
+        }
     finally:
         with contextlib.suppress(AttributeError, RuntimeError, TypeError, ValueError):
             db.close()
@@ -593,7 +617,7 @@ async def run_chatbooks_adapter(config: dict[str, Any], context: dict[str, Any])
         # Initialize user's notes database for chatbook service
         try:
             user_id_int = int(user_id)
-            notes_db_path = DatabasePaths.get_chachanotes_db_path(user_id_int)
+            notes_db_path = DatabasePaths.get_chacha_db_path(user_id_int)
         except (OverflowError, TypeError, ValueError):
             user_id_int = None
             notes_db_path = Path("Databases") / "user_databases" / user_id / "ChaChaNotes.db"
@@ -664,9 +688,9 @@ async def run_chatbooks_adapter(config: dict[str, Any], context: dict[str, Any])
 
         return {"error": f"unknown_action:{action}"}
 
-    except (AttributeError, ImportError, ModuleNotFoundError, OSError, RuntimeError, TypeError, ValueError) as e:
-        logger.exception(f"Chatbooks adapter error: {e}")
-        return {"error": f"chatbooks_error:{e}"}
+    except (AttributeError, ImportError, ModuleNotFoundError, OSError, RuntimeError, TypeError, ValueError):
+        logger.exception("Chatbooks adapter error")
+        return {"error": "chatbooks_error"}
 
 
 @registry.register(
@@ -751,7 +775,7 @@ async def run_character_chat_adapter(config: dict[str, Any], context: dict[str, 
         # Initialize user's character DB
         try:
             user_id_int = int(user_id)
-            db_path = DatabasePaths.get_chachanotes_db_path(user_id_int)
+            db_path = DatabasePaths.get_chacha_db_path(user_id_int)
         except (OverflowError, TypeError, ValueError):
             db_path = Path("Databases") / "user_databases" / user_id / "ChaChaNotes.db"
 
@@ -857,6 +881,6 @@ async def run_character_chat_adapter(config: dict[str, Any], context: dict[str, 
 
         return {"error": f"unknown_action:{action}"}
 
-    except (AttributeError, ImportError, ModuleNotFoundError, OSError, RuntimeError, TypeError, ValueError) as e:
-        logger.exception(f"Character chat adapter error: {e}")
-        return {"error": f"character_chat_error:{e}"}
+    except (AttributeError, ImportError, ModuleNotFoundError, OSError, RuntimeError, TypeError, ValueError):
+        logger.exception("Character chat adapter error")
+        return {"error": "character_chat_error"}

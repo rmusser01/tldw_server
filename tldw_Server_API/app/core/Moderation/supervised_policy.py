@@ -156,14 +156,14 @@ class SupervisedPolicyEngine:
                 if pol.pattern_type == "regex":
                     is_safe, reason = validate_regex_safety(pol.pattern)
                     if not is_safe:
-                        logger.warning(f"Unsafe supervised policy regex '{pol.pattern}': {reason}")
+                        logger.warning("Unsafe supervised policy regex skipped")
                         continue
                     regex = re.compile(pol.pattern, re.IGNORECASE)
                 else:
                     regex = re.compile(re.escape(pol.pattern), re.IGNORECASE)
                 compiled.append((pol, regex, gp))
-            except re.error as e:
-                logger.warning(f"Invalid supervised policy pattern '{pol.pattern}': {e}")
+            except re.error:
+                logger.warning("Invalid supervised policy pattern skipped")
                 continue
 
         with self._lock:
@@ -365,8 +365,8 @@ def dispatch_guardian_notification(
             payload["rule_name"] = result.rule_name_visible
         svc = get_notification_service()
         return svc.notify_or_batch(payload)
-    except _SUPERVISED_NONCRITICAL_EXCEPTIONS as e:
-        logger.debug(f"Guardian notification dispatch failed: {e}")
+    except _SUPERVISED_NONCRITICAL_EXCEPTIONS:
+        logger.debug("Guardian notification dispatch failed")
         return "failed"
 
 
@@ -394,8 +394,8 @@ class GuardianModerationProxy:
                 base_policy,
                 chat_type=self._chat_type,
             )
-        except _SUPERVISED_NONCRITICAL_EXCEPTIONS as e:
-            logger.debug(f"Guardian policy overlay skipped in proxy: {e}")
+        except _SUPERVISED_NONCRITICAL_EXCEPTIONS:
+            logger.debug("Guardian policy overlay skipped in proxy")
             return base_policy
 
     def __getattr__(self, name: str) -> Any:

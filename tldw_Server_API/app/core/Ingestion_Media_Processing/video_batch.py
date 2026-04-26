@@ -230,9 +230,7 @@ async def run_video_batch(
     except Exception as exec_err:
         # Catch errors during the library execution call itself.
         logger.error(f"Error executing process_videos: {exec_err}", exc_info=True)
-        error_msg = (
-            f"Error during video processing execution: {type(exec_err).__name__}"
-        )
+        error_msg = "Video processing failed"
 
         # Start with existing file errors.
         final_results_list = list(file_handling_errors_structured)

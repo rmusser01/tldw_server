@@ -2220,7 +2220,7 @@ def update_claims_settings(
         try:
             setup_manager.update_config({"Claims": updates})
         except _CLAIMS_NONCRITICAL_EXCEPTIONS as exc:
-            raise HTTPException(status_code=500, detail=str(exc)) from exc
+            raise HTTPException(status_code=500, detail="Failed to update claims settings") from exc
 
     return _claims_settings_snapshot()
 
@@ -2590,7 +2590,7 @@ def claims_rebuild_status(*, rebuild_service: Any = None) -> dict[str, Any]:
     except HTTPException:
         raise
     except _CLAIMS_NONCRITICAL_EXCEPTIONS as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        raise HTTPException(status_code=500, detail="Failed to get claims rebuild status") from exc
 
 
 def claims_rebuild_health(principal: AuthPrincipal, *, summary: bool = False) -> dict[str, Any]:

@@ -99,48 +99,6 @@ def test_omnivoice_default_adapter_path_is_registered() -> None:
     )
 
 
-def test_omnivoice_adapter_payload_passes_supported_generation_controls() -> None:
-    from tldw_Server_API.app.core.TTS.adapters.base import AudioFormat, TTSRequest
-    from tldw_Server_API.app.core.TTS.adapters.omnivoice_adapter import OmniVoiceAdapter
-
-    adapter = OmniVoiceAdapter({"sample_rate": 24000, "extra_params": {"_supervisor": object()}})
-    request = TTSRequest(
-        text="Hello",
-        voice="auto",
-        model="omnivoice",
-        format=AudioFormat.WAV,
-        extra_params={
-            "language": "English",
-            "instruct": "warm documentary narrator",
-            "duration": 2.0,
-            "speed": 1.2,
-            "num_step": 16,
-            "guidance_scale": 1.7,
-            "denoise": True,
-            "preprocess_prompt": False,
-            "unsupported_param": "ignored",
-        },
-    )
-
-    payload = adapter._build_sidecar_payload(
-        request,
-        mode="auto",
-        sample_rate=24000,
-        reference_audio_path=None,
-    )
-
-    TestCase().assertEqual(payload["language"], "English")
-    TestCase().assertEqual(payload["instruct"], "warm documentary narrator")
-    TestCase().assertEqual(payload["duration"], 2.0)
-    TestCase().assertEqual(payload["speed"], 1.2)
-    TestCase().assertEqual(payload["generation_params"]["num_step"], 16)
-    TestCase().assertEqual(payload["generation_params"]["guidance_scale"], 1.7)
-    TestCase().assertIs(payload["generation_params"]["denoise"], True)
-    TestCase().assertIs(payload["generation_params"]["preprocess_prompt"], False)
-    TestCase().assertNotIn("unsupported_param", payload)
-    TestCase().assertNotIn("unsupported_param", payload["generation_params"])
-
-
 @pytest.mark.asyncio
 async def test_enabled_omnivoice_provider_returns_unavailable_instead_of_import_error() -> None:
     factory = TTSAdapterFactory(
@@ -171,8 +129,6 @@ def test_omnivoice_provider_is_disabled_by_default_in_config() -> None:
     TestCase().assertEqual(omnivoice["sample_rate"], 24000)
     TestCase().assertEqual(omnivoice["max_concurrent_generations"], 1)
     TestCase().assertEqual(omnivoice["extra_params"]["repo_path"], "../OmniVoice")
-    TestCase().assertEqual(omnivoice["extra_params"]["runtime_mode"], "real")
-    TestCase().assertEqual(omnivoice["extra_params"]["model_id"], "k2-fsa/OmniVoice")
     TestCase().assertEqual(omnivoice["extra_params"]["host"], "127.0.0.1")
     TestCase().assertEqual(omnivoice["extra_params"]["port"], 8039)
     TestCase().assertIs(omnivoice["extra_params"]["autoselect_port"], True)

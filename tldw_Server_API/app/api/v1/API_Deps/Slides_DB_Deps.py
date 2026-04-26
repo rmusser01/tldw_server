@@ -9,6 +9,7 @@ from pathlib import Path
 from fastapi import Depends, HTTPException, status
 from loguru import logger
 
+from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.Slides.slides_db import SchemaError, SlidesDatabase, SlidesDatabaseError
@@ -65,10 +66,7 @@ def get_slides_db_for_user(
             return db_instance
         except (SlidesDatabaseError, SchemaError) as exc:
             logger.error("Failed to initialize Slides DB for user {}: {}", user_id, exc)
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Slides DB unavailable",
-            ) from exc
+            raise map_db_error_to_http(exc, default_detail="Slides DB unavailable") from exc
         except Exception as exc:
             logger.error("Unexpected Slides DB init failure for user {}: {}", user_id, exc)
             raise HTTPException(

@@ -1,5 +1,6 @@
 import os
 import pytest
+from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 
@@ -38,3 +39,30 @@ def test_integrity_sweep_clears_non_processing_lease(tmp_path, monkeypatch):
     assert queued_after and not queued_after.get("lease_id") and not queued_after.get("worker_id")
     assert processing_after and processing_after.get("status") == "queued"
     assert not processing_after.get("lease_id") and not processing_after.get("worker_id")
+
+
+def _init_endpoint_env(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("TEST_MODE", "true")
+    monkeypatch.setenv("AUTH_MODE", "single_user")
+    monkeypatch.delenv("SINGLE_USER_API_KEY", raising=False)
+    monkeypatch.setenv("JOBS_DB_PATH", os.path.join(os.getcwd(), "Databases", "jobs.db"))
+
+
+@pytest.mark.unit
+def test_integrity_sweep_endpoint_sanitizes_generic_failure(monkeypatch, tmp_path):
+    _init_endpoint_env(monkeypatch, tmp_path)
+    from tldw_Server_API.app.core.AuthNZ.settings import get_settings, reset_settings
+    reset_settings()
+    from tldw_Server_API.app.main import app
+
+    def boom(self, **_kwargs):
+        raise RuntimeError("jobs integrity backend exploded")
+
+    monkeypatch.setattr(JobManager, "integrity_sweep", boom)
+
+    headers = {"X-API-KEY": get_settings().SINGLE_USER_API_KEY}
+    with TestClient(app, headers=headers) as client:
+        r = client.post("/api/v1/jobs/integrity/sweep", json={"fix": True})
+        assert r.status_code == 500
+        assert r.json()["detail"] == "Integrity sweep failed"

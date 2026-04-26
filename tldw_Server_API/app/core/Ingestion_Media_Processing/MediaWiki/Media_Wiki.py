@@ -839,11 +839,14 @@ def process_single_item(
             iso_timestamp_str_err = datetime.now(timezone.utc).isoformat()
 
         return {
-            "title": title, "status": "Error", "error_message": str(e), "chunks": [],
+            "title": title,
+            "status": "Error",
+            "error_message": "MediaWiki item processing failed",
+            "chunks": [],
             "content": content,  # content might be available even if processing fails later
             "namespace": item.get("namespace"), "page_id": item.get("page_id"),
             "revision_id": item.get("revision_id"), "timestamp": iso_timestamp_str_err,
-            "media_id": None, "message": f"Failed to process: {str(e)}"
+            "media_id": None, "message": "Failed to process MediaWiki item"
         }
 
 
@@ -1053,9 +1056,25 @@ def import_mediawiki_dump(
     except PermissionError:
         logger.exception(f"Permission denied when trying to read: {file_path}")
         yield {"type": "error", "message": f"Error: Permission denied - {file_path}"}
+    except InvalidStoragePathError as exc:
+        logger.exception("MediaWiki dump path validation failed")
+        reason = str(exc).lower()
+        if "outside allowed directory" in reason:
+            message = "Access denied: path is outside allowed directory"
+        elif "file does not exist" in reason:
+            message = "MediaWiki dump file does not exist"
+        elif "regular file" in reason:
+            message = "MediaWiki dump path is not a regular file"
+        elif "extension" in reason:
+            message = "MediaWiki dump file extension is not allowed"
+        elif "file size" in reason:
+            message = "MediaWiki dump file size exceeds maximum allowed size"
+        else:
+            message = "Invalid MediaWiki dump path"
+        yield {"type": "error", "message": message}
     except Exception as e:
         logger.exception(f"Error during MediaWiki import: {str(e)}")
-        yield {"type": "error", "message": f"Error during import: {str(e)}"}
+        yield {"type": "error", "message": "Error during import"}
 
 
 def count_pages(

@@ -882,7 +882,7 @@ async def dispatch_run(
         await _run_sync(lambda: db.transition_task(task_id, TaskStatus.TRIAGE))
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Failed to create ACP session: {exc}",
+            detail="Failed to create ACP session",
         ) from exc
 
     # Create run record
@@ -920,7 +920,7 @@ async def dispatch_run(
         await _run_sync(lambda: db.transition_task(task_id, TaskStatus.TRIAGE))
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"ACP prompt failed: {exc}",
+            detail="ACP prompt failed",
         ) from exc
 
     # Refetch task to get post-transition status

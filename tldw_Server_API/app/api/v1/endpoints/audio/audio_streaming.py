@@ -2579,7 +2579,7 @@ async def websocket_audio_chat_stream(
                             )
                             if overlap_warning:
                                 await _outer_stream.send_json(
-                                    {"type": "warning", "message": str(overlap_warning)}
+                                    {"type": "warning", "message": "Realtime TTS session warning"}
                                 )
 
                         async def _overlap_audio_sender() -> None:

@@ -1892,7 +1892,10 @@ async def acp_session_new(
         )
     except ACPResponseError as exc:
         logger.error("ACP session/new failed for user {}: {}", user.id, exc)
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Failed to create ACP session",
+        ) from exc
 
     sandbox_meta = None
     try:
@@ -2070,7 +2073,10 @@ async def acp_session_prompt(
         raise
     except ACPResponseError as exc:
         logger.error("ACP session/prompt failed for user {}: {}", user.id, exc)
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="ACP prompt failed",
+        ) from exc
     return ACPSessionPromptResponse(
         stop_reason=result.get("stopReason"),
         raw_result=result,
@@ -2099,7 +2105,10 @@ async def acp_session_cancel(
             session_id=payload.session_id,
             metadata={"reason_code": "failed_runtime", "message": str(exc)},
         )
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="ACP session cancel failed",
+        ) from exc
     _acp_record_audit_event(
         action="cancel",
         user_id=int(user.id),
@@ -2140,7 +2149,10 @@ async def acp_session_close(
             session_id=payload.session_id,
             metadata={"reason_code": "failed_runtime", "message": str(exc)},
         )
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="ACP session close failed",
+        ) from exc
     # Mark session as closed in store and emit SSE event
     try:
         store = await get_acp_session_store()
@@ -2191,7 +2203,7 @@ async def acp_session_teardown(
             session_id=session_id,
             status_value="teardown_failed",
             reason_code="failed_runtime",
-            error=str(exc),
+            error="ACP session teardown failed",
         )
         _acp_record_audit_event(
             action="teardown_failed",
@@ -2262,7 +2274,7 @@ async def acp_session_reconcile(
             session_id=session_id,
             status_value="reconcile_failed",
             reason_code="failed_runtime",
-            error=str(exc),
+            error="ACP session reconcile failed",
         )
         _acp_record_audit_event(
             action="reconcile_failed",
@@ -2696,7 +2708,10 @@ async def acp_session_fork(
         )
     except ACPResponseError as exc:
         logger.error("ACP session/fork create_session failed for user {}: {}", user.id, exc)
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Failed to create forked ACP session",
+        ) from exc
 
     forked = await store.fork_session(
         source_session_id=session_id,
@@ -2904,7 +2919,7 @@ async def _ensure_checkpoint_consumer(session_id: str) -> CheckpointConsumer:
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Sandbox service unavailable: {exc}",
+            detail="Sandbox service unavailable",
         ) from exc
 
     consumer = CheckpointConsumer(sandbox_service=svc, session_id=session_id)
@@ -2961,7 +2976,11 @@ async def acp_session_rollback(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="No checkpoint consumer active for this session; provide to_snapshot_id directly or ensure checkpointing is enabled",
             )
-        assert body.to_sequence is not None
+        if body.to_sequence is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Provide either to_sequence or to_snapshot_id",
+            )
         result = consumer.get_nearest_checkpoint(body.to_sequence)
         if result is None:
             raise HTTPException(
@@ -2970,7 +2989,11 @@ async def acp_session_rollback(
             )
         resolved_sequence, snapshot_id = result
 
-    assert snapshot_id is not None
+    if snapshot_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Checkpoint snapshot not found",
+        )
 
     # Perform the restore via SandboxService
     try:
@@ -2984,7 +3007,7 @@ async def acp_session_rollback(
         )
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"Rollback failed: {exc}",
+            detail="Rollback failed",
         ) from exc
 
     if not restored:

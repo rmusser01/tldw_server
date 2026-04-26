@@ -362,6 +362,18 @@ async def _is_instance_healthy(db_instance: CharactersRAGDB) -> bool:
         return False
 
 
+def _map_chacha_init_db_error(exc: Exception) -> HTTPException:
+    from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
+
+    return map_db_error_to_http(
+        exc,
+        default_detail="ChaChaNotes DB unavailable",
+        input_status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        conflict_status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        conflict_detail="ChaChaNotes DB unavailable",
+    )
+
+
 async def _get_or_init_db_instance(user_id: int, client_id: str) -> CharactersRAGDB:
     user_dir = DatabasePaths.get_user_base_directory(user_id)
     cache_key = str(user_dir)
@@ -416,11 +428,13 @@ async def _get_or_init_db_instance(user_id: int, client_id: str) -> CharactersRA
             if isinstance(init_error, _ChaChaInitializationAborted):
                 raise HTTPException(
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    detail=str(init_error),
+                    detail=_CHACHA_SHUTDOWN_INIT_ERROR_DETAIL,
                 ) from init_error
+            if isinstance(init_error, (CharactersRAGDBError, InputError)):
+                raise _map_chacha_init_db_error(init_error) from init_error
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Could not initialize character & notes database for user: {init_error}",
+                detail="Could not initialize character & notes database for user",
             ) from init_error
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -450,9 +464,11 @@ async def _get_or_init_db_instance(user_id: int, client_id: str) -> CharactersRA
         _record_init(duration_ms, False, e)
         with _chacha_db_lock:
             _chacha_db_init_errors[cache_key] = e
+        if isinstance(e, (CharactersRAGDBError, InputError)):
+            raise _map_chacha_init_db_error(e) from e
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Could not initialize character & notes database for user: {e}",
+            detail="Could not initialize character & notes database for user",
         ) from e
     else:
         with _chacha_db_lock:

@@ -113,6 +113,14 @@ class _PreviewExplodingService:
         raise RuntimeError("preview exploded")
 
 
+class _ContinuationFailedService:
+    db = None
+
+    async def continue_chatbook_export(self, **kwargs):
+        _ = kwargs
+        return False, "continuation backend exploded at /private/db/path", None
+
+
 @pytest.mark.parametrize(
     "path",
     [
@@ -184,3 +192,39 @@ def test_preview_maps_unexpected_service_failures_to_500():
 
     assert response.status_code == 500
     assert response.json().get("detail") == "An error occurred while previewing the chatbook"
+
+
+def test_continue_export_sanitizes_service_failure_message():
+    app = _make_app(_ContinuationFailedService())
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/chatbooks/export/continue",
+            json={
+                "export_id": "export-1",
+                "continuations": [{"kind": "evaluations", "offset": 100}],
+            },
+        )
+
+    assert response.status_code == 500
+    assert response.json().get("detail") == "An error occurred while continuing the chatbook export"
+
+
+def test_health_sanitizes_storage_base_failure(monkeypatch):
+    def _explode_storage_base():
+        raise RuntimeError("chatbook storage exploded at /private/chatbooks")
+
+    monkeypatch.setattr(
+        chatbooks_endpoints.DatabasePaths,
+        "get_user_db_base_dir",
+        _explode_storage_base,
+    )
+    app = _make_app(object())
+
+    with TestClient(app) as client:
+        response = client.get("/api/v1/chatbooks/health")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "unhealthy"
+    assert body["error"] == "Chatbooks health check failed"

@@ -86,7 +86,7 @@ async def create_or_update_pipeline_preset(
             updated_at=to_ts(row.get("updated_at")),
         )
     except _PIPELINE_ENDPOINT_EXCEPTIONS as e:
-        logger.error(f"Failed to save preset: {e}")
+        logger.error("Failed to save preset")
         raise create_error_response(
             message=f"Failed to save preset: {sanitize_error_message(e, 'save_preset')}",
             error_type="server_error",
@@ -132,7 +132,7 @@ async def list_pipeline_presets(
             ))
         return PipelinePresetListResponse(items=resp_items, total=total)
     except _PIPELINE_ENDPOINT_EXCEPTIONS as e:
-        logger.error(f"Failed to list presets: {e}")
+        logger.error("Failed to list presets")
         raise create_error_response(
             message=f"Failed to list presets: {sanitize_error_message(e, 'list_presets')}",
             error_type="server_error",
@@ -182,7 +182,7 @@ async def get_pipeline_preset(
     except HTTPException:
         raise
     except _PIPELINE_ENDPOINT_EXCEPTIONS as e:
-        logger.error(f"Failed to get preset: {e}")
+        logger.error("Failed to get preset")
         raise create_error_response(
             message=f"Failed to get preset: {sanitize_error_message(e, 'get_preset')}",
             error_type="server_error",
@@ -217,7 +217,7 @@ async def delete_pipeline_preset(
     except HTTPException:
         raise
     except _PIPELINE_ENDPOINT_EXCEPTIONS as e:
-        logger.error(f"Failed to delete preset: {e}")
+        logger.error("Failed to delete preset")
         raise create_error_response(
             message=f"Failed to delete preset: {sanitize_error_message(e, 'delete_preset')}",
             error_type="server_error",
@@ -252,12 +252,12 @@ async def cleanup_ephemeral_collections(
                 await adapter.delete_collection(name)
                 db.mark_ephemeral_deleted(name)
                 deleted += 1
-            except _PIPELINE_CLEANUP_ITEM_EXCEPTIONS as e:
-                logger.warning(f"Failed to delete expired collection {name}: {e}")
-                errors.append(f"{name}: {str(e)}")
+            except _PIPELINE_CLEANUP_ITEM_EXCEPTIONS:
+                logger.warning("Failed to delete expired collection")
+                errors.append("Collection cleanup failed")
         return PipelineCleanupResponse(expired_count=len(expired), deleted_count=deleted, errors=errors or None)
     except _PIPELINE_ENDPOINT_EXCEPTIONS as e:
-        logger.error(f"Cleanup failed: {e}")
+        logger.error("Cleanup failed")
         raise create_error_response(
             message=f"Cleanup failed: {sanitize_error_message(e, 'cleanup')}",
             error_type="server_error",

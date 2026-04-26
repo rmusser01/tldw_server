@@ -74,8 +74,8 @@ async def ingest_web_content(
         # parsing / validation) so client-facing 4xx semantics are not
         # converted into generic 500s.
         raise
-    except Exception as exc:  # noqa: BLE001
-        logger.error("Web content ingestion failed: {}", exc, exc_info=True)
+    except Exception:  # noqa: BLE001
+        logger.error("Web content ingestion failed")
         raise HTTPException(
             status_code=500,
             detail="Failed to ingest web content",

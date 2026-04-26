@@ -108,13 +108,13 @@ async def get_user_storage_quota(user_id: int) -> StorageQuotaResponse:
         repo = await _get_repo()
         # User-level quotas are on the users table; for org/team quotas
         # we would need the user's org_id. For now, return org-based status.
-        status = await repo.check_quota_status(org_id=user_id)
-        return StorageQuotaResponse(**status)
+        quota_status = await repo.check_quota_status(org_id=user_id)
+        return StorageQuotaResponse(**quota_status)
     except _NONCRITICAL_EXCEPTIONS as exc:
-        logger.warning("Failed to get storage quota for user {}: {}", user_id, exc)
+        logger.warning("Failed to get user storage quota")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to retrieve storage quota: {exc}",
+            detail="Failed to retrieve storage quota",
         ) from exc
 
 
@@ -141,10 +141,10 @@ async def update_user_storage_quota(
         )
         return result
     except _NONCRITICAL_EXCEPTIONS as exc:
-        logger.warning("Failed to update storage quota for user {}: {}", user_id, exc)
+        logger.warning("Failed to update user storage quota")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to update storage quota: {exc}",
+            detail="Failed to update storage quota",
         ) from exc
 
 
@@ -165,10 +165,10 @@ async def get_org_storage_quota(org_id: int) -> StorageQuotaResponse:
         result = await repo.check_quota_status(org_id=org_id)
         return StorageQuotaResponse(**result)
     except _NONCRITICAL_EXCEPTIONS as exc:
-        logger.warning("Failed to get org storage quota for org {}: {}", org_id, exc)
+        logger.warning("Failed to get org storage quota")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to retrieve org storage quota: {exc}",
+            detail="Failed to retrieve org storage quota",
         ) from exc
 
 
@@ -192,10 +192,10 @@ async def update_org_storage_quota(
         )
         return result
     except _NONCRITICAL_EXCEPTIONS as exc:
-        logger.warning("Failed to update org storage quota for org {}: {}", org_id, exc)
+        logger.warning("Failed to update org storage quota")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to update org storage quota: {exc}",
+            detail="Failed to update org storage quota",
         ) from exc
 
 
@@ -222,8 +222,8 @@ async def get_storage_quota_summary(
             items=items,
         )
     except _NONCRITICAL_EXCEPTIONS as exc:
-        logger.warning("Failed to get storage quota summary: {}", exc)
+        logger.warning("Failed to get storage quota summary")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to retrieve storage quota summary: {exc}",
+            detail="Failed to retrieve storage quota summary",
         ) from exc

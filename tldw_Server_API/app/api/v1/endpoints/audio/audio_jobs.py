@@ -468,7 +468,7 @@ async def list_audio_jobs_admin(
     except HTTPException:
         raise
     except _AUDIO_JOBS_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Failed to list jobs: {e}")
+        logger.error("Failed to list jobs")
         raise HTTPException(status_code=500, detail="Failed to list jobs") from e
 
 
@@ -502,7 +502,7 @@ async def summarize_audio_jobs_admin(
     except HTTPException:
         raise
     except _AUDIO_JOBS_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Failed to summarize jobs: {e}")
+        logger.error("Failed to summarize jobs")
         raise HTTPException(status_code=500, detail="Failed to summarize jobs") from e
 
 
@@ -541,7 +541,7 @@ async def summary_by_owner_admin(
     except HTTPException:
         raise
     except _AUDIO_JOBS_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Failed to summarize by owner: {e}")
+        logger.error("Failed to summarize by owner")
         raise HTTPException(status_code=500, detail="Failed to summarize by owner") from e
 
 
@@ -609,7 +609,7 @@ async def owner_processing_summary(
     except HTTPException:
         raise
     except _AUDIO_JOBS_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Failed to get owner processing summary: {e}")
+        logger.error("Failed to get owner processing summary")
         raise HTTPException(status_code=500, detail="Failed to get owner processing summary") from e
 
 
@@ -637,7 +637,7 @@ async def get_user_tier_admin(user_id: int):
     except HTTPException:
         raise
     except _AUDIO_JOBS_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Failed to get user tier: {e}")
+        logger.error("Failed to get user tier")
         raise HTTPException(status_code=500, detail="Failed to get user tier") from e
 
 
@@ -658,5 +658,5 @@ async def set_user_tier_admin(user_id: int, req: SetUserTierRequest):
     except HTTPException:
         raise
     except _AUDIO_JOBS_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Failed to set user tier: {e}")
+        logger.error("Failed to set user tier")
         raise HTTPException(status_code=500, detail="Failed to set user tier") from e

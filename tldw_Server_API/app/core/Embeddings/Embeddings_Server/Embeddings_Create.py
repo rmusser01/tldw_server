@@ -35,10 +35,12 @@ if TYPE_CHECKING:
 
 _EMBEDDINGS_IMPORT_EXCEPTIONS = (ImportError, OSError, RuntimeError)
 
+
 def _import_torch():
     """Lazily import torch only when actually needed."""
     try:
         import torch  # type: ignore
+
         return torch
     except Exception as e:
         # Defer error to call site with a clearer message
@@ -49,6 +51,7 @@ def _import_transformers():
     """Lazily import transformers AutoModel/AutoTokenizer only when needed."""
     try:
         from transformers import AutoModel, AutoTokenizer  # type: ignore
+
         return AutoModel, AutoTokenizer
     except _EMBEDDINGS_IMPORT_EXCEPTIONS as e:
         raise ImportError(
@@ -89,6 +92,7 @@ def _import_onnxruntime():
         return ort
     try:
         import onnxruntime as _ort  # type: ignore
+
         ort = _ort
         _ORT_IMPORT_ERROR = None
         return _ort
@@ -97,6 +101,8 @@ def _import_onnxruntime():
         raise ImportError(
             "'onnxruntime' is required for the ONNX embeddings provider. Install onnxruntime to proceed."
         ) from e
+
+
 #
 # Local Imports
 import contextlib
@@ -147,9 +153,9 @@ COMMIT_HASHES: dict[str, str] = {
 _CACHE_SUBDIR_PATTERN = re.compile(r"[^0-9A-Za-z_.-]+")
 _ALLOWLIST_ENV_VAR = "EMBEDDINGS_STORAGE_ALLOWLIST_ROOT"
 _allowlist_root_env = (os.environ.get(_ALLOWLIST_ENV_VAR) or "").strip()
-_EMBEDDINGS_STORAGE_ALLOWLIST_ROOT = Path(
-    _allowlist_root_env or resolve_repo_relative_path("models")
-).resolve(strict=False)
+_EMBEDDINGS_STORAGE_ALLOWLIST_ROOT = Path(_allowlist_root_env or resolve_repo_relative_path("models")).resolve(
+    strict=False
+)
 
 
 def _get_http_status_from_exception(exc: Exception) -> int | None:
@@ -214,9 +220,7 @@ def _synthetic_test_embedding(text: str, dims: int = 384) -> list[float]:
         return [0.0] * dims
     vec = [0.0] * dims
     for token in tokens:
-        token_hash = hashlib.sha256(
-            token.encode("utf-8", errors="ignore")
-        ).digest()
+        token_hash = hashlib.sha256(token.encode("utf-8", errors="ignore")).digest()
         vec[int.from_bytes(token_hash[:8], byteorder="big", signed=False) % dims] += 1.0
     norm = float(np.linalg.norm(vec))
     if norm <= 0.0:
@@ -225,11 +229,7 @@ def _synthetic_test_embedding(text: str, dims: int = 384) -> list[float]:
 
 
 def _should_use_inprocess_test_embeddings(provider: str) -> bool:
-    return (
-        provider.strip().lower() == "huggingface"
-        and is_test_mode()
-        and env_flag_enabled("E2E_INPROCESS")
-    )
+    return provider.strip().lower() == "huggingface" and is_test_mode() and env_flag_enabled("E2E_INPROCESS")
 
 
 def _log_rejected_path(
@@ -309,9 +309,7 @@ def _safe_model_storage_subdir(base_dir: str, subpath: str, label: str) -> str:
             resolved=candidate or None,
             base=base_dir,
         )
-        return InvalidStoragePathError(
-            f"{label} must be a relative path within model_storage_base_dir."
-        )
+        return InvalidStoragePathError(f"{label} must be a relative path within model_storage_base_dir.")
 
     return safe_join(base_dir, subpath, error_factory=_path_error)
 
@@ -354,6 +352,7 @@ def resolve_model_storage_base_dir(
 
     return "./models/embedding_models_data/"
 
+
 # Default resource limits
 DEFAULT_MAX_MODELS = 3
 DEFAULT_MAX_MEMORY_GB = 8.0
@@ -394,6 +393,7 @@ def get_resource_limits():
     """Get resource limits from config file."""
     try:
         from tldw_Server_API.app.core.config import load_comprehensive_config
+
         config = load_comprehensive_config()
         embeddings_config = None
         try:
@@ -427,10 +427,11 @@ def get_resource_limits():
             "lru_ttl_seconds": DEFAULT_LRU_TTL_SECONDS,
         }
 
+
 RESOURCE_LIMITS = get_resource_limits()
-MAX_MODELS_IN_MEMORY = RESOURCE_LIMITS['max_models']
-MAX_MODEL_MEMORY_GB = RESOURCE_LIMITS['max_memory_gb']
-MODEL_LRU_TTL_SECONDS = RESOURCE_LIMITS['lru_ttl_seconds']
+MAX_MODELS_IN_MEMORY = RESOURCE_LIMITS["max_models"]
+MAX_MODEL_MEMORY_GB = RESOURCE_LIMITS["max_memory_gb"]
+MODEL_LRU_TTL_SECONDS = RESOURCE_LIMITS["lru_ttl_seconds"]
 
 embedding_models: dict[str, Any] = {}
 embedding_models_lock = threading.RLock()  # Global reentrant lock for the embedding_models dictionary
@@ -453,6 +454,7 @@ def _release_model_in_use(model_id: str) -> None:
             model_in_use_counts.pop(model_id, None)
         else:
             model_in_use_counts[model_id] = current - 1
+
 
 def _get_or_create_metric(metric_cls, name: str, documentation: str, labelnames: tuple[str, ...]):
     """Return an existing Prometheus collector when available, else create one.
@@ -499,6 +501,7 @@ MODEL_CACHE_HITS = _get_or_create_metric(
 
 
 # Add other metrics from your previous version or as needed, e.g., for load times, creation times
+
 
 class RetryCfg(BaseModel):
     max_retries: int = Field(3, ge=0)
@@ -583,7 +586,8 @@ def _ensure_hf_revision(model_name_or_path: str, expected_sha: str | None) -> No
                 f"The model on Hugging Face Hub may have changed for this commit hash."
             )
             raise RuntimeError(
-                f"SHA mismatch for model {model_name_or_path}. Expected: {expected_sha}, Got: {actual_sha}")
+                f"SHA mismatch for model {model_name_or_path}. Expected: {expected_sha}, Got: {actual_sha}"
+            )
         logger.info(f"Successfully verified revision SHA {expected_sha} for model {model_name_or_path}.")
     except OSError as os_err:
         logger.warning(
@@ -599,13 +603,9 @@ def _ensure_hf_revision(model_name_or_path: str, expected_sha: str | None) -> No
             )
             return
         if _is_request_exception(e):
-            logger.exception(
-                f"Failed to verify revision for {model_name_or_path} (SHA: {expected_sha}): {e}"
-            )
+            logger.exception(f"Failed to verify revision for {model_name_or_path} (SHA: {expected_sha}): {e}")
             raise RuntimeError(f"Failed to verify model revision for {model_name_or_path}: {e}") from e
-        logger.exception(
-            f"Failed to verify revision for {model_name_or_path} (SHA: {expected_sha}): {e}"
-        )
+        logger.exception(f"Failed to verify revision for {model_name_or_path} (SHA: {expected_sha}): {e}")
         # Decide if this should be a fatal error. For now, we'll raise to prevent using a potentially wrong model.
         raise RuntimeError(f"Failed to verify model revision for {model_name_or_path}: {e}") from e
 
@@ -641,7 +641,9 @@ class TokenBucketLimiter:
         # Parameters preserved for API compatibility; no internal state.
         self.capacity = capacity
         self.period = period  # seconds
-        logger.info(f"TokenBucketLimiter initialized (Phase 2 shim) with capacity {capacity} tokens per {period} seconds.")
+        logger.info(
+            f"TokenBucketLimiter initialized (Phase 2 shim) with capacity {capacity} tokens per {period} seconds."
+        )
 
     def acquire(self) -> None:
         """Acquire a token, honoring ResourceGovernor if enabled."""
@@ -762,6 +764,7 @@ def _log_rg_emb_server_fallback(reason: str) -> None:
         ctx["cwd"],
     )
 
+
 try:  # pragma: no cover - RG is optional
     from tldw_Server_API.app.core.config import rg_enabled  # type: ignore
     from tldw_Server_API.app.core.Resource_Governance import (  # type: ignore
@@ -864,9 +867,7 @@ async def _get_embeddings_server_rg_governor():
                     rg_policy_path(),
                     PolicyReloadConfig(
                         enabled=True,
-                        interval_sec=int(
-                            os.getenv("RG_POLICY_RELOAD_INTERVAL_SEC", "10") or "10"
-                        ),
+                        interval_sec=int(os.getenv("RG_POLICY_RELOAD_INTERVAL_SEC", "10") or "10"),
                     ),
                 )
             )
@@ -947,9 +948,7 @@ def _maybe_enforce_with_rg_embeddings_server_sync() -> dict[str, object] | None:
 
         def _run_in_thread() -> None:
             try:
-                decision_holder["decision"] = asyncio.run(
-                    _maybe_enforce_with_rg_embeddings_server_async()
-                )
+                decision_holder["decision"] = asyncio.run(_maybe_enforce_with_rg_embeddings_server_async())
             except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS as exc:
                 error_holder["error"] = exc
             finally:
@@ -960,9 +959,7 @@ def _maybe_enforce_with_rg_embeddings_server_sync() -> dict[str, object] | None:
         timeout_s = float(os.getenv("RG_EMBEDDINGS_SERVER_SYNC_TIMEOUT_SEC", "5") or "5")
         done.wait(timeout=timeout_s)
         if not done.is_set():
-            logger.debug(
-                "Embeddings server RG sync helper timed out after {}s", timeout_s
-            )
+            logger.debug("Embeddings server RG sync helper timed out after {}s", timeout_s)
             return None
         if error_holder:
             logger.debug("Embeddings server RG sync helper failed: {}", error_holder.get("error"))
@@ -992,10 +989,7 @@ def exponential_backoff(max_retries: int = 3, base_delay: int = 1):
                     return fn(*args, **kwargs)
                 except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS as e:
                     status = _get_http_status_from_exception(e)
-                    is_retryable_http = (
-                        status == 429
-                        or (isinstance(status, int) and 500 <= status < 600)
-                    )
+                    is_retryable_http = status == 429 or (isinstance(status, int) and 500 <= status < 600)
                     is_network_error = _is_probable_network_error(e) and not isinstance(e, RetryExhaustedError)
 
                     if not (is_retryable_http or is_network_error):
@@ -1009,7 +1003,7 @@ def exponential_backoff(max_retries: int = 3, base_delay: int = 1):
                         )
                         raise
 
-                    delay = base_delay * (2 ** attempt)
+                    delay = base_delay * (2**attempt)
                     logger.warning(
                         f"Attempt {attempt + 1}/{max_retries + 1} for {fn.__name__} failed with transient error. "
                         f"Retrying in {delay}s. Error: {e}"
@@ -1157,7 +1151,7 @@ def get_directory_size(path: str) -> float:
     except OSError:
         pass
 
-    return total_size / (1024 ** 3)  # Convert bytes to GB
+    return total_size / (1024**3)  # Convert bytes to GB
 
 
 def estimate_model_size(model_name: str, model_path: str | None = None) -> float:
@@ -1183,13 +1177,13 @@ def estimate_model_size(model_name: str, model_path: str | None = None) -> float
         return model_memory_usage[model_name]
 
     # Fallback to name-based estimation
-    if 'large' in model_name.lower() or 'xl' in model_name.lower():
+    if "large" in model_name.lower() or "xl" in model_name.lower():
         return 2.0
-    elif 'base' in model_name.lower() or 'medium' in model_name.lower():
+    elif "base" in model_name.lower() or "medium" in model_name.lower():
         return 1.0
-    elif 'small' in model_name.lower() or 'mini' in model_name.lower():
+    elif "small" in model_name.lower() or "mini" in model_name.lower():
         return 0.5
-    elif 'tiny' in model_name.lower():
+    elif "tiny" in model_name.lower():
         return 0.25
     else:
         return 1.0  # Default estimate
@@ -1226,7 +1220,8 @@ class HuggingFaceEmbedder:
             self.unload_timer.daemon = True
             self.unload_timer.start()
             logger.debug(
-                f"Unload timer reset for {self.model_identifier}, timeout {self.config.unload_timeout_seconds}s")
+                f"Unload timer reset for {self.model_identifier}, timeout {self.config.unload_timeout_seconds}s"
+            )
 
     def load_model(self) -> None:
         model_load_attempted = False
@@ -1237,7 +1232,8 @@ class HuggingFaceEmbedder:
                 model_load_attempted = True
                 log_counter("huggingface_model_load_attempt", labels={"model_id": self.model_identifier})
                 logger.info(
-                    f"Loading HuggingFace model/tokenizer: {self.config.model_name_or_path} (ID: {self.model_identifier}) on device {self.device}")
+                    f"Loading HuggingFace model/tokenizer: {self.config.model_name_or_path} (ID: {self.model_identifier}) on device {self.device}"
+                )
 
                 _ensure_hf_revision(self.config.model_name_or_path, self.revision)
 
@@ -1280,7 +1276,8 @@ class HuggingFaceEmbedder:
             log_counter("huggingface_model_unload", labels={"model_id": self.model_identifier})
             if self.model is not None or self.tokenizer is not None:
                 logger.info(
-                    f"Unloading HuggingFace model/tokenizer {self.config.model_name_or_path} (ID: {self.model_identifier})")
+                    f"Unloading HuggingFace model/tokenizer {self.config.model_name_or_path} (ID: {self.model_identifier})"
+                )
                 del self.model
                 del self.tokenizer
                 torch = _import_torch()
@@ -1313,12 +1310,14 @@ class HuggingFaceEmbedder:
             # Explicit checks to satisfy type checkers and for runtime safety
             if self.tokenizer is None or self.model is None:
                 logger.error(
-                    f"Model or tokenizer not loaded for {self.model_identifier} despite load_model call. This indicates a critical issue.")
+                    f"Model or tokenizer not loaded for {self.model_identifier} despite load_model call. This indicates a critical issue."
+                )
                 # Attempt a final reload under lock, though this state should ideally not be reached.
                 self.load_model()
                 if self.tokenizer is None or self.model is None:
                     raise RuntimeError(
-                        f"Model {self.model_identifier} failed to load even after explicit reload attempt.")
+                        f"Model {self.model_identifier} failed to load even after explicit reload attempt."
+                    )
 
             # At this point, self.tokenizer and self.model are confirmed to be loaded and not None.
             # The type checker should now understand they are instances, not Optional.
@@ -1344,7 +1343,7 @@ class HuggingFaceEmbedder:
             try:
                 # Qwen3 Embeddings: apply instruction-aware formatting and use last-token pooling
                 model_l = (self.config.model_name_or_path or "").lower()
-                is_qwen3_embed = ("qwen3" in model_l and "embedding" in model_l)
+                is_qwen3_embed = "qwen3" in model_l and "embedding" in model_l
 
                 fmt_texts = texts
                 if is_qwen3_embed:
@@ -1381,11 +1380,7 @@ class HuggingFaceEmbedder:
 
                 # Tokenize
                 inputs = current_tokenizer(
-                    fmt_texts,
-                    return_tensors="pt",
-                    padding=True,
-                    truncation=True,
-                    max_length=self.config.max_length
+                    fmt_texts, return_tensors="pt", padding=True, truncation=True, max_length=self.config.max_length
                 )
                 inputs = {k: v.to(self.device) for k, v in inputs.items()}
 
@@ -1410,10 +1405,12 @@ class HuggingFaceEmbedder:
             except RuntimeError as e:
                 # Handle BFloat16 issue
                 # The hasattr check is good, add an explicit None check for self.model.dtype
-                if "Got unsupported ScalarType BFloat16" in str(e) and \
-                        current_model is not None and \
-                        hasattr(current_model, 'dtype') and \
-                        current_model.dtype == torch.bfloat16:  # current_model is not None here
+                if (
+                    "Got unsupported ScalarType BFloat16" in str(e)
+                    and current_model is not None
+                    and hasattr(current_model, "dtype")
+                    and current_model.dtype == torch.bfloat16
+                ):  # current_model is not None here
 
                     logger.warning(
                         f"BFloat16 not supported for {self.config.model_name_or_path} on {self.device}. "
@@ -1449,9 +1446,7 @@ class HuggingFaceEmbedder:
                         embeddings_tensor = _mean_pool(last_hidden_state, inputs.get("attention_mask"))
                 else:
                     log_counter("huggingface_create_embeddings_failure", labels={"model_id": self.model_identifier})
-                    logger.exception(
-                        f"RuntimeError during HuggingFace embedding for {self.model_identifier}: {e}"
-                    )
+                    logger.exception(f"RuntimeError during HuggingFace embedding for {self.model_identifier}: {e}")
                     raise
             except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS as e:
                 log_counter("huggingface_create_embeddings_failure", labels={"model_id": self.model_identifier})
@@ -1464,8 +1459,9 @@ class HuggingFaceEmbedder:
                 raise RuntimeError(f"Failed to produce embeddings tensor for {self.model_identifier}")
 
             embedding_time = time.time() - start_time_embed
-            log_histogram("huggingface_create_embeddings_duration", embedding_time,
-                          labels={"model_id": self.model_identifier})
+            log_histogram(
+                "huggingface_create_embeddings_duration", embedding_time, labels={"model_id": self.model_identifier}
+            )
             log_counter("huggingface_create_embeddings_success", labels={"model_id": self.model_identifier})
             return embeddings_tensor.cpu().float().numpy()
         # --- End of critical section ---
@@ -1474,10 +1470,12 @@ class HuggingFaceEmbedder:
         logger_debug = getattr(logger, "debug", None)
         if callable(logger_debug):
             with contextlib.suppress(_EMBEDDINGS_NONCRITICAL_EXCEPTIONS):
-                logger_debug(f"HuggingFaceEmbedder {self.model_identifier} is being deleted.")
-        if self.unload_timer:
+                model_identifier = getattr(self, "model_identifier", "<uninitialized>")
+                logger_debug(f"HuggingFaceEmbedder {model_identifier} is being deleted.")
+        unload_timer = getattr(self, "unload_timer", None)
+        if unload_timer:
             with contextlib.suppress(_EMBEDDINGS_NONCRITICAL_EXCEPTIONS):
-                self.unload_timer.cancel()
+                unload_timer.cancel()
             self.unload_timer = None
 
 
@@ -1556,7 +1554,7 @@ class ONNXEmbedder:
                 export=True,
                 trust_remote_code=self.config.trust_remote_code,
                 revision=self.revision,
-                cache_dir=self.model_specific_onnx_dir  # For downloading original HF model before conversion
+                cache_dir=self.model_specific_onnx_dir,  # For downloading original HF model before conversion
             )
 
             logger.info(f"Saving converted ONNX model to {self.model_specific_onnx_dir}...")
@@ -1590,7 +1588,8 @@ class ONNXEmbedder:
             self.unload_timer.daemon = True
             self.unload_timer.start()
             logger.debug(
-                f"Unload timer reset for ONNX model {self.model_identifier}, timeout {self.config.unload_timeout_seconds}s")
+                f"Unload timer reset for ONNX model {self.model_identifier}, timeout {self.config.unload_timeout_seconds}s"
+            )
 
     def load_model(self) -> None:
         # This entire method needs to be atomic per instance.
@@ -1651,7 +1650,8 @@ class ONNXEmbedder:
 
         if self.session is None or self.tokenizer is None:
             logger.error(
-                f"ONNX session or tokenizer not loaded for {self.model_identifier} before create_embeddings call.")
+                f"ONNX session or tokenizer not loaded for {self.model_identifier} before create_embeddings call."
+            )
             raise RuntimeError(f"ONNX model {self.model_identifier} not loaded properly.")
 
         log_counter("onnx_create_embeddings_attempt", labels={"model_id": self.model_identifier})
@@ -1672,11 +1672,11 @@ class ONNXEmbedder:
                     return_tensors="np",  # ONNX runtime uses NumPy arrays
                     padding=True,
                     truncation=True,
-                    max_length=self.config.max_length
+                    max_length=self.config.max_length,
                 )
                 ort_inputs = {
                     "input_ids": inputs["input_ids"].astype(np.int64),
-                    "attention_mask": inputs["attention_mask"].astype(np.int64)
+                    "attention_mask": inputs["attention_mask"].astype(np.int64),
                 }
                 # Some models need token_type_ids, some don't. Check if tokenizer provides them.
                 if "token_type_ids" in inputs and inputs["token_type_ids"] is not None:
@@ -1723,16 +1723,13 @@ class ONNXEmbedder:
             pass
 
 
-
-
-
 # Exponential backoff decorator with fixed parameters.
 # To make this dynamic per model_config, apply similarly to limiter.
 @exponential_backoff(max_retries=3, base_delay=1)
 def create_embeddings_batch(
-        texts: list[str],
-        user_app_config: dict[str, Any],  # Renamed for clarity: this is the top-level app config
-        model_id_override: str | None = None,
+    texts: list[str],
+    user_app_config: dict[str, Any],  # Renamed for clarity: this is the top-level app config
+    model_id_override: str | None = None,
 ) -> list[list[float]]:
     """
     Creates embeddings for a batch of texts.
@@ -1862,7 +1859,9 @@ def create_embeddings_batch(
                     estimated_size = estimate_model_size(model_id_to_use, model_cache_dir)
 
                     if not check_memory_limit(estimated_size):
-                        logger.warning(f"Memory limit would be exceeded by loading {model_id_to_use} (size: {estimated_size:.2f} GB)")
+                        logger.warning(
+                            f"Memory limit would be exceeded by loading {model_id_to_use} (size: {estimated_size:.2f} GB)"
+                        )
                         with contextlib.suppress(_EMBEDDINGS_NONCRITICAL_EXCEPTIONS):
                             log_memory_limit_exceeded(
                                 model_id=model_id_to_use,
@@ -1943,7 +1942,9 @@ def create_embeddings_batch(
                     estimated_size = estimate_model_size(model_id_to_use, onnx_model_path)
 
                     if not check_memory_limit(estimated_size):
-                        logger.warning(f"Memory limit would be exceeded by loading {model_id_to_use} (size: {estimated_size:.2f} GB)")
+                        logger.warning(
+                            f"Memory limit would be exceeded by loading {model_id_to_use} (size: {estimated_size:.2f} GB)"
+                        )
                         with contextlib.suppress(_EMBEDDINGS_NONCRITICAL_EXCEPTIONS):
                             log_memory_limit_exceeded(
                                 model_id=model_id_to_use,
@@ -2003,7 +2004,8 @@ def create_embeddings_batch(
                 raise ValueError(f"Model spec for {model_id_to_use} is not OpenAIModelCfg.")
 
             logger.debug(
-                f"Creating embeddings for {len(texts)} texts via OpenAI API with model {model_spec.model_name_or_path}")
+                f"Creating embeddings for {len(texts)} texts via OpenAI API with model {model_spec.model_name_or_path}"
+            )
             if not callable(get_openai_embeddings_batch):  # Basic check
                 logger.error("`get_openai_embeddings_batch` is not available or not callable.")
                 raise NotImplementedError("OpenAI batch embedding function is not properly set up.")
@@ -2031,7 +2033,8 @@ def create_embeddings_batch(
 
             # TODO: Implement chunking for texts if len(texts) is large, based on model_spec.chunk_size
             logger.debug(
-                f"Creating {len(texts)} embeddings via local API ({model_spec.api_url}) with model {model_spec.model_name_or_path}")
+                f"Creating {len(texts)} embeddings via local API ({model_spec.api_url}) with model {model_spec.model_name_or_path}"
+            )
             headers = {"Content-Type": "application/json"}
             if model_spec.api_key:
                 headers["Authorization"] = f"Bearer {model_spec.api_key}"
@@ -2040,51 +2043,69 @@ def create_embeddings_batch(
 
             # The outbound call is already wrapped by exponential backoff and the per-config rate limiter
             from tldw_Server_API.app.core.http_client import fetch as _fetch
+
             resp = _fetch(method="POST", url=model_spec.api_url, headers=headers, json=payload, timeout=60)
             if resp.status_code >= 400:
                 resp.raise_for_status()
             response_data = resp.json()
-            if 'embeddings' not in response_data or not isinstance(response_data['embeddings'], list):
+            if "embeddings" not in response_data or not isinstance(response_data["embeddings"], list):
                 logger.error(f"Local API at {model_spec.api_url} returned unexpected data format: {response_data}")
                 raise ValueError("Local API embedding response format error.")
-            embeddings_list = response_data['embeddings']
+            embeddings_list = response_data["embeddings"]
 
         else:
             logger.error(f"Unsupported embedding provider: {provider} for model_id '{model_id_to_use}'")
             raise ValueError(f"Unsupported embedding provider: {provider}")
 
         batch_time = time.time() - start_time_batch
-        log_histogram("create_embeddings_batch_duration", batch_time,
-                      labels={"provider": provider, "model_id": model_id_to_use})
+        log_histogram(
+            "create_embeddings_batch_duration", batch_time, labels={"provider": provider, "model_id": model_id_to_use}
+        )
         log_counter("create_embeddings_batch_success", labels={"provider": provider, "model_id": model_id_to_use})
         return embeddings_list
 
     except ValueError as ve:  # Configuration or validation errors
-        log_counter("create_embeddings_batch_error",
-                    labels={"provider": provider if 'provider' in locals() else 'unknown',
-                            "model_id": model_id_to_use if 'model_id_to_use' in locals() else 'unknown',
-                            "error_type": type(ve).__name__})
+        log_counter(
+            "create_embeddings_batch_error",
+            labels={
+                "provider": provider if "provider" in locals() else "unknown",
+                "model_id": model_id_to_use if "model_id_to_use" in locals() else "unknown",
+                "error_type": type(ve).__name__,
+            },
+        )
         logger.exception(f"Configuration or Value error in create_embeddings_batch: {ve}")
         raise
     except RuntimeError as rte:  # Model loading, conversion, or runtime issues
-        log_counter("create_embeddings_batch_error",
-                    labels={"provider": provider if 'provider' in locals() else 'unknown',
-                            "model_id": model_id_to_use if 'model_id_to_use' in locals() else 'unknown',
-                            "error_type": type(rte).__name__})
+        log_counter(
+            "create_embeddings_batch_error",
+            labels={
+                "provider": provider if "provider" in locals() else "unknown",
+                "model_id": model_id_to_use if "model_id_to_use" in locals() else "unknown",
+                "error_type": type(rte).__name__,
+            },
+        )
         logger.exception(f"Runtime error in create_embeddings_batch: {rte}")
         raise
     except (NetworkError, RetryExhaustedError) as req_e:
-        log_counter("create_embeddings_batch_error",
-                    labels={"provider": provider if 'provider' in locals() else 'unknown',
-                            "model_id": model_id_to_use if 'model_id_to_use' in locals() else 'unknown',
-                            "error_type": type(req_e).__name__})
+        log_counter(
+            "create_embeddings_batch_error",
+            labels={
+                "provider": provider if "provider" in locals() else "unknown",
+                "model_id": model_id_to_use if "model_id_to_use" in locals() else "unknown",
+                "error_type": type(req_e).__name__,
+            },
+        )
         logger.exception(f"Network error after retries in create_embeddings_batch: {req_e}")
         raise
     except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS as e:  # Catch-all for unexpected errors
-        log_counter("create_embeddings_batch_error",
-                    labels={"provider": provider if 'provider' in locals() else 'unknown',
-                            "model_id": model_id_to_use if 'model_id_to_use' in locals() else 'unknown',
-                            "error_type": type(e).__name__})
+        log_counter(
+            "create_embeddings_batch_error",
+            labels={
+                "provider": provider if "provider" in locals() else "unknown",
+                "model_id": model_id_to_use if "model_id_to_use" in locals() else "unknown",
+                "error_type": type(e).__name__,
+            },
+        )
         logger.exception(
             f"Unexpected error in create_embeddings_batch for model_id '{model_id_to_use if 'model_id_to_use' in locals() else 'unknown'}' "
             f"(Provider: {provider if 'provider' in locals() else 'unknown'}): {e}"
@@ -2093,9 +2114,9 @@ def create_embeddings_batch(
 
 
 async def create_embeddings_batch_async(
-        texts: list[str],
-        user_app_config: dict[str, Any],
-        model_id_override: str | None = None,
+    texts: list[str],
+    user_app_config: dict[str, Any],
+    model_id_override: str | None = None,
 ) -> list[list[float]]:
     """
     Async wrapper for create_embeddings_batch.
@@ -2114,18 +2135,14 @@ async def create_embeddings_batch_async(
     # Run the synchronous function in a thread pool to avoid blocking
     loop = asyncio.get_running_loop()
     return await loop.run_in_executor(
-        None,  # Use default executor
-        create_embeddings_batch,
-        texts,
-        user_app_config,
-        model_id_override
+        None, create_embeddings_batch, texts, user_app_config, model_id_override  # Use default executor
     )
 
 
 def create_embedding(
-        text: str,
-        user_app_config: dict[str, Any],
-        model_id_override: str | None = None,
+    text: str,
+    user_app_config: dict[str, Any],
+    model_id_override: str | None = None,
 ) -> list[float]:
     """
     Creates an embedding for a single text using the batch function.
@@ -2138,8 +2155,8 @@ def create_embedding(
 
     # Determine provider and model_id for logging purposes before calling batch,
     # as batch might raise an error before these are determined internally.
-    provider_to_log = 'unknown_provider'
-    model_id_to_log = 'unknown_model_id'
+    provider_to_log = "unknown_provider"
+    model_id_to_log = "unknown_model_id"
     try:
         if "embedding_config" in user_app_config:
             temp_config = EmbeddingConfigSchema(**user_app_config["embedding_config"])
@@ -2154,9 +2171,7 @@ def create_embedding(
 
     # The create_embeddings_batch function is already decorated with rate limiter and backoff
     embeddings_list = create_embeddings_batch(
-        texts=[text],
-        user_app_config=user_app_config,
-        model_id_override=model_id_override  # Pass override if provided
+        texts=[text], user_app_config=user_app_config, model_id_override=model_id_override  # Pass override if provided
     )
 
     if not embeddings_list or not embeddings_list[0]:
@@ -2171,10 +2186,12 @@ def create_embedding(
     embedding_data = embeddings_list[0]
 
     single_time = time.time() - start_time_single
-    log_histogram("create_embedding_duration", single_time,
-                  labels={"provider": provider_to_log, "model_id": model_id_to_log})
+    log_histogram(
+        "create_embedding_duration", single_time, labels={"provider": provider_to_log, "model_id": model_id_to_log}
+    )
     log_counter("create_embedding_success", labels={"provider": provider_to_log, "model_id": model_id_to_log})
     return embedding_data
+
 
 def get_embedding_config() -> dict[str, Any]:
     """
@@ -2197,30 +2214,30 @@ def get_embedding_config() -> dict[str, Any]:
     }
 
     # Add model configurations based on provider
-    provider = embedding_settings.get('embedding_provider', 'huggingface')
-    model = embedding_settings.get('embedding_model', 'sentence-transformers/all-MiniLM-L6-v2')
+    provider = embedding_settings.get("embedding_provider", "huggingface")
+    model = embedding_settings.get("embedding_model", "sentence-transformers/all-MiniLM-L6-v2")
     model_id_key = f"{provider}:{model}"
 
     # Add default configurations for common models - create proper instances
-    if provider == 'openai':
+    if provider == "openai":
         config["embedding_config"]["models"][model_id_key] = OpenAIModelCfg(
             provider="openai",
             model_name_or_path=model,
-            api_key=embedding_settings.get('embedding_api_key', settings.get("OPENAI_API_KEY", ""))
+            api_key=embedding_settings.get("embedding_api_key", settings.get("OPENAI_API_KEY", "")),
         )
-    elif provider == 'huggingface':
+    elif provider == "huggingface":
         config["embedding_config"]["models"][model_id_key] = HFModelCfg(
             provider="huggingface",
             model_name_or_path=model,
             trust_remote_code=False,
-            hf_cache_dir_subpath="huggingface_cache"
+            hf_cache_dir_subpath="huggingface_cache",
         )
-    elif provider == 'local_api':
+    elif provider == "local_api":
         config["embedding_config"]["models"][model_id_key] = LocalAPICfg(
             provider="local_api",
             model_name_or_path=model,
-            api_url=embedding_settings.get('embedding_api_url', 'http://localhost:8080/v1/embeddings'),
-            api_key=embedding_settings.get('embedding_api_key', '')
+            api_url=embedding_settings.get("embedding_api_url", "http://localhost:8080/v1/embeddings"),
+            api_key=embedding_settings.get("embedding_api_key", ""),
         )
 
     # Add common HuggingFace models that might be requested
@@ -2247,7 +2264,7 @@ def get_embedding_config() -> dict[str, Any]:
                 provider="huggingface",
                 model_name_or_path=hf_model,
                 trust_remote_code=False,
-                hf_cache_dir_subpath="huggingface_cache"
+                hf_cache_dir_subpath="huggingface_cache",
             )
 
     # Set default_model_id now that keys are known
@@ -2257,7 +2274,9 @@ def get_embedding_config() -> dict[str, Any]:
     # If TEST_EMBEDDINGS_UNLOAD_TIMEOUT_SECONDS (or EMBEDDINGS_UNLOAD_TIMEOUT_SECONDS) is set,
     # apply it to all configured models. This is helpful to shorten timers during pytest runs.
     try:
-        timeout_env = os.getenv("TEST_EMBEDDINGS_UNLOAD_TIMEOUT_SECONDS") or os.getenv("EMBEDDINGS_UNLOAD_TIMEOUT_SECONDS")
+        timeout_env = os.getenv("TEST_EMBEDDINGS_UNLOAD_TIMEOUT_SECONDS") or os.getenv(
+            "EMBEDDINGS_UNLOAD_TIMEOUT_SECONDS"
+        )
         if timeout_env:
             timeout_val = int(timeout_env)
             for model_cfg in config["embedding_config"]["models"].values():
@@ -2270,16 +2289,17 @@ def get_embedding_config() -> dict[str, Any]:
 
     return config
 
+
 #
 # Legacy exports for backward compatibility
 # Load embedding configuration from settings
 from tldw_Server_API.app.core.config import settings
 
 embedding_config = settings.get("EMBEDDING_CONFIG", {})
-embedding_provider = embedding_config.get('embedding_provider', 'openai')
-embedding_model = embedding_config.get('embedding_model', 'text-embedding-3-small')
-embedding_api_url = embedding_config.get('embedding_api_url', 'http://localhost:8080/v1/embeddings')
-embedding_api_key = embedding_config.get('embedding_api_key', '')
+embedding_provider = embedding_config.get("embedding_provider", "openai")
+embedding_model = embedding_config.get("embedding_model", "text-embedding-3-small")
+embedding_api_url = embedding_config.get("embedding_api_url", "http://localhost:8080/v1/embeddings")
+embedding_api_key = embedding_config.get("embedding_api_key", "")
 
 #
 # End of File.

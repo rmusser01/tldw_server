@@ -766,7 +766,7 @@ async def create_speech(
             _record_tts_history("failed", error_message=_tts_history_error_message(exc))
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=str(exc),
+                detail="Failed to store generated speech audio",
             ) from exc
         except _AUDIO_TTS_NONCRITICAL_EXCEPTIONS as exc:
             _record_tts_history("failed", error_message=_tts_history_error_message(exc))

@@ -109,7 +109,7 @@ async def create_highlight(
             context_after=context_after,
         )
     except Exception as e:
-        logger.error(f"create_highlight failed: {e}")
+        logger.error("create_highlight failed")
         raise HTTPException(status_code=500, detail="highlight_create_failed") from e
     item_title = _item_title_or_none(db, item_id)
     record_reading_highlight_created(

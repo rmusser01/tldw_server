@@ -65,6 +65,19 @@ class _StubRepo:
         self._lockouts.pop((identifier, attempt_type), None)
 
 
+class _FailingSchemaRepo:
+    async def ensure_schema(self) -> None:
+        raise RuntimeError("lockout schema failed at /private/lockouts.db")
+
+
+class _LoggerStub:
+    def __init__(self) -> None:
+        self.messages: list[str] = []
+
+    def warning(self, message: str, *args, **kwargs) -> None:
+        self.messages.append(message)
+
+
 def _make_tracker(settings=None) -> LockoutTracker:
     """Create a LockoutTracker with stub internals for testing."""
     settings = settings or SimpleNamespace(
@@ -188,3 +201,26 @@ async def test_pii_redacted_log(monkeypatch):
     tracker = _make_tracker(settings=settings)
     result = await tracker.record_failed_attempt("sensitive_user")
     assert result["is_locked"] is True
+
+
+@pytest.mark.asyncio
+async def test_initialize_schema_warning_log_is_sanitized(monkeypatch):
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(lt_module, "logger", logger_stub)
+
+    tracker = LockoutTracker(
+        db_pool=object(),  # type: ignore[arg-type]
+        settings=SimpleNamespace(
+            MAX_LOGIN_ATTEMPTS=3,
+            LOCKOUT_DURATION_MINUTES=5,
+            PII_REDACT_LOGS=False,
+        ),
+    )
+    tracker._repo = _FailingSchemaRepo()  # type: ignore[assignment]
+
+    await tracker.initialize()
+
+    assert tracker._initialized is True
+    assert logger_stub.messages == ["LockoutTracker schema ensure warning"]
+    assert "lockout schema failed" not in str(logger_stub.messages)
+    assert "/private/lockouts.db" not in str(logger_stub.messages)

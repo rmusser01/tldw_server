@@ -1,4 +1,4 @@
-from typing import Tuple
+from typing import Any, Tuple
 
 import pytest
 from fastapi import FastAPI
@@ -29,6 +29,16 @@ def _admin_principal() -> AuthPrincipal:
 class _Logger:
     def error(self, *args, **kwargs) -> None:  # noqa: ANN002, ANN003
         return
+
+
+class _CapturingLogger:
+    def __init__(self) -> None:
+        self.errors: list[str] = []
+        self.kwargs: list[dict[str, Any]] = []
+
+    def error(self, message: str, *args: Any, **kwargs: Any) -> None:
+        self.errors.append(message.format(*args) if args else message)
+        self.kwargs.append(kwargs)
 
 
 class _DefaultMgr:
@@ -155,3 +165,41 @@ def test_llamacpp_inference_falls_back_to_manager_when_handler_missing():
     assert body["model"] == "mock.gguf"
     assert body["choices"][0]["message"]["content"] == "hi"
     assert body["backend"] == "llamacpp"
+
+
+@pytest.mark.integration
+def test_llamacpp_inference_generic_failure_log_is_sanitized():
+    class _ExplodingInferenceMgr:
+        llamacpp = True
+
+        def __init__(self, logger: _CapturingLogger) -> None:
+            self.logger = logger
+
+        async def get_server_status(self, backend: str):
+            return {"backend": backend, "model": "mock.gguf"}
+
+        async def run_inference(self, **kwargs: Any):
+            raise RuntimeError("llamacpp inference exploded at /private/llama.cpp")
+
+    logger = _CapturingLogger()
+    app = _make_app_with_manager(_ExplodingInferenceMgr(logger))
+    payload = {
+        "model": "ignored-by-server",
+        "messages": [{"role": "user", "content": "Hello!"}],
+        "temperature": 0.7,
+    }
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/llamacpp/inference",
+            json=payload,
+            headers={"Content-Type": "application/json"},
+        )
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == "An unexpected error occurred."
+    assert logger.errors == ["Unexpected error during Llama.cpp inference"]
+    assert all(not kwargs.get("exc_info") for kwargs in logger.kwargs)
+    logged = "\n".join(logger.errors)
+    assert "llamacpp inference exploded" not in logged
+    assert "/private/llama.cpp" not in logged

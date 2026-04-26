@@ -117,6 +117,12 @@ def map_db_error_to_http(
     conflict_detail: str | None = None,
     data_integrity_detail: str = "Data integrity violation",
     log_context: str | None = None,
+    input_detail_attr: str | None = None,
+    input_status_code: int | None = None,
+    conflict_status_code: int | None = None,
+    database_status_code: int | None = None,
+    not_found_substrings: tuple[str, ...] = (),
+    payload_too_large_substrings: tuple[str, ...] = (),
 ) -> HTTPException:
     """Map a database-layer exception to a FastAPI HTTPException.
 
@@ -156,9 +162,12 @@ def map_db_error_to_http(
     if isinstance(exc, _INPUT_ERROR_TYPES):
         if resolved_input_status >= status.HTTP_500_INTERNAL_SERVER_ERROR:
             _log_db_mapping_error("InputError from DB layer")
+        return HTTPException(status_code=status_code, detail=detail)
+
+    if isinstance(exc, _NOT_FOUND_ERROR_TYPES):
         return HTTPException(
-            status_code=resolved_input_status,
-            detail=input_detail if input_detail is not None else str(exc) or "Invalid input",
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc) or "Resource not found",
         )
     if isinstance(exc, _NOT_FOUND_ERROR_TYPES):
         return HTTPException(
@@ -172,8 +181,8 @@ def map_db_error_to_http(
         )
     if isinstance(exc, _CONFLICT_ERROR_TYPES):
         return HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=(conflict_detail if conflict_detail is not None else str(exc) or "Conflict detected"),
+            status_code=conflict_status_code or status.HTTP_409_CONFLICT,
+            detail=detail,
         )
     if isinstance(exc, _SCHEMA_ERROR_TYPES):
         # Schema issues are serious; log with stack trace.
@@ -185,11 +194,10 @@ def map_db_error_to_http(
     if isinstance(exc, _DATABASE_ERROR_TYPES):
         _log_db_mapping_error("DatabaseError from DB layer")
         return HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=database_status_code or status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=default_detail,
         )
 
-    # Fallback for unexpected errors.
     _log_db_mapping_error("Unexpected exception mapped to HTTP 500")
     return HTTPException(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

@@ -1083,7 +1083,7 @@ def perform_websearch(search_engine, search_query, content_country, search_lang,
         return web_search_results_dict
 
     except _WEBSEARCH_RUNTIME_EXCEPTIONS as e:
-        return {"processing_error": f"Error performing web search: {str(e)}"}
+        return {"processing_error": "Error performing web search"}
 
 #
 ######################### Search Result Parsing ##################################################################
@@ -2002,7 +2002,7 @@ def search_web_searx(search_query, language='auto', time_range='', safesearch=0,
         search_url = f"{parsed_url.scheme}://{parsed_url.netloc}{parsed_url.path}?{urlencode(params)}"
         logging.info(f"Search URL: {search_url}")
     except _WEBSEARCH_PARSE_EXCEPTIONS as e:
-        return json.dumps({"error": f"Invalid URL configuration: {str(e)}"})
+        return json.dumps({"error": "Invalid URL configuration."})
 
     # Perform the search request
     try:
@@ -2040,8 +2040,8 @@ def search_web_searx(search_query, language='auto', time_range='', safesearch=0,
         return json.dumps(data)
 
     except _WEBSEARCH_RUNTIME_EXCEPTIONS as e:
-        logging.error(f"Error searching for content: {str(e)}")
-        return json.dumps({"error": f"There was an error searching for content. {str(e)}"})
+        logging.error("Error searching for content.")
+        return json.dumps({"error": "There was an error searching for content."})
 
 
 
@@ -2098,7 +2098,7 @@ def search_web_tavily(search_query, result_count=10, site_whitelist=None, site_b
         response = fetch(method="POST", url=tavily_api_url, headers=headers, data=json.dumps(payload))
         return response.json()
     except _WEBSEARCH_RUNTIME_EXCEPTIONS as e:
-        return f"There was an error searching for content. {str(e)}"
+        return "There was an error searching for content."
 
 
 

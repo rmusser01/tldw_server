@@ -292,7 +292,7 @@ class WebScrapingService:
 
         except _WEB_SCRAPE_NONCRITICAL_EXCEPTIONS as e:
             logger.error(f"Web scraping task failed: {e}")
-            raise HTTPException(status_code=500, detail=str(e)) from e
+            raise HTTPException(status_code=500, detail="Enhanced web scraping task failed") from e
 
     async def _scrape_individual_urls(
         self, url_input: str, custom_titles: Optional[str],
@@ -776,7 +776,7 @@ class WebScrapingService:
 
                 except _WEB_SCRAPE_NONCRITICAL_EXCEPTIONS as e:
                     logger.error(f"Failed to store article: {e}")
-                    errors.append(f"Storage failed for {article.get('url')}: {str(e)}")
+                    errors.append("Storage failed for article")
                     try:
                         if reg:
                             reg.increment("webscraping.persist.failed_total", 1, {"method": str(result.get("method", "unknown"))})

@@ -63,8 +63,8 @@ async def _get_tokens_daily_ledger() -> ResourceDailyLedger | None:
             await ledger.initialize()
             _tokens_daily_ledger = ledger
             return ledger
-        except _USAGE_NONCRITICAL_EXCEPTIONS as exc:  # pragma: no cover - defensive
-            logger.debug(f"LLM usage: ResourceDailyLedger init failed; tokens/day caps disabled: {exc}")
+        except _USAGE_NONCRITICAL_EXCEPTIONS:  # pragma: no cover - defensive
+            logger.debug("LLM usage ResourceDailyLedger init failed; tokens/day caps disabled")
             _tokens_daily_ledger = None
             return None
 
@@ -448,6 +448,6 @@ async def log_llm_usage(
         except _USAGE_NONCRITICAL_EXCEPTIONS:
             # Ledger writes must never affect request flow
             pass
-    except _USAGE_NONCRITICAL_EXCEPTIONS as e:
+    except _USAGE_NONCRITICAL_EXCEPTIONS:
         # Never break request processing due to logging errors
-        logger.debug(f"LLM usage logging skipped/failed: {e}")
+        logger.debug("LLM usage logging skipped/failed")

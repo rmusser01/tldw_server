@@ -110,7 +110,7 @@ class TestParakeetONNX:
         )
 
         # Setup mocks
-        mock_download.return_value = "/path/to/model"
+        mock_download.return_value = "path/to/model"
         mock_ort_session.return_value = mock_onnx_session
 
         # Create mock vocab file
@@ -404,12 +404,63 @@ class TestParakeetONNX:
         audio_data, sample_rate = sample_audio_data
 
         # Test model loading failure
-        mock_load_model.side_effect = Exception("Model loading failed")
+        mock_load_model.side_effect = Exception(
+            "Model loading failed at /private/models/onnx"
+        )
 
         result = transcribe_with_parakeet_onnx(audio_data, sample_rate)
 
-        assert "[Error:" in result
-        assert "Model loading failed" in result
+        assert result == "[Error: Failed to load ONNX model]"
+        assert "Model loading failed" not in result
+        assert "/private/models/onnx" not in result
+
+    @patch('tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Parakeet_ONNX.sf.read')
+    @patch('tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Parakeet_ONNX.load_parakeet_onnx_model')
+    def test_audio_file_load_error_is_sanitized(
+        self,
+        mock_load_model,
+        mock_sf_read,
+        mock_onnx_session,
+        mock_tokenizer,
+    ):
+        """Audio file load failures should not expose local paths."""
+        from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Parakeet_ONNX import (
+            transcribe_with_parakeet_onnx
+        )
+
+        mock_load_model.return_value = (mock_onnx_session, mock_tokenizer)
+        mock_sf_read.side_effect = OSError("read failed at /private/audio/input.wav")
+
+        result = transcribe_with_parakeet_onnx("/private/audio/input.wav", 16000)
+
+        assert result == "[Error: Failed to load audio]"
+        assert "read failed" not in result
+        assert "/private/audio/input.wav" not in result
+
+    @patch('tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Parakeet_ONNX.load_parakeet_onnx_model')
+    def test_transcription_runtime_error_is_sanitized(
+        self,
+        mock_load_model,
+        sample_audio_data,
+        mock_onnx_session,
+        mock_tokenizer,
+    ):
+        """Inference failures should not expose ONNX runtime details."""
+        from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Parakeet_ONNX import (
+            transcribe_with_parakeet_onnx
+        )
+
+        audio_data, sample_rate = sample_audio_data
+        mock_load_model.return_value = (mock_onnx_session, mock_tokenizer)
+        mock_onnx_session.run.side_effect = RuntimeError(
+            "onnx runtime failed at /private/onnx/session"
+        )
+
+        result = transcribe_with_parakeet_onnx(audio_data, sample_rate)
+
+        assert result == "[Error: Parakeet ONNX transcription failed]"
+        assert "onnx runtime failed" not in result
+        assert "/private/onnx/session" not in result
 
     @patch('tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Parakeet_ONNX.load_parakeet_onnx_model')
     def test_custom_model_path(self, mock_load_model, sample_audio_data, mock_onnx_session, mock_tokenizer):
@@ -419,7 +470,7 @@ class TestParakeetONNX:
         )
 
         audio_data, sample_rate = sample_audio_data
-        custom_path = "/custom/model/path"
+        custom_path = "custom/model/path"
 
         mock_load_model.return_value = (mock_onnx_session, mock_tokenizer)
 

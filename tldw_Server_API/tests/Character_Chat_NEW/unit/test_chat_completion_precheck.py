@@ -368,3 +368,111 @@ def test_complete_v2_surfaces_provider_model_resolution_failures(
     assert resp.status_code == 500
     detail = resp.json()["detail"]
     assert detail["error_code"] == "provider_model_resolution_failed"
+
+
+@pytest.mark.unit
+def test_complete_v2_maps_input_error_to_400(
+    test_client,
+    auth_headers,
+    monkeypatch,
+):
+    from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import InputError
+
+    char_resp = test_client.post(
+        "/api/v1/characters/",
+        json={
+            "name": "InputErrorCharacter",
+            "description": "",
+            "personality": "",
+            "first_message": "Hello there",
+        },
+        headers=auth_headers,
+    )
+    assert char_resp.status_code == 201
+    char_id = char_resp.json()["id"]
+
+    chat_resp = test_client.post(
+        "/api/v1/chats/",
+        json={"character_id": char_id, "title": "Input error completion"},
+        headers=auth_headers,
+    )
+    assert chat_resp.status_code == 201
+    chat_id = chat_resp.json()["id"]
+
+    def _raise_input_error(*args, **kwargs):
+        raise InputError("completion payload is invalid")
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.endpoints.character_chat_sessions.post_message_to_conversation",
+        _raise_input_error,
+    )
+
+    resp = test_client.post(
+        f"/api/v1/chats/{chat_id}/complete-v2",
+        json={
+            "provider": "local-llm",
+            "model": "local-test",
+            "append_user_message": "Hello",
+            "stream": False,
+            "include_character_context": False,
+            "save_to_db": True,
+        },
+        headers=auth_headers,
+    )
+
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "completion payload is invalid"
+
+
+@pytest.mark.unit
+def test_complete_v2_maps_oversize_input_error_to_413(
+    test_client,
+    auth_headers,
+    monkeypatch,
+):
+    from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import InputError
+
+    char_resp = test_client.post(
+        "/api/v1/characters/",
+        json={
+            "name": "OversizeInputCharacter",
+            "description": "",
+            "personality": "",
+            "first_message": "Hello there",
+        },
+        headers=auth_headers,
+    )
+    assert char_resp.status_code == 201
+    char_id = char_resp.json()["id"]
+
+    chat_resp = test_client.post(
+        "/api/v1/chats/",
+        json={"character_id": char_id, "title": "Oversize input completion"},
+        headers=auth_headers,
+    )
+    assert chat_resp.status_code == 201
+    chat_id = chat_resp.json()["id"]
+
+    def _raise_input_error(*args, **kwargs):
+        raise InputError("Completion attachment exceeds maximum size")
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.endpoints.character_chat_sessions.post_message_to_conversation",
+        _raise_input_error,
+    )
+
+    resp = test_client.post(
+        f"/api/v1/chats/{chat_id}/complete-v2",
+        json={
+            "provider": "local-llm",
+            "model": "local-test",
+            "append_user_message": "Hello",
+            "stream": False,
+            "include_character_context": False,
+            "save_to_db": True,
+        },
+        headers=auth_headers,
+    )
+
+    assert resp.status_code == 413
+    assert resp.json()["detail"] == "Completion attachment exceeds maximum size"

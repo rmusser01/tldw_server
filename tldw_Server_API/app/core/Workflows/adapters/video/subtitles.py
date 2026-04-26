@@ -65,8 +65,8 @@ async def run_subtitle_generate_adapter(config: dict[str, Any], context: dict[st
 
     try:
         resolved_input = resolve_workflow_file_path(input_path, context, config)
-    except Exception as e:
-        return {"error": f"input_path_error: {e}", "generated": False}
+    except Exception:
+        return {"error": "input_path_error", "generated": False}
 
     language = config.get("language", "en")
     sub_format = config.get("format", "srt")
@@ -111,9 +111,9 @@ async def run_subtitle_generate_adapter(config: dict[str, Any], context: dict[st
 
         return {"subtitle_path": output_path, "generated": True, "segment_count": len(segments)}
 
-    except Exception as e:
-        logger.exception(f"Subtitle generate error: {e}")
-        return {"error": str(e), "generated": False}
+    except Exception:
+        logger.exception("Subtitle generate error")
+        return {"error": "subtitle_generate_error", "generated": False}
 
 
 @registry.register(
@@ -152,8 +152,8 @@ async def run_subtitle_translate_adapter(config: dict[str, Any], context: dict[s
 
     try:
         resolved_input = resolve_workflow_file_path(input_path, context, config)
-    except Exception as e:
-        return {"error": f"input_path_error: {e}", "translated": False}
+    except Exception:
+        return {"error": "input_path_error", "translated": False}
 
     target_language = config.get("target_language", "es")
 
@@ -183,9 +183,9 @@ async def run_subtitle_translate_adapter(config: dict[str, Any], context: dict[s
 
         return {"output_path": output_path, "translated": True, "target_language": target_language}
 
-    except Exception as e:
-        logger.exception(f"Subtitle translate error: {e}")
-        return {"error": str(e), "translated": False}
+    except Exception:
+        logger.exception("Subtitle translate error")
+        return {"error": "subtitle_translate_error", "translated": False}
 
 
 @registry.register(
@@ -229,8 +229,8 @@ async def run_subtitle_burn_adapter(config: dict[str, Any], context: dict[str, A
     try:
         resolved_video = resolve_workflow_file_path(video_path, context, config)
         resolved_subtitle = resolve_workflow_file_path(subtitle_path, context, config)
-    except Exception as e:
-        return {"error": f"path_error: {e}", "burned": False}
+    except Exception:
+        return {"error": "path_error", "burned": False}
 
     font_size = int(config.get("font_size", 24))
     position = config.get("position", "bottom")
@@ -257,6 +257,6 @@ async def run_subtitle_burn_adapter(config: dict[str, Any], context: dict[str, A
 
         return {"output_path": output_path, "burned": True}
 
-    except Exception as e:
-        logger.exception(f"Subtitle burn error: {e}")
-        return {"error": str(e), "burned": False}
+    except Exception:
+        logger.exception("Subtitle burn error")
+        return {"error": "subtitle_burn_error", "burned": False}

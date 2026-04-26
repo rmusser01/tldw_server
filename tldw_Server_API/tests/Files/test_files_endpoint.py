@@ -7,8 +7,10 @@ from pathlib import Path
 from datetime import datetime, timedelta, timezone
 
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
+from tldw_Server_API.app.api.v1.endpoints import files as files_endpoint
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.config import settings
 from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
@@ -18,6 +20,27 @@ from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 pytestmark = pytest.mark.integration
 
 BASE_OPTIONS = {"persist": True}
+
+
+_FILES_SENSITIVE_MARKERS = (
+    "files path leaked",
+    "local-export-dir",
+    "777",
+)
+
+
+class _LoggerStub:
+    def __init__(self):
+        self.errors: list[tuple[str, tuple[object, ...], dict[str, object]]] = []
+
+    def error(self, message: str, *args: object, **kwargs: object) -> None:
+        self.errors.append((message, args, kwargs))
+
+
+class _UnresolvableBaseDir:
+    def resolve(self, *, strict: bool = False):
+        raise RuntimeError("files path leaked local-export-dir 777")
+
 
 @pytest.fixture()
 def client_with_user(monkeypatch):
@@ -66,6 +89,26 @@ def client_with_user(monkeypatch):
                 del settings.USER_DB_BASE_DIR
             except AttributeError:
                 pass
+
+
+def test_resolve_export_path_sanitizes_base_dir_failure_log(monkeypatch):
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(files_endpoint, "logger", logger_stub)
+    monkeypatch.setattr(
+        files_endpoint.DatabasePaths,
+        "get_user_temp_outputs_dir",
+        lambda _user_id: _UnresolvableBaseDir(),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        files_endpoint._resolve_export_path_for_user(777, "export.md")
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "storage_unavailable"
+    assert logger_stub.errors == [("files: failed to resolve temp outputs base dir", (), {})]
+    rendered = " ".join([logger_stub.errors[0][0], *(str(arg) for arg in logger_stub.errors[0][1])])
+    for marker in _FILES_SENSITIVE_MARKERS:
+        assert marker not in rendered
 
 
 def test_create_and_export_markdown_table(client_with_user):

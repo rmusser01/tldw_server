@@ -109,6 +109,31 @@ def test_websearch_aggregate_requires_llm_config(client_with_user: TestClient):
     assert "aggregate=true requires" in detail
 
 
+def test_websearch_sanitizes_generic_failure(
+    client_with_user: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    from tldw_Server_API.app.api.v1.endpoints import research as research_module
+
+    def fake_generate_and_search(question, params):
+        raise RuntimeError("search backend exploded")
+
+    monkeypatch.setattr(research_module, "generate_and_search", fake_generate_and_search)
+
+    resp = client_with_user.post(
+        "/api/v1/research/websearch",
+        json={
+            "query": "what is the capital of france",
+            "engine": "google",
+            "result_count": 3,
+            "aggregate": False,
+        },
+    )
+
+    assert resp.status_code == 500
+    assert resp.json()["detail"] == "Websearch failed"
+
+
 def test_websearch_fatal_phase1_error_returns_502(
     client_with_user: TestClient,
     monkeypatch: pytest.MonkeyPatch,
@@ -138,7 +163,8 @@ def test_websearch_fatal_phase1_error_returns_502(
     )
 
     assert resp.status_code == 502
-    assert "provider failed" in resp.json()["detail"]
+    assert resp.json()["detail"] == "Websearch failed"
+    assert "provider failed" not in resp.text
 
 
 def test_websearch_aggregate_fatal_phase1_error_returns_502(
@@ -175,7 +201,8 @@ def test_websearch_aggregate_fatal_phase1_error_returns_502(
     )
 
     assert resp.status_code == 502
-    assert "provider failed" in resp.json()["detail"]
+    assert resp.json()["detail"] == "Websearch failed"
+    assert "provider failed" not in resp.text
 
 
 def test_websearch_partial_provider_warning_with_results_returns_200(

@@ -1661,7 +1661,11 @@ def perform_websearch(search_engine, search_query, content_country, search_lang,
         return web_search_results_dict
 
     except _WEBSEARCH_NONCRITICAL_EXCEPTIONS as e:
-        return {"processing_error": f"Error performing web search: {str(e)}"}
+        error_text = str(e)
+        if error_text.startswith("Blocked by outbound policy:"):
+            return {"processing_error": f"Error performing web search: {error_text}"}
+        logging.error("Error performing web search")
+        return {"processing_error": "Error performing web search"}
 
 
 def test_perform_websearch_google():
@@ -2741,8 +2745,9 @@ def search_web_searx(
             params['format'] = 'json'
         search_url = f"{parsed_url.scheme}://{parsed_url.netloc}{parsed_url.path}?{urlencode(params)}"
         logging.info(f"Search URL: {search_url}")
-    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS as e:
-        return {"error": f"Invalid URL configuration: {str(e)}"}
+    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS:
+        logging.error("Invalid URL configuration for Searx search")
+        return {"error": "Invalid URL configuration."}
 
     # Perform the search request
     try:
@@ -2795,7 +2800,7 @@ def search_web_searx(
 
     except (NetworkError, RetryExhaustedError) as e:
         logging.error(f"Error searching for content: {str(e)}")
-        return {"error": f"There was an error searching for content. {str(e)}"}
+        return {"error": "There was an error searching for content."}
 
 def test_search_searx():
     # Use a different Searx instance to avoid rate limiting
@@ -3057,7 +3062,7 @@ def search_web_tavily(search_query, result_count=10, site_whitelist=None, site_b
         data = fetch_json(method="POST", url=tavily_api_url, headers=headers, json=payload, timeout=15.0)
         return data
     except _WEBSEARCH_NONCRITICAL_EXCEPTIONS as e:
-        return {"error": f"There was an error searching for content. {str(e)}"}
+        return {"error": "There was an error searching for content."}
 
 
 def test_search_tavily():

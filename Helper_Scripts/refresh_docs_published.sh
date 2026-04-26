@@ -56,9 +56,6 @@ preserve_and_copy "$SRC_DIR/Evaluations" "$DEST_DIR/Evaluations"
 # Getting Started (canonical onboarding profiles)
 preserve_and_copy "$SRC_DIR/Getting_Started" "$DEST_DIR/Getting_Started"
 
-# Speech / STT-TTS
-preserve_and_copy "$SRC_DIR/STT-TTS" "$DEST_DIR/STT-TTS"
-
 # User Guides
 preserve_and_copy "$SRC_DIR/User_Guides" "$DEST_DIR/User_Guides"
 

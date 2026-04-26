@@ -33,6 +33,7 @@ from tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps import (
     require_project_access,
     require_project_write_access,
 )
+from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 
 # Local imports
 from tldw_Server_API.app.api.v1.schemas.prompt_studio_base import ListResponse, StandardResponse
@@ -77,7 +78,6 @@ router = APIRouter(
         429: {"description": "Rate limit exceeded"}
     }
 )
-
 ########################################################################################################################
 # Prompt CRUD Endpoints
 
@@ -459,22 +459,25 @@ async def create_prompt(
             data=PromptResponse(**prompt_record)
         )
 
-    except ConflictError:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Prompt with this name already exists in the project"
-        ) from None
-    except DatabaseError as e:
-        logger.error(f"Database error creating prompt: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to create prompt"
+    except ConflictError as e:
+        raise map_db_error_to_http(
+            e,
+            conflict_detail="Prompt with this name already exists in the project",
         ) from e
-    except InputError as e:
-        logger.warning(f"Prompt studio input error creating prompt: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=getattr(e, "safe_message", str(e)),
+    except (DatabaseError, InputError) as e:
+        log_message = "Prompt studio storage error creating prompt"
+        if isinstance(e, InputError):
+            logger.warning(
+                "{}: {}",
+                log_message,
+                getattr(e, "original_message", str(e)),
+            )
+        else:
+            logger.error(log_message)
+        raise map_db_error_to_http(
+            e,
+            default_detail="Failed to create prompt",
+            input_detail_attr="safe_message",
         ) from e
 
 @router.get(
@@ -545,17 +548,20 @@ async def list_prompts(
             metadata=result.get("pagination", {}),
         )
 
-    except DatabaseError as e:
-        logger.error(f"Database error listing prompts: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to list prompts"
-        ) from e
-    except InputError as e:
-        logger.warning(f"Prompt studio input error listing prompts: {getattr(e, 'original_message', str(e))}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=getattr(e, "safe_message", "Invalid input.")
+    except (DatabaseError, InputError) as e:
+        log_message = "Prompt studio storage error listing prompts"
+        if isinstance(e, InputError):
+            logger.warning(
+                "{}: {}",
+                log_message,
+                getattr(e, "original_message", str(e)),
+            )
+        else:
+            logger.error(log_message)
+        raise map_db_error_to_http(
+            e,
+            default_detail="Failed to list prompts",
+            input_detail_attr="safe_message",
         ) from e
 
 # Simple alias that mirrors the canonical list response shape
@@ -656,9 +662,9 @@ async def preview_prompt(
     except HTTPException:
         raise
     except InputError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=getattr(e, "safe_message", str(e)),
+        raise map_db_error_to_http(
+            e,
+            input_detail_attr="safe_message",
         ) from e
     except ValidationError as e:
         raise HTTPException(
@@ -734,17 +740,20 @@ async def get_prompt(
             data=PromptResponse(**prompt)
         )
 
-    except DatabaseError as e:
-        logger.error(f"Database error getting prompt: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to get prompt"
-        ) from e
-    except InputError as e:
-        logger.warning(f"Prompt studio input error getting prompt: {getattr(e, 'original_message', str(e))}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=getattr(e, "safe_message", "Invalid input.")
+    except (DatabaseError, InputError) as e:
+        log_message = "Prompt studio storage error getting prompt"
+        if isinstance(e, InputError):
+            logger.warning(
+                "{}: {}",
+                log_message,
+                getattr(e, "original_message", str(e)),
+            )
+        else:
+            logger.error(log_message)
+        raise map_db_error_to_http(
+            e,
+            default_detail="Failed to get prompt",
+            input_detail_attr="safe_message",
         ) from e
 
 @router.put(
@@ -900,17 +909,20 @@ async def update_prompt(
             data=PromptResponse(**new_prompt)
         )
 
-    except DatabaseError as e:
-        logger.error(f"Database error updating prompt: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to update prompt"
-        ) from e
-    except InputError as e:
-        logger.warning(f"Prompt studio input error updating prompt: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=getattr(e, "safe_message", str(e)),
+    except (DatabaseError, InputError) as e:
+        log_message = "Prompt studio storage error updating prompt"
+        if isinstance(e, InputError):
+            logger.warning(
+                "{}: {}",
+                log_message,
+                getattr(e, "original_message", str(e)),
+            )
+        else:
+            logger.error(log_message)
+        raise map_db_error_to_http(
+            e,
+            default_detail="Failed to update prompt",
+            input_detail_attr="safe_message",
         ) from e
 
 @router.get("/history/{prompt_id}", response_model=StandardResponse, openapi_extra={
@@ -951,17 +963,20 @@ async def get_prompt_history(
             data=versions
         )
 
-    except DatabaseError as e:
-        logger.error(f"Database error getting prompt history: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to get prompt history"
-        ) from e
-    except InputError as e:
-        logger.warning(f"Prompt studio input error getting prompt history: {getattr(e, 'original_message', str(e))}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=getattr(e, "safe_message", "Invalid input.")
+    except (DatabaseError, InputError) as e:
+        log_message = "Prompt studio storage error getting prompt history"
+        if isinstance(e, InputError):
+            logger.warning(
+                "{}: {}",
+                log_message,
+                getattr(e, "original_message", str(e)),
+            )
+        else:
+            logger.error(log_message)
+        raise map_db_error_to_http(
+            e,
+            default_detail="Failed to get prompt history",
+            input_detail_attr="safe_message",
         ) from e
 
 @router.post("/revert/{prompt_id}/{version}", response_model=StandardResponse, openapi_extra={
@@ -1013,15 +1028,18 @@ async def revert_prompt(
             data=PromptResponse(**new_prompt)
         )
 
-    except DatabaseError as e:
-        logger.error(f"Database error reverting prompt: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to revert prompt"
-        ) from e
-    except InputError as e:
-        logger.warning(f"Prompt studio input error reverting prompt: {getattr(e, 'original_message', str(e))}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=getattr(e, "safe_message", "Invalid input.")
+    except (DatabaseError, InputError) as e:
+        log_message = "Prompt studio storage error reverting prompt"
+        if isinstance(e, InputError):
+            logger.warning(
+                "{}: {}",
+                log_message,
+                getattr(e, "original_message", str(e)),
+            )
+        else:
+            logger.error(log_message)
+        raise map_db_error_to_http(
+            e,
+            default_detail="Failed to revert prompt",
+            input_detail_attr="safe_message",
         ) from e

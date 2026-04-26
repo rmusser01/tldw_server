@@ -143,6 +143,35 @@ def _make_principal(
     )
 
 
+class _LoggerStub:
+    def __init__(self) -> None:
+        self.warnings: list[str] = []
+
+    def warning(self, message: str, *args: Any, **kwargs: Any) -> None:
+        self.warnings.append(message.format(*args) if args else message)
+
+
+@pytest.mark.asyncio
+async def test_scheduler_admin_rescan_failure_log_is_sanitized(monkeypatch):
+    class _FailingScheduler:
+        async def _rescan_once(self) -> None:
+            raise RuntimeError("scheduler backend exploded at /private/scheduler.db")
+
+    logger = _LoggerStub()
+    monkeypatch.setattr(sched_mod, "logger", logger)
+    monkeypatch.setattr(sched_mod, "get_workflows_scheduler", lambda: _FailingScheduler())
+
+    with pytest.raises(sched_mod.HTTPException) as exc_info:
+        await sched_mod.admin_rescan(_principal=_make_principal())
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "Rescan failed"
+    assert logger.warnings == ["Admin rescan failed"]
+    warning_text = "\n".join(logger.warnings)
+    assert "scheduler backend exploded" not in warning_text
+    assert "/private/scheduler.db" not in warning_text
+
+
 @pytest.mark.asyncio
 async def test_scheduler_admin_rescan_forbidden_for_non_admin_without_claims(monkeypatch):
     principal = _make_principal(

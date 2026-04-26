@@ -12,6 +12,7 @@ from cachetools import LRUCache
 from fastapi import Depends, Header, HTTPException, Request, status
 from loguru import logger
 
+from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.api.v1.schemas.prompt_studio_base import SecurityConfig
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.config import settings
@@ -435,10 +436,7 @@ async def require_project_access(
 
     except DatabaseError as e:
         logger.error(f"Database error checking project access: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Database error"
-        ) from e
+        raise map_db_error_to_http(e, default_detail="Database error") from e
 
 async def require_project_write_access(
     project_id: int,

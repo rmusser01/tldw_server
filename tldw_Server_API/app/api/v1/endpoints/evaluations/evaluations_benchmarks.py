@@ -221,7 +221,7 @@ async def run_benchmark(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to run benchmark: {e}")
+        logger.error("Failed to run benchmark")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to run benchmark: {sanitize_error_message(e, 'benchmark run')}",

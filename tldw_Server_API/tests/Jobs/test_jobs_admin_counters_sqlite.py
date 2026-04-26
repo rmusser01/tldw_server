@@ -154,6 +154,50 @@ def test_batch_reschedule_moves_ready_to_scheduled(monkeypatch, tmp_path):
         conn.close()
 
 
+def test_batch_cancel_sanitizes_generic_failure(monkeypatch, tmp_path):
+    _env(monkeypatch, tmp_path)
+    from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
+    reset_settings()
+    from tldw_Server_API.app.main import app
+
+    def boom(self):
+        raise RuntimeError("jobs batch cancel backend exploded")
+
+    monkeypatch.setattr(JobManager, "_connect", boom)
+
+    headers = _get_api(app)
+    with TestClient(app, headers=headers) as client:
+        r = client.post(
+            "/api/v1/jobs/batch/cancel",
+            json={"domain": "chatbooks", "queue": "default", "job_type": "export", "dry_run": False},
+            headers={**headers, "X-Confirm": "true"},
+        )
+        assert r.status_code == 500
+        assert r.json()["detail"] == "Batch cancel failed"
+
+
+def test_batch_reschedule_sanitizes_generic_failure(monkeypatch, tmp_path):
+    _env(monkeypatch, tmp_path)
+    from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
+    reset_settings()
+    from tldw_Server_API.app.main import app
+
+    def boom(self):
+        raise RuntimeError("jobs batch reschedule backend exploded")
+
+    monkeypatch.setattr(JobManager, "_connect", boom)
+
+    headers = _get_api(app)
+    with TestClient(app, headers=headers) as client:
+        r = client.post(
+            "/api/v1/jobs/batch/reschedule",
+            json={"domain": "chatbooks", "queue": "default", "job_type": "export", "delay_seconds": 30, "dry_run": False},
+            headers={**headers, "X-Confirm": "true"},
+        )
+        assert r.status_code == 500
+        assert r.json()["detail"] == "Batch reschedule failed"
+
+
 def test_batch_requeue_quarantined_adjusts_counters(monkeypatch, tmp_path):
 
 

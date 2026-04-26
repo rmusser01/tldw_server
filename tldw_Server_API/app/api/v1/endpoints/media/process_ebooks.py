@@ -119,7 +119,7 @@ def _process_single_ebook(
             "input_ref": original_ref,
             "processing_source": str(ebook_path),
             "media_type": "ebook",
-            "error": f"Worker processing failed: {exc}",
+            "error": "Ebook processing failed",
             "content": None,
             "metadata": None,
             "chunks": None,
@@ -290,7 +290,7 @@ async def process_ebooks_endpoint(
                         )
                     )
                 else:
-                    error_detail = f"Download/preparation failed: {result}"
+                    error_detail = "Download/preparation failed"
                     batch["results"].append(
                         {
                             "status": "Error",
@@ -398,9 +398,7 @@ async def process_ebooks_endpoint(
                         exc,
                         exc_info=True,
                     )
-                    error_detail = (
-                        f"Task execution failed: {type(exc).__name__}: {exc}"
-                    )
+                    error_detail = "Ebook processing failed"
                     res = {
                         "status": "Error",
                         "input_ref": original_ref,

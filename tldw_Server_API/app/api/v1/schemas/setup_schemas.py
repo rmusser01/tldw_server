@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -48,10 +48,6 @@ class AudioBundleProvisionRequest(BaseModel):
         False,
         description="If true, skip bundle installation only when all expected install steps were previously completed.",
     )
-    tts_choice: str | None = Field(
-        None,
-        description="Optional curated TTS choice for profiles that expose multiple curated TTS engines.",
-    )
 
 
 class AudioBundleVerificationRequest(BaseModel):
@@ -60,10 +56,6 @@ class AudioBundleVerificationRequest(BaseModel):
         DEFAULT_AUDIO_RESOURCE_PROFILE,
         min_length=1,
         description="Selected resource profile within the curated audio bundle.",
-    )
-    tts_choice: str | None = Field(
-        None,
-        description="Optional curated TTS choice for profiles that expose multiple curated TTS engines.",
     )
 
 
@@ -77,10 +69,6 @@ class AudioPackExportRequest(BaseModel):
     pack_name: str | None = Field(
         None,
         description="Optional JSON filename to write under the setup-managed audio_packs directory.",
-    )
-    tts_choice: str | None = Field(
-        None,
-        description="Optional curated TTS choice for profiles that expose multiple curated TTS engines.",
     )
 
     @model_validator(mode="before")
@@ -169,42 +157,6 @@ class AudioBundleOperationResponse(BaseModel):
     tts_health: dict[str, Any] | None = None
     remediation_items: list[Any] = Field(default_factory=list)
     verified_at: str | None = None
-
-
-class OmniVoiceSetupStatusResponse(BaseModel):
-    provider: str = "omnivoice"
-    enabled: bool = False
-    runtime: str = "sidecar"
-    runtime_mode: str = "real"
-    model_id: str = "k2-fsa/OmniVoice"
-    source_checkout: str | None = None
-    source_checkout_exists: bool = False
-    runtime_installed: bool = False
-    missing_runtime_components: list[str] = Field(default_factory=list)
-    weights_cached: bool = False
-    weights_cache_path: str | None = None
-    python_path: str | None = None
-    runtime_path: str | None = None
-    logs_path: str | None = None
-    sidecar: dict[str, Any] | None = None
-
-
-class OmniVoiceSetupActionRequest(BaseModel):
-    action: Literal["predownload", "warmup"] = Field(
-        ...,
-        description="OmniVoice setup action to execute.",
-    )
-
-
-class OmniVoiceSetupActionResponse(BaseModel):
-    success: bool
-    provider: str = "omnivoice"
-    action: Literal["predownload", "warmup"]
-    status: str
-    detail: str | None = None
-    snapshot_path: str | None = None
-    health: dict[str, Any] | None = None
-    omnivoice: OmniVoiceSetupStatusResponse
 
 
 class AudioPackExportResponse(BaseModel):

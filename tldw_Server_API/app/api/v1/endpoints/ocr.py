@@ -254,5 +254,6 @@ def preload_points_transformers() -> dict[str, Any]:
         )
         _load_transformers()
         return {"status": "ok", "mode": "transformers"}
-    except _OCR_NONCRITICAL_EXCEPTIONS as e:
-        return {"status": "error", "error": str(e)}
+    except _OCR_NONCRITICAL_EXCEPTIONS:
+        logging.error("POINTS transformers preload failed")
+        return {"status": "error", "error": "POINTS OCR preload failed"}

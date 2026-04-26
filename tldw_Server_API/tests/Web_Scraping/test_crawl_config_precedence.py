@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+from fastapi import HTTPException
 
 import tldw_Server_API.app.services.enhanced_web_scraping_service as enhanced_svc_mod
 from tldw_Server_API.app.services.enhanced_web_scraping_service import WebScrapingService
@@ -117,6 +118,30 @@ async def test_enhanced_service_request_values_override_config(monkeypatch):
     assert crawl_cfg.get("strategy_source") == "request"
     assert crawl_cfg.get("include_external_source") == "request"
     assert crawl_cfg.get("score_threshold_source") == "request"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_enhanced_service_sanitizes_unexpected_runtime_error(monkeypatch):
+    svc = WebScrapingService()
+    svc._initialized = True
+
+    async def raise_scraper_error(*args, **kwargs):
+        raise RuntimeError("enhanced scraper leaked /private/web/cache/token")
+
+    monkeypatch.setattr(enhanced_svc_mod, "load_and_log_configs", lambda: _cfg())
+    monkeypatch.setattr(svc, "_scrape_by_url_level", raise_scraper_error)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await svc.process_web_scraping_task(
+            scrape_method="URL Level",
+            url_input="https://example.com",
+            url_level=2,
+            mode="ephemeral",
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "Enhanced web scraping task failed"
 
 
 @pytest.mark.unit

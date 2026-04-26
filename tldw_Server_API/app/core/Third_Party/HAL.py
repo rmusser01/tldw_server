@@ -123,8 +123,10 @@ def search(
             if isinstance(d, dict):
                 items.append(_normalize_doc(d))
         return items, total, None
-    except Exception as e:
-        return None, 0, f"HAL error: {str(e)}"
+    except TimeoutError:
+        return None, 0, "HAL request timed out."
+    except Exception:
+        return None, 0, "HAL request failed."
 
 
 def by_docid(docid: str, fl: str | None = None, scope: str | None = None) -> tuple[dict[str, Any] | None, str | None]:
@@ -135,8 +137,10 @@ def by_docid(docid: str, fl: str | None = None, scope: str | None = None) -> tup
         if items:
             return items[0], None
         return None, None
-    except Exception as e:
-        return None, f"HAL error: {str(e)}"
+    except TimeoutError:
+        return None, "HAL request timed out."
+    except Exception:
+        return None, "HAL request failed."
 
 
 def raw(params: dict[str, Any], scope: str | None = None) -> tuple[bytes | None, str | None, str | None]:
@@ -155,8 +159,10 @@ def raw(params: dict[str, Any], scope: str | None = None) -> tuple[bytes | None,
         r = fetch(method="GET", url=url, params=params, headers={"Accept": accept}, timeout=25)
         ct = r.headers.get("content-type") or "application/octet-stream"
         return r.content, ct.split(";")[0], None
-    except Exception as e:
-        return None, None, f"HAL error: {str(e)}"
+    except TimeoutError:
+        return None, None, "HAL request timed out."
+    except Exception:
+        return None, None, "HAL request failed."
 
 
 def extract_pdf_from_raw_doc(doc: dict[str, Any]) -> str | None:

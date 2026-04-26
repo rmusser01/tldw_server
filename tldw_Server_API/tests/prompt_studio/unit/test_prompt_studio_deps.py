@@ -2,9 +2,11 @@ import types
 from unittest.mock import MagicMock
 
 import pytest
+from fastapi import HTTPException, status
 
 from tldw_Server_API.app.api.v1.API_Deps import prompt_studio_deps as deps
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
+from tldw_Server_API.app.core.DB_Management.PromptStudioDatabase import DatabaseError
 
 
 @pytest.fixture(autouse=True)
@@ -94,3 +96,20 @@ def test_backend_signature_in_cache_includes_connection(monkeypatch, tmp_path):
     third = deps._get_or_create_prompt_studio_db("user-123", "client-xyz")
     assert create_mock.call_count == 2
     assert third is instance_a
+
+
+@pytest.mark.asyncio
+async def test_require_project_access_maps_database_error():
+    class BrokenProjectDb:
+        def get_project(self, project_id: int):
+            raise DatabaseError(f"project {project_id} lookup failed")
+
+    with pytest.raises(HTTPException) as exc_info:
+        await deps.require_project_access(
+            project_id=42,
+            user_context={"user_id": "user-1", "is_admin": False},
+            db=BrokenProjectDb(),
+        )
+
+    assert exc_info.value.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+    assert exc_info.value.detail == "Database error"

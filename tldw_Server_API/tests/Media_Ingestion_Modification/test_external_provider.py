@@ -232,7 +232,9 @@ class TestExternalProvider:
 
         with patch(
             'tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_External_Provider.afetch',
-            new=AsyncMock(side_effect=NetworkError("Request timeout")),
+            new=AsyncMock(
+                side_effect=NetworkError("Request timeout at /private/provider/audio.wav")
+            ),
         ) as mock_afetch:
             result = await transcribe_with_external_provider_async(
                 audio_data,
@@ -240,9 +242,91 @@ class TestExternalProvider:
                 config=provider_config
             )
 
-        assert "[Error:" in result
-        assert "timeout" in result.lower()
+        assert result == "[Error: External transcription request failed]"
+        assert "Request timeout" not in result
+        assert "/private/provider/audio.wav" not in result
         assert mock_afetch.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_invalid_config_error_is_sanitized(self, sample_audio, provider_config):
+        """Invalid provider config should not expose validation internals in transcripts."""
+        from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_External_Provider import (
+            transcribe_with_external_provider_async
+        )
+
+        audio_data, sample_rate = sample_audio
+        provider_config.base_url = "/private/provider/config.txt"
+
+        result = await transcribe_with_external_provider_async(
+            audio_data,
+            sample_rate,
+            config=provider_config,
+        )
+
+        assert result == "[Error: Invalid external provider configuration]"
+        assert "Invalid base URL" not in result
+        assert "/private/provider/config.txt" not in result
+
+    @pytest.mark.asyncio
+    async def test_api_error_response_body_is_sanitized(self, sample_audio, provider_config):
+        """Provider error bodies should not be copied into transcript output."""
+        from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_External_Provider import (
+            transcribe_with_external_provider_async
+        )
+
+        audio_data, sample_rate = sample_audio
+        mock_response = _DummyResp(
+            500,
+            text="backend exploded at /private/provider/trace.log",
+            json_data={
+                "error": {
+                    "message": "backend exploded at /private/provider/trace.log",
+                }
+            },
+        )
+
+        with patch(
+            'tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_External_Provider.afetch',
+            new=AsyncMock(return_value=mock_response),
+        ):
+            result = await transcribe_with_external_provider_async(
+                audio_data,
+                sample_rate,
+                config=provider_config,
+            )
+
+        assert result == "[Error: API returned 500]"
+        assert "backend exploded" not in result
+        assert "/private/provider/trace.log" not in result
+
+    @pytest.mark.asyncio
+    async def test_async_runtime_error_sanitizes_internal_message(
+        self,
+        sample_audio,
+        provider_config,
+        monkeypatch,
+    ):
+        """Unexpected async processing failures should not leak backend details."""
+        from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import (
+            Audio_Transcription_External_Provider as external_provider,
+        )
+
+        audio_data, sample_rate = sample_audio
+
+        def _fail_write(*_args, **_kwargs):
+            raise RuntimeError("audio encoder failed at /private/provider/encode.wav")
+
+        monkeypatch.setattr(external_provider.sf, "write", _fail_write)
+
+        result = await external_provider.transcribe_with_external_provider_async(
+            audio_data,
+            sample_rate,
+            config=provider_config,
+        )
+
+        assert result == "[Error: External transcription failed]"
+        assert "audio encoder failed" not in result
+        assert "/private/provider/encode.wav" not in result
 
     @pytest.mark.asyncio
     async def test_different_response_formats(self, sample_audio, provider_config):
@@ -324,6 +408,38 @@ class TestExternalProvider:
 
         assert result == 'Sync wrapper result'
 
+    def test_synchronous_wrapper_sanitizes_runtime_errors(
+        self,
+        sample_audio,
+        provider_config,
+        monkeypatch,
+    ):
+        """Synchronous wrapper failures should not leak internal exception text."""
+        from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import (
+            Audio_Transcription_External_Provider as external_provider,
+        )
+
+        audio_data, sample_rate = sample_audio
+
+        def _fail_async(*_args, **_kwargs):
+            raise RuntimeError("event loop failed at /private/provider/loop")
+
+        monkeypatch.setattr(
+            external_provider,
+            "transcribe_with_external_provider_async",
+            _fail_async,
+        )
+
+        result = external_provider.transcribe_with_external_provider(
+            audio_data,
+            sample_rate,
+            config=provider_config,
+        )
+
+        assert result == "[Error: External transcription failed]"
+        assert "event loop failed" not in result
+        assert "/private/provider/loop" not in result
+
     @pytest.mark.asyncio
     async def test_with_file_path(self, provider_config):
         """Test transcription with file path input."""
@@ -378,6 +494,33 @@ class TestExternalProvider:
         assert result['result'] == 'Test successful'
         assert 'elapsed_time' in result
         assert result['elapsed_time'] >= 0
+
+    @pytest.mark.asyncio
+    async def test_provider_test_function_sanitizes_runtime_errors(
+        self,
+        provider_config,
+        monkeypatch,
+    ):
+        """Provider self-test failures should not expose backend details."""
+        from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import (
+            Audio_Transcription_External_Provider as external_provider,
+        )
+
+        async def fail_transcription(*_args, **_kwargs):
+            raise RuntimeError("provider self-test failed at /private/provider/test.wav")
+
+        monkeypatch.setattr(
+            external_provider,
+            "transcribe_with_external_provider_async",
+            fail_transcription,
+        )
+
+        result = await external_provider.test_external_provider(config=provider_config)
+
+        assert result["success"] is False
+        assert result["error"] == "External provider test failed"
+        assert "provider self-test failed" not in result["error"]
+        assert "/private/provider/test.wav" not in result["error"]
 
 
 @pytest.mark.integration

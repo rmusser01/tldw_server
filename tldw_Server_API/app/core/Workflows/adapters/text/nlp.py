@@ -118,9 +118,9 @@ Text:
 
         return {"keywords": keywords, "scored_keywords": scored_keywords, "method": "llm"}
 
-    except Exception as e:
-        logger.exception(f"Keyword extract error: {e}")
-        return {"keywords": [], "scored_keywords": [], "error": str(e)}
+    except Exception:
+        logger.exception("Keyword extract error")
+        return {"keywords": [], "scored_keywords": [], "error": "keyword_extract_error"}
 
 
 @registry.register(
@@ -194,9 +194,9 @@ Text: {text[:3000]}"""
                 return {"sentiment": "negative", "score": -0.7, "confidence": 0.6}
             return {"sentiment": "neutral", "score": 0.0, "confidence": 0.5}
 
-    except Exception as e:
-        logger.exception(f"Sentiment analyze error: {e}")
-        return {"sentiment": "neutral", "score": 0.0, "confidence": 0.0, "error": str(e)}
+    except Exception:
+        logger.exception("Sentiment analyze error")
+        return {"sentiment": "neutral", "score": 0.0, "confidence": 0.0, "error": "sentiment_analyze_error"}
 
 
 @registry.register(
@@ -254,9 +254,9 @@ async def run_language_detect_adapter(config: dict[str, Any], context: dict[str,
         }
     except ImportError:
         return {"language": "unknown", "language_name": "Unknown", "confidence": 0.0, "error": "langdetect_not_installed"}
-    except Exception as e:
-        logger.exception(f"Language detect error: {e}")
-        return {"language": "unknown", "language_name": "Unknown", "confidence": 0.0, "error": str(e)}
+    except Exception:
+        logger.exception("Language detect error")
+        return {"language": "unknown", "language_name": "Unknown", "confidence": 0.0, "error": "language_detect_error"}
 
 
 @registry.register(
@@ -334,9 +334,9 @@ Text:
         topics = [{"label": line.strip(), "keywords": []} for line in result_text.split("\n") if line.strip()]
         return {"topics": topics[:num_topics]}
 
-    except Exception as e:
-        logger.exception(f"Topic model error: {e}")
-        return {"topics": [], "error": str(e)}
+    except Exception:
+        logger.exception("Topic model error")
+        return {"topics": [], "error": "topic_model_error"}
 
 
 @registry.register(
@@ -434,9 +434,9 @@ Example:
             "text_length": len(text),
         }
 
-    except Exception as e:
-        logger.exception(f"Entity extract adapter error: {e}")
-        return {"error": f"entity_extract_error:{e}", "entities": {}, "total_count": 0}
+    except Exception:
+        logger.exception("Entity extract adapter error")
+        return {"error": "entity_extract_error", "entities": {}, "total_count": 0}
 
 
 @registry.register(

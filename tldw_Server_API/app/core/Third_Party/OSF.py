@@ -87,8 +87,10 @@ def search_preprints(
         if total == 0:
             total = len(items)
         return items, total, None
-    except Exception as e:
-        return None, 0, f"OSF error: {str(e)}"
+    except TimeoutError:
+        return None, 0, "OSF request timed out."
+    except Exception:
+        return None, 0, "OSF request failed."
 
 
 def get_preprint_by_id(osf_id: str) -> tuple[dict[str, Any] | None, str | None]:
@@ -104,8 +106,10 @@ def get_preprint_by_id(osf_id: str) -> tuple[dict[str, Any] | None, str | None]:
         if isinstance(data.get("data"), dict):
             return _normalize_item(data["data"]), None
         return None, None
-    except Exception as e:
-        return None, f"OSF error: {str(e)}"
+    except TimeoutError:
+        return None, "OSF preprint request timed out."
+    except Exception:
+        return None, "OSF preprint request failed."
     finally:
         try:
             if r is not None:
@@ -139,8 +143,10 @@ def get_preprint_by_doi(doi: str) -> tuple[dict[str, Any] | None, str | None]:
         if items2:
             return _normalize_item(items2[0]), None
         return None, None
-    except Exception as e:
-        return None, f"OSF error: {str(e)}"
+    except TimeoutError:
+        return None, "OSF DOI request timed out."
+    except Exception:
+        return None, "OSF DOI request failed."
 
 
 def get_primary_file_download_url(osf_id: str) -> tuple[str | None, str | None]:
@@ -172,8 +178,10 @@ def get_primary_file_download_url(osf_id: str) -> tuple[str | None, str | None]:
         links = (fdata.get("data") or {}).get("links") or {}
         dl_url = links.get("download") or links.get("meta", {}).get("download")
         return (dl_url or None), None
-    except Exception as e:
-        return None, f"OSF error: {str(e)}"
+    except TimeoutError:
+        return None, "OSF primary file request timed out."
+    except Exception:
+        return None, "OSF primary file request failed."
 
 
 def raw_preprints(params: dict[str, Any]) -> tuple[bytes | None, str | None, str | None]:
@@ -188,8 +196,10 @@ def raw_preprints(params: dict[str, Any]) -> tuple[bytes | None, str | None, str
             return None, None, f"OSF HTTP error: {r.status_code}"
         ct = r.headers.get("content-type") or "application/json"
         return r.content, ct.split(";")[0], None
-    except Exception as e:
-        return None, None, f"OSF error: {str(e)}"
+    except TimeoutError:
+        return None, None, "OSF raw preprints request timed out."
+    except Exception:
+        return None, None, "OSF raw preprints request failed."
 
 
 def raw_by_id(osf_id: str) -> tuple[bytes | None, str | None, str | None]:
@@ -202,5 +212,7 @@ def raw_by_id(osf_id: str) -> tuple[bytes | None, str | None, str | None]:
             return None, None, f"OSF HTTP error: {r.status_code}"
         ct = r.headers.get("content-type") or "application/json"
         return r.content, ct.split(";")[0], None
-    except Exception as e:
-        return None, None, f"OSF error: {str(e)}"
+    except TimeoutError:
+        return None, None, "OSF raw preprint request timed out."
+    except Exception:
+        return None, None, "OSF raw preprint request failed."

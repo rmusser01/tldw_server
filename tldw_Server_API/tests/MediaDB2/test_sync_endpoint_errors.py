@@ -22,6 +22,7 @@ from tldw_Server_API.app.core.Sync.Sync_Client import (
 from tldw_Server_API.app.core.Sync.sync_contract import (
     ALLOWED_SYNC_SEND_ENTITIES as CONTRACT_ALLOWED_SYNC_SEND_ENTITIES,
 )
+from tldw_Server_API.app.core.DB_Management.media_db.errors import DatabaseError
 
 #
 #######################################################################################################################
@@ -204,6 +205,28 @@ async def test_send_changes_sanitizes_unexpected_exception(memory_db_factory, mo
     assert exc_info.value.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
     assert exc_info.value.detail == "Internal server error while retrieving sync changes."
     assert "raw backend failure text" not in str(exc_info.value.detail)
+
+
+@pytest.mark.asyncio
+async def test_send_changes_preserves_database_error_detail(memory_db_factory, monkeypatch):
+    """DatabaseError should keep the dedicated /sync/get 500 detail."""
+    db = memory_db_factory("server-test-client")
+
+    async def _fake_to_thread(*_args, **_kwargs):
+        raise DatabaseError("sync reader failed")
+
+    monkeypatch.setattr(sync_endpoints.asyncio, "to_thread", _fake_to_thread)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await sync_endpoints.send_changes_to_client(
+            client_id="client_sender_1",
+            since_change_id=0,
+            user_id=_DummyUser("sync-user"),
+            db=db,
+        )
+
+    assert exc_info.value.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+    assert exc_info.value.detail == "Failed to retrieve changes from database."
 
 
 @pytest.mark.asyncio

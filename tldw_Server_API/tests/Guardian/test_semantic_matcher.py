@@ -8,6 +8,7 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
+import tldw_Server_API.app.core.Moderation.semantic_matcher as semantic_module
 from tldw_Server_API.app.core.Moderation.semantic_matcher import (
     SemanticMatcher,
     _cosine_similarity,
@@ -100,6 +101,24 @@ class TestSemanticMatch:
             assert matched is False
             assert score == 0.0
 
+    def test_embedding_failure_log_sanitizes_backend_details(self):
+        matcher = SemanticMatcher()
+        messages: list[str] = []
+
+        with patch(
+            "tldw_Server_API.app.core.Embeddings.Embeddings_Server.Embeddings_Create.create_embedding",
+            side_effect=RuntimeError("embedding backend failed at /private/semantic-embed.db"),
+        ):
+            sink_id = semantic_module.logger.add(lambda message: messages.append(str(message)), level="DEBUG")
+            try:
+                assert matcher._embed_text("sensitive prompt") is None
+            finally:
+                semantic_module.logger.remove(sink_id)
+
+        joined = "\n".join(messages)
+        assert "Embedding failed" in joined
+        assert "semantic-embed.db" not in joined
+
     def test_reference_caching(self):
         """Reference embeddings should be cached."""
         matcher = SemanticMatcher()
@@ -177,6 +196,27 @@ class TestLLMClassification:
             )
             assert matched is False
             assert conf == 0.0
+
+    def test_llm_failure_log_sanitizes_backend_details(self):
+        matcher = SemanticMatcher()
+        messages: list[str] = []
+
+        with patch(
+            "tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call",
+            side_effect=RuntimeError("llm backend failed at /private/semantic-llm.db"),
+        ):
+            sink_id = semantic_module.logger.add(lambda message: messages.append(str(message)), level="DEBUG")
+            try:
+                matched, category, conf = matcher.classify_with_llm("test text", ["violence"])
+            finally:
+                semantic_module.logger.remove(sink_id)
+
+        joined = "\n".join(messages)
+        assert matched is False
+        assert category is None
+        assert conf == 0.0
+        assert "LLM classification failed" in joined
+        assert "semantic-llm.db" not in joined
 
     def test_clear_cache(self):
         """clear_cache should reset reference cache."""

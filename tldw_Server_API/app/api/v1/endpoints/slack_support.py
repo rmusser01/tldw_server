@@ -2,22 +2,18 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-import json
 import os
 import secrets
 import threading
 import time
-from datetime import datetime, timedelta, timezone
 from typing import Any
-from urllib.parse import parse_qs, urlencode
 
 from fastapi import HTTPException, Request, status
 from fastapi.responses import JSONResponse
 from loguru import logger
 
-from tldw_Server_API.app.api.v1.endpoints._in_memory_limits import SlidingWindowLimiter, TTLReceiptStore
 from tldw_Server_API.app.api.v1.API_Deps.jobs_deps import get_job_manager as _global_get_job_manager
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
+from tldw_Server_API.app.api.v1.endpoints._in_memory_limits import SlidingWindowLimiter, TTLReceiptStore
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 from tldw_Server_API.app.core.AuthNZ.repos.byok_oauth_state_repo import AuthnzByokOAuthStateRepo
 from tldw_Server_API.app.core.AuthNZ.repos.user_provider_secrets_repo import AuthnzUserProviderSecretsRepo
@@ -25,14 +21,11 @@ from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import (
     decrypt_byok_payload,
     dumps_envelope,
     encrypt_byok_payload,
-    key_hint_for_api_key,
     loads_envelope,
 )
 from tldw_Server_API.app.core.http_client import RetryPolicy as _RetryPolicy
 from tldw_Server_API.app.core.http_client import afetch as _http_afetch
 from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter
-
-
 
 _EVENT_RECEIPTS = TTLReceiptStore()
 _COMMAND_RECEIPTS = TTLReceiptStore()
@@ -170,8 +163,8 @@ def _decrypt_slack_payload(encrypted_blob: str) -> dict[str, Any] | None:
         return None
     try:
         payload = decrypt_byok_payload(loads_envelope(encrypted_blob))
-    except Exception as exc:
-        logger.warning("Failed to decrypt Slack installation payload: {}", exc)
+    except Exception:
+        logger.warning("Failed to decrypt Slack installation payload")
         return None
     return payload if isinstance(payload, dict) else None
 
@@ -231,10 +224,6 @@ async def _slack_oauth_token_exchange(*, token_url: str, form_data: dict[str, An
 
         if status_code < 200 or status_code >= 300:
             detail = "Slack OAuth token exchange failed"
-            if payload:
-                provider_error = _coerce_nonempty_string(payload.get("error"))
-                if provider_error:
-                    detail = f"{detail}: {provider_error}"
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail=detail,
@@ -268,8 +257,8 @@ def _metric_labels(**labels: Any) -> dict[str, str]:
 def _emit_slack_counter(metric_name: str, **labels: Any) -> None:
     try:
         log_counter(metric_name, labels=_metric_labels(**labels))
-    except Exception as exc:
-        logger.debug("Failed to emit Slack metric {}: {}", metric_name, exc)
+    except Exception:
+        logger.debug("Failed to emit Slack metric")
 
 
 def _extract_timestamp(header_value: str | None) -> int | None:
@@ -281,7 +270,9 @@ def _extract_timestamp(header_value: str | None) -> int | None:
         return None
 
 
-def _verify_slack_signature(raw_body: bytes, timestamp_header: str | None, signature_header: str | None) -> tuple[bool, str | None]:
+def _verify_slack_signature(
+    raw_body: bytes, timestamp_header: str | None, signature_header: str | None
+) -> tuple[bool, str | None]:
     secret = _signing_secret()
     if not secret:
         logger.warning("Slack signing secret is not configured")
@@ -298,7 +289,7 @@ def _verify_slack_signature(raw_body: bytes, timestamp_header: str | None, signa
     if not signature_header or not signature_header.startswith("v0="):
         return False, "invalid_signature"
 
-    base = f"v0:{timestamp}:".encode("utf-8") + raw_body
+    base = f"v0:{timestamp}:".encode() + raw_body
     expected = "v0=" + hmac.new(secret.encode("utf-8"), base, hashlib.sha256).hexdigest()
     if not hmac.compare_digest(expected, signature_header.strip()):
         return False, "invalid_signature"
@@ -453,7 +444,9 @@ def _set_slack_policy(workspace_id: str | None, payload: dict[str, Any] | None) 
     return cleaned_workspace, normalized
 
 
-def _resolve_slack_actor_id(policy: dict[str, Any], slack_user_id: str | None) -> tuple[str | None, dict[str, Any] | None]:
+def _resolve_slack_actor_id(
+    policy: dict[str, Any], slack_user_id: str | None
+) -> tuple[str | None, dict[str, Any] | None]:
     requested_user_id = _coerce_nonempty_string(slack_user_id)
     user_mappings = policy.get("user_mappings") if isinstance(policy.get("user_mappings"), dict) else {}
     mapped_user = user_mappings.get(requested_user_id) if requested_user_id else None
@@ -488,8 +481,8 @@ def _evaluate_slack_policy(
                 "message": f"Command '{action}' is not allowed for this workspace",
             }
 
-    deny_channels = {item for item in _normalize_string_list(policy.get("channel_denylist"))}
-    allow_channels = {item for item in _normalize_string_list(policy.get("channel_allowlist"))}
+    deny_channels = set(_normalize_string_list(policy.get("channel_denylist")))
+    allow_channels = set(_normalize_string_list(policy.get("channel_allowlist")))
     if channel_id and channel_id in deny_channels:
         return {
             "status_code": status.HTTP_403_FORBIDDEN,
@@ -534,7 +527,9 @@ def _evaluate_slack_policy(
     return None
 
 
-def _slack_policy_error_response(policy_error: dict[str, Any], *, team_id: str | None, action: str | None) -> JSONResponse:
+def _slack_policy_error_response(
+    policy_error: dict[str, Any], *, team_id: str | None, action: str | None
+) -> JSONResponse:
     status_code = int(policy_error.get("status_code") or status.HTTP_403_FORBIDDEN)
     response_payload = {k: v for k, v in policy_error.items() if k != "status_code"}
     headers: dict[str, str] = {}
@@ -561,6 +556,7 @@ def _slack_policy_error_response(policy_error: dict[str, Any], *, team_id: str |
         response_payload.get("error"),
     )
     return JSONResponse(status_code=status_code, headers=headers, content={"ok": False, **response_payload})
+
 
 def _slack_action_route(action: str) -> str:
     routes = {

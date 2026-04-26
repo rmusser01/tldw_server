@@ -250,7 +250,7 @@ async def run_embeddings_abtest(
         except _EMB_ABTEST_NONCRITICAL_EXCEPTIONS as _e:
             run_error = _e
             with contextlib.suppress(_EMB_ABTEST_NONCRITICAL_EXCEPTIONS):
-                logger.warning(f"A/B test synchronous run failed: {_e}")
+                logger.warning("A/B test synchronous run failed")
         try:
             if idempotency_key:
                 db.record_idempotency("emb_abtest_run", idempotency_key, test_id, identity.created_by)
@@ -299,7 +299,7 @@ async def run_embeddings_abtest(
             target_model="embeddings_abtest",
         )
     except _EMB_ABTEST_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error(f"Failed to enqueue A/B test job {test_id}: {exc}")
+        logger.error("Failed to enqueue A/B test job")
         raise HTTPException(status_code=500, detail="Failed to enqueue A/B test job") from exc
 
     logger.info(f"A/B test enqueued via Jobs: {test_id}")

@@ -11,7 +11,7 @@ def test_omnivoice_installer_prefers_local_checkout(tmp_path):
     local_checkout = tmp_path / "OmniVoice"
     local_checkout.mkdir()
 
-    assert resolve_source_checkout(default_probe=local_checkout) == local_checkout.resolve()  # nosec B101
+    assert resolve_source_checkout(default_probe=local_checkout) == local_checkout.resolve()
 
 
 @pytest.mark.unit
@@ -21,11 +21,11 @@ def test_omnivoice_installer_builds_dedicated_runtime_layout():
     repo_root = Path(__file__).resolve().parents[4]
     layout = build_runtime_layout(Path("models") / "omnivoice_sidecar", repo_root=repo_root)
 
-    assert layout.provider_name == "omnivoice"  # nosec B101
-    assert layout.venv_dir.relative_to(repo_root).as_posix() == "models/omnivoice_sidecar/.venv"  # nosec B101
-    assert layout.runtime_dir.relative_to(repo_root).as_posix() == "models/omnivoice_sidecar/runtime"  # nosec B101
-    assert layout.logs_dir.relative_to(repo_root).as_posix() == "models/omnivoice_sidecar/logs"  # nosec B101
-    assert layout.interpreter_path.relative_to(repo_root).as_posix() == "models/omnivoice_sidecar/.venv/bin/python"  # nosec B101
+    assert layout.provider_name == "omnivoice"
+    assert layout.venv_dir.relative_to(repo_root).as_posix() == "models/omnivoice_sidecar/.venv"
+    assert layout.runtime_dir.relative_to(repo_root).as_posix() == "models/omnivoice_sidecar/runtime"
+    assert layout.logs_dir.relative_to(repo_root).as_posix() == "models/omnivoice_sidecar/logs"
+    assert layout.interpreter_path.relative_to(repo_root).as_posix() == "models/omnivoice_sidecar/.venv/bin/python"
 
 
 @pytest.mark.unit
@@ -35,147 +35,9 @@ def test_omnivoice_installer_creates_runtime_layout(tmp_path):
     layout = build_runtime_layout(tmp_path / "models" / "omnivoice_sidecar", repo_root=tmp_path)
     create_runtime_layout(layout)
 
-    assert layout.runtime_base.is_dir()  # nosec B101
-    assert layout.runtime_dir.is_dir()  # nosec B101
-    assert layout.logs_dir.is_dir()  # nosec B101
-
-
-@pytest.mark.unit
-def test_omnivoice_installer_creates_posix_virtualenv_with_symlinks(tmp_path, monkeypatch):
-    import os
-
-    from Helper_Scripts.TTS_Installers import install_tts_omnivoice_sidecar as installer
-
-    created = {}
-
-    class _FakeBuilder:
-        def __init__(self, *, with_pip, symlinks):
-            created["with_pip"] = with_pip
-            created["symlinks"] = symlinks
-
-        def create(self, target):
-            created["target"] = Path(target)
-
-    monkeypatch.setattr(installer.venv, "EnvBuilder", _FakeBuilder)
-
-    venv_dir = tmp_path / ".venv"
-    installer.create_virtualenv(venv_dir)
-
-    assert created["with_pip"] is True  # nosec B101
-    assert created["symlinks"] is (os.name != "nt")  # nosec B101
-    assert created["target"] == venv_dir  # nosec B101
-
-
-@pytest.mark.unit
-def test_omnivoice_installer_archives_broken_virtualenv_before_recreate(tmp_path, monkeypatch):
-    from Helper_Scripts.TTS_Installers import install_tts_omnivoice_sidecar as installer
-
-    events = {}
-
-    class _FakeBuilder:
-        def __init__(self, *, with_pip, symlinks):
-            events["with_pip"] = with_pip
-            events["symlinks"] = symlinks
-
-        def create(self, target):
-            events["created_target"] = Path(target)
-
-    def _fake_archive(target, *, reason):
-        events["archived_target"] = Path(target)
-        events["archived_reason"] = reason
-        return target.with_name(f"{target.name}.{reason}-stub")
-
-    monkeypatch.setattr(installer, "is_virtualenv_interpreter_usable", lambda _path: False)
-    monkeypatch.setattr(installer, "archive_existing_virtualenv", _fake_archive)
-    monkeypatch.setattr(installer.venv, "EnvBuilder", _FakeBuilder)
-
-    venv_dir = tmp_path / ".venv"
-    venv_dir.mkdir()
-
-    installer.create_virtualenv(venv_dir)
-
-    assert events["archived_target"] == venv_dir  # nosec B101
-    assert events["archived_reason"] == "broken"  # nosec B101
-    assert events["with_pip"] is True  # nosec B101
-    assert events["created_target"] == venv_dir  # nosec B101
-
-
-@pytest.mark.unit
-def test_omnivoice_installer_recreate_flag_forces_virtualenv_rebuild(tmp_path, monkeypatch):
-    from Helper_Scripts.TTS_Installers import install_tts_omnivoice_sidecar as installer
-
-    events = {}
-
-    class _FakeBuilder:
-        def __init__(self, *, with_pip, symlinks):
-            events["with_pip"] = with_pip
-            events["symlinks"] = symlinks
-
-        def create(self, target):
-            events["created_target"] = Path(target)
-
-    def _fake_archive(target, *, reason):
-        events["archived_target"] = Path(target)
-        events["archived_reason"] = reason
-        return target.with_name(f"{target.name}.{reason}-stub")
-
-    monkeypatch.setattr(installer, "is_virtualenv_interpreter_usable", lambda _path: True)
-    monkeypatch.setattr(installer, "archive_existing_virtualenv", _fake_archive)
-    monkeypatch.setattr(installer.venv, "EnvBuilder", _FakeBuilder)
-
-    venv_dir = tmp_path / ".venv"
-    venv_dir.mkdir()
-
-    installer.create_virtualenv(venv_dir, recreate=True)
-
-    assert events["archived_target"] == venv_dir  # nosec B101
-    assert events["archived_reason"] == "recreate"  # nosec B101
-    assert events["with_pip"] is True  # nosec B101
-    assert events["created_target"] == venv_dir  # nosec B101
-
-
-@pytest.mark.unit
-def test_omnivoice_installer_parse_args_supports_recreate_venv():
-    from Helper_Scripts.TTS_Installers.install_tts_omnivoice_sidecar import parse_args
-
-    args = parse_args(["--recreate-venv"])
-
-    assert args.recreate_venv is True  # nosec B101
-
-
-@pytest.mark.unit
-def test_omnivoice_installer_parse_args_supports_install_inference_deps():
-    from Helper_Scripts.TTS_Installers.install_tts_omnivoice_sidecar import parse_args
-
-    args = parse_args(["--install-inference-deps"])
-
-    assert args.install_inference_deps is True  # nosec B101
-
-
-@pytest.mark.unit
-def test_omnivoice_installer_installs_source_with_dependencies_when_requested(tmp_path, monkeypatch):
-    from Helper_Scripts.TTS_Installers import install_tts_omnivoice_sidecar as installer
-
-    commands = []
-    source_checkout = tmp_path / "OmniVoice"
-    source_checkout.mkdir()
-
-    def _fake_run(command, **kwargs):  # noqa: ARG001
-        commands.append(command)
-
-    monkeypatch.setattr(installer.subprocess, "run", _fake_run)
-
-    installer.install_sidecar_runtime(
-        interpreter_path=tmp_path / ".venv" / "bin" / "python",
-        repo_root=tmp_path,
-        source_checkout=source_checkout,
-        install_inference_deps=True,
-    )
-
-    editable_install = commands[-1]
-    assert "-e" in editable_install  # nosec B101
-    assert "--no-deps" not in editable_install  # nosec B101
-    assert str(source_checkout) in editable_install  # nosec B101
+    assert layout.runtime_base.is_dir()
+    assert layout.runtime_dir.is_dir()
+    assert layout.logs_dir.is_dir()
 
 
 @pytest.mark.unit
@@ -239,16 +101,14 @@ providers:
     )
 
     content = config_path.read_text(encoding="utf-8")
-    assert changed is True  # nosec B101
-    assert 'kitten_tts:\n    enabled: false' in content  # nosec B101
-    assert 'omnivoice:\n    enabled: true' in content  # nosec B101
-    assert 'runtime: "sidecar"' in content  # nosec B101
-    assert 'runtime_mode: "real"' in content  # nosec B101
-    assert 'model_id: "k2-fsa/OmniVoice"' in content  # nosec B101
-    assert 'python_path: "models/omnivoice_sidecar/.venv/bin/python"' in content  # nosec B101
-    assert 'runtime_path: "models/omnivoice_sidecar/runtime"' in content  # nosec B101
-    assert 'logs_path: "models/omnivoice_sidecar/logs"' in content  # nosec B101
-    assert 'repo_path: "../OmniVoice"' in content  # nosec B101
+    assert changed is True
+    assert 'kitten_tts:\n    enabled: false' in content
+    assert 'omnivoice:\n    enabled: true' in content
+    assert 'runtime: "sidecar"' in content
+    assert 'python_path: "models/omnivoice_sidecar/.venv/bin/python"' in content
+    assert 'runtime_path: "models/omnivoice_sidecar/runtime"' in content
+    assert 'logs_path: "models/omnivoice_sidecar/logs"' in content
+    assert 'repo_path: "../OmniVoice"' in content
 
 
 @pytest.mark.unit

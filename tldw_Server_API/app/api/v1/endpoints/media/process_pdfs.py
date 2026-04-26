@@ -222,7 +222,7 @@ async def process_pdfs_endpoint(
                         )
                     )
                 else:
-                    error_detail = f"Download/preparation failed: {result}"
+                    error_detail = "Download/preparation failed"
                     normalized_err = normalise_pdf_result(
                         {
                             "status": "Error",
@@ -299,7 +299,7 @@ async def process_pdfs_endpoint(
                         item.local_path,
                         read_err,
                     )
-                    error_detail = f"Failed to read prepared file: {read_err}"
+                    error_detail = "Failed to read prepared file"
                     normalized_err = normalise_pdf_result(
                         {
                             "status": "Error",
@@ -376,7 +376,7 @@ async def process_pdfs_endpoint(
                         exc,
                         exc_info=True,
                     )
-                    error_detail = f"PDF processing failed: {exc}"
+                    error_detail = "PDF processing failed"
                     normalized_err = normalise_pdf_result(
                         {
                             "status": "Error",

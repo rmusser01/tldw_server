@@ -20,6 +20,77 @@ def _user() -> User:
 
 
 @pytest.mark.asyncio
+async def test_get_media_content_sanitizes_backend_lookup_error(monkeypatch):
+    def _raise_backend_error(*_args, **_kwargs):
+        raise RuntimeError("media backend exploded")
+
+    monkeypatch.setattr(media_embeddings, "get_media_by_id", _raise_backend_error)
+
+    with pytest.raises(HTTPException) as excinfo:
+        await media_embeddings.get_media_content(media_id=123, db=object())
+
+    assert excinfo.value.status_code == 500
+    assert excinfo.value.detail == "Error retrieving media content"
+
+
+@pytest.mark.asyncio
+async def test_get_embeddings_status_sanitizes_backend_lookup_error(monkeypatch):
+    def _raise_backend_error(*_args, **_kwargs):
+        raise RuntimeError("media backend exploded")
+
+    monkeypatch.setattr(media_embeddings, "get_media_by_id", _raise_backend_error)
+
+    with pytest.raises(HTTPException) as excinfo:
+        await media_embeddings.get_embeddings_status(
+            media_id=123,
+            db=object(),
+            current_user=_user(),
+        )
+
+    assert excinfo.value.status_code == 500
+    assert excinfo.value.detail == "Error checking embeddings status"
+
+
+@pytest.mark.asyncio
+async def test_generate_embeddings_sanitizes_backend_lookup_error(monkeypatch):
+    def _raise_backend_error(*_args, **_kwargs):
+        raise RuntimeError("media backend exploded")
+
+    monkeypatch.setattr(media_embeddings, "_embeddings_jobs_backend", lambda: "jobs")
+    monkeypatch.setattr(media_embeddings, "_resolve_model_provider", lambda *_: ("model-a", "provider-a"))
+    monkeypatch.setattr(media_embeddings, "get_media_by_id", _raise_backend_error)
+
+    with pytest.raises(HTTPException) as excinfo:
+        await media_embeddings.generate_embeddings(
+            media_id=123,
+            request=media_embeddings.GenerateEmbeddingsRequest(),
+            db=object(),
+            current_user=_user(),
+        )
+
+    assert excinfo.value.status_code == 500
+    assert excinfo.value.detail == "Error generating embeddings"
+
+
+@pytest.mark.asyncio
+async def test_delete_embeddings_sanitizes_backend_lookup_error(monkeypatch):
+    def _raise_backend_error(*_args, **_kwargs):
+        raise RuntimeError("media backend exploded")
+
+    monkeypatch.setattr(media_embeddings, "get_media_by_id", _raise_backend_error)
+
+    with pytest.raises(HTTPException) as excinfo:
+        await media_embeddings.delete_embeddings(
+            media_id=123,
+            db=object(),
+            current_user=_user(),
+        )
+
+    assert excinfo.value.status_code == 500
+    assert excinfo.value.detail == "Error deleting embeddings"
+
+
+@pytest.mark.asyncio
 async def test_generate_embeddings_fails_when_job_create_raises(monkeypatch):
     class _FailingAdapter:
         def create_job(self, **_kwargs):

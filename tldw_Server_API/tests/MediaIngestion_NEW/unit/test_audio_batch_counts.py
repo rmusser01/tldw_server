@@ -168,3 +168,54 @@ async def test_run_audio_batch_dedupes_errors_in_stable_order(monkeypatch, tmp_p
     )
 
     assert batch["errors"] == ["alpha", "beta", "gamma"]
+
+
+@pytest.mark.asyncio
+async def test_run_audio_batch_sanitizes_processing_execution_failure(
+    monkeypatch,
+    tmp_path,
+):
+    def fake_process_audio_files(**_kwargs: Any) -> Dict[str, Any]:
+        raise RuntimeError("audio backend exploded at /private/cache/audio.wav")
+
+    monkeypatch.setattr(audio_batch, "process_audio_files", fake_process_audio_files)
+
+    form_data = SimpleNamespace(
+        transcription_model=None,
+        transcription_language=None,
+        perform_chunking=False,
+        chunk_method=None,
+        chunk_size=None,
+        chunk_overlap=None,
+        use_adaptive_chunking=False,
+        use_multi_level_chunking=False,
+        chunk_language=None,
+        diarize=False,
+        vad_use=False,
+        timestamp_option=None,
+        perform_analysis=False,
+        api_name=None,
+        custom_prompt=None,
+        system_prompt=None,
+        summarize_recursively=False,
+        use_cookies=False,
+        cookies=None,
+        title=None,
+        author=None,
+    )
+
+    batch = await audio_batch.run_audio_batch(
+        all_inputs=["audio.wav"],
+        form_data=form_data,
+        temp_dir=str(tmp_path),
+        temp_path_to_original_name={},
+        saved_files=[],
+        file_errors_raw=[],
+    )
+
+    result = batch["results"][0]
+    assert batch["errors"] == ["Audio processing failed"]
+    assert result["status"] == "Error"
+    assert result["error"] == "Audio processing failed"
+    assert "audio backend exploded" not in batch["errors"][0]
+    assert "/private/cache/audio.wav" not in batch["errors"][0]

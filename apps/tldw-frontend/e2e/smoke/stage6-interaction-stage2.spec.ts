@@ -269,8 +269,6 @@ test.describe("Stage 6 interaction stage 2 positive regressions", () => {
     await page.setViewportSize({ width: 390, height: 844 })
     await page.addInitScript(() => {
       try {
-        localStorage.setItem("assistant_setup_dismissed", "true")
-        localStorage.setItem("__tldw_first_run_complete", "true")
         localStorage.setItem(
           "tldw-ui-mode",
           JSON.stringify({

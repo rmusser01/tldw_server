@@ -337,7 +337,7 @@ def _map_tts_exception(exc: Exception) -> HTTPException:
         logger.error(f"TTS provider not configured in speech chat: {exc}")
         return HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"TTS service unavailable: {str(exc)}",
+            detail="TTS service unavailable",
         )
     if isinstance(exc, TTSAuthenticationError):
         logger.error(f"TTS authentication error in speech chat: {exc}")

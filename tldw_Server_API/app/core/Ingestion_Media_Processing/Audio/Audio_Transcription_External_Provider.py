@@ -204,7 +204,8 @@ async def transcribe_with_external_provider_async(
     # Validate configuration
     is_valid, error_msg = validate_external_provider_config(config)
     if not is_valid:
-        return f"[Error: Invalid configuration - {error_msg}]"
+        logger.warning(f"Invalid external provider configuration: {error_msg}")
+        return "[Error: Invalid external provider configuration]"
 
     # Prepare audio file/stream
     file_handle = None
@@ -304,20 +305,18 @@ async def transcribe_with_external_provider_async(
                 if status_code == 429:
                     return f"[Error: Rate limit exceeded after {config.max_retries} attempts]"
 
-                error_detail = resp.text
-                try:
-                    error_json = resp.json()
-                    error_detail = error_json.get('error', {}).get('message', error_detail)
-                except (ValueError, TypeError, AttributeError) as parse_err:
-                    logger.debug(f"Failed to parse provider error JSON: error={parse_err}")
-                return f"[Error: API returned {status_code} - {error_detail}]"
+                logger.warning(f"External transcription provider returned status {status_code}")
+                return f"[Error: API returned {status_code}]"
 
             except RetryExhaustedError as e:
-                return f"[Error: {str(e)}]"
+                logger.warning(f"External provider retries exhausted: {e}")
+                return "[Error: External transcription request failed]"
             except NetworkError as e:
-                return f"[Error: {str(e)}]"
+                logger.warning(f"External provider network error: {e}")
+                return "[Error: External transcription request failed]"
             except EXTERNAL_PROVIDER_RUNTIME_EXCEPTIONS as e:
-                return f"[Error: {str(e)}]"
+                logger.exception(f"External provider request failed: {e}")
+                return "[Error: External transcription request failed]"
             finally:
                 await _close_response(resp)
 
@@ -325,7 +324,7 @@ async def transcribe_with_external_provider_async(
 
     except EXTERNAL_PROVIDER_RUNTIME_EXCEPTIONS as e:
         logger.exception(f"Error in external provider transcription: {e}")
-        return f"[Error: {str(e)}]"
+        return "[Error: External transcription failed]"
 
     finally:
         pass
@@ -393,7 +392,7 @@ def transcribe_with_external_provider(
             )
     except EXTERNAL_PROVIDER_RUNTIME_EXCEPTIONS as e:
         logger.exception(f"Error in external provider transcription: {e}")
-        return f"[Error: {str(e)}]"
+        return "[Error: External transcription failed]"
 
 
 def add_external_provider(name: str, config: ExternalProviderConfig) -> bool:
@@ -485,10 +484,11 @@ async def test_external_provider(
             'provider': provider_name
         }
 
-    except EXTERNAL_PROVIDER_RUNTIME_EXCEPTIONS as e:
+    except EXTERNAL_PROVIDER_RUNTIME_EXCEPTIONS:
+        logger.warning("External provider test failed")
         return {
             'success': False,
-            'error': str(e),
+            'error': "External provider test failed",
             'elapsed_time': time.time() - start_time,
             'provider': provider_name
         }

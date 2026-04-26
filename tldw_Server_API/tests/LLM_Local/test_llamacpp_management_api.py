@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -29,6 +31,16 @@ def _admin_principal() -> AuthPrincipal:
 class _Logger:
     def error(self, *args, **kwargs) -> None:  # noqa: ANN002, ANN003
         return
+
+
+class _CapturingLogger:
+    def __init__(self) -> None:
+        self.errors: list[str] = []
+        self.kwargs: list[dict[str, Any]] = []
+
+    def error(self, message: str, *args: Any, **kwargs: Any) -> None:
+        self.errors.append(message.format(*args) if args else message)
+        self.kwargs.append(kwargs)
 
 
 class _ManagedStub:
@@ -85,6 +97,36 @@ class _MetricsSyncStub(_ManagedStub):
 class _MetricsAsyncStub(_ManagedStub):
     async def get_metrics(self):
         return {"requests_total": 7}
+
+
+class _ExplodingManagedStub:
+    def __init__(self, logger: _CapturingLogger) -> None:
+        self.logger = logger
+        self.llamacpp = self
+
+    async def start_server(self, **kwargs: Any):
+        raise RuntimeError("llamacpp backend exploded at /private/llama.cpp")
+
+    async def stop_server(self, **kwargs: Any):
+        raise RuntimeError("llamacpp backend exploded at /private/llama.cpp")
+
+    async def get_server_status(self, **kwargs: Any):
+        raise RuntimeError("llamacpp backend exploded at /private/llama.cpp")
+
+    def get_metrics(self):
+        raise RuntimeError("llamacpp backend exploded at /private/llama.cpp")
+
+    async def list_models(self):
+        raise RuntimeError("llamacpp backend exploded at /private/llama.cpp")
+
+
+class _ExplodingLlamafileMetricsStub:
+    def __init__(self, logger: _CapturingLogger) -> None:
+        self.logger = logger
+        self.llamafile = self
+
+    def get_metrics(self):
+        raise RuntimeError("llamafile backend exploded at /private/llamafile.sock")
 
 
 def _make_app_with_manager(manager) -> FastAPI:  # noqa: ANN001
@@ -239,3 +281,60 @@ def test_llamacpp_metrics_happy_path_async():
     body = r.json()
     assert body["requests_total"] == 7
     assert body["backend"] == "llamacpp"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("method", "path", "payload", "expected_log"),
+    [
+        (
+            "post",
+            "/api/v1/llamacpp/start_server",
+            {"model_filename": "mock.gguf", "server_args": {}},
+            "Unexpected error starting Llama.cpp server",
+        ),
+        ("post", "/api/v1/llamacpp/stop_server", {}, "Unexpected error stopping Llama.cpp server"),
+        ("get", "/api/v1/llamacpp/status", None, "Unexpected error getting Llama.cpp server status"),
+        ("get", "/api/v1/llamacpp/metrics", None, "Unexpected error getting Llama.cpp metrics"),
+        ("get", "/api/v1/llamacpp/models", None, "Unexpected error listing Llama.cpp models"),
+    ],
+)
+def test_llamacpp_management_generic_failure_logs_are_sanitized(
+    method: str,
+    path: str,
+    payload: dict[str, Any] | None,
+    expected_log: str,
+):
+    logger = _CapturingLogger()
+    app = _make_app_with_manager(_ExplodingManagedStub(logger))
+    request_kwargs: dict[str, Any] = {}
+    if payload is not None:
+        request_kwargs["json"] = payload
+
+    with TestClient(app) as client:
+        response = client.request(method, path, **request_kwargs)
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == "An unexpected error occurred."
+    assert logger.errors == [expected_log]
+    assert all(not kwargs.get("exc_info") for kwargs in logger.kwargs)
+    logged = "\n".join(logger.errors)
+    assert "llamacpp backend exploded" not in logged
+    assert "/private/llama.cpp" not in logged
+
+
+@pytest.mark.unit
+def test_llamafile_metrics_generic_failure_log_is_sanitized():
+    logger = _CapturingLogger()
+    app = _make_app_with_manager(_ExplodingLlamafileMetricsStub(logger))
+
+    with TestClient(app) as client:
+        response = client.get("/api/v1/llamafile/metrics")
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == "An unexpected error occurred."
+    assert logger.errors == ["Unexpected error getting Llamafile metrics"]
+    assert all(not kwargs.get("exc_info") for kwargs in logger.kwargs)
+    logged = "\n".join(logger.errors)
+    assert "llamafile backend exploded" not in logged
+    assert "/private/llamafile.sock" not in logged

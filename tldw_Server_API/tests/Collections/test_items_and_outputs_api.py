@@ -4,20 +4,32 @@ import shutil
 import hashlib
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from importlib import import_module, reload
+from tldw_Server_API.app.api.v1.endpoints import items as items_endpoint
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.config import settings
+from tldw_Server_API.app.core.DB_Management.backends.factory import close_all_backends
 from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
+from tldw_Server_API.app.core.DB_Management.media_db.errors import InputError
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.exceptions import InvalidStoragePathError
 from tldw_Server_API.app.api.v1.endpoints.outputs import _resolve_output_path_for_user, _strip_html_for_tts
 
 
 pytestmark = pytest.mark.unit
+
+
+class _LoggerStub:
+    def __init__(self) -> None:
+        self.errors: list[str] = []
+
+    def error(self, message: str, *args: Any, **kwargs: Any) -> None:
+        self.errors.append(message.format(*args) if args else message)
 
 
 def _insert_output_row_raw(
@@ -61,6 +73,7 @@ def client_with_user(monkeypatch):
 
     # Force per-user DB dir into project Databases/ for sandbox write allowance
     base_dir = Path.cwd() / "Databases" / "test_user_dbs"
+    close_all_backends()
     shutil.rmtree(base_dir, ignore_errors=True)
     base_dir.mkdir(parents=True, exist_ok=True)
     prev_base_dir = settings.get("USER_DB_BASE_DIR")
@@ -79,6 +92,7 @@ def client_with_user(monkeypatch):
     finally:
         if app is not None:
             app.dependency_overrides.clear()
+        close_all_backends()
         if prev_base_dir is not None:
             settings.USER_DB_BASE_DIR = prev_base_dir
         else:
@@ -157,6 +171,199 @@ def test_items_get_by_id(client_with_user):
     assert item["title"] == "Example Article"
     assert item["status"] == "saved"
     assert item["favorite"] is False
+
+
+def test_items_endpoint_maps_media_input_error_to_400(client_with_user, monkeypatch):
+
+    client = client_with_user
+
+    def _raise_input_error(*args, **kwargs):
+        _ = (args, kwargs)
+        raise InputError("invalid items query")
+
+    monkeypatch.setattr(items_endpoint, "search_media", _raise_input_error)
+
+    r = client.get("/api/v1/items", params={"q": "budget"})
+    assert r.status_code == 400, r.text
+    assert r.json()["detail"] == "invalid items query"
+
+
+def test_items_get_by_id_maps_media_input_error_to_400(client_with_user, monkeypatch):
+
+    client = client_with_user
+
+    def _raise_input_error(*args, **kwargs):
+        _ = (args, kwargs)
+        raise InputError("invalid item lookup")
+
+    monkeypatch.setattr(items_endpoint, "search_media", _raise_input_error)
+
+    r = client.get("/api/v1/items/99999")
+    assert r.status_code == 400, r.text
+    assert r.json()["detail"] == "invalid item lookup"
+
+
+@pytest.mark.asyncio
+async def test_items_list_collections_failure_log_is_sanitized(monkeypatch):
+    class _FailingCollectionsDB:
+        def list_content_items(self, **kwargs: Any):
+            raise RuntimeError("collections backend exploded at /private/items.db")
+
+    logger = _LoggerStub()
+    monkeypatch.setattr(items_endpoint, "logger", logger)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await items_endpoint.list_items(
+            ids=None,
+            q=None,
+            tags=None,
+            domain=None,
+            date_from=None,
+            date_to=None,
+            status_filter=None,
+            favorite=None,
+            origin=None,
+            job_id=None,
+            run_id=None,
+            page=1,
+            size=20,
+            current_user=User(id=123, username="tester", email=None, is_active=True),
+            db=object(),
+            collections_db=_FailingCollectionsDB(),
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "items_query_failed"
+    assert logger.errors == ["collections items query failed"]
+    logged = "\n".join(logger.errors)
+    assert "collections backend exploded" not in logged
+    assert "/private/items.db" not in logged
+
+
+@pytest.mark.asyncio
+async def test_items_list_media_fallback_failure_log_is_sanitized(monkeypatch):
+    class _EmptyCollectionsDB:
+        def list_content_items(self, **kwargs: Any):
+            return [], 0
+
+    def _raise_runtime_error(*args: Any, **kwargs: Any):
+        raise RuntimeError("media backend exploded at /private/media.db")
+
+    logger = _LoggerStub()
+    monkeypatch.setattr(items_endpoint, "logger", logger)
+    monkeypatch.setattr(items_endpoint, "search_media", _raise_runtime_error)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await items_endpoint.list_items(
+            ids=None,
+            q=None,
+            tags=None,
+            domain=None,
+            date_from=None,
+            date_to=None,
+            status_filter=None,
+            favorite=None,
+            origin=None,
+            job_id=None,
+            run_id=None,
+            page=1,
+            size=20,
+            current_user=User(id=123, username="tester", email=None, is_active=True),
+            db=object(),
+            collections_db=_EmptyCollectionsDB(),
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "items_query_failed"
+    assert logger.errors == ["items list failed"]
+    logged = "\n".join(logger.errors)
+    assert "media backend exploded" not in logged
+    assert "/private/media.db" not in logged
+
+
+@pytest.mark.asyncio
+async def test_items_get_collections_fetch_failure_log_is_sanitized(monkeypatch):
+    class _FailingCollectionsDB:
+        def get_content_item(self, item_id: int):
+            raise RuntimeError("collections backend exploded at /private/items.db")
+
+    logger = _LoggerStub()
+    monkeypatch.setattr(items_endpoint, "logger", logger)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await items_endpoint.get_item(
+            item_id=1,
+            current_user=User(id=123, username="tester", email=None, is_active=True),
+            db=object(),
+            collections_db=_FailingCollectionsDB(),
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "item_fetch_failed"
+    assert logger.errors == ["collections item fetch failed"]
+    logged = "\n".join(logger.errors)
+    assert "collections backend exploded" not in logged
+    assert "/private/items.db" not in logged
+
+
+@pytest.mark.asyncio
+async def test_items_get_collections_media_id_fetch_failure_log_is_sanitized(monkeypatch):
+    class _FailingCollectionsDB:
+        def get_content_item(self, item_id: int):
+            raise KeyError(item_id)
+
+        def get_content_item_by_media_id(self, media_id: int):
+            raise RuntimeError("collections backend exploded at /private/items.db")
+
+    logger = _LoggerStub()
+    monkeypatch.setattr(items_endpoint, "logger", logger)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await items_endpoint.get_item(
+            item_id=1,
+            current_user=User(id=123, username="tester", email=None, is_active=True),
+            db=object(),
+            collections_db=_FailingCollectionsDB(),
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "item_fetch_failed"
+    assert logger.errors == ["collections item fetch by media_id failed"]
+    logged = "\n".join(logger.errors)
+    assert "collections backend exploded" not in logged
+    assert "/private/items.db" not in logged
+
+
+@pytest.mark.asyncio
+async def test_items_get_media_fetch_failure_log_is_sanitized(monkeypatch):
+    class _MissingCollectionsDB:
+        def get_content_item(self, item_id: int):
+            raise KeyError(item_id)
+
+        def get_content_item_by_media_id(self, media_id: int):
+            raise KeyError(media_id)
+
+    def _raise_runtime_error(*args: Any, **kwargs: Any):
+        raise RuntimeError("media backend exploded at /private/media.db")
+
+    logger = _LoggerStub()
+    monkeypatch.setattr(items_endpoint, "logger", logger)
+    monkeypatch.setattr(items_endpoint, "search_media", _raise_runtime_error)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await items_endpoint.get_item(
+            item_id=1,
+            current_user=User(id=123, username="tester", email=None, is_active=True),
+            db=object(),
+            collections_db=_MissingCollectionsDB(),
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "item_fetch_failed"
+    assert logger.errors == ["media item fetch failed"]
+    logged = "\n".join(logger.errors)
+    assert "media backend exploded" not in logged
+    assert "/private/media.db" not in logged
 
 
 def test_outputs_preview_with_inline_data_and_generate(client_with_user, tmp_path):
@@ -243,6 +450,10 @@ def test_outputs_generate_variants_and_ingest(client_with_user, monkeypatch):
 
     monkeypatch.setattr(
         "tldw_Server_API.app.core.TTS.tts_service_v2.get_tts_service_v2",
+        _fake_get_tts_service_v2,
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.services.outputs_service.get_tts_service_v2",
         _fake_get_tts_service_v2,
     )
 

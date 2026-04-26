@@ -64,6 +64,7 @@ from tldw_Server_API.app.api.v1.schemas.writing_manuscript_schemas import (
     CHARACTER_ROLES,
     WORLD_INFO_KINDS,
 )
+from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.core.AuthNZ.rate_limiter import RateLimiter
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.Chat.chat_service import is_model_known_for_provider
@@ -134,7 +135,7 @@ def _handle_db_errors(exc: Exception, entity_label: str) -> NoReturn:
         raise exc
     if isinstance(exc, InputError):
         logger.warning("Input error for {}: {}", entity_label, exc)
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        raise map_db_error_to_http(exc) from exc
     if isinstance(exc, ConflictError):
         message = str(exc)
         lowered = message.lower()
@@ -143,16 +144,18 @@ def _handle_db_errors(exc: Exception, entity_label: str) -> NoReturn:
         # should not be reported as 409.
         if ("not found" in lowered or "soft-deleted" in lowered or "soft deleted" in lowered) and "version conflict" not in lowered:
             logger.debug("Entity not found for {}: {}", entity_label, exc)
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail=f"{entity_label} not found"
+            raise map_db_error_to_http(
+                exc,
+                conflict_status_code=status.HTTP_404_NOT_FOUND,
+                conflict_detail=f"{entity_label} not found",
             ) from exc
         logger.warning("Conflict error for {}: {}", entity_label, exc)
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=message) from exc
+        raise map_db_error_to_http(exc) from exc
     if isinstance(exc, CharactersRAGDBError):
         logger.error("Database error for {}: {}", entity_label, exc)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Database error while processing {entity_label}",
+        raise map_db_error_to_http(
+            exc,
+            default_detail=f"Database error while processing {entity_label}",
         ) from exc
     logger.exception("Unexpected error for {}: {}", entity_label, exc)
     raise HTTPException(
