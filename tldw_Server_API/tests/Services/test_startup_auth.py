@@ -186,6 +186,69 @@ async def test_init_auth_services_reraises_when_db_pool_init_fails(
 
 
 @pytest.mark.asyncio
+async def test_init_auth_services_warns_when_schema_ensure_is_skipped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db_pool = SimpleNamespace()
+
+    async def _fake_get_db_pool():
+        return db_pool
+
+    async def _failing_ensure_schema():
+        raise RuntimeError("migration unavailable")
+
+    async def _fake_noop():
+        return None
+
+    async def _fake_refresh(_pool):
+        return None
+
+    class _FakeLogger:
+        def __init__(self) -> None:
+            self.warnings: list[str] = []
+
+        def info(self, _message: str) -> None:
+            pass
+
+        def error(self, _message: str) -> None:
+            pass
+
+        def debug(self, _message: str) -> None:
+            pass
+
+        def warning(self, message: str) -> None:
+            self.warnings.append(message)
+
+    _install_module(
+        monkeypatch,
+        "tldw_Server_API.app.core.AuthNZ.database",
+        get_db_pool=_fake_get_db_pool,
+    )
+    _install_module(
+        monkeypatch,
+        "tldw_Server_API.app.core.AuthNZ.initialize",
+        ensure_authnz_schema_ready_once=_failing_ensure_schema,
+        ensure_single_user_rbac_seed_if_needed=_fake_noop,
+    )
+    _install_module(
+        monkeypatch,
+        "tldw_Server_API.app.core.AuthNZ.llm_provider_overrides",
+        refresh_llm_provider_overrides=_fake_refresh,
+    )
+
+    startup_auth = _import_startup_auth()
+    fake_logger = _FakeLogger()
+    monkeypatch.setattr(startup_auth, "logger", fake_logger)
+
+    result = await startup_auth.init_auth_services()
+
+    assert result is db_pool
+    assert fake_logger.warnings == [
+        "App Startup: Skipped AuthNZ SQLite migration ensure: migration unavailable"
+    ]
+
+
+@pytest.mark.asyncio
 async def test_init_auth_services_skips_provider_override_runtime_failures(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

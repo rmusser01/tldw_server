@@ -41,7 +41,7 @@ async def init_auth_services() -> object | None:
 
         await ensure_authnz_schema_ready_once()
     except _IMPORT_EXCEPTIONS as exc:
-        logger.debug(f"App Startup: Skipped AuthNZ SQLite migration ensure: {exc}")
+        logger.warning(f"App Startup: Skipped AuthNZ SQLite migration ensure: {exc}")
 
     await _ensure_pg_extras(db_pool)
 
