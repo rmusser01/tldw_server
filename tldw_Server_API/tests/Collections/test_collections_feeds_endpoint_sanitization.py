@@ -312,3 +312,58 @@ async def test_update_feed_subscription_job_failure_log_is_sanitized(monkeypatch
     rendered = " ".join(str(part) for call_args in fake_logger.error.call_args_list for part in call_args.args)
     assert "/private/feeds-job-update.db" not in rendered
     assert "exploded" not in rendered
+
+
+async def test_create_feed_subscription_first_run_failure_log_is_sanitized(monkeypatch):
+    from tldw_Server_API.app.core.Watchlists import pipeline as pipeline_module
+
+    class _CreateFeedDb:
+        def __init__(self) -> None:
+            self.source = _source_row(settings={"collections_origin": collections_feeds.FEED_ORIGIN})
+            self.job = _job_row()
+
+        def create_source(self, **kwargs):
+            self.source = _source_row(
+                settings=collections_feeds.json.loads(kwargs["settings_json"]),
+                tags=kwargs["tags"],
+            )
+            return self.source
+
+        def create_job(self, **_kwargs):
+            return self.job
+
+        def update_source(self, _source_id: int, patch: dict):
+            self.source = _source_row(settings=collections_feeds.json.loads(patch["settings_json"]))
+            return self.source
+
+        def get_source(self, _source_id: int):
+            return self.source
+
+        def get_job(self, _job_id: int):
+            return self.job
+
+    async def _raise_first_run(*_args, **_kwargs):
+        raise RuntimeError("watchlist pipeline exploded at /private/feeds-first-run.db")
+
+    fake_logger = MagicMock()
+    background_tasks = BackgroundTasks()
+    monkeypatch.setattr(collections_feeds, "logger", fake_logger)
+    monkeypatch.setattr(collections_feeds, "_compute_next_run", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(collections_feeds, "_register_schedule", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(collections_feeds, "record_watchlist_source_created", lambda **_kwargs: None)
+    monkeypatch.setattr(pipeline_module, "run_watchlist_job", _raise_first_run)
+
+    response = await collections_feeds.create_feed_subscription(
+        payload=CollectionsFeedCreateRequest(url="https://example.com/feed.xml", active=True),
+        background_tasks=background_tasks,
+        current_user=SimpleNamespace(id=42),
+        db=_CreateFeedDb(),
+    )
+    await background_tasks()
+
+    assert response.id == 7
+    fake_logger.debug.assert_called_once_with("collections_feeds_first_run_failed")
+    rendered = " ".join(str(part) for call_args in fake_logger.debug.call_args_list for part in call_args.args)
+    assert "/private/feeds-first-run.db" not in rendered
+    assert "exploded" not in rendered
+    assert "9" not in rendered

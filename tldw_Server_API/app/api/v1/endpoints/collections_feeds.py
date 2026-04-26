@@ -447,8 +447,8 @@ async def create_feed_subscription(
                     capture_companion_activity=True,
                     companion_route="/api/v1/collections/feeds",
                 )
-            except _COLLECTIONS_FEEDS_NONCRITICAL_EXCEPTIONS as exc:
-                logger.debug(f"collections_feeds: first run failed for job {job_id}: {exc}")
+            except _COLLECTIONS_FEEDS_NONCRITICAL_EXCEPTIONS:
+                logger.debug("collections_feeds_first_run_failed")
 
         background_tasks.add_task(_run_first_job, int(current_user.id), int(job.id))
 
