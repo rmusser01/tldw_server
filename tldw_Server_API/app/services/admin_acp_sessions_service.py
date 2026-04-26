@@ -75,6 +75,7 @@ class SessionRecord:
     needs_bootstrap: bool = False
     # Forking lineage
     forked_from: str | None = None
+    ancestry_chain: list[str] = field(default_factory=list)
     # Model used for cost estimation
     model: str | None = None
     # Token budget fields
@@ -106,6 +107,7 @@ class SessionRecord:
             "policy_provenance_summary": self.policy_provenance_summary,
             "policy_refresh_error": self.policy_refresh_error,
             "forked_from": self.forked_from,
+            "ancestry_chain": list(self.ancestry_chain),
             "model": self.model,
             "estimated_cost_usd": compute_token_cost(
                 model=self.model,
@@ -355,6 +357,7 @@ class ACPSessionStore:
             bootstrap_ready=d.get("bootstrap_ready", True),
             needs_bootstrap=d.get("needs_bootstrap", False),
             forked_from=d.get("forked_from"),
+            ancestry_chain=d.get("ancestry_chain_json") or [],
             model=d.get("model"),
             token_budget=d.get("token_budget"),
             auto_terminate_at_budget=d.get("auto_terminate_at_budget", False),

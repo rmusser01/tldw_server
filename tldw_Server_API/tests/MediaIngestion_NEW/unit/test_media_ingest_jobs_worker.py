@@ -74,6 +74,7 @@ async def test_media_ingest_worker_updates_progress_fields(monkeypatch, tmp_path
             "db_id": 123,
             "media_uuid": "media-uuid-123",
             "warnings": None,
+            "db_message": "Media added to database.",
         }
 
     monkeypatch.setattr(worker, "_create_db", _fake_create_db, raising=True)
@@ -102,6 +103,7 @@ async def test_media_ingest_worker_updates_progress_fields(monkeypatch, tmp_path
     result = await worker._handle_job(job, jm, progress)
 
     assert result.get("status") == "Success"
+    assert result.get("db_message") == "Media added to database."
     updated = jm.get_job(int(row.get("id")))
     assert updated is not None
     assert updated.get("progress_message") == "completed"
@@ -133,7 +135,7 @@ async def test_media_ingest_worker_returns_existing_media_id_for_skipped_dedupe_
                 "status": "Skipped",
                 "db_id": 321,
                 "media_uuid": "existing-media-uuid",
-                "message": "Media already exists.",
+                "db_message": "Media already exists.",
                 "warnings": None,
             }
         ]
@@ -169,6 +171,7 @@ async def test_media_ingest_worker_returns_existing_media_id_for_skipped_dedupe_
         "media_uuid": "existing-media-uuid",
         "error": None,
         "warnings": None,
+        "db_message": "Media already exists.",
     }
 
 
@@ -199,6 +202,31 @@ async def test_media_ingest_heavy_worker_uses_configured_queue(monkeypatch):
     await worker.run_media_ingest_heavy_jobs_worker(None)
     assert called["queue"] == "media-heavy-q"
     assert called["worker_id"] == "media-ingest-worker-media-heavy-q"
+
+
+@pytest.mark.asyncio
+async def test_media_ingest_worker_clears_stale_acquire_gate_on_start(monkeypatch):
+    import tldw_Server_API.app.services.media_ingest_jobs_worker as worker
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+
+    class _DummySDK:
+        def __init__(self, jm, cfg):
+            self.jm = jm
+            self.cfg = cfg
+
+        def stop(self):
+            return None
+
+        async def run(self, **_kwargs):
+            assert JobManager._ACQUIRE_GATE_ENABLED is False
+
+    monkeypatch.setattr(worker, "WorkerSDK", _DummySDK, raising=True)
+
+    try:
+        JobManager.set_acquire_gate(True)
+        await worker.run_media_ingest_jobs_worker()
+    finally:
+        JobManager.set_acquire_gate(False)
 
 
 @pytest.mark.asyncio

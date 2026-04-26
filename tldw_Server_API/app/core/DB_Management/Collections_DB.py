@@ -14,10 +14,12 @@ Notes:
 from __future__ import annotations
 
 import contextlib
+import functools
 import json
 import os
 import re
-from collections.abc import Iterable
+import threading
+from collections.abc import Generator, Iterable
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -35,6 +37,7 @@ from tldw_Server_API.app.core.Collections.utils import (
 from tldw_Server_API.app.core.config import load_comprehensive_config, settings
 from tldw_Server_API.app.core.testing import is_truthy
 from tldw_Server_API.app.core.DB_Management.content_backend import (
+    backend_target_key,
     get_content_backend,
     load_content_db_settings,
 )
@@ -44,7 +47,11 @@ from tldw_Server_API.app.core.exceptions import (
 )
 
 from .backends.base import BackendType, DatabaseBackend, DatabaseConfig, DatabaseError
-from .backends.factory import DatabaseBackendFactory
+from .backends.factory import (
+    DatabaseBackendFactory,
+    is_factory_managed_backend,
+    release_managed_backend,
+)
 from .backends.query_utils import prepare_backend_statement
 from .db_path_utils import DatabasePaths, normalize_output_storage_filename
 
@@ -379,21 +386,52 @@ class AudiobookArtifactRow:
     metadata_json: str | None
 
 
+def _pin_collections_public_operation(method):
+    @functools.wraps(method)
+    def wrapper(self: "CollectionsDatabase", *args: Any, **kwargs: Any):
+        with self._operation_backend_pin():
+            return method(self, *args, **kwargs)
+
+    return wrapper
+
+
+def _decorate_collections_public_operations(cls: type["CollectionsDatabase"]) -> type["CollectionsDatabase"]:
+    for name, attribute in list(vars(cls).items()):
+        if name.startswith("_") or name in {"ensure_schema", "transaction"}:
+            continue
+        if isinstance(attribute, (classmethod, staticmethod, property)):
+            continue
+        if not callable(attribute):
+            continue
+        setattr(cls, name, _pin_collections_public_operation(attribute))
+    return cls
+
+
+@_decorate_collections_public_operations
 class CollectionsDatabase:
     """Adapter for Collections tables stored in the per-user Media DB."""
+
+    _bootstrapped_backend_targets: set[str] = set()
 
     def __init__(self, user_id: int | str, backend: DatabaseBackend | None = None):
         self.user_id = str(user_id)
         self._owns_backend = False
+        self._local = threading.local()
+        self._backend: DatabaseBackend
+        self._uses_shared_content_backend = False
+        self._backend_refresh_suspended = False
         if backend is None:
-            backend = self._resolve_backend()
+            backend, uses_shared_backend = self._resolve_backend()
+            self._uses_shared_content_backend = uses_shared_backend
         else:
             self._owns_backend = False
-        self.backend = backend
+        self._backend = backend
         self._fts_available = True
         self._fts_supports_direct_delete = True
-        self.ensure_schema()
-        self._seed_watchlists_output_templates()
+        if self._backend.backend_type == BackendType.POSTGRESQL:
+            self._ensure_bootstrap_for_backend(self._backend)
+        else:
+            self._run_backend_bootstrap()
 
     @classmethod
     def for_user(cls, user_id: int | str) -> CollectionsDatabase:
@@ -404,7 +442,84 @@ class CollectionsDatabase:
         """Construct using an existing backend (avoids path resolution and int casting)."""
         return cls(user_id=user_id, backend=backend)
 
-    def _resolve_backend(self) -> DatabaseBackend:
+    @property
+    def backend(self) -> DatabaseBackend:
+        pinned_backend = self._get_pinned_backend()
+        if pinned_backend is not None:
+            return pinned_backend
+        return self._refresh_backend_if_needed()
+
+    @property
+    def backend_type(self) -> BackendType:
+        return self.backend.backend_type
+
+    def _refresh_backend_if_needed(self) -> DatabaseBackend:
+        if not self._uses_shared_content_backend:
+            return self._backend
+        if self._backend_refresh_suspended:
+            return self._backend
+
+        previous_owns_backend = self._owns_backend
+        current_key = self._backend_target_key(self._backend)
+        refreshed_backend, uses_shared_backend = self._resolve_backend()
+        refreshed_key = self._backend_target_key(refreshed_backend)
+
+        # A transient refresh failure must not demote an active shared backend
+        # to a new SQLite backend mid-operation.
+        if not uses_shared_backend or refreshed_backend.backend_type != BackendType.POSTGRESQL:
+            self._owns_backend = previous_owns_backend
+            if refreshed_backend is not self._backend:
+                with contextlib.suppress(_COLLECTIONS_NONCRITICAL_EXCEPTIONS):
+                    refreshed_backend.get_pool().close_all()
+            logger.warning(
+                "CollectionsDatabase refresh fell back to a non-shared backend while {} remained active; keeping the current backend",
+                current_key or "<unknown>",
+            )
+            return self._backend
+
+        if (
+            uses_shared_backend
+            and refreshed_backend.backend_type == BackendType.POSTGRESQL
+            and refreshed_key != current_key
+        ):
+            self._ensure_bootstrap_for_backend(refreshed_backend)
+
+        self._uses_shared_content_backend = uses_shared_backend
+        self._backend = refreshed_backend
+        return self._backend
+
+    def _backend_target_key(self, backend: DatabaseBackend | None) -> str | None:
+        return backend_target_key(backend)
+
+    def _get_pinned_backend(self) -> DatabaseBackend | None:
+        return getattr(self._local, "backend_pin", None)
+
+    def _run_backend_bootstrap(self) -> None:
+        self.ensure_schema()
+        self._seed_watchlists_output_templates()
+
+    def _mark_backend_bootstrapped(self, backend: DatabaseBackend | None) -> None:
+        key = self._backend_target_key(backend)
+        if key:
+            type(self)._bootstrapped_backend_targets.add(key)
+
+    def _ensure_bootstrap_for_backend(self, backend: DatabaseBackend) -> None:
+        if backend.backend_type != BackendType.POSTGRESQL:
+            return
+        key = self._backend_target_key(backend)
+        if key in type(self)._bootstrapped_backend_targets:
+            return
+        previous_suspend = self._backend_refresh_suspended
+        self._backend_refresh_suspended = True
+        try:
+            self._backend = backend
+            self._run_backend_bootstrap()
+        finally:
+            self._backend_refresh_suspended = previous_suspend
+        if key:
+            type(self)._bootstrapped_backend_targets.add(key)
+
+    def _resolve_backend(self) -> tuple[DatabaseBackend, bool]:
         backend_mode_env = (os.getenv("TLDW_CONTENT_DB_BACKEND") or "").strip().lower()
         if backend_mode_env in {"postgres", "postgresql"}:
             parser = load_comprehensive_config()
@@ -412,7 +527,7 @@ class CollectionsDatabase:
             if resolved is None:
                 raise DatabaseError("PostgreSQL content backend requested but not initialized")
             self._owns_backend = False
-            return resolved
+            return resolved, True
 
         try:
             parser = load_comprehensive_config()
@@ -427,21 +542,28 @@ class CollectionsDatabase:
                     if resolved is None:
                         raise DatabaseError("PostgreSQL content backend requested but not initialized")
                     self._owns_backend = False
-                    return resolved
+                    return resolved, True
             except _COLLECTIONS_NONCRITICAL_EXCEPTIONS:
                 pass
 
         db_path = str(DatabasePaths.get_media_db_path(int(self.user_id)))
         cfg = DatabaseConfig(backend_type=BackendType.SQLITE, sqlite_path=db_path)
         self._owns_backend = True
-        return DatabaseBackendFactory.create_backend(cfg)
+        return DatabaseBackendFactory.create_backend(cfg), False
 
     def close(self) -> None:
         """Release backend connections if this instance owns the backend."""
         if not self._owns_backend:
             return
+        self._owns_backend = False
+        if (
+            getattr(self._backend, "backend_type", None) == BackendType.SQLITE
+            and is_factory_managed_backend(self._backend)
+        ):
+            release_managed_backend(self._backend)
+            return
         try:
-            self.backend.get_pool().close_all()
+            self._backend.get_pool().close_all()
         except _COLLECTIONS_NONCRITICAL_EXCEPTIONS as exc:
             logger.debug("collections_db: failed to close backend for user {}: {}", self.user_id, exc)
 
@@ -450,6 +572,36 @@ class CollectionsDatabase:
 
     def __exit__(self, exc_type, exc, traceback) -> None:
         self.close()
+
+    @contextlib.contextmanager
+    def _operation_backend_pin(self) -> Generator[DatabaseBackend, None, None]:
+        previous_backend = self._get_pinned_backend()
+        if previous_backend is None:
+            self._local.backend_pin = self._refresh_backend_if_needed()
+        try:
+            yield self._local.backend_pin
+        finally:
+            if previous_backend is None:
+                with contextlib.suppress(AttributeError):
+                    del self._local.backend_pin
+            else:
+                self._local.backend_pin = previous_backend
+
+    @contextlib.contextmanager
+    def transaction(self) -> Generator[Any, None, None]:
+        """Pin the active backend for the duration of a transactional operation."""
+        backend = self.backend
+        previous_backend = self._get_pinned_backend()
+        self._local.backend_pin = backend
+        try:
+            with backend.transaction() as conn:
+                yield conn
+        finally:
+            if previous_backend is None:
+                with contextlib.suppress(AttributeError):
+                    del self._local.backend_pin
+            else:
+                self._local.backend_pin = previous_backend
 
     def _execute_insert(self, query: str, params: tuple[Any, ...]) -> Any:
         if self.backend.backend_type == BackendType.POSTGRESQL:

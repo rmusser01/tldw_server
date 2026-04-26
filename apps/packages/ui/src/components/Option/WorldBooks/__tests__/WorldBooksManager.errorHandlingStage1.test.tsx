@@ -237,7 +237,8 @@ describe("WorldBooksManager error-handling stage-1 entry totals", () => {
       const user = userEvent.setup()
       render(<WorldBooksManager />)
 
-      await user.click(screen.getByRole("button", { name: "Manage entries" }))
+      // Select the world book to show detail panel with entries tab
+      await user.click(screen.getByText("Arcana"))
       expect(await screen.findByText("Showing 3 of 500 entries.")).toBeInTheDocument()
 
       await user.clear(screen.getByRole("textbox", { name: "Search entries" }))

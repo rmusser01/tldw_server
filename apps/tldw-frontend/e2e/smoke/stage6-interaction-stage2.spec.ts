@@ -1,6 +1,6 @@
 import { test, expect, seedAuth, SMOKE_LOAD_TIMEOUT } from "./smoke.setup"
 import type { Locator, Route } from "@playwright/test"
-import { waitForAppShell } from "../utils/helpers"
+import { dispatchKeyboardShortcut, waitForAppShell } from "../utils/helpers"
 
 const LOAD_TIMEOUT = SMOKE_LOAD_TIMEOUT
 
@@ -218,13 +218,23 @@ test.describe("Stage 6 interaction stage 2 positive regressions", () => {
 
     const palette = page.getByRole("dialog", { name: /command palette/i })
 
-    await page.keyboard.press("Meta+k")
-    const openedWithMeta = await palette.isVisible().catch(() => false)
-    if (!openedWithMeta) {
-      await page.keyboard.press("Control+k")
-    }
+    await expect
+      .poll(
+        async () => {
+          await dispatchKeyboardShortcut(page, { key: "k", metaKey: true })
+          if (await palette.isVisible().catch(() => false)) {
+            return true
+          }
 
-    await expect(palette).toBeVisible({ timeout: LOAD_TIMEOUT })
+          await dispatchKeyboardShortcut(page, { key: "k", ctrlKey: true })
+          return await palette.isVisible().catch(() => false)
+        },
+        {
+          timeout: LOAD_TIMEOUT,
+          message: "Expected Cmd/Ctrl+K to open the command palette once the home shell shortcuts were active"
+        }
+      )
+      .toBe(true)
 
     const paletteInput = palette.locator("input[type='text']").first()
     await expect(paletteInput).toBeVisible({ timeout: LOAD_TIMEOUT })

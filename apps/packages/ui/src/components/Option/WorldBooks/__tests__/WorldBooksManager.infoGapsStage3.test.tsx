@@ -198,17 +198,15 @@ describe("WorldBooksManager information gaps stage-3 budget visibility", () => {
     const user = userEvent.setup()
     render(<WorldBooksManager />)
 
-    await user.click(screen.getByRole("button", { name: "Manage entries" }))
+    // Select the world book to show detail panel with entries tab
+    await user.click(screen.getByText("Arcana"))
 
     await waitFor(() => {
-      expect(screen.getByLabelText("Entry budget utilization")).toBeInTheDocument()
+      expect(screen.getByRole("meter", { name: "Token budget usage" })).toBeInTheDocument()
     })
-    expect(screen.getByText("126/100 (126.0%)")).toBeInTheDocument()
+    expect(screen.getByText("126/100 tokens")).toBeInTheDocument()
     expect(
-      screen.getByText("Estimated token usage exceeds the configured budget.")
-    ).toBeInTheDocument()
-    expect(
-      screen.getByText("Reduce entry content or increase token budget.")
+      screen.getByText("Estimated usage exceeds the configured budget.")
     ).toBeInTheDocument()
   }, 15000)
 })

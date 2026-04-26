@@ -169,7 +169,7 @@ jobs:
 
       - name: Build frontend production bundle for smoke gate
         working-directory: apps/tldw-frontend
-        run: bun run build
+        run: bun run build:prod
 
       - name: Install Playwright Chromium
         run: bunx playwright install --with-deps chromium

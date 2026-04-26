@@ -8,9 +8,11 @@ and that both SQLite and PostgreSQL backends implement the interface properly.
 import pytest
 import tempfile
 import os
+import threading
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
+from tldw_Server_API.app.core.DB_Management.backends import factory as factory_mod
 from tldw_Server_API.app.core.DB_Management.backends.base import (
     DatabaseBackend,
     DatabaseConfig,
@@ -127,6 +129,132 @@ class TestDatabaseBackends:
                 "cache_size": -2000,
             }
         ]
+
+    def test_sqlite_backend_get_pool_is_singleton_under_concurrent_first_use(self, sqlite_config, monkeypatch):
+        class _BlockingPool:
+            init_calls = 0
+            first_started = threading.Event()
+            release = threading.Event()
+
+            def __init__(self, db_path, config):
+                type(self).init_calls += 1
+                type(self).first_started.set()
+                type(self).release.wait(timeout=2)
+                self.db_path = db_path
+                self.config = config
+
+            def get_connection(self):
+                raise NotImplementedError
+
+            def return_connection(self, connection):
+                raise NotImplementedError
+
+            def connection(self):
+                raise NotImplementedError
+
+            def close_all(self):
+                pass
+
+            def get_stats(self):
+                return {}
+
+        monkeypatch.setattr(
+            "tldw_Server_API.app.core.DB_Management.backends.sqlite_backend.SQLiteConnectionPool",
+            _BlockingPool,
+            raising=True,
+        )
+
+        backend = SQLiteBackend(sqlite_config)
+        results = [None, None]
+        errors: list[BaseException] = []
+
+        def _get_pool(slot: int) -> None:
+            try:
+                results[slot] = backend.get_pool()
+            except BaseException as exc:  # pragma: no cover - defensive
+                errors.append(exc)
+
+        t1 = threading.Thread(target=_get_pool, args=(0,))
+        t1.start()
+        assert _BlockingPool.first_started.wait(timeout=1.0)
+
+        t2 = threading.Thread(target=_get_pool, args=(1,))
+        t2.start()
+        _BlockingPool.release.set()
+
+        t1.join(timeout=2.0)
+        t2.join(timeout=2.0)
+
+        assert not errors
+        assert not t1.is_alive()
+        assert not t2.is_alive()
+        assert _BlockingPool.init_calls == 1
+        assert results[0] is not None
+        assert results[0] is results[1]
+
+    def test_factory_close_backend_waits_for_sqlite_pool_initialization(self, sqlite_config, monkeypatch):
+        class _BlockingPool:
+            created = None
+            init_started = threading.Event()
+            allow_init = threading.Event()
+
+            def __init__(self, db_path, config):
+                self.db_path = db_path
+                self.config = config
+                self.close_calls = 0
+                type(self).created = self
+                type(self).init_started.set()
+                type(self).allow_init.wait(timeout=2)
+
+            def get_connection(self):
+                raise NotImplementedError
+
+            def return_connection(self, connection):
+                raise NotImplementedError
+
+            def connection(self):
+                raise NotImplementedError
+
+            def close_all(self):
+                self.close_calls += 1
+
+            def get_stats(self):
+                return {}
+
+        monkeypatch.setattr(
+            "tldw_Server_API.app.core.DB_Management.backends.sqlite_backend.SQLiteConnectionPool",
+            _BlockingPool,
+            raising=True,
+        )
+
+        backend = SQLiteBackend(sqlite_config)
+        errors: list[BaseException] = []
+
+        def _get_pool() -> None:
+            try:
+                backend.get_pool()
+            except BaseException as exc:  # pragma: no cover - defensive
+                errors.append(exc)
+
+        pool_thread = threading.Thread(target=_get_pool)
+        close_thread = threading.Thread(
+            target=factory_mod._close_backend_instance,
+            args=("sqlite-under-reset", backend),
+        )
+
+        pool_thread.start()
+        assert _BlockingPool.init_started.wait(timeout=1.0)
+        close_thread.start()
+        _BlockingPool.allow_init.set()
+
+        pool_thread.join(timeout=2.0)
+        close_thread.join(timeout=2.0)
+
+        assert not errors
+        assert not pool_thread.is_alive()
+        assert not close_thread.is_alive()
+        assert _BlockingPool.created is not None
+        assert _BlockingPool.created.close_calls == 1
 
     def test_sqlite_backend_schema_creation(self, sqlite_config):
         """Test that SQLite backend can create schema via create_tables."""

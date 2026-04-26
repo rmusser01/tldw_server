@@ -507,11 +507,17 @@ def convert_attempt_remediation_conversions(
 ) -> QuizRemediationConvertResponse:
     """Create remediation flashcards plus conversion records for missed attempt questions."""
     try:
+        create_deck_review_prompt_side = (
+            payload.create_deck_review_prompt_side
+            if "create_deck_review_prompt_side" in payload.model_fields_set
+            else None
+        )
         return db.convert_quiz_remediation_questions(
             attempt_id=attempt_id,
             question_ids=payload.question_ids,
             target_deck_id=payload.target_deck_id,
             create_deck_name=payload.create_deck_name,
+            create_deck_review_prompt_side=create_deck_review_prompt_side,
             create_deck_scheduler_type=payload.create_deck_scheduler_type,
             create_deck_scheduler_settings=(
                 payload.create_deck_scheduler_settings.model_dump()

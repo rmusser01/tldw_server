@@ -18,6 +18,7 @@ import {
 import { useTranslation } from "react-i18next"
 import { useAntdMessage } from "@/hooks/useAntdMessage"
 import { useUndoNotification } from "@/hooks/useUndoNotification"
+import type { DeckReviewPromptSide } from "@/services/flashcards"
 import { processInChunks } from "@/utils/chunk-processing"
 import { ImageOcclusionTransferPanel } from "./ImageOcclusionTransferPanel"
 import { NewDeckConfigurationFields } from "../components/NewDeckConfigurationFields"
@@ -414,6 +415,8 @@ const ImportPanel: React.FC<TransferActionReporterProps> = ({ onTransferAction }
       defaultValue: "Structured Import"
     })
   )
+  const [structuredReviewPromptSide, setStructuredReviewPromptSide] =
+    React.useState<DeckReviewPromptSide>("front")
   const [confirmLargeImportOpen, setConfirmLargeImportOpen] = React.useState(false)
   const [importHelpActiveKeys, setImportHelpActiveKeys] = React.useState<string[]>([
     "columns"
@@ -509,6 +512,7 @@ const ImportPanel: React.FC<TransferActionReporterProps> = ({ onTransferAction }
       }
       const createdDeck = await createDeckMutation.mutateAsync({
         name,
+        review_prompt_side: structuredReviewPromptSide,
         scheduler_type: schedulerSettings.scheduler_type,
         scheduler_settings: schedulerSettings.scheduler_settings
       })
@@ -527,6 +531,7 @@ const ImportPanel: React.FC<TransferActionReporterProps> = ({ onTransferAction }
     createDeckMutation,
     decks,
     structuredNewDeckName,
+    structuredReviewPromptSide,
     structuredSchedulerDraft,
     structuredTargetDeckId,
     t
@@ -1310,6 +1315,8 @@ const ImportPanel: React.FC<TransferActionReporterProps> = ({ onTransferAction }
                 <NewDeckConfigurationFields
                   deckName={structuredNewDeckName}
                   onDeckNameChange={setStructuredNewDeckName}
+                  reviewPromptSide={structuredReviewPromptSide}
+                  onReviewPromptSideChange={setStructuredReviewPromptSide}
                   schedulerDraft={structuredSchedulerDraft}
                   nameTestId="flashcards-structured-new-deck-name"
                 />
@@ -2061,6 +2068,7 @@ const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporterProps> 
       defaultValue: "Generated Flashcards"
     })
   )
+  const [reviewPromptSide, setReviewPromptSide] = React.useState<DeckReviewPromptSide>("front")
   const [generatedCards, setGeneratedCards] = React.useState<GeneratedCardDraft[]>([])
   const [generationError, setGenerationError] = React.useState<string | null>(null)
   const [isSaving, setIsSaving] = React.useState(false)
@@ -2197,6 +2205,7 @@ const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporterProps> 
       }
       const createdDeck = await createDeckMutation.mutateAsync({
         name,
+        review_prompt_side: reviewPromptSide,
         scheduler_type: schedulerSettings.scheduler_type,
         scheduler_settings: schedulerSettings.scheduler_settings
       })
@@ -2209,7 +2218,7 @@ const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporterProps> 
         defaultValue: "Enter a deck name."
       })
     )
-  }, [createDeckMutation, decks, generatedDeckSchedulerDraft, newDeckName, t, targetDeckId])
+  }, [createDeckMutation, decks, generatedDeckSchedulerDraft, newDeckName, reviewPromptSide, t, targetDeckId])
 
   const handleSaveGeneratedCards = React.useCallback(async () => {
     if (generatedCards.length === 0) return
@@ -2419,6 +2428,8 @@ const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporterProps> 
           <NewDeckConfigurationFields
             deckName={newDeckName}
             onDeckNameChange={setNewDeckName}
+            reviewPromptSide={reviewPromptSide}
+            onReviewPromptSideChange={setReviewPromptSide}
             schedulerDraft={generatedDeckSchedulerDraft}
             nameTestId="flashcards-generate-new-deck-name"
           />

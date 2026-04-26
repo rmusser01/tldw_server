@@ -285,6 +285,7 @@ class TranscriptionModel(str, Enum):
     NEMO_PARAKEET_TDT_1B = "nemo-parakeet-tdt-1.1b"
 
     # Parakeet with backends
+    PARAKEET_TDT_0_6B_V3_ONNX = "parakeet-tdt-0.6b-v3-onnx"
     PARAKEET_STANDARD = "parakeet-standard"
     PARAKEET_CUDA = "parakeet-cuda"
     PARAKEET_MLX = "parakeet-mlx"

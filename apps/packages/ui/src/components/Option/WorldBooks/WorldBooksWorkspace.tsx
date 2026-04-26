@@ -17,9 +17,7 @@ export const WorldBooksWorkspace: React.FC = () => {
   const chatSidebarCollapsed = useLayoutUiStore(
     (state) => state.chatSidebarCollapsed
   )
-  const pageShellMaxWidthClassName = chatSidebarCollapsed
-    ? "max-w-none"
-    : "max-w-5xl"
+  const pageShellMaxWidthClassName = "max-w-none"
 
   const worldBooksUnsupported =
     !capsLoading && capabilities && !capabilities.hasWorldBooks

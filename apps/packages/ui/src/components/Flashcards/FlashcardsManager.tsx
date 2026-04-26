@@ -3,7 +3,7 @@ import { Button, Space, Tabs, Tooltip } from "antd"
 import { HelpCircle } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import { useLocation, useNavigate } from "react-router-dom"
-import { ReviewTab, ManageTab, ImportExportTab, SchedulerTab } from "./tabs"
+import { ReviewTab, ManageTab, ImportExportTab, SchedulerTab, TemplatesTab } from "./tabs"
 import { KeyboardShortcutsModal } from "./components"
 import { useDecksQuery } from "./hooks"
 import type { Flashcard } from "@/services/flashcards"
@@ -30,6 +30,9 @@ const parseInitialFlashcardsTab = (locationLike: { search?: string; hash?: strin
     case "transfer":
     case "importexport":
       return "importExport"
+    case "template":
+    case "templates":
+      return "templates"
     case "scheduler":
       return "scheduler"
     default:
@@ -266,6 +269,11 @@ export const FlashcardsManager: React.FC = () => {
               />
             )
           },
+          {
+            key: "templates",
+            label: t("option:flashcards.tabTemplates", { defaultValue: "Templates" }),
+            children: <TemplatesTab />
+          },
           // Hide Scheduler tab when there are zero decks
           ...(showSchedulerTab
             ? [
@@ -295,6 +303,8 @@ export const FlashcardsManager: React.FC = () => {
             ? "import"
             : activeTab === "scheduler"
               ? "scheduler"
+              : activeTab === "templates"
+                ? "templates"
               : (activeTab as "review" | "cards")
         }
       />

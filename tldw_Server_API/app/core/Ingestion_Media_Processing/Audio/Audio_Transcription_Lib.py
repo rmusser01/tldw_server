@@ -2539,6 +2539,7 @@ def parse_transcription_model(model_name: str) -> tuple:
 
     Examples:
     - "parakeet-mlx" -> ("parakeet", "parakeet", "mlx")
+    - "parakeet-tdt-0.6b-v3-onnx" -> ("parakeet", "parakeet", "onnx")
     - "parakeet-onnx" -> ("parakeet", "parakeet", "onnx")
     - "parakeet-cuda" -> ("parakeet", "parakeet", "cuda")
     - "parakeet-standard" -> ("parakeet", "parakeet", "standard")

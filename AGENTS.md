@@ -27,8 +27,7 @@ The project is a FastAPI-first backend with a Next.js WebUI, mature AuthNZ (sing
 │   │   └── main.py               # FastAPI entry point
 │   ├── Config_Files/             # config.txt, example YAMLs, migration helpers
 │   ├── Databases/                # Default DBs (runtime data; some are gitignored)
-│   ├── tests/                    # Pytest suite
-│   └── requirements.txt          # Legacy pin set (prefer pyproject extras)
+│   └── tests/                    # Pytest suite
 ├── Dockerfiles/                  # Docker images and compose files
 ├── Docs/                         # Documentation (API, Development, RAG, AuthNZ, TTS, etc.)
 ├── Helper_Scripts/               # Utilities (installers, prompt tools, doc generators)
@@ -523,7 +522,16 @@ When multiple valid approaches exist, choose based on:
 - [ ] No new security findings introduced in touched code
 - [ ] Commit messages are clear
 - [ ] Implementation matches plan
+- [ ] AI-generated PRs include a human-written `Change summary` that explains both what changed and why those implementation choices were made
 - [ ] No TODOs without issue numbers
+
+### AI-Generated PR Merge Gate
+
+- For PRs materially authored by AI, merge is blocked unless the human requester writes a `Change summary`.
+- That summary must explain both what changed and why those specific implementation choices were made.
+- A diff recap or pasted AI text without clear human ownership does not satisfy this gate.
+- If the human requester cannot explain the rationale in their own words, the PR is not merge-ready.
+- Canonical policy: `Docs/superpowers/AI_GENERATED_PR_CHANGE_SUMMARY_POLICY_2026_04_17.md`
 
 ### Security Validation
 

@@ -256,16 +256,17 @@ describe("WorldBooksManager accessibility stage-1 baseline harness", () => {
     expect(results.violations.map((violation) => violation.id)).toContain("label")
   }, 15000)
 
-  it("enforces valid aria/name rules in the entries drawer workflow", async () => {
+  it("enforces valid aria/name rules in the detail-panel entries workflow", async () => {
     const user = userEvent.setup()
     render(<WorldBooksManager />)
 
-    await user.click(screen.getByRole("button", { name: "Manage entries" }))
-    const drawerBreadcrumb = await screen.findByText("World Books > Arcana > Entries")
-    const drawerScope =
-      drawerBreadcrumb.closest(".ant-drawer-content") || document.body
+    await user.click(screen.getByText("Arcana"))
+    const entriesTab = await screen.findByRole("tab", { name: /Entries/i })
+    const detailScope =
+      entriesTab.closest("main[aria-label='World book detail']") ||
+      screen.getByRole("main", { name: "World book detail" })
 
-    const results = await runA11yBaselineRules(drawerScope)
+    const results = await runA11yBaselineRules(detailScope)
     expectNoInvalidAriaViolations(results.violations)
     expect(results.violations.map((violation) => violation.id)).not.toContain("button-name")
   }, 30000)
@@ -274,7 +275,9 @@ describe("WorldBooksManager accessibility stage-1 baseline harness", () => {
     const user = userEvent.setup()
     render(<WorldBooksManager />)
 
-    await user.click(screen.getByRole("button", { name: "Open relationship matrix" }))
+    // Open Tools dropdown then click Relationship Matrix
+    await user.click(screen.getByRole("button", { name: "Tools" }))
+    await user.click(await screen.findByText("Relationship Matrix"))
     const matrixStatus = await screen.findByText("Matrix view active (2 characters).")
     const matrixScope = matrixStatus.closest(".ant-modal-content") || document.body
 

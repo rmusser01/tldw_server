@@ -1,9 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { Button, Form, Input, InputNumber, Modal, Skeleton, Switch, Table, Tooltip, Tag, Select, Descriptions, Empty, Popover, Divider, Drawer, Checkbox, Grid, Progress, Upload, Dropdown } from "antd"
+import { Button, Drawer, Form, Input, InputNumber, Modal, Skeleton, Switch, Table, Tooltip, Tag, Select, Descriptions, Empty, Popover, Divider, Checkbox, Grid, Progress, Upload } from "antd"
 import React from "react"
 import { useConfirmDanger } from "@/components/Common/confirm-danger"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
-import { Pen, Trash2, BookOpen, Link2, Download, BarChart3, Copy, List, MoreHorizontal, Upload as UploadIcon, HelpCircle } from "lucide-react"
+import { List, Upload as UploadIcon, HelpCircle } from "lucide-react"
 import { useServerOnline } from "@/hooks/useServerOnline"
 import FeatureEmptyState from "../../Common/FeatureEmptyState"
 import { useTranslation } from "react-i18next"
@@ -16,10 +16,6 @@ import {
   isWorldBookVersionConflictError,
   toWorldBookFormValues
 } from "./worldBookFormUtils"
-import {
-  formatWorldBookLastModified,
-  UNKNOWN_LAST_MODIFIED_LABEL
-} from "./worldBookListUtils"
 import {
   getWorldBookImportFormatLabel,
   WORLD_BOOK_IMPORT_MERGE_HELP_TEXT,
@@ -51,10 +47,13 @@ import {
   ATTACHMENT_FEEDBACK_DURATION_MS,
   ATTACHMENT_PULSE_DURATION_MS,
   MODAL_BODY_SCROLL_STYLE,
-  LOREBOOK_DEBUG_ENTRYPOINT_HREF,
   ACCESSIBLE_SWITCH_TEXT_PROPS,
   type EditWorldBookConflictState,
 } from "./worldBookManagerUtils"
+import { WorldBookEmptyState } from "./WorldBookEmptyState"
+import { WorldBookToolbar } from "./WorldBookToolbar"
+import { WorldBookListPanel } from "./WorldBookListPanel"
+import { WorldBookDetailPanel, type WorldBookDetailTabKey } from "./WorldBookDetailPanel"
 
 export { WorldBookForm } from "./WorldBookForm"
 
@@ -66,6 +65,7 @@ export const WorldBooksManager: React.FC = () => {
   const notification = useAntdNotification()
   const { showUndoNotification } = useUndoNotification()
   const [open, setOpen] = React.useState(false)
+  const [selectedWorldBookId, setSelectedWorldBookId] = React.useState<number | null>(null)
   const [openEdit, setOpenEdit] = React.useState(false)
   const [openEntries, setOpenEntries] = React.useState<
     null | { id: number; name: string; entryCount?: number; tokenBudget?: number }
@@ -82,7 +82,9 @@ export const WorldBooksManager: React.FC = () => {
   const [createForm] = Form.useForm()
   const [editForm] = Form.useForm()
   const [entryForm] = Form.useForm()
+  const [settingsForm] = Form.useForm()
   const [attachForm] = Form.useForm()
+  const [detailActiveTab, setDetailActiveTab] = React.useState<WorldBookDetailTabKey>("entries")
   const importFormatHelpContentId = React.useId()
   const importErrorDetailsContentId = React.useId()
   const importPreviewEntriesContentId = React.useId()
@@ -271,6 +273,42 @@ export const WorldBooksManager: React.FC = () => {
     [reconciledAttachmentsByBook]
   )
 
+  const selectedWorldBookRecord = React.useMemo(
+    () => ((data || []) as any[]).find((book: any) => Number(book?.id) === Number(selectedWorldBookId)) || null,
+    [data, selectedWorldBookId]
+  )
+  const selectedWorldBookVersion =
+    typeof selectedWorldBookRecord?.version === "number" ? selectedWorldBookRecord.version : null
+
+  const selectedWorldBookAttached = React.useMemo(
+    () => selectedWorldBookId ? getAttachedCharacters(selectedWorldBookId) : [],
+    [selectedWorldBookId, getAttachedCharacters]
+  )
+
+  const {
+    data: selectedWorldBookStats,
+    status: selectedWorldBookStatsStatus,
+    error: selectedWorldBookStatsError,
+    isFetching: selectedWorldBookStatsFetching
+  } = useQuery({
+    queryKey: ["tldw:selectedWorldBookStatistics", selectedWorldBookId],
+    queryFn: async () => {
+      if (selectedWorldBookId == null) return null
+      await tldwClient.initialize()
+      return await tldwClient.worldBookStatistics(selectedWorldBookId)
+    },
+    enabled: isOnline && selectedWorldBookId != null && detailActiveTab === "stats"
+  })
+
+  const selectWorldBookInDetail = React.useCallback(
+    (id: number, tab: WorldBookDetailTabKey = "entries") => {
+      setSelectedWorldBookId(id)
+      setDetailActiveTab(tab)
+      requestAttachmentHydration()
+    },
+    [requestAttachmentHydration]
+  )
+
   const { mutate: createWB, isPending: creating } = useMutation({
     mutationFn: async (values: any) => {
       const templateKey =
@@ -314,21 +352,31 @@ export const WorldBooksManager: React.FC = () => {
   })
   const { mutate: updateWB, isPending: updating } = useMutation({
     mutationFn: (values: any) => {
-      if (editId == null) return Promise.resolve(null)
-      if (typeof editExpectedVersion === "number") {
-        return tldwClient.updateWorldBook(editId, values, {
-          expectedVersion: editExpectedVersion
+      const targetId = editId ?? selectedWorldBookId
+      if (targetId == null) return Promise.resolve(null)
+      const versionToUse =
+        typeof editExpectedVersion === "number"
+          ? editExpectedVersion
+          : editId == null
+            ? selectedWorldBookVersion
+            : null
+      if (typeof versionToUse === "number") {
+        return tldwClient.updateWorldBook(targetId, values, {
+          expectedVersion: versionToUse
         })
       }
-      return tldwClient.updateWorldBook(editId, values)
+      return tldwClient.updateWorldBook(targetId, values)
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['tldw:listWorldBooks'] })
-      setOpenEdit(false)
-      editForm.resetFields()
-      setEditId(null)
-      setEditExpectedVersion(null)
       setEditConflict(null)
+      if (editId != null) {
+        setOpenEdit(false)
+        editForm.resetFields()
+        setEditId(null)
+        setEditExpectedVersion(null)
+        setEditConflict(null)
+      }
     },
     onError: (e: any, values: any) => {
       const description = buildWorldBookMutationErrorMessage(e, {
@@ -340,6 +388,7 @@ export const WorldBooksManager: React.FC = () => {
         description
       })
       if (isWorldBookVersionConflictError(e)) {
+        setDetailActiveTab("settings")
         setEditConflict({
           attemptedValues: { ...(values || {}) },
           message: description
@@ -400,93 +449,6 @@ export const WorldBooksManager: React.FC = () => {
   })
 
   const [detachingFor, setDetachingFor] = React.useState<{ characterId: number; worldBookId: number } | null>(null)
-
-  const renderAttachedCell = (record: any) => {
-    if (!attachmentsHydrationRequested) {
-      return <Tag color="default">Open to load</Tag>
-    }
-    if (attachmentsLoading) return <span className="text-text-muted">Loading…</span>
-    const attached = getAttachedCharacters(record.id)
-    if (!attached || attached.length === 0) {
-      return <Tag color="gold">Unattached</Tag>
-    }
-
-    const buildCharacterWorkspaceHref = (characterId: number | string) => {
-      const params = new URLSearchParams()
-      params.set("from", "world-books")
-      params.set("focusCharacterId", String(characterId))
-      params.set("focusWorldBookId", String(record.id))
-      return `/characters?${params.toString()}`
-    }
-
-    return (
-      <Popover
-        trigger="click"
-        title="Attached Characters"
-        content={
-          <div className="space-y-2">
-            {attached.map((c: any) => (
-              <div key={c.id} className="flex items-center justify-between gap-2">
-                <a
-                  href={buildCharacterWorkspaceHref(c.id)}
-                  className="text-sm text-primary hover:underline"
-                  aria-label={`Open character ${c.name || `Character ${c.id}`}`}
-                >
-                  {c.name || `Character ${c.id}`}
-                </a>
-                <Button
-                  size="small"
-                  danger
-                  loading={detachingFor?.characterId === c.id && detachingFor?.worldBookId === record.id}
-                  onClick={async (e) => {
-                    e.preventDefault()
-                    e.stopPropagation()
-                    setDetachingFor({ characterId: c.id, worldBookId: record.id })
-                    try {
-                      await detachWB({ characterId: c.id, worldBookId: record.id })
-                      notification.success({ message: 'Detached' })
-                    } finally {
-                      setDetachingFor(null)
-                    }
-                  }}
-                >
-                  Detach
-                </Button>
-              </div>
-            ))}
-          </div>
-        }
-      >
-        <Button
-          type="link"
-          size="small"
-          className="px-0"
-          aria-label={`View attached characters for ${record?.name || "world book"} (${attached.length})`}
-        >
-          {attached.length} {attached.length === 1 ? "character" : "characters"}
-        </Button>
-      </Popover>
-    )
-  }
-
-  const renderLastModifiedCell = (value: unknown) => {
-    const formatted = formatWorldBookLastModified(value)
-    if (!formatted.timestamp) {
-      return <span className="text-text-muted">{UNKNOWN_LAST_MODIFIED_LABEL}</span>
-    }
-    return (
-      <Tooltip title={formatted.absolute}>
-        <span>{formatted.relative}</span>
-      </Tooltip>
-    )
-  }
-
-  const renderBudgetCell = (value: unknown) => {
-    if (typeof value !== "number" || !Number.isFinite(value)) {
-      return <span className="text-text-muted">—</span>
-    }
-    return <span>{value.toLocaleString()} tok</span>
-  }
 
   const attachmentKeyFor = React.useCallback((worldBookId: number, characterId: number) => {
     return `${worldBookId}:${characterId}`
@@ -935,6 +897,34 @@ export const WorldBooksManager: React.FC = () => {
 
   // --- End Hooks ---
 
+  // Escape key clears selection when no modal/drawer is open
+  React.useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (
+        e.key === "Escape" &&
+        selectedWorldBookId != null &&
+        !open &&
+        !openEdit &&
+        !openImport &&
+        !openMatrix &&
+        !openGlobalStats &&
+        !openTestMatching &&
+        !openAttach &&
+        !openEntries
+      ) {
+        setSelectedWorldBookId(null)
+      }
+    }
+    document.addEventListener("keydown", handler)
+    return () => document.removeEventListener("keydown", handler)
+  }, [selectedWorldBookId, open, openEdit, openImport, openMatrix, openGlobalStats, openTestMatching, openAttach, openEntries])
+
+  // Reduced motion preference for animation fallbacks
+  const prefersReducedMotion = React.useMemo(() => {
+    if (typeof window === "undefined") return false
+    return window.matchMedia("(prefers-reduced-motion: reduce)").matches
+  }, [])
+
   const handleCloseCreate = async () => {
     if (createForm.isFieldsTouched()) {
       const ok = await confirmDanger({
@@ -1039,19 +1029,22 @@ export const WorldBooksManager: React.FC = () => {
     [data, getActiveFocusableElement]
   )
 
+  const activeEditTargetId = editId ?? selectedWorldBookId
+
   const latestEditRecord = React.useMemo(
     () =>
       ((data || []) as any[]).find(
-        (book: any) => Number(book?.id) === Number(editId)
+        (book: any) => Number(book?.id) === Number(activeEditTargetId)
       ) || null,
-    [data, editId]
+    [activeEditTargetId, data]
   )
   const latestEditVersion =
     typeof latestEditRecord?.version === "number" ? latestEditRecord.version : null
 
   const handleLoadLatestEditValues = React.useCallback(() => {
     if (!latestEditRecord) return
-    editForm.setFieldsValue(toWorldBookFormValues(latestEditRecord))
+    const targetForm = editId != null ? editForm : settingsForm
+    targetForm.setFieldsValue(toWorldBookFormValues(latestEditRecord))
     setEditExpectedVersion(
       typeof latestEditRecord.version === "number" ? latestEditRecord.version : null
     )
@@ -1060,11 +1053,12 @@ export const WorldBooksManager: React.FC = () => {
       message: "Latest values loaded",
       description: "Review the refreshed values, reapply any local edits, then save again."
     })
-  }, [editForm, latestEditRecord, notification])
+  }, [editForm, editId, latestEditRecord, notification, settingsForm])
 
   const handleReapplyEditDraft = React.useCallback(() => {
     if (!latestEditRecord || !editConflict) return
-    editForm.setFieldsValue({
+    const targetForm = editId != null ? editForm : settingsForm
+    targetForm.setFieldsValue({
       ...toWorldBookFormValues(latestEditRecord),
       ...editConflict.attemptedValues
     })
@@ -1076,7 +1070,46 @@ export const WorldBooksManager: React.FC = () => {
       message: "Edits reapplied",
       description: "Your unsaved edits were merged onto the latest version. Save to retry."
     })
-  }, [editConflict, editForm, latestEditRecord, notification])
+  }, [editConflict, editForm, editId, latestEditRecord, notification, settingsForm])
+
+  const renderEditConflictBanner = React.useCallback(() => {
+    if (!editConflict) return null
+
+    return (
+      <div
+        data-testid="world-book-edit-conflict"
+        className="mb-3 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800"
+      >
+        <p>{editConflict.message}</p>
+        <p className="mt-1 text-xs text-amber-700">
+          Reload the latest version and then reapply your edits before saving again.
+          {latestEditVersion != null ? ` Latest version: ${latestEditVersion}.` : ""}
+        </p>
+        <div className="mt-2 flex flex-wrap gap-2">
+          <Button
+            size="small"
+            onClick={handleLoadLatestEditValues}
+            disabled={!latestEditRecord}
+          >
+            Load latest values
+          </Button>
+          <Button
+            size="small"
+            onClick={handleReapplyEditDraft}
+            disabled={!latestEditRecord}
+          >
+            Reapply my edits
+          </Button>
+        </div>
+      </div>
+    )
+  }, [
+    editConflict,
+    handleLoadLatestEditValues,
+    handleReapplyEditDraft,
+    latestEditRecord,
+    latestEditVersion
+  ])
 
   React.useEffect(() => {
     return () => {
@@ -1111,224 +1144,35 @@ export const WorldBooksManager: React.FC = () => {
     }
   }
 
-  const renderDesktopWorldBookActions = (record: any) => (
-    <div className="flex gap-2">
-      <Tooltip title="Edit">
-        <Button
-          type="text"
-          size="small"
-          aria-label="Edit world book"
-          icon={<Pen className="w-4 h-4" />}
-          onClick={() => openEditWorldBook(record)}
-        />
-      </Tooltip>
-      <Tooltip title="Manage Entries">
-        <Button
-          type="text"
-          size="small"
-          aria-label="Manage entries"
-          icon={<List className="w-4 h-4" />}
-          onClick={() =>
-            openEntriesWithPreset(
-              {
-                id: record.id,
-                name: record.name,
-                entryCount: record.entry_count,
-                tokenBudget: record.token_budget
-              },
-              DEFAULT_ENTRY_FILTER_PRESET
-            )
-          }
-        />
-      </Tooltip>
-      <Tooltip title="Duplicate World Book">
-        <Button
-          type="text"
-          size="small"
-          aria-label="Duplicate world book"
-          icon={<Copy className="w-4 h-4" />}
-          loading={duplicatingId === record.id}
-          onClick={() => void duplicateWorldBook(record)}
-        />
-      </Tooltip>
-      <Tooltip title="Quick Attach Characters">
-        <Button
-          type="text"
-          size="small"
-          aria-label="Quick attach characters"
-          icon={<Link2 className="w-4 h-4" />}
-          onClick={() => {
-            requestAttachmentHydration()
-            setOpenAttach(record.id)
-          }}
-        />
-      </Tooltip>
-      <Tooltip title="Export JSON">
-        <Button
-          type="text"
-          size="small"
-          aria-label="Export world book"
-          icon={<Download className="w-4 h-4" />}
-          loading={exportingId === record.id}
-          onClick={() => void exportSingleWorldBook(record)}
-        />
-      </Tooltip>
-      <Tooltip title="Statistics">
-        <Button
-          type="text"
-          size="small"
-          aria-label="View world book statistics"
-          icon={<BarChart3 className="w-4 h-4" />}
-          loading={statsLoadingId === record.id}
-          onClick={() => void openWorldBookStatistics(record)}
-        />
-      </Tooltip>
-      <Tooltip title="Delete">
-        <Button
-          type="text"
-          size="small"
-          danger
-          aria-label="Delete world book"
-          icon={<Trash2 className="w-4 h-4" />}
-          disabled={deleting || pendingDeleteIds.includes(record.id)}
-          onClick={() => void requestDeleteWorldBook(record)}
-        />
-      </Tooltip>
-    </div>
-  )
-
-  const renderMobileWorldBookActions = (record: any) => {
-    const menuItems = [
-      {
-        key: "entries",
-        label: "Manage Entries",
-        onClick: () =>
-          openEntriesWithPreset(
-            {
-              id: record.id,
-              name: record.name,
-              entryCount: record.entry_count,
-              tokenBudget: record.token_budget
-            },
-            DEFAULT_ENTRY_FILTER_PRESET
-          )
-      },
-      {
-        key: "edit",
-        label: "Edit",
-        onClick: () => openEditWorldBook(record)
-      },
-      {
-        key: "duplicate",
-        label: "Duplicate",
-        onClick: () => void duplicateWorldBook(record)
-      },
-      {
-        key: "attach",
-        label: "Quick Attach Characters",
-        onClick: () => {
-          requestAttachmentHydration()
-          setOpenAttach(record.id)
-        }
-      },
-      {
-        key: "export",
-        label: "Export JSON",
-        onClick: () => void exportSingleWorldBook(record)
-      },
-      {
-        key: "stats",
-        label: "Statistics",
-        onClick: () => void openWorldBookStatistics(record)
-      },
-      {
-        key: "delete",
-        label: "Delete",
-        danger: true,
-        onClick: () => void requestDeleteWorldBook(record)
-      }
-    ]
-
-    return (
-      <Dropdown menu={{ items: menuItems }} trigger={["click"]} placement="bottomRight">
-        <Button
-          size="middle"
-          type="default"
-          aria-label={`More actions for ${record?.name || "world book"}`}
-          icon={<MoreHorizontal className="w-4 h-4" />}
-        />
-      </Dropdown>
-    )
-  }
-
-  const columns = [
-    { title: "", key: "icon", width: 40, render: () => <BookOpen className="w-4 h-4" /> },
-    {
-      title: "Name",
-      dataIndex: "name",
-      key: "name",
-      sorter: (a: any, b: any) => String(a?.name || "").localeCompare(String(b?.name || "")),
-      sortOrder: tableSort.field === "name" ? tableSort.order : null,
-      render: (value: string, record: any) => (
-        <div className="flex flex-wrap items-center gap-2">
-          <span>{value}</span>
-          {pendingDeleteIds.includes(Number(record?.id)) && (
-            <Tag color="orange">Pending delete</Tag>
-          )}
-        </div>
-      )
-    },
-    ...(screens.md
-      ? [
-          {
-            title: "Description",
-            dataIndex: "description",
-            key: "description",
-            render: (v: string) => <span className="line-clamp-1">{v}</span>
-          },
-          {
-            title: "Attached To",
-            key: "attached_to",
-            render: (_: any, record: any) => renderAttachedCell(record)
-          },
-          {
-            title: "Budget",
-            dataIndex: "token_budget",
-            key: "token_budget",
-            render: (v: unknown) => renderBudgetCell(v)
-          }
-        ]
-      : []),
-    {
-      title: "Last Modified",
-      dataIndex: "last_modified",
-      key: "last_modified",
-      render: (v: unknown) => renderLastModifiedCell(v)
-    },
-    {
-      title: "Enabled",
-      dataIndex: "enabled",
-      key: "enabled",
-      sorter: (a: any, b: any) => Number(Boolean(a?.enabled)) - Number(Boolean(b?.enabled)),
-      sortOrder: tableSort.field === "enabled" ? tableSort.order : null,
-      render: (v: boolean) => (v ? <Tag color="green">Enabled</Tag> : <Tag color="volcano">Disabled</Tag>)
-    },
-    {
-      title: "Entries",
-      dataIndex: "entry_count",
-      key: "entry_count",
-      sorter: (a: any, b: any) => Number(a?.entry_count || 0) - Number(b?.entry_count || 0),
-      sortOrder: tableSort.field === "entry_count" ? tableSort.order : null
-    },
-    {
-      title: "Actions",
-      key: "actions",
-      render: (_: any, record: any) =>
-        screens.md
-          ? renderDesktopWorldBookActions(record)
-          : renderMobileWorldBookActions(record)
+  const handleRowAction = React.useCallback((action: string, record: any) => {
+    switch (action) {
+      case "entries":
+        selectWorldBookInDetail(record.id, "entries")
+        break
+      case "duplicate":
+        void duplicateWorldBook(record)
+        break
+      case "attach":
+        requestAttachmentHydration()
+        setOpenAttach(record.id)
+        break
+      case "export":
+        void exportSingleWorldBook(record)
+        break
+      case "stats":
+        void openWorldBookStatistics(record)
+        break
+      case "delete":
+        void requestDeleteWorldBook(record)
+        break
     }
-  ]
+  }, [duplicateWorldBook, exportSingleWorldBook, requestDeleteWorldBook, openWorldBookStatistics, selectWorldBookInDetail])
+
+  const layoutMode: "desktop" | "tablet" | "mobile" = screens.lg
+    ? "desktop"
+    : screens.md
+      ? "tablet"
+      : "mobile"
 
   if (!isOnline) {
     return (
@@ -1346,107 +1190,31 @@ export const WorldBooksManager: React.FC = () => {
 
   return (
     <div className="space-y-4" data-testid="world-books-manager">
-      <div
-        className="flex flex-wrap items-center justify-between gap-2"
-        data-testid="world-books-toolbar"
-      >
-        <div className="flex flex-wrap items-center gap-2">
-          <Input
-            allowClear
-            placeholder="Search world books…"
-            aria-label="Search world books"
-            data-testid="world-books-search-input"
-            value={listSearch}
-            onChange={(e) => setListSearch(e.target.value)}
-            className="w-full min-w-[220px] md:w-72"
-          />
-          <Select
-            value={enabledFilter}
-            onChange={(value) => setEnabledFilter(value)}
-            aria-label="Filter by enabled status"
-            data-testid="world-books-enabled-filter"
-            className="w-40"
-            options={[
-              { label: "All statuses", value: "all" },
-              { label: "Enabled", value: "enabled" },
-              { label: "Disabled", value: "disabled" }
-            ]}
-          />
-          <Select
-            value={attachmentFilter}
-            onChange={(value) => {
-              if (value !== "all") {
-                requestAttachmentHydration()
-              }
-              setAttachmentFilter(value)
-            }}
-            aria-label="Filter by attachment state"
-            data-testid="world-books-attachment-filter"
-            className="w-44"
-            options={[
-              { label: "All attachments", value: "all" },
-              { label: "Has attachments", value: "attached" },
-              { label: "Unattached only", value: "unattached" }
-            ]}
-          />
-        </div>
-        <div className="flex items-center gap-2">
-          <Button aria-label="Open relationship matrix" onClick={handleOpenMatrix}>
-            Relationship Matrix
-          </Button>
-          <Button
-            aria-label="Open global statistics modal"
-            loading={openGlobalStats && globalStatsFetching}
-            disabled={!Array.isArray(data) || data.length === 0}
-            onClick={() => setOpenGlobalStats(true)}
-          >
-            Global Statistics
-          </Button>
-          <Button
-            aria-label="Open test matching modal"
-            disabled={!Array.isArray(data) || data.length === 0}
-            onClick={() => openTestMatchingModal()}
-          >
-            Test Matching
-          </Button>
-          <Button
-            aria-label="Export all world books"
-            loading={bulkExportMode === "all"}
-            disabled={!Array.isArray(data) || data.length === 0}
-            onClick={() => void exportWorldBookBundle("all")}
-          >
-            Export All
-          </Button>
-          <Button
-            aria-label="Open world book import modal"
-            data-testid="world-books-import-button"
-            onClick={openImportModal}
-          >
-            Import
-          </Button>
-          <Button
-            type="primary"
-            data-testid="world-books-new-button"
-            onClick={() => setOpen(true)}
-          >
-            New World Book
-          </Button>
-        </div>
-      </div>
-      <div className="rounded border border-border bg-surface-secondary px-3 py-2">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <p className="text-xs text-text-muted">
-            Need runtime injection diagnostics in a live chat turn?
-          </p>
-          <a
-            href={LOREBOOK_DEBUG_ENTRYPOINT_HREF}
-            className="text-xs text-primary hover:underline"
-            aria-label="Open chat lorebook debug panel from world books"
-          >
-            Open Chat Debug Panel
-          </a>
-        </div>
-      </div>
+      <WorldBookToolbar
+        listSearch={listSearch}
+        onSearchChange={setListSearch}
+        enabledFilter={enabledFilter}
+        onEnabledFilterChange={setEnabledFilter}
+        attachmentFilter={attachmentFilter}
+        onAttachmentFilterChange={(value) => {
+          if (value !== "all") requestAttachmentHydration()
+          setAttachmentFilter(value)
+        }}
+        onNewWorldBook={() => setOpen(true)}
+        onOpenTestMatching={() => openTestMatchingModal()}
+        onOpenMatrix={handleOpenMatrix}
+        onOpenGlobalStats={() => setOpenGlobalStats(true)}
+        onImport={openImportModal}
+        onExportAll={() => void exportWorldBookBundle("all")}
+        onExportSelected={selectedWorldBookKeys.length > 0 ? () => void exportWorldBookBundle("selected") : undefined}
+        hasWorldBooks={Array.isArray(data) && data.length > 0}
+        hasSelection={selectedWorldBookKeys.length > 0}
+        globalStatsFetching={openGlobalStats && globalStatsFetching}
+        bulkExportAllLoading={bulkExportMode === "all"}
+        bulkExportSelectedLoading={bulkExportMode === "selected"}
+        compact={layoutMode === "mobile"}
+      />
+
       {pendingDeleteIds.length > 0 && (
         <div
           data-testid="world-book-pending-delete-banner"
@@ -1472,90 +1240,207 @@ export const WorldBooksManager: React.FC = () => {
           </div>
         </div>
       )}
+
       {selectedWorldBookKeys.length > 0 && (
         <div className="rounded border border-border bg-surface-secondary px-3 py-2 flex flex-wrap items-center justify-between gap-2">
           <span className="text-sm">
             <strong>{selectedWorldBookKeys.length}</strong> selected
           </span>
           <div className="flex items-center gap-2">
-            <Button
-              size="small"
-              loading={bulkExportMode === "selected"}
-              onClick={() => void exportWorldBookBundle("selected")}
-            >
-              Export selected
-            </Button>
-            <Button
-              size="small"
-              loading={bulkWorldBookAction === "enable"}
-              onClick={() => void handleBulkWorldBookAction("enable")}
-            >
-              Enable
-            </Button>
-            <Button
-              size="small"
-              loading={bulkWorldBookAction === "disable"}
-              onClick={() => void handleBulkWorldBookAction("disable")}
-            >
-              Disable
-            </Button>
-            <Button
-              size="small"
-              danger
-              loading={bulkWorldBookAction === "delete"}
-              onClick={() => void handleBulkWorldBookAction("delete")}
-            >
-              Delete
-            </Button>
+            <Button size="small" loading={bulkExportMode === "selected"} onClick={() => void exportWorldBookBundle("selected")}>Export selected</Button>
+            <Button size="small" loading={bulkWorldBookAction === "enable"} onClick={() => void handleBulkWorldBookAction("enable")}>Enable</Button>
+            <Button size="small" loading={bulkWorldBookAction === "disable"} onClick={() => void handleBulkWorldBookAction("disable")}>Disable</Button>
+            <Button size="small" danger loading={bulkWorldBookAction === "delete"} onClick={() => void handleBulkWorldBookAction("delete")}>Delete</Button>
           </div>
         </div>
       )}
-      {status === 'pending' && <Skeleton active paragraph={{ rows: 6 }} />}
-      {status === 'success' && (
-        <Table
-          data-testid="world-books-table"
-          rowKey={(r: any) => r.id}
-          dataSource={filteredWorldBooks}
-          columns={columns as any}
-          rowSelection={{
-            selectedRowKeys: selectedWorldBookKeys,
-            onChange: (keys) => setSelectedWorldBookKeys(keys)
-          }}
-          expandable={{
-            expandRowByClick: true,
-            rowExpandable: (record: any) => Number(record?.entry_count || 0) > 0,
-            expandedRowRender: (record: any) => (
-              <WorldBookEntryPreview
-                worldBookId={record.id}
-                entryCount={Number(record?.entry_count || 0)}
-              />
-            )
-          }}
-          locale={{
-            emptyText: (Array.isArray(data) && data.length === 0 && !hasActiveListFilters) ? (
-              <div className="py-6 text-center space-y-2">
-                <p className="font-medium">No world books yet</p>
-                <p className="text-sm text-text-muted">
-                  World books store reusable lore and context snippets that can be injected into chats.
-                </p>
-                <Button type="primary" onClick={() => setOpen(true)}>
-                  Create your first world book
-                </Button>
+
+      {status === "pending" && <Skeleton active paragraph={{ rows: 6 }} />}
+
+      {status === "success" && (
+        Array.isArray(data) && data.length === 0 && !hasActiveListFilters ? (
+          <WorldBookEmptyState
+            onCreateNew={() => setOpen(true)}
+            onCreateFromTemplate={(key) => {
+              createForm.setFieldsValue({ template_key: key })
+              setOpen(true)
+            }}
+            onImport={openImportModal}
+          />
+        ) : (
+          <>
+            {layoutMode === "desktop" && (
+              <div className="flex gap-4" data-testid="world-books-two-panel">
+                <div className="w-[35%] min-w-[280px] shrink-0">
+                  <WorldBookListPanel
+                    worldBooks={filteredWorldBooks}
+                    selectedWorldBookId={selectedWorldBookId}
+                    onSelectWorldBook={(id) => selectWorldBookInDetail(id, "entries")}
+                    selectedRowKeys={selectedWorldBookKeys}
+                    onSelectedRowKeysChange={setSelectedWorldBookKeys}
+                    pendingDeleteIds={pendingDeleteIds}
+                    onEditWorldBook={(record) => selectWorldBookInDetail(record.id, "settings")}
+                    onRowAction={handleRowAction}
+                    tableSort={tableSort}
+                    onTableSortChange={handleTableSortChange}
+                    loading={false}
+                  />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <WorldBookDetailPanel
+                    worldBook={selectedWorldBookRecord}
+                    attachedCharacters={selectedWorldBookAttached}
+                    allWorldBooks={(data || []) as any[]}
+                    allCharacters={(characters || []) as any[]}
+                    activeTab={detailActiveTab}
+                    onActiveTabChange={setDetailActiveTab}
+                    onUpdateWorldBook={updateWB}
+                    onAttachCharacter={async (characterId) => {
+                      if (selectedWorldBookId) {
+                        await attachWB({ characterId, worldBookId: selectedWorldBookId })
+                      }
+                    }}
+                    onDetachCharacter={async (characterId) => {
+                      if (selectedWorldBookId) {
+                        await detachWB({ characterId, worldBookId: selectedWorldBookId })
+                      }
+                    }}
+                    onOpenTestMatching={(id) => openTestMatchingModal(id)}
+                    maxRecursiveDepth={maxRecursiveDepth}
+                    updating={updating}
+                    entryFormInstance={entryForm}
+                    settingsFormInstance={settingsForm}
+                    entryFilterPreset={entryFilterPreset}
+                    settingsBanner={editId == null ? renderEditConflictBanner() : null}
+                    statsData={selectedWorldBookStats}
+                    statsLoading={
+                      detailActiveTab === "stats" &&
+                      (selectedWorldBookStatsStatus === "pending" || selectedWorldBookStatsFetching)
+                    }
+                    statsError={
+                      detailActiveTab === "stats"
+                        ? (selectedWorldBookStatsError as any)?.message || null
+                        : null
+                    }
+                  />
+                </div>
               </div>
-            ) : (
-              <div className="py-4 text-center space-y-2">
-                <p className="text-sm text-text-muted">No world books match the current filters.</p>
-                {hasActiveListFilters && (
-                  <Button size="small" onClick={clearListFilters}>
-                    Clear filters
-                  </Button>
+            )}
+
+            {layoutMode === "tablet" && (
+              <div className="space-y-4" data-testid="world-books-stacked">
+                <WorldBookListPanel
+                  worldBooks={filteredWorldBooks}
+                  selectedWorldBookId={selectedWorldBookId}
+                  onSelectWorldBook={(id) => selectWorldBookInDetail(id, "entries")}
+                  selectedRowKeys={selectedWorldBookKeys}
+                  onSelectedRowKeysChange={setSelectedWorldBookKeys}
+                  pendingDeleteIds={pendingDeleteIds}
+                  onEditWorldBook={(record) => selectWorldBookInDetail(record.id, "settings")}
+                  onRowAction={handleRowAction}
+                  tableSort={tableSort}
+                  onTableSortChange={handleTableSortChange}
+                  loading={false}
+                  collapsible
+                />
+                <WorldBookDetailPanel
+                  worldBook={selectedWorldBookRecord}
+                  attachedCharacters={selectedWorldBookAttached}
+                  allWorldBooks={(data || []) as any[]}
+                  allCharacters={(characters || []) as any[]}
+                  activeTab={detailActiveTab}
+                  onActiveTabChange={setDetailActiveTab}
+                  onUpdateWorldBook={updateWB}
+                  onAttachCharacter={async (characterId) => {
+                    if (selectedWorldBookId) {
+                      await attachWB({ characterId, worldBookId: selectedWorldBookId })
+                    }
+                  }}
+                  onDetachCharacter={async (characterId) => {
+                    if (selectedWorldBookId) {
+                      await detachWB({ characterId, worldBookId: selectedWorldBookId })
+                    }
+                  }}
+                  onOpenTestMatching={(id) => openTestMatchingModal(id)}
+                  maxRecursiveDepth={maxRecursiveDepth}
+                  updating={updating}
+                  entryFormInstance={entryForm}
+                  settingsFormInstance={settingsForm}
+                  entryFilterPreset={entryFilterPreset}
+                  settingsBanner={editId == null ? renderEditConflictBanner() : null}
+                  statsData={selectedWorldBookStats}
+                  statsLoading={
+                    detailActiveTab === "stats" &&
+                    (selectedWorldBookStatsStatus === "pending" || selectedWorldBookStatsFetching)
+                  }
+                  statsError={
+                    detailActiveTab === "stats"
+                      ? (selectedWorldBookStatsError as any)?.message || null
+                      : null
+                  }
+                />
+              </div>
+            )}
+
+            {layoutMode === "mobile" && (
+              <div data-testid="world-books-mobile">
+                {selectedWorldBookId === null ? (
+                  <WorldBookListPanel
+                    worldBooks={filteredWorldBooks}
+                    selectedWorldBookId={selectedWorldBookId}
+                    onSelectWorldBook={(id) => selectWorldBookInDetail(id, "entries")}
+                    selectedRowKeys={selectedWorldBookKeys}
+                    onSelectedRowKeysChange={setSelectedWorldBookKeys}
+                    pendingDeleteIds={pendingDeleteIds}
+                    onEditWorldBook={(record) => selectWorldBookInDetail(record.id, "settings")}
+                    onRowAction={handleRowAction}
+                    tableSort={tableSort}
+                    onTableSortChange={handleTableSortChange}
+                    loading={false}
+                  />
+                ) : (
+                  <WorldBookDetailPanel
+                    worldBook={selectedWorldBookRecord}
+                    attachedCharacters={selectedWorldBookAttached}
+                    allWorldBooks={(data || []) as any[]}
+                    allCharacters={(characters || []) as any[]}
+                    activeTab={detailActiveTab}
+                    onActiveTabChange={setDetailActiveTab}
+                    onUpdateWorldBook={updateWB}
+                    onAttachCharacter={async (characterId) => {
+                      if (selectedWorldBookId) {
+                        await attachWB({ characterId, worldBookId: selectedWorldBookId })
+                      }
+                    }}
+                    onDetachCharacter={async (characterId) => {
+                      if (selectedWorldBookId) {
+                        await detachWB({ characterId, worldBookId: selectedWorldBookId })
+                      }
+                    }}
+                    onOpenTestMatching={(id) => openTestMatchingModal(id)}
+                    maxRecursiveDepth={maxRecursiveDepth}
+                    updating={updating}
+                    entryFormInstance={entryForm}
+                    settingsFormInstance={settingsForm}
+                    entryFilterPreset={entryFilterPreset}
+                    settingsBanner={editId == null ? renderEditConflictBanner() : null}
+                    statsData={selectedWorldBookStats}
+                    statsLoading={
+                      detailActiveTab === "stats" &&
+                      (selectedWorldBookStatsStatus === "pending" || selectedWorldBookStatsFetching)
+                    }
+                    statsError={
+                      detailActiveTab === "stats"
+                        ? (selectedWorldBookStatsError as any)?.message || null
+                        : null
+                    }
+                    onBack={() => setSelectedWorldBookId(null)}
+                  />
                 )}
               </div>
-            )
-          }}
-          onChange={handleTableSortChange}
-          rowClassName={(record: any) => (record?.enabled === false ? "opacity-75" : "")}
-        />
+            )}
+          </>
+        )
       )}
 
       <Modal
@@ -2053,34 +1938,7 @@ export const WorldBooksManager: React.FC = () => {
         footer={null}
         styles={{ body: MODAL_BODY_SCROLL_STYLE }}
       >
-        {editConflict && (
-          <div
-            data-testid="world-book-edit-conflict"
-            className="mb-3 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800"
-          >
-            <p>{editConflict.message}</p>
-            <p className="mt-1 text-xs text-amber-700">
-              Reload the latest version and then reapply your edits before saving again.
-              {latestEditVersion != null ? ` Latest version: ${latestEditVersion}.` : ""}
-            </p>
-            <div className="mt-2 flex flex-wrap gap-2">
-              <Button
-                size="small"
-                onClick={handleLoadLatestEditValues}
-                disabled={!latestEditRecord}
-              >
-                Load latest values
-              </Button>
-              <Button
-                size="small"
-                onClick={handleReapplyEditDraft}
-                disabled={!latestEditRecord}
-              >
-                Reapply my edits
-              </Button>
-            </div>
-          </div>
-        )}
+        {renderEditConflictBanner()}
         <WorldBookForm
           mode="edit"
           form={editForm}
@@ -2346,7 +2204,7 @@ export const WorldBooksManager: React.FC = () => {
                             : deltaState === "detached"
                               ? "ring-2 ring-amber-400 bg-amber-50"
                               : ""
-                        } ${pulse ? "animate-pulse" : ""}`}
+                        } ${pulse && !prefersReducedMotion ? "animate-pulse" : pulse ? "ring-2 ring-blue-400" : ""}`}
                       >
                         <Checkbox
                           aria-label={`Toggle attachment ${record?.name || "world book"} / ${c?.name || "character"}`}
@@ -2553,50 +2411,6 @@ export const WorldBooksManager: React.FC = () => {
           </Form>
         </div>
       </Modal>
-    </div>
-  )
-}
-
-const WorldBookEntryPreview: React.FC<{ worldBookId: number; entryCount: number }> = ({
-  worldBookId,
-  entryCount
-}) => {
-  const { data, status } = useQuery({
-    queryKey: ["tldw:worldBookPreviewEntries", worldBookId],
-    queryFn: async () => {
-      await tldwClient.initialize()
-      const response = await tldwClient.listWorldBookEntries(worldBookId, false)
-      const entries = Array.isArray(response?.entries) ? response.entries : []
-      return entries.slice(0, 5)
-    }
-  })
-
-  if (status === "pending") {
-    return <Skeleton active paragraph={{ rows: 2 }} title={false} />
-  }
-
-  const previewEntries = Array.isArray(data) ? data : []
-  if (previewEntries.length === 0) {
-    return <span className="text-sm text-text-muted">No entries available for preview.</span>
-  }
-
-  return (
-    <div className="space-y-2">
-      {previewEntries.map((entry: any) => (
-        <div key={entry.entry_id || `${worldBookId}-${String(entry.content || "").slice(0, 10)}`} className="rounded border border-border px-3 py-2">
-          <div className="flex flex-wrap gap-1 mb-1">
-            {(entry.keywords || []).map((keyword: string) => (
-              <Tag key={`${entry.entry_id}-${keyword}`}>{keyword}</Tag>
-            ))}
-          </div>
-          <p className="text-sm line-clamp-2">{entry.content || ""}</p>
-        </div>
-      ))}
-      {entryCount > previewEntries.length && (
-        <p className="text-xs text-text-muted">
-          Showing {previewEntries.length} of {entryCount} entries.
-        </p>
-      )}
     </div>
   )
 }

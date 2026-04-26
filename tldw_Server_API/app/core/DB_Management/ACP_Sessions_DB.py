@@ -18,7 +18,7 @@ from tldw_Server_API.app.core.DB_Management.sqlite_policy import (
     configure_sqlite_connection,
 )
 
-_SCHEMA_VERSION = 10
+_SCHEMA_VERSION = 13
 
 _SCHEMA_SQL = """\
 CREATE TABLE IF NOT EXISTS sessions (
@@ -52,7 +52,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     model TEXT,
     token_budget INTEGER DEFAULT NULL,
     auto_terminate_at_budget INTEGER NOT NULL DEFAULT 0,
-    budget_exhausted INTEGER NOT NULL DEFAULT 0
+    budget_exhausted INTEGER NOT NULL DEFAULT 0,
+    ancestry_chain_json TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_user_status ON sessions(user_id, status);
 CREATE INDEX IF NOT EXISTS idx_sessions_created ON sessions(created_at DESC);
@@ -111,6 +112,7 @@ CREATE TABLE IF NOT EXISTS permission_policies (
     name TEXT NOT NULL,
     description TEXT DEFAULT '',
     rules_json TEXT NOT NULL,
+    conditions_json TEXT,
     org_id TEXT,
     team_id TEXT,
     priority INTEGER DEFAULT 0,
@@ -147,6 +149,23 @@ CREATE TABLE IF NOT EXISTS webhook_triggers (
 );
 CREATE INDEX IF NOT EXISTS idx_webhook_triggers_owner
     ON webhook_triggers(owner_user_id);
+
+CREATE TABLE IF NOT EXISTS config_templates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    scope TEXT NOT NULL DEFAULT 'system',
+    scope_id TEXT,
+    base_template_id INTEGER,
+    schema_version TEXT NOT NULL DEFAULT '1',
+    config_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_config_templates_scope
+    ON config_templates(scope, scope_id);
+CREATE INDEX IF NOT EXISTS idx_config_templates_name
+    ON config_templates(name);
 """
 
 # Columns that are stored as INTEGER 0/1 but should be returned as bool
@@ -160,7 +179,7 @@ _BOOL_FIELDS = frozenset({
 })
 
 # Columns that are stored as JSON TEXT but should be returned as parsed objects
-_JSON_LIST_FIELDS = frozenset({"tags", "mcp_servers"})
+_JSON_LIST_FIELDS = frozenset({"tags", "mcp_servers", "ancestry_chain_json"})
 _JSON_OBJECT_FIELDS = frozenset({"policy_summary", "policy_provenance_summary"})
 _ALLOWED_MIGRATION_COLUMNS = {
     "sessions": {
@@ -174,6 +193,7 @@ _ALLOWED_MIGRATION_COLUMNS = {
         "token_budget": "token_budget INTEGER DEFAULT NULL",
         "auto_terminate_at_budget": "auto_terminate_at_budget INTEGER NOT NULL DEFAULT 0",
         "budget_exhausted": "budget_exhausted INTEGER NOT NULL DEFAULT 0",
+        "ancestry_chain_json": "ancestry_chain_json TEXT",
     },
     "agent_registry": {
         "mcp_orchestration": "mcp_orchestration TEXT NOT NULL DEFAULT 'agent_driven'",
@@ -183,6 +203,9 @@ _ALLOWED_MIGRATION_COLUMNS = {
         "mcp_llm_model": "mcp_llm_model TEXT",
         "mcp_max_iterations": "mcp_max_iterations INTEGER NOT NULL DEFAULT 20",
         "mcp_refresh_tools": "mcp_refresh_tools INTEGER NOT NULL DEFAULT 0",
+    },
+    "permission_policies": {
+        "conditions_json": "conditions_json TEXT",
     },
 }
 
@@ -207,6 +230,32 @@ def _ensure_column(
     if column_name in existing_columns:
         return
     conn.execute(f'ALTER TABLE "{table_name}" ADD COLUMN {column_sql}')
+
+
+def _ensure_config_template_unique_index(conn: sqlite3.Connection) -> None:
+    """Enforce deterministic template lookup within a scope."""
+    duplicate = conn.execute(
+        """
+        SELECT name, scope, COALESCE(scope_id, '') AS normalized_scope_id, COUNT(*) AS duplicate_count
+        FROM config_templates
+        GROUP BY name, scope, COALESCE(scope_id, '')
+        HAVING COUNT(*) > 1
+        LIMIT 1
+        """
+    ).fetchone()
+    if duplicate is not None:
+        raise sqlite3.IntegrityError(
+            "Duplicate config_templates rows detected for "
+            f"name={duplicate['name']!r}, scope={duplicate['scope']!r}, "
+            f"scope_id={duplicate['normalized_scope_id']!r}"
+        )
+
+    conn.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_config_templates_name_scope_unique
+        ON config_templates(name, scope, COALESCE(scope_id, ''))
+        """
+    )
 
 
 class ACPSessionsDB:
@@ -446,6 +495,40 @@ class ACPSessionsDB:
                     CREATE INDEX IF NOT EXISTS idx_webhook_triggers_owner
                         ON webhook_triggers(owner_user_id);
                 """)
+            if current_version < 11:
+                conn.executescript("""
+                    CREATE TABLE IF NOT EXISTS config_templates (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        name TEXT NOT NULL,
+                        description TEXT NOT NULL DEFAULT '',
+                        scope TEXT NOT NULL DEFAULT 'system',
+                        scope_id TEXT,
+                        base_template_id INTEGER,
+                        schema_version TEXT NOT NULL DEFAULT '1',
+                        config_json TEXT NOT NULL DEFAULT '{}',
+                        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+                    );
+                    CREATE INDEX IF NOT EXISTS idx_config_templates_scope
+                        ON config_templates(scope, scope_id);
+                    CREATE INDEX IF NOT EXISTS idx_config_templates_name
+                        ON config_templates(name);
+                """)
+            if current_version < 12:
+                _ensure_column(
+                    conn,
+                    "permission_policies",
+                    "conditions_json",
+                    "conditions_json TEXT",
+                )
+                _ensure_column(
+                    conn,
+                    "sessions",
+                    "ancestry_chain_json",
+                    "ancestry_chain_json TEXT",
+                )
+            if current_version < 13:
+                _ensure_config_template_unique_index(conn)
             conn.execute(f"PRAGMA user_version={_SCHEMA_VERSION}")
             conn.commit()
             self._initialized = True
@@ -1828,6 +1911,117 @@ class ACPSessionsDB:
         conn = self._get_conn()
         cursor = conn.execute(
             "DELETE FROM webhook_triggers WHERE id = ?", (trigger_id,)
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+
+    # ------------------------------------------------------------------
+    # Config Template CRUD
+    # ------------------------------------------------------------------
+
+    def create_config_template(
+        self,
+        name: str,
+        description: str = "",
+        scope: str = "system",
+        scope_id: str | None = None,
+        base_template_id: int | None = None,
+        schema_version: str = "1",
+        config_json: str = "{}",
+    ) -> int:
+        """Insert a new config template. Returns the new row ID."""
+        conn = self._get_conn()
+        now = _utcnow_iso()
+        try:
+            cursor = conn.execute(
+                """
+                INSERT INTO config_templates
+                    (name, description, scope, scope_id, base_template_id,
+                     schema_version, config_json, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    name, description, scope, scope_id, base_template_id,
+                    schema_version, config_json, now, now,
+                ),
+            )
+        except sqlite3.IntegrityError as exc:
+            raise ValueError("Config template already exists for this scope") from exc
+        conn.commit()
+        return cursor.lastrowid  # type: ignore[return-value]
+
+    def get_config_template(self, template_id: int) -> dict[str, Any] | None:
+        """Fetch a single config template by ID, or None."""
+        conn = self._get_conn()
+        row = conn.execute(
+            "SELECT * FROM config_templates WHERE id = ?", (template_id,)
+        ).fetchone()
+        if row is None:
+            return None
+        return dict(row)
+
+    def list_config_templates(
+        self,
+        *,
+        scope: str | None = None,
+        scope_id: str | None = None,
+        name: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """List config templates with optional filters.
+
+        Filters are AND-combined when provided.
+        """
+        conn = self._get_conn()
+        clauses: list[str] = []
+        params: list[Any] = []
+        if scope is not None:
+            clauses.append("scope = ?")
+            params.append(scope)
+        if scope_id is not None:
+            clauses.append("scope_id = ?")
+            params.append(scope_id)
+        if name is not None:
+            clauses.append("name = ?")
+            params.append(name)
+        where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+        rows = conn.execute(
+            f"SELECT * FROM config_templates{where} ORDER BY id",
+            params,
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    _CONFIG_TEMPLATE_UPDATABLE_COLS = frozenset({
+        "name", "description", "scope", "scope_id", "base_template_id",
+        "schema_version", "config_json",
+    })
+
+    def update_config_template(self, template_id: int, **kwargs: Any) -> bool:
+        """Update fields on a config template.
+
+        Returns True if the row was found and updated.
+        """
+        updates = {k: v for k, v in kwargs.items() if k in self._CONFIG_TEMPLATE_UPDATABLE_COLS}
+        if not updates:
+            return False
+        updates["updated_at"] = _utcnow_iso()
+        set_clause = ", ".join(f"{col} = ?" for col in updates)
+        values = list(updates.values()) + [template_id]
+        conn = self._get_conn()
+        try:
+            cursor = conn.execute(
+                f"UPDATE config_templates SET {set_clause} WHERE id = ?",  # nosec B608
+                values,
+            )
+        except sqlite3.IntegrityError as exc:
+            raise ValueError("Config template already exists for this scope") from exc
+        conn.commit()
+        return cursor.rowcount > 0
+
+    def delete_config_template(self, template_id: int) -> bool:
+        """Delete a config template by ID. Returns True if a row was removed."""
+        conn = self._get_conn()
+        cursor = conn.execute(
+            "DELETE FROM config_templates WHERE id = ?", (template_id,)
         )
         conn.commit()
         return cursor.rowcount > 0

@@ -748,7 +748,10 @@ export const QuickIngestModal: React.FC<Props> = ({
 
       let resp: { ok: boolean; error?: string; results?: Array<Partial<ResultItem>> } | undefined
       try {
-        resp = (await submitQuickIngestBatch(requestPayload)) as any
+        resp = (await submitQuickIngestBatch({
+          ...requestPayload,
+          __quickIngestSessionId: sessionId,
+        })) as any
       } catch (sendErr: any) {
         if (shouldIgnoreRunResolution(sessionIdForRun)) return
         throw sendErr

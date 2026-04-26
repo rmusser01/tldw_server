@@ -132,11 +132,13 @@ class BaseModule(ABC):
         self._initialized = False
         self._initializing = False
         self._shutdown = False
+        self._lifecycle_lock = asyncio.Lock()
 
         # Tools, resources, and prompts cache
         self._tools_cache = None
         self._resources_cache = None
         self._prompts_cache = None
+        self._capability_cache_generation = 0
 
         # Per-module concurrency guard
         self._semaphore = asyncio.Semaphore(config.max_concurrent) if config.max_concurrent and config.max_concurrent > 0 else None
@@ -149,39 +151,43 @@ class BaseModule(ABC):
 
         This method should not be overridden. Override on_initialize instead.
         """
-        if self._initialized:
-            logger.warning(f"Module {self.name} already initialized")
-            return
+        async with self._lifecycle_lock:
+            if self._initialized:
+                logger.warning(f"Module {self.name} already initialized")
+                return
 
-        if self._initializing:
-            logger.warning(f"Module {self.name} is already initializing")
-            return
+            if self._initializing:
+                logger.warning(f"Module {self.name} is already initializing")
+                return
 
-        self._initializing = True
-        logger.info(f"Initializing module: {self.name}")
+            self._initializing = True
+            self._shutdown = False
+            logger.info(f"Initializing module: {self.name}")
 
-        try:
-            # Call module-specific initialization
-            await self.on_initialize()
+            try:
+                # Call module-specific initialization
+                await self.on_initialize()
 
-            # Perform initial health check
-            health = await self.health_check()
+                self.invalidate_capability_caches()
 
-            if not health.is_operational:
-                raise Exception(f"Module failed health check: {health.message}")
+                # Perform initial health check
+                health = await self.health_check()
 
-            self._initialized = True
-            logger.info(f"Module initialized successfully: {self.name}")
+                if not health.is_operational:
+                    raise Exception(f"Module failed health check: {health.message}")
 
-        except Exception as e:
-            logger.error(f"Module initialization failed: {self.name} - {str(e)}")
-            self._health = ModuleHealth(
-                status=HealthStatus.UNHEALTHY,
-                message=f"Initialization failed: {str(e)}"
-            )
-            raise
-        finally:
-            self._initializing = False
+                self._initialized = True
+                logger.info(f"Module initialized successfully: {self.name}")
+
+            except Exception as e:
+                logger.error(f"Module initialization failed: {self.name} - {str(e)}")
+                self._health = ModuleHealth(
+                    status=HealthStatus.UNHEALTHY,
+                    message=f"Initialization failed: {str(e)}"
+                )
+                raise
+            finally:
+                self._initializing = False
 
     async def shutdown(self) -> None:
         """
@@ -189,28 +195,38 @@ class BaseModule(ABC):
 
         This method should not be overridden. Override on_shutdown instead.
         """
-        if self._shutdown:
-            logger.warning(f"Module {self.name} already shut down")
-            return
+        async with self._lifecycle_lock:
+            if self._shutdown:
+                logger.warning(f"Module {self.name} already shut down")
+                return
 
-        logger.info(f"Shutting down module: {self.name}")
+            logger.info(f"Shutting down module: {self.name}")
 
-        try:
-            # Call module-specific shutdown
-            await self.on_shutdown()
+            try:
+                # Call module-specific shutdown
+                await self.on_shutdown()
 
-            self._shutdown = True
-            self._initialized = False
-            self._health = ModuleHealth(
-                status=HealthStatus.UNKNOWN,
-                message="Module shut down"
-            )
+                self.invalidate_capability_caches()
 
-            logger.info(f"Module shut down successfully: {self.name}")
+                self._shutdown = True
+                self._initialized = False
+                self._health = ModuleHealth(
+                    status=HealthStatus.UNKNOWN,
+                    message="Module shut down"
+                )
 
-        except Exception as e:
-            logger.error(f"Module shutdown failed: {self.name} - {str(e)}")
-            # Continue shutdown even if there's an error
+                logger.info(f"Module shut down successfully: {self.name}")
+
+            except Exception as e:
+                logger.error(f"Module shutdown failed: {self.name} - {str(e)}")
+                # Continue shutdown even if there's an error
+
+    def invalidate_capability_caches(self) -> None:
+        """Clear cached capability lists after dynamic catalog changes."""
+        self._capability_cache_generation += 1
+        self._tools_cache = None
+        self._resources_cache = None
+        self._prompts_cache = None
 
     async def health_check(self) -> ModuleHealth:
         """
@@ -318,10 +334,14 @@ class BaseModule(ABC):
 
     async def get_tool_def(self, tool_name: str) -> Optional[dict[str, Any]]:
         """Return a single tool definition, using cached tool list if available."""
-        if self._tools_cache is None:
-            self._tools_cache = await self.get_tools()
+        tools = self._tools_cache
+        if tools is None:
+            generation = self._capability_cache_generation
+            tools = await self.get_tools()
+            if generation == self._capability_cache_generation:
+                self._tools_cache = tools
         try:
-            for tool in self._tools_cache:
+            for tool in tools or []:
                 if isinstance(tool, dict) and tool.get("name") == tool_name:
                     return tool
         except Exception as tool_lookup_error:
@@ -383,9 +403,13 @@ class BaseModule(ABC):
 
     async def has_tool(self, tool_name: str) -> bool:
         """Check if module provides a tool"""
-        if self._tools_cache is None:
-            self._tools_cache = await self.get_tools()
-        return any(tool["name"] == tool_name for tool in self._tools_cache)
+        tools = self._tools_cache
+        if tools is None:
+            generation = self._capability_cache_generation
+            tools = await self.get_tools()
+            if generation == self._capability_cache_generation:
+                self._tools_cache = tools
+        return any(isinstance(tool, dict) and tool.get("name") == tool_name for tool in tools or [])
 
     async def get_resources(self) -> list[dict[str, Any]]:
         """Get list of resources (optional)"""
@@ -393,9 +417,13 @@ class BaseModule(ABC):
 
     async def has_resource(self, uri: str) -> bool:
         """Check if module provides a resource"""
-        if self._resources_cache is None:
-            self._resources_cache = await self.get_resources()
-        return any(resource["uri"] == uri for resource in self._resources_cache)
+        resources = self._resources_cache
+        if resources is None:
+            generation = self._capability_cache_generation
+            resources = await self.get_resources()
+            if generation == self._capability_cache_generation:
+                self._resources_cache = resources
+        return any(isinstance(resource, dict) and resource.get("uri") == uri for resource in resources or [])
 
     async def read_resource(self, uri: str, context: Optional[Any] = None) -> dict[str, Any]:
         """Read a resource"""
@@ -407,9 +435,13 @@ class BaseModule(ABC):
 
     async def has_prompt(self, name: str) -> bool:
         """Check if module provides a prompt"""
-        if self._prompts_cache is None:
-            self._prompts_cache = await self.get_prompts()
-        return any(prompt["name"] == name for prompt in self._prompts_cache)
+        prompts = self._prompts_cache
+        if prompts is None:
+            generation = self._capability_cache_generation
+            prompts = await self.get_prompts()
+            if generation == self._capability_cache_generation:
+                self._prompts_cache = prompts
+        return any(isinstance(prompt, dict) and prompt.get("name") == name for prompt in prompts or [])
 
     async def get_prompt(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         """Get a prompt with arguments"""

@@ -1,5 +1,6 @@
 import React from "react"
 import { useTranslation } from "react-i18next"
+import { ExternalLink } from "lucide-react"
 import FeatureEmptyState from "@/components/Common/FeatureEmptyState"
 import { PageShell } from "@/components/Common/PageShell"
 import WorkspaceConnectionGate from "@/components/Common/WorkspaceConnectionGate"
@@ -88,6 +89,31 @@ export const DictionariesWorkspace: React.FC = () => {
               "Define reusable substitutions so tldw understands your organization’s names, acronyms, and terminology."
             )}
           </p>
+          <a
+            href="https://github.com/rmusser01/tldw_server/blob/main/Docs/User_Guides/WebUI_Extension/Chat_Dictionaries_Guide.md"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 text-xs text-text-muted hover:text-text underline"
+            aria-label={translateMessage(
+              t,
+              "option:dictionariesEmpty.learnMoreExternalLabel",
+              "Learn more about dictionaries (opens in a new tab)"
+            )}
+          >
+            {translateMessage(
+              t,
+              "option:dictionariesEmpty.learnMore",
+              "Learn more about dictionaries"
+            )}
+            <ExternalLink className="h-3 w-3" aria-hidden="true" />
+            <span className="sr-only">
+              {translateMessage(
+                t,
+                "common:opensInNewTab",
+                "opens in a new tab"
+              )}
+            </span>
+          </a>
         </div>
         <DictionariesManager />
       </PageShell>

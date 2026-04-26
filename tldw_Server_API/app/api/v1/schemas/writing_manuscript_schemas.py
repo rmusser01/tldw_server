@@ -400,7 +400,6 @@ class ManuscriptWorldInfoCreate(BaseModel):
 
 
 class ManuscriptWorldInfoUpdate(BaseModel):
-    kind: _WORLD_INFO_KINDS | None = Field(None, description="Category of world-info entry")
     name: str | None = Field(None, min_length=1, max_length=255, description="Entry name")
     description: str | None = Field(None, description="Entry description")
     parent_id: str | None = Field(None, description="Parent world-info entry ID")

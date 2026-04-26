@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.core.DB_Management.media_db.errors import (
     ConflictError,

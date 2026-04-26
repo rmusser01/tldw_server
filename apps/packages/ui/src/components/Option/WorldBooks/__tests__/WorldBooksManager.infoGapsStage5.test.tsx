@@ -210,7 +210,8 @@ describe("WorldBooksManager information gaps stage-5 relationship insights", () 
       const user = userEvent.setup()
       render(<WorldBooksManager />)
 
-      await user.click(screen.getByRole("button", { name: "Manage entries" }))
+      // Select the world book to show detail panel with entries tab
+    await user.click(screen.getByText("Arcana"))
 
       expect(await screen.findByRole("columnheader", { name: "Referenced By" })).toBeInTheDocument()
       expect(

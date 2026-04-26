@@ -1,7 +1,6 @@
 import React from "react"
-import { useSimpleForm } from "@/hooks/useSimpleForm"
-import { useDraftPersistence } from "@/hooks/useDraftPersistence"
 import useDynamicTextareaSize from "~/hooks/useDynamicTextareaSize"
+import { useComposerText } from "@/components/Chat/composer/hooks/useComposerText"
 import { handleChatInputKeyDown } from "@/utils/key-down"
 import { PASTED_TEXT_CHAR_LIMIT } from "@/utils/constant"
 import { isFirefoxTarget } from "@/config/platform"
@@ -89,13 +88,27 @@ export function useComposerInput(deps: UseComposerInputDeps) {
     isProMode
   } = deps
 
-  // --- Form ---
-  const form = useSimpleForm({
-    initialValues: {
-      message: "",
-      image: ""
+  // --- Shared text/draft/focus primitive ---
+  // See apps/packages/ui/src/components/Chat/composer/hooks/useComposerText.ts.
+  // `form`, `draftSaved`, and `textAreaFocus` live there; auto-resize is
+  // wired separately below so we can size against `messageDisplayValue`.
+  const composerText = useComposerText({
+    draftKey: "tldw:playgroundChatDraft",
+    textareaRef,
+    isProMode,
+    getDraftMetadata: () => ({
+      wasExpanded: hasExpandedLargeText,
+      collapsedRange: collapsedRange
+        ? { start: collapsedRange.start, end: collapsedRange.end }
+        : null
+    }),
+    restoreWithMetadata: (value, metadata) => {
+      // `useComposerText` already wrote the message into the form; layer on
+      // the Playground-specific collapse-state restore.
+      restoreCollapseState(value, metadata as any)
     }
   })
+  const { form, textAreaFocus, draftSaved, textareaMaxHeight } = composerText
 
   const setFieldValueRef = React.useRef(form.setFieldValue)
   React.useEffect(() => {
@@ -237,39 +250,10 @@ export function useComposerInput(deps: UseComposerInputDeps) {
     }
   }, [form.values.message])
 
-  // --- Draft persistence ---
-  const { draftSaved } = useDraftPersistence({
-    storageKey: "tldw:playgroundChatDraft",
-    getValue: () => form.values.message,
-    getMetadata: () => ({
-      wasExpanded: hasExpandedLargeText,
-      collapsedRange: collapsedRange
-        ? { start: collapsedRange.start, end: collapsedRange.end }
-        : null
-    }),
-    setValue: (value) => restoreMessageValue(value),
-    setValueWithMetadata: restoreMessageValue
-  })
-
   // --- Textarea sizing ---
-  const textareaMaxHeight = isProMode ? 160 : 120
+  // Sized against `messageDisplayValue` (not the raw form value) so the
+  // textarea shrinks when the paste-collapse overlay swaps in a short label.
   useDynamicTextareaSize(textareaRef, messageDisplayValue, textareaMaxHeight)
-
-  // --- Focus helper ---
-  const textAreaFocus = React.useCallback(() => {
-    const el = textareaRef.current
-    if (!el) return
-    if (el.selectionStart === el.selectionEnd) {
-      const ua = typeof navigator !== "undefined" ? navigator.userAgent : ""
-      const isMobile =
-        /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua)
-      if (!isMobile) {
-        el.focus()
-      } else {
-        el.blur()
-      }
-    }
-  }, [])
 
   // --- Collapsed caret sync ---
   const syncCollapsedCaret = React.useCallback(

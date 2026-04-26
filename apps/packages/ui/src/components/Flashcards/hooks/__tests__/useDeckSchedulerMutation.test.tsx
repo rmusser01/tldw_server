@@ -77,6 +77,7 @@ const makeDeck = (overrides: Partial<Deck> = {}): Deck => ({
   id: 7,
   name: "Biology",
   description: "Study deck",
+  review_prompt_side: "front",
   deleted: false,
   client_id: "test-client",
   version: 2,
@@ -109,6 +110,7 @@ describe("useUpdateDeckMutation", () => {
 
     const updatedDeck = makeDeck({
       version: 3,
+      review_prompt_side: "back",
       scheduler_settings: {
         ...baseEnvelope,
         sm2_plus: {
@@ -131,6 +133,7 @@ describe("useUpdateDeckMutation", () => {
       await result.current.mutateAsync({
         deckId: 7,
         update: {
+          review_prompt_side: "back",
           scheduler_settings: {
             sm2_plus: {
               new_steps_minutes: [2, 20],
@@ -145,6 +148,7 @@ describe("useUpdateDeckMutation", () => {
     expect(updateDeck).toHaveBeenCalledWith(
       7,
       {
+        review_prompt_side: "back",
         scheduler_settings: {
           sm2_plus: {
             new_steps_minutes: [2, 20],
@@ -192,5 +196,40 @@ describe("useUpdateDeckMutation", () => {
     ).rejects.toBe(conflictError)
 
     expect(queryClient.getQueryData<Deck[]>(["flashcards:decks"])).toEqual([existingDeck])
+  })
+
+  it("forwards review_prompt_side when updating a deck", async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+        mutations: { retry: false }
+      }
+    })
+    const updatedDeck = makeDeck({
+      version: 3,
+      review_prompt_side: "back"
+    })
+    vi.mocked(updateDeck).mockResolvedValue(updatedDeck)
+
+    queryClient.setQueryData(["flashcards:decks"], [makeDeck()])
+
+    const { result } = renderHook(() => useUpdateDeckMutation(), {
+      wrapper: buildWrapper(queryClient)
+    })
+
+    await act(async () => {
+      await result.current.mutateAsync({
+        deckId: 7,
+        update: {
+          review_prompt_side: "back",
+          expected_version: 2
+        }
+      })
+    })
+
+    expect(updateDeck).toHaveBeenCalledWith(7, {
+      review_prompt_side: "back",
+      expected_version: 2
+    })
   })
 })

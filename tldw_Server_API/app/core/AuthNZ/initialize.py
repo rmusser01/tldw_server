@@ -738,7 +738,8 @@ async def ensure_single_user_rbac_seed_if_needed() -> None:
             user_id=single_user_id,
             username="single_user",
             email="single_user@example.local",
-            password_hash="",
+            # Single-user auth uses the API key; this fixed account has no password login.
+            password_hash="",  # nosec B106
         )
 
         # Ensure single-user role assignment + primary/test API keys.
@@ -759,10 +760,22 @@ async def ensure_single_user_rbac_seed_if_needed() -> None:
                     if len(primary_api_key) > 10
                     else primary_api_key
                 )
+                key_identifier = None
+                try:
+                    from tldw_Server_API.app.core.AuthNZ.api_key_crypto import parse_api_key
+
+                    parsed = parse_api_key(primary_api_key)
+                    if parsed:
+                        key_identifier, _secret = parsed
+                except _AUTHNZ_INIT_NONCRITICAL_EXCEPTIONS as exc:
+                    logger.opt(exception=True).debug(
+                        "Failed to parse SINGLE_USER_API_KEY for seed key identifier extraction: {}",
+                        exc,
+                    )
                 await api_repo.upsert_primary_key(
                     user_id=single_user_id,
                     key_hash=key_hash,
-                    key_identifier=None,
+                    key_identifier=key_identifier,
                     key_prefix=key_prefix,
                     name="single-user primary key",
                     description="Primary API key for single-user profile",
@@ -779,10 +792,22 @@ async def ensure_single_user_rbac_seed_if_needed() -> None:
                     if len(test_api_key) > 10
                     else test_api_key
                 )
+                test_key_identifier = None
+                try:
+                    from tldw_Server_API.app.core.AuthNZ.api_key_crypto import parse_api_key
+
+                    parsed = parse_api_key(test_api_key)
+                    if parsed:
+                        test_key_identifier, _secret = parsed
+                except _AUTHNZ_INIT_NONCRITICAL_EXCEPTIONS as exc:
+                    logger.opt(exception=True).debug(
+                        "Failed to parse SINGLE_USER_TEST_API_KEY for seed key identifier extraction: {}",
+                        exc,
+                    )
                 await api_repo.upsert_primary_key(
                     user_id=single_user_id,
                     key_hash=test_key_hash,
-                    key_identifier=None,
+                    key_identifier=test_key_identifier,
                     key_prefix=test_key_prefix,
                     name="single-user test key",
                     description="Deterministic API key for test automation",

@@ -47,6 +47,8 @@ This guide helps project developers understand the Audit module’s architecture
 - If metadata isn’t JSON-serializable, the service stores a redacted representation as `{ "redacted_text": "..." }`.
 - Heuristic risk scoring; high‑risk events trigger immediate flush.
 - Background tasks: periodic flush and daily cleanup (disabled in test mode).
+- Strict write support: callers can force durability with `flush(raise_on_failure=True)` and surface
+  `MandatoryAuditWriteError` for fail-closed security or state-changing paths.
 
 ### Key Types
 
@@ -92,6 +94,22 @@ Note: a legacy migration file exists for evaluation DB instrumentation (`tldw_Se
 - Storage rule: even when general audit storage mode is `per_user`, Sharing audit still uses the shared audit DB so `GET /api/v1/sharing/admin/audit` remains a practical cross-user query surface.
 - Compatibility surface: `GET /api/v1/sharing/admin/audit` is the required operator-facing endpoint for Sharing audit history. Generic `GET /api/v1/audit/*` surfaces may include Sharing naturally in shared mode, but they are not required to aggregate Sharing events in `per_user` mode.
 - Historical backfill: `tldw_Server_API/app/core/Sharing/share_audit_unified_migration.py` migrates legacy `share_audit_log` rows idempotently, preserves historical timestamps, and reserves legacy integer ids as the compatibility ids returned by the Sharing admin audit API.
+
+## AuthNZ API-Key Audit
+
+- Mandatory unified audit now applies to API-key management actions in `tldw_Server_API/app/core/AuthNZ/api_key_manager.py`:
+  create, rotate, revoke, and virtual-key creation.
+- Helper boundary: `tldw_Server_API/app/core/AuthNZ/api_key_audit.py` writes those events through an isolated
+  audit service instance, flushes with `raise_on_failure=True`, and stops that isolated service immediately after
+  the write. This avoids unrelated buffered events in a cached service causing false failures for strict AuthNZ flows.
+- Actor/target context: strict API-key audit metadata always includes `target_user_id`, and admin-triggered actions
+  also include actor metadata (`actor_user_id`, `actor_subject`, `actor_kind`, `actor_roles`) when available.
+- Failure contract: HTTP surfaces that depend on these mandatory writes should translate `MandatoryAuditWriteError`
+  to `503 Service Unavailable`. Auth state changes must not commit successfully if the mandatory audit write fails.
+- Compatibility boundary: legacy `api_key_audit_log` rows remain a best-effort mirror for compatibility during the
+  transition, but unified audit is now the required source of truth for those management events.
+- Best-effort exception: API-key usage/touch auditing remains best-effort so an audit outage does not become an
+  authentication outage.
 
 ## Configuration
 
@@ -154,7 +172,8 @@ async def handler(audit_service: UnifiedAuditService = Depends(get_audit_service
 
 Tips:
 - Always set `AuditContext.user_id`, and when in HTTP, set `endpoint` and `method`.
-- For streaming paths, schedule audit writes with `asyncio.create_task(...)` to avoid blocking.
+- For best-effort streaming paths, schedule audit writes with `asyncio.create_task(...)` to avoid blocking.
+- For mandatory audit paths, await the write and `flush(raise_on_failure=True)` before reporting success.
 - For timing an operation, prefer `audit_operation(...)` context manager (it logs success/failure and duration).
 
 ## Programmatic API (service methods)
@@ -201,7 +220,11 @@ async with audit_operation(service, AuditEventType.DATA_READ, ctx,
 
 - Background tasks: periodic flush (`flush_interval`) and daily cleanup. Disabled in test mode to avoid busy loops.
 - DI layer caches per‑user services (LRU). On app shutdown, call `shutdown_all_audit_services()` (see `Audit_DB_Deps.py`).
+- `shutdown_all_audit_services()` returns an `AuditShutdownSummary` and is best-effort by default; pass
+  `raise_on_error=True` for targeted callers or tests that need shutdown failures surfaced.
 - The service enforces owner‑loop shutdown; DI helpers schedule safe cross‑loop shutdown.
+- `UnifiedAuditService.stop()` attempts a final durable spill of buffered events to the fallback queue before raising
+  if the last flush still cannot be persisted cleanly.
 
 ## Performance & Scaling
 
@@ -231,6 +254,8 @@ async with audit_operation(service, AuditEventType.DATA_READ, ctx,
 
 - DB locked / flush failures: service retries with backoff; worst‑case, events spill to a fallback JSONL file adjacent to the audit DB (per‑user under the audit directory when using DI; `./Databases/` when using the default constructor). Check logs for `flush_failures` and the persisted queue file.
 - Missing events: ensure `await flush()` is called before shutdown; prefer DI and `await stop()` on app shutdown.
+- Mandatory write failures: check for `MandatoryAuditWriteError` and confirm the caller is using an isolated or
+  otherwise clean audit service boundary before the strict `flush(raise_on_failure=True)` call.
 - PII not redacting: verify patterns and `AUDIT_PII_*` settings; confirm fields are strings or in `metadata`.
 - Slow queries: verify indexes were created (service creates on init); filter narrowing with indexed fields (`timestamp`, `context_*`, `event_type`, `category`).
 - Admin requirement: export/count endpoints enforce admin via claim-first dependencies (`require_roles("admin")` / `require_permissions(...)`); override those deps in tests accordingly.

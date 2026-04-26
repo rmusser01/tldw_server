@@ -6,7 +6,11 @@ database backend instances based on configuration.
 """
 
 import os
+import time
+import urllib.parse as _url
+from dataclasses import replace
 from pathlib import Path
+from threading import RLock, Thread
 from typing import Optional
 
 from loguru import logger
@@ -35,6 +39,10 @@ if POSTGRESQL_AVAILABLE:
 
 # Global backend instances cache
 _backend_instances: dict[str, DatabaseBackend] = {}
+_backend_instances_lock = RLock()
+_sqlite_backend_registry: dict[tuple, DatabaseBackend] = {}
+_sqlite_registry_lock = RLock()
+_SQLITE_EVICTION_GRACE_SECONDS = 5.0
 
 
 def _describe_sqlite_target(config: DatabaseConfig) -> str:
@@ -44,6 +52,300 @@ def _describe_sqlite_target(config: DatabaseConfig) -> str:
     if raw_path.lower().startswith("file:"):
         return raw_path
     return str(Path(raw_path).resolve()) if raw_path else "<default>"
+
+
+def _snapshot_sqlite_config(config: DatabaseConfig) -> DatabaseConfig:
+    return replace(config)
+
+
+def _sqlite_uri_to_file_path(
+    raw_uri: str,
+    *,
+    parsed: _url.ParseResult | None = None,
+) -> Optional[Path]:
+    if parsed is None:
+        try:
+            parsed = _url.urlparse(raw_uri)
+        except (TypeError, ValueError):
+            return None
+    if parsed.scheme != "file":
+        return None
+    path = _url.unquote(parsed.path or "")
+    if not path or path in {":memory:", "/:memory:"}:
+        return None
+    candidate = Path(path).expanduser()
+    try:
+        if candidate.is_absolute():
+            return candidate.resolve()
+        return (Path.cwd() / candidate).resolve()
+    except (OSError, RuntimeError, ValueError):
+        return candidate
+
+
+def _is_anonymous_memory_uri(raw_path: str) -> bool:
+    lowered = raw_path.lower()
+    if not lowered.startswith("file:"):
+        return False
+    if lowered.startswith("file::memory:"):
+        return True
+    try:
+        parsed = _url.urlparse(raw_path)
+    except (TypeError, ValueError):
+        return False
+    query = _url.parse_qs(parsed.query or "")
+    mode = (query.get("mode", [""])[0] or "").lower()
+    if mode != "memory":
+        return False
+    return not bool((parsed.path or "").strip("/"))
+
+
+def _is_named_shared_cache_memory_uri(raw_path: str) -> bool:
+    lowered = raw_path.lower()
+    if not lowered.startswith("file:"):
+        return False
+    if _is_anonymous_memory_uri(raw_path):
+        return False
+    try:
+        parsed = _url.urlparse(raw_path)
+    except (TypeError, ValueError):
+        return False
+    query = _url.parse_qs(parsed.query or "")
+    mode = (query.get("mode", [""])[0] or "").lower()
+    cache = (query.get("cache", [""])[0] or "").lower()
+    if mode != "memory" or cache != "shared":
+        return False
+    return bool((parsed.path or "").strip("/"))
+
+
+def _canonicalize_named_shared_cache_memory_uri(raw_uri: str) -> str:
+    try:
+        parsed = _url.urlparse(raw_uri)
+    except (TypeError, ValueError):
+        return raw_uri
+
+    raw_name = _url.unquote(parsed.path or "")
+    if not raw_name:
+        return raw_uri
+
+    extra_pairs = [
+        (key, value)
+        for key, value in _url.parse_qsl(parsed.query or "", keep_blank_values=True)
+        if key.lower() not in {"cache", "mode"}
+    ]
+    extra_pairs.sort(key=lambda item: (item[0], item[1]))
+    query_pairs = [("cache", "shared"), ("mode", "memory"), *extra_pairs]
+    return f"file:{raw_name}?{_url.urlencode(query_pairs, doseq=True)}"
+
+
+def _normalize_sqlite_target(raw_path: str) -> str:
+    cleaned = (raw_path or "").strip()
+    if cleaned.lower().startswith("file:"):
+        if _is_anonymous_memory_uri(cleaned):
+            return cleaned
+        if _is_named_shared_cache_memory_uri(cleaned):
+            return _canonicalize_named_shared_cache_memory_uri(cleaned)
+        try:
+            parsed = _url.urlparse(cleaned)
+        except (TypeError, ValueError):
+            parsed = None
+        maybe_file = _sqlite_uri_to_file_path(cleaned, parsed=parsed)
+        if maybe_file is not None:
+            if parsed and parsed.query:
+                # Keep behavior-affecting URI options distinct in canonical identity.
+                query_pairs = sorted(_url.parse_qsl(parsed.query, keep_blank_values=True))
+                encoded_query = _url.urlencode(query_pairs, doseq=True)
+                return f"{maybe_file}?{encoded_query}"
+            return str(maybe_file)
+        return cleaned
+    if cleaned:
+        try:
+            return str(Path(cleaned).resolve())
+        except (OSError, RuntimeError, ValueError):
+            return cleaned
+    return "<default>"
+
+
+def _sqlite_signature(config: DatabaseConfig) -> tuple | None:
+    raw_path = (config.sqlite_path or "").strip()
+    if raw_path == ":memory:":
+        return None
+    if _is_anonymous_memory_uri(raw_path):
+        return None
+    if raw_path.lower().startswith("file:"):
+        try:
+            parsed = _url.urlparse(raw_path)
+        except (TypeError, ValueError):
+            parsed = None
+        if parsed is not None:
+            mode = (_url.parse_qs(parsed.query or "").get("mode", [""])[0] or "").lower()
+            if mode == "memory" and not _is_named_shared_cache_memory_uri(raw_path):
+                return None
+    return (
+        BackendType.SQLITE,
+        _normalize_sqlite_target(raw_path),
+        bool(config.sqlite_wal_mode),
+        bool(config.sqlite_foreign_keys),
+    )
+
+
+def _retire_backend_instance(backend: DatabaseBackend) -> None:
+    if getattr(backend, "backend_type", None) != BackendType.SQLITE:
+        return
+
+    pool_lock = getattr(backend, "_pool_lock", None)
+    if pool_lock is not None:
+        with pool_lock:
+            setattr(backend, "_retired", True)
+        return
+
+    if hasattr(backend, "_retired"):
+        setattr(backend, "_retired", True)
+
+
+def _close_backend_instance(name: str, backend: DatabaseBackend) -> None:
+    try:
+        _retire_backend_instance(backend)
+        pool_lock = getattr(backend, "_pool_lock", None)
+        if pool_lock is not None:
+            with pool_lock:
+                pool = getattr(backend, "_pool", None)
+                if pool is not None:
+                    pool.close_all()
+                    backend._pool = None
+        else:
+            pool = getattr(backend, "_pool", None)
+            if pool is not None:
+                pool.close_all()
+                if hasattr(backend, "_pool"):
+                    backend._pool = None
+        logger.info(f"Closed backend: {name}")
+    except Exception as e:
+        logger.error(f"Error closing backend {name}: {e}")
+
+
+def _close_backends_deduplicated(backends: list[tuple[str, DatabaseBackend]]) -> None:
+    seen: set[int] = set()
+    for name, backend in backends:
+        if id(backend) in seen:
+            continue
+        seen.add(id(backend))
+        _close_backend_instance(name, backend)
+
+
+def _retire_backends_deduplicated(backends: list[tuple[str, DatabaseBackend]]) -> None:
+    seen: set[int] = set()
+    for _, backend in backends:
+        if id(backend) in seen:
+            continue
+        seen.add(id(backend))
+        _retire_backend_instance(backend)
+
+
+def _evict_backend_references() -> list[tuple[str, DatabaseBackend]]:
+    with _backend_instances_lock:
+        named = list(_backend_instances.items())
+        _backend_instances.clear()
+    with _sqlite_registry_lock:
+        sqlite_managed = [(f"sqlite::{sig[1]}", backend) for sig, backend in _sqlite_backend_registry.items()]
+        _sqlite_backend_registry.clear()
+    return named + sqlite_managed
+
+
+def _evict_selected_sqlite_backend_references(
+    *,
+    backends: list[DatabaseBackend] | None = None,
+    sqlite_targets: list[str] | None = None,
+) -> list[tuple[str, DatabaseBackend]]:
+    selected_backend_ids = {
+        id(backend)
+        for backend in (backends or [])
+        if backend is not None
+    }
+    normalized_targets = {
+        _normalize_sqlite_target(str(target))
+        for target in (sqlite_targets or [])
+        if str(target).strip()
+    }
+
+    if not selected_backend_ids and not normalized_targets:
+        return []
+
+    sqlite_managed: list[tuple[str, DatabaseBackend]] = []
+    with _sqlite_registry_lock:
+        for signature, backend in list(_sqlite_backend_registry.items()):
+            signature_target = signature[1]
+            if (
+                id(backend) in selected_backend_ids
+                or signature_target in normalized_targets
+            ):
+                sqlite_managed.append((f"sqlite::{signature_target}", backend))
+                selected_backend_ids.add(id(backend))
+                _sqlite_backend_registry.pop(signature, None)
+
+    if not selected_backend_ids:
+        return sqlite_managed
+
+    named: list[tuple[str, DatabaseBackend]] = []
+    with _backend_instances_lock:
+        for name, backend in list(_backend_instances.items()):
+            if id(backend) in selected_backend_ids:
+                named.append((name, backend))
+                _backend_instances.pop(name, None)
+
+    return named + sqlite_managed
+
+
+def _close_evicted_backends(evicted: list[tuple[str, DatabaseBackend]], mode: str) -> None:
+    if not evicted:
+        return
+    _retire_backends_deduplicated(evicted)
+    if mode == "hard":
+        _close_backends_deduplicated(evicted)
+        return
+
+    def _deferred_close(backends: list[tuple[str, DatabaseBackend]]) -> None:
+        time.sleep(_SQLITE_EVICTION_GRACE_SECONDS)
+        _close_backends_deduplicated(backends)
+
+    Thread(target=_deferred_close, args=(evicted,), daemon=True).start()
+
+
+def _get_or_create_shared_sqlite_backend(config: DatabaseConfig) -> DatabaseBackend:
+    signature = _sqlite_signature(config)
+    backend_class = _BACKEND_REGISTRY[BackendType.SQLITE]
+    if signature is None:
+        logger.debug("Creating sqlite backend for {}", _describe_sqlite_target(config))
+        return backend_class(_snapshot_sqlite_config(config))
+
+    with _sqlite_registry_lock:
+        existing = _sqlite_backend_registry.get(signature)
+        if existing is not None:
+            return existing
+
+        logger.debug("Creating sqlite backend for {}", _describe_sqlite_target(config))
+        backend = backend_class(_snapshot_sqlite_config(config))
+        _sqlite_backend_registry[signature] = backend
+        return backend
+
+
+def is_factory_managed_backend(backend: DatabaseBackend | None) -> bool:
+    """Return True when *backend* is a shared SQLite backend tracked by the factory."""
+    if backend is None:
+        return False
+    if getattr(backend, "backend_type", None) != BackendType.SQLITE:
+        return False
+    with _sqlite_registry_lock:
+        return any(candidate is backend for candidate in _sqlite_backend_registry.values())
+
+
+def release_managed_backend(backend: DatabaseBackend | None) -> bool:
+    """Release a managed backend reference without directly closing its pool.
+
+    Pool lifecycle for managed SQLite backends is owned centrally via
+    ``reset_backend_registry()``; this helper intentionally does not close
+    pools directly.
+    """
+    return is_factory_managed_backend(backend)
 
 
 class DatabaseBackendFactory:
@@ -68,12 +370,11 @@ class DatabaseBackendFactory:
         if backend_type not in _BACKEND_REGISTRY:
             raise DatabaseError(f"Unsupported backend type: {backend_type}")
 
-        backend_class = _BACKEND_REGISTRY[backend_type]
         if backend_type == BackendType.SQLITE:
-            logger.debug("Creating sqlite backend for {}", _describe_sqlite_target(config))
-        else:
-            logger.info("Creating {} backend", backend_type.value)
+            return _get_or_create_shared_sqlite_backend(config)
 
+        backend_class = _BACKEND_REGISTRY[backend_type]
+        logger.info("Creating {} backend", backend_type.value)
         return backend_class(config)
 
 
@@ -248,38 +549,78 @@ def get_backend(
     Returns:
         DatabaseBackend instance or None
     """
-    global _backend_instances
-
-    if name in _backend_instances:
-        return _backend_instances[name]
+    with _backend_instances_lock:
+        existing = _backend_instances.get(name)
+        if existing is not None:
+            return existing
 
     if not create_if_missing:
         return None
 
-    if config is None:
-        # Build config from environment variables
-        config = DatabaseConfig.from_env()
-        backend = DatabaseBackendFactory.create_backend(config)
-    else:
-        backend = DatabaseBackendFactory.create_backend(config)
+    resolved_config = config if config is not None else DatabaseConfig.from_env()
+    backend = DatabaseBackendFactory.create_backend(resolved_config)
 
-    _backend_instances[name] = backend
+    duplicate: DatabaseBackend | None = None
+    with _backend_instances_lock:
+        existing = _backend_instances.get(name)
+        if existing is not None:
+            if existing is not backend:
+                duplicate = backend
+            backend = existing
+        else:
+            _backend_instances[name] = backend
+
+    if duplicate is not None:
+        _close_backend_instance(name, duplicate)
+
     return backend
 
 
+def reset_backend_registry(mode: str = "hard") -> None:
+    """
+    Reset backend registries and close backend pools.
+
+    hard:
+      - evict named and canonical sqlite references immediately
+      - close pools synchronously
+    graceful:
+      - evict references immediately
+      - close pools after a grace delay in a background thread
+    """
+    normalized = (mode or "hard").strip().lower()
+    if normalized not in {"hard", "graceful"}:
+        raise ValueError(f"Unsupported reset mode: {mode}")
+
+    evicted = _evict_backend_references()
+    _close_evicted_backends(evicted, normalized)
+
+
+def reset_managed_sqlite_backends(
+    mode: str = "hard",
+    *,
+    backends: list[DatabaseBackend] | None = None,
+    sqlite_targets: list[str] | None = None,
+) -> None:
+    """Reset selected managed SQLite backends and their named aliases.
+
+    Unlike ``reset_backend_registry()``, this only evicts canonical managed
+    SQLite backends matched by backend object identity or normalized sqlite
+    target path/URI.
+    """
+    normalized = (mode or "hard").strip().lower()
+    if normalized not in {"hard", "graceful"}:
+        raise ValueError(f"Unsupported reset mode: {mode}")
+
+    evicted = _evict_selected_sqlite_backend_references(
+        backends=backends,
+        sqlite_targets=sqlite_targets,
+    )
+    _close_evicted_backends(evicted, normalized)
+
+
 def close_all_backends() -> None:
-    """Close all backend instances and clear the cache."""
-    global _backend_instances
-
-    for name, backend in _backend_instances.items():
-        try:
-            if hasattr(backend, '_pool') and backend._pool:
-                backend._pool.close_all()
-            logger.info(f"Closed backend: {name}")
-        except Exception as e:
-            logger.error(f"Error closing backend {name}: {e}")
-
-    _backend_instances.clear()
+    """Close all backends and clear named/canonical caches via hard reset."""
+    reset_backend_registry(mode="hard")
 
 
 # Convenience function for getting default backend

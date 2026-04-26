@@ -20,16 +20,16 @@ For a local-first CPU setup in the current repo:
 
 | Goal | STT | TTS | Why |
 | --- | --- | --- | --- |
-| Recommended first local stack | `parakeet-onnx` | `supertonic` | Keeps the stack local-first and avoids mandatory voice-cloning input on every TTS request |
-| If you need local voice cloning immediately | `parakeet-onnx` | `pocket_tts` | Python/ONNX runtime; still local-first, but every request needs reference audio |
-| If you want the native compiled runtime | `parakeet-onnx` | `pocket_tts_cpp` | Separate installer and runtime layout; streaming only works when the local CLI probe proves incremental |
-| Better but more demanding | `parakeet-onnx` or `faster-whisper` | `qwen3_tts` | Strong upgrade path after the basic stack already works |
+| Recommended first local stack | `parakeet-tdt-0.6b-v3-onnx` | `supertonic` | Keeps the stack local-first and avoids mandatory voice-cloning input on every TTS request |
+| If you need local voice cloning immediately | `parakeet-tdt-0.6b-v3-onnx` | `pocket_tts` | Python/ONNX runtime; still local-first, but every request needs reference audio |
+| If you want the native compiled runtime | `parakeet-tdt-0.6b-v3-onnx` | `pocket_tts_cpp` | Separate installer and runtime layout; streaming only works when the local CLI probe proves incremental |
+| Better but more demanding | `parakeet-tdt-0.6b-v3-onnx` or `faster-whisper` | `qwen3_tts` | Strong upgrade path after the basic stack already works |
 
 Important current-repo realities:
 
-- The shipped explicit STT defaults are currently `parakeet-onnx` for batch and streaming.
+- The shipped explicit STT defaults are currently `parakeet-tdt-0.6b-v3-onnx` for batch and streaming. The shorter `parakeet-onnx` alias remains supported for older configs.
 - The current `/setup` audio bundle docs still describe a different first-run path in some places.
-- The stock Docker profile does not bind-mount `Config_Files` or `models/`, so host-side audio config/model changes are not visible inside the container until you rebuild or customize the container path.
+- Stock Docker CPU/default audio works with bundled dependencies. Host-side config or model edits are not visible inside the container until you rebuild, use `Dockerfiles/docker-compose.host-storage.yml`, or build a custom image path.
 
 If your only goal is "make sound come out as fast as possible", the current `/setup` bundle path may still be less manual than the exact `supertonic` path in this guide. This guide is the better fit when you want a local-first stack that you understand and can control.
 
@@ -99,8 +99,9 @@ Use this when you want a local Python install but do not want to do the venv/boo
 ```bash
 git clone https://github.com/rmusser01/tldw_server.git
 cd tldw_server
-make quickstart-install
-make quickstart-local
+make install-local
+make setup-local-single
+make start-local-single
 ```
 
 ### Option B: Manual / Local Python Setup
@@ -145,7 +146,7 @@ Set `AUTH_MODE=single_user` and `SINGLE_USER_API_KEY=...` in `tldw_Server_API/Co
 
 ```bash
 docker compose --env-file tldw_Server_API/Config_Files/.env \
-  -f Dockerfiles/docker-compose.yml \
+  -f Dockerfiles/docker-compose.single-user.yml \
   -f Dockerfiles/docker-compose.webui.yml \
   up -d --build
 ```
@@ -158,10 +159,10 @@ make quickstart
 
 Important Docker note:
 
+- Stock Docker CPU/default audio works with bundled dependencies.
 - The stock container image does not bind-mount `Config_Files` or `models/`.
-- Host-side edits to `tldw_Server_API/Config_Files/config.txt` or local model assets do not affect the running container until you rebuild the image.
-- If you change audio configuration on the host, rebuild with `docker compose ... up -d --build`.
-- If you use `/setup` inside the running container, those changes are container-local unless you also update the host files.
+- Host-side edits to `tldw_Server_API/Config_Files/config.txt` or local model assets require a rebuild, `Dockerfiles/docker-compose.host-storage.yml`, or a custom image path.
+- If you use `/setup` inside the running container, those changes are container-local unless you also persist or reproduce them in your chosen image/storage path.
 
 ## Step 2: Set the CPU STT Defaults
 
@@ -169,8 +170,8 @@ Edit [config.txt](../../tldw_Server_API/Config_Files/config.txt) and make the ST
 
 ```ini
 [STT-Settings]
-default_batch_transcription_model = parakeet-onnx
-default_streaming_transcription_model = parakeet-onnx
+default_batch_transcription_model = parakeet-tdt-0.6b-v3-onnx
+default_streaming_transcription_model = parakeet-tdt-0.6b-v3-onnx
 default_transcriber = parakeet
 nemo_model_variant = onnx
 ```
@@ -184,7 +185,7 @@ If you are on the stock Docker path, rebuild the app image after editing the fil
 
 ```bash
 docker compose --env-file tldw_Server_API/Config_Files/.env \
-  -f Dockerfiles/docker-compose.yml \
+  -f Dockerfiles/docker-compose.single-user.yml \
   -f Dockerfiles/docker-compose.webui.yml \
   up -d --build
 ```
@@ -259,7 +260,7 @@ Local / `make` paths:
 
 ```bash
 # stop the server, then start it again
-make quickstart-local
+make start-local-single
 ```
 
 or
@@ -272,7 +273,7 @@ Docker paths:
 
 ```bash
 docker compose --env-file tldw_Server_API/Config_Files/.env \
-  -f Dockerfiles/docker-compose.yml \
+  -f Dockerfiles/docker-compose.single-user.yml \
   -f Dockerfiles/docker-compose.webui.yml \
   up -d --build
 ```
@@ -281,11 +282,31 @@ docker compose --env-file tldw_Server_API/Config_Files/.env \
 
 Do not stop at `/health`. Verify one real TTS request and one real STT request.
 
+Choose one reusable auth header before running the commands.
+
+Single-user auth mode:
+
+```bash
+AUTH_HEADER=(-H "X-API-KEY: $SINGLE_USER_API_KEY")
+```
+
+Multi-user auth mode:
+
+```bash
+JWT=$(
+  curl -sS -X POST http://127.0.0.1:8000/api/v1/auth/login \
+    -H "Content-Type: application/x-www-form-urlencoded" \
+    -d "username=$ADMIN_USERNAME" \
+    -d "password=$ADMIN_PASSWORD" | jq -r '.access_token'
+)
+AUTH_HEADER=(-H "Authorization: Bearer $JWT")
+```
+
 ### 4A. Confirm TTS health
 
 ```bash
 curl -sS http://127.0.0.1:8000/api/v1/audio/health \
-  -H "X-API-KEY: $SINGLE_USER_API_KEY"
+  "${AUTH_HEADER[@]}"
 ```
 
 What you want to see:
@@ -297,7 +318,7 @@ What you want to see:
 
 ```bash
 curl -sS http://127.0.0.1:8000/api/v1/audio/voices/catalog \
-  -H "X-API-KEY: $SINGLE_USER_API_KEY" | jq '.supertonic'
+  "${AUTH_HEADER[@]}" | jq '.supertonic'
 ```
 
 You should see voices such as `supertonic_m1` and `supertonic_f1`.
@@ -306,7 +327,7 @@ You should see voices such as `supertonic_m1` and `supertonic_f1`.
 
 ```bash
 curl -sS -X POST http://127.0.0.1:8000/api/v1/audio/speech \
-  -H "X-API-KEY: $SINGLE_USER_API_KEY" \
+  "${AUTH_HEADER[@]}" \
   -H "Content-Type: application/json" \
   -d '{
         "model": "tts-supertonic-1",
@@ -321,23 +342,23 @@ curl -sS -X POST http://127.0.0.1:8000/api/v1/audio/speech \
 ### 4D. Confirm STT health
 
 ```bash
-curl -sS "http://127.0.0.1:8000/api/v1/audio/transcriptions/health?model=parakeet-onnx" \
-  -H "X-API-KEY: $SINGLE_USER_API_KEY"
+curl -sS "http://127.0.0.1:8000/api/v1/audio/transcriptions/health?model=parakeet-tdt-0.6b-v3-onnx" \
+  "${AUTH_HEADER[@]}"
 ```
 
 What you want to see:
 
 - `"provider": "parakeet"`
-- `"alias": "parakeet-onnx"`
+- `"alias": "parakeet-tdt-0.6b-v3-onnx"` or `"alias": "parakeet-onnx"`
 - `"usable": true` or `"available": true`
 
 ### 4E. Transcribe the generated audio back through STT
 
 ```bash
 curl -sS -X POST http://127.0.0.1:8000/api/v1/audio/transcriptions \
-  -H "X-API-KEY: $SINGLE_USER_API_KEY" \
+  "${AUTH_HEADER[@]}" \
   -F "file=@cpu_audio_smoke.wav" \
-  -F "model=parakeet-onnx"
+  -F "model=parakeet-tdt-0.6b-v3-onnx"
 ```
 
 Success means:
@@ -397,7 +418,7 @@ Treat it as a second-step upgrade, not the first-run baseline.
 ### STT health shows the wrong model/provider
 
 - re-open [config.txt](../../tldw_Server_API/Config_Files/config.txt)
-- make sure both `default_batch_transcription_model` and `default_streaming_transcription_model` are set to `parakeet-onnx`
+- make sure both `default_batch_transcription_model` and `default_streaming_transcription_model` are set to `parakeet-tdt-0.6b-v3-onnx`
 - make sure `default_transcriber = parakeet`
 - restart the server
 
@@ -408,7 +429,7 @@ Treat it as a second-step upgrade, not the first-run baseline.
 
 ```bash
 docker compose --env-file tldw_Server_API/Config_Files/.env \
-  -f Dockerfiles/docker-compose.yml \
+  -f Dockerfiles/docker-compose.single-user.yml \
   -f Dockerfiles/docker-compose.webui.yml \
   up -d --build
 ```
@@ -419,7 +440,7 @@ Use `/setup`, accept the current recommended audio bundle, and verify speech fir
 
 Then come back to this guide if you want to move from the bundle defaults to:
 
-- `parakeet-onnx`
+- `parakeet-tdt-0.6b-v3-onnx` (`parakeet-onnx` remains accepted as a legacy alias)
 - `supertonic`
 - `pocket_tts`
 - `pocket_tts_cpp`

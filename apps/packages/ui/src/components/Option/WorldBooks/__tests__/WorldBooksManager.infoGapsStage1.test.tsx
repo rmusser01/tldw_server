@@ -206,7 +206,9 @@ describe("WorldBooksManager information-gaps stage-1 test-match workflow", () =>
       const user = userEvent.setup()
       const { unmount } = render(<WorldBooksManager />)
 
-      await user.click(screen.getByRole("button", { name: "Open test matching modal" }))
+      // Open Tools dropdown then click Test Matching
+      await user.click(screen.getByRole("button", { name: "Tools" }))
+      await user.click(await screen.findByText("Test Matching"))
       const sampleInput = await screen.findByRole("textbox", {
         name: "Sample text for keyword test"
       })
@@ -217,7 +219,9 @@ describe("WorldBooksManager information-gaps stage-1 test-match workflow", () =>
       unmount()
 
       render(<WorldBooksManager />)
-      await user.click(screen.getByRole("button", { name: "Open test matching modal" }))
+      // Open Tools dropdown then click Test Matching
+      await user.click(screen.getByRole("button", { name: "Tools" }))
+      await user.click(await screen.findByText("Test Matching"))
 
       const restoredSampleInput = await screen.findByRole("textbox", {
         name: "Sample text for keyword test"

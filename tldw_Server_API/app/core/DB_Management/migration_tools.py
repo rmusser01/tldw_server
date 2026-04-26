@@ -89,18 +89,19 @@ def migrate_sqlite_to_postgres(
     if not sqlite_path.exists():
         raise FileNotFoundError(f'SQLite database not found: {sqlite_path}')
 
-    logger.info("Starting SQLite-to-PostgreSQL migration")
+    logger.info("Starting SQLite to PostgreSQL migration")
     sqlite_conn = sqlite3.connect(str(sqlite_path))
     sqlite_conn.row_factory = sqlite3.Row
     try:
         tables = _introspect_sqlite_schema(sqlite_conn, skip_tables)
         if not tables:
-            logger.warning("No tables discovered for SQLite-to-PostgreSQL migration; skipping")
+            logger.warning("No tables discovered for SQLite to PostgreSQL migration; skipping")
             return
 
         insertion_order = _topological_sort(tables)
         logger.debug(
-            f"Computed insertion order for SQLite-to-PostgreSQL migration ({len(insertion_order)} tables)"
+            "Computed insertion order for SQLite to PostgreSQL migration (%s tables)",
+            len(insertion_order),
         )
 
         backend = DatabaseBackendFactory.create_backend(postgres_config)
@@ -118,7 +119,7 @@ def migrate_sqlite_to_postgres(
                 pass
     finally:
         sqlite_conn.close()
-    logger.info("Completed SQLite-to-PostgreSQL migration")
+    logger.info("Completed SQLite to PostgreSQL migration")
 
 
 def migrate_workflows_sqlite_to_postgres(

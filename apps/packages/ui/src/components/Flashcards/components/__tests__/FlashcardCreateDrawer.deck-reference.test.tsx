@@ -7,11 +7,12 @@ import { FlashcardCreateDrawer } from "../FlashcardCreateDrawer"
 import {
   useCreateDeckMutation,
   useCreateFlashcardMutation,
+  useCreateFlashcardTemplateMutation,
   useDecksQuery,
   useFlashcardDeckRecentCardsQuery,
   useFlashcardDeckSearchQuery
 } from "../../hooks"
-import type { DeckSchedulerSettings, DeckSchedulerSettingsEnvelope } from "@/services/flashcards"
+import type { Deck, DeckSchedulerSettings, DeckSchedulerSettingsEnvelope } from "@/services/flashcards"
 
 const defaultFsrsSettings = {
   target_retention: 0.9,
@@ -19,33 +20,39 @@ const defaultFsrsSettings = {
   enable_fuzz: false
 }
 
+const defaultSm2Settings = {
+  new_steps_minutes: [1, 10],
+  relearn_steps_minutes: [10],
+  graduating_interval_days: 1,
+  easy_interval_days: 4,
+  easy_bonus: 1.3,
+  interval_modifier: 1,
+  max_interval_days: 36500,
+  leech_threshold: 8,
+  enable_fuzz: false
+}
+
+const defaultSchedulerSettingsEnvelope: DeckSchedulerSettingsEnvelope = {
+  sm2_plus: defaultSm2Settings,
+  fsrs: defaultFsrsSettings
+}
+
 const makeDeck = (
   id: number,
   name: string,
   schedulerSettings?: DeckSchedulerSettingsEnvelope
-) =>
-  ({
+) : Deck => ({
     id,
     name,
     description: null,
+    review_prompt_side: "front",
     deleted: false,
     client_id: "test",
     version: 1,
     scheduler_type: "sm2_plus",
     scheduler_settings_json: schedulerSettings ? JSON.stringify(schedulerSettings) : null,
-    scheduler_settings:
-      schedulerSettings ?? {
-        new_steps_minutes: [1, 10],
-        relearn_steps_minutes: [10],
-        graduating_interval_days: 1,
-        easy_interval_days: 4,
-        easy_bonus: 1.3,
-        interval_modifier: 1,
-        max_interval_days: 36500,
-        leech_threshold: 8,
-        enable_fuzz: false
-      }
-  }) as const
+    scheduler_settings: schedulerSettings ?? defaultSchedulerSettingsEnvelope
+  })
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -86,6 +93,7 @@ vi.mock("../../hooks", () => ({
   useDecksQuery: vi.fn(),
   useCreateFlashcardMutation: vi.fn(),
   useCreateDeckMutation: vi.fn(),
+  useCreateFlashcardTemplateMutation: vi.fn(),
   useDebouncedFormField: vi.fn((form, field) => Form.useWatch(field, form)),
   useFlashcardDeckRecentCardsQuery: vi.fn(),
   useFlashcardDeckSearchQuery: vi.fn()
@@ -188,7 +196,7 @@ describe("FlashcardCreateDrawer deck reference section", () => {
   let consoleErrorSpy: ReturnType<typeof vi.spyOn>
   let recentState: Record<string, unknown>
   let searchState: Record<string, unknown>
-  let currentDecks: Array<ReturnType<typeof makeDeck>>
+  let currentDecks: Deck[]
 
   beforeEach(() => {
     vi.clearAllMocks()
@@ -222,6 +230,10 @@ describe("FlashcardCreateDrawer deck reference section", () => {
       mutateAsync: createDeckMutateAsync,
       isPending: false
     } as any)
+    vi.mocked(useCreateFlashcardTemplateMutation).mockReturnValue({
+      mutateAsync: vi.fn(),
+      isPending: false
+    } as any)
     vi.mocked(useFlashcardDeckRecentCardsQuery).mockImplementation(() => recentState as any)
     vi.mocked(useFlashcardDeckSearchQuery).mockImplementation(() => searchState as any)
   })
@@ -235,19 +247,17 @@ describe("FlashcardCreateDrawer deck reference section", () => {
     render(<FlashcardCreateDrawer open onClose={vi.fn()} onSuccess={vi.fn()} {...props} />)
 
   const selectDeck = async (deckName: string) => {
-    fireEvent.mouseDown(screen.getByLabelText("Deck"))
+    const deckInputs = screen.getAllByLabelText("Deck")
+    fireEvent.mouseDown(deckInputs[deckInputs.length - 1] as HTMLElement)
     fireEvent.click(await screen.findByText(deckName))
   }
 
   const expandReferenceSection = async () => {
     await waitFor(() => {
-      expect(
-        screen.getByRole("button", { name: /existing cards in this deck/i })
-      ).toBeInTheDocument()
+      expect(screen.getAllByRole("button", { name: /existing cards in this deck/i }).length).toBeGreaterThan(0)
     })
-    fireEvent.click(
-      screen.getByRole("button", { name: /existing cards in this deck/i })
-    )
+    const expandButtons = screen.getAllByRole("button", { name: /existing cards in this deck/i })
+    fireEvent.click(expandButtons[expandButtons.length - 1] as HTMLElement)
   }
 
   const openAdvancedOptions = async () => {
@@ -315,7 +325,7 @@ describe("FlashcardCreateDrawer deck reference section", () => {
 
     await selectDeck("Biology")
 
-    fireEvent.mouseDown(screen.getByLabelText("Card template"))
+    fireEvent.mouseDown(screen.getByLabelText("Card model"))
     fireEvent.click(
       await screen.findByText("Cloze (Fill in the blank)", {
         selector: ".ant-select-item-option-content"
@@ -416,7 +426,7 @@ describe("FlashcardCreateDrawer deck reference section", () => {
     await expandReferenceSection()
 
     expect((screen.getByPlaceholderText("Search this deck") as HTMLInputElement).value).toBe("")
-  })
+  }, 15000)
 
   it("selects the inline-created deck and shows the empty reference state", async () => {
     const createdDeckSettings: DeckSchedulerSettings = {
@@ -435,10 +445,11 @@ describe("FlashcardCreateDrawer deck reference section", () => {
       fsrs: defaultFsrsSettings
     }
 
-    const createdDeck = {
+    const createdDeck: Deck = {
       id: 7,
       name: "New deck",
       description: null,
+      review_prompt_side: "front",
       deleted: false,
       client_id: "test",
       version: 1,

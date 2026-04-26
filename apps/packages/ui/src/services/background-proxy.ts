@@ -2,7 +2,10 @@ import { browser } from "wxt/browser"
 import { Storage } from "@plasmohq/storage"
 import { createSafeStorage } from "@/utils/safe-storage"
 import { formatErrorMessage } from "@/utils/format-error-message"
-import { tldwRequest } from "@/services/tldw/request-core"
+import {
+  resolveBrowserRequestTransport,
+  tldwRequest
+} from "@/services/tldw/request-core"
 import {
   BACKEND_UNREACHABLE_EVENT,
   type BackendUnreachableDetail
@@ -264,6 +267,32 @@ const isExtensionTransportFailure = (error: unknown): boolean => {
   )
 }
 
+type RequestAbortError = Error & {
+  status?: number
+  code?: string
+  details?: unknown
+}
+
+const isAbortErrorMessage = (value?: string) =>
+  typeof value === "string" && value.toLowerCase().includes("abort")
+
+const readErrorMessage = (error: unknown, fallback = "Aborted") =>
+  error instanceof Error && error.message ? error.message : fallback
+const createAbortError = (
+  message?: string,
+  status?: number,
+  details?: unknown
+): RequestAbortError => {
+  const abortError = new Error(message || "Aborted") as RequestAbortError
+  abortError.name = "AbortError"
+  abortError.status = typeof status === "number" ? status : 0
+  abortError.code = "REQUEST_ABORTED"
+  if (typeof details !== "undefined") {
+    abortError.details = sanitizeResponseData(details)
+  }
+  return abortError
+}
+
 const shouldNotifyBackendUnavailable = (entry: {
   method: string
   path: string
@@ -326,6 +355,7 @@ export interface BgRequestInit<
   abortSignal?: AbortSignal
   responseType?: "json" | "text" | "arrayBuffer"
   returnResponse?: boolean
+  preferDirect?: boolean
 }
 
 export async function bgRequest<
@@ -342,7 +372,8 @@ export async function bgRequest<
     timeoutMs,
     abortSignal,
     responseType,
-    returnResponse
+    returnResponse,
+    preferDirect = false
   } = init
   const path = normalizeKnownPathQuirks(rawPath)
   const isAbsoluteUrl = typeof path === "string" && /^https?:/i.test(path)
@@ -380,26 +411,13 @@ export async function bgRequest<
       // best-effort logging only
     }
   }
-  const isAbortErrorMessage = (value?: string) =>
-    typeof value === "string" && value.toLowerCase().includes("abort")
   const buildRequestError = (
     msg: string,
     status?: number,
     details?: unknown
   ): (Error & { status?: number; code?: string; details?: unknown }) => {
     if (isAbortErrorMessage(msg)) {
-      const abortError = new Error(msg || "Aborted") as Error & {
-        status?: number
-        code?: string
-        details?: unknown
-      }
-      abortError.name = "AbortError"
-      abortError.status = typeof status === "number" ? status : 0
-      abortError.code = "REQUEST_ABORTED"
-      if (typeof details !== "undefined") {
-        abortError.details = sanitizeResponseData(details)
-      }
-      return abortError
+      return createAbortError(msg, status, details)
     }
     const error = new Error(`${msg} (${method} ${path})`) as Error & {
       status?: number
@@ -426,7 +444,9 @@ export async function bgRequest<
     if (typeof Blob !== "undefined" && value instanceof Blob) return true
     return false
   }
-  const hasRuntimeMessage = Boolean(browser?.runtime?.sendMessage && browser?.runtime?.id)
+  const hasRuntimeMessage =
+    !preferDirect &&
+    Boolean(browser?.runtime?.sendMessage && browser?.runtime?.id)
   const methodIsSafeFallback = isSafeFallbackMethod(method)
 
   // Some binary responses do not survive extension message serialization.
@@ -791,18 +811,37 @@ async function* bgStreamDirect<
 ): AsyncGenerator<string> {
   const storage = createSafeStorage()
   const cfg = (await storage.get<Record<string, unknown>>("tldwConfig").catch(() => null)) || null
-  const isAbsolute = typeof path === "string" && /^https?:/i.test(path)
-  const absolutePath = isAbsolute ? String(path) : ""
+  const normalizedPath = normalizeKnownPathQuirks(path)
+  const isAbsolute = typeof normalizedPath === "string" && /^https?:/i.test(normalizedPath)
+  const absolutePath = isAbsolute ? String(normalizedPath) : ""
+  const transport =
+    !isAbsolute && typeof normalizedPath === "string"
+      ? resolveBrowserRequestTransport({
+          config: cfg,
+          path: String(normalizedPath)
+        })
+      : null
+  const hostedMode = transport?.mode === "hosted"
+  const advancedTransportOrigin =
+    transport?.mode === "advanced" ? parseHttpOrigin(transport?.url) : null
   if (isAbsolute && !isAbsoluteUrlAllowlisted(absolutePath, cfg)) {
     throw new Error(ABSOLUTE_URL_BLOCK_ERROR)
   }
-  if (!cfg?.serverUrl && !isAbsolute) {
+  if (
+    !cfg?.serverUrl &&
+    !isAbsolute &&
+    transport?.mode === "advanced" &&
+    !advancedTransportOrigin
+  ) {
     throw new Error("tldw server not configured")
   }
-  const baseUrl = cfg?.serverUrl ? String(cfg.serverUrl).replace(/\/$/, "") : ""
+  const baseUrl =
+    advancedTransportOrigin ||
+    (cfg?.serverUrl ? String(cfg.serverUrl).replace(/\/$/, "") : "")
   const url = isAbsolute
     ? absolutePath
-    : `${baseUrl}${String(path).startsWith("/") ? "" : "/"}${String(path)}`
+    : transport?.url ||
+      `${baseUrl}${String(normalizedPath).startsWith("/") ? "" : "/"}${String(normalizedPath)}`
   const sameOriginAbsolute = isAbsolute
     ? isSameOriginAbsoluteUrlForConfiguredServer(absolutePath, cfg)
     : false
@@ -813,7 +852,7 @@ async function* bgStreamDirect<
     if (kl === "x-api-key" || kl === "authorization") delete resolvedHeaders[k]
   }
 
-  if (!shouldSkipAuth && cfg?.authMode === "single-user") {
+  if (!shouldSkipAuth && !hostedMode && cfg?.authMode === "single-user") {
     const key = String(cfg?.apiKey || "").trim()
     if (!key) {
       throw new Error(
@@ -821,7 +860,7 @@ async function* bgStreamDirect<
       )
     }
     resolvedHeaders["X-API-KEY"] = key
-  } else if (!shouldSkipAuth && cfg?.authMode === "multi-user") {
+  } else if (!shouldSkipAuth && !hostedMode && cfg?.authMode === "multi-user") {
     const token = String(cfg?.accessToken || "").trim()
     if (token) {
       resolvedHeaders["Authorization"] = `Bearer ${token}`
@@ -840,7 +879,11 @@ async function* bgStreamDirect<
     resolvedHeaders["Connection"] || "keep-alive"
 
   const controller = new AbortController()
-  const idleMs = deriveStreamIdleTimeout(cfg, path as string, Number(streamIdleTimeoutMs))
+  const idleMs = deriveStreamIdleTimeout(
+    cfg,
+    normalizedPath as string,
+    Number(streamIdleTimeoutMs)
+  )
   let idleTimer: ReturnType<typeof setTimeout> | null = null
   let idleError: Error | null = null
   const resetIdle = () => {
@@ -880,6 +923,7 @@ async function* bgStreamDirect<
   let resp = await fetchStream()
   if (
     !shouldSkipAuth &&
+    !hostedMode &&
     resp.status === 401 &&
     cfg?.authMode === "multi-user" &&
     cfg?.refreshToken
@@ -893,7 +937,18 @@ async function* bgStreamDirect<
       if (refreshResp.ok) {
         const tokens = await refreshResp.json().catch(() => null)
         if (tokens?.access_token) {
-          const updated = { ...(cfg || {}), accessToken: tokens.access_token }
+          const latestCfg =
+            (await storage
+              .get<Record<string, unknown>>("tldwConfig")
+              .catch(() => null)) || null
+          const updated = {
+            ...(latestCfg || cfg || {}),
+            accessToken: tokens.access_token,
+            refreshToken:
+              tokens?.refresh_token ||
+              latestCfg?.refreshToken ||
+              cfg?.refreshToken
+          }
           await storage.set("tldwConfig", updated)
           resolvedHeaders["Authorization"] = `Bearer ${tokens.access_token}`
           resp = await fetchStream()
@@ -961,7 +1016,7 @@ async function* bgStreamDirect<
       throw idleError
     }
     if (abortSignal?.aborted) {
-      throw new Error("Aborted")
+      throw createAbortError(readErrorMessage(e))
     }
     throw e
   } finally {
@@ -1182,12 +1237,23 @@ export interface BgUploadInit<P extends AllowedPath = AllowedPath, M extends All
   fileFieldName?: string
   // Optional timeout override for upload requests
   timeoutMs?: number
+  preferDirect?: boolean
 }
 
 export async function bgUpload<T = any, P extends AllowedPath = AllowedPath, M extends AllowedMethodFor<P> = AllowedMethodFor<P>>(
-  { path, method = 'POST' as UpperLower<M>, fields = {}, file, fileFieldName, timeoutMs }: BgUploadInit<P, M>
+  {
+    path,
+    method = 'POST' as UpperLower<M>,
+    fields = {},
+    file,
+    fileFieldName,
+    timeoutMs,
+    preferDirect = false
+  }: BgUploadInit<P, M>
 ): Promise<T> {
-  const hasRuntimeMessage = Boolean(browser?.runtime?.sendMessage && browser?.runtime?.id)
+  const hasRuntimeMessage =
+    !preferDirect &&
+    Boolean(browser?.runtime?.sendMessage && browser?.runtime?.id)
   const methodIsSafeFallback = isSafeFallbackMethod(method)
   if (hasRuntimeMessage) {
     try {

@@ -19,6 +19,7 @@ type UseDictionaryFormManagementParams = {
   notification: {
     error: (config: { message: string; description?: string }) => void
     info: (config: { message: string; description?: string }) => void
+    success: (config: { message: string; description?: string }) => void
   }
   confirmDanger: (config: {
     title: string
@@ -70,6 +71,9 @@ export function useDictionaryFormManagement({
       editId != null ? tldwClient.updateDictionary(editId, values) : Promise.resolve(null),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["tldw:listDictionaries"] })
+      notification.success({
+        message: t("option:dictionaries.updatedTitle", "Dictionary updated")
+      })
       setOpenEdit(false)
       editForm.resetFields()
       setEditId(null)
@@ -109,6 +113,8 @@ export function useDictionaryFormManagement({
       const starterTemplate = getDictionaryStarterTemplate(values?.starter_template)
       try {
         const createdDictionary = await createDict(normalizeCreateDictionaryPayload(values))
+        let starterEntriesApplied = 0
+        const starterEntriesTotal = starterTemplate?.entries.length ?? 0
 
         if (starterTemplate) {
           const dictionaryId = Number(
@@ -119,30 +125,88 @@ export function useDictionaryFormManagement({
 
           if (!Number.isFinite(dictionaryId) || dictionaryId <= 0) {
             notification.error({
-              message: "Template not applied",
-              description:
-                "Dictionary was created, but starter entries could not be added automatically.",
+              message: t(
+                "option:dictionaries.templateNotAppliedTitle",
+                "Template not applied"
+              ),
+              description: t(
+                "option:dictionaries.templateNotAppliedDescription",
+                "Dictionary was created, but starter entries could not be added automatically."
+              ),
             })
           } else {
-            await Promise.all(
+            const starterEntryResults = await Promise.allSettled(
               starterTemplate.entries.map((entry) =>
                 tldwClient.addDictionaryEntry(dictionaryId, entry)
               )
             )
+            starterEntriesApplied = starterEntryResults.filter(
+              (result) => result.status === "fulfilled"
+            ).length
+
+            if (starterEntriesApplied < starterEntriesTotal) {
+              notification.error({
+                message: t(
+                  "option:dictionaries.templatePartiallyAppliedTitle",
+                  "Template only partially applied"
+                ),
+                description:
+                  starterEntriesApplied > 0
+                    ? t("option:dictionaries.templatePartiallyAppliedDescription", {
+                        defaultValue:
+                          "Dictionary was created, but only {{applied}} of {{total}} starter entries were added automatically.",
+                        applied: starterEntriesApplied,
+                        total: starterEntriesTotal
+                      })
+                    : t(
+                        "option:dictionaries.templateNotAppliedDescription",
+                        "Dictionary was created, but starter entries could not be added automatically."
+                      ),
+              })
+            }
           }
         }
 
         await queryClient.invalidateQueries({ queryKey: ["tldw:listDictionaries"] })
+        notification.success({
+          message: t("option:dictionaries.createdTitle", "Dictionary created"),
+          description:
+            starterEntriesApplied > 0 && starterEntriesApplied === starterEntriesTotal
+              ? t("option:dictionaries.createdWithTemplateDescription", {
+                  defaultValue:
+                    '"{{name}}" created with {{count}} starter entr{{suffix}}.',
+                  name: values?.name || t("option:dictionaries.dictionaryLabel", "Dictionary"),
+                  count: starterEntriesApplied,
+                  suffix: starterEntriesApplied === 1 ? "y" : "ies"
+                })
+              : starterEntriesApplied > 0
+                ? t("option:dictionaries.createdWithPartialTemplateDescription", {
+                    defaultValue:
+                      '"{{name}}" created with {{applied}} of {{total}} starter entries.',
+                    name: values?.name || t("option:dictionaries.dictionaryLabel", "Dictionary"),
+                    applied: starterEntriesApplied,
+                    total: starterEntriesTotal
+                  })
+                : t("option:dictionaries.createdDescription", {
+                    defaultValue: '"{{name}}" created.',
+                    name: values?.name || t("option:dictionaries.dictionaryLabel", "Dictionary")
+                  }),
+        })
         setOpenCreate(false)
         createForm.resetFields()
       } catch (error: any) {
         notification.error({
-          message: "Error",
-          description: error?.message || "Failed to create dictionary",
+          message: t("common:error", { defaultValue: "Error" }),
+          description:
+            error?.message ||
+            t(
+              "option:dictionaries.createFailedDescription",
+              "Failed to create dictionary"
+            ),
         })
       }
     },
-    [createDict, createForm, notification, queryClient]
+    [createDict, createForm, notification, queryClient, t]
   )
 
   const handleEditSubmit = React.useCallback(
@@ -152,8 +216,13 @@ export function useDictionaryFormManagement({
           await updateDict(values)
         } catch (error: any) {
           notification.error({
-            message: "Error",
-            description: error?.message || "Failed to update dictionary",
+            message: t("common:error", { defaultValue: "Error" }),
+            description:
+              error?.message ||
+              t(
+                "option:dictionaries.updateFailedDescription",
+                "Failed to update dictionary"
+              ),
           })
         }
         return
@@ -181,17 +250,30 @@ export function useDictionaryFormManagement({
       } catch (error: any) {
         if (!isDictionaryVersionConflictError(error)) {
           notification.error({
-            message: "Error",
-            description: error?.message || "Failed to update dictionary",
+            message: t("common:error", { defaultValue: "Error" }),
+            description:
+              error?.message ||
+              t(
+                "option:dictionaries.updateFailedDescription",
+                "Failed to update dictionary"
+              ),
           })
           return
         }
 
         const shouldReload = await confirmDanger({
-          title: "Dictionary changed in another session",
-          content:
-            "This dictionary was updated elsewhere. Reload the latest version while keeping your current edits?",
-          okText: "Reload latest",
+          title: t(
+            "option:dictionaries.versionConflictTitle",
+            "Dictionary changed in another session"
+          ),
+          content: t(
+            "option:dictionaries.versionConflictDescription",
+            "This dictionary was updated elsewhere. Reload the latest version while keeping your current edits?"
+          ),
+          okText: t(
+            "option:dictionaries.reloadLatest",
+            "Reload latest"
+          ),
           cancelText: t("common:cancel", { defaultValue: "Cancel" }),
         })
         if (!shouldReload) return
@@ -204,16 +286,25 @@ export function useDictionaryFormManagement({
             version: latest?.version,
           })
           notification.info({
-            message: "Latest version loaded",
-            description: "Your edits were preserved. Save again to retry.",
+            message: t(
+              "option:dictionaries.latestVersionLoadedTitle",
+              "Latest version loaded"
+            ),
+            description: t(
+              "option:dictionaries.latestVersionLoadedDescription",
+              "Your edits were preserved. Save again to retry."
+            ),
           })
           await queryClient.invalidateQueries({ queryKey: ["tldw:listDictionaries"] })
         } catch (reloadError: any) {
           notification.error({
-            message: "Reload failed",
+            message: t("option:dictionaries.reloadFailedTitle", "Reload failed"),
             description:
               reloadError?.message ||
-              "Could not load the latest dictionary version. Please retry.",
+              t(
+                "option:dictionaries.reloadFailedDescription",
+                "Could not load the latest dictionary version. Please retry."
+              ),
           })
         }
       }

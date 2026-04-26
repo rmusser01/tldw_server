@@ -7,10 +7,11 @@ canonical error response format for Phase 3.1 migration.
 Response format (target for all error responses)::
 
     {
+        "detail": "Human-readable description",
         "error": {
             "code": "internal_server_error",
             "message": "Human-readable description",
-            "request_id": "<X-Request-ID header or generated UUID>"
+            "request_id": "<canonical request id or generated UUID>"
         }
     }
 """
@@ -27,7 +28,22 @@ from starlette.requests import ClientDisconnect
 
 def _get_request_id(request: Request) -> str:
     """Extract or generate a request ID for error tracing."""
-    return request.headers.get("X-Request-ID") or str(uuid.uuid4())
+    state = getattr(request, "state", None)
+    request_id = getattr(state, "request_id", None)
+    if request_id:
+        return request_id
+
+    header_request_id = request.headers.get("X-Request-ID")
+    if header_request_id:
+        return header_request_id
+
+    generated_request_id = str(uuid.uuid4())
+    if state is not None:
+        try:
+            state.request_id = generated_request_id
+        except (AttributeError, TypeError):
+            logger.debug("Unable to persist generated request_id onto request.state")
+    return generated_request_id
 
 
 async def global_unhandled_exception_handler(
@@ -43,15 +59,17 @@ async def global_unhandled_exception_handler(
 
     request_id = _get_request_id(request)
     logger.opt(exception=exc).error(
-        "Unhandled exception on {method} {url} (request_id={rid}): {exc}",
+        "Unhandled exception on {method} {path} (request_id={rid}): {exc}",
         method=request.method,
-        url=request.url,
+        path=request.url.path,
         rid=request_id,
         exc=exc,
     )
     return JSONResponse(
         status_code=500,
+        headers={"X-Request-ID": request_id},
         content={
+            "detail": "Internal server error",
             "error": {
                 "code": "internal_server_error",
                 "message": "Internal server error",
@@ -68,14 +86,16 @@ async def client_disconnect_handler(
     """Handler for client disconnect exceptions."""
     request_id = _get_request_id(request)
     logger.debug(
-        "Client disconnected during {method} {url} (request_id={rid})",
+        "Client disconnected during {method} {path} (request_id={rid})",
         method=request.method,
-        url=request.url,
+        path=request.url.path,
         rid=request_id,
     )
     return JSONResponse(
         status_code=499,
+        headers={"X-Request-ID": request_id},
         content={
+            "detail": "Client disconnected",
             "error": {
                 "code": "client_disconnected",
                 "message": "Client disconnected",

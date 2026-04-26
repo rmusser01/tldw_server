@@ -5,16 +5,23 @@
 import React from "react"
 import { Tooltip } from "antd"
 import { HelpCircle } from "lucide-react"
+import { useTranslation } from "react-i18next"
 import { useKnowledgeQA } from "../KnowledgeQAProvider"
 import { useServerCapabilities } from "@/hooks/useServerCapabilities"
 import { cn } from "@/libs/utils"
+import { getRagSourceOptions } from "@/services/rag/sourceMetadata"
 
 export function BasicSettings() {
+  const { t } = useTranslation(["sidepanel"])
   const { settings, updateSetting, preset } = useKnowledgeQA()
   const { capabilities, loading: capsLoading } = useServerCapabilities()
   const webFallbackHelpId = React.useId()
   const webFallbackHelpText =
     "Requires a configured web search provider on the server (e.g., DuckDuckGo/Brave/Bing/Google/Tavily)."
+  const sourceOptions = React.useMemo(
+    () => getRagSourceOptions((key, fallback) => t(key, fallback)),
+    [t]
+  )
 
   return (
     <div className="space-y-6">
@@ -63,13 +70,7 @@ export function BasicSettings() {
       <div className="space-y-2">
         <label className="text-sm font-medium">Search Sources</label>
         <div className="space-y-2">
-          {[
-            { value: "media_db", label: "Your Documents" },
-            { value: "notes", label: "Your Notes" },
-            { value: "characters", label: "Characters & Profiles" },
-            { value: "chats", label: "Conversations" },
-            { value: "kanban", label: "Boards" },
-          ].map((source) => (
+          {sourceOptions.map((source) => (
             <label key={source.value} className="flex items-center gap-2">
               <input
                 type="checkbox"

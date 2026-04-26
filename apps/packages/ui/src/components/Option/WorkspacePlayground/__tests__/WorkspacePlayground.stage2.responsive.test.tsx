@@ -2,6 +2,19 @@ import { render, screen, within } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { WorkspacePlayground } from "../index"
 
+const ONBOARDING_KEY = "tldw:workspace-playground:onboarding-dismissed:v1"
+const {
+  onboardingStorageState,
+  mockWorkspaceStorageGetItem,
+  mockWorkspaceStorageSetItem
+} = vi.hoisted(() => ({
+  onboardingStorageState: {
+    value: undefined as string | undefined
+  },
+  mockWorkspaceStorageGetItem: vi.fn(async (_key: string) => null as string | null),
+  mockWorkspaceStorageSetItem: vi.fn(async (_key: string, _value: string) => undefined)
+}))
+
 const mockMessageApi = {
   open: vi.fn(),
   warning: vi.fn(),
@@ -15,10 +28,14 @@ const testState = {
   leftPaneCollapsed: false,
   rightPaneCollapsed: false,
   workspaceId: "workspace-1",
+  workspaceTag: "",
   initializeWorkspace: vi.fn(),
+  createNewWorkspace: vi.fn(),
   addSources: vi.fn(),
   setSelectedSourceIds: vi.fn(),
   captureToCurrentNote: vi.fn(),
+  clearCurrentNote: vi.fn(),
+  loadNote: vi.fn(),
   selectedSourceIds: [] as string[],
   generatedArtifacts: [] as Array<{ id: string }>,
   setLeftPaneCollapsed: vi.fn(),
@@ -67,7 +84,22 @@ vi.mock("@/hooks/useMediaQuery", () => ({
 vi.mock("@/store/workspace", () => ({
   useWorkspaceStore: (
     selector: (state: typeof testState) => unknown
-  ) => selector(testState)
+  ) => selector(testState),
+  createWorkspaceStorage: () => ({
+    getItem: (key: string) => {
+      mockWorkspaceStorageGetItem.mockImplementationOnce(async (requestedKey: string) =>
+        requestedKey === ONBOARDING_KEY ? onboardingStorageState.value ?? null : null
+      )
+      return mockWorkspaceStorageGetItem(key)
+    },
+    setItem: (key: string, value: string) => {
+      if (key === ONBOARDING_KEY) {
+        onboardingStorageState.value = value
+      }
+      return mockWorkspaceStorageSetItem(key, value)
+    },
+    removeItem: vi.fn()
+  })
 }))
 
 vi.mock("@/services/tldw/TldwApiClient", () => ({
@@ -142,11 +174,16 @@ vi.mock("antd", () => ({
 describe("WorkspacePlayground Stage 2 drawer responsiveness", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    onboardingStorageState.value = "1"
     testState.isMobile = false
     testState.storeHydrated = true
     testState.leftPaneCollapsed = false
     testState.rightPaneCollapsed = false
+    testState.workspaceTag = ""
     testState.setSourceStatusByMediaId = vi.fn()
+    testState.createNewWorkspace = vi.fn()
+    testState.clearCurrentNote = vi.fn()
+    testState.loadNote = vi.fn()
   })
 
   it("uses non-masked tablet drawers so chat remains visible", () => {

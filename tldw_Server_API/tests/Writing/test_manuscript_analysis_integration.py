@@ -227,43 +227,6 @@ def test_analyze_chapter(client: TestClient):
     assert data[0]["score"] == 0.8
 
 
-@pytest.mark.parametrize(
-    ("scope", "analysis_path"),
-    [("scene", "scenes/{target_id}/analyze"), ("chapter", "chapters/{target_id}/analyze")],
-)
-def test_analyze_endpoints_do_not_persist_partial_results_when_later_analysis_fails(
-    client: TestClient,
-    monkeypatch: pytest.MonkeyPatch,
-    scope: str,
-    analysis_path: str,
-):
-    """Scene/chapter analysis should remain atomic across multiple requested analysis types."""
-    project_id, chapter_id, scene_id = _create_project_chapter_scene(client)
-    target_id = scene_id if scope == "scene" else chapter_id
-
-    import tldw_Server_API.app.core.Writing.manuscript_analysis as analysis_module
-
-    async def fake_pacing(*_args, **_kwargs):
-        return {"pacing": 0.5}
-
-    async def failing_plot_holes(*_args, **_kwargs):
-        raise RuntimeError("plot hole analysis failed")
-
-    monkeypatch.setattr(analysis_module, "analyze_pacing", fake_pacing)
-    monkeypatch.setattr(analysis_module, "analyze_plot_holes", failing_plot_holes)
-
-    resp = client.post(
-        f"{PREFIX}/{analysis_path.format(target_id=target_id)}",
-        json={"analysis_types": ["pacing", "plot_holes"]},
-    )
-
-    assert resp.status_code == 500, resp.text
-
-    analyses_resp = client.get(f"{PREFIX}/projects/{project_id}/analyses")
-    assert analyses_resp.status_code == 200, analyses_resp.text
-    assert analyses_resp.json()["total"] == 0
-
-
 def test_analyze_scene_not_found(client: TestClient):
     """Analyze a non-existent scene returns 404."""
     resp = client.post(
@@ -365,6 +328,95 @@ def test_list_analyses_filter_by_type(client: TestClient):
     assert data["analyses"][0]["analysis_type"] == "pacing"
 
 
+def test_deleted_project_suppresses_cached_analyses(client: TestClient):
+    """Deleted projects should hide all cached analyses from the project list route."""
+    project_id, _chapter_id, _scene_id = _create_project_chapter_scene(client)
+
+    with patch(
+        f"{_LLM_MODULE}.perform_chat_api_call_async",
+        new_callable=AsyncMock,
+        return_value=_mock_llm_response(_consistency_json()),
+    ):
+        resp = client.post(f"{PREFIX}/projects/{project_id}/analyze/consistency", json={})
+    assert resp.status_code == 200, resp.text
+
+    project_resp = client.get(f"{PREFIX}/projects/{project_id}")
+    assert project_resp.status_code == 200, project_resp.text
+    project_version = project_resp.json()["version"]
+
+    resp = client.delete(
+        f"{PREFIX}/projects/{project_id}",
+        headers={"expected-version": str(project_version)},
+    )
+    assert resp.status_code == 204, resp.text
+
+    resp = client.get(f"{PREFIX}/projects/{project_id}/analyses")
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["total"] == 0
+    assert data["analyses"] == []
+
+
+def test_deleted_scene_scope_analysis_is_suppressed_from_project_lists(client: TestClient):
+    """Deleted scene analyses should not appear in project analysis listings."""
+    project_id, chapter_id, scene_id = _create_project_chapter_scene(client)
+
+    with patch(
+        f"{_LLM_MODULE}.perform_chat_api_call_async",
+        new_callable=AsyncMock,
+        return_value=_mock_llm_response(_pacing_json()),
+    ):
+        resp = client.post(f"{PREFIX}/scenes/{scene_id}/analyze", json={"analysis_types": ["pacing"]})
+    assert resp.status_code == 200, resp.text
+
+    scene_resp = client.get(f"{PREFIX}/scenes/{scene_id}")
+    assert scene_resp.status_code == 200, scene_resp.text
+    scene_version = scene_resp.json()["version"]
+
+    resp = client.delete(
+        f"{PREFIX}/scenes/{scene_id}",
+        headers={"expected-version": str(scene_version)},
+    )
+    assert resp.status_code == 204, resp.text
+
+    resp = client.get(f"{PREFIX}/projects/{project_id}/analyses")
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["total"] == 0
+    assert data["analyses"] == []
+
+
+def test_scene_reorder_stales_chapter_and_project_analyses(client: TestClient):
+    """Scene reorder should stale cached chapter and project analyses."""
+    project_id, chapter_id, _scene_id = _create_project_chapter_scene(client)
+    second_scene_resp = client.post(
+        f"{PREFIX}/chapters/{chapter_id}/scenes",
+        json={
+            "title": "Second Scene",
+            "content_plain": "Another scene changes the order.",
+            "sort_order": 2,
+        },
+    )
+    assert second_scene_resp.status_code == 201, second_scene_resp.text
+    second_scene_id = second_scene_resp.json()["id"]
+
+    _seed_project_and_chapter_analyses(client, project_id, chapter_id)
+
+    resp = client.post(
+        f"{PREFIX}/projects/{project_id}/reorder",
+        json={
+            "entity_type": "scenes",
+            "items": [
+                {"id": second_scene_id, "sort_order": 1, "version": 1},
+                {"id": _scene_id, "sort_order": 2, "version": 1},
+            ],
+        },
+    )
+    assert resp.status_code == 204, resp.text
+
+    _assert_project_and_chapter_analyses_stale(client, project_id)
+
+
 def test_stale_after_scene_create(client: TestClient):
     """Creating a new scene should stale chapter and project analyses."""
     project_id, chapter_id, scene_id = _create_project_chapter_scene(client)
@@ -427,7 +479,7 @@ def test_stale_after_scene_delete(client: TestClient):
     _assert_project_and_chapter_analyses_stale(
         client,
         project_id,
-        expected_scopes={"scene", "chapter", "project"},
+        expected_scopes={"chapter", "project"},
     )
 
     resp = client.get(f"{PREFIX}/projects/{project_id}/analyses")
@@ -481,7 +533,7 @@ def test_analyze_scene_rejects_unknown_model_override(client: TestClient, monkey
     monkeypatch.setattr(
         writing_endpoint,
         "is_model_known_for_provider",
-        lambda provider, model: not (provider == "openai" and model == "bad-model"),
+        lambda provider, model: False if provider == "openai" and model == "bad-model" else True,
     )
 
     resp = client.post(

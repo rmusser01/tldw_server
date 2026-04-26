@@ -321,7 +321,7 @@ async def test_worker_sdk_cancellation_marks_study_suggestions_job_cancelled_wit
     assert stored["status"] == "cancelled"  # nosec B101
 
 
-async def test_selection_fingerprint_includes_snapshot_target_topics_action_and_generator_version():
+async def test_selection_fingerprint_includes_snapshot_target_topics_action_generator_and_normalization_version():
     actions_mod, _snapshot_service_mod, _jobs_mod, _worker_mod = _load_modules()
 
     fingerprint = actions_mod.build_selection_fingerprint(
@@ -331,6 +331,7 @@ async def test_selection_fingerprint_includes_snapshot_target_topics_action_and_
         selected_topics=[" Renal Basics ", "acid base", "renal basics"],
         action_kind="follow_up_quiz",
         generator_version="v2",
+        normalization_version="norm-v2",
     )
 
     assert "snapshot_id=17" in fingerprint  # nosec B101
@@ -339,6 +340,7 @@ async def test_selection_fingerprint_includes_snapshot_target_topics_action_and_
     assert "topics=acid base,renal basics" in fingerprint  # nosec B101
     assert "action_kind=follow_up_quiz" in fingerprint  # nosec B101
     assert "generator_version=v2" in fingerprint  # nosec B101
+    assert "normalization_version=norm-v2" in fingerprint  # nosec B101
 
 
 async def test_resolve_selected_topic_labels_defaults_to_snapshot_selected_topics():

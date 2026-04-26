@@ -79,6 +79,14 @@ class AuditReadError(RuntimeError):
     """Raised when audit read/export queries fail and cannot be served safely."""
 
 
+class MandatoryAuditWriteError(RuntimeError):
+    """Raised when a caller requires durable audit persistence before success."""
+
+
+class AuditShutdownError(RuntimeError):
+    """Raised when the audit service cannot complete a durable shutdown."""
+
+
 #
 # Local Imports
 try:
@@ -2090,20 +2098,43 @@ class UnifiedAuditService:
             finally:
                 self._db_pool = None
 
-        # Final flush of any remaining buffered events
         try:
-            await self.flush()
-        except _AUDIT_NONCRITICAL_EXCEPTIONS as _e:
-            # During teardown it's acceptable to skip the final flush if the event loop
-            pass
-            # or DB is no longer available.
-            logger.debug(f"Audit final flush skipped due to shutdown condition: {_e}")
+            # Final flush of any remaining buffered events
+            await self.flush(raise_on_failure=True)
+        except asyncio.CancelledError:
+            raise
+        except _AUDIT_NONCRITICAL_EXCEPTIONS as exc:
+            async with self.buffer_lock:
+                remaining = list(self.event_buffer)
+            fb_path: Optional[Path] = None
+            spill_exc: Optional[BaseException] = None
+            if remaining:
+                try:
+                    fb_path = await self._spill_events_to_fallback(remaining)
+                except _AUDIT_NONCRITICAL_EXCEPTIONS as spill_error:
+                    spill_exc = spill_error
+                else:
+                    async with self.buffer_lock:
+                        spilled_ids = {event.event_id for event in remaining if event.event_id}
+                        if spilled_ids:
+                            self.event_buffer = [
+                                event for event in self.event_buffer
+                                if event.event_id not in spilled_ids
+                            ]
 
-        # Close connection pool
-        if self._db_pool:
-            await self._db_pool.close()
-            self._db_pool = None
-        self._owner_loop = None
+            detail = "UnifiedAuditService.stop failed to complete a durable shutdown"
+            if fb_path is not None:
+                detail = f"{detail}; buffered events spilled to {fb_path}"
+            if spill_exc is not None:
+                detail = f"{detail}; fallback spill failed: {spill_exc}"
+            raise AuditShutdownError(detail) from exc
+        finally:
+            # Close connection pool deterministically even when shutdown fails.
+            if self._db_pool:
+                with suppress(_AUDIT_NONCRITICAL_EXCEPTIONS):
+                    await self._db_pool.close()
+                self._db_pool = None
+            self._owner_loop = None
 
     @property
     def owner_loop(self) -> Optional[asyncio.AbstractEventLoop]:
@@ -2528,6 +2559,14 @@ class UnifiedAuditService:
         with fb_path.open("a", encoding="utf-8") as fb:
             for ev in events:
                 fb.write(json.dumps(ev.to_dict(), ensure_ascii=False) + "\n")
+            fb.flush()
+            os.fsync(fb.fileno())
+
+    async def _spill_events_to_fallback(self, events: list[AuditEvent]) -> Path:
+        fb_path = self.db_path.parent / "audit_fallback_queue.jsonl"
+        async with _fallback_queue_lock(fb_path):
+            await asyncio.to_thread(self._append_events_to_fallback, fb_path, events)
+        return fb_path
 
     async def _update_daily_stats(self, db: aiosqlite.Connection, events: list[AuditEvent]):
         """Update daily statistics"""

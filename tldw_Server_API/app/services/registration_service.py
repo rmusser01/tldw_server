@@ -496,6 +496,65 @@ class RegistrationService:
             # Re-raise the exception
             raise
 
+    async def rollback_user_registration(self, user_id: int) -> bool:
+        """Compensate a partially completed registration by tombstoning the user row."""
+        if not self.db_pool:
+            await self.initialize()
+
+        tombstone = f"registration-rollback-{user_id}-{uuid4().hex[:12]}"
+        tombstone_email = f"{tombstone}@invalid.local"
+
+        try:
+            async with self.db_pool.transaction() as conn:
+                if self._is_postgres_backend():
+                    existing = await conn.fetchrow("SELECT id FROM users WHERE id = $1", user_id)
+                    if not existing:
+                        return False
+                    await conn.execute(
+                        """
+                        UPDATE users
+                        SET username = $2,
+                            email = $3,
+                            is_active = FALSE,
+                            is_verified = FALSE,
+                            updated_at = CURRENT_TIMESTAMP
+                        WHERE id = $1
+                        """,
+                        user_id,
+                        tombstone,
+                        tombstone_email,
+                    )
+                else:
+                    cursor = await conn.execute("SELECT id FROM users WHERE id = ?", (user_id,))
+                    existing = await cursor.fetchone()
+                    if not existing:
+                        return False
+                    await conn.execute(
+                        """
+                        UPDATE users
+                        SET username = ?,
+                            email = ?,
+                            is_active = 0,
+                            is_verified = 0,
+                            updated_at = datetime('now')
+                        WHERE id = ?
+                        """,
+                        (tombstone, tombstone_email, user_id),
+                    )
+
+            await asyncio.to_thread(self._cleanup_user_directories, user_id)
+            logger.warning(
+                "Rolled back partially registered user {} after downstream provisioning failure",
+                user_id,
+            )
+            return True
+        except Exception as exc:
+            logger.opt(exception=exc).error(
+                "Failed to roll back partially registered user {}",
+                user_id,
+            )
+            return False
+
     async def accept_org_invite_code(
         self,
         *,

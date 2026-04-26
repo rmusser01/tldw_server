@@ -19,7 +19,7 @@ import relativeTime from "dayjs/plugin/relativeTime"
 import { useTranslation } from "react-i18next"
 import { useNavigate } from "react-router-dom"
 import { useAntdMessage } from "@/hooks/useAntdMessage"
-import type { Flashcard, FlashcardUpdate } from "@/services/flashcards"
+import type { DeckReviewPromptSide, Flashcard, FlashcardUpdate } from "@/services/flashcards"
 import { getSetting, setSetting } from "@/services/settings/registry"
 import { FLASHCARDS_REVIEW_ONBOARDING_DISMISSED_SETTING } from "@/services/settings/ui-settings"
 import { trackFlashcardsShortcutHintTelemetry } from "@/utils/flashcards-shortcut-hint-telemetry"
@@ -158,6 +158,7 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
   const [activeReviewSessionId, setActiveReviewSessionId] = React.useState<number | null>(null)
   const [selectedStudySessionId, setSelectedStudySessionId] = React.useState<number | null>(null)
   const [shortcutHintDensity, setShortcutHintDensity] = useFlashcardsShortcutHintDensity()
+  const [sessionReviewPromptSide, setSessionReviewPromptSide] = React.useState<DeckReviewPromptSide | null>(null)
 
   // Undo state - stores the last reviewed card for potential re-rating
   const [lastReviewedCard, setLastReviewedCard] = React.useState<Flashcard | null>(null)
@@ -316,6 +317,27 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
     if (!reviewDeckId) return undefined
     return availableDecks.find((d) => d.id === reviewDeckId)?.name ?? `Deck ${reviewDeckId}`
   }, [availableDecks, reviewDeckId])
+  const selectedDeck = React.useMemo(
+    () => (reviewDeckId ? availableDecks.find((deck) => deck.id === reviewDeckId) ?? null : null),
+    [availableDecks, reviewDeckId]
+  )
+  const isPromptSideLockedToFront = activeCard?.model_type === "cloze"
+  const effectivePromptSide: DeckReviewPromptSide =
+    isPromptSideLockedToFront
+      ? "front"
+      : sessionReviewPromptSide ?? selectedDeck?.review_prompt_side ?? "front"
+  const promptLabel =
+    effectivePromptSide === "back"
+      ? t("option:flashcards.back", { defaultValue: "Back" })
+      : t("option:flashcards.front", { defaultValue: "Front" })
+  const promptContent =
+    effectivePromptSide === "back" ? activeCard?.back ?? "" : activeCard?.front ?? ""
+  const answerLabel =
+    effectivePromptSide === "back"
+      ? t("option:flashcards.front", { defaultValue: "Front" })
+      : t("option:flashcards.back", { defaultValue: "Back" })
+  const answerContent =
+    effectivePromptSide === "back" ? activeCard?.front ?? "" : activeCard?.back ?? ""
 
   const activeSchedulerLabel = React.useMemo(() => {
     if (!activeCard?.scheduler_type) return null
@@ -672,9 +694,6 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
         }
         autoEndSessionAttemptedRef.current = null
       } catch (error: unknown) {
-        if (reason === "auto") {
-          autoEndSessionAttemptedRef.current = null
-        }
         reportUiError(
           error,
           "ending the review session",
@@ -692,9 +711,6 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
       const targetId = parseStudySuggestionTargetId(response.target_id)
 
       if (response.target_service === "flashcards" && targetId) {
-        if (activeReviewSessionId != null) {
-          await completeReviewSession("manual", { revealSnapshot: false })
-        }
         setSelectedStudySessionId(null)
         onReviewDeckChange(targetId)
         return
@@ -712,15 +728,7 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
         )
       }
     },
-    [
-      activeReviewSessionId,
-      completeReviewSession,
-      currentDeckName,
-      forceShowWorkspaceItems,
-      navigate,
-      onReviewDeckChange,
-      reviewDeckId
-    ]
+    [currentDeckName, forceShowWorkspaceItems, navigate, onReviewDeckChange, reviewDeckId]
   )
 
   React.useEffect(() => {
@@ -931,6 +939,7 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
     setLastReviewedCard(null)
     setUndoCountdown(0)
     setSelectedStudySessionId(null)
+    setSessionReviewPromptSide(null)
     autoEndSessionAttemptedRef.current = null
     autoRevealAnswerRef.current = false
     previousReviewScopeKeyRef.current = reviewScopeKey
@@ -1022,6 +1031,28 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
             }
           ]}
           data-testid="flashcards-review-mode-toggle"
+        />
+        <Segmented
+          value={effectivePromptSide}
+          onChange={(value) => {
+            setSessionReviewPromptSide(value as DeckReviewPromptSide)
+          }}
+          disabled={isPromptSideLockedToFront}
+          options={[
+            {
+              label: t("option:flashcards.reviewPromptSideFront", {
+                defaultValue: "Front first"
+              }),
+              value: "front"
+            },
+            {
+              label: t("option:flashcards.reviewPromptSideBack", {
+                defaultValue: "Back first"
+              }),
+              value: "back"
+            }
+          ]}
+          data-testid="flashcards-review-prompt-side-toggle"
         />
         {reviewMode === "cram" && (
           <>
@@ -1135,11 +1166,11 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
 
             <div>
               <Title level={5} className="!mb-2">
-                {t("option:flashcards.front", { defaultValue: "Front" })}
+                {promptLabel}
               </Title>
               <div className="rounded border border-border bg-surface p-3 text-sm text-text">
                 <MarkdownWithBoundary
-                  content={activeCard.front}
+                  content={promptContent}
                   size="sm"
                   className="prose-headings:!text-text prose-p:!text-text prose-li:!text-text prose-strong:!text-text"
                 />
@@ -1149,11 +1180,11 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
             {showAnswer && (
               <div>
                 <Title level={5} className="!mb-2">
-                  {t("option:flashcards.back", { defaultValue: "Back" })}
+                  {answerLabel}
                 </Title>
                 <div className="rounded border border-border bg-surface p-3 text-sm text-text">
                   <MarkdownWithBoundary
-                    content={activeCard.back}
+                    content={answerContent}
                     size="sm"
                     className="prose-headings:!text-text prose-p:!text-text prose-li:!text-text prose-strong:!text-text"
                   />

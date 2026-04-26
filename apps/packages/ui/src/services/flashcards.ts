@@ -13,6 +13,10 @@ const flashcardsClient = createResourceClient({
   basePath: "/api/v1/flashcards" as AllowedPath
 })
 
+const flashcardTemplatesClient = createResourceClient({
+  basePath: "/api/v1/flashcards/templates" as AllowedPath
+})
+
 const flashcardTagsClient = createResourceClient({
   basePath: "/api/v1/flashcards/tags" as AllowedPath
 })
@@ -32,6 +36,7 @@ export type DeckSchedulerSettings = {
 }
 
 export type DeckSchedulerType = "sm2_plus" | "fsrs"
+export type DeckReviewPromptSide = "front" | "back"
 
 export type FsrsSchedulerSettings = {
   target_retention: number
@@ -193,6 +198,7 @@ export type Deck = {
   name: string
   description?: string | null
   workspace_id?: string | null
+  review_prompt_side: DeckReviewPromptSide
   deleted: boolean
   client_id: string
   version: number
@@ -236,10 +242,71 @@ export type Flashcard = {
   next_intervals?: FlashcardIntervalPreviews | null
 }
 
+export type FlashcardTemplateFieldTarget =
+  | "front_template"
+  | "back_template"
+  | "notes_template"
+  | "extra_template"
+
+export type FlashcardTemplateModelType = "basic" | "basic_reverse" | "cloze"
+
+export type FlashcardTemplatePlaceholderDefinition = {
+  key: string
+  label: string
+  help_text?: string | null
+  default_value?: string | null
+  required?: boolean
+  targets: FlashcardTemplateFieldTarget[]
+}
+
+export type FlashcardTemplate = {
+  id: number
+  name: string
+  model_type: FlashcardTemplateModelType
+  front_template: string
+  back_template?: string | null
+  notes_template?: string | null
+  extra_template?: string | null
+  placeholder_definitions: FlashcardTemplatePlaceholderDefinition[]
+  created_at?: string | null
+  last_modified?: string | null
+  deleted: boolean
+  client_id: string
+  version: number
+}
+
+export type FlashcardTemplateCreate = {
+  name: string
+  model_type: FlashcardTemplateModelType
+  front_template: string
+  back_template?: string | null
+  notes_template?: string | null
+  extra_template?: string | null
+  placeholder_definitions?: FlashcardTemplatePlaceholderDefinition[]
+}
+
+export type FlashcardTemplateUpdate = {
+  name?: string | null
+  model_type?: FlashcardTemplateModelType | null
+  front_template?: string | null
+  back_template?: string | null
+  notes_template?: string | null
+  extra_template?: string | null
+  placeholder_definitions?: FlashcardTemplatePlaceholderDefinition[] | null
+  expected_version?: number | null
+}
+
+export type FlashcardTemplateListResponse = {
+  items: FlashcardTemplate[]
+  count: number
+  total?: number | null
+}
+
 export type DeckUpdate = {
   name?: string | null
   description?: string | null
   workspace_id?: string | null
+  review_prompt_side?: DeckReviewPromptSide
   scheduler_type?: DeckSchedulerType | null
   scheduler_settings?: DeckSchedulerSettingsEnvelopeUpdate | null
   expected_version?: number | null
@@ -249,6 +316,7 @@ export type DeckCreateInput = {
   name: string
   description?: string | null
   workspace_id?: string | null
+  review_prompt_side?: DeckReviewPromptSide
   scheduler_type?: DeckSchedulerType | null
   scheduler_settings?: DeckSchedulerSettingsEnvelope | null
 }
@@ -502,6 +570,55 @@ export async function updateDeck(
   options?: { signal?: AbortSignal }
 ): Promise<Deck> {
   return await decksClient.update<Deck>(String(deck_id), input, {
+    abortSignal: options?.signal
+  })
+}
+
+// Flashcard templates
+export async function listFlashcardTemplates(options?: {
+  signal?: AbortSignal
+}): Promise<FlashcardTemplateListResponse> {
+  return await flashcardTemplatesClient.list<FlashcardTemplateListResponse>({}, {
+    abortSignal: options?.signal
+  })
+}
+
+export async function getFlashcardTemplate(
+  template_id: number,
+  options?: { signal?: AbortSignal }
+): Promise<FlashcardTemplate> {
+  return await flashcardTemplatesClient.get<FlashcardTemplate>(template_id, undefined, {
+    abortSignal: options?.signal
+  })
+}
+
+export async function createFlashcardTemplate(
+  input: FlashcardTemplateCreate,
+  options?: { signal?: AbortSignal }
+): Promise<FlashcardTemplate> {
+  return await flashcardTemplatesClient.create<FlashcardTemplate>(input, {
+    abortSignal: options?.signal
+  })
+}
+
+export async function updateFlashcardTemplate(
+  template_id: number,
+  input: FlashcardTemplateUpdate,
+  options?: { signal?: AbortSignal }
+): Promise<FlashcardTemplate> {
+  return await flashcardTemplatesClient.update<FlashcardTemplate>(String(template_id), input, {
+    abortSignal: options?.signal
+  })
+}
+
+export async function deleteFlashcardTemplate(
+  template_id: number,
+  expected_version: number,
+  options?: { signal?: AbortSignal }
+): Promise<void> {
+  await flashcardTemplatesClient.remove<void>(String(template_id), {
+    expected_version
+  }, {
     abortSignal: options?.signal
   })
 }

@@ -18,10 +18,7 @@ import {
   DEFAULT_CHARACTER_PROFILE_PREFERENCE_KEY,
   normalizeDefaultCharacterPreferenceId
 } from "@/utils/default-character-preference"
-import {
-  normalizePersonaBuddySummary,
-  type PersonaBuddySummary
-} from "@/types/persona-buddy"
+import type { PersonaBuddySummary } from "@/types/persona-buddy"
 import {
   resolveWebUiQuickstartServerUrl,
   type BrowserSurface
@@ -50,6 +47,49 @@ import type {
   UpdateReadingSavedSearchRequest,
   UpdateReadingDigestScheduleRequest
 } from "@/types/collections"
+import {
+  normalizeIngestionSource,
+  normalizeIngestionSourceItem,
+  normalizeIngestionSourceItemsListResponse,
+  normalizeIngestionSourceListResponse,
+  normalizeIngestionSourceSyncSummary,
+  normalizeIngestionSourceSyncTrigger,
+  normalizeIngestionSourceType,
+  normalizeReadingDigestSchedule,
+  toFiniteNumber,
+  toOptionalString,
+  toRecord
+} from "./collections-normalizers"
+import {
+  buildPresentationVisualStyleSnapshot,
+  clonePresentationVisualStyleSnapshot
+} from "./presentation-style"
+import {
+  normalizePersonaExemplar,
+  normalizePersonaProfile
+} from "./persona-normalizers"
+
+export {
+  normalizeIngestionSource,
+  normalizeIngestionSourceItem,
+  normalizeIngestionSourceItemsListResponse,
+  normalizeIngestionSourceListResponse,
+  normalizeIngestionSourceSyncSummary,
+  normalizeIngestionSourceSyncTrigger,
+  normalizeIngestionSourceType,
+  normalizeReadingDigestSchedule,
+  toFiniteNumber,
+  toOptionalString,
+  toRecord
+} from "./collections-normalizers"
+export {
+  buildPresentationVisualStyleSnapshot,
+  clonePresentationVisualStyleSnapshot
+} from "./presentation-style"
+export {
+  normalizePersonaExemplar,
+  normalizePersonaProfile
+} from "./persona-normalizers"
 
 const DEFAULT_SERVER_URL = "http://127.0.0.1:8000"
 const CHARACTER_CACHE_TTL_MS = 5 * 60 * 1000
@@ -58,6 +98,25 @@ const RAG_QUERY_MAX_LENGTH = 20000
 const CHAT_COMPLETION_ERROR_MESSAGE = "Chat completion failed."
 const CHAT_COMPLETION_ERRORS_MESSAGE =
   "One or more internal errors were suppressed."
+
+const toRecordOrNull = (value: unknown): Record<string, unknown> | null =>
+  value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null
+
+const isSavedDegradedCharacterPersistError = (error: unknown): boolean => {
+  const candidate = error as
+    | {
+        detail?: unknown
+        details?: { detail?: unknown; code?: unknown; saved?: unknown }
+      }
+    | null
+  const detail =
+    toRecordOrNull(candidate?.detail)
+    ?? toRecordOrNull(candidate?.details?.detail)
+    ?? toRecordOrNull(candidate?.details)
+  return detail?.code === "persist_validation_degraded" && detail?.saved === true
+}
 
 const isSuspiciousChatCompletionString = (value: string): boolean =>
   /traceback|stack(?:\s*trace)?|exception|error|\/Users\/|[A-Za-z]:\\|\.py:\d+/i.test(
@@ -122,62 +181,6 @@ const sanitizeChatCompletionPayload = (value: unknown): unknown => {
   return value
 }
 
-export const normalizeReadingDigestSchedule = (schedule: any): ReadingDigestSchedule => ({
-  ...schedule,
-  id: String(schedule?.id ?? ""),
-  name: schedule?.name ?? null,
-  cron: String(schedule?.cron ?? ""),
-  timezone: schedule?.timezone ?? null,
-  enabled: Boolean(schedule?.enabled),
-  require_online: Boolean(schedule?.require_online),
-  format: schedule?.format === "html" ? "html" : "md",
-  template_id:
-    typeof schedule?.template_id === "number" && Number.isFinite(schedule.template_id)
-      ? schedule.template_id
-      : null,
-  template_name: schedule?.template_name ?? null,
-  retention_days:
-    typeof schedule?.retention_days === "number" && Number.isFinite(schedule.retention_days)
-      ? schedule.retention_days
-      : null,
-  filters:
-    schedule?.filters && typeof schedule.filters === "object" && !Array.isArray(schedule.filters)
-      ? schedule.filters
-      : null,
-  last_run_at: schedule?.last_run_at ?? null,
-  next_run_at: schedule?.next_run_at ?? null,
-  last_status: schedule?.last_status ?? null,
-  created_at: schedule?.created_at ?? null,
-  updated_at: schedule?.updated_at ?? null
-})
-
-export const toFiniteNumber = (value: unknown, fallback = 0): number => {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return value
-  }
-  if (typeof value === "string" && value.trim().length > 0) {
-    const parsed = Number(value)
-    if (Number.isFinite(parsed)) {
-      return parsed
-    }
-  }
-  return fallback
-}
-
-export const toOptionalString = (value: unknown): string | null => {
-  if (value === null || typeof value === "undefined") {
-    return null
-  }
-  return String(value)
-}
-
-export const toRecord = (value: unknown): Record<string, unknown> => {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return {}
-  }
-  return { ...(value as Record<string, unknown>) }
-}
-
 const toOptionalNumber = (value: unknown): number | null => {
   if (typeof value === "number" && Number.isFinite(value)) {
     return value
@@ -190,105 +193,6 @@ const toOptionalNumber = (value: unknown): number | null => {
   }
   return null
 }
-
-export const normalizeIngestionSourceSyncSummary = (
-  summary: unknown
-): IngestionSourceSyncSummary | null => {
-  if (!summary || typeof summary !== "object" || Array.isArray(summary)) {
-    return null
-  }
-  const record = summary as Record<string, unknown>
-  return {
-    changed_count: toFiniteNumber(record.changed_count),
-    degraded_count: toFiniteNumber(record.degraded_count),
-    conflict_count: toFiniteNumber(record.conflict_count),
-    sink_failure_count: toFiniteNumber(record.sink_failure_count),
-    ingestion_failure_count: toFiniteNumber(record.ingestion_failure_count),
-    created_count: toFiniteNumber(record.created_count),
-    updated_count: toFiniteNumber(record.updated_count),
-    deleted_count: toFiniteNumber(record.deleted_count),
-    unchanged_count: toFiniteNumber(record.unchanged_count)
-  }
-}
-
-export const normalizeIngestionSourceType = (value: unknown): IngestionSourceSummary["source_type"] => {
-  if (value === "archive_snapshot" || value === "git_repository") {
-    return value
-  }
-  return "local_directory"
-}
-
-export const normalizeIngestionSource = (source: any): IngestionSourceSummary => ({
-  id: String(source?.id ?? ""),
-  user_id: toFiniteNumber(source?.user_id),
-  source_type: normalizeIngestionSourceType(source?.source_type),
-  sink_type: source?.sink_type === "notes" ? "notes" : "media",
-  policy: source?.policy === "import_only" ? "import_only" : "canonical",
-  enabled: Boolean(source?.enabled),
-  schedule_enabled: Boolean(source?.schedule_enabled),
-  schedule_config: toRecord(source?.schedule_config),
-  config: toRecord(source?.config),
-  active_job_id: toOptionalString(source?.active_job_id),
-  last_successful_snapshot_id: toOptionalString(source?.last_successful_snapshot_id),
-  last_sync_started_at: toOptionalString(source?.last_sync_started_at),
-  last_sync_completed_at: toOptionalString(source?.last_sync_completed_at),
-  last_sync_status: toOptionalString(source?.last_sync_status),
-  last_error: toOptionalString(source?.last_error),
-  last_successful_sync_summary: normalizeIngestionSourceSyncSummary(
-    source?.last_successful_sync_summary
-  ),
-  created_at: toOptionalString(source?.created_at),
-  updated_at: toOptionalString(source?.updated_at)
-})
-
-export const normalizeIngestionSourceListResponse = (payload: any): IngestionSourceListResponse => {
-  const rawSources = Array.isArray(payload)
-    ? payload
-    : Array.isArray(payload?.sources)
-      ? payload.sources
-      : []
-  const sources = rawSources.map((source: any) => normalizeIngestionSource(source))
-  return {
-    sources,
-    total: toFiniteNumber(payload?.total, sources.length)
-  }
-}
-
-export const normalizeIngestionSourceItem = (item: any): IngestionSourceItem => ({
-  id: String(item?.id ?? ""),
-  source_id: String(item?.source_id ?? ""),
-  normalized_relative_path: String(item?.normalized_relative_path ?? ""),
-  content_hash: item?.content_hash == null ? null : String(item.content_hash),
-  sync_status: String(item?.sync_status ?? "unknown"),
-  binding: toRecord(item?.binding),
-  present_in_source: Boolean(item?.present_in_source),
-  created_at: toOptionalString(item?.created_at),
-  updated_at: toOptionalString(item?.updated_at)
-})
-
-export const normalizeIngestionSourceItemsListResponse = (
-  payload: any
-): IngestionSourceItemsListResponse => {
-  const rawItems = Array.isArray(payload)
-    ? payload
-    : Array.isArray(payload?.items)
-      ? payload.items
-      : []
-  const items = rawItems.map((item: any) => normalizeIngestionSourceItem(item))
-  return {
-    items,
-    total: toFiniteNumber(payload?.total, items.length)
-  }
-}
-
-export const normalizeIngestionSourceSyncTrigger = (
-  payload: any
-): IngestionSourceSyncTriggerResponse => ({
-  status: String(payload?.status ?? ""),
-  source_id: String(payload?.source_id ?? ""),
-  job_id: toOptionalString(payload?.job_id),
-  snapshot_status: toOptionalString(payload?.snapshot_status)
-})
 
 export interface TldwConfig {
   serverUrl: string
@@ -437,83 +341,6 @@ export type VisualStylePatchInput = {
   appearance_defaults?: Record<string, any> | null
   fallback_policy?: Record<string, any> | null
 }
-
-const cloneVisualStyleValue = (value: unknown): unknown => {
-  if (Array.isArray(value)) {
-    return value.map((item) => cloneVisualStyleValue(item))
-  }
-  if (value && typeof value === "object") {
-    return Object.fromEntries(
-      Object.entries(value as Record<string, unknown>).map(([key, entryValue]) => [
-        key,
-        cloneVisualStyleValue(entryValue)
-      ])
-    )
-  }
-  return value
-}
-
-const cloneVisualStyleObject = (value: Record<string, any> | null | undefined): Record<string, any> =>
-  value && typeof value === "object" && !Array.isArray(value)
-    ? (cloneVisualStyleValue(value) as Record<string, any>)
-    : {}
-
-export const clonePresentationVisualStyleSnapshot = (
-  snapshot: PresentationVisualStyleSnapshot | null | undefined
-): PresentationVisualStyleSnapshot | null => {
-  if (!snapshot) {
-    return null
-  }
-  return {
-    id: snapshot.id,
-    scope: snapshot.scope,
-    name: snapshot.name,
-    description: snapshot.description ?? null,
-    category: snapshot.category ?? null,
-    guide_number: snapshot.guide_number ?? null,
-    tags: [...(snapshot.tags || [])],
-    best_for: [...(snapshot.best_for || [])],
-    generation_rules: cloneVisualStyleObject(snapshot.generation_rules),
-    artifact_preferences: [...(snapshot.artifact_preferences || [])],
-    appearance_defaults: cloneVisualStyleObject(snapshot.appearance_defaults),
-    fallback_policy: cloneVisualStyleObject(snapshot.fallback_policy),
-    version: snapshot.version ?? null
-  }
-}
-
-export const buildPresentationVisualStyleSnapshot = (
-  style: Pick<
-    VisualStyleRecord,
-    | "id"
-    | "scope"
-    | "name"
-    | "description"
-    | "category"
-    | "guide_number"
-    | "tags"
-    | "best_for"
-    | "generation_rules"
-    | "artifact_preferences"
-    | "appearance_defaults"
-    | "fallback_policy"
-    | "version"
-  >
-): PresentationVisualStyleSnapshot =>
-  clonePresentationVisualStyleSnapshot({
-    id: style.id,
-    scope: style.scope,
-    name: style.name,
-    description: style.description ?? null,
-    category: style.category ?? null,
-    guide_number: style.guide_number ?? null,
-    tags: [...(style.tags || [])],
-    best_for: [...(style.best_for || [])],
-    generation_rules: cloneVisualStyleObject(style.generation_rules),
-    artifact_preferences: [...(style.artifact_preferences || [])],
-    appearance_defaults: cloneVisualStyleObject(style.appearance_defaults),
-    fallback_policy: cloneVisualStyleObject(style.fallback_policy),
-    version: style.version ?? null
-  })!
 
 export type PresentationStudioRecord = {
   id: string
@@ -1036,70 +863,6 @@ export type ChatSettingsResponse = {
   last_modified: string
 }
 
-export const normalizePersonaProfile = <T extends Record<string, unknown>>(
-  input: T | null | undefined
-): PersonaProfile => {
-  const candidate = input && typeof input === "object" ? input : ({} as T)
-  const rawBuddySummary = Object.prototype.hasOwnProperty.call(
-    candidate,
-    "buddy_summary"
-  )
-    ? candidate.buddy_summary
-    : candidate?.buddySummary
-  return {
-    ...candidate,
-    id: String(candidate?.id ?? candidate?.persona_id ?? ""),
-    buddy_summary: normalizePersonaBuddySummary(rawBuddySummary)
-  }
-}
-
-export const normalizeStringArray = (value: unknown): string[] => {
-  if (!Array.isArray(value)) return []
-  return value
-    .map((item) => String(item ?? "").trim())
-    .filter((item) => item.length > 0)
-}
-
-export const normalizePersonaExemplar = (
-  input: Record<string, unknown> | null | undefined
-): PersonaExemplar => {
-  const candidate = input && typeof input === "object" ? input : {}
-  const priorityValue = Number(candidate?.priority)
-  return {
-    id: String(candidate?.id ?? ""),
-    persona_id: String(candidate?.persona_id ?? candidate?.personaId ?? ""),
-    kind: String(candidate?.kind ?? "style"),
-    content: String(candidate?.content ?? ""),
-    tone:
-      candidate?.tone == null || String(candidate.tone).trim() === ""
-        ? null
-        : String(candidate.tone),
-    scenario_tags: normalizeStringArray(
-      candidate?.scenario_tags ?? candidate?.scenarioTags
-    ),
-    capability_tags: normalizeStringArray(
-      candidate?.capability_tags ?? candidate?.capabilityTags
-    ),
-    priority: Number.isFinite(priorityValue) ? priorityValue : 0,
-    enabled: candidate?.enabled !== false,
-    source_type:
-      candidate?.source_type == null || String(candidate.source_type).trim() === ""
-        ? null
-        : String(candidate.source_type),
-    source_ref:
-      candidate?.source_ref == null || String(candidate.source_ref).trim() === ""
-        ? null
-        : String(candidate.source_ref),
-    notes:
-      candidate?.notes == null || String(candidate.notes).trim() === ""
-        ? null
-        : String(candidate.notes),
-    created_at:
-      candidate?.created_at == null ? null : String(candidate.created_at),
-    last_modified:
-      candidate?.last_modified == null ? null : String(candidate.last_modified)
-  }
-}
 export type WorldBookProcessDiagnostic = {
   entry_id: number | null
   world_book_id: number | null
@@ -1406,7 +1169,7 @@ export interface MediaIngestionBudgetDiagnostics {
   error?: string | null
 }
 
-export class TldwApiClient {
+export class TldwApiClientBase {
   private storage: Storage
   private config: TldwConfig | null = null
   private baseUrl: string = ''
@@ -2360,58 +2123,6 @@ export class TldwApiClient {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: payload || {}
-    })
-  }
-
-  async listAdminUsers(params?: {
-    page?: number
-    limit?: number
-    role?: string
-    is_active?: boolean
-    search?: string
-  }): Promise<AdminUserListResponse> {
-    const query = this.buildQuery(params as Record<string, any>)
-    return await bgRequest<AdminUserListResponse>({
-      path: `/api/v1/admin/users${query}`,
-      method: "GET"
-    })
-  }
-
-  async updateAdminUser(
-    userId: number,
-    payload: AdminUserUpdateRequest
-  ): Promise<{ message: string }> {
-    return await bgRequest<{ message: string }>({
-      path: `/api/v1/admin/users/${userId}`,
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: payload
-    })
-  }
-
-  async listAdminRoles(): Promise<AdminRole[]> {
-    return await bgRequest<AdminRole[]>({
-      path: "/api/v1/admin/roles",
-      method: "GET"
-    })
-  }
-
-  async createAdminRole(
-    name: string,
-    description?: string
-  ): Promise<AdminRole> {
-    return await bgRequest<AdminRole>({
-      path: "/api/v1/admin/roles",
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: { name, description }
-    })
-  }
-
-  async deleteAdminRole(roleId: number): Promise<{ message: string }> {
-    return await bgRequest<{ message: string }>({
-      path: `/api/v1/admin/roles/${roleId}`,
-      method: "DELETE"
     })
   }
 
@@ -5025,14 +4736,21 @@ export class TldwApiClient {
     payload: Record<string, any>
   ): Promise<any> {
     const cid = String(chat_id)
-    const res = await bgRequest<any>({
-      path: `/api/v1/chats/${cid}/completions/persist`,
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: payload
-    })
-    this.invalidateChatMessagesCache(cid)
-    return res
+    try {
+      const res = await bgRequest<any>({
+        path: `/api/v1/chats/${cid}/completions/persist`,
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: payload
+      })
+      this.invalidateChatMessagesCache(cid)
+      return res
+    } catch (error) {
+      if (isSavedDegradedCharacterPersistError(error)) {
+        this.invalidateChatMessagesCache(cid)
+      }
+      throw error
+    }
   }
 
   async *streamCharacterChatCompletion(
@@ -7312,277 +7030,6 @@ export class TldwApiClient {
   // Slides / Presentations API
   // ─────────────────────────────────────────────────────────────────────────────
 
-  async generateSlidesFromMedia(
-    mediaId: number,
-    options?: {
-      titleHint?: string
-      theme?: string
-      provider?: string
-      model?: string
-      temperature?: number
-      signal?: AbortSignal
-    }
-  ): Promise<{
-    id: string
-    title: string
-    description?: string
-    theme: string
-    slides: Array<{
-      order: number
-      layout: string
-      title?: string
-      content: string
-      speaker_notes?: string
-    }>
-    version: number
-    created_at: string
-  }> {
-    const body: Record<string, unknown> = { media_id: mediaId }
-    if (options?.titleHint) body.title_hint = options.titleHint
-    if (options?.theme) body.theme = options.theme
-    if (options?.provider) body.provider = options.provider
-    if (options?.model) body.model = options.model
-    if (options?.temperature != null) body.temperature = options.temperature
-    return await this.request<any>({
-      path: "/api/v1/slides/generate/from-media",
-      method: "POST",
-      body,
-      abortSignal: options?.signal
-    })
-  }
-
-  async getPresentation(presentationId: string): Promise<{
-    id: string
-    title: string
-    description?: string
-    theme: string
-    slides: Array<{
-      order: number
-      layout: string
-      title?: string
-      content: string
-      speaker_notes?: string
-    }>
-    version: number
-    created_at: string
-    last_modified: string
-  }> {
-    return await this.request<any>({
-      path: `/api/v1/slides/presentations/${encodeURIComponent(presentationId)}`,
-      method: "GET"
-    })
-  }
-
-  async exportPresentation(
-    presentationId: string,
-    format: "revealjs" | "markdown" | "json" | "pdf"
-  ): Promise<Blob> {
-    await this.ensureConfigForRequest(true)
-
-    const response = await this.request<any>({
-      path: `/api/v1/slides/presentations/${encodeURIComponent(presentationId)}/export?format=${encodeURIComponent(format)}`,
-      method: "GET",
-      responseType: "arrayBuffer",
-      returnResponse: true
-    })
-
-    if (!response) {
-      throw new Error("Export failed")
-    }
-
-    // Handle response data
-    let data: ArrayBuffer
-    if (response.data instanceof ArrayBuffer) {
-      data = response.data
-    } else if (response.data instanceof Uint8Array) {
-      data = response.data.buffer.slice(
-        response.data.byteOffset,
-        response.data.byteOffset + response.data.byteLength
-      )
-    } else if (typeof response.data === "string") {
-      const encoder = new TextEncoder()
-      data = encoder.encode(response.data).buffer
-    } else if (response.data && typeof response.data === "object") {
-      // Handle JSON response
-      const encoder = new TextEncoder()
-      data = encoder.encode(JSON.stringify(response.data)).buffer
-    } else {
-      throw new Error("Invalid export response")
-    }
-
-    // Determine MIME type based on format
-    let mimeType: string
-    switch (format) {
-      case "revealjs":
-        mimeType = "application/zip"
-        break
-      case "markdown":
-        mimeType = "text/markdown"
-        break
-      case "json":
-        mimeType = "application/json"
-        break
-      case "pdf":
-        mimeType = "application/pdf"
-        break
-      default:
-        mimeType = "application/octet-stream"
-    }
-
-    return new Blob([data], { type: mimeType })
-  }
-
-  // Skills API
-  async listSkills(params?: {
-    limit?: number
-    offset?: number
-  }): Promise<any> {
-    const query = this.buildQuery(params)
-    const base = await this.resolveApiPath("skills.list", [
-      "/api/v1/skills",
-      "/api/v1/skills/"
-    ])
-    return await bgRequest<any>({
-      path: appendPathQuery(base, query),
-      method: "GET"
-    })
-  }
-
-  async getSkill(name: string): Promise<any> {
-    const base = await this.resolveApiPath("skills.get", [
-      "/api/v1/skills/{name}",
-      "/api/v1/skills/{name}/"
-    ])
-    const path = this.fillPathParams(base, name)
-    return await bgRequest<any>({ path, method: "GET" })
-  }
-
-  async createSkill(payload: {
-    name: string
-    content: string
-    supporting_files?: Record<string, string> | null
-  }): Promise<any> {
-    const base = await this.resolveApiPath("skills.create", [
-      "/api/v1/skills",
-      "/api/v1/skills/"
-    ])
-    return await bgRequest<any>({
-      path: base,
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: payload
-    })
-  }
-
-  async updateSkill(
-    name: string,
-    payload: {
-      content?: string
-      supporting_files?: Record<string, string | null> | null
-    },
-    version?: number
-  ): Promise<any> {
-    const base = await this.resolveApiPath("skills.update", [
-      "/api/v1/skills/{name}",
-      "/api/v1/skills/{name}/"
-    ])
-    const path = this.fillPathParams(base, name)
-    const headers: Record<string, string> = { "Content-Type": "application/json" }
-    if (version != null) {
-      headers["If-Match"] = String(version)
-    }
-    return await bgRequest<any>({ path, method: "PUT", headers, body: payload })
-  }
-
-  async deleteSkill(name: string): Promise<void> {
-    const base = await this.resolveApiPath("skills.delete", [
-      "/api/v1/skills/{name}",
-      "/api/v1/skills/{name}/"
-    ])
-    const path = this.fillPathParams(base, name)
-    await bgRequest<any>({ path, method: "DELETE" })
-  }
-
-  async importSkill(payload: {
-    name?: string
-    content: string
-    supporting_files?: Record<string, string> | null
-    overwrite?: boolean
-  }): Promise<any> {
-    const base = await this.resolveApiPath("skills.import", [
-      "/api/v1/skills/import",
-      "/api/v1/skills/import/"
-    ])
-    return await bgRequest<any>({
-      path: base,
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: payload
-    })
-  }
-
-  async importSkillFile(file: File): Promise<any> {
-    const data = await file.arrayBuffer()
-    return await this.upload<any>({
-      path: "/api/v1/skills/import/file" as AllowedPath,
-      method: "POST",
-      fileFieldName: "file",
-      file: {
-        name: file.name || "skill-import",
-        type: file.type || "application/octet-stream",
-        data
-      }
-    })
-  }
-
-  async seedSkills(params?: {
-    overwrite?: boolean
-  }): Promise<any> {
-    const query = this.buildQuery(params)
-    const base = await this.resolveApiPath("skills.seed", [
-      "/api/v1/skills/seed",
-      "/api/v1/skills/seed/"
-    ])
-    return await bgRequest<any>({
-      path: appendPathQuery(base, query),
-      method: "POST"
-    })
-  }
-
-  async exportSkill(name: string): Promise<Blob> {
-    await this.ensureConfigForRequest(true)
-    const res = await bgRequest<ArrayBuffer, AllowedPath>({
-      path: `/api/v1/skills/${encodeURIComponent(name)}/export` as AllowedPath,
-      method: "GET",
-      responseType: "arrayBuffer"
-    })
-    return new Blob([res], { type: "application/zip" })
-  }
-
-  async executeSkill(
-    name: string,
-    args?: string
-  ): Promise<any> {
-    const base = await this.resolveApiPath("skills.execute", [
-      "/api/v1/skills/{name}/execute",
-      "/api/v1/skills/{name}/execute/"
-    ])
-    const path = this.fillPathParams(base, name)
-    return await bgRequest<any>({
-      path,
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: { args: args || "" }
-    })
-  }
-
-  async getSkillsContext(): Promise<any> {
-    const base = await this.resolveApiPath("skills.context", [
-      "/api/v1/skills/context",
-      "/api/v1/skills/context/"
-    ])
-    return await bgRequest<any>({ path: base, method: "GET" })
-  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -7598,6 +7045,8 @@ import { modelsAudioMethods } from "./domains/models-audio"
 import { presentationsMethods } from "./domains/presentations"
 import { workspaceApiMethods } from "./domains/workspace-api"
 import { webClipperMethods } from "./domains/web-clipper"
+
+export class TldwApiClient extends TldwApiClientBase {}
 
 // Declaration merging: extend the class type with all domain methods
 export interface TldwApiClient

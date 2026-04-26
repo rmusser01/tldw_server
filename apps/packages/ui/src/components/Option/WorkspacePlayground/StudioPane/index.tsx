@@ -62,6 +62,16 @@ import {
   encodeSlidesVisualStyleValue,
 } from "./hooks/useArtifactGeneration"
 import {
+  STUDIO_DEFAULT_RAG_TOP_K,
+  STUDIO_DEFAULT_RAG_MIN_SCORE,
+  STUDIO_DEFAULT_ENABLE_RERANKING,
+  STUDIO_DEFAULT_MAX_TOKENS,
+  STUDIO_DEFAULT_SUMMARY_INSTRUCTION,
+  OUTPUT_VIRTUALIZATION_THRESHOLD,
+  OUTPUT_VIRTUAL_ROW_HEIGHT,
+  OUTPUT_VIRTUAL_OVERSCAN
+} from "./hooks/useStudioDerivedState"
+import {
   TTS_PROVIDERS,
   AUDIO_FORMATS,
 } from "./hooks/useAudioTtsSettings"
@@ -217,17 +227,6 @@ const STATUS_ICONS: Record<
   failed: { icon: XCircle, className: "text-error" }
 }
 
-import {
-  STUDIO_DEFAULT_RAG_TOP_K,
-  STUDIO_DEFAULT_RAG_MIN_SCORE,
-  STUDIO_DEFAULT_ENABLE_RERANKING,
-  STUDIO_DEFAULT_MAX_TOKENS,
-  STUDIO_DEFAULT_SUMMARY_INSTRUCTION,
-  OUTPUT_VIRTUALIZATION_THRESHOLD,
-  OUTPUT_VIRTUAL_ROW_HEIGHT,
-  OUTPUT_VIRTUAL_OVERSCAN
-} from "./hooks/useStudioDerivedState"
-
 const MindMapArtifactViewer = React.lazy(() =>
   import("./ArtifactModalContent").then((module) => ({
     default: module.MindMapArtifactViewer
@@ -258,11 +257,14 @@ const QuickNotesSection = React.lazy(() =>
   }))
 )
 
-const renderArtifactModalContent = (node: React.ReactNode) => (
+const renderArtifactModalContent = (
+  node: React.ReactNode,
+  loadingLabel: string
+) => (
   <Suspense
     fallback={
       <div className="flex min-h-[200px] items-center justify-center text-sm text-text-muted">
-        Loading output viewer...
+        {loadingLabel}
       </div>
     }
   >
@@ -822,7 +824,8 @@ export const StudioPane: React.FC<StudioPaneProps> = ({ onHide }) => {
       Modal.info({
         title: artifact.title,
         content: renderArtifactModalContent(
-          <MindMapArtifactViewer title={artifact.title} content={artifact.content} />
+          <MindMapArtifactViewer title={artifact.title} content={artifact.content} />,
+          t("playground:studio.loadingOutputViewer", "Loading output viewer...")
         ),
         ...responsiveModalProps(960),
         footer: null,
@@ -835,7 +838,8 @@ export const StudioPane: React.FC<StudioPaneProps> = ({ onHide }) => {
       Modal.info({
         title: artifact.title,
         content: renderArtifactModalContent(
-          <DataTableArtifactViewer title={artifact.title} content={artifact.content} />
+          <DataTableArtifactViewer title={artifact.title} content={artifact.content} />,
+          t("playground:studio.loadingOutputViewer", "Loading output viewer...")
         ),
         ...responsiveModalProps(980),
         footer: null,
@@ -868,7 +872,8 @@ export const StudioPane: React.FC<StudioPaneProps> = ({ onHide }) => {
               )
               modal.destroy()
             }}
-          />
+          />,
+          t("playground:studio.loadingOutputViewer", "Loading output viewer...")
         ),
         ...responsiveModalProps(820),
         footer: null,
@@ -901,7 +906,8 @@ export const StudioPane: React.FC<StudioPaneProps> = ({ onHide }) => {
               )
               modal.destroy()
             }}
-          />
+          />,
+          t("playground:studio.loadingOutputViewer", "Loading output viewer...")
         ),
         ...responsiveModalProps(860),
         footer: null,

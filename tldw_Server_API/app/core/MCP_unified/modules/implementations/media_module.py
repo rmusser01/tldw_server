@@ -67,6 +67,10 @@ _MEDIA_MODULE_NONCRITICAL_EXCEPTIONS = (
 )
 
 
+class UnsupportedMediaQueueBackendError(RuntimeError):
+    """Raised when a configured media queue backend is recognized but not implemented."""
+
+
 class MediaModule(BaseModule):
     """
     Enhanced Media Module with production features.
@@ -1666,8 +1670,12 @@ class MediaModule(BaseModule):
                     or self.config.settings.get("queue_provider")
                 )
                 if queue_backend:
-                    await self._queue_media_job(job_id)
-                    queued = True
+                    try:
+                        await self._queue_media_job(job_id)
+                        queued = True
+                    except UnsupportedMediaQueueBackendError as exc:
+                        logger.warning("Falling back to inline ingestion for {}: {}", queue_backend, exc)
+                        await self._process_media_job(job_id)
                 else:
                     await self._process_media_job(job_id)
 
@@ -2246,7 +2254,7 @@ class MediaModule(BaseModule):
         )
         if not queue_backend:
             raise RuntimeError("Ingestion queue not configured; set ingestion_queue to enable background jobs")
-        raise RuntimeError(f"Ingestion queue backend '{queue_backend}' not implemented")
+        raise UnsupportedMediaQueueBackendError(f"Ingestion queue backend '{queue_backend}' not implemented")
 
     async def _get_media_stats(self, media_id: int) -> dict[str, Any]:
         """Get media statistics"""

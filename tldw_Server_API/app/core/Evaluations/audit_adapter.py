@@ -23,6 +23,7 @@ from tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps import (
 )
 from tldw_Server_API.app.core.Audit.unified_audit_service import (
     AuditContext,
+    MandatoryAuditWriteError,
     UnifiedAuditService,
 )
 from tldw_Server_API.app.core.Audit.unified_audit_service import (
@@ -154,19 +155,29 @@ async def _emit(
     result: str = "success",
     metadata: dict[str, Any] | None = None,
 ) -> None:
-    svc = await _get_svc(user_id)
-    ctx = AuditContext(user_id=user_id)
-    await svc.log_event(
-        event_type=event_type,
-        context=ctx,
-        action=action,
-        resource_type=resource_type,
-        resource_id=resource_id,
-        result=result,
-        metadata=metadata,
-    )
-    # Mandatory audit: flush immediately and surface failures.
-    await svc.flush(raise_on_failure=True)
+    try:
+        svc = await _get_svc(user_id)
+        ctx = AuditContext(user_id=user_id)
+        await svc.log_event(
+            event_type=event_type,
+            context=ctx,
+            action=action,
+            resource_type=resource_type,
+            resource_id=resource_id,
+            result=result,
+            metadata=metadata,
+        )
+        # Mandatory audit: flush immediately and surface failures.
+        await svc.flush(raise_on_failure=True)
+    except Exception as exc:
+        logger.error(
+            "Mandatory evaluations audit write failed for {}:{} ({})",
+            action,
+            resource_id,
+            type(exc).__name__,
+            exc_info=True,
+        )
+        raise MandatoryAuditWriteError("Mandatory audit persistence unavailable") from exc
 
 
 # Convenience wrappers

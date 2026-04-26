@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo } from "react"
-import { EditorContent, useEditor, type JSONContent } from "@tiptap/react"
+import { EditorContent, useEditor, type Editor, type JSONContent } from "@tiptap/react"
 import StarterKit from "@tiptap/starter-kit"
 import Placeholder from "@tiptap/extension-placeholder"
 import CharacterCount from "@tiptap/extension-character-count"
@@ -7,10 +7,15 @@ import { SceneBreakExtension } from "./extensions/SceneBreakExtension"
 import { CitationExtension } from "./extensions/CitationExtension"
 import { AIAnnotationExtension } from "./extensions/AIAnnotationExtension"
 import { tipTapJsonToPlainText } from "./writing-tiptap-utils"
+import {
+  createTipTapEditorAdapter,
+  type WritingEditorAdapter
+} from "./writing-editor-adapter"
 
 export type WritingTipTapEditorProps = {
   content: JSONContent | null
   onContentChange: (json: JSONContent, plainText: string) => void
+  onAdapterReady?: (adapter: WritingEditorAdapter | null) => void
   editable?: boolean
   placeholder?: string
   className?: string
@@ -19,6 +24,7 @@ export type WritingTipTapEditorProps = {
 export function WritingTipTapEditor({
   content,
   onContentChange,
+  onAdapterReady,
   editable = true,
   placeholder = "Start writing...",
   className,
@@ -38,7 +44,7 @@ export function WritingTipTapEditor({
   )
 
   const handleUpdate = useCallback(
-    ({ editor }: { editor: any }) => {
+    ({ editor }: { editor: Editor }) => {
       const json = editor.getJSON() as JSONContent
       const plain = tipTapJsonToPlainText(json)
       onContentChange(json, plain)
@@ -53,14 +59,25 @@ export function WritingTipTapEditor({
     onUpdate: handleUpdate,
   })
 
-  // Sync content from parent (e.g., when switching scenes)
+  const adapter = useMemo(
+    () => createTipTapEditorAdapter(editor),
+    [editor]
+  )
+
   useEffect(() => {
-    if (editor && content && !editor.isFocused) {
-      const currentJson = JSON.stringify(editor.getJSON())
-      const newJson = JSON.stringify(content)
-      if (currentJson !== newJson) {
-        editor.commands.setContent(content)
-      }
+    onAdapterReady?.(adapter)
+    return () => {
+      onAdapterReady?.(null)
+    }
+  }, [adapter, onAdapterReady])
+
+  useEffect(() => {
+    if (!editor) return
+    const nextContent = content || { type: "doc", content: [{ type: "paragraph" }] }
+    const currentJson = JSON.stringify(editor.getJSON())
+    const nextJson = JSON.stringify(nextContent)
+    if (currentJson !== nextJson) {
+      editor.commands.setContent(nextContent, false)
     }
   }, [editor, content])
 

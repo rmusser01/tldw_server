@@ -13,12 +13,12 @@
 // - When you remove or rename an endpoint, update ClientPath (and any entries
 //   in API_PATHS) to match the current server API.
 // - To verify that ClientPath and MEDIA_ADD_SCHEMA_FALLBACK stay in sync with
-//   openapi.json, run:
-//     npm run verify:openapi
-//     bun run verify:openapi
+//   the current OpenAPI contract, run `bun run verify:openapi` from
+//   `apps/packages/ui`.
 //   If verification fails, reconcile the differences by updating ClientPath
-//   (or, if the spec is stale, regenerate / update openapi.json) until the
-//   check passes.
+//   or by refreshing `apps/extension/openapi.json`. If that snapshot is absent,
+//   the verifier derives the spec from the checked-out backend using the
+//   project Python environment.
 
 // Union of relative API paths that the web UI calls via bgRequest/bgStream
 // or direct fetch. If a new endpoint is added in the UI, it should be
@@ -218,6 +218,8 @@ export type ClientPath =
   | "/api/v1/quizzes/import/json"
   | "/api/v1/flashcards"
   | "/api/v1/flashcards/decks"
+  | "/api/v1/flashcards/templates"
+  | "/api/v1/flashcards/templates/{template_id}"
   | "/api/v1/flashcards/generate"
   | "/api/v1/flashcards/review"
   | "/api/v1/flashcards/import"
@@ -241,6 +243,12 @@ export type ClientPath =
   | "/api/v1/auth/register"
   | "/api/v1/auth/magic-link/request"
   | "/api/v1/auth/magic-link/verify"
+  | "/api/v1/persona/profiles"
+  | "/api/v1/persona/archetypes"
+  | "/api/v1/persona/archetypes/{archetype_key}"
+  | "/api/v1/persona/archetypes/{archetype_key}/preview"
+  | "/api/v1/mcp/catalog"
+  | "/api/v1/mcp/catalog/test-connection"
   | "/api/v1/users/keys"
   | "/api/v1/users/keys/openai/oauth/authorize"
   | "/api/v1/users/keys/openai/oauth/callback"

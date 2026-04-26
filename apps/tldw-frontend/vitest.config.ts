@@ -10,6 +10,7 @@ export default defineConfig({
       '@': path.resolve(__dirname, '../packages/ui/src'),
       '~': path.resolve(__dirname, '../packages/ui/src'),
       '@web': path.resolve(__dirname, '.'),
+      'wxt/browser': path.resolve(__dirname, './extension/shims/wxt-browser.ts'),
       'react-router-dom': path.resolve(
         __dirname,
         '../packages/ui/node_modules/react-router-dom'

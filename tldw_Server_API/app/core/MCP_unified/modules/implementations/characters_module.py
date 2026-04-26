@@ -11,6 +11,7 @@ from typing import Any
 from loguru import logger
 
 from ....DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from ...persona_scope import assert_identifier_in_scope
 from ..base import BaseModule, create_tool_definition
 from ..disk_space import get_free_disk_space_gb
 
@@ -175,6 +176,7 @@ class CharactersModule(BaseModule):
             r = db.get_character_card_by_id(character_id)
             if not r:
                 raise ValueError(f"Character not found: {character_id}")
+            assert_identifier_in_scope(context, "character_id", r.get("id"), label="Character")
             desc = r.get("description") or ""
             meta = {
                 "id": r.get("id"),

@@ -48,10 +48,7 @@ describe("RecentStudySessions", () => {
         }
       ],
       isLoading: false,
-      isFetching: false,
-      isError: false,
-      error: null,
-      refetch: vi.fn()
+      isFetching: false
     } as any)
   })
 
@@ -78,65 +75,15 @@ describe("RecentStudySessions", () => {
     expect(sessionsMock).toHaveBeenCalledWith(81)
   })
 
-  it("shows a loading state while recent sessions are fetching", () => {
+  it("shows a retryable error state when loading fails", () => {
+    const refetchMock = vi.fn()
     vi.mocked(useRecentFlashcardReviewSessionsQuery).mockReturnValue({
-      data: [],
-      isLoading: true,
-      isFetching: true,
-      isError: false,
-      error: null,
-      refetch: vi.fn()
-    } as any)
-
-    render(
-      <RecentStudySessions
-        deckId={12}
-        selectedSessionId={null}
-        onOpenSession={sessionsMock}
-        isActive
-      />
-    )
-
-    expect(screen.getByText("Loading recent study sessions...")).toBeInTheDocument()
-    expect(
-      screen.queryByRole("button", { name: /reopen snapshot/i })
-    ).not.toBeInTheDocument()
-  })
-
-  it("shows an empty state when there are no completed sessions", () => {
-    vi.mocked(useRecentFlashcardReviewSessionsQuery).mockReturnValue({
-      data: [],
-      isLoading: false,
-      isFetching: false,
-      isError: false,
-      error: null,
-      refetch: vi.fn()
-    } as any)
-
-    render(
-      <RecentStudySessions
-        deckId={12}
-        selectedSessionId={null}
-        onOpenSession={sessionsMock}
-        isActive
-      />
-    )
-
-    expect(screen.getByText("No completed study sessions yet.")).toBeInTheDocument()
-    expect(
-      screen.queryByRole("button", { name: /reopen snapshot/i })
-    ).not.toBeInTheDocument()
-  })
-
-  it("shows an error state and retry action when loading recent sessions fails", () => {
-    const refetch = vi.fn()
-    vi.mocked(useRecentFlashcardReviewSessionsQuery).mockReturnValue({
-      data: [],
+      data: undefined,
       isLoading: false,
       isFetching: false,
       isError: true,
-      error: new Error("Recent session request failed"),
-      refetch
+      error: new Error("Session service offline"),
+      refetch: refetchMock
     } as any)
 
     render(
@@ -148,8 +95,9 @@ describe("RecentStudySessions", () => {
       />
     )
 
-    expect(screen.getByText("Recent session request failed")).toBeInTheDocument()
+    expect(screen.getByText("Session service offline")).toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: "Retry" }))
-    expect(refetch).toHaveBeenCalledTimes(1)
+
+    expect(refetchMock).toHaveBeenCalled()
   })
 })

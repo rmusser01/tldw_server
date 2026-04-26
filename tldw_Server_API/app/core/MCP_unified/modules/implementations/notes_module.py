@@ -12,7 +12,7 @@ from typing import Any, Optional
 from loguru import logger
 
 from ....DB_Management.ChaChaNotes_DB import CharactersRAGDB
-from ...persona_scope import get_explicit_scope_ids, merge_requested_ids_with_scope
+from ...persona_scope import assert_identifier_in_scope, get_explicit_scope_ids, merge_requested_ids_with_scope
 from ..base import BaseModule, create_tool_definition
 from ..disk_space import get_free_disk_space_gb
 
@@ -619,6 +619,9 @@ class NotesModule(BaseModule):
         content: str,
         tags: Iterable[str],
     ) -> dict[str, Any]:
+        scoped_note_ids = get_explicit_scope_ids(context, "note_id")
+        if scoped_note_ids is not None:
+            raise PermissionError("Cannot create a note outside explicit persona scope")
         db = self._open_db(context)
         try:
             note_id = db.add_note(title=title, content=content)
@@ -645,6 +648,7 @@ class NotesModule(BaseModule):
         updates: dict[str, Any],
         expected_version: Any,
     ) -> dict[str, Any]:
+        assert_identifier_in_scope(context, "note_id", note_id, label="Note")
         db = self._open_db(context)
         try:
             row = db.get_note_by_id(note_id)
@@ -670,6 +674,7 @@ class NotesModule(BaseModule):
     ) -> dict[str, Any]:
         if permanent and not self._is_admin(context):
             raise PermissionError("Admin role required for permanent delete")
+        assert_identifier_in_scope(context, "note_id", note_id, label="Note")
         db = self._open_db(context)
         try:
             row = db.get_note_by_id(note_id)
@@ -692,6 +697,7 @@ class NotesModule(BaseModule):
                 logger.debug("Failed to close ChaChaNotes DB connections after delete: {}", exc)
 
     def _tags_add_sync(self, context: Any | None, note_id: str, tags: Iterable[str]) -> dict[str, Any]:
+        assert_identifier_in_scope(context, "note_id", note_id, label="Note")
         db = self._open_db(context)
         try:
             if not db.get_note_by_id(note_id):
@@ -713,6 +719,7 @@ class NotesModule(BaseModule):
                 logger.debug("Failed to close ChaChaNotes DB connections after tags add: {}", exc)
 
     def _tags_remove_sync(self, context: Any | None, note_id: str, tags: Iterable[str]) -> dict[str, Any]:
+        assert_identifier_in_scope(context, "note_id", note_id, label="Note")
         db = self._open_db(context)
         try:
             if not db.get_note_by_id(note_id):
@@ -730,6 +737,7 @@ class NotesModule(BaseModule):
                 logger.debug("Failed to close ChaChaNotes DB connections after tags remove: {}", exc)
 
     def _tags_set_sync(self, context: Any | None, note_id: str, tags: Iterable[str]) -> dict[str, Any]:
+        assert_identifier_in_scope(context, "note_id", note_id, label="Note")
         db = self._open_db(context)
         try:
             if not db.get_note_by_id(note_id):
@@ -759,6 +767,11 @@ class NotesModule(BaseModule):
                 logger.debug("Failed to close ChaChaNotes DB connections after tags set: {}", exc)
 
     def _tags_list_sync(self, context: Any | None, note_id: Optional[str], limit: int, offset: int) -> dict[str, Any]:
+        scoped_note_ids = get_explicit_scope_ids(context, "note_id")
+        if note_id is None and scoped_note_ids is not None:
+            raise PermissionError("Cannot list all tags outside explicit persona scope")
+        if note_id is not None:
+            assert_identifier_in_scope(context, "note_id", note_id, label="Note")
         db = self._open_db(context)
         try:
             if note_id:

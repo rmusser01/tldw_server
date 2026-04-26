@@ -11,8 +11,6 @@ import {
   useCramQueueQuery,
   useReviewQuery,
   useReviewFlashcardMutation,
-  useEndFlashcardReviewSessionMutation,
-  useRecentFlashcardReviewSessionsQuery,
   useFlashcardAssistantQuery,
   useFlashcardAssistantRespondMutation,
   useUpdateFlashcardMutation,
@@ -133,17 +131,6 @@ describe("ReviewTab analytics summary", () => {
     vi.mocked(useReviewQuery).mockReturnValue({ data: null } as any)
     vi.mocked(useReviewFlashcardMutation).mockReturnValue({
       mutateAsync: vi.fn()
-    } as any)
-    vi.mocked(useEndFlashcardReviewSessionMutation).mockReturnValue({
-      mutateAsync: vi.fn(),
-      isPending: false
-    } as any)
-    vi.mocked(useRecentFlashcardReviewSessionsQuery).mockReturnValue({
-      data: [],
-      isLoading: false,
-      isError: false,
-      error: null,
-      refetch: vi.fn()
     } as any)
     vi.mocked(useFlashcardAssistantQuery).mockReturnValue({
       data: null,

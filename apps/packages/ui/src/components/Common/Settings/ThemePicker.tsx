@@ -170,18 +170,23 @@ export function ThemePicker() {
   )
 
   const handleDelete = useCallback(
-    (theme: ThemeDefinition) => {
+    (id: string) => {
+      const theme = customThemes.find((entry) => entry.id === id)
       Modal.confirm({
-        title: "Delete theme?",
-        content: `"${theme.name}" will be permanently removed.`,
-        okText: "Delete",
+        title: t("generalSettings.settings.themePreset.delete.title", "Delete theme?"),
+        content: t(
+          "generalSettings.settings.themePreset.delete.description",
+          `"${theme?.name ?? "This theme"}" will be permanently removed.`
+        ),
+        okText: t("common:delete", "Delete"),
         okType: "danger",
+        cancelText: t("common:cancel", "Cancel"),
         onOk: () => {
-          deleteCustomTheme(theme.id)
+          deleteCustomTheme(id)
         }
       })
     },
-    [deleteCustomTheme],
+    [customThemes, deleteCustomTheme, t],
   )
 
   const handleEditCustom = useCallback((theme: ThemeDefinition) => {
@@ -304,7 +309,7 @@ export function ThemePicker() {
               onClick={() => setThemeId(preset.id)}
               onEdit={() => handleEditCustom(preset)}
               onExport={() => handleExportCustom(preset)}
-              onDelete={() => handleDelete(preset)}
+              onDelete={() => handleDelete(preset.id)}
             />
           ))}
         </div>

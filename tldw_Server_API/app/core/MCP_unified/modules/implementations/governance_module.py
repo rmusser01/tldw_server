@@ -94,7 +94,9 @@ class GovernanceModule(BaseModule):
     async def execute_tool(self, tool_name: str, arguments: dict[str, Any], context: Any | None = None) -> Any:
         args = self.sanitize_input(arguments or {})
         service = await self._ensure_service()
-        metadata = self._merged_metadata(args, context)
+        authenticated_metadata = self._authenticated_metadata(context)
+        caller_metadata = self._caller_metadata(args)
+        metadata = self._merged_metadata(caller_metadata, authenticated_metadata)
 
         if tool_name == "governance.query_knowledge":
             result = await service.query_knowledge(
@@ -105,32 +107,28 @@ class GovernanceModule(BaseModule):
             return self._to_jsonable(result)
 
         if tool_name == "governance.validate_change":
+            scope = self._verified_scope(args, authenticated_metadata)
+            service_metadata = self._overlay_scope(metadata, scope)
             result = await service.validate_change(
                 surface=str(args.get("surface") or ""),
                 summary=str(args.get("summary") or ""),
                 category=self._optional_str(args.get("category")),
-                metadata=metadata,
+                metadata=service_metadata,
                 fallback_mode=self._optional_str(args.get("fallback_mode")),
             )
             return self._to_jsonable(result)
 
         if tool_name == "governance.resolve_gap":
+            scope = self._verified_scope(args, authenticated_metadata)
+            service_metadata = self._overlay_scope(metadata, scope)
             result = await service.resolve_gap(
                 question=str(args.get("question") or ""),
                 category=self._optional_str(args.get("category")),
-                metadata=metadata,
-                org_id=self._optional_int(
-                    self._first_non_none(args.get("org_id"), metadata.get("org_id"))
-                ),
-                team_id=self._optional_int(
-                    self._first_non_none(args.get("team_id"), metadata.get("team_id"))
-                ),
-                persona_id=self._optional_str(
-                    self._first_non_none(args.get("persona_id"), metadata.get("persona_id"))
-                ),
-                workspace_id=self._optional_str(
-                    self._first_non_none(args.get("workspace_id"), metadata.get("workspace_id"))
-                ),
+                metadata=service_metadata,
+                org_id=scope["org_id"],
+                team_id=scope["team_id"],
+                persona_id=scope["persona_id"],
+                workspace_id=scope["workspace_id"],
                 resolution_mode=self._optional_str(args.get("resolution_mode")),
             )
             return self._to_jsonable(result)
@@ -159,10 +157,6 @@ class GovernanceModule(BaseModule):
             return self._governance_service
 
     @staticmethod
-    def _first_non_none(primary: Any, secondary: Any) -> Any:
-        return primary if primary is not None else secondary
-
-    @staticmethod
     def _optional_int(value: Any) -> int | None:
         if value is None:
             return None
@@ -180,20 +174,88 @@ class GovernanceModule(BaseModule):
         rendered = str(value).strip()
         return rendered or None
 
+    def _verified_scope(self, args: dict[str, Any], authenticated_metadata: dict[str, Any]) -> dict[str, Any]:
+        caller_metadata = self._caller_metadata(args)
+        return {
+            "org_id": self._verified_scope_value(
+                field="org_id",
+                top_level=args.get("org_id"),
+                caller_metadata_value=caller_metadata.get("org_id"),
+                authenticated_value=authenticated_metadata.get("org_id"),
+                coercer=self._optional_int,
+            ),
+            "team_id": self._verified_scope_value(
+                field="team_id",
+                top_level=args.get("team_id"),
+                caller_metadata_value=caller_metadata.get("team_id"),
+                authenticated_value=authenticated_metadata.get("team_id"),
+                coercer=self._optional_int,
+            ),
+            "persona_id": self._verified_scope_value(
+                field="persona_id",
+                top_level=args.get("persona_id"),
+                caller_metadata_value=caller_metadata.get("persona_id"),
+                authenticated_value=authenticated_metadata.get("persona_id"),
+                coercer=self._optional_str,
+            ),
+            "workspace_id": self._verified_scope_value(
+                field="workspace_id",
+                top_level=args.get("workspace_id"),
+                caller_metadata_value=caller_metadata.get("workspace_id"),
+                authenticated_value=authenticated_metadata.get("workspace_id"),
+                coercer=self._optional_str,
+            ),
+        }
+
+    def _verified_scope_value(
+        self,
+        *,
+        field: str,
+        top_level: Any,
+        caller_metadata_value: Any,
+        authenticated_value: Any,
+        coercer: Any,
+    ) -> Any:
+        normalized_authenticated = coercer(authenticated_value)
+        normalized_top_level = coercer(top_level)
+        normalized_caller_metadata_value = coercer(caller_metadata_value)
+
+        if normalized_authenticated is not None:
+            if normalized_top_level is not None and normalized_top_level != normalized_authenticated:
+                raise PermissionError(f"{field} must match authenticated context")
+            if normalized_caller_metadata_value is not None and normalized_caller_metadata_value != normalized_authenticated:
+                raise PermissionError(f"{field} must match authenticated context")
+            return normalized_authenticated
+
+        if normalized_top_level is not None:
+            return normalized_top_level
+        if normalized_caller_metadata_value is not None:
+            return normalized_caller_metadata_value
+        return None
+
     @staticmethod
-    def _merged_metadata(arguments: dict[str, Any], context: Any | None) -> dict[str, Any]:
-        merged: dict[str, Any] = {}
-
+    def _caller_metadata(arguments: dict[str, Any]) -> dict[str, Any]:
         arg_metadata = arguments.get("metadata")
-        if isinstance(arg_metadata, Mapping):
-            merged.update(arg_metadata)
+        if not isinstance(arg_metadata, Mapping):
+            return {}
+        return {str(key): value for key, value in arg_metadata.items()}
 
+    @staticmethod
+    def _authenticated_metadata(context: Any | None) -> dict[str, Any]:
         context_metadata = getattr(context, "metadata", None)
-        if isinstance(context_metadata, Mapping):
-            for key, value in context_metadata.items():
-                merged.setdefault(str(key), value)
+        if not isinstance(context_metadata, Mapping):
+            return {}
+        return {str(key): value for key, value in context_metadata.items()}
 
+    @staticmethod
+    def _merged_metadata(caller_metadata: dict[str, Any], authenticated_metadata: dict[str, Any]) -> dict[str, Any]:
+        merged = dict(authenticated_metadata)
+        merged.update(caller_metadata)
         return merged
+
+    @staticmethod
+    def _overlay_scope(metadata: dict[str, Any], scope: dict[str, Any]) -> dict[str, Any]:
+        return {**metadata, **{key: value for key, value in scope.items() if value is not None}}
 
     @classmethod
     def _to_jsonable(cls, value: Any) -> Any:

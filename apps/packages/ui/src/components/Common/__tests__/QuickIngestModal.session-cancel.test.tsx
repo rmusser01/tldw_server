@@ -363,6 +363,11 @@ describe("QuickIngestModal session cancel flow", () => {
     await waitFor(() => {
       expect(mocks.submitQuickIngestBatch).toHaveBeenCalledTimes(1)
     })
+    expect(mocks.submitQuickIngestBatch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        __quickIngestSessionId: "qi-direct-test",
+      })
+    )
 
     await user.click(await screen.findByTestId("quick-ingest-cancel"))
     await waitFor(() => {

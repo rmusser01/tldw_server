@@ -33,16 +33,19 @@ Notes:
 from __future__ import annotations
 
 import contextlib
+import functools
 import json
 import os
 import sqlite3
-from collections.abc import Iterable
+import threading
+from collections.abc import Generator, Iterable
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from tldw_Server_API.app.core.config import load_comprehensive_config
 from tldw_Server_API.app.core.DB_Management.content_backend import (
+    backend_target_key,
     get_content_backend,
     load_content_db_settings,
 )
@@ -219,24 +222,50 @@ class WatchlistOnboardingEventRow:
     created_at: str
 
 
+def _pin_watchlists_public_operation(method):
+    @functools.wraps(method)
+    def wrapper(self: "WatchlistsDatabase", *args: Any, **kwargs: Any):
+        with self._operation_backend_pin():
+            return method(self, *args, **kwargs)
+
+    return wrapper
+
+
+def _decorate_watchlists_public_operations(cls: type["WatchlistsDatabase"]) -> type["WatchlistsDatabase"]:
+    for name, attribute in list(vars(cls).items()):
+        if name.startswith("_") or name in {"ensure_schema", "transaction"}:
+            continue
+        if isinstance(attribute, (classmethod, staticmethod, property)):
+            continue
+        if not callable(attribute):
+            continue
+        setattr(cls, name, _pin_watchlists_public_operation(attribute))
+    return cls
+
+
+@_decorate_watchlists_public_operations
 class WatchlistsDatabase:
     # Keep track of schema initialization per DB path to avoid redundant ALTER checks/noise
     _schema_init_keys: set[str] = set()
 
     def __init__(self, user_id: int | str, backend: DatabaseBackend | None = None):
         self.user_id = str(user_id)
+        self._local = threading.local()
+        self._backend_refresh_suspended = False
         db_key: str | None = None
+        self._backend: DatabaseBackend
+        self._uses_shared_content_backend = False
         if backend is None:
-            backend, db_key = self._resolve_backend()
+            backend, db_key, uses_shared_backend = self._resolve_backend()
+            self._uses_shared_content_backend = uses_shared_backend
         else:
             # Fallback key when external backend is supplied (best-effort de-dupe)
             db_key = f"backend:{id(backend)}"
-        self.backend = backend
+        self._backend = backend
         # De-duplicate schema ensures across startup/requests
-        if db_key and db_key not in WatchlistsDatabase._schema_init_keys:
-            self.ensure_schema()
-            WatchlistsDatabase._schema_init_keys.add(db_key)
-        elif not db_key:
+        if db_key:
+            self._ensure_schema_for_key(self._backend, db_key)
+        else:
             # If we couldn't derive a key, fall back to ensuring schema once here
             self.ensure_schema()
 
@@ -244,14 +273,88 @@ class WatchlistsDatabase:
     def for_user(cls, user_id: int | str) -> WatchlistsDatabase:
         return cls(user_id=user_id)
 
-    def _resolve_backend(self) -> tuple[DatabaseBackend, str | None]:
+    @property
+    def backend(self) -> DatabaseBackend:
+        pinned_backend = getattr(self._local, "backend_pin", None)
+        if pinned_backend is not None:
+            return pinned_backend
+        return self._refresh_backend_if_needed()
+
+    def _refresh_backend_if_needed(self) -> DatabaseBackend:
+        if not self._uses_shared_content_backend:
+            return self._backend
+        if self._backend_refresh_suspended:
+            return self._backend
+
+        current_key = self._backend_target_key(self._backend)
+        refreshed_backend, refreshed_key, uses_shared_backend = self._resolve_backend()
+        self._uses_shared_content_backend = uses_shared_backend
+        self._backend = refreshed_backend
+        if (
+            uses_shared_backend
+            and refreshed_backend.backend_type == BackendType.POSTGRESQL
+            and refreshed_key != current_key
+        ):
+            self._ensure_schema_for_key(refreshed_backend, refreshed_key)
+        return self._backend
+
+    def _backend_target_key(self, backend: DatabaseBackend | None) -> str | None:
+        return backend_target_key(backend)
+
+    def _ensure_schema_for_key(self, backend: DatabaseBackend, db_key: str | None) -> None:
+        if not db_key or db_key in WatchlistsDatabase._schema_init_keys:
+            return
+        previous_suspend = self._backend_refresh_suspended
+        self._backend_refresh_suspended = True
+        try:
+            self._backend = backend
+            self.ensure_schema()
+        finally:
+            self._backend_refresh_suspended = previous_suspend
+        WatchlistsDatabase._schema_init_keys.add(db_key)
+
+    @contextlib.contextmanager
+    def _operation_backend_pin(self) -> Generator[DatabaseBackend, None, None]:
+        previous_backend = getattr(self._local, "backend_pin", None)
+        if previous_backend is None:
+            self._local.backend_pin = self._refresh_backend_if_needed()
+        try:
+            yield self._local.backend_pin
+        finally:
+            if previous_backend is None:
+                with contextlib.suppress(AttributeError):
+                    del self._local.backend_pin
+            else:
+                self._local.backend_pin = previous_backend
+
+    @contextlib.contextmanager
+    def transaction(self) -> Generator[Any, None, None]:
+        """Pin the active backend for the duration of a transactional operation."""
+        backend = self.backend
+        previous_backend = getattr(self._local, "backend_pin", None)
+        self._local.backend_pin = backend
+        try:
+            with backend.transaction() as conn:
+                yield conn
+        finally:
+            if previous_backend is None:
+                with contextlib.suppress(AttributeError):
+                    del self._local.backend_pin
+            else:
+                self._local.backend_pin = previous_backend
+
+    def _resolve_backend(self) -> tuple[DatabaseBackend, str | None, bool]:
         backend_mode_env = (os.getenv("TLDW_CONTENT_DB_BACKEND") or "").strip().lower()
         if backend_mode_env in {"postgres", "postgresql"}:
             parser = load_comprehensive_config()
             resolved = get_content_backend(parser)
             if resolved is None:
                 raise RuntimeError("PostgreSQL content backend requested but not initialized")
-            return resolved, f"postgres:{resolved.config.connection_string or resolved.config.pg_database}"
+            return (
+                resolved,
+                self._backend_target_key(resolved),
+                True,
+            )
 
         try:
             parser = load_comprehensive_config()
@@ -265,13 +368,17 @@ class WatchlistsDatabase:
                     resolved = get_content_backend(parser)
                     if resolved is None:
                         raise RuntimeError("PostgreSQL content backend requested but not initialized")
-                    return resolved, f"postgres:{resolved.config.connection_string or resolved.config.pg_database}"
+                    return (
+                        resolved,
+                        self._backend_target_key(resolved),
+                        True,
+                    )
             except _WATCHLISTS_DB_NONCRITICAL_EXCEPTIONS:
                 pass
 
         db_path = str(DatabasePaths.get_media_db_path(int(self.user_id)))
         cfg = DatabaseConfig(backend_type=BackendType.SQLITE, sqlite_path=db_path)
-        return DatabaseBackendFactory.create_backend(cfg), f"sqlite:{db_path}"
+        return DatabaseBackendFactory.create_backend(cfg), f"sqlite:{db_path}", False
 
     def _execute_insert(self, query: str, params: tuple[Any, ...]) -> Any:
         if self.backend.backend_type == BackendType.POSTGRESQL:
@@ -1222,7 +1329,7 @@ class WatchlistsDatabase:
         return result
 
     def delete_source(self, source_id: int) -> bool:
-        with self.backend.transaction() as conn:
+        with self.transaction() as conn:
             self.backend.execute("DELETE FROM source_groups WHERE source_id = ?", (source_id,), connection=conn)
             self.backend.execute("DELETE FROM source_tags WHERE source_id = ?", (source_id,), connection=conn)
             self.backend.execute(
@@ -1271,7 +1378,7 @@ class WatchlistsDatabase:
         deleted_at = _utcnow_iso()
         expires_at = self._restore_expires_at(undo_window_seconds)
 
-        with self.backend.transaction() as conn:
+        with self.transaction() as conn:
             self.backend.execute(
                 """
                 INSERT INTO deleted_sources (user_id, source_id, payload_json, deleted_at, expires_at)
@@ -1353,7 +1460,7 @@ class WatchlistsDatabase:
             except _WATCHLISTS_DB_NONCRITICAL_EXCEPTIONS:
                 continue
 
-        with self.backend.transaction() as conn:
+        with self.transaction() as conn:
             conflict = self.backend.execute(
                 "SELECT id FROM sources WHERE user_id = ? AND url = ?",
                 (self.user_id, url),
@@ -1750,7 +1857,7 @@ class WatchlistsDatabase:
         deleted_at = _utcnow_iso()
         expires_at = self._restore_expires_at(undo_window_seconds)
 
-        with self.backend.transaction() as conn:
+        with self.transaction() as conn:
             self.backend.execute(
                 """
                 INSERT INTO deleted_jobs (user_id, job_id, payload_json, deleted_at, expires_at)
@@ -1816,7 +1923,7 @@ class WatchlistsDatabase:
         created_at = str(payload.get("created_at") or _utcnow_iso())
         updated_at = str(payload.get("updated_at") or created_at)
 
-        with self.backend.transaction() as conn:
+        with self.transaction() as conn:
             existing = self.backend.execute(
                 "SELECT id FROM scrape_jobs WHERE id = ? AND user_id = ?",
                 (job_id, self.user_id),

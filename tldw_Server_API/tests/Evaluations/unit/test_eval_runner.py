@@ -302,3 +302,67 @@ async def test_process_batch_honors_max_workers(tmp_path):
         timeout_seconds=1.0,
     )
     assert max_seen <= 2
+
+
+def test_cancel_run_cleans_up_local_task_without_overwriting_completed_status(monkeypatch, tmp_path):
+    runner = EvaluationRunner(db_path=str(tmp_path / "evals.db"))
+
+    class _Task:
+        def __init__(self) -> None:
+            self.cancel_called = False
+
+        def cancel(self) -> None:
+            self.cancel_called = True
+
+    task = _Task()
+    runner.running_tasks["run_terminal"] = task
+
+    monkeypatch.setattr(
+        runner.db,
+        "get_run",
+        lambda run_id: {"id": run_id, "status": "completed"},
+    )
+
+    status_updates: list[tuple[str, str, str | None]] = []
+
+    def _record_status(run_id: str, status: str, error_message: str | None = None) -> bool:
+        status_updates.append((run_id, status, error_message))
+        return True
+
+    monkeypatch.setattr(runner.db, "update_run_status", _record_status)
+
+    assert runner.cancel_run("run_terminal") is False
+    assert status_updates == []
+    assert task.cancel_called is True
+    assert "run_terminal" not in runner.running_tasks
+
+
+def test_cancel_run_keeps_task_registered_when_status_update_fails(monkeypatch, tmp_path):
+    runner = EvaluationRunner(db_path=str(tmp_path / "evals.db"))
+
+    class _Task:
+        def __init__(self) -> None:
+            self.cancel_called = False
+
+        def cancel(self) -> None:
+            self.cancel_called = True
+
+    task = _Task()
+    runner.running_tasks["run_db_error"] = task
+
+    monkeypatch.setattr(
+        runner.db,
+        "get_run",
+        lambda run_id: {"id": run_id, "status": "running"},
+    )
+
+    def _raise_status_error(run_id: str, status: str, error_message: str | None = None) -> bool:
+        raise RuntimeError("db write failed")
+
+    monkeypatch.setattr(runner.db, "update_run_status", _raise_status_error)
+
+    with pytest.raises(RuntimeError, match="db write failed"):
+        runner.cancel_run("run_db_error")
+
+    assert task.cancel_called is True
+    assert runner.running_tasks["run_db_error"] is task

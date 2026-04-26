@@ -88,7 +88,7 @@ describe("WorldBooksWorkspace layout", () => {
     )
   })
 
-  it("uses bounded shell when the sidebar is expanded", () => {
+  it("uses full-width shell when the sidebar is expanded", () => {
     useLayoutUiStoreMock.mockImplementation(
       (selector: (state: { chatSidebarCollapsed: boolean }) => boolean) =>
         selector({ chatSidebarCollapsed: false })
@@ -97,7 +97,6 @@ describe("WorldBooksWorkspace layout", () => {
     render(<WorldBooksWorkspace />)
 
     const shell = screen.getByTestId("world-books-page-shell")
-    expect(shell.className).toContain("max-w-5xl")
-    expect(shell.className).not.toContain("max-w-none")
+    expect(shell.className).toContain("max-w-none")
   })
 })

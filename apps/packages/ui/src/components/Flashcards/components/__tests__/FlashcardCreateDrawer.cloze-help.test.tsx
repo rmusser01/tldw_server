@@ -1,7 +1,12 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { FlashcardCreateDrawer } from "../FlashcardCreateDrawer"
-import { useCreateFlashcardMutation, useCreateDeckMutation, useDecksQuery } from "../../hooks"
+import {
+  useCreateDeckMutation,
+  useCreateFlashcardMutation,
+  useCreateFlashcardTemplateMutation,
+  useDecksQuery
+} from "../../hooks"
 import { FLASHCARDS_DRAWER_WIDTH_PX } from "../../constants"
 
 vi.mock("react-i18next", () => ({
@@ -43,6 +48,7 @@ vi.mock("../../hooks", () => ({
   useDecksQuery: vi.fn(),
   useCreateFlashcardMutation: vi.fn(),
   useCreateDeckMutation: vi.fn(),
+  useCreateFlashcardTemplateMutation: vi.fn(),
   useDebouncedFormField: vi.fn(() => undefined),
   useFlashcardDeckRecentCardsQuery: vi.fn(() => ({
     data: [],
@@ -122,6 +128,10 @@ describe("FlashcardCreateDrawer cloze helper and validation", () => {
       mutateAsync: vi.fn(),
       isPending: false
     } as any)
+    vi.mocked(useCreateFlashcardTemplateMutation).mockReturnValue({
+      mutateAsync: vi.fn(),
+      isPending: false
+    } as any)
   })
 
   afterEach(() => {
@@ -147,7 +157,7 @@ describe("FlashcardCreateDrawer cloze helper and validation", () => {
       )
     ).toBeInTheDocument()
 
-    fireEvent.mouseDown(screen.getByLabelText("Card template"))
+    fireEvent.mouseDown(screen.getByLabelText("Card model"))
     fireEvent.click(screen.getByText("Cloze (Fill in the blank)"))
 
     await waitFor(() => {

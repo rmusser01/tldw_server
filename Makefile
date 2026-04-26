@@ -9,12 +9,22 @@ help:
 	@echo ""
 	@echo "Getting Started:"
 	@echo "  make quickstart              Docker single-user + WebUI (recommended)"
-	@echo "  make quickstart-install      Local Python install + start server"
+	@echo "  make setup-docker-single     Configure Docker single-user + WebUI"
+	@echo "  make start-docker-single     Start Docker single-user + WebUI"
+	@echo "  make verify-docker-single    Verify Docker single-user + WebUI"
+	@echo "  make setup-docker-multi      Configure Docker multi-user + PostgreSQL"
+	@echo "  make start-docker-multi      Start Docker multi-user + PostgreSQL"
+	@echo "  make verify-docker-multi     Verify Docker multi-user + PostgreSQL"
+	@echo "  make install-local           Install local Python dependencies"
+	@echo "  make setup-local-single      Configure local single-user mode"
+	@echo "  make start-local-single      Start local single-user server"
+	@echo "  make verify-local-single     Verify local single-user server"
+	@echo "  make quickstart-install      Local Python install only"
 	@echo "  make quickstart-docker       Docker API-only (no WebUI)"
 	@echo "  make quickstart-prereqs      Check Python, ffmpeg, and dependencies"
 	@echo ""
 	@echo "Server:"
-	@echo "  make quickstart-local        Start local server (after install)"
+	@echo "  make quickstart-local        Configure and start local server"
 	@echo "  make server-up-dev           Start server in mock/dev mode"
 	@echo "  make verify                  Health-check a running server"
 	@echo "  make check                   Run sanity checks (health, keys, ffmpeg)"
@@ -38,7 +48,7 @@ help:
 # -----------------------------------------------------------------------------
 # Quickstart targets (first-time setup)
 # -----------------------------------------------------------------------------
-.PHONY: quickstart quickstart-install quickstart-prereqs quickstart-local quickstart-docker quickstart-docker-bootstrap quickstart-docker-webui model-cycle verify pypi-build pypi-check tooling-install tooling-smoke show-api-key
+.PHONY: setup-wizard-tools setup-docker-single start-docker-single verify-docker-single setup-docker-multi start-docker-multi verify-docker-multi install-local setup-local-single start-local-single verify-local-single quickstart quickstart-install quickstart-prereqs quickstart-local quickstart-docker quickstart-docker-bootstrap quickstart-docker-webui model-cycle verify pypi-build pypi-check tooling-install tooling-smoke show-api-key
 
 PYTHON ?= python3
 VENV_DIR ?= .venv
@@ -46,12 +56,20 @@ VENV_PYTHON ?= $(VENV_DIR)/bin/python
 TLDW_ENV_FILE ?= tldw_Server_API/Config_Files/.env
 TLDW_ENV_TEMPLATE ?= tldw_Server_API/Config_Files/.env.example
 DOCKER_BASE_COMPOSE ?= Dockerfiles/docker-compose.yml
+DOCKER_SINGLE_COMPOSE ?= Dockerfiles/docker-compose.single-user.yml
+DOCKER_MULTI_COMPOSE ?= Dockerfiles/docker-compose.multi-user-postgres.yml
 DOCKER_WEBUI_COMPOSE ?= Dockerfiles/docker-compose.webui.yml
+SETUP_VENV_DIR ?= .setup-venv
+SETUP_VENV_PYTHON ?= $(SETUP_VENV_DIR)/bin/python
+TLDW_SETUP ?= $(SETUP_VENV_PYTHON) -m tldw_Server_API.cli.wizard.cli
+TLDW_BASE_URL ?= http://127.0.0.1:8000
+TLDW_WEBUI_URL ?= http://127.0.0.1:8080
 NEXT_PUBLIC_API_URL ?=
 NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE ?= quickstart
 TLDW_INTERNAL_API_ORIGIN ?= http://app:8000
 DOCKER_BUILD ?= false
 DOCKER_BUILD_FLAG = $(if $(filter true TRUE 1 yes YES,$(DOCKER_BUILD)),--build,)
+DOCKER_WAIT_FLAG ?= --wait
 PYPI_BUILD_ARGS ?= --no-isolation
 MODEL_CYCLE_FIRST ?=
 MODEL_CYCLE_SECOND ?=
@@ -80,34 +98,85 @@ quickstart-prereqs:
 		esac; \
 	fi
 
-quickstart-install:
-	@command -v $(PYTHON) >/dev/null 2>&1 || (echo "[quickstart-install] $(PYTHON) not found. Install Python 3.10+ and retry." && exit 1)
-	@$(PYTHON) -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)' || (echo "[quickstart-install] Python 3.10+ is required." && exit 1)
+setup-wizard-tools:
+	@command -v $(PYTHON) >/dev/null 2>&1 || (echo "[setup-wizard-tools] $(PYTHON) not found. Install Python 3.10+ and retry." && exit 1)
+	@$(PYTHON) -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)' || (echo "[setup-wizard-tools] Python 3.10+ is required." && exit 1)
+	@if [ ! -x "$(SETUP_VENV_PYTHON)" ]; then \
+		echo "[setup-wizard-tools] Creating lightweight wizard virtualenv at $(SETUP_VENV_DIR)"; \
+		$(PYTHON) -m venv $(SETUP_VENV_DIR); \
+	fi
+	@$(SETUP_VENV_PYTHON) -m pip install --upgrade pip setuptools wheel >/dev/null
+	@$(SETUP_VENV_PYTHON) -m pip install "typer>=0.12.0" "loguru>=0.7.0" "httpx>=0.24.0" "python-dotenv>=1.0.0" "cryptography>=41.0.0" >/dev/null
+
+setup-docker-single: setup-wizard-tools
+	@command -v docker >/dev/null 2>&1 || (echo "[setup-docker-single] docker not found. Install Docker and retry." && exit 1)
+	@$(TLDW_SETUP) init --profile docker-single-webui --env-file "$(TLDW_ENV_FILE)" --default --yes
+	@echo "[setup-docker-single] Next: make start-docker-single"
+
+start-docker-single:
+	@command -v docker >/dev/null 2>&1 || (echo "[start-docker-single] docker not found. Install Docker and retry." && exit 1)
+	docker compose --env-file "$(TLDW_ENV_FILE)" -f "$(DOCKER_SINGLE_COMPOSE)" -f "$(DOCKER_WEBUI_COMPOSE)" up -d $(DOCKER_BUILD_FLAG) $(DOCKER_WAIT_FLAG)
+	@echo "[start-docker-single] API:   $(TLDW_BASE_URL)"
+	@echo "[start-docker-single] WebUI: $(TLDW_WEBUI_URL)"
+	@echo "[start-docker-single] Next:  make verify-docker-single"
+
+verify-docker-single: setup-wizard-tools
+	@$(TLDW_SETUP) verify --profile docker-single-webui --env-file "$(TLDW_ENV_FILE)" --base-url "$(TLDW_BASE_URL)" --webui-url "$(TLDW_WEBUI_URL)" --first-value
+
+setup-docker-multi: setup-wizard-tools
+	@command -v docker >/dev/null 2>&1 || (echo "[setup-docker-multi] docker not found. Install Docker and retry." && exit 1)
+	@test -n "$$ADMIN_USERNAME" || (echo "[setup-docker-multi] Set ADMIN_USERNAME=<admin> ADMIN_PASSWORD=<password> in the shell environment for first admin bootstrap." && exit 1)
+	@test -n "$$ADMIN_PASSWORD" || (echo "[setup-docker-multi] Set ADMIN_PASSWORD=<password> in the shell environment for first admin bootstrap." && exit 1)
+	@ADMIN_USERNAME="$$ADMIN_USERNAME" ADMIN_PASSWORD="$$ADMIN_PASSWORD" ADMIN_EMAIL="$$ADMIN_EMAIL" $(TLDW_SETUP) init --profile docker-multi-postgres --env-file "$(TLDW_ENV_FILE)" --default --yes
+	@echo "[setup-docker-multi] Next: make start-docker-multi"
+
+start-docker-multi:
+	@command -v docker >/dev/null 2>&1 || (echo "[start-docker-multi] docker not found. Install Docker and retry." && exit 1)
+	@test -f "$(TLDW_ENV_FILE)" || (echo "[start-docker-multi] $(TLDW_ENV_FILE) not found. Run: make setup-docker-multi" && exit 1)
+	@TLDW_ENV_FILE_ABS="$$(cd "$$(dirname "$(TLDW_ENV_FILE)")" && pwd)/$$(basename "$(TLDW_ENV_FILE)")"; \
+		TLDW_ENV_FILE="$$TLDW_ENV_FILE_ABS" docker compose -f "$(DOCKER_MULTI_COMPOSE)" config >/dev/null && \
+		TLDW_ENV_FILE="$$TLDW_ENV_FILE_ABS" docker compose -f "$(DOCKER_MULTI_COMPOSE)" up -d $(DOCKER_BUILD_FLAG) $(DOCKER_WAIT_FLAG)
+	@echo "[start-docker-multi] API:  $(TLDW_BASE_URL)"
+	@echo "[start-docker-multi] Next: make verify-docker-multi"
+
+verify-docker-multi: setup-wizard-tools
+	@$(TLDW_SETUP) verify --profile docker-multi-postgres --env-file "$(TLDW_ENV_FILE)" --base-url "$(TLDW_BASE_URL)" --first-value
+
+install-local:
+	@command -v $(PYTHON) >/dev/null 2>&1 || (echo "[install-local] $(PYTHON) not found. Install Python 3.10+ and retry." && exit 1)
+	@$(PYTHON) -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)' || (echo "[install-local] Python 3.10+ is required." && exit 1)
 	@if [ ! -x "$(VENV_PYTHON)" ]; then \
-		echo "[quickstart-install] Creating virtualenv at $(VENV_DIR)"; \
+		echo "[install-local] Creating virtualenv at $(VENV_DIR)"; \
 		$(PYTHON) -m venv $(VENV_DIR); \
 	fi
-	@echo "[quickstart-install] Installing Python dependencies into $(VENV_DIR)..."
+	@echo "[install-local] Installing Python dependencies into $(VENV_DIR)..."
 	@$(VENV_PYTHON) -m pip install --upgrade pip setuptools wheel
 	@$(VENV_PYTHON) -m pip install -e .
-	@if [ "$$(uname -s)" = "Linux" ]; then \
-		echo "[quickstart-install] Linux audio note: if PyAudio build/install fails, install PortAudio headers (e.g., sudo apt install -y portaudio19-dev python3-pyaudio)."; \
-	fi
-	@$(MAKE) quickstart-local PYTHON=$(VENV_PYTHON)
+	@echo "[install-local] Next: make setup-local-single"
 
-quickstart-local: quickstart-prereqs
-	@echo "[quickstart-local] Setting up local tldw_server development..."
-	@mkdir -p $(dir $(TLDW_ENV_FILE))
-	@test -f $(TLDW_ENV_FILE) || (cp $(TLDW_ENV_TEMPLATE) $(TLDW_ENV_FILE) && echo "[quickstart-local] Created $(TLDW_ENV_FILE) from template - set SINGLE_USER_API_KEY before exposing beyond localhost.")
-	@echo "[quickstart-local] Initializing auth (non-interactive)..."
-	$(PYTHON) -m tldw_Server_API.app.core.AuthNZ.initialize --non-interactive
-	@echo "[quickstart-local] Starting server on http://127.0.0.1:8000"
-	@echo "[quickstart-local] Verify with: curl http://localhost:8000/health"
-	@echo "[quickstart-local] API docs at: http://127.0.0.1:8000/docs"
-	$(PYTHON) -m uvicorn tldw_Server_API.app.main:app --host 127.0.0.1 --port 8000
+setup-local-single: setup-wizard-tools
+	@$(TLDW_SETUP) init --profile local-single --env-file "$(TLDW_ENV_FILE)" --default --yes
+	@echo "[setup-local-single] Next: make start-local-single"
 
-quickstart:
-	@$(MAKE) quickstart-docker-webui
+start-local-single:
+	@echo "[start-local-single] Starting API at $(TLDW_BASE_URL)"
+	TLDW_ENV_FILE="$(TLDW_ENV_FILE)" $(VENV_PYTHON) -m uvicorn tldw_Server_API.app.main:app --host 127.0.0.1 --port 8000
+
+verify-local-single: setup-wizard-tools
+	@$(TLDW_SETUP) verify --profile local-single --env-file "$(TLDW_ENV_FILE)" --base-url "$(TLDW_BASE_URL)" --first-value
+
+quickstart: setup-docker-single start-docker-single verify-docker-single
+
+quickstart-docker-webui: quickstart
+
+quickstart-docker: setup-docker-single
+	@command -v docker >/dev/null 2>&1 || (echo "[quickstart-docker] docker not found. Install Docker and retry." && exit 1)
+	docker compose --env-file "$(TLDW_ENV_FILE)" -f "$(DOCKER_SINGLE_COMPOSE)" up -d $(DOCKER_BUILD_FLAG) $(DOCKER_WAIT_FLAG)
+	@$(TLDW_SETUP) verify --profile docker-single-webui --env-file "$(TLDW_ENV_FILE)" --base-url "$(TLDW_BASE_URL)" --webui-url ""
+
+quickstart-install: install-local
+
+quickstart-local: install-local setup-local-single start-local-single
 
 tooling-install:
 	@command -v $(PYTHON) >/dev/null 2>&1 || (echo "[tooling-install] $(PYTHON) not found. Install Python 3.10+ and retry." && exit 1)
@@ -123,58 +192,6 @@ tooling-install:
 quickstart-docker-bootstrap:
 	@echo "[quickstart-docker-bootstrap] Ensuring $(TLDW_ENV_FILE) has safe first-use auth defaults..."
 	@bash Helper_Scripts/docker_prepare_env.sh "$(TLDW_ENV_FILE)" "$(TLDW_ENV_TEMPLATE)"
-
-quickstart-docker: quickstart-docker-bootstrap
-	@echo "[quickstart-docker] Starting tldw_server via Docker Compose..."
-	@command -v docker >/dev/null 2>&1 || (echo "[quickstart-docker] docker not found. Install Docker and retry." && exit 1)
-	docker compose --env-file $(TLDW_ENV_FILE) -f $(DOCKER_BASE_COMPOSE) up -d $(DOCKER_BUILD_FLAG)
-	@echo ""
-	@echo "[quickstart-docker] Server running at http://localhost:8000"
-	@echo "[quickstart-docker] API docs at:    http://localhost:8000/docs"
-	@echo "[quickstart-docker] Setup wizard:   http://localhost:8000/setup"
-	@echo "[quickstart-docker] Verify with:    curl http://localhost:8000/health"
-	@echo "[quickstart-docker] Your API key:   run 'make show-api-key' to retrieve"
-	@echo ""
-
-quickstart-docker-webui: quickstart-docker-bootstrap
-	@echo "[quickstart-docker-webui] Starting API + WebUI via Docker Compose..."
-	@command -v docker >/dev/null 2>&1 || (echo "[quickstart-docker-webui] docker not found. Install Docker and retry." && exit 1)
-	@echo "[quickstart-docker-webui] Deployment mode: $(NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE)"
-	@echo "[quickstart-docker-webui] Internal API origin: $(TLDW_INTERNAL_API_ORIGIN)"
-	@if [ -n "$(NEXT_PUBLIC_API_URL)" ]; then \
-		echo "[quickstart-docker-webui] Browser API override: $(NEXT_PUBLIC_API_URL)"; \
-	fi
-	NEXT_PUBLIC_API_URL="$(NEXT_PUBLIC_API_URL)" \
-	NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE="$(NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE)" \
-	TLDW_INTERNAL_API_ORIGIN="$(TLDW_INTERNAL_API_ORIGIN)" \
-	docker compose --env-file $(TLDW_ENV_FILE) -f $(DOCKER_BASE_COMPOSE) -f $(DOCKER_WEBUI_COMPOSE) up -d $(DOCKER_BUILD_FLAG)
-	@echo ""
-	@echo "╔══════════════════════════════════════════════════════════════╗"
-	@echo "║  tldw is starting up!                                       ║"
-	@echo "╠══════════════════════════════════════════════════════════════╣"
-	@echo "║  API:         http://localhost:8000                          ║"
-	@echo "║  WebUI:       http://localhost:8080                          ║"
-	@echo "║  API Docs:    http://localhost:8000/docs                     ║"
-	@echo "║  Setup:       http://localhost:8000/setup                    ║"
-	@echo "╠══════════════════════════════════════════════════════════════╣"
-	@echo "║  Your API Key:                                               ║"
-	@if [ -f "$(TLDW_ENV_FILE)" ]; then \
-		KEY=$$(grep '^SINGLE_USER_API_KEY=' "$(TLDW_ENV_FILE)" | cut -d= -f2-); \
-		echo "║    $$KEY"; \
-	else \
-		echo "║    (run 'make show-api-key' to retrieve)"; \
-	fi
-	@echo "╠══════════════════════════════════════════════════════════════╣"
-	@echo "║  Next steps:                                                 ║"
-	@echo "║  1. Open WebUI at http://localhost:8080                      ║"
-	@echo "║  2. Paste your API key when prompted                         ║"
-	@echo "║  3. Add an LLM provider key (OpenAI, Anthropic, etc.)       ║"
-	@echo "║     → Edit tldw_Server_API/Config_Files/.env                 ║"
-	@echo "║     → Add OPENAI_API_KEY=sk-... (or other provider)         ║"
-	@echo "║     → Restart: docker compose up -d                           ║"
-	@echo "║  4. Try chatting or ingesting a YouTube URL!                 ║"
-	@echo "╚══════════════════════════════════════════════════════════════╝"
-	@echo ""
 
 model-cycle:
 	@command -v docker >/dev/null 2>&1 || (echo "[model-cycle] docker not found. Install Docker and retry." && exit 1)

@@ -1019,6 +1019,12 @@
   "managePrompts_filterHelp": {
     "message": "Search matches title and prompt content. Use type and tags to narrow the list."
   },
+  "managePrompts_drawer_multiSectionTitle": {
+    "message": "Multi-section prompt mode"
+  },
+  "managePrompts_drawer_multiSectionDescription": {
+    "message": "This prompt uses a block-based structure with separate sections for instructions, context, and examples. The text fields above are read-only summaries. Use the block editor below to make changes."
+  },
   "managePrompts_copilotEmptyTitle": {
     "message": "No Copilot prompts available"
   },
@@ -4672,6 +4678,24 @@
   },
   "managePrompts_studio_evaluations_detail_testRunResults": {
     "message": "Test Run Results"
+  },
+  "managePrompts_studio_evaluations_metrics_accuracy": {
+    "message": "Accuracy"
+  },
+  "managePrompts_studio_evaluations_metrics_passRate": {
+    "message": "Pass Rate"
+  },
+  "managePrompts_studio_evaluations_metrics_f1": {
+    "message": "F1 Score"
+  },
+  "managePrompts_studio_evaluations_tooltip_accuracy": {
+    "message": "How often the model's output exactly matches the expected answer"
+  },
+  "managePrompts_studio_evaluations_tooltip_passRate": {
+    "message": "Percentage of test cases where the output met the quality threshold"
+  },
+  "managePrompts_studio_evaluations_tooltip_f1": {
+    "message": "Balances precision (relevance of results) and recall (coverage of expected content). Higher is better, max 1.0"
   },
   "managePrompts_studio_optimizations_title": {
     "message": "Optimizations"

@@ -102,3 +102,29 @@ def test_verify_errors_on_endpoint_failure(monkeypatch):
     payload = assert_wizard_json(result.output, command="verify", status="error")
     notes = payload.get("notes") or []
     assert "One or more endpoints failed checks." in notes
+
+
+def test_verify_profile_dry_run_json_includes_env_path(tmp_path):
+    env_path = tmp_path / ".env"
+
+    result = runner.invoke(
+        wizard_cli.app,
+        [
+            "verify",
+            "--profile",
+            "docker-multi-postgres",
+            "--env-file",
+            str(env_path),
+            "--dry-run",
+            "--json",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = assert_wizard_json(result.output, command="verify", status="ok")
+    assert payload.get("dry_run") is True
+    assert payload.get("facts", {}).get("profile") == "docker-multi-postgres"
+    assert payload.get("paths", {}).get("env") == str(env_path.resolve())
+    actions = payload.get("actions") or []
+    assert_action_field(actions, "server", "mode", "dry_run")
+    assert_action_field(actions, "server", "profile", "docker-multi-postgres")

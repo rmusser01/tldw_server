@@ -10,7 +10,7 @@ test.describe("Flashcards workspace UX", () => {
     page: import("@playwright/test").Page,
     timeoutMs = 15000
   ) => {
-    const managerTab = page.getByRole("tab", { name: "Review", exact: true })
+    const managerTab = page.getByRole("tab", { name: /^(Review|Study)$/i })
     const offlineHeadline = page.getByText(
       /Connect to use Flashcards|Explore Flashcards in demo mode|Flashcards API not available|Can.?t reach your tldw server/i
     )
@@ -127,7 +127,7 @@ test.describe("Flashcards workspace UX", () => {
   }
 
   const openCreateDrawer = async (page: import("@playwright/test").Page) => {
-    const cardsTab = page.getByRole("tab", { name: "Cards", exact: true })
+    const cardsTab = page.getByRole("tab", { name: /^(Cards|Manage)$/i })
     await expect(cardsTab).toBeVisible()
     await cardsTab.click()
 
@@ -471,11 +471,14 @@ test.describe("Flashcards workspace UX", () => {
 
       const tabsRoot = page
         .locator(".ant-tabs")
-        .filter({ has: page.getByRole("tab", { name: "Review", exact: true }) })
+        .filter({ has: page.getByRole("tab", { name: /^(Review|Study)$/i }) })
         .first()
       await expect(tabsRoot).toBeVisible()
-      const getTabPanel = async (name: string) => {
-        const tab = tabsRoot.getByRole("tab", { name, exact: true })
+      const getTabPanel = async (name: string | RegExp) => {
+        const tab =
+          typeof name === "string"
+            ? tabsRoot.getByRole("tab", { name, exact: true })
+            : tabsRoot.getByRole("tab", { name })
         await expect(tab).toBeVisible()
         await tab.scrollIntoViewIfNeeded()
         await tab.click()
@@ -489,7 +492,7 @@ test.describe("Flashcards workspace UX", () => {
       }
 
       mark("review tab")
-      const reviewPanel = await getTabPanel("Review")
+      const reviewPanel = await getTabPanel(/^(Review|Study)$/i)
       const reviewDeckSelect = reviewPanel.getByTestId(
         "flashcards-review-deck-select"
       )
@@ -505,6 +508,23 @@ test.describe("Flashcards workspace UX", () => {
           mark("review tab: deck selected")
         } else {
           mark("review tab: deck option not visible")
+        }
+      }
+      const promptSideToggle = reviewPanel.getByTestId(
+        "flashcards-review-prompt-side-toggle"
+      )
+      if ((await promptSideToggle.count()) > 0) {
+        mark("review tab: prompt side toggle")
+        await expect(promptSideToggle).toBeVisible()
+        const frontFirst = promptSideToggle.getByText("Front first", { exact: true })
+        const backFirst = promptSideToggle.getByText("Back first", { exact: true })
+        if ((await backFirst.count()) > 0) {
+          await backFirst.click()
+          await expect(backFirst).toBeVisible()
+        }
+        if ((await frontFirst.count()) > 0) {
+          await frontFirst.click()
+          await expect(frontFirst).toBeVisible()
         }
       }
       const showAnswerButton = reviewPanel.getByTestId(
@@ -552,6 +572,13 @@ test.describe("Flashcards workspace UX", () => {
           )
           .toBeTruthy()
         mark("review tab: ready for next card")
+      }
+
+      const templatesTab = tabsRoot.getByRole("tab", { name: /Templates/i })
+      if ((await templatesTab.count()) > 0) {
+        mark("templates tab")
+        const templatesPanel = await getTabPanel(/Templates/i)
+        await expect(templatesPanel).toBeVisible()
       }
 
       mark("cards tab: create")
@@ -677,7 +704,7 @@ test.describe("Flashcards workspace UX", () => {
       mark("cards tab: create drawer closed")
 
       mark("cards tab")
-      const managePanel = await getTabPanel("Cards")
+      const managePanel = await getTabPanel(/^(Cards|Manage)$/i)
       mark("cards tab: panel ready")
       const manageSearch = await pick(
         managePanel.getByTestId("flashcards-manage-search"),
@@ -922,7 +949,7 @@ test.describe("Flashcards workspace UX", () => {
         await clickVisibleMenuItem(page, /Review now/i, "Review now")
       }
       const reviewActivated = await page
-        .getByRole("tab", { name: "Review", exact: true })
+        .getByRole("tab", { name: /^(Review|Study)$/i })
         .getAttribute("aria-selected")
         .then((value) => value === "true")
         .catch(() => false)
@@ -1068,7 +1095,7 @@ test.describe("Flashcards workspace UX", () => {
         .toBe(true)
 
       mark("cards tab: bulk actions")
-      const bulkPanel = await getTabPanel("Cards")
+      const bulkPanel = await getTabPanel(/^(Cards|Manage)$/i)
       const bulkSearch = await pick(
         bulkPanel.getByTestId("flashcards-manage-search"),
         bulkPanel.getByPlaceholder(/Search/i)

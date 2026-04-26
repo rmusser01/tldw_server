@@ -15,6 +15,7 @@ from typing import Any, Dict, List, Optional
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from fastapi import WebSocketDisconnect
 from fastapi.testclient import TestClient
 from starlette.testclient import WebSocketTestSession
 
@@ -23,6 +24,7 @@ from tldw_Server_API.app.core.Agent_Client_Protocol.runner_client import (
     PendingPermission,
     SessionWebSocketRegistry,
 )
+from tldw_Server_API.app.core.Agent_Client_Protocol.event_bus import SessionEventBus
 from tldw_Server_API.app.core.Agent_Client_Protocol.stdio_client import ACPMessage
 from tldw_Server_API.app.services.acp_runtime_policy_service import (
     ACPRuntimePolicySnapshot,
@@ -144,6 +146,31 @@ class MockRunnerClient:
         if session_id in self._ws_callbacks:
             for callback in self._ws_callbacks[session_id]:
                 await callback(message)
+
+
+class _FakeMultiplexWebSocket:
+    """Minimal async WebSocket stub for direct multiplex endpoint tests."""
+
+    def __init__(self, incoming: list[str] | None = None, headers: dict[str, str] | None = None) -> None:
+        self._incoming = list(incoming or [])
+        self.headers = headers or {}
+        self.accepted = False
+        self.closed_codes: list[int] = []
+        self.sent_text: list[str] = []
+
+    async def accept(self) -> None:
+        self.accepted = True
+
+    async def close(self, code: int = 1000) -> None:
+        self.closed_codes.append(code)
+
+    async def receive_text(self) -> str:
+        if self._incoming:
+            return self._incoming.pop(0)
+        raise WebSocketDisconnect(code=1000)
+
+    async def send_text(self, raw: str) -> None:
+        self.sent_text.append(raw)
 
 
 @pytest.fixture
@@ -927,3 +954,142 @@ class TestACPRunnerClientPermissions:
         assert prompts[0]["approval_requirement"] == "approval_required"
         assert prompts[0]["provenance_summary"] == {"source_kinds": ["profile"]}
         assert prompts[0]["policy_snapshot_fingerprint"] == "snapshot-message"
+
+
+class TestACPMultiplexWebSocket:
+    @pytest.mark.asyncio
+    async def test_multiplex_rejects_unauthenticated_client(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        import tldw_Server_API.app.api.v1.endpoints.acp_multiplex as multiplex_endpoints
+
+        async def _fake_authenticate_ws(*args: Any, **kwargs: Any) -> None:
+            return None
+
+        monkeypatch.setattr(multiplex_endpoints, "_authenticate_ws", _fake_authenticate_ws)
+        ws = _FakeMultiplexWebSocket()
+
+        await multiplex_endpoints.acp_multiplex_ws(ws, token="bad-token")
+
+        assert ws.accepted is False
+        assert ws.closed_codes == [4401]
+
+    @pytest.mark.asyncio
+    async def test_multiplex_stream_open_checks_access_and_releases_quota(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        import tldw_Server_API.app.api.v1.endpoints.acp_multiplex as multiplex_endpoints
+
+        quota_acquire_calls: list[dict[str, Any]] = []
+        quota_release_calls: list[dict[str, str | None]] = []
+        bus = SessionEventBus("sess-1")
+
+        class _StubClient:
+            def __init__(self) -> None:
+                self.access_checks: list[tuple[str, int]] = []
+
+            async def verify_session_access(self, session_id: str, user_id: int) -> bool:
+                self.access_checks.append((session_id, user_id))
+                return True
+
+            async def get_session_metadata(
+                self,
+                session_id: str,
+                user_id: int | None = None,
+            ) -> dict[str, Any]:
+                return {"persona_id": "persona-1"}
+
+        stub_client = _StubClient()
+
+        async def _fake_authenticate_ws(*args: Any, **kwargs: Any) -> int:
+            return 7
+
+        async def _fake_get_runner_client() -> _StubClient:
+            return stub_client
+
+        def _fake_get_session_event_bus(session_id: str) -> SessionEventBus | None:
+            return bus if session_id == "sess-1" else None
+
+        def _fake_try_acquire_quota(*, user_id: int, session_id: str, persona_id: str | None):
+            quota_acquire_calls.append(
+                {"user_id": user_id, "session_id": session_id, "persona_id": persona_id}
+            )
+            return {
+                "user_key": f"user:{user_id}",
+                "persona_key": f"persona:{persona_id}",
+                "session_key": f"session:{session_id}",
+            }, None
+
+        def _fake_release_quota(token: dict[str, str | None] | None) -> None:
+            if token is not None:
+                quota_release_calls.append(token)
+
+        monkeypatch.setattr(multiplex_endpoints, "_authenticate_ws", _fake_authenticate_ws)
+        monkeypatch.setattr(multiplex_endpoints, "get_runner_client", _fake_get_runner_client)
+        monkeypatch.setattr(multiplex_endpoints, "get_session_event_bus", _fake_get_session_event_bus)
+        monkeypatch.setattr(multiplex_endpoints, "_acp_ws_try_acquire_quota", _fake_try_acquire_quota)
+        monkeypatch.setattr(multiplex_endpoints, "_acp_ws_release_quota", _fake_release_quota)
+
+        ws = _FakeMultiplexWebSocket(
+            incoming=[multiplex_endpoints.MultiplexMessage.stream_open("sess-1").to_json()],
+        )
+
+        await multiplex_endpoints.acp_multiplex_ws(ws, token="valid-token")
+
+        assert ws.accepted is True
+        assert stub_client.access_checks == [("sess-1", 7)]
+        assert quota_acquire_calls == [
+            {"user_id": 7, "session_id": "sess-1", "persona_id": "persona-1"}
+        ]
+        assert quota_release_calls == [
+            {
+                "user_key": "user:7",
+                "persona_key": "persona:persona-1",
+                "session_key": "session:sess-1",
+            }
+        ]
+
+    @pytest.mark.asyncio
+    async def test_multiplex_sends_error_frame_for_handler_exception(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        import tldw_Server_API.app.api.v1.endpoints.acp_multiplex as multiplex_endpoints
+
+        lifecycle = {"started": 0, "stopped": 0}
+
+        class _StubManager:
+            def __init__(self, *args: Any, **kwargs: Any) -> None:
+                pass
+
+            def start(self) -> None:
+                lifecycle["started"] += 1
+
+            async def handle_message(self, raw: str) -> None:
+                raise RuntimeError("boom")
+
+            async def stop(self) -> None:
+                lifecycle["stopped"] += 1
+
+        async def _fake_authenticate_ws(*args: Any, **kwargs: Any) -> int:
+            return 1
+
+        async def _fake_get_runner_client() -> MockRunnerClient:
+            return MockRunnerClient()
+
+        monkeypatch.setattr(multiplex_endpoints, "_authenticate_ws", _fake_authenticate_ws)
+        monkeypatch.setattr(multiplex_endpoints, "get_runner_client", _fake_get_runner_client)
+        monkeypatch.setattr(multiplex_endpoints, "MultiplexManager", _StubManager)
+
+        ws = _FakeMultiplexWebSocket(
+            incoming=[multiplex_endpoints.MultiplexMessage.ping().to_json()],
+        )
+
+        await multiplex_endpoints.acp_multiplex_ws(ws, token="valid-token")
+
+        assert lifecycle == {"started": 1, "stopped": 1}
+        assert len(ws.sent_text) == 1
+        error_message = multiplex_endpoints.MultiplexMessage.from_json(ws.sent_text[0])
+        assert error_message.type.value == "error"

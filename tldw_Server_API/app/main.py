@@ -6,6 +6,7 @@ import asyncio
 import logging
 import os
 from collections.abc import Iterator, Mapping
+from dataclasses import dataclass
 
 #
 # Local Imports
@@ -18,6 +19,7 @@ import os as _env_os
 # 3rd-party Libraries
 import sys
 import threading
+import time
 from contextlib import asynccontextmanager, contextmanager, suppress
 from pathlib import Path
 from typing import Any
@@ -29,7 +31,7 @@ from fastapi.routing import APIRoute
 from loguru import logger
 from starlette import status as _starlette_status
 from starlette.requests import ClientDisconnect
-from starlette.responses import FileResponse
+from starlette.responses import FileResponse, Response
 from starlette.staticfiles import StaticFiles
 
 from tldw_Server_API.app.core.startup_logging import (
@@ -222,16 +224,14 @@ def _build_coordinated_shutdown_coordinator(
             coordinator,
             legacy_shutdown_plan,
         )
-    except (_STARTUP_GUARD_EXCEPTIONS + _IMPORT_EXCEPTIONS):
+    except _STARTUP_GUARD_EXCEPTIONS + _IMPORT_EXCEPTIONS:
         legacy_components = []
     transport_components = build_shutdown_components(transport_registry)
     for component in transport_components:
         coordinator.register(component)
 
     try:
-        app.state._tldw_shutdown_transport_component_names = [
-            component.name for component in transport_components
-        ]
+        app.state._tldw_shutdown_transport_component_names = [component.name for component in transport_components]
     except _STARTUP_GUARD_EXCEPTIONS:
         pass
 
@@ -249,7 +249,7 @@ async def _run_coordinated_shutdown(
         from tldw_Server_API.app.services.shutdown_legacy_adapters import (
             get_legacy_shutdown_suppressed_component_names,
         )
-    except (_STARTUP_GUARD_EXCEPTIONS + _IMPORT_EXCEPTIONS):
+    except _STARTUP_GUARD_EXCEPTIONS + _IMPORT_EXCEPTIONS:
         get_legacy_shutdown_suppressed_component_names = lambda _summary: set()
 
     (
@@ -274,9 +274,7 @@ async def _run_coordinated_shutdown(
     }
     try:
         app.state._tldw_shutdown_legacy_coordinator_summary = coordinated_legacy_summary
-        app.state._tldw_shutdown_legacy_coordinator_component_names = [
-            component.name for component in all_components
-        ]
+        app.state._tldw_shutdown_legacy_coordinator_component_names = [component.name for component in all_components]
         app.state._tldw_shutdown_legacy_coordinator_phase_groups = {
             phase.value: phase_summary.component_names
             for phase, phase_summary in coordinated_legacy_summary.phases.items()
@@ -293,6 +291,285 @@ async def _run_coordinated_shutdown(
         coordinated_legacy_summary.wall_time_ms,
     )
     return coordinated_legacy_component_names
+
+
+@dataclass
+class _ManagedJobPoller:
+    """Shutdown-owned in-process job poller handle."""
+
+    name: str
+    task: asyncio.Task[Any]
+    stop_event: asyncio.Event | None = None
+    timeout_sec: float = 5.0
+
+
+def _publish_shutdown_job_poller_inventory(
+    app: FastAPI,
+    handles: list[_ManagedJobPoller],
+) -> None:
+    """Expose shutdown-owned job poller metadata on app.state."""
+    inventory = [
+        {
+            "name": handle.name,
+            "task_name": handle.task.get_name(),
+            "has_stop_event": handle.stop_event is not None,
+            "timeout_sec": handle.timeout_sec,
+        }
+        for handle in handles
+    ]
+    try:
+        app.state._tldw_shutdown_job_poller_inventory = inventory
+    except _STARTUP_GUARD_EXCEPTIONS:
+        pass
+
+
+def _register_owned_job_poller(
+    app: FastAPI,
+    handles: list[_ManagedJobPoller],
+    *,
+    name: str,
+    task: asyncio.Task[Any] | None,
+    stop_event: asyncio.Event | None = None,
+    timeout_sec: float = 5.0,
+) -> None:
+    """Register one shutdown-owned job poller and refresh app-state inventory."""
+    if task is None:
+        return
+    handles.append(
+        _ManagedJobPoller(
+            name=name,
+            task=task,
+            stop_event=stop_event,
+            timeout_sec=timeout_sec,
+        )
+    )
+    _publish_shutdown_job_poller_inventory(app, handles)
+
+
+def _replace_owned_job_poller_inventory(
+    app: FastAPI,
+    handles: list[_ManagedJobPoller],
+    *,
+    registrations: list[tuple[str, asyncio.Task[Any] | None, asyncio.Event | None, float]],
+) -> None:
+    """Replace the managed job-poller inventory with the current owned poller set."""
+    handles.clear()
+    _publish_shutdown_job_poller_inventory(app, handles)
+    for name, task, stop_event, timeout_sec in registrations:
+        _register_owned_job_poller(
+            app,
+            handles,
+            name=name,
+            task=task,
+            stop_event=stop_event,
+            timeout_sec=timeout_sec,
+        )
+
+
+def _record_shutdown_timing_segment(
+    app: FastAPI,
+    segment: str,
+    duration_ms: int,
+    **extra: object,
+) -> None:
+    """Store one shutdown timing segment and emit a consistent log line."""
+    payload = {"segment": segment, "duration_ms": max(int(duration_ms), 0), **extra}
+    segments = getattr(app.state, "_tldw_shutdown_timing_segments", None)
+    if not isinstance(segments, list):
+        segments = []
+        try:
+            app.state._tldw_shutdown_timing_segments = segments
+        except _STARTUP_GUARD_EXCEPTIONS:
+            return
+    segments.append(payload)
+    extra_text = " ".join(f"{key}={value}" for key, value in extra.items())
+    if extra_text:
+        logger.info(f"App Shutdown Timing: segment={segment} duration_ms={payload['duration_ms']} {extra_text}")
+    else:
+        logger.info(f"App Shutdown Timing: segment={segment} duration_ms={payload['duration_ms']}")
+
+
+@contextmanager
+def _timed_shutdown_segment(
+    app: FastAPI,
+    segment: str,
+    **extra: object,
+) -> Iterator[None]:
+    """Measure a shutdown block with monotonic time and record it on app.state."""
+    started = time.monotonic()
+    try:
+        yield
+    finally:
+        duration_ms = int((time.monotonic() - started) * 1000)
+        _record_shutdown_timing_segment(app, segment, duration_ms, **extra)
+
+
+def _record_shutdown_timing_total(app: FastAPI, duration_ms: int) -> None:
+    """Record total teardown time and summarize the slowest non-total segment."""
+    segments = getattr(app.state, "_tldw_shutdown_timing_segments", [])
+    non_total_segments = [
+        entry for entry in segments if isinstance(entry, dict) and entry.get("segment") != "total app teardown"
+    ]
+    if non_total_segments:
+        slowest = max(non_total_segments, key=lambda entry: int(entry.get("duration_ms", 0)))
+        slowest_segment = str(slowest.get("segment", ""))
+        slowest_duration_ms = int(slowest.get("duration_ms", 0))
+    else:
+        slowest_segment = "total app teardown"
+        slowest_duration_ms = max(int(duration_ms), 0)
+    _record_shutdown_timing_segment(app, "total app teardown", duration_ms)
+    summary = {
+        "duration_ms": max(int(duration_ms), 0),
+        "slowest_segment": slowest_segment,
+        "slowest_duration_ms": slowest_duration_ms,
+    }
+    try:
+        app.state._tldw_shutdown_timing_total = summary
+    except _STARTUP_GUARD_EXCEPTIONS:
+        pass
+    logger.info(
+        "App Shutdown Timing: total duration_ms={} slowest_segment={} slowest_duration_ms={}",
+        summary["duration_ms"],
+        summary["slowest_segment"],
+        summary["slowest_duration_ms"],
+    )
+
+
+async def _stop_registered_job_pollers(
+    app: FastAPI,
+    handles: list[_ManagedJobPoller],
+) -> None:
+    """Stop registered job pollers, preferring explicit stop events."""
+
+    async def _await_job_poller_shutdown(handle: _ManagedJobPoller) -> bool:
+        try:
+            await asyncio.wait_for(asyncio.shield(handle.task), timeout=handle.timeout_sec)
+        except asyncio.CancelledError:
+            return bool(handle.task.done())
+        except asyncio.TimeoutError:
+            logger.warning(
+                "App Shutdown: Timed out waiting for job poller {} after {}s; cancelling",
+                handle.name,
+                handle.timeout_sec,
+            )
+            handle.task.cancel()
+            try:
+                await asyncio.wait_for(handle.task, timeout=1.0)
+            except asyncio.CancelledError:
+                pass
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "App Shutdown: Job poller {} did not cancel within 1.0s after timeout",
+                    handle.name,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "App Shutdown: Job poller {} raised after cancellation: {}",
+                    handle.name,
+                    exc,
+                )
+            except _STARTUP_GUARD_EXCEPTIONS as exc:
+                logger.debug(
+                    "App Shutdown: Job poller cancel guard triggered for {}: {}",
+                    handle.name,
+                    exc,
+                )
+        except _STARTUP_GUARD_EXCEPTIONS as exc:
+            logger.debug(
+                "App Shutdown: Job poller stop guard triggered for {}: {}",
+                handle.name,
+                exc,
+            )
+        except Exception as exc:
+            logger.warning(
+                "App Shutdown: Job poller {} exited during shutdown: {}",
+                handle.name,
+                exc,
+            )
+        return bool(handle.task.done())
+
+    for handle in handles:
+        if handle.stop_event is not None:
+            handle.stop_event.set()
+        else:
+            with suppress(_STARTUP_GUARD_EXCEPTIONS):
+                handle.task.cancel()
+
+    quiesce_results = await asyncio.gather(
+        *(_await_job_poller_shutdown(handle) for handle in handles),
+        return_exceptions=False,
+    )
+    try:
+        app.state._tldw_shutdown_quiesced_job_poller_names = [
+            handle.name for handle, quiesced in zip(handles, quiesce_results) if quiesced
+        ]
+    except _STARTUP_GUARD_EXCEPTIONS:
+        pass
+
+
+async def _quiesce_owned_job_pollers_for_shutdown(
+    app: FastAPI,
+    handles: list[_ManagedJobPoller],
+    *,
+    wait_for_leases_sec: int | float,
+    count_active_processing: Any,
+) -> None:
+    """Optionally wait for active leases, then quiesce owned job pollers.
+
+    This helper runs only after the shutdown transition handoff has enabled the
+    Jobs acquire gate, so the bounded wait drains already-leased work rather
+    than allowing new in-process pollers to claim fresh jobs.
+    """
+    lease_wait_started = time.monotonic()
+    initial_active = 0
+    if wait_for_leases_sec > 0 and handles:
+        try:
+            initial_active = max(int(count_active_processing()), 0)
+        except _STARTUP_GUARD_EXCEPTIONS:
+            initial_active = 0
+        if initial_active > 0:
+            deadline = time.monotonic() + float(wait_for_leases_sec)
+            active = initial_active
+            while active > 0:
+                remaining_sec = deadline - time.monotonic()
+                if remaining_sec <= 0:
+                    break
+                await asyncio.sleep(min(0.5, remaining_sec))
+                try:
+                    active = max(int(count_active_processing()), 0)
+                except _STARTUP_GUARD_EXCEPTIONS:
+                    active = 0
+            duration_ms = int((time.monotonic() - lease_wait_started) * 1000)
+            _record_shutdown_timing_segment(
+                app,
+                "optional_lease_wait",
+                duration_ms,
+                skipped=False,
+                initial_active=initial_active,
+                wait_for_leases_sec=float(wait_for_leases_sec),
+            )
+        else:
+            _record_shutdown_timing_segment(
+                app,
+                "optional_lease_wait",
+                0,
+                skipped=True,
+                initial_active=0,
+                wait_for_leases_sec=float(wait_for_leases_sec),
+            )
+    else:
+        _record_shutdown_timing_segment(
+            app,
+            "optional_lease_wait",
+            0,
+            skipped=True,
+            initial_active=0,
+            wait_for_leases_sec=float(wait_for_leases_sec),
+        )
+
+    with _timed_shutdown_segment(app, "job_poller_quiesce", poller_count=len(handles)):
+        await _stop_registered_job_pollers(app, handles)
+
 
 _early_os.environ.setdefault("MCP_INHERIT_GLOBAL_LOGGER", "1")
 try:
@@ -491,7 +768,7 @@ class _StderrInterceptor:
             ("DEBUG:", "debug"),
         ):
             if text.startswith(prefix):
-                msg = text[len(prefix):].lstrip()
+                msg = text[len(prefix) :].lstrip()
                 level = lvl
                 break
         try:
@@ -569,11 +846,13 @@ class _StderrInterceptor:
         fn = getattr(self._stream, "fileno", None)
         if fn is None:
             import io
+
             raise io.UnsupportedOperation("fileno")
         return fn()
 
     def __getattr__(self, name):
         return getattr(self._stream, name)
+
 
 def _redirect_external_loggers() -> None:
     """Ensure third-party loggers route through our Loguru interceptor."""
@@ -634,6 +913,7 @@ def _unwrap_stderr(stream):
     if isinstance(stream, _StderrInterceptor):
         return stream._stream
     return stream
+
 
 # Reset Loguru and configure a single, thread-safe sink
 logger.remove()
@@ -1059,7 +1339,9 @@ else:
     _full_audio_import_enabled = True
     if _in_pytest_cmd and not _env_flag_enabled("MINIMAL_TEST_INCLUDE_AUDIO"):
         _full_audio_import_enabled = False
-        logger.info("Skipping audio endpoint imports in pytest full startup (set MINIMAL_TEST_INCLUDE_AUDIO=1 to enable)")
+        logger.info(
+            "Skipping audio endpoint imports in pytest full startup (set MINIMAL_TEST_INCLUDE_AUDIO=1 to enable)"
+        )
 
     # Audio Endpoint (includes WebSocket streaming transcription)
     if _full_audio_import_enabled:
@@ -1240,6 +1522,7 @@ else:
     from tldw_Server_API.app.api.v1.endpoints.notes import router as notes_router
     from tldw_Server_API.app.api.v1.endpoints.slides import router as slides_router
     from tldw_Server_API.app.api.v1.endpoints.translate import router as translate_router
+
     try:
         from tldw_Server_API.app.api.v1.endpoints.web_clipper import router as web_clipper_router
 
@@ -1322,9 +1605,7 @@ else:
 
         _HAS_CHAT_WORKFLOWS = True
     except _IMPORT_EXCEPTIONS as _chat_wf_import_err:
-        logger.warning(
-            f"Chat workflows endpoints unavailable; skipping import: {_chat_wf_import_err}"
-        )
+        logger.warning(f"Chat workflows endpoints unavailable; skipping import: {_chat_wf_import_err}")
         _HAS_CHAT_WORKFLOWS = False
 # Legacy RAG Endpoint (Deprecated)
 # from tldw_Server_API.app.api.v1.endpoints.rag import router as retrieval_agent_router
@@ -1342,6 +1623,7 @@ elif _MINIMAL_TEST_APP:
     from tldw_Server_API.app.api.v1.endpoints.privileges import router as privileges_router
     from tldw_Server_API.app.api.v1.endpoints.research import router as research_router
     from tldw_Server_API.app.api.v1.endpoints.research_runs import router as research_runs_router
+
     try:
         from tldw_Server_API.app.api.v1.endpoints.setup import router as setup_router
     except _IMPORT_EXCEPTIONS as _setup_min_import_err:
@@ -1445,9 +1727,15 @@ else:
     except _IMPORT_EXCEPTIONS as _acp_perm_err:
         logger.warning(f"ACP permissions endpoints unavailable at import time; deferring: {_acp_perm_err}")
         acp_permissions_router = None  # type: ignore[assignment]
+    try:
+        from tldw_Server_API.app.api.v1.endpoints.acp_multiplex import router as acp_multiplex_router
+    except _IMPORT_EXCEPTIONS as _acp_mpx_err:
+        logger.warning(f"ACP multiplex endpoints unavailable at import time; deferring: {_acp_mpx_err}")
+        acp_multiplex_router = None  # type: ignore[assignment]
     # Users Endpoint (NEW)
     # Chatbooks Endpoint
     from tldw_Server_API.app.api.v1.endpoints.chatbooks import router as chatbooks_router
+
     # Sharing Endpoint
     from tldw_Server_API.app.api.v1.endpoints.sharing import router as sharing_router
     from tldw_Server_API.app.api.v1.endpoints.consent import router as consent_router
@@ -1487,6 +1775,7 @@ else:
     from tldw_Server_API.app.api.v1.endpoints.setup import router as setup_router
     from tldw_Server_API.app.api.v1.endpoints.shared_keys_scoped import router as shared_keys_scoped_router
     from tldw_Server_API.app.api.v1.endpoints.user_keys import router as user_keys_router
+
     try:
         from tldw_Server_API.app.api.v1.endpoints.users import router as users_router
     except _IMPORT_EXCEPTIONS as _users_import_err:
@@ -1663,6 +1952,7 @@ async def lifespan(app: FastAPI):
     # - default => synchronous (no deferral)
     try:
         import os as _env_os
+
         _disable = _shared_is_truthy(_env_os.getenv("DISABLE_HEAVY_STARTUP"))
         _defer_heavy = False if _disable else _shared_is_truthy(_env_os.getenv("DEFER_HEAVY_STARTUP"))
         # Default to synchronous (False) if neither flag is set
@@ -1798,6 +2088,7 @@ async def lifespan(app: FastAPI):
     if _sentry_dsn:
         try:
             import sentry_sdk
+
             sentry_sdk.init(
                 dsn=_sentry_dsn,
                 traces_sample_rate=float(os.getenv("SENTRY_TRACES_SAMPLE_RATE", "0.1")),
@@ -1806,7 +2097,7 @@ async def lifespan(app: FastAPI):
                 send_default_pii=False,
             )
             logger.info("App Startup: Sentry error tracking initialized")
-        except (_STARTUP_GUARD_EXCEPTIONS + _IMPORT_EXCEPTIONS) as _sentry_err:
+        except _STARTUP_GUARD_EXCEPTIONS + _IMPORT_EXCEPTIONS as _sentry_err:
             logger.warning("App Startup: Sentry initialization failed: {}", _sentry_err)
 
     # Startup: Warn if first-time setup is enabled (local-only, no proxies)
@@ -1826,9 +2117,7 @@ async def lifespan(app: FastAPI):
         from tldw_Server_API.app.core.AuthNZ.settings import get_settings as _get_auth_settings
 
         _auth_settings = _get_auth_settings()
-        _allow_corrupt_startup = _shared_is_truthy(
-            os.getenv("TLDW_ALLOW_CORRUPT_AUTHNZ_STARTUP")
-        )
+        _allow_corrupt_startup = _shared_is_truthy(os.getenv("TLDW_ALLOW_CORRUPT_AUTHNZ_STARTUP"))
         await verify_authnz_sqlite_startup_integrity(
             database_url=str(getattr(_auth_settings, "DATABASE_URL", "")),
             auth_mode=str(getattr(_auth_settings, "AUTH_MODE", "single_user")),
@@ -1837,13 +2126,10 @@ async def lifespan(app: FastAPI):
         )
         if _allow_corrupt_startup:
             logger.warning(
-                "App Startup: Corrupt AuthNZ DB fail-open mode enabled via "
-                "TLDW_ALLOW_CORRUPT_AUTHNZ_STARTUP=true"
+                "App Startup: Corrupt AuthNZ DB fail-open mode enabled via " "TLDW_ALLOW_CORRUPT_AUTHNZ_STARTUP=true"
             )
     except _STARTUP_GUARD_EXCEPTIONS as _integrity_err:
-        logger.exception(
-            f"App Startup: AuthNZ SQLite integrity preflight failed: {_integrity_err}"
-        )
+        logger.exception(f"App Startup: AuthNZ SQLite integrity preflight failed: {_integrity_err}")
         raise
 
     try:
@@ -2049,6 +2335,7 @@ async def lifespan(app: FastAPI):
 
             # Best-effort audit: warn on API routes not covered by RG route_map.
             try:
+
                 def _should_audit_rg_route_map() -> bool:
                     return _shared_is_truthy(os.getenv("RG_ROUTE_MAP_AUDIT", "true"))
 
@@ -2097,12 +2384,8 @@ async def lifespan(app: FastAPI):
                             missing.append((path, tags))
                             seen_paths.add(path)
                         if missing:
-                            sample = ", ".join(
-                                f"{p} (tags={tags})" for p, tags in missing[:10]
-                            )
-                            logger.warning(
-                                f"RG route_map missing coverage for {len(missing)} routes; sample: {sample}"
-                            )
+                            sample = ", ".join(f"{p} (tags={tags})" for p, tags in missing[:10])
+                            logger.warning(f"RG route_map missing coverage for {len(missing)} routes; sample: {sample}")
             except _IMPORT_EXCEPTIONS as _rg_audit_err:
                 logger.debug(f"RG route_map audit skipped: {_rg_audit_err}")
         except _IMPORT_EXCEPTIONS as _rg_err:
@@ -2224,8 +2507,7 @@ async def lifespan(app: FastAPI):
             except _STARTUP_GUARD_EXCEPTIONS as _llm_ep_err:
                 logger.debug(f"LLM manager initialized but not injected into llama.cpp endpoints: {_llm_ep_err}")
             logger.info(
-                ("Deferred startup: " if deferred else "App Startup: ")
-                + "Local LLM inference manager initialized"
+                ("Deferred startup: " if deferred else "App Startup: ") + "Local LLM inference manager initialized"
             )
         except _STARTUP_GUARD_EXCEPTIONS as _llm_init_err:
             if deferred:
@@ -2292,9 +2574,7 @@ async def lifespan(app: FastAPI):
                 if env_queued is not None:
                     queued_execution_enabled = _shared_is_truthy(env_queued)
                 else:
-                    queued_execution_enabled = _shared_is_truthy(
-                        str(chat_cfg.get("queued_execution", "False"))
-                    )
+                    queued_execution_enabled = _shared_is_truthy(str(chat_cfg.get("queued_execution", "False")))
             except _STARTUP_GUARD_EXCEPTIONS:
                 queued_execution_enabled = False
             if queued_execution_enabled:
@@ -2321,10 +2601,10 @@ async def lifespan(app: FastAPI):
     async def _init_rate_limiter(*, deferred: bool) -> None:
         try:
             from tldw_Server_API.app.core.config import rg_enabled as _rg_enabled_flag
+
             if _rg_enabled_flag(False):
                 logger.info(
-                    ("Deferred startup: " if deferred else "App Startup: ")
-                    + "Rate limiter skipped (RG enabled)"
+                    ("Deferred startup: " if deferred else "App Startup: ") + "Rate limiter skipped (RG enabled)"
                 )
                 return
             from tldw_Server_API.app.core.Chat.rate_limiter import RateLimitConfig, initialize_rate_limiter
@@ -2519,6 +2799,19 @@ async def lifespan(app: FastAPI):
         if deferred:
             logger.info("Deferred startup: completed non-critical initializations")
 
+    # Load persona archetypes and MCP server catalog (lightweight YAML reads).
+    try:
+        from pathlib import Path as _ArchPath
+
+        from tldw_Server_API.app.core.Persona.archetype_loader import load_archetypes_from_directory
+        from tldw_Server_API.app.core.MCP_unified.catalog_loader import load_mcp_catalog
+
+        _config_dir = _ArchPath(__file__).resolve().parent.parent / "Config_Files"
+        load_archetypes_from_directory(_config_dir / "persona_archetypes")
+        load_mcp_catalog(_config_dir / "mcp_server_catalog.yaml")
+    except _STARTUP_GUARD_EXCEPTIONS + _IMPORT_EXCEPTIONS as _archetype_err:
+        logger.debug("Archetype/catalog loading skipped: {}", _archetype_err)
+
     # Initialize Chat Module Components (single log retained)
     logger.info("App Startup: Initializing Chat module components...")
 
@@ -2541,6 +2834,7 @@ async def lifespan(app: FastAPI):
     cleanup_task = None
     chatbooks_cleanup_task = None
     core_jobs_task = None
+    audiobook_jobs_task = None
     files_jobs_task = None
     data_tables_jobs_task = None
     prompt_studio_jobs_task = None
@@ -2552,23 +2846,64 @@ async def lifespan(app: FastAPI):
     reading_digest_jobs_task = None
     study_pack_jobs_task = None
     study_suggestions_jobs_task = None
+    companion_reflection_jobs_task = None
     reminder_jobs_task = None
     admin_backup_jobs_task = None
+    admin_byok_validation_jobs_task = None
+    connectors_jobs_task = None
+    evals_abtest_jobs_task = None
+    admin_maintenance_rotation_jobs_task = None
+    recipe_run_jobs_task = None
+    jobs_metrics_reconcile_task = None
+    loop_lag_task = None
+    jobs_crypto_rotate_task = None
+    jobs_webhooks_task = None
+    meetings_webhook_dlq_task = None
+    workflows_dlq_task = None
+    workflows_gc_task = None
+    workflows_maint_task = None
+    jobs_integrity_task = None
+    _tts_history_cleanup_task = None
     jobs_notifications_bridge_task = None
     chatbooks_cleanup_stop_event = None
+    audiobook_jobs_stop_event = None
+    core_jobs_stop_event = None
     files_jobs_stop_event = None
     data_tables_jobs_stop_event = None
     prompt_studio_jobs_stop_event = None
     privilege_snapshot_stop_event = None
+    embeddings_compactor_stop_event = None
+    audio_jobs_stop_event = None
     presentation_render_jobs_stop_event = None
     media_ingest_jobs_stop_event = None
     media_ingest_heavy_jobs_stop_event = None
     reading_digest_jobs_stop_event = None
     study_pack_jobs_stop_event = None
     study_suggestions_jobs_stop_event = None
+    companion_reflection_jobs_stop_event = None
+    reminder_jobs_stop_event = None
+    admin_backup_jobs_stop_event = None
+    admin_byok_validation_jobs_stop_event = None
+    admin_maintenance_rotation_jobs_stop_event = None
+    connectors_jobs_stop_event = None
+    evals_abtest_jobs_stop_event = None
+    recipe_run_jobs_stop_event = None
+    jobs_metrics_stop_event = None
+    jobs_metrics_reconcile_stop = None
+    loop_lag_stop_event = None
+    jobs_crypto_rotate_stop_event = None
+    jobs_webhooks_stop_event = None
+    meetings_webhook_dlq_stop_event = None
+    workflows_dlq_stop_event = None
+    workflows_gc_stop_event = None
+    workflows_maint_stop_event = None
+    jobs_integrity_stop_event = None
+    _tts_history_cleanup_stop_event = None
     claims_task = None
     jobs_metrics_task = None
     reminders_sched_task = None
+    owned_job_pollers: list[_ManagedJobPoller] = []
+    _publish_shutdown_job_poller_inventory(app, owned_job_pollers)
     try:
         import asyncio as _asyncio
         import os as _os
@@ -2682,7 +3017,11 @@ async def lifespan(app: FastAPI):
 
         _storage_cleanup_default = "false" if globals().get("_TEST_MODE") else "true"
         _storage_cleanup_enabled = _os.getenv("STORAGE_CLEANUP_ENABLED", _storage_cleanup_default).lower() in {
-            "true", "1", "yes", "y", "on"
+            "true",
+            "1",
+            "yes",
+            "y",
+            "on",
         }
         if _storage_cleanup_enabled:
             storage_cleanup_service = _get_storage_cleanup()
@@ -2715,6 +3054,13 @@ async def lifespan(app: FastAPI):
             core_jobs_stop_event = _asyncio.Event()
             core_jobs_task = _asyncio.create_task(_run_cb_jobs(core_jobs_stop_event))
             logger.info("Core Jobs worker (Chatbooks) started with explicit stop_event signal")
+            _register_owned_job_poller(
+                app,
+                owned_job_pollers,
+                name="core_jobs_task",
+                task=core_jobs_task,
+                stop_event=core_jobs_stop_event,
+            )
         else:
             logger.info("Core Jobs worker (Chatbooks) disabled by backend selection or flag")
     except _STARTUP_GUARD_EXCEPTIONS as e:
@@ -2734,6 +3080,13 @@ async def lifespan(app: FastAPI):
             files_jobs_stop_event = _asyncio.Event()
             files_jobs_task = _asyncio.create_task(_run_files_jobs(files_jobs_stop_event))
             logger.info("File Artifacts Jobs worker started with explicit stop_event signal")
+            _register_owned_job_poller(
+                app,
+                owned_job_pollers,
+                name="files_jobs_task",
+                task=files_jobs_task,
+                stop_event=files_jobs_stop_event,
+            )
         else:
             logger.info("File Artifacts Jobs worker disabled by flag (FILES_JOBS_WORKER_ENABLED)")
     except _STARTUP_GUARD_EXCEPTIONS as e:
@@ -2754,6 +3107,13 @@ async def lifespan(app: FastAPI):
             data_tables_jobs_stop_event = _asyncio.Event()
             data_tables_jobs_task = _asyncio.create_task(_run_data_tables_jobs(data_tables_jobs_stop_event))
             logger.info("Data Tables Jobs worker started with explicit stop_event signal")
+            _register_owned_job_poller(
+                app,
+                owned_job_pollers,
+                name="data_tables_jobs_task",
+                task=data_tables_jobs_task,
+                stop_event=data_tables_jobs_stop_event,
+            )
         else:
             logger.info("Data Tables Jobs worker disabled by flag (DATA_TABLES_JOBS_WORKER_ENABLED)")
     except _STARTUP_GUARD_EXCEPTIONS as e:
@@ -2774,6 +3134,13 @@ async def lifespan(app: FastAPI):
             prompt_studio_jobs_stop_event = _asyncio.Event()
             prompt_studio_jobs_task = _asyncio.create_task(_run_prompt_studio_jobs(prompt_studio_jobs_stop_event))
             logger.info("Prompt Studio Jobs worker started with explicit stop_event signal")
+            _register_owned_job_poller(
+                app,
+                owned_job_pollers,
+                name="prompt_studio_jobs_task",
+                task=prompt_studio_jobs_task,
+                stop_event=prompt_studio_jobs_stop_event,
+            )
         else:
             logger.info("Prompt Studio Jobs worker disabled by flag (PROMPT_STUDIO_JOBS_WORKER_ENABLED)")
     except _STARTUP_GUARD_EXCEPTIONS as e:
@@ -2793,6 +3160,13 @@ async def lifespan(app: FastAPI):
             study_pack_jobs_stop_event = _asyncio.Event()
             study_pack_jobs_task = _asyncio.create_task(_run_study_pack_jobs(study_pack_jobs_stop_event))
             logger.info("Study-pack Jobs worker started with explicit stop_event signal")
+            _register_owned_job_poller(
+                app,
+                owned_job_pollers,
+                name="study_pack_jobs_task",
+                task=study_pack_jobs_task,
+                stop_event=study_pack_jobs_stop_event,
+            )
         else:
             logger.info("Study-pack Jobs worker disabled by flag (STUDY_PACK_JOBS_WORKER_ENABLED)")
     except _STARTUP_GUARD_EXCEPTIONS as e:
@@ -2813,6 +3187,13 @@ async def lifespan(app: FastAPI):
                 _run_study_suggestions_jobs(study_suggestions_jobs_stop_event)
             )
             logger.info("Study-suggestions Jobs worker started with explicit stop_event signal")
+            _register_owned_job_poller(
+                app,
+                owned_job_pollers,
+                name="study_suggestions_jobs_task",
+                task=study_suggestions_jobs_task,
+                stop_event=study_suggestions_jobs_stop_event,
+            )
         else:
             logger.info("Study-suggestions Jobs worker disabled by flag (STUDY_SUGGESTIONS_JOBS_WORKER_ENABLED)")
     except _STARTUP_GUARD_EXCEPTIONS as e:
@@ -2832,6 +3213,13 @@ async def lifespan(app: FastAPI):
             privilege_snapshot_stop_event = _asyncio.Event()
             privilege_snapshot_task = _asyncio.create_task(_run_priv_snapshot(privilege_snapshot_stop_event))
             logger.info("Privilege snapshot worker started with explicit stop_event signal")
+            _register_owned_job_poller(
+                app,
+                owned_job_pollers,
+                name="privilege_snapshot_task",
+                task=privilege_snapshot_task,
+                stop_event=privilege_snapshot_stop_event,
+            )
         else:
             logger.info("Privilege snapshot worker disabled by flag (PRIVILEGE_SNAPSHOT_WORKER_ENABLED)")
     except _STARTUP_GUARD_EXCEPTIONS as e:
@@ -2884,6 +3272,13 @@ async def lifespan(app: FastAPI):
             audio_jobs_stop_event = _asyncio.Event()
             audio_jobs_task = _asyncio.create_task(_run_audio_jobs(audio_jobs_stop_event))
             logger.info("Audio Jobs worker started with explicit stop_event signal")
+            _register_owned_job_poller(
+                app,
+                owned_job_pollers,
+                name="audio_jobs_task",
+                task=audio_jobs_task,
+                stop_event=audio_jobs_stop_event,
+            )
         else:
             logger.info("Audio Jobs worker disabled by flag (AUDIO_JOBS_WORKER_ENABLED)")
     except _STARTUP_GUARD_EXCEPTIONS as e:
@@ -2902,6 +3297,13 @@ async def lifespan(app: FastAPI):
             audiobook_jobs_stop_event = _asyncio.Event()
             audiobook_jobs_task = _asyncio.create_task(_run_audiobook_jobs(audiobook_jobs_stop_event))
             logger.info("Audiobook Jobs worker started with explicit stop_event signal")
+            _register_owned_job_poller(
+                app,
+                owned_job_pollers,
+                name="audiobook_jobs_task",
+                task=audiobook_jobs_task,
+                stop_event=audiobook_jobs_stop_event,
+            )
         else:
             logger.info("Audiobook Jobs worker disabled by flag (AUDIOBOOK_JOBS_WORKER_ENABLED)")
     except _STARTUP_GUARD_EXCEPTIONS as e:
@@ -2922,10 +3324,15 @@ async def lifespan(app: FastAPI):
                 _run_presentation_render_jobs(presentation_render_jobs_stop_event)
             )
             logger.info("Presentation Render Jobs worker started with explicit stop_event signal")
-        else:
-            logger.info(
-                "Presentation Render Jobs worker disabled by flag (PRESENTATION_RENDER_JOBS_WORKER_ENABLED)"
+            _register_owned_job_poller(
+                app,
+                owned_job_pollers,
+                name="presentation_render_jobs_task",
+                task=presentation_render_jobs_task,
+                stop_event=presentation_render_jobs_stop_event,
             )
+        else:
+            logger.info("Presentation Render Jobs worker disabled by flag (PRESENTATION_RENDER_JOBS_WORKER_ENABLED)")
     except _STARTUP_GUARD_EXCEPTIONS as e:
         logger.warning(f"Failed to start Presentation Render Jobs worker: {e}")
 
@@ -2942,13 +3349,20 @@ async def lifespan(app: FastAPI):
             media_ingest_jobs_stop_event = _asyncio.Event()
             media_ingest_jobs_task = _asyncio.create_task(_run_media_jobs(media_ingest_jobs_stop_event))
             logger.info("Media Ingest Jobs worker started with explicit stop_event signal")
+            _register_owned_job_poller(
+                app,
+                owned_job_pollers,
+                name="media_ingest_jobs_task",
+                task=media_ingest_jobs_task,
+                stop_event=media_ingest_jobs_stop_event,
+            )
         else:
             logger.info("Media Ingest Jobs worker disabled by flag (MEDIA_INGEST_JOBS_WORKER_ENABLED)")
 
         _heavy_enabled = _should_start_worker(
             "MEDIA_INGEST_HEAVY_JOBS_WORKER_ENABLED",
             "media-ingest-heavy-jobs",
-            default_enabled=False,
+            default_stable=False,
         )
         if _heavy_enabled:
             from tldw_Server_API.app.services.media_ingest_jobs_worker import (
@@ -2960,10 +3374,15 @@ async def lifespan(app: FastAPI):
                 _run_media_heavy_jobs(media_ingest_heavy_jobs_stop_event)
             )
             logger.info("Media Ingest Heavy Jobs worker started with explicit stop_event signal")
-        else:
-            logger.info(
-                "Media Ingest Heavy Jobs worker disabled by flag (MEDIA_INGEST_HEAVY_JOBS_WORKER_ENABLED)"
+            _register_owned_job_poller(
+                app,
+                owned_job_pollers,
+                name="media_ingest_heavy_jobs_task",
+                task=media_ingest_heavy_jobs_task,
+                stop_event=media_ingest_heavy_jobs_stop_event,
             )
+        else:
+            logger.info("Media Ingest Heavy Jobs worker disabled by flag (MEDIA_INGEST_HEAVY_JOBS_WORKER_ENABLED)")
     except _STARTUP_GUARD_EXCEPTIONS as e:
         logger.warning(f"Failed to start Media Ingest Jobs worker: {e}")
 
@@ -2978,10 +3397,15 @@ async def lifespan(app: FastAPI):
             )
 
             reading_digest_jobs_stop_event = _asyncio.Event()
-            reading_digest_jobs_task = _asyncio.create_task(
-                _run_reading_digest_jobs(reading_digest_jobs_stop_event)
-            )
+            reading_digest_jobs_task = _asyncio.create_task(_run_reading_digest_jobs(reading_digest_jobs_stop_event))
             logger.info("Reading digest Jobs worker started with explicit stop_event signal")
+            _register_owned_job_poller(
+                app,
+                owned_job_pollers,
+                name="reading_digest_jobs_task",
+                task=reading_digest_jobs_task,
+                stop_event=reading_digest_jobs_stop_event,
+            )
         else:
             logger.info("Reading digest Jobs worker disabled by flag (READING_DIGEST_JOBS_WORKER_ENABLED)")
     except _STARTUP_GUARD_EXCEPTIONS as e:
@@ -3002,10 +3426,15 @@ async def lifespan(app: FastAPI):
                 _run_companion_reflection_jobs(companion_reflection_jobs_stop_event)
             )
             logger.info("Companion reflection Jobs worker started with explicit stop_event signal")
-        else:
-            logger.info(
-                "Companion reflection Jobs worker disabled by flag (COMPANION_REFLECTION_JOBS_WORKER_ENABLED)"
+            _register_owned_job_poller(
+                app,
+                owned_job_pollers,
+                name="companion_reflection_jobs_task",
+                task=companion_reflection_jobs_task,
+                stop_event=companion_reflection_jobs_stop_event,
             )
+        else:
+            logger.info("Companion reflection Jobs worker disabled by flag (COMPANION_REFLECTION_JOBS_WORKER_ENABLED)")
     except _STARTUP_GUARD_EXCEPTIONS as e:
         logger.warning(f"Failed to start Companion reflection Jobs worker: {e}")
 
@@ -3016,9 +3445,17 @@ async def lifespan(app: FastAPI):
         else:
             from tldw_Server_API.app.services.reminder_jobs_worker import start_reminder_jobs_worker
 
-            reminder_jobs_task = await start_reminder_jobs_worker()
+            reminder_jobs_stop_event = _asyncio.Event()
+            reminder_jobs_task = await start_reminder_jobs_worker(stop_event=reminder_jobs_stop_event)
             if reminder_jobs_task:
                 logger.info("Reminder Jobs worker started")
+                _register_owned_job_poller(
+                    app,
+                    owned_job_pollers,
+                    name="reminder_jobs_task",
+                    task=reminder_jobs_task,
+                    stop_event=reminder_jobs_stop_event,
+                )
             else:
                 logger.info("Reminder Jobs worker disabled (REMINDER_JOBS_WORKER_ENABLED != true)")
     except _STARTUP_GUARD_EXCEPTIONS as e:
@@ -3031,9 +3468,17 @@ async def lifespan(app: FastAPI):
         else:
             from tldw_Server_API.app.services.admin_backup_jobs_worker import start_admin_backup_jobs_worker
 
-            admin_backup_jobs_task = await start_admin_backup_jobs_worker()
+            admin_backup_jobs_stop_event = _asyncio.Event()
+            admin_backup_jobs_task = await start_admin_backup_jobs_worker(stop_event=admin_backup_jobs_stop_event)
             if admin_backup_jobs_task:
                 logger.info("Admin backup Jobs worker started")
+                _register_owned_job_poller(
+                    app,
+                    owned_job_pollers,
+                    name="admin_backup_jobs_task",
+                    task=admin_backup_jobs_task,
+                    stop_event=admin_backup_jobs_stop_event,
+                )
             else:
                 logger.info("Admin backup Jobs worker disabled (ADMIN_BACKUP_JOBS_WORKER_ENABLED != true)")
     except _STARTUP_GUARD_EXCEPTIONS as e:
@@ -3048,13 +3493,22 @@ async def lifespan(app: FastAPI):
                 start_admin_byok_validation_jobs_worker,
             )
 
-            admin_byok_validation_jobs_task = await start_admin_byok_validation_jobs_worker()
+            admin_byok_validation_jobs_stop_event = _asyncio.Event()
+            admin_byok_validation_jobs_task = await start_admin_byok_validation_jobs_worker(
+                stop_event=admin_byok_validation_jobs_stop_event
+            )
             if admin_byok_validation_jobs_task:
                 logger.info("Admin BYOK validation Jobs worker started")
+                _register_owned_job_poller(
+                    app,
+                    owned_job_pollers,
+                    name="admin_byok_validation_jobs_task",
+                    task=admin_byok_validation_jobs_task,
+                    stop_event=admin_byok_validation_jobs_stop_event,
+                )
             else:
                 logger.info(
-                    "Admin BYOK validation Jobs worker disabled "
-                    "(ADMIN_BYOK_VALIDATION_JOBS_WORKER_ENABLED != true)"
+                    "Admin BYOK validation Jobs worker disabled " "(ADMIN_BYOK_VALIDATION_JOBS_WORKER_ENABLED != true)"
                 )
     except _STARTUP_GUARD_EXCEPTIONS as e:
         logger.warning(f"Failed to start Admin BYOK validation Jobs worker: {e}")
@@ -3068,9 +3522,19 @@ async def lifespan(app: FastAPI):
                 start_admin_maintenance_rotation_jobs_worker,
             )
 
-            admin_maintenance_rotation_jobs_task = await start_admin_maintenance_rotation_jobs_worker()
+            admin_maintenance_rotation_jobs_stop_event = _asyncio.Event()
+            admin_maintenance_rotation_jobs_task = await start_admin_maintenance_rotation_jobs_worker(
+                stop_event=admin_maintenance_rotation_jobs_stop_event
+            )
             if admin_maintenance_rotation_jobs_task:
                 logger.info("Admin maintenance rotation Jobs worker started")
+                _register_owned_job_poller(
+                    app,
+                    owned_job_pollers,
+                    name="admin_maintenance_rotation_jobs_task",
+                    task=admin_maintenance_rotation_jobs_task,
+                    stop_event=admin_maintenance_rotation_jobs_stop_event,
+                )
             else:
                 logger.info(
                     "Admin maintenance rotation Jobs worker disabled "
@@ -3088,33 +3552,20 @@ async def lifespan(app: FastAPI):
                 start_recipe_run_jobs_worker,
             )
 
-            recipe_run_jobs_task = await start_recipe_run_jobs_worker()
+            recipe_run_jobs_stop_event = _asyncio.Event()
+            recipe_run_jobs_task = await start_recipe_run_jobs_worker(stop_event=recipe_run_jobs_stop_event)
             if recipe_run_jobs_task:
                 logger.info("Evaluation recipe-run Jobs worker started")
-            else:
-                logger.info(
-                    "Evaluation recipe-run Jobs worker disabled "
-                    "(EVALUATIONS_RECIPE_RUN_JOBS_WORKER_ENABLED != true)"
+                _register_owned_job_poller(
+                    app,
+                    owned_job_pollers,
+                    name="recipe_run_jobs_task",
+                    task=recipe_run_jobs_task,
+                    stop_event=recipe_run_jobs_stop_event,
                 )
-    except _STARTUP_GUARD_EXCEPTIONS as e:
-        logger.warning("Failed to start evaluation recipe-run Jobs worker: {}", e)
-
-    # Evaluations recipe-run Jobs worker
-    try:
-        if _sidecar_mode:
-            logger.info("Evaluation recipe-run Jobs worker disabled in sidecar mode")
-        else:
-            from tldw_Server_API.app.core.Evaluations.recipe_runs_jobs_worker import (
-                start_recipe_run_jobs_worker,
-            )
-
-            recipe_run_jobs_task = await start_recipe_run_jobs_worker()
-            if recipe_run_jobs_task:
-                logger.info("Evaluation recipe-run Jobs worker started")
             else:
                 logger.info(
-                    "Evaluation recipe-run Jobs worker disabled "
-                    "(EVALUATIONS_RECIPE_RUN_JOBS_WORKER_ENABLED != true)"
+                    "Evaluation recipe-run Jobs worker disabled " "(EVALUATIONS_RECIPE_RUN_JOBS_WORKER_ENABLED != true)"
                 )
     except _STARTUP_GUARD_EXCEPTIONS as e:
         logger.warning(f"Failed to start evaluation recipe-run Jobs worker: {e}")
@@ -3130,9 +3581,7 @@ async def lifespan(app: FastAPI):
             if jobs_notifications_bridge_task:
                 logger.info("Jobs notifications bridge worker started")
             else:
-                logger.info(
-                    "Jobs notifications bridge worker disabled (JOBS_NOTIFICATIONS_BRIDGE_ENABLED != true)"
-                )
+                logger.info("Jobs notifications bridge worker disabled (JOBS_NOTIFICATIONS_BRIDGE_ENABLED != true)")
     except _STARTUP_GUARD_EXCEPTIONS as e:
         logger.warning(f"Failed to start Jobs notifications bridge worker: {e}")
 
@@ -3145,15 +3594,34 @@ async def lifespan(app: FastAPI):
             run_embeddings_abtest_jobs_worker as _run_abtest_jobs,
         )
 
-        _enabled = _os.getenv("EVALUATIONS_ABTEST_JOBS_WORKER_ENABLED", "false").lower() in {"true", "1", "yes", "y", "on"}
+        _enabled = _os.getenv("EVALUATIONS_ABTEST_JOBS_WORKER_ENABLED", "false").lower() in {
+            "true",
+            "1",
+            "yes",
+            "y",
+            "on",
+        }
         if not _enabled:
-            _enabled = _os.getenv("EVALS_ABTEST_JOBS_WORKER_ENABLED", "false").lower() in {"true", "1", "yes", "y", "on"}
+            _enabled = _os.getenv("EVALS_ABTEST_JOBS_WORKER_ENABLED", "false").lower() in {
+                "true",
+                "1",
+                "yes",
+                "y",
+                "on",
+            }
         if _sidecar_mode:
             _enabled = False
         if _enabled:
             evals_abtest_jobs_stop_event = _asyncio.Event()
             evals_abtest_jobs_task = _asyncio.create_task(_run_abtest_jobs(evals_abtest_jobs_stop_event))
             logger.info("Embeddings A/B Jobs worker started with explicit stop_event signal")
+            _register_owned_job_poller(
+                app,
+                owned_job_pollers,
+                name="evals_abtest_jobs_task",
+                task=evals_abtest_jobs_task,
+                stop_event=evals_abtest_jobs_stop_event,
+            )
         else:
             logger.info("Embeddings A/B Jobs worker disabled by flag")
     except _STARTUP_GUARD_EXCEPTIONS as e:
@@ -3203,7 +3671,7 @@ async def lifespan(app: FastAPI):
         _enabled_recon = _os.getenv("JOBS_METRICS_RECONCILE_ENABLE", "false").lower() in {"true", "1", "yes", "y", "on"}
         if _enabled_recon:
             jobs_metrics_reconcile_stop = _asyncio.Event()
-            _ = _asyncio.create_task(_run_jobs_reconcile(jobs_metrics_reconcile_stop))
+            jobs_metrics_reconcile_task = _asyncio.create_task(_run_jobs_reconcile(jobs_metrics_reconcile_stop))
             logger.info("Jobs metrics reconcile worker started with explicit stop_event signal")
         else:
             logger.info("Jobs metrics reconcile worker disabled by flag (JOBS_METRICS_RECONCILE_ENABLE)")
@@ -3264,9 +3732,7 @@ async def lifespan(app: FastAPI):
         }
         if _meetings_dlq_enabled:
             meetings_webhook_dlq_stop_event = _asyncio.Event()
-            meetings_webhook_dlq_task = _asyncio.create_task(
-                _run_meetings_dlq(meetings_webhook_dlq_stop_event)
-            )
+            meetings_webhook_dlq_task = _asyncio.create_task(_run_meetings_dlq(meetings_webhook_dlq_stop_event))
             logger.info("Meetings webhook DLQ worker started with explicit stop_event signal")
         else:
             logger.info("Meetings webhook DLQ worker disabled by flag")
@@ -3511,6 +3977,7 @@ async def lifespan(app: FastAPI):
     # Start TTS history cleanup scheduler (retention cleanup)
     try:
         from tldw_Server_API.app.services.tts_history_cleanup_service import run_tts_history_cleanup_loop
+
         _tts_history_cleanup_stop_event = _asyncio.Event()
         _tts_history_cleanup_task = _asyncio.create_task(run_tts_history_cleanup_loop(_tts_history_cleanup_stop_event))
         logger.info("TTS history cleanup worker started")
@@ -3519,9 +3986,7 @@ async def lifespan(app: FastAPI):
 
     # Start Kanban activity cleanup scheduler (retention cleanup)
     try:
-        _enable_kanban_activity_cleanup = _shared_is_truthy(
-            _env_os.getenv("KANBAN_ACTIVITY_CLEANUP_ENABLED", "false")
-        )
+        _enable_kanban_activity_cleanup = _shared_is_truthy(_env_os.getenv("KANBAN_ACTIVITY_CLEANUP_ENABLED", "false"))
         if not _enable_kanban_activity_cleanup:
             logger.info("Kanban activity cleanup scheduler disabled (KANBAN_ACTIVITY_CLEANUP_ENABLED != true)")
         else:
@@ -3542,8 +4007,7 @@ async def lifespan(app: FastAPI):
         )
         if not _enable_ingestion_sources_cleanup:
             logger.info(
-                "Ingestion source archive cleanup scheduler disabled "
-                "(INGESTION_SOURCES_CLEANUP_ENABLED != true)"
+                "Ingestion source archive cleanup scheduler disabled " "(INGESTION_SOURCES_CLEANUP_ENABLED != true)"
             )
         else:
             from tldw_Server_API.app.services.ingestion_sources_cleanup_service import (
@@ -3617,15 +4081,83 @@ async def lifespan(app: FastAPI):
 
     # Start Connectors worker (scaffold; opt-in via env)
     try:
+        import asyncio as _asyncio
+
         from tldw_Server_API.app.services.connectors_worker import start_connectors_worker
 
-        _conn_task = await start_connectors_worker()
-        if _conn_task:
+        connectors_jobs_stop_event = _asyncio.Event()
+        connectors_jobs_task = await start_connectors_worker(stop_event=connectors_jobs_stop_event)
+        if connectors_jobs_task:
             logger.info("Connectors worker started")
+            _register_owned_job_poller(
+                app,
+                owned_job_pollers,
+                name="connectors_jobs_task",
+                task=connectors_jobs_task,
+                stop_event=connectors_jobs_stop_event,
+            )
         else:
             logger.info("Connectors worker disabled (CONNECTORS_WORKER_ENABLED != true)")
     except _STARTUP_GUARD_EXCEPTIONS as e:
         logger.warning(f"Failed to start Connectors worker: {e}")
+
+    _replace_owned_job_poller_inventory(
+        app,
+        owned_job_pollers,
+        registrations=[
+            ("core_jobs_task", core_jobs_task, core_jobs_stop_event, 5.0),
+            ("files_jobs_task", files_jobs_task, files_jobs_stop_event, 5.0),
+            ("data_tables_jobs_task", data_tables_jobs_task, data_tables_jobs_stop_event, 5.0),
+            ("prompt_studio_jobs_task", prompt_studio_jobs_task, prompt_studio_jobs_stop_event, 5.0),
+            ("study_pack_jobs_task", study_pack_jobs_task, study_pack_jobs_stop_event, 5.0),
+            (
+                "study_suggestions_jobs_task",
+                study_suggestions_jobs_task,
+                study_suggestions_jobs_stop_event,
+                5.0,
+            ),
+            ("privilege_snapshot_task", privilege_snapshot_task, privilege_snapshot_stop_event, 5.0),
+            ("audio_jobs_task", audio_jobs_task, audio_jobs_stop_event, 5.0),
+            ("audiobook_jobs_task", audiobook_jobs_task, audiobook_jobs_stop_event, 5.0),
+            (
+                "presentation_render_jobs_task",
+                presentation_render_jobs_task,
+                presentation_render_jobs_stop_event,
+                5.0,
+            ),
+            ("media_ingest_jobs_task", media_ingest_jobs_task, media_ingest_jobs_stop_event, 5.0),
+            (
+                "media_ingest_heavy_jobs_task",
+                media_ingest_heavy_jobs_task,
+                media_ingest_heavy_jobs_stop_event,
+                5.0,
+            ),
+            ("reading_digest_jobs_task", reading_digest_jobs_task, reading_digest_jobs_stop_event, 5.0),
+            (
+                "companion_reflection_jobs_task",
+                companion_reflection_jobs_task,
+                companion_reflection_jobs_stop_event,
+                5.0,
+            ),
+            ("reminder_jobs_task", reminder_jobs_task, reminder_jobs_stop_event, 5.0),
+            ("admin_backup_jobs_task", admin_backup_jobs_task, admin_backup_jobs_stop_event, 5.0),
+            (
+                "admin_byok_validation_jobs_task",
+                admin_byok_validation_jobs_task,
+                admin_byok_validation_jobs_stop_event,
+                5.0,
+            ),
+            (
+                "admin_maintenance_rotation_jobs_task",
+                admin_maintenance_rotation_jobs_task,
+                admin_maintenance_rotation_jobs_stop_event,
+                5.0,
+            ),
+            ("recipe_run_jobs_task", recipe_run_jobs_task, recipe_run_jobs_stop_event, 5.0),
+            ("evals_abtest_jobs_task", evals_abtest_jobs_task, evals_abtest_jobs_stop_event, 5.0),
+            ("connectors_jobs_task", connectors_jobs_task, connectors_jobs_stop_event, 5.0),
+        ],
+    )
 
     # Start AuthNZ scheduler (retention/cleanup tasks) with env guard
     _authnz_sched_started = False
@@ -3843,18 +4375,14 @@ async def lifespan(app: FastAPI):
         if _cors_disable:
             logger.info("• CORS: disabled")
         else:
-            logger.info(
-                f"• CORS: allowed_origins={_cors_count} | allow_credentials={_cors_allow_credentials}"
-            )
+            logger.info(f"• CORS: allowed_origins={_cors_count} | allow_credentials={_cors_allow_credentials}")
         logger.info(
             "• CORS effective settings: "
             f"disable={_cors_disable} (source={_cors_disable_source}) | "
             f"allow_credentials={_cors_allow_credentials} (source={_cors_allow_credentials_source}) | "
             f"origins={_cors_count} (source={_cors_allowed_origins_source})"
         )
-        logger.info(
-            f"• CORS config file: path={_cors_config_path or '(unknown)'} | loaded={_cors_config_loaded}"
-        )
+        logger.info(f"• CORS config file: path={_cors_config_path or '(unknown)'} | loaded={_cors_config_loaded}")
         if _cors_allowed_origins:
             _origin_preview_max = 6
             _origin_preview = ", ".join(str(o) for o in _cors_allowed_origins[:_origin_preview_max])
@@ -3883,96 +4411,101 @@ async def lifespan(app: FastAPI):
     except _STARTUP_GUARD_EXCEPTIONS as _pf_e:
         logger.warning(f"Preflight report could not be generated: {_pf_e}")
 
-    # Validate configuration — warnings only, does not block startup.
-    try:
-        from tldw_Server_API.app.core.config import validate_config
-        validate_config()
-    except _STARTUP_GUARD_EXCEPTIONS as _vc_e:
-        logger.warning(f"Config validation could not run: {_vc_e}")
+    _run_startup_config_validation()
 
     yield
 
     # Build and record the legacy shutdown inventory first.
     # Execute only the narrow transition gate handoff through the coordinator;
     # the remaining legacy teardown paths stay on the existing direct teardown path.
+    shutdown_started = time.monotonic()
+    try:
+        app.state._tldw_shutdown_timing_segments = []
+    except _STARTUP_GUARD_EXCEPTIONS:
+        pass
     transition_gate_applied = False
     legacy_shutdown_plan: list[Any] = []
     coordinated_legacy_component_names: set[str] = set()
-    try:
-        from tldw_Server_API.app.services.shutdown_coordinator import ShutdownCoordinator, ShutdownPhase
-        from tldw_Server_API.app.services.shutdown_legacy_adapters import (
-            build_legacy_shutdown_plan,
-        )
-
-        shutdown_context = _build_legacy_shutdown_context(
-            readiness_state=READINESS_STATE,
-            usage_task=usage_task,
-            llm_usage_task=llm_usage_task,
-            authnz_scheduler_started=_authnz_sched_started,
-            chatbooks_cleanup_task=chatbooks_cleanup_task,
-            chatbooks_cleanup_stop_event=chatbooks_cleanup_stop_event,
-            storage_cleanup_service=storage_cleanup_service,
-        )
-        legacy_shutdown_plan = build_legacy_shutdown_plan(app, shutdown_context)
-        legacy_phase_groups: dict[str, list[str]] = {}
-        for component in legacy_shutdown_plan:
-            legacy_phase_groups.setdefault(component.phase.value, []).append(component.name)
-
+    with _timed_shutdown_segment(app, "transition_handoff"):
         try:
-            app.state._tldw_shutdown_legacy_plan = legacy_shutdown_plan
-            app.state._tldw_shutdown_legacy_phase_groups = legacy_phase_groups
-            app.state._tldw_shutdown_legacy_inventory_visible = bool(legacy_shutdown_plan)
-        except _STARTUP_GUARD_EXCEPTIONS:
-            pass
-
-        logger.info(
-            "App Shutdown: legacy inventory visible={} phase_groups={}",
-            bool(legacy_shutdown_plan),
-            legacy_phase_groups,
-        )
-
-        transition_coordinator = ShutdownCoordinator(profile="dev_fast")
-        for component in legacy_shutdown_plan:
-            if component.phase == ShutdownPhase.TRANSITION:
-                transition_coordinator.register(component)
-        if legacy_shutdown_plan:
-            transition_summary = await transition_coordinator.shutdown()
-            transition_gate_summary = transition_summary.components.get("lifecycle_gate")
-            transition_gate_applied = bool(
-                transition_gate_summary is not None and transition_gate_summary.result == "stopped"
+            from tldw_Server_API.app.services.shutdown_coordinator import ShutdownCoordinator, ShutdownPhase
+            from tldw_Server_API.app.services.shutdown_legacy_adapters import (
+                build_legacy_shutdown_plan,
             )
-            if transition_gate_applied:
-                logger.info("App Shutdown: legacy transition gate handoff executed via coordinator")
-            else:
-                logger.warning(
-                    "App Shutdown: legacy transition gate handoff did not complete cleanly; "
-                    "falling back to direct drain",
+
+            shutdown_context = _build_legacy_shutdown_context(
+                readiness_state=READINESS_STATE,
+                usage_task=usage_task,
+                llm_usage_task=llm_usage_task,
+                authnz_scheduler_started=_authnz_sched_started,
+                chatbooks_cleanup_task=chatbooks_cleanup_task,
+                chatbooks_cleanup_stop_event=chatbooks_cleanup_stop_event,
+                storage_cleanup_service=storage_cleanup_service,
+            )
+            legacy_shutdown_plan = build_legacy_shutdown_plan(app, shutdown_context)
+            legacy_phase_groups: dict[str, list[str]] = {}
+            for component in legacy_shutdown_plan:
+                legacy_phase_groups.setdefault(component.phase.value, []).append(component.name)
+
+            try:
+                app.state._tldw_shutdown_legacy_plan = legacy_shutdown_plan
+                app.state._tldw_shutdown_legacy_phase_groups = legacy_phase_groups
+                app.state._tldw_shutdown_legacy_inventory_visible = bool(legacy_shutdown_plan)
+            except _STARTUP_GUARD_EXCEPTIONS:
+                pass
+
+            logger.info(
+                "App Shutdown: legacy inventory visible={} phase_groups={}",
+                bool(legacy_shutdown_plan),
+                legacy_phase_groups,
+            )
+
+            transition_coordinator = ShutdownCoordinator(profile="dev_fast")
+            for component in legacy_shutdown_plan:
+                if component.phase == ShutdownPhase.TRANSITION:
+                    transition_coordinator.register(component)
+            if legacy_shutdown_plan:
+                transition_summary = await transition_coordinator.shutdown()
+                transition_gate_summary = transition_summary.components.get("lifecycle_gate")
+                transition_gate_applied = bool(
+                    transition_gate_summary is not None and transition_gate_summary.result == "stopped"
                 )
-    except (_STARTUP_GUARD_EXCEPTIONS + _IMPORT_EXCEPTIONS) as _legacy_shutdown_err:
-        logger.debug(f"Legacy shutdown inventory skipped: {_legacy_shutdown_err}")
-    finally:
-        if not transition_gate_applied:
-            _apply_shutdown_transition_gate(app, READINESS_STATE)
+                if transition_gate_applied:
+                    logger.info("App Shutdown: legacy transition gate handoff executed via coordinator")
+                else:
+                    logger.warning(
+                        "App Shutdown: legacy transition gate handoff did not complete cleanly; "
+                        "falling back to direct drain",
+                    )
+        except _STARTUP_GUARD_EXCEPTIONS + _IMPORT_EXCEPTIONS as _legacy_shutdown_err:
+            logger.debug(f"Legacy shutdown inventory skipped: {_legacy_shutdown_err}")
+        finally:
+            if not transition_gate_applied:
+                _apply_shutdown_transition_gate(app, READINESS_STATE)
 
-    # Optionally wait for leases to finish (bounded wait)
+    _max_wait = 0
+    _count_active_processing = lambda: 0
     try:
-        import asyncio as _asyncio
-        import os as _os
-
-        _max_wait = int(_os.getenv("JOBS_SHUTDOWN_WAIT_FOR_LEASES_SEC", "0") or "0")
-        if _max_wait > 0:
-            jm_chk = _JM()
-            deadline = _asyncio.get_event_loop().time() + float(_max_wait)
-            while _asyncio.get_event_loop().time() < deadline:
-                try:
-                    active = jm_chk.count_active_processing()
-                except _STARTUP_GUARD_EXCEPTIONS:
-                    active = 0
-                if active <= 0:
-                    break
-                await _asyncio.sleep(0.5)
+        _max_wait = int(_env_os.getenv("JOBS_SHUTDOWN_WAIT_FOR_LEASES_SEC", "0") or "0")
     except _STARTUP_GUARD_EXCEPTIONS:
+        _max_wait = 0
+    try:
+        from tldw_Server_API.app.core.Jobs.manager import JobManager as _ShutdownJM
+
+        _count_active_processing = _ShutdownJM().count_active_processing
+    except _IMPORT_EXCEPTIONS:
         pass
+
+    await _quiesce_owned_job_pollers_for_shutdown(
+        app,
+        owned_job_pollers,
+        wait_for_leases_sec=_max_wait,
+        count_active_processing=_count_active_processing,
+    )
+    early_quiesced_job_poller_names = set(getattr(app.state, "_tldw_shutdown_quiesced_job_poller_names", []))
+
+    def _should_run_late_stop(task_name: str, task: Any) -> bool:
+        return bool(task) and task_name not in early_quiesced_job_poller_names
 
     # Execute the migrated legacy shutdown components through the coordinator.
     try:
@@ -3985,7 +4518,7 @@ async def lifespan(app: FastAPI):
             app,
             non_transition_legacy_shutdown_plan,
         )
-    except (_STARTUP_GUARD_EXCEPTIONS + _IMPORT_EXCEPTIONS) as _coordinated_legacy_shutdown_err:
+    except _STARTUP_GUARD_EXCEPTIONS + _IMPORT_EXCEPTIONS as _coordinated_legacy_shutdown_err:
         logger.debug(f"Legacy coordinator shutdown skipped: {_coordinated_legacy_shutdown_err}")
 
     # Cancel/stop background worker(s)
@@ -4036,7 +4569,7 @@ async def lifespan(app: FastAPI):
             logger.info("AuthNZ limiter singletons reset")
         except _STARTUP_GUARD_EXCEPTIONS:
             pass
-        if "core_jobs_task" in locals() and core_jobs_task:
+        if "core_jobs_task" in locals() and _should_run_late_stop("core_jobs_task", core_jobs_task):
             # Prefer graceful stop via explicit stop_event
             if "core_jobs_stop_event" in locals() and core_jobs_stop_event:
                 try:
@@ -4047,7 +4580,7 @@ async def lifespan(app: FastAPI):
                     core_jobs_task.cancel()
             else:
                 core_jobs_task.cancel()
-        if "files_jobs_task" in locals() and files_jobs_task:
+        if "files_jobs_task" in locals() and _should_run_late_stop("files_jobs_task", files_jobs_task):
             # Prefer graceful stop via explicit stop_event
             if "files_jobs_stop_event" in locals() and files_jobs_stop_event:
                 try:
@@ -4059,7 +4592,9 @@ async def lifespan(app: FastAPI):
                     files_jobs_task.cancel()
             else:
                 files_jobs_task.cancel()
-        if "data_tables_jobs_task" in locals() and data_tables_jobs_task:
+        if "data_tables_jobs_task" in locals() and _should_run_late_stop(
+            "data_tables_jobs_task", data_tables_jobs_task
+        ):
             # Prefer graceful stop via explicit stop_event
             if "data_tables_jobs_stop_event" in locals() and data_tables_jobs_stop_event:
                 try:
@@ -4070,7 +4605,9 @@ async def lifespan(app: FastAPI):
                     data_tables_jobs_task.cancel()
             else:
                 data_tables_jobs_task.cancel()
-        if "prompt_studio_jobs_task" in locals() and prompt_studio_jobs_task:
+        if "prompt_studio_jobs_task" in locals() and _should_run_late_stop(
+            "prompt_studio_jobs_task", prompt_studio_jobs_task
+        ):
             # Prefer graceful stop via explicit stop_event
             if "prompt_studio_jobs_stop_event" in locals() and prompt_studio_jobs_stop_event:
                 try:
@@ -4081,7 +4618,9 @@ async def lifespan(app: FastAPI):
                     prompt_studio_jobs_task.cancel()
             else:
                 prompt_studio_jobs_task.cancel()
-        if "privilege_snapshot_task" in locals() and privilege_snapshot_task:
+        if "privilege_snapshot_task" in locals() and _should_run_late_stop(
+            "privilege_snapshot_task", privilege_snapshot_task
+        ):
             # Prefer graceful stop via explicit stop_event
             if "privilege_snapshot_stop_event" in locals() and privilege_snapshot_stop_event:
                 try:
@@ -4092,7 +4631,7 @@ async def lifespan(app: FastAPI):
                     privilege_snapshot_task.cancel()
             else:
                 privilege_snapshot_task.cancel()
-        if "audio_jobs_task" in locals() and audio_jobs_task:
+        if "audio_jobs_task" in locals() and _should_run_late_stop("audio_jobs_task", audio_jobs_task):
             # Prefer graceful stop via explicit stop_event
             if "audio_jobs_stop_event" in locals() and audio_jobs_stop_event:
                 try:
@@ -4104,14 +4643,14 @@ async def lifespan(app: FastAPI):
                 except _STARTUP_GUARD_EXCEPTIONS:
                     audio_jobs_task.cancel()
                 except Exception as e:
-                    logger.warning(
-                        f"Audio Jobs worker exited with exception before shutdown completion: {e}"
-                    )
+                    logger.warning(f"Audio Jobs worker exited with exception before shutdown completion: {e}")
                     with suppress(_STARTUP_GUARD_EXCEPTIONS):
                         audio_jobs_task.cancel()
             else:
                 audio_jobs_task.cancel()
-        if "presentation_render_jobs_task" in locals() and presentation_render_jobs_task:
+        if "presentation_render_jobs_task" in locals() and _should_run_late_stop(
+            "presentation_render_jobs_task", presentation_render_jobs_task
+        ):
             if "presentation_render_jobs_stop_event" in locals() and presentation_render_jobs_stop_event:
                 try:
                     presentation_render_jobs_stop_event.set()
@@ -4129,7 +4668,9 @@ async def lifespan(app: FastAPI):
                         presentation_render_jobs_task.cancel()
             else:
                 presentation_render_jobs_task.cancel()
-        if "media_ingest_jobs_task" in locals() and media_ingest_jobs_task:
+        if "media_ingest_jobs_task" in locals() and _should_run_late_stop(
+            "media_ingest_jobs_task", media_ingest_jobs_task
+        ):
             # Prefer graceful stop via explicit stop_event
             if "media_ingest_jobs_stop_event" in locals() and media_ingest_jobs_stop_event:
                 try:
@@ -4140,11 +4681,10 @@ async def lifespan(app: FastAPI):
                     media_ingest_jobs_task.cancel()
             else:
                 media_ingest_jobs_task.cancel()
-        if "media_ingest_heavy_jobs_task" in locals() and media_ingest_heavy_jobs_task:
-            if (
-                "media_ingest_heavy_jobs_stop_event" in locals()
-                and media_ingest_heavy_jobs_stop_event
-            ):
+        if "media_ingest_heavy_jobs_task" in locals() and _should_run_late_stop(
+            "media_ingest_heavy_jobs_task", media_ingest_heavy_jobs_task
+        ):
+            if "media_ingest_heavy_jobs_stop_event" in locals() and media_ingest_heavy_jobs_stop_event:
                 try:
                     media_ingest_heavy_jobs_stop_event.set()
                     await _asyncio.wait_for(media_ingest_heavy_jobs_task, timeout=5.0)
@@ -4153,7 +4693,9 @@ async def lifespan(app: FastAPI):
                     media_ingest_heavy_jobs_task.cancel()
             else:
                 media_ingest_heavy_jobs_task.cancel()
-        if "reading_digest_jobs_task" in locals() and reading_digest_jobs_task:
+        if "reading_digest_jobs_task" in locals() and _should_run_late_stop(
+            "reading_digest_jobs_task", reading_digest_jobs_task
+        ):
             if "reading_digest_jobs_stop_event" in locals() and reading_digest_jobs_stop_event:
                 try:
                     reading_digest_jobs_stop_event.set()
@@ -4163,7 +4705,7 @@ async def lifespan(app: FastAPI):
                     reading_digest_jobs_task.cancel()
             else:
                 reading_digest_jobs_task.cancel()
-        if "study_pack_jobs_task" in locals() and study_pack_jobs_task:
+        if "study_pack_jobs_task" in locals() and _should_run_late_stop("study_pack_jobs_task", study_pack_jobs_task):
             if "study_pack_jobs_stop_event" in locals() and study_pack_jobs_stop_event:
                 try:
                     study_pack_jobs_stop_event.set()
@@ -4173,7 +4715,9 @@ async def lifespan(app: FastAPI):
                     study_pack_jobs_task.cancel()
             else:
                 study_pack_jobs_task.cancel()
-        if "study_suggestions_jobs_task" in locals() and study_suggestions_jobs_task:
+        if "study_suggestions_jobs_task" in locals() and _should_run_late_stop(
+            "study_suggestions_jobs_task", study_suggestions_jobs_task
+        ):
             if "study_suggestions_jobs_stop_event" in locals() and study_suggestions_jobs_stop_event:
                 try:
                     study_suggestions_jobs_stop_event.set()
@@ -4183,7 +4727,9 @@ async def lifespan(app: FastAPI):
                     study_suggestions_jobs_task.cancel()
             else:
                 study_suggestions_jobs_task.cancel()
-        if "companion_reflection_jobs_task" in locals() and companion_reflection_jobs_task:
+        if "companion_reflection_jobs_task" in locals() and _should_run_late_stop(
+            "companion_reflection_jobs_task", companion_reflection_jobs_task
+        ):
             if "companion_reflection_jobs_stop_event" in locals() and companion_reflection_jobs_stop_event:
                 try:
                     companion_reflection_jobs_stop_event.set()
@@ -4193,7 +4739,7 @@ async def lifespan(app: FastAPI):
                     companion_reflection_jobs_task.cancel()
             else:
                 companion_reflection_jobs_task.cancel()
-        if "reminder_jobs_task" in locals() and reminder_jobs_task:
+        if "reminder_jobs_task" in locals() and _should_run_late_stop("reminder_jobs_task", reminder_jobs_task):
             try:
                 reminder_jobs_task.cancel()
                 await _asyncio.wait_for(reminder_jobs_task, timeout=5.0)
@@ -4203,7 +4749,9 @@ async def lifespan(app: FastAPI):
             except _STARTUP_GUARD_EXCEPTIONS:
                 with suppress(_STARTUP_GUARD_EXCEPTIONS):
                     reminder_jobs_task.cancel()
-        if "admin_backup_jobs_task" in locals() and admin_backup_jobs_task:
+        if "admin_backup_jobs_task" in locals() and _should_run_late_stop(
+            "admin_backup_jobs_task", admin_backup_jobs_task
+        ):
             try:
                 admin_backup_jobs_task.cancel()
                 await _asyncio.wait_for(admin_backup_jobs_task, timeout=5.0)
@@ -4213,6 +4761,19 @@ async def lifespan(app: FastAPI):
             except _STARTUP_GUARD_EXCEPTIONS:
                 with suppress(_STARTUP_GUARD_EXCEPTIONS):
                     admin_backup_jobs_task.cancel()
+        if "admin_maintenance_rotation_jobs_task" in locals() and _should_run_late_stop(
+            "admin_maintenance_rotation_jobs_task",
+            admin_maintenance_rotation_jobs_task,
+        ):
+            if "admin_maintenance_rotation_jobs_stop_event" in locals() and admin_maintenance_rotation_jobs_stop_event:
+                try:
+                    admin_maintenance_rotation_jobs_stop_event.set()
+                    await _asyncio.wait_for(admin_maintenance_rotation_jobs_task, timeout=5.0)
+                    logger.info("Admin maintenance rotation Jobs worker stopped via stop_event")
+                except _STARTUP_GUARD_EXCEPTIONS:
+                    admin_maintenance_rotation_jobs_task.cancel()
+            else:
+                admin_maintenance_rotation_jobs_task.cancel()
         if "jobs_notifications_bridge_task" in locals() and jobs_notifications_bridge_task:
             try:
                 jobs_notifications_bridge_task.cancel()
@@ -4223,17 +4784,19 @@ async def lifespan(app: FastAPI):
             except _STARTUP_GUARD_EXCEPTIONS:
                 with suppress(_STARTUP_GUARD_EXCEPTIONS):
                     jobs_notifications_bridge_task.cancel()
-        if "recipe_run_jobs_task" in locals() and recipe_run_jobs_task:
-            try:
-                recipe_run_jobs_task.cancel()
-                await _asyncio.wait_for(recipe_run_jobs_task, timeout=5.0)
-                logger.info("Evaluation recipe-run Jobs worker cancelled")
-            except _asyncio.CancelledError:
-                pass
-            except _STARTUP_GUARD_EXCEPTIONS:
-                with suppress(_STARTUP_GUARD_EXCEPTIONS):
+        if "recipe_run_jobs_task" in locals() and _should_run_late_stop("recipe_run_jobs_task", recipe_run_jobs_task):
+            if "recipe_run_jobs_stop_event" in locals() and recipe_run_jobs_stop_event:
+                try:
+                    recipe_run_jobs_stop_event.set()
+                    await _asyncio.wait_for(recipe_run_jobs_task, timeout=5.0)
+                    logger.info("Evaluation recipe-run Jobs worker stopped via stop_event")
+                except _STARTUP_GUARD_EXCEPTIONS:
                     recipe_run_jobs_task.cancel()
-        if "evals_abtest_jobs_task" in locals() and evals_abtest_jobs_task:
+            else:
+                recipe_run_jobs_task.cancel()
+        if "evals_abtest_jobs_task" in locals() and _should_run_late_stop(
+            "evals_abtest_jobs_task", evals_abtest_jobs_task
+        ):
             if "evals_abtest_jobs_stop_event" in locals() and evals_abtest_jobs_stop_event:
                 try:
                     evals_abtest_jobs_stop_event.set()
@@ -4383,6 +4946,19 @@ async def lifespan(app: FastAPI):
             except _STARTUP_GUARD_EXCEPTIONS:
                 with suppress(_STARTUP_GUARD_EXCEPTIONS):
                     jobs_metrics_task.cancel()
+
+        # Jobs metrics reconcile worker shutdown
+        if "jobs_metrics_reconcile_task" in locals() and jobs_metrics_reconcile_task:
+            try:
+                if "jobs_metrics_reconcile_stop" in locals() and jobs_metrics_reconcile_stop:
+                    jobs_metrics_reconcile_stop.set()
+                    await _asyncio.wait_for(jobs_metrics_reconcile_task, timeout=5.0)
+                    logger.info("Jobs metrics reconcile worker stopped via stop_event")
+                else:
+                    jobs_metrics_reconcile_task.cancel()
+            except _STARTUP_GUARD_EXCEPTIONS:
+                with suppress(_STARTUP_GUARD_EXCEPTIONS):
+                    jobs_metrics_reconcile_task.cancel()
 
         # Event loop lag watchdog shutdown
         if "loop_lag_task" in locals() and loop_lag_task:
@@ -4667,94 +5243,96 @@ async def lifespan(app: FastAPI):
     except _STARTUP_GUARD_EXCEPTIONS as e:
         logger.exception(f"App Shutdown: Error cleaning up local LLM manager: {e}")
 
-    # Shutdown Evaluations pool via lazy helper (no-op if never initialized)
-    try:
-        from tldw_Server_API.app.core.Evaluations.connection_pool import (
-            shutdown_evaluations_pool_if_initialized as _shutdown_evals,
-        )
-
-        _shutdown_evals()
-        logger.info("App Shutdown: Evaluations connection manager shutdown (lazy)")
-    except _IMPORT_EXCEPTIONS as e:
-        logger.debug(f"App Shutdown: Evaluations pool shutdown skipped/failed: {e}")
-
-    # Shutdown Evaluations webhook manager (no-op if never initialized)
-    try:
-        from tldw_Server_API.app.core.Evaluations.webhook_manager import (
-            shutdown_webhook_manager_if_initialized as _shutdown_webhooks,
-        )
-
-        _shutdown_webhooks()
-        logger.info("App Shutdown: Evaluations webhook manager shutdown (lazy)")
-    except _IMPORT_EXCEPTIONS as e:
-        logger.debug(f"App Shutdown: Evaluations webhook manager shutdown skipped/failed: {e}")
-
-    # Shutdown Unified Audit Services (via DI cache)
-    try:
-        from tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps import (
-            shutdown_all_audit_services,
-        )
-
-        logger.info("App Shutdown: Shutting down unified audit services...")
-        await shutdown_all_audit_services()
-        logger.info("App Shutdown: Unified audit services stopped")
-
+    with _timed_shutdown_segment(app, "evaluations_pool_shutdown"):
+        # Shutdown Evaluations pool via lazy helper (no-op if never initialized)
         try:
-            from tldw_Server_API.app.api.v1.endpoints.sharing import (
-                shutdown_sharing_audit_service,
+            from tldw_Server_API.app.core.Evaluations.connection_pool import (
+                shutdown_evaluations_pool_if_initialized as _shutdown_evals,
             )
 
-            await shutdown_sharing_audit_service()
-            logger.info("App Shutdown: Sharing audit service stopped")
-        except (*_STARTUP_GUARD_EXCEPTIONS, ImportError, ModuleNotFoundError) as _e:
-            logger.debug(f"Sharing audit service shutdown skipped: {_e}")
+            _shutdown_evals()
+            logger.info("App Shutdown: Evaluations connection manager shutdown (lazy)")
+        except _IMPORT_EXCEPTIONS as e:
+            logger.debug(f"App Shutdown: Evaluations pool shutdown skipped/failed: {e}")
 
+        # Shutdown Evaluations webhook manager (no-op if never initialized)
         try:
-            from tldw_Server_API.app.core.Embeddings.audit_adapter import (
-                shutdown_local_audit_adapter_loop,
+            from tldw_Server_API.app.core.Evaluations.webhook_manager import (
+                shutdown_webhook_manager_if_initialized as _shutdown_webhooks,
             )
 
-            shutdown_local_audit_adapter_loop()
-            logger.info("App Shutdown: Embeddings audit adapter loop stopped")
-        except (_STARTUP_GUARD_EXCEPTIONS + _IMPORT_EXCEPTIONS) as _e:
-            logger.debug("Embeddings audit adapter loop shutdown skipped: {}", _e)
+            _shutdown_webhooks()
+            logger.info("App Shutdown: Evaluations webhook manager shutdown (lazy)")
+        except _IMPORT_EXCEPTIONS as e:
+            logger.debug(f"App Shutdown: Evaluations webhook manager shutdown skipped/failed: {e}")
 
+    with _timed_shutdown_segment(app, "unified_audit_and_executor_shutdown"):
+        # Shutdown Unified Audit Services (via DI cache)
         try:
-            from tldw_Server_API.app.core.Evaluations.audit_adapter import (
-                shutdown_local_evaluations_audit_loop,
+            from tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps import (
+                shutdown_all_audit_services,
             )
 
-            shutdown_local_evaluations_audit_loop()
-            logger.info("App Shutdown: Evaluations audit adapter loop stopped")
-        except (_STARTUP_GUARD_EXCEPTIONS + _IMPORT_EXCEPTIONS) as _e:
-            logger.debug("Evaluations audit adapter loop shutdown skipped: {}", _e)
-    except _IMPORT_EXCEPTIONS as e:
-        logger.exception(f"App Shutdown: Error stopping unified audit services: {e}")
+            logger.info("App Shutdown: Shutting down unified audit services...")
+            await shutdown_all_audit_services()
+            logger.info("App Shutdown: Unified audit services stopped")
 
-    # Shutdown registered executors (thread/process pools)
-    try:
-        from tldw_Server_API.app.core.Utils.executor_registry import shutdown_all_registered_executors
+            try:
+                from tldw_Server_API.app.api.v1.endpoints.sharing import (
+                    shutdown_sharing_audit_service,
+                )
 
-        await shutdown_all_registered_executors(wait=True, cancel_futures=True)
-        logger.info("App Shutdown: Registered executors shutdown")
+                await shutdown_sharing_audit_service()
+                logger.info("App Shutdown: Sharing audit service stopped")
+            except (*_STARTUP_GUARD_EXCEPTIONS, ImportError, ModuleNotFoundError) as _e:
+                logger.debug(f"Sharing audit service shutdown skipped: {_e}")
+
+            try:
+                from tldw_Server_API.app.core.Embeddings.audit_adapter import (
+                    shutdown_local_audit_adapter_loop,
+                )
+
+                shutdown_local_audit_adapter_loop()
+                logger.info("App Shutdown: Embeddings audit adapter loop stopped")
+            except _STARTUP_GUARD_EXCEPTIONS + _IMPORT_EXCEPTIONS as _e:
+                logger.debug("Embeddings audit adapter loop shutdown skipped: {}", _e)
+
+            try:
+                from tldw_Server_API.app.core.Evaluations.audit_adapter import (
+                    shutdown_local_evaluations_audit_loop,
+                )
+
+                shutdown_local_evaluations_audit_loop()
+                logger.info("App Shutdown: Evaluations audit adapter loop stopped")
+            except _STARTUP_GUARD_EXCEPTIONS + _IMPORT_EXCEPTIONS as _e:
+                logger.debug("Evaluations audit adapter loop shutdown skipped: {}", _e)
+        except _IMPORT_EXCEPTIONS as e:
+            logger.exception(f"App Shutdown: Error stopping unified audit services: {e}")
+
+        # Shutdown registered executors (thread/process pools)
         try:
-            loop = asyncio.get_running_loop()
-            if hasattr(loop, "shutdown_default_executor"):
-                await loop.shutdown_default_executor()
-                logger.info("App Shutdown: Default executor shutdown")
+            from tldw_Server_API.app.core.Utils.executor_registry import shutdown_all_registered_executors
+
+            await shutdown_all_registered_executors(wait=True, cancel_futures=True)
+            logger.info("App Shutdown: Registered executors shutdown")
+            try:
+                loop = asyncio.get_running_loop()
+                if hasattr(loop, "shutdown_default_executor"):
+                    await loop.shutdown_default_executor()
+                    logger.info("App Shutdown: Default executor shutdown")
+            except _STARTUP_GUARD_EXCEPTIONS as e:
+                logger.debug(f"App Shutdown: Default executor shutdown skipped/failed: {e}")
+        except _IMPORT_EXCEPTIONS as e:
+            logger.exception(f"App Shutdown: Error shutting down executors: {e}")
+
+        # Cleanup CPU pools
+        try:
+            from tldw_Server_API.app.core.Utils.cpu_bound_handler import cleanup_pools
+
+            cleanup_pools()
+            logger.info("App Shutdown: CPU pools cleaned up")
         except _STARTUP_GUARD_EXCEPTIONS as e:
-            logger.debug(f"App Shutdown: Default executor shutdown skipped/failed: {e}")
-    except _IMPORT_EXCEPTIONS as e:
-        logger.exception(f"App Shutdown: Error shutting down executors: {e}")
-
-    # Cleanup CPU pools
-    try:
-        from tldw_Server_API.app.core.Utils.cpu_bound_handler import cleanup_pools
-
-        cleanup_pools()
-        logger.info("App Shutdown: CPU pools cleaned up")
-    except _STARTUP_GUARD_EXCEPTIONS as e:
-        logger.exception(f"App Shutdown: Error cleaning up CPU pools: {e}")
+            logger.exception(f"App Shutdown: Error cleaning up CPU pools: {e}")
 
     # Stop usage aggregator
     try:
@@ -4768,26 +5346,27 @@ async def lifespan(app: FastAPI):
     except _STARTUP_GUARD_EXCEPTIONS as e:
         logger.exception(f"App Shutdown: Error stopping usage aggregator: {e}")
 
-    # Shutdown telemetry
-    try:
-        # Stop AuthNZ scheduler if started
+    with _timed_shutdown_segment(app, "telemetry_shutdown"):
+        # Shutdown telemetry
         try:
-            if (
-                "_authnz_sched_started" in locals()
-                and _authnz_sched_started
-                and "authnz_scheduler" not in coordinated_legacy_component_names
-            ):
-                from tldw_Server_API.app.core.AuthNZ.scheduler import stop_authnz_scheduler
+            # Stop AuthNZ scheduler if started
+            try:
+                if (
+                    "_authnz_sched_started" in locals()
+                    and _authnz_sched_started
+                    and "authnz_scheduler" not in coordinated_legacy_component_names
+                ):
+                    from tldw_Server_API.app.core.AuthNZ.scheduler import stop_authnz_scheduler
 
-                await stop_authnz_scheduler()
-                logger.info("AuthNZ scheduler stopped")
-        except _IMPORT_EXCEPTIONS as _e:
-            logger.debug(f"AuthNZ scheduler shutdown skipped: {_e}")
+                    await stop_authnz_scheduler()
+                    logger.info("AuthNZ scheduler stopped")
+            except _IMPORT_EXCEPTIONS as _e:
+                logger.debug(f"AuthNZ scheduler shutdown skipped: {_e}")
 
-        shutdown_telemetry()
-        logger.info("App Shutdown: Telemetry shutdown")
-    except _IMPORT_EXCEPTIONS as e:
-        logger.exception(f"App Shutdown: Error shutting down telemetry: {e}")
+            shutdown_telemetry()
+            logger.info("App Shutdown: Telemetry shutdown")
+        except _IMPORT_EXCEPTIONS as e:
+            logger.exception(f"App Shutdown: Error shutting down telemetry: {e}")
 
     # Close cached MediaDatabase instances so Postgres pooled connections are released
     try:
@@ -4826,6 +5405,10 @@ async def lifespan(app: FastAPI):
         _JM.set_acquire_gate(False)
     except _STARTUP_GUARD_EXCEPTIONS:
         pass
+    _record_shutdown_timing_total(
+        app,
+        int((time.monotonic() - shutdown_started) * 1000),
+    )
 
 
 #
@@ -5254,10 +5837,7 @@ def _fail_on_duplicate_route_method_pairs(app: FastAPI, *, context: str) -> None
     if not duplicates:
         return
 
-    sample = "; ".join(
-        f"{method} {path} ({first} vs {second})"
-        for path, method, first, second in duplicates[:10]
-    )
+    sample = "; ".join(f"{method} {path} ({first} vs {second})" for path, method, first, second in duplicates[:10])
     message = (
         f"Duplicate route registrations detected during {context}: "
         f"{len(duplicates)} duplicate (path, method) pairs. Sample: {sample}"
@@ -5385,10 +5965,7 @@ def _apply_runtime_cors_headers(request: Request, response: Any) -> Any:
         response.headers.setdefault("Vary", "Origin")
     if _cors_allow_credentials:
         response.headers.setdefault("Access-Control-Allow-Credentials", "true")
-    response.headers.setdefault(
-        "Access-Control-Expose-Headers",
-        "X-Request-ID, traceparent, X-Trace-Id"
-    )
+    response.headers.setdefault("Access-Control-Expose-Headers", "X-Request-ID, traceparent, X-Trace-Id")
     return response
 
 
@@ -5403,14 +5980,30 @@ from tldw_Server_API.app.api.v1.utils.exception_handlers import (  # noqa: E402
 )
 
 
+def _run_startup_config_validation() -> None:
+    """Run best-effort startup config validation without blocking app startup."""
+    try:
+        from tldw_Server_API.app.core.config import validate_config
+
+        validate_config()
+    except _STARTUP_GUARD_EXCEPTIONS + _IMPORT_EXCEPTIONS as _vc_e:
+        logger.warning(f"Config validation could not run: {_vc_e}")
+
+
 @app.exception_handler(Exception)
-async def _global_unhandled_exception_handler(request, exc):
+async def _global_unhandled_exception_handler(
+    request: Request,
+    exc: Exception,
+) -> Response:
     response = await _global_handler(request, exc)
     return _apply_runtime_cors_headers(request, response)
 
 
 @app.exception_handler(ClientDisconnect)
-async def _client_disconnect_exception_handler(request: Request, exc: ClientDisconnect):
+async def _client_disconnect_exception_handler(
+    request: Request,
+    exc: ClientDisconnect,
+) -> Response:
     response = await _client_disconnect_handler(request, exc)
     return _apply_runtime_cors_headers(request, response)
 
@@ -5667,6 +6260,7 @@ else:
     _env_allowed_origins_set = os.getenv("ALLOWED_ORIGINS") is not None
     try:
         from tldw_Server_API.app.core.AuthNZ.settings import get_settings as _get_cors_settings
+
         _cors_auth_mode = _get_cors_settings().AUTH_MODE
     except Exception:
         _cors_auth_mode = os.getenv("AUTH_MODE", "single_user")
@@ -5685,9 +6279,7 @@ else:
                 origins.append(_origin)
                 _auto_added.append(_origin)
         if _auto_added:
-            logger.info(
-                f"CORS single-user auto-detect: added localhost origins {_auto_added}"
-            )
+            logger.info(f"CORS single-user auto-detect: added localhost origins {_auto_added}")
         else:
             logger.info("CORS single-user auto-detect: all common localhost origins already present.")
     elif str(_cors_auth_mode) == "multi_user" and not origins:
@@ -5796,14 +6388,10 @@ from tldw_Server_API.app.core.testing import (
 
 _TEST_FLAGS_SET = _shared_is_test_mode() or _test_env_flag_enabled("TESTING")
 _EXPLICIT_PYTEST_RUNTIME = _is_explicit_pytest_runtime()
-_TEST_MODE = _EXPLICIT_PYTEST_RUNTIME and (
-    _TEST_FLAGS_SET or bool(_env_os.getenv("PYTEST_CURRENT_TEST"))
-)
+_TEST_MODE = _EXPLICIT_PYTEST_RUNTIME and (_TEST_FLAGS_SET or bool(_env_os.getenv("PYTEST_CURRENT_TEST")))
 
 if _TEST_FLAGS_SET and not _EXPLICIT_PYTEST_RUNTIME:
-    logger.warning(
-        "Test flags are set without explicit pytest runtime; startup guard will reject this configuration."
-    )
+    logger.warning("Test flags are set without explicit pytest runtime; startup guard will reject this configuration.")
 
 if _TEST_MODE:
     logger.info("TEST_MODE detected: Skipping non-essential middlewares (security headers, metrics, usage logging)")
@@ -6074,7 +6662,9 @@ elif _MINIMAL_TEST_APP:
     include_router_idempotent(app, chat_loop_router, prefix=f"{API_V1_PREFIX}")
     include_router_idempotent(app, conversations_alias_router, prefix=f"{API_V1_PREFIX}/chats", tags=["chat"])
     include_router_idempotent(app, character_router, prefix=f"{API_V1_PREFIX}/characters", tags=["characters"])
-    include_router_idempotent(app, character_memory_router, prefix=f"{API_V1_PREFIX}/characters", tags=["character-memory"])
+    include_router_idempotent(
+        app, character_memory_router, prefix=f"{API_V1_PREFIX}/characters", tags=["character-memory"]
+    )
     include_router_idempotent(
         app, character_chat_sessions_router, prefix=f"{API_V1_PREFIX}/chats", tags=["character-chat-sessions"]
     )
@@ -6327,7 +6917,9 @@ elif _MINIMAL_TEST_APP:
 
         app.include_router(scheduled_tasks_control_plane_router, prefix=f"{API_V1_PREFIX}", tags=["scheduled-tasks"])
     except _IMPORT_EXCEPTIONS as _scheduled_tasks_cp_min_err:
-        logger.debug(f"Skipping scheduled tasks control plane router in minimal test app: {_scheduled_tasks_cp_min_err}")
+        logger.debug(
+            f"Skipping scheduled tasks control plane router in minimal test app: {_scheduled_tasks_cp_min_err}"
+        )
     try:
         from tldw_Server_API.app.api.v1.endpoints.notifications import router as notifications_router
 
@@ -6384,6 +6976,13 @@ elif _MINIMAL_TEST_APP:
         app.include_router(persona_router, prefix=f"{API_V1_PREFIX}/persona", tags=["persona"])
     except _IMPORT_EXCEPTIONS as _persona_min_err:
         logger.debug(f"Skipping persona router in minimal test app: {_persona_min_err}")
+    # Archetype template endpoints (list / detail / preview)
+    try:
+        from tldw_Server_API.app.api.v1.endpoints.archetype_endpoints import router as archetype_router
+
+        app.include_router(archetype_router, prefix=f"{API_V1_PREFIX}/persona/archetypes", tags=["persona-archetypes"])
+    except _IMPORT_EXCEPTIONS as _archetype_min_err:
+        logger.debug("Skipping archetype router in minimal test app: {}", _archetype_min_err)
     # Notes endpoints (health + CRUD)
     try:
         from tldw_Server_API.app.api.v1.endpoints.notes import router as notes_router
@@ -6476,9 +7075,7 @@ elif _MINIMAL_TEST_APP:
     _minimal_audio_jobs_enabled = route_enabled("audio-jobs")
     if _in_pytest_cmd and not _env_flag_enabled("MINIMAL_TEST_INCLUDE_AUDIO_JOBS"):
         _minimal_audio_jobs_enabled = False
-        logger.info(
-            "Skipping audio-jobs router in minimal test app (set MINIMAL_TEST_INCLUDE_AUDIO_JOBS=1 to enable)"
-        )
+        logger.info("Skipping audio-jobs router in minimal test app (set MINIMAL_TEST_INCLUDE_AUDIO_JOBS=1 to enable)")
 
     if _minimal_audio_jobs_enabled:
         try:
@@ -6633,6 +7230,12 @@ elif _MINIMAL_TEST_APP:
         app.include_router(acp_permissions_router, prefix=f"{API_V1_PREFIX}", tags=["acp-permissions"])
     except _IMPORT_EXCEPTIONS as _acp_perm_min_err:
         logger.debug(f"Skipping ACP permissions router in minimal test app: {_acp_perm_min_err}")
+    try:
+        from tldw_Server_API.app.api.v1.endpoints.acp_multiplex import router as acp_multiplex_router
+
+        app.include_router(acp_multiplex_router, prefix=f"{API_V1_PREFIX}", tags=["acp-multiplex"])
+    except _IMPORT_EXCEPTIONS as _acp_mpx_min_err:
+        logger.debug(f"Skipping ACP multiplex router in minimal test app: {_acp_mpx_min_err}")
     # Agent Orchestration endpoints
     try:
         from tldw_Server_API.app.api.v1.endpoints.agent_orchestration import router as orch_router
@@ -6713,9 +7316,7 @@ elif _MINIMAL_TEST_APP:
 
         app.include_router(_chat_wf_router, prefix="", tags=["chat-workflows"])
     except _IMPORT_EXCEPTIONS as _chat_wf_min_err:
-        logger.debug(
-            f"Skipping chat workflows router in minimal test app: {_chat_wf_min_err}"
-        )
+        logger.debug(f"Skipping chat workflows router in minimal test app: {_chat_wf_min_err}")
     try:
         from tldw_Server_API.app.api.v1.endpoints.scheduler_workflows import router as _sch_wf_router
 
@@ -6887,11 +7488,21 @@ else:
     if "acp_router" in locals() and acp_router is not None:
         _include_if_enabled("acp", acp_router, prefix=f"{API_V1_PREFIX}", tags=["acp"], default_stable=False)
     if "acp_schedules_router" in locals() and acp_schedules_router is not None:
-        _include_if_enabled("acp", acp_schedules_router, prefix=f"{API_V1_PREFIX}", tags=["acp-schedules"], default_stable=False)
+        _include_if_enabled(
+            "acp", acp_schedules_router, prefix=f"{API_V1_PREFIX}", tags=["acp-schedules"], default_stable=False
+        )
     if "acp_triggers_router" in locals() and acp_triggers_router is not None:
-        _include_if_enabled("acp", acp_triggers_router, prefix=f"{API_V1_PREFIX}", tags=["acp-triggers"], default_stable=False)
+        _include_if_enabled(
+            "acp", acp_triggers_router, prefix=f"{API_V1_PREFIX}", tags=["acp-triggers"], default_stable=False
+        )
     if "acp_permissions_router" in locals() and acp_permissions_router is not None:
-        _include_if_enabled("acp", acp_permissions_router, prefix=f"{API_V1_PREFIX}", tags=["acp-permissions"], default_stable=False)
+        _include_if_enabled(
+            "acp", acp_permissions_router, prefix=f"{API_V1_PREFIX}", tags=["acp-permissions"], default_stable=False
+        )
+    if "acp_multiplex_router" in locals() and acp_multiplex_router is not None:
+        _include_if_enabled(
+            "acp", acp_multiplex_router, prefix=f"{API_V1_PREFIX}", tags=["acp-multiplex"], default_stable=False
+        )
     if "character_router" in locals():
         _include_if_enabled("characters", character_router, prefix=f"{API_V1_PREFIX}/characters", tags=["characters"])
     if "character_memory_router" in locals():
@@ -6899,9 +7510,7 @@ else:
             "character-memory", character_memory_router, prefix=f"{API_V1_PREFIX}/characters", tags=["character-memory"]
         )
     if "workspaces_router" in locals():
-        _include_if_enabled(
-            "workspaces", workspaces_router, prefix=f"{API_V1_PREFIX}/workspaces", tags=["workspaces"]
-        )
+        _include_if_enabled("workspaces", workspaces_router, prefix=f"{API_V1_PREFIX}/workspaces", tags=["workspaces"])
     if "character_chat_sessions_router" in locals():
         _include_if_enabled(
             "character-chat-sessions",
@@ -6940,7 +7549,9 @@ else:
     if _HAS_SLACK and "slack_router" in locals():
         _include_if_enabled("slack", slack_router, prefix=f"{API_V1_PREFIX}", tags=["slack"], default_stable=False)
     if _HAS_DISCORD and "discord_router" in locals():
-        _include_if_enabled("discord", discord_router, prefix=f"{API_V1_PREFIX}", tags=["discord"], default_stable=False)
+        _include_if_enabled(
+            "discord", discord_router, prefix=f"{API_V1_PREFIX}", tags=["discord"], default_stable=False
+        )
     if _HAS_TELEGRAM and "telegram_router" in locals():
         _include_if_enabled(
             "telegram", telegram_router, prefix=f"{API_V1_PREFIX}", tags=["telegram"], default_stable=False
@@ -7061,13 +7672,11 @@ else:
     except _IMPORT_EXCEPTIONS as _e:
         logger.warning(f"Notifications endpoint not available: {_e}")
     _reading_import_enabled = True
-    if (
-        _EXPLICIT_PYTEST_RUNTIME
-        and _MINIMAL_TEST_APP
-        and not _test_env_flag_enabled("MINIMAL_TEST_INCLUDE_READING")
-    ):
+    if _EXPLICIT_PYTEST_RUNTIME and _MINIMAL_TEST_APP and not _test_env_flag_enabled("MINIMAL_TEST_INCLUDE_READING"):
         _reading_import_enabled = False
-        logger.info("Skipping reading endpoint imports in pytest startup (set MINIMAL_TEST_INCLUDE_READING=1 to enable)")
+        logger.info(
+            "Skipping reading endpoint imports in pytest startup (set MINIMAL_TEST_INCLUDE_READING=1 to enable)"
+        )
     if _reading_import_enabled:
         try:
             from tldw_Server_API.app.api.v1.endpoints.reading import router as _reading_router
@@ -7089,39 +7698,23 @@ else:
         )  # /api/v1/notes/graph
     _include_if_enabled("notes", notes_router, prefix=f"{API_V1_PREFIX}/notes", tags=["notes"])
     if _HAS_WEB_CLIPPER:
-        _include_if_enabled("web-clipper", web_clipper_router, prefix=f"{API_V1_PREFIX}/web-clipper", tags=["web-clipper"])
+        _include_if_enabled(
+            "web-clipper", web_clipper_router, prefix=f"{API_V1_PREFIX}/web-clipper", tags=["web-clipper"]
+        )
     _include_if_enabled("translation", translate_router, prefix=f"{API_V1_PREFIX}", tags=["translation"])
     _include_if_enabled("slides", slides_router, prefix=f"{API_V1_PREFIX}", tags=["slides"])
     _include_if_enabled("prompts", prompt_router, prefix=f"{API_V1_PREFIX}/prompts", tags=["prompts"])
     # Kanban Board endpoints
     if _HAS_KANBAN:
-        _include_if_enabled(
-            "kanban", kanban_boards_router, prefix=f"{API_V1_PREFIX}/kanban", tags=["kanban"]
-        )
-        _include_if_enabled(
-            "kanban", kanban_lists_router, prefix=f"{API_V1_PREFIX}/kanban", tags=["kanban"]
-        )
-        _include_if_enabled(
-            "kanban", kanban_cards_router, prefix=f"{API_V1_PREFIX}/kanban", tags=["kanban"]
-        )
-        _include_if_enabled(
-            "kanban", kanban_labels_router, prefix=f"{API_V1_PREFIX}/kanban", tags=["kanban"]
-        )
-        _include_if_enabled(
-            "kanban", kanban_checklists_router, prefix=f"{API_V1_PREFIX}/kanban", tags=["kanban"]
-        )
-        _include_if_enabled(
-            "kanban", kanban_comments_router, prefix=f"{API_V1_PREFIX}/kanban", tags=["kanban"]
-        )
-        _include_if_enabled(
-            "kanban", kanban_search_router, prefix=f"{API_V1_PREFIX}/kanban", tags=["kanban"]
-        )
-        _include_if_enabled(
-            "kanban", kanban_links_router, prefix=f"{API_V1_PREFIX}/kanban", tags=["kanban"]
-        )
-        _include_if_enabled(
-            "kanban", kanban_workflow_router, prefix=f"{API_V1_PREFIX}/kanban", tags=["kanban"]
-        )
+        _include_if_enabled("kanban", kanban_boards_router, prefix=f"{API_V1_PREFIX}/kanban", tags=["kanban"])
+        _include_if_enabled("kanban", kanban_lists_router, prefix=f"{API_V1_PREFIX}/kanban", tags=["kanban"])
+        _include_if_enabled("kanban", kanban_cards_router, prefix=f"{API_V1_PREFIX}/kanban", tags=["kanban"])
+        _include_if_enabled("kanban", kanban_labels_router, prefix=f"{API_V1_PREFIX}/kanban", tags=["kanban"])
+        _include_if_enabled("kanban", kanban_checklists_router, prefix=f"{API_V1_PREFIX}/kanban", tags=["kanban"])
+        _include_if_enabled("kanban", kanban_comments_router, prefix=f"{API_V1_PREFIX}/kanban", tags=["kanban"])
+        _include_if_enabled("kanban", kanban_search_router, prefix=f"{API_V1_PREFIX}/kanban", tags=["kanban"])
+        _include_if_enabled("kanban", kanban_links_router, prefix=f"{API_V1_PREFIX}/kanban", tags=["kanban"])
+        _include_if_enabled("kanban", kanban_workflow_router, prefix=f"{API_V1_PREFIX}/kanban", tags=["kanban"])
     if _HAS_READING_HIGHLIGHTS:
         _include_if_enabled(
             "reading-highlights", reading_highlights_router, prefix=f"{API_V1_PREFIX}", tags=["reading-highlights"]
@@ -7259,9 +7852,7 @@ else:
     _include_if_enabled(
         "flashcards", flashcards_router, prefix=f"{API_V1_PREFIX}", tags=["flashcards"], default_stable=True
     )
-    _include_if_enabled(
-        "quizzes", quizzes_router, prefix=f"{API_V1_PREFIX}", tags=["quizzes"], default_stable=True
-    )
+    _include_if_enabled("quizzes", quizzes_router, prefix=f"{API_V1_PREFIX}", tags=["quizzes"], default_stable=True)
     _include_if_enabled(
         "study-suggestions",
         study_suggestions_router,
@@ -7275,8 +7866,11 @@ else:
         )
     if "manuscripts_router" in locals() and manuscripts_router is not None:
         _include_if_enabled(
-            "manuscripts", manuscripts_router, prefix=f"{API_V1_PREFIX}/writing/manuscripts",
-            tags=["manuscripts"], default_stable=True
+            "manuscripts",
+            manuscripts_router,
+            prefix=f"{API_V1_PREFIX}/writing/manuscripts",
+            tags=["manuscripts"],
+            default_stable=True,
         )
     from tldw_Server_API.app.api.v1.endpoints.persona import (
         router as persona_router,
@@ -7337,6 +7931,15 @@ else:
         _include_if_enabled(
             "persona", persona_router, prefix=f"{API_V1_PREFIX}/persona", tags=["persona"], default_stable=True
         )
+    # Archetype template endpoints are always available (read-only catalog data)
+    try:
+        from tldw_Server_API.app.api.v1.endpoints.archetype_endpoints import router as archetype_router  # noqa: F811
+
+        include_router_idempotent(
+            app, archetype_router, prefix=f"{API_V1_PREFIX}/persona/archetypes", tags=["persona-archetypes"]
+        )
+    except _STARTUP_GUARD_EXCEPTIONS + _IMPORT_EXCEPTIONS as _arch_full_err:
+        logger.debug("Archetype router unavailable in full app: {}", _arch_full_err)
     _include_if_enabled("mcp-unified", mcp_unified_router, prefix=f"{API_V1_PREFIX}", tags=["mcp-unified"])
     _include_if_enabled("chatbooks", chatbooks_router, prefix=f"{API_V1_PREFIX}", tags=["chatbooks"])
     _include_if_enabled("sharing", sharing_router, prefix=f"{API_V1_PREFIX}", tags=["sharing"])

@@ -38,8 +38,9 @@ def test_batch_parallel_strict_fail_fast_cancels_remaining(monkeypatch):
             api_name: str,
             api_key: str,
             user_id: str,
+            webhook_user_id: str | None = None,
         ):
-            _ = (summary, metrics, api_name, api_key, user_id)
+            _ = (summary, metrics, api_name, api_key, user_id, webhook_user_id)
             idx = int(source_text.split("_")[-1])
             started_items.append(idx)
             if idx == 0:

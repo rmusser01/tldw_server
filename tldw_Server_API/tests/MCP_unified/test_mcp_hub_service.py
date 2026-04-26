@@ -32,6 +32,25 @@ def test_normalize_shared_workspace_root_rejects_paths_outside_allowed_bases(
         McpHubService._normalize_shared_workspace_root(str(disallowed_root))
 
 
+def test_normalize_shared_workspace_root_accepts_paths_under_symlinked_allowed_base(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    from tldw_Server_API.app.services.mcp_hub_service import McpHubService
+
+    real_root = tmp_path / "real-shared"
+    real_root.mkdir()
+    team_root = real_root / "team-a"
+    team_root.mkdir()
+    symlink_root = tmp_path / "allowed-link"
+    symlink_root.symlink_to(real_root, target_is_directory=True)
+    monkeypatch.setenv("ACP_WORKSPACE_ALLOWED_BASE_PATHS", str(symlink_root))
+
+    normalized = McpHubService._normalize_shared_workspace_root(str(team_root))
+
+    assert normalized == str(team_root.resolve())
+
+
 @pytest.mark.asyncio
 async def test_set_external_secret_encrypts_and_never_returns_plaintext(tmp_path, monkeypatch) -> None:
     from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool

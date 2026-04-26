@@ -15,9 +15,11 @@ from tldw_Server_API.app.core.AuthNZ.permissions import EVALS_MANAGE, EVALS_READ
 from tldw_Server_API.app.core.Evaluations.benchmark_loaders import load_benchmark_dataset
 from tldw_Server_API.app.core.Evaluations.benchmark_registry import get_registry
 from tldw_Server_API.app.core.Evaluations.evaluation_manager import EvaluationManager
+from tldw_Server_API.app.core.Evaluations.identity import EvaluationIdentity
 
 from .evaluations_auth import (
     check_evaluation_rate_limit,
+    get_evaluation_identity,
     get_eval_request_user,
     require_eval_permissions,
     sanitize_error_message,
@@ -27,12 +29,8 @@ from .evaluations_auth import (
 benchmarks_router = APIRouter()
 
 
-def _get_evaluation_manager_for_user(current_user: User) -> EvaluationManager:
-    user_id = getattr(current_user, "id", None)
-    try:
-        return EvaluationManager(user_id=int(user_id)) if user_id is not None else EvaluationManager()
-    except (TypeError, ValueError):
-        return EvaluationManager()
+def _get_evaluation_manager_for_user(identity: EvaluationIdentity) -> EvaluationManager:
+    return EvaluationManager(user_id=identity.user_scope)
 
 
 class BenchmarkRunRequest(BaseModel):
@@ -106,8 +104,9 @@ async def run_benchmark(
     current_user: User = Depends(get_eval_request_user),
 ):
     try:
-        evaluation_manager = _get_evaluation_manager_for_user(current_user)
-        stable_user_id = getattr(current_user, "id_str", None) or str(getattr(current_user, "id", ""))
+        identity = get_evaluation_identity(current_user)
+        evaluation_manager = _get_evaluation_manager_for_user(identity)
+        stable_user_id = identity.created_by
         registry = get_registry()
         config = registry.get(benchmark_name)
         if not config:
@@ -208,7 +207,7 @@ async def run_benchmark(
                 metadata={
                     "api_name": request.api_name,
                     "user_id": stable_user_id,
-                    "current_user_id": str(getattr(current_user, "id", "")),
+                    "current_user_id": identity.user_scope,
                     "total_samples": len(dataset),
                 },
             )

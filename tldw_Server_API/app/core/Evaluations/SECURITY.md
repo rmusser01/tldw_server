@@ -66,9 +66,23 @@ y`
   - JWT token validation for multi-user mode
   - API key validation for single-user mode
   - Rate limiting per user/IP
+  - Canonical evaluations identity mapping for ownership, DB routing, and webhook subjects
 - **Considerations**:
   - Implement key rotation mechanism
   - Add request signing for webhooks
+
+### 7. Canonical Identity Handling
+- **Location**: `identity.py`, evaluations route modules, Jobs workers
+- **Rules**:
+  - Resolve one canonical `EvaluationIdentity` from the authenticated user for each request or job.
+  - Use `user_scope` for per-user service binding and database path selection.
+  - Use `created_by` for ownership checks, row filters, and idempotency records.
+  - Use `webhook_user_id` for webhook manager ownership.
+- **Do Not**:
+  - Do not use the raw `verify_api_key()` return value as an ownership key, limiter subject, or storage-routing identifier.
+  - Do not mix route-local `current_user.id`, token strings, and webhook prefixes in separate ad hoc normalization paths.
+- **Reason**:
+  - The auth artifact can differ from the durable evaluations owner string. Using one canonical identity prevents cross-user leakage, idempotency drift, and service cache misrouting.
 
 ## Known Security Risks & Mitigations
 

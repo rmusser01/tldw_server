@@ -22,14 +22,24 @@ def test_sanitize_webhook_error_detail_hides_internal_failures() -> None:
     assert detail == {"status": "error", "error": "internal_error"}
 
 
-def test_sanitize_webhook_success_result_strips_unexpected_fields() -> None:
-    safe_result = _sanitize_webhook_success_result(
+def test_sanitize_webhook_error_detail_hides_secret_decryption_failures() -> None:
+    status_code, detail = _sanitize_webhook_error_detail(
+        {"status": "error", "error": "secret_decryption_failed: decrypt failed"}
+    )
+
+    assert status_code == 503
+    assert detail == {"status": "error", "error": "internal_error"}
+
+
+def test_sanitize_webhook_success_result_strips_internal_fields() -> None:
+    detail = _sanitize_webhook_success_result(
         {
             "status": "accepted",
             "task_id": "task-123",
-            "error": "should_not_leak",
-            "traceback": "should_not_leak",
+            "run_id": "internal-run-id",
+            "debug": {"trace_id": "abc"},
+            "error": "should-not-leak",
         }
     )
 
-    assert safe_result == {"status": "accepted", "task_id": "task-123"}
+    assert detail == {"status": "accepted", "task_id": "task-123"}

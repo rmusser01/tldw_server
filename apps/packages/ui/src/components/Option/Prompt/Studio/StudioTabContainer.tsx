@@ -13,9 +13,10 @@ import {
   TestTube,
   BarChart3,
   Sparkles,
-  Settings
+  Settings,
+  X
 } from "lucide-react"
-import React, { Suspense, useEffect } from "react"
+import React, { Suspense, useEffect, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { useSearchParams } from "react-router-dom"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
@@ -118,6 +119,16 @@ export const StudioTabContainer: React.FC = () => {
   const setActiveSubTab = usePromptStudioStore((s) => s.setActiveSubTab)
   const selectedProjectId = usePromptStudioStore((s) => s.selectedProjectId)
   const setSelectedProjectId = usePromptStudioStore((s) => s.setSelectedProjectId)
+  const [wsConnected, setWsConnected] = useState(true)
+  const studioContainerRef = useRef<HTMLDivElement | null>(null)
+  const [onboardingDismissed, setOnboardingDismissed] = useState(() => {
+    if (typeof window === "undefined") return false
+    try {
+      return window.localStorage.getItem("tldw-studio-onboarding-dismissed") === "true"
+    } catch {
+      return false
+    }
+  })
 
   // Capability check
   const { data: hasStudio, isLoading: isCheckingCapability } = useQuery({
@@ -226,11 +237,22 @@ export const StudioTabContainer: React.FC = () => {
     }
   }, [activeSubTab, searchParams, setSearchParams])
 
+  // Auto-select default project when none is selected and defaults are loaded
   useEffect(() => {
-    if (!selectedProjectId && activeSubTab !== "projects") {
-      setActiveSubTab("projects")
+    if (
+      !selectedProjectId &&
+      typeof settingsDefaults.defaultProjectId === "number" &&
+      settingsDefaults.defaultProjectId > 0 &&
+      settingsProjects.some((project) => project.id === settingsDefaults.defaultProjectId)
+    ) {
+      setSelectedProjectId(settingsDefaults.defaultProjectId)
     }
-  }, [selectedProjectId, activeSubTab, setActiveSubTab])
+  }, [
+    selectedProjectId,
+    settingsDefaults.defaultProjectId,
+    settingsProjects,
+    setSelectedProjectId
+  ])
 
   useEffect(() => {
     if (!isOnline || hasStudio !== true || typeof window === "undefined") {
@@ -250,6 +272,7 @@ export const StudioTabContainer: React.FC = () => {
 
         ws.onopen = () => {
           if (!ws || ws.readyState !== WebSocket.OPEN) return
+          setWsConnected(true)
           const subscribePayload = selectedProjectId
             ? { type: "subscribe", project_id: selectedProjectId }
             : { type: "subscribe" }
@@ -271,9 +294,15 @@ export const StudioTabContainer: React.FC = () => {
         }
 
         ws.onerror = () => {
+          setWsConnected(false)
           // Polling remains active as fallback when websocket errors.
         }
+
+        ws.onclose = () => {
+          setWsConnected(false)
+        }
       } catch {
+        setWsConnected(false)
         // Polling remains active as fallback when websocket setup fails.
       }
     }
@@ -285,8 +314,40 @@ export const StudioTabContainer: React.FC = () => {
       if (ws && ws.readyState < WebSocket.CLOSING) {
         ws.close()
       }
+      // Don't reset wsConnected here — let onopen set it when the next
+      // connection attempt succeeds. Resetting to true in cleanup would
+      // flash-hide the disconnected banner between effect re-runs.
     }
   }, [isOnline, hasStudio, selectedProjectId, queryClient])
+
+  // Keyboard shortcuts: Cmd/Ctrl+1-5 for tab switching
+  useEffect(() => {
+    const container = studioContainerRef.current
+    if (!container) {
+      return
+    }
+
+    const handler = (e: KeyboardEvent) => {
+      if (!e.metaKey && !e.ctrlKey) return
+      const tabMap: Record<string, StudioSubTab> = {
+        "1": "projects",
+        "2": "prompts",
+        "3": "testCases",
+        "4": "evaluations",
+        "5": "optimizations"
+      }
+      const tab = tabMap[e.key]
+      if (tab) {
+        e.preventDefault()
+        // Only switch to non-projects tabs if a project is selected
+        if (tab !== "projects" && !selectedProjectId) return
+        setActiveSubTab(tab)
+      }
+    }
+
+    container.addEventListener("keydown", handler)
+    return () => container.removeEventListener("keydown", handler)
+  }, [selectedProjectId, setActiveSubTab])
 
   const handleSubTabChange = (value: string | number) => {
     if (isValidSubTab(value as string)) {
@@ -364,6 +425,22 @@ export const StudioTabContainer: React.FC = () => {
   const selectProjectFirstLabel = t("managePrompts.studio.selectProjectFirstShort", {
     defaultValue: "Select a project first"
   })
+
+  // When a non-projects tab has no project selected, show a helpful gate with action
+  const renderProjectGate = () => (
+    <FeatureEmptyState
+      title={t("managePrompts.studio.noProject.title", {
+        defaultValue: "No project selected"
+      })}
+      description={t("managePrompts.studio.noProject.description", {
+        defaultValue: "Select or create a project in the Projects tab to get started with prompts, test cases, evaluations, and optimizations."
+      })}
+      primaryActionLabel={t("managePrompts.studio.noProject.goToProjects", {
+        defaultValue: "Go to Projects"
+      })}
+      onPrimaryAction={() => setActiveSubTab("projects")}
+    />
+  )
 
   const projectsLabel = t("managePrompts.studio.tabs.projects", {
     defaultValue: "Projects"
@@ -502,6 +579,10 @@ export const StudioTabContainer: React.FC = () => {
   })
 
   const renderStudioSubTab = () => {
+    if (activeSubTab !== "projects" && !selectedProjectId) {
+      return renderProjectGate()
+    }
+
     switch (activeSubTab) {
       case "projects":
         return <ProjectsTab />
@@ -535,7 +616,12 @@ export const StudioTabContainer: React.FC = () => {
   }
 
   return (
-    <div className="space-y-4" data-testid="studio-tab-container">
+    <div
+      ref={studioContainerRef}
+      className="space-y-4"
+      data-testid="studio-tab-container"
+      tabIndex={0}
+    >
       {/* Header with sub-tabs and status */}
       <div className="flex flex-wrap items-center justify-between gap-4">
         {isMobile ? (
@@ -618,8 +704,106 @@ export const StudioTabContainer: React.FC = () => {
         </div>
       </div>
 
-      {/* Project context reminder */}
-      {!selectedProjectId && (
+      {/* Getting-started onboarding or project context reminder */}
+      {!selectedProjectId && !onboardingDismissed && (
+        <div className="rounded-lg border border-border bg-surface p-6" data-testid="studio-onboarding-card">
+          <div className="mb-4 flex items-start justify-between">
+            <h3 className="text-base font-semibold text-text">
+              {t("managePrompts.studio.onboarding.title", {
+                defaultValue: "Getting started with Prompt Studio"
+              })}
+            </h3>
+            <button
+              type="button"
+              onClick={() => {
+                setOnboardingDismissed(true)
+                try { window.localStorage.setItem("tldw-studio-onboarding-dismissed", "true") } catch {}
+              }}
+              className="text-text-muted hover:text-text"
+              aria-label={t("common:dismiss", { defaultValue: "Dismiss" })}
+              data-testid="studio-onboarding-dismiss"
+            >
+              <X className="size-4" />
+            </button>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {([
+              {
+                step: 1,
+                key: "createProject" as const,
+                title: t("managePrompts.studio.onboarding.step1Title", { defaultValue: "Create a project" }),
+                description: t("managePrompts.studio.onboarding.step1Desc", { defaultValue: "Organize your prompts into projects for different use cases" }),
+                tab: "projects" as const,
+                highlighted: true
+              },
+              {
+                step: 2,
+                key: "addPrompts" as const,
+                title: t("managePrompts.studio.onboarding.step2Title", { defaultValue: "Add prompts" }),
+                description: t("managePrompts.studio.onboarding.step2Desc", { defaultValue: "Write and version your prompt templates" }),
+                tab: "prompts" as const,
+                highlighted: false
+              },
+              {
+                step: 3,
+                key: "writeTests" as const,
+                title: t("managePrompts.studio.onboarding.step3Title", { defaultValue: "Write test cases" }),
+                description: t("managePrompts.studio.onboarding.step3Desc", { defaultValue: "Define expected inputs and outputs to measure quality" }),
+                tab: "testCases" as const,
+                highlighted: false
+              },
+              {
+                step: 4,
+                key: "runEvals" as const,
+                title: t("managePrompts.studio.onboarding.step4Title", { defaultValue: "Run evaluations" }),
+                description: t("managePrompts.studio.onboarding.step4Desc", { defaultValue: "Test your prompts against your test cases automatically" }),
+                tab: "evaluations" as const,
+                highlighted: false
+              },
+              {
+                step: 5,
+                key: "optimize" as const,
+                title: t("managePrompts.studio.onboarding.step5Title", { defaultValue: "Optimize" }),
+                description: t("managePrompts.studio.onboarding.step5Desc", { defaultValue: "Let the system improve your prompts based on evaluation results" }),
+                tab: "optimizations" as const,
+                highlighted: false
+              }
+            ]).map((item) => (
+              <button
+                key={item.key}
+                type="button"
+                onClick={() => {
+                  setActiveSubTab(item.tab)
+                }}
+                className={`flex items-start gap-3 rounded-md border p-3 text-left transition ${
+                  item.highlighted
+                    ? "border-primary/30 bg-primary/5 hover:bg-primary/10 cursor-pointer"
+                    : "border-border bg-bg hover:border-primary/20 hover:bg-surface2 cursor-pointer"
+                }`}
+                data-testid={`studio-onboarding-step-${item.step}`}
+              >
+                <span className={`mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full text-xs font-bold ${
+                  item.highlighted ? "bg-primary text-white" : "bg-border text-text-muted"
+                }`}>
+                  {item.step}
+                </span>
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-text">{item.title}</p>
+                  <p className="mt-0.5 text-xs text-text-muted">{item.description}</p>
+                  {!item.highlighted && (
+                    <p className="mt-1 text-xs italic text-text-muted">
+                      {t("managePrompts.studio.onboarding.needsProject", {
+                        defaultValue: "Requires a project"
+                      })}
+                    </p>
+                  )}
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+      {!selectedProjectId && onboardingDismissed && (
         <div className="p-4 bg-warn/10 border border-warn/30 rounded-md">
           <p className="text-sm text-warn">
             {t("managePrompts.studio.selectProjectFirstDetails", {
@@ -629,6 +813,36 @@ export const StudioTabContainer: React.FC = () => {
           </p>
         </div>
       )}
+
+      {/* WebSocket disconnected banner */}
+      {!wsConnected && isOnline && (
+        <div
+          className="bg-warn/10 border border-warn/20 text-warn text-xs p-2 rounded"
+          data-testid="studio-ws-disconnected-banner"
+        >
+          {t("managePrompts.studio.wsDisconnected", {
+            defaultValue: "Real-time updates unavailable. Status refreshes automatically."
+          })}
+        </div>
+      )}
+
+      {/* Breadcrumb — shows selected project context on non-projects tabs */}
+      {selectedProjectId && activeSubTab !== "projects" && (() => {
+        const projectName = settingsProjects.find((p) => p.id === selectedProjectId)?.name
+        const tabLabel = activeSubTab === "prompts" ? promptsLabel
+          : activeSubTab === "testCases" ? testCasesLabel
+          : activeSubTab === "evaluations" ? evaluationsLabel
+          : optimizationsLabel
+        return (
+          <nav aria-label="Breadcrumb" className="flex items-center gap-1.5 text-sm text-text-muted" data-testid="studio-breadcrumb">
+            <button type="button" onClick={() => setActiveSubTab("projects")} className="hover:text-primary hover:underline">
+              {projectName || `Project #${selectedProjectId}`}
+            </button>
+            <span aria-hidden="true">/</span>
+            <span className="font-medium text-text">{tabLabel}</span>
+          </nav>
+        )
+      })()}
 
       {/* Content area */}
       <div className="min-h-[400px]">{renderStudioSubTab()}</div>

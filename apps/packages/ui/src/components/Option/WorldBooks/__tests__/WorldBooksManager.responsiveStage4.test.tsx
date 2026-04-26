@@ -240,9 +240,8 @@ describe("WorldBooksManager responsive stage-4 modal scrolling", () => {
 
       await user.click(screen.getByRole("button", { name: "Close" }))
 
-      await user.click(screen.getByRole("button", { name: "Edit world book" }))
-      expect(await screen.findByText("Edit World Book")).toBeInTheDocument()
-      expectOpenModalBodyScrollable()
+      // Edit modal is no longer directly accessible (replaced by detail panel Settings tab)
+      // Just verify the create modal scrolling works
     },
     60000
   )
@@ -253,13 +252,17 @@ describe("WorldBooksManager responsive stage-4 modal scrolling", () => {
       const user = userEvent.setup()
       render(<WorldBooksManager />)
 
-      await user.click(screen.getByRole("button", { name: "View world book statistics" }))
+      // Open overflow menu then click Statistics
+      await user.click(screen.getByRole("button", { name: "More actions for Arcana" }))
+      await user.click(await screen.findByText("Statistics"))
       expect(await screen.findByText("World Book Statistics")).toBeInTheDocument()
       expectOpenModalBodyScrollable()
 
       await user.click(screen.getByRole("button", { name: "Close" }))
 
-      await user.click(screen.getByRole("button", { name: "Open relationship matrix" }))
+      // Open Tools dropdown then click Relationship Matrix
+    await user.click(screen.getByRole("button", { name: "Tools" }))
+    await user.click(await screen.findByText("Relationship Matrix"))
       expect(await screen.findByText("World Book ↔ Character Matrix")).toBeInTheDocument()
       expectOpenModalBodyScrollable()
     },

@@ -21,6 +21,10 @@ vi.mock("@/hooks/keyboard/useShortcutConfig", () => ({
   })
 }))
 
+vi.mock("@/components/Option/Prompt/usePromptPaletteCommands", () => ({
+  usePromptPaletteCommands: () => []
+}))
+
 describe("CommandPaletteHost", () => {
   beforeEach(() => {
     HTMLElement.prototype.scrollIntoView = vi.fn()
@@ -82,6 +86,28 @@ describe("CommandPaletteHost", () => {
     )
 
     const input = screen.getByRole("textbox", { name: "composer" })
+    input.focus()
+    fireEvent.keyDown(input, { key: "k", ctrlKey: true })
+
+    expect(await screen.findByRole("dialog")).toBeInTheDocument()
+  })
+
+  it("opens the palette even when a focused control stops keydown propagation", async () => {
+    render(
+      <MemoryRouter>
+        <div>
+          <input
+            aria-label="propagation-blocker"
+            onKeyDown={(event) => {
+              event.stopPropagation()
+            }}
+          />
+          <CommandPaletteHost />
+        </div>
+      </MemoryRouter>
+    )
+
+    const input = screen.getByRole("textbox", { name: "propagation-blocker" })
     input.focus()
     fireEvent.keyDown(input, { key: "k", ctrlKey: true })
 

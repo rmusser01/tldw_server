@@ -24,7 +24,7 @@ import type { PersonaBuddySummary } from '@/types/persona-buddy'
 import {
   normalizePersonaProfile,
   normalizePersonaExemplar,
-} from '../TldwApiClient'
+} from '../persona-normalizers'
 
 const CHARACTER_CACHE_TTL_MS = 5 * 60 * 1000
 type PersonaProfileWithBuddy = PersonaProfileSummary & {

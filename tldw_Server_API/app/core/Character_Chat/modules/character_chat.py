@@ -1146,6 +1146,7 @@ def post_message_to_conversation(
     character_name: str,
     message_content: str,
     is_user_message: bool,
+    message_id: Optional[str] = None,
     parent_message_id: Optional[str] = None,
     ranking: Optional[int] = None,
     image_data: Optional[bytes] = None,
@@ -1197,6 +1198,7 @@ def post_message_to_conversation(
             raise InputError(f"Image attachment exceeds maximum size of {max_bytes} bytes")
 
     msg_payload = {
+        "id": message_id,
         "conversation_id": conversation_id,
         "sender": sender_name,
         "content": message_content,

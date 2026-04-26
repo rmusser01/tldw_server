@@ -10,6 +10,9 @@ from loguru import logger
 
 from tldw_Server_API.app.core.config import load_comprehensive_config
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType, DatabaseBackend
+from tldw_Server_API.app.core.DB_Management.backends.factory import (
+    reset_managed_sqlite_backends,
+)
 from tldw_Server_API.app.core.DB_Management.content_backend import (
     ContentDatabaseSettings,
     get_content_backend,
@@ -67,17 +70,13 @@ def _clear_content_backend_cache_unlocked() -> None:
 
     Intended to be called from within a ``_runtime_state_context()`` block.
     Swallows import and runtime errors so callers can proceed with reset.
+    The shared cache module owns its own cache lock, so callers should invoke
+    ``clear_cached_backend()`` directly.
     """
     try:
         import tldw_Server_API.app.core.DB_Management.content_backend as cb
 
-        # clear_cached_backend() acquires _cache_lock internally, so no
-        # external lock acquisition is needed here.
-        if hasattr(cb, "_cache_lock") and cb._cache_lock:
-            with cb._cache_lock:  # type: ignore[attr-defined]
-                cb.clear_cached_backend()
-        else:
-            cb.clear_cached_backend()
+        cb.clear_cached_backend()
     except ImportError as exc:
         logger.debug(f"reset_media_runtime_defaults: unable to import content_backend: {exc}")
     except MEDIA_DB_RUNTIME_EXCEPTIONS as exc:
@@ -119,6 +118,7 @@ def reset_media_runtime_defaults(
     *,
     config: configparser.ConfigParser | None = None,
     reload: bool = True,
+    reset_mode: str = "hard",
 ) -> Optional[DatabaseBackend]:
     """Reset shared Media DB runtime defaults and optionally reload the backend."""
     global single_user_config, content_db_settings, postgres_content_mode
@@ -126,6 +126,9 @@ def reset_media_runtime_defaults(
 
     with _runtime_state_context():
         cfg = config or single_user_config
+        previous_backend_type = content_db_settings.backend_type
+        previous_runtime_db_path = str(single_user_db_path)
+        previous_configured_sqlite_path = content_db_settings.sqlite_path
         content_db_backend = None
         _clear_content_backend_cache_unlocked()
 
@@ -136,6 +139,24 @@ def reset_media_runtime_defaults(
             content_db_settings.sqlite_path
             or str(DatabasePaths.get_media_db_path(DatabasePaths.get_single_user_id()))
         )
+        if (
+            previous_backend_type == BackendType.SQLITE
+            or content_db_settings.backend_type == BackendType.SQLITE
+        ):
+            sqlite_targets = {
+                str(target).strip()
+                for target in (
+                    previous_runtime_db_path,
+                    previous_configured_sqlite_path,
+                    content_db_settings.sqlite_path,
+                    single_user_db_path,
+                )
+                if target and str(target).strip()
+            }
+            reset_managed_sqlite_backends(
+                mode=reset_mode,
+                sqlite_targets=sorted(sqlite_targets),
+            )
 
         if reload:
             try:

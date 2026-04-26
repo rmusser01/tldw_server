@@ -38,6 +38,15 @@ class TestSchemaCreation:
         db = GuardianDB(str(tmp_path / "fresh.db"))
         assert db.db_path.endswith("fresh.db")
 
+    def test_db_preserves_sqlite_in_memory_sentinel(self):
+        db = GuardianDB(":memory:")
+        conn = db._connect()
+        try:
+            assert db.db_path == ":memory:"
+            assert conn.execute("SELECT 1").fetchone()[0] == 1
+        finally:
+            conn.close()
+
     def test_double_init_is_idempotent(self, tmp_path):
         path = str(tmp_path / "dup.db")
         GuardianDB(path)

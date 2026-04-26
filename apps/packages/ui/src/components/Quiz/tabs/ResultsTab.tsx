@@ -38,6 +38,7 @@ import { useDecksQuery } from "@/components/Flashcards/hooks/useFlashcardQueries
 import { NewDeckConfigurationFields } from "@/components/Flashcards/components/NewDeckConfigurationFields"
 import { useDeckSchedulerDraft } from "@/components/Flashcards/hooks/useDeckSchedulerDraft"
 import { formatSchedulerSummary } from "@/components/Flashcards/utils/scheduler-settings"
+import type { DeckReviewPromptSide } from "@/services/flashcards"
 import { StudySuggestionsPanel } from "@/components/StudySuggestions/StudySuggestionsPanel"
 import type {
   AnswerValue,
@@ -167,6 +168,7 @@ export const ResultsTab: React.FC<ResultsTabProps> = ({ onRetakeQuiz }) => {
   const [selectedMissedQuestions, setSelectedMissedQuestions] = React.useState<Record<number, boolean>>({})
   const [deckTarget, setDeckTarget] = React.useState<DeckTargetValue>(null)
   const [newDeckName, setNewDeckName] = React.useState("")
+  const [reviewPromptSide, setReviewPromptSide] = React.useState<DeckReviewPromptSide>("front")
   const [replaceExistingQuestionIds, setReplaceExistingQuestionIds] = React.useState<number[]>([])
   const newDeckSchedulerDraft = useDeckSchedulerDraft()
 
@@ -887,6 +889,7 @@ export const ResultsTab: React.FC<ResultsTabProps> = ({ onRetakeQuiz }) => {
             return {
               question_ids: questionIds,
               create_deck_name: trimmedDeckName,
+              create_deck_review_prompt_side: reviewPromptSide,
               create_deck_scheduler_type: schedulerSettings.scheduler_type,
               create_deck_scheduler_settings: schedulerSettings.scheduler_settings,
               replace_active: replaceActive
@@ -973,6 +976,7 @@ export const ResultsTab: React.FC<ResultsTabProps> = ({ onRetakeQuiz }) => {
     missedQuestionEntries,
     newDeckSchedulerDraft,
     newDeckName,
+    reviewPromptSide,
     replaceExistingQuestionIds,
     selectedAttemptDetails,
     selectedMissedQuestions,
@@ -1042,6 +1046,8 @@ export const ResultsTab: React.FC<ResultsTabProps> = ({ onRetakeQuiz }) => {
               <NewDeckConfigurationFields
                 deckName={newDeckName}
                 onDeckNameChange={setNewDeckName}
+                reviewPromptSide={reviewPromptSide}
+                onReviewPromptSideChange={setReviewPromptSide}
                 schedulerDraft={newDeckSchedulerDraft}
                 nameTestId="quiz-remediation-new-deck-name"
                 hint={t("option:quiz.newDeckSchedulerHint", {

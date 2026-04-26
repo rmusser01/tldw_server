@@ -3,6 +3,9 @@ import types
 import pytest
 
 from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as AEL
+from tldw_Server_API.app.core.Web_Scraping.outbound_policy import (
+    WebOutboundPolicyDecision,
+)
 
 
 def test_scrape_from_sitemap_uses_blocking(monkeypatch):
@@ -55,3 +58,27 @@ def test_scrape_by_url_level_uses_blocking(monkeypatch):
     results = AEL.scrape_by_url_level("https://example.com", level=1)
     assert len(results) == 1
     assert calls == ["https://example.com/one"]
+
+
+def test_scrape_from_sitemap_blocks_on_shared_sync_policy_denial(monkeypatch):
+    monkeypatch.setattr(
+        AEL,
+        "decide_web_outbound_policy_sync",
+        lambda *args, **kwargs: WebOutboundPolicyDecision(
+            allowed=False,
+            mode="strict",
+            reason="deny_test",
+            stage="pre_fetch",
+            source="sitemap_scrape",
+        ),
+        raising=False,
+    )
+
+    def fail_fetch(*args, **kwargs):
+        raise AssertionError("sitemap fetch should not run when outbound policy blocks")
+
+    monkeypatch.setattr(AEL, "http_fetch", fail_fetch)
+
+    results = AEL.scrape_from_sitemap("https://example.com/sitemap.xml")
+
+    assert results == []

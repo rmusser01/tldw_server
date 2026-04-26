@@ -212,7 +212,8 @@ describe("WorldBooksManager entry drawer stage-2 authoring controls", () => {
     const user = userEvent.setup()
     render(<WorldBooksManager />)
 
-    await user.click(screen.getByRole("button", { name: "Manage entries" }))
+    // Select the world book to show detail panel with entries tab
+    await user.click(screen.getByText("Arcana"))
     await screen.findByRole("columnheader", { name: "Keywords" })
 
     const addKeywordInput = screen.getByRole("combobox", { name: "Keywords" })
@@ -234,7 +235,8 @@ describe("WorldBooksManager entry drawer stage-2 authoring controls", () => {
     const user = userEvent.setup()
     render(<WorldBooksManager />)
 
-    await user.click(screen.getByRole("button", { name: "Manage entries" }))
+    // Select the world book to show detail panel with entries tab
+    await user.click(screen.getByText("Arcana"))
     expect(await screen.findByRole("columnheader", { name: "Group" })).toBeInTheDocument()
     expect(screen.getByText("History", { selector: ".ant-tag" })).toBeInTheDocument()
     expect(screen.getByText("Ungrouped")).toBeInTheDocument()
@@ -265,7 +267,8 @@ describe("WorldBooksManager entry drawer stage-2 authoring controls", () => {
     const user = userEvent.setup()
     render(<WorldBooksManager />)
 
-    await user.click(screen.getByRole("button", { name: "Manage entries" }))
+    // Select the world book to show detail panel with entries tab
+    await user.click(screen.getByText("Arcana"))
     await screen.findByRole("columnheader", { name: "Keywords" })
     await user.click(screen.getByText("Matching Options"))
 

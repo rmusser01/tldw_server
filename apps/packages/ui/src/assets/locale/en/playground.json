@@ -855,9 +855,21 @@
     "compareMode": "Compare Mode",
     "compareResponses": "Compare Responses",
     "addModel": "Add model",
+    "keyboardShortcuts": "Keyboard Shortcuts",
+    "shortcutSearch": "Search workspace",
+    "shortcutFocusSources": "Focus sources pane",
+    "shortcutFocusChat": "Focus chat pane",
+    "shortcutFocusStudio": "Focus studio pane",
+    "shortcutNewNote": "New note",
+    "shortcutNewWorkspace": "New workspace",
+    "shortcutUndo": "Undo",
+    "shortcutShowShortcuts": "Show shortcuts",
     "clearChat": "Clear chat",
     "messagePlaceholder": "Type your message...",
     "messagePlaceholderCompare": "Send to {{count}} models..."
+  },
+  "studio": {
+    "loadingOutputViewer": "Loading output viewer..."
   },
   "debug": {
     "title": "Debug Panel",

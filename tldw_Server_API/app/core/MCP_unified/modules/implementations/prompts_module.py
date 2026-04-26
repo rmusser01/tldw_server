@@ -11,6 +11,7 @@ from typing import Any
 from loguru import logger
 
 from ....DB_Management.Prompts_DB import PromptsDatabase
+from ...persona_scope import assert_identifier_in_scope
 from ..base import BaseModule, create_tool_definition
 from ..disk_space import get_free_disk_space_gb
 
@@ -165,7 +166,13 @@ class PromptsModule(BaseModule):
             else:
                 rows = rows[:limit]
             out = []
+            scope_filtered = False
             for r in rows:
+                try:
+                    assert_identifier_in_scope(context, "prompt_id", r.get("id"), label="Prompt")
+                except PermissionError:
+                    scope_filtered = True
+                    continue
                 desc = r.get("details") or r.get("system_prompt") or ""
                 out.append({
                     "id": r.get("id"),
@@ -181,9 +188,15 @@ class PromptsModule(BaseModule):
                     "tags": r.get("keywords") or None,
                     "loc": None,
                 })
-            has_more = (offset + len(out)) < total
+            visible_total = len(out) if scope_filtered else total
+            has_more = False if scope_filtered else (offset + len(out)) < visible_total
             next_offset = (offset + len(out)) if has_more else None
-            return {"results": out, "has_more": has_more, "next_offset": next_offset, "total_estimated": total}
+            return {
+                "results": out,
+                "has_more": has_more,
+                "next_offset": next_offset,
+                "total_estimated": visible_total,
+            }
         finally:
             try:
                 db.close_connection()
@@ -201,6 +214,7 @@ class PromptsModule(BaseModule):
                 row = db.get_prompt_by_name(ident)
             if not row:
                 raise ValueError(f"Prompt not found: {ident}")
+            assert_identifier_in_scope(context, "prompt_id", row.get("id"), label="Prompt")
             desc = row.get("details") or ""
             meta = {
                 "id": row.get("id"),

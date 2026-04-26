@@ -10,6 +10,7 @@ import {
 import {
   projectTokenBudget
 } from "../usage-metrics"
+import { useComposerSubmit } from "@/components/Chat/composer/hooks/useComposerSubmit"
 import type { TFunction } from "i18next"
 import type { ChatResearchContext } from "@/services/tldw/TldwApiClient"
 
@@ -83,6 +84,10 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
   const submitFormRef = React.useRef<
     (options?: { ignorePinnedResults?: boolean }) => void
   >(() => undefined)
+
+  // Route through the shared composer dispatch so cross-cutting concerns
+  // (metrics, error handling) have one home if we need them later.
+  const { dispatch } = useComposerSubmit({ sendMessage })
 
   const buildPinnedMessage = React.useCallback(
     (message: string, options?: { ignorePinnedResults?: boolean }) => {
@@ -229,7 +234,7 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
         })
       }
       setLastSubmittedContext(currentContextSnapshot)
-      await sendMessage({
+      await dispatch({
         image: intent.isImageCommand ? "" : value.image,
         message: trimmed,
         docs: intent.isImageCommand

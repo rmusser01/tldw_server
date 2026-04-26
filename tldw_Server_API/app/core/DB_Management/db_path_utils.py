@@ -118,9 +118,87 @@ def _ensure_dir(path: Path, *, label: str) -> None:
         raise StorageUnavailableError(f"Failed to create {label} directory") from e
 
 
-def _resolve_candidate_for_containment(candidate: Path) -> Path:
-    parent = candidate.parent.resolve(strict=False)
-    return parent / candidate.name
+def _normalize_trusted_root(root: str | Path, *, project_root: Path) -> list[Path]:
+    try:
+        candidate = Path(root).expanduser()
+    except Exception:
+        return []
+
+    if candidate.is_absolute():
+        lexical_root = Path(os.path.abspath(str(candidate)))
+    else:
+        lexical_root = Path(os.path.abspath(str(project_root / candidate)))
+
+    roots = [lexical_root]
+    try:
+        resolved_root = lexical_root.resolve(strict=False)
+    except Exception:
+        resolved_root = lexical_root
+    if resolved_root not in roots:
+        roots.append(resolved_root)
+    return roots
+
+
+def _iter_trusted_database_roots(
+    *,
+    extra_roots: Optional[list[Path]] = None,
+) -> list[Path]:
+    project_root = Path(get_project_root()).resolve()
+    trusted_roots: list[Path] = []
+
+    trusted_roots.extend(_normalize_trusted_root(project_root, project_root=project_root))
+
+    try:
+        user_db_base_dir = DatabasePaths.get_user_db_base_dir(allow_legacy_alias=True)
+    except Exception as exc:
+        logger.debug("Skipping user database trusted root discovery: {}", exc)
+    else:
+        trusted_roots.extend(_normalize_trusted_root(user_db_base_dir, project_root=project_root))
+
+    if extra_roots:
+        for root in extra_roots:
+            normalized_roots = _normalize_trusted_root(root, project_root=project_root)
+            if not normalized_roots:
+                logger.debug("Skipping invalid trusted root {}", root)
+                continue
+            trusted_roots.extend(normalized_roots)
+
+    if _is_test_context():
+        trusted_roots.extend(_normalize_trusted_root(tempfile.gettempdir(), project_root=project_root))
+        trusted_roots.extend(_normalize_trusted_root(Path.cwd(), project_root=project_root))
+
+    unique_roots: list[Path] = []
+    for root in trusted_roots:
+        if root not in unique_roots:
+            unique_roots.append(root)
+    return unique_roots
+
+
+def _path_is_within_root(candidate: Path, root: Path) -> bool:
+    try:
+        candidate.relative_to(root)
+        return True
+    except ValueError:
+        return False
+
+
+def _path_is_within_trusted_roots(candidate: Path, trusted_roots: list[Path]) -> bool:
+    return any(_path_is_within_root(candidate, root) for root in trusted_roots)
+
+
+def _resolve_real_path_within_trusted_roots(
+    candidate_path: str | Path,
+    trusted_roots: list[Path],
+) -> Path:
+    candidate_real = os.path.realpath(str(candidate_path))
+    for root in trusted_roots:
+        root_real = os.path.realpath(str(root))
+        try:
+            if os.path.commonpath([root_real, candidate_real]) == root_real:
+                return Path(candidate_real)
+        except ValueError:
+            continue
+    raise InvalidStoragePathError("invalid_path")
 
 
 def resolve_trusted_database_path(
@@ -134,55 +212,25 @@ def resolve_trusted_database_path(
     if not raw_path:
         raise InvalidStoragePathError("invalid_path")
 
-    trusted_roots: list[Path] = []
     project_root = Path(get_project_root()).resolve()
-    trusted_roots.append(project_root)
-
-    try:
-        user_db_base_dir = DatabasePaths.get_user_db_base_dir(allow_legacy_alias=True).resolve()
-    except Exception as exc:
-        logger.debug("Skipping user database trusted root discovery: {}", exc)
-    else:
-        trusted_roots.append(user_db_base_dir)
-
-    if extra_roots:
-        for root in extra_roots:
-            try:
-                resolved_root = Path(root).expanduser().resolve(strict=False)
-            except Exception as exc:
-                logger.debug("Skipping invalid trusted root {}: {}", root, exc)
-            else:
-                trusted_roots.append(resolved_root)
-
-    if _is_test_context():
-        trusted_roots.append(Path(tempfile.gettempdir()).resolve())
-        trusted_roots.append(Path.cwd().resolve())
-
-    unique_roots: list[Path] = []
-    for root in trusted_roots:
-        if root not in unique_roots:
-            unique_roots.append(root)
+    trusted_roots = _iter_trusted_database_roots(extra_roots=extra_roots)
 
     try:
         expanded_path = os.path.expanduser(raw_path)
     except Exception as exc:
         raise InvalidStoragePathError("invalid_path") from exc
+    if raw_path.startswith("~") and (
+        expanded_path == raw_path or expanded_path.startswith("~")
+    ):
+        raise InvalidStoragePathError("invalid_path")
 
     if os.path.isabs(expanded_path):
-        normalized_absolute = os.path.normpath(expanded_path)
-        for root in unique_roots:
-            root_resolved = root.resolve(strict=False)
-            try:
-                relative_candidate = os.path.relpath(normalized_absolute, str(root_resolved))
-            except ValueError:
-                continue
-
-            safe_candidate = safe_join(str(root_resolved), relative_candidate)
-            if safe_candidate is not None:
-                return Path(safe_candidate)
-
-        logger.warning("Rejected {} path outside trusted roots: {}", label, normalized_absolute)
-        raise InvalidStoragePathError("invalid_path")
+        try:
+            return _resolve_real_path_within_trusted_roots(expanded_path, trusted_roots)
+        except Exception as exc:
+            normalized_absolute = os.path.normpath(expanded_path)
+            logger.warning("Rejected {} path outside trusted roots: {}", label, normalized_absolute)
+            raise InvalidStoragePathError("invalid_path") from exc
 
     safe_candidate = safe_join(str(project_root), expanded_path)
     if safe_candidate is not None:
@@ -190,6 +238,55 @@ def resolve_trusted_database_path(
 
     logger.warning("Rejected {} path outside trusted roots: {}", label, expanded_path)
     raise InvalidStoragePathError("invalid_path")
+
+
+def _get_trusted_database_parent_dir(
+    resolved_db_path: Path,
+    *,
+    extra_roots: Optional[list[Path]] = None,
+) -> Path:
+    trusted_roots = _iter_trusted_database_roots(extra_roots=extra_roots)
+    return _resolve_real_path_within_trusted_roots(resolved_db_path.parent, trusted_roots)
+
+
+def ensure_trusted_database_parent_dir(
+    db_path: str | Path,
+    *,
+    label: str = "database",
+    extra_roots: Optional[list[Path]] = None,
+) -> Path:
+    """Resolve a trusted database path and create its parent directory safely."""
+    resolved_db_path = resolve_trusted_database_path(db_path, label=label, extra_roots=extra_roots)
+    parent_dir = _get_trusted_database_parent_dir(resolved_db_path, extra_roots=extra_roots)
+    _ensure_dir(parent_dir, label=f"{label} parent")
+    return resolved_db_path
+
+
+def require_trusted_database_parent_exists(
+    db_path: str | Path,
+    *,
+    label: str = "database",
+    extra_roots: Optional[list[Path]] = None,
+    missing_parent_message: str | None = None,
+) -> Path:
+    """Resolve a trusted database path and require its parent directory to exist."""
+    resolved_db_path = resolve_trusted_database_path(db_path, label=label, extra_roots=extra_roots)
+    trusted_roots = _iter_trusted_database_roots(extra_roots=extra_roots)
+    parent_dir = os.path.realpath(str(resolved_db_path.parent))
+    parent_is_trusted = False
+    for root in trusted_roots:
+        root_real = os.path.realpath(str(root))
+        try:
+            if os.path.commonpath([root_real, parent_dir]) == root_real:
+                parent_is_trusted = True
+                break
+        except ValueError:
+            continue
+    if not parent_is_trusted:
+        raise InvalidStoragePathError("invalid_path")
+    if not os.path.isdir(parent_dir):
+        raise ValueError(missing_parent_message or f"{label} parent directory must already exist")
+    return resolved_db_path
 
 
 def _build_user_dir(base_path: Path, user_id: Optional[UserId]) -> Path:

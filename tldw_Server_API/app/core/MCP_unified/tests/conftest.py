@@ -4,9 +4,10 @@
 """
 from __future__ import annotations
 
-import os
 import pytest
-from fastapi.testclient import TestClient
+
+from tldw_Server_API.app.core.MCP_unified import get_mcp_server
+from tldw_Server_API.app.core.MCP_unified.tests.support import build_mcp_test_client
 
 
 @pytest.fixture
@@ -20,27 +21,19 @@ def mcp_ws_client(monkeypatch):
     monkeypatch.setenv("MCP_WS_AUTH_REQUIRED", "false")
     # Accept both empty and JSON list for env-based list parsing
     monkeypatch.setenv("MCP_ALLOWED_IPS", "")
-
-    # Import app and configure server instance
-    from tldw_Server_API.app.main import app  # late import to pick up env
-    try:
-        from tldw_Server_API.app.core.MCP_unified import get_mcp_server
+    with build_mcp_test_client() as client:
         server = get_mcp_server()
         server.config.ws_auth_required = False
         server.config.allowed_client_ips = []
         server.config.blocked_client_ips = []
-    except Exception:
-        # If server not yet initialized in tests, proceed; WS paths may init lazily
-        _ = None
-
-    client = TestClient(app)
-    try:
+        try:
+            server.config.debug_mode = True
+        except AttributeError:
+            _ = None
         yield client
-    finally:
-        client.close()
 
 
 @pytest.fixture
-def ws_client(monkeypatch):
+def ws_client(mcp_ws_client):
     """Alias for mcp_ws_client to match common fixture name across tests."""
-    yield from mcp_ws_client(monkeypatch)  # type: ignore[misc]
+    yield mcp_ws_client

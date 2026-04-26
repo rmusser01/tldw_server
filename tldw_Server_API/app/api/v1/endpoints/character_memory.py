@@ -52,6 +52,14 @@ def _character_id_from_persona(persona_id: str) -> str:
     return persona_id
 
 
+def _ids_match(left: Any, right: Any) -> bool:
+    """Compare ownership identifiers using int coercion first, then normalized strings."""
+    try:
+        return int(left) == int(right)
+    except (TypeError, ValueError):
+        return str(left).strip() == str(right).strip()
+
+
 def get_or_create_character_persona_profile(
     db: CharactersRAGDB,
     character_id: str,
@@ -231,8 +239,19 @@ async def extract_character_memories_endpoint(
     conversation = db.get_conversation_by_id(body.chat_id)
     if not conversation:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chat session not found")
-    if str(conversation.get("user_id")) != user_id:
+    stored_client_id = conversation.get("client_id")
+    request_user_id = current_user.id
+    if not _ids_match(stored_client_id, request_user_id):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not your chat session")
+    conversation_character_id = conversation.get("character_id")
+    requested_character_id = card.get("id") or character_id
+    if conversation_character_id in (None, "") or not _ids_match(
+        conversation_character_id, requested_character_id,
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Chat session must belong to the requested character",
+        )
 
     user_name = conversation.get("user_name", "User")
     persona_id = get_or_create_character_persona_profile(db, character_id, char_name, user_id)

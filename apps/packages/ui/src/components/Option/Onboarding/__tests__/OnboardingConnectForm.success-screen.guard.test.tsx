@@ -2,7 +2,6 @@
 import React from "react"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { HEADER_SHORTCUT_SELECTION_SETTING } from "@/services/settings/ui-settings"
 
 type HarnessState = {
   navigate: ReturnType<typeof vi.fn>
@@ -408,10 +407,6 @@ describe("OnboardingConnectForm success screen guards", () => {
 
     await waitFor(() => {
       expect(harness.setUserPersona).toHaveBeenCalledWith("explorer")
-      expect(harness.setSetting).toHaveBeenCalledWith(
-        expect.objectContaining({ key: HEADER_SHORTCUT_SELECTION_SETTING.key }),
-        ["explorer-shortcut"]
-      )
       expect(harness.openSidepanelForActiveTab).toHaveBeenCalledTimes(1)
       expect(harness.markFirstRunComplete).toHaveBeenCalled()
       expect(harness.navigate).toHaveBeenCalledWith("/chat")

@@ -96,10 +96,10 @@ const KeywordPickerModal: React.FC<KeywordPickerModalProps> = ({
     <Modal
       open={open}
       title={t('option:notesSearch.keywordPickerTitle', {
-        defaultValue: 'Browse keywords'
+        defaultValue: 'Browse tags'
       })}
       aria-label={t('option:notesSearch.keywordPickerTitle', {
-        defaultValue: 'Browse keywords'
+        defaultValue: 'Browse tags'
       })}
       onCancel={onCancel}
       onOk={onApply}
@@ -114,7 +114,7 @@ const KeywordPickerModal: React.FC<KeywordPickerModalProps> = ({
       <Input
         allowClear
         placeholder={t('option:notesSearch.keywordPickerSearch', {
-          defaultValue: 'Search keywords'
+          defaultValue: 'Search tags'
         })}
         value={keywordPickerQuery}
         onChange={(e) => onQueryChange(e.target.value)}
@@ -122,7 +122,7 @@ const KeywordPickerModal: React.FC<KeywordPickerModalProps> = ({
       <div className="space-y-1">
         <Typography.Text type="secondary" className="text-xs text-text-muted">
           {t('option:notesSearch.keywordPickerSortLabel', {
-            defaultValue: 'Sort keywords'
+            defaultValue: 'Sort tags'
           })}
         </Typography.Text>
         <select
@@ -133,7 +133,7 @@ const KeywordPickerModal: React.FC<KeywordPickerModalProps> = ({
           className="w-full rounded-md border border-border bg-surface px-2 py-1.5 text-sm text-text"
           data-testid="notes-keyword-picker-sort-select"
           aria-label={t('option:notesSearch.keywordPickerSortAriaLabel', {
-            defaultValue: 'Sort keywords'
+            defaultValue: 'Sort tags'
           })}
         >
           <option value="frequency_desc">
@@ -156,7 +156,7 @@ const KeywordPickerModal: React.FC<KeywordPickerModalProps> = ({
       <div className="flex items-center justify-between gap-2">
         <Typography.Text type="secondary" className="text-xs text-text-muted">
           {t('option:notesSearch.keywordPickerCount', {
-            defaultValue: '{{count}} keywords',
+            defaultValue: '{{count}} tags',
             count: availableKeywords.length
           })}
         </Typography.Text>
@@ -187,7 +187,7 @@ const KeywordPickerModal: React.FC<KeywordPickerModalProps> = ({
               data-testid="notes-keyword-picker-open-manager"
             >
               {t('option:notesSearch.keywordPickerManageAction', {
-                defaultValue: 'Manage keywords'
+                defaultValue: 'Manage tags'
               })}
             </Button>
           ) : null}
@@ -228,7 +228,7 @@ const KeywordPickerModal: React.FC<KeywordPickerModalProps> = ({
             className="block text-xs text-text-muted text-center"
           >
             {t('option:notesSearch.keywordPickerEmpty', {
-              defaultValue: 'No keywords found'
+              defaultValue: 'No tags found'
             })}
           </Typography.Text>
         ) : (

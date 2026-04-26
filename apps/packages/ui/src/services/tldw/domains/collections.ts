@@ -32,7 +32,7 @@ import {
   normalizeIngestionSourceListResponse,
   normalizeIngestionSourceSyncTrigger,
   normalizeReadingDigestSchedule
-} from "../TldwApiClient"
+} from "../collections-normalizers"
 
 export interface TldwApiClientCore {
   resolveApiPath(key: string, candidates: string[]): Promise<string>

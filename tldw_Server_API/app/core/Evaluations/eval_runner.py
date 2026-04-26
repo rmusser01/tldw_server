@@ -50,6 +50,10 @@ from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
     resolve_provider_model,
     split_system_message,
 )
+from tldw_Server_API.app.core.Evaluations.run_state import (
+    can_transition_run_status,
+    normalize_run_status,
+)
 from tldw_Server_API.app.core.RAG.rag_custom_metrics import get_custom_metrics
 from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import unified_rag_pipeline
 from tldw_Server_API.app.core.RAG.rag_service.vector_stores import (
@@ -526,8 +530,9 @@ class EvaluationRunner:
         if max_trials and len(grid) > max_trials:
             if strategy == "random":
                 import random
-                random.seed(42)
-                grid = random.sample(grid, max_trials)
+                # Deterministic sampling keeps experimental comparisons reproducible.
+                random.seed(42)  # nosec B311
+                grid = random.sample(grid, max_trials)  # nosec B311
             else:
                 grid = grid[:max_trials]
         return grid
@@ -2216,13 +2221,14 @@ class EvaluationRunner:
         """Calculate aggregate statistics"""
         _ = metrics
         _ = threshold
+        empty_pass_rate = 0.0
         if not results:
             return {
                 "mean_score": 0,
                 "std_dev": 0,
                 "min_score": 0,
                 "max_score": 0,
-                "pass_rate": 0,
+                "pass_rate": empty_pass_rate,
                 "total_samples": 0,
                 "failed_samples": 0
             }
@@ -2252,7 +2258,7 @@ class EvaluationRunner:
                 "std_dev": 0,
                 "min_score": 0,
                 "max_score": 0,
-                "pass_rate": 0,
+                "pass_rate": empty_pass_rate,
                 "total_samples": len(results),
                 "failed_samples": len(results)
             }
@@ -2363,19 +2369,28 @@ class EvaluationRunner:
 
     def cancel_run(self, run_id: str) -> bool:
         """Cancel a running evaluation"""
-        if run_id in self.running_tasks:
-            task = self.running_tasks[run_id]
-            task.cancel()
-            self.db.update_run_status(run_id, "cancelled")
-            del self.running_tasks[run_id]
-            return True
-        return False
+        task = self.running_tasks.get(run_id)
+        if task is None:
+            return False
+
+        run = self.db.get_run(run_id)
+        current_status = normalize_run_status(run.get("status") if run else None)
+
+        task.cancel()
+
+        if not can_transition_run_status(current_status, "cancelled"):
+            self.running_tasks.pop(run_id, None)
+            return False
+
+        self.db.update_run_status(run_id, "cancelled")
+        self.running_tasks.pop(run_id, None)
+        return True
 
     def get_run_status(self, run_id: str) -> Optional[str]:
         """Get the status of a run"""
         run = self.db.get_run(run_id)
         if run:
-            return run["status"]
+            return normalize_run_status(run.get("status"))
         return None
 
     async def shutdown(self) -> None:

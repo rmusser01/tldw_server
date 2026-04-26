@@ -1,7 +1,7 @@
 import React from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { fireEvent, render, screen } from "@testing-library/react"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import NotesManagerPage from "../NotesManagerPage"
 
 const {
@@ -12,7 +12,11 @@ const {
   mockNavigate,
   mockConfirmDanger,
   mockGetSetting,
-  mockClearSetting
+  mockClearSetting,
+  mockStorageGet,
+  mockStorageSet,
+  mockStorageRemove,
+  mockStartTutorial
 } = vi.hoisted(() => {
   return {
     mockBgRequest: vi.fn(),
@@ -22,7 +26,11 @@ const {
     mockNavigate: vi.fn(),
     mockConfirmDanger: vi.fn(),
     mockGetSetting: vi.fn(),
-    mockClearSetting: vi.fn()
+    mockClearSetting: vi.fn(),
+    mockStorageGet: vi.fn(),
+    mockStorageSet: vi.fn(),
+    mockStorageRemove: vi.fn(),
+    mockStartTutorial: vi.fn()
   }
 })
 
@@ -118,6 +126,23 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
   }
 }))
 
+vi.mock("@/utils/safe-storage", () => ({
+  createSafeStorage: () => ({
+    get: mockStorageGet,
+    set: mockStorageSet,
+    remove: mockStorageRemove
+  })
+}))
+
+vi.mock("@/store/tutorials", () => {
+  const store = Object.assign(() => ({}), {
+    getState: () => ({
+      startTutorial: mockStartTutorial
+    })
+  })
+  return { useTutorialStore: store }
+})
+
 vi.mock("@/components/Notes/NotesListPanel", () => ({
   default: () => <div data-testid="notes-list-panel" />
 }))
@@ -142,6 +167,9 @@ describe("NotesManagerPage stage 20 accessibility shortcut discovery", () => {
     mockConfirmDanger.mockResolvedValue(true)
     mockGetSetting.mockResolvedValue(null)
     mockClearSetting.mockResolvedValue(undefined)
+    mockStorageGet.mockResolvedValue(null)
+    mockStorageSet.mockResolvedValue(undefined)
+    mockStorageRemove.mockResolvedValue(undefined)
 
     mockBgRequest.mockImplementation(async (request: { path?: string }) => {
       const path = String(request.path || "")
@@ -153,6 +181,10 @@ describe("NotesManagerPage stage 20 accessibility shortcut discovery", () => {
       }
       return {}
     })
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
   })
 
   it("adds shortcut summary semantics and opens shortcut help from the toolbar", async () => {
@@ -184,5 +216,59 @@ describe("NotesManagerPage stage 20 accessibility shortcut discovery", () => {
 
     expect(await screen.findByRole("dialog")).toBeInTheDocument()
     expect(await screen.findByTestId("notes-shortcuts-modal")).toBeInTheDocument()
+  })
+
+  it("ignores Ctrl/Cmd+K and Alt+N while typing, but still focuses search globally", async () => {
+    vi.useFakeTimers()
+    renderPage()
+
+    const textarea = screen.getByLabelText("Note content")
+    const searchInput = screen.getByPlaceholderText(
+      "Search notes... (use quotes for exact match)"
+    )
+
+    textarea.focus()
+    fireEvent.keyDown(textarea, { key: "k", ctrlKey: true })
+    expect(textarea).toHaveFocus()
+
+    fireEvent.keyDown(textarea, { key: "N", altKey: true })
+    await act(async () => {
+      vi.runOnlyPendingTimers()
+    })
+    expect(textarea).toHaveFocus()
+
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true })
+    expect(searchInput).toHaveFocus()
+  })
+
+  it("persists tutorial state through shared storage on first visit", async () => {
+    vi.useFakeTimers()
+    renderPage()
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(mockStorageGet).toHaveBeenCalledWith("notes-tutorial-shown")
+
+    await act(async () => {
+      vi.advanceTimersByTime(1000)
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(mockStorageSet).toHaveBeenCalledWith("notes-tutorial-shown", "1")
+    expect(mockStartTutorial).toHaveBeenCalledWith("notes-basics")
+  })
+
+  it("removes tutorial state from shared storage when restarting the tutorial", async () => {
+    renderPage()
+
+    fireEvent.click(screen.getByTestId("notes-shortcuts-help-button"))
+    fireEvent.click(await screen.findByTestId("notes-restart-tutorial"))
+
+    await waitFor(() => {
+      expect(mockStorageRemove).toHaveBeenCalledWith("notes-tutorial-shown")
+    })
+    expect(mockStartTutorial).toHaveBeenCalledWith("notes-basics")
   })
 })

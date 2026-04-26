@@ -249,7 +249,8 @@ class KnowledgeModule(BaseModule):
         offset: int = int(args.get("offset", 0))
         snippet_len: int = int(args.get("snippet_length", 300))
         order_by: str = args.get("order_by", "relevance")
-        sources: list[str] = args.get("sources") or ["notes", "media"]
+        default_sources = ["notes", "media", "chats", "characters", "prompts"]
+        sources: list[str] = args.get("sources") or default_sources
         filters: dict[str, Any] = args.get("filters") or {}
 
         # Apply session defaults

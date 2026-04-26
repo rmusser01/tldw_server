@@ -1340,9 +1340,16 @@ class MCPProtocol:
                     result = await handler(request.params or {}, context)
                     span.set_attribute("mcp.status", "success")
                 except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS as _span_e:
+                    sanitized = self._sanitize_exception_for_telemetry(_span_e)
                     span.set_attribute("mcp.status", "failure")
-                    span.set_attribute("mcp.error_type", _span_e.__class__.__name__)
-                    span.set_attribute("mcp.error_message", str(_span_e)[:200])
+                    span.set_attribute("mcp.error_type", sanitized.__class__.__name__)
+                    span.set_attribute("mcp.error_message", str(sanitized)[:200])
+                    raise
+                except Exception as _span_e:
+                    sanitized = self._sanitize_exception_for_telemetry(_span_e)
+                    span.set_attribute("mcp.status", "failure")
+                    span.set_attribute("mcp.error_type", sanitized.__class__.__name__)
+                    span.set_attribute("mcp.error_message", str(sanitized)[:200])
                     raise
                 finally:
                     span.set_attribute("mcp.duration_ms", max(0.0, (time.time() - start_exec) * 1000.0))
@@ -1395,10 +1402,18 @@ class MCPProtocol:
             )
         except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS as e:
             # Log error
-            log.exception(
-                f"MCP request failed: method={request.method}, error={self._mask_secrets(str(e))}",
-                extra={"audit": True}
-            )
+            masked = self._mask_secrets(str(e))
+            secret_redacted = bool(getattr(e, "_mcp_masked_secret", False)) or masked != str(e)
+            if secret_redacted:
+                log.error(
+                    f"MCP request failed: method={request.method}, error={masked}",
+                    extra={"audit": True},
+                )
+            else:
+                log.exception(
+                    f"MCP request failed: method={request.method}, error={masked}",
+                    extra={"audit": True},
+                )
             try:
                 elapsed = max(0.0, time.time() - start_ts)
                 self.metrics.record_request(method=request.method, duration=elapsed, status="failure")
@@ -1411,12 +1426,36 @@ class MCPProtocol:
             # Return error response with reduced leakage when not in debug mode
             try:
                 cfg = get_config()
-                msg = self._mask_secrets(str(e)) if getattr(cfg, "debug_mode", False) else "Internal error"
+                debug_mode = bool(getattr(cfg, "debug_mode", False))
             except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS:
-                msg = "Internal error"
+                debug_mode = False
+            msg = masked if debug_mode and not secret_redacted else "Internal error"
             return self._error_response(
                 ErrorCode.INTERNAL_ERROR,
                 msg,
+                request.id if isinstance(request, MCPRequest) else None,
+            )
+        except Exception as e:
+            masked = self._mask_secrets(str(e))
+            secret_redacted = bool(getattr(e, "_mcp_masked_secret", False)) or masked != str(e)
+            if secret_redacted:
+                log.error(
+                    f"MCP request failed: method={request.method}, error={masked}",
+                    extra={"audit": True},
+                )
+            else:
+                log.exception(
+                    f"MCP request failed: method={request.method}, error={masked}",
+                    extra={"audit": True},
+                )
+            with contextlib.suppress(_MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS):
+                elapsed = max(0.0, time.time() - start_ts)
+                self.metrics.record_request(method=request.method, duration=elapsed, status="failure")
+            if isinstance(request, MCPRequest) and request.id is None:
+                return None
+            return self._error_response(
+                ErrorCode.INTERNAL_ERROR,
+                "Internal error",
                 request.id if isinstance(request, MCPRequest) else None,
             )
 
@@ -1440,6 +1479,31 @@ class MCPProtocol:
             return text
         except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS:
             return text
+
+    def _sanitize_exception_for_telemetry(self, exc: Exception) -> Exception:
+        """Redact secret-bearing exception messages before tracing records them."""
+        original = str(exc)
+        masked = self._mask_secrets(original)
+        if masked == original:
+            with contextlib.suppress(Exception):
+                setattr(exc, "_mcp_masked_secret", False)
+            return exc
+        try:
+            sanitized = exc.__class__(masked)
+        except Exception:
+            sanitized = RuntimeError(masked)
+        with contextlib.suppress(Exception):
+            setattr(sanitized, "_mcp_masked_secret", True)
+        if hasattr(sanitized, "__dict__") and hasattr(exc, "__dict__"):
+            with contextlib.suppress(Exception):
+                for attr in ("errno", "code", "name", "lineno"):
+                    if hasattr(exc, attr):
+                        setattr(sanitized, attr, getattr(exc, attr))
+        with contextlib.suppress(Exception):
+            sanitized.args = (masked,)
+        with contextlib.suppress(Exception):
+            setattr(sanitized, "_mcp_masked_secret", True)
+        return sanitized
 
     def _error_response(
         self,

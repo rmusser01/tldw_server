@@ -188,4 +188,23 @@ describe("CommandPalette shortcut hints", () => {
 
     expect(await screen.findByRole("dialog")).toBeInTheDocument()
   })
+
+  it("opens from a window-level Ctrl+K event on standard routes", async () => {
+    render(
+      <MemoryRouter>
+        <CommandPalette
+          onNewChat={vi.fn()}
+          onToggleRag={vi.fn()}
+          onToggleWebSearch={vi.fn()}
+          onIngestPage={vi.fn()}
+          onSwitchModel={vi.fn()}
+          onToggleSidebar={vi.fn()}
+        />
+      </MemoryRouter>
+    )
+
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true })
+
+    expect(await screen.findByRole("dialog")).toBeInTheDocument()
+  })
 })

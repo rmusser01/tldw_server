@@ -24,6 +24,7 @@ import {
 import { extractImportedTemplateItems } from "../writing-template-import-utils"
 import { extractImportedThemeItems } from "../writing-theme-import-utils"
 import {
+  getSnapshotImportInvalidationKeys,
   resolveSnapshotImportAction,
   type SnapshotImportMode
 } from "../writing-snapshot-import-utils"
@@ -261,11 +262,11 @@ export function useWritingImportExport(deps: UseWritingImportExportDeps) {
           setApiProvider(importedProviderHint)
         }
 
-        await Promise.all([
-          queryClient.invalidateQueries({ queryKey: ["writing-sessions"] }),
-          queryClient.invalidateQueries({ queryKey: ["writing-templates"] }),
-          queryClient.invalidateQueries({ queryKey: ["writing-themes"] })
-        ])
+        await Promise.all(
+          getSnapshotImportInvalidationKeys(importMode, activeSessionId).map((queryKey) =>
+            queryClient.invalidateQueries({ queryKey })
+          )
+        )
       } finally {
         setSnapshotImporting(false)
         setSnapshotImportMode("merge")
@@ -274,6 +275,7 @@ export function useWritingImportExport(deps: UseWritingImportExportDeps) {
     },
     [
       apiProviderOverride,
+      activeSessionId,
       queryClient,
       selectedModel,
       snapshotImportMode,

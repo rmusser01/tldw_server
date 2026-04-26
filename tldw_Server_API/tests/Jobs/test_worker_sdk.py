@@ -39,8 +39,11 @@ async def test_auto_renew_jitter_and_progress(monkeypatch, tmp_path):
 
     # Capture renew calls and progress fields
     calls = []
+    renewed = asyncio.Event()
+
     def fake_renew(**kwargs):
         calls.append(kwargs)
+        renewed.set()
         return True
 
     # Capture original sleep; use it inside the stub and assign to sdk._sleep
@@ -54,9 +57,7 @@ async def test_auto_renew_jitter_and_progress(monkeypatch, tmp_path):
         return {"progress_percent": 12.5, "progress_message": "tick"}
 
     task = asyncio.create_task(sdk._auto_renew(acq, progress_cb=progress_cb))
-    # Let it loop twice then stop
-    await _orig_sleep(0)  # enter loop
-    await _orig_sleep(0)
+    await asyncio.wait_for(renewed.wait(), timeout=1)
     sdk.stop()
     try:
         await asyncio.wait_for(task, timeout=1)
@@ -122,6 +123,38 @@ async def test_run_retryable_exception_and_backoff(monkeypatch, tmp_path):
     # Verify backoff sleeps used exponential sequence up to max
     # After job handled and no further jobs, loop should sleep at least base once
     assert any(int(s) in (2, 4, 8) for s in sleep_stub.calls)
+
+
+@pytest.mark.asyncio
+async def test_run_stop_interrupts_idle_backoff_sleep(monkeypatch, tmp_path):
+    db_path = tmp_path / "jobs_wsdk_stop.db"
+    ensure_jobs_tables(db_path)
+    jm = JobManager(db_path)
+
+    cfg = WorkerConfig(
+        domain="chatbooks",
+        queue="default",
+        worker_id="w-stop",
+        backoff_base_seconds=30,
+        backoff_max_seconds=30,
+    )
+    sdk = WorkerSDK(jm, cfg)
+    sleep_started = asyncio.Event()
+
+    async def blocking_sleep(_seconds: float) -> None:
+        sleep_started.set()
+        await asyncio.Future()
+
+    async def handler(_job):
+        pytest.fail("Handler should not run when there are no jobs")
+
+    monkeypatch.setattr(jm, "acquire_next_job", lambda **kwargs: None)
+    sdk._sleep = blocking_sleep
+
+    task = asyncio.create_task(sdk.run(handler=handler))
+    await asyncio.wait_for(sleep_started.wait(), timeout=1)
+    sdk.stop()
+    await asyncio.wait_for(task, timeout=1)
 
 
 @pytest.mark.asyncio

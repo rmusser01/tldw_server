@@ -22,6 +22,7 @@ from tldw_Server_API.app.core.AuthNZ.audit_integrity import verify_audit_chain
 from tldw_Server_API.app.core.Audit.unified_audit_service import (
     UnifiedAuditService,
     AuditReadError,
+    AuditShutdownError,
     AuditEvent,
     AuditContext,
     AuditEventType,
@@ -800,6 +801,177 @@ class TestUnifiedAuditService:
         assert any(row.get("event_id") == ev.event_id for row in events)
         # Fallback file cleaned up
         assert not fallback_path.exists()
+
+    @pytest.mark.asyncio
+    async def test_stop_spills_remaining_events_to_fallback_before_raising(self, tmp_path, monkeypatch):
+        db_path = tmp_path / "audit_stop.db"
+        service = UnifiedAuditService(
+            db_path=str(db_path),
+            enable_pii_detection=False,
+            enable_risk_scoring=False,
+            buffer_size=10,
+            flush_interval=60.0,
+        )
+        await service.initialize(start_background_tasks=False)
+        await service._ensure_db_pool()
+        await service.log_event(
+            AuditEventType.DATA_WRITE,
+            context=AuditContext(user_id="stop-user"),
+            resource_type="doc",
+            resource_id="doc-1",
+        )
+
+        original_update_daily_stats = service._update_daily_stats
+
+        async def _boom_update_daily_stats(*_args, **_kwargs):
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr(service, "_update_daily_stats", _boom_update_daily_stats)
+
+        with pytest.raises(AuditShutdownError) as exc_info:
+            await service.stop()
+
+        assert isinstance(exc_info.value.__cause__, RuntimeError)
+        fb_path = db_path.parent / "audit_fallback_queue.jsonl"
+        assert fb_path.exists()
+        assert len(fb_path.read_text(encoding="utf-8").splitlines()) == 1
+        assert service.event_buffer == []
+        assert service._db_pool is None
+        assert service.owner_loop is None
+        monkeypatch.setattr(service, "_update_daily_stats", original_update_daily_stats)
+
+    @pytest.mark.asyncio
+    async def test_stop_wraps_original_flush_failure_in_shutdown_error(self, tmp_path, monkeypatch):
+        service = UnifiedAuditService(
+            db_path=str(tmp_path / "audit_stop_cause.db"),
+            enable_pii_detection=False,
+            enable_risk_scoring=False,
+            buffer_size=10,
+            flush_interval=60.0,
+        )
+        await service.initialize(start_background_tasks=False)
+        await service._ensure_db_pool()
+
+        async def _boom_update_daily_stats(*_args, **_kwargs):
+            raise RuntimeError("flush exploded")
+
+        monkeypatch.setattr(service, "_update_daily_stats", _boom_update_daily_stats)
+
+        await service.log_event(
+            AuditEventType.DATA_WRITE,
+            context=AuditContext(user_id="stop-user-cause"),
+            resource_type="doc",
+            resource_id="doc-2",
+        )
+
+        with pytest.raises(AuditShutdownError) as exc_info:
+            await service.stop()
+
+        assert "durable shutdown" in str(exc_info.value).lower()
+        assert isinstance(exc_info.value.__cause__, RuntimeError)
+        assert service._db_pool is None
+        assert service.owner_loop is None
+
+    @pytest.mark.asyncio
+    async def test_stop_keeps_buffer_when_fallback_spill_fails(self, tmp_path, monkeypatch):
+        db_path = tmp_path / "audit_stop_spill_fail.db"
+        service = UnifiedAuditService(
+            db_path=str(db_path),
+            enable_pii_detection=False,
+            enable_risk_scoring=False,
+            buffer_size=10,
+            flush_interval=60.0,
+        )
+        await service.initialize(start_background_tasks=False)
+        await service._ensure_db_pool()
+        await service.log_event(
+            AuditEventType.DATA_WRITE,
+            context=AuditContext(user_id="stop-spill-user"),
+            resource_type="doc",
+            resource_id="doc-3",
+        )
+
+        async def _boom_update_daily_stats(*_args, **_kwargs):
+            raise RuntimeError("flush exploded")
+
+        async def _boom_spill(_events):
+            raise OSError("spill failed")
+
+        monkeypatch.setattr(service, "_update_daily_stats", _boom_update_daily_stats)
+        monkeypatch.setattr(service, "_spill_events_to_fallback", _boom_spill)
+
+        with pytest.raises(AuditShutdownError) as exc_info:
+            await service.stop()
+
+        assert isinstance(exc_info.value.__cause__, RuntimeError)
+        assert "spill failed" in str(exc_info.value).lower()
+        assert len(service.event_buffer) == 1
+        assert service._db_pool is None
+        assert service.owner_loop is None
+
+    @pytest.mark.asyncio
+    async def test_stop_preserves_late_arrivals_during_fallback_spill(self, tmp_path, monkeypatch):
+        db_path = tmp_path / "audit_stop_race.db"
+        service = UnifiedAuditService(
+            db_path=str(db_path),
+            enable_pii_detection=False,
+            enable_risk_scoring=False,
+            buffer_size=10,
+            flush_interval=60.0,
+        )
+        await service.initialize(start_background_tasks=False)
+        await service._ensure_db_pool()
+
+        first_event_id = await service.log_event(
+            AuditEventType.DATA_WRITE,
+            context=AuditContext(user_id="race-user"),
+            resource_type="doc",
+            resource_id="doc-4",
+        )
+
+        async def _boom_update_daily_stats(*_args, **_kwargs):
+            raise RuntimeError("flush exploded")
+
+        spill_started = asyncio.Event()
+        release_spill = asyncio.Event()
+        captured_event_ids: list[str] = []
+        original_spill = service._spill_events_to_fallback
+
+        async def _blocked_spill(events):
+            captured_event_ids.extend(event.event_id for event in events)
+            spill_started.set()
+            await release_spill.wait()
+            return await original_spill(events)
+
+        monkeypatch.setattr(service, "_update_daily_stats", _boom_update_daily_stats)
+        monkeypatch.setattr(service, "_spill_events_to_fallback", _blocked_spill)
+
+        stop_task = asyncio.create_task(service.stop())
+        await asyncio.wait_for(spill_started.wait(), timeout=5)
+
+        second_event_id = await service.log_event(
+            AuditEventType.DATA_WRITE,
+            context=AuditContext(user_id="race-user"),
+            resource_type="doc",
+            resource_id="doc-5",
+        )
+
+        release_spill.set()
+
+        with pytest.raises(AuditShutdownError) as exc_info:
+            await stop_task
+
+        assert isinstance(exc_info.value.__cause__, RuntimeError)
+        assert captured_event_ids == [first_event_id]
+        fb_path = db_path.parent / "audit_fallback_queue.jsonl"
+        assert fb_path.exists()
+        fallback_contents = fb_path.read_text(encoding="utf-8")
+        assert first_event_id in fallback_contents
+        assert second_event_id not in fallback_contents
+        assert len(service.event_buffer) == 1
+        assert service.event_buffer[0].event_id == second_event_id
+        assert service._db_pool is None
+        assert service.owner_loop is None
 
     @pytest.mark.asyncio
     async def test_export_events_json_and_csv(self, audit_service):
@@ -2110,6 +2282,7 @@ async def test_flush_propagates_cancellation_and_preserves_buffer(audit_service,
         await audit_service.flush()
 
     assert len(audit_service.event_buffer) == 1
+    monkeypatch.undo()
 
 
 @pytest.mark.asyncio
@@ -2586,4 +2759,3 @@ async def test_export_events_flushes_buffered_events(tmp_path):
         assert service.event_buffer == []
     finally:
         await service.stop()
-

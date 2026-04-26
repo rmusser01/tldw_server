@@ -25,12 +25,9 @@ import {
   clampBulkPriority,
   normalizeBulkEntryIds
 } from "./worldBookBulkActionUtils"
-import {
-  getBudgetUtilizationBand,
-  getBudgetUtilizationColor,
-  getBudgetUtilizationPercent
-} from "./worldBookStatsUtils"
+// worldBookStatsUtils consumed transitively by WorldBookBudgetBar
 import { buildReferencedBySignalMap } from "./worldBookRelationshipUtils"
+import { WorldBookBudgetBar } from "./WorldBookBudgetBar"
 
 const normalizeKeywords = (value: any): string[] => {
   return normalizeKeywordList(value)
@@ -359,20 +356,23 @@ export const WorldBookEntryManager: React.FC<{
       ),
     [entries]
   )
-  const entryBudgetUtilizationPercent = React.useMemo(
-    () => getBudgetUtilizationPercent(estimatedEntryTokens, configuredTokenBudget),
-    [configuredTokenBudget, estimatedEntryTokens]
+  const addFormProjectedTokens = React.useMemo(
+    () => estimateEntryTokens(addContentWatch),
+    [addContentWatch]
   )
-  const entryBudgetUtilizationBand = React.useMemo(
-    () => getBudgetUtilizationBand(entryBudgetUtilizationPercent),
-    [entryBudgetUtilizationPercent]
+  const addFormProjectedTotal = estimatedEntryTokens + addFormProjectedTokens
+  const editFormProjectedTokens = React.useMemo(
+    () => estimateEntryTokens(editContentWatch),
+    [editContentWatch]
   )
-  const entryBudgetUtilizationColor = React.useMemo(
-    () => getBudgetUtilizationColor(entryBudgetUtilizationBand),
-    [entryBudgetUtilizationBand]
+  const editingEntryTokens = React.useMemo(
+    () => estimateEntryTokens(editingEntry?.content),
+    [editingEntry?.content]
   )
-  const isEntryBudgetOverLimit =
-    typeof entryBudgetUtilizationPercent === "number" && entryBudgetUtilizationPercent > 100
+  const editFormProjectedTotal = Math.max(
+    0,
+    estimatedEntryTokens - editingEntryTokens + editFormProjectedTokens
+  )
   const { mutate: addEntry, mutateAsync: addEntryAsync, isPending: adding } = useMutation({
     mutationFn: (v: any) =>
       tldwClient.addWorldBookEntry(worldBookId, {
@@ -937,45 +937,22 @@ export const WorldBookEntryManager: React.FC<{
       )}
       {status === 'success' && entries.length > 0 && (
         <div className="space-y-3">
-          <div
-            className="rounded border border-border px-3 py-2 space-y-1"
-            aria-label="Entry budget utilization"
-          >
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className="text-xs text-text-muted">Estimated using ~4 characters per token.</p>
-              {typeof entryBudgetUtilizationPercent === "number" ? (
-                <p className="text-xs font-medium">
-                  {estimatedEntryTokens}/{configuredTokenBudget} ({entryBudgetUtilizationPercent.toFixed(1)}%)
-                </p>
-              ) : (
-                <p className="text-xs text-text-muted">Budget unavailable</p>
-              )}
-            </div>
-            {typeof entryBudgetUtilizationPercent === "number" ? (
-              <>
-                <Progress
-                  percent={Math.min(entryBudgetUtilizationPercent, 100)}
-                  status={isEntryBudgetOverLimit ? "exception" : "normal"}
-                  strokeColor={entryBudgetUtilizationColor}
-                  size="small"
-                />
-                {isEntryBudgetOverLimit && (
-                  <div className="space-y-0.5">
-                    <p className="text-xs text-danger">
-                      Estimated token usage exceeds the configured budget.
-                    </p>
-                    <p className="text-xs text-text-muted">
-                      Reduce entry content or increase token budget.
-                    </p>
-                  </div>
-                )}
-              </>
-            ) : (
+          {typeof configuredTokenBudget === "number" && configuredTokenBudget > 0 ? (
+            <WorldBookBudgetBar
+              estimatedTokens={estimatedEntryTokens}
+              tokenBudget={configuredTokenBudget}
+              className="mb-3"
+            />
+          ) : (
+            <div
+              className="rounded border border-border px-3 py-2 space-y-1"
+              aria-label="Entry budget utilization"
+            >
               <p className="text-xs text-text-muted">
                 Configure a token budget in world book settings to track utilization.
               </p>
-            )}
-          </div>
+            </div>
+          )}
           <div className="flex flex-wrap items-center gap-2">
             <Input
               allowClear
@@ -1182,7 +1159,12 @@ export const WorldBookEntryManager: React.FC<{
                   )
                 }
               },
-              { title: 'Content', dataIndex: 'content', key: 'content', render: (v: string) => <span className="line-clamp-2">{v}</span> },
+              { title: 'Content', dataIndex: 'content', key: 'content', render: (v: string) => (
+                <div>
+                  <span className="line-clamp-2">{v}</span>
+                  <span className="text-xs text-text-muted">~{estimateEntryTokens(v)} tokens</span>
+                </div>
+              ) },
               {
                 title: (
                   <Tooltip title="Heuristic: counts entries whose content contains this entry's keywords.">
@@ -1401,6 +1383,19 @@ export const WorldBookEntryManager: React.FC<{
             <Input placeholder="e.g., Geography, Characters, History" />
           </Form.Item>
           <p className="text-xs text-text-muted -mt-4 mb-3">{formatEntryContentStats(editContentWatch)}</p>
+          {typeof configuredTokenBudget === "number" && configuredTokenBudget > 0 && editFormProjectedTokens > 0 && (
+            <WorldBookBudgetBar
+              estimatedTokens={estimatedEntryTokens}
+              tokenBudget={configuredTokenBudget}
+              projectedTokens={editFormProjectedTotal}
+              className="mt-2"
+            />
+          )}
+          {typeof configuredTokenBudget === "number" && configuredTokenBudget > 0 && editFormProjectedTotal > configuredTokenBudget && editFormProjectedTokens > 0 && (
+            <div className="mt-1 rounded border border-amber-300 bg-amber-50 px-2 py-1 text-xs text-amber-800">
+              This entry would push usage over budget. The AI may not receive all entries. You can still save — or increase the budget.
+            </div>
+          )}
           <Form.Item
             name="priority"
             label={<LabelWithHelp label="Priority" help="Higher values = more important (0-100). Higher priority entries are selected first when token budget is limited." />}
@@ -1510,6 +1505,19 @@ export const WorldBookEntryManager: React.FC<{
               <Input placeholder="e.g., Geography, Characters, History" />
             </Form.Item>
             <p className="text-xs text-text-muted -mt-4 mb-3">{formatEntryContentStats(addContentWatch)}</p>
+            {typeof configuredTokenBudget === "number" && configuredTokenBudget > 0 && addFormProjectedTokens > 0 && (
+              <WorldBookBudgetBar
+                estimatedTokens={estimatedEntryTokens}
+                tokenBudget={configuredTokenBudget}
+                projectedTokens={addFormProjectedTotal}
+                className="mt-2"
+              />
+            )}
+            {typeof configuredTokenBudget === "number" && configuredTokenBudget > 0 && addFormProjectedTotal > configuredTokenBudget && addFormProjectedTokens > 0 && (
+              <div className="mt-1 rounded border border-amber-300 bg-amber-50 px-2 py-1 text-xs text-amber-800">
+                This entry would push usage over budget. The AI may not receive all entries. You can still save — or increase the budget.
+              </div>
+            )}
             <Form.Item
               name="priority"
               label={<LabelWithHelp label="Priority" help="Higher values = more important (0-100). Higher priority entries are selected first when token budget is limited." />}

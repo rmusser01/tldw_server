@@ -3,7 +3,7 @@
  *
  * The route renders FlashcardsWorkspace which shows either:
  * - A connection/offline banner when the server is unreachable
- * - FlashcardsManager with three tabs: Study, Manage, Transfer
+ * - FlashcardsManager with tabs for Study, Manage, Import / Export, Templates, and Scheduler
  *
  * API base paths:
  *   /api/v1/flashcards        (cards CRUD, review, generate, import, export)
@@ -45,7 +45,7 @@ export class FlashcardsPage extends BasePage {
 
   // -- Locators: Top-level ---------------------------------------------------
 
-  /** The Ant Design Tabs container wrapping Study / Manage / Transfer */
+  /** The Ant Design Tabs container wrapping the flashcards workspace tabs */
   get tabsContainer(): Locator {
     return this.page.locator('[data-testid="flashcards-tabs"]');
   }
@@ -70,8 +70,24 @@ export class FlashcardsPage extends BasePage {
     return this.page.getByRole('tab', { name: /manage/i });
   }
 
+  get templatesTab(): Locator {
+    return this.page.getByRole('tab', { name: /templates/i });
+  }
+
+  get schedulerTab(): Locator {
+    return this.page.getByRole('tab', { name: /scheduler/i });
+  }
+
+  get templatesCreateButton(): Locator {
+    return this.page.getByRole('button', { name: /create template/i });
+  }
+
+  get templatesErrorAlert(): Locator {
+    return this.page.getByRole('alert').filter({ hasText: /could not load templates/i });
+  }
+
   get transferTab(): Locator {
-    return this.page.getByRole('tab', { name: /transfer/i });
+    return this.page.getByRole('tab', { name: /import\s*\/\s*export/i });
   }
 
   // -- Locators: Tab bar extra content ---------------------------------------
@@ -94,6 +110,18 @@ export class FlashcardsPage extends BasePage {
 
   get reviewModeToggle(): Locator {
     return this.page.locator('[data-testid="flashcards-review-mode-toggle"]');
+  }
+
+  get reviewPromptSideToggle(): Locator {
+    return this.page.locator('[data-testid="flashcards-review-prompt-side-toggle"]');
+  }
+
+  get reviewPromptSideFrontOption(): Locator {
+    return this.reviewPromptSideToggle.getByText('Front first', { exact: true });
+  }
+
+  get reviewPromptSideBackOption(): Locator {
+    return this.reviewPromptSideToggle.getByText('Back first', { exact: true });
   }
 
   get reviewActiveCard(): Locator {
@@ -232,10 +260,6 @@ export class FlashcardsPage extends BasePage {
     return this.page.locator(`[data-testid="flashcard-edit-${cardUuid}"]`);
   }
 
-  getReviewDeckOption(deckName: string): Locator {
-    return this.page.getByRole('option', { name: deckName });
-  }
-
   getActiveSelectOption(optionName: string, exact = false): Locator {
     return this.page
       .locator('.ant-select-dropdown')
@@ -243,10 +267,6 @@ export class FlashcardsPage extends BasePage {
       .locator('[role="option"]')
       .filter({ hasText: optionName })
       .first();
-  }
-
-  async openReviewDeckSelect(): Promise<void> {
-    await this.reviewDeckSelect.click({ force: true });
   }
 
   async selectManageDeckByName(deckName: string): Promise<void> {
@@ -282,12 +302,14 @@ export class FlashcardsPage extends BasePage {
 
   // -- Tab Navigation --------------------------------------------------------
 
-  async switchToTab(tab: 'study' | 'manage' | 'transfer'): Promise<void> {
+  async switchToTab(tab: 'study' | 'manage' | 'templates' | 'transfer' | 'scheduler'): Promise<void> {
     // Dismiss any overlays that might intercept clicks
     await dismissConnectionModals(this.page);
     const tabLocator = {
       study: this.studyTab,
       manage: this.manageTab,
+      templates: this.templatesTab,
+      scheduler: this.schedulerTab,
       transfer: this.transferTab,
     }[tab];
     await tabLocator.click({ force: true });

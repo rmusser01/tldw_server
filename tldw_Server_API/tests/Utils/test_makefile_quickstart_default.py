@@ -20,23 +20,31 @@ def _target_block(makefile_text: str, target: str) -> str:
     return match.group(0)
 
 
-def test_quickstart_target_delegates_to_webui_docker_path() -> None:
-    """make quickstart should route to the WebUI Docker target by default."""
+def test_quickstart_target_runs_docker_single_webui_path() -> None:
+    """make quickstart should run the Docker single-user + WebUI path by default."""
     text = Path("Makefile").read_text(encoding="utf-8")
     quickstart = _target_block(text, "quickstart")
     _require(
-        "quickstart-docker-webui" in quickstart,
-        "quickstart should delegate to quickstart-docker-webui",
+        "setup-docker-single start-docker-single verify-docker-single" in quickstart,
+        "quickstart should depend on setup/start/verify Docker single-user targets",
     )
+    quickstart_docker_webui = _target_block(text, "quickstart-docker-webui")
+    _require(": quickstart" in quickstart_docker_webui, "quickstart-docker-webui should alias quickstart")
 
 
-def test_quickstart_install_stays_on_local_dev_path() -> None:
-    """make quickstart-install should preserve the local development path."""
+def test_quickstart_install_is_install_only() -> None:
+    """make quickstart-install should install local deps without starting the server."""
     text = Path("Makefile").read_text(encoding="utf-8")
     quickstart_install = _target_block(text, "quickstart-install")
-    quickstart_local = _target_block(text, "quickstart-local")
     _require(
-        "quickstart-local" in quickstart_install,
-        "quickstart-install should still delegate to quickstart-local",
+        "install-local" in quickstart_install,
+        "quickstart-install should delegate to install-local",
     )
-    _require("uvicorn" in quickstart_local, "quickstart-local should still start uvicorn")
+    _require(
+        "quickstart-local" not in quickstart_install,
+        "quickstart-install should not delegate to quickstart-local",
+    )
+    _require(
+        "uvicorn" not in quickstart_install,
+        "quickstart-install should not start uvicorn",
+    )

@@ -3,6 +3,7 @@ import { Popover } from "antd"
 import { Layers, Globe, ChevronDown, Settings } from "lucide-react"
 import { cn } from "@/libs/utils"
 import type { RagPresetName, RagSource } from "@/services/rag/unified-rag"
+import { ALL_RAG_SOURCES, getRagSourceLabel } from "@/services/rag/sourceMetadata"
 import { AnswerModelMenu } from "./AnswerModelMenu"
 
 type CompactToolbarProps = {
@@ -21,19 +22,11 @@ type CompactToolbarProps = {
   className?: string
 }
 
-const ALL_SOURCES_THRESHOLD = 5
-
-const SOURCE_LABELS: Record<RagSource, string> = {
-  media_db: "Documents & Media",
-  notes: "Notes",
-  characters: "Story Characters",
-  chats: "Conversations",
-  kanban: "Task Boards",
-}
+const ALL_SOURCES_THRESHOLD = ALL_RAG_SOURCES.length
 
 function summarizeSources(sources: RagSource[]): string {
   if (!Array.isArray(sources) || sources.length === 0) return "None"
-  if (sources.length === 1) return SOURCE_LABELS[sources[0]] || sources[0]
+  if (sources.length === 1) return getRagSourceLabel(sources[0])
   if (sources.length >= ALL_SOURCES_THRESHOLD) return "All sources"
   return `${sources.length} selected`
 }

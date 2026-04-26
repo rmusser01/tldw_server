@@ -17,6 +17,7 @@ from tldw_Server_API.app.api.v1.schemas.media_response_models import (
     MediaKeywordsResponse,
 )
 from tldw_Server_API.app.api.v1.utils.cache import generate_etag, is_not_modified
+from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.api.v1.utils.rag_cache import (
     delete_media_vectors,
     invalidate_rag_caches,
@@ -33,6 +34,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.errors import (
     DatabaseError,
     InputError,
 )
+
 from .....core.DB_Management.media_db.legacy_maintenance import (
     permanently_delete_item,
 )
@@ -132,16 +134,13 @@ async def get_media_item(
         return payload
     except HTTPException:
         raise
-    except DatabaseError as exc:
-        logger.error(
-            "Database error fetching details for media {}: {}",
-            media_id,
+    except (DatabaseError, InputError, ConflictError) as exc:
+        raise map_db_error_to_http(
             exc,
-            exc_info=True,
-        )
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Database error retrieving media details",
+            default_detail="Database error retrieving media details",
+            input_detail="Invalid media identifier",
+            conflict_detail="Conflict detected while retrieving media details",
+            log_context=f"get_media_item media_id={media_id}",
         ) from exc
     except Exception as exc:
         logger.error(
@@ -207,29 +206,16 @@ async def delete_media_item(
             media_id,
         )
         return Response(status_code=status.HTTP_204_NO_CONTENT)
-    except ConflictError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Media was modified concurrently",
-        ) from exc
-    except InputError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid media identifier",
-        ) from exc
-    except DatabaseError as exc:
-        logger.error(
-            "Database error trashing media {}: {}",
-            media_id,
-            exc,
-            exc_info=True,
-        )
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Database error moving media to trash",
-        ) from exc
     except HTTPException:
         raise
+    except (ConflictError, InputError, DatabaseError) as exc:
+        raise map_db_error_to_http(
+            exc,
+            default_detail="Database error moving media to trash",
+            input_detail="Invalid media identifier",
+            conflict_detail="Media was modified concurrently",
+            log_context=f"delete_media_item media_id={media_id}",
+        ) from exc
     except Exception as exc:
         logger.error(
             "Unexpected error trashing media {}: {}",
@@ -315,29 +301,16 @@ async def restore_media_item(
                 detail="Media not found or is inactive/trashed",
             )
         return MediaDetailResponse(**details)
-    except ConflictError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Media was modified concurrently",
-        ) from exc
-    except InputError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid media identifier",
-        ) from exc
-    except DatabaseError as exc:
-        logger.error(
-            "Database error restoring media {}: {}",
-            media_id,
-            exc,
-            exc_info=True,
-        )
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Database error restoring media from trash",
-        ) from exc
     except HTTPException:
         raise
+    except (ConflictError, InputError, DatabaseError) as exc:
+        raise map_db_error_to_http(
+            exc,
+            default_detail="Database error restoring media from trash",
+            input_detail="Invalid media identifier",
+            conflict_detail="Media was modified concurrently",
+            log_context=f"restore_media_item media_id={media_id}",
+        ) from exc
     except Exception as exc:
         logger.error(
             "Unexpected error restoring media {}: {}",
@@ -405,29 +378,16 @@ async def permanently_delete_media_item(
             media_id,
         )
         return Response(status_code=status.HTTP_204_NO_CONTENT)
-    except ConflictError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Media was modified concurrently",
-        ) from exc
-    except InputError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid media identifier",
-        ) from exc
-    except DatabaseError as exc:
-        logger.error(
-            "Database error permanently deleting media {}: {}",
-            media_id,
-            exc,
-            exc_info=True,
-        )
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Database error permanently deleting media",
-        ) from exc
     except HTTPException:
         raise
+    except (ConflictError, InputError, DatabaseError) as exc:
+        raise map_db_error_to_http(
+            exc,
+            default_detail="Database error permanently deleting media",
+            input_detail="Invalid media identifier",
+            conflict_detail="Media was modified concurrently",
+            log_context=f"permanently_delete_media_item media_id={media_id}",
+        ) from exc
     except Exception as exc:
         logger.error(
             "Unexpected error permanently deleting media {}: {}",
@@ -707,27 +667,14 @@ async def update_media_item(
         return MediaDetailResponse(**details)
     except HTTPException:
         raise
-    except ConflictError as exc:
-        logger.error(
-            "Conflict updating media {}: {}",
-            media_id,
+    except (ConflictError, InputError, DatabaseError) as exc:
+        raise map_db_error_to_http(
             exc,
-            exc_info=True,
-        )
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Conflict detected during update",
-        ) from exc
-    except (DatabaseError, InputError) as exc:
-        logger.error(
-            "Database/Input error updating media {}: {}",
-            media_id,
-            exc,
-            exc_info=True,
-        )
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Database error during update",
+            input_status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            default_detail="Database error during update",
+            input_detail="Database error during update",
+            conflict_detail="Conflict detected during update",
+            log_context=f"update_media_item media_id={media_id}",
         ) from exc
     except Exception as exc:  # noqa: BLE001
         logger.error(
@@ -774,11 +721,28 @@ async def update_media_keywords(
         db.update_keywords_for_media(media_id=media_id, keywords=desired)
         updated_keywords = fetch_keywords_for_media(db, media_id)
         return MediaKeywordsResponse(media_id=media_id, keywords=updated_keywords)
-    except InputError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    except DatabaseError as exc:
-        logger.error(f"Failed to update keywords for media {media_id}: {exc}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="keywords_update_failed") from exc
+    except HTTPException:
+        raise
+    except (ConflictError, InputError, DatabaseError) as exc:
+        raise map_db_error_to_http(
+            exc,
+            input_status=status.HTTP_404_NOT_FOUND,
+            default_detail="Failed to update keywords",
+            input_detail="Media not found or deleted",
+            conflict_detail="Conflict detected updating keywords",
+            log_context=f"update_media_keywords media_id={media_id}",
+        ) from exc
+    except Exception as exc:  # noqa: BLE001
+        logger.error(
+            "Unexpected error updating keywords for media {}: {}",
+            media_id,
+            exc,
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update keywords",
+        ) from exc
 
 
 __all__ = ["router"]

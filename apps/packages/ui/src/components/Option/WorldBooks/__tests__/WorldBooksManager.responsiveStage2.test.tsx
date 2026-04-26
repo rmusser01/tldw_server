@@ -1,6 +1,6 @@
 import React from "react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { render, screen } from "@testing-library/react"
+import { render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { WorldBooksManager } from "../Manager"
 
@@ -211,14 +211,14 @@ describe("WorldBooksManager responsive stage-2 entry drawer mobile ergonomics", 
       mockBreakpoints.md = false
       render(<WorldBooksManager />)
 
-      await user.click(screen.getByRole("button", { name: "More actions for Arcana" }))
-      await user.click(await screen.findByRole("menuitem", { name: "Manage Entries" }))
+      await user.click(screen.getByText("Arcana"))
+      const detailPanel = await screen.findByRole("main", { name: "World book detail" })
 
-      expect(screen.queryAllByRole("columnheader", { name: "Priority" })).toHaveLength(0)
-      expect(screen.queryAllByRole("columnheader", { name: "Enabled" })).toHaveLength(1)
+      expect(within(detailPanel).queryAllByRole("columnheader", { name: "Priority" })).toHaveLength(0)
+      expect(within(detailPanel).queryAllByRole("columnheader", { name: "Enabled" })).toHaveLength(0)
 
-      const editEntryButton = await screen.findByRole("button", { name: "Edit entry" })
-      const deleteEntryButton = await screen.findByRole("button", { name: "Delete entry" })
+      const editEntryButton = within(detailPanel).getByRole("button", { name: "Edit entry" })
+      const deleteEntryButton = within(detailPanel).getByRole("button", { name: "Delete entry" })
       expect(editEntryButton).toHaveClass("min-h-11")
       expect(editEntryButton).toHaveClass("min-w-11")
       expect(deleteEntryButton).toHaveClass("min-h-11")
@@ -234,12 +234,13 @@ describe("WorldBooksManager responsive stage-2 entry drawer mobile ergonomics", 
       mockBreakpoints.md = true
       render(<WorldBooksManager />)
 
-      await user.click(screen.getByRole("button", { name: "Manage entries" }))
+      await user.click(screen.getByText("Arcana"))
+      const detailPanel = await screen.findByRole("main", { name: "World book detail" })
 
-      expect(screen.queryAllByRole("columnheader", { name: "Priority" })).toHaveLength(1)
-      expect(screen.queryAllByRole("columnheader", { name: "Enabled" }).length).toBeGreaterThan(1)
+      expect(within(detailPanel).queryAllByRole("columnheader", { name: "Priority" })).toHaveLength(1)
+      expect(within(detailPanel).queryAllByRole("columnheader", { name: "Enabled" })).toHaveLength(1)
 
-      const editEntryButton = await screen.findByRole("button", { name: "Edit entry" })
+      const editEntryButton = within(detailPanel).getByRole("button", { name: "Edit entry" })
       expect(editEntryButton.className).not.toContain("min-h-11")
       expect(editEntryButton.className).not.toContain("min-w-11")
     },

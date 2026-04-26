@@ -788,8 +788,10 @@ async def _migrate_source(
                     duplicates_existing = [r["event_id"] for r in records if r.get("event_id") in existing]
                     duplicates_total = len(duplicates_in_chunk) + len(duplicates_existing)
 
-                    counts.events_inserted += len(filtered)
-                    counts.events_skipped += duplicates_total
+                    chunk_events_inserted = len(filtered)
+                    chunk_events_skipped = duplicates_total
+                    chunk_stats_inserted = 0
+                    chunk_stats_skipped = duplicates_total
 
                     if duplicates_in_chunk:
                         logger.warning(
@@ -808,7 +810,6 @@ async def _migrate_source(
                             duplicates_existing[:5],
                         )
 
-                    counts.stats_skipped += duplicates_total
                     if filtered:
                         await shared_db.executemany(insert_sql, filtered)
                         stats_result = await _update_shared_daily_stats_from_records(
@@ -816,8 +817,8 @@ async def _migrate_source(
                             filtered,
                             unidentified_tenant_id=unidentified_tenant_id,
                         )
-                        counts.stats_inserted += stats_result.events_contributed
-                        counts.stats_skipped += stats_result.events_skipped
+                        chunk_stats_inserted = stats_result.events_contributed
+                        chunk_stats_skipped += stats_result.events_skipped
 
                     last_row = rows[-1]
                     with contextlib.suppress(_AUDIT_COERCE_EXCEPTIONS):
@@ -834,7 +835,13 @@ async def _migrate_source(
                         last_timestamp = last_timestamp
                     await _save_checkpoint(shared_db, source_key, last_rowid, last_event_id, last_timestamp)
                     await shared_db.commit()
+                    counts.events_inserted += chunk_events_inserted
+                    counts.events_skipped += chunk_events_skipped
+                    counts.stats_inserted += chunk_stats_inserted
+                    counts.stats_skipped += chunk_stats_skipped
     except _AUDIT_DB_EXCEPTIONS as exc:
+        with contextlib.suppress(_AUDIT_NONCRITICAL_EXCEPTIONS):
+            await shared_db.rollback()
         counts.failed = True
         counts.error = f"{type(exc).__name__}: {exc}"
         logger.warning(

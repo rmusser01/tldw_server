@@ -60,6 +60,18 @@ vi.mock("@/hooks/useUndoNotification", () => ({
   })
 }))
 
+vi.mock("react-router-dom", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("react-router-dom")>()
+  return {
+    ...actual,
+    useNavigate: () => vi.fn()
+  }
+})
+
+vi.mock("../components/StudyPackCreateDrawer", () => ({
+  StudyPackCreateDrawer: () => null
+}))
+
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (
@@ -93,7 +105,16 @@ vi.mock("../../hooks", () => ({
   useImportFlashcardsApkgMutation: vi.fn(),
   useImportFlashcardsJsonMutation: vi.fn(),
   useImportLimitsQuery: vi.fn(),
-  usePreviewStructuredQaImportMutation: vi.fn()
+  usePreviewStructuredQaImportMutation: vi.fn(),
+  useStudyPackCreateMutation: vi.fn(() => ({
+    mutateAsync: vi.fn(),
+    isPending: false
+  })),
+  useStudyPackJobQuery: vi.fn(() => ({
+    data: null,
+    isLoading: false,
+    isFetching: false
+  }))
 }))
 
 if (!(globalThis as any).ResizeObserver) {
@@ -246,6 +267,8 @@ describe("ImportExportTab deck creation flows", () => {
     fireEvent.change(screen.getByTestId("flashcards-structured-new-deck-name"), {
       target: { value: "Structured deck" }
     })
+    fireEvent.mouseDown(screen.getByTestId("deck-study-defaults-review-prompt-side"))
+    fireEvent.click(await screen.findByText("Back first"))
     fireEvent.click(screen.getByTestId("deck-scheduler-editor-preset-fast_acquisition"))
 
     fireEvent.change(screen.getByTestId("flashcards-import-textarea"), {
@@ -262,6 +285,7 @@ describe("ImportExportTab deck creation flows", () => {
     await waitFor(() =>
       expect(createDeckMutateAsync).toHaveBeenCalledWith({
         name: "Structured deck",
+        review_prompt_side: "back",
         scheduler_type: "sm2_plus",
         scheduler_settings: fastAcquisitionEnvelope
       })
@@ -300,6 +324,8 @@ describe("ImportExportTab deck creation flows", () => {
     fireEvent.change(screen.getByTestId("flashcards-generate-new-deck-name"), {
       target: { value: "Generated deck" }
     })
+    fireEvent.mouseDown(screen.getByTestId("deck-study-defaults-review-prompt-side"))
+    fireEvent.click(await screen.findByText("Back first"))
     fireEvent.click(screen.getByTestId("deck-scheduler-editor-preset-fast_acquisition"))
 
     fireEvent.change(screen.getByTestId("flashcards-generate-text"), {
@@ -316,6 +342,7 @@ describe("ImportExportTab deck creation flows", () => {
     await waitFor(() =>
       expect(createDeckMutateAsync).toHaveBeenCalledWith({
         name: "Generated deck",
+        review_prompt_side: "back",
         scheduler_type: "sm2_plus",
         scheduler_settings: fastAcquisitionEnvelope
       })

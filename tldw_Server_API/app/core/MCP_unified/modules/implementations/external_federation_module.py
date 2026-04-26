@@ -158,7 +158,10 @@ class ExternalFederationModule(BaseModule):
             server_id = args.get("server_id")
             if server_id is not None and not isinstance(server_id, str):
                 raise ValueError("server_id must be a string when provided")
-            return await self._manager.refresh_discovery(server_id=server_id)
+            try:
+                return await self._manager.refresh_discovery(server_id=server_id)
+            finally:
+                self.invalidate_capability_caches()
 
         if tool_name.startswith("ext."):
             return await self._manager.execute_virtual_tool(

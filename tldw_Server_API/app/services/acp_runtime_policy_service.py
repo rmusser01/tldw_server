@@ -5,6 +5,7 @@ import json
 from datetime import datetime, timezone
 from typing import Any
 
+from loguru import logger
 from pydantic import BaseModel, Field
 
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
@@ -176,6 +177,40 @@ class ACPRuntimePolicyService:
 
         return metadata, execution_config
 
+    def _resolve_template_config(
+        self,
+        *,
+        template_name: str,
+        session_id: str | None = None,
+        persona_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Resolve a template config dict, trying DB templates first then flat fallback."""
+        # Try DB-backed templates if a session store is available.
+        try:
+            from tldw_Server_API.app.core.Agent_Client_Protocol.templates import (
+                resolve_for_session,
+            )
+            from tldw_Server_API.app.core.DB_Management.ACP_Sessions_DB import ACPSessionsDB
+
+            db = ACPSessionsDB()
+            result = resolve_for_session(db, session_id, persona_id, template_name)
+            if result is not None:
+                return result
+        except Exception:
+            logger.exception(
+                "ACP runtime policy template lookup failed for template_name={} session_id={} persona_id={}; "
+                "falling back to flat templates",
+                template_name,
+                session_id,
+                persona_id,
+            )
+
+        # Fallback: use the flat PERMISSION_POLICY_TEMPLATES dict.
+        from tldw_Server_API.app.core.Agent_Client_Protocol.config import (
+            PERMISSION_POLICY_TEMPLATES,
+        )
+        return PERMISSION_POLICY_TEMPLATES.get(template_name)
+
     async def build_snapshot(
         self,
         *,
@@ -207,15 +242,15 @@ class ACPRuntimePolicyService:
         # User / MCP-Hub overrides that are already in the resolved document
         # take precedence over template defaults.
         if template_name:
-            from tldw_Server_API.app.core.Agent_Client_Protocol.config import (
-                PERMISSION_POLICY_TEMPLATES,
+            template_config = self._resolve_template_config(
+                template_name=template_name,
+                session_id=str(getattr(session_record, "session_id", "")),
+                persona_id=getattr(session_record, "persona_id", None),
             )
-
-            template = PERMISSION_POLICY_TEMPLATES.get(template_name)
-            if template:
+            if template_config:
                 existing_overrides = resolved_policy_document.get("tool_tier_overrides", {})
                 # Template is the base layer -- merge user overrides on top.
-                merged = {**template.get("tool_tier_overrides", {}), **existing_overrides}
+                merged = {**template_config.get("tool_tier_overrides", {}), **existing_overrides}
                 resolved_policy_document["tool_tier_overrides"] = merged
         allowed_tools = _unique(_as_str_list(resolved_policy_document.get("allowed_tools")))
         denied_tools = _unique(_as_str_list(resolved_policy_document.get("denied_tools")))

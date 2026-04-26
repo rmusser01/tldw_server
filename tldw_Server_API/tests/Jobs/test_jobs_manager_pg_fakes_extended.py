@@ -12,6 +12,7 @@ class FakePGCursor:
         self._last = None
         self.rowcount = 0
         self._fetch_buffer = None
+        self.job_event_inserts = []
 
     def __enter__(self):
 
@@ -66,6 +67,9 @@ class FakePGCursor:
                     return
             self._fetch_buffer = None
             return
+        if "INSERT INTO job_events(" in s:
+            self.job_event_inserts.append(tuple(params or ()))
+            return
         # Count(*) aliases c
         if s.startswith("SELECT COUNT(*) AS c FROM jobs"):
             self._fetch_buffer = {"c": 0}
@@ -112,6 +116,14 @@ class FakePGCursor:
     def fetchall(self):
 
         return []
+
+
+class FailingJobEventsPGCursor(FakePGCursor):
+    def execute(self, sql, params=None):
+        s = str(sql)
+        if "INSERT INTO job_events(" in s:
+            raise RuntimeError("forced job_events insert failure")
+        return super().execute(sql, params)
 
 
 class FakePGConn:
@@ -173,6 +185,99 @@ def test_pg_create_job_idempotent_gates_created_metric(monkeypatch, tmp_path):
 
 
 @pytest.mark.unit
+def test_pg_create_job_logs_created_metric_failure_without_aborting(monkeypatch, tmp_path):
+    warnings: list[tuple] = []
+
+    class _LoggerStub:
+        def warning(self, *args, **kwargs):
+            warnings.append((args, kwargs))
+
+        def info(self, *args, **kwargs):
+            return None
+
+        def debug(self, *args, **kwargs):
+            return None
+
+        def error(self, *args, **kwargs):
+            return None
+
+    def _inc(_labels):
+        raise RuntimeError("metric backend offline")
+
+    monkeypatch.setenv("JOBS_DB_URL", "postgresql://fake")
+    jm = JobManager(db_path=tmp_path / "dummy.db")
+    jm.backend = "postgres"
+
+    import tldw_Server_API.app.core.Jobs.manager as mgr
+
+    monkeypatch.setattr(mgr, "increment_created", _inc)
+    monkeypatch.setattr(mgr, "logger", _LoggerStub())
+
+    jobs = {}
+    monkeypatch.setattr(jm, "_connect", lambda: FakePGConn())
+    monkeypatch.setattr(jm, "_pg_cursor", lambda conn: FakePGCursor(jobs))
+
+    row = jm.create_job(
+        domain="pg",
+        queue="default",
+        job_type="x",
+        payload={},
+        owner_user_id=None,
+        idempotency_key="K",
+    )
+
+    assert row and row.get("status") == "queued"
+    assert len(warnings) == 1
+    assert warnings[0][0][0] == "Non-critical jobs created metric update failed for {}:{}:{}: {}"
+    assert warnings[0][0][1:4] == ("pg", "default", "x")
+    assert str(warnings[0][0][4]) == "metric backend offline"
+
+
+@pytest.mark.unit
+def test_pg_idempotent_create_uses_current_request_context_for_job_created_event(monkeypatch, tmp_path):
+    monkeypatch.setenv("JOBS_DB_URL", "postgresql://fake")
+    jm = JobManager(db_path=tmp_path / "dummy.db")
+    jm.backend = "postgres"
+
+    jobs = {
+        1: {
+            "id": 1,
+            "domain": "pg",
+            "queue": "default",
+            "job_type": "x",
+            "idempotency_key": "K",
+            "status": "queued",
+            "priority": 5,
+            "available_at": None,
+            "owner_user_id": "owner-1",
+            "request_id": "old-request",
+            "trace_id": "old-trace",
+            "retry_count": 0,
+        }
+    }
+    cursor = FakePGCursor(jobs)
+    monkeypatch.setattr(jm, "_connect", lambda: FakePGConn())
+    monkeypatch.setattr(jm, "_pg_cursor", lambda conn: cursor)
+
+    row = jm.create_job(
+        domain="pg",
+        queue="default",
+        job_type="x",
+        payload={},
+        owner_user_id=None,
+        idempotency_key="K",
+        request_id="new-request",
+        trace_id="new-trace",
+    )
+
+    assert row["id"] == 1
+    assert cursor.job_event_inserts
+    event_params = cursor.job_event_inserts[-1]
+    assert event_params[7] == "new-request"
+    assert event_params[8] == "new-trace"
+
+
+@pytest.mark.unit
 def test_pg_batch_complete_encrypts_results(monkeypatch, tmp_path):
      # Enable encryption for domain SECURE and provide AES key
     monkeypatch.setenv("JOBS_ENCRYPT_SECURE", "true")
@@ -201,3 +306,37 @@ def test_pg_batch_complete_encrypts_results(monkeypatch, tmp_path):
     r2 = jobs[2].get("result_json")
     assert isinstance(r1, dict) and "_encrypted" in r1
     assert isinstance(r2, dict) and "_encrypted" in r2
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("idempotency_key", [None, "K"])
+def test_pg_create_failure_on_job_events_insert_does_not_increment_created(monkeypatch, tmp_path, idempotency_key):
+    calls = {"n": 0}
+
+    def _inc(_labels):
+        calls["n"] += 1
+
+    monkeypatch.setenv("JOBS_DB_URL", "postgresql://fake")
+    jm = JobManager(db_path=tmp_path / "dummy.db")
+    jm.backend = "postgres"
+
+    import tldw_Server_API.app.core.Jobs.manager as mgr
+
+    monkeypatch.setattr(mgr, "increment_created", _inc)
+
+    jobs = {}
+    monkeypatch.setattr(jm, "_connect", lambda: FakePGConn())
+    monkeypatch.setattr(jm, "_pg_cursor", lambda conn: FailingJobEventsPGCursor(jobs))
+
+    with pytest.raises(RuntimeError, match="job_events insert failure"):
+        jm.create_job(
+            domain="pg",
+            queue="default",
+            job_type="x",
+            payload={},
+            owner_user_id=None,
+            idempotency_key=idempotency_key,
+        )
+
+    if calls["n"] != 0:
+        raise AssertionError("increment_created must not be called when create fails at job_events insert")

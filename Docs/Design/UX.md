@@ -110,6 +110,14 @@ https://medium.com/@alphadesignglobal/8-tiny-ui-fixes-that-will-make-your-produc
 https://github.com/Dammyjay93/interface-design?tab=readme-ov-file#installation
 https://uxdesign.cc/so-youve-built-a-design-system-what-now-3df9ae21ef0c
 https://medium.com/design-bootcamp/how-to-build-your-startups-first-design-system-4d8724fbb802
+https://medium.com/design-bootcamp/unlocking-the-power-of-color-psychology-in-ui-ux-design-b58f874018c3
+https://medium.muz.li/how-i-think-like-a-product-designer-not-just-a-ui-designer-2dc6bbe04aa4
+https://medium.muz.li/the-ux-secrets-behind-billion-dollar-apps-20b40fc89755?gi=c766c0693a56
+https://medium.muz.li/what-working-as-a-ui-ux-designer-in-sri-lanka-really-looks-like-6c2341da365f
+https://medium.muz.li/how-good-ux-increased-engagement-in-my-product-design-35caef3fccb6
+https://medium.muz.li/from-0-to-production-my-ui-ux-process-for-a-real-startup-product-030ad67f05f8
+https://medium.com/design-bootcamp/my-journey-from-zero-to-associate-ui-ux-engineer-insights-and-common-questions-from-20-interviews-a185d3ec10fb
+
 
 https://www.reddit.com/r/UXDesign/comments/1hy761l/how_do_you_guys_plan_your_design_systems_and/
 https://dessign.net/creating-a-design-system/

@@ -4,11 +4,32 @@ import {
   Select,
   Button
 } from "antd"
-import { Link } from "react-router-dom"
+import { Link, useNavigate } from "react-router-dom"
+import { FirstRunBanner } from "@/components/PersonaGarden/FirstRunBanner"
+import { useFirstRunCheck } from "@/hooks/useFirstRunCheck"
 import { ModelRecommendationsPanel } from "./ModelRecommendationsPanel"
 import type { ModelRecommendationAction } from "./model-recommendations"
 import { toText } from "./hooks/utils"
 import type { TFunction } from "i18next"
+
+const CHAT_NUDGE_DISMISSED_KEY = "assistant_nudge_dismissed_chat"
+
+const readChatNudgeDismissedState = (): boolean => {
+  try {
+    return localStorage.getItem(CHAT_NUDGE_DISMISSED_KEY) === "true"
+  } catch (error) {
+    console.warn("Failed to read assistant chat nudge dismissal state", error)
+    return false
+  }
+}
+
+const persistChatNudgeDismissedState = (): void => {
+  try {
+    localStorage.setItem(CHAT_NUDGE_DISMISSED_KEY, "true")
+  } catch (error) {
+    console.warn("Failed to persist assistant chat nudge dismissal state", error)
+  }
+}
 
 export type PlaygroundComposerNoticesProps = {
   modeAnnouncement: string | null
@@ -65,6 +86,41 @@ export type PlaygroundComposerNoticesProps = {
   t: TFunction
 }
 
+/**
+ * Thin wrapper around the chat-surface nudge banner dismiss state.
+ * Keeps localStorage reads inside a hook so the memo boundary on the
+ * outer component does not break.
+ */
+function ChatFirstRunNudge() {
+  const { shouldShowSetup, resumeStep, loading } = useFirstRunCheck()
+  const navigate = useNavigate()
+  const [dismissed, setDismissed] = React.useState(readChatNudgeDismissedState)
+
+  const handleDismiss = React.useCallback(() => {
+    persistChatNudgeDismissedState()
+    setDismissed(true)
+  }, [])
+
+  const handleNavigate = React.useCallback(() => {
+    navigate("/persona")
+  }, [navigate])
+
+  if (loading || dismissed || (!shouldShowSetup && !resumeStep)) {
+    return null
+  }
+
+  return (
+    <div className="mt-1">
+      <FirstRunBanner
+        variant={resumeStep ? "resume" : "nudge"}
+        resumeStep={resumeStep}
+        onResume={handleNavigate}
+        onDismiss={handleDismiss}
+      />
+    </div>
+  )
+}
+
 export const PlaygroundComposerNotices = React.memo(function PlaygroundComposerNotices(
   props: PlaygroundComposerNoticesProps
 ) {
@@ -113,6 +169,7 @@ export const PlaygroundComposerNotices = React.memo(function PlaygroundComposerN
 
   return (
     <>
+      <ChatFirstRunNudge />
       {modeAnnouncement && (
         <div
           role="status"
@@ -401,7 +458,7 @@ export const PlaygroundComposerNotices = React.memo(function PlaygroundComposerN
           <span>
             {t(
               "playground:composer.jsonModeHint",
-              "JSON mode is active. Responses should be valid JSON objects."
+              "JSON output is active (developer). Responses will be formatted as JSON objects."
             )}
           </span>
           <button
@@ -414,6 +471,29 @@ export const PlaygroundComposerNotices = React.memo(function PlaygroundComposerN
               "Configure"
             )}
           </button>
+        </div>
+      )}
+      {!isConnectionReady && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="mt-1 flex flex-wrap items-center justify-between gap-2 rounded-md border border-text-muted/30 bg-surface2/50 px-2 py-2 text-xs text-text-muted"
+        >
+          <span>
+            {t(
+              "playground:composer.disconnectedNotice",
+              "You're offline \u2014 connect to a tldw server to start chatting."
+            )}
+          </span>
+          <Link
+            to="/settings/tldw"
+            className="rounded border border-border bg-surface px-2 py-0.5 text-[11px] font-medium text-text-muted hover:bg-surface2 hover:text-text"
+          >
+            {t(
+              "playground:composer.disconnectedOpenSettings",
+              "Open settings"
+            )}
+          </Link>
         </div>
       )}
       {isConnectionReady &&

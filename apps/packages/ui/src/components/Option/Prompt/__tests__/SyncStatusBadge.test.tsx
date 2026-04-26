@@ -53,4 +53,66 @@ describe("SyncStatusBadge", () => {
 
     expect(screen.queryByRole("button")).not.toBeInTheDocument()
   })
+
+  it("shows retry button when syncStatus is pending and onRetry is provided", async () => {
+    const user = userEvent.setup()
+    const onRetry = vi.fn()
+
+    render(
+      <SyncStatusBadge
+        syncStatus="pending"
+        sourceSystem="workspace"
+        onRetry={onRetry}
+      />
+    )
+
+    const retryButton = screen.getByTestId("sync-retry-button")
+    expect(retryButton).toBeInTheDocument()
+
+    await user.click(retryButton)
+    expect(onRetry).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not show retry button when syncStatus is not pending", () => {
+    render(
+      <SyncStatusBadge
+        syncStatus="synced"
+        sourceSystem="workspace"
+        onRetry={vi.fn()}
+      />
+    )
+
+    expect(screen.queryByTestId("sync-retry-button")).not.toBeInTheDocument()
+  })
+
+  it("does not show retry button when onRetry is not provided", () => {
+    render(
+      <SyncStatusBadge
+        syncStatus="pending"
+        sourceSystem="workspace"
+      />
+    )
+
+    expect(screen.queryByTestId("sync-retry-button")).not.toBeInTheDocument()
+  })
+
+  it("shows retry button in compact mode for pending status", async () => {
+    const user = userEvent.setup()
+    const onRetry = vi.fn()
+
+    render(
+      <SyncStatusBadge
+        syncStatus="pending"
+        sourceSystem="workspace"
+        compact
+        onRetry={onRetry}
+      />
+    )
+
+    const retryButton = screen.getByTestId("sync-retry-button")
+    expect(retryButton).toBeInTheDocument()
+
+    await user.click(retryButton)
+    expect(onRetry).toHaveBeenCalledTimes(1)
+  })
 })

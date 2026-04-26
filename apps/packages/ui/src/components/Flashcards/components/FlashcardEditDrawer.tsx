@@ -343,7 +343,7 @@ export const FlashcardEditDrawer: React.FC<FlashcardEditDrawerProps> = ({
           <Form.Item
             name="model_type"
             label={t("option:flashcards.modelType", {
-              defaultValue: "Card template"
+              defaultValue: "Card model"
             })}
           >
             <Select

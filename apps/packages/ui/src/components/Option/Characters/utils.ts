@@ -762,6 +762,8 @@ export const truncateText = (value?: string, max?: number) => {
 }
 
 export const buildCharacterSelectionPayload = (record: any) => {
+  const normalizedExtensions = parseExtensionsObject(record.extensions)
+
   return {
     id: record.id || record.slug || record.name,
     name: record.name || record.title || record.slug,
@@ -775,10 +777,21 @@ export const buildCharacterSelectionPayload = (record: any) => {
       record.first_message ||
       record.greet ||
       "",
+    alternate_greetings: normalizeAlternateGreetings(record.alternate_greetings),
+    extensions:
+      normalizedExtensions && Object.keys(normalizedExtensions).length > 0
+        ? normalizedExtensions
+        : null,
+    image_base64:
+      typeof record.image_base64 === "string" ? record.image_base64 : null,
+    image_mime:
+      typeof record.image_mime === "string" ? record.image_mime : null,
     avatar_url:
       record.avatar_url ||
       validateAndCreateImageDataUrl(record.image_base64) ||
-      ""
+      "",
+    description: record.description || "",
+    version: typeof record.version === "number" ? record.version : undefined
   }
 }
 

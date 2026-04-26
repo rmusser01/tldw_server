@@ -673,11 +673,11 @@ components:
         job_id:
           type: string
           nullable: true
-          description: Job ID for async exports; sync exports may also include it when a background record is created
+          description: Job ID if async mode
         download_url:
           type: string
           nullable: true
-          description: Download URL for immediately available exports; async responses omit it until the artifact is ready
+          description: Download URL if sync mode
 
     ImportChatbookResponse:
       type: object

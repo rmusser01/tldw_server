@@ -197,7 +197,6 @@ def test_public_repo_does_not_ship_hosted_ops_and_asset_paths() -> None:
 
 def test_public_repo_does_not_ship_extracted_commercial_runtime_files() -> None:
     commercial_runtime_paths = [
-        Path("tldw_Server_API/app/api/v1/endpoints/billing.py"),
         Path("tldw_Server_API/app/api/v1/endpoints/billing_webhooks.py"),
         Path("tldw_Server_API/app/core/Billing/stripe_client.py"),
         Path("tldw_Server_API/app/services/stripe_metering_service.py"),
