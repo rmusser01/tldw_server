@@ -19,8 +19,7 @@ _PROVIDER_ENV_EXAMPLES = [
 _FIRST_VALUE_TITLE = "tldw onboarding verification"
 _FIRST_VALUE_UNIQUE_PHRASE = "tldw-onboarding-verification-unique"
 _FIRST_VALUE_SAMPLE = (
-    f"# {_FIRST_VALUE_TITLE}\n\n"
-    f"This sample verifies ingest and search with {_FIRST_VALUE_UNIQUE_PHRASE}.\n"
+    f"# {_FIRST_VALUE_TITLE}\n\n" f"This sample verifies ingest and search with {_FIRST_VALUE_UNIQUE_PHRASE}.\n"
 )
 
 
@@ -229,15 +228,10 @@ def _configured_provider_count(body: Any) -> int:
     elif isinstance(providers, dict):
         provider_entries = list(providers.values())
 
-    has_config_status = any(
-        isinstance(provider, dict) and "is_configured" in provider
-        for provider in provider_entries
-    )
+    has_config_status = any(isinstance(provider, dict) and "is_configured" in provider for provider in provider_entries)
     if has_config_status:
         return sum(
-            1
-            for provider in provider_entries
-            if isinstance(provider, dict) and bool(provider.get("is_configured"))
+            1 for provider in provider_entries if isinstance(provider, dict) and bool(provider.get("is_configured"))
         )
 
     total = body.get("total_configured")
@@ -337,14 +331,7 @@ def run_profile_checks(
         "docs": _request("GET", base_url, "/docs", timeout=timeout),
         "quickstart": _request("GET", base_url, "/api/v1/config/quickstart", timeout=timeout),
     }
-    actions.append(
-        {
-            "endpoints": {
-                key: _response_summary(value)
-                for key, value in endpoint_results.items()
-            }
-        }
-    )
+    actions.append({"endpoints": {key: _response_summary(value) for key, value in endpoint_results.items()}})
 
     headers = _headers_for_profile(profile, env_values)
     auth_checks: dict[str, Any] = {}
