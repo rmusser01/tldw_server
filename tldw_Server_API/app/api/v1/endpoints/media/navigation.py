@@ -1525,7 +1525,7 @@ async def get_media_navigation(
         try:
             return MediaNavigationResponse.model_validate(payload)
         except (TypeError, ValueError):
-            logger.debug("Ignoring invalid cached navigation payload for media_id={}", media_id)
+            logger.debug("Ignoring invalid cached navigation payload")
 
     raw_nodes, source_order_used = await _select_source_nodes(
         media_id=media_id,
@@ -1644,9 +1644,7 @@ async def get_media_navigation_content(
         try:
             return MediaNavigationContentResponse.model_validate(payload)
         except (TypeError, ValueError):
-            logger.debug(
-                "Ignoring invalid cached navigation content payload for media_id={}, node_id={}", media_id, node_id
-            )
+            logger.debug("Ignoring invalid cached navigation content payload")
 
     full_text = _get_media_text(media_id=media_id, media=media, db=db)
     span = _derive_content_span(

@@ -30,6 +30,18 @@ class _GetMediaByIdErrorDb:
         raise DatabaseError("navigation database exploded")
 
 
+class _GetMediaByIdDb:
+    def get_media_by_id(self, media_id: int, *, include_deleted: bool, include_trash: bool):
+        return {
+            "id": media_id,
+            "type": "document",
+            "title": "Doc",
+            "content": "Navigation content from media fallback.",
+            "version": 1,
+            "last_modified": "2026-02-09T10:00:00Z",
+        }
+
+
 class _ExecuteQueryErrorDb:
     backend_type = "sqlite"
 
@@ -157,6 +169,68 @@ async def test_get_media_navigation_content_sanitizes_db_fetch_log(monkeypatch) 
     assert exc_info.value.status_code == 500
     assert exc_info.value.detail == "Database error while fetching media item"
     fake_logger.error.assert_called_once_with("Database error fetching media for navigation content")
+
+
+@pytest.mark.asyncio
+async def test_get_media_navigation_sanitizes_invalid_cached_payload_log(monkeypatch) -> None:
+    fake_logger = MagicMock()
+    monkeypatch.setattr(navigation_mod, "logger", fake_logger)
+    monkeypatch.setattr(navigation_mod, "get_cached_response", lambda _cache_key: ("etag", {}))
+    monkeypatch.setattr(navigation_mod, "cache_response", lambda *_args, **_kwargs: "etag")
+
+    async def _empty_source_nodes(**_kwargs):
+        return [], []
+
+    monkeypatch.setattr(navigation_mod, "_select_source_nodes", _empty_source_nodes)
+
+    response = await navigation_mod.get_media_navigation(
+        media_id=7,
+        params=MediaNavigationQueryParams(),
+        db=_GetMediaByIdDb(),
+        current_user=SimpleNamespace(id=1),
+    )
+
+    assert response.available is False
+    fake_logger.debug.assert_any_call("Ignoring invalid cached navigation payload")
+
+
+@pytest.mark.asyncio
+async def test_get_media_navigation_content_sanitizes_invalid_cached_payload_log(monkeypatch) -> None:
+    fake_logger = MagicMock()
+    monkeypatch.setattr(navigation_mod, "logger", fake_logger)
+    monkeypatch.setattr(navigation_mod, "get_cached_response", lambda _cache_key: ("etag", {}))
+    monkeypatch.setattr(navigation_mod, "cache_response", lambda *_args, **_kwargs: "etag")
+
+    async def _source_nodes(**_kwargs):
+        return [
+            {
+                "id": "dsi:10",
+                "parent_id": None,
+                "level": 1,
+                "title": "Section",
+                "order": 0,
+                "path_label": "1",
+                "target_type": "char_range",
+                "target_start": 0,
+                "target_end": 18,
+                "target_href": None,
+                "source": "document_structure_index",
+                "confidence": 0.95,
+            }
+        ], ["document_structure_index"]
+
+    monkeypatch.setattr(navigation_mod, "_select_source_nodes", _source_nodes)
+
+    response = await navigation_mod.get_media_navigation_content(
+        media_id=7,
+        node_id="dsi:10",
+        params=MediaNavigationContentQueryParams(),
+        db=_GetMediaByIdDb(),
+        current_user=SimpleNamespace(id=1),
+    )
+
+    assert response.content.startswith("Navigation content")
+    fake_logger.debug.assert_any_call("Ignoring invalid cached navigation content payload")
 
 
 def test_extract_document_structure_nodes_sanitizes_query_failure_log(monkeypatch) -> None:
