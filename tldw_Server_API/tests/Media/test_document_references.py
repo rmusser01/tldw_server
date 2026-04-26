@@ -93,6 +93,18 @@ def _assert_log_sanitized(
     assert "/private/references-cache.db" not in rendered_calls
 
 
+def _assert_sanitized_debug_messages(
+    logger_mock: MagicMock,
+    expected_messages: list[str],
+    forbidden_markers: list[str],
+) -> None:
+    messages = [args[0] for args, _kwargs in logger_mock.debug.call_args_list if args]
+    assert messages == expected_messages
+    rendered_calls = repr(logger_mock.debug.call_args_list)
+    for marker in forbidden_markers:
+        assert marker not in rendered_calls
+
+
 @pytest.mark.asyncio
 async def test_references_endpoint_extracts_basic(mock_user, mock_db):
     content = (
@@ -914,6 +926,51 @@ async def test_enrich_with_semantic_scholar_caps_external_calls_at_five():
     assert performed is True
     assert len(enriched) == 7
     assert call_count == 5
+
+
+@pytest.mark.asyncio
+async def test_enrich_with_semantic_scholar_sanitizes_lookup_failure_logs(monkeypatch):
+    logger_mock = MagicMock()
+    monkeypatch.setattr(refs_mod, "logger", logger_mock)
+    refs = [
+        ReferenceEntry(
+            raw_text="Ref 1",
+            doi="10.9999/private-doi",
+            arxiv_id="2401.99999",
+            title="Sensitive Title /private/reference.txt",
+        )
+    ]
+
+    with (
+        patch.object(refs_mod, "_get_cached_external", return_value=None),
+        patch.object(refs_mod, "_set_cached_external", return_value=None),
+        patch.object(refs_mod.asyncio, "sleep", new=AsyncMock()),
+        patch.object(
+            refs_mod.asyncio,
+            "to_thread",
+            new=AsyncMock(side_effect=RuntimeError("provider leaked /private/token")),
+        ),
+    ):
+        enriched, performed = await refs_mod._enrich_with_semantic_scholar(refs)
+
+    assert performed is False
+    assert enriched[0] == refs[0]
+    _assert_sanitized_debug_messages(
+        logger_mock,
+        [
+            "Semantic Scholar DOI lookup failed",
+            "Semantic Scholar arXiv lookup failed",
+            "Semantic Scholar title search failed",
+        ],
+        [
+            "10.9999/private-doi",
+            "2401.99999",
+            "Sensitive Title",
+            "provider leaked",
+            "/private/token",
+            "/private/reference.txt",
+        ],
+    )
 
 
 @pytest.mark.asyncio

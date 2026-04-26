@@ -1045,8 +1045,8 @@ async def _enrich_with_semantic_scholar(references: list[ReferenceEntry]) -> tup
                     enriched.append(enriched_ref)
                     enriched.extend(refs_to_enrich[idx + 1 :])
                     break
-            except REFERENCE_ENRICH_EXCEPTIONS as e:
-                logger.debug("DOI lookup failed for {}: {}", ref.doi, e)
+            except REFERENCE_ENRICH_EXCEPTIONS:
+                logger.debug("Semantic Scholar DOI lookup failed")
 
         # Try to look up by arXiv ID
         if ref.arxiv_id:
@@ -1075,8 +1075,8 @@ async def _enrich_with_semantic_scholar(references: list[ReferenceEntry]) -> tup
                     enriched.append(enriched_ref)
                     enriched.extend(refs_to_enrich[idx + 1 :])
                     break
-            except REFERENCE_ENRICH_EXCEPTIONS as e:
-                logger.debug("arXiv lookup failed for {}: {}", ref.arxiv_id, e)
+            except REFERENCE_ENRICH_EXCEPTIONS:
+                logger.debug("Semantic Scholar arXiv lookup failed")
 
         # Try title search as fallback
         if ref.title:
@@ -1112,8 +1112,8 @@ async def _enrich_with_semantic_scholar(references: list[ReferenceEntry]) -> tup
                     enriched.append(enriched_ref)
                     enriched.extend(refs_to_enrich[idx + 1 :])
                     break
-            except REFERENCE_ENRICH_EXCEPTIONS as e:
-                logger.debug("Title search failed for {}: {}", ref.title, e)
+            except REFERENCE_ENRICH_EXCEPTIONS:
+                logger.debug("Semantic Scholar title search failed")
 
         enriched.append(enriched_ref)
 
