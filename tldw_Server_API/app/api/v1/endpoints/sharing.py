@@ -423,8 +423,8 @@ async def shared_with_me(
             for oid in owner_ids:
                 try:
                     owner_dbs[oid] = await get_chacha_db_for_owner(oid)
-                except Exception as exc:
-                    logger.debug("Skipping shared workspace name preload for owner {}: {}", oid, exc)
+                except Exception:
+                    logger.debug("Skipping shared workspace name preload")
 
             for item in items:
                 db = owner_dbs.get(item.owner_user_id)
@@ -433,13 +433,8 @@ async def shared_with_me(
                         ws = db.get_workspace(item.workspace_id)
                         if ws:
                             item.workspace_name = ws.get("name")
-                    except Exception as exc:
-                        logger.debug(
-                            "Failed to resolve shared workspace name share_id={} owner_user_id={}: {}",
-                            item.share_id,
-                            item.owner_user_id,
-                            exc,
-                        )
+                    except Exception:
+                        logger.debug("Failed to resolve shared workspace name")
         except Exception as exc:
             logger.debug("Shared workspace name population skipped: {}", exc)
 

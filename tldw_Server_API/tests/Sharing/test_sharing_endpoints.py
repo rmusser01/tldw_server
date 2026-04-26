@@ -94,6 +94,75 @@ async def test_verify_workspace_ownership_single_user_skip_log_is_sanitized(monk
     fake_logger.warning.assert_called_once_with("Workspace ownership check skipped in single-user mode")
 
 
+@pytest.mark.asyncio
+async def test_shared_with_me_workspace_name_preload_log_is_sanitized(
+    repo,
+    test_user,
+    monkeypatch,
+):
+    from tldw_Server_API.app.api.v1.API_Deps import ChaCha_Notes_DB_Deps as chacha_deps
+    from tldw_Server_API.app.api.v1.endpoints import sharing
+
+    await repo.create_share(
+        workspace_id="private-ws",
+        owner_user_id=2,
+        share_scope_type="team",
+        share_scope_id=10,
+        created_by=2,
+    )
+
+    async def _fail_get_chacha_db_for_owner(owner_user_id: int):
+        assert owner_user_id == 2
+        raise RuntimeError("owner workspace DB exploded at /private/owner-workspaces.db")
+
+    fake_logger = MagicMock()
+    monkeypatch.setattr(sharing, "_get_repo", lambda: repo)
+    monkeypatch.setattr(chacha_deps, "get_chacha_db_for_owner", _fail_get_chacha_db_for_owner)
+    monkeypatch.setattr(sharing, "logger", fake_logger)
+
+    response = await sharing.shared_with_me(user=test_user)
+
+    assert response.total == 1
+    fake_logger.debug.assert_called_once_with("Skipping shared workspace name preload")
+
+
+@pytest.mark.asyncio
+async def test_shared_with_me_workspace_name_resolution_log_is_sanitized(
+    repo,
+    test_user,
+    monkeypatch,
+):
+    from tldw_Server_API.app.api.v1.API_Deps import ChaCha_Notes_DB_Deps as chacha_deps
+    from tldw_Server_API.app.api.v1.endpoints import sharing
+
+    class _FailingWorkspaceDb:
+        def get_workspace(self, workspace_id: str):
+            assert workspace_id == "private-ws"
+            raise RuntimeError("workspace lookup exploded at /private/owner-workspaces.db")
+
+    await repo.create_share(
+        workspace_id="private-ws",
+        owner_user_id=2,
+        share_scope_type="team",
+        share_scope_id=10,
+        created_by=2,
+    )
+
+    async def _get_chacha_db_for_owner(owner_user_id: int):
+        assert owner_user_id == 2
+        return _FailingWorkspaceDb()
+
+    fake_logger = MagicMock()
+    monkeypatch.setattr(sharing, "_get_repo", lambda: repo)
+    monkeypatch.setattr(chacha_deps, "get_chacha_db_for_owner", _get_chacha_db_for_owner)
+    monkeypatch.setattr(sharing, "logger", fake_logger)
+
+    response = await sharing.shared_with_me(user=test_user)
+
+    assert response.total == 1
+    fake_logger.debug.assert_called_once_with("Failed to resolve shared workspace name")
+
+
 @pytest.fixture
 def mock_repo(repo, tmp_path):
     """Patch repo and security helpers while keeping the real audit service wiring."""
