@@ -142,10 +142,13 @@ async def admin_kanban_fts_maintenance(
     try:
         await _enforce_admin_user_scope(principal, user_id, require_hierarchy=True)
         db = _get_kanban_db_for_user_id(user_id)
-        if action == "rebuild":
-            db.rebuild_fts()
-        else:
-            db.optimize_fts()
+        try:
+            if action == "rebuild":
+                db.rebuild_fts()
+            else:
+                db.optimize_fts()
+        finally:
+            db.close()
     except InputError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except KanbanDBError as exc:

@@ -1,0 +1,173 @@
+from __future__ import annotations
+
+import importlib
+import sys
+
+import pytest
+
+
+pytestmark = pytest.mark.unit
+
+
+def _import_startup_primary_jobs_pollers():
+    sys.modules.pop("tldw_Server_API.app.services.startup_primary_jobs_pollers", None)
+    return importlib.import_module("tldw_Server_API.app.services.startup_primary_jobs_pollers")
+
+
+@pytest.mark.asyncio
+async def test_start_primary_jobs_pollers_combines_handles_in_order(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_pollers = _import_startup_primary_jobs_pollers()
+    calls: list[str] = []
+
+    async def _record_core(**kwargs):
+        del kwargs
+        calls.append("core")
+        return ("core-stop", "core-task")
+
+    async def _record_files(**kwargs):
+        del kwargs
+        calls.append("files")
+        return ("files-stop", "files-task")
+
+    async def _record_data_tables(**kwargs):
+        del kwargs
+        calls.append("data-tables")
+        return ("data-tables-stop", "data-tables-task")
+
+    async def _record_prompt_studio(**kwargs):
+        del kwargs
+        calls.append("prompt-studio")
+        return ("prompt-studio-stop", "prompt-studio-task")
+
+    monkeypatch.setattr(startup_pollers, "_start_core_jobs_worker", _record_core)
+    monkeypatch.setattr(startup_pollers, "_start_files_jobs_worker", _record_files)
+    monkeypatch.setattr(startup_pollers, "_start_data_tables_jobs_worker", _record_data_tables)
+    monkeypatch.setattr(startup_pollers, "_start_prompt_studio_jobs_worker", _record_prompt_studio)
+
+    handles = await startup_pollers.start_primary_jobs_pollers(
+        app="app",
+        owned_job_pollers=[],
+        register_owned_job_poller=lambda *args, **kwargs: None,
+        should_start_worker=lambda *args, **kwargs: False,
+        sidecar_mode=False,
+    )
+
+    assert calls == ["core", "files", "data-tables", "prompt-studio"]
+    assert handles.core_jobs_stop_event == "core-stop"
+    assert handles.core_jobs_task == "core-task"
+    assert handles.files_jobs_stop_event == "files-stop"
+    assert handles.files_jobs_task == "files-task"
+    assert handles.data_tables_jobs_stop_event == "data-tables-stop"
+    assert handles.data_tables_jobs_task == "data-tables-task"
+    assert handles.prompt_studio_jobs_stop_event == "prompt-studio-stop"
+    assert handles.prompt_studio_jobs_task == "prompt-studio-task"
+
+
+@pytest.mark.asyncio
+async def test_start_core_jobs_worker_skips_in_sidecar_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_pollers = _import_startup_primary_jobs_pollers()
+
+    monkeypatch.setattr(startup_pollers, "_make_event", lambda: (_ for _ in ()).throw(AssertionError("no event")))
+    monkeypatch.setattr(startup_pollers, "_create_task", lambda coro: (_ for _ in ()).throw(AssertionError("no task")))
+
+    stop_event, task = await startup_pollers._start_core_jobs_worker(
+        app="app",
+        owned_job_pollers=[],
+        register_owned_job_poller=lambda *args, **kwargs: None,
+        sidecar_mode=True,
+    )
+
+    assert stop_event is None
+    assert task is None
+
+
+@pytest.mark.asyncio
+async def test_start_files_jobs_worker_registers_owned_poller_when_enabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_pollers = _import_startup_primary_jobs_pollers()
+    captured_stop_events: list[object] = []
+    created_coroutines: list[object] = []
+    registrations: list[dict[str, object]] = []
+
+    monkeypatch.setattr(startup_pollers, "_make_event", lambda: "files-stop")
+    monkeypatch.setattr(
+        startup_pollers,
+        "_create_task",
+        lambda coro: created_coroutines.append(coro) or "files-task",
+    )
+    monkeypatch.setattr(
+        startup_pollers,
+        "_run_file_artifacts_jobs_worker_service",
+        lambda stop_event: captured_stop_events.append(stop_event) or "files-coro",
+    )
+
+    def _register_owned_job_poller(app, owned_job_pollers, *, name, task, stop_event):
+        registrations.append(
+            {
+                "app": app,
+                "owned_job_pollers": owned_job_pollers,
+                "name": name,
+                "task": task,
+                "stop_event": stop_event,
+            }
+        )
+
+    owned_job_pollers: list[object] = []
+    stop_event, task = await startup_pollers._start_files_jobs_worker(
+        app="app",
+        owned_job_pollers=owned_job_pollers,
+        register_owned_job_poller=_register_owned_job_poller,
+        should_start_worker=lambda flag, route: (flag, route) == ("FILES_JOBS_WORKER_ENABLED", "files"),
+    )
+
+    assert stop_event == "files-stop"
+    assert task == "files-task"
+    assert captured_stop_events == ["files-stop"]
+    assert created_coroutines == ["files-coro"]
+    assert registrations == [
+        {
+            "app": "app",
+            "owned_job_pollers": owned_job_pollers,
+            "name": "files_jobs_task",
+            "task": "files-task",
+            "stop_event": "files-stop",
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_start_prompt_studio_jobs_worker_handles_guard_exception(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_pollers = _import_startup_primary_jobs_pollers()
+
+    monkeypatch.setattr(startup_pollers, "_make_event", lambda: "prompt-studio-stop")
+
+    def _failing_create_task(coro):
+        del coro
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(startup_pollers, "_create_task", _failing_create_task)
+    monkeypatch.setattr(
+        startup_pollers,
+        "_run_prompt_studio_jobs_worker_service",
+        lambda stop_event: stop_event,
+    )
+
+    stop_event, task = await startup_pollers._start_prompt_studio_jobs_worker(
+        app="app",
+        owned_job_pollers=[],
+        register_owned_job_poller=lambda *args, **kwargs: None,
+        should_start_worker=lambda flag, route: (flag, route) == (
+            "PROMPT_STUDIO_JOBS_WORKER_ENABLED",
+            "prompt-studio",
+        ),
+    )
+
+    assert stop_event is None
+    assert task is None

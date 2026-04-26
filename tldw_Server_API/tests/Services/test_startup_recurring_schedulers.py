@@ -1,0 +1,128 @@
+from __future__ import annotations
+
+import importlib
+import sys
+
+import pytest
+
+
+pytestmark = pytest.mark.unit
+
+
+def _import_startup_recurring_schedulers():
+    sys.modules.pop("tldw_Server_API.app.services.startup_recurring_schedulers", None)
+    return importlib.import_module("tldw_Server_API.app.services.startup_recurring_schedulers")
+
+
+@pytest.mark.asyncio
+async def test_start_recurring_schedulers_combines_handles(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_recurring = _import_startup_recurring_schedulers()
+    calls: list[str] = []
+
+    async def _fake_authnz():
+        calls.append("authnz")
+        return True
+
+    async def _fake_workflows():
+        calls.append("workflows")
+        return "workflows-task"
+
+    async def _fake_reading_digest(*, test_mode: bool):
+        calls.append(f"reading-digest:{test_mode}")
+        return "reading-digest-task"
+
+    async def _fake_admin_backup():
+        calls.append("admin-backup")
+        return "admin-backup-task"
+
+    async def _fake_companion_reflection():
+        calls.append("companion-reflection")
+        return "companion-reflection-task"
+
+    async def _fake_reminders():
+        calls.append("reminders")
+        return "reminders-task"
+
+    async def _fake_connectors_sync():
+        calls.append("connectors-sync")
+        return "connectors-sync-task"
+
+    monkeypatch.setattr(startup_recurring, "_start_authnz_scheduler", _fake_authnz)
+    monkeypatch.setattr(startup_recurring, "_start_workflows_scheduler", _fake_workflows)
+    monkeypatch.setattr(startup_recurring, "_start_reading_digest_scheduler", _fake_reading_digest)
+    monkeypatch.setattr(startup_recurring, "_start_admin_backup_scheduler", _fake_admin_backup)
+    monkeypatch.setattr(startup_recurring, "_start_companion_reflection_scheduler", _fake_companion_reflection)
+    monkeypatch.setattr(startup_recurring, "_start_reminders_scheduler", _fake_reminders)
+    monkeypatch.setattr(startup_recurring, "_start_connectors_sync_scheduler", _fake_connectors_sync)
+
+    handles = await startup_recurring.start_recurring_schedulers(test_mode=False)
+
+    assert calls == [
+        "authnz",
+        "workflows",
+        "reading-digest:False",
+        "admin-backup",
+        "companion-reflection",
+        "reminders",
+        "connectors-sync",
+    ]
+    assert handles.authnz_scheduler_started is True
+    assert handles.workflows_sched_task == "workflows-task"
+    assert handles.reading_digest_sched_task == "reading-digest-task"
+    assert handles.admin_backup_sched_task == "admin-backup-task"
+    assert handles.companion_reflection_sched_task == "companion-reflection-task"
+    assert handles.reminders_sched_task == "reminders-task"
+    assert handles.connectors_sync_sched_task == "connectors-sync-task"
+
+
+@pytest.mark.asyncio
+async def test_start_authnz_scheduler_skips_when_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_recurring = _import_startup_recurring_schedulers()
+
+    monkeypatch.setattr(startup_recurring, "_env_flag_enabled", lambda key: True)
+
+    started = await startup_recurring._start_authnz_scheduler()
+
+    assert started is False
+
+
+@pytest.mark.asyncio
+async def test_start_reading_digest_scheduler_defaults_off_in_test_mode_without_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_recurring = _import_startup_recurring_schedulers()
+    calls: list[bool] = []
+
+    async def _fake_start(*, enabled: bool):
+        calls.append(enabled)
+        return "reading-digest-task"
+
+    monkeypatch.delenv("READING_DIGEST_SCHEDULER_ENABLED", raising=False)
+    monkeypatch.setattr(startup_recurring, "_start_reading_digest_scheduler_service", _fake_start)
+
+    task = await startup_recurring._start_reading_digest_scheduler(test_mode=True)
+
+    assert task is None
+    assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_start_companion_reflection_scheduler_starts_when_enabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_recurring = _import_startup_recurring_schedulers()
+
+    async def _fake_start(*, enabled: bool):
+        assert enabled is True
+        return "companion-reflection-task"
+
+    monkeypatch.setattr(startup_recurring, "_env_flag", lambda key, default: True)
+    monkeypatch.setattr(startup_recurring, "_start_companion_reflection_scheduler_service", _fake_start)
+
+    task = await startup_recurring._start_companion_reflection_scheduler()
+
+    assert task == "companion-reflection-task"

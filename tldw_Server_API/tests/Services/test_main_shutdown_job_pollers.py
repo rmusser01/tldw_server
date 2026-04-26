@@ -17,7 +17,11 @@ from tldw_Server_API.app.services import connectors_worker
 from tldw_Server_API.app.services import core_jobs_worker
 from tldw_Server_API.app.services import jobs_metrics_service
 from tldw_Server_API.app.services import media_ingest_jobs_worker
+from tldw_Server_API.app.services import privilege_snapshot_worker
 from tldw_Server_API.app.services import reminder_jobs_worker
+from tldw_Server_API.app.services import study_pack_jobs_worker
+from tldw_Server_API.app.services import study_suggestions_jobs_worker
+from tldw_Server_API.app.core.Evaluations import embeddings_abtest_jobs_worker
 from tldw_Server_API.app.core.Evaluations import recipe_runs_jobs_worker
 
 
@@ -582,18 +586,18 @@ def test_lifespan_startup_publishes_owned_job_poller_inventory_for_enabled_worke
         "REMINDER_JOBS_WORKER_ENABLED",
         "ADMIN_BACKUP_JOBS_WORKER_ENABLED",
         "ADMIN_BYOK_VALIDATION_JOBS_WORKER_ENABLED",
+        "STUDY_PACK_JOBS_WORKER_ENABLED",
+        "STUDY_SUGGESTIONS_JOBS_WORKER_ENABLED",
+        "PRIVILEGE_SNAPSHOT_WORKER_ENABLED",
+        "EVALUATIONS_ABTEST_JOBS_WORKER_ENABLED",
         "CONNECTORS_WORKER_ENABLED",
     ):
         monkeypatch.setenv(key, "1")
     for key in (
         "DATA_TABLES_JOBS_WORKER_ENABLED",
         "PROMPT_STUDIO_JOBS_WORKER_ENABLED",
-        "STUDY_PACK_JOBS_WORKER_ENABLED",
-        "STUDY_SUGGESTIONS_JOBS_WORKER_ENABLED",
-        "PRIVILEGE_SNAPSHOT_WORKER_ENABLED",
         "PRESENTATION_RENDER_JOBS_WORKER_ENABLED",
         "MEDIA_INGEST_HEAVY_JOBS_WORKER_ENABLED",
-        "EVALUATIONS_ABTEST_JOBS_WORKER_ENABLED",
         "EVALS_ABTEST_JOBS_WORKER_ENABLED",
     ):
         monkeypatch.setenv(key, "0")
@@ -625,6 +629,22 @@ def test_lifespan_startup_publishes_owned_job_poller_inventory_for_enabled_worke
         "run_companion_reflection_jobs_worker",
         _wait_for_optional_stop_event,
     )
+    monkeypatch.setattr(study_pack_jobs_worker, "run_study_pack_jobs_worker", _wait_for_optional_stop_event)
+    monkeypatch.setattr(
+        study_suggestions_jobs_worker,
+        "run_study_suggestions_jobs_worker",
+        _wait_for_optional_stop_event,
+    )
+    monkeypatch.setattr(
+        privilege_snapshot_worker,
+        "run_privilege_snapshot_worker",
+        _wait_for_optional_stop_event,
+    )
+    monkeypatch.setattr(
+        embeddings_abtest_jobs_worker,
+        "run_embeddings_abtest_jobs_worker",
+        _wait_for_optional_stop_event,
+    )
     monkeypatch.setattr(reminder_jobs_worker, "run_reminder_jobs_worker", _wait_for_optional_stop_event)
     monkeypatch.setattr(
         admin_backup_jobs_worker,
@@ -645,6 +665,9 @@ def test_lifespan_startup_publishes_owned_job_poller_inventory_for_enabled_worke
     assert {entry["name"] for entry in inventory} == {
         "core_jobs_task",
         "files_jobs_task",
+        "study_pack_jobs_task",
+        "study_suggestions_jobs_task",
+        "privilege_snapshot_task",
         "audio_jobs_task",
         "audiobook_jobs_task",
         "media_ingest_jobs_task",
@@ -653,6 +676,7 @@ def test_lifespan_startup_publishes_owned_job_poller_inventory_for_enabled_worke
         "reminder_jobs_task",
         "admin_backup_jobs_task",
         "admin_byok_validation_jobs_task",
+        "evals_abtest_jobs_task",
         "connectors_jobs_task",
     }
     assert all(
