@@ -1052,8 +1052,8 @@ def _generate_presentation(
                 "slides_generation_errors_total",
                 labels={"source_type": source_type, "error": error_type},
             )
-        except _SLIDES_NONCRITICAL_EXCEPTIONS as exc:
-            logger.debug("Failed to record generation error metric: {}", exc)
+        except _SLIDES_NONCRITICAL_EXCEPTIONS:
+            logger.debug("Failed to record slides generation error metric")
 
     try:
         generated = generator.generate_from_text(
