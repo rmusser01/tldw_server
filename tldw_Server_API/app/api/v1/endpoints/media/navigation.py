@@ -382,8 +382,8 @@ def _materialize_navigation_nodes(raw_nodes: list[dict[str, Any]]) -> list[Media
     for raw in raw_nodes:
         try:
             nodes.append(MediaNavigationNode.model_validate(raw))
-        except (TypeError, ValueError) as exc:
-            logger.debug("Skipping invalid navigation node payload: {}", exc)
+        except (TypeError, ValueError):
+            logger.debug("Skipping invalid navigation node payload")
     return nodes
 
 

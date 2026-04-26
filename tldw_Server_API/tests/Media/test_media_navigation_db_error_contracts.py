@@ -194,6 +194,16 @@ def test_extract_chunk_metadata_nodes_sanitizes_query_failure_log(monkeypatch) -
     fake_logger.warning.assert_called_once_with("Navigation source chunk_metadata query failed")
 
 
+def test_materialize_navigation_nodes_sanitizes_invalid_payload_log(monkeypatch) -> None:
+    fake_logger = MagicMock()
+    monkeypatch.setattr(navigation_mod, "logger", fake_logger)
+
+    result = navigation_mod._materialize_navigation_nodes([{}])
+
+    assert result == []
+    fake_logger.debug.assert_called_once_with("Skipping invalid navigation node payload")
+
+
 def test_get_media_text_sanitizes_document_version_failure_log(monkeypatch) -> None:
     fake_logger = MagicMock()
     monkeypatch.setattr(navigation_mod, "logger", fake_logger)
