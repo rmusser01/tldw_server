@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from pathlib import Path
 import threading
+from pathlib import Path
 from types import SimpleNamespace
 
-from fastapi.testclient import TestClient
 import pytest
+from fastapi.testclient import TestClient
 
 
 class _FakeRuntime:
@@ -206,6 +206,65 @@ def test_real_runtime_generates_wav_for_plain_text_with_fake_model():
     assert calls["writer"][0]["sample_rate"] == 24000  # nosec B101
     assert runtime.health().model_loaded is True  # nosec B101
     assert runtime.health().model_ready is True  # nosec B101
+
+
+@pytest.mark.unit
+def test_real_runtime_converts_tensor_audio_to_cpu_numpy_mono_before_writing():
+    from tldw_Server_API.app.core.TTS.adapters.omnivoice_sidecar_protocol import OmniVoiceSynthesizeRequest
+    from tldw_Server_API.app.core.TTS.adapters.omnivoice_sidecar_server import RealOmniVoiceRuntime
+
+    calls = {"writer": []}
+
+    class _FakeArray:
+        def __init__(self, tensor_calls):
+            self._tensor_calls = tensor_calls
+
+        def squeeze(self):
+            self._tensor_calls.append("squeeze")
+            return "mono-audio"
+
+    class _FakeTensor:
+        def __init__(self):
+            self.calls = []
+
+        def detach(self):
+            self.calls.append("detach")
+            return self
+
+        def cpu(self):
+            self.calls.append("cpu")
+            return self
+
+        def numpy(self):
+            self.calls.append("numpy")
+            return _FakeArray(self.calls)
+
+    generated_audio = _FakeTensor()
+
+    class _FakeModel:
+        sampling_rate = 24000
+
+        def generate(self, **kwargs):  # noqa: ARG002
+            return generated_audio
+
+    def _fake_wav_writer(buffer, audio, sample_rate):
+        calls["writer"].append({"audio": audio, "sample_rate": sample_rate})
+        buffer.write(b"tensor-wav")
+
+    runtime = RealOmniVoiceRuntime(
+        model_id="k2-fsa/OmniVoice",
+        device="cpu",
+        dtype="float32",
+        model_loader=lambda **kwargs: _FakeModel(),  # noqa: ARG005
+        wav_writer=_fake_wav_writer,
+    )
+
+    audio_bytes, metadata = runtime.synthesize(OmniVoiceSynthesizeRequest(text="hello", mode="auto"))
+
+    assert audio_bytes == b"tensor-wav"  # nosec B101
+    assert metadata.sample_rate == 24000  # nosec B101
+    assert generated_audio.calls == ["detach", "cpu", "numpy", "squeeze"]  # nosec B101
+    assert calls["writer"] == [{"audio": "mono-audio", "sample_rate": 24000}]  # nosec B101
 
 
 @pytest.mark.unit

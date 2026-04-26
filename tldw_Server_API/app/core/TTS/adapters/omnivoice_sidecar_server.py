@@ -13,10 +13,10 @@ from typing import Any, Callable, Protocol
 from fastapi import Depends, FastAPI, Header, HTTPException, Response, status
 
 from .omnivoice_sidecar_protocol import (
+    X_TLDW_SIDECAR_TOKEN_HEADER,
     OmniVoiceHealthResponse,
     OmniVoiceSynthesizeRequest,
     OmniVoiceSynthesizeResponse,
-    X_TLDW_SIDECAR_TOKEN_HEADER,
 )
 
 
@@ -172,7 +172,7 @@ class RealOmniVoiceRuntime:
             generate_kwargs = self._build_generate_kwargs(request)
             try:
                 generated_audio = model.generate(**generate_kwargs)
-                audio = generated_audio[0] if isinstance(generated_audio, (list, tuple)) else generated_audio
+                audio = self._prepare_audio_for_wav_writer(generated_audio)
                 sample_rate = int(getattr(model, "sampling_rate", request.sample_rate) or request.sample_rate)
                 buffer = BytesIO()
                 self._wav_writer(buffer, audio, sample_rate)
@@ -232,6 +232,23 @@ class RealOmniVoiceRuntime:
             kwargs["ref_text"] = request.reference_text
         kwargs.update(request.generation_params)
         return kwargs
+
+    @staticmethod
+    def _prepare_audio_for_wav_writer(generated_audio: Any) -> Any:
+        audio = generated_audio[0] if isinstance(generated_audio, (list, tuple)) else generated_audio
+        detach = getattr(audio, "detach", None)
+        if callable(detach):
+            audio = detach()
+        cpu = getattr(audio, "cpu", None)
+        if callable(cpu):
+            audio = cpu()
+        numpy = getattr(audio, "numpy", None)
+        if callable(numpy):
+            audio = numpy()
+        squeeze = getattr(audio, "squeeze", None)
+        if callable(squeeze):
+            audio = squeeze()
+        return audio
 
     @staticmethod
     def _default_dtype_for_device(device: str) -> str:
