@@ -109,7 +109,7 @@ async def set_user_override(user_id: str, override: ModerationUserOverride) -> d
     status_dict = status_info if isinstance(status_info, dict) else {}
     if not status_dict.get("ok"):
         error_detail = status_dict.get("error", "Failed to persist override")
-        logger.error("Moderation override persist failed for user_id={} error={}", user_id, error_detail)
+        logger.error("Moderation override persist failed")
         error_type = str(status_dict.get("error_type", "")).strip().lower()
         if error_type == "validation":
             status_code = status.HTTP_400_BAD_REQUEST
