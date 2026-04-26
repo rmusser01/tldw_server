@@ -278,6 +278,33 @@ def test_materialize_navigation_nodes_sanitizes_invalid_payload_log(monkeypatch)
     fake_logger.debug.assert_called_once_with("Skipping invalid navigation node payload")
 
 
+@pytest.mark.asyncio
+async def test_select_source_nodes_sanitizes_empty_generated_fallback_log(monkeypatch) -> None:
+    fake_logger = MagicMock()
+    monkeypatch.setattr(navigation_mod, "logger", fake_logger)
+
+    async def _empty_pdf_outline(*_args, **_kwargs):
+        return []
+
+    monkeypatch.setattr(navigation_mod, "_extract_pdf_outline_nodes", _empty_pdf_outline)
+    monkeypatch.setattr(navigation_mod, "_extract_generated_toc_nodes", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(navigation_mod, "_extract_document_structure_nodes", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(navigation_mod, "_extract_transcript_segment_nodes", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(navigation_mod, "_extract_chunk_metadata_nodes", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(navigation_mod, "_extract_generated_fallback_nodes", lambda *_args, **_kwargs: [])
+
+    nodes, sources = await navigation_mod._select_source_nodes(
+        media_id=7,
+        db=object(),
+        media={"type": "document"},
+        include_generated_fallback=True,
+    )
+
+    assert nodes == []
+    assert sources[-1] == "generated"
+    fake_logger.debug.assert_any_call("Generated fallback requested but produced no nodes")
+
+
 def test_get_media_text_sanitizes_document_version_failure_log(monkeypatch) -> None:
     fake_logger = MagicMock()
     monkeypatch.setattr(navigation_mod, "logger", fake_logger)

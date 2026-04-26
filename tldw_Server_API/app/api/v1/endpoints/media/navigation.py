@@ -1235,7 +1235,7 @@ async def _select_source_nodes(
         generated_nodes = _extract_generated_fallback_nodes(media_id, db, media)
         if generated_nodes:
             return generated_nodes, source_order_used
-        logger.debug("Generated fallback requested but produced no nodes for media_id={}", media_id)
+        logger.debug("Generated fallback requested but produced no nodes")
     if sparse_pdf_candidate:
         return sparse_pdf_candidate, source_order_used
     return [], source_order_used
