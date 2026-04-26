@@ -191,8 +191,8 @@ def _register_schedule(db: WatchlistsDatabase, job_row, *, current_user: User) -
         )
         db.set_job_schedule_id(job_row.id, sid)
         return
-    except _COLLECTIONS_FEEDS_NONCRITICAL_EXCEPTIONS as exc:
-        logger.debug(f"Collections feeds schedule registration failed: {exc}")
+    except _COLLECTIONS_FEEDS_NONCRITICAL_EXCEPTIONS:
+        logger.debug("Collections feeds schedule registration failed")
     try:
         if job_row.schedule_expr:
             from uuid import uuid4
@@ -217,8 +217,8 @@ def _register_schedule(db: WatchlistsDatabase, job_row, *, current_user: User) -
                 coalesce=True,
             )
             db.set_job_schedule_id(job_row.id, sid)
-    except _COLLECTIONS_FEEDS_NONCRITICAL_EXCEPTIONS as exc:
-        logger.debug(f"Collections feeds schedule DB fallback failed: {exc}")
+    except _COLLECTIONS_FEEDS_NONCRITICAL_EXCEPTIONS:
+        logger.debug("Collections feeds schedule DB fallback failed")
 
 
 def _derive_health_status(source_row) -> str:
