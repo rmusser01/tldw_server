@@ -1127,8 +1127,8 @@ def _generate_presentation(
                 time.perf_counter() - started_at,
                 labels={"source_type": source_type},
             )
-        except _SLIDES_NONCRITICAL_EXCEPTIONS as exc:
-            logger.debug("Failed to record generation latency metric: {}", exc)
+        except _SLIDES_NONCRITICAL_EXCEPTIONS:
+            logger.debug("Failed to record slides generation latency metric")
     response.headers["ETag"] = _format_etag(row.version)
     response.headers["Last-Modified"] = row.last_modified
     return _build_presentation_response(row)
