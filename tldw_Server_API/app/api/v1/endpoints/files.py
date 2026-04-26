@@ -111,8 +111,8 @@ def _clear_export_state(
                 export_expires_at=row.export_expires_at,
                 export_consumed_at=consumed_at,
             )
-    except Exception as exc:
-        logger.warning("files.export: failed to clear export state for {}: {}", file_id, exc)
+    except Exception:
+        logger.warning("files.export: failed to clear export state")
 
 
 @router.post(

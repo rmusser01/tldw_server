@@ -5,6 +5,7 @@ import threading
 from io import BytesIO
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
@@ -32,9 +33,13 @@ _FILES_SENSITIVE_MARKERS = (
 class _LoggerStub:
     def __init__(self):
         self.errors: list[tuple[str, tuple[object, ...], dict[str, object]]] = []
+        self.warnings: list[tuple[str, tuple[object, ...], dict[str, object]]] = []
 
     def error(self, message: str, *args: object, **kwargs: object) -> None:
         self.errors.append((message, args, kwargs))
+
+    def warning(self, message: str, *args: object, **kwargs: object) -> None:
+        self.warnings.append((message, args, kwargs))
 
 
 class _UnresolvableBaseDir:
@@ -109,6 +114,44 @@ def test_resolve_export_path_sanitizes_base_dir_failure_log(monkeypatch):
     rendered = " ".join([logger_stub.errors[0][0], *(str(arg) for arg in logger_stub.errors[0][1])])
     for marker in _FILES_SENSITIVE_MARKERS:
         assert marker not in rendered
+
+
+def test_clear_export_state_sanitizes_cleanup_failure_log(monkeypatch):
+    class _FailingCollectionsDb:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def update_file_artifact_export(self, *args, **kwargs):
+            raise RuntimeError("export cleanup leaked /private/files/export-state.db")
+
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(files_endpoint, "logger", logger_stub)
+    monkeypatch.setattr(
+        files_endpoint.CollectionsDatabase,
+        "for_user",
+        staticmethod(lambda user_id: _FailingCollectionsDb()),
+    )
+
+    files_endpoint._clear_export_state(
+        user_id=777,
+        file_id=123,
+        row=SimpleNamespace(
+            export_format="md",
+            export_bytes=10,
+            export_content_type="text/markdown",
+            export_job_id=None,
+            export_expires_at=None,
+        ),
+        consumed_at=None,
+    )
+
+    assert logger_stub.warnings == [("files.export: failed to clear export state", (), {})]
+    rendered = " ".join([logger_stub.warnings[0][0], *(str(arg) for arg in logger_stub.warnings[0][1])])
+    assert "123" not in rendered
+    assert "/private/files/export-state.db" not in rendered
 
 
 def test_create_and_export_markdown_table(client_with_user):
