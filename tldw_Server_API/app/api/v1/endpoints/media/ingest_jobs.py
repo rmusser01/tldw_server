@@ -133,8 +133,8 @@ class MediaIngestJobListResponse(BaseModel):
 def _cleanup_dir(path_str: str) -> None:
     try:
         shutil.rmtree(path_str, ignore_errors=True)
-    except Exception as exc:
-        logger.debug("Failed to cleanup temp dir {}: {}", path_str, exc)
+    except Exception:
+        logger.debug("Failed to cleanup media ingest temp dir")
 
 
 def _validate_submit_inputs(
