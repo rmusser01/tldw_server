@@ -16,10 +16,51 @@ from tldw_Server_API.app.core.config import load_tts_config
 pytestmark = [pytest.mark.asyncio, pytest.mark.integration, pytest.mark.local_llm_service]
 
 
+def _repo_root() -> Path:
+    return Path(__file__).resolve().parents[4]
+
+
+def _omnivoice_cache_candidates(model_id: str, repo_root: Path) -> list[Path]:
+    normalized_repo = f"models--{model_id.replace('/', '--')}"
+    roots: list[Path] = []
+
+    hf_hub_cache = os.getenv("HF_HUB_CACHE")
+    if hf_hub_cache:
+        roots.append(Path(hf_hub_cache).expanduser())
+
+    hf_home = os.getenv("HF_HOME")
+    if hf_home:
+        hf_home_path = Path(hf_home).expanduser()
+        roots.extend([hf_home_path, hf_home_path / "hub"])
+
+    default_hf_home = Path.home() / ".cache" / "huggingface"
+    roots.extend(
+        [
+            default_hf_home,
+            default_hf_home / "hub",
+            repo_root / "models",
+            repo_root / "models" / "huggingface",
+            repo_root / "models" / "huggingface" / "hub",
+        ]
+    )
+
+    candidates: list[Path] = []
+    seen: set[Path] = set()
+    for root in roots:
+        for candidate in (root / normalized_repo, root / "hub" / normalized_repo):
+            resolved = candidate.expanduser()
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+            candidates.append(resolved)
+    return candidates
+
+
 def _require_omnivoice_runtime() -> tuple[dict[str, object], Path]:
     if os.getenv("TLDW_RUN_OMNIVOICE_INTEGRATION") != "1":
         pytest.skip("TLDW_RUN_OMNIVOICE_INTEGRATION not set")
 
+    repo_root = _repo_root()
     config = load_tts_config() or {}
     provider_cfg = config.get("omnivoice_config")
     if not isinstance(provider_cfg, dict):
@@ -35,16 +76,15 @@ def _require_omnivoice_runtime() -> tuple[dict[str, object], Path]:
 
     interpreter_path = Path(str(python_path)).expanduser()
     if not interpreter_path.is_absolute():
-        interpreter_path = (Path.cwd() / interpreter_path).resolve()
+        interpreter_path = (repo_root / interpreter_path).resolve()
     if not interpreter_path.exists():
         pytest.skip("OmniVoice sidecar runtime is not installed")
 
     model_id = str(extra_params.get("model_id") or "k2-fsa/OmniVoice")
-    cache_dir = Path.home() / ".cache" / "huggingface" / "hub" / f"models--{model_id.replace('/', '--')}"
-    if not cache_dir.exists():
+    if not any(candidate.exists() for candidate in _omnivoice_cache_candidates(model_id, repo_root)):
         pytest.skip("OmniVoice weights are not cached locally")
 
-    return provider_cfg, Path.cwd().resolve()
+    return provider_cfg, repo_root
 
 
 @pytest.mark.requires_model

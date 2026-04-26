@@ -1356,12 +1356,15 @@ def _install_omnivoice() -> None:
     missing = installer.validate_runtime_layout(layout)
     if missing:
         raise RuntimeError(f"OmniVoice runtime layout incomplete: {', '.join(missing)}")
-    installer.patch_tts_config(
+    config_patched = installer.patch_tts_config(
         config_path=repo_root / installer.DEFAULT_CONFIG_PATH,
         layout=layout,
         source_checkout=source_checkout,
         repo_root=repo_root,
     )
+    if not config_patched:
+        logger.error("OmniVoice provider configuration was not updated after runtime installation")
+        raise RuntimeError("OmniVoice provider configuration could not be updated")
 
 
 def _download_huggingface_models(models: list[str]) -> None:

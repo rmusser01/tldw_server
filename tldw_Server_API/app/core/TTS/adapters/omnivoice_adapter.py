@@ -309,6 +309,8 @@ class OmniVoiceAdapter(TTSAdapter):
             value = extras.get(key)
             if value is not None:
                 payload[key] = value
+        if request.speed is not None:
+            payload["speed"] = request.speed
         generation_params = {
             key: extras[key]
             for key in self.PASSTHROUGH_GENERATION_PARAMS

@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, Callable, Protocol
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Response, status
+from loguru import logger
 
 from .omnivoice_sidecar_protocol import (
     X_TLDW_SIDECAR_TOKEN_HEADER,
@@ -367,9 +368,10 @@ def create_app(*, sidecar_token: str, runtime: OmniVoiceRuntime | None = None) -
         try:
             audio_bytes, metadata = await asyncio.to_thread(sidecar_runtime.synthesize, request)
         except OmniVoiceRuntimeError as exc:
+            logger.opt(exception=True).warning("OmniVoice sidecar synthesis failed")
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=str(exc),
+                detail="OmniVoice service unavailable",
             ) from exc
         return Response(
             content=audio_bytes,

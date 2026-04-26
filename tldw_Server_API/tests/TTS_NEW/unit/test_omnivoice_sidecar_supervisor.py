@@ -542,3 +542,7 @@ async def test_supervisor_prefers_graceful_shutdown_endpoint_before_terminate(tm
     assert recorded["urls"] == ["http://127.0.0.1:8039/control/shutdown"]  # nosec B101
     assert process.terminate_called is False  # nosec B101
     assert process.kill_called is False  # nosec B101
+    assert supervisor._process is None  # noqa: SLF001 # nosec B101
+    assert supervisor._base_url is None  # noqa: SLF001 # nosec B101
+    assert supervisor._port is None  # noqa: SLF001 # nosec B101
+    assert supervisor._last_activity_at is None  # noqa: SLF001 # nosec B101

@@ -276,6 +276,10 @@ class OmniVoiceSidecarSupervisor:
     def _clear_process_state(self, process: asyncio.subprocess.Process | None = None) -> None:
         if process is not None and self._process is not None and self._process is not process:
             return
+        self._process = None
+        self._base_url = None
+        self._port = None
+        self._last_activity_at = None
 
     async def _request_graceful_shutdown(self, base_url: str) -> bool:
         headers = build_sidecar_auth_headers(self._token)
@@ -289,13 +293,8 @@ class OmniVoiceSidecarSupervisor:
                 )
             return response.status_code == 200
         except Exception:
-            logger.debug("OmniVoice sidecar graceful shutdown probe failed", exc_info=True)
+            logger.opt(exception=True).debug("OmniVoice sidecar graceful shutdown probe failed")
             return False
-
-        self._process = None
-        self._base_url = None
-        self._port = None
-        self._last_activity_at = None
 
     async def _stop_process(self) -> None:
         async with self._lock:
@@ -317,6 +316,7 @@ class OmniVoiceSidecarSupervisor:
         if graceful_shutdown_requested:
             try:
                 await asyncio.wait_for(process.wait(), timeout=self._shutdown_timeout_seconds)
+                self._clear_process_state(process)
                 return
             except asyncio.TimeoutError:
                 logger.warning("OmniVoice sidecar did not exit after graceful shutdown request; terminating")

@@ -31,15 +31,26 @@ def test_tts_health_path_exists(client_with_user: TestClient):
     assert resp.status_code in (404, 405)
 
 
+def _configured_provider_key(raw_value: str, *, placeholder_prefixes: tuple[str, ...]) -> str:
+    value = raw_value.strip()
+    if not value:
+        return ""
+    if any(value.startswith(prefix) for prefix in placeholder_prefixes):
+        return ""
+    return value
+
+
 @pytest.mark.requires_llm
 def test_tts_generate_when_configured(client_with_user: TestClient):
-    openai_key = os.getenv("OPENAI_API_KEY", "")
-    elevenlabs_key = os.getenv("ELEVENLABS_API_KEY", "")
-    if (
-        (not openai_key and not elevenlabs_key)
-        or openai_key.startswith("sk-test-")
-        or elevenlabs_key.startswith("el-test-")
-    ):
+    openai_key = _configured_provider_key(
+        os.getenv("OPENAI_API_KEY", ""),
+        placeholder_prefixes=("sk-test-",),
+    )
+    elevenlabs_key = _configured_provider_key(
+        os.getenv("ELEVENLABS_API_KEY", ""),
+        placeholder_prefixes=("el-test-",),
+    )
+    if not openai_key and not elevenlabs_key:
         pytest.skip("No TTS providers configured")
     # Attempt a small generation (may still fail depending on provider config)
     payload = {

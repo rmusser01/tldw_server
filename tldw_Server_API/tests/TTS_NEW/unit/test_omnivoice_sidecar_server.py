@@ -162,7 +162,8 @@ def test_sidecar_runtime_failure_returns_503_without_stub_fallback():
         )
 
     assert response.status_code == 503  # nosec B101
-    assert "soundfile" in response.json()["detail"]  # nosec B101
+    assert response.json()["detail"] == "OmniVoice service unavailable"  # nosec B101
+    assert "soundfile" not in response.text  # nosec B101
     assert response.content != b"fake-wav"  # nosec B101
 
 

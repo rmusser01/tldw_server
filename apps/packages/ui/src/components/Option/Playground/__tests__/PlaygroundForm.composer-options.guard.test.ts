@@ -8,6 +8,7 @@ describe("PlaygroundForm composer options guard", () => {
     const source = fs.readFileSync(sourcePath, "utf8")
 
     expect(source).toContain("playgroundComposerOptionsExpanded")
+    expect(source).toContain('"playgroundComposerOptionsExpanded",\n    true')
     expect(source).toContain('data-testid="composer-options-toggle"')
     expect(source).toContain('data-testid="composer-inline-send-control"')
     expect(source).toContain('id="composer-options-panel"')
