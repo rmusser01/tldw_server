@@ -289,10 +289,10 @@ async def delete_file_artifact(
                 if path.exists():
                     path.unlink()
                     fs_deleted = True
-            except HTTPException as exc:
-                logger.warning("files.delete: invalid export path for {}: {}", file_id, exc.detail)
-            except Exception as exc:
-                logger.warning("files.delete: failed to delete export file for {}: {}", file_id, exc)
+            except HTTPException:
+                logger.warning("files.delete: invalid export path")
+            except Exception:
+                logger.warning("files.delete: failed to delete export file")
     ok = cdb.delete_file_artifact(file_id, hard=hard)
     if not ok:
         raise HTTPException(status_code=404, detail="file_artifact_not_found")
