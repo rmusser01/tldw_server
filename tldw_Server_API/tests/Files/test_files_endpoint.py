@@ -325,6 +325,79 @@ async def test_delete_file_artifact_delete_failure_log_is_sanitized(monkeypatch)
     assert "/private/files/export.md" not in rendered
 
 
+@pytest.mark.asyncio
+async def test_purge_file_artifacts_invalid_export_path_log_is_sanitized(monkeypatch):
+    class _FakeCollectionsDb:
+        def list_file_artifacts_for_purge(self, *, now_iso: str, soft_deleted_grace_days: int, include_retention: bool):
+            assert now_iso
+            assert soft_deleted_grace_days == 30
+            assert include_retention is True
+            return {123: "export.md"}
+
+        def delete_file_artifacts_by_ids(self, file_ids: list[int]) -> int:
+            assert file_ids == [123]
+            return 1
+
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(files_endpoint, "logger", logger_stub)
+
+    def _raise_invalid_path(user_id: int, path: str):
+        raise HTTPException(status_code=400, detail="leaked invalid path /private/files/export.md")
+
+    monkeypatch.setattr(files_endpoint, "_resolve_export_path_for_user", _raise_invalid_path)
+
+    response = await files_endpoint.purge_file_artifacts(
+        payload=files_endpoint.FileArtifactsPurgeRequest(delete_files=True),
+        cdb=_FakeCollectionsDb(),
+        current_user=SimpleNamespace(id=777),
+    )
+
+    assert response.removed == 1
+    assert response.files_deleted == 0
+    assert logger_stub.warnings == [("files.purge: invalid export path", (), {})]
+    rendered = " ".join([logger_stub.warnings[0][0], *(str(arg) for arg in logger_stub.warnings[0][1])])
+    assert "123" not in rendered
+    assert "/private/files/export.md" not in rendered
+
+
+@pytest.mark.asyncio
+async def test_purge_file_artifacts_delete_failure_log_is_sanitized(monkeypatch):
+    class _FakeExportPath:
+        def exists(self) -> bool:
+            return True
+
+        def unlink(self) -> None:
+            raise RuntimeError("purge unlink leaked /private/files/export.md")
+
+    class _FakeCollectionsDb:
+        def list_file_artifacts_for_purge(self, *, now_iso: str, soft_deleted_grace_days: int, include_retention: bool):
+            assert now_iso
+            assert soft_deleted_grace_days == 30
+            assert include_retention is True
+            return {123: "export.md"}
+
+        def delete_file_artifacts_by_ids(self, file_ids: list[int]) -> int:
+            assert file_ids == [123]
+            return 1
+
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(files_endpoint, "logger", logger_stub)
+    monkeypatch.setattr(files_endpoint, "_resolve_export_path_for_user", lambda user_id, path: _FakeExportPath())
+
+    response = await files_endpoint.purge_file_artifacts(
+        payload=files_endpoint.FileArtifactsPurgeRequest(delete_files=True),
+        cdb=_FakeCollectionsDb(),
+        current_user=SimpleNamespace(id=777),
+    )
+
+    assert response.removed == 1
+    assert response.files_deleted == 0
+    assert logger_stub.warnings == [("files.purge: failed to delete export file", (), {})]
+    rendered = " ".join([logger_stub.warnings[0][0], *(str(arg) for arg in logger_stub.warnings[0][1])])
+    assert "123" not in rendered
+    assert "/private/files/export.md" not in rendered
+
+
 def test_create_and_export_markdown_table(client_with_user):
     payload = {
         "file_type": "markdown_table",

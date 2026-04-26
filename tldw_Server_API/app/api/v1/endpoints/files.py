@@ -326,10 +326,10 @@ async def purge_file_artifacts(
                 if path.exists():
                     path.unlink()
                     files_deleted += 1
-            except HTTPException as exc:
-                logger.warning("files.purge: invalid export path for {}: {}", file_id, exc.detail)
-            except Exception as exc:
-                logger.warning("files.purge: failed to delete export file for {}: {}", file_id, exc)
+            except HTTPException:
+                logger.warning("files.purge: invalid export path")
+            except Exception:
+                logger.warning("files.purge: failed to delete export file")
 
     removed = 0
     if candidates:
