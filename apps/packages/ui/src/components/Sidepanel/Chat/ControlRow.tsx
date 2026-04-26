@@ -721,28 +721,6 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
           </button>
         )}
 
-        <Upload
-          accept="image/*"
-          showUploadList={false}
-          beforeUpload={(file) => {
-            onImageUpload(file)
-            return false
-          }}
-        >
-          <button
-            type="button"
-            data-testid="control-attach-image"
-            className="flex min-h-[44px] min-w-[44px] items-center justify-center gap-2 rounded px-3 py-2 text-sm font-medium text-text-muted transition-colors hover:bg-surface2 hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus sm:min-h-0 sm:min-w-0 sm:px-2 sm:py-1"
-            aria-label={t("playground:actions.attachImage", "Attach image")}
-            title={t("playground:actions.attachImage", "Attach image")}
-          >
-            <ImageIcon className="size-3.5" />
-            <span className="hidden sm:inline">
-              {t("playground:actions.uploadShort", "Image")}
-            </span>
-          </button>
-        </Upload>
-
         {/* More Tools Menu */}
         <div className="relative">
           <Popover
