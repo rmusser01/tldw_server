@@ -2,8 +2,10 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, call
 
 import pytest
+from fastapi import BackgroundTasks, HTTPException
 
 from tldw_Server_API.app.api.v1.endpoints import collections_feeds
+from tldw_Server_API.app.api.v1.schemas.collections_feeds_schemas import CollectionsFeedCreateRequest
 
 pytestmark = pytest.mark.unit
 
@@ -118,3 +120,68 @@ def test_sync_job_schedule_sanitizes_scheduler_update_failure_log(monkeypatch):
 
     assert result.id == 9
     fake_logger.debug.assert_called_once_with("Collections feeds schedule update failed")
+
+
+async def test_create_feed_subscription_source_failure_log_is_sanitized(monkeypatch):
+    class _FailingCreateSourceDb:
+        def create_source(self, **_kwargs):
+            raise RuntimeError("collections source backend exploded at /private/feeds-source.db")
+
+    fake_logger = MagicMock()
+    monkeypatch.setattr(collections_feeds, "logger", fake_logger)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await collections_feeds.create_feed_subscription(
+            payload=CollectionsFeedCreateRequest(url="https://example.com/feed.xml", active=False),
+            background_tasks=BackgroundTasks(),
+            current_user=SimpleNamespace(id=42),
+            db=_FailingCreateSourceDb(),
+        )
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail == "feed_create_failed"
+    fake_logger.error.assert_called_once_with("collections_feeds_create_source_failed")
+    rendered = " ".join(str(part) for call_args in fake_logger.error.call_args_list for part in call_args.args)
+    assert "/private/feeds-source.db" not in rendered
+    assert "exploded" not in rendered
+
+
+async def test_create_feed_subscription_job_failure_log_is_sanitized(monkeypatch):
+    class _FailingCreateJobDb:
+        def __init__(self) -> None:
+            self.deleted_sources: list[int] = []
+
+        def create_source(self, **kwargs):
+            return SimpleNamespace(
+                id=7,
+                name=kwargs["name"],
+                url=kwargs["url"],
+                source_type=kwargs["source_type"],
+                active=kwargs["active"],
+            )
+
+        def create_job(self, **_kwargs):
+            raise RuntimeError("collections job backend exploded at /private/feeds-job.db")
+
+        def delete_source(self, source_id: int) -> None:
+            self.deleted_sources.append(source_id)
+
+    fake_logger = MagicMock()
+    fake_db = _FailingCreateJobDb()
+    monkeypatch.setattr(collections_feeds, "logger", fake_logger)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await collections_feeds.create_feed_subscription(
+            payload=CollectionsFeedCreateRequest(url="https://example.com/feed.xml", active=False),
+            background_tasks=BackgroundTasks(),
+            current_user=SimpleNamespace(id=42),
+            db=fake_db,
+        )
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail == "feed_create_failed"
+    assert fake_db.deleted_sources == [7]
+    fake_logger.error.assert_called_once_with("collections_feeds_create_job_failed")
+    rendered = " ".join(str(part) for call_args in fake_logger.error.call_args_list for part in call_args.args)
+    assert "/private/feeds-job.db" not in rendered
+    assert "exploded" not in rendered

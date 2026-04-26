@@ -385,7 +385,7 @@ async def create_feed_subscription(
             group_ids=None,
         )
     except _COLLECTIONS_FEEDS_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error(f"collections_feeds_create_source_failed: {exc}")
+        logger.error("collections_feeds_create_source_failed")
         raise HTTPException(status_code=400, detail="feed_create_failed") from exc
 
     try:
@@ -411,7 +411,7 @@ async def create_feed_subscription(
             job_filters_json=None,
         )
     except _COLLECTIONS_FEEDS_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error(f"collections_feeds_create_job_failed: {exc}")
+        logger.error("collections_feeds_create_job_failed")
         with contextlib.suppress(_COLLECTIONS_FEEDS_NONCRITICAL_EXCEPTIONS):
             db.delete_source(int(source.id))
         raise HTTPException(status_code=400, detail="feed_create_failed") from exc
