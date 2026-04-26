@@ -54,21 +54,33 @@ async def test_shutdown_executor_resources_handles_import_exception(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     shutdown_executors = _import_shutdown_executor_resources()
+    calls: list[str] = []
 
     async def _failing_registered_executors(*, wait, cancel_futures):
         del wait, cancel_futures
         raise LookupError("boom")
+
+    class _Loop:
+        async def shutdown_default_executor(self) -> None:
+            calls.append("default")
 
     monkeypatch.setattr(
         shutdown_executors,
         "_shutdown_registered_executors_service",
         _failing_registered_executors,
     )
+    monkeypatch.setattr(
+        shutdown_executors.asyncio,
+        "get_running_loop",
+        lambda: _Loop(),
+    )
 
     await shutdown_executors.shutdown_executor_resources(
         startup_guard_exceptions=(RuntimeError,),
         import_exceptions=(LookupError,),
     )
+
+    assert calls == ["default"]
 
 
 @pytest.mark.asyncio

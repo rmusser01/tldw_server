@@ -13,6 +13,7 @@ from loguru import logger
 
 _STARTUP_GUARD_EXCEPTIONS = (
     AttributeError,
+    ImportError,
     OSError,
     RuntimeError,
     TypeError,
@@ -231,7 +232,7 @@ async def _start_admin_maintenance_rotation_jobs_worker(
             )
         return stop_event, task
     except _STARTUP_GUARD_EXCEPTIONS as exc:
-        logger.warning("Failed to start Admin maintenance rotation Jobs worker: {}", exc)
+        logger.warning(f"Failed to start Admin maintenance rotation Jobs worker: {exc}")
         return None, None
 
 

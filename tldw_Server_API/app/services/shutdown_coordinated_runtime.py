@@ -113,7 +113,7 @@ async def run_coordinated_shutdown(
     try:
         app.state._tldw_shutdown_legacy_coordinator_summary = coordinated_legacy_summary
         app.state._tldw_shutdown_legacy_coordinator_component_names = [
-            component.name for component in all_components
+            component.name for component in coordinated_legacy_components
         ]
         app.state._tldw_shutdown_legacy_coordinator_phase_groups = phase_groups
     except startup_guard_exceptions:

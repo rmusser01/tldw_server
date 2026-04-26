@@ -31,8 +31,8 @@ def initialize_startup_telemetry(
             logger.debug(f"App Startup: FastAPI instrumentation skipped: {exc}")
 
         return telemetry_manager
-    except startup_guard_exceptions as exc:
-        logger.exception(f"App Startup: Failed to initialize telemetry: {exc}")
+    except startup_guard_exceptions:
+        logger.exception("App Startup: Failed to initialize telemetry")
         return None
 
 

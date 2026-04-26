@@ -18,6 +18,7 @@ class _FakeLogger:
     def __init__(self) -> None:
         self.info_messages: list[str] = []
         self.warning_messages: list[str] = []
+        self.debug_messages: list[str] = []
 
     def info(self, message: str) -> None:
         self.info_messages.append(str(message))
@@ -27,6 +28,12 @@ class _FakeLogger:
             self.warning_messages.append(str(message).format(*args))
         else:
             self.warning_messages.append(str(message))
+
+    def debug(self, message: str, *args: object) -> None:
+        if args:
+            self.debug_messages.append(str(message).format(*args))
+        else:
+            self.debug_messages.append(str(message))
 
 
 def test_initialize_startup_sentry_skips_when_dsn_missing(
@@ -122,5 +129,5 @@ def test_initialize_startup_sentry_logs_warning_on_failures(
 
     assert logger.info_messages == []
     assert logger.warning_messages == [
-        "App Startup: Sentry initialization failed: missing sentry"
+        "App Startup: Sentry initialization failed"
     ]

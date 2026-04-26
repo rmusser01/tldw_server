@@ -21,11 +21,12 @@ async def shutdown_executor_resources(
             cancel_futures=True,
         )
         logger.info("App Shutdown: Registered executors shutdown")
-        await _shutdown_default_executor(
-            guard_exceptions=startup_guard_exceptions,
-        )
     except import_exceptions as exc:
         logger.exception(f"App Shutdown: Error shutting down executors: {exc}")
+
+    await _shutdown_default_executor(
+        guard_exceptions=startup_guard_exceptions,
+    )
 
 
 async def _shutdown_default_executor(

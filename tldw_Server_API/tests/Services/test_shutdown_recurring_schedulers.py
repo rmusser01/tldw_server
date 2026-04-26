@@ -126,3 +126,33 @@ async def test_stop_companion_reflection_scheduler_cancels_task_on_guard_excepti
     await shutdown_recurring._stop_companion_reflection_scheduler(task)
 
     assert task.cancelled is True
+
+
+@pytest.mark.asyncio
+async def test_stop_workflows_scheduler_logs_cancel_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    shutdown_recurring = _import_shutdown_recurring_schedulers()
+    warning_messages: list[str] = []
+
+    class _FakeTask:
+        def cancel(self) -> None:
+            raise RuntimeError("cancel boom")
+
+    async def _failing_stop(_task):
+        raise RuntimeError("stop boom")
+
+    monkeypatch.setattr(
+        shutdown_recurring,
+        "_stop_workflows_scheduler_service",
+        _failing_stop,
+    )
+    monkeypatch.setattr(
+        shutdown_recurring.logger,
+        "warning",
+        lambda message, *args, **kwargs: warning_messages.append(str(message)),
+    )
+
+    await shutdown_recurring._stop_workflows_scheduler(_FakeTask())
+
+    assert any("Workflow scheduler shutdown failed" in message for message in warning_messages)

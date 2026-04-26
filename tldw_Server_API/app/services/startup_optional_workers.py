@@ -15,6 +15,7 @@ from tldw_Server_API.app.core.testing import env_flag_enabled as _env_flag_enabl
 
 _STARTUP_GUARD_EXCEPTIONS = (
     AttributeError,
+    ImportError,
     OSError,
     RuntimeError,
     TypeError,

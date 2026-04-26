@@ -169,16 +169,14 @@ async def test_initialize_auth_runtime_services_logs_invalid_security_alert_conf
         lambda: dispatcher,
     )
 
-    handles = await auth_runtime.initialize_auth_runtime_services(
-        app=object(),
-        logger=logger,
-        startup_guard_exceptions=(ValueError,),
-    )
+    with pytest.raises(ValueError, match="invalid alerting"):
+        await auth_runtime.initialize_auth_runtime_services(
+            app=object(),
+            logger=logger,
+            startup_guard_exceptions=(ValueError,),
+        )
 
-    assert handles.db_pool is db_pool
-    assert handles.session_manager is session_manager
     assert logger.info_messages == ["App Startup: Session manager initialized"]
     assert logger.exception_messages == [
         "App Startup: Security alert configuration invalid: invalid alerting",
-        "App Startup: Security alert validation / auth services init failed: invalid alerting",
     ]

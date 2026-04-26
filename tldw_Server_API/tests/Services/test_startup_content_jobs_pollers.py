@@ -204,6 +204,48 @@ async def test_start_media_ingest_jobs_workers_respects_heavy_default_stable_fal
 
 
 @pytest.mark.asyncio
+async def test_start_media_ingest_jobs_workers_preserves_light_handles_when_heavy_start_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_pollers = _import_startup_content_jobs_pollers()
+    stop_events = iter(["media-stop", "media-heavy-stop"])
+    registrations: list[dict[str, object]] = []
+
+    monkeypatch.setattr(startup_pollers, "_make_event", lambda: next(stop_events))
+    monkeypatch.setattr(
+        startup_pollers,
+        "_create_task",
+        lambda coro: "media-task" if coro == "media-coro" else (_ for _ in ()).throw(RuntimeError("heavy boom")),
+    )
+    monkeypatch.setattr(
+        startup_pollers,
+        "_run_media_ingest_jobs_worker_service",
+        lambda stop_event: "media-coro",
+    )
+    monkeypatch.setattr(
+        startup_pollers,
+        "_run_media_ingest_heavy_jobs_worker_service",
+        lambda stop_event: "media-heavy-coro",
+    )
+
+    def _register_owned_job_poller(app, owned_job_pollers, *, name, task, stop_event):
+        del app, owned_job_pollers
+        registrations.append({"name": name, "task": task, "stop_event": stop_event})
+
+    handles = await startup_pollers._start_media_ingest_jobs_workers(
+        app="app",
+        owned_job_pollers=[],
+        register_owned_job_poller=_register_owned_job_poller,
+        should_start_worker=lambda *args, **kwargs: True,
+    )
+
+    assert handles == ("media-stop", "media-task", None, None)
+    assert registrations == [
+        {"name": "media_ingest_jobs_task", "task": "media-task", "stop_event": "media-stop"}
+    ]
+
+
+@pytest.mark.asyncio
 async def test_start_companion_reflection_jobs_worker_handles_guard_exception(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

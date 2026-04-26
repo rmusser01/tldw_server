@@ -121,7 +121,6 @@ async def test_run_coordinated_shutdown_filters_suppressed_names_to_legacy_compo
     assert suppressed == {"legacy:usage"}
     assert app.state._tldw_shutdown_legacy_coordinator_component_names == [
         "legacy:usage",
-        "transport:mcp.websocket",
     ]
     assert app.state._tldw_shutdown_legacy_coordinator_phase_groups == {
         "resources": ["legacy:usage", "transport:mcp.websocket"]

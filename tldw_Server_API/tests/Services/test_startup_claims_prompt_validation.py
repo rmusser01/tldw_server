@@ -137,3 +137,31 @@ def test_validate_startup_claims_prompt_validation_logs_debug_on_guard_failure(
     assert logger.info_messages == []
     assert logger.warning_messages == []
     assert logger.exception_messages == []
+
+
+def test_validate_startup_claims_prompt_validation_guards_validation_error_import(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_claims = _import_startup_claims_prompt_validation()
+    logger = _FakeLogger()
+
+    def _raise_import_error() -> type[BaseException]:
+        raise ImportError("claims validation import failed")
+
+    monkeypatch.setattr(
+        startup_claims,
+        "_get_claims_prompt_validation_error",
+        _raise_import_error,
+    )
+
+    startup_claims.validate_startup_claims_prompt_validation(
+        logger=logger,
+        startup_guard_exceptions=(ImportError, RuntimeError),
+    )
+
+    assert logger.debug_messages == [
+        "App Startup: Claims prompt validation skipped/failed: claims validation import failed"
+    ]
+    assert logger.info_messages == []
+    assert logger.warning_messages == []
+    assert logger.exception_messages == []

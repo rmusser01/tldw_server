@@ -215,12 +215,12 @@ async def _start_media_ingest_jobs_workers(
     register_owned_job_poller: Callable[..., None],
     should_start_worker: Callable[..., bool],
 ) -> tuple[Any | None, Any | None, Any | None, Any | None]:
-    try:
-        media_ingest_jobs_stop_event = None
-        media_ingest_jobs_task = None
-        media_ingest_heavy_jobs_stop_event = None
-        media_ingest_heavy_jobs_task = None
+    media_ingest_jobs_stop_event = None
+    media_ingest_jobs_task = None
+    media_ingest_heavy_jobs_stop_event = None
+    media_ingest_heavy_jobs_task = None
 
+    try:
         enabled = should_start_worker("MEDIA_INGEST_JOBS_WORKER_ENABLED", "media")
         if enabled:
             media_ingest_jobs_stop_event = _make_event()
@@ -237,7 +237,12 @@ async def _start_media_ingest_jobs_workers(
             )
         else:
             logger.info("Media Ingest Jobs worker disabled by flag (MEDIA_INGEST_JOBS_WORKER_ENABLED)")
+    except _STARTUP_GUARD_EXCEPTIONS as exc:
+        _safe_cancel_task(media_ingest_jobs_task)
+        logger.warning(f"Failed to start Media Ingest Jobs worker: {exc}")
+        return None, None, None, None
 
+    try:
         heavy_enabled = should_start_worker(
             "MEDIA_INGEST_HEAVY_JOBS_WORKER_ENABLED",
             "media-ingest-heavy-jobs",
@@ -260,16 +265,27 @@ async def _start_media_ingest_jobs_workers(
             logger.info(
                 "Media Ingest Heavy Jobs worker disabled by flag (MEDIA_INGEST_HEAVY_JOBS_WORKER_ENABLED)"
             )
-
-        return (
-            media_ingest_jobs_stop_event,
-            media_ingest_jobs_task,
-            media_ingest_heavy_jobs_stop_event,
-            media_ingest_heavy_jobs_task,
-        )
     except _STARTUP_GUARD_EXCEPTIONS as exc:
-        logger.warning(f"Failed to start Media Ingest Jobs worker: {exc}")
-        return None, None, None, None
+        _safe_cancel_task(media_ingest_heavy_jobs_task)
+        logger.warning(f"Failed to start Media Ingest Heavy Jobs worker: {exc}")
+        media_ingest_heavy_jobs_stop_event = None
+        media_ingest_heavy_jobs_task = None
+
+    return (
+        media_ingest_jobs_stop_event,
+        media_ingest_jobs_task,
+        media_ingest_heavy_jobs_stop_event,
+        media_ingest_heavy_jobs_task,
+    )
+
+
+def _safe_cancel_task(task: Any | None) -> None:
+    if task is None:
+        return
+    try:
+        task.cancel()
+    except _STARTUP_GUARD_EXCEPTIONS:
+        pass
 
 
 async def _start_reading_digest_jobs_worker(

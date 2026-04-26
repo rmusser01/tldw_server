@@ -190,3 +190,28 @@ async def test_start_recipe_run_jobs_worker_handles_guard_exception(
 
     assert stop_event is None
     assert task is None
+
+
+@pytest.mark.asyncio
+async def test_start_recipe_run_jobs_worker_handles_import_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_pollers = _import_startup_sidecar_owned_jobs_pollers()
+
+    monkeypatch.setattr(startup_pollers, "_make_event", lambda: "recipe-stop")
+
+    def _failing_start(*, stop_event):
+        del stop_event
+        raise ImportError("missing recipe worker")
+
+    monkeypatch.setattr(startup_pollers, "_start_recipe_run_jobs_worker_service", _failing_start)
+
+    stop_event, task = await startup_pollers._start_recipe_run_jobs_worker(
+        app="app",
+        owned_job_pollers=[],
+        register_owned_job_poller=lambda *args, **kwargs: None,
+        sidecar_mode=False,
+    )
+
+    assert stop_event is None
+    assert task is None

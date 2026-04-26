@@ -18,8 +18,8 @@ async def shutdown_personalization_consolidation(
         service = _get_consolidation_service()
         await service.stop()
         logger.info("Personalization consolidation service stopped")
-    except guard_exceptions:
-        pass
+    except guard_exceptions as exc:
+        logger.warning(f"Personalization consolidation shutdown failed: {exc}")
 
 
 def _get_consolidation_service() -> Any:

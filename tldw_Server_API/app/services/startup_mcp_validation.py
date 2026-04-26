@@ -19,7 +19,12 @@ def validate_startup_mcp_configuration(
             return
 
         mcp_cfg = get_mcp_config()
-        if not mcp_cfg.debug_mode:
+        debug_mode = (
+            bool(mcp_cfg.get("debug_mode", False))
+            if isinstance(mcp_cfg, dict)
+            else bool(getattr(mcp_cfg, "debug_mode", False))
+        )
+        if not debug_mode:
             ok = validate_mcp_config()
             if not ok:
                 raise RuntimeError(

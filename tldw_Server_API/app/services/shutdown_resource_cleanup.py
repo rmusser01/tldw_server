@@ -28,21 +28,21 @@ async def shutdown_resource_cleanup(
     )
     await _shutdown_mcp_server(
         heavy_startup_handles=heavy_startup_handles,
-        import_exceptions=import_exceptions,
+        guard_exceptions=startup_guard_exceptions,
     )
     await _shutdown_mcp_rate_limiter(
-        import_exceptions=import_exceptions,
+        guard_exceptions=startup_guard_exceptions,
     )
     await _shutdown_tts_service(
         in_pytest_for_tts_shutdown=in_pytest_for_tts_shutdown,
-        import_exceptions=import_exceptions,
+        guard_exceptions=startup_guard_exceptions,
     )
     await _shutdown_tts_resource_manager(
         in_pytest_for_tts_shutdown=in_pytest_for_tts_shutdown,
-        import_exceptions=import_exceptions,
+        guard_exceptions=startup_guard_exceptions,
     )
     await _shutdown_http_client(
-        import_exceptions=import_exceptions,
+        guard_exceptions=startup_guard_exceptions,
     )
     await _shutdown_chacha_resources(
         guard_exceptions=startup_guard_exceptions,
@@ -61,7 +61,7 @@ async def shutdown_resource_cleanup(
     )
     await _shutdown_request_queue(
         heavy_startup_handles=heavy_startup_handles,
-        import_exceptions=import_exceptions,
+        guard_exceptions=startup_guard_exceptions,
     )
     await _shutdown_local_llm_manager(
         app=app,
@@ -86,20 +86,20 @@ async def _shutdown_session_manager(
 async def _shutdown_mcp_server(
     *,
     heavy_startup_handles: Any | None,
-    import_exceptions: tuple[type[BaseException], ...],
+    guard_exceptions: tuple[type[BaseException], ...],
 ) -> None:
     try:
         mcp_server = getattr(heavy_startup_handles, "mcp_server", None)
         if mcp_server is not None:
             await mcp_server.shutdown()
             logger.info("App Shutdown: MCP Unified server shutdown")
-    except import_exceptions as exc:
+    except guard_exceptions as exc:
         logger.exception(f"App Shutdown: Error shutting down MCP Unified server: {exc}")
 
 
 async def _shutdown_mcp_rate_limiter(
     *,
-    import_exceptions: tuple[type[BaseException], ...],
+    guard_exceptions: tuple[type[BaseException], ...],
 ) -> None:
     try:
         from tldw_Server_API.app.core.MCP_unified.auth.rate_limiter import (
@@ -108,14 +108,14 @@ async def _shutdown_mcp_rate_limiter(
 
         await _shutdown_rate_limiter()
         logger.info("App Shutdown: MCP rate limiter cleanup task cancelled")
-    except import_exceptions as exc:
+    except guard_exceptions as exc:
         logger.debug(f"App Shutdown: MCP rate limiter shutdown skipped/failed: {exc}")
 
 
 async def _shutdown_tts_service(
     *,
     in_pytest_for_tts_shutdown: bool,
-    import_exceptions: tuple[type[BaseException], ...],
+    guard_exceptions: tuple[type[BaseException], ...],
 ) -> None:
     if in_pytest_for_tts_shutdown:
         logger.info("App Shutdown: Skipping TTS service shutdown in test context")
@@ -124,14 +124,14 @@ async def _shutdown_tts_service(
     try:
         await _shutdown_tts_service_components()
         logger.info("App Shutdown: TTS service shutdown complete")
-    except import_exceptions as exc:
+    except guard_exceptions as exc:
         logger.exception(f"App Shutdown: Error shutting down TTS service: {exc}")
 
 
 async def _shutdown_tts_resource_manager(
     *,
     in_pytest_for_tts_shutdown: bool,
-    import_exceptions: tuple[type[BaseException], ...],
+    guard_exceptions: tuple[type[BaseException], ...],
 ) -> None:
     if in_pytest_for_tts_shutdown:
         logger.info("App Shutdown: Skipping TTS resource manager shutdown in test context")
@@ -140,20 +140,20 @@ async def _shutdown_tts_resource_manager(
     try:
         await _shutdown_tts_resource_manager_components()
         logger.info("App Shutdown: TTS resource manager shutdown complete")
-    except import_exceptions as exc:
+    except guard_exceptions as exc:
         logger.exception(f"App Shutdown: Error shutting down TTS resource manager: {exc}")
 
 
 async def _shutdown_http_client(
     *,
-    import_exceptions: tuple[type[BaseException], ...],
+    guard_exceptions: tuple[type[BaseException], ...],
 ) -> None:
     try:
         from tldw_Server_API.app.core.http_client import shutdown_http_client
 
         await shutdown_http_client()
         logger.info("App Shutdown: HTTP client sessions shutdown complete")
-    except import_exceptions as exc:
+    except guard_exceptions as exc:
         logger.exception(f"App Shutdown: Error shutting down HTTP client sessions: {exc}")
 
 
@@ -222,14 +222,14 @@ async def _shutdown_provider_manager(
 async def _shutdown_request_queue(
     *,
     heavy_startup_handles: Any | None,
-    import_exceptions: tuple[type[BaseException], ...],
+    guard_exceptions: tuple[type[BaseException], ...],
 ) -> None:
     try:
         request_queue = getattr(heavy_startup_handles, "request_queue", None)
         if request_queue is not None:
             await request_queue.stop()
             logger.info("App Shutdown: Request queue stopped")
-    except import_exceptions as exc:
+    except guard_exceptions as exc:
         logger.exception(f"App Shutdown: Error stopping request queue: {exc}")
 
 

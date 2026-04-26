@@ -189,7 +189,7 @@ async def test_shutdown_pre_worker_cleanup_skips_coordinated_chatbooks_and_stora
     assert stop_event.is_set is False
     assert chatbooks_task.cancelled is False
     assert storage_cleanup_service.stopped is False
-    assert reset_calls == ["cleanup", "storage", "auth"]
+    assert reset_calls == ["auth"]
 
 
 @pytest.mark.asyncio

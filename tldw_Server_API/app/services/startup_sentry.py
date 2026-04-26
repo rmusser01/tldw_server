@@ -28,7 +28,11 @@ def initialize_startup_sentry(
         )
         logger.info("App Startup: Sentry error tracking initialized")
     except startup_guard_exceptions + import_exceptions as exc:
-        logger.warning("App Startup: Sentry initialization failed: {}", exc)
+        logger.warning("App Startup: Sentry initialization failed")
+        logger.debug(
+            "App Startup: Sentry initialization failure type={}",
+            type(exc).__name__,
+        )
 
 
 def _getenv(name: str, default: str = "") -> str:

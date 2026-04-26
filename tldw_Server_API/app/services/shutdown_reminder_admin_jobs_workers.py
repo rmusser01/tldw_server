@@ -61,6 +61,8 @@ async def _shutdown_reminder_jobs_worker(
     should_run_late_stop: Callable[[str, Any], bool],
     guard_exceptions: tuple[type[BaseException], ...],
 ) -> None:
+    if task is None:
+        return
     if not should_run_late_stop("reminder_jobs_task", task):
         return
     try:
@@ -69,11 +71,8 @@ async def _shutdown_reminder_jobs_worker(
         logger.info("Reminder Jobs worker cancelled")
     except asyncio.CancelledError:
         pass
-    except guard_exceptions:
-        try:
-            task.cancel()
-        except guard_exceptions:
-            pass
+    except (asyncio.TimeoutError,) + guard_exceptions:
+        await _cancel_and_wait_for_task(task, guard_exceptions=guard_exceptions)
 
 
 async def _shutdown_admin_backup_jobs_worker(
@@ -82,6 +81,8 @@ async def _shutdown_admin_backup_jobs_worker(
     should_run_late_stop: Callable[[str, Any], bool],
     guard_exceptions: tuple[type[BaseException], ...],
 ) -> None:
+    if task is None:
+        return
     if not should_run_late_stop("admin_backup_jobs_task", task):
         return
     try:
@@ -90,11 +91,8 @@ async def _shutdown_admin_backup_jobs_worker(
         logger.info("Admin backup Jobs worker cancelled")
     except asyncio.CancelledError:
         pass
-    except guard_exceptions:
-        try:
-            task.cancel()
-        except guard_exceptions:
-            pass
+    except (asyncio.TimeoutError,) + guard_exceptions:
+        await _cancel_and_wait_for_task(task, guard_exceptions=guard_exceptions)
 
 
 async def _shutdown_admin_maintenance_rotation_jobs_worker(
@@ -104,18 +102,39 @@ async def _shutdown_admin_maintenance_rotation_jobs_worker(
     should_run_late_stop: Callable[[str, Any], bool],
     guard_exceptions: tuple[type[BaseException], ...],
 ) -> None:
+    if task is None:
+        return
     if not should_run_late_stop("admin_maintenance_rotation_jobs_task", task):
         return
-    if stop_event:
+    fallback_exceptions = (asyncio.TimeoutError,) + guard_exceptions
+    if stop_event is not None:
         try:
             stop_event.set()
             await _wait_for_task(task, timeout=5.0)
             logger.info("Admin maintenance rotation Jobs worker stopped via stop_event")
-        except guard_exceptions:
-            task.cancel()
+        except fallback_exceptions:
+            await _cancel_and_wait_for_task(task, guard_exceptions=guard_exceptions)
     else:
-        task.cancel()
+        await _cancel_and_wait_for_task(task, guard_exceptions=guard_exceptions)
 
 
 async def _wait_for_task(task: Any, *, timeout: float) -> Any:
     return await asyncio.wait_for(task, timeout=timeout)
+
+
+async def _cancel_and_wait_for_task(
+    task: Any,
+    *,
+    guard_exceptions: tuple[type[BaseException], ...],
+    timeout: float = 5.0,
+) -> None:
+    try:
+        task.cancel()
+    except guard_exceptions:
+        return
+    try:
+        await _wait_for_task(task, timeout=timeout)
+    except asyncio.CancelledError:
+        pass
+    except (asyncio.TimeoutError,) + guard_exceptions:
+        pass

@@ -158,3 +158,14 @@ async def test_start_ephemeral_cleanup_worker_skips_when_disabled() -> None:
     )
 
     assert task is None
+
+
+@pytest.mark.asyncio
+async def test_start_ephemeral_cleanup_worker_treats_false_string_as_disabled() -> None:
+    startup_cleanup = _import_startup_cleanup_workers()
+
+    task = await startup_cleanup._start_ephemeral_cleanup_worker(
+        {"SINGLE_USER_FIXED_ID": "11", "EPHEMERAL_CLEANUP_ENABLED": "false"}
+    )
+
+    assert task is None

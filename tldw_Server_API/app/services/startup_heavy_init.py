@@ -401,6 +401,8 @@ async def _init_embeddings_dim_check(*, deferred: bool) -> None:
                 )
             )
     except _STARTUP_GUARD_EXCEPTIONS as exc:
+        if isinstance(exc, RuntimeError) and str(exc) == "EMBEDDINGS_STARTUP_DIM_CHECK_FAILED":
+            raise
         if deferred:
             logger.debug(f"Deferred startup: embeddings dimension check skipped/failed: {exc}")
         else:

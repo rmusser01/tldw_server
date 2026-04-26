@@ -107,18 +107,23 @@ async def _start_connectors_worker(
     register_owned_job_poller,
 ) -> tuple[Any | None, Any | None]:
     """Start the connectors worker and register it as a managed poller when active."""
+    task = None
     try:
         stop_event = asyncio.Event()
         task = await _start_connectors_worker_service(stop_event=stop_event)
         if task:
             logger.info("Connectors worker started")
-            register_owned_job_poller(
-                app,
-                owned_job_pollers,
-                name="connectors_jobs_task",
-                task=task,
-                stop_event=stop_event,
-            )
+            try:
+                register_owned_job_poller(
+                    app,
+                    owned_job_pollers,
+                    name="connectors_jobs_task",
+                    task=task,
+                    stop_event=stop_event,
+                )
+            except _STARTUP_GUARD_EXCEPTIONS:
+                _safe_cancel_task(task)
+                raise
             return task, stop_event
         logger.info("Connectors worker disabled (CONNECTORS_WORKER_ENABLED != true)")
         return None, None
@@ -131,6 +136,15 @@ async def _run_tts_history_cleanup_loop(stop_event: Any) -> Any:
     from tldw_Server_API.app.services.tts_history_cleanup_service import run_tts_history_cleanup_loop
 
     return await run_tts_history_cleanup_loop(stop_event)
+
+
+def _safe_cancel_task(task: Any | None) -> None:
+    if task is None:
+        return
+    try:
+        task.cancel()
+    except _STARTUP_GUARD_EXCEPTIONS:
+        pass
 
 
 async def _start_connectors_worker_service(*, stop_event: Any) -> Any:

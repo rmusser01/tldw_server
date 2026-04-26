@@ -154,3 +154,24 @@ async def test_start_jobs_integrity_sweeper_handles_guard_exception(
 
     assert stop_event is None
     assert task is None
+
+
+@pytest.mark.asyncio
+async def test_start_jobs_integrity_sweeper_handles_import_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_workers = _import_startup_optional_workers()
+
+    monkeypatch.setenv("JOBS_INTEGRITY_SWEEP_ENABLED", "true")
+    monkeypatch.setattr(startup_workers, "_make_event", lambda: "jobs-integrity-stop")
+
+    def _failing_service(stop_event):
+        del stop_event
+        raise ImportError("missing jobs integrity service")
+
+    monkeypatch.setattr(startup_workers, "_run_jobs_integrity_sweeper_service", _failing_service)
+
+    stop_event, task = await startup_workers._start_jobs_integrity_sweeper()
+
+    assert stop_event is None
+    assert task is None

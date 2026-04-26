@@ -30,18 +30,24 @@ async def start_claims_rebuild_worker(app_settings: Mapping[str, Any]) -> Any | 
 
         interval_sec = int(app_settings.get("CLAIMS_REBUILD_INTERVAL_SEC", 3600))
         policy = str(app_settings.get("CLAIMS_REBUILD_POLICY", "missing")).lower()
+        stop_event = asyncio.Event()
 
         async def _claims_rebuild_loop() -> None:
             logger.info(f"Starting claims rebuild worker (every {interval_sec}s, policy={policy})")
             service = _get_claims_rebuild_service()
-            while True:
+            while not stop_event.is_set():
                 try:
                     run_claims_rebuild_iteration(app_settings, service, policy=policy)
                 except _STARTUP_GUARD_EXCEPTIONS as exc:
                     logger.warning(f"Claims rebuild loop error: {exc}")
-                await asyncio.sleep(interval_sec)
+                try:
+                    await asyncio.wait_for(stop_event.wait(), timeout=interval_sec)
+                except asyncio.TimeoutError:
+                    continue
 
-        return asyncio.create_task(_claims_rebuild_loop())
+        task = asyncio.create_task(_claims_rebuild_loop())
+        setattr(task, "_tldw_claims_rebuild_stop_event", stop_event)
+        return task
     except _STARTUP_GUARD_EXCEPTIONS as exc:
         logger.warning(f"Failed to start claims rebuild worker: {exc}")
         return None

@@ -33,7 +33,7 @@ async def report_startup_environment(
             shared_is_truthy=shared_is_truthy,
             startup_guard_exceptions=startup_guard_exceptions,
         )
-    except startup_guard_exceptions as exc:
+    except startup_guard_exceptions + import_exceptions as exc:
         logger.warning(f"Preflight report could not be generated: {exc}")
 
 
@@ -94,7 +94,7 @@ async def _log_preflight_environment_report(
         is_pg = bool(getattr(pool, "pool", None) is not None)
         db_engine = "postgresql" if is_pg else ("sqlite" if str(db_url).startswith("sqlite") else "other")
     except startup_guard_exceptions:
-        db_engine = "other"
+        db_engine = "sqlite" if str(db_url).startswith("sqlite") else "other"
 
     redis_enabled = bool(settings.REDIS_URL) or bool(
         os.getenv("REDIS_ENABLED", "false").lower() in {"true", "1", "yes", "y", "on"}

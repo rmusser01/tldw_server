@@ -79,39 +79,37 @@ async def test_shutdown_coordinated_legacy_components_returns_handles_and_filter
 
 
 @pytest.mark.asyncio
-async def test_shutdown_coordinated_legacy_components_returns_empty_set_on_guard_exception() -> None:
+async def test_shutdown_coordinated_legacy_components_propagates_guard_exception() -> None:
     shutdown_legacy = _import_shutdown_coordinated_legacy_components()
 
     async def _failing_run_coordinated_shutdown(_app_obj, _non_transition_plan):
         raise RuntimeError("boom")
 
-    handles = await shutdown_legacy.shutdown_coordinated_legacy_components(
-        app="app",
-        legacy_shutdown_plan=[],
-        run_coordinated_shutdown=_failing_run_coordinated_shutdown,
-        startup_guard_exceptions=(RuntimeError,),
-        import_exceptions=(ImportError,),
-    )
-
-    assert handles.coordinated_legacy_component_names == set()
+    with pytest.raises(RuntimeError, match="boom"):
+        await shutdown_legacy.shutdown_coordinated_legacy_components(
+            app="app",
+            legacy_shutdown_plan=[],
+            run_coordinated_shutdown=_failing_run_coordinated_shutdown,
+            startup_guard_exceptions=(RuntimeError,),
+            import_exceptions=(ImportError,),
+        )
 
 
 @pytest.mark.asyncio
-async def test_shutdown_coordinated_legacy_components_returns_empty_set_on_import_exception() -> None:
+async def test_shutdown_coordinated_legacy_components_propagates_import_exception() -> None:
     shutdown_legacy = _import_shutdown_coordinated_legacy_components()
 
     async def _failing_run_coordinated_shutdown(_app_obj, _non_transition_plan):
         raise ImportError("boom")
 
-    handles = await shutdown_legacy.shutdown_coordinated_legacy_components(
-        app="app",
-        legacy_shutdown_plan=[],
-        run_coordinated_shutdown=_failing_run_coordinated_shutdown,
-        startup_guard_exceptions=(RuntimeError,),
-        import_exceptions=(ImportError,),
-    )
-
-    assert handles.coordinated_legacy_component_names == set()
+    with pytest.raises(ImportError, match="boom"):
+        await shutdown_legacy.shutdown_coordinated_legacy_components(
+            app="app",
+            legacy_shutdown_plan=[],
+            run_coordinated_shutdown=_failing_run_coordinated_shutdown,
+            startup_guard_exceptions=(RuntimeError,),
+            import_exceptions=(ImportError,),
+        )
 
 
 @pytest.mark.asyncio

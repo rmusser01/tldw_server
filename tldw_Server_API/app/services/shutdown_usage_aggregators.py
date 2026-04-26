@@ -38,11 +38,13 @@ async def stop_usage_aggregators(
     if "llm_usage_aggregator" not in coordinated_legacy_component_names and llm_usage_task:
         try:
             await _stop_llm_usage_aggregator_service(llm_usage_task)
+            llm_usage_task = None
         except guard_exceptions:
             try:
                 llm_usage_task.cancel()
             except guard_exceptions:
                 pass
+            llm_usage_task = None
 
     return UsageAggregatorShutdownHandles(
         usage_task=usage_task,

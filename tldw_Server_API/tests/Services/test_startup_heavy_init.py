@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import importlib
 import sys
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 
 import pytest
 
@@ -158,3 +158,52 @@ async def test_start_heavy_initializations_schedules_background_task_when_deferr
     await created_tasks[0]
     assert observed == [(True, True)]
     assert handles.provider_manager == "deferred-provider"
+
+
+@pytest.mark.asyncio
+async def test_init_embeddings_dim_check_strict_mode_reraises_mismatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_heavy = _import_startup_heavy_init()
+
+    class _FakeCollection:
+        name = "docs"
+        metadata = {"embedding_dimension": 3}
+
+        def get(self, *, limit, include):
+            assert limit == 1
+            assert include == ["embeddings"]
+            return {"embeddings": [[1.0, 2.0]]}
+
+    class _FakeClient:
+        def list_collections(self):
+            return [_FakeCollection()]
+
+        def get_collection(self, *, name):
+            assert name == "docs"
+            return _FakeCollection()
+
+    class _FakeChromaDBManager:
+        def __init__(self, *, user_id, user_embedding_config):
+            assert user_id == "1"
+            assert user_embedding_config["AUTH_MODE"] == "single_user"
+            self.client = _FakeClient()
+
+        def close(self) -> None:
+            return None
+
+    config_module = ModuleType("tldw_Server_API.app.core.config")
+    config_module.settings = {"AUTH_MODE": "single_user", "SINGLE_USER_FIXED_ID": "1"}
+    chroma_module = ModuleType("tldw_Server_API.app.core.Embeddings.ChromaDB_Library")
+    chroma_module.ChromaDBManager = _FakeChromaDBManager
+    monkeypatch.setitem(sys.modules, "tldw_Server_API.app.core.config", config_module)
+    monkeypatch.setitem(
+        sys.modules,
+        "tldw_Server_API.app.core.Embeddings.ChromaDB_Library",
+        chroma_module,
+    )
+    monkeypatch.setenv("EMBEDDINGS_STARTUP_DIM_CHECK_ENABLED", "true")
+    monkeypatch.setenv("EMBEDDINGS_DIM_CHECK_STRICT", "true")
+
+    with pytest.raises(RuntimeError, match="EMBEDDINGS_STARTUP_DIM_CHECK_FAILED"):
+        await startup_heavy._init_embeddings_dim_check(deferred=False)

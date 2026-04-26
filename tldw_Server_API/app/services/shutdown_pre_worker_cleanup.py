@@ -107,9 +107,10 @@ async def _shutdown_pre_worker_cleanup(
             logger.info("Storage cleanup worker stopped")
         except guard_exceptions:
             pass
-    await _reset_storage_service_singletons(
-        guard_exceptions=guard_exceptions,
-    )
+    if "storage_cleanup_service" not in coordinated_legacy_component_names:
+        await _reset_storage_service_singletons(
+            guard_exceptions=guard_exceptions,
+        )
     await _reset_authnz_rate_limiter_singleton(
         guard_exceptions=guard_exceptions,
     )

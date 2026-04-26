@@ -85,7 +85,6 @@ async def init_resource_governor(app: Any) -> None:
             _interval = _rg_reload_interval()
             _path = _rg_policy_path()
             rg_loader = _RGPolicyLoader(_path, _RGReloadCfg(enabled=_enabled, interval_sec=_interval))
-            _store_mode = "file"
 
         await rg_loader.load_once()
         try:
@@ -234,8 +233,8 @@ def _audit_route_map_coverage(app: Any, rg_loader: Any) -> None:
 
 def _route_map_matches(path: str, by_path: dict[str, Any]) -> bool:
     """Return whether a concrete route path matches a route-map entry."""
-    for pattern in by_path:
-        pattern = str(pattern)
+    for raw_pattern in by_path:
+        pattern = str(raw_pattern)
         if pattern.endswith("*"):
             if path.startswith(pattern[:-1]):
                 return True

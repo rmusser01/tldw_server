@@ -43,6 +43,7 @@ async def test_shutdown_personalization_consolidation_swallows_guard_exception(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     shutdown_personalization = _import_shutdown_personalization_consolidation()
+    warning_messages: list[str] = []
 
     class _FakeService:
         async def stop(self) -> None:
@@ -53,7 +54,14 @@ async def test_shutdown_personalization_consolidation_swallows_guard_exception(
         "_get_consolidation_service",
         lambda: _FakeService(),
     )
+    monkeypatch.setattr(
+        shutdown_personalization.logger,
+        "warning",
+        lambda message, *args, **kwargs: warning_messages.append(str(message)),
+    )
 
     await shutdown_personalization.shutdown_personalization_consolidation(
         guard_exceptions=(RuntimeError,),
     )
+
+    assert any("Personalization consolidation shutdown failed" in message for message in warning_messages)

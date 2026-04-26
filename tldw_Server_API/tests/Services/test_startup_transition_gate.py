@@ -74,6 +74,33 @@ def test_apply_startup_transition_gate_swallows_import_errors(
     assert calls == [("mark", app, readiness_state)]
 
 
+def test_apply_startup_transition_gate_runs_gate_when_lifecycle_marker_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_transition = _import_startup_transition_gate()
+    app = object()
+    readiness_state = {"ready": False}
+    calls: list[str] = []
+
+    def _raise_import_error(_seen_app, _seen_readiness_state) -> None:
+        raise ImportError("lifecycle unavailable")
+
+    monkeypatch.setattr(startup_transition, "_mark_lifecycle_startup", _raise_import_error)
+    monkeypatch.setattr(
+        startup_transition,
+        "_disable_job_acquire_gate",
+        lambda: calls.append("gate"),
+    )
+
+    startup_transition.apply_startup_transition_gate(
+        app=app,
+        readiness_state=readiness_state,
+        import_exceptions=(ImportError,),
+    )
+
+    assert calls == ["gate"]
+
+
 def test_apply_startup_transition_gate_reraises_non_import_errors(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -27,6 +27,28 @@ def _import_startup_auth() -> ModuleType:
     return importlib.import_module("tldw_Server_API.app.services.startup_auth")
 
 
+def test_startup_auth_exception_guards_match_lifespan_contract() -> None:
+    startup_auth = _import_startup_auth()
+
+    assert startup_auth._STARTUP_GUARD_EXCEPTIONS == (
+        AttributeError,
+        OSError,
+        RuntimeError,
+        TypeError,
+        ValueError,
+    )
+    assert startup_auth._IMPORT_EXCEPTIONS == (
+        AssertionError,
+        ImportError,
+        ModuleNotFoundError,
+        AttributeError,
+        OSError,
+        RuntimeError,
+        TypeError,
+        ValueError,
+    )
+
+
 @pytest.mark.asyncio
 async def test_init_auth_services_runs_sqlite_startup_chain(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[object] = []
@@ -145,7 +167,7 @@ async def test_init_auth_services_runs_pg_extras_when_pool_present(
 
 
 @pytest.mark.asyncio
-async def test_init_auth_services_returns_none_when_db_pool_init_fails(
+async def test_init_auth_services_reraises_when_db_pool_init_fails(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async def _failing_get_db_pool():
@@ -159,6 +181,44 @@ async def test_init_auth_services_returns_none_when_db_pool_init_fails(
 
     startup_auth = _import_startup_auth()
 
+    with pytest.raises(RuntimeError, match="db boom"):
+        await startup_auth.init_auth_services()
+
+
+@pytest.mark.asyncio
+async def test_init_auth_services_skips_provider_override_runtime_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db_pool = SimpleNamespace()
+
+    async def _fake_get_db_pool():
+        return db_pool
+
+    async def _fake_noop():
+        return None
+
+    async def _failing_refresh(_pool):
+        raise RuntimeError("override cache unavailable")
+
+    _install_module(
+        monkeypatch,
+        "tldw_Server_API.app.core.AuthNZ.database",
+        get_db_pool=_fake_get_db_pool,
+    )
+    _install_module(
+        monkeypatch,
+        "tldw_Server_API.app.core.AuthNZ.initialize",
+        ensure_authnz_schema_ready_once=_fake_noop,
+        ensure_single_user_rbac_seed_if_needed=_fake_noop,
+    )
+    _install_module(
+        monkeypatch,
+        "tldw_Server_API.app.core.AuthNZ.llm_provider_overrides",
+        refresh_llm_provider_overrides=_failing_refresh,
+    )
+
+    startup_auth = _import_startup_auth()
+
     result = await startup_auth.init_auth_services()
 
-    assert result is None
+    assert result is db_pool

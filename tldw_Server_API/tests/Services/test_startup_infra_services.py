@@ -117,3 +117,38 @@ async def test_start_connectors_startup_registers_owned_poller(
             handles.connectors_jobs_stop_event,
         ),
     ]
+
+
+@pytest.mark.asyncio
+async def test_start_connectors_worker_cancels_task_when_registration_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_infra = _import_startup_infra_services()
+
+    class _FakeTask:
+        def __init__(self) -> None:
+            self.cancelled = False
+
+        def cancel(self) -> None:
+            self.cancelled = True
+
+    task = _FakeTask()
+
+    async def _fake_start(*, stop_event):
+        assert stop_event is not None
+        return task
+
+    def _failing_register(*args, **kwargs):
+        raise RuntimeError("registration boom")
+
+    monkeypatch.setattr(startup_infra, "_start_connectors_worker_service", _fake_start)
+
+    returned_task, stop_event = await startup_infra._start_connectors_worker(
+        app="app",
+        owned_job_pollers=[],
+        register_owned_job_poller=_failing_register,
+    )
+
+    assert returned_task is None
+    assert stop_event is None
+    assert task.cancelled is True

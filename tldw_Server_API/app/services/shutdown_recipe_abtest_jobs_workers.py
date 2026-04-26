@@ -94,21 +94,39 @@ async def _shutdown_late_stop_event_worker(
     should_run_late_stop: Callable[[str, Any], bool],
     guard_exceptions: tuple[type[BaseException], ...],
 ) -> None:
+    if task is None:
+        return
     if not should_run_late_stop(task_name, task):
         return
+    fallback_exceptions = (asyncio.TimeoutError,) + guard_exceptions
     try:
-        if stop_event:
+        if stop_event is not None:
             stop_event.set()
             await _wait_for_task(task, timeout=5.0)
             logger.info(stop_message)
         else:
-            task.cancel()
-    except guard_exceptions:
-        try:
-            task.cancel()
-        except guard_exceptions:
-            pass
+            await _cancel_and_wait_for_task(task, guard_exceptions=guard_exceptions)
+    except fallback_exceptions:
+        await _cancel_and_wait_for_task(task, guard_exceptions=guard_exceptions)
 
 
 async def _wait_for_task(task: Any, *, timeout: float) -> Any:
     return await asyncio.wait_for(task, timeout=timeout)
+
+
+async def _cancel_and_wait_for_task(
+    task: Any,
+    *,
+    guard_exceptions: tuple[type[BaseException], ...],
+    timeout: float = 5.0,
+) -> None:
+    try:
+        task.cancel()
+    except guard_exceptions:
+        return
+    try:
+        await _wait_for_task(task, timeout=timeout)
+    except asyncio.CancelledError:
+        pass
+    except (asyncio.TimeoutError,) + guard_exceptions:
+        pass

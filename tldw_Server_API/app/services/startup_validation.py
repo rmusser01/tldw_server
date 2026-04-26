@@ -15,7 +15,13 @@ from tldw_Server_API.app.core.AuthNZ.startup_integrity import (
 from tldw_Server_API.app.core.Setup.setup_manager import needs_setup
 from tldw_Server_API.app.core.testing import is_truthy as _shared_is_truthy
 
-_STARTUP_GUARD_EXCEPTIONS = (Exception,)
+_STARTUP_GUARD_EXCEPTIONS = (
+    AttributeError,
+    OSError,
+    RuntimeError,
+    TypeError,
+    ValueError,
+)
 
 
 async def run_startup_validations() -> None:

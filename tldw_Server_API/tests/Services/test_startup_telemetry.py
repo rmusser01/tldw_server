@@ -146,4 +146,4 @@ def test_initialize_startup_telemetry_logs_exception_when_telemetry_init_fails(
 
     assert result is None
     assert logger.info_messages == ["App Startup: Initializing telemetry and metrics..."]
-    assert logger.exception_messages == ["App Startup: Failed to initialize telemetry: telemetry boom"]
+    assert logger.exception_messages == ["App Startup: Failed to initialize telemetry"]

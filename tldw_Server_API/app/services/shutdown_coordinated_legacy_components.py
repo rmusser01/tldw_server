@@ -68,16 +68,14 @@ async def _shutdown_coordinated_legacy_components(
     startup_guard_exceptions: tuple[type[BaseException], ...],
     import_exceptions: tuple[type[BaseException], ...],
 ) -> set[str]:
-    try:
-        non_transition_legacy_shutdown_plan = [
-            component
-            for component in legacy_shutdown_plan
-            if getattr(getattr(component, "phase", None), "value", None) != "transition"
-        ]
-        return await run_coordinated_shutdown(
-            app,
-            non_transition_legacy_shutdown_plan,
-        )
-    except (startup_guard_exceptions + import_exceptions) as exc:
-        logger.debug(f"Legacy coordinator shutdown skipped: {exc}")
-        return set()
+    del startup_guard_exceptions, import_exceptions
+
+    non_transition_legacy_shutdown_plan = [
+        component
+        for component in legacy_shutdown_plan
+        if getattr(getattr(component, "phase", None), "value", None) != "transition"
+    ]
+    return await run_coordinated_shutdown(
+        app,
+        non_transition_legacy_shutdown_plan,
+    )

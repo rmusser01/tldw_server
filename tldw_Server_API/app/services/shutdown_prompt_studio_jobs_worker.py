@@ -46,17 +46,31 @@ async def _shutdown_prompt_studio_jobs_worker(
     should_run_late_stop: Callable[[str, Any], bool],
     guard_exceptions: tuple[type[BaseException], ...],
 ) -> None:
+    if task is None:
+        return
     if not should_run_late_stop("prompt_studio_jobs_task", task):
         return
-    if stop_event:
+    fallback_exceptions = (asyncio.TimeoutError,) + guard_exceptions
+    if stop_event is not None:
         try:
             stop_event.set()
             await _wait_for_task(task, timeout=5.0)
             logger.info("Prompt Studio Jobs worker stopped via stop_event")
-        except guard_exceptions:
-            task.cancel()
+        except fallback_exceptions:
+            _safe_cancel_task(task, guard_exceptions=guard_exceptions)
     else:
+        _safe_cancel_task(task, guard_exceptions=guard_exceptions)
+
+
+def _safe_cancel_task(
+    task: Any,
+    *,
+    guard_exceptions: tuple[type[BaseException], ...],
+) -> None:
+    try:
         task.cancel()
+    except guard_exceptions:
+        pass
 
 
 async def _wait_for_task(task: Any, *, timeout: float) -> Any:

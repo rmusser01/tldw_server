@@ -219,15 +219,15 @@ async def stop_registered_job_pollers(
                     "App Shutdown: Job poller {} did not cancel within 1.0s after timeout",
                     handle.name,
                 )
-            except Exception as exc:
-                logger_obj.warning(
-                    "App Shutdown: Job poller {} raised after cancellation: {}",
-                    handle.name,
-                    exc,
-                )
             except guard_exceptions as exc:
                 logger_obj.debug(
                     "App Shutdown: Job poller cancel guard triggered for {}: {}",
+                    handle.name,
+                    exc,
+                )
+            except Exception as exc:
+                logger_obj.warning(
+                    "App Shutdown: Job poller {} raised after cancellation: {}",
                     handle.name,
                     exc,
                 )

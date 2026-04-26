@@ -61,11 +61,8 @@ async def _shutdown_jobs_notifications_bridge_worker(
         logger.info("Jobs notifications bridge worker cancelled")
     except asyncio.CancelledError:
         pass
-    except guard_exceptions:
-        try:
-            task.cancel()
-        except guard_exceptions:
-            pass
+    except (asyncio.TimeoutError,) + guard_exceptions:
+        await _cancel_and_wait_for_task(task, guard_exceptions=guard_exceptions)
 
 
 async def _shutdown_embeddings_vector_compactor_worker(
@@ -76,18 +73,16 @@ async def _shutdown_embeddings_vector_compactor_worker(
 ) -> None:
     if not task:
         return
+    fallback_exceptions = (asyncio.TimeoutError,) + guard_exceptions
     try:
-        if stop_event:
+        if stop_event is not None:
             stop_event.set()
             await _wait_for_task(task, timeout=5.0)
             logger.info("Embeddings Vector Compactor stopped via stop_event")
         else:
-            task.cancel()
-    except guard_exceptions:
-        try:
-            task.cancel()
-        except guard_exceptions:
-            pass
+            await _cancel_and_wait_for_task(task, guard_exceptions=guard_exceptions)
+    except fallback_exceptions:
+        await _cancel_and_wait_for_task(task, guard_exceptions=guard_exceptions)
 
 
 async def _shutdown_websub_renewal_worker(*, task: Any | None) -> None:
@@ -99,3 +94,21 @@ async def _shutdown_websub_renewal_worker(*, task: Any | None) -> None:
 
 async def _wait_for_task(task: Any, *, timeout: float) -> Any:
     return await asyncio.wait_for(task, timeout=timeout)
+
+
+async def _cancel_and_wait_for_task(
+    task: Any,
+    *,
+    guard_exceptions: tuple[type[BaseException], ...],
+    timeout: float = 5.0,
+) -> None:
+    try:
+        task.cancel()
+    except guard_exceptions:
+        return
+    try:
+        await _wait_for_task(task, timeout=timeout)
+    except asyncio.CancelledError:
+        pass
+    except (asyncio.TimeoutError,) + guard_exceptions:
+        pass

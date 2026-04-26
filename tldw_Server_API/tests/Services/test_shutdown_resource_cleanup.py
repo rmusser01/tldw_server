@@ -28,27 +28,27 @@ async def test_shutdown_resource_cleanup_runs_steps_in_order(
         assert guard_exceptions == (RuntimeError,)
         calls.append("session")
 
-    async def _record_mcp_server(*, heavy_startup_handles, import_exceptions):
+    async def _record_mcp_server(*, heavy_startup_handles, guard_exceptions):
         assert heavy_startup_handles == "heavy-handles"
-        assert import_exceptions == (LookupError,)
+        assert guard_exceptions == (RuntimeError,)
         calls.append("mcp-server")
 
-    async def _record_mcp_rate_limiter(*, import_exceptions):
-        assert import_exceptions == (LookupError,)
+    async def _record_mcp_rate_limiter(*, guard_exceptions):
+        assert guard_exceptions == (RuntimeError,)
         calls.append("mcp-rate-limiter")
 
-    async def _record_tts_service(*, in_pytest_for_tts_shutdown, import_exceptions):
+    async def _record_tts_service(*, in_pytest_for_tts_shutdown, guard_exceptions):
         assert in_pytest_for_tts_shutdown is False
-        assert import_exceptions == (LookupError,)
+        assert guard_exceptions == (RuntimeError,)
         calls.append("tts-service")
 
-    async def _record_tts_resource_manager(*, in_pytest_for_tts_shutdown, import_exceptions):
+    async def _record_tts_resource_manager(*, in_pytest_for_tts_shutdown, guard_exceptions):
         assert in_pytest_for_tts_shutdown is False
-        assert import_exceptions == (LookupError,)
+        assert guard_exceptions == (RuntimeError,)
         calls.append("tts-resource-manager")
 
-    async def _record_http_client(*, import_exceptions):
-        assert import_exceptions == (LookupError,)
+    async def _record_http_client(*, guard_exceptions):
+        assert guard_exceptions == (RuntimeError,)
         calls.append("http-client")
 
     async def _record_chacha(*, guard_exceptions):
@@ -67,8 +67,8 @@ async def test_shutdown_resource_cleanup_runs_steps_in_order(
         assert guard_exceptions == (RuntimeError,)
         calls.append("provider-manager")
 
-    async def _record_request_queue(*, heavy_startup_handles, import_exceptions):
-        assert import_exceptions == (LookupError,)
+    async def _record_request_queue(*, heavy_startup_handles, guard_exceptions):
+        assert guard_exceptions == (RuntimeError,)
         calls.append("request-queue")
 
     async def _record_local_llm_manager(*, app, guard_exceptions, run_in_thread):
@@ -134,7 +134,7 @@ async def test_shutdown_tts_service_skips_in_pytest(
 
     await shutdown_resources._shutdown_tts_service(
         in_pytest_for_tts_shutdown=True,
-        import_exceptions=(LookupError,),
+        guard_exceptions=(RuntimeError,),
     )
 
     assert called is False
@@ -159,7 +159,7 @@ async def test_shutdown_tts_resource_manager_skips_in_pytest(
 
     await shutdown_resources._shutdown_tts_resource_manager(
         in_pytest_for_tts_shutdown=True,
-        import_exceptions=(LookupError,),
+        guard_exceptions=(RuntimeError,),
     )
 
     assert called is False
@@ -184,6 +184,34 @@ async def test_shutdown_provider_manager_stops_health_checks_when_present(
     )
 
     assert calls == ["stop-health-checks"]
+
+
+@pytest.mark.asyncio
+async def test_shutdown_mcp_server_handles_runtime_guard_exception() -> None:
+    shutdown_resources = _import_shutdown_resource_cleanup()
+
+    class _MCPServer:
+        async def shutdown(self) -> None:
+            raise RuntimeError("mcp boom")
+
+    await shutdown_resources._shutdown_mcp_server(
+        heavy_startup_handles=SimpleNamespace(mcp_server=_MCPServer()),
+        guard_exceptions=(RuntimeError,),
+    )
+
+
+@pytest.mark.asyncio
+async def test_shutdown_request_queue_handles_runtime_guard_exception() -> None:
+    shutdown_resources = _import_shutdown_resource_cleanup()
+
+    class _RequestQueue:
+        async def stop(self) -> None:
+            raise RuntimeError("queue boom")
+
+    await shutdown_resources._shutdown_request_queue(
+        heavy_startup_handles=SimpleNamespace(request_queue=_RequestQueue()),
+        guard_exceptions=(RuntimeError,),
+    )
 
 
 @pytest.mark.asyncio

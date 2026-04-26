@@ -217,3 +217,93 @@ async def test_report_startup_environment_handles_banner_and_preflight_failures(
 
     assert logger.exception_messages == ["Failed to display startup info: settings import failed"]
     assert logger.warning_messages == ["Preflight report could not be generated: preflight failed"]
+
+
+@pytest.mark.asyncio
+async def test_report_startup_environment_handles_preflight_import_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reporting = _import_startup_environment_reporting()
+    logger = _FakeLogger()
+    app = SimpleNamespace(state=SimpleNamespace())
+    auth_settings_calls = {"count": 0}
+
+    def _fake_get_auth_settings():
+        auth_settings_calls["count"] += 1
+        if auth_settings_calls["count"] == 2:
+            raise ImportError("preflight import failed")
+        return SimpleNamespace(
+            SINGLE_USER_API_KEY="unused",
+            AUTH_MODE="single_user",
+            DATABASE_URL="sqlite:///tmp/users.db",
+            REDIS_URL="",
+        )
+
+    monkeypatch.setattr(reporting, "_get_auth_settings", _fake_get_auth_settings)
+    monkeypatch.setattr(reporting, "_is_single_user_mode", lambda: True)
+
+    await reporting.report_startup_environment(
+        app=app,
+        logger=logger,
+        startup_api_key_log_value=lambda api_key: api_key,
+        shared_is_truthy=lambda value: bool(value),
+        startup_guard_exceptions=(RuntimeError,),
+        import_exceptions=(ImportError,),
+    )
+
+    assert logger.warning_messages == [
+        "Preflight report could not be generated: preflight import failed"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_log_preflight_environment_report_preserves_sqlite_engine_when_pool_lookup_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reporting = _import_startup_environment_reporting()
+    logger = _FakeLogger()
+    app = SimpleNamespace(state=SimpleNamespace())
+
+    monkeypatch.setattr(
+        reporting,
+        "_get_auth_settings",
+        lambda: SimpleNamespace(
+            AUTH_MODE="multi_user",
+            DATABASE_URL="sqlite:///tmp/users.db",
+            REDIS_URL="",
+        ),
+    )
+    monkeypatch.setattr(reporting, "_get_csrf_global_settings", lambda: {"CSRF_ENABLED": False})
+    monkeypatch.setattr(
+        reporting,
+        "_get_cors_runtime_diagnostics",
+        lambda: {
+            "disable_cors": True,
+            "disable_cors_source": "env",
+            "allow_credentials": False,
+            "allow_credentials_source": "default",
+            "allowed_origins_count": 0,
+            "allowed_origins_source": "default",
+            "allowed_origins": [],
+            "config_path": None,
+            "config_loaded": False,
+        },
+    )
+    monkeypatch.setattr(reporting, "_get_provider_manager", lambda: None)
+    monkeypatch.setattr(reporting, "_otel_available", lambda: False)
+
+    async def _failing_get_db_pool():
+        raise RuntimeError("pool unavailable")
+
+    monkeypatch.setattr(reporting, "_get_db_pool", _failing_get_db_pool)
+    monkeypatch.setenv("tldw_production", "true")
+
+    await reporting._log_preflight_environment_report(
+        app=app,
+        logger=logger,
+        shared_is_truthy=lambda value: str(value).lower() in {"true", "1", "yes", "y", "on"},
+        startup_guard_exceptions=(RuntimeError,),
+    )
+
+    assert "• Database: engine=sqlite" in logger.info_messages
+    assert "• Database check: FAIL (SQLite in multi-user prod not supported)" in logger.error_messages

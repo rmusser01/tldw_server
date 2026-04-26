@@ -51,6 +51,7 @@ async def test_start_claims_rebuild_worker_creates_task_when_enabled(
     )
 
     assert task is created_tasks[0]
+    assert getattr(task, "_tldw_claims_rebuild_stop_event") is not None
 
 
 def test_run_claims_rebuild_iteration_submits_selected_media_ids(

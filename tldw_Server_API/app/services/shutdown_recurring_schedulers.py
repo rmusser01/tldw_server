@@ -6,6 +6,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from loguru import logger
+
 
 _SHUTDOWN_GUARD_EXCEPTIONS = (
     AttributeError,
@@ -39,11 +41,8 @@ async def _stop_workflows_scheduler(task: Any | None) -> None:
         return
     try:
         await _stop_workflows_scheduler_service(task)
-    except _SHUTDOWN_GUARD_EXCEPTIONS:
-        try:
-            task.cancel()
-        except _SHUTDOWN_GUARD_EXCEPTIONS:
-            pass
+    except _SHUTDOWN_GUARD_EXCEPTIONS as exc:
+        await _cancel_scheduler_task(task, label="Workflow", reason=exc)
 
 
 async def _stop_reading_digest_scheduler(task: Any | None) -> None:
@@ -51,11 +50,8 @@ async def _stop_reading_digest_scheduler(task: Any | None) -> None:
         return
     try:
         await _stop_reading_digest_scheduler_service(task)
-    except _SHUTDOWN_GUARD_EXCEPTIONS:
-        try:
-            task.cancel()
-        except _SHUTDOWN_GUARD_EXCEPTIONS:
-            pass
+    except _SHUTDOWN_GUARD_EXCEPTIONS as exc:
+        await _cancel_scheduler_task(task, label="Reading digest", reason=exc)
 
 
 async def _stop_admin_backup_scheduler(task: Any | None) -> None:
@@ -63,11 +59,8 @@ async def _stop_admin_backup_scheduler(task: Any | None) -> None:
         return
     try:
         await _stop_admin_backup_scheduler_service(task)
-    except _SHUTDOWN_GUARD_EXCEPTIONS:
-        try:
-            task.cancel()
-        except _SHUTDOWN_GUARD_EXCEPTIONS:
-            pass
+    except _SHUTDOWN_GUARD_EXCEPTIONS as exc:
+        await _cancel_scheduler_task(task, label="Admin backup", reason=exc)
 
 
 async def _stop_companion_reflection_scheduler(task: Any | None) -> None:
@@ -75,33 +68,32 @@ async def _stop_companion_reflection_scheduler(task: Any | None) -> None:
         return
     try:
         await _stop_companion_reflection_scheduler_service(task)
-    except _SHUTDOWN_GUARD_EXCEPTIONS:
-        try:
-            task.cancel()
-        except _SHUTDOWN_GUARD_EXCEPTIONS:
-            pass
+    except _SHUTDOWN_GUARD_EXCEPTIONS as exc:
+        await _cancel_scheduler_task(task, label="Companion reflection", reason=exc)
 
 
 async def _stop_reminders_scheduler(task: Any | None) -> None:
     try:
         await _stop_reminders_scheduler_service(task)
-    except _SHUTDOWN_GUARD_EXCEPTIONS:
-        try:
-            if task:
-                task.cancel()
-        except _SHUTDOWN_GUARD_EXCEPTIONS:
-            pass
+    except _SHUTDOWN_GUARD_EXCEPTIONS as exc:
+        await _cancel_scheduler_task(task, label="Reminders", reason=exc)
 
 
 async def _stop_connectors_sync_scheduler(task: Any | None) -> None:
     try:
         await _stop_connectors_sync_scheduler_service(task)
-    except _SHUTDOWN_GUARD_EXCEPTIONS:
-        try:
-            if task:
-                task.cancel()
-        except _SHUTDOWN_GUARD_EXCEPTIONS:
-            pass
+    except _SHUTDOWN_GUARD_EXCEPTIONS as exc:
+        await _cancel_scheduler_task(task, label="Connectors sync", reason=exc)
+
+
+async def _cancel_scheduler_task(task: Any | None, *, label: str, reason: BaseException) -> None:
+    logger.warning(f"{label} scheduler shutdown failed: {reason}")
+    if not task:
+        return
+    try:
+        task.cancel()
+    except _SHUTDOWN_GUARD_EXCEPTIONS as exc:
+        logger.warning(f"{label} scheduler cancellation failed: {exc}")
 
 
 async def _stop_workflows_scheduler_service(task: Any) -> None:

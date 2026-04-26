@@ -103,3 +103,73 @@ async def test_quiesce_owned_job_pollers_waits_then_calls_stop_callback() -> Non
     assert segments[0]["skipped"] is False
     assert segments[0]["initial_active"] == 2
     assert segments[1]["segment"] == "enter:job_poller_quiesce"
+
+
+@pytest.mark.asyncio
+async def test_stop_registered_job_pollers_logs_guard_cancel_failure_at_debug() -> None:
+    shutdown_pollers = _import_shutdown_owned_job_pollers()
+    app = FastAPI()
+    debug_messages: list[str] = []
+    warning_messages: list[str] = []
+
+    class _FakeTask:
+        def __init__(self) -> None:
+            self.cancelled = False
+
+        def cancel(self) -> None:
+            self.cancelled = True
+
+        def done(self) -> bool:
+            return False
+
+        def get_name(self) -> str:
+            return "fake-poller"
+
+    class _AsyncioProxy:
+        CancelledError = asyncio.CancelledError
+        TimeoutError = asyncio.TimeoutError
+
+        @staticmethod
+        def shield(task):
+            return task
+
+        @staticmethod
+        async def wait_for(awaitable, *, timeout):
+            del awaitable
+            if timeout == 0.01:
+                raise asyncio.TimeoutError()
+            raise RuntimeError("cancel guard")
+
+        @staticmethod
+        async def gather(*awaitables, return_exceptions):
+            assert return_exceptions is False
+            return [await awaitable for awaitable in awaitables]
+
+    logger_obj = type(
+        "_Logger",
+        (),
+        {
+            "debug": lambda _self, message, *args: debug_messages.append(str(message)),
+            "warning": lambda _self, message, *args: warning_messages.append(str(message)),
+        },
+    )()
+    task = _FakeTask()
+
+    await shutdown_pollers.stop_registered_job_pollers(
+        app,
+        [
+            shutdown_pollers.ManagedJobPoller(
+                name="poller",
+                task=task,
+                stop_event=None,
+                timeout_sec=0.01,
+            )
+        ],
+        logger_obj=logger_obj,
+        guard_exceptions=(RuntimeError,),
+        asyncio_module=_AsyncioProxy(),
+    )
+
+    assert task.cancelled is True
+    assert any("Job poller cancel guard triggered" in message for message in debug_messages)
+    assert not any("raised after cancellation" in message for message in warning_messages)

@@ -15,7 +15,7 @@ def _import_shutdown_usage_aggregators():
 
 
 @pytest.mark.asyncio
-async def test_stop_usage_aggregators_stops_both_in_order_and_clears_usage_task(
+async def test_stop_usage_aggregators_stops_both_in_order_and_clears_task_handles(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     shutdown_usage = _import_shutdown_usage_aggregators()
@@ -39,7 +39,7 @@ async def test_stop_usage_aggregators_stops_both_in_order_and_clears_usage_task(
 
     assert calls == [("usage", "usage-task"), ("llm", "llm-task")]
     assert handles.usage_task is None
-    assert handles.llm_usage_task == "llm-task"
+    assert handles.llm_usage_task is None
 
 
 @pytest.mark.asyncio
@@ -123,4 +123,4 @@ async def test_stop_usage_aggregators_cancels_llm_usage_task_on_guard_exception(
     )
 
     assert task.cancelled is True
-    assert handles.llm_usage_task is task
+    assert handles.llm_usage_task is None

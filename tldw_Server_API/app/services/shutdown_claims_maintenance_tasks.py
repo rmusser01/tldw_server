@@ -39,6 +39,9 @@ async def shutdown_claims_maintenance_tasks(
 
 
 async def _shutdown_claims_task(*, task: Any | None) -> None:
+    stop_event = getattr(task, "_tldw_claims_rebuild_stop_event", None)
+    if stop_event is not None:
+        stop_event.set()
     _cancel_task(task)
 
 

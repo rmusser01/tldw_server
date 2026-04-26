@@ -173,3 +173,46 @@ async def test_start_evals_abtest_jobs_worker_handles_guard_exception(
 
     assert stop_event is None
     assert task is None
+
+
+@pytest.mark.asyncio
+async def test_start_evals_abtest_jobs_worker_cancels_task_when_registration_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_workers = _import_startup_notifications_abtest_workers()
+
+    class _FakeTask:
+        def __init__(self) -> None:
+            self.cancelled = False
+
+        def cancel(self) -> None:
+            self.cancelled = True
+
+    task = _FakeTask()
+
+    monkeypatch.setattr(
+        startup_workers.os,
+        "getenv",
+        lambda key, default=None: "true" if key == "EVALUATIONS_ABTEST_JOBS_WORKER_ENABLED" else default,
+    )
+    monkeypatch.setattr(startup_workers, "_make_event", lambda: "abtest-stop")
+    monkeypatch.setattr(startup_workers, "_create_task", lambda coro: task)
+    monkeypatch.setattr(
+        startup_workers,
+        "_run_embeddings_abtest_jobs_worker_service",
+        lambda stop_event: stop_event,
+    )
+
+    def _failing_register(*args, **kwargs):
+        raise RuntimeError("registration boom")
+
+    stop_event, returned_task = await startup_workers._start_evals_abtest_jobs_worker(
+        app="app",
+        owned_job_pollers=[],
+        register_owned_job_poller=_failing_register,
+        sidecar_mode=False,
+    )
+
+    assert stop_event is None
+    assert returned_task is None
+    assert task.cancelled is True

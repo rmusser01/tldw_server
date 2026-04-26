@@ -6,8 +6,23 @@ from __future__ import annotations
 
 from loguru import logger
 
-_STARTUP_GUARD_EXCEPTIONS = (Exception,)
-_IMPORT_EXCEPTIONS = (ImportError, ModuleNotFoundError)
+_STARTUP_GUARD_EXCEPTIONS = (
+    AttributeError,
+    OSError,
+    RuntimeError,
+    TypeError,
+    ValueError,
+)
+_IMPORT_EXCEPTIONS = (
+    AssertionError,
+    ImportError,
+    ModuleNotFoundError,
+    AttributeError,
+    OSError,
+    RuntimeError,
+    TypeError,
+    ValueError,
+)
 
 
 async def init_auth_services() -> object | None:
@@ -19,7 +34,7 @@ async def init_auth_services() -> object | None:
         logger.info("App Startup: Database pool initialized")
     except _STARTUP_GUARD_EXCEPTIONS as exc:
         logger.error(f"App Startup: Failed to initialize database pool: {exc}")
-        return None
+        raise
 
     try:
         from tldw_Server_API.app.core.AuthNZ.initialize import ensure_authnz_schema_ready_once

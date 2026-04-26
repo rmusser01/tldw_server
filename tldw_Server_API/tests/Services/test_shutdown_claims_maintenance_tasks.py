@@ -22,6 +22,14 @@ class _FakeTask:
         self.cancelled = True
 
 
+class _FakeStopEvent:
+    def __init__(self) -> None:
+        self.is_set = False
+
+    def set(self) -> None:
+        self.is_set = True
+
+
 @pytest.mark.asyncio
 async def test_shutdown_claims_maintenance_tasks_runs_helpers_in_order(
     monkeypatch: pytest.MonkeyPatch,
@@ -71,6 +79,19 @@ async def test_shutdown_claims_task_cancels_task() -> None:
 
     await shutdown_tasks._shutdown_claims_task(task=task)
 
+    assert task.cancelled is True
+
+
+@pytest.mark.asyncio
+async def test_shutdown_claims_task_sets_attached_stop_event_before_cancel() -> None:
+    shutdown_tasks = _import_shutdown_claims_maintenance_tasks()
+    task = _FakeTask()
+    stop_event = _FakeStopEvent()
+    task._tldw_claims_rebuild_stop_event = stop_event
+
+    await shutdown_tasks._shutdown_claims_task(task=task)
+
+    assert stop_event.is_set is True
     assert task.cancelled is True
 
 

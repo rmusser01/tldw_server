@@ -37,6 +37,8 @@ async def initialize_auth_runtime_services(
         except ValueError as config_error:
             logger.exception(f"App Startup: Security alert configuration invalid: {config_error}")
             raise
+    except ValueError:
+        raise
     except startup_guard_exceptions as exc:
         logger.exception(f"App Startup: Security alert validation / auth services init failed: {exc}")
 

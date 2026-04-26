@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import importlib
 import sys
 
@@ -137,6 +138,53 @@ async def test_shutdown_embeddings_vector_compactor_worker_cancels_on_guard_exce
 
     assert stop_event.is_set is True
     assert task.cancelled is True
+
+
+@pytest.mark.asyncio
+async def test_shutdown_embeddings_vector_compactor_worker_cancels_on_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    shutdown_workers = _import_shutdown_notifications_compactor_websub_workers()
+    task = _FakeTask()
+    stop_event = _FakeStopEvent()
+
+    async def _timeout_wait(_task, *, timeout):
+        del timeout
+        raise asyncio.TimeoutError()
+
+    monkeypatch.setattr(shutdown_workers, "_wait_for_task", _timeout_wait)
+
+    await shutdown_workers._shutdown_embeddings_vector_compactor_worker(
+        task=task,
+        stop_event=stop_event,
+        guard_exceptions=(RuntimeError,),
+    )
+
+    assert stop_event.is_set is True
+    assert task.cancelled is True
+
+
+@pytest.mark.asyncio
+async def test_shutdown_embeddings_vector_compactor_worker_waits_after_cancel_without_stop_event(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    shutdown_workers = _import_shutdown_notifications_compactor_websub_workers()
+    task = _FakeTask()
+    waits: list[tuple[object, float]] = []
+
+    async def _fake_wait(task_obj, *, timeout):
+        waits.append((task_obj, timeout))
+
+    monkeypatch.setattr(shutdown_workers, "_wait_for_task", _fake_wait)
+
+    await shutdown_workers._shutdown_embeddings_vector_compactor_worker(
+        task=task,
+        stop_event=None,
+        guard_exceptions=(RuntimeError,),
+    )
+
+    assert task.cancelled is True
+    assert waits == [(task, 5.0)]
 
 
 @pytest.mark.asyncio

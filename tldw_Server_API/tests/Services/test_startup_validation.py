@@ -15,6 +15,18 @@ def _import_startup_validation():
     return importlib.import_module("tldw_Server_API.app.services.startup_validation")
 
 
+def test_startup_validation_exception_guard_is_specific() -> None:
+    startup_validation = _import_startup_validation()
+
+    assert startup_validation._STARTUP_GUARD_EXCEPTIONS == (
+        AttributeError,
+        OSError,
+        RuntimeError,
+        TypeError,
+        ValueError,
+    )
+
+
 @pytest.mark.asyncio
 async def test_run_startup_validations_warns_for_first_time_setup(
     monkeypatch: pytest.MonkeyPatch,

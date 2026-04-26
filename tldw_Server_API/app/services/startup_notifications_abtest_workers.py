@@ -95,6 +95,7 @@ async def _start_evals_abtest_jobs_worker(
     register_owned_job_poller: Callable[..., None],
     sidecar_mode: bool,
 ) -> tuple[Any | None, Any | None]:
+    task = None
     try:
         enabled = os.getenv("EVALUATIONS_ABTEST_JOBS_WORKER_ENABLED", "false").lower() in _TRUTHY_ENV_VALUES
         if not enabled:
@@ -108,14 +109,18 @@ async def _start_evals_abtest_jobs_worker(
 
         stop_event = _make_event()
         task = _create_task(_run_embeddings_abtest_jobs_worker_service(stop_event))
+        try:
+            register_owned_job_poller(
+                app,
+                owned_job_pollers,
+                name="evals_abtest_jobs_task",
+                task=task,
+                stop_event=stop_event,
+            )
+        except _STARTUP_GUARD_EXCEPTIONS:
+            _safe_cancel_task(task)
+            raise
         logger.info("Embeddings A/B Jobs worker started with explicit stop_event signal")
-        register_owned_job_poller(
-            app,
-            owned_job_pollers,
-            name="evals_abtest_jobs_task",
-            task=task,
-            stop_event=stop_event,
-        )
         return stop_event, task
     except _STARTUP_GUARD_EXCEPTIONS as exc:
         logger.warning(f"Failed to start Embeddings A/B Jobs worker: {exc}")
@@ -128,6 +133,15 @@ def _start_jobs_notifications_service() -> Any:
     )
 
     return _start_jobs_notifications_service_impl()
+
+
+def _safe_cancel_task(task: Any | None) -> None:
+    if task is None:
+        return
+    try:
+        task.cancel()
+    except _STARTUP_GUARD_EXCEPTIONS:
+        pass
 
 
 def _run_embeddings_abtest_jobs_worker_service(stop_event: Any) -> Any:

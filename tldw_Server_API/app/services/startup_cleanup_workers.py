@@ -19,6 +19,7 @@ _STARTUP_GUARD_EXCEPTIONS = (
     TypeError,
     ValueError,
 )
+_TRUTHY_VALUES = {"true", "1", "yes", "y", "on"}
 
 
 @dataclass
@@ -63,7 +64,7 @@ async def _start_ephemeral_cleanup_worker(app_settings: Mapping[str, Any]) -> An
     try:
         single_uid = int(app_settings.get("SINGLE_USER_FIXED_ID", "1"))
         db_path = str(_get_evaluations_db_path(single_uid))
-        enabled = bool(app_settings.get("EPHEMERAL_CLEANUP_ENABLED", True))
+        enabled = _settings_truthy(app_settings.get("EPHEMERAL_CLEANUP_ENABLED", True))
         interval_sec = int(app_settings.get("EPHEMERAL_CLEANUP_INTERVAL_SEC", 1800))
 
         async def _ephemeral_cleanup_loop() -> None:
@@ -73,7 +74,7 @@ async def _start_ephemeral_cleanup_worker(app_settings: Mapping[str, Any]) -> An
             await _maybe_await(getattr(adapter, "initialize", lambda: None)())
             while True:
                 try:
-                    enabled_dyn = bool(app_settings.get("EPHEMERAL_CLEANUP_ENABLED", True))
+                    enabled_dyn = _settings_truthy(app_settings.get("EPHEMERAL_CLEANUP_ENABLED", True))
                     interval_dyn = int(app_settings.get("EPHEMERAL_CLEANUP_INTERVAL_SEC", interval_sec))
                     if not enabled_dyn:
                         await asyncio.sleep(interval_sec)
@@ -149,6 +150,12 @@ async def _maybe_await(value: Any) -> Any:
     if inspect.isawaitable(value):
         return await value
     return value
+
+
+def _settings_truthy(value: Any) -> bool:
+    if isinstance(value, str):
+        return value.strip().lower() in _TRUTHY_VALUES
+    return bool(value)
 
 
 def _create_evaluations_db(db_path: str) -> Any:

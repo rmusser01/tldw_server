@@ -6,6 +6,8 @@ from __future__ import annotations
 
 from typing import Any, MutableMapping
 
+from loguru import logger
+
 
 def apply_startup_transition_gate(
     *,
@@ -15,9 +17,13 @@ def apply_startup_transition_gate(
 ) -> None:
     try:
         _mark_lifecycle_startup(app, readiness_state)
+    except import_exceptions as exc:
+        logger.warning(f"App Startup: lifecycle startup marker unavailable: {exc}")
+
+    try:
         _disable_job_acquire_gate()
-    except import_exceptions:
-        pass
+    except import_exceptions as exc:
+        logger.warning(f"App Startup: job acquire gate toggle unavailable: {exc}")
 
 
 def _mark_lifecycle_startup(app: Any, readiness_state: MutableMapping[str, bool]) -> None:

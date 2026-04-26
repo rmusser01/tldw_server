@@ -85,6 +85,30 @@ def test_validate_startup_mcp_configuration_validates_non_debug_mode() -> None:
     assert logger.exception_messages == []
 
 
+def test_validate_startup_mcp_configuration_accepts_mapping_config() -> None:
+    startup_mcp = _import_startup_mcp_validation()
+    logger = _FakeLogger()
+    calls: list[str] = []
+
+    def _get_config() -> object:
+        calls.append("get")
+        return {"debug_mode": False}
+
+    def _validate_config() -> bool:
+        calls.append("validate")
+        return True
+
+    startup_mcp.validate_startup_mcp_configuration(
+        get_mcp_config=_get_config,
+        validate_mcp_config=_validate_config,
+        logger=logger,
+        startup_guard_exceptions=(RuntimeError,),
+    )
+
+    assert calls == ["get", "validate"]
+    assert logger.exception_messages == []
+
+
 def test_validate_startup_mcp_configuration_logs_and_reraises_invalid_config() -> None:
     startup_mcp = _import_startup_mcp_validation()
     logger = _FakeLogger()
