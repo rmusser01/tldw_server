@@ -78,9 +78,13 @@ class _ExplodingAdapter:
 class _LoggerStub:
     def __init__(self) -> None:
         self.error_calls: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
+        self.warning_calls: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
 
     def error(self, *args: Any, **kwargs: Any) -> None:
         self.error_calls.append((args, kwargs))
+
+    def warning(self, *args: Any, **kwargs: Any) -> None:
+        self.warning_calls.append((args, kwargs))
 
     def info(self, *_args: Any, **_kwargs: Any) -> None:
         return
@@ -199,6 +203,42 @@ async def test_generate_document_insights_parses_fenced_json_with_think(mock_use
     payload = response.json()
     assert payload["insights"][0]["category"] == "summary"
     assert payload["insights"][0]["title"] == "T"
+
+    app.dependency_overrides.clear()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_generate_document_insights_sanitizes_missing_insights_list_warning(
+    mock_user,
+    mock_db,
+    monkeypatch,
+):
+    app.dependency_overrides[get_request_user] = lambda: mock_user
+    app.dependency_overrides[get_media_db_for_user] = lambda: mock_db
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(insights_mod, "logger", logger_stub, raising=True)
+
+    with (
+        patch.object(insights_mod, "_get_adapter", return_value=_StubAdapter()),
+        patch.object(insights_mod, "resolve_provider_api_key", return_value=("key", None)),
+        patch.object(insights_mod, "provider_requires_api_key", return_value=False),
+        patch.object(insights_mod, "_resolve_model", return_value="test-model"),
+        patch.object(insights_mod, "extract_response_content", return_value={"unexpected": "shape"}),
+        patch.object(insights_mod, "get_cached_response", return_value=None),
+    ):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.post("/api/v1/media/1/insights")
+
+    assert response.status_code == 200
+    assert response.json()["insights"] == []
+    assert [args[0] for args, _kwargs in logger_stub.warning_calls if args] == [
+        "LLM response did not include an insights list"
+    ]
+    assert all(not kwargs.get("exc_info") for _args, kwargs in logger_stub.warning_calls)
+    rendered_calls = repr(logger_stub.warning_calls)
+    assert "media_id" not in rendered_calls
+    assert "NoneType" not in rendered_calls
 
     app.dependency_overrides.clear()
 

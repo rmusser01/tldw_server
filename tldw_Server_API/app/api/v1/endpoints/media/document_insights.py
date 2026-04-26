@@ -354,11 +354,7 @@ async def generate_document_insights(
         raw_insights = payload.get("insights") if isinstance(payload, dict) else payload
 
         if not isinstance(raw_insights, list):
-            logger.warning(
-                "LLM response did not include an insights list (media_id={}): {}",
-                media_id,
-                type(raw_insights),
-            )
+            logger.warning("LLM response did not include an insights list")
             raw_insights = []
 
         insights = _normalize_insights(raw_insights)
