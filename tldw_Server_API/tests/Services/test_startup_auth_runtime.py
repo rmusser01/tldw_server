@@ -130,6 +130,58 @@ async def test_initialize_auth_runtime_services_logs_and_preserves_partial_handl
 
 
 @pytest.mark.asyncio
+async def test_initialize_auth_runtime_services_reraises_auth_startup_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    auth_runtime = _import_startup_auth_runtime()
+    logger = _FakeLogger()
+
+    async def _raise_auth_startup_error():
+        raise auth_runtime.AuthStartupError("AUTHNZ_DB_POOL_STARTUP_FAILED")
+
+    monkeypatch.setattr(auth_runtime, "_init_auth_services", _raise_auth_startup_error)
+
+    with pytest.raises(
+        auth_runtime.AuthStartupError,
+        match="AUTHNZ_DB_POOL_STARTUP_FAILED",
+    ):
+        await auth_runtime.initialize_auth_runtime_services(
+            app=object(),
+            logger=logger,
+            startup_guard_exceptions=(RuntimeError,),
+        )
+
+    assert logger.info_messages == []
+    assert logger.exception_messages == []
+
+
+@pytest.mark.asyncio
+async def test_initialize_auth_runtime_services_rejects_missing_db_pool(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    auth_runtime = _import_startup_auth_runtime()
+    logger = _FakeLogger()
+
+    async def _fake_init_auth_services():
+        return None
+
+    monkeypatch.setattr(auth_runtime, "_init_auth_services", _fake_init_auth_services)
+
+    with pytest.raises(
+        auth_runtime.AuthStartupError,
+        match="AUTHNZ_DB_POOL_STARTUP_RETURNED_NONE",
+    ):
+        await auth_runtime.initialize_auth_runtime_services(
+            app=object(),
+            logger=logger,
+            startup_guard_exceptions=(RuntimeError,),
+        )
+
+    assert logger.info_messages == []
+    assert logger.exception_messages == []
+
+
+@pytest.mark.asyncio
 async def test_initialize_auth_runtime_services_logs_invalid_security_alert_configuration(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

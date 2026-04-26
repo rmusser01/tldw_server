@@ -7,6 +7,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from tldw_Server_API.app.services.startup_auth import AuthStartupError
+
 
 @dataclass
 class AuthRuntimeHandles:
@@ -23,7 +25,10 @@ async def initialize_auth_runtime_services(
     handles = AuthRuntimeHandles()
 
     try:
-        handles.db_pool = await _init_auth_services()
+        db_pool = await _init_auth_services()
+        if db_pool is None:
+            raise AuthStartupError("AUTHNZ_DB_POOL_STARTUP_RETURNED_NONE")
+        handles.db_pool = db_pool
         await _init_resource_governor(app)
         _validate_auth_rg_startup_guards(app)
         handles.session_manager = await _get_session_manager()
@@ -37,6 +42,8 @@ async def initialize_auth_runtime_services(
         except ValueError as config_error:
             logger.exception(f"App Startup: Security alert configuration invalid: {config_error}")
             raise
+    except AuthStartupError:
+        raise
     except ValueError:
         raise
     except startup_guard_exceptions as exc:

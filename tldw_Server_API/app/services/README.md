@@ -96,7 +96,7 @@ event yet, but new workers should prefer cooperative stop events.
 Lifecycle helpers should make failure semantics explicit.
 
 - Critical startup resources should fail fast. Auth DB pool initialization is a
-  critical startup dependency and should raise on failure.
+  critical startup dependency and raises `AuthStartupError` on failure.
 - Optional startup services may log and return `None` when disabled or
   unavailable.
 - Reporting-only paths may degrade, but should log at an operator-visible level

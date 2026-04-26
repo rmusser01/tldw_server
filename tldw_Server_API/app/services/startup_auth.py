@@ -25,16 +25,24 @@ _IMPORT_EXCEPTIONS = (
 )
 
 
-async def init_auth_services() -> object | None:
+class AuthStartupError(RuntimeError):
+    """Raised when AuthNZ startup cannot safely continue."""
+
+
+async def init_auth_services() -> object:
     """Initialize AuthNZ database access, migrations, seed data, and overrides."""
     try:
         from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 
         db_pool = await get_db_pool()
+        if db_pool is None:
+            raise AuthStartupError("AUTHNZ_DB_POOL_STARTUP_RETURNED_NONE")
         logger.info("App Startup: Database pool initialized")
+    except AuthStartupError:
+        raise
     except _STARTUP_GUARD_EXCEPTIONS as exc:
         logger.error(f"App Startup: Failed to initialize database pool: {exc}")
-        raise
+        raise AuthStartupError("AUTHNZ_DB_POOL_STARTUP_FAILED") from exc
 
     try:
         from tldw_Server_API.app.core.AuthNZ.initialize import ensure_authnz_schema_ready_once

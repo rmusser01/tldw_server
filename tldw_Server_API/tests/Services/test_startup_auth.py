@@ -167,7 +167,7 @@ async def test_init_auth_services_runs_pg_extras_when_pool_present(
 
 
 @pytest.mark.asyncio
-async def test_init_auth_services_reraises_when_db_pool_init_fails(
+async def test_init_auth_services_raises_auth_startup_error_when_db_pool_init_fails(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async def _failing_get_db_pool():
@@ -181,7 +181,35 @@ async def test_init_auth_services_reraises_when_db_pool_init_fails(
 
     startup_auth = _import_startup_auth()
 
-    with pytest.raises(RuntimeError, match="db boom"):
+    with pytest.raises(
+        startup_auth.AuthStartupError,
+        match="AUTHNZ_DB_POOL_STARTUP_FAILED",
+    ) as exc_info:
+        await startup_auth.init_auth_services()
+
+    assert isinstance(exc_info.value.__cause__, RuntimeError)
+    assert str(exc_info.value.__cause__) == "db boom"
+
+
+@pytest.mark.asyncio
+async def test_init_auth_services_raises_auth_startup_error_when_db_pool_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _missing_get_db_pool():
+        return None
+
+    _install_module(
+        monkeypatch,
+        "tldw_Server_API.app.core.AuthNZ.database",
+        get_db_pool=_missing_get_db_pool,
+    )
+
+    startup_auth = _import_startup_auth()
+
+    with pytest.raises(
+        startup_auth.AuthStartupError,
+        match="AUTHNZ_DB_POOL_STARTUP_RETURNED_NONE",
+    ):
         await startup_auth.init_auth_services()
 
 
