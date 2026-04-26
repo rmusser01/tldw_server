@@ -482,6 +482,79 @@ def test_reprocess_embeddings_state_database_error_is_sanitized():
         fastapi_app.dependency_overrides.pop(get_media_db_for_user, None)
 
 
+def test_reprocess_force_regenerate_embeddings_delete_failure_sanitizes_log(tmp_path, monkeypatch):
+    from tldw_Server_API.app.main import app as fastapi_app
+    from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
+    from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
+    from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user
+    from tldw_Server_API.app.api.v1.endpoints.media import reprocess as reprocess_endpoint
+
+    logger_stub = _patch_reprocess_logger(monkeypatch)
+    monkeypatch.setenv("TEST_MODE", "1")
+
+    def _raise_delete_embeddings_for_media(media_id: int, user_id: str) -> None:
+        _ = media_id, user_id
+        raise RuntimeError("embedding backend leaked /private/vector/token")
+
+    async def _fake_generate_embeddings_for_media(**_kwargs):
+        return {"status": "success", "embedding_count": 1, "chunks_processed": 1}
+
+    monkeypatch.setattr(
+        reprocess_endpoint,
+        "_delete_embeddings_for_media",
+        _raise_delete_embeddings_for_media,
+    )
+    monkeypatch.setattr(
+        reprocess_endpoint.embeddings_endpoint,
+        "generate_embeddings_for_media",
+        _fake_generate_embeddings_for_media,
+    )
+    monkeypatch.setattr(reprocess_endpoint, "invalidate_rag_caches", lambda *_, **__: None)
+
+    db_path = tmp_path / "media.db"
+    seed_db = MediaDatabase(db_path=str(db_path), client_id="test_client")
+    media_id = create_test_media(seed_db, title="Embeddings Doc", content="Embeddings should still regenerate.")
+    seed_db.close_connection()
+
+    async def _override_user() -> User:
+        return User(id=1, username="tester", email=None, is_active=True)
+
+    async def _override_db() -> AsyncGenerator[MediaDatabase, None]:
+        override_db = MediaDatabase(db_path=str(db_path), client_id="test_client")
+        try:
+            yield override_db
+        finally:
+            override_db.close_connection()
+
+    fastapi_app.dependency_overrides[get_request_user] = _override_user
+    fastapi_app.dependency_overrides[get_auth_principal] = _principal_override()
+    fastapi_app.dependency_overrides[get_media_db_for_user] = _override_db
+
+    try:
+        with TestClient(fastapi_app) as client:
+            resp = client.post(
+                f"/api/v1/media/{media_id}/reprocess",
+                json={
+                    "perform_chunking": False,
+                    "generate_embeddings": True,
+                    "force_regenerate_embeddings": True,
+                    "chunk_size": 50,
+                    "chunk_overlap": 10,
+                },
+            )
+            assert resp.status_code == 200, resp.text
+            assert resp.json()["status"] == "completed"
+    finally:
+        fastapi_app.dependency_overrides.pop(get_request_user, None)
+        fastapi_app.dependency_overrides.pop(get_auth_principal, None)
+        fastapi_app.dependency_overrides.pop(get_media_db_for_user, None)
+
+    _assert_sanitized_warning_log(
+        logger_stub,
+        "Failed to delete embeddings before regeneration",
+    )
+
+
 def test_generate_embeddings_sanitizes_persisted_error(monkeypatch):
     from tldw_Server_API.app.api.v1.endpoints.media import reprocess as reprocess_endpoint
 

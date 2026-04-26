@@ -327,8 +327,8 @@ async def reprocess_media_item(
         if payload.force_regenerate_embeddings:
             try:
                 _delete_embeddings_for_media(media_id, user_id)
-            except Exception as exc:
-                logger.warning("Failed to delete embeddings for media {}: {}", media_id, exc)
+            except Exception:
+                logger.warning("Failed to delete embeddings before regeneration")
 
         embeddings_started = True
         media_payload = {"media_item": media_item, "content": media_item}
