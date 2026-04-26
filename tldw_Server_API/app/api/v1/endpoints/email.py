@@ -117,13 +117,8 @@ async def list_email_sources(
                     source_key=str(source_id),
                     tenant_id=tenant_id,
                 )
-            except (DatabaseError, InputError) as exc:
-                logger.warning(
-                    "Failed to fetch sync state for source_id={} user_id={}: {}",
-                    source_id,
-                    user_id,
-                    exc,
-                )
+            except (DatabaseError, InputError):
+                logger.warning("Failed to fetch email sync state")
 
         sync_payload = {
             "state": _derive_sync_state(sync_state),

@@ -17,9 +17,13 @@ pytestmark = pytest.mark.unit
 class _LoggerStub:
     def __init__(self) -> None:
         self.errors: list[tuple[str, tuple[object, ...], dict[str, object]]] = []
+        self.warnings: list[tuple[str, tuple[object, ...], dict[str, object]]] = []
 
     def error(self, message: str, *args: object, **kwargs: object) -> None:
         self.errors.append((message, args, kwargs))
+
+    def warning(self, message: str, *args: object, **kwargs: object) -> None:
+        self.warnings.append((message, args, kwargs))
 
 
 class _BrokenEmailDb:
@@ -151,6 +155,49 @@ async def test_trigger_email_source_sync_backend_error_log_is_sanitized(monkeypa
     assert "55" not in rendered
     assert "/private/connectors.db" not in rendered
     assert "backend failed" not in rendered
+
+
+@pytest.mark.asyncio
+async def test_list_email_sources_sync_state_log_is_sanitized(monkeypatch):
+    class _BrokenSyncStateDb:
+        def get_email_sync_state(self, **_kwargs):
+            raise DatabaseError("sync state failed at /private/email.db")
+
+    logger_stub = _LoggerStub()
+    monkeypatch.setitem(email_endpoint.settings, "EMAIL_GMAIL_CONNECTOR_ENABLED", True)
+    monkeypatch.setattr(email_endpoint, "logger", logger_stub)
+
+    async def _list_sources(_db, _user_id):
+        return [
+            {
+                "id": 55,
+                "account_id": 7,
+                "provider": "gmail",
+                "remote_id": "remote-1",
+                "type": "mailbox",
+                "path": "inbox",
+                "options": {},
+                "enabled": True,
+                "last_synced_at": None,
+            }
+        ]
+
+    monkeypatch.setattr(email_endpoint, "list_connector_sources", _list_sources)
+
+    response = await list_email_sources(
+        db=object(),
+        principal=type("Principal", (), {"user_id": 42})(),
+        media_db=_BrokenSyncStateDb(),
+    )
+
+    assert response["total"] == 1
+    assert response["items"][0]["sync"]["state"] == "never_synced"
+    assert logger_stub.warnings == [("Failed to fetch email sync state", (), {})]
+    rendered = " ".join([logger_stub.warnings[0][0], *(str(arg) for arg in logger_stub.warnings[0][1])])
+    assert "42" not in rendered
+    assert "55" not in rendered
+    assert "/private/email.db" not in rendered
+    assert "sync state failed" not in rendered
 
 
 @pytest.mark.asyncio
