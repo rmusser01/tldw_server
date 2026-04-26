@@ -4,7 +4,9 @@ from fastapi import HTTPException
 from tldw_Server_API.app.api.v1.endpoints import email as email_endpoint
 from tldw_Server_API.app.api.v1.endpoints.email import (
     get_email_message_detail,
+    list_email_sources,
     search_email_messages,
+    trigger_email_source_sync,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.errors import DatabaseError, InputError
 
@@ -89,6 +91,66 @@ async def test_search_email_messages_database_error_log_is_sanitized(monkeypatch
     rendered = " ".join([logger_stub.errors[0][0], *(str(arg) for arg in logger_stub.errors[0][1])])
     assert "/private/email.db" not in rendered
     assert "driver failed" not in rendered
+
+
+@pytest.mark.asyncio
+async def test_list_email_sources_backend_error_log_is_sanitized(monkeypatch):
+    logger_stub = _LoggerStub()
+    monkeypatch.setitem(email_endpoint.settings, "EMAIL_GMAIL_CONNECTOR_ENABLED", True)
+    monkeypatch.setattr(email_endpoint, "logger", logger_stub)
+
+    async def _raise_list_sources(_db, _user_id):
+        raise RuntimeError("connector backend failed at /private/connectors.db")
+
+    monkeypatch.setattr(email_endpoint, "list_connector_sources", _raise_list_sources)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await list_email_sources(
+            db=object(),
+            principal=type("Principal", (), {"user_id": 42})(),
+            media_db=object(),
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "Failed to list email sources."
+    assert logger_stub.errors == [("Failed to list email sources", (), {})]
+    rendered = " ".join([logger_stub.errors[0][0], *(str(arg) for arg in logger_stub.errors[0][1])])
+    assert "42" not in rendered
+    assert "/private/connectors.db" not in rendered
+    assert "backend failed" not in rendered
+
+
+@pytest.mark.asyncio
+async def test_trigger_email_source_sync_backend_error_log_is_sanitized(monkeypatch):
+    logger_stub = _LoggerStub()
+    monkeypatch.setitem(email_endpoint.settings, "EMAIL_GMAIL_CONNECTOR_ENABLED", True)
+    monkeypatch.setattr(email_endpoint, "logger", logger_stub)
+
+    async def _get_source(_db, _user_id, _source_id):
+        return {"provider": "gmail"}
+
+    async def _raise_import_job(_user_id, _source_id, *, request_id=None):
+        raise RuntimeError("queue backend failed at /private/connectors.db")
+
+    monkeypatch.setattr(email_endpoint, "get_source_by_id", _get_source)
+    monkeypatch.setattr(email_endpoint, "create_import_job", _raise_import_job)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await trigger_email_source_sync(
+            request=None,
+            source_id=55,
+            db=object(),
+            principal=type("Principal", (), {"user_id": 42})(),
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "Failed to queue email sync job."
+    assert logger_stub.errors == [("Failed to queue email sync job", (), {})]
+    rendered = " ".join([logger_stub.errors[0][0], *(str(arg) for arg in logger_stub.errors[0][1])])
+    assert "42" not in rendered
+    assert "55" not in rendered
+    assert "/private/connectors.db" not in rendered
+    assert "backend failed" not in rendered
 
 
 @pytest.mark.asyncio

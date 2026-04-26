@@ -97,7 +97,7 @@ async def list_email_sources(
     try:
         rows = await list_connector_sources(db, user_id)
     except Exception as exc:
-        logger.error("Failed to list connector sources for user_id={}: {}", user_id, exc)
+        logger.error("Failed to list email sources")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to list email sources.",
@@ -184,12 +184,7 @@ async def trigger_email_source_sync(
     try:
         job = await create_import_job(user_id, source_id, request_id=rid)
     except Exception as exc:
-        logger.error(
-            "Failed to queue email sync job for source_id={} user_id={}: {}",
-            source_id,
-            user_id,
-            exc,
-        )
+        logger.error("Failed to queue email sync job")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to queue email sync job.",
