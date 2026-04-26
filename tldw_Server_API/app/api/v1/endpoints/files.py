@@ -247,8 +247,8 @@ async def export_file_artifact(
         try:
             if path.exists():
                 path.unlink()
-        except Exception as exc:
-            logger.warning("files.export: failed to delete export file for {}: {}", file_id, exc)
+        except Exception:
+            logger.warning("files.export: failed to delete export file")
         _clear_export_state(
             user_id=user_id,
             file_id=file_id,
