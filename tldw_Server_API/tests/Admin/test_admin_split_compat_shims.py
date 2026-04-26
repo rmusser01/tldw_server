@@ -3,6 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
+from fastapi import HTTPException
 
 REQUIRED_ROOT_SHIM_SYMBOLS = {
     "_is_postgres_backend",
@@ -83,6 +84,77 @@ async def test_admin_rbac_scope_enforcement_uses_root_compat_shim(monkeypatch) -
         "target_user_id": 42,
         "require_hierarchy": True,
     }
+
+
+@pytest.mark.asyncio
+async def test_admin_kanban_fts_maintenance_closes_db(monkeypatch) -> None:
+    from tldw_Server_API.app.api.v1.endpoints.admin import admin_rbac
+
+    calls: list[object] = []
+
+    class _FakeKanbanDB:
+        def optimize_fts(self) -> None:
+            calls.append("optimize")
+
+        def close(self) -> None:
+            calls.append("close")
+
+    async def _fake_scope_check(principal, target_user_id: int, *, require_hierarchy: bool) -> None:
+        calls.append(
+            {
+                "principal": principal,
+                "target_user_id": target_user_id,
+                "require_hierarchy": require_hierarchy,
+            }
+        )
+
+    monkeypatch.setattr(admin_rbac, "_enforce_admin_user_scope", _fake_scope_check)
+    monkeypatch.setattr(admin_rbac, "_get_kanban_db_for_user_id", lambda user_id: _FakeKanbanDB())
+
+    principal = SimpleNamespace(user_id=1)
+    response = await admin_rbac.admin_kanban_fts_maintenance(
+        "optimize",
+        user_id=42,
+        principal=principal,
+    )
+
+    assert response.status == "ok"
+    assert calls == [
+        {"principal": principal, "target_user_id": 42, "require_hierarchy": True},
+        "optimize",
+        "close",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_admin_kanban_fts_maintenance_closes_db_when_operation_fails(monkeypatch) -> None:
+    from tldw_Server_API.app.api.v1.endpoints.admin import admin_rbac
+
+    calls: list[str] = []
+
+    class _FakeKanbanDB:
+        def rebuild_fts(self) -> None:
+            calls.append("rebuild")
+            raise admin_rbac.KanbanDBError("boom")
+
+        def close(self) -> None:
+            calls.append("close")
+
+    async def _fake_scope_check(*_args, **_kwargs) -> None:
+        calls.append("scope")
+
+    monkeypatch.setattr(admin_rbac, "_enforce_admin_user_scope", _fake_scope_check)
+    monkeypatch.setattr(admin_rbac, "_get_kanban_db_for_user_id", lambda user_id: _FakeKanbanDB())
+
+    with pytest.raises(HTTPException) as exc_info:
+        await admin_rbac.admin_kanban_fts_maintenance(
+            "rebuild",
+            user_id=42,
+            principal=SimpleNamespace(user_id=1),
+        )
+
+    assert exc_info.value.status_code == 500
+    assert calls == ["scope", "rebuild", "close"]
 
 
 def test_admin_backend_detector_is_loaded_via_root_compat_shim(monkeypatch) -> None:
