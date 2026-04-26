@@ -243,7 +243,7 @@ async def search_email_messages(
         }
     except (InputError, DatabaseError) as exc:
         if isinstance(exc, DatabaseError):
-            logger.error("Database error during email search: {}", exc, exc_info=True)
+            logger.error("Database error during email search")
         raise map_db_error_to_http(
             exc,
             default_detail="A database error occurred during email search.",
@@ -276,12 +276,7 @@ async def get_email_message_detail(
         return detail
     except (InputError, DatabaseError) as exc:
         if isinstance(exc, DatabaseError):
-            logger.error(
-                "Database error during email detail lookup (email_message_id={}): {}",
-                email_message_id,
-                exc,
-                exc_info=True,
-            )
+            logger.error("Database error during email detail lookup")
         raise map_db_error_to_http(
             exc,
             default_detail="A database error occurred while fetching email message detail.",

@@ -12,6 +12,14 @@ from tldw_Server_API.app.core.DB_Management.media_db.errors import DatabaseError
 pytestmark = pytest.mark.unit
 
 
+class _LoggerStub:
+    def __init__(self) -> None:
+        self.errors: list[tuple[str, tuple[object, ...], dict[str, object]]] = []
+
+    def error(self, message: str, *args: object, **kwargs: object) -> None:
+        self.errors.append((message, args, kwargs))
+
+
 class _BrokenEmailDb:
     def __init__(
         self,
@@ -62,6 +70,28 @@ async def test_search_email_messages_maps_db_errors(
 
 
 @pytest.mark.asyncio
+async def test_search_email_messages_database_error_log_is_sanitized(monkeypatch):
+    logger_stub = _LoggerStub()
+    monkeypatch.setitem(email_endpoint.settings, "EMAIL_OPERATOR_SEARCH_ENABLED", True)
+    monkeypatch.setattr(email_endpoint, "logger", logger_stub)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await search_email_messages(
+            q="budget",
+            limit=50,
+            offset=0,
+            db=_BrokenEmailDb(search_exc=DatabaseError("driver failed at /private/email.db")),
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "A database error occurred during email search."
+    assert logger_stub.errors == [("Database error during email search", (), {})]
+    rendered = " ".join([logger_stub.errors[0][0], *(str(arg) for arg in logger_stub.errors[0][1])])
+    assert "/private/email.db" not in rendered
+    assert "driver failed" not in rendered
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("raised_exc", "expected_status", "expected_detail"),
     [
@@ -89,3 +119,24 @@ async def test_get_email_message_detail_maps_db_errors(
 
     assert exc_info.value.status_code == expected_status
     assert exc_info.value.detail == expected_detail
+
+
+@pytest.mark.asyncio
+async def test_get_email_message_detail_database_error_log_is_sanitized(monkeypatch):
+    logger_stub = _LoggerStub()
+    monkeypatch.setitem(email_endpoint.settings, "EMAIL_OPERATOR_SEARCH_ENABLED", True)
+    monkeypatch.setattr(email_endpoint, "logger", logger_stub)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await get_email_message_detail(
+            email_message_id=42,
+            db=_BrokenEmailDb(detail_exc=DatabaseError("driver failed at /private/email.db")),
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "A database error occurred while fetching email message detail."
+    assert logger_stub.errors == [("Database error during email detail lookup", (), {})]
+    rendered = " ".join([logger_stub.errors[0][0], *(str(arg) for arg in logger_stub.errors[0][1])])
+    assert "42" not in rendered
+    assert "/private/email.db" not in rendered
+    assert "driver failed" not in rendered
