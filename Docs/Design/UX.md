@@ -391,6 +391,3 @@ https://github.com/albirrkarim/react-speech-highlight-demo
   - Start with a Noun or verb
   - Drop Articles (a, the, an)
   - Be clear & Direct
-
-
-

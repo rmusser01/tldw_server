@@ -34,8 +34,8 @@ def map_db_error_to_http(
     input_status: int | None = None,
     not_found_status: int | None = None,
     default_detail: str = "Database error occurred",
-    input_detail: str = "Invalid input",
-    conflict_detail: str = "Conflict detected",
+    input_detail: str | None = None,
+    conflict_detail: str | None = None,
     log_context: str | None = None,
 ) -> HTTPException:
     """
@@ -50,9 +50,11 @@ def map_db_error_to_http(
 
     `input_detail` and `conflict_detail` let call sites keep stable,
     endpoint-specific client messages instead of exposing raw DB exception
-    strings. `log_context` lets callers preserve request identifiers such as
-    `media_id` in server-side logs.
+    strings. If omitted, the exception message is preserved for compatibility,
+    with a safe generic fallback for empty messages. `log_context` lets callers
+    preserve request identifiers such as `media_id` in server-side logs.
     """
+
     def _log_db_mapping_error(label: str) -> None:
         prefix = f"{log_context}: " if log_context else ""
         logger.error(f"{prefix}{label}: {exc}", exc_info=True)
@@ -68,12 +70,12 @@ def map_db_error_to_http(
             _log_db_mapping_error("InputError from DB layer")
         return HTTPException(
             status_code=resolved_input_status,
-            detail=input_detail,
+            detail=input_detail if input_detail is not None else str(exc) or "Invalid input",
         )
     if isinstance(exc, ConflictError):
         return HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=conflict_detail,
+            detail=(conflict_detail if conflict_detail is not None else str(exc) or "Conflict detected"),
         )
     if isinstance(exc, SchemaError):
         # Schema issues are serious; log with stack trace.

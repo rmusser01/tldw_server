@@ -154,10 +154,7 @@ def build_postgres_database_url(
     host: str = "postgres",
     port: str = "5432",
 ) -> str:
-    return (
-        f"postgresql://{quote(user, safe='')}:{quote(password, safe='')}"
-        f"@{host}:{port}/{quote(db, safe='')}"
-    )
+    return f"postgresql://{quote(user, safe='')}:{quote(password, safe='')}" f"@{host}:{port}/{quote(db, safe='')}"
 
 
 def build_profile_env(
