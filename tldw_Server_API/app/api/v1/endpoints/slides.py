@@ -947,8 +947,8 @@ def _resolve_media_source_text(
             version_number=None,
             include_content=True,
         )
-    except Exception as exc:
-        logger.debug("Failed to resolve latest document content for media {}: {}", media_id, exc)
+    except Exception:
+        logger.debug("Failed to resolve latest document content for slides source media")
         latest_document = None
 
     if isinstance(latest_document, dict):

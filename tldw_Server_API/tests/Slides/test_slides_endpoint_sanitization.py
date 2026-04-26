@@ -148,3 +148,27 @@ def test_generate_presentation_latency_metric_log_is_sanitized(monkeypatch):
     rendered = " ".join([logger_stub.debugs[0][0], *(str(arg) for arg in logger_stub.debugs[0][1])])
     assert "/private/slides-latency.db" not in rendered
     assert "exploded" not in rendered
+
+
+def test_resolve_media_source_text_document_fallback_log_is_sanitized(monkeypatch):
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(slides_ep, "logger", logger_stub)
+    monkeypatch.setattr(slides_ep, "get_latest_transcription", lambda _db, _media_id: None)
+
+    def _raise_document_lookup(**_kwargs):
+        raise RuntimeError("document backend exploded at /private/slides-documents.db")
+
+    monkeypatch.setattr(slides_ep, "get_document_version", _raise_document_lookup, raising=False)
+
+    source_text = slides_ep._resolve_media_source_text(
+        media_db=object(),
+        media_row={"content": " Stored media content "},
+        media_id=99,
+    )
+
+    assert source_text == "Stored media content"
+    assert logger_stub.debugs == [("Failed to resolve latest document content for slides source media", (), {})]
+    rendered = " ".join([logger_stub.debugs[0][0], *(str(arg) for arg in logger_stub.debugs[0][1])])
+    assert "/private/slides-documents.db" not in rendered
+    assert "exploded" not in rendered
+    assert "99" not in rendered
