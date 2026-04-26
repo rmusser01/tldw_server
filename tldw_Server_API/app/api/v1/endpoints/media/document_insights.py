@@ -386,12 +386,7 @@ async def generate_document_insights(
         return response
 
     except Exception as e:
-        logger.error(
-            "Failed to parse LLM response for document insights (media_id={}): {}",
-            media_id,
-            e,
-            exc_info=True,
-        )
+        logger.error("Failed to parse LLM response for document insights")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to parse insights from LLM response.",
