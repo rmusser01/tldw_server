@@ -154,6 +154,46 @@ def test_clear_export_state_sanitizes_cleanup_failure_log(monkeypatch):
     assert "/private/files/export-state.db" not in rendered
 
 
+@pytest.mark.asyncio
+async def test_export_expired_file_delete_failure_log_is_sanitized(monkeypatch):
+    class _FakeExportPath:
+        def exists(self) -> bool:
+            return True
+
+        def unlink(self) -> None:
+            raise RuntimeError("expired export unlink leaked /private/files/export.md")
+
+    class _FakeCollectionsDb:
+        def get_file_artifact(self, file_id: int):
+            assert file_id == 123
+            return SimpleNamespace(
+                export_status="ready",
+                export_storage_path="export.md",
+                export_format="md",
+                export_expires_at=(datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat(),
+            )
+
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(files_endpoint, "logger", logger_stub)
+    monkeypatch.setattr(files_endpoint, "_resolve_export_path_for_user", lambda user_id, path: _FakeExportPath())
+    monkeypatch.setattr(files_endpoint, "_clear_export_state", lambda **kwargs: None)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await files_endpoint.export_file_artifact(
+            file_id=123,
+            format="md",
+            cdb=_FakeCollectionsDb(),
+            current_user=SimpleNamespace(id=777),
+        )
+
+    assert exc_info.value.status_code == 404
+    assert exc_info.value.detail == "export_expired"
+    assert logger_stub.warnings == [("files.export: failed to delete expired export file", (), {})]
+    rendered = " ".join([logger_stub.warnings[0][0], *(str(arg) for arg in logger_stub.warnings[0][1])])
+    assert "123" not in rendered
+    assert "/private/files/export.md" not in rendered
+
+
 def test_create_and_export_markdown_table(client_with_user):
     payload = {
         "file_type": "markdown_table",
