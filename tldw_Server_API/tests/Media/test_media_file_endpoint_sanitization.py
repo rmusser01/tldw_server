@@ -24,9 +24,36 @@ class _MediaFileDb:
         }
 
 
+class _EmptyStoragePathDb(_MediaFileDb):
+    def get_media_file(self, media_id: int, file_type: str):
+        record = super().get_media_file(media_id, file_type)
+        record["storage_path"] = ""
+        return record
+
+
 class _ExistenceErrorStorage:
     async def exists(self, storage_path: str) -> bool:
         raise StorageError("storage backend leaked /private/storage/original.pdf")
+
+
+@pytest.mark.asyncio
+async def test_get_media_file_sanitizes_empty_storage_path_log(monkeypatch) -> None:
+    fake_logger = MagicMock()
+    monkeypatch.setattr(file_mod, "logger", fake_logger)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await file_mod.get_media_file(
+            media_id=7,
+            file_type="original",
+            range_header=None,
+            if_none_match=None,
+            db=_EmptyStoragePathDb(),
+            current_user=SimpleNamespace(id=1),
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "File record is corrupted"
+    fake_logger.error.assert_called_once_with("File record has empty storage path")
 
 
 @pytest.mark.asyncio
