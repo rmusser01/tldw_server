@@ -106,7 +106,7 @@ async def test_quiesce_owned_job_pollers_waits_then_calls_stop_callback() -> Non
 
 
 @pytest.mark.asyncio
-async def test_stop_registered_job_pollers_logs_guard_cancel_failure_at_debug() -> None:
+async def test_stop_registered_job_pollers_logs_task_cancel_failure_at_warning() -> None:
     shutdown_pollers = _import_shutdown_owned_job_pollers()
     app = FastAPI()
     debug_messages: list[str] = []
@@ -171,5 +171,5 @@ async def test_stop_registered_job_pollers_logs_guard_cancel_failure_at_debug() 
     )
 
     assert task.cancelled is True
-    assert any("Job poller cancel guard triggered" in message for message in debug_messages)
-    assert not any("raised after cancellation" in message for message in warning_messages)
+    assert not any("Job poller cancel guard triggered" in message for message in debug_messages)
+    assert any("raised after cancellation" in message for message in warning_messages)
