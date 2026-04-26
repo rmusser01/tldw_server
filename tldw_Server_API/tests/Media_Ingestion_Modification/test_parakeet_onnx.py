@@ -227,6 +227,91 @@ class TestParakeetONNX:
         assert isinstance(result, str)
         mock_onnx_session.run.assert_called()
 
+    @patch('tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Parakeet_ONNX.load_parakeet_onnx_model')
+    def test_transcribe_provides_waveforms_lens_for_raw_waveform_export(self, mock_load_model, sample_audio_data):
+        """Raw waveform ONNX exports should receive both waveforms and waveforms_lens."""
+        from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Parakeet_ONNX import (
+            transcribe_with_parakeet_onnx
+        )
+
+        audio_data, sample_rate = sample_audio_data
+        session = MagicMock()
+        input_waveforms = MagicMock()
+        input_waveforms.name = "waveforms"
+        input_waveforms.shape = ["batch", "time"]
+        input_lens = MagicMock()
+        input_lens.name = "waveforms_lens"
+        input_lens.shape = ["batch"]
+        output = MagicMock()
+        output.name = "tokens"
+        session.get_inputs.return_value = [input_waveforms, input_lens]
+        session.get_outputs.return_value = [output]
+
+        captured_inputs = {}
+
+        def mock_run(output_names, input_dict):
+            captured_inputs.update(input_dict)
+            assert set(input_dict) == {"waveforms", "waveforms_lens"}
+            assert input_dict["waveforms"].shape == (1, audio_data.shape[0])
+            assert input_dict["waveforms"].dtype == np.float32
+            assert input_dict["waveforms_lens"].tolist() == [audio_data.shape[0]]
+            assert input_dict["waveforms_lens"].dtype == np.int64
+            return [np.array([[100, 101]], dtype=np.int64)]
+
+        session.run = MagicMock(side_effect=mock_run)
+        tokenizer = MagicMock()
+        tokenizer.decode.return_value = "raw waveform ok"
+        mock_load_model.return_value = (session, tokenizer)
+
+        result = transcribe_with_parakeet_onnx(audio_data, sample_rate)
+
+        assert result == "raw waveform ok"
+        assert captured_inputs["waveforms_lens"].tolist() == [audio_data.shape[0]]
+
+    @patch('tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Parakeet_ONNX.load_parakeet_onnx_model')
+    def test_chunked_transcribe_provides_waveforms_lens_for_raw_waveform_export(self, mock_load_model):
+        """Chunked raw waveform ONNX exports should receive per-chunk waveforms_lens."""
+        from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Parakeet_ONNX import (
+            transcribe_with_parakeet_onnx
+        )
+
+        sample_rate = 16000
+        audio_data = np.random.randn(sample_rate * 2).astype(np.float32)
+        session = MagicMock()
+        input_waveforms = MagicMock()
+        input_waveforms.name = "waveforms"
+        input_waveforms.shape = ["batch", "time"]
+        input_lens = MagicMock()
+        input_lens.name = "waveforms_lens"
+        input_lens.shape = ["batch"]
+        output = MagicMock()
+        output.name = "tokens"
+        session.get_inputs.return_value = [input_waveforms, input_lens]
+        session.get_outputs.return_value = [output]
+
+        seen_lens = []
+
+        def mock_run(output_names, input_dict):
+            assert set(input_dict) == {"waveforms", "waveforms_lens"}
+            assert input_dict["waveforms"].shape == (1, sample_rate)
+            seen_lens.append(input_dict["waveforms_lens"].tolist()[0])
+            return [np.array([[100]], dtype=np.int64)]
+
+        session.run = MagicMock(side_effect=mock_run)
+        tokenizer = MagicMock()
+        tokenizer.decode.return_value = "chunk ok"
+        mock_load_model.return_value = (session, tokenizer)
+
+        result = transcribe_with_parakeet_onnx(
+            audio_data,
+            sample_rate=sample_rate,
+            chunk_duration=1.0,
+            overlap_duration=0.0,
+        )
+
+        assert result == "chunk ok chunk ok"
+        assert seen_lens == [sample_rate, sample_rate]
+
     def test_preprocessing(self):
 
         """Test audio preprocessing functions."""
