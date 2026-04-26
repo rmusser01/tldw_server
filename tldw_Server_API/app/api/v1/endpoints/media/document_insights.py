@@ -331,7 +331,7 @@ async def generate_document_insights(
             media_id,
         )
     except ChatConfigurationError as e:
-        logger.error("LLM configuration error for insights: {}", e)
+        logger.error("LLM configuration error for insights")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="LLM provider configuration error",

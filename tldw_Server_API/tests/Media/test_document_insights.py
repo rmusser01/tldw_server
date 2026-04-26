@@ -289,9 +289,11 @@ async def test_generate_document_insights_invalid_json_returns_500(mock_user, mo
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_generate_document_insights_sanitizes_configuration_errors(mock_user, mock_db):
+async def test_generate_document_insights_sanitizes_configuration_errors(mock_user, mock_db, monkeypatch):
     app.dependency_overrides[get_request_user] = lambda: mock_user
     app.dependency_overrides[get_media_db_for_user] = lambda: mock_db
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(insights_mod, "logger", logger_stub, raising=True)
 
     with (
         patch.object(insights_mod, "_get_adapter", return_value=_StubAdapter()),
@@ -305,6 +307,12 @@ async def test_generate_document_insights_sanitizes_configuration_errors(mock_us
 
     assert response.status_code == 503
     assert response.json()["detail"] == "LLM provider configuration error"
+    assert [args[0] for args, _kwargs in logger_stub.error_calls if args] == [
+        "LLM configuration error for insights"
+    ]
+    assert all(not kwargs.get("exc_info") for _args, kwargs in logger_stub.error_calls)
+    rendered_calls = repr(logger_stub.error_calls)
+    assert "Model is required" not in rendered_calls
 
     app.dependency_overrides.clear()
 
