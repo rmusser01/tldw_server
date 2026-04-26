@@ -305,6 +305,49 @@ async def test_select_source_nodes_sanitizes_empty_generated_fallback_log(monkey
     fake_logger.debug.assert_any_call("Generated fallback requested but produced no nodes")
 
 
+@pytest.mark.asyncio
+async def test_select_source_nodes_sanitizes_sparse_pdf_fallback_log(monkeypatch) -> None:
+    fake_logger = MagicMock()
+    monkeypatch.setattr(navigation_mod, "logger", fake_logger)
+
+    sparse_outline = [
+        {
+            "id": "pdf_outline:0",
+            "parent_id": None,
+            "level": 1,
+            "title": "Title Page",
+            "order": 0,
+            "path_label": "1",
+            "target_type": "page",
+            "target_start": 1,
+            "target_end": None,
+            "target_href": None,
+            "source": "pdf_outline",
+            "confidence": 1.0,
+        }
+    ]
+
+    async def _sparse_pdf_outline(*_args, **_kwargs):
+        return sparse_outline
+
+    monkeypatch.setattr(navigation_mod, "_extract_pdf_outline_nodes", _sparse_pdf_outline)
+    monkeypatch.setattr(navigation_mod, "_extract_generated_toc_nodes", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(navigation_mod, "_extract_document_structure_nodes", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(navigation_mod, "_extract_transcript_segment_nodes", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(navigation_mod, "_extract_chunk_metadata_nodes", lambda *_args, **_kwargs: [])
+
+    nodes, sources = await navigation_mod._select_source_nodes(
+        media_id=7,
+        db=object(),
+        media={"type": "pdf"},
+        include_generated_fallback=False,
+    )
+
+    assert nodes == sparse_outline
+    assert sources == list(navigation_mod.NAVIGATION_SOURCE_PRIORITY)
+    fake_logger.debug.assert_any_call("Navigation source pdf_outline produced sparse structure; trying fallback sources")
+
+
 def test_get_media_text_sanitizes_document_version_failure_log(monkeypatch) -> None:
     fake_logger = MagicMock()
     monkeypatch.setattr(navigation_mod, "logger", fake_logger)

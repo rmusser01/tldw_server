@@ -1214,10 +1214,7 @@ async def _select_source_nodes(
             nodes = await _extract_pdf_outline_nodes(media_id, db, media)
             if nodes and _is_sparse_pdf_outline(nodes):
                 sparse_pdf_candidate = nodes
-                logger.debug(
-                    "Navigation source pdf_outline produced sparse structure for media_id={}; trying fallback sources",
-                    media_id,
-                )
+                logger.debug("Navigation source pdf_outline produced sparse structure; trying fallback sources")
                 continue
         elif source == "generated_toc":
             nodes = _extract_generated_toc_nodes(media_id, db, media)
