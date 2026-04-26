@@ -18,6 +18,9 @@ from .omnivoice_sidecar_protocol import X_TLDW_SIDECAR_TOKEN_HEADER, build_sidec
 from .omnivoice_sidecar_server import validate_loopback_host
 
 
+DEFAULT_OMNIVOICE_MODEL_ID = "k2-fsa/OmniVoice"
+
+
 def create_sidecar_async_client(*, timeout: float | None = None) -> httpx.AsyncClient:
     """Create an httpx client dedicated to loopback sidecar traffic."""
     kwargs: dict[str, Any] = {"trust_env": False}
@@ -39,8 +42,20 @@ class OmniVoiceSidecarSupervisor:
         self._port_probe_max = max(0, int(self._coalesce_extra_param("port_probe_max", 10)))
         self._healthcheck_timeout_seconds = float(self._coalesce_extra_param("healthcheck_timeout_seconds", 10.0))
         self._healthcheck_interval_seconds = float(self._coalesce_extra_param("healthcheck_interval_seconds", 0.25))
+        self._shutdown_timeout_seconds = float(self._coalesce_extra_param("shutdown_timeout_seconds", 10.0))
         self._startup_backoff_seconds = float(self._coalesce_extra_param("startup_backoff_seconds", 5.0))
         self._idle_shutdown_seconds = float(self._coalesce_extra_param("idle_shutdown_seconds", 900.0))
+        self._runtime_mode = str(self._coalesce_config_param("runtime_mode", "real")).strip().lower()
+        if self._runtime_mode not in {"stub", "real"}:
+            raise ValueError("OmniVoice runtime_mode must be 'stub' or 'real'")
+        self._model_id = str(
+            self._coalesce_config_param(
+                "model_id",
+                self._coalesce_config_param("model_path", DEFAULT_OMNIVOICE_MODEL_ID),
+            )
+        ).strip()
+        self._device = self._optional_config_param("device")
+        self._dtype = self._optional_config_param("dtype")
         self._closing = False
         self._token = secrets.token_urlsafe(32)
         self._client: httpx.AsyncClient | None = None
@@ -55,12 +70,25 @@ class OmniVoiceSidecarSupervisor:
         value = self._extra_params.get(key)
         return default if value is None else value
 
+    def _coalesce_config_param(self, key: str, default: Any) -> Any:
+        value = self._extra_params.get(key)
+        if value is None:
+            value = self._provider_config.get(key)
+        return default if value is None else value
+
+    def _optional_config_param(self, key: str) -> str | None:
+        value = self._coalesce_config_param(key, None)
+        if value is None:
+            return None
+        normalized = str(value).strip()
+        return normalized or None
+
     def _resolve_interpreter(self) -> str:
         configured = self._extra_params.get("python_path") or self._extra_params.get("interpreter_path")
         if configured:
             candidate = Path(str(configured)).expanduser()
             if not candidate.is_absolute():
-                candidate = (self._repo_root / candidate).resolve()
+                candidate = (self._repo_root / candidate).absolute()
             if candidate.exists():
                 return str(candidate)
             logger.warning("Configured OmniVoice interpreter does not exist: {}", candidate)
@@ -158,8 +186,14 @@ class OmniVoiceSidecarSupervisor:
                 "OMNIVOICE_SIDECAR_TOKEN": self._token,
                 "OMNIVOICE_SIDECAR_HOST": self._host,
                 "OMNIVOICE_SIDECAR_PORT": str(port),
+                "OMNIVOICE_RUNTIME_MODE": self._runtime_mode,
+                "OMNIVOICE_MODEL": self._model_id or DEFAULT_OMNIVOICE_MODEL_ID,
             }
         )
+        if self._device:
+            env["OMNIVOICE_DEVICE"] = self._device
+        if self._dtype:
+            env["OMNIVOICE_DTYPE"] = self._dtype
         return env
 
     async def shutdown_if_idle(self) -> bool:
@@ -247,18 +281,46 @@ class OmniVoiceSidecarSupervisor:
         self._port = None
         self._last_activity_at = None
 
+    async def _request_graceful_shutdown(self, base_url: str) -> bool:
+        headers = build_sidecar_auth_headers(self._token)
+        try:
+            async with create_sidecar_async_client(
+                timeout=max(1.0, self._shutdown_timeout_seconds),
+            ) as client:
+                response = await client.post(
+                    f"{str(base_url).rstrip('/')}/control/shutdown",
+                    headers=headers,
+                )
+            return response.status_code == 200
+        except Exception:
+            logger.opt(exception=True).debug("OmniVoice sidecar graceful shutdown probe failed")
+            return False
+
     async def _stop_process(self) -> None:
         async with self._lock:
             await self._stop_process_locked()
 
     async def _stop_process_locked(self) -> None:
         process = self._process
+        base_url = self._base_url
         if process is None:
             self._clear_process_state()
             return
         if process.returncode is not None:
             self._clear_process_state(process)
             return
+
+        graceful_shutdown_requested = False
+        if base_url:
+            graceful_shutdown_requested = await self._request_graceful_shutdown(base_url)
+        if graceful_shutdown_requested:
+            try:
+                await asyncio.wait_for(process.wait(), timeout=self._shutdown_timeout_seconds)
+                self._clear_process_state(process)
+                return
+            except asyncio.TimeoutError:
+                logger.warning("OmniVoice sidecar did not exit after graceful shutdown request; terminating")
+
         with contextlib.suppress(ProcessLookupError):
             process.terminate()
         try:

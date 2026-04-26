@@ -20,7 +20,8 @@ OmniVoice note:
 - `omnivoice` is a first-class local provider backed by a managed loopback sidecar runtime.
 - Requests that explicitly resolve to OmniVoice and omit `voice` normalize to `voice: "auto"`.
 - Explicit caller-provided voices are preserved, including `custom:<voice_id>` selections.
-- Setup/install details for the dedicated runtime live in `Docs/STT-TTS/TTS-SETUP-GUIDE.md`.
+- Setup/install details for the dedicated runtime live in `Docs/STT-TTS/OMNIVOICE_TTS_SETUP.md`.
+- End-user request examples live in `Docs/STT-TTS/OMNIVOICE_TTS_USER_GUIDE.md`.
 
 1. Client pattern (Python)
 

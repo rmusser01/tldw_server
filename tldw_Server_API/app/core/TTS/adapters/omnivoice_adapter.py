@@ -6,7 +6,7 @@ import tempfile
 import wave
 from io import BytesIO
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from loguru import logger
 
@@ -43,8 +43,24 @@ class OmniVoiceAdapter(TTSAdapter):
     MAX_TEXT_LENGTH = 5000
     DEFAULT_TIMEOUT_SECONDS = 30.0
     VALID_MODES = frozenset({"auto", "clone"})
+    PASSTHROUGH_REQUEST_PARAMS = frozenset({"language", "instruct", "duration", "speed"})
+    PASSTHROUGH_GENERATION_PARAMS = frozenset(
+        {
+            "num_step",
+            "guidance_scale",
+            "t_shift",
+            "denoise",
+            "postprocess_output",
+            "layer_penalty_factor",
+            "position_temperature",
+            "class_temperature",
+            "audio_chunk_duration",
+            "audio_chunk_threshold",
+            "preprocess_prompt",
+        }
+    )
 
-    def __init__(self, config: Optional[dict[str, Any]] = None):
+    def __init__(self, config: dict[str, Any] | None = None):
         super().__init__(config)
         cfg = config or {}
         extras = cfg.get("extra_params", {}) or {}
@@ -281,19 +297,32 @@ class OmniVoiceAdapter(TTSAdapter):
         *,
         mode: str,
         sample_rate: int,
-        reference_audio_path: Optional[Path],
+        reference_audio_path: Path | None,
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "text": self.preprocess_text(request.text),
             "mode": mode,
             "sample_rate": sample_rate,
         }
+        extras = request.extra_params if isinstance(request.extra_params, dict) else {}
+        if request.speed is not None:
+            payload["speed"] = request.speed
+        for key in self.PASSTHROUGH_REQUEST_PARAMS:
+            value = extras.get(key)
+            if value is not None:
+                payload[key] = value
+        generation_params = {
+            key: extras[key]
+            for key in self.PASSTHROUGH_GENERATION_PARAMS
+            if extras.get(key) is not None
+        }
+        if generation_params:
+            payload["generation_params"] = generation_params
         if mode != "clone":
             voice = (request.voice or "").strip() or "auto"
             if voice and not voice.startswith("custom:") and voice.lower() != "clone":
                 payload["voice"] = voice
         else:
-            extras = request.extra_params if isinstance(request.extra_params, dict) else {}
             reference_text = (
                 extras.get("reference_text")
                 or extras.get("ref_text")
@@ -305,7 +334,7 @@ class OmniVoiceAdapter(TTSAdapter):
                 payload["reference_text"] = reference_text.strip()
         return payload
 
-    async def _materialize_reference_audio(self, request: TTSRequest) -> Optional[Path]:
+    async def _materialize_reference_audio(self, request: TTSRequest) -> Path | None:
         if request.voice_reference is None:
             return None
         return await asyncio.to_thread(self._materialize_reference_audio_sync, request.voice_reference)
