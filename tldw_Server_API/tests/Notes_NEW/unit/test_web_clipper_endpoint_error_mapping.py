@@ -40,6 +40,11 @@ class _NoopRateLimiter:
         return True, {}
 
 
+class _FailingRateLimiter:
+    async def check_user_rate_limit(self, *_args, **_kwargs):
+        raise RuntimeError("rate limiter exploded at /private/rate-limiter.db")
+
+
 async def _run_inline(fn, *args, **kwargs):
     return fn(*args, **kwargs)
 
@@ -80,6 +85,27 @@ def _enrichment_payload() -> WebClipperEnrichmentPayload:
         structured_payload={"raw_text": "Captured text summary."},
         source_note_version=1,
     )
+
+
+@pytest.mark.asyncio
+async def test_check_rate_limit_backend_failure_log_is_sanitized(monkeypatch):
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(web_clipper_endpoint, "logger", logger_stub)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await web_clipper_endpoint._check_rate_limit(
+            rate_limiter=_FailingRateLimiter(),
+            current_user=_current_user(),
+            scope="web_clipper.save",
+        )
+
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.detail == "Rate limiter unavailable"
+    assert logger_stub.errors == ["Web clipper rate limiter unavailable"]
+    rendered_logs = " ".join(logger_stub.errors)
+    assert "web_clipper.save" not in rendered_logs
+    assert "/private/" not in rendered_logs
+    assert "exploded" not in rendered_logs
 
 
 @pytest.mark.asyncio

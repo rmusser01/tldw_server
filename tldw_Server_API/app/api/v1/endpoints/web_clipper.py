@@ -47,7 +47,7 @@ async def _check_rate_limit(
     try:
         allowed, meta = await rate_limiter.check_user_rate_limit(int(current_user.id), scope)
     except Exception as exc:
-        logger.error("Web clipper rate limiter unavailable for scope {}: {}", scope, exc)
+        logger.error("Web clipper rate limiter unavailable")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Rate limiter unavailable",
