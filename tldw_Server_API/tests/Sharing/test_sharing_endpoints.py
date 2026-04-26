@@ -2,10 +2,11 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from pydantic import Field
 
@@ -48,6 +49,49 @@ def test_app(test_user):
 @pytest.fixture
 def client(test_app):
     return TestClient(test_app)
+
+
+@pytest.mark.asyncio
+async def test_verify_workspace_ownership_multi_user_failure_log_is_sanitized(monkeypatch):
+    from tldw_Server_API.app.api.v1.API_Deps import ChaCha_Notes_DB_Deps as chacha_deps
+    from tldw_Server_API.app.api.v1.endpoints import sharing
+    from tldw_Server_API.app.core.AuthNZ import settings as auth_settings
+
+    async def _fail_get_chacha_db_for_user_id(user_id: int):
+        assert user_id == 1
+        raise RuntimeError("workspace DB exploded at /private/workspaces.db")
+
+    fake_logger = MagicMock()
+    monkeypatch.setattr(chacha_deps, "get_chacha_db_for_user_id", _fail_get_chacha_db_for_user_id)
+    monkeypatch.setattr(auth_settings, "get_settings", lambda: SimpleNamespace(auth_mode="multi_user"))
+    monkeypatch.setattr(sharing, "logger", fake_logger)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await sharing._verify_workspace_ownership("private-ws", SimpleNamespace(id=1))
+
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.detail == "Could not verify workspace ownership due to a database error."
+    fake_logger.error.assert_called_once_with("Workspace ownership check failed")
+
+
+@pytest.mark.asyncio
+async def test_verify_workspace_ownership_single_user_skip_log_is_sanitized(monkeypatch):
+    from tldw_Server_API.app.api.v1.API_Deps import ChaCha_Notes_DB_Deps as chacha_deps
+    from tldw_Server_API.app.api.v1.endpoints import sharing
+    from tldw_Server_API.app.core.AuthNZ import settings as auth_settings
+
+    async def _fail_get_chacha_db_for_user_id(user_id: int):
+        assert user_id == 1
+        raise RuntimeError("workspace DB exploded at /private/workspaces.db")
+
+    fake_logger = MagicMock()
+    monkeypatch.setattr(chacha_deps, "get_chacha_db_for_user_id", _fail_get_chacha_db_for_user_id)
+    monkeypatch.setattr(auth_settings, "get_settings", lambda: SimpleNamespace(auth_mode="single_user"))
+    monkeypatch.setattr(sharing, "logger", fake_logger)
+
+    await sharing._verify_workspace_ownership("private-ws", SimpleNamespace(id=1))
+
+    fake_logger.warning.assert_called_once_with("Workspace ownership check skipped in single-user mode")
 
 
 @pytest.fixture

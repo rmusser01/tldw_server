@@ -207,9 +207,9 @@ async def _verify_workspace_ownership(workspace_id: str, user: User) -> None:
         # In single-user mode, workspace validation may not be available
         from ....core.AuthNZ.settings import get_settings
         if get_settings().auth_mode == "single_user":
-            logger.warning(f"Workspace ownership check skipped in single-user mode: {exc}")
+            logger.warning("Workspace ownership check skipped in single-user mode")
             return
-        logger.error(f"Workspace ownership check failed: {exc}")
+        logger.error("Workspace ownership check failed")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Could not verify workspace ownership due to a database error.",
