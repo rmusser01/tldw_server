@@ -1272,8 +1272,8 @@ async def _enrich_with_crossref(references: list[ReferenceEntry]) -> tuple[list[
                     enriched.append(enriched_ref)
                     enriched.extend(refs_to_enrich[idx + 1 :])
                     break
-            except REFERENCE_ENRICH_EXCEPTIONS as e:
-                logger.debug("Crossref lookup failed for {}: {}", ref.doi, e)
+            except REFERENCE_ENRICH_EXCEPTIONS:
+                logger.debug("Crossref lookup failed")
         enriched.append(enriched_ref)
 
     enriched.extend(unenriched_remainder)
@@ -1322,8 +1322,8 @@ async def _enrich_with_arxiv(references: list[ReferenceEntry]) -> tuple[list[Ref
                     enriched.append(enriched_ref)
                     enriched.extend(refs_to_enrich[idx + 1 :])
                     break
-            except REFERENCE_ENRICH_EXCEPTIONS as e:
-                logger.debug("arXiv lookup failed for {}: {}", ref.arxiv_id, e)
+            except REFERENCE_ENRICH_EXCEPTIONS:
+                logger.debug("arXiv lookup failed")
         enriched.append(enriched_ref)
 
     enriched.extend(unenriched_remainder)

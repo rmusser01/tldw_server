@@ -998,6 +998,56 @@ async def test_enrich_with_crossref_sets_cooldown_on_rate_limit():
 
 
 @pytest.mark.asyncio
+async def test_enrich_with_crossref_and_arxiv_sanitizes_lookup_failure_logs(monkeypatch):
+    logger_mock = MagicMock()
+    monkeypatch.setattr(refs_mod, "logger", logger_mock)
+
+    with (
+        patch.object(refs_mod, "_get_cached_external", return_value=None),
+        patch.object(refs_mod, "_set_cached_external", return_value=None),
+        patch.object(
+            refs_mod.asyncio,
+            "to_thread",
+            new=AsyncMock(side_effect=RuntimeError("provider leaked /private/token")),
+        ),
+    ):
+        crossref_enriched, crossref_performed = await refs_mod._enrich_with_crossref(
+            [ReferenceEntry(raw_text="Ref 1", doi="10.9999/private-doi")]
+        )
+
+    with (
+        patch.object(refs_mod, "_get_cached_external", return_value=None),
+        patch.object(refs_mod, "_set_cached_external", return_value=None),
+        patch.object(
+            refs_mod.asyncio,
+            "to_thread",
+            new=AsyncMock(side_effect=RuntimeError("provider leaked /private/token")),
+        ),
+    ):
+        arxiv_enriched, arxiv_performed = await refs_mod._enrich_with_arxiv(
+            [ReferenceEntry(raw_text="Ref 2", arxiv_id="2401.99999")]
+        )
+
+    assert crossref_performed is False
+    assert arxiv_performed is False
+    assert crossref_enriched[0].doi == "10.9999/private-doi"
+    assert arxiv_enriched[0].arxiv_id == "2401.99999"
+    _assert_sanitized_debug_messages(
+        logger_mock,
+        [
+            "Crossref lookup failed",
+            "arXiv lookup failed",
+        ],
+        [
+            "10.9999/private-doi",
+            "2401.99999",
+            "provider leaked",
+            "/private/token",
+        ],
+    )
+
+
+@pytest.mark.asyncio
 async def test_enrich_with_crossref_uses_cached_external_result_without_network_call():
     refs = [ReferenceEntry(raw_text="Ref 1", doi="10.1234/abc")]
     cached_item = {
