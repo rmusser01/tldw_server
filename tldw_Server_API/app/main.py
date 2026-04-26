@@ -22,7 +22,7 @@ import threading
 import time
 from contextlib import asynccontextmanager, contextmanager, suppress
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -65,6 +65,13 @@ from tldw_Server_API.app.core.DB_Management.media_db.api import (
 from tldw_Server_API.app.core.Claims_Extraction.claims_service import (
     list_claims_rebuild_media_ids,
 )
+
+if TYPE_CHECKING:
+    from tldw_Server_API.app.services.shutdown_coordinator import (
+        ShutdownComponent,
+        ShutdownCoordinator,
+    )
+    from tldw_Server_API.app.services.shutdown_legacy_adapters import LegacyShutdownContext
 
 # Backward-compat for Starlette variants that expose 413 as
 # HTTP_413_REQUEST_ENTITY_TOO_LARGE instead of HTTP_413_CONTENT_TOO_LARGE.
@@ -250,7 +257,8 @@ async def _run_coordinated_shutdown(
             get_legacy_shutdown_suppressed_component_names,
         )
     except _STARTUP_GUARD_EXCEPTIONS + _IMPORT_EXCEPTIONS:
-        get_legacy_shutdown_suppressed_component_names = lambda _summary: set()
+        def get_legacy_shutdown_suppressed_component_names(_summary: Any) -> set[str]:
+            return set()
 
     (
         coordinated_legacy_coordinator,
@@ -4484,7 +4492,10 @@ async def lifespan(app: FastAPI):
                 _apply_shutdown_transition_gate(app, READINESS_STATE)
 
     _max_wait = 0
-    _count_active_processing = lambda: 0
+
+    def _count_active_processing() -> int:
+        return 0
+
     try:
         _max_wait = int(_env_os.getenv("JOBS_SHUTDOWN_WAIT_FOR_LEASES_SEC", "0") or "0")
     except _STARTUP_GUARD_EXCEPTIONS:
