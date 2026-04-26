@@ -78,6 +78,14 @@ class _PdfStorageBackend:
         return object()
 
 
+class _LargePdfStorageBackend:
+    async def exists(self, storage_path: str) -> bool:
+        return True
+
+    async def get_size(self, storage_path: str) -> int:
+        return navigation_mod.MAX_OUTLINE_FILE_SIZE + 1
+
+
 def test_derive_content_span_swallows_typed_database_errors(monkeypatch) -> None:
     fake_logger = MagicMock()
     monkeypatch.setattr(navigation_mod, "logger", fake_logger)
@@ -393,6 +401,23 @@ async def test_extract_pdf_outline_nodes_sanitizes_file_record_failure_log(monke
 
     assert result == []
     fake_logger.warning.assert_called_once_with("Navigation source pdf_outline failed to fetch file record")
+
+
+@pytest.mark.asyncio
+async def test_extract_pdf_outline_nodes_sanitizes_large_file_skip_log(monkeypatch) -> None:
+    fake_logger = MagicMock()
+    monkeypatch.setattr(navigation_mod, "logger", fake_logger)
+    monkeypatch.setattr(navigation_mod, "_check_pymupdf_available", lambda: True)
+    monkeypatch.setattr(navigation_mod, "get_storage_backend", lambda: _LargePdfStorageBackend())
+
+    result = await navigation_mod._extract_pdf_outline_nodes(
+        media_id=7,
+        db=_PdfFileDb(),
+        media={"type": "pdf"},
+    )
+
+    assert result == []
+    fake_logger.debug.assert_called_once_with("Navigation source pdf_outline skipped due to file size")
 
 
 @pytest.mark.asyncio

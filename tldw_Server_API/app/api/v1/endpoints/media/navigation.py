@@ -508,11 +508,7 @@ async def _extract_pdf_outline_nodes(
         try:
             file_size = await storage.get_size(storage_path)
             if file_size > MAX_OUTLINE_FILE_SIZE:
-                logger.debug(
-                    "Navigation source pdf_outline skipped for media_id={} due to file size {}",
-                    media_id,
-                    file_size,
-                )
+                logger.debug("Navigation source pdf_outline skipped due to file size")
                 return []
         except FileNotFoundError:
             return []
