@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi import FastAPI
@@ -97,6 +97,30 @@ class TestWorkspaceSharing:
             "share_scope_id": 10,
         })
         assert resp.status_code == 409
+
+    def test_share_workspace_generic_failure_log_is_sanitized(
+        self,
+        client,
+        mock_repo,
+        monkeypatch,
+    ):
+        from tldw_Server_API.app.api.v1.endpoints import sharing
+
+        async def _fail_create_share(*args, **kwargs):
+            raise RuntimeError("share backend exploded at /private/sharing.db")
+
+        fake_logger = MagicMock()
+        monkeypatch.setattr(mock_repo, "create_share", _fail_create_share)
+        monkeypatch.setattr(sharing, "logger", fake_logger)
+
+        resp = client.post("/api/v1/sharing/workspaces/private-ws/share", json={
+            "share_scope_type": "team",
+            "share_scope_id": 10,
+        })
+
+        assert resp.status_code == 500
+        assert resp.json()["detail"] == "An internal error occurred while creating the share."
+        fake_logger.error.assert_called_once_with("Failed to create share")
 
     def test_list_workspace_shares(self, client, mock_repo):
         client.post("/api/v1/sharing/workspaces/ws-list/share", json={

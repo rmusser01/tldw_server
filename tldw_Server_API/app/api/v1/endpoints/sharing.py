@@ -254,7 +254,7 @@ async def share_workspace(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="This workspace is already shared with the specified scope.",
             ) from exc
-        logger.error(f"Failed to create share for workspace {workspace_id}: {exc}")
+        logger.error("Failed to create share")
         raise HTTPException(
             status_code=500,
             detail="An internal error occurred while creating the share.",
