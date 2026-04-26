@@ -7,7 +7,8 @@ initialization logic. High coverage impact for minimal code.
 
 from __future__ import annotations
 
-import importlib
+import importlib.util
+from pathlib import Path
 
 
 class TestCoreModuleImports:
@@ -68,7 +69,15 @@ class TestCoreModuleImports:
         assert hasattr(chat_exceptions, "ChatModuleException")
 
     def test_rag_exceptions(self):
-        exceptions = importlib.import_module("tldw_Server_API.app.core.RAG.exceptions")
+        exceptions_path = Path(__file__).resolve().parents[2] / "app" / "core" / "RAG" / "exceptions.py"
+        spec = importlib.util.spec_from_file_location(
+            "tldw_Server_API_app_core_RAG_exceptions_for_test",
+            exceptions_path,
+        )
+        assert spec is not None
+        assert spec.loader is not None
+        exceptions = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(exceptions)
         assert hasattr(exceptions, "RAGError")
 
     def test_authnz_exceptions(self):
