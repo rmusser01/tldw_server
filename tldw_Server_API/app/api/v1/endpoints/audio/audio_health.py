@@ -685,8 +685,8 @@ async def get_tts_health(request: Request, tts_service: TTSServiceV2 = Depends(g
 
                 _recompute_health_rollup(health, provider_details, capability_envelopes)
                 health["providers"]["kokoro"] = kokoro_info
-        except Exception as e:
-            logger.debug(f"Kokoro health enrichment failed: {e}")
+        except Exception:
+            logger.debug("Kokoro health enrichment failed")
 
         return health
     except Exception as e:
