@@ -1,7 +1,22 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
+
+
+MANIFEST_SCHEMA_VERSION = 1
+
+
+class ImageStoreError(RuntimeError):
+    """Base exception for sandbox image-store failures."""
+
+
+class ImageStoreValidationError(ImageStoreError):
+    """Raised when a template or bundle cannot be registered safely."""
 
 
 @dataclass(slots=True)
@@ -12,11 +27,11 @@ class CloneItem:
 
 
 @dataclass(slots=True)
-class TemplateRecord:
-    template_id: str
-    runtime: str
-    template_name: str
-    disk_paths: list[str] = field(default_factory=list)
+class TemplateArtifact:
+    name: str
+    path: str
+    size_bytes: int
+    sha256: str
 
 
 @dataclass(slots=True)
@@ -26,18 +41,46 @@ class RunCloneManifest:
     clone_items: list[CloneItem] = field(default_factory=list)
 
 
-class SandboxImageStore:
-    """Manifest-oriented VM template store.
+@dataclass(slots=True)
+class TemplateRecord:
+    template_id: str
+    runtime: str
+    template_name: str
+    disk_paths: list[str] = field(default_factory=list)
+    source_path: str | None = None
+    labels: dict[str, str] = field(default_factory=dict)
+    artifacts: list[TemplateArtifact] = field(default_factory=list)
+    provenance: dict[str, Any] = field(default_factory=dict)
+    registered_at: str | None = None
+    manifest_path: str | None = None
 
-    The initial implementation is intentionally lightweight: it records template
-    metadata and returns deterministic clone manifests without performing APFS
-    cloning yet. It is not the authoritative source of runnable-template truth;
-    the macOS helper owns validation for templates that can actually boot.
+
+@dataclass(slots=True)
+class GarbageCollectionCandidate:
+    run_id: str
+    path: str
+    size_bytes: int
+    reason: str
+
+
+@dataclass(slots=True)
+class GarbageCollectionPlan:
+    run_candidates: list[GarbageCollectionCandidate] = field(default_factory=list)
+
+
+class SandboxImageStore:
+    """Filesystem-backed VM template manifest store.
+
+    The store owns local inventory, provenance, and deterministic clone-manifest
+    planning. It does not prove that a template can boot; the macOS helper stays
+    the runtime authority for bootability.
     """
 
     def __init__(self, root_path: str | Path) -> None:
         self.root_path = Path(root_path)
         self._templates: dict[str, TemplateRecord] = {}
+        self.root_path.mkdir(parents=True, exist_ok=True)
+        self._load_templates()
 
     def register_template(
         self,
@@ -45,17 +88,77 @@ class SandboxImageStore:
         runtime: str,
         template_name: str,
         disk_paths: list[str],
+        source_path: str | Path | None = None,
+        labels: dict[str, str] | None = None,
+        provenance: dict[str, Any] | None = None,
+        allow_existing: bool = False,
     ) -> str:
-        runtime_name = str(runtime).strip()
-        normalized_name = str(template_name).strip()
+        runtime_name = self._normalize_manifest_segment(runtime, "runtime")
+        normalized_name = self._normalize_manifest_segment(template_name, "template_name")
         template_id = f"{runtime_name}:{normalized_name}"
-        self._templates[template_id] = TemplateRecord(
+        manifest_path = self._manifest_path(runtime=runtime_name, template_name=normalized_name)
+
+        if not allow_existing and (template_id in self._templates or manifest_path.exists()):
+            raise ImageStoreValidationError(f"template_duplicate: {template_id}")
+
+        artifacts = [self._artifact_from_path(Path(path).expanduser()) for path in disk_paths]
+        if not artifacts:
+            raise ImageStoreValidationError("template_artifacts_required")
+
+        registered_at = datetime.now(timezone.utc).isoformat()
+        record = TemplateRecord(
             template_id=template_id,
             runtime=runtime_name,
             template_name=normalized_name,
-            disk_paths=[str(path) for path in disk_paths],
+            disk_paths=[artifact.path for artifact in artifacts],
+            source_path=str(Path(source_path).expanduser()) if source_path is not None else None,
+            labels=dict(labels or {}),
+            artifacts=artifacts,
+            provenance=dict(provenance or {}),
+            registered_at=registered_at,
+            manifest_path=str(manifest_path),
         )
+        self._write_manifest(record)
+        self._templates[template_id] = record
         return template_id
+
+    def register_bundle(
+        self,
+        *,
+        runtime: str,
+        template_name: str,
+        bundle_path: str | Path,
+        labels: dict[str, str] | None = None,
+        allow_existing: bool = False,
+    ) -> str:
+        bundle = Path(bundle_path).expanduser()
+        if not bundle.is_dir():
+            raise ImageStoreValidationError(f"bundle_missing: {bundle}")
+
+        bundle_manifest = self._read_optional_json(bundle / "manifest.json")
+        provenance = self._read_optional_json(bundle / "build-info.json")
+        artifact_names = self._bundle_artifact_names(bundle_manifest, bundle=bundle)
+        artifact_paths = [str(bundle / artifact_name) for artifact_name in artifact_names]
+
+        return self.register_template(
+            runtime=runtime,
+            template_name=template_name,
+            disk_paths=artifact_paths,
+            source_path=bundle,
+            labels=labels,
+            provenance=provenance,
+            allow_existing=allow_existing,
+        )
+
+    def get_template(self, template_id: str) -> TemplateRecord | None:
+        return self._templates.get(str(template_id))
+
+    def list_templates(self, *, runtime: str | None = None) -> list[TemplateRecord]:
+        runtime_name = str(runtime).strip() if runtime is not None else None
+        records = self._templates.values()
+        if runtime_name:
+            records = [record for record in records if record.runtime == runtime_name]
+        return sorted(records, key=lambda record: record.template_id)
 
     def prepare_run_clone(self, *, template_id: str, run_id: str) -> RunCloneManifest:
         template = self._templates[template_id]
@@ -73,3 +176,179 @@ class SandboxImageStore:
             run_id=str(run_id),
             clone_items=clone_items,
         )
+
+    def plan_garbage_collection(self, *, active_run_ids: set[str] | None = None) -> GarbageCollectionPlan:
+        active_ids = set(active_run_ids or set())
+        runs_root = self.root_path / "runs"
+        if not runs_root.exists():
+            return GarbageCollectionPlan()
+
+        candidates = []
+        for run_path in sorted(path for path in runs_root.iterdir() if path.is_dir()):
+            if run_path.name in active_ids:
+                continue
+            candidates.append(
+                GarbageCollectionCandidate(
+                    run_id=run_path.name,
+                    path=str(run_path),
+                    size_bytes=self._tree_size(run_path),
+                    reason="inactive_run",
+                )
+            )
+        return GarbageCollectionPlan(run_candidates=candidates)
+
+    def _load_templates(self) -> None:
+        templates_root = self.root_path / "templates"
+        if not templates_root.exists():
+            return
+
+        for manifest_path in sorted(templates_root.glob("*/*/manifest.json")):
+            record = self._read_manifest(manifest_path)
+            self._templates[record.template_id] = record
+
+    def _write_manifest(self, record: TemplateRecord) -> None:
+        manifest_path = Path(record.manifest_path or self._manifest_path(runtime=record.runtime, template_name=record.template_name))
+        manifest_path.parent.mkdir(parents=True, exist_ok=True)
+        payload = self._record_to_manifest(record)
+        tmp_path = manifest_path.with_name(".manifest.json.tmp")
+        tmp_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        tmp_path.replace(manifest_path)
+
+    def _read_manifest(self, manifest_path: Path) -> TemplateRecord:
+        try:
+            payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            raise ImageStoreValidationError(f"manifest_invalid_json: {manifest_path}") from exc
+
+        if payload.get("schema_version") != MANIFEST_SCHEMA_VERSION:
+            raise ImageStoreValidationError(f"manifest_unsupported_schema: {manifest_path}")
+
+        required_fields = {"template_id", "runtime", "template_name", "disk_paths", "artifacts"}
+        missing_fields = sorted(required_fields.difference(payload))
+        if missing_fields:
+            missing_text = ",".join(missing_fields)
+            raise ImageStoreValidationError(f"manifest_missing_fields: {manifest_path}: {missing_text}")
+
+        raw_artifacts = payload["artifacts"]
+        if not isinstance(raw_artifacts, list):
+            raise ImageStoreValidationError(f"manifest_artifacts_invalid: {manifest_path}")
+
+        artifacts = [
+            self._artifact_from_manifest_payload(artifact, manifest_path=manifest_path)
+            for artifact in raw_artifacts
+        ]
+        return TemplateRecord(
+            template_id=str(payload["template_id"]),
+            runtime=str(payload["runtime"]),
+            template_name=str(payload["template_name"]),
+            disk_paths=[str(path) for path in payload.get("disk_paths", [])],
+            source_path=payload.get("source_path"),
+            labels=dict(payload.get("labels", {})),
+            artifacts=artifacts,
+            provenance=dict(payload.get("provenance", {})),
+            registered_at=payload.get("registered_at"),
+            manifest_path=str(manifest_path),
+        )
+
+    def _artifact_from_manifest_payload(self, artifact: Any, *, manifest_path: Path) -> TemplateArtifact:
+        if not isinstance(artifact, dict):
+            raise ImageStoreValidationError(f"manifest_artifact_invalid: {manifest_path}")
+        required_fields = {"name", "path", "size_bytes", "sha256"}
+        missing_fields = sorted(required_fields.difference(artifact))
+        if missing_fields:
+            missing_text = ",".join(missing_fields)
+            raise ImageStoreValidationError(f"manifest_artifact_missing_fields: {manifest_path}: {missing_text}")
+        return TemplateArtifact(
+            name=str(artifact["name"]),
+            path=str(artifact["path"]),
+            size_bytes=int(artifact["size_bytes"]),
+            sha256=str(artifact["sha256"]),
+        )
+
+    def _record_to_manifest(self, record: TemplateRecord) -> dict[str, Any]:
+        return {
+            "schema_version": MANIFEST_SCHEMA_VERSION,
+            "template_id": record.template_id,
+            "runtime": record.runtime,
+            "template_name": record.template_name,
+            "source_path": record.source_path,
+            "registered_at": record.registered_at,
+            "disk_paths": list(record.disk_paths),
+            "artifacts": [
+                {
+                    "name": artifact.name,
+                    "path": artifact.path,
+                    "size_bytes": artifact.size_bytes,
+                    "sha256": artifact.sha256,
+                }
+                for artifact in record.artifacts
+            ],
+            "labels": dict(record.labels),
+            "provenance": dict(record.provenance),
+        }
+
+    def _manifest_path(self, *, runtime: str, template_name: str) -> Path:
+        return self.root_path / "templates" / runtime / template_name / "manifest.json"
+
+    def _artifact_from_path(self, path: Path) -> TemplateArtifact:
+        if not path.is_file():
+            raise ImageStoreValidationError(f"template_artifact_missing: {path}")
+        return TemplateArtifact(
+            name=path.name,
+            path=str(path),
+            size_bytes=path.stat().st_size,
+            sha256=self._sha256_file(path),
+        )
+
+    def _read_optional_json(self, path: Path) -> dict[str, Any]:
+        if not path.exists():
+            return {}
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            raise ImageStoreValidationError(f"json_invalid: {path}") from exc
+        if not isinstance(payload, dict):
+            raise ImageStoreValidationError(f"json_expected_object: {path}")
+        return payload
+
+    def _bundle_artifact_names(self, bundle_manifest: dict[str, Any], *, bundle: Path) -> list[str]:
+        kernel_name = str(bundle_manifest.get("kernel", "kernel"))
+        rootfs_name = str(bundle_manifest.get("rootfs", "rootfs.img"))
+        initrd_name = bundle_manifest.get("initrd")
+        if initrd_name is None and (bundle / "initrd").is_file():
+            initrd_name = "initrd"
+        artifact_names = [
+            self._safe_bundle_artifact_name(kernel_name, field_name="kernel"),
+            self._safe_bundle_artifact_name(rootfs_name, field_name="rootfs"),
+        ]
+        if initrd_name:
+            artifact_names.append(self._safe_bundle_artifact_name(str(initrd_name), field_name="initrd"))
+        return artifact_names
+
+    def _safe_bundle_artifact_name(self, value: str, *, field_name: str) -> str:
+        name = str(value).strip()
+        if not name or name in {".", ".."} or Path(name).name != name:
+            raise ImageStoreValidationError(f"bundle_artifact_name_invalid: {field_name}")
+        return name
+
+    def _normalize_manifest_segment(self, value: str, field_name: str) -> str:
+        normalized = str(value).strip()
+        if not normalized:
+            raise ImageStoreValidationError(f"{field_name}_required")
+        if normalized in {".", ".."} or "/" in normalized or "\\" in normalized:
+            raise ImageStoreValidationError(f"{field_name}_invalid")
+        return normalized
+
+    def _sha256_file(self, path: Path) -> str:
+        digest = hashlib.sha256()
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+
+    def _tree_size(self, path: Path) -> int:
+        total = 0
+        for item in path.rglob("*"):
+            if item.is_file():
+                total += item.stat().st_size
+        return total

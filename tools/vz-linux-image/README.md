@@ -177,7 +177,23 @@ the expected `multi-user.target.wants/` symlinks inside the rootfs.
 
 ## Helper Smoke
 
-The canonical bundle can also drive the host-gated helper smoke:
+The canonical bundle can also drive the repeatable host-side E2E smoke:
+
+```bash
+./scripts/run-host-e2e-smoke.sh --dry-run --bundle "${BUNDLE_DIR}"
+./scripts/run-host-e2e-smoke.sh \
+  --bundle "${BUNDLE_DIR}" \
+  --socket /tmp/tldw-vz-helper-e2e.sock \
+  --serial-log-dir /tmp/tldw-vz-serial-e2e
+```
+
+On a prepared Apple silicon macOS host, that script builds the Swift helper
+when needed, optionally signs it with `--entitlements`, runs the helper-daemon
+bundle smoke, starts a helper daemon for the Python sandbox runtime, runs real
+`vz_linux` ephemeral execution, verifies same-session VM reuse, and stops the
+helper on exit.
+
+The lower-level helper smoke remains available for focused debugging:
 
 ```bash
 TLDW_SANDBOX_MACOS_HELPER_DAEMON_SMOKE=1 \
@@ -187,6 +203,33 @@ source ../../.venv/bin/activate && \
 python -m pytest tldw_Server_API/tests/sandbox/test_macos_virtualization_helper_daemon_host_gated.py -q
 ```
 
-At the current slice, a prepared host should validate the canonical bundle and
-move past the old `boot_not_implemented` path. The likely remaining ceiling is
-guest readiness until the real vsock guest transport is wired.
+Use the direct module command for focused helper or bundle validation. Use
+`run-host-e2e-smoke.sh` for the full operator workflow because it also covers
+real sandbox execution and session VM reuse.
+
+## Image Store Registration
+
+Canonical bundles can be registered in the sandbox image store for durable local
+inventory, artifact hashes, build provenance, and run-clone planning:
+
+```python
+from tldw_Server_API.app.core.Sandbox.image_store import SandboxImageStore
+
+store = SandboxImageStore(root_path="/var/lib/tldw/sandbox-images")
+template_id = store.register_bundle(
+    runtime="vz_linux",
+    template_name="debian-bookworm-arm64",
+    bundle_path="${BUNDLE_DIR}",
+    labels={"suite": "bookworm", "profile": "minimal"},
+)
+```
+
+The store writes:
+
+```text
+<image-store-root>/templates/vz_linux/debian-bookworm-arm64/manifest.json
+```
+
+The manifest records `kernel`, `rootfs.img`, optional `initrd`, artifact sizes,
+SHA-256 hashes, labels, source path, registration time, and `build-info.json`
+provenance when present. The helper still owns bootability validation.

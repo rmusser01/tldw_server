@@ -18,16 +18,16 @@
 
 **Tests:**
 
-- `tldw_Server_API/tests/sandbox/test_image_store.py`
+- `tldw_Server_API/tests/sandbox/test_macos_image_store.py`
 
-**Status:** Not Started
+**Status:** Complete
 
-- [ ] Add failing tests for registering a canonical bundle and reloading it from disk.
-- [ ] Add failing tests for missing artifact paths and duplicate template handling.
-- [ ] Implement durable manifest write/read in `tldw_Server_API/app/core/Sandbox/image_store.py`.
-- [ ] Add SHA-256 and size metadata for registered artifacts.
-- [ ] Preserve compatibility with existing `register_template()` and `prepare_run_clone()` callers.
-- [ ] Run `python -m pytest tldw_Server_API/tests/sandbox/test_image_store.py -q`.
+- [x] Add failing tests for registering a canonical bundle and reloading it from disk.
+- [x] Add failing tests for missing artifact paths and duplicate template handling.
+- [x] Implement durable manifest write/read in `tldw_Server_API/app/core/Sandbox/image_store.py`.
+- [x] Add SHA-256 and size metadata for registered artifacts.
+- [x] Preserve compatibility with existing `register_template()` and `prepare_run_clone()` callers.
+- [x] Run `python -m pytest tldw_Server_API/tests/sandbox/test_macos_image_store.py -q`.
 
 ## Stage 2: Provenance And GC Planning
 
@@ -37,15 +37,15 @@
 
 **Tests:**
 
-- `tldw_Server_API/tests/sandbox/test_image_store.py`
+- `tldw_Server_API/tests/sandbox/test_macos_image_store.py`
 
-**Status:** Not Started
+**Status:** Complete
 
-- [ ] Add failing tests for provenance capture from bundle `build-info.json`.
-- [ ] Add failing tests for `list_templates()`, `get_template()`, and GC dry-run planning.
-- [ ] Implement list/get APIs returning dataclass records.
-- [ ] Implement `plan_garbage_collection()` with explicit candidate records and no deletion side effects.
-- [ ] Run `python -m pytest tldw_Server_API/tests/sandbox/test_image_store.py -q`.
+- [x] Add failing tests for provenance capture from bundle `build-info.json`.
+- [x] Add failing tests for `list_templates()`, `get_template()`, and GC dry-run planning.
+- [x] Implement list/get APIs returning dataclass records.
+- [x] Implement `plan_garbage_collection()` with explicit candidate records and no deletion side effects.
+- [x] Run `python -m pytest tldw_Server_API/tests/sandbox/test_macos_image_store.py -q`.
 
 ## Stage 3: Host Smoke Operator Script
 
@@ -57,14 +57,14 @@
 
 - `tools/vz-linux-image/tests/test_host_e2e_smoke_script.py`
 
-**Status:** Not Started
+**Status:** Complete
 
-- [ ] Add failing tests for `--help`, missing `--bundle`, and `--dry-run` command output.
-- [ ] Create `tools/vz-linux-image/scripts/run-host-e2e-smoke.sh`.
-- [ ] Implement argument parsing and dry-run command printing.
-- [ ] Implement helper build/sign/start/stop orchestration with shell traps.
-- [ ] Wire pytest commands for `test_macos_virtualization_helper_daemon_host_gated.py` and `test_vz_linux_real_host_e2e.py`.
-- [ ] Run `python -m pytest tools/vz-linux-image/tests/test_host_e2e_smoke_script.py -q`.
+- [x] Add failing tests for `--help`, missing `--bundle`, and `--dry-run` command output.
+- [x] Create `tools/vz-linux-image/scripts/run-host-e2e-smoke.sh`.
+- [x] Implement argument parsing and dry-run command printing.
+- [x] Implement helper build/sign/start/stop orchestration with shell traps.
+- [x] Wire pytest commands for `test_macos_virtualization_helper_daemon_host_gated.py` and `test_vz_linux_real_host_e2e.py`.
+- [x] Run `python -m pytest tools/vz-linux-image/tests/test_host_e2e_smoke_script.py -q`.
 
 ## Stage 4: Operator Docs And Verification
 
@@ -78,11 +78,11 @@
 - existing helper client and bundle layout tests
 - Bandit on touched Python sandbox files
 
-**Status:** Not Started
+**Status:** Complete
 
-- [ ] Update `Docs/Sandbox/macos-runtime-operator-notes.md`.
-- [ ] Update `tools/vz-linux-image/README.md`.
-- [ ] Update `tldw_Server_API/app/core/Sandbox/README.md` if new APIs need mention.
-- [ ] Run targeted pytest suite for image store, smoke script, helper client, and bundle layout.
-- [ ] Run Bandit on `tldw_Server_API/app/core/Sandbox/image_store.py`.
-- [ ] Commit and prepare PR against `dev`.
+- [x] Update `Docs/Sandbox/macos-runtime-operator-notes.md`.
+- [x] Update `tools/vz-linux-image/README.md`.
+- [x] Update `tldw_Server_API/app/core/Sandbox/README.md` if new APIs need mention.
+- [x] Run targeted pytest suite for image store, smoke script, helper client, and bundle layout.
+- [x] Run Bandit on `tldw_Server_API/app/core/Sandbox/image_store.py`.
+- [x] Commit and prepare PR against `dev`.
