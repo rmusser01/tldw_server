@@ -1359,8 +1359,8 @@ async def _transcribe_audio(
             return result.get("text", "")
         return str(result) if result else ""
 
-    except Exception as e:
-        logger.error(f"Audio transcription failed: {e}")
+    except Exception:
+        logger.error("Audio transcription failed")
         raise
 
 
