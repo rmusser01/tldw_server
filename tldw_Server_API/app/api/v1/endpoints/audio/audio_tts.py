@@ -981,7 +981,7 @@ async def list_tts_providers(request: Request, tts_service: TTSServiceV2 = Depen
 
         return {"providers": capabilities, "voices": voices, "timestamp": datetime.utcnow().isoformat()}
     except _AUDIO_TTS_NONCRITICAL_EXCEPTIONS as e:
-        logger.error("Error listing TTS providers", exc_info=True)
+        logger.error("Error listing TTS providers")
         request_id = ensure_request_id(request)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -1012,7 +1012,7 @@ async def list_tts_voices(
     except HTTPException:
         raise
     except _AUDIO_TTS_NONCRITICAL_EXCEPTIONS as e:
-        logger.error("Error listing TTS voices", exc_info=True)
+        logger.error("Error listing TTS voices")
         request_id = ensure_request_id(request)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -1107,7 +1107,7 @@ async def reset_tts_metrics(
     except HTTPException:
         raise
     except _AUDIO_TTS_NONCRITICAL_EXCEPTIONS as e:
-        logger.error("Error resetting metrics", exc_info=True)
+        logger.error("Error resetting metrics")
         request_id = ensure_request_id(request)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

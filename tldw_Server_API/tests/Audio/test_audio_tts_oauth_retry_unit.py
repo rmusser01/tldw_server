@@ -130,7 +130,7 @@ async def test_list_tts_providers_failure_log_is_sanitized(monkeypatch):
 
     assert exc_info.value.status_code == 500
     assert exc_info.value.detail["message"] == "Failed to list providers"
-    fake_logger.error.assert_called_once_with("Error listing TTS providers", exc_info=True)
+    fake_logger.error.assert_called_once_with("Error listing TTS providers")
 
 
 @pytest.mark.unit
@@ -151,7 +151,7 @@ async def test_list_tts_voices_failure_log_is_sanitized(monkeypatch):
 
     assert exc_info.value.status_code == 500
     assert exc_info.value.detail["message"] == "Failed to list voices"
-    fake_logger.error.assert_called_once_with("Error listing TTS voices", exc_info=True)
+    fake_logger.error.assert_called_once_with("Error listing TTS voices")
 
 
 @pytest.mark.unit
@@ -172,7 +172,7 @@ async def test_reset_tts_metrics_failure_log_is_sanitized(monkeypatch):
 
     assert exc_info.value.status_code == 500
     assert exc_info.value.detail["message"] == "Failed to reset metrics"
-    fake_logger.error.assert_called_once_with("Error resetting metrics", exc_info=True)
+    fake_logger.error.assert_called_once_with("Error resetting metrics")
 
 
 @pytest.mark.unit
