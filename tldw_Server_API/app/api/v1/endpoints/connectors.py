@@ -747,7 +747,7 @@ async def add_source(
     try:
         ok, why = evaluate_policy_constraints(org_policy, provider=provider, remote_path=path)
     except Exception as e:
-        logger.exception(f"Policy evaluation failed for provider '{provider}': {e}")
+        logger.error("Connector source policy evaluation failed")
         raise HTTPException(
             status_code=HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Source denied: policy evaluation failed",

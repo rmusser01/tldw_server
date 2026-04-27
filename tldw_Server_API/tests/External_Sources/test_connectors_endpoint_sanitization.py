@@ -110,3 +110,41 @@ async def test_browse_provider_sources_error_log_is_sanitized(monkeypatch):
     assert exc_info.value.status_code == 502
     assert exc_info.value.detail == "Browse failed"
     fake_logger.error.assert_called_once_with("Connector browse failed")
+
+
+@pytest.mark.asyncio
+async def test_add_source_policy_error_log_is_sanitized(monkeypatch):
+    async def _get_account(db, user_id: int, account_id: int):
+        assert user_id == 7
+        assert account_id == 11
+        return {"id": 11, "provider": "drive"}
+
+    def _failing_policy(*args, **kwargs):
+        raise RuntimeError("policy backend leaked /private/connectors-policy.db")
+
+    fake_logger = MagicMock()
+    monkeypatch.setattr(connectors, "logger", fake_logger)
+    monkeypatch.setattr(connectors, "get_account_for_user", _get_account)
+    monkeypatch.setattr(connectors, "evaluate_policy_constraints", _failing_policy)
+
+    payload = connectors.ConnectorSourceCreateRequest(
+        account_id=11,
+        provider="drive",
+        remote_id="root",
+        type="folder",
+        path="/Team Drive",
+    )
+    principal = AuthPrincipal(kind="user", user_id=7)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await connectors.add_source(
+            request=object(),
+            payload=payload,
+            db=object(),
+            principal=principal,
+            org_policy={},
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "Source denied: policy evaluation failed"
+    fake_logger.error.assert_called_once_with("Connector source policy evaluation failed")
