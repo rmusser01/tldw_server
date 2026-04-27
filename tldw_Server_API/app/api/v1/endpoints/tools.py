@@ -97,7 +97,7 @@ async def execute_tool_endpoint(
         )
         return ExecuteToolResult(ok=True, result=result.get("result", result), module=result.get("module"))
     except ToolExecutionError as te:
-        logger.warning(f"tools.execute denied or invalid: {te}")
+        logger.warning("tools_execute_denied_or_invalid")
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(te)) from te
     except _TOOL_ENDPOINT_NONCRITICAL_EXCEPTIONS as e:
         logger.error("tools.execute failed")
