@@ -393,6 +393,46 @@ def test_outputs_normalize_storage_path_update_failure_log_is_sanitized(monkeypa
     assert "/private/outputs.db" not in logged
 
 
+@pytest.mark.asyncio
+async def test_outputs_create_render_failure_log_is_sanitized(monkeypatch):
+    class _Template:
+        id = 1
+        name = "Template"
+        body = "{{ broken }}"
+        type = "newsletter_markdown"
+        format = "md"
+
+    class _CollectionsDB:
+        def get_output_template(self, _template_id: int):
+            return _Template()
+
+    def _raise_render_failure(*args: Any, **kwargs: Any) -> str:
+        raise RuntimeError("render backend exploded at /private/output-template.md")
+
+    logger = _LoggerStub()
+    monkeypatch.setattr(outputs_endpoint, "logger", logger)
+    monkeypatch.setattr(outputs_endpoint, "render_output_template", _raise_render_failure)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await outputs_endpoint.create_output(
+            payload=outputs_endpoint.OutputCreateRequest(
+                template_id=1,
+                data={"items": []},
+                title="demo",
+            ),
+            current_user=User(id=123, username="tester", email=None, is_active=True),
+            cdb=_CollectionsDB(),
+            media_db=object(),
+        )
+
+    assert exc_info.value.status_code == 422
+    assert exc_info.value.detail == "render_failed"
+    assert logger.errors == ["outputs render failed"]
+    logged = "\n".join(logger.errors)
+    assert "render backend exploded" not in logged
+    assert "/private/output-template.md" not in logged
+
+
 def test_outputs_preview_with_inline_data_and_generate(client_with_user, tmp_path):
 
     client = client_with_user

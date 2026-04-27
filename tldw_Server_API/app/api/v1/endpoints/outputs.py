@@ -260,7 +260,7 @@ async def create_output(
     try:
         rendered = render_output_template(tpl.body, context)
     except _OUTPUTS_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"render failed: {e}")
+        logger.error("outputs render failed")
         raise HTTPException(status_code=422, detail="render_failed") from e
 
     user_id = resolve_user_id_for_request(
