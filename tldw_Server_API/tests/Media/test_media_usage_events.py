@@ -102,6 +102,81 @@ def test_ebooks_process_usage_event_logged(client_with_single_user, quota_servic
     assert any(e[0] == "media.process.ebook" for e in usage_logger.events)
 
 
+def test_ebooks_process_usage_event_failure_log_is_sanitized(
+    client_with_single_user,
+    quota_service_stub,
+    monkeypatch,
+):
+    client, usage_logger = client_with_single_user
+
+    import tldw_Server_API.app.api.v1.endpoints.media as media_mod
+    from tldw_Server_API.app.api.v1.endpoints.media import process_ebooks as process_ebooks_mod
+
+    logger_stub = _LoggerStub()
+
+    def _fail_usage_event(*_args, **_kwargs):
+        raise RuntimeError("ebook usage logger exploded at /private/usage-events.db")
+
+    def _stub_process_epub(**_kwargs):
+        return {
+            "status": "Success",
+            "content": "Hello ebook content.",
+            "metadata": {"title": "stub-ebook"},
+        }
+
+    monkeypatch.setattr(process_ebooks_mod, "logger", logger_stub)
+    monkeypatch.setattr(usage_logger, "log_event", _fail_usage_event)
+    monkeypatch.setattr(media_mod.books, "process_epub", _stub_process_epub)
+
+    response = client.post(
+        "/api/v1/media/process-ebooks",
+        files=[("files", ("sample.epub", b"fake", "application/epub+zip"))],
+    )
+
+    assert response.status_code == 200, response.text
+    _assert_sanitized_debug_log(logger_stub, "Ebook process endpoint usage logging failed")
+
+
+def test_ebooks_process_rechunk_failure_log_is_sanitized(
+    client_with_single_user,
+    quota_service_stub,
+    monkeypatch,
+):
+    client, _ = client_with_single_user
+
+    import tldw_Server_API.app.api.v1.endpoints.media as media_mod
+    import tldw_Server_API.app.core.Chunking as chunking_mod
+    from tldw_Server_API.app.api.v1.endpoints.media import process_ebooks as process_ebooks_mod
+
+    logger_stub = _LoggerStub()
+
+    def _stub_process_epub(**_kwargs):
+        return {
+            "status": "Success",
+            "content": "Hello ebook content for rechunking.",
+            "metadata": {"title": "stub-ebook"},
+        }
+
+    def _fail_improved_chunking_process(*_args, **_kwargs):
+        raise RuntimeError("ebook rechunk exploded at /private/chunks")
+
+    monkeypatch.setattr(process_ebooks_mod, "logger", logger_stub)
+    monkeypatch.setattr(media_mod.books, "process_epub", _stub_process_epub)
+    monkeypatch.setattr(chunking_mod, "improved_chunking_process", _fail_improved_chunking_process)
+
+    response = client.post(
+        "/api/v1/media/process-ebooks",
+        data={"perform_chunking": "true"},
+        files=[("files", ("sample.epub", b"fake", "application/epub+zip"))],
+    )
+
+    assert response.status_code == 200, response.text
+    _assert_sanitized_debug_log(
+        logger_stub,
+        "Ebook post-processing re-chunking skipped/failed",
+    )
+
+
 def test_ebooks_process_sanitizes_worker_failure(
     client_with_single_user,
     quota_service_stub,
