@@ -34,6 +34,7 @@ class _LoggerStub:
 
 _SENSITIVE_MARKERS = (
     "driver failed",
+    "versions read exploded",
     "/private/tmp/media-versions.db",
 )
 
@@ -128,4 +129,71 @@ async def test_get_version_maps_database_error(monkeypatch):
     _assert_sanitized_error_log(
         logger_stub,
         "Database error getting version {} for media {}",
+    )
+
+
+@pytest.mark.asyncio
+async def test_list_versions_sanitizes_unexpected_error_log(monkeypatch):
+    logger_stub = _patch_endpoint_logger(monkeypatch)
+    monkeypatch.setattr(
+        media_versions_endpoint,
+        "check_media_exists",
+        lambda _db, media_id: media_id,
+        raising=True,
+    )
+
+    def _raise_unexpected_error(*_args, **_kwargs):
+        raise RuntimeError("versions read exploded /private/tmp/media-versions.db")
+
+    monkeypatch.setattr(
+        media_versions_endpoint,
+        "list_document_versions",
+        _raise_unexpected_error,
+        raising=True,
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await list_versions(
+            media_id=42,
+            include_content=False,
+            limit=10,
+            page=1,
+            db=object(),
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "Internal server error listing versions"
+    _assert_sanitized_error_log(
+        logger_stub,
+        "Unexpected error listing versions for media {}",
+    )
+
+
+@pytest.mark.asyncio
+async def test_get_version_sanitizes_unexpected_error_log(monkeypatch):
+    logger_stub = _patch_endpoint_logger(monkeypatch)
+
+    def _raise_unexpected_error(*_args, **_kwargs):
+        raise RuntimeError("versions read exploded /private/tmp/media-versions.db")
+
+    monkeypatch.setattr(
+        media_versions_endpoint,
+        "get_document_version",
+        _raise_unexpected_error,
+        raising=True,
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await get_version(
+            media_id=42,
+            version_number=2,
+            include_content=True,
+            db=object(),
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "Internal server error getting version"
+    _assert_sanitized_error_log(
+        logger_stub,
+        "Unexpected error getting version {} for media {}",
     )

@@ -184,10 +184,8 @@ async def list_versions(
         raise
     except Exception as exc:
         logger.error(
-            "Unexpected error listing versions for media {}: {}",
+            "Unexpected error listing versions for media {}",
             media_id,
-            exc,
-            exc_info=True,
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -284,11 +282,9 @@ async def get_version(
         raise
     except Exception as exc:
         logger.error(
-            "Unexpected error getting version {} for media {}: {}",
+            "Unexpected error getting version {} for media {}",
             version_number,
             media_id,
-            exc,
-            exc_info=True,
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
