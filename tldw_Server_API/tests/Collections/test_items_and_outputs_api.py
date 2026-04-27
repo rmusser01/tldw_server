@@ -11,6 +11,7 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from importlib import import_module, reload
 from tldw_Server_API.app.api.v1.endpoints import items as items_endpoint
+from tldw_Server_API.app.api.v1.endpoints import outputs as outputs_endpoint
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.config import settings
 from tldw_Server_API.app.core.DB_Management.backends.factory import close_all_backends
@@ -364,6 +365,32 @@ async def test_items_get_media_fetch_failure_log_is_sanitized(monkeypatch):
     logged = "\n".join(logger.errors)
     assert "media backend exploded" not in logged
     assert "/private/media.db" not in logged
+
+
+def test_outputs_normalize_storage_path_update_failure_log_is_sanitized(monkeypatch):
+    def _raise_update_failure(*args: Any, **kwargs: Any) -> None:
+        raise RuntimeError("output backend exploded at /private/outputs.db")
+
+    logger = _LoggerStub()
+    monkeypatch.setattr(outputs_endpoint, "logger", logger)
+    monkeypatch.setattr(outputs_endpoint, "normalize_output_storage_path", lambda *_args: "normalized/output.md")
+    monkeypatch.setattr(outputs_endpoint, "update_output_artifact_db", _raise_update_failure)
+
+    with pytest.raises(HTTPException) as exc_info:
+        outputs_endpoint._normalize_output_storage_path_for_user(
+            cdb=object(),
+            user_id=123,
+            output_id=777,
+            storage_path="legacy/output.md",
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "db_update_failed"
+    assert logger.errors == ["outputs storage_path normalization update failed"]
+    logged = "\n".join(logger.errors)
+    assert "777" not in logged
+    assert "output backend exploded" not in logged
+    assert "/private/outputs.db" not in logged
 
 
 def test_outputs_preview_with_inline_data_and_generate(client_with_user, tmp_path):

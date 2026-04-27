@@ -92,7 +92,7 @@ def _normalize_output_storage_path_for_user(
                 retention_until=None,
             )
         except _OUTPUTS_NONCRITICAL_EXCEPTIONS as exc:
-            logger.error(f"outputs: failed to normalize storage_path for {output_id}: {exc}")
+            logger.error("outputs storage_path normalization update failed")
             raise HTTPException(status_code=500, detail="db_update_failed") from exc
     return normalized
 
