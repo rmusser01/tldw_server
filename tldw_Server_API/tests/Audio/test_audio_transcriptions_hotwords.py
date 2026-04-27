@@ -46,6 +46,21 @@ class _UnreadableSoundFile:
         raise RuntimeError("soundfile read leaked /private/audio.wav")
 
 
+class _LongDurationInfo:
+    frames = 16000 * 121
+    samplerate = 16000
+
+
+class _LongDurationSoundFile:
+    def info(self, _path):
+        return _LongDurationInfo()
+
+
+class _FailingBillingEnforcer:
+    async def check_limit(self, *_args, **_kwargs):
+        raise RuntimeError("billing enforcer leaked /private/audio.wav")
+
+
 class _FailingUsageLog:
     def log_event(self, *_args, **_kwargs):
         raise RuntimeError("usage log leaked /private/audio.wav")
@@ -250,6 +265,49 @@ def test_audio_transcriptions_sanitizes_test_mode_canonical_path_log(
         if msg.startswith("TEST_MODE: canonical audio path resolved")
     ]
     assert canonical_path_logs == ["TEST_MODE: canonical audio path resolved"]
+
+
+@pytest.mark.unit
+def test_audio_transcriptions_sanitizes_billing_recheck_fail_open_log(
+    monkeypatch,
+    bypass_api_limits,
+):
+    app, _captured = _setup_stubbed_audio_app(monkeypatch)
+    from tldw_Server_API.app.api.v1.API_Deps.billing_deps import get_billing_org_id
+    import tldw_Server_API.app.api.v1.endpoints.audio as audio_pkg
+    import tldw_Server_API.app.api.v1.endpoints.audio.audio_transcriptions as audio_tx
+
+    logger_stub = _LoggerStub()
+    app.dependency_overrides[get_billing_org_id] = lambda: 123
+    monkeypatch.setattr(audio_tx, "logger", logger_stub)
+    monkeypatch.setattr(audio_pkg, "sf", _LongDurationSoundFile())
+    monkeypatch.setattr(audio_tx, "enforcement_enabled", lambda: True)
+    monkeypatch.setattr(audio_tx, "get_billing_enforcer", lambda: _FailingBillingEnforcer())
+
+    with bypass_api_limits(app), TestClient(app) as client:
+        wav_bytes = _make_wav_bytes()
+        headers = {"X-API-KEY": TEST_API_KEY}
+        files = {"file": ("sample.wav", io.BytesIO(wav_bytes), "audio/wav")}
+        data = {
+            "model": "vibevoice-asr",
+            "response_format": "json",
+        }
+        resp = client.post(
+            "/api/v1/audio/transcriptions",
+            headers=headers,
+            files=files,
+            data=data,
+        )
+        if resp.status_code == 404:
+            pytest.skip("audio/transcriptions endpoint not mounted in this build")
+        assert resp.status_code == 200, resp.text
+
+    billing_logs = [
+        msg
+        for msg in logger_stub.debugs
+        if msg.startswith("Billing secondary minutes check failed")
+    ]
+    assert billing_logs == ["Billing secondary minutes check failed; allowing by default"]
 
 
 @pytest.mark.unit

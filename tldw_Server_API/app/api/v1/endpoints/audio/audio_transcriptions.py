@@ -890,8 +890,8 @@ async def create_transcription(
                     )
             except HTTPException:
                 raise
-            except _AUDIO_TRANSCRIPTIONS_NONCRITICAL_EXCEPTIONS as _billing_err:
-                logger.debug(f"Billing secondary minutes check failed (fail-open): {_billing_err}")
+            except _AUDIO_TRANSCRIPTIONS_NONCRITICAL_EXCEPTIONS:
+                logger.debug("Billing secondary minutes check failed; allowing by default")
 
         detected_language: Optional[str] = None
         segments_for_timing: Optional[list[dict[str, Any]]] = None
