@@ -356,3 +356,122 @@ async def test_delete_reading_item_sanitizes_backend_log(monkeypatch):
     assert excinfo.value.status_code == 400
     assert excinfo.value.detail == "reading_delete_failed"
     logger_stub.error.assert_called_once_with("reading_delete_failed")
+
+
+def _reading_action_row() -> SimpleNamespace:
+    return SimpleNamespace(
+        id=123,
+        media_id=None,
+        title="Research item",
+        url="https://example.test/research",
+        canonical_url=None,
+        domain="example.test",
+        summary="Existing summary",
+        notes="Existing notes",
+        published_at=None,
+        status="saved",
+        favorite=False,
+        tags=[],
+        created_at=None,
+        updated_at=None,
+        read_at=None,
+        content_hash="hash",
+        metadata_json='{"text": "Action body text"}',
+    )
+
+
+@pytest.mark.asyncio
+async def test_summarize_reading_item_sanitizes_fetch_log(monkeypatch):
+    logger_stub = MagicMock()
+
+    class _FailingService:
+        def get_item(self, *_args, **_kwargs):
+            raise RuntimeError("summary fetch exploded at /private/collections.db")
+
+    monkeypatch.setattr(reading, "logger", logger_stub)
+    monkeypatch.setattr(reading, "_service_for_user", lambda _user: _FailingService())
+
+    with pytest.raises(HTTPException) as excinfo:
+        await reading.summarize_reading_item(
+            item_id=123,
+            payload=reading.ReadingSummarizeRequest(provider="openai"),
+            current_user=SimpleNamespace(id=42),
+        )
+
+    assert excinfo.value.status_code == 400
+    assert excinfo.value.detail == "reading_item_fetch_failed"
+    logger_stub.error.assert_called_once_with("reading_summary_get_failed")
+
+
+@pytest.mark.asyncio
+async def test_summarize_reading_item_sanitizes_backend_log(monkeypatch):
+    logger_stub = MagicMock()
+
+    class _Service:
+        def get_item(self, *_args, **_kwargs):
+            return _reading_action_row()
+
+    def _failing_summarize(*_args, **_kwargs):
+        raise RuntimeError("summarizer exploded at /private/llm.key")
+
+    monkeypatch.setattr(reading, "logger", logger_stub)
+    monkeypatch.setattr(reading, "_service_for_user", lambda _user: _Service())
+    monkeypatch.setattr(reading, "summarize_analyze", _failing_summarize)
+
+    with pytest.raises(HTTPException) as excinfo:
+        await reading.summarize_reading_item(
+            item_id=123,
+            payload=reading.ReadingSummarizeRequest(provider="openai"),
+            current_user=SimpleNamespace(id=42),
+        )
+
+    assert excinfo.value.status_code == 503
+    assert excinfo.value.detail == "reading_summarize_failed"
+    logger_stub.error.assert_called_once_with("reading_summarize_failed")
+
+
+@pytest.mark.asyncio
+async def test_summarize_reading_item_sanitizes_error_string_log(monkeypatch):
+    logger_stub = MagicMock()
+
+    class _Service:
+        def get_item(self, *_args, **_kwargs):
+            return _reading_action_row()
+
+    monkeypatch.setattr(reading, "logger", logger_stub)
+    monkeypatch.setattr(reading, "_service_for_user", lambda _user: _Service())
+    monkeypatch.setattr(reading, "summarize_analyze", lambda *_args, **_kwargs: "Error: /private/llm.key")
+
+    with pytest.raises(HTTPException) as excinfo:
+        await reading.summarize_reading_item(
+            item_id=123,
+            payload=reading.ReadingSummarizeRequest(provider="openai"),
+            current_user=SimpleNamespace(id=42),
+        )
+
+    assert excinfo.value.status_code == 503
+    assert excinfo.value.detail == "reading_summarize_failed"
+    logger_stub.error.assert_called_once_with("reading_summarize_error")
+
+
+@pytest.mark.asyncio
+async def test_tts_reading_item_sanitizes_fetch_log(monkeypatch):
+    logger_stub = MagicMock()
+
+    class _FailingService:
+        def get_item(self, *_args, **_kwargs):
+            raise RuntimeError("tts fetch exploded at /private/collections.db")
+
+    monkeypatch.setattr(reading, "logger", logger_stub)
+    monkeypatch.setattr(reading, "_service_for_user", lambda _user: _FailingService())
+
+    with pytest.raises(HTTPException) as excinfo:
+        await reading.tts_reading_item(
+            item_id=123,
+            payload=reading.ReadingTTSRequest(model="kokoro"),
+            current_user=SimpleNamespace(id=42),
+        )
+
+    assert excinfo.value.status_code == 400
+    assert excinfo.value.detail == "reading_item_fetch_failed"
+    logger_stub.error.assert_called_once_with("reading_tts_get_failed")

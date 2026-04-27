@@ -963,7 +963,7 @@ async def summarize_reading_item(
     except KeyError:
         raise HTTPException(status_code=404, detail="reading_item_not_found") from None
     except _READING_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error(f"reading_summary_get_failed: {exc}")
+        logger.error("reading_summary_get_failed")
         raise HTTPException(status_code=400, detail="reading_item_fetch_failed") from exc
 
     metadata = _parse_metadata(row)
@@ -996,13 +996,13 @@ async def summarize_reading_item(
             ),
         )
     except _READING_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error(f"reading_summarize_failed: {exc}")
+        logger.error("reading_summarize_failed")
         raise HTTPException(status_code=503, detail="reading_summarize_failed") from exc
 
     if not isinstance(summary, str):
         summary = str(summary)
     if not summary or summary.strip().lower().startswith("error:"):
-        logger.error(f"reading_summarize_error: {summary}")
+        logger.error("reading_summarize_error")
         raise HTTPException(status_code=503, detail="reading_summarize_failed")
 
     citation = _build_reading_citation(row)
@@ -1048,7 +1048,7 @@ async def tts_reading_item(
     except KeyError:
         raise HTTPException(status_code=404, detail="reading_item_not_found") from None
     except _READING_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error(f"reading_tts_get_failed: {exc}")
+        logger.error("reading_tts_get_failed")
         raise HTTPException(status_code=400, detail="reading_item_fetch_failed") from exc
 
     metadata = _parse_metadata(row)
