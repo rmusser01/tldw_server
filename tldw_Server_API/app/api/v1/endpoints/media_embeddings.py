@@ -247,8 +247,8 @@ async def get_media_content(media_id: int, db: Any) -> dict[str, Any]:
                 if latest and latest.get("content"):
                     media_item = dict(media_item)
                     media_item["content"] = latest["content"]
-        except _MEDIA_EMBEDDINGS_NONCRITICAL_EXCEPTIONS as exc:
-            logger.warning(f"Failed to load fallback document content for media {media_id}: {exc}")
+        except _MEDIA_EMBEDDINGS_NONCRITICAL_EXCEPTIONS:
+            logger.warning("Failed to load fallback document content")
 
         # Get content
         content = media_item  # The get_media_by_id returns all data including content

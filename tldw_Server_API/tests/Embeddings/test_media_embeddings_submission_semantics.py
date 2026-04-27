@@ -1,5 +1,6 @@
 import pytest
 from fastapi import HTTPException
+from unittest.mock import MagicMock
 
 from tldw_Server_API.app.api.v1.endpoints import media_embeddings
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
@@ -31,6 +32,28 @@ async def test_get_media_content_sanitizes_backend_lookup_error(monkeypatch):
 
     assert excinfo.value.status_code == 500
     assert excinfo.value.detail == "Error retrieving media content"
+
+
+@pytest.mark.asyncio
+async def test_get_media_content_fallback_document_content_log_is_sanitized(monkeypatch):
+    from tldw_Server_API.app.core.DB_Management.media_db import api as media_db_api
+
+    logger_stub = MagicMock()
+
+    def _empty_media_item(*_args, **_kwargs):
+        return {"id": 123, "title": "Doc", "content": ""}
+
+    def _raise_fallback_error(*_args, **_kwargs):
+        raise RuntimeError("fallback document backend exploded at /private/media.db")
+
+    monkeypatch.setattr(media_embeddings, "logger", logger_stub)
+    monkeypatch.setattr(media_embeddings, "get_media_by_id", _empty_media_item)
+    monkeypatch.setattr(media_db_api, "get_document_version", _raise_fallback_error)
+
+    result = await media_embeddings.get_media_content(media_id=123, db=object())
+
+    assert result["media_item"]["content"] == ""
+    logger_stub.warning.assert_called_once_with("Failed to load fallback document content")
 
 
 @pytest.mark.asyncio
