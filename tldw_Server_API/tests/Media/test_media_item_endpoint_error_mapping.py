@@ -82,6 +82,21 @@ def _assert_sanitized_error_log(
         assert marker not in rendered_calls
 
 
+def _assert_sanitized_debug_log(
+    logger_stub: _LoggerStub,
+    expected_message: str,
+) -> None:
+    assert logger_stub.debug_calls
+
+    matching_messages = [args[0] for args, _kwargs in logger_stub.debug_calls if args]
+    assert expected_message in matching_messages
+    assert all(not kwargs.get("exc_info") for _args, kwargs in logger_stub.debug_calls)
+
+    rendered_calls = repr(logger_stub.debug_calls)
+    for marker in _SENSITIVE_MARKERS:
+        assert marker not in rendered_calls
+
+
 class _FakeMediaUpdateCursor:
     def __init__(self, update_exc: Exception | None):
         self._update_exc = update_exc
@@ -398,6 +413,54 @@ async def test_get_media_item_sanitizes_unexpected_error_log(monkeypatch):
     _assert_sanitized_error_log(
         logger_stub,
         "Unexpected error fetching details for media {}",
+    )
+
+
+@pytest.mark.asyncio
+async def test_get_media_item_auth_header_diagnostic_failure_log_is_sanitized(monkeypatch):
+    logger_stub = _patch_endpoint_logger(monkeypatch)
+
+    class ExplodingHeaders:
+        def get(self, _key: str) -> bool:
+            raise RuntimeError("header diagnostics backend exploded /private/tmp/media-item.db")
+
+    class FakeMediaDetailResponse:
+        def __init__(self, **details):
+            self._details = details
+
+        def model_dump(self):
+            return self._details
+
+    monkeypatch.setattr(media_item_endpoint, "_is_test_mode", lambda: True, raising=True)
+    monkeypatch.setattr(
+        media_item_endpoint,
+        "get_full_media_details_rich",
+        lambda *_args, **_kwargs: {"id": 42, "title": "test item"},
+        raising=True,
+    )
+    monkeypatch.setattr(
+        media_item_endpoint,
+        "MediaDetailResponse",
+        FakeMediaDetailResponse,
+        raising=True,
+    )
+
+    payload = await get_media_item(
+        request=type("_Req", (), {"headers": ExplodingHeaders()})(),
+        response=Response(),
+        media_id=42,
+        include_content=True,
+        include_versions=True,
+        include_version_content=False,
+        db=object(),
+        current_user=User(id=1, username="tester", email=None, is_active=True),
+        if_none_match=None,
+    )
+
+    assert payload["id"] == 42
+    _assert_sanitized_debug_log(
+        logger_stub,
+        "Failed to emit media item auth header diagnostics",
     )
 
 
