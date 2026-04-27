@@ -1,5 +1,6 @@
 import pytest
 from fastapi import Depends, Request, status
+from unittest.mock import MagicMock
 
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
@@ -7,6 +8,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.errors import DatabaseError
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.TTS.utils import compute_tts_history_text_hash
 from tldw_Server_API.app.core.config import settings
+from tldw_Server_API.app.api.v1.endpoints.audio import audio_history
 
 
 pytestmark = [pytest.mark.unit]
@@ -142,6 +144,69 @@ def test_history_text_exact_search(test_client, auth_headers, monkeypatch):
         payload = resp.json()
         assert len(payload["items"]) == 1
         assert payload["items"][0]["has_text"] is False
+    finally:
+        _clear_media_db_override(fastapi_app, dep_keys)
+        db.close_connection()
+
+
+def test_history_text_exact_hash_failure_log_is_sanitized(test_client, auth_headers, monkeypatch):
+    db = MediaDatabase(db_path=":memory:", client_id="tts_history_hash_failure")
+    fastapi_app = test_client.app
+    fake_logger = MagicMock()
+    monkeypatch.setattr(audio_history, "logger", fake_logger)
+
+    def fail_hash(*_args, **_kwargs):
+        raise RuntimeError("hash backend exploded at /private/tts-history.key")
+
+    monkeypatch.setattr(audio_history, "compute_tts_history_text_hash", fail_hash)
+
+    dep_keys = _set_media_db_override(fastapi_app, db)
+    try:
+        resp = test_client.get("/api/v1/audio/history?text_exact=Exact", headers=auth_headers)
+        assert resp.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+        assert resp.json()["detail"] == "TTS history hash key not configured"
+        fake_logger.debug.assert_called_once_with(
+            "TTS history: failed to compute text_exact hash"
+        )
+    finally:
+        _clear_media_db_override(fastapi_app, dep_keys)
+        db.close_connection()
+
+
+def test_history_next_cursor_failure_log_is_sanitized(test_client, auth_headers, monkeypatch):
+    db = MediaDatabase(db_path=":memory:", client_id="tts_history_cursor_failure")
+    fastapi_app = test_client.app
+    fake_logger = MagicMock()
+    monkeypatch.setattr(audio_history, "logger", fake_logger)
+
+    db.create_tts_history_entry(
+        user_id="1",
+        text_hash="cursor_hash_1",
+        text="First",
+        text_length=5,
+        status="success",
+    )
+    db.create_tts_history_entry(
+        user_id="1",
+        text_hash="cursor_hash_2",
+        text="Second",
+        text_length=6,
+        status="success",
+    )
+
+    def fail_encode_cursor(*_args, **_kwargs):
+        raise RuntimeError("cursor encoder exploded at /private/tts-cursor")
+
+    monkeypatch.setattr(audio_history, "_encode_cursor", fail_encode_cursor)
+
+    dep_keys = _set_media_db_override(fastapi_app, db)
+    try:
+        resp = test_client.get("/api/v1/audio/history?limit=1", headers=auth_headers)
+        assert resp.status_code == status.HTTP_200_OK
+        assert resp.json()["next_cursor"] is None
+        fake_logger.debug.assert_called_once_with(
+            "TTS history: failed to build next cursor"
+        )
     finally:
         _clear_media_db_override(fastapi_app, dep_keys)
         db.close_connection()

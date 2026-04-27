@@ -144,7 +144,7 @@ async def list_tts_history(
         try:
             text_hash = compute_tts_history_text_hash(text_exact, cfg.get("hash_key"))
         except _TTS_HISTORY_NONCRITICAL_EXCEPTIONS as exc:
-            logger.debug("TTS history: failed to compute text_exact hash: {}", exc)
+            logger.debug("TTS history: failed to compute text_exact hash")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="TTS history hash key not configured",
@@ -237,8 +237,8 @@ async def list_tts_history(
         last_row = rows[-1]
         try:
             next_cursor = _encode_cursor(last_row.get("created_at"), int(last_row.get("id")))
-        except _TTS_HISTORY_NONCRITICAL_EXCEPTIONS as exc:
-            logger.debug("TTS history: failed to build next cursor: {}", exc)
+        except _TTS_HISTORY_NONCRITICAL_EXCEPTIONS:
+            logger.debug("TTS history: failed to build next cursor")
             next_cursor = None
 
     total = None
