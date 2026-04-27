@@ -1275,8 +1275,8 @@ async def create_transcription(
                         "transition_indices": segmenter.get_transition_indices(),
                         "segments": segs,
                     }
-            except _AUDIO_TRANSCRIPTIONS_NONCRITICAL_EXCEPTIONS as seg_err:
-                logger.warning(f"Auto-segmentation failed: {seg_err}")
+            except _AUDIO_TRANSCRIPTIONS_NONCRITICAL_EXCEPTIONS:
+                logger.warning("Auto-segmentation failed; continuing without it")
 
         if response_format == "verbose_json":
             response_data["task"] = task_normalized
