@@ -837,6 +837,69 @@ def test_audio_transcriptions_sanitizes_temp_cleanup_metrics_failure_log(
 
 
 @pytest.mark.unit
+def test_audio_transcriptions_sanitizes_canonical_cleanup_failure_log(
+    monkeypatch,
+    bypass_api_limits,
+):
+    app, _captured = _setup_stubbed_audio_app(monkeypatch)
+    import tldw_Server_API.app.api.v1.endpoints.audio.audio_transcriptions as audio_tx
+    import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib as atlib
+
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(audio_tx, "logger", logger_stub)
+    created_canonical_paths: list[str] = []
+
+    def _copy_to_canonical(path, *_args, **_kwargs):
+        canonical_path = f"{path}.canonical.wav"
+        with open(path, "rb") as src, open(canonical_path, "wb") as dst:
+            dst.write(src.read())
+        created_canonical_paths.append(canonical_path)
+        return canonical_path
+
+    class _OSStub:
+        path = real_os.path
+
+        @staticmethod
+        def remove(path):
+            if str(path).endswith(".canonical.wav"):
+                raise OSError("canonical cleanup leaked /private/canonical.wav")
+            real_os.remove(path)
+
+    monkeypatch.setattr(atlib, "convert_to_wav", _copy_to_canonical)
+    monkeypatch.setattr(audio_tx, "os", _OSStub)
+
+    try:
+        with bypass_api_limits(app), TestClient(app) as client:
+            wav_bytes = _make_wav_bytes()
+            headers = {"X-API-KEY": TEST_API_KEY}
+            files = {"file": ("sample.wav", io.BytesIO(wav_bytes), "audio/wav")}
+            data = {
+                "model": "vibevoice-asr",
+                "response_format": "json",
+            }
+            resp = client.post(
+                "/api/v1/audio/transcriptions",
+                headers=headers,
+                files=files,
+                data=data,
+            )
+            if resp.status_code == 404:
+                pytest.skip("audio/transcriptions endpoint not mounted in this build")
+            assert resp.status_code == 200, resp.text
+    finally:
+        for canonical_path in created_canonical_paths:
+            if real_os.path.exists(canonical_path):
+                real_os.remove(canonical_path)
+
+    cleanup_logs = [
+        msg
+        for msg in logger_stub.warnings
+        if msg.startswith("Failed to remove canonical audio file")
+    ]
+    assert cleanup_logs == ["Failed to remove canonical audio file"]
+
+
+@pytest.mark.unit
 def test_audio_transcriptions_sanitizes_malformed_timestamp_granularity_log(
     monkeypatch,
     bypass_api_limits,

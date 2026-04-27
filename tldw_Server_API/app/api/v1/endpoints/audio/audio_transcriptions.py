@@ -1321,8 +1321,8 @@ async def create_transcription(
         if canonical_path and canonical_path != temp_audio_path and os.path.exists(canonical_path):
             try:
                 os.remove(canonical_path)
-            except OSError as e:
-                logger.warning(f"Failed to remove canonical audio file: path={canonical_path}, error={e}")
+            except OSError:
+                logger.warning("Failed to remove canonical audio file")
         if temp_audio_path and os.path.exists(temp_audio_path):
             try:
                 os.remove(temp_audio_path)
