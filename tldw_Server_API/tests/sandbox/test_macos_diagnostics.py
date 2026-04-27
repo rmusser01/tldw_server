@@ -345,6 +345,55 @@ def test_collect_macos_diagnostics_classifies_helper_protocol_mismatch(monkeypat
     assert "macos_virtualization_helper_protocol_mismatch" in data["helper"]["reasons"]
 
 
+def test_collect_macos_diagnostics_classifies_template_protocol_mismatch(monkeypatch) -> None:
+    _patch_macos_host(monkeypatch)
+    monkeypatch.delenv("TEST_MODE", raising=False)
+    monkeypatch.setenv("TLDW_SANDBOX_VZ_LINUX_TEMPLATE_SOURCE", "/tmp/vz-linux.img")
+
+    class _FakeHelper:
+        def ping(self):
+            return HelperPingReply(
+                protocol_version="1",
+                helper_version="0.1.0",
+                status="ok",
+                details={"transport": "unix"},
+            )
+
+        def validate_template(self, request: dict[str, object]) -> dict[str, object]:
+            raise MacOSVirtualizationHelperProtocolError("macos_virtualization_helper_protocol_mismatch")
+
+    monkeypatch.setattr(diagnostics_module, "MacOSVirtualizationHelperClient", _FakeHelper)
+    monkeypatch.setattr(
+        diagnostics_module,
+        "collect_runtime_preflights",
+        lambda network_policy="deny_all": {
+            RuntimeType.vz_linux: RuntimePreflightResult(
+                runtime=RuntimeType.vz_linux,
+                available=False,
+                reasons=["macos_virtualization_helper_protocol_mismatch"],
+                execution_mode="none",
+            ),
+            RuntimeType.vz_macos: RuntimePreflightResult(
+                runtime=RuntimeType.vz_macos,
+                available=False,
+                reasons=["macos_virtualization_helper_unavailable"],
+                execution_mode="none",
+            ),
+            RuntimeType.seatbelt: RuntimePreflightResult(
+                runtime=RuntimeType.seatbelt,
+                available=False,
+                reasons=["seatbelt_unavailable"],
+                execution_mode="none",
+                supported_trust_levels=["trusted"],
+            ),
+        },
+    )
+
+    data = diagnostics_module.collect_macos_diagnostics()
+
+    assert "macos_virtualization_helper_protocol_mismatch" in data["templates"]["vz_linux"]["reasons"]
+
+
 def test_collect_macos_diagnostics_reports_reconciliation_mismatches(monkeypatch) -> None:
     _patch_macos_host(monkeypatch)
     monkeypatch.delenv("TEST_MODE", raising=False)
