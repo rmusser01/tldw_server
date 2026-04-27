@@ -276,7 +276,7 @@ class TestParakeetONNX:
         )
 
         sample_rate = 16000
-        audio_data = np.random.randn(sample_rate * 2).astype(np.float32)
+        audio_data = np.random.randn(sample_rate * 2 + sample_rate // 2).astype(np.float32)
         session = MagicMock()
         input_waveforms = MagicMock()
         input_waveforms.name = "waveforms"
@@ -309,8 +309,8 @@ class TestParakeetONNX:
             overlap_duration=0.0,
         )
 
-        assert result == "chunk ok chunk ok"
-        assert seen_lens == [sample_rate, sample_rate]
+        assert result == "chunk ok chunk ok chunk ok"  # nosec B101
+        assert seen_lens == [sample_rate, sample_rate, sample_rate // 2]  # nosec B101
 
     def test_preprocessing(self):
 

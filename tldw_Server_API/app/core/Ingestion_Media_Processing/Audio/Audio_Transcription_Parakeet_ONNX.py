@@ -346,6 +346,7 @@ def _prepare_onnx_inputs(
     session: Any,
     features: np.ndarray,
     waveform: Optional[np.ndarray] = None,
+    signal_length: int | None = None,
 ) -> dict[str, np.ndarray]:
     """
     Build a best-effort ONNX input map from runtime input names.
@@ -357,6 +358,12 @@ def _prepare_onnx_inputs(
     inputs_meta = list(session.get_inputs() or [])
     input_names = [_onnx_input_name(inp) for inp in inputs_meta]
     prepared: dict[str, np.ndarray] = {}
+    explicit_signal_length: int | None = None
+    if signal_length is not None:
+        try:
+            explicit_signal_length = max(0, int(signal_length))
+        except (OverflowError, TypeError, ValueError):
+            explicit_signal_length = None
 
     signal_name: str | None = None
     signal_tensor = features
@@ -367,7 +374,11 @@ def _prepare_onnx_inputs(
             if _is_raw_waveform_input(input_meta):
                 signal_name = _onnx_input_name(input_meta)
                 signal_tensor = waveform.astype(np.float32, copy=False)
-                signal_length = int(signal_tensor.shape[-1])
+                signal_length = (
+                    explicit_signal_length
+                    if explicit_signal_length is not None
+                    else int(signal_tensor.shape[-1])
+                )
                 break
 
     if signal_name is None:
@@ -386,7 +397,11 @@ def _prepare_onnx_inputs(
             signal_name = name
             if waveform is not None and _onnx_input_rank(input_meta) == 2:
                 signal_tensor = waveform.astype(np.float32, copy=False)
-                signal_length = int(signal_tensor.shape[-1])
+                signal_length = (
+                    explicit_signal_length
+                    if explicit_signal_length is not None
+                    else int(signal_tensor.shape[-1])
+                )
             break
 
     if signal_name is not None:
@@ -701,7 +716,9 @@ def transcribe_chunked_onnx(
         end = min(start + chunk_samples, total_samples)
 
         # Extract chunk
-        chunk = audio_data[start:end]
+        raw_chunk = audio_data[start:end]
+        chunk_length = len(raw_chunk)
+        chunk = raw_chunk
 
         # Pad if needed
         if len(chunk) < chunk_samples:
@@ -719,7 +736,12 @@ def transcribe_chunked_onnx(
             waveform = _prepare_waveform_input(chunk)
 
             # Prepare inputs
-            inputs = _prepare_onnx_inputs(session, features, waveform=waveform)
+            inputs = _prepare_onnx_inputs(
+                session,
+                features,
+                waveform=waveform,
+                signal_length=chunk_length,
+            )
 
             # Run inference
             outputs = session.run(output_names, inputs)

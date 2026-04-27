@@ -3058,6 +3058,8 @@ def speech_to_text_parakeet(
         # Convert to segment format with sentence-level segmentation
         return create_segments_from_text(text, audio_duration, segmentation="sentence")
 
+    except STTTranscriptionError:
+        raise
     except _AUDIO_TRANSCRIPTION_NONCRITICAL_EXCEPTIONS as e:
         logging.error(f"Parakeet transcription failed: {e}")
         raise STTTranscriptionError(f"Parakeet transcription error: {str(e)}") from e
