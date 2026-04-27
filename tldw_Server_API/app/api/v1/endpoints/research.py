@@ -161,7 +161,7 @@ async def arxiv_search_endpoint(
     except HTTPException:  # Re-raise if it's already an HTTPException
         raise
     except Exception as e:
-        logger.error(f"Unexpected error during arXiv search execution: {e}", exc_info=True)
+        logger.error("Unexpected error during arXiv search execution")
         raise HTTPException(
             status_code=500,
             detail="An unexpected error occurred while searching arXiv",
@@ -282,7 +282,7 @@ async def semantic_scholar_search_endpoint(
     except HTTPException:  # Re-raise if it's already an HTTPException from above
         raise
     except Exception as e:
-        logger.error(f"Unexpected error during Semantic Scholar search execution: {e}", exc_info=True)
+        logger.error("Unexpected error during Semantic Scholar search execution")
         raise HTTPException(
             status_code=500,
             detail="An unexpected error occurred while searching Semantic Scholar",
