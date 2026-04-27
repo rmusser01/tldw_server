@@ -242,10 +242,13 @@ async def test_delete_embeddings_sanitizes_verify_failure_log(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_generate_embeddings_fails_when_job_create_raises(monkeypatch):
+    logger_stub = MagicMock()
+
     class _FailingAdapter:
         def create_job(self, **_kwargs):
             raise RuntimeError("queue unavailable")
 
+    monkeypatch.setattr(media_embeddings, "logger", logger_stub)
     monkeypatch.setattr(media_embeddings, "_embeddings_jobs_backend", lambda: "jobs")
     monkeypatch.setattr(media_embeddings, "_resolve_model_provider", lambda *_: ("model-a", "provider-a"))
     monkeypatch.setattr(media_embeddings, "EmbeddingsJobsAdapter", _FailingAdapter)
@@ -260,14 +263,18 @@ async def test_generate_embeddings_fails_when_job_create_raises(monkeypatch):
 
     assert excinfo.value.status_code == 500
     assert excinfo.value.detail == "Failed to queue embedding job"
+    logger_stub.error.assert_called_once_with("Failed to persist media embedding job")
 
 
 @pytest.mark.asyncio
 async def test_generate_embeddings_fails_when_job_id_missing(monkeypatch):
+    logger_stub = MagicMock()
+
     class _MissingIdAdapter:
         def create_job(self, **_kwargs):
             return {}
 
+    monkeypatch.setattr(media_embeddings, "logger", logger_stub)
     monkeypatch.setattr(media_embeddings, "_embeddings_jobs_backend", lambda: "jobs")
     monkeypatch.setattr(media_embeddings, "_resolve_model_provider", lambda *_: ("model-a", "provider-a"))
     monkeypatch.setattr(media_embeddings, "EmbeddingsJobsAdapter", _MissingIdAdapter)
@@ -282,6 +289,7 @@ async def test_generate_embeddings_fails_when_job_id_missing(monkeypatch):
 
     assert excinfo.value.status_code == 500
     assert excinfo.value.detail == "Failed to queue embedding job"
+    logger_stub.error.assert_called_once_with("Embeddings job creation returned no job id")
 
 
 @pytest.mark.asyncio

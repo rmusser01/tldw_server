@@ -719,10 +719,7 @@ async def generate_embeddings(
                 embedding_priority=request.priority,
             )
         except _MEDIA_EMBEDDINGS_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(
-                "Failed to persist media embedding job "
-                f"(user_id={user_id}, media_id={media_id}, reason={type(e).__name__}: {e})"
-            )
+            logger.error("Failed to persist media embedding job")
             raise HTTPException(
                 status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to queue embedding job",
@@ -730,10 +727,7 @@ async def generate_embeddings(
 
         job_id = str((job_row or {}).get("uuid") or (job_row or {}).get("id") or "").strip()
         if not job_id:
-            logger.error(
-                "Embeddings job creation returned no job id "
-                f"(user_id={user_id}, media_id={media_id}, job_row_type={type(job_row).__name__})"
-            )
+            logger.error("Embeddings job creation returned no job id")
             raise HTTPException(
                 status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to queue embedding job",
