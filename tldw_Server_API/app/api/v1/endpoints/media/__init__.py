@@ -28,7 +28,7 @@ def _optional_import_module(module_path: str):
     try:
         return importlib.import_module(module_path)
     except _MEDIA_IMPORT_EXCEPTIONS as exc:
-        logger.warning("Media import skipped: {} ({})", module_path, exc)
+        logger.warning("Media import skipped: optional module unavailable")
         return None
 
 
