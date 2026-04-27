@@ -482,7 +482,7 @@ async def stream_session_ws(
         except WebSocketDisconnect:
             break
         except Exception as exc:
-            logger.warning("Meetings websocket received invalid JSON frame: {}", exc)
+            logger.warning("Meetings websocket received invalid JSON frame")
             await websocket.send_json({"type": "error", "detail": "invalid_message", "session_id": session_id})
             continue
 
