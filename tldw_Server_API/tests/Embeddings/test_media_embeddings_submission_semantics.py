@@ -347,6 +347,76 @@ async def test_generate_embeddings_batch_returns_partial_when_some_media_ids_mis
 
 
 @pytest.mark.asyncio
+async def test_search_embeddings_sanitizes_embedding_failure_log(monkeypatch):
+    from tldw_Server_API.app.api.v1.endpoints import embeddings_v5_production_enhanced
+
+    logger_stub = MagicMock()
+
+    async def _raise_embedding_error(*_args, **_kwargs):
+        raise RuntimeError("embedding backend exploded at /private/models")
+
+    monkeypatch.setattr(media_embeddings, "logger", logger_stub)
+    monkeypatch.setattr(media_embeddings, "_resolve_model_provider", lambda *_: ("model-a", "provider-a"))
+    monkeypatch.setattr(
+        embeddings_v5_production_enhanced,
+        "create_embeddings_batch_async",
+        _raise_embedding_error,
+    )
+
+    with pytest.raises(HTTPException) as excinfo:
+        await media_embeddings.search_embeddings(
+            request=media_embeddings.EmbeddingsSearchRequest(query="needle"),
+            current_user=_user(),
+        )
+
+    assert excinfo.value.status_code == 503
+    assert excinfo.value.detail == "Embedding service unavailable"
+    logger_stub.error.assert_called_once_with("Failed to embed search query")
+
+
+@pytest.mark.asyncio
+async def test_search_embeddings_sanitizes_chroma_query_failure_log(monkeypatch):
+    from tldw_Server_API.app.api.v1.endpoints import embeddings_v5_production_enhanced
+
+    logger_stub = MagicMock()
+
+    async def _embedding_result(*_args, **_kwargs):
+        return [[0.1, 0.2]]
+
+    class _FailingCollection:
+        def query(self, **_kwargs):
+            raise RuntimeError("chroma query exploded at /private/chroma")
+
+    class _Client:
+        def get_collection(self, **_kwargs):
+            return _FailingCollection()
+
+    class _ChromaDBManager:
+        def __init__(self, *_args, **_kwargs):
+            self.client = _Client()
+
+    monkeypatch.setattr(media_embeddings, "logger", logger_stub)
+    monkeypatch.setattr(media_embeddings, "_user_embedding_config", lambda: {})
+    monkeypatch.setattr(media_embeddings, "_resolve_model_provider", lambda *_: ("model-a", "provider-a"))
+    monkeypatch.setattr(media_embeddings, "ChromaDBManager", _ChromaDBManager)
+    monkeypatch.setattr(
+        embeddings_v5_production_enhanced,
+        "create_embeddings_batch_async",
+        _embedding_result,
+    )
+
+    with pytest.raises(HTTPException) as excinfo:
+        await media_embeddings.search_embeddings(
+            request=media_embeddings.EmbeddingsSearchRequest(query="needle"),
+            current_user=_user(),
+        )
+
+    assert excinfo.value.status_code == 500
+    assert excinfo.value.detail == "Search failed"
+    logger_stub.error.assert_called_once_with("Chroma query failed")
+
+
+@pytest.mark.asyncio
 async def test_generate_embeddings_batch_raises_when_all_media_ids_missing(monkeypatch):
     class _OkAdapter:
         def create_job(self, **kwargs):

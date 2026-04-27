@@ -881,7 +881,7 @@ async def search_embeddings(
             metadata=query_metadata,
         )
     except Exception as exc:
-        logger.error(f"Failed to embed search query: {exc}")
+        logger.error("Failed to embed search query")
         raise HTTPException(
             status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Embedding service unavailable",
@@ -910,7 +910,7 @@ async def search_embeddings(
             where=request.filters if request.filters else None
         )
     except Exception as exc:
-        logger.error(f"Chroma query failed for collection {collection_name}: {exc}")
+        logger.error("Chroma query failed")
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Search failed",
