@@ -1,45 +1,45 @@
-import React from "react"
-import { PlaygroundForm } from "./PlaygroundForm"
-import { PlaygroundChat } from "./PlaygroundChat"
-import { ChatErrorBoundary } from "@/components/Common/Playground/ChatErrorBoundary"
-import { useMessageOption } from "@/hooks/useMessageOption"
-import { usePlaygroundSessionPersistence } from "@/hooks/usePlaygroundSessionPersistence"
-import { shouldRestorePersistedPlaygroundSession } from "@/hooks/playground-session-restore"
-import { webUIResumeLastChat } from "@/services/app"
+import React from "react";
+import { PlaygroundForm } from "./PlaygroundForm";
+import { PlaygroundChat } from "./PlaygroundChat";
+import { ChatErrorBoundary } from "@/components/Common/Playground/ChatErrorBoundary";
+import { useMessageOption } from "@/hooks/useMessageOption";
+import { usePlaygroundSessionPersistence } from "@/hooks/usePlaygroundSessionPersistence";
+import { shouldRestorePersistedPlaygroundSession } from "@/hooks/playground-session-restore";
+import { webUIResumeLastChat } from "@/services/app";
 import {
   formatToChatHistory,
   formatToMessage,
   getHistoryByServerChatId,
   getPromptById,
-  getRecentChatFromWebUI
-} from "@/db/dexie/helpers"
-import { useStoreChatModelSettings } from "@/store/model"
-import { useSmartScroll } from "@/hooks/useSmartScroll"
-import { ChevronDown, Keyboard, Search, X } from "lucide-react"
-import { CHAT_BACKGROUND_IMAGE_SETTING } from "@/services/settings/ui-settings"
-import { otherUnsupportedTypes } from "../Knowledge/utils/unsupported-types"
-import { useTranslation } from "react-i18next"
-import { useStoreMessageOption } from "@/store/option"
-import { useArtifactsStore } from "@/store/artifacts"
-import { useSetting } from "@/hooks/useSetting"
-import { useStorage } from "@plasmohq/storage/hook"
-import { DEFAULT_CHAT_SETTINGS } from "@/types/chat-settings"
-import { useMobile } from "@/hooks/useMediaQuery"
-import { useLoadLocalConversation } from "@/hooks/useLoadLocalConversation"
-import { tldwClient } from "@/services/tldw/TldwApiClient"
-import { resolvePlaygroundShortcutAction } from "./playground-shortcuts"
+  getRecentChatFromWebUI,
+} from "@/db/dexie/helpers";
+import { useStoreChatModelSettings } from "@/store/model";
+import { useSmartScroll } from "@/hooks/useSmartScroll";
+import { ChevronDown, Keyboard, Search, X } from "lucide-react";
+import { CHAT_BACKGROUND_IMAGE_SETTING } from "@/services/settings/ui-settings";
+import { otherUnsupportedTypes } from "../Knowledge/utils/unsupported-types";
+import { useTranslation } from "react-i18next";
+import { useStoreMessageOption } from "@/store/option";
+import { useArtifactsStore } from "@/store/artifacts";
+import { useSetting } from "@/hooks/useSetting";
+import { useStorage } from "@plasmohq/storage/hook";
+import { DEFAULT_CHAT_SETTINGS } from "@/types/chat-settings";
+import { useMobile } from "@/hooks/useMediaQuery";
+import { useLoadLocalConversation } from "@/hooks/useLoadLocalConversation";
+import { tldwClient } from "@/services/tldw/TldwApiClient";
+import { resolvePlaygroundShortcutAction } from "./playground-shortcuts";
 import {
   EDIT_MESSAGE_EVENT,
   OPEN_HISTORY_EVENT,
   TIMELINE_ACTION_EVENT,
   type OpenHistoryDetail,
-  type TimelineActionDetail
-} from "@/utils/timeline-actions"
-import { useCharacterGreeting } from "@/hooks/useCharacterGreeting"
+  type TimelineActionDetail,
+} from "@/utils/timeline-actions";
+import { useCharacterGreeting } from "@/hooks/useCharacterGreeting";
 import {
   applyChatSettingsPatch,
-  syncChatSettingsForServerChat
-} from "@/services/chat-settings"
+  syncChatSettingsForServerChat,
+} from "@/services/chat-settings";
 import {
   buildResearchFollowUpPrompt,
   clearAttachedResearchContext,
@@ -52,32 +52,32 @@ import {
   toPersistedDeepResearchAttachment,
   unpinAttachedResearchContext,
   type AttachedResearchContext,
-  type ResearchFollowUpTarget
-} from "./research-chat-context"
+  type ResearchFollowUpTarget,
+} from "./research-chat-context";
 import {
   collectThreadSearchMatches,
-  getWrappedMatchIndex
-} from "./playground-thread-search"
+  getWrappedMatchIndex,
+} from "./playground-thread-search";
 import {
   RESEARCH_RETURN_RUN_ID_PARAM,
   SETTINGS_HISTORY_ID_PARAM,
-  SETTINGS_SERVER_CHAT_ID_PARAM
-} from "@/utils/settings-return"
-import { useChatSurfaceCoordinatorStore } from "@/store/chat-surface-coordinator"
-import { useNavigate } from "react-router-dom"
+  SETTINGS_SERVER_CHAT_ID_PARAM,
+} from "@/utils/settings-return";
+import { useChatSurfaceCoordinatorStore } from "@/store/chat-surface-coordinator";
+import { useNavigate } from "react-router-dom";
 import {
   resolveComposerBottomOffsetPx,
-  type ComposerDockLayoutMetrics
-} from "./mobile-composer-layout"
+  type ComposerDockLayoutMetrics,
+} from "./mobile-composer-layout";
 
 const toText = (value: unknown): string =>
-  typeof value === "string" ? value : String(value)
+  typeof value === "string" ? value : String(value);
 
 const LazyArtifactsPanel = React.lazy(() =>
   import("@/components/Sidepanel/Chat/ArtifactsPanel").then((module) => ({
-    default: module.ArtifactsPanel
-  }))
-)
+    default: module.ArtifactsPanel,
+  })),
+);
 
 const renderArtifactsPanel = () => (
   <React.Suspense
@@ -89,37 +89,37 @@ const renderArtifactsPanel = () => (
   >
     <LazyArtifactsPanel />
   </React.Suspense>
-)
+);
 
 export const Playground = () => {
-  const drop = React.useRef<HTMLDivElement>(null)
-  const artifactsTriggerRef = React.useRef<HTMLButtonElement>(null)
-  const threadSearchInputRef = React.useRef<HTMLInputElement>(null)
-  const shortcutsTriggerRef = React.useRef<HTMLButtonElement>(null)
-  const shortcutsCloseRef = React.useRef<HTMLButtonElement>(null)
-  const composerDockRef = React.useRef<HTMLDivElement>(null)
-  const [droppedFiles, setDroppedFiles] = React.useState<File[]>([])
+  const drop = React.useRef<HTMLDivElement>(null);
+  const artifactsTriggerRef = React.useRef<HTMLButtonElement>(null);
+  const threadSearchInputRef = React.useRef<HTMLInputElement>(null);
+  const shortcutsTriggerRef = React.useRef<HTMLButtonElement>(null);
+  const shortcutsCloseRef = React.useRef<HTMLButtonElement>(null);
+  const composerDockRef = React.useRef<HTMLDivElement>(null);
+  const [droppedFiles, setDroppedFiles] = React.useState<File[]>([]);
   const [attachedResearchContext, setAttachedResearchContext] =
-    React.useState<AttachedResearchContext | null>(null)
+    React.useState<AttachedResearchContext | null>(null);
   const [attachedResearchContextBaseline, setAttachedResearchContextBaseline] =
-    React.useState<AttachedResearchContext | null>(null)
+    React.useState<AttachedResearchContext | null>(null);
   const [attachedResearchContextPinned, setAttachedResearchContextPinned] =
-    React.useState<AttachedResearchContext | null>(null)
+    React.useState<AttachedResearchContext | null>(null);
   const [attachedResearchContextHistory, setAttachedResearchContextHistory] =
-    React.useState<AttachedResearchContext[]>([])
+    React.useState<AttachedResearchContext[]>([]);
   const [pendingReturnedResearchRunId, setPendingReturnedResearchRunId] =
-    React.useState<string | null>(null)
+    React.useState<string | null>(null);
   const [dismissedReturnedResearchRunId, setDismissedReturnedResearchRunId] =
-    React.useState<string | null>(null)
+    React.useState<string | null>(null);
   const [composerDockMetrics, setComposerDockMetrics] =
-    React.useState<ComposerDockLayoutMetrics | null>(null)
-  const { t } = useTranslation(["playground", "common"])
-  const [chatBackgroundImage] = useSetting(CHAT_BACKGROUND_IMAGE_SETTING)
+    React.useState<ComposerDockLayoutMetrics | null>(null);
+  const { t } = useTranslation(["playground", "common"]);
+  const [chatBackgroundImage] = useSetting(CHAT_BACKGROUND_IMAGE_SETTING);
   const [stickyChatInput] = useStorage(
     "stickyChatInput",
-    DEFAULT_CHAT_SETTINGS.stickyChatInput
-  )
-  const isMobileViewport = useMobile()
+    DEFAULT_CHAT_SETTINGS.stickyChatInput,
+  );
+  const isMobileViewport = useMobile();
   const {
     messages,
     history,
@@ -138,128 +138,132 @@ export const Playground = () => {
     selectedCharacter,
     setSelectedCharacter,
     compareMode,
-    compareFeatureEnabled
-  } = useMessageOption()
-  const { setSystemPrompt } = useStoreChatModelSettings()
+    compareFeatureEnabled,
+  } = useMessageOption();
+  const { setSystemPrompt } = useStoreChatModelSettings();
   const composerBottomOffsetPx = stickyChatInput
     ? resolveComposerBottomOffsetPx(composerDockMetrics)
-    : 0
+    : 0;
   const handleComposerLayoutChange = React.useCallback(
     (metrics: ComposerDockLayoutMetrics) => {
       if (metrics.occupiedHeightPx === 0 && metrics.keyboardInsetPx === 0) {
-        setComposerDockMetrics(null)
-        return
+        setComposerDockMetrics(null);
+        return;
       }
 
-      const dockEl = composerDockRef.current
+      const dockEl = composerDockRef.current;
       setComposerDockMetrics({
         occupiedHeightPx: dockEl
           ? Math.round(dockEl.getBoundingClientRect().height)
           : metrics.occupiedHeightPx,
-        keyboardInsetPx: metrics.keyboardInsetPx
-      })
+        keyboardInsetPx: metrics.keyboardInsetPx,
+      });
     },
-    []
-  )
+    [],
+  );
   const { containerRef, isAutoScrollToBottom, autoScrollToBottom } =
     useSmartScroll(messages, streaming, 120, {
-      bottomOffsetPx: composerBottomOffsetPx
-    })
+      bottomOffsetPx: composerBottomOffsetPx,
+    });
   const [dropState, setDropState] = React.useState<
     "idle" | "dragging" | "error"
-  >("idle")
-  const [threadSearchOpen, setThreadSearchOpen] = React.useState(false)
-  const [threadSearchQuery, setThreadSearchQuery] = React.useState("")
-  const [debouncedSearchQuery, setDebouncedSearchQuery] = React.useState("")
-  const [threadSearchActiveIndex, setThreadSearchActiveIndex] = React.useState(0)
-  const [shortcutsHelpOpen, setShortcutsHelpOpen] = React.useState(false)
-  const [dropFeedback, setDropFeedback] = React.useState<
-    { type: "info" | "error" | "warning"; message: string } | null
-  >(null)
-  const [playgroundReady, setPlaygroundReady] = React.useState(false)
+  >("idle");
+  const [threadSearchOpen, setThreadSearchOpen] = React.useState(false);
+  const [threadSearchQuery, setThreadSearchQuery] = React.useState("");
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = React.useState("");
+  const [threadSearchActiveIndex, setThreadSearchActiveIndex] =
+    React.useState(0);
+  const [shortcutsHelpOpen, setShortcutsHelpOpen] = React.useState(false);
+  const [dropFeedback, setDropFeedback] = React.useState<{
+    type: "info" | "error" | "warning";
+    message: string;
+  } | null>(null);
+  const [playgroundReady, setPlaygroundReady] = React.useState(false);
   const feedbackTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(
-    null
-  )
-  const timelineActionRetryTimeoutRef = React.useRef<
-    ReturnType<typeof setTimeout> | null
-  >(null)
-  const initializePlaygroundRef = React.useRef(false)
-  const previousThreadRef = React.useRef<string | null>(null)
-  const stableHistoryId =
-    historyId && historyId !== "temp" ? historyId : null
+    null,
+  );
+  const timelineActionRetryTimeoutRef = React.useRef<ReturnType<
+    typeof setTimeout
+  > | null>(null);
+  const initializePlaygroundRef = React.useRef(false);
+  const previousThreadRef = React.useRef<string | null>(null);
+  const stableHistoryId = historyId && historyId !== "temp" ? historyId : null;
   const setRouteContext = useChatSurfaceCoordinatorStore(
-    (state) => state.setRouteContext
-  )
+    (state) => state.setRouteContext,
+  );
   const setSelectedQuickPrompt = useStoreMessageOption(
-    (state) => state.setSelectedQuickPrompt
-  )
+    (state) => state.setSelectedQuickPrompt,
+  );
 
   React.useEffect(() => {
-    setRouteContext({ routeId: "chat", surface: "webui" })
-  }, [setRouteContext])
+    setRouteContext({ routeId: "chat", surface: "webui" });
+  }, [setRouteContext]);
 
   // Debounce search query to avoid running collectThreadSearchMatches on every keystroke
   React.useEffect(() => {
-    const timer = setTimeout(() => setDebouncedSearchQuery(threadSearchQuery), 200)
-    return () => clearTimeout(timer)
-  }, [threadSearchQuery])
+    const timer = setTimeout(
+      () => setDebouncedSearchQuery(threadSearchQuery),
+      200,
+    );
+    return () => clearTimeout(timer);
+  }, [threadSearchQuery]);
 
   const showDropFeedback = React.useCallback(
     (feedback: { type: "info" | "error" | "warning"; message: string }) => {
-      setDropFeedback(feedback)
+      setDropFeedback(feedback);
       if (feedbackTimerRef.current) {
-        clearTimeout(feedbackTimerRef.current)
+        clearTimeout(feedbackTimerRef.current);
       }
       feedbackTimerRef.current = setTimeout(() => {
-        setDropFeedback(null)
-        feedbackTimerRef.current = null
-      }, 6000)
+        setDropFeedback(null);
+        feedbackTimerRef.current = null;
+      }, 6000);
     },
-    []
-  )
+    [],
+  );
 
   React.useEffect(() => {
     if (!drop.current) {
-      return
+      return;
     }
     const handleDragOver = (e: DragEvent) => {
-      e.preventDefault()
-      e.stopPropagation()
-    }
+      e.preventDefault();
+      e.stopPropagation();
+    };
 
     const handleDrop = (e: DragEvent) => {
-      e.preventDefault()
-      e.stopPropagation()
+      e.preventDefault();
+      e.stopPropagation();
 
-      setDropState("idle")
+      setDropState("idle");
 
-      const files = Array.from(e.dataTransfer?.files || [])
+      const files = Array.from(e.dataTransfer?.files || []);
 
       const hasUnsupportedFiles = files.some((file) =>
-        otherUnsupportedTypes.includes(file.type)
-      )
+        otherUnsupportedTypes.includes(file.type),
+      );
 
       if (hasUnsupportedFiles) {
-        setDropState("error")
+        setDropState("error");
         showDropFeedback({
           type: "error",
           message: t(
             "playground:drop.unsupported",
-            "That file type isn’t supported. Try images or text-based files."
-          )
-        })
-        return
+            "That file type isn’t supported. Try images or text-based files.",
+          ),
+        });
+        return;
       }
 
-      const FILE_LIMIT = 5
+      const FILE_LIMIT = 5;
       const allFiles = Array.from(e.dataTransfer?.files || []).filter(
-        (file) => !otherUnsupportedTypes.includes(file.type)
-      )
-      const newFiles = allFiles.slice(0, FILE_LIMIT)
-      const droppedExtra = allFiles.length - newFiles.length
+        (file) => !otherUnsupportedTypes.includes(file.type),
+      );
+      const newFiles = allFiles.slice(0, FILE_LIMIT);
+      const droppedExtra = allFiles.length - newFiles.length;
 
       if (newFiles.length > 0) {
-        setDroppedFiles(newFiles)
+        setDroppedFiles(newFiles);
 
         // Show warning if files were truncated
         if (droppedExtra > 0) {
@@ -269,94 +273,94 @@ export const Playground = () => {
               count: newFiles.length,
               extra: droppedExtra,
               limit: FILE_LIMIT,
-              defaultValue: `Attached first ${newFiles.length} files. ${droppedExtra} additional file(s) were not attached (limit: ${FILE_LIMIT}).`
-            })
-          })
+              defaultValue: `Attached first ${newFiles.length} files. ${droppedExtra} additional file(s) were not attached (limit: ${FILE_LIMIT}).`,
+            }),
+          });
         } else {
           showDropFeedback({
             type: "info",
             message:
               newFiles.length > 1
                 ? t("playground:drop.readyMultiple", {
-                    count: newFiles.length
+                    count: newFiles.length,
                   })
                 : t("playground:drop.readySingle", {
                     name:
                       newFiles[0]?.name ||
-                      t("playground:drop.defaultFileName", "File")
-                  })
-          })
+                      t("playground:drop.defaultFileName", "File"),
+                  }),
+          });
         }
       }
-    }
+    };
     const handleDragEnter = (e: DragEvent) => {
-      e.preventDefault()
-      e.stopPropagation()
-      setDropState("dragging")
+      e.preventDefault();
+      e.stopPropagation();
+      setDropState("dragging");
       showDropFeedback({
         type: "info",
         message: t(
           "playground:drop.hint",
-          "Drop files to attach them to your message"
-        )
-      })
-    }
+          "Drop files to attach them to your message",
+        ),
+      });
+    };
 
     const handleDragLeave = (e: DragEvent) => {
-      e.preventDefault()
-      e.stopPropagation()
-      setDropState("idle")
-    }
+      e.preventDefault();
+      e.stopPropagation();
+      setDropState("idle");
+    };
 
-    drop.current.addEventListener("dragover", handleDragOver)
-    drop.current.addEventListener("drop", handleDrop)
-    drop.current.addEventListener("dragenter", handleDragEnter)
-    drop.current.addEventListener("dragleave", handleDragLeave)
+    drop.current.addEventListener("dragover", handleDragOver);
+    drop.current.addEventListener("drop", handleDrop);
+    drop.current.addEventListener("dragenter", handleDragEnter);
+    drop.current.addEventListener("dragleave", handleDragLeave);
 
     return () => {
       if (drop.current) {
-        drop.current.removeEventListener("dragover", handleDragOver)
-        drop.current.removeEventListener("drop", handleDrop)
-        drop.current.removeEventListener("dragenter", handleDragEnter)
-        drop.current.removeEventListener("dragleave", handleDragLeave)
+        drop.current.removeEventListener("dragover", handleDragOver);
+        drop.current.removeEventListener("drop", handleDrop);
+        drop.current.removeEventListener("dragenter", handleDragEnter);
+        drop.current.removeEventListener("dragleave", handleDragLeave);
       }
-    }
-  }, [showDropFeedback, t])
+    };
+  }, [showDropFeedback, t]);
 
   React.useEffect(() => {
     return () => {
       if (feedbackTimerRef.current) {
-        clearTimeout(feedbackTimerRef.current)
+        clearTimeout(feedbackTimerRef.current);
       }
       if (timelineActionRetryTimeoutRef.current) {
-        clearTimeout(timelineActionRetryTimeoutRef.current)
+        clearTimeout(timelineActionRetryTimeoutRef.current);
       }
-      pendingTimelineActionRef.current = null
-    }
-  }, [])
+      pendingTimelineActionRef.current = null;
+    };
+  }, []);
 
   React.useEffect(() => {
-    const currentThreadKey = `${serverChatId ?? ""}::${historyId ?? ""}`
+    const currentThreadKey = `${serverChatId ?? ""}::${historyId ?? ""}`;
     if (
       previousThreadRef.current !== null &&
       previousThreadRef.current !== currentThreadKey
     ) {
-      setAttachedResearchContext(null)
-      setAttachedResearchContextBaseline(null)
-      setAttachedResearchContextPinned(null)
-      setAttachedResearchContextHistory([])
+      setAttachedResearchContext(null);
+      setAttachedResearchContextBaseline(null);
+      setAttachedResearchContextPinned(null);
+      setAttachedResearchContextHistory([]);
     }
-    previousThreadRef.current = currentThreadKey
-  }, [historyId, serverChatId])
+    previousThreadRef.current = currentThreadKey;
+  }, [historyId, serverChatId]);
 
   const persistAttachedResearchContext = React.useCallback(
     async (
       context: AttachedResearchContext | null,
       pinned: AttachedResearchContext | null,
-      history: AttachedResearchContext[]
+      history: AttachedResearchContext[],
     ) => {
       if (!serverChatId || !stableHistoryId) {
-        return
+        return;
       }
       try {
         await applyChatSettingsPatch({
@@ -370,66 +374,70 @@ export const Playground = () => {
               ? toPersistedDeepResearchAttachment(pinned)
               : null,
             deepResearchAttachmentHistory: history.map((entry) =>
-              toPersistedDeepResearchAttachment(entry, entry.attached_at)
-            )
-          }
-        })
+              toPersistedDeepResearchAttachment(entry, entry.attached_at),
+            ),
+          },
+        });
       } catch {
         // Attachment persistence is best-effort and should never block chat use.
       }
     },
-    [serverChatId, stableHistoryId]
-  )
+    [serverChatId, stableHistoryId],
+  );
 
   React.useEffect(() => {
     if (!playgroundReady || !serverChatId || !stableHistoryId) {
-      return
+      return;
     }
-    let cancelled = false
-    const threadKey = `${serverChatId}::${stableHistoryId}`
+    let cancelled = false;
+    const threadKey = `${serverChatId}::${stableHistoryId}`;
 
     const restorePersistedAttachment = async () => {
       try {
         const settings = await syncChatSettingsForServerChat({
           historyId: stableHistoryId,
-          serverChatId
-        })
+          serverChatId,
+        });
         if (cancelled || previousThreadRef.current !== threadKey) {
-          return
+          return;
         }
         const restoredAttachment = settings?.deepResearchAttachment
           ? fromPersistedDeepResearchAttachment(settings.deepResearchAttachment)
-          : null
+          : null;
         const restoredPinnedAttachment = settings?.deepResearchPinnedAttachment
           ? fromPersistedDeepResearchAttachment(
-              settings.deepResearchPinnedAttachment
+              settings.deepResearchPinnedAttachment,
             )
-          : null
-        const restoredHistory = Array.isArray(settings?.deepResearchAttachmentHistory)
+          : null;
+        const restoredHistory = Array.isArray(
+          settings?.deepResearchAttachmentHistory,
+        )
           ? settings.deepResearchAttachmentHistory.map(
-              fromPersistedDeepResearchAttachment
+              fromPersistedDeepResearchAttachment,
             )
-          : []
-        const restoredActive = restoredAttachment ?? restoredPinnedAttachment
-        setAttachedResearchContext((current) => current ?? restoredActive)
-        setAttachedResearchContextBaseline((current) => current ?? restoredActive)
+          : [];
+        const restoredActive = restoredAttachment ?? restoredPinnedAttachment;
+        setAttachedResearchContext((current) => current ?? restoredActive);
+        setAttachedResearchContextBaseline(
+          (current) => current ?? restoredActive,
+        );
         setAttachedResearchContextPinned(
-          (current) => current ?? restoredPinnedAttachment
-        )
+          (current) => current ?? restoredPinnedAttachment,
+        );
         setAttachedResearchContextHistory((current) =>
-          current.length > 0 ? current : restoredHistory
-        )
+          current.length > 0 ? current : restoredHistory,
+        );
       } catch {
         // Silent, non-blocking auxiliary restore.
       }
-    }
+    };
 
-    void restorePersistedAttachment()
+    void restorePersistedAttachment();
 
     return () => {
-      cancelled = true
-    }
-  }, [playgroundReady, serverChatId, stableHistoryId])
+      cancelled = true;
+    };
+  }, [playgroundReady, serverChatId, stableHistoryId]);
 
   const handleAttachResearchContext = React.useCallback(
     (context: AttachedResearchContext) => {
@@ -438,100 +446,106 @@ export const Playground = () => {
         baseline: attachedResearchContextBaseline,
         pinned: attachedResearchContextPinned,
         history: attachedResearchContextHistory,
-        nextActive: context
-      })
-      setAttachedResearchContext(nextState.active)
-      setAttachedResearchContextBaseline(nextState.baseline)
-      setAttachedResearchContextPinned(nextState.pinned)
-      setAttachedResearchContextHistory(nextState.history)
+        nextActive: context,
+      });
+      setAttachedResearchContext(nextState.active);
+      setAttachedResearchContextBaseline(nextState.baseline);
+      setAttachedResearchContextPinned(nextState.pinned);
+      setAttachedResearchContextHistory(nextState.history);
       void persistAttachedResearchContext(
         nextState.active,
         nextState.pinned,
-        nextState.history
-      )
+        nextState.history,
+      );
     },
     [
       attachedResearchContext,
       attachedResearchContextBaseline,
       attachedResearchContextPinned,
       attachedResearchContextHistory,
-      persistAttachedResearchContext
-    ]
-  )
+      persistAttachedResearchContext,
+    ],
+  );
 
   const handlePrepareResearchFollowUp = React.useCallback(
     async (target: ResearchFollowUpTarget) => {
       if (attachedResearchContext?.run_id !== target.run_id) {
         try {
-          await tldwClient.initialize().catch(() => null)
-          const bundle = await tldwClient.getResearchBundle(target.run_id)
+          await tldwClient.initialize().catch(() => null);
+          const bundle = await tldwClient.getResearchBundle(target.run_id);
           handleAttachResearchContext(
-            deriveAttachedResearchContext(bundle, target.run_id, target.query)
-          )
+            deriveAttachedResearchContext(bundle, target.run_id, target.query),
+          );
         } catch {
           // Keep prompt preparation available even if bundle reload fails.
         }
       }
 
-      setSelectedQuickPrompt(buildResearchFollowUpPrompt(target.query))
+      setSelectedQuickPrompt(buildResearchFollowUpPrompt(target.query));
     },
-    [attachedResearchContext?.run_id, handleAttachResearchContext, setSelectedQuickPrompt]
-  )
+    [
+      attachedResearchContext?.run_id,
+      handleAttachResearchContext,
+      setSelectedQuickPrompt,
+    ],
+  );
 
   const handleApplyAttachedResearchContext = React.useCallback(
     (context: AttachedResearchContext) => {
-      setAttachedResearchContext(context)
+      setAttachedResearchContext(context);
       void persistAttachedResearchContext(
         context,
         attachedResearchContextPinned,
-        attachedResearchContextHistory
-      )
+        attachedResearchContextHistory,
+      );
     },
     [
       attachedResearchContextHistory,
       attachedResearchContextPinned,
-      persistAttachedResearchContext
-    ]
-  )
+      persistAttachedResearchContext,
+    ],
+  );
 
   const handleResetAttachedResearchContext = React.useCallback(() => {
-    const resetContext = resetAttachedResearchContext(attachedResearchContextBaseline)
-    setAttachedResearchContext(resetContext)
+    const resetContext = resetAttachedResearchContext(
+      attachedResearchContextBaseline,
+    );
+    setAttachedResearchContext(resetContext);
     void persistAttachedResearchContext(
       resetContext,
       attachedResearchContextPinned,
-      attachedResearchContextHistory
-    )
+      attachedResearchContextHistory,
+    );
   }, [
     attachedResearchContextBaseline,
     attachedResearchContextHistory,
     attachedResearchContextPinned,
-    persistAttachedResearchContext
-  ])
+    persistAttachedResearchContext,
+  ]);
 
   const handleRemoveAttachedResearchContext = React.useCallback(() => {
     const cleared = clearAttachedResearchContext({
       active: attachedResearchContext,
       baseline: attachedResearchContextBaseline,
       pinned: attachedResearchContextPinned,
-      history: attachedResearchContextHistory
-    })
-    setAttachedResearchContext(cleared.active)
-    setAttachedResearchContextBaseline(cleared.baseline)
-    setAttachedResearchContextPinned(cleared.pinned)
-    setAttachedResearchContextHistory(cleared.history)
+      history: attachedResearchContextHistory,
+    });
+    setAttachedResearchContext(cleared.active);
+    setAttachedResearchContextBaseline(cleared.baseline);
+    setAttachedResearchContextPinned(cleared.pinned);
+    setAttachedResearchContextHistory(cleared.history);
     void persistAttachedResearchContext(
       cleared.active,
       cleared.pinned,
-      cleared.history
-    )
+      cleared.history,
+    );
   }, [
     attachedResearchContext,
     attachedResearchContextBaseline,
     attachedResearchContextPinned,
     attachedResearchContextHistory,
-    persistAttachedResearchContext
-  ])
+    persistAttachedResearchContext,
+  ]);
 
   const handleSelectAttachedResearchContextHistory = React.useCallback(
     (context: AttachedResearchContext) => {
@@ -540,50 +554,50 @@ export const Playground = () => {
         baseline: attachedResearchContextBaseline,
         pinned: attachedResearchContextPinned,
         history: attachedResearchContextHistory,
-        nextActive: context
-      })
-      setAttachedResearchContext(nextState.active)
-      setAttachedResearchContextBaseline(nextState.baseline)
-      setAttachedResearchContextPinned(nextState.pinned)
-      setAttachedResearchContextHistory(nextState.history)
+        nextActive: context,
+      });
+      setAttachedResearchContext(nextState.active);
+      setAttachedResearchContextBaseline(nextState.baseline);
+      setAttachedResearchContextPinned(nextState.pinned);
+      setAttachedResearchContextHistory(nextState.history);
       void persistAttachedResearchContext(
         nextState.active,
         nextState.pinned,
-        nextState.history
-      )
+        nextState.history,
+      );
     },
     [
       attachedResearchContext,
       attachedResearchContextBaseline,
       attachedResearchContextPinned,
       attachedResearchContextHistory,
-      persistAttachedResearchContext
-    ]
-  )
+      persistAttachedResearchContext,
+    ],
+  );
 
   const handlePinAttachedResearchContext = React.useCallback(() => {
     const nextState = pinAttachedResearchContext({
       active: attachedResearchContext,
       baseline: attachedResearchContextBaseline,
       pinned: attachedResearchContextPinned,
-      history: attachedResearchContextHistory
-    })
-    setAttachedResearchContext(nextState.active)
-    setAttachedResearchContextBaseline(nextState.baseline)
-    setAttachedResearchContextPinned(nextState.pinned)
-    setAttachedResearchContextHistory(nextState.history)
+      history: attachedResearchContextHistory,
+    });
+    setAttachedResearchContext(nextState.active);
+    setAttachedResearchContextBaseline(nextState.baseline);
+    setAttachedResearchContextPinned(nextState.pinned);
+    setAttachedResearchContextHistory(nextState.history);
     void persistAttachedResearchContext(
       nextState.active,
       nextState.pinned,
-      nextState.history
-    )
+      nextState.history,
+    );
   }, [
     attachedResearchContext,
     attachedResearchContextBaseline,
     attachedResearchContextPinned,
     attachedResearchContextHistory,
-    persistAttachedResearchContext
-  ])
+    persistAttachedResearchContext,
+  ]);
 
   const handlePinAttachedResearchContextHistory = React.useCallback(
     (context: AttachedResearchContext) => {
@@ -592,74 +606,74 @@ export const Playground = () => {
         baseline: attachedResearchContextBaseline,
         pinned: attachedResearchContextPinned,
         history: attachedResearchContextHistory,
-        nextPinned: context
-      })
-      setAttachedResearchContext(nextState.active)
-      setAttachedResearchContextBaseline(nextState.baseline)
-      setAttachedResearchContextPinned(nextState.pinned)
-      setAttachedResearchContextHistory(nextState.history)
+        nextPinned: context,
+      });
+      setAttachedResearchContext(nextState.active);
+      setAttachedResearchContextBaseline(nextState.baseline);
+      setAttachedResearchContextPinned(nextState.pinned);
+      setAttachedResearchContextHistory(nextState.history);
       void persistAttachedResearchContext(
         nextState.active,
         nextState.pinned,
-        nextState.history
-      )
+        nextState.history,
+      );
     },
     [
       attachedResearchContext,
       attachedResearchContextBaseline,
       attachedResearchContextPinned,
       attachedResearchContextHistory,
-      persistAttachedResearchContext
-    ]
-  )
+      persistAttachedResearchContext,
+    ],
+  );
 
   const handleUnpinAttachedResearchContext = React.useCallback(() => {
     const nextState = unpinAttachedResearchContext({
       active: attachedResearchContext,
       baseline: attachedResearchContextBaseline,
       pinned: attachedResearchContextPinned,
-      history: attachedResearchContextHistory
-    })
-    setAttachedResearchContext(nextState.active)
-    setAttachedResearchContextBaseline(nextState.baseline)
-    setAttachedResearchContextPinned(nextState.pinned)
-    setAttachedResearchContextHistory(nextState.history)
+      history: attachedResearchContextHistory,
+    });
+    setAttachedResearchContext(nextState.active);
+    setAttachedResearchContextBaseline(nextState.baseline);
+    setAttachedResearchContextPinned(nextState.pinned);
+    setAttachedResearchContextHistory(nextState.history);
     void persistAttachedResearchContext(
       nextState.active,
       nextState.pinned,
-      nextState.history
-    )
+      nextState.history,
+    );
   }, [
     attachedResearchContext,
     attachedResearchContextBaseline,
     attachedResearchContextPinned,
     attachedResearchContextHistory,
-    persistAttachedResearchContext
-  ])
+    persistAttachedResearchContext,
+  ]);
 
   const handleRestorePinnedResearchContext = React.useCallback(() => {
     const nextState = restorePinnedResearchContext({
       active: attachedResearchContext,
       baseline: attachedResearchContextBaseline,
       pinned: attachedResearchContextPinned,
-      history: attachedResearchContextHistory
-    })
-    setAttachedResearchContext(nextState.active)
-    setAttachedResearchContextBaseline(nextState.baseline)
-    setAttachedResearchContextPinned(nextState.pinned)
-    setAttachedResearchContextHistory(nextState.history)
+      history: attachedResearchContextHistory,
+    });
+    setAttachedResearchContext(nextState.active);
+    setAttachedResearchContextBaseline(nextState.baseline);
+    setAttachedResearchContextPinned(nextState.pinned);
+    setAttachedResearchContextHistory(nextState.history);
     void persistAttachedResearchContext(
       nextState.active,
       nextState.pinned,
-      nextState.history
-    )
+      nextState.history,
+    );
   }, [
     attachedResearchContext,
     attachedResearchContextBaseline,
     attachedResearchContextPinned,
     attachedResearchContextHistory,
-    persistAttachedResearchContext
-  ])
+    persistAttachedResearchContext,
+  ]);
 
   // Session persistence for draft restoration
   const {
@@ -667,8 +681,8 @@ export const Playground = () => {
     sessionScopeReady,
     hasPersistedSession,
     persistedHistoryId,
-    persistedServerChatId
-  } = usePlaygroundSessionPersistence()
+    persistedServerChatId,
+  } = usePlaygroundSessionPersistence();
 
   const initializePlayground = React.useCallback(async () => {
     // 1. Try session persistence first (restores exact state from nav-away)
@@ -680,38 +694,38 @@ export const Playground = () => {
         currentHistoryId: historyId ?? null,
         currentServerChatId: serverChatId ?? null,
         currentMessagesLength: messages.length,
-        currentHistoryLength: history.length
-      })
+        currentHistoryLength: history.length,
+      });
 
     if (shouldRestorePersistedSession) {
-      const restored = await restoreSession()
-      if (restored) return
+      const restored = await restoreSession();
+      if (restored) return;
     }
 
     // 2. Fall back to existing webUIResumeLastChat behavior
-    const isEnabled = await webUIResumeLastChat()
-    if (!isEnabled) return
+    const isEnabled = await webUIResumeLastChat();
+    if (!isEnabled) return;
 
     if (messages.length === 0 && history.length === 0) {
-      const recentChat = await getRecentChatFromWebUI()
+      const recentChat = await getRecentChatFromWebUI();
       if (recentChat) {
-        setHistoryId(recentChat.history.id)
-        setHistory(formatToChatHistory(recentChat.messages))
-        setMessages(formatToMessage(recentChat.messages))
+        setHistoryId(recentChat.history.id);
+        setHistory(formatToChatHistory(recentChat.messages));
+        setMessages(formatToMessage(recentChat.messages));
 
-        const lastUsedPrompt = recentChat?.history?.last_used_prompt
+        const lastUsedPrompt = recentChat?.history?.last_used_prompt;
         if (lastUsedPrompt) {
           if (lastUsedPrompt.prompt_id) {
-            const prompt = await getPromptById(lastUsedPrompt.prompt_id)
+            const prompt = await getPromptById(lastUsedPrompt.prompt_id);
             if (prompt) {
-              setSelectedSystemPrompt(lastUsedPrompt.prompt_id)
+              setSelectedSystemPrompt(lastUsedPrompt.prompt_id);
               if (!lastUsedPrompt.prompt_content?.trim()) {
-                setSystemPrompt(prompt.content)
+                setSystemPrompt(prompt.content);
               }
             }
           }
           if (lastUsedPrompt.prompt_content?.trim()) {
-            setSystemPrompt(lastUsedPrompt.prompt_content)
+            setSystemPrompt(lastUsedPrompt.prompt_content);
           }
         }
       }
@@ -729,29 +743,29 @@ export const Playground = () => {
     setHistoryId,
     setMessages,
     setSelectedSystemPrompt,
-    setSystemPrompt
-  ])
+    setSystemPrompt,
+  ]);
 
   React.useEffect(() => {
     if (!sessionScopeReady) {
-      return
+      return;
     }
     if (initializePlaygroundRef.current) {
-      return
+      return;
     }
-    initializePlaygroundRef.current = true
-    let cancelled = false
+    initializePlaygroundRef.current = true;
+    let cancelled = false;
     const run = async () => {
-      await initializePlayground()
+      await initializePlayground();
       if (!cancelled) {
-        setPlaygroundReady(true)
+        setPlaygroundReady(true);
       }
-    }
-    void run()
+    };
+    void run();
     return () => {
-      cancelled = true
-    }
-  }, [initializePlayground, sessionScopeReady])
+      cancelled = true;
+    };
+  }, [initializePlayground, sessionScopeReady]);
 
   useCharacterGreeting({
     playgroundReady,
@@ -761,8 +775,8 @@ export const Playground = () => {
     messagesLength: messages.length,
     setMessages,
     setHistory,
-    setSelectedCharacter
-  })
+    setSelectedCharacter,
+  });
 
   const loadLocalConversation = useLoadLocalConversation(
     {
@@ -773,114 +787,114 @@ export const Playground = () => {
       setSelectedModel: (id) => setSelectedModel(id),
       setSelectedSystemPrompt: (id) => {
         if (id) {
-          setSelectedSystemPrompt(id)
+          setSelectedSystemPrompt(id);
         }
       },
       setSystemPrompt,
-      setContextFiles
+      setContextFiles,
     },
     {
       t,
       errorLogPrefix: t(
         "playground:errors.loadLocalHistoryPrefix",
-        "Failed to load local chat history"
+        "Failed to load local chat history",
       ),
       errorDefaultMessage: t(
         "playground:errors.loadLocalHistoryDefault",
-        "Something went wrong while loading local chat history."
-      )
-    }
-  )
+        "Something went wrong while loading local chat history.",
+      ),
+    },
+  );
 
   const settingsReturnContext = React.useMemo(() => {
     if (typeof window === "undefined") {
       return {
         historyId: null as string | null,
         serverChatId: null as string | null,
-        researchReturnRunId: null as string | null
-      }
+        researchReturnRunId: null as string | null,
+      };
     }
-    const params = new URLSearchParams(window.location.search)
-    const historyId = params.get(SETTINGS_HISTORY_ID_PARAM)?.trim() || null
+    const params = new URLSearchParams(window.location.search);
+    const historyId = params.get(SETTINGS_HISTORY_ID_PARAM)?.trim() || null;
     const serverChatId =
-      params.get(SETTINGS_SERVER_CHAT_ID_PARAM)?.trim() || null
+      params.get(SETTINGS_SERVER_CHAT_ID_PARAM)?.trim() || null;
     const researchReturnRunId =
-      params.get(RESEARCH_RETURN_RUN_ID_PARAM)?.trim() || null
-    return { historyId, serverChatId, researchReturnRunId }
-  }, [])
+      params.get(RESEARCH_RETURN_RUN_ID_PARAM)?.trim() || null;
+    return { historyId, serverChatId, researchReturnRunId };
+  }, []);
 
-  const returnHistoryIdFromSettings = settingsReturnContext.historyId
-  const returnServerChatIdFromSettings = settingsReturnContext.serverChatId
+  const returnHistoryIdFromSettings = settingsReturnContext.historyId;
+  const returnServerChatIdFromSettings = settingsReturnContext.serverChatId;
   const returnResearchRunIdFromSettings =
-    settingsReturnContext.researchReturnRunId
+    settingsReturnContext.researchReturnRunId;
 
   React.useEffect(() => {
-    if (!playgroundReady) return
+    if (!playgroundReady) return;
     if (
       !returnHistoryIdFromSettings &&
       !returnServerChatIdFromSettings &&
       !returnResearchRunIdFromSettings
     ) {
-      return
+      return;
     }
 
-    let cancelled = false
+    let cancelled = false;
 
     const restoreFromSettingsReturnTarget = async () => {
       if (
         returnHistoryIdFromSettings &&
         returnHistoryIdFromSettings !== historyId
       ) {
-        await loadLocalConversation(returnHistoryIdFromSettings)
+        await loadLocalConversation(returnHistoryIdFromSettings);
       } else if (
         !returnHistoryIdFromSettings &&
         returnServerChatIdFromSettings &&
         returnServerChatIdFromSettings !== serverChatId
       ) {
         const existingHistory = await getHistoryByServerChatId(
-          returnServerChatIdFromSettings
-        )
+          returnServerChatIdFromSettings,
+        );
         const fallbackHistoryId =
           existingHistory?.id && existingHistory.id.trim().length > 0
             ? existingHistory.id
-            : null
+            : null;
         if (fallbackHistoryId) {
-          await loadLocalConversation(fallbackHistoryId)
+          await loadLocalConversation(fallbackHistoryId);
         }
       }
 
-      if (cancelled) return
+      if (cancelled) return;
 
       if (
         returnServerChatIdFromSettings &&
         returnServerChatIdFromSettings !== serverChatId
       ) {
-        setServerChatId(returnServerChatIdFromSettings)
+        setServerChatId(returnServerChatIdFromSettings);
       }
 
       if (
         returnResearchRunIdFromSettings &&
         returnResearchRunIdFromSettings !== dismissedReturnedResearchRunId
       ) {
-        setPendingReturnedResearchRunId(returnResearchRunIdFromSettings)
+        setPendingReturnedResearchRunId(returnResearchRunIdFromSettings);
       }
 
       if (typeof window !== "undefined") {
-        const url = new URL(window.location.href)
-        url.searchParams.delete(SETTINGS_HISTORY_ID_PARAM)
-        url.searchParams.delete(SETTINGS_SERVER_CHAT_ID_PARAM)
-        url.searchParams.delete(RESEARCH_RETURN_RUN_ID_PARAM)
-        const nextQuery = url.searchParams.toString()
-        const nextPath = `${url.pathname}${nextQuery ? `?${nextQuery}` : ""}${url.hash}`
-        window.history.replaceState(window.history.state, "", nextPath)
+        const url = new URL(window.location.href);
+        url.searchParams.delete(SETTINGS_HISTORY_ID_PARAM);
+        url.searchParams.delete(SETTINGS_SERVER_CHAT_ID_PARAM);
+        url.searchParams.delete(RESEARCH_RETURN_RUN_ID_PARAM);
+        const nextQuery = url.searchParams.toString();
+        const nextPath = `${url.pathname}${nextQuery ? `?${nextQuery}` : ""}${url.hash}`;
+        window.history.replaceState(window.history.state, "", nextPath);
       }
-    }
+    };
 
-    void restoreFromSettingsReturnTarget()
+    void restoreFromSettingsReturnTarget();
 
     return () => {
-      cancelled = true
-    }
+      cancelled = true;
+    };
   }, [
     historyId,
     loadLocalConversation,
@@ -890,105 +904,109 @@ export const Playground = () => {
     returnServerChatIdFromSettings,
     serverChatId,
     setServerChatId,
-    dismissedReturnedResearchRunId
-  ])
+    dismissedReturnedResearchRunId,
+  ]);
 
-  const pendingTimelineActionRef = React.useRef<TimelineActionDetail | null>(null)
+  const pendingTimelineActionRef = React.useRef<TimelineActionDetail | null>(
+    null,
+  );
   const threadSearchMatches = React.useMemo(
     () => collectThreadSearchMatches(messages, debouncedSearchQuery),
-    [messages, debouncedSearchQuery]
-  )
+    [messages, debouncedSearchQuery],
+  );
   const threadSearchMatchSet = React.useMemo(
     () => new Set(threadSearchMatches),
-    [threadSearchMatches]
-  )
+    [threadSearchMatches],
+  );
   const threadSearchActiveMessageIndex =
     threadSearchMatches.length > 0
       ? threadSearchMatches[
           Math.max(
             0,
-            Math.min(threadSearchActiveIndex, threadSearchMatches.length - 1)
+            Math.min(threadSearchActiveIndex, threadSearchMatches.length - 1),
           )
         ]
-      : null
+      : null;
 
   const findMessageIndex = React.useCallback(
     (messageId: string) =>
       messages.findIndex(
         (message) =>
-          message.id === messageId || message.serverMessageId === messageId
+          message.id === messageId || message.serverMessageId === messageId,
       ),
-    [messages]
-  )
+    [messages],
+  );
 
   const scrollToMessage = React.useCallback(
     (messageId: string) => {
-      const container = containerRef.current
-      if (!container) return false
+      const container = containerRef.current;
+      if (!container) return false;
       const target = container.querySelector<HTMLElement>(
-        `[data-message-id="${messageId}"], [data-server-message-id="${messageId}"]`
-      )
-      if (!target) return false
-      target.scrollIntoView({ block: "center", behavior: "smooth" })
-      return true
+        `[data-message-id="${messageId}"], [data-server-message-id="${messageId}"]`,
+      );
+      if (!target) return false;
+      target.scrollIntoView({ block: "center", behavior: "smooth" });
+      return true;
     },
-    [containerRef]
-  )
+    [containerRef],
+  );
   const scrollToMessageIndex = React.useCallback(
     (index: number) => {
-      const container = containerRef.current
-      if (!container) return false
-      const target = container.querySelector<HTMLElement>(`[data-index="${index}"]`)
-      if (!target) return false
-      target.scrollIntoView({ block: "center", behavior: "smooth" })
-      return true
+      const container = containerRef.current;
+      if (!container) return false;
+      const target = container.querySelector<HTMLElement>(
+        `[data-index="${index}"]`,
+      );
+      if (!target) return false;
+      target.scrollIntoView({ block: "center", behavior: "smooth" });
+      return true;
     },
-    [containerRef]
-  )
+    [containerRef],
+  );
 
   const dispatchEditMessage = React.useCallback((messageId: string) => {
-    if (typeof window === "undefined") return
+    if (typeof window === "undefined") return;
     window.dispatchEvent(
-      new CustomEvent(EDIT_MESSAGE_EVENT, { detail: { messageId } })
-    )
-  }, [])
+      new CustomEvent(EDIT_MESSAGE_EVENT, { detail: { messageId } }),
+    );
+  }, []);
 
   const performTimelineAction = React.useCallback(
     (detail: TimelineActionDetail) => {
-      if (!detail?.historyId) return true
-      if (detail.historyId !== historyId) return false
+      if (!detail?.historyId) return true;
+      if (detail.historyId !== historyId) return false;
 
       if (detail.action === "branch") {
-        if (!detail.messageId) return true
-        if (messages.length === 0) return false
-        const index = findMessageIndex(detail.messageId)
-        if (index < 0) return true
-        void createChatBranch(index)
-        return true
+        if (!detail.messageId) return true;
+        if (messages.length === 0) return false;
+        const index = findMessageIndex(detail.messageId);
+        if (index < 0) return true;
+        void createChatBranch(index);
+        return true;
       }
 
-      if (!detail.messageId) return true
+      if (!detail.messageId) return true;
 
-      const scrolled = scrollToMessage(detail.messageId)
+      const scrolled = scrollToMessage(detail.messageId);
       if (!scrolled) {
-        if (!containerRef.current) return false
+        if (!containerRef.current) return false;
         if (timelineActionRetryTimeoutRef.current) {
-          clearTimeout(timelineActionRetryTimeoutRef.current)
+          clearTimeout(timelineActionRetryTimeoutRef.current);
         }
         timelineActionRetryTimeoutRef.current = setTimeout(() => {
-          timelineActionRetryTimeoutRef.current = null
-          const retry = scrollToMessage(detail.messageId)
+          timelineActionRetryTimeoutRef.current = null;
+          const retry = scrollToMessage(detail.messageId);
           if (retry && detail.action === "edit") {
-            dispatchEditMessage(detail.messageId)
+            dispatchEditMessage(detail.messageId);
           }
-        }, 80)
-        return true
+        }, 80);
+        return true;
       }
 
       if (detail.action === "edit") {
-        dispatchEditMessage(detail.messageId)
+        dispatchEditMessage(detail.messageId);
       }
-      return true
+      return true;
     },
     [
       containerRef,
@@ -998,167 +1016,170 @@ export const Playground = () => {
       historyId,
       messages.length,
       scrollToMessage,
-      timelineActionRetryTimeoutRef
-    ]
-  )
+      timelineActionRetryTimeoutRef,
+    ],
+  );
 
   const enqueueTimelineAction = React.useCallback(
     (detail: TimelineActionDetail) => {
-      if (!detail?.historyId) return
+      if (!detail?.historyId) return;
       if (detail.historyId !== historyId) {
-        pendingTimelineActionRef.current = detail
-        void loadLocalConversation(detail.historyId)
-        return
+        pendingTimelineActionRef.current = detail;
+        void loadLocalConversation(detail.historyId);
+        return;
       }
 
-      const handled = performTimelineAction(detail)
+      const handled = performTimelineAction(detail);
       if (!handled) {
-        pendingTimelineActionRef.current = detail
+        pendingTimelineActionRef.current = detail;
       }
     },
-    [historyId, loadLocalConversation, performTimelineAction]
-  )
+    [historyId, loadLocalConversation, performTimelineAction],
+  );
 
   React.useEffect(() => {
-    const pending = pendingTimelineActionRef.current
-    if (!pending) return
-    const handled = performTimelineAction(pending)
+    const pending = pendingTimelineActionRef.current;
+    if (!pending) return;
+    const handled = performTimelineAction(pending);
     if (handled) {
-      pendingTimelineActionRef.current = null
+      pendingTimelineActionRef.current = null;
     }
-  }, [historyId, messages, performTimelineAction])
+  }, [historyId, messages, performTimelineAction]);
 
   React.useEffect(() => {
-    if (typeof window === "undefined") return
+    if (typeof window === "undefined") return;
 
     const handleTimelineActionEvent = (event: Event) => {
-      const detail = (event as CustomEvent<TimelineActionDetail>).detail
-      if (!detail?.historyId) return
-      enqueueTimelineAction(detail)
-    }
+      const detail = (event as CustomEvent<TimelineActionDetail>).detail;
+      if (!detail?.historyId) return;
+      enqueueTimelineAction(detail);
+    };
 
     const handleOpenHistoryEvent = (event: Event) => {
-      const detail = (event as CustomEvent<OpenHistoryDetail>).detail
-      if (!detail?.historyId) return
+      const detail = (event as CustomEvent<OpenHistoryDetail>).detail;
+      if (!detail?.historyId) return;
       enqueueTimelineAction({
         action: "go",
         historyId: detail.historyId,
-        messageId: detail.messageId
-      })
-    }
+        messageId: detail.messageId,
+      });
+    };
     const handleScrollToLatestEvent = () => {
-      autoScrollToBottom()
-    }
+      autoScrollToBottom();
+    };
 
-    window.addEventListener(TIMELINE_ACTION_EVENT, handleTimelineActionEvent)
-    window.addEventListener(OPEN_HISTORY_EVENT, handleOpenHistoryEvent)
-    window.addEventListener("tldw:scroll-to-latest", handleScrollToLatestEvent)
+    window.addEventListener(TIMELINE_ACTION_EVENT, handleTimelineActionEvent);
+    window.addEventListener(OPEN_HISTORY_EVENT, handleOpenHistoryEvent);
+    window.addEventListener("tldw:scroll-to-latest", handleScrollToLatestEvent);
     return () => {
-      window.removeEventListener(TIMELINE_ACTION_EVENT, handleTimelineActionEvent)
-      window.removeEventListener(OPEN_HISTORY_EVENT, handleOpenHistoryEvent)
+      window.removeEventListener(
+        TIMELINE_ACTION_EVENT,
+        handleTimelineActionEvent,
+      );
+      window.removeEventListener(OPEN_HISTORY_EVENT, handleOpenHistoryEvent);
       window.removeEventListener(
         "tldw:scroll-to-latest",
-        handleScrollToLatestEvent
-      )
-    }
-  }, [autoScrollToBottom, enqueueTimelineAction])
+        handleScrollToLatestEvent,
+      );
+    };
+  }, [autoScrollToBottom, enqueueTimelineAction]);
 
   const compareParentByHistory = useStoreMessageOption(
-    (state) => state.compareParentByHistory
-  )
-  const artifactsOpen = useArtifactsStore((state) => state.isOpen)
-  const activeArtifact = useArtifactsStore((state) => state.active)
-  const artifactsPinned = useArtifactsStore((state) => state.isPinned)
-  const artifactHistory = useArtifactsStore((state) => state.history)
-  const artifactUnreadCount = useArtifactsStore((state) => state.unreadCount)
-  const setArtifactsOpen = useArtifactsStore((state) => state.setOpen)
-  const closeArtifacts = useArtifactsStore((state) => state.closeArtifact)
-  const markArtifactsRead = useArtifactsStore((state) => state.markRead)
+    (state) => state.compareParentByHistory,
+  );
+  const artifactsOpen = useArtifactsStore((state) => state.isOpen);
+  const activeArtifact = useArtifactsStore((state) => state.active);
+  const artifactsPinned = useArtifactsStore((state) => state.isPinned);
+  const artifactHistory = useArtifactsStore((state) => state.history);
+  const artifactUnreadCount = useArtifactsStore((state) => state.unreadCount);
+  const setArtifactsOpen = useArtifactsStore((state) => state.setOpen);
+  const closeArtifacts = useArtifactsStore((state) => state.closeArtifact);
+  const markArtifactsRead = useArtifactsStore((state) => state.markRead);
 
   const parentMeta =
     historyId && compareParentByHistory
       ? compareParentByHistory[historyId]
-      : undefined
+      : undefined;
   const branchDepth = React.useMemo(() => {
-    if (!historyId || !compareParentByHistory) return 0
-    let depth = 0
-    let cursor = historyId
-    const seen = new Set<string>()
+    if (!historyId || !compareParentByHistory) return 0;
+    let depth = 0;
+    let cursor = historyId;
+    const seen = new Set<string>();
     while (cursor && !seen.has(cursor)) {
-      seen.add(cursor)
-      const meta = compareParentByHistory[cursor]
-      if (!meta?.parentHistoryId) break
-      depth += 1
-      cursor = meta.parentHistoryId
+      seen.add(cursor);
+      const meta = compareParentByHistory[cursor];
+      if (!meta?.parentHistoryId) break;
+      depth += 1;
+      cursor = meta.parentHistoryId;
     }
-    return depth
-  }, [compareParentByHistory, historyId])
+    return depth;
+  }, [compareParentByHistory, historyId]);
   const branchForkPointLabel = React.useMemo(() => {
-    if (!parentMeta?.parentHistoryId) return null
+    if (!parentMeta?.parentHistoryId) return null;
     if (parentMeta.clusterId) {
       return toText(
         t("playground:branching.forkPointCluster", "Fork point: {{cluster}}", {
-          cluster: parentMeta.clusterId
-        } as any)
-      )
+          cluster: parentMeta.clusterId,
+        } as any),
+      );
     }
     return toText(
       t("playground:branching.forkPointParent", "Fork point: {{historyId}}", {
-        historyId: parentMeta.parentHistoryId
-      } as any)
-    )
-  }, [parentMeta?.clusterId, parentMeta?.parentHistoryId, t])
+        historyId: parentMeta.parentHistoryId,
+      } as any),
+    );
+  }, [parentMeta?.clusterId, parentMeta?.parentHistoryId, t]);
   const branchDepthLabel = React.useMemo(() => {
-    if (branchDepth <= 0) return null
+    if (branchDepth <= 0) return null;
     return toText(
       t("playground:branching.depth", "Depth {{depth}}", {
-        depth: branchDepth
-      } as any)
-    )
-  }, [branchDepth, t])
-  const compareActive = compareFeatureEnabled && compareMode
+        depth: branchDepth,
+      } as any),
+    );
+  }, [branchDepth, t]);
+  const compareActive = compareFeatureEnabled && compareMode;
   const compactFeatureNoticeVisible =
-    isMobileViewport &&
-    (compareActive || Boolean(parentMeta?.parentHistoryId))
-  const artifactPinnedCount =
-    activeArtifact && artifactsPinned ? 1 : 0
-  const artifactHistoryCount = artifactHistory.length
+    isMobileViewport && (compareActive || Boolean(parentMeta?.parentHistoryId));
+  const artifactPinnedCount = activeArtifact && artifactsPinned ? 1 : 0;
+  const artifactHistoryCount = artifactHistory.length;
   const artifactBadgeLabel = artifactsOpen
     ? toText(t("playground:regions.artifactsOpen", "Artifacts panel open"))
     : activeArtifact
       ? toText(t("playground:regions.artifactsAvailable", "Artifacts ready"))
-      : toText(t("playground:regions.artifactsClosed", "Artifacts panel closed"))
+      : toText(
+          t("playground:regions.artifactsClosed", "Artifacts panel closed"),
+        );
   const closeArtifactsWithFocusReturn = React.useCallback(() => {
-    closeArtifacts()
+    closeArtifacts();
     requestAnimationFrame(() => {
-      artifactsTriggerRef.current?.focus()
-    })
-  }, [closeArtifacts])
+      artifactsTriggerRef.current?.focus();
+    });
+  }, [closeArtifacts]);
 
   React.useEffect(() => {
-    if (typeof window === "undefined") return
+    if (typeof window === "undefined") return;
 
     const handleShortcut = (event: KeyboardEvent) => {
-      const target = event.target as HTMLElement | null
+      const target = event.target as HTMLElement | null;
       const isEditableTarget = Boolean(
         target &&
-          (target.tagName === "INPUT" ||
-            target.tagName === "TEXTAREA" ||
-            target.isContentEditable)
-      )
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.isContentEditable),
+      );
       if (
         (event.metaKey || event.ctrlKey) &&
         !event.altKey &&
         !event.shiftKey &&
         event.key.toLowerCase() === "f"
       ) {
-        event.preventDefault()
-        setThreadSearchOpen(true)
+        event.preventDefault();
+        setThreadSearchOpen(true);
         requestAnimationFrame(() => {
-          threadSearchInputRef.current?.focus()
-          threadSearchInputRef.current?.select()
-        })
-        return
+          threadSearchInputRef.current?.focus();
+          threadSearchInputRef.current?.select();
+        });
+        return;
       }
       if (
         !event.altKey &&
@@ -1167,54 +1188,54 @@ export const Playground = () => {
         event.shiftKey &&
         event.key === "?"
       ) {
-        event.preventDefault()
-        setShortcutsHelpOpen(true)
-        return
+        event.preventDefault();
+        setShortcutsHelpOpen(true);
+        return;
       }
       if (shortcutsHelpOpen && event.key === "Escape") {
-        event.preventDefault()
-        setShortcutsHelpOpen(false)
+        event.preventDefault();
+        setShortcutsHelpOpen(false);
         requestAnimationFrame(() => {
-          shortcutsTriggerRef.current?.focus()
-        })
-        return
+          shortcutsTriggerRef.current?.focus();
+        });
+        return;
       }
       if (threadSearchOpen && event.key === "Escape") {
-        event.preventDefault()
-        setThreadSearchOpen(false)
-        return
+        event.preventDefault();
+        setThreadSearchOpen(false);
+        return;
       }
 
-      const action = resolvePlaygroundShortcutAction(event)
-      if (!action) return
-      if (isEditableTarget) return
-      event.preventDefault()
+      const action = resolvePlaygroundShortcutAction(event);
+      if (!action) return;
+      if (isEditableTarget) return;
+      event.preventDefault();
 
       if (action === "toggle_artifacts") {
         if (artifactsOpen) {
-          closeArtifacts()
-          return
+          closeArtifacts();
+          return;
         }
-        if (!activeArtifact) return
-        setArtifactsOpen(true)
-        markArtifactsRead()
-        return
+        if (!activeArtifact) return;
+        setArtifactsOpen(true);
+        markArtifactsRead();
+        return;
       }
 
       if (action === "toggle_compare") {
-        window.dispatchEvent(new CustomEvent("tldw:toggle-compare-mode"))
-        return
+        window.dispatchEvent(new CustomEvent("tldw:toggle-compare-mode"));
+        return;
       }
 
       if (action === "toggle_modes") {
-        window.dispatchEvent(new CustomEvent("tldw:toggle-mode-launcher"))
+        window.dispatchEvent(new CustomEvent("tldw:toggle-mode-launcher"));
       }
-    }
+    };
 
-    window.addEventListener("keydown", handleShortcut)
+    window.addEventListener("keydown", handleShortcut);
     return () => {
-      window.removeEventListener("keydown", handleShortcut)
-    }
+      window.removeEventListener("keydown", handleShortcut);
+    };
   }, [
     activeArtifact,
     artifactsOpen,
@@ -1222,89 +1243,89 @@ export const Playground = () => {
     markArtifactsRead,
     setArtifactsOpen,
     shortcutsHelpOpen,
-    threadSearchOpen
-  ])
+    threadSearchOpen,
+  ]);
 
   React.useEffect(() => {
-    if (typeof window === "undefined") return
+    if (typeof window === "undefined") return;
     const handleFocusArtifactsTrigger = () => {
-      artifactsTriggerRef.current?.focus()
-    }
+      artifactsTriggerRef.current?.focus();
+    };
     window.addEventListener(
       "tldw:focus-artifacts-trigger",
-      handleFocusArtifactsTrigger
-    )
+      handleFocusArtifactsTrigger,
+    );
     return () => {
       window.removeEventListener(
         "tldw:focus-artifacts-trigger",
-        handleFocusArtifactsTrigger
-      )
-    }
-  }, [])
+        handleFocusArtifactsTrigger,
+      );
+    };
+  }, []);
 
   React.useEffect(() => {
-    if (typeof window === "undefined") return
+    if (typeof window === "undefined") return;
     const handleOpenShortcutHelp = () => {
-      setShortcutsHelpOpen(true)
-    }
+      setShortcutsHelpOpen(true);
+    };
     window.addEventListener(
       "tldw:open-playground-shortcuts",
-      handleOpenShortcutHelp
-    )
+      handleOpenShortcutHelp,
+    );
     return () => {
       window.removeEventListener(
         "tldw:open-playground-shortcuts",
-        handleOpenShortcutHelp
-      )
-    }
-  }, [])
+        handleOpenShortcutHelp,
+      );
+    };
+  }, []);
 
   React.useEffect(() => {
-    if (!shortcutsHelpOpen) return
+    if (!shortcutsHelpOpen) return;
     requestAnimationFrame(() => {
-      shortcutsCloseRef.current?.focus()
-    })
-  }, [shortcutsHelpOpen])
+      shortcutsCloseRef.current?.focus();
+    });
+  }, [shortcutsHelpOpen]);
 
   React.useEffect(() => {
-    if (!threadSearchOpen) return
+    if (!threadSearchOpen) return;
     if (threadSearchMatches.length === 0) {
-      setThreadSearchActiveIndex(0)
-      return
+      setThreadSearchActiveIndex(0);
+      return;
     }
     setThreadSearchActiveIndex((previous) => {
       const bounded =
-        previous >= 0 && previous < threadSearchMatches.length ? previous : 0
-      const messageIndex = threadSearchMatches[bounded]
+        previous >= 0 && previous < threadSearchMatches.length ? previous : 0;
+      const messageIndex = threadSearchMatches[bounded];
       if (typeof messageIndex === "number") {
         requestAnimationFrame(() => {
-          scrollToMessageIndex(messageIndex)
-        })
+          scrollToMessageIndex(messageIndex);
+        });
       }
-      return bounded
-    })
-  }, [scrollToMessageIndex, threadSearchMatches, threadSearchOpen])
+      return bounded;
+    });
+  }, [scrollToMessageIndex, threadSearchMatches, threadSearchOpen]);
 
   const stepThreadSearchMatch = React.useCallback(
     (direction: 1 | -1) => {
-      if (threadSearchMatches.length === 0) return
+      if (threadSearchMatches.length === 0) return;
       setThreadSearchActiveIndex((previous) => {
         const next = getWrappedMatchIndex(
           previous,
           threadSearchMatches.length,
-          direction
-        )
-        const messageIndex = threadSearchMatches[next]
+          direction,
+        );
+        const messageIndex = threadSearchMatches[next];
         if (typeof messageIndex === "number") {
           requestAnimationFrame(() => {
-            scrollToMessageIndex(messageIndex)
-          })
+            scrollToMessageIndex(messageIndex);
+          });
         }
-        return next
-      })
+        return next;
+      });
     },
-    [scrollToMessageIndex, threadSearchMatches]
-  )
+    [scrollToMessageIndex, threadSearchMatches],
+  );
 
   return (
     <div
@@ -1317,10 +1338,11 @@ export const Playground = () => {
               backgroundImage: `url(${chatBackgroundImage})`,
               backgroundSize: "cover",
               backgroundPosition: "center",
-              backgroundRepeat: "no-repeat"
+              backgroundRepeat: "no-repeat",
             }
           : {}
-      }>
+      }
+    >
       {/* Background overlay for opacity effect */}
       {chatBackgroundImage && (
         <div
@@ -1332,7 +1354,10 @@ export const Playground = () => {
       {dropState === "dragging" && (
         <div className="pointer-events-none absolute inset-0 z-30 flex flex-col items-center justify-center">
           <div className="rounded-2xl border border-dashed border-border bg-elevated px-6 py-4 text-center text-sm font-medium text-text shadow-card">
-            {t("playground:drop.hint", "Drop files to attach them to your message")}
+            {t(
+              "playground:drop.hint",
+              "Drop files to attach them to your message",
+            )}
           </div>
         </div>
       )}
@@ -1365,20 +1390,21 @@ export const Playground = () => {
                   className="inline-flex items-center gap-2 rounded-full border border-primary bg-surface2 px-3 py-1 text-[11px] font-medium text-primaryStrong hover:bg-surface focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
                   title={t(
                     "playground:composer.compareBreadcrumb",
-                    "Back to comparison chat"
+                    "Back to comparison chat",
                   )}
                   onClick={() => {
                     window.dispatchEvent(
                       new CustomEvent("tldw:open-history", {
-                        detail: { historyId: parentMeta.parentHistoryId }
-                      })
-                    )
-                  }}>
+                        detail: { historyId: parentMeta.parentHistoryId },
+                      }),
+                    );
+                  }}
+                >
                   <span aria-hidden="true">←</span>
                   <span>
                     {t(
                       "playground:composer.compareBreadcrumb",
-                      "Back to comparison chat"
+                      "Back to comparison chat",
                     )}
                   </span>
                 </button>
@@ -1415,7 +1441,7 @@ export const Playground = () => {
                   title={
                     t(
                       "playground:shortcuts.openHelp",
-                      "Open keyboard shortcuts (Shift+/)"
+                      "Open keyboard shortcuts (Shift+/)",
                     ) as string
                   }
                   className="inline-flex items-center gap-1 rounded-full border border-border bg-surface2 px-2 py-0.5 text-text hover:bg-surface"
@@ -1430,14 +1456,14 @@ export const Playground = () => {
                   disabled={!activeArtifact && !artifactsOpen}
                   onClick={() => {
                     if (artifactsOpen) {
-                      closeArtifacts()
-                      return
+                      closeArtifacts();
+                      return;
                     }
                     if (!activeArtifact) {
-                      return
+                      return;
                     }
-                    setArtifactsOpen(true)
-                    markArtifactsRead()
+                    setArtifactsOpen(true);
+                    markArtifactsRead();
                   }}
                   title={artifactBadgeLabel as string}
                   className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 transition ${
@@ -1454,8 +1480,8 @@ export const Playground = () => {
                     >
                       {toText(
                         t("playground:regions.artifactsNew", "New {{count}}", {
-                          count: artifactUnreadCount
-                        } as any)
+                          count: artifactUnreadCount,
+                        } as any),
                       )}
                     </span>
                   )}
@@ -1469,9 +1495,9 @@ export const Playground = () => {
                           "playground:regions.artifactsPinned",
                           "Pinned {{count}}",
                           {
-                            count: artifactPinnedCount
-                          } as any
-                        )
+                            count: artifactPinnedCount,
+                          } as any,
+                        ),
                       )}
                     </span>
                   )}
@@ -1481,9 +1507,13 @@ export const Playground = () => {
                       className="rounded-full border border-border bg-surface px-1.5 py-0.5 text-[10px] text-text-subtle"
                     >
                       {toText(
-                        t("playground:regions.artifactsCount", "{{count}} total", {
-                          count: artifactHistoryCount
-                        } as any)
+                        t(
+                          "playground:regions.artifactsCount",
+                          "{{count}} total",
+                          {
+                            count: artifactHistoryCount,
+                          } as any,
+                        ),
                       )}
                     </span>
                   )}
@@ -1507,10 +1537,10 @@ export const Playground = () => {
                     type="button"
                     data-testid="playground-shortcuts-help-close"
                     onClick={() => {
-                      setShortcutsHelpOpen(false)
+                      setShortcutsHelpOpen(false);
                       requestAnimationFrame(() => {
-                        shortcutsTriggerRef.current?.focus()
-                      })
+                        shortcutsTriggerRef.current?.focus();
+                      });
                     }}
                     className="rounded border border-border bg-surface px-2 py-0.5 text-[10px] font-medium text-text hover:bg-surface2"
                   >
@@ -1518,14 +1548,63 @@ export const Playground = () => {
                   </button>
                 </div>
                 <div className="grid gap-1 sm:grid-cols-2">
-                  <p><span className="font-medium">Shift+Esc</span> {t("playground:shortcuts.focusComposer", "Focus composer")}</p>
-                  <p><span className="font-medium">{t("playground:shortcuts.findCombo", "Cmd/Ctrl+F")}</span> {t("playground:shortcuts.searchThread", "Search this thread")}</p>
-                  <p><span className="font-medium">{t("playground:shortcuts.helpCombo", "Shift+/")}</span> {t("playground:shortcuts.openHelp", "Open keyboard shortcuts (Shift+/)")}</p>
-                  <p><span className="font-medium">Alt+Shift+A</span> {t("playground:shortcuts.toggleArtifacts", "Toggle artifacts panel")}</p>
-                  <p><span className="font-medium">Alt+Shift+C</span> {t("playground:shortcuts.toggleCompare", "Toggle compare mode")}</p>
-                  <p><span className="font-medium">Alt+Shift+M</span> {t("playground:shortcuts.toggleModes", "Open mode launcher")}</p>
-                  <p><span className="font-medium">Alt+Shift+← / →</span> {t("playground:shortcuts.variantSwitch", "Switch response variant")}</p>
-                  <p><span className="font-medium">Alt+Shift+B / R</span> {t("playground:shortcuts.branchRegenerate", "Fork branch / regenerate")}</p>
+                  <p>
+                    <span className="font-medium">Shift+Esc</span>{" "}
+                    {t("playground:shortcuts.focusComposer", "Focus composer")}
+                  </p>
+                  <p>
+                    <span className="font-medium">
+                      {t("playground:shortcuts.findCombo", "Cmd/Ctrl+F")}
+                    </span>{" "}
+                    {t(
+                      "playground:shortcuts.searchThread",
+                      "Search this thread",
+                    )}
+                  </p>
+                  <p>
+                    <span className="font-medium">
+                      {t("playground:shortcuts.helpCombo", "Shift+/")}
+                    </span>{" "}
+                    {t(
+                      "playground:shortcuts.openHelp",
+                      "Open keyboard shortcuts (Shift+/)",
+                    )}
+                  </p>
+                  <p>
+                    <span className="font-medium">Alt+Shift+A</span>{" "}
+                    {t(
+                      "playground:shortcuts.toggleArtifacts",
+                      "Toggle artifacts panel",
+                    )}
+                  </p>
+                  <p>
+                    <span className="font-medium">Alt+Shift+C</span>{" "}
+                    {t(
+                      "playground:shortcuts.toggleCompare",
+                      "Toggle compare mode",
+                    )}
+                  </p>
+                  <p>
+                    <span className="font-medium">Alt+Shift+M</span>{" "}
+                    {t(
+                      "playground:shortcuts.toggleModes",
+                      "Open mode launcher",
+                    )}
+                  </p>
+                  <p>
+                    <span className="font-medium">Alt+Shift+← / →</span>{" "}
+                    {t(
+                      "playground:shortcuts.variantSwitch",
+                      "Switch response variant",
+                    )}
+                  </p>
+                  <p>
+                    <span className="font-medium">Alt+Shift+B / R</span>{" "}
+                    {t(
+                      "playground:shortcuts.branchRegenerate",
+                      "Fork branch / regenerate",
+                    )}
+                  </p>
                 </div>
               </div>
             )}
@@ -1540,18 +1619,18 @@ export const Playground = () => {
                     ref={threadSearchInputRef}
                     value={threadSearchQuery}
                     onChange={(event) => {
-                      setThreadSearchQuery(event.target.value)
-                      setThreadSearchActiveIndex(0)
+                      setThreadSearchQuery(event.target.value);
+                      setThreadSearchActiveIndex(0);
                     }}
                     onKeyDown={(event) => {
                       if (event.key === "Enter") {
-                        event.preventDefault()
-                        stepThreadSearchMatch(event.shiftKey ? -1 : 1)
+                        event.preventDefault();
+                        stepThreadSearchMatch(event.shiftKey ? -1 : 1);
                       }
                     }}
                     placeholder={t(
                       "playground:search.placeholder",
-                      "Search messages in this conversation"
+                      "Search messages in this conversation",
                     )}
                     className="h-7 w-full rounded border border-border bg-surface pl-7 pr-2 text-xs text-text placeholder:text-text-subtle focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
                   />
@@ -1568,11 +1647,11 @@ export const Playground = () => {
                           {
                             current: Math.min(
                               threadSearchActiveIndex + 1,
-                              threadSearchMatches.length
+                              threadSearchMatches.length,
                             ),
-                            total: threadSearchMatches.length
-                          } as any
-                        )
+                            total: threadSearchMatches.length,
+                          } as any,
+                        ),
                       )
                     : toText(t("playground:search.noMatches", "No matches"))}
                 </span>
@@ -1618,19 +1697,22 @@ export const Playground = () => {
               >
                 {t(
                   "playground:regions.compactFeatureNotice",
-                  "Limited on this device: compare and branch workflows use compact controls. Use full-chat opens from model cards for detailed review."
+                  "Limited on this device: compare and branch workflows use compact controls. Use full-chat opens from model cards for detailed review.",
                 )}
               </div>
             )}
           </div>
           <div
             ref={containerRef}
-            data-testid={stickyChatInput ? "playground-chat-transcript" : undefined}
+            data-testid={
+              stickyChatInput ? "playground-chat-transcript" : undefined
+            }
             role="log"
             aria-live="polite"
             aria-relevant="additions"
             aria-label={t("playground:aria.chatTranscript", "Chat messages")}
-            className="custom-scrollbar flex-1 min-h-0 w-full overflow-x-hidden overflow-y-auto px-4">
+            className="custom-scrollbar flex-1 min-h-0 w-full overflow-x-hidden overflow-y-auto px-4"
+          >
             <div className="mx-auto w-full max-w-[64rem] pb-6">
               <ChatErrorBoundary>
                 <PlaygroundChat
@@ -1642,10 +1724,12 @@ export const Playground = () => {
                   returnedResearchRunId={pendingReturnedResearchRunId}
                   onDismissReturnedResearchRun={() => {
                     if (!pendingReturnedResearchRunId) {
-                      return
+                      return;
                     }
-                    setDismissedReturnedResearchRunId(pendingReturnedResearchRunId)
-                    setPendingReturnedResearchRunId(null)
+                    setDismissedReturnedResearchRunId(
+                      pendingReturnedResearchRunId,
+                    );
+                    setPendingReturnedResearchRunId(null);
                   }}
                 />
               </ChatErrorBoundary>
@@ -1653,7 +1737,9 @@ export const Playground = () => {
           </div>
           <div
             ref={composerDockRef}
-            data-testid={stickyChatInput ? "playground-chat-composer-dock" : undefined}
+            data-testid={
+              stickyChatInput ? "playground-chat-composer-dock" : undefined
+            }
             className={`relative w-full ${
               stickyChatInput
                 ? "sticky bottom-0 z-20 border-t border-border bg-surface/95 backdrop-blur"
@@ -1669,10 +1755,22 @@ export const Playground = () => {
               <div className="pointer-events-none absolute -top-12 left-0 right-0 flex justify-center">
                 <button
                   onClick={() => autoScrollToBottom()}
-                  aria-label={t("playground:composer.scrollToLatest", "Scroll to latest messages")}
-                  title={t("playground:composer.scrollToLatest", "Scroll to latest messages") as string}
-                  className="pointer-events-auto rounded-full border border-border bg-surface p-2.5 text-text-subtle shadow-md transition-all duration-200 animate-in fade-in zoom-in-95 hover:bg-surface2 focus:outline-none focus-visible:ring-2 focus-visible:ring-focus">
-                  <ChevronDown className="size-4 text-text-subtle" aria-hidden="true" />
+                  aria-label={t(
+                    "playground:composer.scrollToLatest",
+                    "Scroll to latest messages",
+                  )}
+                  title={
+                    t(
+                      "playground:composer.scrollToLatest",
+                      "Scroll to latest messages",
+                    ) as string
+                  }
+                  className="pointer-events-auto rounded-full border border-border bg-surface p-2.5 text-text-subtle shadow-md transition-all duration-200 animate-in fade-in zoom-in-95 hover:bg-surface2 focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+                >
+                  <ChevronDown
+                    className="size-4 text-text-subtle"
+                    aria-hidden="true"
+                  />
                 </button>
               </div>
             )}
@@ -1686,14 +1784,22 @@ export const Playground = () => {
               attachedResearchContextBaseline={attachedResearchContextBaseline}
               attachedResearchContextPinned={attachedResearchContextPinned}
               attachedResearchContextHistory={attachedResearchContextHistory}
-              onApplyAttachedResearchContext={handleApplyAttachedResearchContext}
-              onResetAttachedResearchContext={handleResetAttachedResearchContext}
-              onRemoveAttachedResearchContext={handleRemoveAttachedResearchContext}
+              onApplyAttachedResearchContext={
+                handleApplyAttachedResearchContext
+              }
+              onResetAttachedResearchContext={
+                handleResetAttachedResearchContext
+              }
+              onRemoveAttachedResearchContext={
+                handleRemoveAttachedResearchContext
+              }
               onPinAttachedResearchContext={handlePinAttachedResearchContext}
               onPinAttachedResearchContextHistory={
                 handlePinAttachedResearchContextHistory
               }
-              onUnpinAttachedResearchContext={handleUnpinAttachedResearchContext}
+              onUnpinAttachedResearchContext={
+                handleUnpinAttachedResearchContext
+              }
               onRestorePinnedResearchContext={
                 handleRestorePinnedResearchContext
               }
@@ -1715,13 +1821,13 @@ export const Playground = () => {
                 aria-label={
                   t(
                     "playground:regions.closeArtifactsDrawer",
-                    "Close artifacts drawer"
+                    "Close artifacts drawer",
                   ) as string
                 }
                 title={
                   t(
                     "playground:regions.closeArtifactsDrawer",
-                    "Close artifacts drawer"
+                    "Close artifacts drawer",
                   ) as string
                 }
                 onClick={closeArtifactsWithFocusReturn}
@@ -1731,7 +1837,10 @@ export const Playground = () => {
                 data-testid="playground-mobile-artifacts-sheet"
                 role="dialog"
                 aria-modal="true"
-                aria-label={t("playground:regions.artifacts", "Artifacts panel")}
+                aria-label={t(
+                  "playground:regions.artifacts",
+                  "Artifacts panel",
+                )}
                 className="fixed inset-y-0 right-0 z-50 flex w-full max-w-[520px] flex-col border-l border-border bg-surface"
               >
                 <div className="flex items-center justify-between border-b border-border px-3 py-2 text-xs text-text">
@@ -1747,17 +1856,18 @@ export const Playground = () => {
                     onClick={closeArtifactsWithFocusReturn}
                     className="rounded border border-border bg-surface2 px-2 py-0.5 text-[11px] font-medium text-text hover:bg-surface"
                   >
-                    {t("playground:regions.returnToTimeline", "Back to timeline")}
+                    {t(
+                      "playground:regions.returnToTimeline",
+                      "Back to timeline",
+                    )}
                   </button>
                 </div>
-                <div className="min-h-0 flex-1">
-                  {renderArtifactsPanel()}
-                </div>
+                <div className="min-h-0 flex-1">{renderArtifactsPanel()}</div>
               </div>
             </div>
           </>
         )}
       </div>
     </div>
-  )
-}
+  );
+};
