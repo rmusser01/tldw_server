@@ -559,7 +559,7 @@ async def oauth_callback(
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception(f"Policy enforcement error on callback for provider '{provider}': {e}")
+        logger.error("Connector callback policy enforcement failed")
         raise HTTPException(
             status_code=403,
             detail="Account linking denied: policy enforcement failed",
@@ -616,8 +616,8 @@ async def oauth_callback(
                     close = getattr(resp, "close", None)
                     if callable(close):
                         close()
-        except Exception as e:
-            logger.debug(f"Failed to fetch userinfo for drive account (non-fatal): {e}")
+        except Exception:
+            logger.debug("Failed to fetch drive userinfo")
     elif provider == 'notion':
         notion_workspace_id = tokens.get('workspace_id')
     # Enforce additional org policy constraints at callback across modes using
@@ -631,7 +631,7 @@ async def oauth_callback(
             account_email=acct_email,
         )
     except Exception as e:
-        logger.exception(f"Callback constraint evaluation failed for provider '{provider}': {e}")
+        logger.error("Connector callback constraint evaluation failed")
         raise HTTPException(
             status_code=500,
             detail="Account linking denied: policy evaluation failed",

@@ -221,3 +221,134 @@ async def test_add_source_webhook_warning_log_is_sanitized(monkeypatch):
         }
     ]
     fake_logger.warning.assert_called_once_with("Connector webhook provisioning failed")
+
+
+@pytest.mark.asyncio
+async def test_oauth_callback_policy_enforcement_log_is_sanitized(monkeypatch):
+    class _Connector:
+        redirect_base = "http://localhost:8000"
+
+    class _FailingPolicy:
+        def get(self, *args, **kwargs):
+            raise RuntimeError("callback policy leaked /private/connectors-callback-policy.db")
+
+    async def _consume_state(*args, **kwargs):
+        return {"ok": True}
+
+    fake_logger = MagicMock()
+    monkeypatch.setattr(connectors, "logger", fake_logger)
+    monkeypatch.setattr(connectors, "get_connector_by_name", lambda provider: _Connector())
+    monkeypatch.setattr(connectors, "consume_oauth_state", _consume_state)
+
+    principal = AuthPrincipal(kind="user", user_id=7, roles=["member"])
+
+    with pytest.raises(HTTPException) as exc_info:
+        await connectors.oauth_callback(
+            provider="drive",
+            request=None,
+            code="oauth-code",
+            state="oauth-state",
+            db=object(),
+            principal=principal,
+            org_policy=_FailingPolicy(),
+        )
+
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.detail == "Account linking denied: policy enforcement failed"
+    fake_logger.error.assert_called_once_with("Connector callback policy enforcement failed")
+
+
+@pytest.mark.asyncio
+async def test_oauth_callback_drive_userinfo_log_is_sanitized(monkeypatch):
+    class _Connector:
+        redirect_base = "http://localhost:8000"
+
+        async def exchange_code(self, code: str, redirect_uri: str):
+            assert code == "oauth-code"
+            assert redirect_uri == "http://localhost:8000/api/v1/connectors/providers/drive/callback"
+            return {"access_token": "token", "display_name": "Drive Account"}
+
+    async def _consume_state(*args, **kwargs):
+        return {"ok": True}
+
+    async def _failing_fetch(*args, **kwargs):
+        raise RuntimeError("userinfo leaked /private/connectors-userinfo.db")
+
+    async def _create_account(db, **kwargs):
+        assert kwargs["email"] is None
+        return {
+            "id": 33,
+            "provider": kwargs["provider"],
+            "display_name": kwargs["display_name"],
+            "email": kwargs["email"],
+            "created_at": "now",
+        }
+
+    fake_logger = MagicMock()
+    monkeypatch.setenv("TESTING", "true")
+    monkeypatch.setattr(connectors, "logger", fake_logger)
+    monkeypatch.setattr(connectors, "get_connector_by_name", lambda provider: _Connector())
+    monkeypatch.setattr(connectors, "consume_oauth_state", _consume_state)
+    monkeypatch.setattr(connectors, "_http_afetch", _failing_fetch)
+    monkeypatch.setattr(connectors, "evaluate_policy_constraints", lambda *args, **kwargs: (True, None))
+    monkeypatch.setattr(connectors, "create_account", _create_account)
+
+    principal = AuthPrincipal(kind="user", user_id=7, roles=["admin"])
+
+    result = await connectors.oauth_callback(
+        provider="drive",
+        request=None,
+        code="oauth-code",
+        state="oauth-state",
+        db=object(),
+        principal=principal,
+        org_policy={},
+    )
+
+    assert result.id == 33
+    assert result.email is None
+    fake_logger.debug.assert_called_once_with("Failed to fetch drive userinfo")
+
+
+@pytest.mark.asyncio
+async def test_oauth_callback_constraint_log_is_sanitized(monkeypatch):
+    class _Connector:
+        redirect_base = "http://localhost:8000"
+
+        async def exchange_code(self, code: str, redirect_uri: str):
+            assert code == "oauth-code"
+            assert redirect_uri == "http://localhost:8000/api/v1/connectors/providers/notion/callback"
+            return {
+                "workspace_id": "workspace-1",
+                "workspace_name": "Workspace",
+            }
+
+    async def _consume_state(*args, **kwargs):
+        return {"ok": True}
+
+    def _failing_policy(*args, **kwargs):
+        raise RuntimeError("callback constraints leaked /private/connectors-callback-constraints.db")
+
+    fake_logger = MagicMock()
+    monkeypatch.setenv("TESTING", "true")
+    monkeypatch.setattr(connectors, "logger", fake_logger)
+    monkeypatch.setattr(connectors, "get_connector_by_name", lambda provider: _Connector())
+    monkeypatch.setattr(connectors, "consume_oauth_state", _consume_state)
+    monkeypatch.setattr(connectors, "evaluate_policy_constraints", _failing_policy)
+
+    principal = AuthPrincipal(kind="user", user_id=7, roles=["admin"])
+
+    with pytest.raises(HTTPException) as exc_info:
+        await connectors.oauth_callback(
+            provider="notion",
+            request=None,
+            code="oauth-code",
+            state="oauth-state",
+            db=object(),
+            principal=principal,
+            org_policy={},
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "Account linking denied: policy evaluation failed"
+    fake_logger.error.assert_called_once_with("Connector callback constraint evaluation failed")
