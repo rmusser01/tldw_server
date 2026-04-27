@@ -240,7 +240,7 @@ async def list_media_endpoint(
                 rid = int(rid_raw)
             except (TypeError, ValueError):
                 # Skip rows with invalid IDs rather than failing the entire listing
-                logger.error("Skipping media row with invalid id: {}", rid_raw)
+                logger.error("Skipping media row with invalid id")
                 skipped_count += 1
                 continue
             media_ids.append(rid)
@@ -414,7 +414,7 @@ async def list_media_trash_endpoint(
             try:
                 rid = int(rid_raw)
             except (TypeError, ValueError):
-                logger.error("Skipping trashed media row with invalid id: {}", rid_raw)
+                logger.error("Skipping trashed media row with invalid id")
                 skipped_count += 1
                 continue
             media_ids.append(rid)

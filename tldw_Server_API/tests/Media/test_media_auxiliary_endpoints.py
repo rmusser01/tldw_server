@@ -36,6 +36,7 @@ class _LoggerStub:
 
 _SENSITIVE_MARKERS = (
     "driver failed",
+    "invalid-private-id",
     "/private/tmp/media-listing-keywords.db",
     "progress backend leaked",
     "/private/tmp/reading-progress.db",
@@ -247,6 +248,44 @@ def test_list_media_sanitizes_outer_failure_log(monkeypatch):
     _assert_sanitized_error_log(logger_stub, "Error listing media")
 
 
+def test_list_media_invalid_row_id_log_is_sanitized(monkeypatch):
+    logger_stub = _patch_listing_logger(monkeypatch)
+    from tldw_Server_API.app.api.v1.endpoints.media import listing as listing_endpoints
+
+    def _fake_paginated_files(*_args, **_kwargs):
+        return (
+            [
+                {
+                    "id": "invalid-private-id /private/tmp/media-listing-keywords.db",
+                    "title": "Bad Row",
+                    "type": "document",
+                },
+                {"id": 2, "title": "Good Row", "type": "document"},
+            ],
+            1,
+            1,
+            2,
+        )
+
+    monkeypatch.setattr(listing_endpoints, "get_paginated_files", _fake_paginated_files)
+
+    with _build_media_auxiliary_client(_FakeMediaAuxDb()) as (client, _db):
+        response = client.get("/api/v1/media/")
+
+    assert response.status_code == 200, response.text  # nosec B101
+    payload = response.json()
+    assert payload["items"] == [
+        {
+            "id": 2,
+            "title": "Good Row",
+            "type": "document",
+            "url": "/api/v1/media/2",
+        }
+    ]  # nosec B101
+    assert payload["skipped_count"] == 1  # nosec B101
+    _assert_sanitized_error_log(logger_stub, "Skipping media row with invalid id")
+
+
 def test_list_media_trash_sanitizes_outer_failure_log(monkeypatch):
     logger_stub = _patch_listing_logger(monkeypatch)
     from tldw_Server_API.app.api.v1.endpoints.media import listing as listing_endpoints
@@ -262,6 +301,44 @@ def test_list_media_trash_sanitizes_outer_failure_log(monkeypatch):
     assert response.status_code == 500, response.text  # nosec B101
     assert response.json() == {"detail": "Failed to list trashed media"}  # nosec B101
     _assert_sanitized_error_log(logger_stub, "Error listing trashed media")
+
+
+def test_list_media_trash_invalid_row_id_log_is_sanitized(monkeypatch):
+    logger_stub = _patch_listing_logger(monkeypatch)
+    from tldw_Server_API.app.api.v1.endpoints.media import listing as listing_endpoints
+
+    def _fake_paginated_trash_files(*_args, **_kwargs):
+        return (
+            [
+                {
+                    "id": "invalid-private-id /private/tmp/media-listing-keywords.db",
+                    "title": "Bad Trash Row",
+                    "type": "document",
+                },
+                {"id": 3, "title": "Good Trash Row", "type": "document"},
+            ],
+            1,
+            1,
+            2,
+        )
+
+    monkeypatch.setattr(listing_endpoints, "get_paginated_trash_files", _fake_paginated_trash_files)
+
+    with _build_media_auxiliary_client(_FakeMediaAuxDb()) as (client, _db):
+        response = client.get("/api/v1/media/trash")
+
+    assert response.status_code == 200, response.text  # nosec B101
+    payload = response.json()
+    assert payload["items"] == [
+        {
+            "id": 3,
+            "title": "Good Trash Row",
+            "type": "document",
+            "url": "/api/v1/media/3",
+        }
+    ]  # nosec B101
+    assert payload["skipped_count"] == 1  # nosec B101
+    _assert_sanitized_error_log(logger_stub, "Skipping trashed media row with invalid id")
 
 
 def test_metadata_search_sanitizes_outer_failure_log(monkeypatch):
