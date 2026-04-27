@@ -80,8 +80,8 @@ def _extract_request_base(request: Request | None) -> str:
         return ""
     try:
         return str(request.base_url).rstrip("/")
-    except (AttributeError, TypeError, ValueError) as e:
-        logger.debug(f"Failed to resolve base_url from request: {e}")
+    except (AttributeError, TypeError, ValueError):
+        logger.debug("Failed to resolve base_url from request")
         return ""
 
 
