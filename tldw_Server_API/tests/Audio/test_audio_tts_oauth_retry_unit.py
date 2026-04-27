@@ -42,12 +42,15 @@ class _AuthRetryTTSService:
         return _gen()
 
 
-def _make_request(path: str = "/api/v1/audio/speech") -> Request:
+def _make_request(path: str = "/api/v1/audio/speech", headers: list[tuple[str, str]] | None = None) -> Request:
     scope = {
         "type": "http",
         "method": "POST",
         "path": path,
-        "headers": [],
+        "headers": [
+            (name.lower().encode("latin-1"), value.encode("latin-1"))
+            for name, value in (headers or [])
+        ],
         "query_string": b"",
         "server": ("testserver", 80),
         "client": ("testclient", 12345),
@@ -94,6 +97,11 @@ class _SuccessfulTTSService:
             yield b"generated audio"
 
         return _gen()
+
+
+class _FailingUsageLog:
+    def log_event(self, *args, **kwargs):  # noqa: ARG002
+        raise RuntimeError("usage logger leaked /private/tts-usage.json")
 
 
 @pytest.mark.unit
@@ -160,6 +168,77 @@ async def test_reset_tts_metrics_failure_log_is_sanitized(monkeypatch):
     assert exc_info.value.status_code == 500
     assert exc_info.value.detail["message"] == "Failed to reset metrics"
     fake_logger.error.assert_called_once_with("Error resetting metrics", exc_info=True)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_audio_speech_invalid_voice_to_voice_header_log_is_sanitized(monkeypatch):
+    async def _resolve_tts_byok(*args, **kwargs):
+        _ = args, kwargs
+        return (1, {}, None)
+
+    _patch_audio_shim(monkeypatch, _resolve_tts_byok)
+    fake_logger = MagicMock()
+    monkeypatch.setattr(audio_tts, "logger", fake_logger)
+
+    response = await audio_tts.create_speech(
+        _request_data(),
+        _make_request(headers=[("x-voice-to-voice-start", "bad /private/tts-header.txt")]),
+        tts_service=_SuccessfulTTSService(),
+        current_user=SimpleNamespace(id=1),
+        media_db=None,
+        usage_log=SimpleNamespace(log_event=lambda *args, **kwargs: None),
+    )
+
+    assert response.status_code == 200
+    fake_logger.debug.assert_called_once_with("Invalid X-Voice-To-Voice-Start header")
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_audio_speech_usage_log_failure_log_is_sanitized(monkeypatch):
+    async def _resolve_tts_byok(*args, **kwargs):
+        _ = args, kwargs
+        return (1, {}, None)
+
+    _patch_audio_shim(monkeypatch, _resolve_tts_byok)
+    fake_logger = MagicMock()
+    monkeypatch.setattr(audio_tts, "logger", fake_logger)
+
+    response = await audio_tts.create_speech(
+        _request_data(),
+        _make_request(),
+        tts_service=_SuccessfulTTSService(),
+        current_user=SimpleNamespace(id=1),
+        media_db=None,
+        usage_log=_FailingUsageLog(),
+    )
+
+    assert response.status_code == 200
+    fake_logger.debug.assert_called_once_with("usage_log audio.tts failed")
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_audio_metadata_usage_log_failure_log_is_sanitized(monkeypatch):
+    async def _resolve_tts_byok(*args, **kwargs):
+        _ = args, kwargs
+        return (1, {}, None)
+
+    _patch_audio_shim(monkeypatch, _resolve_tts_byok)
+    fake_logger = MagicMock()
+    monkeypatch.setattr(audio_tts, "logger", fake_logger)
+
+    response = await audio_tts.create_speech_metadata(
+        _request_data(),
+        _make_request(path="/api/v1/audio/speech/metadata"),
+        tts_service=_SuccessfulTTSService(),
+        current_user=SimpleNamespace(id=1),
+        usage_log=_FailingUsageLog(),
+    )
+
+    assert response.status_code == 204
+    fake_logger.debug.assert_called_once_with("usage_log audio.tts.metadata failed")
 
 
 @pytest.mark.unit

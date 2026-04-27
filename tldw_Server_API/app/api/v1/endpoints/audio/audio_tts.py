@@ -367,7 +367,7 @@ async def create_speech(
             if ts > 0:
                 voice_to_voice_start = ts
         except (TypeError, ValueError):
-            logger.debug(f"Invalid X-Voice-To-Voice-Start header: {raw_v2v}")
+            logger.debug("Invalid X-Voice-To-Voice-Start header")
     try:
         state_ts = getattr(request.state, "voice_to_voice_start", None)
         if voice_to_voice_start is None and isinstance(state_ts, (int, float)):
@@ -380,8 +380,8 @@ async def create_speech(
             tags=[str(request_data.model or ""), str(request_data.voice or "")],
             metadata={"stream": bool(getattr(request_data, "stream", False)), "format": request_data.response_format},
         )
-    except _AUDIO_TTS_NONCRITICAL_EXCEPTIONS as e:
-        logger.debug(f"usage_log audio.tts failed: error={e}")
+    except _AUDIO_TTS_NONCRITICAL_EXCEPTIONS:
+        logger.debug("usage_log audio.tts failed")
 
     # Determine Content-Type
     content_type = _AUDIO_CONTENT_TYPE_MAP.get(request_data.response_format)
@@ -858,8 +858,8 @@ async def create_speech_metadata(
             tags=[str(request_data.model or ""), str(request_data.voice or "")],
             metadata={"stream": bool(getattr(request_data, "stream", False)), "format": request_data.response_format},
         )
-    except _AUDIO_TTS_NONCRITICAL_EXCEPTIONS as exc:
-        logger.debug(f"usage_log audio.tts.metadata failed: error={exc}")
+    except _AUDIO_TTS_NONCRITICAL_EXCEPTIONS:
+        logger.debug("usage_log audio.tts.metadata failed")
 
     if hasattr(request_data, "stream"):
         try:
