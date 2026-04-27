@@ -22,9 +22,12 @@ def _user() -> User:
 
 @pytest.mark.asyncio
 async def test_get_media_content_sanitizes_backend_lookup_error(monkeypatch):
+    logger_stub = MagicMock()
+
     def _raise_backend_error(*_args, **_kwargs):
         raise RuntimeError("media backend exploded")
 
+    monkeypatch.setattr(media_embeddings, "logger", logger_stub)
     monkeypatch.setattr(media_embeddings, "get_media_by_id", _raise_backend_error)
 
     with pytest.raises(HTTPException) as excinfo:
@@ -32,6 +35,7 @@ async def test_get_media_content_sanitizes_backend_lookup_error(monkeypatch):
 
     assert excinfo.value.status_code == 500
     assert excinfo.value.detail == "Error retrieving media content"
+    logger_stub.error.assert_called_once_with("Error retrieving media content")
 
 
 @pytest.mark.asyncio
@@ -58,9 +62,12 @@ async def test_get_media_content_fallback_document_content_log_is_sanitized(monk
 
 @pytest.mark.asyncio
 async def test_get_embeddings_status_sanitizes_backend_lookup_error(monkeypatch):
+    logger_stub = MagicMock()
+
     def _raise_backend_error(*_args, **_kwargs):
         raise RuntimeError("media backend exploded")
 
+    monkeypatch.setattr(media_embeddings, "logger", logger_stub)
     monkeypatch.setattr(media_embeddings, "get_media_by_id", _raise_backend_error)
 
     with pytest.raises(HTTPException) as excinfo:
@@ -72,6 +79,7 @@ async def test_get_embeddings_status_sanitizes_backend_lookup_error(monkeypatch)
 
     assert excinfo.value.status_code == 500
     assert excinfo.value.detail == "Error checking embeddings status"
+    logger_stub.error.assert_called_once_with("Error checking embeddings status")
 
 
 @pytest.mark.asyncio
@@ -106,9 +114,12 @@ async def test_get_embeddings_status_chroma_failure_log_is_sanitized(monkeypatch
 
 @pytest.mark.asyncio
 async def test_generate_embeddings_sanitizes_backend_lookup_error(monkeypatch):
+    logger_stub = MagicMock()
+
     def _raise_backend_error(*_args, **_kwargs):
         raise RuntimeError("media backend exploded")
 
+    monkeypatch.setattr(media_embeddings, "logger", logger_stub)
     monkeypatch.setattr(media_embeddings, "_embeddings_jobs_backend", lambda: "jobs")
     monkeypatch.setattr(media_embeddings, "_resolve_model_provider", lambda *_: ("model-a", "provider-a"))
     monkeypatch.setattr(media_embeddings, "get_media_by_id", _raise_backend_error)
@@ -123,13 +134,17 @@ async def test_generate_embeddings_sanitizes_backend_lookup_error(monkeypatch):
 
     assert excinfo.value.status_code == 500
     assert excinfo.value.detail == "Error generating embeddings"
+    logger_stub.error.assert_called_once_with("Error generating embeddings")
 
 
 @pytest.mark.asyncio
 async def test_delete_embeddings_sanitizes_backend_lookup_error(monkeypatch):
+    logger_stub = MagicMock()
+
     def _raise_backend_error(*_args, **_kwargs):
         raise RuntimeError("media backend exploded")
 
+    monkeypatch.setattr(media_embeddings, "logger", logger_stub)
     monkeypatch.setattr(media_embeddings, "get_media_by_id", _raise_backend_error)
 
     with pytest.raises(HTTPException) as excinfo:
@@ -141,6 +156,7 @@ async def test_delete_embeddings_sanitizes_backend_lookup_error(monkeypatch):
 
     assert excinfo.value.status_code == 500
     assert excinfo.value.detail == "Error deleting embeddings"
+    logger_stub.error.assert_called_once_with("Error deleting embeddings")
 
 
 @pytest.mark.asyncio

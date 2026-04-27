@@ -266,7 +266,7 @@ async def get_media_content(media_id: int, db: Any) -> dict[str, Any]:
         # Propagate explicit HTTP errors (e.g., 404 Not Found)
         raise
     except _MEDIA_EMBEDDINGS_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Error retrieving media content: {e}")
+        logger.error("Error retrieving media content")
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error retrieving media content"
@@ -659,7 +659,7 @@ async def get_embeddings_status(
     except HTTPException:
         raise
     except _MEDIA_EMBEDDINGS_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Error checking embeddings status: {e}")
+        logger.error("Error checking embeddings status")
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error checking embeddings status"
@@ -751,7 +751,7 @@ async def generate_embeddings(
     except HTTPException:
         raise
     except _MEDIA_EMBEDDINGS_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Error generating embeddings: {e}")
+        logger.error("Error generating embeddings")
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error generating embeddings"
@@ -1003,7 +1003,7 @@ async def delete_embeddings(
     except HTTPException:
         raise
     except _MEDIA_EMBEDDINGS_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Error deleting embeddings: {e}")
+        logger.error("Error deleting embeddings")
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error deleting embeddings"
