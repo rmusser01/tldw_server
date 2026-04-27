@@ -321,7 +321,7 @@ async def create_output(
             try:
                 path.write_text(rendered_text, encoding="utf-8")
             except _OUTPUTS_NONCRITICAL_EXCEPTIONS as exc:
-                logger.error(f"failed to write output file: {exc}")
+                logger.error("outputs file write failed")
                 raise HTTPException(status_code=500, detail="write_failed") from exc
 
         meta = dict(base_meta)
