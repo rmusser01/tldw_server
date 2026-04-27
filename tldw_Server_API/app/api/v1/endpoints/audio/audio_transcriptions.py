@@ -753,8 +753,8 @@ async def create_transcription(
                         granularity_tokens = {str(x).strip().lower() for x in arr}
                 else:
                     granularity_tokens = {t.strip().lower() for t in s.split(",") if t.strip()}
-        except _AUDIO_TRANSCRIPTIONS_NONCRITICAL_EXCEPTIONS as e:
-            logger.debug(f"Failed to parse timestamp_granularities; defaulting to 'segment': error={e}")
+        except _AUDIO_TRANSCRIPTIONS_NONCRITICAL_EXCEPTIONS:
+            logger.debug("Failed to parse timestamp_granularities; defaulting to 'segment'")
             granularity_tokens = {"segment"}
         if not granularity_tokens:
             granularity_tokens = {"segment"}
@@ -771,8 +771,8 @@ async def create_transcription(
                     parsed_hotwords = json.loads(raw_hotwords)
                     if isinstance(parsed_hotwords, list):
                         hotwords_norm = [str(x).strip() for x in parsed_hotwords if str(x).strip()]
-                except _AUDIO_TRANSCRIPTIONS_NONCRITICAL_EXCEPTIONS as hotwords_exc:
-                    logger.debug(f"Failed to parse hotwords JSON; falling back to CSV parsing: {hotwords_exc}")
+                except _AUDIO_TRANSCRIPTIONS_NONCRITICAL_EXCEPTIONS:
+                    logger.debug("Failed to parse hotwords JSON; falling back to CSV parsing")
             if hotwords_norm is None:
                 hotwords_norm = [part.strip() for part in raw_hotwords.split(",") if part.strip()]
             hotwords_norm = hotwords_norm[:128] if hotwords_norm else None
