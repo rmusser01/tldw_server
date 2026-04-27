@@ -1,6 +1,32 @@
 import pytest
 
 from tldw_Server_API.app.api.v1.utils import cache, http_errors, request_parsing
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
+    CharactersRAGDBError,
+    ConflictError as ChaChaConflictError,
+    InputError as ChaChaInputError,
+    SchemaError as ChaChaSchemaError,
+)
+from tldw_Server_API.app.core.DB_Management.Kanban_DB import (
+    ConflictError as KanbanConflictError,
+    InputError as KanbanInputError,
+    KanbanDBError,
+    NotFoundError as KanbanNotFoundError,
+)
+from tldw_Server_API.app.core.DB_Management.Prompts_DB import (
+    ConflictError as PromptsConflictError,
+    DatabaseError as PromptsDatabaseError,
+    InputError as PromptsInputError,
+    SchemaError as PromptsSchemaError,
+)
+from tldw_Server_API.app.core.DB_Management.db_errors import (
+    ConflictError as UnifiedConflictError,
+    DataIntegrityError as UnifiedDataIntegrityError,
+    DatabaseError as UnifiedDatabaseError,
+    InputError as UnifiedInputError,
+    NotFoundError as UnifiedNotFoundError,
+    SchemaError as UnifiedSchemaError,
+)
 from tldw_Server_API.app.core.DB_Management.media_db.errors import (
     ConflictError,
     DatabaseError,
@@ -199,3 +225,44 @@ def test_http_error_mapping_logs_database_errors_with_context(monkeypatch):
     assert http_exc.detail == "Database error moving media to trash"
     assert logged_calls
     assert "delete_media_item media_id=42" in logged_calls[0][0]
+
+
+@pytest.mark.parametrize(
+    ("exc", "expected_status"),
+    [
+        (UnifiedInputError("bad"), 400),
+        (UnifiedConflictError("conflict"), 409),
+        (UnifiedNotFoundError("missing"), 404),
+        (UnifiedDataIntegrityError("bad data"), 422),
+        (UnifiedSchemaError("schema"), 500),
+        (KanbanInputError("bad"), 400),
+        (KanbanConflictError("conflict"), 409),
+        (KanbanNotFoundError("missing"), 404),
+        (ChaChaInputError("bad"), 400),
+        (ChaChaConflictError("conflict"), 409),
+        (ChaChaSchemaError("schema"), 500),
+        (PromptsInputError("bad"), 400),
+        (PromptsConflictError("conflict"), 409),
+        (PromptsSchemaError("schema"), 500),
+    ],
+)
+def test_http_error_mapping_handles_cross_module_db_errors(exc, expected_status):
+    http_exc = http_errors.map_db_error_to_http(exc, default_detail="db fallback")
+    assert http_exc.status_code == expected_status
+    if isinstance(exc, (UnifiedNotFoundError, KanbanNotFoundError)):
+        assert http_exc.detail == "Resource not found"
+
+
+@pytest.mark.parametrize(
+    "exc",
+    [
+        UnifiedDatabaseError("db"),
+        KanbanDBError("db"),
+        CharactersRAGDBError("db"),
+        PromptsDatabaseError("db"),
+    ],
+)
+def test_http_error_mapping_uses_default_detail_for_database_base_errors(exc):
+    http_exc = http_errors.map_db_error_to_http(exc, default_detail="db fallback")
+    assert http_exc.status_code == 500
+    assert http_exc.detail == "db fallback"
