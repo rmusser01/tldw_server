@@ -99,9 +99,9 @@ async def process_documents_endpoint(
             tags=["no_db"],
             metadata={"has_urls": bool(form_data.urls), "has_files": bool(files)},
         )
-    except Exception as usage_log_error:
+    except Exception:
         # Usage logging is best-effort; never fail the request.
-        logger.debug("Document process endpoint usage logging failed", exc_info=usage_log_error)
+        logger.debug("Document process endpoint usage logging failed")
     logger.debug(
         "Form data for /process-documents: has_urls={}, has_files={}, "
         "perform_analysis={}, perform_chunking={}",

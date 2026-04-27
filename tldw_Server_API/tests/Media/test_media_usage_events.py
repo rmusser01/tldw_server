@@ -4,6 +4,36 @@ import pytest
 pytestmark = pytest.mark.unit
 
 
+class _LoggerStub:
+    def __init__(self) -> None:
+        self.debugs: list[str] = []
+        self.debug_kwargs: list[dict[str, object]] = []
+
+    def info(self, *_args: object, **_kwargs: object) -> None:
+        return None
+
+    def log(self, *_args: object, **_kwargs: object) -> None:
+        return None
+
+    def warning(self, *_args: object, **_kwargs: object) -> None:
+        return None
+
+    def debug(self, message: str, *args: object, **kwargs: object) -> None:
+        self.debugs.append(message.format(*args, **kwargs) if args or kwargs else message)
+        self.debug_kwargs.append(dict(kwargs))
+
+
+def _assert_sanitized_debug_log(logger: _LoggerStub, expected: str) -> None:
+    target_kwargs = [
+        kwargs for message, kwargs in zip(logger.debugs, logger.debug_kwargs) if message == expected
+    ]
+    assert target_kwargs, logger.debugs
+    rendered = "\n".join(message for message in logger.debugs if message == expected)
+    assert "exploded" not in rendered
+    assert "/private/" not in rendered
+    assert all(not kwargs for kwargs in target_kwargs)
+
+
 class _StubQuotaService:
     async def check_quota(self, user_id, size_bytes, raise_on_exceed=False):
         # Always allow in tests
@@ -166,6 +196,41 @@ def test_documents_process_usage_event_logged(client_with_single_user, quota_ser
     assert any(e[0] == "media.process.document" for e in usage_logger.events)
 
 
+def test_documents_process_usage_event_failure_log_is_sanitized(
+    client_with_single_user,
+    quota_service_stub,
+    monkeypatch,
+):
+    client, usage_logger = client_with_single_user
+
+    import tldw_Server_API.app.api.v1.endpoints.media as media_mod
+    from tldw_Server_API.app.api.v1.endpoints.media import process_documents as process_documents_mod
+
+    logger_stub = _LoggerStub()
+
+    def _fail_usage_event(*_args, **_kwargs):
+        raise RuntimeError("usage logger exploded at /private/usage-events.db")
+
+    def _stub_process_document_content(**_kwargs):
+        return {
+            "status": "Success",
+            "content": "Hello",
+            "metadata": {"title": "stub-doc"},
+        }
+
+    monkeypatch.setattr(process_documents_mod, "logger", logger_stub)
+    monkeypatch.setattr(usage_logger, "log_event", _fail_usage_event)
+    monkeypatch.setattr(media_mod.docs, "process_document_content", _stub_process_document_content)
+
+    response = client.post(
+        "/api/v1/media/process-documents",
+        files=[("files", ("note.txt", b"hi", "text/plain"))],
+    )
+
+    assert response.status_code == 200, response.text
+    _assert_sanitized_debug_log(logger_stub, "Document process endpoint usage logging failed")
+
+
 def test_documents_process_sanitizes_worker_failure(
     client_with_single_user,
     quota_service_stub,
@@ -267,6 +332,41 @@ def test_pdfs_process_usage_event_logged(client_with_single_user, quota_service_
     assert captured_kwargs.get("ocr_backend") == "hunyuan"
     assert captured_kwargs.get("ocr_output_format") == "json"
     assert captured_kwargs.get("ocr_prompt_preset") == "json"
+
+
+def test_pdfs_process_usage_event_failure_log_is_sanitized(
+    client_with_single_user,
+    quota_service_stub,
+    monkeypatch,
+):
+    client, usage_logger = client_with_single_user
+
+    import tldw_Server_API.app.api.v1.endpoints.media as media_mod
+    from tldw_Server_API.app.api.v1.endpoints.media import process_pdfs as process_pdfs_mod
+
+    logger_stub = _LoggerStub()
+
+    def _fail_usage_event(*_args, **_kwargs):
+        raise RuntimeError("usage logger exploded at /private/usage-events.db")
+
+    async def _stub_process_pdf_task(**_kwargs):
+        return {
+            "status": "Success",
+            "content": "",
+            "metadata": {"title": "stub-pdf"},
+        }
+
+    monkeypatch.setattr(process_pdfs_mod, "logger", logger_stub)
+    monkeypatch.setattr(usage_logger, "log_event", _fail_usage_event)
+    monkeypatch.setattr(media_mod.pdf_lib, "process_pdf_task", _stub_process_pdf_task)
+
+    response = client.post(
+        "/api/v1/media/process-pdfs",
+        files=[("files", ("paper.pdf", b"%PDF-1.4\n", "application/pdf"))],
+    )
+
+    assert response.status_code == 200, response.text
+    _assert_sanitized_debug_log(logger_stub, "PDF process endpoint usage logging failed")
 
 
 def test_pdfs_process_sanitizes_processor_failure(
