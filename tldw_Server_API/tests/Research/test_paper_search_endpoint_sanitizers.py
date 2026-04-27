@@ -37,6 +37,24 @@ class LoggerStub:
             "get_pubmed_by_id",
             "Unexpected PubMed by-id error",
         ),
+        (
+            lambda: paper_search.chemrxiv_item_by_id("chemrxiv-123"),
+            paper_search.ChemRxiv,
+            "get_item_by_id",
+            "Unexpected ChemRxiv by-id error",
+        ),
+        (
+            lambda: paper_search.earthrxiv_by_id("earthrxiv-123"),
+            paper_search.EarthRxiv,
+            "get_item_by_id",
+            "Unexpected EarthArXiv by-id error",
+        ),
+        (
+            lambda: paper_search.osf_by_id("osf-123"),
+            paper_search.OSF,
+            "get_preprint_by_id",
+            "Unexpected OSF by-id error",
+        ),
     ],
 )
 async def test_by_id_unexpected_errors_log_sanitized_fallback(
