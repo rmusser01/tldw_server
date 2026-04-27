@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 from fastapi import HTTPException
@@ -14,6 +15,14 @@ from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 pytestmark = pytest.mark.unit
 
 
+class _LoggerStub:
+    def __init__(self) -> None:
+        self.debugs: list[str] = []
+
+    def debug(self, message: str, *args: Any, **kwargs: Any) -> None:
+        self.debugs.append(str(message))
+
+
 class _SharedRepo:
     async def fetch_secret(self, *_args):
         return {"encrypted_blob": "encrypted-shared-provider-secret"}
@@ -24,6 +33,17 @@ class _SharedRepo:
 
 def _principal() -> AuthPrincipal:
     return AuthPrincipal(kind="user", user_id=7, roles=["admin"], permissions=["*"], is_admin=True)
+
+
+def _non_admin_principal() -> AuthPrincipal:
+    return AuthPrincipal(kind="user", user_id=7, roles=["user"], permissions=[], is_admin=False)
+
+
+def _assert_sanitized_debug_log(logger_stub: _LoggerStub, expected_message: str) -> None:
+    assert logger_stub.debugs == [expected_message]
+    rendered = " ".join(logger_stub.debugs)
+    assert "exploded" not in rendered
+    assert "/private/" not in rendered
 
 
 async def _allow_scope(*_args, **_kwargs) -> None:
@@ -44,6 +64,42 @@ def _install_common_patches(monkeypatch) -> None:
 
 async def _repo() -> _SharedRepo:
     return _SharedRepo()
+
+
+@pytest.mark.asyncio
+async def test_require_org_manager_backend_failure_log_is_sanitized(monkeypatch) -> None:
+    logger_stub = _LoggerStub()
+
+    async def fail_membership_lookup(**_kwargs):
+        raise RuntimeError("org membership backend exploded at /private/shared-keys.db")
+
+    monkeypatch.setattr(routes, "logger", logger_stub)
+    monkeypatch.setattr(routes, "list_org_members", fail_membership_lookup)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await routes._require_org_manager(_non_admin_principal(), org_id=42)
+
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.detail == "Org manager role required"
+    _assert_sanitized_debug_log(logger_stub, "Org manager check failed")
+
+
+@pytest.mark.asyncio
+async def test_require_team_manager_backend_failure_log_is_sanitized(monkeypatch) -> None:
+    logger_stub = _LoggerStub()
+
+    async def fail_membership_lookup(_team_id):
+        raise RuntimeError("team membership backend exploded at /private/shared-keys.db")
+
+    monkeypatch.setattr(routes, "logger", logger_stub)
+    monkeypatch.setattr(routes, "list_team_members", fail_membership_lookup)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await routes._require_team_manager(_non_admin_principal(), team_id=42)
+
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.detail == "Team manager role required"
+    _assert_sanitized_debug_log(logger_stub, "Team manager check failed")
 
 
 @pytest.mark.asyncio
