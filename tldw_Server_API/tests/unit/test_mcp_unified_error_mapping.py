@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from typing import Any
 
+import base64
+
 import pytest
 from fastapi import HTTPException
 from starlette.requests import Request
@@ -45,6 +47,46 @@ class _StatusMcpServer:
 
     async def get_status(self) -> dict[str, str]:
         return {"status": "degraded: redis backend exploded at /private/mcp"}
+
+
+class _SuccessfulMcpServer:
+    initialized = True
+
+    def __init__(self) -> None:
+        self.metadata: dict[str, Any] | None = None
+
+    async def initialize(self) -> None:  # pragma: no cover - initialized starts true
+        self.initialized = True
+
+    async def handle_http_request(
+        self,
+        request: Any,
+        *,
+        client_id: str | None = None,
+        user_id: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> MCPResponse:
+        self.metadata = metadata
+        return MCPResponse(id=getattr(request, "id", None), result={"ok": True})
+
+    async def handle_http_batch(
+        self,
+        requests: list[Any],
+        *,
+        client_id: str | None = None,
+        user_id: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> list[MCPResponse]:
+        self.metadata = metadata
+        return [MCPResponse(id=getattr(request, "id", None), result={"ok": True}) for request in requests]
+
+
+class _LoggerStub:
+    def __init__(self) -> None:
+        self.debug_messages: list[str] = []
+
+    def debug(self, message: str, *args: Any, **kwargs: Any) -> None:
+        self.debug_messages.append(message.format(*args) if args else message)
 
 
 def _request() -> Request:
@@ -171,3 +213,59 @@ async def test_health_check_sanitizes_nonhealthy_status(monkeypatch: pytest.Monk
 
     assert excinfo.value.status_code == 503
     assert excinfo.value.detail == "MCP server is not healthy"
+
+
+@pytest.mark.asyncio
+async def test_request_sanitizes_safe_config_parse_log(monkeypatch: pytest.MonkeyPatch) -> None:
+    server = _SuccessfulMcpServer()
+    logger = _LoggerStub()
+    monkeypatch.setattr(mcp, "get_mcp_server", lambda: server)
+    monkeypatch.setattr(mcp, "logger", logger)
+
+    def _raise_leaky_parse_error(_value: str) -> bytes:
+        raise ValueError("safe config leaked /private/mcp/config.json")
+
+    monkeypatch.setattr(base64, "b64decode", _raise_leaky_parse_error)
+
+    response = await mcp.mcp_request(
+        request=mcp.MCPRequest(method="tools/list", id="req-1"),
+        http_request=_request(),
+        client_id=None,
+        auth=_auth(),
+        mcp_session_id=None,
+        config="invalid-config",
+        response=None,
+        _guard=None,
+    )
+
+    assert response.result == {"ok": True}
+    assert logger.debug_messages == ["Failed to parse safe config"]
+    assert "/private/mcp/config.json" not in logger.debug_messages[0]
+
+
+@pytest.mark.asyncio
+async def test_batch_request_sanitizes_safe_config_parse_log(monkeypatch: pytest.MonkeyPatch) -> None:
+    server = _SuccessfulMcpServer()
+    logger = _LoggerStub()
+    monkeypatch.setattr(mcp, "get_mcp_server", lambda: server)
+    monkeypatch.setattr(mcp, "logger", logger)
+
+    def _raise_leaky_parse_error(_value: str) -> bytes:
+        raise ValueError("batch safe config leaked /private/mcp/config.json")
+
+    monkeypatch.setattr(base64, "b64decode", _raise_leaky_parse_error)
+
+    responses = await mcp.mcp_request_batch(
+        requests=[mcp.MCPRequest(method="tools/list", id="req-1")],
+        http_request=_request(),
+        client_id=None,
+        auth=_auth(),
+        mcp_session_id=None,
+        config="invalid-config",
+        response=None,
+        _guard=None,
+    )
+
+    assert responses[0].result == {"ok": True}
+    assert logger.debug_messages == ["Batch failed to parse safe config"]
+    assert "/private/mcp/config.json" not in logger.debug_messages[0]

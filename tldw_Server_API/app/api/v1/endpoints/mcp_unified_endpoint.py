@@ -783,8 +783,8 @@ async def mcp_request(
             cfg = _json.loads(decoded)
             if isinstance(cfg, dict):
                 safe_config = cfg
-        except _MCP_UNIFIED_NONCRITICAL_EXCEPTIONS as e:
-            logger.debug(f"Failed to parse safe config: {e}")
+        except _MCP_UNIFIED_NONCRITICAL_EXCEPTIONS:
+            logger.debug("Failed to parse safe config")
 
     # Session lifecycle: if initialize and no session id provided, generate one and return header
     try:
@@ -880,8 +880,8 @@ async def mcp_request_batch(
             cfg = _json.loads(decoded)
             if isinstance(cfg, dict):
                 safe_config = cfg
-        except _MCP_UNIFIED_NONCRITICAL_EXCEPTIONS as e:
-            logger.debug(f"Batch failed to parse safe config: {e}")
+        except _MCP_UNIFIED_NONCRITICAL_EXCEPTIONS:
+            logger.debug("Batch failed to parse safe config")
 
     # If any initialize request is present and no session id was provided, generate one.
     try:
