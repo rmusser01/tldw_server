@@ -10,6 +10,7 @@ import contextlib
 import hashlib
 import json
 import re
+import threading
 import time
 import uuid
 from collections import defaultdict, deque
@@ -145,6 +146,12 @@ from tldw_Server_API.app.core.Persona.policy_evaluator import (
     evaluate_canonical_policy,
     normalize_policy_rules,
 )
+from tldw_Server_API.app.core.Persona.dialogue_tree_context import build_runtime_tree_context
+from tldw_Server_API.app.core.Persona.runtime_explorer import (
+    PersonaRuntimeExplorer,
+    RuntimeExplorerConfig,
+    RuntimeScorer,
+)
 from tldw_Server_API.app.core.Persona.session_manager import get_session_manager
 from tldw_Server_API.app.core.Personalization.companion_activity import (
     normalize_persona_activity_surface,
@@ -216,6 +223,8 @@ _PERSONA_STATE_FIELD_LABELS = {
     "identity_md": "identity",
     "heartbeat_md": "heartbeat",
 }
+_PERSONA_RUNTIME_EXPLORER_SELECTED_KEY = "_runtime_explorer_selected"
+_PERSONA_RUNTIME_SAFE_DENIAL_TEXT = RuntimeExplorerConfig().safe_denial_text
 
 
 def _bounded_label(value: Any, *, allowed: set[str], fallback: str) -> str:
@@ -392,6 +401,209 @@ def _get_persona_rbac_flags() -> tuple[bool, bool]:
         allow_export = False
         allow_delete = False
     return allow_export, allow_delete
+
+
+def _get_persona_runtime_explorer_config() -> RuntimeExplorerConfig:
+    from tldw_Server_API.app.core.config import settings as _app_settings
+
+    return RuntimeExplorerConfig(
+        enabled=_coerce_bool(_app_settings.get("PERSONA_RUNTIME_EXPLORER_ENABLED", False), default=False),
+        max_depth=_persona_int_setting("PERSONA_RUNTIME_EXPLORER_MAX_DEPTH", 1, 1, 10),
+        max_branching=_persona_int_setting("PERSONA_RUNTIME_EXPLORER_MAX_BRANCHING", 2, 1, 10),
+        max_provider_calls=_persona_int_setting("PERSONA_RUNTIME_EXPLORER_MAX_PROVIDER_CALLS", 1, 0, 100),
+        timeout_ms=_persona_int_setting("PERSONA_RUNTIME_EXPLORER_TIMEOUT_MS", 750, 100, 60_000),
+        max_tokens=_persona_int_setting("PERSONA_RUNTIME_EXPLORER_MAX_TOKENS", 256, 16, 4096),
+        llm_judges_enabled=_coerce_bool(
+            _app_settings.get("PERSONA_RUNTIME_EXPLORER_LLM_JUDGES_ENABLED", False),
+            default=False,
+        ),
+    )
+
+
+def _persona_runtime_scorers() -> list[RuntimeScorer] | None:
+    return None
+
+
+def _persona_runtime_candidate_generator(context: dict[str, Any]) -> list[dict[str, Any]]:
+    base_plan = _sanitize_persona_runtime_plan(context.get("base_plan"))
+    user_message = str(context.get("user_message") or "")
+    candidates = [
+        {
+            "action_type": "plan",
+            "text": user_message,
+            "plan": base_plan,
+            "metadata": {"source": "existing_persona_planner", "grounded": True},
+        }
+    ]
+    if _persona_runtime_requires_safe_refusal_branch(user_message):
+        candidates.append(
+            {
+                "action_type": "plan",
+                "text": _PERSONA_RUNTIME_SAFE_DENIAL_TEXT,
+                "plan": _runtime_safe_denial_plan(_PERSONA_RUNTIME_SAFE_DENIAL_TEXT),
+                "metadata": {"source": "deterministic_safe_refusal", "grounded": True},
+            }
+        )
+    return candidates
+
+
+def _persona_runtime_requires_safe_refusal_branch(user_message: str) -> bool:
+    lowered = str(user_message or "").casefold()
+    markers = (
+        "ignore previous",
+        "ignore prior",
+        "ignore earlier",
+        "override policy",
+        "bypass safety",
+        "bypass guardrail",
+        "reveal hidden prompt",
+        "reveal system prompt",
+        "dump system prompt",
+        "ignore persona",
+    )
+    return any(marker in lowered for marker in markers)
+
+
+class PersonaRuntimeExplorerProvider:
+    """App-scoped cache for runtime explorer instances with matching dependencies."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._cache_key: tuple[Any, ...] | None = None
+        self._explorer: PersonaRuntimeExplorer | None = None
+
+    def get(self, config: RuntimeExplorerConfig) -> PersonaRuntimeExplorer:
+        scorers = _persona_runtime_scorers()
+        cache_key = (
+            config,
+            id(_persona_runtime_candidate_generator),
+            tuple(id(scorer) for scorer in (scorers or [])),
+        )
+        with self._lock:
+            if self._explorer is None or self._cache_key != cache_key:
+                self._explorer = PersonaRuntimeExplorer(
+                    config=config,
+                    candidate_generator=_persona_runtime_candidate_generator,
+                    scorers=scorers,
+                )
+                self._cache_key = cache_key
+            return self._explorer
+
+
+def get_persona_runtime_explorer_provider(ws: WebSocket) -> PersonaRuntimeExplorerProvider:
+    provider = getattr(ws.app.state, "persona_runtime_explorer_provider", None)
+    if isinstance(provider, PersonaRuntimeExplorerProvider):
+        return provider
+    provider = PersonaRuntimeExplorerProvider()
+    ws.app.state.persona_runtime_explorer_provider = provider
+    return provider
+
+
+def _sanitize_persona_runtime_plan(raw_plan: Any) -> dict[str, Any]:
+    if not isinstance(raw_plan, dict):
+        return {"steps": []}
+    steps: list[dict[str, Any]] = []
+    for fallback_idx, raw_step in enumerate(raw_plan.get("steps") or []):
+        if not isinstance(raw_step, dict):
+            continue
+        try:
+            step_idx = int(raw_step.get("idx", fallback_idx))
+        except (TypeError, ValueError):
+            step_idx = fallback_idx
+        args = raw_step.get("args")
+        steps.append(
+            {
+                "idx": step_idx,
+                "step_type": str(raw_step.get("step_type") or ""),
+                "tool": str(raw_step.get("tool") or ""),
+                "args": dict(args) if isinstance(args, dict) else {},
+                "description": str(raw_step.get("description") or ""),
+                "why": str(raw_step.get("why") or ""),
+            }
+        )
+    return {"steps": steps}
+
+
+def _runtime_safe_denial_plan(message: str) -> dict[str, Any]:
+    return {
+        "steps": [
+            {
+                "idx": 0,
+                "step_type": "final_answer",
+                "tool": "summarize",
+                "args": {"text": str(message or "I cannot safely proceed with that request.")},
+                "description": "Decline unsafe runtime candidate",
+                "why": "Runtime exploration found a hard policy or safety violation.",
+            }
+        ]
+    }
+
+
+def _apply_persona_runtime_explorer_to_plan(
+    *,
+    base_plan: dict[str, Any],
+    user_message: str,
+    session_id: str,
+    persona_id: str,
+    runtime_mode: str,
+    memory_context: list[str],
+    persona_state_fields: list[str],
+    companion_usage: dict[str, Any],
+    persona_exemplar_selection: dict[str, Any],
+    runtime_explorer_provider: PersonaRuntimeExplorerProvider | None = None,
+) -> dict[str, Any]:
+    config = _get_persona_runtime_explorer_config()
+    if not config.enabled:
+        return base_plan
+
+    sanitized_base_plan = _sanitize_persona_runtime_plan(base_plan)
+    context_counts = {
+        "memory_count": len(memory_context or []),
+        "persona_state_field_count": len(persona_state_fields or []),
+        "companion_card_count": int(companion_usage.get("applied_card_count", 0) or 0),
+        "companion_goal_count": int(companion_usage.get("applied_goal_count", 0) or 0),
+        "companion_activity_count": int(companion_usage.get("applied_activity_count", 0) or 0),
+        "persona_exemplar_selected_count": int(
+            persona_exemplar_selection.get("selected_count", 0) or 0
+        ),
+    }
+    provider_context = build_runtime_tree_context(
+        persona_id=str(persona_id or ""),
+        session_id=str(session_id or ""),
+        user_message=str(user_message or ""),
+        policy_snapshot={
+            "runtime_mode": str(runtime_mode or ""),
+            "base_plan": sanitized_base_plan,
+            "context_counts": context_counts,
+        },
+        max_text_length=max(1, int(config.max_tokens) * 4),
+    ).for_generator()
+    policy_snapshot = provider_context.get("policy_snapshot") or {}
+    runtime_context = {
+        "user_message": provider_context.get("user_message", ""),
+        "session_id": provider_context.get("session_id", ""),
+        "persona_id": provider_context.get("persona_id", ""),
+        "runtime_mode": policy_snapshot.get("runtime_mode", ""),
+        "base_plan": policy_snapshot.get("base_plan", {"steps": []}),
+        "context_counts": policy_snapshot.get("context_counts", context_counts),
+        "metadata": provider_context.get("metadata", {}),
+    }
+    provider = runtime_explorer_provider or PersonaRuntimeExplorerProvider()
+    result = provider.get(config).explore(runtime_context)
+    if result.safe_denial:
+        return _runtime_safe_denial_plan(result.safe_denial)
+    if result.selected_candidate:
+        candidate_metadata = result.selected_candidate.get("metadata")
+        if isinstance(candidate_metadata, dict) and candidate_metadata.get("source") == "existing_persona_planner":
+            selected_base_plan = dict(base_plan)
+            selected_base_plan[_PERSONA_RUNTIME_EXPLORER_SELECTED_KEY] = True
+            return selected_base_plan
+        selected_plan = result.selected_candidate.get("plan")
+        sanitized_selected_plan = _sanitize_persona_runtime_plan(selected_plan)
+        if sanitized_selected_plan.get("steps"):
+            sanitized_selected_plan[_PERSONA_RUNTIME_EXPLORER_SELECTED_KEY] = True
+            return sanitized_selected_plan
+    return base_plan
 
 
 def _get_persona_session_scopes(*, allow_export: bool, allow_delete: bool) -> set[str]:
@@ -4750,6 +4962,7 @@ async def persona_stream(
     ws: WebSocket,
     token: str | None = Query(default=None),
     api_key: str | None = Query(default=None),
+    runtime_explorer_provider: PersonaRuntimeExplorerProvider = Depends(get_persona_runtime_explorer_provider),
 ):
     """
     Bi-directional placeholder stream.
@@ -6502,6 +6715,20 @@ async def persona_stream(
                 companion_context=companion_context,
                 persona_exemplar_sections=persona_exemplar_assembly.sections,
             )
+            plan = await asyncio.to_thread(
+                _apply_persona_runtime_explorer_to_plan,
+                base_plan=plan,
+                user_message=normalized_text,
+                session_id=session_id,
+                persona_id=runtime_persona_id,
+                runtime_mode=runtime_mode,
+                memory_context=memory_context,
+                persona_state_fields=persona_state_fields,
+                companion_usage=companion_usage,
+                persona_exemplar_selection=persona_exemplar_selection,
+                runtime_explorer_provider=runtime_explorer_provider,
+            )
+            runtime_explorer_selected_plan = bool(plan.pop(_PERSONA_RUNTIME_EXPLORER_SELECTED_KEY, False))
             plan_id = uuid.uuid4().hex
             max_tool_steps = _get_persona_max_tool_steps()
             proposed_steps = list(plan.get("steps", []))
@@ -6530,38 +6757,76 @@ async def persona_stream(
                     reason_code="PLAN_INVALID",
                 )
                 return
-            stored_steps: list[dict[str, Any]] = []
-            for step in pending_plan.steps:
-                step_type = _normalize_persona_step_type(step.step_type, tool_name=step.tool)
-                policy = _evaluate_step_policy(
-                    step_type=step_type,
-                    tool_name=step.tool,
-                    args=step.args,
-                    persona_policy_rules=persona_policy_rules,
-                    session_policy_rules=session_policy_rules,
-                    session_scopes=session_scopes,
-                    allow_export=allow_export,
-                    allow_delete=allow_delete,
-                )
-                if not bool(policy.get("allow", False)):
-                    _increment_persona_metric(
-                        "persona_ws_policy_denials_total",
-                        {
-                            "step_type": _bounded_label(step_type, allowed=_PERSONA_WS_ALLOWED_STEP_TYPES, fallback="mcp_tool"),
-                            "reason": _metric_reason_bucket(policy.get("reason_code")),
-                        },
+            def _build_stored_steps_with_policy() -> tuple[list[dict[str, Any]], bool]:
+                stored: list[dict[str, Any]] = []
+                denied = False
+                for step in pending_plan.steps:
+                    step_type = _normalize_persona_step_type(step.step_type, tool_name=step.tool)
+                    policy = _evaluate_step_policy(
+                        step_type=step_type,
+                        tool_name=step.tool,
+                        args=step.args,
+                        persona_policy_rules=persona_policy_rules,
+                        session_policy_rules=session_policy_rules,
+                        session_scopes=session_scopes,
+                        allow_export=allow_export,
+                        allow_delete=allow_delete,
                     )
-                stored_steps.append(
-                    {
-                        "idx": step.idx,
-                        "step_type": step_type,
-                        "tool": step.tool,
-                        "args": step.args,
-                        "description": step.description,
-                        "why": step.why,
-                        "policy": policy,
-                    }
-                )
+                    if not bool(policy.get("allow", False)):
+                        denied = True
+                        _increment_persona_metric(
+                            "persona_ws_policy_denials_total",
+                            {
+                                "step_type": _bounded_label(
+                                    step_type,
+                                    allowed=_PERSONA_WS_ALLOWED_STEP_TYPES,
+                                    fallback="mcp_tool",
+                                ),
+                                "reason": _metric_reason_bucket(policy.get("reason_code")),
+                            },
+                        )
+                    stored.append(
+                        {
+                            "idx": step.idx,
+                            "step_type": step_type,
+                            "tool": step.tool,
+                            "args": step.args,
+                            "description": step.description,
+                            "why": step.why,
+                            "policy": policy,
+                        }
+                    )
+                return stored, denied
+
+            async def _rewrite_runtime_policy_denial_to_safe_plan() -> list[dict[str, Any]] | None:
+                nonlocal pending_plan
+                safe_plan = _runtime_safe_denial_plan(_get_persona_runtime_explorer_config().safe_denial_text)
+                try:
+                    pending_plan = session_manager.put_plan(
+                        session_id=session_id,
+                        user_id=connection_user_id,
+                        persona_id=runtime_persona_id,
+                        plan_id=plan_id,
+                        steps=list(safe_plan.get("steps", [])),
+                    )
+                except ValueError as exc:
+                    _cancel_persona_live_processing_notice(session_id)
+                    await _emit_notice(
+                        session_id=session_id,
+                        level="error",
+                        message=str(exc),
+                        reason_code="PLAN_INVALID",
+                    )
+                    return None
+                rewritten_steps, _has_safe_denial_policy_denial = _build_stored_steps_with_policy()
+                return rewritten_steps
+
+            stored_steps, has_policy_denial = _build_stored_steps_with_policy()
+            if runtime_explorer_selected_plan and has_policy_denial:
+                rewritten_steps = await _rewrite_runtime_policy_denial_to_safe_plan()
+                if rewritten_steps is None:
+                    return
+                stored_steps = rewritten_steps
             await _emit_tool_plan(
                 session_id=session_id,
                 plan_id=plan_id,
