@@ -7,6 +7,7 @@ import { useLocation, useNavigate } from "react-router-dom"
 import { useTranslation } from "react-i18next"
 import { useQueryClient } from "@tanstack/react-query"
 import { useShallow } from "zustand/react/shallow"
+import { useStorage } from "@plasmohq/storage/hook"
 
 import { classNames } from "@/libs/class-name"
 import { PageAssistDatabase } from "@/db/dexie/chat"
@@ -88,19 +89,6 @@ type OptionLayoutProps = {
 
 const SHORTCUT_LOADING_MIN_MS = 0
 const SHORTCUT_LOADING_MAX_MS = 2500
-const STICKY_CHAT_INPUT_STORAGE_KEY = "stickyChatInput"
-
-const shouldUseTranscriptOwnedChatShell = (pathname: string): boolean => {
-  if (pathname !== "/chat" || typeof window === "undefined") {
-    return false
-  }
-
-  try {
-    return window.localStorage.getItem(STICKY_CHAT_INPUT_STORAGE_KEY) === "true"
-  } catch {
-    return false
-  }
-}
 
 const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
   children,
@@ -162,11 +150,10 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
     }
   }, [])
   const [chatBackgroundImage] = useSetting(CHAT_BACKGROUND_IMAGE_SETTING)
+  const [stickyChatInput] = useStorage("stickyChatInput", false)
   const isChatScreen = location.pathname === "/chat"
   const isViewportConstrainedRoute = (VIEWPORT_CONSTRAINED_PATHS as readonly string[]).includes(location.pathname)
-  const stickyChatLayoutActive = shouldUseTranscriptOwnedChatShell(
-    location.pathname
-  )
+  const stickyChatLayoutActive = isChatScreen && stickyChatInput
   const chatScreenBackgroundStyle =
     isChatScreen && chatBackgroundImage
       ? {

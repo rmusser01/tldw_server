@@ -64,6 +64,9 @@ const connectionState = vi.hoisted(() => ({
 }))
 
 const confirmDangerMock = vi.hoisted(() => vi.fn(async () => false))
+const storageState = vi.hoisted(() => ({
+  stickyChatInput: true
+}))
 
 vi.mock("antd", () => ({
   Drawer: ({
@@ -228,6 +231,15 @@ vi.mock("@/hooks/useSetting", () => ({
   useSetting: () => [""]
 }))
 
+vi.mock("@plasmohq/storage/hook", () => ({
+  useStorage: (key: string, defaultValue: unknown) => {
+    if (key === "stickyChatInput") {
+      return [storageState.stickyChatInput]
+    }
+    return [defaultValue]
+  }
+}))
+
 vi.mock("@/hooks/useServerOnline", () => ({
   useServerOnline: () => undefined
 }))
@@ -312,34 +324,12 @@ vi.mock("@/context/demo-mode", () => ({
 }))
 
 describe("WebLayout /chat scroll contract", () => {
-  const previousWindow = globalThis.window
-
   beforeEach(() => {
     vi.clearAllMocks()
     routerState.location.pathname = "/chat"
     routerState.location.search = ""
     routerState.location.hash = ""
-    ;(
-      globalThis as typeof globalThis & {
-        window?: {
-          localStorage: {
-            getItem: (key: string) => string | null
-          }
-        }
-      }
-    ).window = {
-      localStorage: {
-        getItem: (key: string) => (key === "stickyChatInput" ? "true" : null)
-      }
-    }
-  })
-
-  afterEach(() => {
-    ;(
-      globalThis as typeof globalThis & {
-        window?: typeof globalThis.window
-      }
-    ).window = previousWindow
+    storageState.stickyChatInput = true
   })
 
   it("marks the /chat route shell as transcript-owned when sticky chat input is active", () => {
