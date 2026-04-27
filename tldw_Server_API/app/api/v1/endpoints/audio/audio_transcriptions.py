@@ -1326,8 +1326,8 @@ async def create_transcription(
         if temp_audio_path and os.path.exists(temp_audio_path):
             try:
                 os.remove(temp_audio_path)
-            except OSError as e:
-                logger.warning(f"Failed to remove temp audio file: path={temp_audio_path}, error={e}")
+            except OSError:
+                logger.warning("Failed to remove temp audio file")
                 try:
                     increment_counter(
                         "app_warning_events_total", labels={"component": "audio", "event": "tempfile_remove_failed"}

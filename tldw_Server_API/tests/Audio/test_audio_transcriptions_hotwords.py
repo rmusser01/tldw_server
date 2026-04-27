@@ -1,4 +1,5 @@
 import io
+import os as real_os
 
 import numpy as np
 import pytest
@@ -737,6 +738,52 @@ def test_audio_transcriptions_sanitizes_outer_failure_log(
         if msg.startswith("Error during transcription")
     ]
     assert outer_logs == ["Error during transcription"]
+
+
+@pytest.mark.unit
+def test_audio_transcriptions_sanitizes_temp_cleanup_failure_log(
+    monkeypatch,
+    bypass_api_limits,
+):
+    app, _captured = _setup_stubbed_audio_app(monkeypatch)
+    import tldw_Server_API.app.api.v1.endpoints.audio.audio_transcriptions as audio_tx
+
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(audio_tx, "logger", logger_stub)
+
+    class _OSStub:
+        path = real_os.path
+
+        @staticmethod
+        def remove(_path):
+            raise OSError("temp cleanup leaked /private/upload.wav")
+
+    monkeypatch.setattr(audio_tx, "os", _OSStub)
+
+    with bypass_api_limits(app), TestClient(app) as client:
+        wav_bytes = _make_wav_bytes()
+        headers = {"X-API-KEY": TEST_API_KEY}
+        files = {"file": ("sample.wav", io.BytesIO(wav_bytes), "audio/wav")}
+        data = {
+            "model": "vibevoice-asr",
+            "response_format": "json",
+        }
+        resp = client.post(
+            "/api/v1/audio/transcriptions",
+            headers=headers,
+            files=files,
+            data=data,
+        )
+        if resp.status_code == 404:
+            pytest.skip("audio/transcriptions endpoint not mounted in this build")
+        assert resp.status_code == 200, resp.text
+
+    cleanup_logs = [
+        msg
+        for msg in logger_stub.warnings
+        if msg.startswith("Failed to remove temp audio file")
+    ]
+    assert cleanup_logs == ["Failed to remove temp audio file"]
 
 
 @pytest.mark.unit
