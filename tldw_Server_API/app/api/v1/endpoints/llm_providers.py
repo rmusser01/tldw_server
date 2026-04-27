@@ -954,8 +954,8 @@ async def llm_health():
                     "per_user_tokens_per_minute": cfg.per_user_tokens_per_minute
                 }
             }
-    except _LLM_PROVIDERS_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"LLM health check error: {e}")
+    except _LLM_PROVIDERS_NONCRITICAL_EXCEPTIONS:
+        logger.error("LLM health check failed")
         health["status"] = "unhealthy"
         health["error"] = "LLM health check failed"
 
@@ -1817,8 +1817,8 @@ def get_configured_providers(
             'total_configured': len(providers)
         }
 
-    except _LLM_PROVIDERS_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Error getting configured providers: {e}", exc_info=True)
+    except _LLM_PROVIDERS_NONCRITICAL_EXCEPTIONS:
+        logger.error("Error getting configured providers")
         return {
             'providers': [],
             'default_provider': 'openai',
@@ -2104,7 +2104,7 @@ async def get_llm_providers(include_deprecated: bool = False):
         return result
 
     except _LLM_PROVIDERS_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Error in get_llm_providers endpoint: {e}", exc_info=True)
+        logger.error("Error in get_llm_providers endpoint")
         raise HTTPException(
             status_code=500,
             detail="Failed to retrieve LLM providers"
@@ -2168,8 +2168,8 @@ async def get_models_metadata(
         # Append image generation backends to the catalog
         try:
             image_models = list_image_models_for_catalog()
-        except _LLM_PROVIDERS_NONCRITICAL_EXCEPTIONS as exc:
-            logger.warning(f"Failed to list image generation models: {exc}")
+        except _LLM_PROVIDERS_NONCRITICAL_EXCEPTIONS:
+            logger.warning("Failed to list image generation models")
             image_models = []
         for entry in image_models:
             if not _model_matches_filters(
@@ -2185,7 +2185,7 @@ async def get_models_metadata(
             'total': len(flattened)
         }
     except _LLM_PROVIDERS_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Error getting models metadata: {e}", exc_info=True)
+        logger.error("Error getting models metadata")
         raise HTTPException(
             status_code=500,
             detail="Failed to retrieve model metadata"
@@ -2223,7 +2223,7 @@ async def get_provider_details(provider_name: str, include_deprecated: bool = Fa
     except HTTPException:
         raise
     except _LLM_PROVIDERS_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Error getting provider details for {provider_name}: {e}", exc_info=True)
+        logger.error("Error getting provider details")
         raise HTTPException(
             status_code=500,
             detail="Failed to retrieve provider details"
@@ -2282,8 +2282,8 @@ async def get_all_models(
         # Append image generation backends to the flat list
         try:
             image_models = list_image_models_for_catalog()
-        except _LLM_PROVIDERS_NONCRITICAL_EXCEPTIONS as exc:
-            logger.warning(f"Failed to list image generation models: {exc}")
+        except _LLM_PROVIDERS_NONCRITICAL_EXCEPTIONS:
+            logger.warning("Failed to list image generation models")
             image_models = []
         for entry in image_models:
             if not _model_matches_filters(
@@ -2299,7 +2299,7 @@ async def get_all_models(
         logger.info(f"Found {len(models)} total models across all providers")
         return models
     except _LLM_PROVIDERS_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Error getting all models: {e}", exc_info=True)
+        logger.error("Error getting all models")
         raise HTTPException(
             status_code=500,
             detail="Failed to retrieve models"
