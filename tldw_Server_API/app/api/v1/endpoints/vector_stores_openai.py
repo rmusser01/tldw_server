@@ -373,8 +373,8 @@ async def create_vector_store(
                 raise HTTPException(status_code=409, detail=f"A vector store named '{payload.name}' already exists for this user")
         except HTTPException:
             raise
-        except _VECTORSTORE_NONCRITICAL_EXCEPTIONS as _e:
-            logger.warning(f"Meta DB uniqueness check failed: {_e}")
+        except _VECTORSTORE_NONCRITICAL_EXCEPTIONS:
+            logger.warning("Meta DB uniqueness check failed; falling back to adapter scan")
         # As a fallback when meta lookup fails, scan adapter collections by metadata.name
         try:
             for col in await adapter.list_collections():
@@ -481,8 +481,8 @@ async def list_vector_stores(
                 used_ids.add(row['id'])
             except _VECTORSTORE_NONCRITICAL_EXCEPTIONS:
                 continue
-    except _VECTORSTORE_NONCRITICAL_EXCEPTIONS as _e:
-        logger.warning(f"Meta DB list failed; falling back to Chroma-only: {_e}")
+    except _VECTORSTORE_NONCRITICAL_EXCEPTIONS:
+        logger.warning("Meta DB list failed; falling back to Chroma-only")
     # Include any collections not in meta DB
     try:
         adapter2 = await _get_adapter_for_user(current_user, 1536)
@@ -1202,8 +1202,8 @@ async def list_vectors(
                     metadata=row.get('metadata') or {},
                     content=row.get('content') or "",
                 ))
-        except _VECTORSTORE_NONCRITICAL_EXCEPTIONS as e:
-            logger.warning(f"Adapter list_vectors_paginated failed; falling back to Chroma path: {e}")
+        except _VECTORSTORE_NONCRITICAL_EXCEPTIONS:
+            logger.warning("Adapter list_vectors_paginated failed; falling back to Chroma path")
     if not items and total == 0:
         # Fallback to Chroma collection semantics
         try:
