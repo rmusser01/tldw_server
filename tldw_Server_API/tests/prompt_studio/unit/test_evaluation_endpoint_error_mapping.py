@@ -20,8 +20,12 @@ pytestmark = pytest.mark.unit
 
 class _FakePsLogger:
     def __init__(self):
+        self.debug_calls = []
         self.error_calls = []
         self.exception_calls = []
+
+    def debug(self, *args, **kwargs):
+        self.debug_calls.append((args, kwargs))
 
     def error(self, *args, **kwargs):
         self.error_calls.append((args, kwargs))
@@ -48,6 +52,17 @@ def _assert_sanitized_endpoint_error_log(
     assert expected_message in matching_messages
 
     rendered_calls = repr(ps_logger.error_calls)
+    for marker in _SENSITIVE_MARKERS:
+        assert marker not in rendered_calls
+
+
+def _assert_sanitized_debug_log(
+    logger_stub: _FakePsLogger,
+    expected_message: str,
+) -> None:
+    assert logger_stub.debug_calls
+    assert ((expected_message,), {}) in logger_stub.debug_calls
+    rendered_calls = repr(logger_stub.debug_calls)
     for marker in _SENSITIVE_MARKERS:
         assert marker not in rendered_calls
 
@@ -101,6 +116,44 @@ class _BrokenCreateEvaluationManager:
 class _UnexpectedConnectionDb:
     def get_connection(self):
         raise RuntimeError("driver exploded /private/tmp/prompt-studio.db")
+
+
+class _ColumnCheckFailureCursor:
+    def __init__(self):
+        self.rowcount = 0
+        self._execute_count = 0
+
+    def execute(self, *_args, **_kwargs):
+        self._execute_count += 1
+        if self._execute_count == 1:
+            raise RuntimeError("driver exploded /private/tmp/prompt-studio.db")
+        self.rowcount = 1
+
+    def fetchall(self):
+        return []
+
+
+class _ColumnCheckFailureConnection:
+    def __init__(self):
+        self.cursor_instance = _ColumnCheckFailureCursor()
+        self.committed = False
+
+    def cursor(self):
+        return self.cursor_instance
+
+    def commit(self):
+        self.committed = True
+
+
+class _ColumnCheckFailureDb:
+    backend_type = "sqlite"
+    backend = None
+
+    def __init__(self):
+        self.connection = _ColumnCheckFailureConnection()
+
+    def get_connection(self):
+        return self.connection
 
 
 class _UnexpectedEvaluationManager:
@@ -231,6 +284,27 @@ async def test_delete_evaluation_maps_database_error(monkeypatch):
     assert exc_info.value.status_code == 500
     assert exc_info.value.detail == "Failed to delete evaluation"
     _assert_sanitized_endpoint_error_log(ps_logger, "Failed to delete evaluation")
+
+
+@pytest.mark.asyncio
+async def test_delete_evaluation_column_check_failure_log_is_sanitized(monkeypatch):
+    logger_stub = _FakePsLogger()
+    monkeypatch.setattr(evaluations_endpoint, "logger", logger_stub, raising=True)
+    db = _ColumnCheckFailureDb()
+
+    result = await delete_evaluation(
+        evaluation_id=42,
+        request=object(),
+        db=db,
+        user_context={"user_id": "tester"},
+    )
+
+    assert result == {"message": "Evaluation 42 deleted successfully"}
+    assert db.connection.committed is True
+    _assert_sanitized_debug_log(
+        logger_stub,
+        "Failed to check prompt_studio_evaluations columns",
+    )
 
 
 @pytest.mark.asyncio

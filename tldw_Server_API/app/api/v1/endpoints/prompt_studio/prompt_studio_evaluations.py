@@ -623,8 +623,8 @@ async def delete_evaluation(
                 cursor.execute("PRAGMA table_info(prompt_studio_evaluations)")
                 columns = {row[1] for row in cursor.fetchall()}
             supports_soft_delete = "deleted" in columns and "deleted_at" in columns
-        except _PROMPT_STUDIO_EVAL_NONCRITICAL_EXCEPTIONS as exc:
-            logger.debug("Failed to check prompt_studio_evaluations columns: {}", exc)
+        except _PROMPT_STUDIO_EVAL_NONCRITICAL_EXCEPTIONS:
+            logger.debug("Failed to check prompt_studio_evaluations columns")
 
         if supports_soft_delete:
             cursor.execute(
