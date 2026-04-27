@@ -14,6 +14,7 @@ from loguru import logger
 
 from ..macos_virtualization.helper_client import (
     MacOSVirtualizationHelperClient,
+    MacOSVirtualizationHelperProtocolError,
     MacOSVirtualizationHelperUnavailable,
 )
 from ..models import RunPhase, RunSpec, RunStatus, RuntimeType
@@ -275,7 +276,11 @@ class VZLinuxRunner(VZBaseRunner):
                 and str(session_control.get("vm_id") or "").strip()
             ):
                 candidate_vm_id = str(session_control.get("vm_id") or "").strip()
-                status = helper.get_vm_status(candidate_vm_id)
+                try:
+                    status = helper.get_vm_status(candidate_vm_id)
+                except (MacOSVirtualizationHelperUnavailable, MacOSVirtualizationHelperProtocolError):
+                    # Host truth is unavailable or untrusted; explicit admin repair owns row cleanup.
+                    raise
                 if bool(status.healthy):
                     vm_id = candidate_vm_id
                     template_ref = str(session_control.get("template_id") or "").strip() or spec.base_image

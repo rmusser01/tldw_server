@@ -7,6 +7,10 @@ from tldw_Server_API.app.core.Sandbox.macos_virtualization.models import (
     HelperVMReply,
     HelperVMStatusReply,
 )
+from tldw_Server_API.app.core.Sandbox.macos_virtualization.helper_client import (
+    MacOSVirtualizationHelperProtocolError,
+    MacOSVirtualizationHelperUnavailable,
+)
 from tldw_Server_API.app.core.Sandbox.models import RunPhase, RunSpec, RuntimeType
 from tldw_Server_API.app.core.Sandbox.streams import get_hub
 from tldw_Server_API.app.core.Sandbox.runners.vz_linux_runner import VZLinuxRunner
@@ -220,6 +224,98 @@ def test_vz_linux_session_run_reuses_only_healthy_vm(monkeypatch, tmp_path) -> N
     assert status.phase == RunPhase.completed
     assert status.exit_code == 0
     assert calls == ["get_vm_status", "exec_guest"]
+
+
+def test_vz_linux_session_reuse_helper_unavailable_does_not_delete_control(monkeypatch, tmp_path) -> None:
+    monkeypatch.delenv("TLDW_SANDBOX_VZ_LINUX_FAKE_EXEC", raising=False)
+    deleted: list[str] = []
+
+    class _Store:
+        def get_vz_session_control(self, session_id: str) -> dict[str, object]:
+            assert session_id == "sess-helper-unavailable"
+            return {
+                "runtime": "vz_linux",
+                "vm_id": "vm-candidate",
+                "template_id": "vz_linux:existing",
+                "workspace_mount": str(tmp_path),
+                "agent_ready": True,
+            }
+
+        def delete_vz_session_control(self, session_id: str) -> bool:
+            deleted.append(session_id)
+            return True
+
+    class _FakeHelper:
+        def get_vm_status(self, vm_id: str) -> HelperVMStatusReply:
+            assert vm_id == "vm-candidate"
+            raise MacOSVirtualizationHelperUnavailable("macos_virtualization_helper_unavailable")
+
+        def validate_template(self, request: dict[str, object]) -> dict[str, object]:
+            raise AssertionError(f"validate_template should not run when helper status is unavailable: {request}")
+
+    monkeypatch.setattr(vz_linux_module.VZLinuxRunner, "helper_client_cls", _FakeHelper)
+
+    status = VZLinuxRunner(session_control_store=_Store()).start_run(
+        run_id="vz-run-helper-unavailable",
+        spec=RunSpec(
+            session_id="sess-helper-unavailable",
+            runtime=RuntimeType.vz_linux,
+            base_image="ubuntu-24.04",
+            command=["/bin/echo", "ok"],
+            network_policy="deny_all",
+        ),
+        session_workspace=str(tmp_path),
+    )
+
+    assert status.phase == RunPhase.failed
+    assert "macos_virtualization_helper_unavailable" in status.message
+    assert deleted == []
+
+
+def test_vz_linux_session_reuse_protocol_mismatch_does_not_delete_control(monkeypatch, tmp_path) -> None:
+    monkeypatch.delenv("TLDW_SANDBOX_VZ_LINUX_FAKE_EXEC", raising=False)
+    deleted: list[str] = []
+
+    class _Store:
+        def get_vz_session_control(self, session_id: str) -> dict[str, object]:
+            assert session_id == "sess-protocol-mismatch"
+            return {
+                "runtime": "vz_linux",
+                "vm_id": "vm-candidate",
+                "template_id": "vz_linux:existing",
+                "workspace_mount": str(tmp_path),
+                "agent_ready": True,
+            }
+
+        def delete_vz_session_control(self, session_id: str) -> bool:
+            deleted.append(session_id)
+            return True
+
+    class _FakeHelper:
+        def get_vm_status(self, vm_id: str) -> HelperVMStatusReply:
+            assert vm_id == "vm-candidate"
+            raise MacOSVirtualizationHelperProtocolError("macos_virtualization_helper_protocol_mismatch")
+
+        def validate_template(self, request: dict[str, object]) -> dict[str, object]:
+            raise AssertionError(f"validate_template should not run on helper protocol mismatch: {request}")
+
+    monkeypatch.setattr(vz_linux_module.VZLinuxRunner, "helper_client_cls", _FakeHelper)
+
+    status = VZLinuxRunner(session_control_store=_Store()).start_run(
+        run_id="vz-run-protocol-mismatch",
+        spec=RunSpec(
+            session_id="sess-protocol-mismatch",
+            runtime=RuntimeType.vz_linux,
+            base_image="ubuntu-24.04",
+            command=["/bin/echo", "ok"],
+            network_policy="deny_all",
+        ),
+        session_workspace=str(tmp_path),
+    )
+
+    assert status.phase == RunPhase.failed
+    assert "macos_virtualization_helper_protocol_mismatch" in status.message
+    assert deleted == []
 
 
 def test_vz_linux_session_run_recreates_unhealthy_vm(monkeypatch, tmp_path) -> None:
