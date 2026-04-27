@@ -1236,7 +1236,7 @@ async def get_optimization_history(
     except HTTPException:
         raise
     except _OPTIMIZATION_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error(f"Unexpected error fetching optimization history {optimization_id}: {exc}")
+        logger.error("Unexpected error fetching optimization history")
         raise HTTPException(status_code=500, detail="Failed to fetch optimization history") from exc
 
 ########################################################################################################################
@@ -1315,7 +1315,7 @@ async def add_optimization_iteration(
     except HTTPException:
         raise
     except _OPTIMIZATION_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error(f"Unexpected error adding iteration: {exc}")
+        logger.error("Unexpected error adding optimization iteration")
         raise HTTPException(status_code=500, detail="Failed to add iteration") from exc
 
 
@@ -1384,7 +1384,7 @@ async def list_optimization_iterations(
     except HTTPException:
         raise
     except _OPTIMIZATION_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error(f"Unexpected error listing iterations: {exc}")
+        logger.error("Unexpected error listing optimization iterations")
         raise HTTPException(status_code=500, detail="Failed to list iterations") from exc
 @router.post(
     "/compare",

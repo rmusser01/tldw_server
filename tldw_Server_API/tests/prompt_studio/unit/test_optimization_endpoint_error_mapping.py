@@ -394,6 +394,27 @@ async def test_get_optimization_history_maps_database_error(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_get_optimization_history_unexpected_error_log_is_sanitized(monkeypatch):
+    logger_stub = _EndpointLoggerStub()
+    monkeypatch.setattr(optimization_endpoint, "logger", logger_stub)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await get_optimization_history(
+            optimization_id=42,
+            db=_BrokenOptimizationLookupUnexpectedDb(),
+            user_context={"user_id": "tester", "is_admin": False},
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "Failed to fetch optimization history"
+    _assert_sanitized_endpoint_error_log(
+        logger_stub,
+        "Unexpected error fetching optimization history",
+        "prompt studio backend exploded",
+    )
+
+
+@pytest.mark.asyncio
 async def test_add_optimization_iteration_maps_database_error(monkeypatch):
     logger_stub = _EndpointLoggerStub()
     monkeypatch.setattr(optimization_endpoint, "logger", logger_stub)
@@ -414,6 +435,28 @@ async def test_add_optimization_iteration_maps_database_error(monkeypatch):
         logger_stub,
         "Database error recording optimization iteration",
         "prompt studio driver exploded",
+    )
+
+
+@pytest.mark.asyncio
+async def test_add_optimization_iteration_unexpected_error_log_is_sanitized(monkeypatch):
+    logger_stub = _EndpointLoggerStub()
+    monkeypatch.setattr(optimization_endpoint, "logger", logger_stub)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await add_optimization_iteration(
+            optimization_id=42,
+            payload=OptimizationIterationCreate(iteration_number=1),
+            db=_BrokenOptimizationLookupUnexpectedDb(),
+            user_context={"user_id": "tester", "is_admin": False},
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "Failed to add iteration"
+    _assert_sanitized_endpoint_error_log(
+        logger_stub,
+        "Unexpected error adding optimization iteration",
+        "prompt studio backend exploded",
     )
 
 
@@ -439,6 +482,29 @@ async def test_list_optimization_iterations_maps_database_error(monkeypatch):
         logger_stub,
         "Database error listing optimization iterations",
         "prompt studio driver exploded",
+    )
+
+
+@pytest.mark.asyncio
+async def test_list_optimization_iterations_unexpected_error_log_is_sanitized(monkeypatch):
+    logger_stub = _EndpointLoggerStub()
+    monkeypatch.setattr(optimization_endpoint, "logger", logger_stub)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await list_optimization_iterations(
+            optimization_id=42,
+            page=1,
+            per_page=50,
+            db=_BrokenOptimizationLookupUnexpectedDb(),
+            user_context={"user_id": "tester", "is_admin": False},
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "Failed to list iterations"
+    _assert_sanitized_endpoint_error_log(
+        logger_stub,
+        "Unexpected error listing optimization iterations",
+        "prompt studio backend exploded",
     )
 
 
