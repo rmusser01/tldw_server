@@ -1306,7 +1306,7 @@ async def create_transcription(
         raise
     except _AUDIO_TRANSCRIPTIONS_NONCRITICAL_EXCEPTIONS as e:
         _emit_error_metrics(status_label="internal_error", reason="internal")
-        logger.error(f"Error during transcription: {e}", exc_info=True)
+        logger.error("Error during transcription")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=_dictation_error_detail(
