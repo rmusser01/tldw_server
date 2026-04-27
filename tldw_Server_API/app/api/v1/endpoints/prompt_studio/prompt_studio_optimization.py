@@ -817,7 +817,7 @@ async def create_optimization(
         return StandardResponse(success=True, data=response_payload)
 
     except DatabaseError as exc:
-        logger.error("Database error creating optimization: {}", exc)
+        logger.error("Database error creating optimization")
         raise map_db_error_to_http(exc, default_detail="Failed to create optimization") from exc
     except HTTPException:
         raise
@@ -898,7 +898,7 @@ async def list_optimizations(
         return ListResponse(success=True, data=optimizations, metadata=metadata)
 
     except DatabaseError as exc:
-        logger.error("Database error listing optimizations: {}", exc)
+        logger.error("Database error listing optimizations")
         raise map_db_error_to_http(exc, default_detail="Failed to list optimizations") from exc
     except _OPTIMIZATION_NONCRITICAL_EXCEPTIONS as exc:
         logger.error("Unexpected error listing optimizations")
@@ -945,7 +945,7 @@ async def get_optimization(
         )
 
     except DatabaseError as exc:
-        logger.error("Database error fetching optimization {}: {}", optimization_id, exc)
+        logger.error("Database error fetching optimization")
         raise map_db_error_to_http(exc, default_detail="Failed to get optimization") from exc
     except HTTPException:
         raise
@@ -1510,7 +1510,7 @@ async def compare_strategies(
         )
 
     except DatabaseError as exc:
-        logger.error("Database error comparing strategies: {}", exc)
+        logger.error("Database error comparing strategies")
         raise map_db_error_to_http(exc, default_detail="Failed to compare strategies") from exc
     except HTTPException:
         raise

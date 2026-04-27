@@ -190,6 +190,30 @@ async def test_list_optimizations_maps_database_error():
 
 
 @pytest.mark.asyncio
+async def test_list_optimizations_database_error_log_is_sanitized(monkeypatch):
+    logger_stub = _EndpointLoggerStub()
+    monkeypatch.setattr(optimization_endpoint, "logger", logger_stub)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await list_optimizations(
+            project_id=7,
+            page=1,
+            per_page=20,
+            status_filter=None,
+            _=True,
+            db=_BrokenListOptimizationsDb(),
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "Failed to list optimizations"
+    _assert_sanitized_endpoint_error_log(
+        logger_stub,
+        "Database error listing optimizations",
+        "driver failed",
+    )
+
+
+@pytest.mark.asyncio
 async def test_list_optimizations_unexpected_error_log_is_sanitized(monkeypatch):
     logger_stub = _EndpointLoggerStub()
     monkeypatch.setattr(optimization_endpoint, "logger", logger_stub)
@@ -268,6 +292,40 @@ async def test_create_optimization_sanitizes_database_error(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_create_optimization_database_error_log_is_sanitized(monkeypatch):
+    async def _allow_write_access(*_args, **_kwargs):
+        return True
+
+    logger_stub = _EndpointLoggerStub()
+    monkeypatch.setattr(
+        optimization_endpoint,
+        "require_project_write_access",
+        _allow_write_access,
+        raising=True,
+    )
+    monkeypatch.setattr(optimization_endpoint, "logger", logger_stub)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await create_optimization(
+            optimization_data=_build_optimization_create_payload(),
+            request=object(),
+            _=True,
+            db=_BrokenCreateOptimizationDb(),
+            security_config=object(),
+            user_context={"user_id": "tester", "client_id": "client-1"},
+            idempotency_key=None,
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "Failed to create optimization"
+    _assert_sanitized_endpoint_error_log(
+        logger_stub,
+        "Database error creating optimization",
+        "driver failed",
+    )
+
+
+@pytest.mark.asyncio
 async def test_create_optimization_unexpected_error_log_is_sanitized(monkeypatch):
     logger_stub = _EndpointLoggerStub()
     monkeypatch.setattr(optimization_endpoint, "logger", logger_stub)
@@ -303,6 +361,27 @@ async def test_get_optimization_maps_database_error():
 
     assert exc_info.value.status_code == 500
     assert exc_info.value.detail == "Failed to get optimization"
+
+
+@pytest.mark.asyncio
+async def test_get_optimization_database_error_log_is_sanitized(monkeypatch):
+    logger_stub = _EndpointLoggerStub()
+    monkeypatch.setattr(optimization_endpoint, "logger", logger_stub)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await get_optimization(
+            optimization_id=42,
+            db=_BrokenOptimizationLookupDb("driver failed at /private/prompt-studio.db"),
+            user_context={"user_id": "tester", "is_admin": False},
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "Failed to get optimization"
+    _assert_sanitized_endpoint_error_log(
+        logger_stub,
+        "Database error fetching optimization",
+        "driver failed",
+    )
 
 
 @pytest.mark.asyncio
@@ -565,6 +644,34 @@ async def test_compare_strategies_maps_database_error():
 
     assert exc_info.value.status_code == 500
     assert exc_info.value.detail == "Failed to compare strategies"
+
+
+@pytest.mark.asyncio
+async def test_compare_strategies_database_error_log_is_sanitized(monkeypatch):
+    logger_stub = _EndpointLoggerStub()
+    monkeypatch.setattr(optimization_endpoint, "logger", logger_stub)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await compare_strategies(
+            request=CompareStrategiesRequest(
+                prompt_id=12,
+                test_case_ids=[1],
+                strategies=["iterative"],
+                model_configuration={"model_name": "gpt-4o-mini"},
+            ),
+            http_request=object(),
+            _=True,
+            db=_BrokenCompareStrategiesDb(),
+            user_context={"user_id": "tester", "client_id": "client-1"},
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "Failed to compare strategies"
+    _assert_sanitized_endpoint_error_log(
+        logger_stub,
+        "Database error comparing strategies",
+        "driver failed",
+    )
 
 
 @pytest.mark.asyncio
