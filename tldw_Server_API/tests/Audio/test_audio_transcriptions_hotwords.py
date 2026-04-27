@@ -103,6 +103,26 @@ class _ErrorSentinelTranscriptionRegistry:
         return _ErrorSentinelTranscriptionAdapter()
 
 
+class _WhisperTranscriptionAdapter:
+    def transcribe_batch(self, *_args, **kwargs):
+        return {
+            "text": "stub whisper transcript",
+            "language": kwargs.get("language") or "en",
+            "segments": [],
+            "diarization": {"enabled": False, "speakers": None},
+            "usage": {"duration_ms": None, "tokens": None},
+            "metadata": {"provider": "faster-whisper", "model": kwargs.get("model") or "base"},
+        }
+
+
+class _WhisperTranscriptionRegistry:
+    def resolve_provider_for_model(self, _model):
+        return "faster-whisper", "base", None
+
+    def get_adapter(self, _provider):
+        return _WhisperTranscriptionAdapter()
+
+
 def _make_wav_bytes(duration_sec: float = 0.1, sr: int = 16000) -> bytes:
     buf = io.BytesIO()
     data = np.zeros(int(sr * duration_sec), dtype=np.float32)
@@ -570,6 +590,51 @@ def test_audio_transcriptions_sanitizes_heartbeat_jobs_failure_log(
         or msg.startswith("audio.transcriptions job heartbeat failed")
     ]
     assert heartbeat_logs == ["audio.transcriptions job heartbeat failed; continuing"]
+
+
+@pytest.mark.unit
+def test_audio_transcriptions_sanitizes_whisper_preflight_failure_log(
+    monkeypatch,
+    bypass_api_limits,
+):
+    app, _captured = _setup_stubbed_audio_app(monkeypatch)
+    import tldw_Server_API.app.api.v1.endpoints.audio.audio_transcriptions as audio_tx
+    import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Files as audio_files
+    import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_provider_adapter as stt_adapter
+
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(audio_tx, "logger", logger_stub)
+    monkeypatch.setattr(stt_adapter, "get_stt_provider_registry", lambda: _WhisperTranscriptionRegistry())
+
+    def _raise_model_status_failure(_model):
+        raise RuntimeError("whisper preflight leaked /private/models/base")
+
+    monkeypatch.setattr(audio_files, "check_transcription_model_status", _raise_model_status_failure)
+
+    with bypass_api_limits(app), TestClient(app) as client:
+        wav_bytes = _make_wav_bytes()
+        headers = {"X-API-KEY": TEST_API_KEY}
+        files = {"file": ("sample.wav", io.BytesIO(wav_bytes), "audio/wav")}
+        data = {
+            "model": "base",
+            "response_format": "json",
+        }
+        resp = client.post(
+            "/api/v1/audio/transcriptions",
+            headers=headers,
+            files=files,
+            data=data,
+        )
+        if resp.status_code == 404:
+            pytest.skip("audio/transcriptions endpoint not mounted in this build")
+        assert resp.status_code == 200, resp.text
+
+    preflight_logs = [
+        msg
+        for msg in logger_stub.debugs
+        if msg.startswith("Whisper model preflight check failed")
+    ]
+    assert preflight_logs == ["Whisper model preflight check failed; proceeding without it"]
 
 
 @pytest.mark.unit

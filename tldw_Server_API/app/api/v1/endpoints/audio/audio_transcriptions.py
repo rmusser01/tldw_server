@@ -913,8 +913,8 @@ async def create_transcription(
                         )
                 except HTTPException:
                     raise
-                except _AUDIO_TRANSCRIPTIONS_NONCRITICAL_EXCEPTIONS as preflight_exc:  # pragma: no cover - defensive
-                    logger.debug(f"Whisper model preflight check failed; proceeding without it: {preflight_exc}")
+                except _AUDIO_TRANSCRIPTIONS_NONCRITICAL_EXCEPTIONS:  # pragma: no cover - defensive
+                    logger.debug("Whisper model preflight check failed; proceeding without it")
                 try:
                     if task_normalized == "translate":
                         selected_lang_for_stt: Optional[str] = None
