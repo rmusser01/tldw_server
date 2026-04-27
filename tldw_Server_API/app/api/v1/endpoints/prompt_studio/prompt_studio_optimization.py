@@ -822,7 +822,7 @@ async def create_optimization(
     except HTTPException:
         raise
     except _OPTIMIZATION_NONCRITICAL_EXCEPTIONS as exc:  # pragma: no cover - safety
-        logger.error(f"Unexpected error creating optimization: {exc}")
+        logger.error("Unexpected error creating optimization")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to create optimization",
@@ -1515,7 +1515,7 @@ async def compare_strategies(
     except HTTPException:
         raise
     except _OPTIMIZATION_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error(f"Unexpected error comparing strategies: {exc}")
+        logger.error("Unexpected error comparing strategies")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to compare strategies",

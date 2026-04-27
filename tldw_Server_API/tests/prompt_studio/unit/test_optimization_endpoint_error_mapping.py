@@ -64,6 +64,13 @@ class _BrokenCompareStrategiesDb:
         raise DatabaseError("driver failed")
 
 
+class _BrokenCompareStrategiesUnexpectedDb:
+    client_id = "client-1"
+
+    def get_prompt_with_project(self, *_args, **_kwargs):
+        raise ValueError("prompt studio backend exploded at /private/prompt-studio.db")
+
+
 class _BrokenCreateOptimizationDb:
     client_id = "client-1"
 
@@ -72,6 +79,13 @@ class _BrokenCreateOptimizationDb:
 
     def create_optimization(self, *_args, **_kwargs):
         raise DatabaseError("driver failed")
+
+
+class _BrokenCreateOptimizationUnexpectedDb:
+    client_id = "client-1"
+
+    def get_prompt_with_project(self, *_args, **_kwargs):
+        raise ValueError("prompt studio backend exploded at /private/prompt-studio.db")
 
 
 class _FakePsLogger:
@@ -251,6 +265,31 @@ async def test_create_optimization_sanitizes_database_error(monkeypatch):
 
     assert exc_info.value.status_code == 500
     assert exc_info.value.detail == "Failed to create optimization"
+
+
+@pytest.mark.asyncio
+async def test_create_optimization_unexpected_error_log_is_sanitized(monkeypatch):
+    logger_stub = _EndpointLoggerStub()
+    monkeypatch.setattr(optimization_endpoint, "logger", logger_stub)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await create_optimization(
+            optimization_data=_build_optimization_create_payload(),
+            request=object(),
+            _=True,
+            db=_BrokenCreateOptimizationUnexpectedDb(),
+            security_config=object(),
+            user_context={"user_id": "tester", "client_id": "client-1"},
+            idempotency_key=None,
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "Failed to create optimization"
+    _assert_sanitized_endpoint_error_log(
+        logger_stub,
+        "Unexpected error creating optimization",
+        "prompt studio backend exploded",
+    )
 
 
 @pytest.mark.asyncio
@@ -526,3 +565,31 @@ async def test_compare_strategies_maps_database_error():
 
     assert exc_info.value.status_code == 500
     assert exc_info.value.detail == "Failed to compare strategies"
+
+
+@pytest.mark.asyncio
+async def test_compare_strategies_unexpected_error_log_is_sanitized(monkeypatch):
+    logger_stub = _EndpointLoggerStub()
+    monkeypatch.setattr(optimization_endpoint, "logger", logger_stub)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await compare_strategies(
+            request=CompareStrategiesRequest(
+                prompt_id=12,
+                test_case_ids=[1],
+                strategies=["iterative"],
+                model_configuration={"model_name": "gpt-4o-mini"},
+            ),
+            http_request=object(),
+            _=True,
+            db=_BrokenCompareStrategiesUnexpectedDb(),
+            user_context={"user_id": "tester", "client_id": "client-1"},
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "Failed to compare strategies"
+    _assert_sanitized_endpoint_error_log(
+        logger_stub,
+        "Unexpected error comparing strategies",
+        "prompt studio backend exploded",
+    )
