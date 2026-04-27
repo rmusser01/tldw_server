@@ -585,8 +585,8 @@ async def get_tts_health(request: Request, tts_service: TTSServiceV2 = Depends(g
                                 "initialized": False,
                                 "failed": availability == "failed",
                             }
-        except Exception as envelope_exc:
-            logger.debug(f"TTS health envelope enrichment failed: {envelope_exc}")
+        except Exception:
+            logger.debug("TTS health envelope enrichment failed")
 
         if capability_envelopes:
             if not total_providers:
