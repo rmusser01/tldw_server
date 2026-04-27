@@ -232,14 +232,14 @@ class NotificationService:
             if self.webhook_url:
                 threading.Thread(target=self._send_webhook_safe, args=(payload,), daemon=True).start()
         except (OSError, RuntimeError) as e:
-            logger.debug(f"Webhook thread start failed: {e}")
+            logger.debug("Webhook thread start failed ({})", _safe_exception_label(e))
         try:
             # Email optional and only if SMTP configured and recipients provided
             recipients = self._parse_email_recipients(self.email_to)
             if recipients and self.smtp_host and self.email_from:
                 threading.Thread(target=self._send_email_safe, args=(alert,), daemon=True).start()
         except (OSError, RuntimeError) as e:
-            logger.debug(f"Email thread start failed: {e}")
+            logger.debug("Email thread start failed ({})", _safe_exception_label(e))
         return "logged" if file_written else "failed"
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=8), reraise=False)
@@ -303,7 +303,7 @@ class NotificationService:
                 f.write(json.dumps(payload, ensure_ascii=False) + "\n")
         except (OSError, RuntimeError, TypeError, ValueError) as e:
             file_written = False
-            logger.warning(f"Notification file sink failed: {e}")
+            logger.warning("Notification file sink failed ({})", _safe_exception_label(e))
         try:
             if self.webhook_url:
                 threading.Thread(target=self._send_webhook_safe, args=(payload,), daemon=True).start()

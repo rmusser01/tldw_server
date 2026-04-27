@@ -344,6 +344,113 @@ def test_notify_generic_webhook_thread_failure_log_is_sanitized(monkeypatch, tmp
     assert "private-webhook-dispatch" not in "\n".join(messages)
 
 
+def test_notify_webhook_thread_failure_log_is_sanitized(monkeypatch, tmp_path):
+    svc = NotificationService()
+    svc.enabled = True
+    svc.min_severity = "info"
+    svc.file_path = str(tmp_path / "notifications.jsonl")
+    svc.webhook_url = "https://example.com/hook"
+    secret_thread_detail = "thread-token=/tmp/private-topic-webhook-dispatch"
+    messages, sink_id = _capture_notification_logs("DEBUG")
+
+    class _FailingThread:
+        def __init__(self, *, target=None, args=(), daemon=None):  # noqa: ANN001, ANN002
+            _ = (target, args, daemon)
+            raise RuntimeError(secret_thread_detail)
+
+    monkeypatch.setattr(notification_service.threading, "Thread", _FailingThread)
+
+    alert = TopicAlert(
+        user_id="u",
+        scope_type="user",
+        scope_id="u",
+        source="chat.input",
+        watchlist_id="w",
+        rule_category="adult",
+        rule_severity="critical",
+        pattern="nsfw",
+        text_snippet="...nsfw...",
+    )
+
+    try:
+        result = svc.notify(alert)
+    finally:
+        notification_service.logger.remove(sink_id)
+
+    assert result == "logged"
+    assert any("Webhook thread start failed" in message for message in messages)
+    joined = "\n".join(messages)
+    assert secret_thread_detail not in joined
+    assert "private-topic-webhook-dispatch" not in joined
+
+
+def test_notify_email_thread_failure_log_is_sanitized(monkeypatch, tmp_path):
+    svc = NotificationService()
+    svc.enabled = True
+    svc.min_severity = "info"
+    svc.file_path = str(tmp_path / "notifications.jsonl")
+    svc.smtp_host = "smtp.example.com"
+    svc.email_from = "alerts@example.com"
+    svc.email_to = "recipient@example.com"
+    secret_thread_detail = "thread-token=/tmp/private-topic-email-dispatch"
+    messages, sink_id = _capture_notification_logs("DEBUG")
+
+    class _FailingThread:
+        def __init__(self, *, target=None, args=(), daemon=None):  # noqa: ANN001, ANN002
+            _ = (target, args, daemon)
+            raise RuntimeError(secret_thread_detail)
+
+    monkeypatch.setattr(notification_service.threading, "Thread", _FailingThread)
+
+    alert = TopicAlert(
+        user_id="u",
+        scope_type="user",
+        scope_id="u",
+        source="chat.input",
+        watchlist_id="w",
+        rule_category="adult",
+        rule_severity="critical",
+        pattern="nsfw",
+        text_snippet="...nsfw...",
+    )
+
+    try:
+        result = svc.notify(alert)
+    finally:
+        notification_service.logger.remove(sink_id)
+
+    assert result == "logged"
+    assert any("Email thread start failed" in message for message in messages)
+    joined = "\n".join(messages)
+    assert secret_thread_detail not in joined
+    assert "private-topic-email-dispatch" not in joined
+
+
+def test_notify_generic_file_sink_failure_log_is_sanitized(monkeypatch, tmp_path):
+    svc = NotificationService()
+    svc.enabled = True
+    svc.min_severity = "info"
+    svc.file_path = str(tmp_path / "secret-generic-notification-sink.jsonl")
+    messages, sink_id = _capture_notification_logs("WARNING")
+
+    def _raise_open(*args, **kwargs):  # noqa: ANN002, ANN003
+        _ = (args, kwargs)
+        raise OSError(f"permission denied for {svc.file_path}")
+
+    monkeypatch.setattr(builtins, "open", _raise_open)
+
+    try:
+        result = svc.notify_generic({"type": "guardian_alert", "severity": "warning", "user_id": "u1"})
+    finally:
+        notification_service.logger.remove(sink_id)
+
+    assert result == "failed"
+    assert any("Notification file sink failed" in message for message in messages)
+    joined = "\n".join(messages)
+    assert "secret-generic-notification-sink" not in joined
+    assert svc.file_path not in joined
+
+
 def test_flush_digest_returns_count_without_dispatch(monkeypatch):
     svc = NotificationService()
     svc.enabled = True
