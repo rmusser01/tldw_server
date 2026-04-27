@@ -825,7 +825,7 @@ async def update_dictionary_entry(
         except HTTPException:
             raise
         except Exception as e:
-            logger.error(f"Error checking existing entry type for regex validation: {e}")
+            logger.error("Error checking existing entry type for regex validation")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Unable to validate regex pattern safety",

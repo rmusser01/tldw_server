@@ -616,6 +616,29 @@ async def test_update_dictionary_entry_sanitizes_unexpected_error_log(monkeypatc
 
 
 @pytest.mark.asyncio
+async def test_update_dictionary_entry_regex_precheck_sanitizes_unexpected_error_log(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    logger_stub = _patch_endpoint_logger(monkeypatch)
+
+    def _get_entry(self, *_args, **_kwargs):
+        raise _unexpected_failure()
+
+    _patch_service(monkeypatch, get_entry=_get_entry)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await chat_dictionary_endpoints.update_dictionary_entry(
+            entry_id=42,
+            update=chat_dictionary_endpoints.DictionaryEntryUpdate(type="regex"),
+            db=object(),
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "Unable to validate regex pattern safety"
+    _assert_sanitized_log_call(logger_stub, "Error checking existing entry type for regex validation")
+
+
+@pytest.mark.asyncio
 async def test_delete_dictionary_entry_maps_database_error(monkeypatch: pytest.MonkeyPatch):
     logger_stub = _patch_endpoint_logger(monkeypatch)
 
