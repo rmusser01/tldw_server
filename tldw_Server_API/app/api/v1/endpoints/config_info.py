@@ -558,8 +558,8 @@ def _resolve_provider_key(provider: str) -> Optional[str]:
         val = (keys.get(provider) or "").strip()
         if val:
             return val
-    except Exception as e:
-        logger.debug("Failed to load API keys for provider %s: %s", provider, e)
+    except Exception:
+        logger.debug("Failed to load API keys for provider")
 
     return None
 

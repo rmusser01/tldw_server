@@ -107,6 +107,21 @@ class TestResolveProviderKey:
             result = _resolve_provider_key("anthropic")
             assert result == "ant-key-from-config"
 
+    def test_get_api_keys_failure_log_is_sanitized(self, monkeypatch):
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        logger_stub = MagicMock()
+
+        def _fail_get_api_keys():
+            raise RuntimeError("provider key loader exploded at /private/config.txt")
+
+        monkeypatch.setattr(config_info_mod, "logger", logger_stub)
+        _target = "tldw_Server_API.app.api.v1.schemas.chat_request_schemas.get_api_keys"
+        with patch(_target, side_effect=_fail_get_api_keys):
+            result = _resolve_provider_key("openai")
+
+        assert result is None
+        logger_stub.debug.assert_called_once_with("Failed to load API keys for provider")
+
 
 class TestConfigInfoSanitizedLogs:
     def test_missing_config_path_log_is_sanitized(self, monkeypatch):
