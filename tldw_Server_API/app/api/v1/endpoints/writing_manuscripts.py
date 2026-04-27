@@ -113,11 +113,7 @@ async def _enforce_rate_limit(rate_limiter: RateLimiter, user_id: int, scope: st
         allowed, meta = await rate_limiter.check_user_rate_limit(int(user_id), scope)
     except _MANUSCRIPT_NONCRITICAL_EXCEPTIONS as exc:
         retry_after = 60
-        logger.exception(
-            "Rate limiter check failed for user_id={} scope={}",
-            user_id,
-            scope,
-        )
+        logger.error("Rate limiter check failed")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Rate limiter unavailable",

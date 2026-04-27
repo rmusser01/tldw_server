@@ -37,8 +37,11 @@ class _LoggerStub:
 
 
 _SENSITIVE_LOG_MARKERS = (
+    "private.scope",
+    "rate limiter backend leaked",
     "sqlite backend exploded",
     "unexpected writing backend leaked",
+    "/private/limits.db",
     "/private/writing.db",
 )
 
@@ -124,6 +127,27 @@ def test_writing_handle_db_errors_sanitizes_unexpected_error_log(monkeypatch, mo
     assert exc_info.value.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
     assert exc_info.value.detail == f"Unexpected error while processing {entity_label}"
     _assert_sanitized_error_log(logger_stub, "Unexpected error while processing writing entity")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("module", [writing, writing_manuscripts])
+async def test_writing_enforce_rate_limit_sanitizes_backend_failure_log(monkeypatch, module):
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(module, "logger", logger_stub)
+
+    class _FailingRateLimiter:
+        async def check_user_rate_limit(self, user_id: int, scope: str):
+            assert user_id == 881
+            assert scope == "private.scope"
+            raise RuntimeError("rate limiter backend leaked /private/limits.db")
+
+    with pytest.raises(HTTPException) as exc_info:
+        await module._enforce_rate_limit(_FailingRateLimiter(), 881, "private.scope")
+
+    assert exc_info.value.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
+    assert exc_info.value.detail == "Rate limiter unavailable"
+    assert exc_info.value.headers == {"Retry-After": "60"}
+    _assert_sanitized_error_log(logger_stub, "Rate limiter check failed")
 
 
 @pytest.mark.parametrize(
