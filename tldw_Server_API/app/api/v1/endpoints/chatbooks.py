@@ -165,13 +165,13 @@ def _persist_completed_sync_export_job(
     )
     try:
         service._save_export_job(job)  # noqa: SLF001 (internal helper is appropriate here)
-    except _CHATBOOKS_NONCRITICAL_EXCEPTIONS as exc:
-        logger.warning(f"Failed to persist completed export job for sync path: {exc}")
+    except _CHATBOOKS_NONCRITICAL_EXCEPTIONS:
+        logger.warning("Failed to persist completed export job for sync path")
         try:
             if file_path.exists():
                 file_path.unlink()
-        except _CHATBOOKS_NONCRITICAL_EXCEPTIONS as cleanup_err:
-            logger.warning(f"Failed to remove export archive after job persistence failure: {cleanup_err}")
+        except _CHATBOOKS_NONCRITICAL_EXCEPTIONS:
+            logger.warning("Failed to remove export archive after job persistence failure")
         raise HTTPException(
             status_code=500,
             detail="Export completed but failed to persist job metadata",
