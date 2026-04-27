@@ -414,10 +414,10 @@ async def create_chat_dictionary(
         entries = service.get_entries(dictionary_id=dict_id) if dict_data else []
     except (ConflictError, InputError, CharactersRAGDBError) as e:
         if isinstance(e, CharactersRAGDBError) and not isinstance(e, (ConflictError, InputError)):
-            logger.error("Error creating dictionary: {}", e)
+            logger.error("Error creating dictionary")
         raise map_db_error_to_http(e, default_detail="Failed to create dictionary") from e
     except Exception as e:
-        logger.error(f"Error creating dictionary: {e}")
+        logger.error("Error creating dictionary")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to create dictionary",
@@ -496,10 +496,10 @@ async def list_chat_dictionaries(
             inactive_count=inactive_count,
         )
     except CharactersRAGDBError as e:
-        logger.error("Error listing dictionaries: {}", e)
+        logger.error("Error listing dictionaries")
         raise map_db_error_to_http(e, default_detail="Failed to list dictionaries") from e
     except Exception as e:
-        logger.error(f"Error listing dictionaries: {e}")
+        logger.error("Error listing dictionaries")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to list dictionaries",
@@ -525,10 +525,10 @@ async def get_chat_dictionary(
     except HTTPException:
         raise
     except CharactersRAGDBError as e:
-        logger.error("Error getting dictionary: {}", e)
+        logger.error("Error getting dictionary")
         raise map_db_error_to_http(e, default_detail="Failed to get dictionary") from e
     except Exception as e:
-        logger.error(f"Error getting dictionary: {e}")
+        logger.error("Error getting dictionary")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to get dictionary",
@@ -584,12 +584,12 @@ async def update_chat_dictionary(
         entries = service.get_entries(dictionary_id=dictionary_id) if success else []
     except (ConflictError, InputError, CharactersRAGDBError) as e:
         if isinstance(e, CharactersRAGDBError) and not isinstance(e, (ConflictError, InputError)):
-            logger.error("Error updating dictionary: {}", e)
+            logger.error("Error updating dictionary")
         raise map_db_error_to_http(e, default_detail="Failed to update dictionary") from e
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error updating dictionary: {e}")
+        logger.error("Error updating dictionary")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to update dictionary",
@@ -623,10 +623,10 @@ async def delete_chat_dictionary(
     except HTTPException:
         raise
     except CharactersRAGDBError as e:
-        logger.error("Error deleting dictionary: {}", e)
+        logger.error("Error deleting dictionary")
         raise map_db_error_to_http(e, default_detail="Failed to delete dictionary") from e
     except Exception as e:
-        logger.error(f"Error deleting dictionary: {e}")
+        logger.error("Error deleting dictionary")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to delete dictionary",
