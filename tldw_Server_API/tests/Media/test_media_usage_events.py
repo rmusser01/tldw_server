@@ -8,6 +8,9 @@ class _LoggerStub:
     def __init__(self) -> None:
         self.debugs: list[str] = []
         self.debug_kwargs: list[dict[str, object]] = []
+        self.errors: list[str] = []
+        self.error_args: list[tuple[object, ...]] = []
+        self.error_kwargs: list[dict[str, object]] = []
         self.warnings: list[str] = []
         self.warning_args: list[tuple[object, ...]] = []
         self.warning_kwargs: list[dict[str, object]] = []
@@ -27,6 +30,16 @@ class _LoggerStub:
         self.debugs.append(message.format(*args, **kwargs) if args or kwargs else message)
         self.debug_kwargs.append(dict(kwargs))
 
+    def error(self, message: str, *args: object, **kwargs: object) -> None:
+        self.errors.append(message.format(*args, **kwargs) if args or kwargs else message)
+        self.error_args.append(args)
+        self.error_kwargs.append(dict(kwargs))
+
+
+class _DebugFailingLoggerStub(_LoggerStub):
+    def debug(self, *_args: object, **_kwargs: object) -> None:
+        raise RuntimeError("debug logging exploded at /private/debug.log")
+
 
 def _assert_sanitized_debug_log(logger: _LoggerStub, expected: str) -> None:
     target_kwargs = [
@@ -37,6 +50,23 @@ def _assert_sanitized_debug_log(logger: _LoggerStub, expected: str) -> None:
     assert "exploded" not in rendered
     assert "/private/" not in rendered
     assert all(not kwargs for kwargs in target_kwargs)
+
+
+def _assert_sanitized_error_log(logger: _LoggerStub, expected: str) -> None:
+    target_records = [
+        (message, args, kwargs)
+        for message, args, kwargs in zip(
+            logger.errors,
+            logger.error_args,
+            logger.error_kwargs,
+        )
+        if message == expected
+    ]
+    assert target_records, logger.errors
+    rendered = "\n".join(message for message, _args, _kwargs in target_records)
+    assert "exploded" not in rendered
+    assert "/private/" not in rendered
+    assert all(not args and not kwargs for _message, args, kwargs in target_records)
 
 
 def _assert_sanitized_warning_log(logger: _LoggerStub, expected: str) -> None:
@@ -826,4 +856,49 @@ def test_videos_process_rechunk_failure_log_is_sanitized(
     _assert_sanitized_debug_log(
         logger_stub,
         "Video process endpoint rechunking failed; returning original result",
+    )
+
+
+def test_videos_process_debug_logging_failure_log_is_sanitized(
+    client_with_single_user,
+    quota_service_stub,
+    monkeypatch,
+):
+    client, _ = client_with_single_user
+
+    import tldw_Server_API.app.core.Ingestion_Media_Processing.video_batch as video_batch_mod
+    from tldw_Server_API.app.api.v1.endpoints.media import process_videos as process_videos_mod
+
+    logger_stub = _DebugFailingLoggerStub()
+
+    async def _stub_run_video_batch(**_kwargs):
+        return {
+            "processed_count": 1,
+            "errors_count": 0,
+            "errors": [],
+            "results": [
+                {
+                    "status": "Success",
+                    "input_ref": "clip.mp4",
+                    "media_type": "video",
+                    "content": "video transcript",
+                    "metadata": {},
+                }
+            ],
+            "confabulation_results": None,
+        }
+
+    monkeypatch.setattr(process_videos_mod, "logger", logger_stub)
+    monkeypatch.setattr(video_batch_mod, "run_video_batch", _stub_run_video_batch)
+
+    response = client.post(
+        "/api/v1/media/process-videos",
+        data={"perform_chunking": "false"},
+        files=[("files", ("clip.mp4", b"\x00\x00\x00\x18ftypmp42", "video/mp4"))],
+    )
+
+    assert response.status_code == 200, response.text
+    _assert_sanitized_error_log(
+        logger_stub,
+        "Video process endpoint debug logging failed",
     )

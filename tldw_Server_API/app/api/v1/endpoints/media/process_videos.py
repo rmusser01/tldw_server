@@ -307,8 +307,8 @@ async def process_videos_endpoint(
             )
         else:
             logger.debug("No success item found in final results before return.")
-    except Exception as debug_err:  # pragma: no cover - defensive logging
-        logger.error(f"Error during debug logging: {debug_err}")
+    except Exception:  # pragma: no cover - defensive logging
+        logger.error("Video process endpoint debug logging failed")
 
     # Optional template/hierarchical re-chunking of video transcripts (best-effort).
     try:
