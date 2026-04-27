@@ -242,6 +242,39 @@ def test_tts_health_capability_dataclass_failure_log_is_sanitized(monkeypatch):
     assert not fake_logger.debug.call_args.kwargs
 
 
+def test_tts_health_auth_config_lookup_failure_log_is_sanitized(monkeypatch):
+    def _fail_config_manager():
+        raise RuntimeError("auth config leaked /private/tts-auth.toml")
+
+    fake_logger = MagicMock()
+    monkeypatch.setattr(audio_health, "logger", fake_logger)
+    monkeypatch.setattr(audio_health, "get_tts_config_manager", _fail_config_manager)
+
+    loaded, configs = audio_health._load_auth_provider_configs()
+
+    assert loaded is False
+    assert configs == {}
+    fake_logger.debug.assert_called_once_with("TTS health auth config lookup failed")
+
+
+def test_tts_health_detailed_circuit_breaker_failure_log_is_sanitized(monkeypatch):
+    class _FailingCircuitManager:
+        def get_all_status(self, detailed: bool = False):
+            assert detailed is True
+            raise RuntimeError("breaker details leaked /private/tts-breakers.json")
+
+    class _Service:
+        circuit_manager = _FailingCircuitManager()
+
+    fake_logger = MagicMock()
+    monkeypatch.setattr(audio_health, "logger", fake_logger)
+
+    result = audio_health._load_detailed_circuit_breakers(_Service())
+
+    assert result == {}
+    fake_logger.debug.assert_called_once_with("TTS health detailed circuit-breaker lookup failed")
+
+
 @pytest.mark.asyncio
 async def test_get_tts_health_derives_omnivoice_backoff_state_from_supervisor(monkeypatch):
     class _FakeRegistry:

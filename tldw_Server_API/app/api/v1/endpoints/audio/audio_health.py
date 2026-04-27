@@ -249,8 +249,8 @@ def _load_auth_provider_configs() -> tuple[bool, dict[str, Any]]:
             provider_name: config_manager.get_provider_config(provider_name)
             for provider_name in _AUTH_HEALTH_PROVIDERS
         }
-    except Exception as exc:
-        logger.debug(f"TTS health auth config lookup failed: {exc}")
+    except Exception:
+        logger.debug("TTS health auth config lookup failed")
         return False, {}
 
 
@@ -261,8 +261,8 @@ def _load_detailed_circuit_breakers(tts_service: Any) -> dict[str, Any]:
     try:
         detailed = circuit_manager.get_all_status(detailed=True)
         return detailed if isinstance(detailed, dict) else {}
-    except Exception as exc:
-        logger.debug(f"TTS health detailed circuit-breaker lookup failed: {exc}")
+    except Exception:
+        logger.debug("TTS health detailed circuit-breaker lookup failed")
         return {}
 
 
