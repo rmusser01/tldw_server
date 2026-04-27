@@ -257,12 +257,12 @@ async def upsert_policy(
                         await loader.load_once()
                         app.state.rg_policy_loader = loader
                         app.state.rg_policy_store = "db"
-                    except _RG_ENDPOINT_NONCRITICAL_EXCEPTIONS as _boot_err:
-                        logger.debug(f"Policy upsert DB loader init skipped: {_boot_err}")
+                    except _RG_ENDPOINT_NONCRITICAL_EXCEPTIONS:
+                        logger.debug("Policy upsert DB loader init skipped")
                 elif loader is not None:
                     await loader.load_once()
-        except _RG_ENDPOINT_NONCRITICAL_EXCEPTIONS as _ref_e:
-            logger.debug(f"Policy upsert refresh skipped: {_ref_e}")
+        except _RG_ENDPOINT_NONCRITICAL_EXCEPTIONS:
+            logger.debug("Policy upsert refresh skipped")
         return JSONResponse({"status": "ok", "policy_id": policy_id})
     except PolicyVersionConflictError as e:
         logger.debug(f"upsert_policy version conflict for {policy_id}: {e}")
@@ -320,12 +320,12 @@ async def delete_policy(
                         await loader.load_once()
                         app.state.rg_policy_loader = loader
                         app.state.rg_policy_store = "db"
-                    except _RG_ENDPOINT_NONCRITICAL_EXCEPTIONS as _boot_err:
-                        logger.debug(f"Policy delete DB loader init skipped: {_boot_err}")
+                    except _RG_ENDPOINT_NONCRITICAL_EXCEPTIONS:
+                        logger.debug("Policy delete DB loader init skipped")
                 elif loader is not None:
                     await loader.load_once()
-        except _RG_ENDPOINT_NONCRITICAL_EXCEPTIONS as _ref_e:
-            logger.debug(f"Policy delete refresh skipped: {_ref_e}")
+        except _RG_ENDPOINT_NONCRITICAL_EXCEPTIONS:
+            logger.debug("Policy delete refresh skipped")
         return JSONResponse({"status": "ok", "deleted": int(deleted)})
     except PolicyVersionConflictError as e:
         logger.debug(f"delete_policy version conflict for {policy_id}: {e}")
