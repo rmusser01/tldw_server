@@ -471,6 +471,7 @@ def test_persona_setup_and_live_voice_analytics_roundtrip(store):
     listed_summaries = store.list_persona_live_voice_session_summaries(
         user_id=7,
         persona_id="persona-analytics",
+        days=30,
     )
 
     assert session_summary is not None

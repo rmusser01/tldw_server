@@ -842,6 +842,7 @@ def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
     except Exception as e:  # noqa: BLE001
         logger.debug(f"Skipping config_admin router in minimal test app: {e}")
 
+    admin_router_added = False
     try:
         from tldw_Server_API.app.api.v1.endpoints.admin import router as admin_router
 
@@ -850,19 +851,21 @@ def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
             prefix=f"{API_V1_PREFIX}",
             tags=("admin",),
         ))
+        admin_router_added = True
     except Exception as e:  # noqa: BLE001
         logger.debug(f"Skipping admin router in minimal test app: {e}")
 
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.admin.admin_byok import router as admin_byok_router
+    if not admin_router_added:
+        try:
+            from tldw_Server_API.app.api.v1.endpoints.admin.admin_byok import router as admin_byok_router
 
-        specs.append(RouterSpec(
-            router=admin_byok_router,
-            prefix=f"{API_V1_PREFIX}/admin",
-            tags=("admin",),
-        ))
-    except Exception as admin_byok_error:  # noqa: BLE001
-        logger.debug(f"Skipping admin_byok router in minimal test app: {admin_byok_error}")
+            specs.append(RouterSpec(
+                router=admin_byok_router,
+                prefix=f"{API_V1_PREFIX}/admin",
+                tags=("admin",),
+            ))
+        except Exception as admin_byok_error:  # noqa: BLE001
+            logger.debug(f"Skipping admin_byok router in minimal test app: {admin_byok_error}")
 
     try:
         from tldw_Server_API.app.api.v1.endpoints.orgs import router as orgs_router
