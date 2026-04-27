@@ -16,6 +16,7 @@ import Virtualization
 
     let configuration = try builder.build(spec: spec, workspacePath: workspace.path())
 
+    #expect(configuration.platform is VZGenericPlatformConfiguration)
     #expect(configuration.bootLoader is VZLinuxBootLoader)
     #expect(configuration.storageDevices.count == 1)
     #expect(configuration.directorySharingDevices.count == 1)
@@ -38,10 +39,41 @@ import Virtualization
 
     let configuration = try builder.build(spec: spec, workspacePath: workspace.path())
 
+    #expect(configuration.platform is VZGenericPlatformConfiguration)
     #expect(configuration.bootLoader is VZEFIBootLoader)
     #expect(configuration.storageDevices.count == 1)
     #expect(configuration.directorySharingDevices.count == 1)
     #expect(configuration.socketDevices.count == 1)
+}
+
+@Test func configurationBuilderAddsSerialLogPortWhenConfigured() throws {
+    let serialLogDirectory = try temporaryWorkspaceDirectory()
+    let builder = VZLinuxConfigurationBuilder(serialLogDirectory: serialLogDirectory.path())
+    let bundleDirectory = try temporaryBundleDirectory()
+    let spec = try BundleTemplateResolver().resolve(templatePath: bundleDirectory.path())
+    let workspace = try temporaryWorkspaceDirectory()
+    let guestTransport = GuestTransportMetadata(
+        vmID: "vm/serial log",
+        connectionToken: "token",
+        hostPort: 1024,
+        workspaceRoot: "/workspace"
+    )
+
+    defer {
+        try? FileManager.default.removeItem(at: serialLogDirectory)
+        try? FileManager.default.removeItem(at: bundleDirectory)
+        try? FileManager.default.removeItem(at: workspace)
+    }
+
+    let configuration = try builder.build(
+        spec: spec,
+        workspacePath: workspace.path(),
+        guestTransport: guestTransport
+    )
+
+    #expect(configuration.serialPorts.count == 1)
+    let logPath = serialLogDirectory.appendingPathComponent("vm_serial_log.serial.log").path()
+    #expect(FileManager.default.fileExists(atPath: logPath))
 }
 
 private func temporaryWorkspaceDirectory() throws -> URL {

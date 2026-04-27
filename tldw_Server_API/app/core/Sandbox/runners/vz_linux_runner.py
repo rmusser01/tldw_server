@@ -61,7 +61,10 @@ class VZLinuxRunner(VZBaseRunner):
         if not reasons:
             try:
                 helper_result = self.helper_client_cls().validate_vz_linux_host(
-                    {"network_policy": str(network_policy or "deny_all").strip().lower() or "deny_all"}
+                    {
+                        "runtime": self.runtime_type.value,
+                        "network_policy": str(network_policy or "deny_all").strip().lower() or "deny_all",
+                    }
                 )
             except MacOSVirtualizationHelperUnavailable as exc:
                 helper_result = {
@@ -293,6 +296,7 @@ class VZLinuxRunner(VZBaseRunner):
                     reason_text = ", ".join(template_reasons) if template_reasons else "template_invalid"
                     raise RuntimeError(reason_text)
                 template_ref = str(template_validation.get("template_id") or "").strip() or spec.base_image
+                template_source = str(template_validation.get("source") or "").strip() or spec.base_image
                 vm = helper.create_vm(
                     {
                         "runtime": self.runtime_type.value,
@@ -301,8 +305,9 @@ class VZLinuxRunner(VZBaseRunner):
                         "session_mode": session_mode,
                         "workspace_path": workspace,
                         "workspace_mount": "virtiofs",
-                        "template": template_ref,
+                        "template": template_source,
                         "network_policy": str(spec.network_policy or "deny_all").strip().lower() or "deny_all",
+                        "timeout_sec": int(spec.startup_timeout_sec or spec.timeout_sec or 300),
                     }
                 )
                 vm_id = vm.vm_id

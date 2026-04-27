@@ -21,7 +21,8 @@ import Virtualization
     try driver.boot(
         vmID: "vm-bundle",
         templatePath: bundleDirectory.path(),
-        workspacePath: workspace.path()
+        workspacePath: workspace.path(),
+        startupTimeoutSeconds: 5
     )
 
     #expect(machineProvider.recordedConfigurations.count == 1)
@@ -46,7 +47,8 @@ import Virtualization
     try driver.boot(
         vmID: "vm-stop",
         templatePath: bundleDirectory.path(),
-        workspacePath: workspace.path()
+        workspacePath: workspace.path(),
+        startupTimeoutSeconds: 5
     )
 
     try driver.stop(vmID: "vm-stop")
@@ -54,31 +56,60 @@ import Virtualization
     #expect(machineProvider.stopCallCount == 1)
 }
 
+@Test func bootDriverPassesStartupTimeoutToMachine() throws {
+    let workspace = try bootDriverWorkspaceDirectory()
+    let bundleDirectory = try bootDriverBundleDirectory()
+    defer {
+        try? FileManager.default.removeItem(at: bundleDirectory)
+        try? FileManager.default.removeItem(at: workspace)
+    }
+
+    let machineProvider = RecordingVirtualMachineProvider()
+    let driver = VirtualizationLinuxBootDriver(
+        templateValidator: TemplateValidator(),
+        configurationBuilder: VZLinuxConfigurationBuilder(),
+        machineProvider: machineProvider
+    )
+
+    try driver.boot(
+        vmID: "vm-startup-timeout",
+        templatePath: bundleDirectory.path(),
+        workspacePath: workspace.path(),
+        startupTimeoutSeconds: 9
+    )
+
+    #expect(machineProvider.lastStartupTimeoutSeconds == 9)
+}
+
 private final class RecordingVirtualMachineProvider: VirtualMachineProviding {
     private(set) var recordedConfigurations: [VZVirtualMachineConfiguration] = []
     private(set) var startCallCount = 0
     private(set) var stopCallCount = 0
+    private(set) var lastStartupTimeoutSeconds: TimeInterval?
 
     func makeVirtualMachine(configuration: VZVirtualMachineConfiguration) throws -> VirtualMachineControlling {
         recordedConfigurations.append(configuration)
         return RecordingVirtualMachine(
-            onStart: { self.startCallCount += 1 },
+            onStart: { timeout in
+                self.startCallCount += 1
+                self.lastStartupTimeoutSeconds = timeout
+            },
             onStop: { self.stopCallCount += 1 }
         )
     }
 }
 
 private final class RecordingVirtualMachine: VirtualMachineControlling {
-    private let onStart: () -> Void
+    private let onStart: (TimeInterval) -> Void
     private let onStop: () -> Void
 
-    init(onStart: @escaping () -> Void, onStop: @escaping () -> Void) {
+    init(onStart: @escaping (TimeInterval) -> Void, onStop: @escaping () -> Void) {
         self.onStart = onStart
         self.onStop = onStop
     }
 
-    func start() throws {
-        onStart()
+    func start(timeoutSeconds: TimeInterval) throws {
+        onStart(timeoutSeconds)
     }
 
     func stop() throws {

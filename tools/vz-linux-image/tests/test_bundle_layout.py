@@ -48,6 +48,7 @@ def test_bundle_builder_emits_manifest_and_expected_paths(tmp_path: Path) -> Non
     assert manifest["vsock_port"] == 1024
 
     assert (rootfs_dir / "usr/local/bin/tldw-agent-guest").is_file()
+    assert (rootfs_dir / "usr/local/bin/tldw-agent-guest-wrapper").is_file()
     assert (rootfs_dir / "etc/systemd/system/tldw-agent-guest.service").is_file()
     assert (rootfs_dir / "etc/systemd/system/workspace.mount").is_file()
     assert (rootfs_dir / "workspace").is_dir()
@@ -55,6 +56,8 @@ def test_bundle_builder_emits_manifest_and_expected_paths(tmp_path: Path) -> Non
     guest_service = (rootfs_dir / "etc/systemd/system/tldw-agent-guest.service").read_text(encoding="utf-8")
     assert "Requires=workspace.mount" in guest_service
     assert "After=workspace.mount" in guest_service
+    assert "PassEnvironment=TLDW_AGENT_GUEST_VM_ID" in guest_service
+    assert "ExecStart=/usr/local/bin/tldw-agent-guest-wrapper" in guest_service
 
     workspace_mount = (rootfs_dir / "etc/systemd/system/workspace.mount").read_text(encoding="utf-8")
     assert "What=workspace" in workspace_mount

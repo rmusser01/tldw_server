@@ -90,6 +90,15 @@ private struct GuestExecResponse: Decodable {
         case stdout
         case stderr
     }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        protocolVersion = try container.decode(String.self, forKey: .protocolVersion)
+        requestID = try container.decode(String.self, forKey: .requestID)
+        exitCode = try container.decode(Int.self, forKey: .exitCode)
+        stdout = try container.decodeIfPresent(String.self, forKey: .stdout) ?? ""
+        stderr = try container.decodeIfPresent(String.self, forKey: .stderr) ?? ""
+    }
 }
 
 private struct GuestErrorResponse: Decodable {

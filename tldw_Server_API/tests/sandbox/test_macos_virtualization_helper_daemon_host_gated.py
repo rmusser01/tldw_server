@@ -150,7 +150,8 @@ def test_macos_helper_daemon_canonical_bundle_boot_smoke(monkeypatch, tmp_path: 
     created_vm_id: str | None = None
     cleanup_error: Exception | None = None
     try:
-        client = MacOSVirtualizationHelperClient(socket_path=str(socket_path), timeout_sec=0.5)
+        boot_timeout_sec = float(os.getenv("TLDW_SANDBOX_VZ_LINUX_BUNDLE_BOOT_TIMEOUT_SEC") or "60")
+        client = MacOSVirtualizationHelperClient(socket_path=str(socket_path), timeout_sec=max(5.0, boot_timeout_sec + 5.0))
         deadline = time.time() + 5.0
         while time.time() < deadline:
             if process.poll() is not None:
@@ -185,7 +186,7 @@ def test_macos_helper_daemon_canonical_bundle_boot_smoke(monkeypatch, tmp_path: 
                     "vm_name": "bundle-smoke-vm",
                     "template": str(bundle_path),
                     "workspace_path": str(tmp_path),
-                    "timeout_sec": 5,
+                    "timeout_sec": boot_timeout_sec,
                 }
             )
         except MacOSVirtualizationHelperFailure as exc:
@@ -204,7 +205,7 @@ def test_macos_helper_daemon_canonical_bundle_boot_smoke(monkeypatch, tmp_path: 
     finally:
         if created_vm_id:
             try:
-                client = MacOSVirtualizationHelperClient(socket_path=str(socket_path), timeout_sec=0.5)
+                client = MacOSVirtualizationHelperClient(socket_path=str(socket_path), timeout_sec=5.0)
                 client.terminate_vm(created_vm_id)
             except Exception as exc:  # pragma: no cover - cleanup warning path only
                 cleanup_error = exc

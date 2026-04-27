@@ -6,7 +6,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"net"
 	"os"
 	"syscall"
 	"unsafe"
@@ -20,20 +19,6 @@ type rawSockaddrVM struct {
 	Port      uint32
 	CID       uint32
 	Zero      [4]byte
-}
-
-type fileBackedConn struct {
-	net.Conn
-	file *os.File
-}
-
-func (c *fileBackedConn) Close() error {
-	connErr := c.Conn.Close()
-	fileErr := c.file.Close()
-	if connErr != nil {
-		return connErr
-	}
-	return fileErr
 }
 
 func dialVSockConnection(ctx context.Context, port uint32) (io.ReadWriteCloser, error) {
@@ -63,15 +48,5 @@ func dialVSockConnection(ctx context.Context, port uint32) (io.ReadWriteCloser, 
 		return nil, os.NewSyscallError("connect", errno)
 	}
 
-	file := os.NewFile(uintptr(fd), fmt.Sprintf("vsock:%d", port))
-	conn, err := net.FileConn(file)
-	if err != nil {
-		_ = file.Close()
-		return nil, fmt.Errorf("wrap vsock connection: %w", err)
-	}
-
-	return &fileBackedConn{
-		Conn: conn,
-		file: file,
-	}, nil
+	return os.NewFile(uintptr(fd), fmt.Sprintf("vsock:%d", port)), nil
 }

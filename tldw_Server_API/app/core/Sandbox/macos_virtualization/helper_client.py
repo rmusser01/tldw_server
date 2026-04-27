@@ -92,7 +92,7 @@ class MacOSVirtualizationHelperClient:
                 state="created",
                 details={"runtime": runtime or None, "transport": "vsock"},
             )
-        payload = self._request("create_vm", request)
+        payload = self._request("create_vm", request, timeout_sec=self._operation_timeout_sec(request))
         return HelperVMReply(
             vm_id=str(payload.get("vm_id") or "").strip(),
             state=str(payload.get("state") or "").strip(),
@@ -140,7 +140,11 @@ class MacOSVirtualizationHelperClient:
                 stdout=stdout,
                 details={"vm_id": str(vm_id or "").strip() or None, "transport": "vsock"},
             )
-        payload = self._request("exec_guest", {"vm_id": vm_id, **dict(request)})
+        payload = self._request(
+            "exec_guest",
+            {"vm_id": vm_id, **dict(request)},
+            timeout_sec=self._operation_timeout_sec(request),
+        )
         stdout = payload.get("stdout", "")
         stderr = payload.get("stderr", "")
         return HelperExecReply(
@@ -186,7 +190,7 @@ class MacOSVirtualizationHelperClient:
             raise
         return bool(payload.get("terminated"))
 
-    def _request(self, operation: str, request: dict[str, Any]) -> dict[str, Any]:
+    def _request(self, operation: str, request: dict[str, Any], *, timeout_sec: float | None = None) -> dict[str, Any]:
         socket_path = self._socket_path
         if not socket_path:
             raise MacOSVirtualizationHelperUnavailable("macos_virtualization_helper_unavailable")
@@ -199,7 +203,7 @@ class MacOSVirtualizationHelperClient:
 
         try:
             with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
-                client.settimeout(self._timeout_sec)
+                client.settimeout(float(timeout_sec if timeout_sec is not None else self._timeout_sec))
                 client.connect(socket_path)
                 client.sendall(json.dumps(payload).encode("utf-8") + b"\n")
                 response = self._read_response(client)
@@ -220,6 +224,15 @@ class MacOSVirtualizationHelperClient:
                 message=str(response.get("message") or "").strip(),
             )
         return response
+
+    def _operation_timeout_sec(self, request: dict[str, Any]) -> float:
+        try:
+            requested = float(request.get("timeout_sec") or 0)
+        except (TypeError, ValueError):
+            requested = 0.0
+        if requested <= 0:
+            return self._timeout_sec
+        return max(self._timeout_sec, requested + 5.0)
 
     def _fake_template_reply(self, request: dict[str, Any]) -> dict[str, Any]:
         runtime = str(request.get("runtime") or "vz_linux").strip().lower() or "vz_linux"

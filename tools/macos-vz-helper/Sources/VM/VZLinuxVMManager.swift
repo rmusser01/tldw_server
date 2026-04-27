@@ -1,7 +1,7 @@
 import Foundation
 
 protocol VZBootDriving {
-    func boot(vmID: String, templatePath: String, workspacePath: String) throws
+    func boot(vmID: String, templatePath: String, workspacePath: String, startupTimeoutSeconds: TimeInterval) throws
     func stop(vmID: String) throws
 }
 
@@ -10,7 +10,7 @@ enum VZLinuxVMManagerError: Error {
 }
 
 final class PlaceholderVZBootDriver: VZBootDriving {
-    func boot(vmID: String, templatePath: String, workspacePath: String) throws {
+    func boot(vmID: String, templatePath: String, workspacePath: String, startupTimeoutSeconds: TimeInterval) throws {
         throw VZLinuxVMManagerError.bootNotImplemented
     }
 
@@ -42,11 +42,17 @@ final class VZLinuxVMManager {
     ) throws -> VMRecord {
         registry.upsert(vmID: vmID, state: "booting", healthy: false)
         do {
-            try bootDriver.boot(vmID: vmID, templatePath: templatePath, workspacePath: workspacePath)
+            try bootDriver.boot(
+                vmID: vmID,
+                templatePath: templatePath,
+                workspacePath: workspacePath,
+                startupTimeoutSeconds: readinessTimeoutSeconds
+            )
             try guestBridge.waitUntilReady(vmID: vmID, timeoutSeconds: readinessTimeoutSeconds)
             registry.upsert(vmID: vmID, state: "running", healthy: true)
             return VMRecord(vmID: vmID, state: "running", healthy: true)
         } catch {
+            try? bootDriver.stop(vmID: vmID)
             registry.remove(vmID: vmID)
             throw error
         }

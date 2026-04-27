@@ -3,13 +3,15 @@ import Foundation
 
 final class RecordingBootDriver: VZBootDriving {
     private let onBoot: (String) -> Void
+    private(set) var lastReadinessTimeoutSeconds: TimeInterval?
     private(set) var stoppedVMIDs: [String] = []
 
     init(onBoot: @escaping (String) -> Void = { _ in }) {
         self.onBoot = onBoot
     }
 
-    func boot(vmID: String, templatePath: String, workspacePath: String) throws {
+    func boot(vmID: String, templatePath: String, workspacePath: String, startupTimeoutSeconds: TimeInterval) throws {
+        lastReadinessTimeoutSeconds = startupTimeoutSeconds
         onBoot(vmID)
     }
 
@@ -29,5 +31,27 @@ final class ReadyGuestBridge: GuestBridging {
         timeoutSeconds: TimeInterval
     ) throws -> GuestExecResult {
         GuestExecResult(exitCode: 0, stdout: "", stderr: "")
+    }
+}
+
+final class FailingGuestBridge: GuestBridging {
+    private let error: Error
+
+    init(error: Error) {
+        self.error = error
+    }
+
+    func waitUntilReady(vmID: String, timeoutSeconds: TimeInterval) throws {
+        throw error
+    }
+
+    func exec(
+        vmID: String,
+        argv: [String],
+        cwd: String,
+        env: [String : String],
+        timeoutSeconds: TimeInterval
+    ) throws -> GuestExecResult {
+        throw error
     }
 }

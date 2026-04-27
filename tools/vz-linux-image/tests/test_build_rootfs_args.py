@@ -51,6 +51,18 @@ def test_install_agent_stages_vsock_modules_and_serial_console(tmp_path: Path) -
     contents = vsock_conf.read_text(encoding="utf-8")
     assert "vsock" in contents
     assert "vmw_vsock_virtio_transport" in contents
+    assert "virtiofs" in contents
+    assert "virtio_console" in contents
+
+    initramfs_modules = rootfs_dir / "etc/initramfs-tools/modules"
+    assert initramfs_modules.is_file()
+    initramfs_contents = initramfs_modules.read_text(encoding="utf-8")
+    assert "virtio_blk" in initramfs_contents
+    assert "virtio_console" in initramfs_contents
+
+    wrapper = rootfs_dir / "usr/local/bin/tldw-agent-guest-wrapper"
+    assert wrapper.is_file()
+    assert os.access(wrapper, os.X_OK)
 
     serial_getty = rootfs_dir / "etc/systemd/system/getty.target.wants/serial-getty@ttyS0.service"
     assert serial_getty.is_symlink()

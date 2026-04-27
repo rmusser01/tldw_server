@@ -24,7 +24,8 @@ import Virtualization
     try driver.boot(
         vmID: "vm-transport",
         templatePath: bundleDirectory.path(),
-        workspacePath: workspace.path()
+        workspacePath: workspace.path(),
+        startupTimeoutSeconds: 5
     )
 
     #expect(machineProvider.listenerInstalled == true)
@@ -52,13 +53,16 @@ import Virtualization
     try driver.boot(
         vmID: "vm-config",
         templatePath: bundleDirectory.path(),
-        workspacePath: workspace.path()
+        workspacePath: workspace.path(),
+        startupTimeoutSeconds: 5
     )
 
     let configuration = try #require(machineProvider.recordedConfiguration)
     let bootLoader = try #require(configuration.bootLoader as? VZLinuxBootLoader)
     let commandLine = bootLoader.commandLine
 
+    #expect(commandLine.contains("rootfstype=ext4"))
+    #expect(commandLine.contains("rootwait"))
     #expect(commandLine.contains("TLDW_AGENT_GUEST_VM_ID=vm-config"))
     #expect(commandLine.contains("TLDW_AGENT_GUEST_CONNECTION_TOKEN=token-fixed"))
     #expect(commandLine.contains("TLDW_AGENT_GUEST_HOST_VSOCK_PORT=1024"))
@@ -97,7 +101,7 @@ private final class TransportRecordingVirtualMachine: VirtualMachineControlling 
         self.onStart = onStart
     }
 
-    func start() throws {
+    func start(timeoutSeconds: TimeInterval) throws {
         onStart()
     }
 

@@ -68,6 +68,31 @@ final class RecordingGuestTransport: GuestTransporting {
     #expect(argv == ["/bin/echo", "ok"])
 }
 
+@Test func vsockBridgeTreatsMissingExecStreamsAsEmptyStrings() throws {
+    let transport = RecordingGuestTransport()
+    transport.execResponseFactory = { payload in
+        let requestID = payload["request_id"] as? String ?? ""
+        return Data(
+            """
+            {"protocol_version":"1","request_id":"\(requestID)","exit_code":0}
+            """.utf8
+        )
+    }
+    let bridge = VSockBridge(transport: transport)
+
+    let result = try bridge.exec(
+        vmID: "vm-exec",
+        argv: ["/usr/bin/true"],
+        cwd: "/workspace",
+        env: [:],
+        timeoutSeconds: 15
+    )
+
+    #expect(result.exitCode == 0)
+    #expect(result.stdout == "")
+    #expect(result.stderr == "")
+}
+
 @Test func vsockBridgeMapsGuestErrorResponsesToStructuredFailure() throws {
     let transport = RecordingGuestTransport()
     transport.execResponseFactory = { payload in

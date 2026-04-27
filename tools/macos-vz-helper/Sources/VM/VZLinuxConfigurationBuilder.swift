@@ -23,10 +23,16 @@ protocol VZLinuxConfigurationBuilding {
 struct VZLinuxConfigurationBuilder: VZLinuxConfigurationBuilding {
     private let cpuCount: Int
     private let memorySize: UInt64
+    private let serialLogDirectory: String?
 
-    init(cpuCount: Int = 2, memorySize: UInt64 = 1_073_741_824) {
+    init(
+        cpuCount: Int = 2,
+        memorySize: UInt64 = 1_073_741_824,
+        serialLogDirectory: String? = ProcessInfo.processInfo.environment["TLDW_SANDBOX_VZ_LINUX_SERIAL_LOG_DIR"]
+    ) {
         self.cpuCount = cpuCount
         self.memorySize = memorySize
+        self.serialLogDirectory = serialLogDirectory?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
     }
 
     func build(
@@ -40,6 +46,7 @@ struct VZLinuxConfigurationBuilder: VZLinuxConfigurationBuilding {
         }
 
         let configuration = VZVirtualMachineConfiguration()
+        configuration.platform = VZGenericPlatformConfiguration()
         configuration.bootLoader = try bootLoader(for: spec, guestTransport: guestTransport)
         configuration.cpuCount = cpuCount
         configuration.memorySize = memorySize
@@ -47,6 +54,9 @@ struct VZLinuxConfigurationBuilder: VZLinuxConfigurationBuilding {
         configuration.directorySharingDevices = [directorySharingDevice(tag: spec.workspaceMountTag, workspacePath: workspacePath)]
         configuration.socketDevices = [VZVirtioSocketDeviceConfiguration()]
         configuration.entropyDevices = [VZVirtioEntropyDeviceConfiguration()]
+        if let serialPort = try serialPort(guestTransport: guestTransport) {
+            configuration.serialPorts = [serialPort]
+        }
         return configuration
     }
 
@@ -71,7 +81,7 @@ struct VZLinuxConfigurationBuilder: VZLinuxConfigurationBuilding {
 
     private func linuxCommandLine(
         guestTransport: GuestTransportMetadata?,
-        base: String = "console=hvc0 root=/dev/vda rw"
+        base: String = "console=hvc0 root=/dev/vda rootfstype=ext4 rootwait rw"
     ) -> String {
         guard let guestTransport else {
             return base
@@ -117,5 +127,38 @@ struct VZLinuxConfigurationBuilder: VZLinuxConfigurationBuilding {
         let device = VZVirtioFileSystemDeviceConfiguration(tag: tag)
         device.share = share
         return device
+    }
+
+    private func serialPort(guestTransport: GuestTransportMetadata?) throws -> VZVirtioConsoleDeviceSerialPortConfiguration? {
+        guard let serialLogDirectory else {
+            return nil
+        }
+
+        let vmID = guestTransport?.vmID ?? "vm"
+        let directoryURL = URL(fileURLWithPath: serialLogDirectory, isDirectory: true)
+        try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
+        let logURL = directoryURL.appendingPathComponent("\(sanitizedFileComponent(vmID)).serial.log")
+        if !FileManager.default.fileExists(atPath: logURL.path()) {
+            FileManager.default.createFile(atPath: logURL.path(), contents: nil)
+        }
+
+        let serialPort = VZVirtioConsoleDeviceSerialPortConfiguration()
+        serialPort.attachment = try VZFileSerialPortAttachment(url: logURL, append: false)
+        return serialPort
+    }
+
+    private func sanitizedFileComponent(_ value: String) -> String {
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "._-"))
+        let scalars = value.unicodeScalars.map { scalar in
+            allowed.contains(scalar) ? Character(scalar) : "_"
+        }
+        let sanitized = String(scalars)
+        return sanitized.isEmpty ? "vm" : sanitized
+    }
+}
+
+private extension String {
+    var nilIfEmpty: String? {
+        isEmpty ? nil : self
     }
 }

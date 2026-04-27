@@ -3,7 +3,7 @@ import Foundation
 import Virtualization
 
 protocol VirtualMachineControlling {
-    func start() throws
+    func start(timeoutSeconds: TimeInterval) throws
     func stop() throws
     func installSocketListener(_ listener: VZVirtioSocketListener, port: UInt32) throws
 }
@@ -14,48 +14,76 @@ protocol VirtualMachineProviding {
 
 enum VirtualizationLinuxBootDriverError: Error {
     case socketDeviceMissing
+    case startTimedOut(String)
 }
 
 private final class VZVirtualMachineController: VirtualMachineControlling {
     private let machine: VZVirtualMachine
+    private let queue: DispatchQueue
+    private let queueKey = DispatchSpecificKey<Bool>()
 
-    init(machine: VZVirtualMachine) {
+    init(machine: VZVirtualMachine, queue: DispatchQueue) {
         self.machine = machine
+        self.queue = queue
+        self.queue.setSpecific(key: queueKey, value: true)
     }
 
-    func start() throws {
+    func start(timeoutSeconds: TimeInterval) throws {
         let semaphore = DispatchSemaphore(value: 0)
-        var startError: Error?
-        machine.start { result in
-            if case let .failure(error) = result {
-                startError = error
+        let resultLock = NSLock()
+        var startResult: Result<Void, Error>?
+        queue.async {
+            self.machine.start { result in
+                resultLock.lock()
+                startResult = result
+                resultLock.unlock()
+                semaphore.signal()
             }
-            semaphore.signal()
         }
-        semaphore.wait()
-        if let startError {
-            throw startError
+        let timeout = max(timeoutSeconds, 0)
+        let timedOut = semaphore.wait(timeout: .now() + timeout) == .timedOut
+        if timedOut {
+            throw VirtualizationLinuxBootDriverError.startTimedOut("vm_start_timed_out")
+        }
+        resultLock.lock()
+        let result = startResult
+        resultLock.unlock()
+        if case let .failure(error) = result {
+            throw error
         }
     }
 
     func stop() throws {
-        if machine.canRequestStop {
-            try machine.requestStop()
+        try syncOnQueue {
+            if machine.canRequestStop {
+                try machine.requestStop()
+            }
         }
     }
 
     func installSocketListener(_ listener: VZVirtioSocketListener, port: UInt32) throws {
-        guard let socketDevice = machine.socketDevices.first(where: { $0 is VZVirtioSocketDevice }) as? VZVirtioSocketDevice else {
-            throw VirtualizationLinuxBootDriverError.socketDeviceMissing
+        try syncOnQueue {
+            guard let socketDevice = machine.socketDevices.first(where: { $0 is VZVirtioSocketDevice }) as? VZVirtioSocketDevice else {
+                throw VirtualizationLinuxBootDriverError.socketDeviceMissing
+            }
+            socketDevice.setSocketListener(listener, forPort: port)
         }
-        socketDevice.setSocketListener(listener, forPort: port)
+    }
+
+    private func syncOnQueue<T>(_ work: () throws -> T) throws -> T {
+        if DispatchQueue.getSpecific(key: queueKey) == true {
+            return try work()
+        }
+        return try queue.sync(execute: work)
     }
 }
 
 struct VZVirtualMachineProvider: VirtualMachineProviding {
     func makeVirtualMachine(configuration: VZVirtualMachineConfiguration) throws -> VirtualMachineControlling {
         try configuration.validate()
-        return VZVirtualMachineController(machine: VZVirtualMachine(configuration: configuration))
+        let queue = DispatchQueue(label: "tldw.sandbox.vz.vm.\(UUID().uuidString)")
+        let machine = VZVirtualMachine(configuration: configuration, queue: queue)
+        return VZVirtualMachineController(machine: machine, queue: queue)
     }
 }
 
@@ -82,7 +110,7 @@ final class VirtualizationLinuxBootDriver: VZBootDriving {
         self.connectionTokenFactory = connectionTokenFactory
     }
 
-    func boot(vmID: String, templatePath: String, workspacePath: String) throws {
+    func boot(vmID: String, templatePath: String, workspacePath: String, startupTimeoutSeconds: TimeInterval) throws {
         let spec = try templateValidator.resolve(runtime: "vz_linux", templatePath: templatePath)
         let guestTransport = GuestTransportMetadata(
             vmID: vmID,
@@ -104,9 +132,10 @@ final class VirtualizationLinuxBootDriver: VZBootDriving {
         let machine = try machineProvider.makeVirtualMachine(configuration: configuration)
         do {
             try machine.installSocketListener(listener.listener, port: spec.vsockPort)
-            try machine.start()
+            try machine.start(timeoutSeconds: startupTimeoutSeconds)
             machines[vmID] = machine
         } catch {
+            try? machine.stop()
             sessionManager.removeSession(vmID: vmID)
             throw error
         }

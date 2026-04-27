@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import Virtualization
 
@@ -36,14 +37,12 @@ final class VSockListener: NSObject, VZVirtioSocketListenerDelegate {
 
 final class FileHandleVSockChannel: VSockChanneling {
     private let connection: VZVirtioSocketConnection
-    private let fileHandle: FileHandle
     private let queue: DispatchQueue
     private var readSource: DispatchSourceRead?
     private var buffer = Data()
 
     init(connection: VZVirtioSocketConnection) {
         self.connection = connection
-        self.fileHandle = FileHandle(fileDescriptor: connection.fileDescriptor, closeOnDealloc: false)
         self.queue = DispatchQueue(label: "vz.helper.vsock.\(UUID().uuidString)")
     }
 
@@ -51,24 +50,32 @@ final class FileHandleVSockChannel: VSockChanneling {
         let source = DispatchSource.makeReadSource(fileDescriptor: connection.fileDescriptor, queue: queue)
         source.setEventHandler { [weak self] in
             guard let self else { return }
-            do {
-                let chunk = try self.fileHandle.read(upToCount: 4096) ?? Data()
-                if chunk.isEmpty {
-                    handler(.failure(VSockSessionError.closed))
+            var chunk = [UInt8](repeating: 0, count: 4096)
+            let readCount = Darwin.read(self.connection.fileDescriptor, &chunk, chunk.count)
+            if readCount < 0 {
+                if errno == EINTR || errno == EAGAIN {
                     return
                 }
-                self.buffer.append(chunk)
-                while let newlineRange = self.buffer.firstRange(of: Data([0x0A])) {
-                    let line = self.buffer.subdata(in: 0..<newlineRange.lowerBound)
-                    self.buffer.removeSubrange(0...newlineRange.lowerBound)
-                    handler(.success(line))
+                handler(.failure(VSockSessionError.invalidMessage("read_error_\(errno)")))
+                return
+            }
+            if readCount == 0 {
+                handler(.failure(VSockSessionError.closed))
+                return
+            }
+
+            chunk.withUnsafeBufferPointer { pointer in
+                if let baseAddress = pointer.baseAddress {
+                    self.buffer.append(baseAddress, count: readCount)
                 }
-            } catch {
-                handler(.failure(error))
+            }
+            while let newlineRange = self.buffer.firstRange(of: Data([0x0A])) {
+                let line = self.buffer.subdata(in: 0..<newlineRange.lowerBound)
+                self.buffer.removeSubrange(0...newlineRange.lowerBound)
+                handler(.success(line))
             }
         }
-        source.setCancelHandler { [fileHandle, connection] in
-            try? fileHandle.close()
+        source.setCancelHandler { [connection] in
             connection.close()
         }
         readSource = source
@@ -78,7 +85,29 @@ final class FileHandleVSockChannel: VSockChanneling {
     func writeLine(_ data: Data) throws {
         var line = data
         line.append(0x0A)
-        try fileHandle.write(contentsOf: line)
+        try line.withUnsafeBytes { rawBuffer in
+            guard let baseAddress = rawBuffer.baseAddress else {
+                return
+            }
+            var bytesWritten = 0
+            while bytesWritten < line.count {
+                let result = Darwin.write(
+                    connection.fileDescriptor,
+                    baseAddress.advanced(by: bytesWritten),
+                    line.count - bytesWritten
+                )
+                if result < 0 {
+                    if errno == EINTR || errno == EAGAIN {
+                        continue
+                    }
+                    throw VSockSessionError.invalidMessage("write_error_\(errno)")
+                }
+                if result == 0 {
+                    throw VSockSessionError.closed
+                }
+                bytesWritten += result
+            }
+        }
     }
 
     func close() {

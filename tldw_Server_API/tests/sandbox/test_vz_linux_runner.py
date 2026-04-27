@@ -60,7 +60,7 @@ def test_vz_linux_preflight_requires_execution_readiness(monkeypatch) -> None:
     assert result.reasons == []
     assert result.execution_mode == "real"
     assert result.enforcement_ready == {"deny_all": True, "allowlist": False}
-    assert calls == [{"network_policy": "deny_all"}]
+    assert calls == [{"runtime": "vz_linux", "network_policy": "deny_all"}]
 
 
 def test_vz_linux_start_run_executes_real_ephemeral_vm_command(monkeypatch, tmp_path) -> None:
@@ -72,6 +72,7 @@ def test_vz_linux_start_run_executes_real_ephemeral_vm_command(monkeypatch, tmp_
             calls.append(("validate_template", dict(request)))
             return {
                 "template_id": "vz_linux:validated-ubuntu",
+                "source": "ubuntu-24.04",
                 "ready": True,
                 "reasons": [],
             }
@@ -103,6 +104,7 @@ def test_vz_linux_start_run_executes_real_ephemeral_vm_command(monkeypatch, tmp_
             command=["/bin/echo", "ok"],
             network_policy="deny_all",
             env={"DEMO": "1"},
+            startup_timeout_sec=23,
         ),
         session_workspace=str(tmp_path),
     )
@@ -113,7 +115,8 @@ def test_vz_linux_start_run_executes_real_ephemeral_vm_command(monkeypatch, tmp_
     assert calls[0][1]["template"] == "ubuntu-24.04"
     assert calls[1][1]["workspace_path"] == str(tmp_path)
     assert calls[1][1]["workspace_mount"] == "virtiofs"
-    assert calls[1][1]["template"] == "vz_linux:validated-ubuntu"
+    assert calls[1][1]["template"] == "ubuntu-24.04"
+    assert calls[1][1]["timeout_sec"] == 23
     assert calls[2][1]["vm_id"] == "vm-ephemeral-1"
     assert calls[2][1]["argv"] == ["/bin/echo", "ok"]
     assert calls[2][1]["cwd"] == "/workspace"

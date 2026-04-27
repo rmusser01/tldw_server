@@ -46,6 +46,46 @@ import Testing
     #expect(status?.healthy == true)
 }
 
+@Test func createVMPassesReadinessTimeoutToBootDriver() throws {
+    let bootDriver = RecordingBootDriver()
+    let manager = VZLinuxVMManager(
+        registry: VMRegistry(),
+        bootDriver: bootDriver,
+        guestBridge: ReadyGuestBridge()
+    )
+
+    _ = try manager.createVM(
+        vmID: "vm-timeout",
+        templatePath: "/tmp/template.img",
+        workspacePath: "/tmp/workspace",
+        readinessTimeoutSeconds: 12
+    )
+
+    #expect(bootDriver.lastReadinessTimeoutSeconds == 12)
+}
+
+@Test func createVMStopsBootedMachineWhenReadinessFails() throws {
+    let registry = VMRegistry()
+    let bootDriver = RecordingBootDriver()
+    let manager = VZLinuxVMManager(
+        registry: registry,
+        bootDriver: bootDriver,
+        guestBridge: FailingGuestBridge(error: VSockSessionError.requestTimedOut("vm-readiness-failed"))
+    )
+
+    #expect(throws: VSockSessionError.self) {
+        _ = try manager.createVM(
+            vmID: "vm-readiness-failed",
+            templatePath: "/tmp/template.img",
+            workspacePath: "/tmp/workspace",
+            readinessTimeoutSeconds: 5
+        )
+    }
+
+    #expect(registry.status(vmID: "vm-readiness-failed") == nil)
+    #expect(bootDriver.stoppedVMIDs == ["vm-readiness-failed"])
+}
+
 @Test func terminateVMRemovesRegistryState() throws {
     let registry = VMRegistry()
     let bootDriver = RecordingBootDriver()
