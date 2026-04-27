@@ -1070,8 +1070,8 @@ async def export_subtitles(
     )
     try:
         collections_db.update_audiobook_output_usage(size_bytes)
-    except _AUDIOBOOKS_DB_OPERATION_EXCEPTIONS as exc:
-        logger.warning("audiobook_quota: failed to increment subtitle usage: {}", exc)
+    except _AUDIOBOOKS_DB_OPERATION_EXCEPTIONS:
+        logger.warning("audiobook_quota: failed to increment subtitle usage")
 
     project_id = metadata.get("project_id")
     if project_id:
@@ -1086,8 +1086,8 @@ async def export_subtitles(
             )
         except KeyError:
             pass
-        except _AUDIOBOOKS_DB_OPERATION_EXCEPTIONS as exc:
-            logger.warning("audiobook subtitles: failed to link artifact: {}", exc)
+        except _AUDIOBOOKS_DB_OPERATION_EXCEPTIONS:
+            logger.warning("audiobook subtitles: failed to link artifact")
 
     response = PlainTextResponse(content)
     response.headers["X-Subtitle-Output-Id"] = str(row.id)
