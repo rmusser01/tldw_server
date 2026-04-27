@@ -35,6 +35,17 @@ class _UsageLogStub:
         return
 
 
+class _ProfileCountsDB:
+    def topic_counts(self, _user_id: str) -> int:
+        return 0
+
+    def memory_counts(self, _user_id: str) -> int:
+        return 0
+
+    def session_count(self, _user_id: str) -> int:
+        return 0
+
+
 @pytest.fixture()
 def client_with_personalization_db(tmp_path):
     db_path = tmp_path / "personalization.db"
@@ -103,6 +114,26 @@ async def test_personalization_purge_failure_log_is_sanitized(monkeypatch):
     logged = "\n".join(logger.warnings)
     assert "personalization backend exploded" not in logged
     assert "/private/personalization.db" not in logged
+
+
+def test_profile_from_dict_invalid_updated_at_log_is_sanitized(monkeypatch):
+    logger = _LoggerStub()
+    monkeypatch.setattr(personalization_ep, "logger", logger)
+
+    profile = personalization_ep._profile_from_dict(
+        {
+            "enabled": 1,
+            "updated_at": {"raw": "/private/personalization-profile.json"},
+        },
+        _ProfileCountsDB(),
+        "private-user",
+    )
+
+    assert profile.enabled is True
+    assert logger.warnings == ["Profile updated_at missing or unparseable"]
+    logged = "\n".join(logger.warnings)
+    assert "private-user" not in logged
+    assert "/private/personalization-profile.json" not in logged
 
 
 def test_profile_roundtrip(client_with_personalization_db: TestClient):

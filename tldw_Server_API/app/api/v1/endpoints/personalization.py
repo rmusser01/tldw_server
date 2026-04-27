@@ -41,7 +41,7 @@ def _profile_from_dict(prof_dict: dict, db: PersonalizationDB, user_id: str) -> 
     elif isinstance(raw_updated, datetime):
         updated_at = raw_updated
     else:
-        logger.warning("Profile for user {} has missing/unparseable updated_at: {!r}", user_id, raw_updated)
+        logger.warning("Profile updated_at missing or unparseable")
         updated_at = datetime.now(timezone.utc)
     return PersonalizationProfile(
         enabled=bool(prof_dict.get("enabled")),
