@@ -1,3 +1,9 @@
+"""OmniVoice TTS adapter backed by the local authenticated sidecar.
+
+The adapter validates public TTS requests, materializes optional clone-mode
+reference audio, delegates synthesis to the sidecar supervisor, and normalizes
+the returned audio format before handing responses back to the TTS service.
+"""
 from __future__ import annotations
 
 import asyncio
@@ -60,7 +66,7 @@ class OmniVoiceAdapter(TTSAdapter):
         }
     )
 
-    def __init__(self, config: dict[str, Any] | None = None):
+    def __init__(self, config: dict[str, Any] | None = None) -> None:
         super().__init__(config)
         cfg = config or {}
         extras = cfg.get("extra_params", {}) or {}
