@@ -207,7 +207,10 @@ class PerformanceMonitor:
                 memory_mb = memory_info.rss / (1024 * 1024)
                 cpu_percent = self._process.cpu_percent()
             except Exception as e:
-                logger.debug(f"Failed to get resource usage: {e}")
+                logger.debug(
+                    "Failed to get resource usage: {}",
+                    type(e).__name__,
+                )
 
         # Create metrics
         metrics = PerformanceMetrics(
@@ -429,7 +432,8 @@ class QueryProfiler:
         """
         if self.start_time is None:
             self.start()
-        assert self.start_time is not None
+        if self.start_time is None:
+            self.start_time = time.time()
 
         event = {
             "name": name,
