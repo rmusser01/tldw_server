@@ -573,8 +573,8 @@ async def create_transcription(
                     await _audio_shim_attr("heartbeat_jobs")(user_id)
                 except asyncio.CancelledError:
                     raise
-                except _AUDIO_TRANSCRIPTIONS_NONCRITICAL_EXCEPTIONS as hb_exc:
-                    logger.debug(f"audio.transcriptions heartbeat_jobs failed: {hb_exc}")
+                except _AUDIO_TRANSCRIPTIONS_NONCRITICAL_EXCEPTIONS:
+                    logger.debug("audio.transcriptions job heartbeat failed; continuing")
 
         try:
             return asyncio.create_task(_hb_loop())
