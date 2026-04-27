@@ -273,7 +273,7 @@ async def create_output(
     try:
         out_dir.mkdir(parents=True, exist_ok=True)
     except _OUTPUTS_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"failed to create outputs dir: {e}")
+        logger.error("outputs directory creation failed")
         raise HTTPException(status_code=500, detail="storage_unavailable") from e
 
     ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")

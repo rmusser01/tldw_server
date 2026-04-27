@@ -433,6 +433,48 @@ async def test_outputs_create_render_failure_log_is_sanitized(monkeypatch):
     assert "/private/output-template.md" not in logged
 
 
+@pytest.mark.asyncio
+async def test_outputs_create_directory_failure_log_is_sanitized(monkeypatch):
+    class _Template:
+        id = 1
+        name = "Template"
+        body = "hello"
+        type = "newsletter_markdown"
+        format = "md"
+
+    class _CollectionsDB:
+        def get_output_template(self, _template_id: int):
+            return _Template()
+
+    class _OutputDir:
+        def mkdir(self, *args: Any, **kwargs: Any) -> None:
+            raise OSError("mkdir exploded at /private/generated-outputs")
+
+    logger = _LoggerStub()
+    monkeypatch.setattr(outputs_endpoint, "logger", logger)
+    monkeypatch.setattr(outputs_endpoint, "render_output_template", lambda *_args: "rendered")
+    monkeypatch.setattr(outputs_endpoint, "_outputs_dir_for_user", lambda _user_id: _OutputDir())
+
+    with pytest.raises(HTTPException) as exc_info:
+        await outputs_endpoint.create_output(
+            payload=outputs_endpoint.OutputCreateRequest(
+                template_id=1,
+                data={"items": []},
+                title="demo",
+            ),
+            current_user=User(id=123, username="tester", email=None, is_active=True),
+            cdb=_CollectionsDB(),
+            media_db=object(),
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "storage_unavailable"
+    assert logger.errors == ["outputs directory creation failed"]
+    logged = "\n".join(logger.errors)
+    assert "mkdir exploded" not in logged
+    assert "/private/generated-outputs" not in logged
+
+
 def test_outputs_preview_with_inline_data_and_generate(client_with_user, tmp_path):
 
     client = client_with_user
