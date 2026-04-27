@@ -950,7 +950,7 @@ async def create_transcription(
                     segments_for_timing = artifact.get("segments") or []
                     transcribed_text = artifact.get("text", "")
                 except _AUDIO_TRANSCRIPTIONS_NONCRITICAL_EXCEPTIONS as e:
-                    logger.error(f"Whisper transcription failed: {e}")
+                    logger.error("Whisper transcription failed")
                     raise HTTPException(
                         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                         detail=_dictation_error_detail(

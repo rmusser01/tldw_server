@@ -123,6 +123,19 @@ class _WhisperTranscriptionRegistry:
         return _WhisperTranscriptionAdapter()
 
 
+class _FailingWhisperTranscriptionAdapter:
+    def transcribe_batch(self, *_args, **_kwargs):
+        raise RuntimeError("whisper adapter leaked /private/audio.wav")
+
+
+class _FailingWhisperTranscriptionRegistry:
+    def resolve_provider_for_model(self, _model):
+        return "faster-whisper", "base", None
+
+    def get_adapter(self, _provider):
+        return _FailingWhisperTranscriptionAdapter()
+
+
 def _make_wav_bytes(duration_sec: float = 0.1, sr: int = 16000) -> bytes:
     buf = io.BytesIO()
     data = np.zeros(int(sr * duration_sec), dtype=np.float32)
@@ -635,6 +648,52 @@ def test_audio_transcriptions_sanitizes_whisper_preflight_failure_log(
         if msg.startswith("Whisper model preflight check failed")
     ]
     assert preflight_logs == ["Whisper model preflight check failed; proceeding without it"]
+
+
+@pytest.mark.unit
+def test_audio_transcriptions_sanitizes_whisper_adapter_failure_log(
+    monkeypatch,
+    bypass_api_limits,
+):
+    app, _captured = _setup_stubbed_audio_app(monkeypatch)
+    import tldw_Server_API.app.api.v1.endpoints.audio.audio_transcriptions as audio_tx
+    import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Files as audio_files
+    import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_provider_adapter as stt_adapter
+
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(audio_tx, "logger", logger_stub)
+    monkeypatch.setattr(stt_adapter, "get_stt_provider_registry", lambda: _FailingWhisperTranscriptionRegistry())
+    monkeypatch.setattr(
+        audio_files,
+        "check_transcription_model_status",
+        lambda _model: {"available": True, "model": "base", "message": "cached"},
+    )
+
+    with bypass_api_limits(app), TestClient(app) as client:
+        wav_bytes = _make_wav_bytes()
+        headers = {"X-API-KEY": TEST_API_KEY}
+        files = {"file": ("sample.wav", io.BytesIO(wav_bytes), "audio/wav")}
+        data = {
+            "model": "base",
+            "response_format": "json",
+        }
+        resp = client.post(
+            "/api/v1/audio/transcriptions",
+            headers=headers,
+            files=files,
+            data=data,
+        )
+        if resp.status_code == 404:
+            pytest.skip("audio/transcriptions endpoint not mounted in this build")
+        assert resp.status_code == 500
+        assert resp.json()["detail"]["message"] == "Whisper transcription failed"
+
+    whisper_logs = [
+        msg
+        for msg in logger_stub.errors
+        if msg.startswith("Whisper transcription failed")
+    ]
+    assert whisper_logs == ["Whisper transcription failed"]
 
 
 @pytest.mark.unit
