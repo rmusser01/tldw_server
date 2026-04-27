@@ -10,22 +10,14 @@ from tldw_Server_API.app.core.Persona.robustness_eval import (
 pytestmark = pytest.mark.unit
 
 
-def _check(condition: bool, message: str) -> None:
-    if not condition:
-        raise AssertionError(message)
-
-
 def test_smoke_suite_has_required_case_ids() -> None:
     suite = build_default_smoke_suite()
     case_ids = [case.case_id for case in suite]
-    _check("benign_basic" in case_ids, "missing benign_basic in smoke suite")
-    _check("persona_drift_boundary" in case_ids, "missing persona_drift_boundary in smoke suite")
-    _check(
-        "prompt_injection_policy_override" in case_ids,
-        "missing prompt_injection_policy_override in smoke suite",
-    )
-    _check("unsafe_tool_plan" in case_ids, "missing unsafe_tool_plan in smoke suite")
-    _check(PersonaRobustnessEval is not None, "expected evaluator class import")
+    assert "benign_basic" in case_ids, "missing benign_basic in smoke suite"
+    assert "persona_drift_boundary" in case_ids, "missing persona_drift_boundary in smoke suite"
+    assert "prompt_injection_policy_override" in case_ids, "missing prompt_injection_policy_override in smoke suite"
+    assert "unsafe_tool_plan" in case_ids, "missing unsafe_tool_plan in smoke suite"
+    assert PersonaRobustnessEval is not None, "expected evaluator class import"
 
 
 def test_run_suite_returns_report_with_summary_and_trace_artifacts() -> None:
@@ -40,23 +32,19 @@ def test_run_suite_returns_report_with_summary_and_trace_artifacts() -> None:
     payload = report.model_dump(mode="json")
     case_ids = [case["case_id"] for case in payload["cases"]]
 
-    _check(report.summary["total_cases"] == len(suite), "summary did not support dict-style access")
-    _check(payload["summary"]["total_cases"] == len(suite), "summary total cases mismatch")
-    _check(payload["summary"]["trace_artifact_count"] == len(suite), "trace artifact count mismatch")
-    _check(payload["summary"]["hard_prune_count"] > 0, "expected hard prune count > 0")
-    _check(payload["summary"]["skipped_scorer_count"] > 0, "expected skipped scorer count > 0")
-    _check(
-        payload["summary"]["selected_trajectory_count"] == len(suite),
-        "expected selected trajectory count to match cases",
+    assert report.summary["total_cases"] == len(suite), "summary did not support dict-style access"
+    assert payload["summary"]["total_cases"] == len(suite), "summary total cases mismatch"
+    assert payload["summary"]["trace_artifact_count"] == len(suite), "trace artifact count mismatch"
+    assert payload["summary"]["hard_prune_count"] > 0, "expected hard prune count > 0"
+    assert payload["summary"]["skipped_scorer_count"] > 0, "expected skipped scorer count > 0"
+    assert payload["summary"]["selected_trajectory_count"] == len(suite), (
+        "expected selected trajectory count to match cases"
     )
-    _check(len(payload["trace_artifacts"]) == len(suite), "trace artifacts length mismatch")
-    _check("benign_basic" in case_ids, "missing benign_basic report")
-    _check("persona_drift_boundary" in case_ids, "missing persona_drift_boundary report")
-    _check(
-        "prompt_injection_policy_override" in case_ids,
-        "missing prompt_injection_policy_override report",
-    )
-    _check("unsafe_tool_plan" in case_ids, "missing unsafe_tool_plan report")
+    assert len(payload["trace_artifacts"]) == len(suite), "trace artifacts length mismatch"
+    assert "benign_basic" in case_ids, "missing benign_basic report"
+    assert "persona_drift_boundary" in case_ids, "missing persona_drift_boundary report"
+    assert "prompt_injection_policy_override" in case_ids, "missing prompt_injection_policy_override report"
+    assert "unsafe_tool_plan" in case_ids, "missing unsafe_tool_plan report"
 
 
 def test_run_suite_does_not_call_persistence_callbacks_or_mutate_input_lists() -> None:
@@ -108,15 +96,15 @@ def test_run_suite_does_not_call_persistence_callbacks_or_mutate_input_lists() -
     evaluator = PersonaRobustnessEval()
     report = evaluator.run_suite(persona=persona, character=character, suite=suite)
 
-    _check(report.summary.total_cases == 1, "expected single-case report")
-    _check(calls["memory"] == 0, "memory persistence callback was called")
-    _check(calls["exemplar"] == 0, "exemplar persistence callback was called")
-    _check(calls["state"] == 0, "state persistence callback was called")
-    _check(calls["history"] == 0, "chat history persistence callback was called")
-    _check(memory_entries == [{"id": "m1", "content": "keep"}], "memory entries were mutated")
-    _check(state_docs == [{"id": "s1", "content": "state"}], "state docs were mutated")
-    _check(chat_history == [{"role": "user", "content": "hello"}], "chat history was mutated")
-    _check(exemplar_entries == [("style", "steady", 1.0)], "exemplar entries were mutated")
+    assert report.summary.total_cases == 1, "expected single-case report"
+    assert calls["memory"] == 0, "memory persistence callback was called"
+    assert calls["exemplar"] == 0, "exemplar persistence callback was called"
+    assert calls["state"] == 0, "state persistence callback was called"
+    assert calls["history"] == 0, "chat history persistence callback was called"
+    assert memory_entries == [{"id": "m1", "content": "keep"}], "memory entries were mutated"
+    assert state_docs == [{"id": "s1", "content": "state"}], "state docs were mutated"
+    assert chat_history == [{"role": "user", "content": "hello"}], "chat history was mutated"
+    assert exemplar_entries == [("style", "steady", 1.0)], "exemplar entries were mutated"
 
 
 def test_run_suite_redacts_selected_candidate_report_payload() -> None:
@@ -148,5 +136,35 @@ def test_run_suite_redacts_selected_candidate_report_payload() -> None:
     )
     serialized = repr(report.model_dump(mode="json"))
 
-    _check("sk-report" not in serialized, "selected candidate report leaked provider marker")
-    _check(raw_output not in serialized, "selected candidate report leaked raw output")
+    assert "sk-report" not in serialized, "selected candidate report leaked provider marker"
+    assert raw_output not in serialized, "selected candidate report leaked raw output"
+
+
+def test_run_suite_does_not_score_soft_pruned_duplicate_candidates() -> None:
+    suite = [
+        PersonaRobustnessCase(
+            case_id="duplicate_soft_prune",
+            prompt="choose one candidate",
+            candidates=[
+                {"action_type": "assistant", "text": "same answer"},
+                {"action_type": "assistant", "text": "same answer"},
+            ],
+        )
+    ]
+
+    report = PersonaRobustnessEval().run_suite(
+        persona={"id": "persona-duplicate"},
+        character=None,
+        suite=suite,
+    )
+    payload = report.model_dump(mode="json")
+    trace_nodes = payload["trace_artifacts"][0]["trace"]["nodes"]
+    duplicate_node = next(node for node in trace_nodes if node["node_id"] == "root.2")
+
+    assert payload["cases"][0]["soft_prune_count"] == 1
+    assert duplicate_node["prune_diagnostics"][0]["reason"] == "none"
+    assert any(
+        diagnostic["reason"] == "duplicate_low_diversity"
+        for diagnostic in duplicate_node["prune_diagnostics"]
+    )
+    assert duplicate_node["score_diagnostics"] == []

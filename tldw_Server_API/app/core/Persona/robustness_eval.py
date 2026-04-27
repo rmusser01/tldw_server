@@ -203,7 +203,7 @@ class PersonaRobustnessEval:
 
         for node in _iter_candidate_nodes(tree_result.nodes):
             candidate_payload = _candidate_to_mapping(node.candidate)
-            node_prunes, node_hard_pruned = _run_pruners(
+            node_prunes, node_hard_pruned, node_soft_pruned = _run_pruners(
                 candidate=candidate_payload,
                 existing_signatures=signature_cache,
             )
@@ -214,7 +214,7 @@ class PersonaRobustnessEval:
             soft_prune_count += sum(
                 1 for decision in node_prunes if decision.pruned and decision.severity == PruneSeverity.SOFT
             )
-            if node_hard_pruned:
+            if node_hard_pruned or node_soft_pruned:
                 continue
 
             node_scores = _run_scorers(candidate_payload)
@@ -466,9 +466,10 @@ def _run_pruners(
     *,
     candidate: dict[str, Any],
     existing_signatures: set[str],
-) -> tuple[list[PruneDecision], bool]:
+) -> tuple[list[PruneDecision], bool, bool]:
     decisions: list[PruneDecision] = []
     hard_pruned = False
+    soft_pruned = False
 
     for pruner in (
         malformed_candidate_pruner,
@@ -480,16 +481,20 @@ def _run_pruners(
         decisions.append(decision)
         if decision.pruned and decision.severity == PruneSeverity.HARD:
             hard_pruned = True
+        if decision.pruned and decision.severity == PruneSeverity.SOFT:
+            soft_pruned = True
 
     duplicate_decision = duplicate_low_diversity_pruner(
         candidate,
         existing_signatures=existing_signatures,
     )
     decisions.append(duplicate_decision)
+    if duplicate_decision.pruned and duplicate_decision.severity == PruneSeverity.SOFT:
+        soft_pruned = True
     signature = duplicate_decision.metadata.get("signature")
     if isinstance(signature, str):
         existing_signatures.add(signature)
-    return decisions, hard_pruned
+    return decisions, hard_pruned, soft_pruned
 
 
 def _run_scorers(candidate: dict[str, Any]) -> list[ScoreResult]:

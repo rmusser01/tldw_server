@@ -1243,7 +1243,9 @@ def load_settings():
     def _persona_bool(env_key: str, option: str, default: bool) -> bool:
         env_value = os.getenv(env_key)
         if env_value is not None:
-            return is_truthy(env_value)
+            text = str(env_value).strip()
+            if text and text.lower() not in {"none", "null", "nil"}:
+                return is_truthy(text)
         cfg_value = _persona_cfg_get(option)
         if cfg_value is None:
             return default

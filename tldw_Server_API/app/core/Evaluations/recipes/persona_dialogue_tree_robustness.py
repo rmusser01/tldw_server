@@ -14,6 +14,8 @@ _DIRECT_PERSONA_KEYS = ("persona", "persona_target")
 _DIRECT_CHARACTER_KEYS = ("character", "character_target")
 _PERSONA_LIST_KEYS = ("personas", "persona_targets")
 _CHARACTER_LIST_KEYS = ("characters", "character_targets")
+_TRUE_BOOL_STRINGS = {"1", "true", "yes", "y", "on"}
+_FALSE_BOOL_STRINGS = {"0", "false", "no", "n", "off"}
 
 
 class PersonaDialogueTreeRobustnessRecipe(RecipeDefinition):
@@ -48,7 +50,10 @@ class PersonaDialogueTreeRobustnessRecipe(RecipeDefinition):
             raise ValueError("; ".join(target_errors))
         return {
             "targets": _redact_targets(_normalize_targets(run_config)),
-            "include_trace_artifacts": bool(run_config.get("include_trace_artifacts", True)),
+            "include_trace_artifacts": _coerce_run_config_bool(
+                run_config.get("include_trace_artifacts", True),
+                field_name="include_trace_artifacts",
+            ),
         }
 
     def validate_dataset(
@@ -58,7 +63,13 @@ class PersonaDialogueTreeRobustnessRecipe(RecipeDefinition):
         run_config: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         errors: list[str] = []
-        samples = [dict(sample) for sample in (dataset or []) if isinstance(sample, dict)]
+        raw_samples = list(dataset or [])
+        samples: list[dict[str, Any]] = []
+        for index, sample in enumerate(raw_samples):
+            if not isinstance(sample, Mapping):
+                errors.append(f"Scenario {index} must be an object, got {type(sample).__name__}.")
+                continue
+            samples.append(dict(sample))
         errors.extend(_target_config_errors(run_config or {}))
         targets = _normalize_targets(run_config or {})
         if not targets:
@@ -70,7 +81,7 @@ class PersonaDialogueTreeRobustnessRecipe(RecipeDefinition):
                 "valid": False,
                 "errors": errors,
                 "dataset_mode": None,
-                "sample_count": 0,
+                "sample_count": len(raw_samples),
                 "target_count": len(targets),
                 "review_sample": {"required": False, "sample_size": 0, "sample_ids": []},
             }
@@ -109,7 +120,7 @@ class PersonaDialogueTreeRobustnessRecipe(RecipeDefinition):
             "valid": not errors,
             "errors": errors,
             "dataset_mode": dataset_mode,
-            "sample_count": len(samples),
+            "sample_count": len(raw_samples),
             "target_count": len(targets),
             "review_sample": review_sample,
         }
@@ -134,9 +145,7 @@ class PersonaDialogueTreeRobustnessRecipe(RecipeDefinition):
             "soft_prune_count": 0,
             "selected_trajectory_count": 0,
             "skipped_scorer_count": 0,
-            "trace_artifact_count": len(
-                [artifact for artifact in (trace_artifacts or []) if isinstance(artifact, dict)]
-            ),
+            "trace_artifact_count": 0,
         }
         selected_trajectories: list[dict[str, Any]] = []
         trace_refs: list[dict[str, Any]] = []
@@ -173,18 +182,35 @@ class PersonaDialogueTreeRobustnessRecipe(RecipeDefinition):
                     }
                 )
 
-        if not trace_refs:
-            for artifact in _as_mapping_list(trace_artifacts):
-                trace_refs.append(
-                    {
-                        "target_id": str(artifact.get("target_id") or ""),
-                        "artifact_id": str(artifact.get("artifact_id") or ""),
-                        "case_id": str(artifact.get("case_id") or ""),
-                    }
-                )
+        seen_trace_refs = {
+            (ref["target_id"], ref["artifact_id"], ref["case_id"])
+            for ref in trace_refs
+        }
+        existing_target_by_artifact_case = {
+            (ref["artifact_id"], ref["case_id"]): ref["target_id"]
+            for ref in trace_refs
+        }
+        for artifact in _as_mapping_list(trace_artifacts):
+            artifact_id = str(artifact.get("artifact_id") or "")
+            case_id = str(artifact.get("case_id") or "")
+            target_id = str(artifact.get("target_id") or "")
+            if not target_id:
+                target_id = existing_target_by_artifact_case.get((artifact_id, case_id), "")
+            synthesized_ref = {
+                "target_id": target_id,
+                "artifact_id": artifact_id,
+                "case_id": case_id,
+            }
+            ref_key = (
+                synthesized_ref["target_id"],
+                synthesized_ref["artifact_id"],
+                synthesized_ref["case_id"],
+            )
+            if ref_key not in seen_trace_refs:
+                trace_refs.append(synthesized_ref)
+                seen_trace_refs.add(ref_key)
 
-        if summary["trace_artifact_count"] == 0:
-            summary["trace_artifact_count"] = len(trace_refs)
+        summary["trace_artifact_count"] = len(trace_refs)
 
         return {
             "dataset_mode": dataset_mode,
@@ -252,6 +278,18 @@ def _normalize_targets(run_config: Mapping[str, Any]) -> list[dict[str, Any]]:
             for index, character_payload in enumerate(characters)
         ]
     return []
+
+
+def _coerce_run_config_bool(value: Any, *, field_name: str) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().casefold()
+        if normalized in _TRUE_BOOL_STRINGS:
+            return True
+        if normalized in _FALSE_BOOL_STRINGS:
+            return False
+    raise ValueError(f"{field_name} must be a boolean.")
 
 
 def _target_config_errors(run_config: Mapping[str, Any]) -> list[str]:

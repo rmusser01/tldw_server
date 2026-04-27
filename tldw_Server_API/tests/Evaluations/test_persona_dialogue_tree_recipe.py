@@ -58,6 +58,24 @@ def test_persona_dialogue_tree_recipe_validates_targets_and_scenarios() -> None:
     assert any("at least one scenario" in error for error in missing_scenario["errors"])
 
 
+def test_persona_dialogue_tree_recipe_rejects_non_object_scenario_rows() -> None:
+    recipe = get_builtin_recipe_registry().get_recipe("persona_dialogue_tree_robustness")
+    dataset = [
+        _scenario_dataset()[0],
+        "not-a-scenario",
+        ["also", "not", "a", "scenario"],
+    ]
+
+    validation = recipe.validate_dataset(dataset, run_config=_run_config())
+
+    assert validation["valid"] is False
+    assert validation["sample_count"] == 3
+    assert any("Scenario 1 must be an object" in error for error in validation["errors"])
+    assert any("str" in error for error in validation["errors"])
+    assert any("Scenario 2 must be an object" in error for error in validation["errors"])
+    assert any("list" in error for error in validation["errors"])
+
+
 def test_persona_dialogue_tree_recipe_normalizes_targets_with_redacted_secrets() -> None:
     recipe = get_builtin_recipe_registry().get_recipe("persona_dialogue_tree_robustness")
     secret = "sk-" + "persona-secret"
@@ -140,6 +158,22 @@ def test_persona_dialogue_tree_recipe_rejects_empty_nested_target_payloads() -> 
         recipe.normalize_run_config(run_config)
 
 
+def test_persona_dialogue_tree_recipe_string_boolean_run_config_is_canonical() -> None:
+    recipe = get_builtin_recipe_registry().get_recipe("persona_dialogue_tree_robustness")
+
+    normalized_false = recipe.normalize_run_config(
+        {**_run_config(), "include_trace_artifacts": "false"}
+    )
+    normalized_true = recipe.normalize_run_config(
+        {**_run_config(), "include_trace_artifacts": "yes"}
+    )
+
+    assert normalized_false["include_trace_artifacts"] is False
+    assert normalized_true["include_trace_artifacts"] is True
+    with pytest.raises(ValueError, match="include_trace_artifacts"):
+        recipe.normalize_run_config({**_run_config(), "include_trace_artifacts": "sometimes"})
+
+
 def test_persona_dialogue_tree_recipe_rejects_non_object_scenario_metadata() -> None:
     recipe = get_builtin_recipe_registry().get_recipe("persona_dialogue_tree_robustness")
     dataset = _scenario_dataset()
@@ -217,4 +251,30 @@ def test_persona_dialogue_tree_recipe_report_summarizes_counts_and_trace_refs() 
             "artifact_id": "trace-2",
             "case_id": "case-b",
         },
+    ]
+
+
+def test_persona_dialogue_tree_recipe_report_merges_missing_trace_refs() -> None:
+    recipe = get_builtin_recipe_registry().get_recipe("persona_dialogue_tree_robustness")
+
+    report = recipe.build_report(
+        dataset_mode="unlabeled",
+        review_sample={"required": False, "sample_size": 0, "sample_ids": []},
+        target_results=[
+            {
+                "target_id": "persona-1",
+                "summary": {"trace_artifact_count": 1},
+                "trace_artifact_refs": [{"artifact_id": "trace-existing", "case_id": "case-a"}],
+            }
+        ],
+        trace_artifacts=[
+            {"target_id": "persona-1", "artifact_id": "trace-existing", "case_id": "case-a"},
+            {"target_id": "persona-1", "artifact_id": "trace-missing", "case_id": "case-b"},
+        ],
+    )
+
+    assert report["summary"]["trace_artifact_count"] == 2
+    assert report["trace_artifact_refs"] == [
+        {"target_id": "persona-1", "artifact_id": "trace-existing", "case_id": "case-a"},
+        {"target_id": "persona-1", "artifact_id": "trace-missing", "case_id": "case-b"},
     ]

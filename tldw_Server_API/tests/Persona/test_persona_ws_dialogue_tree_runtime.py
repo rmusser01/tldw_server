@@ -21,19 +21,20 @@ fastapi_app.include_router(persona_ep.router, prefix="/api/v1/persona")
 
 
 def _recv_until(client, predicate, timeout=2.0):
-    start = time.time()
-    while time.time() - start < timeout:
-        inbox: queue.Queue[tuple[str, object]] = queue.Queue(maxsize=1)
+    deadline = time.monotonic() + timeout
+    inbox: queue.Queue[tuple[str, object]] = queue.Queue()
 
-        def _reader() -> None:
+    def _reader() -> None:
+        while time.monotonic() < deadline:
             try:
                 inbox.put(("ok", client.receive_text()))
             except Exception as exc:  # pragma: no cover - harness defensive path
                 inbox.put(("err", exc))
+                return
 
-        thread = threading.Thread(target=_reader, daemon=True)
-        thread.start()
-        remaining = max(0.01, min(0.1, timeout - (time.time() - start)))
+    threading.Thread(target=_reader, daemon=True).start()
+    while time.monotonic() < deadline:
+        remaining = max(0.01, min(0.1, deadline - time.monotonic()))
         try:
             status, payload = inbox.get(timeout=remaining)
         except queue.Empty:
@@ -56,8 +57,6 @@ def _mock_persona_ws_runtime(monkeypatch):
 
     monkeypatch.setattr(persona_ep, "_resolve_authenticated_user_id", _fake_resolve)
     monkeypatch.setattr(persona_ep, "is_persona_enabled", lambda: True)
-    monkeypatch.setattr(persona_ep, "_PERSONA_RUNTIME_EXPLORER", None, raising=False)
-    monkeypatch.setattr(persona_ep, "_PERSONA_RUNTIME_EXPLORER_CACHE_KEY", None, raising=False)
 
 
 def _plan_for_text(text: str, *, session_id: str = "sess_runtime") -> dict:
@@ -84,8 +83,27 @@ def test_runtime_explorer_config_rejects_invalid_int_settings(monkeypatch) -> No
 
     monkeypatch.setitem(settings, "PERSONA_RUNTIME_EXPLORER_MAX_DEPTH", "not-an-int")
 
-    with pytest.raises(ValueError):
-        persona_ep._get_persona_runtime_explorer_config()
+    config = persona_ep._get_persona_runtime_explorer_config()
+
+    assert config.max_depth == 1
+
+
+def test_runtime_explorer_config_clamps_numeric_settings(monkeypatch) -> None:
+    from tldw_Server_API.app.core.config import settings
+
+    monkeypatch.setitem(settings, "PERSONA_RUNTIME_EXPLORER_MAX_DEPTH", "999")
+    monkeypatch.setitem(settings, "PERSONA_RUNTIME_EXPLORER_MAX_BRANCHING", "-3")
+    monkeypatch.setitem(settings, "PERSONA_RUNTIME_EXPLORER_MAX_PROVIDER_CALLS", "500")
+    monkeypatch.setitem(settings, "PERSONA_RUNTIME_EXPLORER_TIMEOUT_MS", "5")
+    monkeypatch.setitem(settings, "PERSONA_RUNTIME_EXPLORER_MAX_TOKENS", "1")
+
+    config = persona_ep._get_persona_runtime_explorer_config()
+
+    assert config.max_depth == 10
+    assert config.max_branching == 1
+    assert config.max_provider_calls == 100
+    assert config.timeout_ms == 100
+    assert config.max_tokens == 16
 
 
 def test_runtime_explorer_provider_context_is_minimized_and_redacted(monkeypatch) -> None:
@@ -298,7 +316,11 @@ def test_runtime_explorer_selected_plan_denied_by_policy_falls_back_to_safe_deni
     monkeypatch.setattr(
         persona_ep,
         "_get_persona_runtime_explorer_config",
-        lambda: RuntimeExplorerConfig(enabled=True, max_provider_calls=1),
+        lambda: RuntimeExplorerConfig(
+            enabled=True,
+            max_provider_calls=1,
+            safe_denial_text="Configured safe-denial response.",
+        ),
         raising=False,
     )
     monkeypatch.setattr(
@@ -330,7 +352,7 @@ def test_runtime_explorer_selected_plan_denied_by_policy_falls_back_to_safe_deni
 
     assert plan["steps"][0]["step_type"] == "final_answer"
     assert plan["steps"][0]["tool"] == "summarize"
-    assert "cannot safely proceed" in plan["steps"][0]["args"]["text"].lower()
+    assert plan["steps"][0]["args"]["text"] == "Configured safe-denial response."
     assert plan["steps"][0]["policy"]["allow"] is True
 
 

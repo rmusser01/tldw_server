@@ -24,6 +24,22 @@ def test_runtime_hard_prunes_are_deterministic_policy_only() -> None:
     _check(soft.authorizes_runtime_action is False, "llm judge warning authorized action")
 
 
+def test_tool_plan_requires_explicit_authorization() -> None:
+    from tldw_Server_API.app.core.Persona.dialogue_tree_pruners import (
+        PruneSeverity,
+        unsafe_tool_plan_pruner,
+    )
+
+    missing_authorization = unsafe_tool_plan_pruner({"tool_plan": {"action": "read"}})
+    explicit_authorization = unsafe_tool_plan_pruner(
+        {"tool_plan": {"action": "read", "authorized": True}}
+    )
+
+    _check(missing_authorization.pruned is True, "missing tool authorization was allowed")
+    _check(missing_authorization.severity == PruneSeverity.HARD, "missing authorization was not hard-pruned")
+    _check(explicit_authorization.pruned is False, "explicitly authorized safe action was pruned")
+
+
 def test_malformed_candidate_pruner_detects_non_mapping_candidate() -> None:
     from tldw_Server_API.app.core.Persona.dialogue_tree_pruners import (
         PruneReason,

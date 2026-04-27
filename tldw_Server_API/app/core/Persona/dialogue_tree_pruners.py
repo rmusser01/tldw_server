@@ -1,3 +1,5 @@
+"""Deterministic pruning rules for persona dialogue-tree candidates."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -149,7 +151,7 @@ def unsafe_tool_plan_pruner(candidate: Mapping[str, Any]) -> PruneDecision:
         "http_post",
     }
     action_is_risky = any(action == risk_action or action.startswith(f"{risk_action}_") for risk_action in risk_actions)
-    if authorized is False or action_is_risky:
+    if authorized is not True or action_is_risky:
         return prune_decision(
             severity=PruneSeverity.HARD,
             reason=PruneReason.UNSAFE_TOOL_PLAN,

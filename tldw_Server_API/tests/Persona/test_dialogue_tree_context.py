@@ -73,9 +73,30 @@ def test_redact_sensitive_payload_handles_nested_case_insensitive_keys() -> None
         redacted["nested"][2][1]["CredentialBlob"] == "[REDACTED]",
         "credential blob not redacted",
     )
-    _check(redacted["auth_header"] == "[REDACTED]", "auth_header not redacted")
+    _check(redacted["auth_header"] == {"redacted": True}, "auth_header not redacted")
     _check(redacted["safe"] == "visible", "safe field changed unexpectedly")
     _check(redacted["nested"][2][0] == "leave-me", "tuple element changed unexpectedly")
+
+
+def test_redact_sensitive_payload_preserves_container_types_for_sensitive_values() -> None:
+    from tldw_Server_API.app.core.Persona.dialogue_tree_context import (
+        redact_sensitive_payload,
+    )
+
+    payload = {
+        "api_key": {"value": "sk-secret", "scope": "all"},
+        "tokens": ["one", "two"],
+        "nested": {"client_secret": ("tuple-secret",)},
+    }
+
+    redacted = redact_sensitive_payload(payload)
+
+    _check(isinstance(redacted["api_key"], dict), "sensitive dict placeholder changed type")
+    _check(redacted["api_key"]["redacted"] is True, "sensitive dict placeholder missing marker")
+    _check(isinstance(redacted["tokens"], list), "sensitive list placeholder changed type")
+    _check(redacted["tokens"] == ["[REDACTED]"], "sensitive list placeholder mismatch")
+    _check(isinstance(redacted["nested"]["client_secret"], tuple), "sensitive tuple placeholder changed type")
+    _check(redacted["nested"]["client_secret"] == ("[REDACTED]",), "sensitive tuple placeholder mismatch")
 
 
 def test_runtime_context_preserves_safe_summaries_and_ids() -> None:
@@ -221,6 +242,32 @@ def test_tool_result_private_fields_are_omitted_with_metadata() -> None:
     _check(
         "tool_results.private_response_fields" in categories,
         "private tool omission category missing",
+    )
+
+
+def test_non_mapping_tool_results_are_sanitized_as_omitted_placeholders() -> None:
+    from tldw_Server_API.app.core.Persona.dialogue_tree_context import (
+        build_runtime_tree_context,
+    )
+
+    context = build_runtime_tree_context(
+        persona_id="p1",
+        session_id="s1",
+        user_message="hello",
+        tool_results=[None, "raw secret token=tool-secret"],
+    )
+
+    payload = context.for_generator()
+    serialized = repr(payload)
+
+    _check(payload["tool_results"][0]["tool"] == "tool_0", "first placeholder tool name mismatch")
+    _check(payload["tool_results"][0]["raw_omitted"] is True, "first placeholder missing omission marker")
+    _check(payload["tool_results"][1]["tool"] == "tool_1", "second placeholder tool name mismatch")
+    _check(payload["tool_results"][1]["raw_omitted"] is True, "second placeholder missing omission marker")
+    _check("tool-secret" not in serialized, "non-mapping tool result leaked raw value")
+    _check(
+        "tool_results.invalid_entries" in payload["metadata"]["omitted_context_categories"],
+        "invalid tool result omission category missing",
     )
 
 

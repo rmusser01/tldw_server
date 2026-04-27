@@ -195,6 +195,34 @@ def test_trace_serialization_redacts_common_raw_tool_output_fields() -> None:
     )
 
 
+def test_trace_serialization_normalizes_metadata_and_mixed_sort_keys() -> None:
+    from tldw_Server_API.app.core.Persona.dialogue_tree_traces import (
+        serialize_dialogue_tree_trace,
+    )
+
+    tree_result = DialogueTreeResult(
+        nodes=[
+            DialogueTreeNode(node_id="root.a", parent_node_id="root", depth=1, candidate=None),
+            DialogueTreeNode(node_id="root.2", parent_node_id="root", depth=1, candidate=None),
+            DialogueTreeNode(node_id="root", parent_node_id=None, depth=0, candidate=None),
+        ],
+        children_by_parent={"root": ["root.a", "root.2"]},
+        max_depth_seen=1,
+    )
+
+    trace = serialize_dialogue_tree_trace(
+        tree_result,
+        metadata={"mixed_set": {2, "10", 1}, "nested": {"values": {"b", "a"}}},
+    )
+
+    _check(
+        [node["node_id"] for node in trace["nodes"]] == ["root", "root.2", "root.a"],
+        "mixed node ids were not sorted stably",
+    )
+    _check(trace["metadata"]["mixed_set"] == [1, 2, "10"], "mixed metadata set was not portable")
+    _check(trace["metadata"]["nested"]["values"] == ["a", "b"], "nested metadata set was not portable")
+
+
 def test_trace_serialization_includes_required_root_edges_and_trajectory_scores() -> None:
     from tldw_Server_API.app.core.Persona.dialogue_tree_scorers import (
         ScoreResult,

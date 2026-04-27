@@ -21,6 +21,7 @@ _DIALOGUE_TREE_ENV_KEYS = (
 
 @pytest.fixture(autouse=True)
 def _reset_config(monkeypatch):
+    monkeypatch.setattr(config, "_load_env_files_early", lambda: None)
     for key in (*_DIALOGUE_TREE_ENV_KEYS, "TLDW_CONFIG_FILE", "TLDW_CONFIG_PATH", "TLDW_CONFIG_DIR"):
         monkeypatch.delenv(key, raising=False)
     config.clear_config_cache()
@@ -108,6 +109,28 @@ def test_persona_runtime_explorer_env_overrides_are_typed(monkeypatch):
     assert settings["PERSONA_RUNTIME_EXPLORER_P95_ADDED_LATENCY_MS"] == 2500
     assert settings["PERSONA_RUNTIME_EXPLORER_LLM_JUDGES_ENABLED"] is True
     assert settings["PERSONA_DIALOGUE_TREE_TRACE_RETENTION_DAYS"] == 30
+
+
+def test_blank_persona_boolean_env_vars_fall_back_to_config_file(tmp_path, monkeypatch):
+    cfg = tmp_path / "config.txt"
+    cfg.write_text(
+        "\n".join(
+            [
+                "[persona]",
+                "dialogue_tree_eval_enabled = true",
+                "runtime_explorer_enabled = true",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("TLDW_CONFIG_FILE", str(cfg))
+    monkeypatch.setenv("PERSONA_DIALOGUE_TREE_EVAL_ENABLED", "")
+    monkeypatch.setenv("PERSONA_RUNTIME_EXPLORER_ENABLED", "null")
+
+    settings = _load_settings_for_test()
+
+    assert settings["PERSONA_DIALOGUE_TREE_EVAL_ENABLED"] is True
+    assert settings["PERSONA_RUNTIME_EXPLORER_ENABLED"] is True
 
 
 def test_persona_runtime_explorer_invalid_env_int_raises(monkeypatch):

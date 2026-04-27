@@ -1,3 +1,5 @@
+"""Runtime bounded candidate exploration for persona websocket planning."""
+
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
@@ -129,7 +131,11 @@ class PersonaRuntimeExplorer:
                 circuit_open=True,
             )
 
-        if self.config.max_provider_calls <= 0:
+        max_provider_calls = min(
+            max(0, int(self.config.max_provider_calls)),
+            max(0, int(self.config.max_depth)),
+        )
+        if max_provider_calls <= 0:
             return RuntimeExplorationResult(
                 selected_candidate=None,
                 fallback=ExplorationFallback.SOFT_EXISTING_BEHAVIOR,
@@ -138,9 +144,32 @@ class PersonaRuntimeExplorer:
                 diagnostics={"reason": "provider_call_budget_exhausted"},
             )
 
-        provider_calls = 1
+        provider_calls = 0
+        raw_candidates: list[Any] = []
         try:
-            raw_candidates = self._generate_candidates_with_timeout(context)
+            for call_index in range(max_provider_calls):
+                elapsed_ms = self._elapsed_ms(started_at)
+                remaining_timeout_ms = max(0, self.config.timeout_ms - elapsed_ms)
+                if remaining_timeout_ms <= 0:
+                    raise TimeoutError("runtime explorer exceeded timeout budget")
+                call_context = dict(context)
+                call_context.update(
+                    {
+                        "runtime_depth": call_index + 1,
+                        "runtime_max_depth": self.config.max_depth,
+                        "runtime_provider_call_index": call_index,
+                        "runtime_max_provider_calls": self.config.max_provider_calls,
+                    }
+                )
+                provider_calls += 1
+                raw_candidates.extend(
+                    _coerce_candidate_list(
+                        self._generate_candidates_with_timeout(
+                            call_context,
+                            timeout_ms=remaining_timeout_ms,
+                        )
+                    )
+                )
         except _GeneratorBusyError as exc:
             return self._runtime_failure_result(
                 started_at=started_at,
@@ -172,7 +201,7 @@ class PersonaRuntimeExplorer:
                 reason="runtime_timeout",
             )
 
-        candidates = _coerce_candidate_list(raw_candidates)[: self.config.max_branching]
+        candidates = raw_candidates[: self.config.max_branching]
         usage = _MutableBudget(provider_calls=provider_calls, elapsed_ms=elapsed_ms)
         hard_violation_seen = False
         scored_candidates: list[tuple[float, int, dict[str, Any], AggregateScoreResult]] = []
@@ -247,10 +276,11 @@ class PersonaRuntimeExplorer:
                 )
         return aggregate_scores(results)
 
-    def _generate_candidates_with_timeout(self, context: Mapping[str, Any]) -> Any:
+    def _generate_candidates_with_timeout(self, context: Mapping[str, Any], *, timeout_ms: int | None = None) -> Any:
         with self._generator_lock:
             if self._timed_out_generator_in_flight:
                 raise _GeneratorBusyError("previous runtime explorer generator is still running")
+            self._timed_out_generator_in_flight = True
 
         result_queue: queue.Queue[tuple[str, Any]] = queue.Queue(maxsize=1)
 
@@ -271,7 +301,8 @@ class PersonaRuntimeExplorer:
         )
         thread.start()
         try:
-            status, payload = result_queue.get(timeout=max(0.0, self.config.timeout_ms / 1000.0))
+            effective_timeout_ms = self.config.timeout_ms if timeout_ms is None else timeout_ms
+            status, payload = result_queue.get(timeout=max(0.0, effective_timeout_ms / 1000.0))
         except queue.Empty as exc:
             with self._generator_lock:
                 self._timed_out_generator_in_flight = thread.is_alive()

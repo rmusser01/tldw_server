@@ -1,3 +1,5 @@
+"""Portable trace serialization for persona dialogue-tree diagnostics."""
+
 from __future__ import annotations
 
 from dataclasses import asdict, is_dataclass
@@ -63,7 +65,7 @@ def serialize_dialogue_tree_trace(
             "fallback_node_id": fallback_node_id,
             "decision_label": decision_label,
         },
-        "metadata": dict(metadata or {}),
+        "metadata": _portable_mapping(metadata or {}),
     }
     return redact_sensitive_payload(_redact_trace_raw_output_fields(trace))
 
@@ -143,23 +145,47 @@ def _to_portable_value(value: Any) -> Any:
     if isinstance(value, tuple):
         return [_to_portable_value(item) for item in value]
     if isinstance(value, set):
-        return sorted(_to_portable_value(item) for item in value)
+        return sorted(
+            (_to_portable_value(item) for item in value),
+            key=_portable_sort_key,
+        )
     return value
 
 
-def _node_sort_key(node_id: str) -> tuple[Any, ...]:
+def _portable_mapping(value: Mapping[str, Any]) -> dict[str, Any]:
+    portable = _to_portable_value(value)
+    if isinstance(portable, Mapping):
+        return {str(key): sub_value for key, sub_value in portable.items()}
+    return {}
+
+
+def _portable_sort_key(value: Any) -> tuple[int, str]:
+    if isinstance(value, bool):
+        return (0, str(int(value)))
+    if isinstance(value, int):
+        return (1, f"{value:020d}")
+    if isinstance(value, float):
+        return (2, repr(value))
+    if isinstance(value, str):
+        return (3, value)
+    if value is None:
+        return (4, "")
+    return (5, repr(value))
+
+
+def _node_sort_key(node_id: str) -> tuple[tuple[int, Any], ...]:
     if node_id == "root":
         return ()
     segments = node_id.split(".")
     if segments and segments[0] == "root":
         segments = segments[1:]
 
-    key_parts: list[Any] = []
+    key_parts: list[tuple[int, Any]] = []
     for segment in segments:
         if segment.isdigit():
-            key_parts.append(int(segment))
+            key_parts.append((0, int(segment)))
         else:
-            key_parts.append(segment)
+            key_parts.append((1, segment))
     return tuple(key_parts)
 
 

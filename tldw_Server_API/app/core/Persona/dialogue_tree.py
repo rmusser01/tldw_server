@@ -1,8 +1,12 @@
+"""Shared bounded dialogue-tree expansion engine for persona robustness flows."""
+
 from __future__ import annotations
 
 from collections import defaultdict, deque
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-import json
+import hashlib
+from types import MappingProxyType
 from typing import Any, Callable
 
 
@@ -43,9 +47,22 @@ class DialogueTreeNode:
 
 @dataclass(frozen=True)
 class DialogueTreeResult:
-    nodes: list[DialogueTreeNode]
-    children_by_parent: dict[str, list[str]]
+    nodes: tuple[DialogueTreeNode, ...]
+    children_by_parent: Mapping[str, tuple[str, ...]]
     max_depth_seen: int
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "nodes", tuple(self.nodes))
+        object.__setattr__(
+            self,
+            "children_by_parent",
+            MappingProxyType(
+                {
+                    str(parent): tuple(children)
+                    for parent, children in dict(self.children_by_parent).items()
+                }
+            ),
+        )
 
 
 class DialogueTreeEngine:
@@ -110,8 +127,10 @@ class DialogueTreeEngine:
                     break
 
         return DialogueTreeResult(
-            nodes=nodes,
-            children_by_parent=dict(children_by_parent),
+            nodes=tuple(nodes),
+            children_by_parent=MappingProxyType(
+                {parent: tuple(children) for parent, children in children_by_parent.items()}
+            ),
             max_depth_seen=max_depth_seen,
         )
 
@@ -134,9 +153,30 @@ class DialogueTreeEngine:
 
     @staticmethod
     def _candidate_sort_key(candidate: TreeCandidate) -> tuple[str, str, str, str]:
-        metadata = json.dumps(candidate.metadata, sort_keys=True, default=str)
-        tool_plan = json.dumps(candidate.tool_plan, sort_keys=True, default=str)
+        metadata = _stable_payload_digest(candidate.metadata)
+        tool_plan = _stable_payload_digest(candidate.tool_plan)
         return (candidate.text, candidate.action_type, metadata, tool_plan)
+
+
+def _stable_payload_digest(value: Any) -> str:
+    normalized = _normalize_for_sort(value)
+    payload = repr(normalized).encode("utf-8", errors="replace")
+    return hashlib.sha1(payload, usedforsecurity=False).hexdigest()
+
+
+def _normalize_for_sort(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return tuple(
+            (str(key), _normalize_for_sort(sub_value))
+            for key, sub_value in sorted(value.items(), key=lambda item: str(item[0]))
+        )
+    if isinstance(value, list):
+        return tuple(_normalize_for_sort(item) for item in value)
+    if isinstance(value, tuple):
+        return tuple(_normalize_for_sort(item) for item in value)
+    if isinstance(value, set):
+        return tuple(sorted((_normalize_for_sort(item) for item in value), key=repr))
+    return value
 
 
 __all__ = [

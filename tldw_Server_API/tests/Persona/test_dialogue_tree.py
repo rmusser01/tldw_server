@@ -66,6 +66,28 @@ def test_tree_expansion_respects_total_provider_call_budget() -> None:
     assert [node.node_id for node in result.nodes] == ["root", "root.1", "root.2"]
 
 
+def test_tree_result_exposes_immutable_node_and_child_containers() -> None:
+    from tldw_Server_API.app.core.Persona.dialogue_tree import (
+        DialogueTreeBudget,
+        DialogueTreeEngine,
+        TreeCandidate,
+    )
+
+    engine = DialogueTreeEngine(
+        budget=DialogueTreeBudget(max_depth=1, max_branching=1),
+        generators=[lambda _node: [TreeCandidate(action_type="assistant", text="safe")]],
+    )
+
+    result = engine.expand()
+
+    assert isinstance(result.nodes, tuple)
+    assert isinstance(result.children_by_parent["root"], tuple)
+    with pytest.raises(AttributeError):
+        result.nodes.append(result.nodes[0])  # type: ignore[attr-defined]
+    with pytest.raises(TypeError):
+        result.children_by_parent["root"] += ("root.99",)
+
+
 @pytest.mark.parametrize(
     "kwargs",
     [

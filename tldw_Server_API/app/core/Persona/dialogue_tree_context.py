@@ -1,5 +1,8 @@
+"""Context minimization and redaction helpers for persona dialogue-tree runs."""
+
 from __future__ import annotations
 
+from collections.abc import Mapping
 import re
 from dataclasses import dataclass, field
 from typing import Any
@@ -358,6 +361,19 @@ def _sanitize_tool_results(
 ) -> list[dict[str, Any]]:
     sanitized_results: list[dict[str, Any]] = []
     for index, result in enumerate(tool_results):
+        if not isinstance(result, Mapping):
+            omitted_context_categories.add("tool_results.invalid_entries")
+            sanitized_results.append(
+                _sanitize_general_payload(
+                    payload={"tool": f"tool_{index}", "raw_omitted": True},
+                    path_prefix=f"tool_results[{index}]",
+                    max_text_length=max_text_length,
+                    redacted_paths=redacted_paths,
+                    truncation_paths=truncation_paths,
+                )
+            )
+            continue
+
         sanitized: dict[str, Any] = {}
         tool_name = str(result.get("tool") or result.get("name") or f"tool_{index}")
         sanitized["tool"] = tool_name
@@ -431,7 +447,7 @@ def _redact_value(*, payload: Any, path: str, redacted_paths: list[str]) -> Any:
         for key, value in payload.items():
             key_path = f"{path}.{key}" if path else str(key)
             if _is_sensitive_key(key):
-                sanitized_dict[key] = _REDACTED_PLACEHOLDER
+                sanitized_dict[key] = _redacted_placeholder_for(value)
                 redacted_paths.append(key_path)
             else:
                 sanitized_dict[key] = _redact_value(
@@ -460,6 +476,18 @@ def _redact_value(*, payload: Any, path: str, redacted_paths: list[str]) -> Any:
         return redacted_text
 
     return payload
+
+
+def _redacted_placeholder_for(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {"redacted": True}
+    if isinstance(value, list):
+        return [_REDACTED_PLACEHOLDER]
+    if isinstance(value, tuple):
+        return (_REDACTED_PLACEHOLDER,)
+    if isinstance(value, set):
+        return {_REDACTED_PLACEHOLDER}
+    return _REDACTED_PLACEHOLDER
 
 
 def _is_sensitive_key(key: Any) -> bool:

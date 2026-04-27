@@ -222,8 +222,6 @@ _PERSONA_STATE_FIELD_LABELS = {
     "identity_md": "identity",
     "heartbeat_md": "heartbeat",
 }
-_PERSONA_RUNTIME_EXPLORER: PersonaRuntimeExplorer | None = None
-_PERSONA_RUNTIME_EXPLORER_CACHE_KEY: tuple[Any, ...] | None = None
 _PERSONA_RUNTIME_EXPLORER_SELECTED_KEY = "_runtime_explorer_selected"
 _PERSONA_RUNTIME_SAFE_DENIAL_TEXT = RuntimeExplorerConfig().safe_denial_text
 
@@ -409,11 +407,11 @@ def _get_persona_runtime_explorer_config() -> RuntimeExplorerConfig:
 
     return RuntimeExplorerConfig(
         enabled=_coerce_bool(_app_settings.get("PERSONA_RUNTIME_EXPLORER_ENABLED", False), default=False),
-        max_depth=int(_app_settings.get("PERSONA_RUNTIME_EXPLORER_MAX_DEPTH", 1)),
-        max_branching=int(_app_settings.get("PERSONA_RUNTIME_EXPLORER_MAX_BRANCHING", 2)),
-        max_provider_calls=int(_app_settings.get("PERSONA_RUNTIME_EXPLORER_MAX_PROVIDER_CALLS", 1)),
-        timeout_ms=int(_app_settings.get("PERSONA_RUNTIME_EXPLORER_TIMEOUT_MS", 750)),
-        max_tokens=int(_app_settings.get("PERSONA_RUNTIME_EXPLORER_MAX_TOKENS", 256)),
+        max_depth=_persona_int_setting("PERSONA_RUNTIME_EXPLORER_MAX_DEPTH", 1, 1, 10),
+        max_branching=_persona_int_setting("PERSONA_RUNTIME_EXPLORER_MAX_BRANCHING", 2, 1, 10),
+        max_provider_calls=_persona_int_setting("PERSONA_RUNTIME_EXPLORER_MAX_PROVIDER_CALLS", 1, 0, 100),
+        timeout_ms=_persona_int_setting("PERSONA_RUNTIME_EXPLORER_TIMEOUT_MS", 750, 100, 60_000),
+        max_tokens=_persona_int_setting("PERSONA_RUNTIME_EXPLORER_MAX_TOKENS", 256, 16, 4096),
         llm_judges_enabled=_coerce_bool(
             _app_settings.get("PERSONA_RUNTIME_EXPLORER_LLM_JUDGES_ENABLED", False),
             default=False,
@@ -466,21 +464,12 @@ def _persona_runtime_requires_safe_refusal_branch(user_message: str) -> bool:
 
 
 def _get_persona_runtime_explorer(config: RuntimeExplorerConfig) -> PersonaRuntimeExplorer:
-    global _PERSONA_RUNTIME_EXPLORER, _PERSONA_RUNTIME_EXPLORER_CACHE_KEY
     scorers = _persona_runtime_scorers()
-    cache_key = (
-        config,
-        id(_persona_runtime_candidate_generator),
-        tuple(id(scorer) for scorer in (scorers or [])),
+    return PersonaRuntimeExplorer(
+        config=config,
+        candidate_generator=_persona_runtime_candidate_generator,
+        scorers=scorers,
     )
-    if _PERSONA_RUNTIME_EXPLORER is None or _PERSONA_RUNTIME_EXPLORER_CACHE_KEY != cache_key:
-        _PERSONA_RUNTIME_EXPLORER = PersonaRuntimeExplorer(
-            config=config,
-            candidate_generator=_persona_runtime_candidate_generator,
-            scorers=scorers,
-        )
-        _PERSONA_RUNTIME_EXPLORER_CACHE_KEY = cache_key
-    return _PERSONA_RUNTIME_EXPLORER
 
 
 def _sanitize_persona_runtime_plan(raw_plan: Any) -> dict[str, Any]:
@@ -6696,7 +6685,8 @@ async def persona_stream(
                 companion_context=companion_context,
                 persona_exemplar_sections=persona_exemplar_assembly.sections,
             )
-            plan = _apply_persona_runtime_explorer_to_plan(
+            plan = await asyncio.to_thread(
+                _apply_persona_runtime_explorer_to_plan,
                 base_plan=plan,
                 user_message=normalized_text,
                 session_id=session_id,
@@ -6777,19 +6767,35 @@ async def persona_stream(
                     )
                 return stored, denied
 
+            async def _rewrite_runtime_policy_denial_to_safe_plan() -> list[dict[str, Any]] | None:
+                nonlocal pending_plan
+                safe_plan = _runtime_safe_denial_plan(_get_persona_runtime_explorer_config().safe_denial_text)
+                try:
+                    pending_plan = session_manager.put_plan(
+                        session_id=session_id,
+                        user_id=connection_user_id,
+                        persona_id=runtime_persona_id,
+                        plan_id=plan_id,
+                        steps=list(safe_plan.get("steps", [])),
+                    )
+                except ValueError as exc:
+                    _cancel_persona_live_processing_notice(session_id)
+                    await _emit_notice(
+                        session_id=session_id,
+                        level="error",
+                        message=str(exc),
+                        reason_code="PLAN_INVALID",
+                    )
+                    return None
+                rewritten_steps, _has_safe_denial_policy_denial = _build_stored_steps_with_policy()
+                return rewritten_steps
+
             stored_steps, has_policy_denial = _build_stored_steps_with_policy()
             if runtime_explorer_selected_plan and has_policy_denial:
-                safe_plan = _runtime_safe_denial_plan(
-                    "I cannot safely proceed with that request. I can help with a safer alternative instead."
-                )
-                pending_plan = session_manager.put_plan(
-                    session_id=session_id,
-                    user_id=connection_user_id,
-                    persona_id=runtime_persona_id,
-                    plan_id=plan_id,
-                    steps=list(safe_plan.get("steps", [])),
-                )
-                stored_steps, _has_safe_denial_policy_denial = _build_stored_steps_with_policy()
+                rewritten_steps = await _rewrite_runtime_policy_denial_to_safe_plan()
+                if rewritten_steps is None:
+                    return
+                stored_steps = rewritten_steps
             await _emit_tool_plan(
                 session_id=session_id,
                 plan_id=plan_id,

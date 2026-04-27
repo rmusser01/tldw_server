@@ -112,6 +112,83 @@ def test_runtime_explorer_does_not_spawn_new_generator_while_timeout_is_in_fligh
     assert calls == 1
 
 
+def test_runtime_explorer_does_not_spawn_concurrent_generator_while_first_call_is_running() -> None:
+    from tldw_Server_API.app.core.Persona.runtime_explorer import (
+        ExplorationFallback,
+        PersonaRuntimeExplorer,
+        RuntimeExplorerConfig,
+    )
+
+    generator_started = threading.Event()
+    release_generator = threading.Event()
+    calls = 0
+
+    def _blocked_generator(_context: dict) -> list[dict]:
+        nonlocal calls
+        calls += 1
+        generator_started.set()
+        release_generator.wait(timeout=1.0)
+        return []
+
+    explorer = PersonaRuntimeExplorer(
+        config=RuntimeExplorerConfig(enabled=True, timeout_ms=500, max_provider_calls=1),
+        candidate_generator=_blocked_generator,
+    )
+    first_result: list[object] = []
+    worker = threading.Thread(
+        target=lambda: first_result.append(explorer.explore({"user_message": "one"})),
+        daemon=True,
+    )
+    worker.start()
+    assert generator_started.wait(timeout=0.2)
+
+    second = explorer.explore({"user_message": "two"})
+    release_generator.set()
+    worker.join(timeout=1.0)
+
+    assert second.fallback == ExplorationFallback.SOFT_EXISTING_BEHAVIOR
+    assert second.diagnostics["reason"] == "candidate_generation_busy"
+    assert second.budget.provider_calls == 0
+    assert calls == 1
+    assert first_result
+
+
+def test_runtime_explorer_honors_depth_and_provider_call_budgets() -> None:
+    from tldw_Server_API.app.core.Persona.runtime_explorer import (
+        PersonaRuntimeExplorer,
+        RuntimeExplorerConfig,
+    )
+
+    call_depths: list[int] = []
+
+    def _generator(context: dict) -> list[dict]:
+        depth = int(context["runtime_depth"])
+        call_depths.append(depth)
+        return [
+            {
+                "action_type": "assistant",
+                "text": f"candidate from depth {depth}",
+                "metadata": {"grounded": True, "depth": depth},
+            }
+        ]
+
+    explorer = PersonaRuntimeExplorer(
+        config=RuntimeExplorerConfig(
+            enabled=True,
+            max_depth=2,
+            max_branching=5,
+            max_provider_calls=3,
+        ),
+        candidate_generator=_generator,
+    )
+
+    result = explorer.explore({"user_message": "hello"})
+
+    assert call_depths == [1, 2]
+    assert result.budget.provider_calls == 2
+    assert result.budget.candidates_considered == 2
+
+
 def test_runtime_explorer_selects_highest_scoring_safe_candidate() -> None:
     from tldw_Server_API.app.core.Persona.runtime_explorer import (
         PersonaRuntimeExplorer,
