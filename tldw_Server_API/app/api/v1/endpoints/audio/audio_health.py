@@ -662,8 +662,8 @@ async def get_tts_health(request: Request, tts_service: TTSServiceV2 = Depends(g
                     kokoro_info["espeak_lib_env"] = _sanitize_health_path_value(es_env)
                     kokoro_info["espeak_lib_path"] = runtime_diagnostics.get("espeak_lib_path")
                     kokoro_info["espeak_lib_exists"] = bool(runtime_diagnostics.get("espeak_lib_exists"))
-                except Exception as exc:
-                    logger.debug(f"Kokoro health: espeak library introspection failed: {exc}")
+                except Exception:
+                    logger.debug("Kokoro health eSpeak library introspection failed")
                 kokoro_detail = provider_details.get("kokoro")
                 if not isinstance(kokoro_detail, dict):
                     kokoro_detail = {}

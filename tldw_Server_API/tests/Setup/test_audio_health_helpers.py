@@ -215,6 +215,63 @@ async def test_get_tts_health_envelope_enrichment_failure_log_is_sanitized(monke
     fake_logger.debug.assert_called_once_with("TTS health envelope enrichment failed")
 
 
+@pytest.mark.asyncio
+async def test_get_tts_health_kokoro_espeak_introspection_failure_log_is_sanitized(monkeypatch):
+    class _FakeAdapter:
+        use_onnx = False
+        device = "cpu"
+
+    class _FakeRegistry:
+        def list_capabilities(self, include_disabled=True):
+            assert include_disabled is True
+            return []
+
+        async def get_adapter(self, _provider):
+            return _FakeAdapter()
+
+    class _FakeFactory:
+        registry = _FakeRegistry()
+
+    class _FakeTTSService:
+        def get_status(self):
+            return {
+                "providers": {"kokoro": {"status": "available"}},
+                "available": 1,
+                "total_providers": 1,
+                "circuit_breakers": {},
+            }
+
+        async def get_capabilities(self):
+            return {}
+
+    async def _fake_get_tts_factory():
+        return _FakeFactory()
+
+    def _fail_getenv(name, default=None):
+        if name == "PHONEMIZER_ESPEAK_LIBRARY":
+            raise RuntimeError("env lookup leaked /private/espeak.env")
+        return default
+
+    fake_logger = MagicMock()
+    monkeypatch.setattr(audio_health, "logger", fake_logger)
+    monkeypatch.setattr(audio_health.os, "getenv", _fail_getenv)
+    monkeypatch.setattr(audio_health, "_module_spec_available", lambda _name: True)
+    monkeypatch.setattr(audio_health, "_enrich_external_provider_auth_health", lambda *args: None)
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.TTS.adapter_registry.get_tts_factory",
+        _fake_get_tts_factory,
+        raising=True,
+    )
+
+    health = await audio_health.get_tts_health(
+        request=MagicMock(),
+        tts_service=_FakeTTSService(),
+    )
+
+    assert health["providers"]["kokoro"]["device"] == "cpu"
+    fake_logger.debug.assert_called_once_with("Kokoro health eSpeak library introspection failed")
+
+
 def test_tts_health_capability_serializer_failure_log_is_sanitized(monkeypatch):
     class _FailingTTSService:
         def _serialize_capabilities(self, _caps):
