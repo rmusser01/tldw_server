@@ -8,6 +8,7 @@ import time
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from starlette.datastructures import State
 
 from tldw_Server_API.app.api.v1.endpoints import persona as persona_ep
 from tldw_Server_API.app.core.Persona.dialogue_tree_scorers import ScoreResult, ScoreSeverity
@@ -57,6 +58,8 @@ def _mock_persona_ws_runtime(monkeypatch):
 
     monkeypatch.setattr(persona_ep, "_resolve_authenticated_user_id", _fake_resolve)
     monkeypatch.setattr(persona_ep, "is_persona_enabled", lambda: True)
+    if hasattr(fastapi_app.state, "persona_runtime_explorer_provider"):
+        delattr(fastapi_app.state, "persona_runtime_explorer_provider")
 
 
 def _plan_for_text(text: str, *, session_id: str = "sess_runtime") -> dict:
@@ -76,6 +79,26 @@ def _plan_for_text(text: str, *, session_id: str = "sess_runtime") -> dict:
                 )
             )
             return _recv_until(ws, lambda data: data.get("event") == "tool_plan")
+
+
+def test_runtime_explorer_provider_reuses_matching_explorer_instances() -> None:
+    provider = persona_ep.PersonaRuntimeExplorerProvider()
+    config = RuntimeExplorerConfig(enabled=True, max_provider_calls=1)
+
+    first = provider.get(config)
+    second = provider.get(config)
+
+    assert first is second
+
+
+def test_runtime_explorer_provider_is_stored_on_websocket_app_state() -> None:
+    class _FakeWebSocket:
+        app = type("_App", (), {"state": State()})()
+
+    first = persona_ep.get_persona_runtime_explorer_provider(_FakeWebSocket())
+    second = persona_ep.get_persona_runtime_explorer_provider(_FakeWebSocket())
+
+    assert first is second
 
 
 def test_runtime_explorer_config_rejects_invalid_int_settings(monkeypatch) -> None:

@@ -10,6 +10,7 @@ import contextlib
 import hashlib
 import json
 import re
+import threading
 import time
 import uuid
 from collections import defaultdict, deque
@@ -463,13 +464,39 @@ def _persona_runtime_requires_safe_refusal_branch(user_message: str) -> bool:
     return any(marker in lowered for marker in markers)
 
 
-def _get_persona_runtime_explorer(config: RuntimeExplorerConfig) -> PersonaRuntimeExplorer:
-    scorers = _persona_runtime_scorers()
-    return PersonaRuntimeExplorer(
-        config=config,
-        candidate_generator=_persona_runtime_candidate_generator,
-        scorers=scorers,
-    )
+class PersonaRuntimeExplorerProvider:
+    """App-scoped cache for runtime explorer instances with matching dependencies."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._cache_key: tuple[Any, ...] | None = None
+        self._explorer: PersonaRuntimeExplorer | None = None
+
+    def get(self, config: RuntimeExplorerConfig) -> PersonaRuntimeExplorer:
+        scorers = _persona_runtime_scorers()
+        cache_key = (
+            config,
+            id(_persona_runtime_candidate_generator),
+            tuple(id(scorer) for scorer in (scorers or [])),
+        )
+        with self._lock:
+            if self._explorer is None or self._cache_key != cache_key:
+                self._explorer = PersonaRuntimeExplorer(
+                    config=config,
+                    candidate_generator=_persona_runtime_candidate_generator,
+                    scorers=scorers,
+                )
+                self._cache_key = cache_key
+            return self._explorer
+
+
+def get_persona_runtime_explorer_provider(ws: WebSocket) -> PersonaRuntimeExplorerProvider:
+    provider = getattr(ws.app.state, "persona_runtime_explorer_provider", None)
+    if isinstance(provider, PersonaRuntimeExplorerProvider):
+        return provider
+    provider = PersonaRuntimeExplorerProvider()
+    ws.app.state.persona_runtime_explorer_provider = provider
+    return provider
 
 
 def _sanitize_persona_runtime_plan(raw_plan: Any) -> dict[str, Any]:
@@ -523,6 +550,7 @@ def _apply_persona_runtime_explorer_to_plan(
     persona_state_fields: list[str],
     companion_usage: dict[str, Any],
     persona_exemplar_selection: dict[str, Any],
+    runtime_explorer_provider: PersonaRuntimeExplorerProvider | None = None,
 ) -> dict[str, Any]:
     config = _get_persona_runtime_explorer_config()
     if not config.enabled:
@@ -560,7 +588,8 @@ def _apply_persona_runtime_explorer_to_plan(
         "context_counts": policy_snapshot.get("context_counts", context_counts),
         "metadata": provider_context.get("metadata", {}),
     }
-    result = _get_persona_runtime_explorer(config).explore(runtime_context)
+    provider = runtime_explorer_provider or PersonaRuntimeExplorerProvider()
+    result = provider.get(config).explore(runtime_context)
     if result.safe_denial:
         return _runtime_safe_denial_plan(result.safe_denial)
     if result.selected_candidate:
@@ -4933,6 +4962,7 @@ async def persona_stream(
     ws: WebSocket,
     token: str | None = Query(default=None),
     api_key: str | None = Query(default=None),
+    runtime_explorer_provider: PersonaRuntimeExplorerProvider = Depends(get_persona_runtime_explorer_provider),
 ):
     """
     Bi-directional placeholder stream.
@@ -6696,6 +6726,7 @@ async def persona_stream(
                 persona_state_fields=persona_state_fields,
                 companion_usage=companion_usage,
                 persona_exemplar_selection=persona_exemplar_selection,
+                runtime_explorer_provider=runtime_explorer_provider,
             )
             runtime_explorer_selected_plan = bool(plan.pop(_PERSONA_RUNTIME_EXPLORER_SELECTED_KEY, False))
             plan_id = uuid.uuid4().hex
