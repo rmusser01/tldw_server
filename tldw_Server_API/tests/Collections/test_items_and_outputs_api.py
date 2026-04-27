@@ -715,6 +715,58 @@ async def test_outputs_delete_tts_history_failure_log_is_sanitized(monkeypatch):
     assert "/private/media.db" not in logged
 
 
+@pytest.mark.asyncio
+async def test_outputs_purge_enumerate_failure_log_is_sanitized(monkeypatch):
+    class _CollectionsDB:
+        user_id = 123
+
+    def _raise_enumerate_failure(*args: Any, **kwargs: Any):
+        raise RuntimeError("purge enumerate exploded at /private/outputs.db")
+
+    logger = _LoggerStub()
+    monkeypatch.setattr(outputs_endpoint, "logger", logger)
+    monkeypatch.setattr(outputs_endpoint, "find_outputs_to_purge", _raise_enumerate_failure)
+
+    result = await outputs_endpoint.purge_outputs(
+        payload=outputs_endpoint.OutputsPurgeRequest(delete_files=False),
+        current_user=User(id=123, username="tester", email=None, is_active=True),
+        cdb=_CollectionsDB(),
+    )
+
+    assert result == {"removed": 0, "files_deleted": 0}
+    assert logger.errors == ["outputs.purge: failed to enumerate purge candidates"]
+    logged = "\n".join(logger.errors)
+    assert "purge enumerate exploded" not in logged
+    assert "/private/outputs.db" not in logged
+
+
+@pytest.mark.asyncio
+async def test_outputs_purge_db_delete_failure_log_is_sanitized(monkeypatch):
+    class _CollectionsDB:
+        user_id = 123
+
+    def _raise_delete_failure(*args: Any, **kwargs: Any):
+        raise RuntimeError("purge delete exploded at /private/outputs.db")
+
+    logger = _LoggerStub()
+    monkeypatch.setattr(outputs_endpoint, "logger", logger)
+    monkeypatch.setattr(outputs_endpoint, "find_outputs_to_purge", lambda **_kwargs: {777: "output.md"})
+    monkeypatch.setattr(outputs_endpoint, "delete_outputs_by_ids", _raise_delete_failure)
+
+    result = await outputs_endpoint.purge_outputs(
+        payload=outputs_endpoint.OutputsPurgeRequest(delete_files=False),
+        current_user=User(id=123, username="tester", email=None, is_active=True),
+        cdb=_CollectionsDB(),
+    )
+
+    assert result == {"removed": 0, "files_deleted": 0}
+    assert logger.errors == ["outputs.purge: DB delete failed"]
+    logged = "\n".join(logger.errors)
+    assert "777" not in logged
+    assert "purge delete exploded" not in logged
+    assert "/private/outputs.db" not in logged
+
+
 def test_outputs_preview_with_inline_data_and_generate(client_with_user, tmp_path):
 
     client = client_with_user

@@ -816,8 +816,8 @@ async def purge_outputs(
         for rid, pth in candidate_paths.items():
             ids.add(rid)
             paths[rid] = pth
-    except _OUTPUTS_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"outputs.purge: failed to enumerate purge candidates: {e}")
+    except _OUTPUTS_NONCRITICAL_EXCEPTIONS:
+        logger.error("outputs.purge: failed to enumerate purge candidates")
 
     files_deleted = 0
     if payload.delete_files and ids:
@@ -844,8 +844,8 @@ async def purge_outputs(
     if ids:
         try:
             removed = delete_outputs_by_ids(cdb=cdb, user_id=cdb.user_id, ids=list(ids))
-        except _OUTPUTS_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"outputs.purge: DB delete failed: {e}")
+        except _OUTPUTS_NONCRITICAL_EXCEPTIONS:
+            logger.error("outputs.purge: DB delete failed")
             removed = 0
 
     return {"removed": removed, "files_deleted": files_deleted}
