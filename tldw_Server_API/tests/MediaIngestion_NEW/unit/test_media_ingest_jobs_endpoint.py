@@ -14,6 +14,14 @@ from tldw_Server_API.app.core.exceptions import BadRequestError
 pytestmark = pytest.mark.unit
 
 
+class _LoggerStub:
+    def __init__(self) -> None:
+        self.warnings: list[str] = []
+
+    def warning(self, message: str, *args: object, **kwargs: object) -> None:
+        self.warnings.append(message.format(*args, **kwargs) if args or kwargs else message)
+
+
 @pytest.fixture
 def media_ingest_jobs_client(monkeypatch, tmp_path):
     monkeypatch.setenv("TEST_MODE", "true")
@@ -119,9 +127,12 @@ def test_submit_media_ingest_jobs_sanitizes_upload_staging_failure(
 ):
     from tldw_Server_API.app.api.v1.endpoints.media import ingest_jobs
 
+    logger_stub = _LoggerStub()
+
     async def fake_save_uploaded_files(*_args, **_kwargs):
         raise RuntimeError("staging backend exploded at /private/cache/upload.txt")
 
+    monkeypatch.setattr(ingest_jobs, "logger", logger_stub)
     monkeypatch.setattr(
         ingest_jobs,
         "save_uploaded_files",
@@ -143,6 +154,9 @@ def test_submit_media_ingest_jobs_sanitizes_upload_staging_failure(
     body = resp.json()
     assert body["jobs"] == []
     assert body["errors"] == ["Upload staging failed"]
+    assert logger_stub.warnings == ["Failed to stage upload for ingest jobs"]
+    assert "staging backend exploded" not in str(logger_stub.warnings)
+    assert "/private/cache/upload.txt" not in str(logger_stub.warnings)
     assert "staging backend exploded" not in resp.text
     assert "/private/cache/upload.txt" not in resp.text
 

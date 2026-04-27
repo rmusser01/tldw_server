@@ -542,8 +542,8 @@ async def submit_media_ingest_jobs(
                 )
             except HTTPException:
                 raise
-            except Exception as exc:
-                logger.warning("Failed to stage upload for ingest jobs: {}", exc)
+            except Exception:
+                logger.warning("Failed to stage upload for ingest jobs")
                 errors.append("Upload staging failed")
                 if temp_dir_path:
                     _cleanup_dir(temp_dir_path)
