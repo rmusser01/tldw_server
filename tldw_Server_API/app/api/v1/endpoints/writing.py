@@ -163,12 +163,12 @@ def _handle_db_errors(exc: Exception, entity_label: str) -> NoReturn:
         logger.warning("Conflict error for {}: {}", entity_label, exc)
         raise map_db_error_to_http(exc) from exc
     if isinstance(exc, CharactersRAGDBError):
-        logger.error("Database error for {}: {}", entity_label, exc)
+        logger.error("Database error while processing writing entity")
         raise map_db_error_to_http(
             exc,
             default_detail=f"Database error while processing {entity_label}",
         ) from exc
-    logger.exception("Unexpected error for {}: {}", entity_label, exc)
+    logger.error("Unexpected error while processing writing entity")
     raise HTTPException(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         detail=f"Unexpected error while processing {entity_label}",
