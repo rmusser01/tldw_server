@@ -177,6 +177,12 @@ class TestCharacterStoreSearch:
         results = store.search_character_cards_by_tags(["legacy-tag"])
         assert {row["id"] for row in results} == {card_id}
 
+    def test_query_by_tags_handles_legacy_non_json_tags(self, store):
+        card_id = store.add_character_card({"name": "Legacy Query Tagged", "tags": "legacy-tag"})
+        results, total = store.query_character_cards(tags=["legacy-tag"])
+        assert total == 1
+        assert {row["id"] for row in results} == {card_id}
+
     def test_manage_tags_rename_updates_tag_search_results(self, store):
         first_id = store.add_character_card({"name": "Tagged One", "tags": ["old-tag", "shared"]})
         second_id = store.add_character_card({"name": "Tagged Two", "tags": ["shared"]})
@@ -202,3 +208,34 @@ class TestCharacterStoreSearch:
         assert set(untouched["tags"]) == {"shared"}
         assert store.search_character_cards_by_tags(["old-tag"]) == []
         assert {row["id"] for row in store.search_character_cards_by_tags(["new-tag"])} == {first_id}
+
+    def test_manage_tags_limit_applies_to_matching_cards(self, store):
+        store.add_character_card({"name": "A Untagged", "tags": ["shared"]})
+        tagged_id = store.add_character_card({"name": "B Tagged", "tags": ["old-tag"]})
+
+        summary = store.manage_character_tags(
+            operation="rename",
+            source_tag="old-tag",
+            target_tag="new-tag",
+            limit=1,
+        )
+
+        assert summary["matched_count"] == 1
+        assert summary["updated_count"] == 1
+        assert summary["updated_character_ids"] == [tagged_id]
+
+    def test_manage_tags_handles_legacy_non_json_tags(self, store):
+        card_id = store.add_character_card({"name": "Legacy Manage Tagged", "tags": "legacy-tag"})
+
+        summary = store.manage_character_tags(
+            operation="rename",
+            source_tag="legacy-tag",
+            target_tag="new-tag",
+        )
+
+        assert summary["matched_count"] == 1
+        assert summary["updated_count"] == 1
+        assert summary["updated_character_ids"] == [card_id]
+        renamed = store.get_character_card_by_id(card_id)
+        assert renamed is not None
+        assert renamed["tags"] == ["new-tag"]

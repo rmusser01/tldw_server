@@ -376,13 +376,21 @@ class CharacterStore:
                         "SELECT 1 FROM json_each(cc.tags) je "
                         "WHERE LOWER(TRIM(COALESCE(je.value, ''))) = ?"
                         ")) "
+                        "OR LOWER(TRIM(COALESCE(cc.tags, ''))) = ? "
                         "OR LOWER(COALESCE(cc.tags, '')) LIKE ?"
                         ")"
                     )
                     params.append(tag)
+                    params.append(tag)
                     params.append(f'%"{tag}"%')
                 else:
-                    tag_clauses.append("LOWER(COALESCE(cc.tags, '')) LIKE ?")
+                    tag_clauses.append(
+                        "("
+                        "LOWER(TRIM(COALESCE(cc.tags, ''))) = ? OR "
+                        "LOWER(COALESCE(cc.tags, '')) LIKE ?"
+                        ")"
+                    )
+                    params.append(tag)
                     params.append(f'%"{tag}"%')
             joiner = " AND " if match_all_tags else " OR "
             filters.append("(" + joiner.join(tag_clauses) + ")")
@@ -503,6 +511,15 @@ class CharacterStore:
     # Tag normalisation helpers
     # ------------------------------------------------------------------
 
+    def _get_raw_character_tags(self, character_id: int) -> Any:
+        """Return the stored tags value without JSON deserialization."""
+        cursor = self._db.execute_query(
+            "SELECT tags FROM character_cards WHERE id = ?",
+            (character_id,),
+        )
+        row = cursor.fetchone()
+        return dict(row).get("tags") if row else None
+
     @staticmethod
     def _normalize_character_tags_for_operation(tags_value: Any) -> list[str]:
         """Normalize tags and enforce a single reserved character-folder token."""
@@ -607,71 +624,65 @@ class CharacterStore:
             raise InputError("target_tag is required for rename and merge operations")  # noqa: TRY003
 
         normalized_limit = max(1, int(limit))
-        all_cards: list[dict[str, Any]] = []
-        offset = 0
-        batch_size = min(500, normalized_limit)
-        while len(all_cards) < normalized_limit:
-            batch = self.list_character_cards(limit=batch_size, offset=offset)
-            if not batch:
-                break
-            all_cards.extend(batch)
-            if len(batch) < batch_size:
-                break
-            offset += len(batch)
-            remaining = normalized_limit - len(all_cards)
-            if remaining <= 0:
-                break
-            batch_size = min(500, remaining)
+        candidate_cards, _ = self.query_character_cards(
+            tags=[normalized_source],
+            include_deleted=False,
+            limit=normalized_limit,
+        )
 
         matched_count = 0
         updated_character_ids: list[int] = []
         failed_character_ids: list[int] = []
 
-        for card in all_cards:
-            card_id_raw = card.get("id")
-            card_version_raw = card.get("version")
+        with self._db.transaction():
+            for card in candidate_cards:
+                card_id_raw = card.get("id")
+                card_version_raw = card.get("version")
 
-            try:
-                card_id = int(card_id_raw)
-                card_version = int(card_version_raw)
-            except (TypeError, ValueError):
-                logger.warning(
-                    "Skipping character tag operation for record with invalid id/version: id={}, version={}",
-                    card_id_raw,
-                    card_version_raw,
-                )
-                continue
+                try:
+                    card_id = int(card_id_raw)
+                    card_version = int(card_version_raw)
+                except (TypeError, ValueError):
+                    logger.warning(
+                        "Skipping character tag operation for record with invalid id/version: id={}, version={}",
+                        card_id_raw,
+                        card_version_raw,
+                    )
+                    continue
 
-            existing_tags = self._normalize_character_tags_for_operation(card.get("tags"))
-            if normalized_source not in existing_tags:
-                continue
+                tags_value = card.get("tags")
+                if tags_value is None:
+                    tags_value = self._get_raw_character_tags(card_id)
+                existing_tags = self._normalize_character_tags_for_operation(tags_value)
+                if normalized_source not in existing_tags:
+                    continue
 
-            matched_count += 1
-            next_tags = self._apply_character_tag_operation_to_list(
-                existing_tags,
-                normalized_operation,
-                normalized_source,
-                normalized_target,
-            )
-
-            if next_tags == existing_tags:
-                continue
-
-            try:
-                self.update_character_card(
-                    card_id,
-                    {"tags": next_tags},
-                    expected_version=card_version,
-                )
-                updated_character_ids.append(card_id)
-            except (ConflictError, InputError, CharactersRAGDBError) as exc:
-                logger.warning(
-                    "Failed to apply '{}' tag operation for character {}: {}",
+                matched_count += 1
+                next_tags = self._apply_character_tag_operation_to_list(
+                    existing_tags,
                     normalized_operation,
-                    card_id,
-                    exc,
+                    normalized_source,
+                    normalized_target,
                 )
-                failed_character_ids.append(card_id)
+
+                if next_tags == existing_tags:
+                    continue
+
+                try:
+                    self.update_character_card(
+                        card_id,
+                        {"tags": next_tags},
+                        expected_version=card_version,
+                    )
+                    updated_character_ids.append(card_id)
+                except (ConflictError, InputError, CharactersRAGDBError) as exc:
+                    logger.warning(
+                        "Failed to apply '{}' tag operation for character {}: {}",
+                        normalized_operation,
+                        card_id,
+                        exc,
+                    )
+                    failed_character_ids.append(card_id)
 
         return {
             "operation": normalized_operation,
