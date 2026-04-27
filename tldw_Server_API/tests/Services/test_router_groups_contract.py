@@ -444,6 +444,36 @@ def test_iter_content_router_specs_uses_canonical_rag_key_and_single_web_scrapin
     assert web_scraping_specs[0].prefix == "/api/v1"
 
 
+def test_qodo_reviewed_router_policy_regressions(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install_fake_router_module(
+        monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.rag_unified",
+        path="/api/v1/rag/search",
+    )
+    _install_fake_router_module(
+        monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.llm_providers",
+        path="/llm/providers",
+    )
+    _install_fake_router_module(
+        monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.vlm",
+        path="/vlm/backends",
+    )
+
+    content_specs = list(iter_content_router_specs())
+    core_specs = list(iter_core_router_specs())
+    by_content_path = {_first_router_path(spec.router): spec for spec in content_specs}
+    by_core_path = {_first_router_path(spec.router): spec for spec in core_specs}
+    main_source = _main_source_text()
+
+    assert by_content_path["/api/v1/rag/search"].route_key == "rag-unified"
+    assert by_core_path["/llm/providers"].route_key == "llm"
+    assert by_core_path["/vlm/backends"].route_key == "vlm"
+    assert "from tldw_Server_API.app.api.v1.endpoints.vlm import router as vlm_router" not in main_source
+    assert "app.include_router(vlm_router" not in main_source
+
+
 def test_iter_admin_router_specs_keeps_independent_guardian_imports(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
