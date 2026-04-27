@@ -138,13 +138,13 @@ def _serialize_tts_caps_for_health(tts_service: TTSServiceV2, caps: Any) -> Any:
         dumped = model_dump_compat(caps)
         if isinstance(dumped, dict):
             return dumped
-    except Exception as dump_error:
-        logger.debug("TTS health capabilities model dump failed", exc_info=dump_error)
+    except Exception:
+        logger.debug("TTS health capabilities model dump failed")
     try:
         if is_dataclass(caps):
             return asdict(caps)
-    except Exception as dataclass_error:
-        logger.debug("TTS health capabilities dataclass conversion failed", exc_info=dataclass_error)
+    except Exception:
+        logger.debug("TTS health capabilities dataclass conversion failed")
     return None
 
 

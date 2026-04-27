@@ -195,6 +195,53 @@ def test_tts_health_capability_serializer_failure_log_is_sanitized(monkeypatch):
     assert not fake_logger.debug.call_args.kwargs
 
 
+def test_tts_health_capability_model_dump_failure_log_is_sanitized(monkeypatch):
+    fake_logger = MagicMock()
+    monkeypatch.setattr(audio_health, "logger", fake_logger)
+    monkeypatch.setattr(audio_health, "is_dataclass", lambda _caps: False)
+
+    def _fail_model_dump(_caps):
+        raise RuntimeError("capability model dump exploded at /private/tts-caps.json")
+
+    monkeypatch.setattr(audio_health, "model_dump_compat", _fail_model_dump)
+
+    result = audio_health._serialize_tts_caps_for_health(
+        object(),
+        object(),
+    )
+
+    assert result is None
+    fake_logger.debug.assert_called_once()
+    message = fake_logger.debug.call_args.args[0]
+    assert "exploded" not in message
+    assert "/private/" not in message
+    assert not fake_logger.debug.call_args.kwargs
+
+
+def test_tts_health_capability_dataclass_failure_log_is_sanitized(monkeypatch):
+    fake_logger = MagicMock()
+    monkeypatch.setattr(audio_health, "logger", fake_logger)
+    monkeypatch.setattr(audio_health, "model_dump_compat", lambda _caps: None)
+    monkeypatch.setattr(audio_health, "is_dataclass", lambda _caps: True)
+
+    def _fail_asdict(_caps):
+        raise RuntimeError("capability dataclass exploded at /private/tts-caps.json")
+
+    monkeypatch.setattr(audio_health, "asdict", _fail_asdict)
+
+    result = audio_health._serialize_tts_caps_for_health(
+        object(),
+        object(),
+    )
+
+    assert result is None
+    fake_logger.debug.assert_called_once()
+    message = fake_logger.debug.call_args.args[0]
+    assert "exploded" not in message
+    assert "/private/" not in message
+    assert not fake_logger.debug.call_args.kwargs
+
+
 @pytest.mark.asyncio
 async def test_get_tts_health_derives_omnivoice_backoff_state_from_supervisor(monkeypatch):
     class _FakeRegistry:
