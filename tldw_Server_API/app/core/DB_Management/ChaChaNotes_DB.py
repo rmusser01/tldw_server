@@ -13600,6 +13600,395 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         message = str(error).lower()
         return "unique constraint" in message or "duplicate key" in message
 
+    # ----------------------
+    # Skill registry
+    # ----------------------
+    def _ensure_skill_registry_table(self) -> None:
+        """Ensure the skill_registry table exists for the active backend."""
+        if self.backend_type == BackendType.SQLITE:
+            self.execute_query(
+                """
+                CREATE TABLE IF NOT EXISTS skill_registry (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL UNIQUE,
+                    description TEXT,
+                    argument_hint TEXT,
+                    disable_model_invocation BOOLEAN DEFAULT 0,
+                    user_invocable BOOLEAN DEFAULT 1,
+                    allowed_tools TEXT,
+                    model TEXT,
+                    context TEXT DEFAULT 'inline',
+                    directory_path TEXT NOT NULL,
+                    last_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    file_hash TEXT,
+                    uuid TEXT UNIQUE NOT NULL,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    deleted BOOLEAN DEFAULT 0,
+                    version INTEGER NOT NULL DEFAULT 1
+                )
+                """,
+                script=False,
+                commit=True,
+            )
+            self.execute_query(
+                "CREATE INDEX IF NOT EXISTS idx_skill_name ON skill_registry(name)",
+                script=False,
+                commit=True,
+            )
+            self.execute_query(
+                "CREATE INDEX IF NOT EXISTS idx_skill_user_invocable ON skill_registry(user_invocable)",
+                script=False,
+                commit=True,
+            )
+            self.execute_query(
+                "CREATE INDEX IF NOT EXISTS idx_skill_deleted ON skill_registry(deleted)",
+                script=False,
+                commit=True,
+            )
+            return
+
+        if self.backend_type == BackendType.POSTGRESQL:
+            self.backend.execute(
+                """
+                CREATE TABLE IF NOT EXISTS skill_registry (
+                    id SERIAL PRIMARY KEY,
+                    name TEXT NOT NULL UNIQUE,
+                    description TEXT,
+                    argument_hint TEXT,
+                    disable_model_invocation BOOLEAN DEFAULT FALSE,
+                    user_invocable BOOLEAN DEFAULT TRUE,
+                    allowed_tools TEXT,
+                    model TEXT,
+                    context TEXT DEFAULT 'inline',
+                    directory_path TEXT NOT NULL,
+                    last_modified TIMESTAMP NOT NULL DEFAULT NOW(),
+                    file_hash TEXT,
+                    uuid TEXT UNIQUE NOT NULL,
+                    created_at TIMESTAMP DEFAULT NOW(),
+                    deleted BOOLEAN DEFAULT FALSE,
+                    version INTEGER NOT NULL DEFAULT 1
+                )
+                """
+            )
+            self.backend.execute("CREATE INDEX IF NOT EXISTS idx_skill_name ON skill_registry(name)")
+            self.backend.execute(
+                "CREATE INDEX IF NOT EXISTS idx_skill_user_invocable ON skill_registry(user_invocable)"
+            )
+            self.backend.execute("CREATE INDEX IF NOT EXISTS idx_skill_deleted ON skill_registry(deleted)")
+            return
+
+        raise NotImplementedError(
+            f"skill_registry table creation not supported for backend {self.backend_type.value}"
+        )
+
+    def _coerce_skill_datetime(self, value: Any) -> datetime | None:
+        """Best-effort conversion of database timestamps to datetime."""
+        if value is None:
+            return None
+        if isinstance(value, datetime):
+            return value
+        if isinstance(value, str):
+            try:
+                return datetime.fromisoformat(value.replace("Z", "+00:00"))
+            except ValueError:
+                return None
+        return None
+
+    def _skill_row_to_dict(self, row: Any) -> dict[str, Any] | None:
+        """Convert a skill_registry row to a dict with JSON fields decoded."""
+        if not row:
+            return None
+        item = dict(row)
+        allowed_tools = item.get("allowed_tools")
+        if isinstance(allowed_tools, str):
+            try:
+                item["allowed_tools"] = json.loads(allowed_tools)
+            except json.JSONDecodeError:
+                item["allowed_tools"] = [tool.strip() for tool in allowed_tools.split(",") if tool.strip()]
+        elif allowed_tools is None:
+            item["allowed_tools"] = None
+        else:
+            item["allowed_tools"] = allowed_tools
+
+        item["disable_model_invocation"] = bool(item.get("disable_model_invocation", False))
+        item["user_invocable"] = bool(item.get("user_invocable", True))
+        item["deleted"] = bool(item.get("deleted", False))
+        item["created_at"] = self._coerce_skill_datetime(item.get("created_at"))
+        item["last_modified"] = self._coerce_skill_datetime(item.get("last_modified"))
+        return item
+
+    def _skill_bool_value(self, value: bool) -> bool | int:
+        return value if self.backend_type == BackendType.POSTGRESQL else int(value)
+
+    def list_skill_registry(
+        self,
+        *,
+        include_hidden: bool = False,
+        include_deleted: bool = False,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        """List skill registry entries with optional filters."""
+        self._ensure_skill_registry_table()
+        clauses = []
+        params: list[Any] = []
+        if not include_deleted:
+            clauses.append("deleted = ?")
+            params.append(self._skill_bool_value(False))
+        if not include_hidden:
+            clauses.append("user_invocable = ?")
+            params.append(self._skill_bool_value(True))
+        where_sql = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        query = (
+            "SELECT * FROM skill_registry "  # nosec B608
+            f"{where_sql} "
+            "ORDER BY name ASC LIMIT ? OFFSET ?"
+        )
+        params.extend([limit, offset])
+        try:
+            cursor = self.execute_query(query, tuple(params))
+            return [item for row in cursor.fetchall() if (item := self._skill_row_to_dict(row))]
+        except CharactersRAGDBError as exc:
+            logger.error(f"Database error listing skills: {exc}")
+            raise
+
+    def count_skill_registry(
+        self,
+        *,
+        include_hidden: bool = False,
+        include_deleted: bool = False,
+    ) -> int:
+        """Return count of skills in registry."""
+        self._ensure_skill_registry_table()
+        clauses = []
+        params: list[Any] = []
+        if not include_deleted:
+            clauses.append("deleted = ?")
+            params.append(self._skill_bool_value(False))
+        if not include_hidden:
+            clauses.append("user_invocable = ?")
+            params.append(self._skill_bool_value(True))
+        where_sql = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        query = f"SELECT COUNT(*) AS cnt FROM skill_registry {where_sql}"  # nosec B608
+        try:
+            cursor = self.execute_query(query, tuple(params))
+            row = cursor.fetchone()
+            return int(row["cnt"]) if row else 0
+        except CharactersRAGDBError as exc:
+            logger.error(f"Database error counting skills: {exc}")
+            raise
+
+    def get_skill_registry(self, name: str, *, include_deleted: bool = False) -> dict[str, Any] | None:
+        """Fetch a skill registry entry by name."""
+        self._ensure_skill_registry_table()
+        query = "SELECT * FROM skill_registry WHERE name = ?"
+        params: list[Any] = [name]
+        if not include_deleted:
+            query += " AND deleted = ?"
+            params.append(self._skill_bool_value(False))
+        try:
+            cursor = self.execute_query(query, tuple(params))
+            return self._skill_row_to_dict(cursor.fetchone())
+        except CharactersRAGDBError as exc:
+            logger.error(f"Database error fetching skill '{name}': {exc}")
+            raise
+
+    def insert_skill_registry(self, skill_data: dict[str, Any]) -> str:
+        """Insert a new skill registry row and return its UUID."""
+        self._ensure_skill_registry_table()
+        name = str(skill_data.get("name") or "").strip().lower()
+        if not name:
+            raise InputError("Skill name is required.")  # noqa: TRY003
+        directory_path = str(skill_data.get("directory_path") or "")
+        if not directory_path:
+            raise InputError("directory_path is required for skill registry.")  # noqa: TRY003
+
+        now = self._get_current_utc_timestamp_iso()
+        skill_uuid = str(skill_data.get("uuid") or self._generate_uuid())
+        allowed_tools_json = self._ensure_json_string(skill_data.get("allowed_tools"))
+
+        query = (
+            "INSERT INTO skill_registry ("
+            "name, description, argument_hint, disable_model_invocation, user_invocable, "
+            "allowed_tools, model, context, directory_path, last_modified, file_hash, uuid, "
+            "created_at, deleted, version"
+            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        )
+        params = (
+            name,
+            skill_data.get("description"),
+            skill_data.get("argument_hint"),
+            self._skill_bool_value(bool(skill_data.get("disable_model_invocation", False))),
+            self._skill_bool_value(bool(skill_data.get("user_invocable", True))),
+            allowed_tools_json,
+            skill_data.get("model"),
+            skill_data.get("context", "inline"),
+            directory_path,
+            now,
+            skill_data.get("file_hash"),
+            skill_uuid,
+            skill_data.get("created_at") or now,
+            self._skill_bool_value(bool(skill_data.get("deleted", False))),
+            int(skill_data.get("version", 1)),
+        )
+        try:
+            self.execute_query(query, params, commit=True)
+            return skill_uuid
+        except sqlite3.IntegrityError as exc:
+            if "unique constraint failed: skill_registry.name" in str(exc).lower():
+                raise ConflictError(
+                    f"Skill '{name}' already exists.",
+                    entity="skill_registry",
+                    entity_id=name,
+                ) from exc
+            if "unique constraint failed: skill_registry.uuid" in str(exc).lower():
+                raise ConflictError(
+                    "Skill UUID already exists.",
+                    entity="skill_registry",
+                    entity_id=skill_uuid,
+                ) from exc
+            raise CharactersRAGDBError(f"Database integrity error adding skill '{name}': {exc}") from exc
+        except BackendDatabaseError as exc:
+            if self._is_unique_violation(exc):
+                raise ConflictError(
+                    f"Skill '{name}' already exists.",
+                    entity="skill_registry",
+                    entity_id=name,
+                ) from exc
+            raise CharactersRAGDBError(f"Database integrity error adding skill '{name}': {exc}") from exc
+
+    def update_skill_registry(
+        self,
+        name: str,
+        update_data: dict[str, Any],
+        expected_version: int,
+    ) -> bool:
+        """Update a skill registry row using optimistic locking."""
+        if not update_data:
+            raise InputError(f"No data provided for update of skill '{name}'.")  # noqa: TRY003
+
+        self._ensure_skill_registry_table()
+        now = self._get_current_utc_timestamp_iso()
+        allowed_fields = {
+            "description",
+            "argument_hint",
+            "disable_model_invocation",
+            "user_invocable",
+            "allowed_tools",
+            "model",
+            "context",
+            "directory_path",
+            "file_hash",
+            "deleted",
+        }
+
+        set_parts: list[str] = []
+        params: list[Any] = []
+        for key, value in update_data.items():
+            if key not in allowed_fields:
+                continue
+            if key == "allowed_tools":
+                params.append(self._ensure_json_string(value))
+                set_parts.append("allowed_tools = ?")
+            elif key in {"disable_model_invocation", "user_invocable", "deleted"}:
+                params.append(self._skill_bool_value(bool(value)))
+                set_parts.append(f"{key} = ?")
+            else:
+                params.append(value)
+                set_parts.append(f"{key} = ?")
+
+        if not set_parts:
+            raise InputError(f"No supported data provided for update of skill '{name}'.")  # noqa: TRY003
+
+        set_parts.extend(["last_modified = ?", "version = version + 1"])
+        params.append(now)
+        params.extend([name, expected_version])
+        query = (
+            f"UPDATE skill_registry SET {', '.join(set_parts)} "  # nosec B608
+            "WHERE name = ? AND version = ? AND deleted = ?"
+        )
+        params.append(self._skill_bool_value(False))
+
+        try:
+            with self.transaction() as conn:
+                current_db_version = self._get_current_db_version(conn, "skill_registry", "name", name)
+                if current_db_version != expected_version:
+                    raise ConflictError(
+                        f"Skill '{name}' was modified (db has {current_db_version}, expected {expected_version}).",
+                        entity="skill_registry",
+                        entity_id=name,
+                    )
+
+                prepared_query, prepared_params = self._prepare_backend_statement(query, tuple(params))
+                cursor = conn.execute(prepared_query, prepared_params)
+                if cursor.rowcount == 0:
+                    raise ConflictError(
+                        f"Skill '{name}' update affected 0 rows.",
+                        entity="skill_registry",
+                        entity_id=name,
+                    )
+                return True
+        except ConflictError:
+            raise
+        except CharactersRAGDBError as exc:
+            logger.error(f"Database error updating skill '{name}': {exc}")
+            raise
+
+    def mark_skill_registry_deleted(self, name: str, expected_version: int) -> bool:
+        """Soft-delete a skill registry row using optimistic locking."""
+        self._ensure_skill_registry_table()
+        now = self._get_current_utc_timestamp_iso()
+        next_version = expected_version + 1
+
+        query = (
+            "UPDATE skill_registry SET deleted = ?, last_modified = ?, version = ? "
+            "WHERE name = ? AND version = ? AND deleted = ?"
+        )
+        params = (
+            self._skill_bool_value(True),
+            now,
+            next_version,
+            name,
+            expected_version,
+            self._skill_bool_value(False),
+        )
+
+        try:
+            with self.transaction() as conn:
+                try:
+                    current_db_version = self._get_current_db_version(conn, "skill_registry", "name", name)
+                except ConflictError:
+                    check_deleted = conn.execute(
+                        "SELECT deleted, version FROM skill_registry WHERE name = ?",
+                        (name,),
+                    ).fetchone()
+                    if check_deleted and check_deleted["deleted"]:
+                        logger.info("Skill '{}' already deleted; soft-delete is idempotent.", name)
+                        return True
+                    raise
+
+                if current_db_version != expected_version:
+                    raise ConflictError(
+                        f"Skill '{name}' version mismatch (db has {current_db_version}, expected {expected_version}).",
+                        entity="skill_registry",
+                        entity_id=name,
+                    )
+
+                prepared_query, prepared_params = self._prepare_backend_statement(query, params)
+                cursor = conn.execute(prepared_query, prepared_params)
+                if cursor.rowcount == 0:
+                    raise ConflictError(
+                        f"Skill '{name}' delete affected 0 rows.",
+                        entity="skill_registry",
+                        entity_id=name,
+                    )
+                return True
+        except ConflictError:
+            raise
+        except CharactersRAGDBError as exc:
+            logger.error(f"Database error deleting skill '{name}': {exc}")
+            raise
+
     def _deserialize_row_fields(self, row: sqlite3.Row, json_fields: list[str]) -> dict[str, Any] | None:
         """
         Converts a sqlite3.Row object to a dictionary, deserializing specified JSON fields.
