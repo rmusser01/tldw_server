@@ -736,8 +736,10 @@ async def test_import_dictionary_maps_conflict_error(monkeypatch: pytest.MonkeyP
 
 @pytest.mark.asyncio
 async def test_import_dictionary_maps_database_error(monkeypatch: pytest.MonkeyPatch):
+    logger_stub = _patch_endpoint_logger(monkeypatch)
+
     def _import_from_markdown(self, *_args, **_kwargs):
-        raise CharactersRAGDBError("driver failed")
+        raise _database_failure()
 
     _patch_service(monkeypatch, import_from_markdown=_import_from_markdown)
 
@@ -752,6 +754,30 @@ async def test_import_dictionary_maps_database_error(monkeypatch: pytest.MonkeyP
 
     assert exc_info.value.status_code == 500
     assert exc_info.value.detail == "Failed to import dictionary"
+    _assert_sanitized_log_call(logger_stub, "Error importing dictionary")
+
+
+@pytest.mark.asyncio
+async def test_import_dictionary_sanitizes_unexpected_error_log(monkeypatch: pytest.MonkeyPatch):
+    logger_stub = _patch_endpoint_logger(monkeypatch)
+
+    def _import_from_markdown(self, *_args, **_kwargs):
+        raise _unexpected_failure()
+
+    _patch_service(monkeypatch, import_from_markdown=_import_from_markdown)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await chat_dictionary_endpoints.import_dictionary(
+            import_request=chat_dictionary_endpoints.ImportDictionaryRequest(
+                name="Imported Dictionary",
+                content="# dictionary",
+            ),
+            db=object(),
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "Failed to import dictionary"
+    _assert_sanitized_log_call(logger_stub, "Error importing dictionary")
 
 
 @pytest.mark.asyncio
@@ -780,11 +806,13 @@ async def test_export_dictionary_maps_input_error(monkeypatch: pytest.MonkeyPatc
 
 @pytest.mark.asyncio
 async def test_export_dictionary_maps_database_error(monkeypatch: pytest.MonkeyPatch):
+    logger_stub = _patch_endpoint_logger(monkeypatch)
+
     def _get_dictionary(self, *_args, **_kwargs):
         return {"id": 42, "name": "Dictionary"}
 
     def _export_to_markdown(self, *_args, **_kwargs):
-        raise CharactersRAGDBError("driver failed")
+        raise _database_failure()
 
     _patch_service(
         monkeypatch,
@@ -800,12 +828,42 @@ async def test_export_dictionary_maps_database_error(monkeypatch: pytest.MonkeyP
 
     assert exc_info.value.status_code == 500
     assert exc_info.value.detail == "Failed to export dictionary"
+    _assert_sanitized_log_call(logger_stub, "Error exporting dictionary")
+
+
+@pytest.mark.asyncio
+async def test_export_dictionary_sanitizes_unexpected_error_log(monkeypatch: pytest.MonkeyPatch):
+    logger_stub = _patch_endpoint_logger(monkeypatch)
+
+    def _get_dictionary(self, *_args, **_kwargs):
+        return {"id": 42, "name": "Dictionary"}
+
+    def _export_to_markdown(self, *_args, **_kwargs):
+        raise _unexpected_failure()
+
+    _patch_service(
+        monkeypatch,
+        get_dictionary=_get_dictionary,
+        export_to_markdown=_export_to_markdown,
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await chat_dictionary_endpoints.export_dictionary(
+            dictionary_id=42,
+            db=object(),
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "Failed to export dictionary"
+    _assert_sanitized_log_call(logger_stub, "Error exporting dictionary")
 
 
 @pytest.mark.asyncio
 async def test_export_dictionary_json_maps_database_error(monkeypatch: pytest.MonkeyPatch):
+    logger_stub = _patch_endpoint_logger(monkeypatch)
+
     def _export_to_json(self, *_args, **_kwargs):
-        raise CharactersRAGDBError("driver failed")
+        raise _database_failure()
 
     _patch_service(monkeypatch, export_to_json=_export_to_json)
 
@@ -817,6 +875,27 @@ async def test_export_dictionary_json_maps_database_error(monkeypatch: pytest.Mo
 
     assert exc_info.value.status_code == 500
     assert exc_info.value.detail == "Failed to export dictionary JSON"
+    _assert_sanitized_log_call(logger_stub, "Error exporting dictionary JSON")
+
+
+@pytest.mark.asyncio
+async def test_export_dictionary_json_sanitizes_unexpected_error_log(monkeypatch: pytest.MonkeyPatch):
+    logger_stub = _patch_endpoint_logger(monkeypatch)
+
+    def _export_to_json(self, *_args, **_kwargs):
+        raise _unexpected_failure()
+
+    _patch_service(monkeypatch, export_to_json=_export_to_json)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await chat_dictionary_endpoints.export_dictionary_json(
+            dictionary_id=42,
+            db=object(),
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "Failed to export dictionary JSON"
+    _assert_sanitized_log_call(logger_stub, "Error exporting dictionary JSON")
 
 
 @pytest.mark.asyncio
@@ -840,8 +919,10 @@ async def test_import_dictionary_json_maps_conflict_error(monkeypatch: pytest.Mo
 
 @pytest.mark.asyncio
 async def test_import_dictionary_json_maps_database_error(monkeypatch: pytest.MonkeyPatch):
+    logger_stub = _patch_endpoint_logger(monkeypatch)
+
     def _import_from_json(self, *_args, **_kwargs):
-        raise CharactersRAGDBError("driver failed")
+        raise _database_failure()
 
     _patch_service(monkeypatch, import_from_json=_import_from_json)
 
@@ -855,6 +936,29 @@ async def test_import_dictionary_json_maps_database_error(monkeypatch: pytest.Mo
 
     assert exc_info.value.status_code == 500
     assert exc_info.value.detail == "Failed to import dictionary JSON"
+    _assert_sanitized_log_call(logger_stub, "Error importing dictionary JSON")
+
+
+@pytest.mark.asyncio
+async def test_import_dictionary_json_sanitizes_unexpected_error_log(monkeypatch: pytest.MonkeyPatch):
+    logger_stub = _patch_endpoint_logger(monkeypatch)
+
+    def _import_from_json(self, *_args, **_kwargs):
+        raise _unexpected_failure()
+
+    _patch_service(monkeypatch, import_from_json=_import_from_json)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await chat_dictionary_endpoints.import_dictionary_json(
+            import_request=chat_dictionary_endpoints.ImportDictionaryJSONRequest(
+                data={"name": "Imported Dictionary", "entries": []},
+            ),
+            db=object(),
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "Failed to import dictionary JSON"
+    _assert_sanitized_log_call(logger_stub, "Error importing dictionary JSON")
 
 
 @pytest.mark.asyncio

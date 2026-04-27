@@ -1112,10 +1112,10 @@ async def import_dictionary(
         )
     except (InputError, ConflictError, CharactersRAGDBError) as e:
         if isinstance(e, CharactersRAGDBError) and not isinstance(e, (ConflictError, InputError)):
-            logger.error("Error importing dictionary: {}", e)
+            logger.error("Error importing dictionary")
         raise map_db_error_to_http(e, default_detail="Failed to import dictionary") from e
     except Exception as e:
-        logger.error(f"Error importing dictionary: {e}")
+        logger.error("Error importing dictionary")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to import dictionary",
@@ -1147,12 +1147,12 @@ async def export_dictionary(
         entries = service.get_entries(dictionary_id=dictionary_id, active_only=False) if dict_data else []
     except (InputError, CharactersRAGDBError) as e:
         if isinstance(e, CharactersRAGDBError) and not isinstance(e, InputError):
-            logger.error("Error exporting dictionary: {}", e)
+            logger.error("Error exporting dictionary")
         raise map_db_error_to_http(e, default_detail="Failed to export dictionary") from e
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error exporting dictionary: {e}")
+        logger.error("Error exporting dictionary")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to export dictionary",
@@ -1189,12 +1189,12 @@ async def export_dictionary_json(
         return ExportDictionaryJSONResponse(**data)
     except (InputError, CharactersRAGDBError) as e:
         if isinstance(e, CharactersRAGDBError) and not isinstance(e, InputError):
-            logger.error("Error exporting dictionary JSON: {}", e)
+            logger.error("Error exporting dictionary JSON")
         raise map_db_error_to_http(e, default_detail="Failed to export dictionary JSON") from e
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error exporting dictionary JSON: {e}")
+        logger.error("Error exporting dictionary JSON")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to export dictionary JSON",
@@ -1229,10 +1229,10 @@ async def import_dictionary_json(
         )
     except (InputError, ConflictError, CharactersRAGDBError) as e:
         if isinstance(e, CharactersRAGDBError) and not isinstance(e, (ConflictError, InputError)):
-            logger.error("Error importing dictionary JSON: {}", e)
+            logger.error("Error importing dictionary JSON")
         raise map_db_error_to_http(e, default_detail="Failed to import dictionary JSON") from e
     except Exception as e:
-        logger.error(f"Error importing dictionary JSON: {e}")
+        logger.error("Error importing dictionary JSON")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to import dictionary JSON",
