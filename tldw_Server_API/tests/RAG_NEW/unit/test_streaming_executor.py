@@ -4,11 +4,12 @@ import pytest
 
 from tldw_Server_API.app.core.RAG.rag_service.request_resolution import ResolvedRAGRequest
 from tldw_Server_API.app.core.RAG.rag_service.retrieval_plan import RetrievalPlan
-from tldw_Server_API.app.core.RAG.rag_service.streaming_executor import stream_rag_events
+from tldw_Server_API.app.core.RAG.rag_service.streaming_executor import (
+    _PUBLIC_STREAM_ERROR_MESSAGE,
+    stream_rag_events,
+)
 from tldw_Server_API.app.core.RAG.rag_service.types import DataSource, Document
 from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import UnifiedSearchResult
-
-_PUBLIC_STREAM_ERROR = "Search failed due to an internal error."
 
 
 def _resolved_request(strategy: str = "standard") -> ResolvedRAGRequest:
@@ -110,7 +111,7 @@ async def test_stream_rag_events_emits_structured_error():
     ]
 
     assert [event["type"] for event in events] == ["contexts", "reasoning", "error"]  # nosec B101
-    assert events[2] == {"type": "error", "message": _PUBLIC_STREAM_ERROR}  # nosec B101
+    assert events[2] == {"type": "error", "message": _PUBLIC_STREAM_ERROR_MESSAGE}  # nosec B101
 
 
 @pytest.mark.asyncio
@@ -134,7 +135,7 @@ async def test_stream_rag_events_continues_when_standard_prefetch_fails():
 
 
 @pytest.mark.asyncio
-async def test_stream_rag_events_continues_when_agentic_prefetch_fails():
+async def test_stream_rag_events_continues_with_empty_contexts_when_agentic_prefetch_fails():
     async def standard_pipeline(**kwargs: Any) -> UnifiedSearchResult:
         return UnifiedSearchResult(
             documents=[
@@ -164,5 +165,45 @@ async def test_stream_rag_events_continues_when_agentic_prefetch_fails():
     ]
 
     assert [event["type"] for event in events] == ["contexts", "reasoning", "delta"]  # nosec B101
-    assert events[0]["contexts"][0]["id"] == "standard-doc"  # nosec B101
+    assert events[0]["contexts"] == []  # nosec B101
     assert events[-1]["text"] == "answer text"  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_stream_rag_events_skips_standard_prefetch_for_agentic_strategy():
+    calls: list[str] = []
+
+    async def standard_pipeline(**kwargs: Any) -> UnifiedSearchResult:  # noqa: ARG001
+        calls.append("standard")
+        return UnifiedSearchResult(documents=[], query="standard")
+
+    async def agentic_pipeline(**kwargs: Any) -> UnifiedSearchResult:
+        calls.append("agentic")
+        return UnifiedSearchResult(
+            documents=[
+                Document(
+                    id="agentic-doc",
+                    content="Agentic context",
+                    metadata={"title": "Agentic"},
+                    source=DataSource.MEDIA_DB,
+                    score=0.8,
+                )
+            ],
+            query=str(kwargs.get("query", "")),
+            metadata={"agentic_metrics": {"steps": 1}},
+        )
+
+    events = [
+        event
+        async for event in stream_rag_events(
+            resolved_request=_resolved_request("agentic"),
+            retrieval_plan=_retrieval_plan(),
+            standard_pipeline=standard_pipeline,
+            agentic_pipeline=agentic_pipeline,
+            extra_context={"generate_streaming_response": _fake_generate_streaming_response},
+        )
+    ]
+
+    assert calls == ["agentic"]  # nosec B101
+    assert [event["type"] for event in events] == ["plan", "contexts", "reasoning", "delta"]  # nosec B101
+    assert events[1]["contexts"][0]["id"] == "agentic-doc"  # nosec B101

@@ -10,6 +10,7 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import re
+import threading
 import time
 from dataclasses import dataclass
 from typing import Any, Sequence
@@ -78,6 +79,7 @@ class AgenticConfig:
 
 
 _STRUCT_DB: Any = None
+_STRUCT_DB_LOCK = threading.Lock()
 
 
 def build_agentic_execution_context(
@@ -280,29 +282,30 @@ def _should_use_structure_index(default: bool = True) -> bool:
 def _get_media_db_for_structure() -> Any:
     """Return a MediaDatabase instance bound to the configured content backend."""
     global _STRUCT_DB
-    if _STRUCT_DB is not None:
-        return _STRUCT_DB
+    with _STRUCT_DB_LOCK:
+        if _STRUCT_DB is not None:
+            return _STRUCT_DB
 
-    try:
-        from tldw_Server_API.app.core.config import load_comprehensive_config as _load_cfg
-        from tldw_Server_API.app.core.DB_Management.content_backend import get_content_backend as _get_cb
-        from tldw_Server_API.app.core.DB_Management.media_db.api import (
-            create_media_database,
-        )
+        try:
+            from tldw_Server_API.app.core.config import load_comprehensive_config as _load_cfg
+            from tldw_Server_API.app.core.DB_Management.content_backend import get_content_backend as _get_cb
+            from tldw_Server_API.app.core.DB_Management.media_db.api import (
+                create_media_database,
+            )
 
-        cfg = _load_cfg()
-        backend = _get_cb(cfg) if cfg else None
-        if backend is None:
+            cfg = _load_cfg()
+            backend = _get_cb(cfg) if cfg else None
+            if backend is None:
+                return None
+
+            _STRUCT_DB = create_media_database(
+                "agentic_toolbox",
+                db_path=":memory:",
+                backend=backend,
+            )
+        except (ImportError, AttributeError, OSError, RuntimeError, TypeError, ValueError):
             return None
-
-        _STRUCT_DB = create_media_database(
-            "agentic_toolbox",
-            db_path=":memory:",
-            backend=backend,
-        )
-    except (ImportError, AttributeError, OSError, RuntimeError, TypeError, ValueError):
-        return None
-    return _STRUCT_DB
+        return _STRUCT_DB
 
 
 def _lookup_section_from_structure_index(doc: Document, heading: str) -> tuple[int, int] | None:
@@ -550,7 +553,7 @@ async def tool_loop(docs: list[Document], query: str, cfg: Any) -> tuple[str, li
     tb = AgenticToolbox(docs, cfg)
     registry = make_default_registry(tb)
     remaining_tokens = int(getattr(cfg, "max_tokens_read", 0) or 0)
-    max_steps = max(1, int(getattr(cfg, "max_tool_calls", 1) or 1))
+    max_steps = min(100, max(1, int(getattr(cfg, "max_tool_calls", 1) or 1)))
     deadline = (_now() + float(cfg.time_budget_sec)) if getattr(cfg, "time_budget_sec", None) is not None else None
 
     assembled: list[tuple[Document, int, int]] = []
@@ -739,6 +742,7 @@ __all__ = [
     "AgenticConfig",
     "AgenticToolbox",
     "AnswerGenerator",
+    # Exported for legacy tests and monkeypatch hooks; not part of the public API.
     "_get_media_db_for_structure",
     "assemble_ephemeral_chunk",
     "build_agentic_derived_evidence",

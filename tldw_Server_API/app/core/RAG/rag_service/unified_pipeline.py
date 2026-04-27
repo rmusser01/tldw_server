@@ -1644,6 +1644,64 @@ async def unified_rag_pipeline(
             return plan.collection_names.get("media_db")
         return None
 
+    def _refresh_retrieval_snapshot_from_current_knobs(
+        *,
+        prefer_current_scalars: bool = False,
+    ) -> None:
+        nonlocal retrieval_query, retrieval_sources, retrieval_search_mode
+        nonlocal retrieval_top_k, retrieval_min_score, retrieval_index_namespace, retrieval_plan
+
+        snapshot_query = query
+        snapshot_sources = sources
+        snapshot_search_mode = search_mode
+        snapshot_top_k = top_k
+        snapshot_min_score = min_score
+        snapshot_index_namespace = index_namespace
+
+        if retrieval_plan is not None:
+            planned_query = str(retrieval_plan.query or "").strip()
+            if planned_query:
+                snapshot_query = planned_query
+            planned_sources = [
+                str(getattr(source, "value", source)).strip()
+                for source in retrieval_plan.sources
+                if str(getattr(source, "value", source)).strip()
+            ]
+            if planned_sources:
+                snapshot_sources = planned_sources
+            planned_search_mode = str(retrieval_plan.search_mode or "").strip().lower()
+            if planned_search_mode in {"fts", "vector", "hybrid"}:
+                snapshot_search_mode = cast(
+                    Literal["fts", "vector", "hybrid"],
+                    planned_search_mode,
+                )
+            if not prefer_current_scalars:
+                with contextlib.suppress(TypeError, ValueError):
+                    snapshot_top_k = max(1, int(retrieval_plan.top_k))
+                with contextlib.suppress(TypeError, ValueError):
+                    snapshot_min_score = float(retrieval_plan.min_score)
+            snapshot_index_namespace = _planned_index_namespace(retrieval_plan)
+
+        retrieval_query = snapshot_query
+        retrieval_sources = snapshot_sources
+        retrieval_search_mode = snapshot_search_mode
+        with contextlib.suppress(TypeError, ValueError):
+            retrieval_top_k = max(1, int(snapshot_top_k))
+        with contextlib.suppress(TypeError, ValueError):
+            retrieval_min_score = float(snapshot_min_score)
+        retrieval_index_namespace = snapshot_index_namespace
+
+        if retrieval_plan is not None:
+            retrieval_plan = replace(
+                retrieval_plan,
+                query=str(retrieval_query),
+                sources=tuple(str(source) for source in (retrieval_sources or [])),
+                search_mode=str(retrieval_search_mode),
+                top_k=int(retrieval_top_k),
+                min_score=float(retrieval_min_score),
+                index_namespace=retrieval_index_namespace,
+            )
+
     if retrieval_plan is not None:
         planned_query = str(retrieval_plan.query or "").strip()
         if planned_query:
@@ -1687,6 +1745,10 @@ async def unified_rag_pipeline(
         nonlocal query, retrieval_query, retrieval_plan
         query = str(new_query)
         retrieval_query = query
+        result.query = query
+        result_payload = getattr(result, "payload", None)
+        if isinstance(result_payload, dict):
+            result_payload["query"] = query
         resolved_request.query = query
         resolved_request.payload["query"] = query
         retrieval_plan = replace(retrieval_plan, query=query)
@@ -1746,6 +1808,7 @@ async def unified_rag_pipeline(
     # ========== SEARCH DEPTH MODE PRESETS ==========
     # Apply parameter presets based on search_depth_mode. Individual parameter
     # overrides (if explicitly non-default) take precedence over mode presets.
+    retrieval_scalar_overrides_applied = False
     if search_depth_mode is not None:
         _mode_presets = {
             "speed": {
@@ -1781,7 +1844,10 @@ async def unified_rag_pipeline(
         # (we check against the function defaults)
         if presets:
             if top_k == 10:
-                top_k = presets.get("top_k", top_k)
+                preset_top_k = presets.get("top_k", top_k)
+                if preset_top_k != top_k:
+                    retrieval_scalar_overrides_applied = True
+                top_k = preset_top_k
             if enable_reranking is True and "enable_reranking" in presets:
                 enable_reranking = presets["enable_reranking"]
             if reranking_strategy == "flashrank" and "reranking_strategy" in presets:
@@ -1794,6 +1860,10 @@ async def unified_rag_pipeline(
                 enable_web_fallback = True
             if not enable_multi_vector_passages and presets.get("enable_multi_vector_passages"):
                 enable_multi_vector_passages = True
+
+    _refresh_retrieval_snapshot_from_current_knobs(
+        prefer_current_scalars=retrieval_scalar_overrides_applied,
+    )
 
     # Initialize result and timing
     start_time = time.time()
@@ -2649,6 +2719,8 @@ async def unified_rag_pipeline(
                 try:
                     tk = int(routing.get("top_k", top_k))
                     if 1 <= tk <= 100:
+                        if tk != top_k:
+                            retrieval_scalar_overrides_applied = True
                         top_k = tk
                 except (TypeError, ValueError):
                     pass
@@ -2672,6 +2744,8 @@ async def unified_rag_pipeline(
                     params = granularity_decision.retrieval_params
                     # Override top_k if not explicitly set by user
                     if "top_k" in params:
+                        if params["top_k"] != top_k:
+                            retrieval_scalar_overrides_applied = True
                         top_k = params["top_k"]
                     # Override fts_level
                     if "fts_level" in params:
@@ -2706,6 +2780,10 @@ async def unified_rag_pipeline(
             except (AttributeError, RuntimeError, TypeError, ValueError) as e:
                 result.errors.append(f"Granularity routing failed: {e}")
                 logger.warning(f"Granularity routing error: {e}")
+
+        _refresh_retrieval_snapshot_from_current_knobs(
+            prefer_current_scalars=retrieval_scalar_overrides_applied,
+        )
 
         # ========== CACHE CHECK ==========
         cached_documents = None
@@ -5464,22 +5542,42 @@ async def unified_rag_pipeline(
                         }
                         generation_result = await execute_generation_phase(**generation_phase_kwargs)
                         if isinstance(generation_result, dict):
-                            return coordinate_standard_result_evidence(
+                            generation_result = coordinate_standard_result_evidence(
                                 generation_result,
                                 resolved_request,
                                 retrieval_plan=retrieval_plan,
                             )
-                        generation_result = coordinate_standard_result_evidence(
-                            generation_result,
-                            resolved_request,
-                            retrieval_plan=retrieval_plan,
-                        )
+                        else:
+                            generation_result = coordinate_standard_result_evidence(
+                                generation_result,
+                                resolved_request,
+                                retrieval_plan=retrieval_plan,
+                            )
                         standard_evidence_coordinated = True
-                        result.generated_answer = generation_result.generated_answer
-                        result.metadata.update(dict(generation_result.metadata or {}))
-                        result.metadata["chunk_citations"] = list(generation_result.chunk_citations or [])
-                        if generation_result.verification_report is not None:
-                            result.metadata["verification_report"] = generation_result.verification_report
+                        if isinstance(generation_result, dict):
+                            result.generated_answer = generation_result.get(
+                                "generated_answer",
+                                generation_result.get("answer"),
+                            )
+                            generation_documents = (
+                                generation_result.get("documents")
+                                or generation_result.get("sources")
+                            )
+                            if generation_documents is not None:
+                                result.documents = list(generation_documents)
+                            result.metadata.update(dict(generation_result.get("metadata") or {}))
+                            if generation_result.get("chunk_citations") is not None:
+                                result.metadata["chunk_citations"] = list(
+                                    generation_result.get("chunk_citations") or []
+                                )
+                            if generation_result.get("verification_report") is not None:
+                                result.metadata["verification_report"] = generation_result.get("verification_report")
+                        else:
+                            result.generated_answer = generation_result.generated_answer
+                            result.metadata.update(dict(generation_result.metadata or {}))
+                            result.metadata["chunk_citations"] = list(generation_result.chunk_citations or [])
+                            if generation_result.verification_report is not None:
+                                result.metadata["verification_report"] = generation_result.verification_report
                     result.timings["answer_generation"] = time.time() - generation_start
                     try:
                         from tldw_Server_API.app.core.Metrics.metrics_manager import observe_histogram
@@ -6939,6 +7037,7 @@ async def unified_batch_pipeline(
     heads = list(clusters.keys())
     head_queries = [rep_texts[h] for h in heads]
     base_retrieval_plan = kwargs.get("retrieval_plan")
+    base_resolved_request = kwargs.get("resolved_request")
 
     def _pipeline_kwargs_for_query(query_text: str) -> dict[str, Any]:
         effective_kwargs = dict(kwargs)
@@ -6946,6 +7045,14 @@ async def unified_batch_pipeline(
             effective_kwargs["retrieval_plan"] = replace(
                 base_retrieval_plan,
                 query=query_text,
+            )
+        if isinstance(base_resolved_request, ResolvedRAGRequest):
+            payload = dict(base_resolved_request.payload or {})
+            payload["query"] = query_text
+            effective_kwargs["resolved_request"] = replace(
+                base_resolved_request,
+                query=query_text,
+                payload=payload,
             )
         return effective_kwargs
 

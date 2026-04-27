@@ -56,17 +56,13 @@ def test_convert_unified_result_maps_round2_search_agent_response_fields():
         generated_answer="Answer text",
     )
 
-    converted = rag_result_to_response(rag_result_from_unified_search_result(result))
-    core_converted = rag_result_to_response(rag_result_from_unified_search_result(result))
+    rag_result = rag_result_from_unified_search_result(result)
+    converted = rag_result_to_response(rag_result)
 
     assert converted.research_summary == research_summary
     assert converted.suggestions == suggestions
     assert converted.images == images
     assert converted.videos == videos
-    assert core_converted.research_summary == converted.research_summary
-    assert core_converted.suggestions == converted.suggestions
-    assert core_converted.images == converted.images
-    assert core_converted.videos == converted.videos
     assert converted.metadata.get("research") == research_summary
     assert converted.metadata.get("suggestions") == suggestions
     assert converted.metadata.get("images") == images

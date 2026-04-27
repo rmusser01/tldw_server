@@ -86,13 +86,15 @@ async def test_unified_pipeline_reuses_resolved_request_and_plan(monkeypatch):
         retrieval_plan=plan,
     )
 
-    assert result["answer"] == "generated answer"
+    assert result.generated_answer == "generated answer"
     assert seen["retrieval_resolved"] is resolved
-    assert seen["retrieval_plan"] is plan
+    assert seen["retrieval_plan"].query == plan.query
+    assert seen["retrieval_plan"].top_k == plan.top_k
+    assert seen["retrieval_plan"].collection_names == plan.collection_names
     assert seen["generation_resolved"] is resolved
-    assert seen["generation_plan"] is plan
+    assert seen["generation_plan"] is seen["retrieval_plan"]
     assert seen["coordinator_resolved"] is resolved
-    assert seen["coordinator_plan"] is plan
+    assert seen["coordinator_plan"] is seen["retrieval_plan"]
 
 
 @pytest.mark.asyncio
@@ -125,7 +127,7 @@ async def test_unified_pipeline_builds_single_legacy_resolved_request(monkeypatc
         enable_generation=True,
     )
 
-    assert result["answer"] == "legacy answer"
+    assert result.generated_answer == "legacy answer"
     assert seen["retrieval_resolved"] is seen["generation_resolved"]
     assert seen["retrieval_plan"] is seen["generation_plan"]
     assert seen["coordinator_resolved"] is seen["retrieval_resolved"]
@@ -187,11 +189,13 @@ async def test_unified_pipeline_coordinates_retrieval_only_result(monkeypatch):
     assert result.query == resolved.query
     assert result.documents[0]["id"] == "doc-1"
     assert seen["retrieval_resolved"] is resolved
-    assert seen["retrieval_plan"] is plan
+    assert seen["retrieval_plan"].query == plan.query
+    assert seen["retrieval_plan"].top_k == plan.top_k
+    assert seen["retrieval_plan"].collection_names == plan.collection_names
     assert seen["retrieval_only_resolved"] is resolved
-    assert seen["retrieval_only_plan"] is plan
+    assert seen["retrieval_only_plan"] is seen["retrieval_plan"]
     assert seen["coordinator_resolved"] is resolved
-    assert seen["coordinator_plan"] is plan
+    assert seen["coordinator_plan"] is seen["retrieval_plan"]
     assert seen["coordinator_result"].metadata["retrieval_plan"]["top_k"] == plan.top_k
 
 
@@ -297,7 +301,7 @@ async def test_unified_pipeline_threads_effective_query_to_generation(monkeypatc
         retrieval_plan=plan,
     )
 
-    assert result["answer"] == "effective answer"
+    assert result.generated_answer == "effective answer"
     assert seen["classifier_query"] == "What changed?"
     assert seen["retrieval_resolved"] is resolved
     assert seen["generation_resolved"] is resolved

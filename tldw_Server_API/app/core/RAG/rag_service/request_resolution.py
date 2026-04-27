@@ -258,30 +258,30 @@ def resolve_rag_request(
             payload[field_name] = value
 
     resolved_storage_user_id = _resolve_implicit_feedback_user_id(
-        None,
+        payload.get("user_id"),
         current_user,
         single_user_id_resolver=single_user_id_resolver,
     )
     if resolved_storage_user_id is None:
         resolved_storage_user_id = _resolve_implicit_feedback_user_id(
-            payload.get("user_id"),
+            None,
             current_user,
             single_user_id_resolver=single_user_id_resolver,
         )
 
-    resolved_feedback_user_id = (
-        _resolve_implicit_feedback_user_id(
+    if payload.get("feedback_user_id") is not None:
+        resolved_feedback_user_id = _resolve_implicit_feedback_user_id(
             payload.get("feedback_user_id"),
             current_user,
             single_user_id_resolver=single_user_id_resolver,
         )
-        or resolved_storage_user_id
-    )
+    else:
+        resolved_feedback_user_id = resolved_storage_user_id
 
     payload["user_id"] = resolved_storage_user_id
     payload["feedback_user_id"] = resolved_feedback_user_id
-    payload.setdefault("query", str(payload.get("query") or ((payload.get("queries") or [""])[0])))
-    payload.setdefault("strategy", str(payload.get("strategy", "standard")))
+    payload["query"] = str(payload.get("query") or ((payload.get("queries") or [""])[0]))
+    payload["strategy"] = str(payload.get("strategy") or "standard")
 
     return ResolvedRAGRequest(
         query=str(payload.get("query", "")),
@@ -326,6 +326,10 @@ def resolve_legacy_standard_pipeline_request(
             "include_metadata": include_metadata,
         }
     )
+    payload["user_id"] = user_id
+    payload["feedback_user_id"] = feedback_user_id or user_id
+    payload["index_namespace"] = index_namespace
+    payload["rag_profile"] = rag_profile
     return ResolvedRAGRequest(
         query=query,
         strategy="standard",

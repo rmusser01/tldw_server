@@ -19,7 +19,7 @@ class RAGResult:
     academic_citations: list[str] = field(default_factory=list)
     chunk_citations: list[dict[str, Any]] = field(default_factory=list)
     feedback_id: Optional[str] = None
-    generated_answer: Optional[str] = None
+    generated_answer: Optional[str | dict[str, Any]] = None
     cache_hit: bool = False
     errors: list[str] = field(default_factory=list)
     security_report: Optional[dict[str, Any]] = None

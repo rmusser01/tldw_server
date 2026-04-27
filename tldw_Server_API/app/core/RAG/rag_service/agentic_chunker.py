@@ -316,8 +316,8 @@ async def agentic_rag_pipeline(
             retrieval_config=config,
         )
         docs = list(retrieved_evidence.documents)
-    except (AttributeError, ConnectionError, OSError, RuntimeError, TypeError, ValueError, TimeoutError) as e:
-        logger.warning(f"Agentic coarse retrieval failed: {e}")
+    except (AttributeError, ConnectionError, OSError, RuntimeError, TypeError, ValueError, TimeoutError):
+        logger.opt(exception=True).warning("Agentic coarse retrieval failed")
         docs = []
 
     # Fallback: if no documents were retrieved via MultiDatabaseRetriever but we
@@ -504,6 +504,13 @@ async def agentic_rag_pipeline(
         derived_from_document_ids = [
             str(d.id) for d in coarse_docs if getattr(d, "id", None)
         ]
+    if not derived_from_document_ids:
+        logger.warning(
+            "Agentic derived evidence has no source lineage: retrieved_docs={}, coarse_docs={}, top_k_docs={}",
+            len(retrieved_docs),
+            len(coarse_docs),
+            cfg.top_k_docs,
+        )
     retrieved_evidence = RetrievedEvidence(
         documents=retrieved_docs,
         metadata={
@@ -844,6 +851,7 @@ __all__ = [
     "AgenticConfig",
     "AgenticToolbox",
     "AnswerGenerator",
+    # Legacy re-exports retained for tests and old callers that patched these internals.
     "_decompose_query",
     "_get_media_db_for_structure",
     "agentic_rag_pipeline",

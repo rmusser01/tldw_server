@@ -12,7 +12,7 @@ pytestmark = pytest.mark.unit
 def test_collect_cache_namespaces_includes_user_id_username_and_explicit_namespaces() -> None:
     namespaces = collect_cache_namespaces(
         type("User", (), {"id": 4, "username": "alice"})(),
-        namespaces=["tenant-a"],
+        namespaces=[" tenant-a "],
     )
 
     assert namespaces == {"4", "alice", "tenant-a"}
@@ -45,6 +45,6 @@ def test_invalidate_rag_caches_clears_shared_and_agentic_caches(monkeypatch: pyt
         media_id=99,
     )
 
-    assert clear_calls == [("4",), ("alice",), ("tenant-a",)]
+    assert len(clear_calls) == 3
+    assert {namespace for (namespace,) in clear_calls} == {"4", "alice", "tenant-a"}
     assert agentic_calls == ["99"]
-

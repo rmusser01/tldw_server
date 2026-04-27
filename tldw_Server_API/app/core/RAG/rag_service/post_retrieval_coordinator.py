@@ -44,6 +44,19 @@ class PostRetrievalCoordinator:
         )
 
 
+def _metadata_from_coordinated_evidence(coordinated: DerivedEvidence) -> dict[str, Any]:
+    updated_metadata = dict(coordinated.metadata)
+    if coordinated.citations:
+        updated_metadata["chunk_citations"] = list(coordinated.citations)
+    if coordinated.verification_report is not None:
+        updated_metadata["verification_report"] = coordinated.verification_report
+    if coordinated.derived_from_document_ids:
+        updated_metadata["derived_from_document_ids"] = list(
+            coordinated.derived_from_document_ids
+        )
+    return updated_metadata
+
+
 def coordinate_standard_result_evidence(
     result: Any,
     resolved_request: ResolvedRAGRequest,
@@ -82,27 +95,9 @@ def coordinate_standard_result_evidence(
     )
     if isinstance(result, dict):
         result["documents"] = list(coordinated.documents)
-        updated_metadata = dict(coordinated.metadata)
-        if coordinated.citations:
-            updated_metadata["chunk_citations"] = list(coordinated.citations)
-        if coordinated.verification_report is not None:
-            updated_metadata["verification_report"] = coordinated.verification_report
-        if coordinated.derived_from_document_ids:
-            updated_metadata["derived_from_document_ids"] = list(
-                coordinated.derived_from_document_ids
-            )
-        result["metadata"] = updated_metadata
+        result["metadata"] = _metadata_from_coordinated_evidence(coordinated)
         return result
 
     result.documents = list(coordinated.documents)
-    updated_metadata = dict(coordinated.metadata)
-    if coordinated.citations:
-        updated_metadata["chunk_citations"] = list(coordinated.citations)
-    if coordinated.verification_report is not None:
-        updated_metadata["verification_report"] = coordinated.verification_report
-    if coordinated.derived_from_document_ids:
-        updated_metadata["derived_from_document_ids"] = list(
-            coordinated.derived_from_document_ids
-        )
-    result.metadata = updated_metadata
+    result.metadata = _metadata_from_coordinated_evidence(coordinated)
     return result

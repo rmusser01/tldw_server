@@ -1,3 +1,4 @@
+import ast
 from pathlib import Path
 
 import pytest
@@ -11,9 +12,16 @@ pytestmark = pytest.mark.unit
 
 
 def test_agentic_execution_does_not_import_shell_module():
-    source = Path(agentic_execution.__file__).read_text()
+    source = Path(agentic_execution.__file__).read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    imported_modules: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imported_modules.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            imported_modules.add(node.module)
 
-    assert "agentic_chunker" not in source
+    assert all("agentic_chunker" not in module for module in imported_modules)
 
 
 def test_agentic_chunker_reexports_core_config_and_toolbox():

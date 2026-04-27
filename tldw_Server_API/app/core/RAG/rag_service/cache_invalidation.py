@@ -23,7 +23,11 @@ def collect_cache_namespaces(
 ) -> set[str]:
     """Collect all namespaces that should be invalidated for a request."""
 
-    collected: set[str] = {str(ns) for ns in (namespaces or []) if str(ns).strip()}
+    collected: set[str] = set()
+    for namespace in namespaces or []:
+        namespace_text = str(namespace).strip()
+        if namespace_text:
+            collected.add(namespace_text)
     if current_user is None:
         return collected
 
@@ -78,4 +82,3 @@ def invalidate_rag_caches(
         logger.debug("Agentic cache invalidation skipped: {}", exc)
     else:
         logger.debug("RAG cache invalidation complete for media_id={}", media_id)
-

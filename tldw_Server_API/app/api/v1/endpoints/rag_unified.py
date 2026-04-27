@@ -234,6 +234,40 @@ def _build_resume_batch_request(
     return UnifiedBatchRequest(**request_payload)
 
 
+_CHECKPOINT_UNSUPPORTED = object()
+
+
+def _checkpoint_safe_value(value: Any) -> Any:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, dict):
+        safe: dict[str, Any] = {}
+        for key, item in value.items():
+            if not isinstance(key, (str, int, float, bool)):
+                continue
+            safe_item = _checkpoint_safe_value(item)
+            if safe_item is not _CHECKPOINT_UNSUPPORTED:
+                safe[str(key)] = safe_item
+        return safe
+    if isinstance(value, (list, tuple)):
+        safe_items: list[Any] = []
+        for item in value:
+            safe_item = _checkpoint_safe_value(item)
+            if safe_item is not _CHECKPOINT_UNSUPPORTED:
+                safe_items.append(safe_item)
+        return safe_items
+    return _CHECKPOINT_UNSUPPORTED
+
+
+def _sanitize_checkpoint_config_for_persistence(config: dict[str, Any]) -> dict[str, Any]:
+    sanitized: dict[str, Any] = {}
+    for key, value in dict(config or {}).items():
+        safe_value = _checkpoint_safe_value(value)
+        if safe_value is not _CHECKPOINT_UNSUPPORTED:
+            sanitized[str(key)] = safe_value
+    return sanitized
+
+
 def _sync_retriever_overrides_to_pipeline() -> None:
     """
     Keep endpoint-level retriever monkeypatches effective.
@@ -1266,7 +1300,7 @@ async def unified_batch_endpoint(
             from tldw_Server_API.app.core.RAG.rag_service.checkpoint import CheckpointManager
 
             checkpoint_manager = CheckpointManager()
-            checkpoint_config = dict(kwargs)
+            checkpoint_config = _sanitize_checkpoint_config_for_persistence(kwargs)
             checkpoint_config["queries"] = list(request.queries)
             checkpoint_config["max_concurrent"] = request.max_concurrent
             checkpoint_state = checkpoint_manager.create(

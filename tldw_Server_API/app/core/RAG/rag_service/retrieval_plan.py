@@ -7,6 +7,18 @@ from loguru import logger
 
 from .request_resolution import ResolvedRAGRequest
 
+_SOURCE_ALIASES = {
+    "character": "character_cards",
+    "characters": "character_cards",
+    "character_cards_db": "character_cards",
+    "chats": "character_cards",
+    "chat": "character_cards",
+    "notes_db": "notes",
+    "media": "media_db",
+    "media_db_path": "media_db",
+    "kanban_db": "kanban",
+}
+
 
 @dataclass(frozen=True, slots=True)
 class RetrievalPlan:
@@ -39,6 +51,7 @@ def _normalize_sources(raw_sources: Any) -> tuple[str, ...]:
             source = str(value).strip().lower()
         except (TypeError, ValueError):
             continue
+        source = _SOURCE_ALIASES.get(source, source)
         if not source or source in seen:
             continue
         seen.add(source)
@@ -87,4 +100,3 @@ def build_retrieval_plan(resolved: ResolvedRAGRequest) -> RetrievalPlan:
         index_namespace=resolved.index_namespace,
         collection_names=collection_names,
     )
-

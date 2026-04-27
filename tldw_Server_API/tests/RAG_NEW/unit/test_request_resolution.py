@@ -4,6 +4,7 @@ import pytest
 
 from tldw_Server_API.app.core.RAG.rag_service.request_resolution import (
     ResolvedRAGRequest,
+    resolve_legacy_standard_pipeline_request,
     resolve_rag_request,
 )
 
@@ -113,3 +114,43 @@ def test_resolve_rag_request_does_not_override_explicit_search_agent_fields() ->
     assert resolved.payload["enable_query_classification"] is False
     assert resolved.payload["search_depth_mode"] == "speed"
     assert resolved.payload["discussion_platforms"] == ["quora"]
+
+
+def test_resolve_rag_request_preserves_explicit_user_id_before_current_user() -> None:
+    resolved = resolve_rag_request(
+        {
+            "query": None,
+            "queries": ["fallback query"],
+            "strategy": None,
+            "user_id": "explicit-user",
+        },
+        current_user=SimpleNamespace(id=77),
+        get_profile_kwargs_fn=lambda profile: {},
+    )
+
+    assert resolved.user_id == "explicit-user"
+    assert resolved.feedback_user_id == "explicit-user"
+    assert resolved.payload["user_id"] == "explicit-user"
+    assert resolved.payload["feedback_user_id"] == "explicit-user"
+    assert resolved.query == "fallback query"
+    assert resolved.strategy == "standard"
+    assert resolved.payload["query"] == "fallback query"
+    assert resolved.payload["strategy"] == "standard"
+
+
+def test_legacy_standard_request_payload_matches_identity_contract() -> None:
+    resolved = resolve_legacy_standard_pipeline_request(
+        query="legacy identity",
+        search_mode="hybrid",
+        top_k=3,
+        sources=["media_db"],
+        index_namespace="tenant-a",
+        rag_profile="fast",
+        user_id="user-1",
+        feedback_user_id=None,
+    )
+
+    assert resolved.payload["user_id"] == "user-1"
+    assert resolved.payload["feedback_user_id"] == "user-1"
+    assert resolved.payload["index_namespace"] == "tenant-a"
+    assert resolved.payload["rag_profile"] == "fast"

@@ -124,6 +124,35 @@ def test_rag_service_readme_documents_current_standard_path_flow() -> None:
     assert expected_flow in readme_text  # nosec B101
 
 
+def test_checkpoint_config_sanitizer_drops_non_primitive_pipeline_objects() -> None:
+    plan = RetrievalPlan(
+        query="checkpoint",
+        sources=("media_db",),
+        search_mode="hybrid",
+        top_k=3,
+        min_score=0.0,
+        index_namespace="tenant-a",
+    )
+
+    sanitized = rag_ep._sanitize_checkpoint_config_for_persistence(
+        {
+            "query": "checkpoint",
+            "top_k": 3,
+            "retrieval_plan": plan,
+            "nested": {"keep": True, "drop": plan},
+            "items": ["ok", plan, 2],
+        }
+    )
+
+    assert sanitized == {
+        "query": "checkpoint",
+        "top_k": 3,
+        "nested": {"keep": True},
+        "items": ["ok", 2],
+    }
+    json.dumps(sanitized)
+
+
 @pytest.mark.asyncio
 async def test_unified_search_standard_path_maps_core_result_directly(
     monkeypatch: pytest.MonkeyPatch,

@@ -8,6 +8,7 @@ including media database, notes, prompts, and character cards.
 
 import asyncio
 import contextlib
+import copy
 from difflib import SequenceMatcher
 import json
 import os
@@ -446,13 +447,28 @@ class RetrievalConfig:
 
 
 _RETRIEVAL_PLAN_SEARCH_MODES = frozenset({"fts", "vector", "hybrid"})
+_RETRIEVAL_PLAN_SOURCE_ALIASES = {
+    "character": DataSource.CHARACTER_CARDS,
+    "characters": DataSource.CHARACTER_CARDS,
+    "character_cards_db": DataSource.CHARACTER_CARDS,
+    "chats": DataSource.CHARACTER_CARDS,
+    "chat": DataSource.CHARACTER_CARDS,
+    "notes_db": DataSource.NOTES,
+    "media": DataSource.MEDIA_DB,
+    "media_db_path": DataSource.MEDIA_DB,
+    "kanban_db": DataSource.KANBAN,
+}
 
 
 def _normalize_plan_sources(plan: RetrievalPlan) -> list[DataSource]:
     normalized: list[DataSource] = []
     for raw_source in plan.sources:
         try:
-            source = raw_source if isinstance(raw_source, DataSource) else DataSource(str(raw_source))
+            if isinstance(raw_source, DataSource):
+                source = raw_source
+            else:
+                source_text = str(raw_source).strip().lower()
+                source = _RETRIEVAL_PLAN_SOURCE_ALIASES.get(source_text) or DataSource(source_text)
         except (TypeError, ValueError):
             continue
         if source not in normalized:
@@ -3250,6 +3266,11 @@ class MultiDatabaseRetriever:
         ) -> Any:
             if config is None:
                 return await operation(*args, **kwargs)
+            operation_name = getattr(operation, "__name__", None)
+            if isinstance(operation_name, str) and hasattr(retriever, operation_name):
+                call_retriever = copy.copy(retriever)
+                call_retriever.config = config
+                return await getattr(call_retriever, operation_name)(*args, **kwargs)
             previous_config = getattr(retriever, "config", None)
             retriever.config = config
             try:

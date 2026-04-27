@@ -330,7 +330,10 @@ def _generation_config(
         from tldw_Server_API.app.core.config import load_and_log_configs
 
         cfg = load_and_log_configs() or {}
-    except Exception:  # noqa: BLE001 - config load is best-effort in streaming path
+    except Exception as config_error:  # noqa: BLE001 - config load is best-effort in streaming path
+        logger.opt(exception=config_error).debug(
+            "RAG streaming config load failed; using request/env defaults"
+        )
         cfg = {}
 
     request_provider = _value(payload, request_defaults, "generation_provider")
@@ -433,27 +436,6 @@ async def stream_rag_events(
             sync_retriever_overrides()
 
         docs: list[Any] = []
-        try:
-            async for item in _prefetch_documents(
-                resolved_request=resolved_request,
-                retrieval_plan=retrieval_plan,
-                standard_pipeline=standard_pipeline,
-                pipeline_kwargs=pipeline_kwargs,
-                payload=payload,
-            ):
-                if isinstance(item, list):
-                    docs = item
-                else:
-                    yield item
-        except asyncio.CancelledError:
-            raise
-        except Exception as prefetch_error:  # noqa: BLE001 - retrieval prefetch is best-effort for streaming
-            logger.debug(
-                "RAG streaming standard prefetch failed; continuing with empty contexts",
-                exc_info=prefetch_error,
-            )
-            docs = []
-
         if str(resolved_request.strategy).strip().lower() == "agentic":
             try:
                 docs, agentic_events = await _run_agentic_prefetch(
@@ -471,9 +453,31 @@ async def stream_rag_events(
                 raise
             except Exception as agentic_error:  # noqa: BLE001 - agentic streaming prefetch is best-effort
                 logger.debug(
-                    "Agentic streaming prefetch failed; continuing standard stream",
+                    "Agentic streaming prefetch failed; continuing with empty contexts",
                     exc_info=agentic_error,
                 )
+                docs = []
+        else:
+            try:
+                async for item in _prefetch_documents(
+                    resolved_request=resolved_request,
+                    retrieval_plan=retrieval_plan,
+                    standard_pipeline=standard_pipeline,
+                    pipeline_kwargs=pipeline_kwargs,
+                    payload=payload,
+                ):
+                    if isinstance(item, list):
+                        docs = item
+                    else:
+                        yield item
+            except asyncio.CancelledError:
+                raise
+            except Exception as prefetch_error:  # noqa: BLE001 - retrieval prefetch is best-effort for streaming
+                logger.debug(
+                    "RAG streaming standard prefetch failed; continuing with empty contexts",
+                    exc_info=prefetch_error,
+                )
+                docs = []
 
         for event in _context_events(
             docs=docs,

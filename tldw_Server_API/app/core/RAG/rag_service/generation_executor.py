@@ -15,6 +15,7 @@ async def execute_generation_phase(
     generate_answer_fn: Callable[..., Awaitable[Any]],
     generation_context: str,
 ) -> RAGResult:
+    del retrieval_plan  # Reserved for future plan-aware generation behavior.
     generation_query = resolved_request.query
     source_documents = derived_evidence.documents
     generation_prompt = (resolved_request.payload or {}).get("generation_prompt")

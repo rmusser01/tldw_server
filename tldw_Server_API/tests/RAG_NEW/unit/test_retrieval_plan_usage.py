@@ -8,6 +8,7 @@ from tldw_Server_API.app.core.RAG.rag_service.database_retrievers import (
     MultiDatabaseRetriever,
     RetrievalConfig,
 )
+from tldw_Server_API.app.core.RAG.rag_service.request_resolution import ResolvedRAGRequest
 from tldw_Server_API.app.core.RAG.rag_service.retrieval_plan import RetrievalPlan
 from tldw_Server_API.app.core.RAG.rag_service.types import DataSource, Document
 from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import (
@@ -97,6 +98,13 @@ class _LegacyCaptureRetriever:
         ]
 
 
+@pytest.fixture(autouse=True)
+def _reset_legacy_capture_retriever_instances():
+    _LegacyCaptureRetriever.instances.clear()
+    yield
+    _LegacyCaptureRetriever.instances.clear()
+
+
 @pytest.mark.asyncio
 async def test_multi_database_retriever_derives_effective_config_from_retrieval_plan() -> None:
     retriever = MultiDatabaseRetriever({})
@@ -144,6 +152,27 @@ async def test_multi_database_retriever_plan_overrides_conflicting_legacy_namesp
 
     assert fake.calls[0]["query"] == "planned query"
     assert fake.calls[0]["index_namespace"] == "user_5_media_embeddings"
+
+
+@pytest.mark.asyncio
+async def test_multi_database_retriever_maps_character_alias_plan_source() -> None:
+    retriever = MultiDatabaseRetriever({})
+    fake = _FakeRetriever()
+    retriever.retrievers = {DataSource.CHARACTER_CARDS: fake}
+    plan = RetrievalPlan(
+        query="character query",
+        sources=("characters",),
+        search_mode="hybrid",
+        top_k=3,
+        min_score=0.1,
+        index_namespace=None,
+        collection_names={"character_cards": "user_5_character_embeddings"},
+    )
+
+    documents = await retriever.retrieve_from_plan(plan)
+
+    assert [doc.id for doc in documents] == ["doc:character query"]
+    assert fake.calls[0]["query"] == "character query"
 
 
 @pytest.mark.asyncio
@@ -247,6 +276,40 @@ async def test_unified_batch_pipeline_rewrites_plan_query_per_item() -> None:
     assert first_call.kwargs["retrieval_plan"].query == "first query"
     assert second_call.kwargs["query"] == "second query"
     assert second_call.kwargs["retrieval_plan"].query == "second query"
+
+
+@pytest.mark.asyncio
+async def test_unified_batch_pipeline_rewrites_resolved_request_per_item() -> None:
+    resolved_request = ResolvedRAGRequest(
+        query="base batch query",
+        strategy="standard",
+        payload={"query": "base batch query", "strategy": "standard"},
+        index_namespace="tenant-a",
+        rag_profile=None,
+        user_id="5",
+        feedback_user_id="5",
+    )
+
+    async def _fake_unified_rag_pipeline(**kwargs):
+        return {"query": kwargs["query"]}
+
+    with patch(
+        "tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.unified_rag_pipeline",
+        AsyncMock(side_effect=_fake_unified_rag_pipeline),
+    ) as mock_pipeline:
+        await unified_batch_pipeline(
+            queries=["first query", "second query"],
+            max_concurrent=1,
+            resolved_request=resolved_request,
+        )
+
+    first_call, second_call = mock_pipeline.await_args_list
+    assert first_call.kwargs["resolved_request"] is not resolved_request
+    assert first_call.kwargs["resolved_request"].query == "first query"
+    assert first_call.kwargs["resolved_request"].payload["query"] == "first query"
+    assert second_call.kwargs["resolved_request"] is not resolved_request
+    assert second_call.kwargs["resolved_request"].query == "second query"
+    assert second_call.kwargs["resolved_request"].payload["query"] == "second query"
 
 
 @pytest.mark.asyncio

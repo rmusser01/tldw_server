@@ -106,3 +106,16 @@ def test_rag_result_mapping_preserves_top_level_generation_fields() -> None:
     assert mapped.verification_report == {"ok": True}
     assert response.chunk_citations == [{"id": "doc-1"}]
     assert response.verification_report == {"ok": True}
+
+
+def test_rag_result_mapping_preserves_dict_shaped_answer_field() -> None:
+    mapped = rag_result_from_unified_search_result(
+        {
+            "documents": [],
+            "query": "structured answer",
+            "answer": {"summary": "structured", "confidence": 0.9},
+            "metadata": {},
+        }
+    )
+
+    assert mapped.generated_answer == {"summary": "structured", "confidence": 0.9}

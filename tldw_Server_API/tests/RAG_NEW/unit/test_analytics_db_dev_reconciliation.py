@@ -3,7 +3,10 @@ from dataclasses import dataclass
 
 import pytest
 
-from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
+from tldw_Server_API.app.core.DB_Management.backends.base import (
+    BackendType,
+    DatabaseError as BackendDatabaseError,
+)
 from tldw_Server_API.app.core.RAG.rag_service import analytics_db
 
 
@@ -40,7 +43,7 @@ class FakePostgresBackend:
         return Transaction()
 
 
-def test_analytics_database_refreshes_shared_content_backend(monkeypatch, tmp_path):
+def test_analytics_database_refreshes_shared_content_backend_after_error(monkeypatch, tmp_path):
     first_backend = FakePostgresBackend("first")
     second_backend = FakePostgresBackend("second")
     backend_calls = iter([first_backend, second_backend])
@@ -56,12 +59,20 @@ def test_analytics_database_refreshes_shared_content_backend(monkeypatch, tmp_pa
 
     db = analytics_db.AnalyticsDatabase(db_path=str(tmp_path / "analytics.db"))
 
+    def stale_execute(*args, **kwargs):  # noqa: ANN002, ANN003
+        raise BackendDatabaseError("stale shared backend")
+
+    first_backend.execute = stale_execute
+
     assert first_backend.bootstrap_calls == 1
+    assert db.backend is first_backend
+    with pytest.raises(BackendDatabaseError):
+        db._execute_on_backend(first_backend, object(), "SELECT 1")
     assert db.backend is second_backend
     assert second_backend.bootstrap_calls == 1
 
 
-def test_analytics_database_bootstraps_refreshed_backend_before_publish(monkeypatch, tmp_path):
+def test_analytics_database_bootstraps_refreshed_backend_before_publish_after_error(monkeypatch, tmp_path):
     first_backend = FakePostgresBackend("first")
     second_backend = FakePostgresBackend("second")
     backend_calls = iter([first_backend, second_backend])
@@ -78,6 +89,14 @@ def test_analytics_database_bootstraps_refreshed_backend_before_publish(monkeypa
 
     db = analytics_db.AnalyticsDatabase(db_path=str(tmp_path / "analytics.db"))
 
+    def stale_execute(*args, **kwargs):  # noqa: ANN002, ANN003
+        raise BackendDatabaseError("stale shared backend")
+
+    first_backend.execute = stale_execute
+
+    assert db.backend is first_backend
+    with pytest.raises(BackendDatabaseError):
+        db._execute_on_backend(first_backend, object(), "SELECT 1")
     assert db.backend is second_backend
     assert db._backend is second_backend
     assert bootstrap_targets[-1] == "postgresql://example/second"

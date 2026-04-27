@@ -16,6 +16,7 @@ Main components:
 """
 
 from importlib import import_module
+from typing import Any
 
 # Expose commonly patched submodules for tests
 from . import (
@@ -35,7 +36,7 @@ _LAZY_EXPORTS = {
 }
 
 
-def __getattr__(name):
+def __getattr__(name: str) -> Any:
     target = _LAZY_EXPORTS.get(name)
     if target is None:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

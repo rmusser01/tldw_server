@@ -82,8 +82,8 @@ def _reset_main_app_lifecycle_between_rag_tests():
 
             reset_lifecycle_state(app)
             JobManager.set_acquire_gate(False)
-        except Exception:
-            _ = None
+        except Exception as exc:
+            raise RuntimeError("Lifecycle reset failed in RAG_NEW autouse fixture") from exc
 
     _reset_if_main_app_loaded()
 

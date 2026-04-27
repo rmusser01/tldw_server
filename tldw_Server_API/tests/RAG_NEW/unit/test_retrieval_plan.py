@@ -34,3 +34,25 @@ def test_build_retrieval_plan_centralizes_namespace_and_sources() -> None:
     assert plan.top_k == 5
     assert plan.min_score == 0.25
 
+
+def test_build_retrieval_plan_maps_character_aliases_to_character_cards() -> None:
+    resolved = ResolvedRAGRequest(
+        query="character retrieval",
+        strategy="standard",
+        payload={
+            "query": "character retrieval",
+            "sources": ["characters", "chats"],
+            "search_mode": "hybrid",
+            "top_k": 5,
+            "min_score": 0.0,
+        },
+        index_namespace=None,
+        rag_profile=None,
+        user_id="9",
+        feedback_user_id="9",
+    )
+
+    plan = build_retrieval_plan(resolved)
+
+    assert plan.sources == ("character_cards",)
+    assert plan.collection_names["character_cards"] == "user_9_character_embeddings"

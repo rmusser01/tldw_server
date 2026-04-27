@@ -397,12 +397,14 @@ class AnalyticsDatabase:
         pinned_backend = getattr(self._local, "backend_pin", None)
         if pinned_backend is not None:
             return pinned_backend
-        if not self._uses_shared_content_backend:
-            return self._backend
+        return self._backend
 
+    def _refresh_shared_backend_after_error(self) -> None:
+        if not self._uses_shared_content_backend:
+            return
         with self._lock:
             if not self._uses_shared_content_backend:
-                return self._backend
+                return
             refreshed_backend = self._resolve_backend(
                 db_path=self.db_path,
                 backend=None,
@@ -412,7 +414,6 @@ class AnalyticsDatabase:
             self._backend = refreshed_backend
             self._uses_shared_content_backend = self._is_shared_content_backend(refreshed_backend)
             self._db_identifier = self._describe_backend(refreshed_backend)
-            return self._backend
 
     @property
     def backend_type(self) -> BackendType:
@@ -469,7 +470,7 @@ class AnalyticsDatabase:
 
     def _initialize_database(self) -> None:
         backend = self.backend
-        self._bootstrap_backend_schema(backend, self._describe_backend(backend))
+        self._ensure_bootstrap_for_backend(backend)
 
     def _bootstrap_backend_schema(
         self,
@@ -537,6 +538,7 @@ class AnalyticsDatabase:
             return BackendCursorAdapter(result)
         except BackendDatabaseError as exc:
             logger.error("Backend execute failed: {}", exc)
+            self._refresh_shared_backend_after_error()
             raise
 
     def _fetchone(

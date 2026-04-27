@@ -82,6 +82,12 @@ def rag_result_from_unified_search_result(result: Any) -> RAGResult:
     if chunk_citations is None and isinstance(metadata, dict):
         chunk_citations = metadata.get("chunk_citations")
 
+    generated_answer = _result_field(result, "generated_answer", None)
+    if generated_answer is None:
+        answer_payload = _result_field(result, "answer", None)
+        if answer_payload is not None:
+            generated_answer = answer_payload
+
     return RAGResult(
         documents=list(_result_field(result, "documents", None) or []),
         query=str(_result_field(result, "query", "")),
@@ -92,7 +98,7 @@ def rag_result_from_unified_search_result(result: Any) -> RAGResult:
         academic_citations=list(metadata.get("academic_citations", []) or []),
         chunk_citations=list(chunk_citations or []),
         feedback_id=_result_field(result, "feedback_id", None),
-        generated_answer=_result_field(result, "generated_answer", None),
+        generated_answer=generated_answer,
         cache_hit=bool(_result_field(result, "cache_hit", False)),
         errors=list(_result_field(result, "errors", None) or []),
         security_report=_result_field(result, "security_report", None),
