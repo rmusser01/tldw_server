@@ -231,10 +231,10 @@ async def create_project(
             if row:
                 project = db._row_to_dict(cursor, row)
                 return StandardResponse(success=True, data=ProjectResponse(**project))
-        except DatabaseError as fallback_err:
-            logger.error(f"Failed to retrieve existing project after conflict: {fallback_err}")
-        except Exception as fallback_err:
-            logger.exception(f"Unexpected error retrieving existing project after conflict: {fallback_err}")
+        except DatabaseError:
+            logger.error("Failed to retrieve existing project after conflict")
+        except Exception:
+            logger.error("Unexpected error retrieving existing project after conflict")
             raise
         raise map_db_error_to_http(e) from e
     except DatabaseError as e:
@@ -503,12 +503,12 @@ async def delete_project(
             data={"message": f"Project {'permanently' if permanent else 'soft'} deleted"}
         )
 
-    except DatabaseError as e:
-        logger.error(f"Database error deleting project: {e}")
+    except DatabaseError:
+        logger.error("Database error deleting project")
         # Fallback: try to mark as archived to keep operation idempotent for tests
         try:
             _ = db.update_project(project_id, {"status": "archived"})
-            logger.warning(f"Fallback archive applied for project {project_id} after delete failure")
+            logger.warning("Fallback archive applied after project delete failure")
             return StandardResponse(
                 success=True,
                 data={"message": "Project soft deleted (fallback archive applied)"}

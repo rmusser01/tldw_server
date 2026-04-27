@@ -10,6 +10,7 @@ from tldw_Server_API.app.api.v1.endpoints.prompt_studio.prompt_studio_projects i
     archive_project,
     get_project_stats,
     list_projects,
+    delete_project,
     unarchive_project,
     update_project,
 )
@@ -147,6 +148,14 @@ class _UnexpectedListProjectsDb:
         raise RuntimeError("unexpected list exploded /private/tmp/prompt-studio-projects.db")
 
 
+class _DeleteProjectFallbackDb:
+    def delete_project(self, *_args, **_kwargs):
+        raise _database_failure()
+
+    def update_project(self, *_args, **_kwargs):
+        return {"id": 42, "status": "archived"}
+
+
 class _BrokenGetProjectDb:
     def get_project(self, *_args, **_kwargs):
         raise _database_failure()
@@ -271,6 +280,54 @@ async def test_create_project_maps_conflict_error_after_existing_lookup_fails():
 
     assert exc_info.value.status_code == 409
     assert exc_info.value.detail == "project name already exists"
+
+
+@pytest.mark.asyncio
+async def test_create_project_conflict_lookup_database_error_log_is_sanitized(monkeypatch):
+    logger_stub = _patch_endpoint_logger(monkeypatch)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await create_project(
+            project_data=ProjectCreate(name="Prompt Studio Project"),
+            request=object(),
+            user_context={"user_id": "tester"},
+            db=_BrokenCreateProjectDb(
+                create_exc=ConflictError("project name already exists"),
+                fallback_exc=_database_failure(),
+            ),
+            _=True,
+            idempotency_key=None,
+        )
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail == "project name already exists"
+    _assert_sanitized_error_log(
+        logger_stub,
+        "Failed to retrieve existing project after conflict",
+    )
+
+
+@pytest.mark.asyncio
+async def test_create_project_conflict_lookup_unexpected_error_log_is_sanitized(monkeypatch):
+    logger_stub = _patch_endpoint_logger(monkeypatch)
+
+    with pytest.raises(RuntimeError):
+        await create_project(
+            project_data=ProjectCreate(name="Prompt Studio Project"),
+            request=object(),
+            user_context={"user_id": "tester"},
+            db=_BrokenCreateProjectDb(
+                create_exc=ConflictError("project name already exists"),
+                fallback_exc=RuntimeError("fallback lookup exploded /private/tmp/prompt-studio-projects.db"),
+            ),
+            _=True,
+            idempotency_key=None,
+        )
+
+    _assert_sanitized_error_log(
+        logger_stub,
+        "Unexpected error retrieving existing project after conflict",
+    )
 
 
 @pytest.mark.asyncio
@@ -415,3 +472,24 @@ async def test_unarchive_project_maps_input_error_to_not_found(monkeypatch):
 
     assert exc_info.value.status_code == 404
     assert exc_info.value.detail == "project not found"
+
+
+@pytest.mark.asyncio
+async def test_delete_project_fallback_archive_logs_are_sanitized(monkeypatch):
+    logger_stub = _patch_endpoint_logger(monkeypatch)
+
+    response = await delete_project(
+        project_id=42,
+        permanent=False,
+        _=True,
+        db=_DeleteProjectFallbackDb(),
+        user_context={"user_id": "tester"},
+    )
+
+    assert response.success is True
+    assert response.data == {"message": "Project soft deleted (fallback archive applied)"}
+    _assert_sanitized_error_log(logger_stub, "Database error deleting project")
+    _assert_sanitized_warning_log(logger_stub, "Fallback archive applied after project delete failure")
+
+    rendered_warnings = repr(logger_stub.warning_calls)
+    assert "42" not in rendered_warnings
