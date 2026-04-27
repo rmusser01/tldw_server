@@ -32,6 +32,21 @@ class _ExplodingDB:
         return super().__getattribute__(name)
 
 
+class _ApplyTemplateDB:
+    def get_chunking_template(self, *, name):
+        return {
+            "name": name,
+            "description": "demo",
+            "tags": ["demo"],
+            "template_json": '{"chunking": {"method": "words", "config": {}}}',
+            "version": 1,
+            "is_builtin": False,
+        }
+
+    def list_chunking_templates(self, **_kwargs):
+        return []
+
+
 def _template_config() -> TemplateConfig:
     return TemplateConfig(chunking={"method": "words", "config": {}})
 
@@ -93,5 +108,48 @@ async def test_chunking_template_generic_failure_logs_are_sanitized(
     assert expected_detail in str(exc_info.value.detail)
     assert "/private/" not in str(exc_info.value.detail)
     assert logger_stub.errors == [expected_log]
+    assert "/private/" not in logger_stub.errors[0]
+    assert "exploded" not in logger_stub.errors[0]
+
+
+@pytest.mark.asyncio
+async def test_apply_template_failure_log_sanitizes_exception_text(monkeypatch):
+    class ExplodingTemplateProcessor:
+        def process_template(self, **_kwargs):
+            raise RuntimeError("chunking apply exploded at /private/chunking-templates.db")
+
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(routes, "logger", logger_stub)
+    monkeypatch.setattr(routes, "TemplateProcessor", ExplodingTemplateProcessor)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await routes.apply_template(
+            routes.ApplyTemplateRequest(template_name="demo-template", text="hello world"),
+            current_user=SimpleNamespace(id=1),
+            db=_ApplyTemplateDB(),
+        )
+
+    assert exc_info.value.status_code == 400
+    assert "chunking apply exploded" in str(exc_info.value.detail)
+    assert logger_stub.errors == ["Error applying template"]
+    assert "/private/" not in logger_stub.errors[0]
+    assert "exploded" not in logger_stub.errors[0]
+
+
+@pytest.mark.asyncio
+async def test_validate_template_failure_log_sanitizes_exception_text(monkeypatch):
+    def raise_model_validate(*_args, **_kwargs):
+        raise RuntimeError("validation exploded at /private/chunking-templates.db")
+
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(routes, "logger", logger_stub)
+    monkeypatch.setattr(routes.TemplateConfig, "model_validate", raise_model_validate)
+
+    response = await routes.validate_template({"chunking": {"method": "words", "config": {}}})
+
+    assert response.valid is False
+    assert response.errors is not None
+    assert "validation exploded" in response.errors[0].message
+    assert logger_stub.errors == ["Error validating template"]
     assert "/private/" not in logger_stub.errors[0]
     assert "exploded" not in logger_stub.errors[0]

@@ -775,7 +775,7 @@ async def apply_template(
     except HTTPException:
         raise
     except _CHUNKING_TEMPLATES_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Error applying template: {e}")
+        logger.error("Error applying template")
         raise HTTPException(status_code=400, detail={"success": False, "error": f"Template application error: {str(e)}", "error_code": "BAD_REQUEST"}) from e
 
 
@@ -982,7 +982,7 @@ async def validate_template(
         )
 
     except _CHUNKING_TEMPLATES_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Error validating template: {e}")
+        logger.error("Error validating template")
         return TemplateValidationResponse(
             valid=False,
             errors=[TemplateValidationError(
