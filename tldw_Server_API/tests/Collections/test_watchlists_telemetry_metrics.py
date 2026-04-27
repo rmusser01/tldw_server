@@ -1,3 +1,8 @@
+import importlib
+
+from loguru import logger as loguru_logger
+
+from tldw_Server_API.app.core import Metrics as metrics_module
 from tldw_Server_API.app.core.Watchlists import watchlists_telemetry_metrics as metrics
 
 
@@ -49,4 +54,24 @@ def test_record_summary_request_sanitizes_metrics_emit_failure(monkeypatch) -> N
     _assert_sanitized_debug_log(
         logger_stub,
         "watchlists telemetry metrics summary emit skipped",
+    )
+
+
+def test_import_time_registration_sanitizes_metrics_registration_failure(monkeypatch) -> None:
+    logger_stub = _LoggerStub()
+
+    def failing_get_metrics_registry():
+        raise RuntimeError("metrics backend exploded /private/metrics.db")
+
+    with monkeypatch.context() as patch_context:
+        patch_context.setattr(metrics_module, "get_metrics_registry", failing_get_metrics_registry)
+        patch_context.setattr(loguru_logger, "debug", logger_stub.debug)
+
+        importlib.reload(metrics)
+
+    importlib.reload(metrics)
+
+    _assert_sanitized_debug_log(
+        logger_stub,
+        "watchlists telemetry metrics registration skipped",
     )

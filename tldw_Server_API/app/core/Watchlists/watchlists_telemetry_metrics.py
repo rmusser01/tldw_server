@@ -81,5 +81,5 @@ def record_summary_request(endpoint: str, status: str, duration_seconds: float) 
 
 try:
     register_watchlists_telemetry_metrics()
-except Exception as exc:  # noqa: BLE001
-    logger.debug("watchlists telemetry metrics registration skipped: {}", exc)
+except Exception:  # noqa: BLE001
+    logger.debug("watchlists telemetry metrics registration skipped")
