@@ -1,7 +1,10 @@
+"""Durable local image-store metadata for sandbox VM templates."""
+
 from __future__ import annotations
 
 import hashlib
 import json
+import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -21,6 +24,8 @@ class ImageStoreValidationError(ImageStoreError):
 
 @dataclass(slots=True)
 class CloneItem:
+    """A planned per-run clone or copy from a template artifact."""
+
     source_path: str
     target_path: str
     mode: str
@@ -28,6 +33,8 @@ class CloneItem:
 
 @dataclass(slots=True)
 class TemplateArtifact:
+    """Hash-addressed metadata for a file that belongs to a template."""
+
     name: str
     path: str
     size_bytes: int
@@ -36,6 +43,8 @@ class TemplateArtifact:
 
 @dataclass(slots=True)
 class RunCloneManifest:
+    """Deterministic clone plan for a sandbox run based on a registered template."""
+
     template_id: str
     run_id: str
     clone_items: list[CloneItem] = field(default_factory=list)
@@ -43,6 +52,8 @@ class RunCloneManifest:
 
 @dataclass(slots=True)
 class TemplateRecord:
+    """Persisted record for a VM template or canonical bundle."""
+
     template_id: str
     runtime: str
     template_name: str
@@ -57,6 +68,8 @@ class TemplateRecord:
 
 @dataclass(slots=True)
 class GarbageCollectionCandidate:
+    """Dry-run candidate for image-store cleanup."""
+
     run_id: str
     path: str
     size_bytes: int
@@ -65,6 +78,8 @@ class GarbageCollectionCandidate:
 
 @dataclass(slots=True)
 class GarbageCollectionPlan:
+    """Dry-run image-store cleanup plan."""
+
     run_candidates: list[GarbageCollectionCandidate] = field(default_factory=list)
 
 
@@ -93,6 +108,13 @@ class SandboxImageStore:
         provenance: dict[str, Any] | None = None,
         allow_existing: bool = False,
     ) -> str:
+        """Register artifact paths as a durable template manifest.
+
+        The method validates artifact existence, computes artifact size and
+        SHA-256 metadata, writes `<root>/templates/<runtime>/<name>/manifest.json`,
+        and returns the stable `runtime:name` template id.
+        """
+
         runtime_name = self._normalize_manifest_segment(runtime, "runtime")
         normalized_name = self._normalize_manifest_segment(template_name, "template_name")
         template_id = f"{runtime_name}:{normalized_name}"
@@ -131,6 +153,13 @@ class SandboxImageStore:
         labels: dict[str, str] | None = None,
         allow_existing: bool = False,
     ) -> str:
+        """Register a canonical bundle directory as a template.
+
+        Bundle registration reads canonical artifact names from `manifest.json`
+        when present, captures optional `build-info.json` provenance, and then
+        delegates to `register_template()`.
+        """
+
         bundle = Path(bundle_path).expanduser()
         if not bundle.is_dir():
             raise ImageStoreValidationError(f"bundle_missing: {bundle}")
@@ -151,9 +180,13 @@ class SandboxImageStore:
         )
 
     def get_template(self, template_id: str) -> TemplateRecord | None:
+        """Return a registered template record by id, or `None` when absent."""
+
         return self._templates.get(str(template_id))
 
     def list_templates(self, *, runtime: str | None = None) -> list[TemplateRecord]:
+        """List registered templates, optionally filtered by runtime."""
+
         runtime_name = str(runtime).strip() if runtime is not None else None
         records = self._templates.values()
         if runtime_name:
@@ -161,6 +194,8 @@ class SandboxImageStore:
         return sorted(records, key=lambda record: record.template_id)
 
     def prepare_run_clone(self, *, template_id: str, run_id: str) -> RunCloneManifest:
+        """Build a deterministic per-run clone manifest for a template."""
+
         template = self._templates[template_id]
         run_root = self.root_path / "runs" / str(run_id)
         clone_items = [
@@ -178,6 +213,11 @@ class SandboxImageStore:
         )
 
     def plan_garbage_collection(self, *, active_run_ids: set[str] | None = None) -> GarbageCollectionPlan:
+        """Return inactive run directories that could be deleted by a later GC step.
+
+        This method is intentionally dry-run only. It never removes files.
+        """
+
         active_ids = set(active_run_ids or set())
         runs_root = self.root_path / "runs"
         if not runs_root.exists():
@@ -204,15 +244,48 @@ class SandboxImageStore:
 
         for manifest_path in sorted(templates_root.glob("*/*/manifest.json")):
             record = self._read_manifest(manifest_path)
+            self._validate_manifest_location(record, manifest_path)
+            if record.template_id in self._templates:
+                existing = self._templates[record.template_id].manifest_path
+                raise ImageStoreValidationError(
+                    f"template_duplicate_on_reload: {record.template_id}: {existing}: {manifest_path}"
+                )
             self._templates[record.template_id] = record
 
     def _write_manifest(self, record: TemplateRecord) -> None:
         manifest_path = Path(record.manifest_path or self._manifest_path(runtime=record.runtime, template_name=record.template_name))
         manifest_path.parent.mkdir(parents=True, exist_ok=True)
         payload = self._record_to_manifest(record)
-        tmp_path = manifest_path.with_name(".manifest.json.tmp")
-        tmp_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-        tmp_path.replace(manifest_path)
+        tmp_path: Path | None = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                dir=manifest_path.parent,
+                prefix=".manifest.json.",
+                suffix=".tmp",
+                delete=False,
+                encoding="utf-8",
+            ) as tmp_file:
+                json.dump(payload, tmp_file, indent=2, sort_keys=True)
+                tmp_file.write("\n")
+                tmp_path = Path(tmp_file.name)
+            tmp_path.replace(manifest_path)
+        finally:
+            if tmp_path is not None:
+                tmp_path.unlink(missing_ok=True)
+
+    def _validate_manifest_location(self, record: TemplateRecord, manifest_path: Path) -> None:
+        runtime_name = manifest_path.parent.parent.name
+        template_name = manifest_path.parent.name
+        expected_template_id = f"{record.runtime}:{record.template_name}"
+        if (
+            record.runtime != runtime_name
+            or record.template_name != template_name
+            or record.template_id != expected_template_id
+        ):
+            raise ImageStoreValidationError(
+                f"manifest_path_mismatch: {manifest_path}: {record.template_id}"
+            )
 
     def _read_manifest(self, manifest_path: Path) -> TemplateRecord:
         try:
@@ -349,6 +422,9 @@ class SandboxImageStore:
     def _tree_size(self, path: Path) -> int:
         total = 0
         for item in path.rglob("*"):
-            if item.is_file():
-                total += item.stat().st_size
+            try:
+                if item.is_file():
+                    total += item.stat().st_size
+            except FileNotFoundError:
+                continue
         return total

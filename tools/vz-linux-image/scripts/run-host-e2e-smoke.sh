@@ -74,6 +74,9 @@ cleanup() {
     kill "${HELPER_PID}" 2>/dev/null || true
     wait "${HELPER_PID}" 2>/dev/null || true
   fi
+  if [[ -S "${SOCKET_PATH}" ]]; then
+    rm -f "${SOCKET_PATH}"
+  fi
 }
 
 while [[ "$#" -gt 0 ]]; do
@@ -179,6 +182,19 @@ require_helper_binary() {
   [[ -x "${HELPER_PATH}" ]] || die "helper binary is not executable: ${HELPER_PATH}"
 }
 
+prepare_socket_path() {
+  if [[ -d "${SOCKET_PATH}" ]]; then
+    die "helper socket path is a directory: ${SOCKET_PATH}"
+  fi
+  if [[ -S "${SOCKET_PATH}" || -f "${SOCKET_PATH}" || -L "${SOCKET_PATH}" ]]; then
+    rm -f "${SOCKET_PATH}"
+    return 0
+  fi
+  if [[ -e "${SOCKET_PATH}" ]]; then
+    die "helper socket path exists and is not removable by this script: ${SOCKET_PATH}"
+  fi
+}
+
 run_helper_daemon_smoke() {
   run_cmd env \
     TLDW_SANDBOX_MACOS_HELPER_DAEMON_SMOKE=1 \
@@ -199,6 +215,7 @@ start_helper_for_real_e2e() {
     return 0
   fi
 
+  prepare_socket_path
   mkdir -p "${SERIAL_LOG_DIR}"
   env \
     TLDW_SANDBOX_MACOS_HELPER_SOCKET="${SOCKET_PATH}" \
@@ -211,6 +228,10 @@ start_helper_for_real_e2e() {
 
 wait_for_helper_socket() {
   if [[ "${DRY_RUN}" -eq 1 ]]; then
+    return 0
+  fi
+  # Test harnesses may run where AF_UNIX socket binding is denied.
+  if [[ "${TLDW_HOST_E2E_SMOKE_SKIP_SOCKET_WAIT:-0}" == "1" ]]; then
     return 0
   fi
   local deadline=$((SECONDS + 10))
