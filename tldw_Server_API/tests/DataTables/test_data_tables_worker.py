@@ -19,6 +19,51 @@ class _StubAdapter:
         return {"choices": [{"message": {"content": json.dumps(self._payload)}}]}
 
 
+class _LoggerStub:
+    def __init__(self):
+        self.warnings: list[tuple[str, tuple[object, ...], dict[str, object]]] = []
+
+    def warning(self, message, *args, **kwargs):
+        self.warnings.append((str(message), args, kwargs))
+
+
+class _FailingCloseDb:
+    def close_connection(self):
+        raise RuntimeError("data tables backend exploded /private/data-tables.db")
+
+
+def _assert_sanitized_warning(logger_stub: _LoggerStub, expected_message: str) -> None:
+    rendered = repr(logger_stub.warnings)
+    assert logger_stub.warnings == [(expected_message, (), {})]
+    assert "data tables backend exploded" not in rendered
+    assert "/private/data-tables.db" not in rendered
+    assert "user-4242" not in rendered
+
+
+def test_close_media_db_sanitizes_close_failure_log(monkeypatch):
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(jobs_worker, "logger", logger_stub)
+
+    jobs_worker._close_media_db("user-4242", _FailingCloseDb())
+
+    _assert_sanitized_warning(
+        logger_stub,
+        "data_tables: failed to close media db",
+    )
+
+
+def test_close_chacha_db_sanitizes_close_failure_log(monkeypatch):
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(jobs_worker, "logger", logger_stub)
+
+    jobs_worker._close_chacha_db("user-4242", _FailingCloseDb())
+
+    _assert_sanitized_warning(
+        logger_stub,
+        "data_tables: failed to close chacha db",
+    )
+
+
 @pytest.mark.asyncio
 async def test_data_tables_worker_generates_rows(monkeypatch, tmp_path):
     media_path = tmp_path / "media.db"

@@ -161,15 +161,15 @@ DATA_TABLES_RUNTIME_EXCEPTIONS = (
 def _close_media_db(user_id: str, db: Any) -> None:
     try:
         db.close_connection()
-    except DATA_TABLES_DB_EXCEPTIONS as exc:
-        logger.warning("data_tables: failed to close media db for user_id {}: {}", user_id, exc)
+    except DATA_TABLES_DB_EXCEPTIONS:
+        logger.warning("data_tables: failed to close media db")
 
 
 def _close_chacha_db(user_id: str, db: CharactersRAGDB) -> None:
     try:
         db.close_connection()
-    except DATA_TABLES_DB_EXCEPTIONS as exc:
-        logger.warning("data_tables: failed to close chacha db for user_id {}: {}", user_id, exc)
+    except DATA_TABLES_DB_EXCEPTIONS:
+        logger.warning("data_tables: failed to close chacha db")
 
 
 def _evict_lru_entry(cache: LRUCache, on_evict: Callable[[str, Any], None]) -> None:
