@@ -276,8 +276,8 @@ async def _generate_tts_audio(
 
         return audio_bytes, mime_type
 
-    except (AttributeError, ImportError, ModuleNotFoundError, OSError, RuntimeError, TypeError, ValueError) as e:
-        logger.error(f"TTS generation failed: {e}")
+    except (AttributeError, ImportError, ModuleNotFoundError, OSError, RuntimeError, TypeError, ValueError):
+        logger.error("TTS generation failed")
         return b"", "audio/mpeg"
 
 

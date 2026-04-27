@@ -65,3 +65,28 @@ async def test_voice_command_dry_run_loads_defaults_and_refreshes_user_commands(
     assert registry.refresh_calls == [(db, 7)]
     assert response.matched is True
     assert response.action_type == "mcp_tool"
+
+
+@pytest.mark.asyncio
+async def test_generate_tts_audio_sanitizes_backend_failure_log(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    logged_errors = []
+
+    class LoggerStub:
+        def error(self, message, *args, **kwargs):
+            logged_errors.append((message, args, kwargs))
+
+    async def fake_get_tts_service_v2():
+        raise RuntimeError("tts backend exploded /private/tts-cache")
+
+    from tldw_Server_API.app.core.TTS import tts_service_v2
+
+    monkeypatch.setattr(voice_assistant, "logger", LoggerStub())
+    monkeypatch.setattr(tts_service_v2, "get_tts_service_v2", fake_get_tts_service_v2)
+
+    audio_bytes, mime_type = await voice_assistant._generate_tts_audio("speak this")
+
+    assert audio_bytes == b""
+    assert mime_type == "audio/mpeg"
+    assert logged_errors == [("TTS generation failed", (), {})]
