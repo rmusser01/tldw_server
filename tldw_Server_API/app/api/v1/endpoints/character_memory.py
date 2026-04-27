@@ -92,7 +92,7 @@ def get_or_create_character_persona_profile(
         existing = db.get_persona_profile(persona_id, user_id=user_id)
         if existing:
             return persona_id
-        logger.error("Failed to create persona profile for character {}: {}", character_id, exc)
+        logger.error("Failed to create persona profile")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to initialize character memory storage.",
@@ -315,8 +315,8 @@ async def extract_character_memories_endpoint(
                 created_at="",
                 last_modified="",
             ))
-        except Exception as exc:
-            logger.warning("Failed to persist extracted memory: {}", exc)
+        except Exception:
+            logger.warning("Failed to persist extracted memory")
 
     return CharacterMemoryExtractResponse(
         extracted=len(created),

@@ -10,6 +10,7 @@ Covers:
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -362,6 +363,26 @@ class TestGetOrCreatePersonaProfile:
         assert call_data["name"] == "char_memory:42"
         assert call_data["origin_character_name"] == "Luna"
 
+    def test_profile_creation_failure_log_is_sanitized(self, monkeypatch):
+        from fastapi import HTTPException
+
+        from tldw_Server_API.app.api.v1.endpoints import character_memory
+
+        db = MagicMock()
+        db.get_persona_profile.side_effect = [None, None]
+        db.create_persona_profile.side_effect = RuntimeError(
+            "profile create exploded at /private/character-memory.db"
+        )
+        fake_logger = MagicMock()
+        monkeypatch.setattr(character_memory, "logger", fake_logger)
+
+        with pytest.raises(HTTPException) as exc_info:
+            character_memory.get_or_create_character_persona_profile(db, "42", "Luna", "1")
+
+        assert exc_info.value.status_code == 500
+        assert exc_info.value.detail == "Failed to initialize character memory storage."
+        fake_logger.error.assert_called_once_with("Failed to create persona profile")
+
 
 # ---------------------------------------------------------------------------
 # Endpoint DB error mapping tests
@@ -589,6 +610,62 @@ class TestCharacterMemoryEndpointDbErrorMapping:
 
         assert exc_info.value.status_code == 500
         assert exc_info.value.detail == "Failed to delete character memory"
+
+    @pytest.mark.asyncio
+    async def test_extract_character_memories_persist_failure_log_is_sanitized(self, monkeypatch):
+        from tldw_Server_API.app.api.v1.endpoints import character_memory
+        from tldw_Server_API.app.api.v1.schemas.character_memory_schemas import (
+            CharacterMemoryExtractRequest,
+        )
+        from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
+        from tldw_Server_API.app.core.Character_Chat.modules import character_memory_extraction
+
+        class _PersistFailDb:
+            def get_character_card_by_id(self, character_id: int):
+                return {"id": character_id, "name": "Luna"}
+
+            def get_conversation_by_id(self, chat_id: str):
+                assert chat_id == "chat-1"
+                return {"id": chat_id, "client_id": 1, "character_id": 42, "user_name": "Alex"}
+
+            def get_persona_profile(self, persona_id: str, user_id: str):
+                return {"id": persona_id, "user_id": user_id}
+
+            def get_messages_for_conversation(self, chat_id: str, limit: int, offset: int):
+                assert chat_id == "chat-1"
+                return [{"role": "user", "content": "I like tea.", "deleted": False}]
+
+            def list_persona_memory_entries(self, **_kwargs):
+                return []
+
+            def add_persona_memory_entry(self, _payload):
+                raise RuntimeError("memory persist exploded at /private/character-memory.db")
+
+        def _fake_extract_character_memories(**_kwargs):
+            return SimpleNamespace(
+                unique=[{"category": "fact", "content": "User likes tea.", "salience": 0.8}],
+                duplicates_skipped=0,
+            )
+
+        fake_logger = MagicMock()
+        monkeypatch.setattr(character_memory, "logger", fake_logger)
+        monkeypatch.setattr(
+            character_memory_extraction,
+            "extract_character_memories",
+            _fake_extract_character_memories,
+        )
+
+        response = await character_memory.extract_character_memories_endpoint(
+            character_id="42",
+            body=CharacterMemoryExtractRequest(chat_id="chat-1"),
+            db=_PersistFailDb(),
+            current_user=User(id=1, username="tester", email=None, is_active=True),
+        )
+
+        assert response.extracted == 0
+        assert response.skipped_duplicates == 0
+        assert response.memories == []
+        fake_logger.warning.assert_called_once_with("Failed to persist extracted memory")
 
 
 # ---------------------------------------------------------------------------
