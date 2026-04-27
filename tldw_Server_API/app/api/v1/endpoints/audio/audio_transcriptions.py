@@ -560,11 +560,8 @@ async def create_transcription(
         """Best-effort RG job heartbeat loop (no-op when unsupported)."""
         try:
             interval = _audio_shim_attr("get_job_heartbeat_interval_seconds")()
-        except _AUDIO_TRANSCRIPTIONS_NONCRITICAL_EXCEPTIONS as exc:
-            logger.debug(
-                "audio.transcriptions: get_job_heartbeat_interval_seconds failed; "
-                f"skipping job heartbeat. user_id={user_id}, error={exc}"
-            )
+        except _AUDIO_TRANSCRIPTIONS_NONCRITICAL_EXCEPTIONS:
+            logger.debug("audio.transcriptions job heartbeat interval lookup failed; skipping job heartbeat")
             return None
         if not interval or interval <= 0:
             return None

@@ -407,6 +407,57 @@ def test_audio_transcriptions_sanitizes_auto_segmentation_failure_log(
 
 
 @pytest.mark.unit
+def test_audio_transcriptions_sanitizes_heartbeat_interval_failure_log(
+    monkeypatch,
+    bypass_api_limits,
+):
+    app, _captured = _setup_stubbed_audio_app(monkeypatch)
+    import tldw_Server_API.app.api.v1.endpoints.audio.audio_transcriptions as audio_tx
+
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(audio_tx, "logger", logger_stub)
+
+    original_shim_attr = audio_tx._audio_shim_attr
+
+    def _shim_attr(name):
+        if name == "get_job_heartbeat_interval_seconds":
+            def _raise_interval_failure():
+                raise RuntimeError("heartbeat interval leaked /private/rg.sock")
+
+            return _raise_interval_failure
+        return original_shim_attr(name)
+
+    monkeypatch.setattr(audio_tx, "_audio_shim_attr", _shim_attr)
+
+    with bypass_api_limits(app), TestClient(app) as client:
+        wav_bytes = _make_wav_bytes()
+        headers = {"X-API-KEY": TEST_API_KEY}
+        files = {"file": ("sample.wav", io.BytesIO(wav_bytes), "audio/wav")}
+        data = {
+            "model": "vibevoice-asr",
+            "response_format": "json",
+        }
+        resp = client.post(
+            "/api/v1/audio/transcriptions",
+            headers=headers,
+            files=files,
+            data=data,
+        )
+        if resp.status_code == 404:
+            pytest.skip("audio/transcriptions endpoint not mounted in this build")
+        assert resp.status_code == 200, resp.text
+
+    heartbeat_logs = [
+        msg
+        for msg in logger_stub.debugs
+        if "job heartbeat" in msg or "get_job_heartbeat_interval_seconds" in msg
+    ]
+    assert heartbeat_logs == [
+        "audio.transcriptions job heartbeat interval lookup failed; skipping job heartbeat"
+    ]
+
+
+@pytest.mark.unit
 def test_audio_transcriptions_sanitizes_malformed_timestamp_granularity_log(
     monkeypatch,
     bypass_api_limits,
