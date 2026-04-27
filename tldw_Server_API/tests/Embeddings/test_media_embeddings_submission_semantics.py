@@ -294,6 +294,8 @@ async def test_generate_embeddings_fails_when_job_id_missing(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_generate_embeddings_batch_returns_partial_response_on_partial_enqueue_error(monkeypatch):
+    logger_stub = MagicMock()
+
     class _PartialAdapter:
         def create_job(self, **kwargs):
             media_id = int(kwargs["media_id"])
@@ -301,6 +303,7 @@ async def test_generate_embeddings_batch_returns_partial_response_on_partial_enq
                 raise RuntimeError("enqueue failed")
             return {"uuid": f"job-{media_id}"}
 
+    monkeypatch.setattr(media_embeddings, "logger", logger_stub)
     monkeypatch.setattr(media_embeddings, "_embeddings_jobs_backend", lambda: "jobs")
     monkeypatch.setattr(media_embeddings, "_resolve_model_provider", lambda *_: ("model-a", "provider-a"))
     monkeypatch.setattr(media_embeddings, "EmbeddingsJobsAdapter", _PartialAdapter)
@@ -316,6 +319,7 @@ async def test_generate_embeddings_batch_returns_partial_response_on_partial_enq
     assert response.submitted == 1
     assert response.failed_media_ids == [456]
     assert response.failure_reasons == ["media_id=456: RuntimeError"]
+    logger_stub.error.assert_called_once_with("Failed to persist batch embedding job")
 
 
 @pytest.mark.asyncio

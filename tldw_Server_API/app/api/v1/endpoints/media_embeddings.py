@@ -815,10 +815,7 @@ async def generate_embeddings_batch(
         except _MEDIA_EMBEDDINGS_NONCRITICAL_EXCEPTIONS as exc:
             failed_media_ids.append(int(media_id))
             failure_reasons.append(f"media_id={media_id}: {type(exc).__name__}")
-            logger.error(
-                "Failed to persist batch embedding job "
-                f"(user_id={user_id}, media_id={media_id}, reason={type(exc).__name__}: {exc})"
-            )
+            logger.error("Failed to persist batch embedding job")
 
     if failed_media_ids and not job_ids:
         detail = {
