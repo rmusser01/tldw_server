@@ -103,14 +103,14 @@ def _build_config_txt_values() -> dict[str, ConfigValue]:
     try:
         sections = config_parser.sections()
     except configparser.Error:
-        logger.exception("Error reading config sections")
+        logger.error("Error reading config sections")
         sections = []
 
     for section in sections:
         try:
             items = config_parser.items(section)
         except configparser.Error:
-            logger.exception("Error reading items for section {}", section)
+            logger.error("Error reading config items")
             items = []
         for key, raw_value in items:
             path = f"{section}.{key}"
