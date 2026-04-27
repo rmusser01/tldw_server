@@ -734,13 +734,13 @@ async def create_transcription(
             if frames is None or not samplerate:
                 raise ValueError("soundfile.info returned incomplete metadata")
             duration_seconds = float(frames) / float(samplerate)
-        except _AUDIO_TRANSCRIPTIONS_NONCRITICAL_EXCEPTIONS as e:
-            logger.debug(f"soundfile.info failed; falling back to read for duration: error={e}")
+        except _AUDIO_TRANSCRIPTIONS_NONCRITICAL_EXCEPTIONS:
+            logger.debug("soundfile.info failed; falling back to read for duration")
             try:
                 audio_data, sample_rate = sf_mod.read(canonical_path)
                 duration_seconds = float(len(audio_data)) / float(sample_rate or 16000)
-            except _AUDIO_TRANSCRIPTIONS_NONCRITICAL_EXCEPTIONS as read_err:
-                logger.debug(f"Failed to compute audio duration; defaulting to 0: error={read_err}")
+            except _AUDIO_TRANSCRIPTIONS_NONCRITICAL_EXCEPTIONS:
+                logger.debug("Failed to compute audio duration; defaulting to 0")
                 duration_seconds = 0.0
 
         granularity_tokens = set()

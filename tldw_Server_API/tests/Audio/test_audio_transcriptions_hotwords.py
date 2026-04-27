@@ -19,6 +19,22 @@ class _LoggerStub:
         self.debugs.append(str(message))
 
 
+class _DurationFallbackSoundFile:
+    def info(self, _path):
+        raise RuntimeError("soundfile info leaked /private/audio.wav")
+
+    def read(self, _path):
+        return [0.0] * 1600, 16000
+
+
+class _UnreadableSoundFile:
+    def info(self, _path):
+        raise RuntimeError("soundfile info leaked /private/audio.wav")
+
+    def read(self, _path):
+        raise RuntimeError("soundfile read leaked /private/audio.wav")
+
+
 def _make_wav_bytes(duration_sec: float = 0.1, sr: int = 16000) -> bytes:
     buf = io.BytesIO()
     data = np.zeros(int(sr * duration_sec), dtype=np.float32)
@@ -225,3 +241,81 @@ def test_audio_transcriptions_sanitizes_malformed_hotwords_json_log(
         if msg.startswith("Failed to parse hotwords JSON")
     ]
     assert parse_logs == ["Failed to parse hotwords JSON; falling back to CSV parsing"]
+
+
+@pytest.mark.unit
+def test_audio_transcriptions_sanitizes_soundfile_info_fallback_log(
+    monkeypatch,
+    bypass_api_limits,
+):
+    app, _captured = _setup_stubbed_audio_app(monkeypatch)
+    import tldw_Server_API.app.api.v1.endpoints.audio as audio_pkg
+    import tldw_Server_API.app.api.v1.endpoints.audio.audio_transcriptions as audio_tx
+
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(audio_tx, "logger", logger_stub)
+    monkeypatch.setattr(audio_pkg, "sf", _DurationFallbackSoundFile())
+
+    with bypass_api_limits(app), TestClient(app) as client:
+        wav_bytes = _make_wav_bytes()
+        headers = {"X-API-KEY": TEST_API_KEY}
+        files = {"file": ("sample.wav", io.BytesIO(wav_bytes), "audio/wav")}
+        data = {
+            "model": "vibevoice-asr",
+            "response_format": "json",
+        }
+        resp = client.post(
+            "/api/v1/audio/transcriptions",
+            headers=headers,
+            files=files,
+            data=data,
+        )
+        if resp.status_code == 404:
+            pytest.skip("audio/transcriptions endpoint not mounted in this build")
+        assert resp.status_code == 200, resp.text
+
+    duration_logs = [
+        msg
+        for msg in logger_stub.debugs
+        if msg.startswith("soundfile.info failed")
+    ]
+    assert duration_logs == ["soundfile.info failed; falling back to read for duration"]
+
+
+@pytest.mark.unit
+def test_audio_transcriptions_sanitizes_soundfile_read_fallback_log(
+    monkeypatch,
+    bypass_api_limits,
+):
+    app, _captured = _setup_stubbed_audio_app(monkeypatch)
+    import tldw_Server_API.app.api.v1.endpoints.audio as audio_pkg
+    import tldw_Server_API.app.api.v1.endpoints.audio.audio_transcriptions as audio_tx
+
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(audio_tx, "logger", logger_stub)
+    monkeypatch.setattr(audio_pkg, "sf", _UnreadableSoundFile())
+
+    with bypass_api_limits(app), TestClient(app) as client:
+        wav_bytes = _make_wav_bytes()
+        headers = {"X-API-KEY": TEST_API_KEY}
+        files = {"file": ("sample.wav", io.BytesIO(wav_bytes), "audio/wav")}
+        data = {
+            "model": "vibevoice-asr",
+            "response_format": "json",
+        }
+        resp = client.post(
+            "/api/v1/audio/transcriptions",
+            headers=headers,
+            files=files,
+            data=data,
+        )
+        if resp.status_code == 404:
+            pytest.skip("audio/transcriptions endpoint not mounted in this build")
+        assert resp.status_code == 200, resp.text
+
+    duration_logs = [
+        msg
+        for msg in logger_stub.debugs
+        if msg.startswith("Failed to compute audio duration")
+    ]
+    assert duration_logs == ["Failed to compute audio duration; defaulting to 0"]
