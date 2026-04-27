@@ -360,8 +360,8 @@ async def _ensure_tables(db) -> None:
     is_pg = _is_postgres_connection(db)
     try:
         await ensure_connectors_tables(db, is_postgres=is_pg)
-    except _CONNECTORS_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Failed to ensure connector tables: {e}")
+    except _CONNECTORS_NONCRITICAL_EXCEPTIONS:
+        logger.error("Failed to ensure connector tables")
         raise
 
 
@@ -2587,8 +2587,8 @@ async def create_import_job(
                 if _job_is_active(active_job):
                     return _format_connectors_job(active_job or {}, source_id=source_id, default_type=job_type)
         return _format_connectors_job(job, source_id=source_id, default_type=job_type)
-    except _CONNECTORS_NONCRITICAL_EXCEPTIONS as e:
-        logger.warning(f"Failed to create connectors job via JobManager: {e}")
+    except _CONNECTORS_NONCRITICAL_EXCEPTIONS:
+        logger.warning("Failed to create connectors job via JobManager")
         # Fallback to synthetic ID
         import uuid
         jid = uuid.uuid4().hex
