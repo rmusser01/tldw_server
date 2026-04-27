@@ -97,13 +97,13 @@ async def upload_voice(
             status_code=status.HTTP_501_NOT_IMPLEMENTED, detail="Custom voice upload is not available in this build"
         ) from None
     except VoiceQuotaExceededError as e:
-        logger.warning(f"Voice quota exceeded: {e}", exc_info=True)
+        logger.warning("Voice quota exceeded")
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail=_http_error_detail("Voice quota exceeded", request_id, exc=e),
         ) from e
     except VoiceProcessingError as e:
-        logger.warning(f"Voice processing failed: {e}", exc_info=True)
+        logger.warning("Voice processing failed")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=_http_error_detail("Voice processing failed", request_id, exc=e),
@@ -151,7 +151,7 @@ async def encode_voice_reference(
         )
         return VoiceEncodeResponse(**result.model_dump())
     except VoiceProcessingError as e:
-        logger.warning(f"Voice encoding failed: {e}", exc_info=True)
+        logger.warning("Voice encoding failed")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e),

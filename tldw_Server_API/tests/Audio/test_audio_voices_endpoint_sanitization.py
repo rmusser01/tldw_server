@@ -12,9 +12,15 @@ from tldw_Server_API.app.api.v1.schemas.audio_schemas import VoiceEncodeRequest
 class _LoggerStub:
     def __init__(self):
         self.errors = []
+        self.warnings = []
+        self.warning_kwargs = []
 
     def error(self, message, *args, **kwargs):
         self.errors.append(str(message))
+
+    def warning(self, message, *args, **kwargs):
+        self.warnings.append(str(message))
+        self.warning_kwargs.append(kwargs)
 
 
 class _UploadFileStub:
@@ -27,6 +33,14 @@ class _UploadFileStub:
 class _VoiceUploadRequestStub:
     def __init__(self, **kwargs):
         self.__dict__.update(kwargs)
+
+
+class _VoiceProcessingError(Exception):
+    pass
+
+
+class _VoiceQuotaExceededError(Exception):
+    pass
 
 
 class _VoiceManagerStub:
@@ -48,12 +62,30 @@ class _VoiceManagerStub:
         raise RuntimeError("voice backend exploded at /private/voices.db")
 
 
-def _install_voice_manager(monkeypatch):
+class _QuotaVoiceManagerStub(_VoiceManagerStub):
+    async def upload_voice(self, **kwargs):
+        _ = kwargs
+        raise _VoiceQuotaExceededError("voice quota exploded at /private/voices.db")
+
+
+class _UploadProcessingVoiceManagerStub(_VoiceManagerStub):
+    async def upload_voice(self, **kwargs):
+        _ = kwargs
+        raise _VoiceProcessingError("voice processing exploded at /private/voices.db")
+
+
+class _EncodeProcessingVoiceManagerStub(_VoiceManagerStub):
+    async def encode_voice_reference(self, **kwargs):
+        _ = kwargs
+        raise _VoiceProcessingError("voice encoding exploded at /private/voices.db")
+
+
+def _install_voice_manager(monkeypatch, voice_manager=None):
     fake_module = types.ModuleType("voice_manager")
-    fake_module.VoiceProcessingError = type("VoiceProcessingError", (Exception,), {})
-    fake_module.VoiceQuotaExceededError = type("VoiceQuotaExceededError", (Exception,), {})
+    fake_module.VoiceProcessingError = _VoiceProcessingError
+    fake_module.VoiceQuotaExceededError = _VoiceQuotaExceededError
     fake_module.VoiceUploadRequest = _VoiceUploadRequestStub
-    fake_module.get_voice_manager = lambda: _VoiceManagerStub()
+    fake_module.get_voice_manager = lambda: voice_manager or _VoiceManagerStub()
     monkeypatch.setitem(
         sys.modules,
         "tldw_Server_API.app.core.TTS.voice_manager",
@@ -123,3 +155,34 @@ async def test_audio_voice_generic_failure_logs_are_sanitized(
     assert logger_stub.errors == [expected_log]
     assert "/private/" not in logger_stub.errors[0]
     assert "exploded" not in logger_stub.errors[0]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("route_name", "voice_manager", "expected_status", "expected_log"),
+    [
+        ("upload", _QuotaVoiceManagerStub(), 429, "Voice quota exceeded"),
+        ("upload", _UploadProcessingVoiceManagerStub(), 400, "Voice processing failed"),
+        ("encode", _EncodeProcessingVoiceManagerStub(), 400, "Voice encoding failed"),
+    ],
+)
+async def test_audio_voice_validation_failure_logs_are_sanitized(
+    monkeypatch,
+    route_name: str,
+    voice_manager,
+    expected_status: int,
+    expected_log: str,
+):
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(audio_voices, "logger", logger_stub)
+    monkeypatch.setattr(audio_voices, "ensure_request_id", lambda _request: "req-test")
+    _install_voice_manager(monkeypatch, voice_manager)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await _call_endpoint(route_name)
+
+    assert exc_info.value.status_code == expected_status
+    assert logger_stub.warnings == [expected_log]
+    assert logger_stub.warning_kwargs == [{}]
+    assert "/private/" not in logger_stub.warnings[0]
+    assert "exploded" not in logger_stub.warnings[0]
