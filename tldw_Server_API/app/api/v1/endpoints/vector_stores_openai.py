@@ -424,8 +424,8 @@ async def create_vector_store(
     # Register in meta DB
     try:
         meta_register_store(uid, store_id, name)
-    except _VECTORSTORE_NONCRITICAL_EXCEPTIONS as _e:
-        logger.warning(f"Failed to register vector store in meta DB: {_e}")
+    except _VECTORSTORE_NONCRITICAL_EXCEPTIONS:
+        logger.warning("Failed to register vector store in meta DB")
 
     # Track expected dimension in-memory for correctness in tests and fakes
     with contextlib.suppress(_VECTORSTORE_NONCRITICAL_EXCEPTIONS):
@@ -644,8 +644,8 @@ async def update_vector_store(
             else:
                 # Not present: register with the new name
                 meta_register_store(uid_str, store_id, payload.name)
-    except _VECTORSTORE_NONCRITICAL_EXCEPTIONS as _e:
-        logger.warning(f"Failed to update/register vector store meta name: {_e}")
+    except _VECTORSTORE_NONCRITICAL_EXCEPTIONS:
+        logger.warning("Failed to persist vector store meta name update")
 
     return VectorStoreObject(
         id=md.get("openai_id", store_id),
@@ -672,8 +672,8 @@ async def delete_vector_store(
             ),
             store_id,
         )
-    except _VECTORSTORE_NONCRITICAL_EXCEPTIONS as _e:
-        logger.warning(f"Failed to delete store from meta DB: {_e}")
+    except _VECTORSTORE_NONCRITICAL_EXCEPTIONS:
+        logger.warning("Failed to delete vector store from meta DB")
     # Remove from in-memory registry
     with contextlib.suppress(_VECTORSTORE_NONCRITICAL_EXCEPTIONS):
         _STORE_DIMENSIONS.pop(store_id, None)

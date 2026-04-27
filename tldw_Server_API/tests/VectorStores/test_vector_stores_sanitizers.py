@@ -70,6 +70,9 @@ class _FakeAdapter:
             "metadata": collection.metadata,
         }
 
+    async def delete_collection(self, name) -> None:
+        self.collections.pop(name, None)
+
     async def list_vectors_paginated(self, *_args, **_kwargs):
         raise RuntimeError("vector backend exploded /private/vector.db")
 
@@ -130,6 +133,102 @@ async def test_create_vector_store_sanitizes_meta_uniqueness_fallback_log(
     _assert_warning_sanitized(
         logger_stub,
         "Meta DB uniqueness check failed; falling back to adapter scan",
+    )
+
+
+@pytest.mark.asyncio
+async def test_create_vector_store_sanitizes_meta_registration_fallback_log(
+    monkeypatch,
+    logger_stub,
+    user,
+):
+    fake_adapter = _FakeAdapter()
+
+    async def fake_get_adapter_for_user(_user, embedding_dim):
+        fake_adapter.config.embedding_dim = embedding_dim
+        return fake_adapter
+
+    monkeypatch.setattr(vector_ep, "_get_adapter_for_user", fake_get_adapter_for_user)
+    monkeypatch.setattr(vector_ep, "resolve_user_id_for_request", lambda *_args, **_kwargs: "1")
+    monkeypatch.setattr(vector_ep, "init_meta_db", lambda _uid: None)
+    monkeypatch.setattr(vector_ep, "meta_find_store_by_name", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(vector_ep, "meta_register_store", _sensitive_error)
+
+    result = await vector_ep.create_vector_store(
+        vector_ep.VectorStoreCreate(name="Docs", dimensions=8),
+        current_user=user,
+    )
+
+    assert result.name == "Docs"
+    _assert_warning_sanitized(
+        logger_stub,
+        "Failed to register vector store in meta DB",
+    )
+
+
+@pytest.mark.asyncio
+async def test_update_vector_store_sanitizes_meta_name_persistence_fallback_log(
+    monkeypatch,
+    logger_stub,
+    user,
+):
+    fake_adapter = _FakeAdapter()
+    fake_adapter.collection.metadata.update(
+        {
+            "openai_id": "vs_existing",
+            "name": "Existing",
+            "created_at": 123,
+        }
+    )
+
+    async def fake_get_adapter_for_user(_user, embedding_dim):
+        fake_adapter.config.embedding_dim = embedding_dim
+        return fake_adapter
+
+    monkeypatch.setattr(vector_ep, "_get_adapter_for_user", fake_get_adapter_for_user)
+    monkeypatch.setattr(vector_ep, "resolve_user_id_for_request", lambda *_args, **_kwargs: "1")
+    monkeypatch.setattr(vector_ep, "init_meta_db", lambda _uid: None)
+    monkeypatch.setattr(vector_ep, "meta_find_store_by_name", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(vector_ep, "meta_list_stores", _sensitive_error)
+
+    result = await vector_ep.update_vector_store(
+        store_id="vs_existing",
+        payload=vector_ep.VectorStoreUpdate(name="Renamed"),
+        current_user=user,
+    )
+
+    assert result.name == "Renamed"
+    _assert_warning_sanitized(
+        logger_stub,
+        "Failed to persist vector store meta name update",
+    )
+
+
+@pytest.mark.asyncio
+async def test_delete_vector_store_sanitizes_meta_delete_fallback_log(
+    monkeypatch,
+    logger_stub,
+    user,
+):
+    fake_adapter = _FakeAdapter()
+
+    async def fake_get_adapter_for_user(_user, embedding_dim):
+        fake_adapter.config.embedding_dim = embedding_dim
+        return fake_adapter
+
+    monkeypatch.setattr(vector_ep, "_get_adapter_for_user", fake_get_adapter_for_user)
+    monkeypatch.setattr(vector_ep, "resolve_user_id_for_request", lambda *_args, **_kwargs: "1")
+    monkeypatch.setattr(vector_ep, "meta_delete_store", _sensitive_error)
+
+    result = await vector_ep.delete_vector_store(
+        store_id="vs_existing",
+        current_user=user,
+    )
+
+    assert result == {"id": "vs_existing", "deleted": True}
+    _assert_warning_sanitized(
+        logger_stub,
+        "Failed to delete vector store from meta DB",
     )
 
 
