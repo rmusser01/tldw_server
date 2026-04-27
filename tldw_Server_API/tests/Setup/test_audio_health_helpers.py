@@ -275,6 +275,25 @@ def test_tts_health_detailed_circuit_breaker_failure_log_is_sanitized(monkeypatc
     fake_logger.debug.assert_called_once_with("TTS health detailed circuit-breaker lookup failed")
 
 
+def test_tts_health_espeak_ctypes_discovery_failure_log_is_sanitized(monkeypatch):
+    class _Adapter:
+        config = {}
+
+    def _fail_find_library(_name):
+        raise RuntimeError("ctypes lookup leaked /private/libespeak-ng.dylib")
+
+    fake_logger = MagicMock()
+    monkeypatch.setattr(audio_health, "logger", fake_logger)
+    monkeypatch.setattr(audio_health, "_ctypes_find_library", _fail_find_library)
+    monkeypatch.setattr(audio_health.os.path, "exists", lambda _path: False)
+    monkeypatch.delenv("PHONEMIZER_ESPEAK_LIBRARY", raising=False)
+
+    result = audio_health._discover_kokoro_espeak_library(_Adapter())
+
+    assert result is None
+    fake_logger.debug.assert_called_once_with("Unable to discover eSpeak library via ctypes lookup")
+
+
 @pytest.mark.asyncio
 async def test_get_tts_health_derives_omnivoice_backoff_state_from_supervisor(monkeypatch):
     class _FakeRegistry:

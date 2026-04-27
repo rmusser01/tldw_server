@@ -453,8 +453,8 @@ def _discover_kokoro_espeak_library(adapter: Any) -> Optional[str]:
         discovered_name = _ctypes_find_library("espeak-ng") or _ctypes_find_library("espeak")
         if discovered_name and os.path.isabs(discovered_name) and os.path.exists(discovered_name):
             candidates.insert(0, discovered_name)
-    except Exception as exc:
-        logger.debug(f"Unable to discover eSpeak library via ctypes lookup: {exc}")
+    except Exception:
+        logger.debug("Unable to discover eSpeak library via ctypes lookup")
 
     for candidate in candidates:
         if candidate and os.path.exists(candidate):
