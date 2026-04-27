@@ -694,13 +694,13 @@ async def import_test_cases(
         )
 
     except (DatabaseError, InputError, ConflictError) as e:
-        logger.error(f"Error importing test cases: {e}")
+        logger.error("Error importing test cases")
         raise map_db_error_to_http(
             e,
             default_detail="Failed to import test cases",
         ) from e
     except PROMPT_STUDIO_TEST_CASE_EXCEPTIONS as e:
-        logger.error(f"Error importing test cases: {e}")
+        logger.error("Error importing test cases")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to import test cases"
@@ -786,13 +786,13 @@ async def import_test_cases_csv_upload(
             }
         )
     except (DatabaseError, InputError, ConflictError) as e:
-        logger.error(f"Error importing test cases via upload: {e}")
+        logger.error("Error importing test cases via upload")
         raise map_db_error_to_http(
             e,
             default_detail="Failed to import CSV test cases",
         ) from e
     except PROMPT_STUDIO_TEST_CASE_EXCEPTIONS as e:
-        logger.error(f"Error importing test cases via upload: {e}")
+        logger.error("Error importing test cases via upload")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to import CSV test cases") from e
 
 

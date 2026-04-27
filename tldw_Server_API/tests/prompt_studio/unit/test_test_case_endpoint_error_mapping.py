@@ -53,7 +53,11 @@ class _LoggerStub:
 
 _SENSITIVE_MARKERS = (
     "duplicate case",
+    "duplicate upload case",
+    "generic import exploded",
+    "generic upload exploded",
     "driver failed",
+    "invalid import payload",
     "unexpected list exploded",
     "/private/tmp/prompt-studio-test-cases.db",
 )
@@ -208,15 +212,16 @@ def _patch_test_case_io(
     io_exc: Exception,
     *,
     manager_exc: Exception | None = None,
-) -> None:
+) -> _LoggerStub:
     effective_manager_exc = manager_exc or DatabaseError("manager should not be called")
-    _patch_test_case_dependencies(monkeypatch, effective_manager_exc)
+    logger_stub = _patch_test_case_dependencies(monkeypatch, effective_manager_exc)
     monkeypatch.setattr(
         test_cases_endpoint,
         "TestCaseIO",
         lambda manager: _BrokenTestCaseIO(manager, io_exc),
         raising=True,
     )
+    return logger_stub
 
 
 def _patch_test_case_generator(
@@ -453,7 +458,7 @@ async def test_delete_test_case_maps_database_error(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_import_test_cases_maps_input_error(monkeypatch):
-    _patch_test_case_io(monkeypatch, InputError("invalid import payload"))
+    logger_stub = _patch_test_case_io(monkeypatch, InputError("invalid import payload"))
 
     with pytest.raises(HTTPException) as exc_info:
         await import_test_cases(
@@ -469,11 +474,36 @@ async def test_import_test_cases_maps_input_error(monkeypatch):
 
     assert exc_info.value.status_code == 400
     assert exc_info.value.detail == "invalid import payload"
+    _assert_sanitized_error_log(logger_stub, "Error importing test cases")
+
+
+@pytest.mark.asyncio
+async def test_import_test_cases_sanitizes_generic_error(monkeypatch):
+    logger_stub = _patch_test_case_io(
+        monkeypatch,
+        RuntimeError("generic import exploded /private/tmp/prompt-studio-test-cases.db"),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await import_test_cases(
+            import_data=TestCaseImportRequest(
+                project_id=7,
+                format="json",
+                data='{"test_cases":[]}',
+            ),
+            db=object(),
+            security_config=_SecurityConfig(),
+            user_context={"user_id": "tester"},
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "Failed to import test cases"
+    _assert_sanitized_error_log(logger_stub, "Error importing test cases")
 
 
 @pytest.mark.asyncio
 async def test_import_test_cases_csv_upload_maps_conflict_error(monkeypatch):
-    _patch_test_case_io(monkeypatch, ConflictError("duplicate upload case"))
+    logger_stub = _patch_test_case_io(monkeypatch, ConflictError("duplicate upload case"))
 
     with pytest.raises(HTTPException) as exc_info:
         await import_test_cases_csv_upload(
@@ -488,6 +518,30 @@ async def test_import_test_cases_csv_upload_maps_conflict_error(monkeypatch):
 
     assert exc_info.value.status_code == 409
     assert exc_info.value.detail == "duplicate upload case"
+    _assert_sanitized_error_log(logger_stub, "Error importing test cases via upload")
+
+
+@pytest.mark.asyncio
+async def test_import_test_cases_csv_upload_sanitizes_generic_error(monkeypatch):
+    logger_stub = _patch_test_case_io(
+        monkeypatch,
+        RuntimeError("generic upload exploded /private/tmp/prompt-studio-test-cases.db"),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await import_test_cases_csv_upload(
+            project_id=7,
+            file=_FakeUploadFile(b"name,input.q\ncase,hi\n"),
+            signature_id=None,
+            auto_generate_names=True,
+            db=object(),
+            security_config=_SecurityConfig(),
+            user_context={"user_id": "tester"},
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "Failed to import CSV test cases"
+    _assert_sanitized_error_log(logger_stub, "Error importing test cases via upload")
 
 
 @pytest.mark.asyncio
