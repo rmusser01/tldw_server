@@ -132,6 +132,110 @@ def test_process_emails_rechunk_failure_log_is_sanitized(client_user_only, monke
     _assert_sanitized_debug_log(logger_stub, "Optional email re-chunking failed")
 
 
+def test_process_emails_template_classifier_failure_log_is_sanitized(client_user_only, monkeypatch):
+    from tldw_Server_API.app.api.v1.endpoints.media import process_emails as process_emails_mod
+
+    logger_stub = _LoggerStub()
+
+    class _MediaProxy:
+        def __init__(self, wrapped):
+            self._wrapped = wrapped
+
+        def __getattr__(self, name):
+            if name == "TemplateClassifier":
+                raise RuntimeError("template classifier exploded at /private/templates")
+            return getattr(self._wrapped, name)
+
+    def stub_process_email_task(**_kwargs):
+        return {
+            "status": "Success",
+            "content": "Hello Bob, this is a test.",
+            "metadata": {"email": {"subject": "Test Email"}},
+        }
+
+    monkeypatch.setattr(process_emails_mod, "logger", logger_stub)
+    monkeypatch.setattr(process_emails_mod, "media_mod", _MediaProxy(process_emails_mod.media_mod))
+    monkeypatch.setattr(process_emails_mod.email_lib, "process_email_task", stub_process_email_task)
+
+    content = (
+        b"From: Alice <alice@example.com>\r\n"
+        b"To: Bob <bob@example.com>\r\n"
+        b"Subject: Test Email\r\n"
+        b"MIME-Version: 1.0\r\n"
+        b"Content-Type: text/plain; charset=utf-8\r\n\r\n"
+        b"Hello Bob, this is a test.\r\n"
+    )
+    files = {
+        "files": ("test.eml", BytesIO(content), "message/rfc822"),
+    }
+
+    response = client_user_only.post(
+        "/api/v1/media/process-emails",
+        files=files,
+        data={"perform_chunking": "true"},
+    )
+
+    assert response.status_code == 200, response.text
+    _assert_sanitized_debug_log(logger_stub, "TemplateClassifier not available")
+
+
+def test_process_emails_first_filename_failure_log_is_sanitized(client_user_only, monkeypatch):
+    from tldw_Server_API.app.api.v1.endpoints.media import process_emails as process_emails_mod
+
+    logger_stub = _LoggerStub()
+
+    class _SavedFilesInfo:
+        def __init__(self, item):
+            self._item = item
+
+        def __iter__(self):
+            return iter([self._item])
+
+        def __bool__(self):
+            return True
+
+        def __getitem__(self, index):
+            if index == 0:
+                raise RuntimeError("filename lookup exploded at /private/filelist")
+            raise IndexError(index)
+
+    async def fake_save_uploaded_files(files, temp_dir, validator, allowed_extensions):
+        saved_path = temp_dir / "test.eml"
+        saved_path.write_bytes(
+            b"From: Alice <alice@example.com>\r\n"
+            b"To: Bob <bob@example.com>\r\n"
+            b"Subject: Test Email\r\n"
+            b"MIME-Version: 1.0\r\n"
+            b"Content-Type: text/plain; charset=utf-8\r\n\r\n"
+            b"Hello Bob, this is a test.\r\n"
+        )
+        return _SavedFilesInfo({"path": str(saved_path), "original_filename": "test.eml"}), []
+
+    def stub_process_email_task(**_kwargs):
+        return {
+            "status": "Success",
+            "content": "Hello Bob, this is a test.",
+            "metadata": {"email": {"subject": "Test Email"}},
+        }
+
+    monkeypatch.setattr(process_emails_mod, "logger", logger_stub)
+    monkeypatch.setattr(process_emails_mod, "save_uploaded_files", fake_save_uploaded_files)
+    monkeypatch.setattr(process_emails_mod.email_lib, "process_email_task", stub_process_email_task)
+
+    files = {
+        "files": ("test.eml", BytesIO(b"ignored"), "message/rfc822"),
+    }
+
+    response = client_user_only.post(
+        "/api/v1/media/process-emails",
+        files=files,
+        data={"perform_chunking": "true"},
+    )
+
+    assert response.status_code == 200, response.text
+    _assert_sanitized_debug_log(logger_stub, "Could not determine first filename")
+
+
 def _build_zip_of_emls() -> bytes:
 
 
