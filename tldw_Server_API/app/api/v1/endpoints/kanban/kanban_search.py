@@ -282,7 +282,7 @@ def _perform_vector_search(
         return cards, total, "vector"
 
     except Exception as e:
-        logger.warning(f"Vector search failed, falling back to FTS: {e}")
+        logger.warning("Vector search failed, falling back to FTS")
         cards, total = _perform_fts_search(
             db, query, board_id, label_ids, priority, include_archived, limit, offset
         )
@@ -389,7 +389,7 @@ def _perform_hybrid_search(
                     seen_ids.add(card_id)
 
             except Exception as e:
-                logger.warning(f"Failed to fetch vector-only cards in hybrid search: {e}")
+                logger.warning("Failed to fetch vector-only cards in hybrid search")
 
         # Sort by combined relevance
         combined_cards.sort(key=lambda c: c.get("relevance_score", 0.0), reverse=True)
@@ -400,7 +400,7 @@ def _perform_hybrid_search(
         return paginated, total, "hybrid"
 
     except Exception as e:
-        logger.warning(f"Hybrid search failed, using FTS only: {e}")
+        logger.warning("Hybrid search failed, using FTS only")
         return fts_cards[offset:offset + limit], fts_total, "fts"
 
 
