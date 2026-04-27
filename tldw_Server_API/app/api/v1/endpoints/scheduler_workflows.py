@@ -16,7 +16,11 @@ from tldw_Server_API.app.core.AuthNZ.permissions import WORKFLOWS_ADMIN
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.Scheduler import get_global_scheduler
-from tldw_Server_API.app.services.workflows_scheduler import get_workflows_scheduler
+from tldw_Server_API.app.services.workflows_scheduler import (
+    build_schedule_payload,
+    get_workflows_scheduler,
+    resolve_schedule_submission_target,
+)
 
 router = APIRouter(prefix="/api/v1/scheduler/workflows", tags=["scheduler", "workflows"])
 
@@ -384,17 +388,11 @@ async def run_now(
     if str(current_user.id) != s.user_id and not is_admin:
         raise HTTPException(status_code=403, detail="Forbidden")
     # Submit immediate job to core Scheduler
-    payload = {
-        "workflow_id": s.workflow_id,
-        "inputs": __import__("json").loads(s.inputs_json or "{}"),
-        "user_id": s.user_id,
-        "tenant_id": s.tenant_id,
-        "mode": s.run_mode,
-        "validation_mode": s.validation_mode,
-    }
+    payload = build_schedule_payload(s)
+    handler_name, queue_name = resolve_schedule_submission_target(payload)
     # Use the global scheduler instance to avoid duplicate worker pools
     core = await get_global_scheduler()
-    task_id = await core.submit("workflow_run", payload=payload, queue_name="workflows", metadata={"user_id": s.user_id})
+    task_id = await core.submit(handler_name, payload=payload, queue_name=queue_name, metadata={"user_id": s.user_id})
     return {"task_id": task_id}
 
 

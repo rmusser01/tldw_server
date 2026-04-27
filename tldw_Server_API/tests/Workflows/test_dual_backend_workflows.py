@@ -139,6 +139,10 @@ def test_workflow_definition_and_run_roundtrip(workflows_dual_backend_db):
         status="succeeded",
         outputs={"response": "Hello"},
     )
+    step_runs = db.list_step_runs(run_id=run_id)
+    assert len(step_runs) == 1
+    assert step_runs[0]["step_run_id"] == step_run_id
+    assert step_runs[0]["status"] == "succeeded"
     attempt_id = db.create_step_attempt(
         tenant_id="tenant-1",
         run_id=run_id,
@@ -185,3 +189,12 @@ def test_workflow_definition_and_run_roundtrip(workflows_dual_backend_db):
 
     # Cleanup flag should succeed without raising
     assert db.soft_delete_definition(workflow_id) is True
+
+
+def test_step_attempt_contract_exists_on_both_backends(workflows_dual_backend_db):
+    _backend_label, db = workflows_dual_backend_db
+
+    assert callable(getattr(db, "create_step_attempt", None))
+    assert callable(getattr(db, "complete_step_attempt", None))
+    assert callable(getattr(db, "list_step_attempts", None))
+    assert callable(getattr(db, "list_step_runs", None))

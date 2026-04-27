@@ -4,7 +4,7 @@ import asyncio
 import contextlib
 import json
 import os
-import random
+import secrets
 import sqlite3
 from typing import Any
 from urllib.parse import urlparse
@@ -154,8 +154,52 @@ def _compute_next_backoff(attempts: int) -> int:
     cap = int(os.getenv("WORKFLOWS_WEBHOOK_DLQ_MAX_BACKOFF_SEC", "3600"))
     # Exponential with jitter: min(cap, base * 2^attempts) +/- 20%
     raw = min(cap, int(base * (2 ** max(0, attempts))))
-    jitter = raw * random.uniform(0.8, 1.2)
-    return max(1, int(jitter))
+    jitter_pct = 80 + secrets.randbelow(41)
+    return max(1, int(raw * jitter_pct / 100))
+
+
+def record_webhook_delivery_event(
+    db: WorkflowsDatabase,
+    *,
+    tenant_id: str,
+    run_id: str,
+    url: str,
+    status: str,
+    code: int | None = None,
+    reason: str | None = None,
+    source: str | None = None,
+    step_run_id: str | None = None,
+    strict: bool = False,
+) -> None:
+    """Append webhook delivery evidence for a workflow run.
+
+    The persisted payload stores the destination host, delivery status, optional
+    HTTP code/reason/source fields, and never stores the full webhook URL. When
+    ``strict`` is true, append failures are re-raised after logging; otherwise
+    evidence remains best-effort so retry bookkeeping can continue.
+    """
+    parsed_url = urlparse(url)
+    host = parsed_url.hostname or ""
+    redacted_url = f"{parsed_url.scheme}://{parsed_url.netloc}/..." if parsed_url.netloc else "<invalid-url>"
+    payload: dict[str, Any] = {"host": host, "status": status}
+    if code is not None:
+        payload["code"] = int(code)
+    if reason:
+        payload["reason"] = reason
+    if source:
+        payload["source"] = source
+    try:
+        db.append_event(tenant_id, run_id, "webhook_delivery", payload, step_run_id=step_run_id)
+    except _WORKFLOWS_DLQ_NONCRITICAL_EXCEPTIONS as exc:
+        logger.warning(
+            "Failed to append webhook_delivery evidence for run_id={} url={} status={}: {}",
+            run_id,
+            redacted_url,
+            status,
+            exc,
+        )
+        if strict:
+            raise
 
 
 async def _attempt_delivery(url: str, payload: dict[str, Any], timeout: float) -> tuple[bool, str | None]:
@@ -245,6 +289,27 @@ async def run_workflows_webhook_dlq_worker(stop_event: asyncio.Event) -> None:
                 )
             except _WORKFLOWS_DLQ_NONCRITICAL_EXCEPTIONS:
                 current_attempt = attempts + 1
+            if current_attempt > max_attempts:
+                exhausted_error = f"max_attempts_exceeded:{max_attempts}"
+                record_webhook_delivery_event(
+                    db,
+                    tenant_id=tenant_id,
+                    run_id=str(r.get("run_id") or ""),
+                    url=url,
+                    status="failed",
+                    reason="max_attempts_exceeded",
+                    source="dlq_worker",
+                )
+                try:
+                    db.update_webhook_dlq_failure(
+                        dlq_id=dlq_id,
+                        last_error=exhausted_error,
+                        next_attempt_at_iso="9999-12-31T23:59:59+00:00",
+                        attempts=current_attempt,
+                    )
+                except _WORKFLOWS_DLQ_NONCRITICAL_EXCEPTIONS as exc:
+                    logger.warning(f"DLQ max-attempts exhaustion update failed for id={dlq_id}: {exc}")
+                continue
             try:
                 body = json.loads(r.get("body_json") or "{}")
             except _WORKFLOWS_DLQ_NONCRITICAL_EXCEPTIONS as e:
@@ -260,6 +325,15 @@ async def run_workflows_webhook_dlq_worker(stop_event: asyncio.Event) -> None:
 
             if not _host_allowed(url, tenant_id):
                 logger.warning(f"DLQ drop (denied host): id={dlq_id} tenant={tenant_id} url={url}")
+                record_webhook_delivery_event(
+                    db,
+                    tenant_id=tenant_id,
+                    run_id=str(r.get("run_id") or ""),
+                    url=url,
+                    status="blocked",
+                    reason="denied_by_policy",
+                    source="dlq_worker",
+                )
                 db.update_webhook_dlq_failure(
                     dlq_id=dlq_id,
                     last_error="denied_by_policy",
@@ -273,6 +347,14 @@ async def run_workflows_webhook_dlq_worker(stop_event: asyncio.Event) -> None:
             except _WORKFLOWS_DLQ_NONCRITICAL_EXCEPTIONS as e:
                 ok, err = False, str(e)
             if ok:
+                record_webhook_delivery_event(
+                    db,
+                    tenant_id=tenant_id,
+                    run_id=str(r.get("run_id") or ""),
+                    url=url,
+                    status="delivered",
+                    source="dlq_worker",
+                )
                 try:
                     db.delete_webhook_dlq(dlq_id=dlq_id)
                 except _WORKFLOWS_DLQ_NONCRITICAL_EXCEPTIONS as _e:
@@ -307,6 +389,15 @@ async def run_workflows_webhook_dlq_worker(stop_event: asyncio.Event) -> None:
                 last_error=err or "unknown_error",
                 next_attempt_at_iso=next_at,
                 attempts=attempts + 1,
+            )
+            record_webhook_delivery_event(
+                db,
+                tenant_id=tenant_id,
+                run_id=str(r.get("run_id") or ""),
+                url=url,
+                status="failed",
+                reason=err or "unknown_error",
+                source="dlq_worker",
             )
             logger.debug(f"DLQ retry scheduled in {next_delay}s (id={dlq_id} attempts={attempts+1}): {err}")
 
