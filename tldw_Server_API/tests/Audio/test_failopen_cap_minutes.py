@@ -2,6 +2,7 @@ import os
 import types
 
 import pytest
+from fastapi import APIRouter
 
 
 pytestmark = pytest.mark.unit
@@ -10,14 +11,20 @@ pytestmark = pytest.mark.unit
 class _LoggerStub:
     def __init__(self):
         self.debug_calls = []
+        self.warning_calls = []
 
     def debug(self, *args, **kwargs):
         self.debug_calls.append((args, kwargs))
 
+    def warning(self, *args, **kwargs):
+        self.warning_calls.append((args, kwargs))
+
 
 _SENSITIVE_LOG_MARKERS = (
     "audio config backend exploded",
-    "/private/tmp/audio-failopen.ini",
+    "streaming import leaked",
+    "user id leaked",
+    "/private/",
 )
 
 
@@ -27,6 +34,16 @@ def _assert_sanitized_debug_log(logger_stub: _LoggerStub, expected_message: str)
     assert all(not kwargs.get("exc_info") for _args, kwargs in logger_stub.debug_calls)
 
     rendered_calls = repr(logger_stub.debug_calls)
+    for marker in _SENSITIVE_LOG_MARKERS:
+        assert marker not in rendered_calls
+
+
+def _assert_sanitized_warning_log(logger_stub: _LoggerStub, expected_message: str) -> None:
+    assert logger_stub.warning_calls
+    assert [args[0] for args, _kwargs in logger_stub.warning_calls if args] == [expected_message]
+    assert all(not kwargs.get("exc_info") for _args, kwargs in logger_stub.warning_calls)
+
+    rendered_calls = repr(logger_stub.warning_calls)
     for marker in _SENSITIVE_LOG_MARKERS:
         assert marker not in rendered_calls
 
@@ -233,3 +250,37 @@ def test_aggregate_failopen_config_read_log_is_sanitized(monkeypatch):
     assert abs(mod._get_failopen_cap_minutes() - 5.0) < 1e-6
 
     _assert_sanitized_debug_log(logger_stub, "Config read for failopen cap failed")
+
+
+def test_aggregate_streaming_route_import_failure_log_is_sanitized(monkeypatch):
+    mod = _import_audio_aggregate_module(monkeypatch, cfg=_fake_cfg({}))
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(mod, "logger", logger_stub, raising=True)
+
+    def _raise_import_error():
+        raise RuntimeError("streaming import leaked /private/audio-streaming.py")
+
+    monkeypatch.setattr(mod, "_load_audio_streaming", _raise_import_error, raising=True)
+
+    router = mod._mount_streaming_routes()
+
+    assert isinstance(router, APIRouter)
+    _assert_sanitized_warning_log(logger_stub, "Audio streaming routes unavailable; skipping import")
+
+
+@pytest.mark.asyncio
+async def test_aggregate_resolve_tts_byok_user_id_failure_log_is_sanitized(monkeypatch):
+    mod = _import_audio_aggregate_module(monkeypatch, cfg=_fake_cfg({}))
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(mod, "logger", logger_stub, raising=True)
+
+    user = types.SimpleNamespace(id="user id leaked /private/user-id.txt")
+
+    result = await mod._resolve_tts_byok(
+        provider_hint=None,
+        current_user=user,
+        request=object(),
+    )
+
+    assert result == (None, None, None)
+    _assert_sanitized_debug_log(logger_stub, "Failed to extract user_id from current_user")

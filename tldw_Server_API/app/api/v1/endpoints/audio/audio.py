@@ -66,8 +66,8 @@ def _mount_streaming_routes() -> APIRouter:
         streaming_module = _load_audio_streaming()
         router.include_router(streaming_module.router)
         return streaming_module.ws_router
-    except Exception as exc:
-        logger.warning(f"Audio streaming routes unavailable; skipping import: {exc}")
+    except Exception:
+        logger.warning("Audio streaming routes unavailable; skipping import")
         return APIRouter()
 
 
@@ -128,8 +128,8 @@ async def _resolve_tts_byok(
             raw_id = getattr(current_user, "id", None)
             if raw_id is not None:
                 user_id_int = int(raw_id)
-    except (AttributeError, TypeError, ValueError) as exc:
-        logger.debug(f"Failed to extract user_id from current_user: {exc}")
+    except (AttributeError, TypeError, ValueError):
+        logger.debug("Failed to extract user_id from current_user")
         user_id_int = None
 
     tts_overrides = None
