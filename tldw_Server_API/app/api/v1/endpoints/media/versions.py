@@ -418,10 +418,8 @@ async def create_version(
         raise
     except Exception as exc:  # pragma: no cover - defensive
         logger.error(
-            "Unexpected error creating version for media {}: {}",
+            "Unexpected error creating version for media {}",
             media_id,
-            exc,
-            exc_info=True,
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

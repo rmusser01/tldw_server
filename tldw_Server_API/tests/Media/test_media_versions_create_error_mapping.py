@@ -41,6 +41,7 @@ class _LoggerStub:
 _SENSITIVE_MARKERS = (
     "driver failed",
     "version create conflict",
+    "version create exploded",
     "/private/tmp/media-versions-create.db",
 )
 
@@ -173,3 +174,36 @@ async def test_create_version_maps_db_errors_when_media_exists(
             logger_stub,
             "Database error creating version for media {}",
         )
+
+
+@pytest.mark.asyncio
+async def test_create_version_sanitizes_unexpected_error_log(monkeypatch):
+    logger_stub = _patch_endpoint_logger(monkeypatch)
+    monkeypatch.setattr(
+        media_versions_endpoint,
+        "check_media_exists",
+        lambda _db, media_id: media_id,
+        raising=True,
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await create_version(
+            media_id=42,
+            request_body=VersionCreateRequest(
+                content="v2 content",
+                prompt="prompt",
+                analysis_content="analysis",
+            ),
+            request=_FakeRequest(),
+            db=_BrokenCreateVersionDb(
+                RuntimeError("version create exploded /private/tmp/media-versions-create.db"),
+            ),
+            current_user=User(id=1, username="tester", email=None, is_active=True),
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "Internal server error during version creation"
+    _assert_sanitized_error_log(
+        logger_stub,
+        "Unexpected error creating version for media {}",
+    )
