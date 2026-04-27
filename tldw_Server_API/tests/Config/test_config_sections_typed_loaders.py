@@ -19,7 +19,6 @@ from tldw_Server_API.app.core.config_sections.rag import load_rag_config
 from tldw_Server_API.app.core.config_sections.server import load_server_config
 from tldw_Server_API.app.core.config_sections.stt import load_stt_config
 
-
 pytestmark = pytest.mark.unit
 
 
@@ -198,6 +197,46 @@ def test_database_section_loader_prefers_env_and_parses_types() -> None:
     assert cfg.pg_pool_timeout == 45.5
 
 
+def test_numeric_loaders_fall_back_for_invalid_non_security_values() -> None:
+    parser = ConfigParser()
+    parser.add_section("Database")
+    parser.add_section("Embeddings")
+    parser.add_section("Logging")
+
+    database_cfg = load_database_config(
+        parser,
+        env={
+            "DB_PG_PORT": "not-a-port",
+            "DB_PG_POOL_SIZE": "not-a-size",
+            "DB_PG_MAX_OVERFLOW": "not-overflow",
+            "DB_PG_POOL_TIMEOUT": "not-a-timeout",
+        },
+    )
+    embeddings_cfg = load_embeddings_config(
+        parser,
+        env={
+            "EMBEDDING_CHUNK_SIZE": "not-a-size",
+            "EMBEDDING_OVERLAP": "not-overlap",
+        },
+    )
+    logging_cfg = load_logging_config(
+        parser,
+        env={
+            "LOG_BACKUP_COUNT": "not-a-count",
+            "SYSTEM_LOG_FILE_MAX_ENTRIES": "not-a-limit",
+        },
+    )
+
+    assert database_cfg.pg_port == 5432
+    assert database_cfg.pg_pool_size == 20
+    assert database_cfg.pg_max_overflow == 40
+    assert database_cfg.pg_pool_timeout == 30.0
+    assert embeddings_cfg.chunk_size == 400
+    assert embeddings_cfg.overlap == 200
+    assert logging_cfg.backup_count == 5
+    assert logging_cfg.system_log_file_max_entries == 5000
+
+
 def test_chunking_section_loader_parses_global_defaults() -> None:
     parser = ConfigParser()
     parser.add_section("Chunking")
@@ -216,6 +255,36 @@ def test_chunking_section_loader_parses_global_defaults() -> None:
     assert cfg.adaptive is True
     assert cfg.multi_level is True
     assert cfg.language == "fr"
+
+
+def test_chunking_section_loader_env_overrides_parser() -> None:
+    parser = ConfigParser()
+    parser.add_section("Chunking")
+    parser.set("Chunking", "chunking_method", "semantic")
+    parser.set("Chunking", "chunk_max_size", "1024")
+    parser.set("Chunking", "chunk_overlap", "256")
+    parser.set("Chunking", "adaptive_chunking", "false")
+    parser.set("Chunking", "chunking_multi_level", "false")
+    parser.set("Chunking", "chunk_language", "fr")
+
+    cfg = load_chunking_config(
+        parser,
+        env={
+            "CHUNKING_METHOD": "sentences",
+            "CHUNKING_MAX_SIZE": "2048",
+            "CHUNKING_OVERLAP": "512",
+            "CHUNKING_ADAPTIVE": "on",
+            "CHUNKING_MULTI_LEVEL": "yes",
+            "CHUNKING_LANGUAGE": "es",
+        },
+    )
+
+    assert cfg.method == "sentences"
+    assert cfg.max_size == 2048
+    assert cfg.overlap == 512
+    assert cfg.adaptive is True
+    assert cfg.multi_level is True
+    assert cfg.language == "es"
 
 
 def test_chat_section_loader_honors_env_and_parses_scalar_limits() -> None:
@@ -336,6 +405,37 @@ def test_embeddings_section_loader_prefers_env_and_parses_bool() -> None:
     assert cfg.enable_contextual_chunking is True
 
 
+def test_embeddings_section_loader_uses_canonical_api_url_env() -> None:
+    parser = ConfigParser()
+    parser.add_section("Embeddings")
+    parser.set("Embeddings", "embedding_api_url", "http://config.example/v1/embeddings")
+
+    cfg = load_embeddings_config(
+        parser,
+        env={
+            "EMBEDDING_API_URL": " http://env.example/v1/embeddings ",
+            "EMBEDDING_EMBEDDING_API_URL": "http://legacy.example/v1/embeddings",
+            "EMBEDDING_ENABLE_CONTEXTUAL_CHUNKING": "on",
+        },
+    )
+
+    assert cfg.embedding_api_url == "http://env.example/v1/embeddings"
+    assert cfg.enable_contextual_chunking is True
+
+
+def test_embeddings_section_loader_preserves_legacy_double_prefixed_api_url() -> None:
+    parser = ConfigParser()
+    parser.add_section("Embeddings")
+    parser.set("Embeddings", "embedding_api_url", "http://config.example/v1/embeddings")
+
+    cfg = load_embeddings_config(
+        parser,
+        env={"EMBEDDING_EMBEDDING_API_URL": "http://legacy.example/v1/embeddings"},
+    )
+
+    assert cfg.embedding_api_url == "http://legacy.example/v1/embeddings"
+
+
 def test_logging_and_server_section_loaders_honor_env_overrides() -> None:
     parser = ConfigParser()
     parser.add_section("Logging")
@@ -359,6 +459,42 @@ def test_logging_and_server_section_loaders_honor_env_overrides() -> None:
     assert logging_cfg.log_level == "WARNING"
     assert server_cfg.disable_cors is True
     assert server_cfg.cors_allow_credentials is True
+
+
+def test_logging_section_loader_uses_runtime_system_log_env_keys() -> None:
+    parser = ConfigParser()
+    parser.add_section("Logging")
+    parser.set("Logging", "system_log_file_path", "Databases/config-system.jsonl")
+    parser.set("Logging", "system_log_file_max_entries", "100")
+
+    cfg = load_logging_config(
+        parser,
+        env={
+            "SYSTEM_LOG_FILE_PATH": "Databases/env-system.jsonl",
+            "SYSTEM_LOG_FILE_MAX_ENTRIES": "777",
+            "LOG_SYSTEM_LOG_FILE_PATH": "Databases/log-prefixed-system.jsonl",
+            "LOG_SYSTEM_LOG_FILE_MAX_ENTRIES": "333",
+        },
+    )
+
+    assert cfg.system_log_file_path == "Databases/env-system.jsonl"
+    assert cfg.system_log_file_max_entries == 777
+
+
+def test_server_section_loader_accepts_existing_truthy_tokens() -> None:
+    parser = ConfigParser()
+    parser.add_section("Server")
+
+    cfg = load_server_config(
+        parser,
+        env={
+            "DISABLE_CORS": "on",
+            "CORS_ALLOW_CREDENTIALS": "y",
+        },
+    )
+
+    assert cfg.disable_cors is True
+    assert cfg.cors_allow_credentials is True
 
 
 def test_auth_audio_rag_and_provider_loaders_honor_env_and_fallbacks() -> None:
@@ -470,3 +606,16 @@ def test_moderation_section_loader_honors_env_backed_fields_and_normalizes_lists
     assert cfg.blocklist_write_debounce_ms == 25
     assert cfg.categories_enabled == ["safety", "pii"]
     assert cfg.pii_enabled is True
+
+
+def test_moderation_section_loader_rejects_invalid_security_values() -> None:
+    parser = ConfigParser()
+    parser.add_section("Moderation")
+    parser.set("Moderation", "enabled", "maybe")
+
+    with pytest.raises(ValueError, match="enabled.*maybe.*true"):
+        load_moderation_config(parser)
+
+    parser.set("Moderation", "enabled", "true")
+    with pytest.raises(ValueError, match="max_scan_chars.*not-an-int"):
+        load_moderation_config(parser, env={"MODERATION_MAX_SCAN_CHARS": "not-an-int"})

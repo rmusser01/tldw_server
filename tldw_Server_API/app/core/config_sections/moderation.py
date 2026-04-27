@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Mapping
 
 from .types import ConfigParserLike
 
@@ -50,7 +50,7 @@ def _get_raw(
     return text or default
 
 
-def _parse_bool(raw: object, default: bool) -> bool:
+def _parse_bool(raw: object, *, option: str, default: bool) -> bool:
     text = str(raw).strip().lower()
     if not text:
         return default
@@ -58,17 +58,18 @@ def _parse_bool(raw: object, default: bool) -> bool:
         return True
     if text in _FALSE_VALUES:
         return False
-    return default
+    accepted = ", ".join(sorted(_TRUE_VALUES | _FALSE_VALUES))
+    raise ValueError(f"Invalid Moderation.{option} value {raw!r}; expected one of: {accepted}")
 
 
-def _parse_int(raw: object, default: int) -> int:
+def _parse_int(raw: object, *, option: str, default: int) -> int:
     text = str(raw).strip()
     if not text:
         return default
     try:
         return int(text)
-    except (TypeError, ValueError):
-        return default
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"Invalid Moderation.{option} integer value {raw!r}") from exc
 
 
 def _parse_string_list(raw: object) -> list[str]:
@@ -113,15 +114,18 @@ def load_moderation_config(
 
     enabled = _parse_bool(
         _get_raw(config_parser, env_map, env_key=None, option="enabled", default="false"),
-        False,
+        option="enabled",
+        default=False,
     )
     input_enabled = _parse_bool(
         _get_raw(config_parser, env_map, env_key=None, option="input_enabled", default="true"),
-        True,
+        option="input_enabled",
+        default=True,
     )
     output_enabled = _parse_bool(
         _get_raw(config_parser, env_map, env_key=None, option="output_enabled", default="true"),
-        True,
+        option="output_enabled",
+        default=True,
     )
     input_action = _get_raw(
         config_parser,
@@ -146,7 +150,8 @@ def load_moderation_config(
     )
     per_user_overrides = _parse_bool(
         _get_raw(config_parser, env_map, env_key=None, option="per_user_overrides", default="true"),
-        True,
+        option="per_user_overrides",
+        default=True,
     )
     blocklist_file = _get_raw(
         config_parser,
@@ -177,7 +182,8 @@ def load_moderation_config(
             option="max_scan_chars",
             default="200000",
         ),
-        200000,
+        option="max_scan_chars",
+        default=200000,
     )
     max_replacements_per_pattern = _parse_int(
         _get_raw(
@@ -187,7 +193,8 @@ def load_moderation_config(
             option="max_replacements_per_pattern",
             default="1000",
         ),
-        1000,
+        option="max_replacements_per_pattern",
+        default=1000,
     )
     match_window_chars = _parse_int(
         _get_raw(
@@ -197,7 +204,8 @@ def load_moderation_config(
             option="match_window_chars",
             default="4096",
         ),
-        4096,
+        option="match_window_chars",
+        default=4096,
     )
     max_fallback_scan_chars = _parse_int(
         _get_raw(
@@ -207,7 +215,8 @@ def load_moderation_config(
             option="max_fallback_scan_chars",
             default="800000",
         ),
-        800000,
+        option="max_fallback_scan_chars",
+        default=800000,
     )
     blocklist_write_debounce_ms = _parse_int(
         _get_raw(
@@ -217,7 +226,8 @@ def load_moderation_config(
             option="blocklist_write_debounce_ms",
             default="0",
         ),
-        0,
+        option="blocklist_write_debounce_ms",
+        default=0,
     )
     categories_enabled = _parse_string_list(
         _get_raw(
@@ -236,7 +246,8 @@ def load_moderation_config(
             option="pii_enabled",
             default="false",
         ),
-        False,
+        option="pii_enabled",
+        default=False,
     )
 
     return ModerationConfig(
