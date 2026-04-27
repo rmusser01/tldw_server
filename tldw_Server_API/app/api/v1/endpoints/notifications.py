@@ -368,7 +368,7 @@ async def stream_notifications(
             await asyncio.wait_for(stream.send_event(event, payload, event_id=event_id), timeout=send_timeout_s)
             return True
         except asyncio.TimeoutError:
-            logger.warning("notifications stream send timeout for event={}", event)
+            logger.warning("notifications stream send timeout")
             with contextlib.suppress(_NOTIFICATIONS_STREAM_NONCRITICAL_EXCEPTIONS):
                 await stream.done(force=True)
             return False
@@ -438,8 +438,8 @@ async def stream_notifications(
                         await asyncio.sleep(poll_interval_s)
             except (asyncio.CancelledError, GeneratorExit):
                 break
-            except _NOTIFICATIONS_STREAM_NONCRITICAL_EXCEPTIONS as exc:
-                logger.warning("notifications stream loop error: {}", exc)
+            except _NOTIFICATIONS_STREAM_NONCRITICAL_EXCEPTIONS:
+                logger.warning("notifications stream loop error")
                 await asyncio.sleep(poll_interval_s)
 
     async def _gen() -> AsyncGenerator[str, None]:
