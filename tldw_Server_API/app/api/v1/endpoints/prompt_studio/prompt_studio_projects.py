@@ -188,8 +188,8 @@ async def create_project(
                             idempotency_key,
                             user_id_str,
                         )
-            except DatabaseError as e:
-                logger.warning(f"Idempotency lookup failed for key {idempotency_key}: {e}")
+            except DatabaseError:
+                logger.warning("Idempotency lookup failed")
 
         # Create project
         project = db.create_project(
@@ -311,7 +311,7 @@ async def list_projects(
         logger.error("Database error listing projects")
         raise map_db_error_to_http(e, default_detail=detail) from e
     except Exception as e:  # noqa: BLE001
-        logger.exception("Unexpected error listing projects: {}", e)
+        logger.error("Unexpected error listing projects")
         detail = "Failed to list projects"
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

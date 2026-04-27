@@ -39,6 +39,8 @@ class _LoggerStub:
 
 _SENSITIVE_MARKERS = (
     "driver failed",
+    "idem-sensitive-key",
+    "unexpected list exploded",
     "/private/tmp/prompt-studio-projects.db",
 )
 
@@ -58,6 +60,21 @@ def _assert_sanitized_error_log(
     assert expected_message in matching_messages
 
     rendered_calls = repr(logger_stub.error_calls)
+    for marker in _SENSITIVE_MARKERS:
+        assert marker not in rendered_calls
+
+
+def _assert_sanitized_warning_log(
+    logger_stub: _LoggerStub,
+    expected_message: str,
+) -> None:
+    assert logger_stub.exception_calls == []
+    assert logger_stub.warning_calls
+
+    matching_messages = [args[0] for args, _kwargs in logger_stub.warning_calls if args]
+    assert expected_message in matching_messages
+
+    rendered_calls = repr(logger_stub.warning_calls)
     for marker in _SENSITIVE_MARKERS:
         assert marker not in rendered_calls
 
@@ -95,9 +112,39 @@ class _BrokenCreateProjectDb:
         raise self._fallback_exc
 
 
+class _IdempotencyLookupFailingCreateProjectDb:
+    def __init__(self):
+        self.recorded_idempotency = None
+
+    def lookup_idempotency(self, *_args, **_kwargs):
+        raise _database_failure()
+
+    def create_project(self, **kwargs):
+        return {
+            "id": 7,
+            "uuid": "12345678-1234-5678-1234-567812345678",
+            "name": kwargs["name"],
+            "description": kwargs.get("description"),
+            "status": kwargs["status"],
+            "metadata": kwargs.get("metadata"),
+            "user_id": kwargs["user_id"],
+            "version": 1,
+            "created_at": None,
+            "updated_at": None,
+        }
+
+    def record_idempotency(self, *args, **kwargs):
+        self.recorded_idempotency = (args, kwargs)
+
+
 class _BrokenListProjectsDb:
     def list_projects(self, *_args, **_kwargs):
         raise _database_failure()
+
+
+class _UnexpectedListProjectsDb:
+    def list_projects(self, *_args, **_kwargs):
+        raise RuntimeError("unexpected list exploded /private/tmp/prompt-studio-projects.db")
 
 
 class _BrokenGetProjectDb:
@@ -189,6 +236,26 @@ async def test_create_project_maps_database_error(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_create_project_idempotency_lookup_failure_log_is_sanitized(monkeypatch):
+    _patch_prompt_studio_request_logging(monkeypatch)
+    logger_stub = _patch_endpoint_logger(monkeypatch)
+    db = _IdempotencyLookupFailingCreateProjectDb()
+
+    response = await create_project(
+        project_data=ProjectCreate(name="Prompt Studio Project"),
+        request=object(),
+        user_context={"user_id": "tester"},
+        db=db,
+        _=True,
+        idempotency_key="idem-sensitive-key",
+    )
+
+    assert response.success is True
+    assert db.recorded_idempotency is not None
+    _assert_sanitized_warning_log(logger_stub, "Idempotency lookup failed")
+
+
+@pytest.mark.asyncio
 async def test_create_project_maps_conflict_error_after_existing_lookup_fails():
     with pytest.raises(HTTPException) as exc_info:
         await create_project(
@@ -224,6 +291,26 @@ async def test_list_projects_sanitizes_database_error(monkeypatch):
     assert exc_info.value.status_code == 500
     assert exc_info.value.detail == "Failed to list projects"
     _assert_sanitized_error_log(logger_stub, "Database error listing projects")
+
+
+@pytest.mark.asyncio
+async def test_list_projects_sanitizes_unexpected_error(monkeypatch):
+    logger_stub = _patch_endpoint_logger(monkeypatch)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await list_projects(
+            page=1,
+            per_page=20,
+            status_filter=None,
+            include_deleted=False,
+            search=None,
+            user_context={"user_id": "tester", "is_admin": False},
+            db=_UnexpectedListProjectsDb(),
+    )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "Failed to list projects"
+    _assert_sanitized_error_log(logger_stub, "Unexpected error listing projects")
 
 
 @pytest.mark.asyncio
