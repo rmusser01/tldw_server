@@ -29,12 +29,16 @@ class _LoggerStub:
     def __init__(self) -> None:
         self.errors: list[str] = []
         self.warnings: list[str] = []
+        self.debugs: list[str] = []
 
     def error(self, message: str, *args: Any, **kwargs: Any) -> None:
         self.errors.append(message.format(*args) if args else message)
 
     def warning(self, message: str, *args: Any, **kwargs: Any) -> None:
         self.warnings.append(message.format(*args) if args else message)
+
+    def debug(self, message: str, *args: Any, **kwargs: Any) -> None:
+        self.debugs.append(message.format(*args) if args else message)
 
 
 def _insert_output_row_raw(
@@ -678,6 +682,37 @@ async def test_outputs_create_insert_cleanup_failure_log_is_sanitized(monkeypatc
     assert "cleanup exploded" not in logged
     assert "/private/outputs.db" not in logged
     assert "/private/output.md" not in logged
+
+
+@pytest.mark.asyncio
+async def test_outputs_delete_tts_history_failure_log_is_sanitized(monkeypatch):
+    class _CollectionsDB:
+        def delete_output_artifact(self, _output_id: int, *, hard: bool) -> bool:
+            assert hard is False
+            return True
+
+    class _MediaDB:
+        def mark_tts_history_artifacts_deleted_for_output(self, **_kwargs: Any) -> None:
+            raise RuntimeError("tts history backend exploded at /private/media.db")
+
+    logger = _LoggerStub()
+    monkeypatch.setattr(outputs_endpoint, "logger", logger)
+
+    result = await outputs_endpoint.delete_output(
+        output_id=777,
+        hard=False,
+        delete_file=False,
+        current_user=User(id=123, username="tester", email=None, is_active=True),
+        cdb=_CollectionsDB(),
+        media_db=_MediaDB(),
+    )
+
+    assert result == {"success": True, "file_deleted": False}
+    assert logger.debugs == ["outputs.delete: failed to update tts_history"]
+    logged = "\n".join(logger.debugs)
+    assert "777" not in logged
+    assert "tts history backend exploded" not in logged
+    assert "/private/media.db" not in logged
 
 
 def test_outputs_preview_with_inline_data_and_generate(client_with_user, tmp_path):

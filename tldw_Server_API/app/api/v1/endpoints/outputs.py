@@ -665,8 +665,8 @@ async def delete_output(
             user_id=str(user_id),
             output_id=int(output_id),
         )
-    except _OUTPUTS_NONCRITICAL_EXCEPTIONS as exc:
-        logger.debug(f"outputs.delete: failed to update tts_history for output {output_id}: {exc}")
+    except _OUTPUTS_NONCRITICAL_EXCEPTIONS:
+        logger.debug("outputs.delete: failed to update tts_history")
     return {"success": True, "file_deleted": fs_deleted}
 
 
