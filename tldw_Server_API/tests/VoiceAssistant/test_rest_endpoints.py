@@ -210,6 +210,13 @@ async def test_voice_command_dry_run_sanitizes_unexpected_failures(monkeypatch, 
     """Dry-run backend failures should return a stable operational detail."""
     from tldw_Server_API.app.api.v1.endpoints import voice_assistant as voice_mod
 
+    logged_errors = []
+
+    class LoggerStub:
+        def error(self, message, *args, **kwargs):
+            logged_errors.append((message, args, kwargs))
+
+    monkeypatch.setattr(voice_mod, "logger", LoggerStub())
     monkeypatch.setattr(
         voice_mod,
         "get_voice_command_registry",
@@ -226,6 +233,7 @@ async def test_voice_command_dry_run_sanitizes_unexpected_failures(monkeypatch, 
 
     assert exc_info.value.status_code == 500
     assert exc_info.value.detail == "Dry-run failed"
+    assert logged_errors == [("Voice command dry-run failed", (), {})]
 
 
 # Test classes

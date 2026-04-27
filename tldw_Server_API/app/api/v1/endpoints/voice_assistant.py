@@ -1631,7 +1631,7 @@ async def voice_command_dry_run(
             detail="Voice assistant module not available",
         ) from exc
     except Exception as exc:
-        logger.error("Voice command dry-run failed: {}", exc)
+        logger.error("Voice command dry-run failed")
         raise HTTPException(
             status_code=500,
             detail="Dry-run failed",
