@@ -1402,8 +1402,8 @@ async def create_translation(
             tags=[str(model or "")],
             metadata={"filename": getattr(file, "filename", None), "language": "en"},
         )
-    except _AUDIO_TRANSCRIPTIONS_NONCRITICAL_EXCEPTIONS as e:
-        logger.debug(f"usage_log audio.translations failed: error={e}")
+    except _AUDIO_TRANSCRIPTIONS_NONCRITICAL_EXCEPTIONS:
+        logger.debug("usage_log audio.translations failed")
 
     return await create_transcription(
         request=request,

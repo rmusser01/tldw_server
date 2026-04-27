@@ -35,6 +35,11 @@ class _UnreadableSoundFile:
         raise RuntimeError("soundfile read leaked /private/audio.wav")
 
 
+class _FailingUsageLog:
+    def log_event(self, *_args, **_kwargs):
+        raise RuntimeError("usage log leaked /private/audio.wav")
+
+
 def _make_wav_bytes(duration_sec: float = 0.1, sr: int = 16000) -> bytes:
     buf = io.BytesIO()
     data = np.zeros(int(sr * duration_sec), dtype=np.float32)
@@ -319,3 +324,33 @@ def test_audio_transcriptions_sanitizes_soundfile_read_fallback_log(
         if msg.startswith("Failed to compute audio duration")
     ]
     assert duration_logs == ["Failed to compute audio duration; defaulting to 0"]
+
+
+@pytest.mark.unit
+async def test_create_translation_sanitizes_usage_log_failure(monkeypatch):
+    import tldw_Server_API.app.api.v1.endpoints.audio.audio_transcriptions as audio_tx
+
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(audio_tx, "logger", logger_stub)
+
+    async def _fake_create_transcription(**kwargs):
+        return {"delegated": kwargs["task"]}
+
+    monkeypatch.setattr(audio_tx, "create_transcription", _fake_create_transcription)
+
+    result = await audio_tx.create_translation(
+        request=object(),
+        file=object(),
+        model="whisper-1",
+        prompt=None,
+        response_format="json",
+        temperature=0.0,
+        current_user=object(),
+        principal=object(),
+        db=object(),
+        usage_log=_FailingUsageLog(),
+        billing_org_id=None,
+    )
+
+    assert result == {"delegated": "translate"}
+    assert logger_stub.debugs == ["usage_log audio.translations failed"]
