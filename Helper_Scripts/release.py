@@ -576,11 +576,8 @@ def orchestrate_release(
         release_commit_sha = runner.create_release_commit(next_version)
         runner.create_or_update_tag(next_version)
     elif state == "local_release_commit_only":
-        release_commit_sha = (
-            _call_runner_if_present(runner, "get_head_sha")
-            if isinstance(_call_runner_if_present(runner, "get_head_sha"), str)
-            else None
-        )
+        head_sha = _call_runner_if_present(runner, "get_head_sha")
+        release_commit_sha = head_sha if isinstance(head_sha, str) else None
         runner.create_or_update_tag(next_version)
     elif state == "local_tag_only":
         head_sha = _call_runner_if_present(runner, "get_head_sha")

@@ -154,7 +154,7 @@ Recently shipped:
 - MCP Hub governance pack management and broader ACP workspace discovery/health support.
 - Audio installer and bundle follow-through, including curated `kitten_tts` and `pocket_tts_cpp` paths.
 
-Currently landing on `dev` (post-`0.1.30` branch work):
+Currently landing on `dev` (post-`0.1.31` branch work):
 - Writing Suite Phases 2-4 with characters, world info, plot/research tools, AI analysis, agent chat, and live writing feedback.
 - Persona-routed onboarding, Mission Control home flows, and storage quota warnings.
 - Browser web clipper support for capturing pages into the research workflow.
