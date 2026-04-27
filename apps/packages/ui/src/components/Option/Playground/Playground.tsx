@@ -1596,6 +1596,7 @@ export const Playground = () => {
           </div>
           <div
             ref={containerRef}
+            data-testid={stickyChatInput ? "playground-chat-transcript" : undefined}
             role="log"
             aria-live="polite"
             aria-relevant="additions"
@@ -1622,6 +1623,7 @@ export const Playground = () => {
             </div>
           </div>
           <div
+            data-testid={stickyChatInput ? "playground-chat-composer-dock" : undefined}
             className={`relative w-full ${
               stickyChatInput
                 ? "sticky bottom-0 z-20 border-t border-border bg-surface/95 backdrop-blur"

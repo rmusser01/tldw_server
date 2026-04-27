@@ -88,6 +88,19 @@ type OptionLayoutProps = {
 
 const SHORTCUT_LOADING_MIN_MS = 0
 const SHORTCUT_LOADING_MAX_MS = 2500
+const STICKY_CHAT_INPUT_STORAGE_KEY = "stickyChatInput"
+
+const shouldUseTranscriptOwnedChatShell = (pathname: string): boolean => {
+  if (pathname !== "/chat" || typeof window === "undefined") {
+    return false
+  }
+
+  try {
+    return window.localStorage.getItem(STICKY_CHAT_INPUT_STORAGE_KEY) === "true"
+  } catch {
+    return false
+  }
+}
 
 const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
   children,
@@ -151,6 +164,9 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
   const [chatBackgroundImage] = useSetting(CHAT_BACKGROUND_IMAGE_SETTING)
   const isChatScreen = location.pathname === "/chat"
   const isViewportConstrainedRoute = (VIEWPORT_CONSTRAINED_PATHS as readonly string[]).includes(location.pathname)
+  const stickyChatLayoutActive = shouldUseTranscriptOwnedChatShell(
+    location.pathname
+  )
   const chatScreenBackgroundStyle =
     isChatScreen && chatBackgroundImage
       ? {
@@ -391,7 +407,15 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
             {shortcutLoading && renderShortcutOverlay()}
           </div>
         ) : isViewportConstrainedRoute ? (
-          <div className="relative flex min-h-0 flex-1 flex-col overflow-y-auto">
+          <div
+            data-chat-scroll-owner={
+              stickyChatLayoutActive ? "transcript" : undefined
+            }
+            className={classNames(
+              "relative flex min-h-0 flex-1 flex-col",
+              stickyChatLayoutActive ? "overflow-hidden" : "overflow-y-auto"
+            )}
+          >
             <div className="relative z-20 w-full shrink-0">
               <Header
                 onToggleSidebar={hideSidebar ? undefined : toggleSidebar}
