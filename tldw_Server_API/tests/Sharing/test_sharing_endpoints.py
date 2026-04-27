@@ -368,6 +368,29 @@ class TestClone:
         resp = client.post("/api/v1/sharing/shared-with-me/9999/clone", json={})
         assert resp.status_code == 404
 
+    def test_clone_task_failure_log_is_sanitized(self, monkeypatch):
+        from tldw_Server_API.app.api.v1.endpoints import sharing
+
+        async def _fail_get_chacha_db_for_owner(owner_user_id: int):
+            assert owner_user_id == 2
+            raise RuntimeError("clone backend exploded at /private/clone.db")
+
+        fake_logger = MagicMock()
+        monkeypatch.setattr(
+            "tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps.get_chacha_db_for_owner",
+            _fail_get_chacha_db_for_owner,
+        )
+        monkeypatch.setattr(sharing, "logger", fake_logger)
+
+        sharing._run_clone_task(
+            share={"owner_user_id": 2, "workspace_id": "private-ws"},
+            user_id=1,
+            new_name=None,
+            job_id="job-private-123",
+        )
+
+        fake_logger.error.assert_called_once_with("Clone job failed")
+
 
 class TestShareTokens:
     def test_create_token(self, client, mock_repo):

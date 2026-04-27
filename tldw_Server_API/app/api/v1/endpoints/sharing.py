@@ -546,8 +546,8 @@ def _run_clone_task(
                 )
                 result = svc.clone_workspace(workspace_id, new_name=new_name)
             logger.info(f"Clone job {job_id} completed: {result.get('workspace_id')}")
-        except Exception as exc:
-            logger.error(f"Clone job {job_id} failed: {exc}")
+        except Exception:
+            logger.error("Clone job failed")
 
     try:
         loop = asyncio.get_event_loop()
@@ -706,8 +706,8 @@ async def chat_with_shared_workspace(
             status_code=501,
             detail="RAG pipeline not available",
         ) from None
-    except Exception as exc:
-        logger.error(f"Shared workspace chat failed for share {share_id}: {exc}")
+    except Exception:
+        logger.error("Shared workspace chat failed")
         raise HTTPException(status_code=500, detail="Chat request failed") from None
 
 
