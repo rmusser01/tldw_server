@@ -216,6 +216,43 @@ def test_audio_transcriptions_hotwords_json(monkeypatch, bypass_api_limits):
 
 
 @pytest.mark.unit
+def test_audio_transcriptions_sanitizes_test_mode_canonical_path_log(
+    monkeypatch,
+    bypass_api_limits,
+):
+    app, _captured = _setup_stubbed_audio_app(monkeypatch)
+    import tldw_Server_API.app.api.v1.endpoints.audio.audio_transcriptions as audio_tx
+
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(audio_tx, "logger", logger_stub)
+
+    with bypass_api_limits(app), TestClient(app) as client:
+        wav_bytes = _make_wav_bytes()
+        headers = {"X-API-KEY": TEST_API_KEY}
+        files = {"file": ("sample.wav", io.BytesIO(wav_bytes), "audio/wav")}
+        data = {
+            "model": "vibevoice-asr",
+            "response_format": "json",
+        }
+        resp = client.post(
+            "/api/v1/audio/transcriptions",
+            headers=headers,
+            files=files,
+            data=data,
+        )
+        if resp.status_code == 404:
+            pytest.skip("audio/transcriptions endpoint not mounted in this build")
+        assert resp.status_code == 200, resp.text
+
+    canonical_path_logs = [
+        msg
+        for msg in logger_stub.debugs
+        if msg.startswith("TEST_MODE: canonical audio path resolved")
+    ]
+    assert canonical_path_logs == ["TEST_MODE: canonical audio path resolved"]
+
+
+@pytest.mark.unit
 def test_audio_transcriptions_sanitizes_malformed_timestamp_granularity_log(
     monkeypatch,
     bypass_api_limits,

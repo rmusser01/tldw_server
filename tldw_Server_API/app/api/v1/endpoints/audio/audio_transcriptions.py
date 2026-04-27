@@ -717,8 +717,7 @@ async def create_transcription(
                 canonical_path = temp_audio_path
 
         if is_test_mode():
-            source_label = "converted" if canonical_path != temp_audio_path else "original"
-            logger.debug(f"TEST_MODE: canonical audio path resolved: path={canonical_path}, source={source_label}")
+            logger.debug("TEST_MODE: canonical audio path resolved")
 
         base_dir = PathLib(canonical_path).parent
 
