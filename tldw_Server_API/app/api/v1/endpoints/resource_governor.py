@@ -61,9 +61,9 @@ def _get_or_init_governor() -> Any | None:
             if loader is not None:
                 gov = MemoryResourceGovernor(policy_loader=loader)
                 app.state.rg_governor = gov
-        except _RG_ENDPOINT_NONCRITICAL_EXCEPTIONS as e:
+        except _RG_ENDPOINT_NONCRITICAL_EXCEPTIONS:
             # Keep behavior consistent with previous code path: best-effort only.
-            logger.debug(f"Resource governor lazy-init skipped: {e}")
+            logger.debug("Resource governor lazy-init skipped")
             gov = None
     return gov
 
@@ -138,9 +138,9 @@ async def get_resource_governor_policy(
                         await loader.load_once()
                         app.state.rg_policy_loader = loader
                         app.state.rg_policy_store = "db"
-                    except _RG_ENDPOINT_NONCRITICAL_EXCEPTIONS as _db_e:
+                    except _RG_ENDPOINT_NONCRITICAL_EXCEPTIONS:
                         # Fall back to file loader if DB path can't init
-                        logger.warning(f"RG policy loader DB init failed; falling back to file store: {_db_e}")
+                        logger.warning("RG policy loader DB init failed; falling back to file store")
                         if env_path:
                             reload_enabled = (os.getenv("RG_POLICY_RELOAD_ENABLED", "true").lower() in {"1", "true", "yes"})
                             interval = int(os.getenv("RG_POLICY_RELOAD_INTERVAL_SEC", "10") or "10")
@@ -168,19 +168,11 @@ async def get_resource_governor_policy(
                     snap_meta = loader.get_snapshot()
                     app.state.rg_policy_version = int(getattr(snap_meta, "version", 0) or 0)
                     app.state.rg_policy_count = len(getattr(snap_meta, "policies", {}) or {})
-                except _RG_ENDPOINT_NONCRITICAL_EXCEPTIONS as meta_exc:
+                except _RG_ENDPOINT_NONCRITICAL_EXCEPTIONS:
                     # Log with context and stack trace but do not interrupt flow
-                    loader_name = type(loader).__name__ if loader is not None else "None"
-                    snap_type = type(snap_meta).__name__ if "snap_meta" in locals() and snap_meta is not None else "None"
-                    logger.exception(
-                        "Failed updating app.state RG metadata (keys=['rg_policy_version','rg_policy_count']). "
-                        "loader={}, snapshot_type={}. Error: {}",
-                        loader_name,
-                        snap_type,
-                        repr(meta_exc),
-                    )
-            except _RG_ENDPOINT_NONCRITICAL_EXCEPTIONS as _init_exc:
-                logger.exception("Resource governor policy loader init failed: {}", repr(_init_exc))
+                    logger.exception("Failed updating app.state RG metadata")
+            except _RG_ENDPOINT_NONCRITICAL_EXCEPTIONS:
+                logger.exception("Resource governor policy loader init failed")
                 return JSONResponse({"status": "unavailable", "reason": "policy_loader_not_initialized"}, status_code=503)
         # Ensure response reflects the effective store mode after init/fallback.
         store = getattr(app.state, "rg_policy_store", None) or store
