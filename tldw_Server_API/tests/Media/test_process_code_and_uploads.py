@@ -2,10 +2,35 @@ import os
 import io
 import json
 import pytest
+from dataclasses import dataclass, field
 from fastapi import UploadFile
 
 
 pytestmark = pytest.mark.unit
+
+
+class _LoggerStub:
+    def __init__(self) -> None:
+        self.debugs: list[str] = []
+        self.debug_kwargs: list[dict[str, object]] = []
+
+    def info(self, *_args: object, **_kwargs: object) -> None:
+        return None
+
+    def debug(self, message: str, *args: object, **kwargs: object) -> None:
+        self.debugs.append(message.format(*args, **kwargs) if args or kwargs else message)
+        self.debug_kwargs.append(dict(kwargs))
+
+
+def _assert_sanitized_debug_log(logger: _LoggerStub, expected: str) -> None:
+    target_kwargs = [
+        kwargs for message, kwargs in zip(logger.debugs, logger.debug_kwargs) if message == expected
+    ]
+    assert target_kwargs, logger.debugs
+    rendered = "\n".join(message for message in logger.debugs if message == expected)
+    assert "exploded" not in rendered
+    assert "/private/" not in rendered
+    assert all(not kwargs for kwargs in target_kwargs)
 
 
 def test_process_code_js_lines(client_with_single_user):
@@ -177,6 +202,66 @@ def test_process_code_logs_upload_errors_when_test_mode_is_single_letter_y(
 
     assert response.status_code in (200, 207), response.text
     assert any("TEST_MODE: process-code upload_errors=" in msg for msg in logged)
+
+
+def test_process_code_chunk_line_bounds_failure_log_is_sanitized(
+    client_with_single_user,
+    monkeypatch,
+):
+    from tldw_Server_API.app.api.v1.endpoints.media import process_code as process_code_mod
+    import tldw_Server_API.app.core.Chunking.chunker as chunker_mod
+
+    client, _ = client_with_single_user
+    logger_stub = _LoggerStub()
+
+    class BadLineNumber(int):
+        def __new__(cls, value: int):
+            return int.__new__(cls, value)
+
+        def __lt__(self, _other):
+            raise RuntimeError("line bounds exploded at /private/source.py")
+
+    @dataclass
+    class FakeMetadata:
+        start_line: int | None = None
+        end_line: int | None = None
+        blocks: list[dict[str, object]] = field(
+            default_factory=lambda: [
+                {"start_line": BadLineNumber(1)},
+                {"start_line": BadLineNumber(2)},
+            ]
+        )
+        options: dict[str, object] = field(default_factory=dict)
+
+    @dataclass
+    class FakeChunkResult:
+        text: str
+        metadata: FakeMetadata
+
+    class FakeChunker:
+        def __init__(self, *_args, **_kwargs):
+            return None
+
+        def chunk_text_with_metadata(self, *_args, **_kwargs):
+            return [FakeChunkResult(text="console.log('hi');", metadata=FakeMetadata())]
+
+    monkeypatch.setattr(process_code_mod, "logger", logger_stub)
+    monkeypatch.setattr(chunker_mod, "Chunker", FakeChunker)
+
+    files = [("files", ("script.js", b"console.log('hi');\n", "application/javascript"))]
+    response = client.post(
+        "/api/v1/media/process-code",
+        files=files,
+        data={
+            "perform_chunking": "true",
+            "chunk_method": "code",
+            "chunk_size": "4000",
+            "chunk_overlap": "0",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    _assert_sanitized_debug_log(logger_stub, "Failed to derive code chunk line bounds")
 
 
 @pytest.mark.asyncio

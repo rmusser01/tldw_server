@@ -310,8 +310,8 @@ async def process_code_endpoint(
                                             md["start_line"] = int(min(starts))
                                         if ends:
                                             md["end_line"] = int(max(ends))
-                                    except Exception as metadata_bounds_error:
-                                        logger.debug("Failed to derive code chunk line bounds", exc_info=metadata_bounds_error)
+                                    except Exception:
+                                        logger.debug("Failed to derive code chunk line bounds")
                                 md["chunk_index"] = idx + 1
                                 md["total_chunks"] = total
                                 chunks.append({"text": cr.text, "metadata": md})
