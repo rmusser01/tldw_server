@@ -84,9 +84,20 @@ class _SuccessfulMcpServer:
 class _LoggerStub:
     def __init__(self) -> None:
         self.debug_messages: list[str] = []
+        self.error_messages: list[str] = []
 
     def debug(self, message: str, *args: Any, **kwargs: Any) -> None:
         self.debug_messages.append(message.format(*args) if args else message)
+
+    def error(self, message: str, *args: Any, **kwargs: Any) -> None:
+        self.error_messages.append(message.format(*args) if args else message)
+
+
+class _FailingJwtManager:
+    _refresh_tokens: dict[str, Any] = {}
+
+    def rotate_refresh_token(self, refresh_token: str, token_id: str) -> tuple[str, str, str]:
+        raise RuntimeError("refresh token backend leaked /private/mcp/tokens.db")
 
 
 def _request() -> Request:
@@ -269,3 +280,21 @@ async def test_batch_request_sanitizes_safe_config_parse_log(monkeypatch: pytest
     assert responses[0].result == {"ok": True}
     assert logger.debug_messages == ["Batch failed to parse safe config"]
     assert "/private/mcp/config.json" not in logger.debug_messages[0]
+
+
+@pytest.mark.asyncio
+async def test_refresh_token_sanitizes_rotation_failure_log(monkeypatch: pytest.MonkeyPatch) -> None:
+    logger = _LoggerStub()
+    monkeypatch.setattr(mcp, "logger", logger)
+    monkeypatch.setattr(mcp, "get_jwt_manager", lambda: _FailingJwtManager())
+
+    with pytest.raises(HTTPException) as excinfo:
+        await mcp.refresh_token(
+            auth_request=mcp.AuthRefreshRequest(refresh_token="refresh-token", token_id="token-id"),
+            _guard=None,
+        )
+
+    assert excinfo.value.status_code == 500
+    assert excinfo.value.detail == "Failed to refresh token"
+    assert logger.error_messages == ["Refresh token rotation failed"]
+    assert "/private/mcp/tokens.db" not in logger.error_messages[0]
