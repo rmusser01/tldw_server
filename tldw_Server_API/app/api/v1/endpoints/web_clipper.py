@@ -74,8 +74,7 @@ async def save_web_clip(
     try:
         result = await asyncio.to_thread(service.save_clip, payload)
         if result.status == "failed":
-            warning_detail = result.warnings[0] if result.warnings else "Canonical note save failed."
-            logger.error("Web clipper canonical save failed for clip_id {}: {}", payload.clip_id, warning_detail)
+            logger.error("Web clipper canonical save failed")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Canonical note save failed.",
@@ -83,7 +82,7 @@ async def save_web_clip(
         return result
     except (InputError, ConflictError, CharactersRAGDBError) as exc:
         if isinstance(exc, CharactersRAGDBError) and not isinstance(exc, ConflictError):
-            logger.error("Web clipper save failed for clip_id {}: {}", payload.clip_id, exc)
+            logger.error("Web clipper save failed")
         raise map_db_error_to_http(exc, default_detail="Internal server error") from exc
     except _WEB_CLIPPER_ENDPOINT_EXCEPTIONS as exc:
         logger.error("Web clipper save failed")
@@ -110,7 +109,7 @@ async def get_web_clip_status(
         ) from exc
     except (InputError, CharactersRAGDBError) as exc:
         if isinstance(exc, CharactersRAGDBError):
-            logger.error("Web clipper status failed for clip_id {}: {}", clip_id, exc)
+            logger.error("Web clipper status failed")
         raise map_db_error_to_http(exc, default_detail="Internal server error") from exc
     except _WEB_CLIPPER_ENDPOINT_EXCEPTIONS as exc:
         logger.error("Web clipper status failed")
@@ -142,7 +141,7 @@ async def persist_web_clip_enrichment(
         ) from exc
     except (InputError, CharactersRAGDBError) as exc:
         if isinstance(exc, CharactersRAGDBError):
-            logger.error("Web clipper enrichment failed for clip_id {}: {}", clip_id, exc)
+            logger.error("Web clipper enrichment failed")
         raise map_db_error_to_http(exc, default_detail="Internal server error") from exc
     except _WEB_CLIPPER_ENDPOINT_EXCEPTIONS as exc:
         logger.error("Web clipper enrichment failed")

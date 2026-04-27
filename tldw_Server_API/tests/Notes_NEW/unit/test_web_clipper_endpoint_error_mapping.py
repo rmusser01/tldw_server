@@ -10,6 +10,7 @@ from tldw_Server_API.app.api.v1.endpoints.web_clipper import (
 from tldw_Server_API.app.api.v1.schemas.web_clipper_schemas import (
     WebClipperEnrichmentPayload,
     WebClipperSaveRequest,
+    WebClipperSaveResponse,
 )
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
@@ -144,6 +145,74 @@ async def test_save_web_clip_maps_db_errors(
 
 
 @pytest.mark.asyncio
+async def test_save_web_clip_canonical_failure_log_is_sanitized(monkeypatch):
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(web_clipper_endpoint, "logger", logger_stub)
+    monkeypatch.setattr(web_clipper_endpoint.asyncio, "to_thread", _run_inline)
+
+    def _failed_save(self, payload):
+        return WebClipperSaveResponse(
+            clip_id="clip-123",
+            status="failed",
+            note=None,
+            workspace_placement=None,
+            attachments=[],
+            warnings=["Canonical note save failed at /private/clipper.db"],
+            note_id="clip-123",
+            workspace_placement_saved=False,
+            workspace_placement_count=0,
+        )
+
+    monkeypatch.setattr(web_clipper_endpoint.WebClipperService, "save_clip", _failed_save)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await save_web_clip(
+            request=_FakeRequest(),
+            payload=_save_payload(),
+            db=object(),
+            rate_limiter=_NoopRateLimiter(),
+            current_user=_current_user(),
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "Canonical note save failed."
+    assert logger_stub.errors == ["Web clipper canonical save failed"]
+    rendered_logs = " ".join(logger_stub.errors)
+    assert "clip-123" not in rendered_logs
+    assert "/private/" not in rendered_logs
+    assert "Canonical note save failed at" not in rendered_logs
+
+
+@pytest.mark.asyncio
+async def test_save_web_clip_db_error_log_is_sanitized(monkeypatch):
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(web_clipper_endpoint, "logger", logger_stub)
+    monkeypatch.setattr(web_clipper_endpoint.asyncio, "to_thread", _run_inline)
+
+    def _raise_save(self, payload):
+        raise CharactersRAGDBError("save backend exploded for clip-123 at /private/clipper.db")
+
+    monkeypatch.setattr(web_clipper_endpoint.WebClipperService, "save_clip", _raise_save)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await save_web_clip(
+            request=_FakeRequest(),
+            payload=_save_payload(),
+            db=object(),
+            rate_limiter=_NoopRateLimiter(),
+            current_user=_current_user(),
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "Internal server error"
+    assert logger_stub.errors == ["Web clipper save failed"]
+    rendered_logs = " ".join(logger_stub.errors)
+    assert "clip-123" not in rendered_logs
+    assert "/private/" not in rendered_logs
+    assert "exploded" not in rendered_logs
+
+
+@pytest.mark.asyncio
 async def test_save_web_clip_generic_fallback_log_is_sanitized(monkeypatch):
     logger_stub = _LoggerStub()
     monkeypatch.setattr(web_clipper_endpoint, "logger", logger_stub)
@@ -205,6 +274,35 @@ async def test_get_web_clip_status_maps_db_errors(
 
     assert exc_info.value.status_code == expected_status
     assert exc_info.value.detail == expected_detail
+
+
+@pytest.mark.asyncio
+async def test_get_web_clip_status_db_error_log_is_sanitized(monkeypatch):
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(web_clipper_endpoint, "logger", logger_stub)
+    monkeypatch.setattr(web_clipper_endpoint.asyncio, "to_thread", _run_inline)
+
+    def _raise_status(self, clip_id):
+        raise CharactersRAGDBError("status backend exploded for clip-123 at /private/clipper.db")
+
+    monkeypatch.setattr(web_clipper_endpoint.WebClipperService, "get_clip_status", _raise_status)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await get_web_clip_status(
+            clip_id="clip-123",
+            request=_FakeRequest(),
+            db=object(),
+            rate_limiter=_NoopRateLimiter(),
+            current_user=_current_user(),
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "Internal server error"
+    assert logger_stub.errors == ["Web clipper status failed"]
+    rendered_logs = " ".join(logger_stub.errors)
+    assert "clip-123" not in rendered_logs
+    assert "/private/" not in rendered_logs
+    assert "exploded" not in rendered_logs
 
 
 @pytest.mark.asyncio
@@ -274,6 +372,40 @@ async def test_persist_web_clip_enrichment_maps_db_errors(
 
     assert exc_info.value.status_code == expected_status
     assert exc_info.value.detail == expected_detail
+
+
+@pytest.mark.asyncio
+async def test_persist_web_clip_enrichment_db_error_log_is_sanitized(monkeypatch):
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(web_clipper_endpoint, "logger", logger_stub)
+    monkeypatch.setattr(web_clipper_endpoint.asyncio, "to_thread", _run_inline)
+
+    def _raise_enrichment(self, clip_id, payload):
+        raise CharactersRAGDBError("enrichment backend exploded for clip-123 at /private/clipper.db")
+
+    monkeypatch.setattr(
+        web_clipper_endpoint.WebClipperService,
+        "persist_enrichment",
+        _raise_enrichment,
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await persist_web_clip_enrichment(
+            clip_id="clip-123",
+            request=_FakeRequest(),
+            payload=_enrichment_payload(),
+            db=object(),
+            rate_limiter=_NoopRateLimiter(),
+            current_user=_current_user(),
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "Internal server error"
+    assert logger_stub.errors == ["Web clipper enrichment failed"]
+    rendered_logs = " ".join(logger_stub.errors)
+    assert "clip-123" not in rendered_logs
+    assert "/private/" not in rendered_logs
+    assert "exploded" not in rendered_logs
 
 
 @pytest.mark.asyncio
