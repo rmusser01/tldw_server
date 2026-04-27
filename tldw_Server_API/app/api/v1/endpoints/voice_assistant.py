@@ -1482,7 +1482,7 @@ async def _stream_tts_response(
         )
 
     except (TTSError, AttributeError, ImportError, ModuleNotFoundError, OSError, RuntimeError, TypeError, ValueError) as e:
-        logger.error(f"TTS streaming failed: {e}")
+        logger.error("TTS streaming failed")
         await websocket.send_json(
             WSErrorMessage(
                 error=f"TTS failed: {e}",
