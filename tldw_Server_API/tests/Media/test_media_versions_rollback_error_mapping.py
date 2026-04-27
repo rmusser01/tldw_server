@@ -39,6 +39,7 @@ class _LoggerStub:
 
 _SENSITIVE_MARKERS = (
     "driver failed",
+    "rollback exploded",
     "/private/tmp/media-versions-rollback.db",
 )
 
@@ -120,3 +121,24 @@ async def test_rollback_version_maps_db_errors(
             logger_stub,
             "Database error rolling back media {} to version {}",
         )
+
+
+@pytest.mark.asyncio
+async def test_rollback_version_sanitizes_unexpected_error_log(monkeypatch):
+    logger_stub = _patch_endpoint_logger(monkeypatch)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await rollback_version(
+            media_id=42,
+            request_body=VersionRollbackRequest(version_number=1),
+            db=_BrokenRollbackDb(
+                RuntimeError("rollback exploded /private/tmp/media-versions-rollback.db"),
+            ),
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "Internal server error during rollback"
+    _assert_sanitized_error_log(
+        logger_stub,
+        "Unexpected error rolling back media {} to version {}",
+    )

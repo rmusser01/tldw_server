@@ -38,6 +38,7 @@ class _LoggerStub:
 
 _SENSITIVE_MARKERS = (
     "driver failed",
+    "version delete exploded",
     "/private/tmp/media-versions-delete.db",
 )
 
@@ -128,3 +129,24 @@ async def test_delete_version_maps_db_errors(
             logger_stub,
             "Database error deleting version {} for media {}",
         )
+
+
+@pytest.mark.asyncio
+async def test_delete_version_sanitizes_unexpected_error_log(monkeypatch):
+    logger_stub = _patch_endpoint_logger(monkeypatch)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await delete_version(
+            media_id=42,
+            version_number=2,
+            db=_BrokenDeleteVersionDb(
+                RuntimeError("version delete exploded /private/tmp/media-versions-delete.db"),
+            ),
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "Internal server error deleting version"
+    _assert_sanitized_error_log(
+        logger_stub,
+        "Unexpected error deleting version {} for media {}",
+    )
