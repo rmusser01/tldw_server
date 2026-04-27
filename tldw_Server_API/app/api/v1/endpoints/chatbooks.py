@@ -1334,7 +1334,7 @@ async def cleanup_expired_exports(
         return CleanupExpiredExportsResponse(deleted_count=deleted_count)
 
     except _CHATBOOKS_NONCRITICAL_EXCEPTIONS:
-        logger.exception(f"Error cleaning up expired exports for user {user.id}")
+        logger.error("Failed to clean up expired chatbook exports")
         raise HTTPException(
             status_code=500,
             detail="An error occurred while cleaning up expired exports",
@@ -1392,7 +1392,7 @@ async def cancel_export_job(
     except JobError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from None
     except _CHATBOOKS_NONCRITICAL_EXCEPTIONS:
-        logger.exception(f"Error cancelling export job {job_id} for user {user.id}")
+        logger.error("Failed to cancel chatbook export job")
         raise HTTPException(
             status_code=500,
             detail="An error occurred while cancelling the export job",
@@ -1450,7 +1450,7 @@ async def cancel_import_job(
     except JobError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from None
     except _CHATBOOKS_NONCRITICAL_EXCEPTIONS:
-        logger.exception(f"Error cancelling import job {job_id} for user {user.id}")
+        logger.error("Failed to cancel chatbook import job")
         raise HTTPException(
             status_code=500,
             detail="An error occurred while cancelling the import job",
@@ -1503,7 +1503,7 @@ async def remove_export_job(
     except JobError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from None
     except _CHATBOOKS_NONCRITICAL_EXCEPTIONS:
-        logger.exception(f"Error removing export job {job_id} for user {user.id}")
+        logger.error("Failed to remove chatbook export job")
         raise HTTPException(
             status_code=500,
             detail="An error occurred while removing the export job",
@@ -1556,7 +1556,7 @@ async def remove_import_job(
     except JobError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from None
     except _CHATBOOKS_NONCRITICAL_EXCEPTIONS:
-        logger.exception(f"Error removing import job {job_id} for user {user.id}")
+        logger.error("Failed to remove chatbook import job")
         raise HTTPException(
             status_code=500,
             detail="An error occurred while removing the import job",

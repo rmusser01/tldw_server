@@ -151,3 +151,91 @@ async def test_chatbook_job_read_failure_logs_are_sanitized(monkeypatch):
     assert "secret-" not in str(logger_stub.errors)
     assert "tester" not in str(logger_stub.errors)
     assert "/private/" not in str(logger_stub.errors)
+
+
+@pytest.mark.asyncio
+async def test_chatbook_job_mutation_failure_logs_are_sanitized(monkeypatch):
+    from tldw_Server_API.app.api.v1.endpoints import chatbooks
+
+    class _FailingMutationService:
+        def cleanup_expired_exports(self):
+            raise RuntimeError("cleanup leaked /private/chatbooks-cleanup.db")
+
+        def cancel_export_job(self, job_id):
+            raise RuntimeError(f"cancel export leaked {job_id} /private/chatbooks-export-cancel.db")
+
+        def cancel_import_job(self, job_id):
+            raise RuntimeError(f"cancel import leaked {job_id} /private/chatbooks-import-cancel.db")
+
+        def delete_export_job(self, job_id):
+            raise RuntimeError(f"remove export leaked {job_id} /private/chatbooks-export-remove.db")
+
+        def delete_import_job(self, job_id):
+            raise RuntimeError(f"remove import leaked {job_id} /private/chatbooks-import-remove.db")
+
+    class _AuditService:
+        async def log_event(self, *args, **kwargs):
+            return None
+
+    user = chatbooks.User(id=1, username="tester", email=None, is_active=True)
+    service = _FailingMutationService()
+    audit_service = _AuditService()
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(chatbooks, "logger", logger_stub)
+
+    with pytest.raises(chatbooks.HTTPException) as cleanup_exc:
+        await chatbooks.cleanup_expired_exports(service=service, user=user, audit_service=audit_service)
+    with pytest.raises(chatbooks.HTTPException) as cancel_export_exc:
+        await chatbooks.cancel_export_job(
+            "secret-export-cancel",
+            request=None,
+            service=service,
+            user=user,
+            audit_service=audit_service,
+        )
+    with pytest.raises(chatbooks.HTTPException) as cancel_import_exc:
+        await chatbooks.cancel_import_job(
+            "secret-import-cancel",
+            request=None,
+            service=service,
+            user=user,
+            audit_service=audit_service,
+        )
+    with pytest.raises(chatbooks.HTTPException) as remove_export_exc:
+        await chatbooks.remove_export_job(
+            "secret-export-remove",
+            request=None,
+            service=service,
+            user=user,
+            audit_service=audit_service,
+        )
+    with pytest.raises(chatbooks.HTTPException) as remove_import_exc:
+        await chatbooks.remove_import_job(
+            "secret-import-remove",
+            request=None,
+            service=service,
+            user=user,
+            audit_service=audit_service,
+        )
+
+    assert cleanup_exc.value.status_code == 500
+    assert cleanup_exc.value.detail == "An error occurred while cleaning up expired exports"
+    assert cancel_export_exc.value.status_code == 500
+    assert cancel_export_exc.value.detail == "An error occurred while cancelling the export job"
+    assert cancel_import_exc.value.status_code == 500
+    assert cancel_import_exc.value.detail == "An error occurred while cancelling the import job"
+    assert remove_export_exc.value.status_code == 500
+    assert remove_export_exc.value.detail == "An error occurred while removing the export job"
+    assert remove_import_exc.value.status_code == 500
+    assert remove_import_exc.value.detail == "An error occurred while removing the import job"
+    assert logger_stub.errors == [
+        "Failed to clean up expired chatbook exports",
+        "Failed to cancel chatbook export job",
+        "Failed to cancel chatbook import job",
+        "Failed to remove chatbook export job",
+        "Failed to remove chatbook import job",
+    ]
+    assert logger_stub.exceptions == []
+    assert "secret-" not in str(logger_stub.errors)
+    assert "tester" not in str(logger_stub.errors)
+    assert "/private/" not in str(logger_stub.errors)
