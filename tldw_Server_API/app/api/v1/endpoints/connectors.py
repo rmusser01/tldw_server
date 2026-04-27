@@ -712,7 +712,7 @@ async def browse_provider_sources(
         else:
             items, next_cursor = [], None
     except Exception as e:
-        logger.error(f"Browse error for {provider}: {e}")
+        logger.error("Connector browse failed")
         raise HTTPException(status_code=502, detail="Browse failed") from e
     return {"items": items, "next_cursor": next_cursor}
 

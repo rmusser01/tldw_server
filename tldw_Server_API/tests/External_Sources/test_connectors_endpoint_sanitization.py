@@ -67,3 +67,46 @@ async def test_queue_source_job_quota_log_is_sanitized(monkeypatch):
     assert exc_info.value.status_code == 500
     assert exc_info.value.detail == "Daily import quota check failed"
     fake_logger.error.assert_called_once_with("Connectors quota check failed")
+
+
+@pytest.mark.asyncio
+async def test_browse_provider_sources_error_log_is_sanitized(monkeypatch):
+    class _FailingConnector:
+        async def list_files(self, *args, **kwargs):
+            raise RuntimeError("browse backend leaked /private/connectors-browse.db")
+
+    async def _get_tokens(db, user_id: int, account_id: int):
+        assert user_id == 7
+        assert account_id == 11
+        return {"access_token": "token"}
+
+    async def _get_account(db, user_id: int, account_id: int):
+        assert user_id == 7
+        assert account_id == 11
+        return {"id": 11, "provider": "drive"}
+
+    async def _get_email(db, user_id: int, account_id: int):
+        assert user_id == 7
+        assert account_id == 11
+        return "user@example.test"
+
+    fake_logger = MagicMock()
+    monkeypatch.setattr(connectors, "logger", fake_logger)
+    monkeypatch.setattr(connectors, "get_account_tokens", _get_tokens)
+    monkeypatch.setattr(connectors, "get_account_for_user", _get_account)
+    monkeypatch.setattr(connectors, "get_account_email", _get_email)
+    monkeypatch.setattr(connectors, "get_connector_by_name", lambda provider: _FailingConnector())
+
+    principal = AuthPrincipal(kind="user", user_id=7)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await connectors.browse_provider_sources(
+            provider="drive",
+            account_id=11,
+            db=object(),
+            principal=principal,
+        )
+
+    assert exc_info.value.status_code == 502
+    assert exc_info.value.detail == "Browse failed"
+    fake_logger.error.assert_called_once_with("Connector browse failed")
