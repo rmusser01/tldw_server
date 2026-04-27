@@ -27,6 +27,7 @@ from loguru import logger
 # Unified hierarchy (preferred — all DB modules should migrate to these)
 from tldw_Server_API.app.core.DB_Management.db_errors import (
     ConflictError as UnifiedConflictError,
+    DataIntegrityError as UnifiedDataIntegrityError,
     DatabaseError as UnifiedDatabaseError,
     InputError as UnifiedInputError,
     NotFoundError as UnifiedNotFoundError,
@@ -52,6 +53,9 @@ _SCHEMA_ERROR_TYPES: tuple[type, ...] = (UnifiedSchemaError, SchemaError)
 
 # All NotFoundError-like types
 _NOT_FOUND_ERROR_TYPES: tuple[type, ...] = (UnifiedNotFoundError,)
+
+# All DataIntegrityError-like types
+_DATA_INTEGRITY_ERROR_TYPES: tuple[type, ...] = (UnifiedDataIntegrityError,)
 
 # All DatabaseError-like base types (catch-all for DB layer)
 _DATABASE_ERROR_TYPES: tuple[type, ...] = (UnifiedDatabaseError, DatabaseError)
@@ -111,6 +115,7 @@ def map_db_error_to_http(
     default_detail: str = "Database error occurred",
     input_detail: str = "Invalid input",
     conflict_detail: str = "Conflict detected",
+    data_integrity_detail: str = "Data integrity violation",
     log_context: str | None = None,
 ) -> HTTPException:
     """Map a database-layer exception to a FastAPI HTTPException.
@@ -121,24 +126,28 @@ def map_db_error_to_http(
     Mapping rules:
     - InputError-like    -> `input_status` (defaults to 400 Bad Request)
     - NotFoundError-like -> 404 Not Found
+    - DataIntegrityError -> 422 Unprocessable Entity
     - ConflictError-like -> 409 Conflict
     - SchemaError-like   -> 500 Internal Server Error (schema/migration issue)
     - DatabaseError-like -> 500 Internal Server Error
     - other Exception    -> 500 Internal Server Error
 
-    `input_detail` and `conflict_detail` let call sites keep stable,
-    endpoint-specific client messages instead of exposing raw DB exception
-    strings. `log_context` lets callers preserve request identifiers such as
-    `media_id` in server-side logs.
+    `input_detail`, `conflict_detail`, and `data_integrity_detail` let call
+    sites keep stable, endpoint-specific client messages instead of exposing
+    raw DB exception strings. `log_context` lets callers preserve request
+    identifiers such as `media_id` in server-side logs.
     """
     def _log_db_mapping_error(label: str) -> None:
         message = f"{log_context}: {label}" if log_context else label
         logger.error(message, exc_info=True)
 
+    # Backward compatibility: some endpoints still model absence as InputError
+    # and pass not_found_status=404. Real NotFoundError handling is below.
+    legacy_input_fallback_status = (
+        not_found_status if not_found_status is not None else status.HTTP_400_BAD_REQUEST
+    )
     resolved_input_status = (
-        input_status
-        if input_status is not None
-        else (not_found_status if not_found_status is not None else status.HTTP_400_BAD_REQUEST)
+        input_status if input_status is not None else legacy_input_fallback_status
     )
 
     if isinstance(exc, _INPUT_ERROR_TYPES):
@@ -152,6 +161,11 @@ def map_db_error_to_http(
         return HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Resource not found",
+        )
+    if isinstance(exc, _DATA_INTEGRITY_ERROR_TYPES):
+        return HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=data_integrity_detail,
         )
     if isinstance(exc, _CONFLICT_ERROR_TYPES):
         return HTTPException(

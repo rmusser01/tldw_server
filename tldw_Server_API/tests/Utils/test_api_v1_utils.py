@@ -21,6 +21,7 @@ from tldw_Server_API.app.core.DB_Management.Prompts_DB import (
 )
 from tldw_Server_API.app.core.DB_Management.db_errors import (
     ConflictError as UnifiedConflictError,
+    DataIntegrityError as UnifiedDataIntegrityError,
     DatabaseError as UnifiedDatabaseError,
     InputError as UnifiedInputError,
     NotFoundError as UnifiedNotFoundError,
@@ -232,6 +233,7 @@ def test_http_error_mapping_logs_database_errors_with_context(monkeypatch):
         (UnifiedInputError("bad"), 400),
         (UnifiedConflictError("conflict"), 409),
         (UnifiedNotFoundError("missing"), 404),
+        (UnifiedDataIntegrityError("bad data"), 422),
         (UnifiedSchemaError("schema"), 500),
         (KanbanInputError("bad"), 400),
         (KanbanConflictError("conflict"), 409),
@@ -247,6 +249,8 @@ def test_http_error_mapping_logs_database_errors_with_context(monkeypatch):
 def test_http_error_mapping_handles_cross_module_db_errors(exc, expected_status):
     http_exc = http_errors.map_db_error_to_http(exc, default_detail="db fallback")
     assert http_exc.status_code == expected_status
+    if isinstance(exc, (UnifiedNotFoundError, KanbanNotFoundError)):
+        assert http_exc.detail == "Resource not found"
 
 
 @pytest.mark.parametrize(
