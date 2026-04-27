@@ -8,6 +8,9 @@ class _LoggerStub:
     def __init__(self) -> None:
         self.debugs: list[str] = []
         self.debug_kwargs: list[dict[str, object]] = []
+        self.warnings: list[str] = []
+        self.warning_args: list[tuple[object, ...]] = []
+        self.warning_kwargs: list[dict[str, object]] = []
 
     def info(self, *_args: object, **_kwargs: object) -> None:
         return None
@@ -15,8 +18,10 @@ class _LoggerStub:
     def log(self, *_args: object, **_kwargs: object) -> None:
         return None
 
-    def warning(self, *_args: object, **_kwargs: object) -> None:
-        return None
+    def warning(self, message: str, *args: object, **kwargs: object) -> None:
+        self.warnings.append(message.format(*args, **kwargs) if args or kwargs else message)
+        self.warning_args.append(args)
+        self.warning_kwargs.append(dict(kwargs))
 
     def debug(self, message: str, *args: object, **kwargs: object) -> None:
         self.debugs.append(message.format(*args, **kwargs) if args or kwargs else message)
@@ -32,6 +37,23 @@ def _assert_sanitized_debug_log(logger: _LoggerStub, expected: str) -> None:
     assert "exploded" not in rendered
     assert "/private/" not in rendered
     assert all(not kwargs for kwargs in target_kwargs)
+
+
+def _assert_sanitized_warning_log(logger: _LoggerStub, expected: str) -> None:
+    target_records = [
+        (message, args, kwargs)
+        for message, args, kwargs in zip(
+            logger.warnings,
+            logger.warning_args,
+            logger.warning_kwargs,
+        )
+        if message.startswith(expected)
+    ]
+    assert target_records, logger.warnings
+    rendered = "\n".join(message for message, _args, _kwargs in target_records)
+    assert "exploded" not in rendered
+    assert "/private/" not in rendered
+    assert all(not args and not kwargs for _message, args, kwargs in target_records)
 
 
 class _StubQuotaService:
@@ -631,3 +653,102 @@ def test_videos_process_usage_event_failure_log_is_sanitized(
 
     assert response.status_code == 200, response.text
     _assert_sanitized_debug_log(logger_stub, "Video process endpoint usage logging failed")
+
+
+def test_audios_process_rechunk_failure_log_is_sanitized(
+    client_with_single_user,
+    quota_service_stub,
+    monkeypatch,
+):
+    client, _ = client_with_single_user
+
+    import tldw_Server_API.app.core.Chunking as chunking_mod
+    import tldw_Server_API.app.core.Ingestion_Media_Processing.audio_batch as audio_batch_mod
+    from tldw_Server_API.app.api.v1.endpoints.media import process_audios as process_audios_mod
+
+    logger_stub = _LoggerStub()
+
+    async def _stub_run_audio_batch(**_kwargs):
+        return {
+            "processed_count": 1,
+            "errors_count": 0,
+            "errors": [],
+            "results": [
+                {
+                    "status": "Success",
+                    "input_ref": "clip.mp3",
+                    "media_type": "audio",
+                    "content": "audio transcript for rechunking",
+                    "metadata": {},
+                }
+            ],
+        }
+
+    def _fail_improved_chunking_process(*_args, **_kwargs):
+        raise RuntimeError("audio rechunk exploded at /private/chunks")
+
+    monkeypatch.setattr(process_audios_mod, "logger", logger_stub)
+    monkeypatch.setattr(audio_batch_mod, "run_audio_batch", _stub_run_audio_batch)
+    monkeypatch.setattr(chunking_mod, "improved_chunking_process", _fail_improved_chunking_process)
+
+    response = client.post(
+        "/api/v1/media/process-audios",
+        data={"perform_chunking": "true"},
+        files=[("files", ("clip.mp3", b"ID3", "audio/mpeg"))],
+    )
+
+    assert response.status_code == 200, response.text
+    _assert_sanitized_warning_log(
+        logger_stub,
+        "Best-effort audio chunking post-processing failed; leaving results unchunked",
+    )
+
+
+def test_videos_process_rechunk_failure_log_is_sanitized(
+    client_with_single_user,
+    quota_service_stub,
+    monkeypatch,
+):
+    client, _ = client_with_single_user
+
+    import tldw_Server_API.app.core.Chunking as chunking_mod
+    import tldw_Server_API.app.core.Ingestion_Media_Processing.video_batch as video_batch_mod
+    from tldw_Server_API.app.api.v1.endpoints.media import process_videos as process_videos_mod
+
+    logger_stub = _LoggerStub()
+
+    async def _stub_run_video_batch(**_kwargs):
+        return {
+            "processed_count": 1,
+            "errors_count": 0,
+            "errors": [],
+            "results": [
+                {
+                    "status": "Success",
+                    "input_ref": "clip.mp4",
+                    "media_type": "video",
+                    "content": "video transcript for rechunking",
+                    "metadata": {},
+                }
+            ],
+            "confabulation_results": None,
+        }
+
+    def _fail_improved_chunking_process(*_args, **_kwargs):
+        raise RuntimeError("video rechunk exploded at /private/chunks")
+
+    monkeypatch.setattr(process_videos_mod, "logger", logger_stub)
+    monkeypatch.setattr(video_batch_mod, "run_video_batch", _stub_run_video_batch)
+    monkeypatch.setattr(chunking_mod, "improved_chunking_process", _fail_improved_chunking_process)
+
+    response = client.post(
+        "/api/v1/media/process-videos",
+        data={"perform_chunking": "true"},
+        files=[("files", ("clip.mp4", b"\x00\x00\x00\x18ftypmp42", "video/mp4"))],
+    )
+
+    assert response.status_code == 200, response.text
+    _assert_sanitized_debug_log(
+        logger_stub,
+        "Video process endpoint rechunking failed; returning original result",
+    )

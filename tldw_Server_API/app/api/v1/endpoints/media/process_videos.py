@@ -378,8 +378,8 @@ async def process_videos_endpoint(
                     chunks = _improved_chunking_process(text, chunk_options_dict)
 
                 res["chunks"] = chunks
-    except Exception as rechunk_error:
-        logger.debug("Video process endpoint rechunking failed; returning original result", exc_info=rechunk_error)
+    except Exception:
+        logger.debug("Video process endpoint rechunking failed; returning original result")
 
     response = JSONResponse(status_code=final_status_code, content=batch_result)
     if legacy_signal is not None:

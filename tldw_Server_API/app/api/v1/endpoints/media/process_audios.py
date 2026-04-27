@@ -362,10 +362,9 @@ async def process_audios_endpoint(
                     chunks = _improved_chunking_process(text, chunk_options_dict)
 
                 res["chunks"] = chunks
-    except Exception as exc:
+    except Exception:
         logger.warning(
-            "Best-effort audio chunking post-processing failed; leaving results unchunked: {}",
-            exc,
+            "Best-effort audio chunking post-processing failed; leaving results unchunked"
         )
 
     response = JSONResponse(status_code=final_status_code, content=batch_result)
