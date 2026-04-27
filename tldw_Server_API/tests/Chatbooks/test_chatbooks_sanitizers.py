@@ -239,3 +239,35 @@ async def test_chatbook_job_mutation_failure_logs_are_sanitized(monkeypatch):
     assert "secret-" not in str(logger_stub.errors)
     assert "tester" not in str(logger_stub.errors)
     assert "/private/" not in str(logger_stub.errors)
+
+
+@pytest.mark.asyncio
+async def test_chatbook_download_failure_log_is_sanitized(monkeypatch):
+    from tldw_Server_API.app.api.v1.endpoints import chatbooks
+
+    class _FailingDownloadService:
+        _jobs_backend = "core"
+
+        def get_export_job(self, job_id):
+            raise RuntimeError(f"download leaked {job_id} /private/chatbooks-download.db")
+
+    user = chatbooks.User(id=1, username="tester", email=None, is_active=True)
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(chatbooks, "logger", logger_stub)
+
+    with pytest.raises(chatbooks.HTTPException) as exc_info:
+        await chatbooks.download_chatbook(
+            job_id="123e4567-e89b-12d3-a456-426614174000",
+            request=None,
+            service=_FailingDownloadService(),
+            user=user,
+            audit_service=object(),
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "An error occurred while downloading the file"
+    assert logger_stub.errors == ["Failed to download chatbook"]
+    assert logger_stub.exceptions == []
+    assert "123e4567" not in str(logger_stub.errors)
+    assert "tester" not in str(logger_stub.errors)
+    assert "/private/" not in str(logger_stub.errors)

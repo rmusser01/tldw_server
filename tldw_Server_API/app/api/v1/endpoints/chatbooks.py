@@ -1289,7 +1289,7 @@ async def download_chatbook(
     except HTTPException:
         raise
     except _CHATBOOKS_NONCRITICAL_EXCEPTIONS:
-        logger.exception(f"Error downloading chatbook {job_id} for user {user.id}")
+        logger.error("Failed to download chatbook")
         raise HTTPException(status_code=500, detail="An error occurred while downloading the file") from None
 
 
