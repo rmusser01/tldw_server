@@ -277,7 +277,7 @@ def _int_env(name: str, default: int) -> int:
     try:
         return int(value)
     except (TypeError, ValueError):
-        logger.warning(f"Invalid integer for {name!r}: {value!r}. Using default {default}.")
+        logger.warning("Invalid integer environment override")
         return default
 
 

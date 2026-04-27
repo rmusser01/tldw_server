@@ -187,3 +187,18 @@ async def test_api_health_metrics_sanitizes_metrics_collection_failure(monkeypat
     assert "health/metrics unavailable" in joined
     assert "psutil metrics exploded" not in joined
     assert "/private/" not in joined
+
+
+def test_int_env_sanitizes_invalid_value_log(monkeypatch):
+    monkeypatch.setenv("AUDIT_SEC_CRITICAL_HIGH_RISK_MIN", "threshold leaked at /private/health.env")
+
+    with _capture_health_logs() as messages:
+        value = health_mod._int_env("AUDIT_SEC_CRITICAL_HIGH_RISK_MIN", 7)
+
+    joined = "\n".join(messages)
+
+    assert value == 7
+    assert "Invalid integer environment override" in joined
+    assert "AUDIT_SEC_CRITICAL_HIGH_RISK_MIN" not in joined
+    assert "threshold leaked" not in joined
+    assert "/private/" not in joined
