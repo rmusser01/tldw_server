@@ -202,7 +202,7 @@ async def create_test_case(
         )
 
     except ConflictError as e:
-        logger.warning("Conflict creating test case: {}", e)
+        logger.warning("Conflict creating test case")
         raise map_db_error_to_http(
             e,
             conflict_detail="Test case already exists",
@@ -406,7 +406,7 @@ async def list_test_cases(
         logger.error("Database error listing test cases")
         raise map_db_error_to_http(e, default_detail=detail) from e
     except Exception as e:  # noqa: BLE001
-        logger.exception("Unexpected error listing test cases: {}", e)
+        logger.error("Unexpected error listing test cases")
         detail = "Failed to list test cases"
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

@@ -52,7 +52,9 @@ class _LoggerStub:
 
 
 _SENSITIVE_MARKERS = (
+    "duplicate case",
     "driver failed",
+    "unexpected list exploded",
     "/private/tmp/prompt-studio-test-cases.db",
 )
 
@@ -72,6 +74,21 @@ def _assert_sanitized_error_log(
     assert expected_message in matching_messages
 
     rendered_calls = repr(logger_stub.error_calls)
+    for marker in _SENSITIVE_MARKERS:
+        assert marker not in rendered_calls
+
+
+def _assert_sanitized_warning_log(
+    logger_stub: _LoggerStub,
+    expected_message: str,
+) -> None:
+    assert logger_stub.exception_calls == []
+    assert logger_stub.warning_calls
+
+    matching_messages = [args[0] for args, _kwargs in logger_stub.warning_calls if args]
+    assert expected_message in matching_messages
+
+    rendered_calls = repr(logger_stub.warning_calls)
     for marker in _SENSITIVE_MARKERS:
         assert marker not in rendered_calls
 
@@ -272,7 +289,7 @@ async def test_create_bulk_test_cases_maps_database_error(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_create_test_case_maps_conflict_error(monkeypatch):
-    _patch_test_case_dependencies(monkeypatch, ConflictError("duplicate case"))
+    logger_stub = _patch_test_case_dependencies(monkeypatch, ConflictError("duplicate case"))
 
     with pytest.raises(HTTPException) as exc_info:
         await create_test_case(
@@ -289,6 +306,7 @@ async def test_create_test_case_maps_conflict_error(monkeypatch):
 
     assert exc_info.value.status_code == 409
     assert exc_info.value.detail == "Test case already exists"
+    _assert_sanitized_warning_log(logger_stub, "Conflict creating test case")
 
 
 @pytest.mark.asyncio
@@ -336,6 +354,31 @@ async def test_list_test_cases_sanitizes_database_error(monkeypatch):
     assert exc_info.value.status_code == 500
     assert exc_info.value.detail == "Failed to list test cases"
     _assert_sanitized_error_log(logger_stub, "Database error listing test cases")
+
+
+@pytest.mark.asyncio
+async def test_list_test_cases_sanitizes_unexpected_error(monkeypatch):
+    logger_stub = _patch_test_case_dependencies(
+        monkeypatch,
+        RuntimeError("unexpected list exploded /private/tmp/prompt-studio-test-cases.db"),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await list_test_cases(
+            project_id=7,
+            page=1,
+            per_page=20,
+            is_golden=None,
+            tags=None,
+            search=None,
+            signature_id=None,
+            _=True,
+            db=object(),
+    )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "Failed to list test cases"
+    _assert_sanitized_error_log(logger_stub, "Unexpected error listing test cases")
 
 
 @pytest.mark.asyncio
