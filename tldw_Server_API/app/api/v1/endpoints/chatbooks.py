@@ -946,7 +946,7 @@ async def list_export_jobs(
     except HTTPException:
         raise
     except _CHATBOOKS_NONCRITICAL_EXCEPTIONS:
-        logger.exception(f"Error listing export jobs for user {user.id}")
+        logger.error("Failed to list chatbook export jobs")
         raise HTTPException(
             status_code=500,
             detail="An error occurred while retrieving export jobs",
@@ -1002,7 +1002,7 @@ async def get_export_job(
     except HTTPException:
         raise
     except _CHATBOOKS_NONCRITICAL_EXCEPTIONS:
-        logger.exception(f"Error getting export job {job_id} for user {user.id}")
+        logger.error("Failed to get chatbook export job")
         raise HTTPException(
             status_code=500,
             detail="An error occurred while retrieving the export job",
@@ -1059,7 +1059,7 @@ async def list_import_jobs(
         return ListImportJobsResponse(jobs=job_responses, total=total)
 
     except _CHATBOOKS_NONCRITICAL_EXCEPTIONS:
-        logger.exception(f"Error listing import jobs for user {user.id}")
+        logger.error("Failed to list chatbook import jobs")
         raise HTTPException(
             status_code=500,
             detail="An error occurred while retrieving import jobs",
@@ -1108,7 +1108,7 @@ async def get_import_job(
     except HTTPException:
         raise
     except _CHATBOOKS_NONCRITICAL_EXCEPTIONS:
-        logger.exception(f"Error getting import job {job_id} for user {user.id}")
+        logger.error("Failed to get chatbook import job")
         raise HTTPException(
             status_code=500,
             detail="An error occurred while retrieving the import job",

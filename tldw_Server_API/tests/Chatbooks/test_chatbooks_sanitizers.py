@@ -5,6 +5,8 @@ class _LoggerStub:
     def __init__(self) -> None:
         self.debugs: list[str] = []
         self.warnings: list[str] = []
+        self.errors: list[str] = []
+        self.exceptions: list[str] = []
 
     def debug(self, message: str, *args, **kwargs) -> None:
         if args or kwargs:
@@ -15,6 +17,16 @@ class _LoggerStub:
         if args or kwargs:
             message = message.format(*args, **kwargs)
         self.warnings.append(message)
+
+    def error(self, message: str, *args, **kwargs) -> None:
+        if args or kwargs:
+            message = message.format(*args, **kwargs)
+        self.errors.append(message)
+
+    def exception(self, message: str, *args, **kwargs) -> None:
+        if args or kwargs:
+            message = message.format(*args, **kwargs)
+        self.exceptions.append(message)
 
 
 def test_safe_increment_metric_failure_log_is_sanitized(monkeypatch):
@@ -88,3 +100,54 @@ def test_persist_completed_sync_export_job_failure_logs_are_sanitized(monkeypatc
     assert "chatbook job store leaked" not in str(logger_stub.warnings)
     assert "cleanup leaked" not in str(logger_stub.warnings)
     assert "/private/" not in str(logger_stub.warnings)
+
+
+@pytest.mark.asyncio
+async def test_chatbook_job_read_failure_logs_are_sanitized(monkeypatch):
+    from tldw_Server_API.app.api.v1.endpoints import chatbooks
+
+    class _FailingJobService:
+        def count_export_jobs(self):
+            raise RuntimeError("export list leaked /private/chatbooks-export-jobs.db")
+
+        def get_export_job(self, job_id):
+            raise RuntimeError(f"export get leaked {job_id} /private/chatbooks-export-job.db")
+
+        def count_import_jobs(self):
+            raise RuntimeError("import list leaked /private/chatbooks-import-jobs.db")
+
+        def get_import_job(self, job_id):
+            raise RuntimeError(f"import get leaked {job_id} /private/chatbooks-import-job.db")
+
+    user = chatbooks.User(id=1, username="tester", email=None, is_active=True)
+    service = _FailingJobService()
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(chatbooks, "logger", logger_stub)
+
+    with pytest.raises(chatbooks.HTTPException) as export_list_exc:
+        await chatbooks.list_export_jobs(request=None, service=service, user=user)
+    with pytest.raises(chatbooks.HTTPException) as export_get_exc:
+        await chatbooks.get_export_job("secret-export-job", service=service, user=user)
+    with pytest.raises(chatbooks.HTTPException) as import_list_exc:
+        await chatbooks.list_import_jobs(request=None, service=service, user=user)
+    with pytest.raises(chatbooks.HTTPException) as import_get_exc:
+        await chatbooks.get_import_job("secret-import-job", service=service, user=user)
+
+    assert export_list_exc.value.status_code == 500
+    assert export_list_exc.value.detail == "An error occurred while retrieving export jobs"
+    assert export_get_exc.value.status_code == 500
+    assert export_get_exc.value.detail == "An error occurred while retrieving the export job"
+    assert import_list_exc.value.status_code == 500
+    assert import_list_exc.value.detail == "An error occurred while retrieving import jobs"
+    assert import_get_exc.value.status_code == 500
+    assert import_get_exc.value.detail == "An error occurred while retrieving the import job"
+    assert logger_stub.errors == [
+        "Failed to list chatbook export jobs",
+        "Failed to get chatbook export job",
+        "Failed to list chatbook import jobs",
+        "Failed to get chatbook import job",
+    ]
+    assert logger_stub.exceptions == []
+    assert "secret-" not in str(logger_stub.errors)
+    assert "tester" not in str(logger_stub.errors)
+    assert "/private/" not in str(logger_stub.errors)
