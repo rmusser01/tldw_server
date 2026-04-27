@@ -201,6 +201,37 @@ async def test_audio_speech_invalid_voice_to_voice_header_log_is_sanitized(monke
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_audio_speech_request_state_failure_log_is_sanitized(monkeypatch):
+    class _StateFailingRequest:
+        headers = {}
+
+        @property
+        def state(self):
+            raise RuntimeError("request state leaked /private/tts-state.json")
+
+    async def _resolve_tts_byok(*args, **kwargs):
+        _ = args, kwargs
+        return (1, {}, None)
+
+    _patch_audio_shim(monkeypatch, _resolve_tts_byok)
+    fake_logger = MagicMock()
+    monkeypatch.setattr(audio_tts, "logger", fake_logger)
+
+    response = await audio_tts.create_speech(
+        _request_data(),
+        _StateFailingRequest(),
+        tts_service=_SuccessfulTTSService(),
+        current_user=SimpleNamespace(id=1),
+        media_db=None,
+        usage_log=SimpleNamespace(log_event=lambda *args, **kwargs: None),
+    )
+
+    assert response.status_code == 200
+    fake_logger.debug.assert_called_once_with("Failed to read voice_to_voice_start from request.state")
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_audio_speech_usage_log_failure_log_is_sanitized(monkeypatch):
     async def _resolve_tts_byok(*args, **kwargs):
         _ = args, kwargs

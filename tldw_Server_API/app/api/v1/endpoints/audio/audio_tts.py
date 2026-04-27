@@ -372,8 +372,8 @@ async def create_speech(
         state_ts = getattr(request.state, "voice_to_voice_start", None)
         if voice_to_voice_start is None and isinstance(state_ts, (int, float)):
             voice_to_voice_start = float(state_ts)
-    except _AUDIO_TTS_NONCRITICAL_EXCEPTIONS as exc:
-        logger.debug(f"Failed to read voice_to_voice_start from request.state: {exc}")
+    except _AUDIO_TTS_NONCRITICAL_EXCEPTIONS:
+        logger.debug("Failed to read voice_to_voice_start from request.state")
     try:
         usage_log.log_event(
             "audio.tts",
