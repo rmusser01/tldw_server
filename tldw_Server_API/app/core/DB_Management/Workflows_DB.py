@@ -2217,16 +2217,13 @@ class WorkflowsDatabase:
                 params_insert,
             )
             conn.commit()
-        except sqlite3.OperationalError as e:
+            return next_seq
+        except (sqlite3.Error, TypeError, ValueError):
             with contextlib.suppress(sqlite3.Error):
                 conn.rollback()
             raise
-        except sqlite3.Error:
-            with contextlib.suppress(sqlite3.Error):
-                conn.rollback()
-            raise
-        self._release_sqlite(conn)
-        return next_seq
+        finally:
+            self._release_sqlite(conn)
 
     def get_events(self, run_id: str, since: int | None = None, limit: int = 500, types: list[str] | None = None) -> list[dict[str, Any]]:
         sql = "SELECT * FROM workflow_events WHERE run_id = ?"

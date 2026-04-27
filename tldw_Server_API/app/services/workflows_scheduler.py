@@ -517,6 +517,15 @@ class _WFRecurringScheduler:
                 s = db.get_schedule(schedule_id)
         if not s or not s.enabled:
             return
+        try:
+            fallback_owner_id = (
+                int(user_id)
+                if user_id is not None
+                else int(core_settings.get("SINGLE_USER_FIXED_ID", 1))
+            )
+        except _WORKFLOWS_SCHED_NONCRITICAL_EXCEPTIONS:
+            fallback_owner_id = 1
+        owner_user_id = self._resolve_schedule_owner_id(s, fallback_user_id=fallback_owner_id)
         # Record last_run_at and pending status
         try:
             from datetime import timezone
@@ -524,11 +533,12 @@ class _WFRecurringScheduler:
         except _WORKFLOWS_SCHED_NONCRITICAL_EXCEPTIONS as e:
             logger.debug(f"Workflows scheduler: failed to set pending status for {schedule_id}: {e}")
         payload = build_schedule_payload(s)
+        payload["user_id"] = str(owner_user_id)
         # Presence gating: optionally skip when user is offline
         try:
             if getattr(s, "require_online", False):
                 sm = await get_session_manager()
-                sessions = await sm.get_active_sessions(int(s.user_id))
+                sessions = await sm.get_active_sessions(owner_user_id)
                 if not sessions:
                     # mark skipped and compute next run time
                     try:
@@ -552,8 +562,8 @@ class _WFRecurringScheduler:
                 jwt_svc = JWTService(settings)
                 ttl = int(os.getenv("WORKFLOWS_VIRTUAL_KEY_TTL_MIN", "15") or 15)
                 token = jwt_svc.create_virtual_access_token(
-                    user_id=int(s.user_id),
-                    username=str(s.user_id),
+                    user_id=owner_user_id,
+                    username=str(owner_user_id),
                     role="user",
                     scope="workflows",
                     ttl_minutes=ttl,
@@ -571,7 +581,7 @@ class _WFRecurringScheduler:
                 handler=handler_name,
                 payload=payload,
                 queue_name=queue_name,
-                metadata={"user_id": s.user_id},
+                metadata={"user_id": str(owner_user_id)},
             )
             logger.info(f"Scheduled {handler_name} submitted: task_id={task_id} schedule_id={s.id}")
             try:

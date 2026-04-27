@@ -92,6 +92,37 @@ def test_sqlite_append_event_uses_begin_immediate(tmp_path):
     assert any("BEGIN IMMEDIATE" in statement.upper() for statement in statements)
 
 
+def test_sqlite_append_event_releases_connection_on_serialization_error(monkeypatch, tmp_path):
+    db_path = tmp_path / "workflows.db"
+    db = WorkflowsDatabase(str(db_path))
+
+    run_id = "run-release-on-error"
+    db.create_run(
+        run_id=run_id,
+        tenant_id="t1",
+        user_id="1",
+        inputs={},
+        workflow_id=None,
+        definition_version=1,
+        definition_snapshot={"name": "release-on-error", "version": 1, "steps": []},
+    )
+
+    released: list[sqlite3.Connection] = []
+    original_release = db._release_sqlite
+
+    def _record_release(conn: sqlite3.Connection) -> None:
+        released.append(conn)
+        original_release(conn)
+
+    monkeypatch.setattr(db, "_release_sqlite", _record_release)
+
+    with pytest.raises(TypeError):
+        db.append_event("t1", run_id, "bad_payload", {"not_json": object()})
+
+    assert released == [db._conn]
+    assert db._conn.in_transaction is False
+
+
 def test_workflow_research_wait_db_tracks_links(tmp_path):
     db_path = tmp_path / "workflows.db"
     db = WorkflowsDatabase(str(db_path))

@@ -434,6 +434,35 @@ async def test_run_schedule_routes_watchlist_backed_schedules_to_watchlists_queu
     await svc.stop()
 
 
+@pytest.mark.asyncio
+async def test_run_schedule_submits_with_resolved_owner_user_id(monkeypatch):
+    monkeypatch.delenv("WORKFLOWS_MINT_VIRTUAL_KEYS", raising=False)
+    svc = workflows_scheduler_mod._WFRecurringScheduler()
+    schedule = _schedule("owner-fallback", user_id="legacy-owner")
+    captured: dict[str, Any] = {}
+
+    class _StubDB:
+        def get_schedule(self, schedule_id: str) -> WorkflowSchedule | None:
+            return schedule if schedule_id == "owner-fallback" else None
+
+        def set_history(self, *_args: Any, **_kwargs: Any) -> None:
+            return None
+
+    class _StubScheduler:
+        async def submit(self, *args: Any, **kwargs: Any) -> str:
+            captured["payload"] = kwargs.get("payload")
+            captured["metadata"] = kwargs.get("metadata")
+            return "task-owner-fallback"
+
+    monkeypatch.setattr(svc, "_get_db", lambda uid: _StubDB())
+    svc._core_scheduler = _StubScheduler()  # type: ignore[attr-defined]
+
+    await svc._run_schedule("owner-fallback", user_id=42)  # type: ignore[attr-defined]
+
+    assert captured["payload"]["user_id"] == "42"
+    assert captured["metadata"] == {"user_id": "42"}
+
+
 def test_run_now_routes_watchlist_backed_schedules_to_watchlists_queue(client_admin, monkeypatch):
     client, svc = client_admin
     sid = svc.create(

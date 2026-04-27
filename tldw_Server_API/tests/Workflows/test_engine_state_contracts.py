@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -58,6 +59,21 @@ def test_control_transition_reports_missing_run(tmp_path) -> None:
         target_status="cancelled",
         op_key="missing-run:cancel",
     ) == ("not_found", "unknown")
+
+
+def test_engine_now_iso_is_timezone_aware() -> None:
+    parsed = datetime.fromisoformat(engine_mod.WorkflowEngine._now_iso())
+
+    assert parsed.tzinfo is not None
+
+
+def test_engine_duration_ms_since_accepts_timezone_aware_started_at() -> None:
+    started_at = (datetime.now(timezone.utc) - timedelta(seconds=2)).isoformat()
+
+    duration_ms = engine_mod.WorkflowEngine._duration_ms_since(started_at)
+
+    assert duration_ms is not None
+    assert duration_ms >= 0
 
 
 @pytest.mark.asyncio

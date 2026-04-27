@@ -945,13 +945,7 @@ class WorkflowEngine:
             duration_ms = None
             try:
                 r = self.db.get_run(run_id)
-                if r and r.started_at:
-                    from datetime import datetime
-                    try:
-                        started = datetime.fromisoformat(r.started_at)
-                    except _WF_NONCRITICAL_EXCEPTIONS:
-                        started = datetime.strptime(r.started_at.split(".")[0], "%Y-%m-%dT%H:%M:%S")
-                    duration_ms = int((datetime.utcnow() - started).total_seconds() * 1000)
+                duration_ms = self._duration_ms_since(r.started_at) if r and r.started_at else None
             except _WF_NONCRITICAL_EXCEPTIONS:
                 duration_ms = None
             tokens_in, tokens_out, cost_usd = self._aggregate_run_token_usage(run_id)
@@ -1420,14 +1414,7 @@ class WorkflowEngine:
         duration_ms = None
         try:
             if run.started_at:
-                from datetime import datetime
-                fmt = "%Y-%m-%dT%H:%M:%S"
-                # allow microseconds if present
-                try:
-                    started = datetime.fromisoformat(run.started_at)
-                except _WF_NONCRITICAL_EXCEPTIONS:
-                    started = datetime.strptime(run.started_at.split(".")[0], fmt)
-                duration_ms = int((datetime.utcnow() - started).total_seconds() * 1000)
+                duration_ms = self._duration_ms_since(run.started_at)
         except _WF_NONCRITICAL_EXCEPTIONS:
             duration_ms = None
         tokens_in, tokens_out, cost_usd = self._aggregate_run_token_usage(run_id)
@@ -1557,7 +1544,29 @@ class WorkflowEngine:
 
     @staticmethod
     def _now_iso() -> str:
-        return __import__("datetime").datetime.utcnow().isoformat()
+        from datetime import datetime, timezone
+
+        return datetime.now(timezone.utc).isoformat()
+
+    @staticmethod
+    def _duration_ms_since(started_at: str | None) -> int | None:
+        if not started_at:
+            return None
+        from datetime import datetime, timezone
+
+        try:
+            started = datetime.fromisoformat(started_at)
+        except _WF_NONCRITICAL_EXCEPTIONS:
+            try:
+                started = datetime.strptime(started_at.split(".")[0], "%Y-%m-%dT%H:%M:%S")
+            except _WF_NONCRITICAL_EXCEPTIONS:
+                return None
+        if started.tzinfo is not None:
+            now = datetime.now(timezone.utc)
+            started = started.astimezone(timezone.utc)
+        else:
+            now = datetime.now()
+        return int((now - started).total_seconds() * 1000)
 
     def _compute_max_retries_for_step(self, step_type: str, step_obj: dict[str, Any]) -> int:
         """Adapter-level retry defaults with per-step override via 'retry'."""
@@ -1809,11 +1818,11 @@ class WorkflowEngine:
                     dt = dt.replace(tzinfo=timezone.utc)
                 return dt
 
-            cutoff = datetime.utcnow().replace(tzinfo=timezone.utc) - timedelta(seconds=int(self.config.heartbeat_interval_sec * 15))
+            cutoff = datetime.now(timezone.utc) - timedelta(seconds=int(self.config.heartbeat_interval_sec * 15))
             stale = self.db.find_orphan_step_runs(cutoff.isoformat())
             if not stale:
                 return
-            now = datetime.utcnow().replace(tzinfo=timezone.utc)
+            now = datetime.now(timezone.utc)
             grace_ms = 5000
             requeue_targets: dict[str, dict[str, Any]] = {}
 
