@@ -376,7 +376,7 @@ async def _queue_source_job(
         try:
             today_count = count_jobs_fn(user_id)
         except Exception as exc:
-            logger.exception(f"Quota check failed for user_id={user_id}: {exc}")
+            logger.error("Connectors quota check failed")
             raise HTTPException(
                 status_code=HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Daily import quota check failed",
