@@ -289,9 +289,9 @@ async def process_audios_endpoint(
                         "download/egress error: {}",
                         errors_joined,
                     )
-            except Exception as endpoint_log_error:
+            except Exception:
                 # Logging must never affect endpoint behavior.
-                logger.debug("Audio process endpoint warning log formatting failed", exc_info=endpoint_log_error)
+                logger.debug("Audio process endpoint warning log formatting failed")
 
     # Optional template/hierarchical re-chunking of transcripts (best-effort).
     try:

@@ -41,6 +41,13 @@ class _DebugFailingLoggerStub(_LoggerStub):
         raise RuntimeError("debug logging exploded at /private/debug.log")
 
 
+class _AudioWarningDebugFailingLoggerStub(_LoggerStub):
+    def debug(self, message: str, *args: object, **kwargs: object) -> None:
+        if message.startswith("TEST_MODE: /process-audios returned 207"):
+            raise RuntimeError("audio warning formatting exploded at /private/audio.log")
+        super().debug(message, *args, **kwargs)
+
+
 def _assert_sanitized_debug_log(logger: _LoggerStub, expected: str) -> None:
     target_kwargs = [
         kwargs for message, kwargs in zip(logger.debugs, logger.debug_kwargs) if message == expected
@@ -806,6 +813,50 @@ def test_audios_process_rechunk_failure_log_is_sanitized(
     _assert_sanitized_warning_log(
         logger_stub,
         "Best-effort audio chunking post-processing failed; leaving results unchunked",
+    )
+
+
+def test_audios_process_warning_log_formatting_failure_log_is_sanitized(
+    client_with_single_user,
+    quota_service_stub,
+    monkeypatch,
+):
+    client, _ = client_with_single_user
+
+    import tldw_Server_API.app.core.Ingestion_Media_Processing.audio_batch as audio_batch_mod
+    from tldw_Server_API.app.api.v1.endpoints.media import process_audios as process_audios_mod
+
+    logger_stub = _AudioWarningDebugFailingLoggerStub()
+
+    async def _stub_run_audio_batch(**_kwargs):
+        return {
+            "processed_count": 0,
+            "errors_count": 1,
+            "errors": ["Download failed: Host could not be resolved"],
+            "results": [
+                {
+                    "status": "Error",
+                    "input_ref": "clip.mp3",
+                    "media_type": "audio",
+                    "error": "Download failed",
+                }
+            ],
+        }
+
+    monkeypatch.setenv("TEST_MODE", "true")
+    monkeypatch.setattr(process_audios_mod, "logger", logger_stub)
+    monkeypatch.setattr(audio_batch_mod, "run_audio_batch", _stub_run_audio_batch)
+
+    response = client.post(
+        "/api/v1/media/process-audios",
+        data={"perform_chunking": "false"},
+        files=[("files", ("clip.mp3", b"ID3", "audio/mpeg"))],
+    )
+
+    assert response.status_code == 207, response.text
+    _assert_sanitized_debug_log(
+        logger_stub,
+        "Audio process endpoint warning log formatting failed",
     )
 
 
