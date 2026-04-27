@@ -55,9 +55,13 @@ _SENSITIVE_MARKERS = (
     "duplicate case",
     "duplicate upload case",
     "generic import exploded",
+    "generic export exploded",
+    "generic template exploded",
     "generic upload exploded",
     "driver failed",
+    "invalid export filter",
     "invalid import payload",
+    "invalid signature",
     "unexpected list exploded",
     "/private/tmp/prompt-studio-test-cases.db",
 )
@@ -546,7 +550,7 @@ async def test_import_test_cases_csv_upload_sanitizes_generic_error(monkeypatch)
 
 @pytest.mark.asyncio
 async def test_get_csv_import_template_maps_input_error(monkeypatch):
-    _patch_test_case_io(monkeypatch, InputError("invalid signature"))
+    logger_stub = _patch_test_case_io(monkeypatch, InputError("invalid signature"))
 
     with pytest.raises(HTTPException) as exc_info:
         await get_csv_import_template(
@@ -557,11 +561,31 @@ async def test_get_csv_import_template_maps_input_error(monkeypatch):
 
     assert exc_info.value.status_code == 400
     assert exc_info.value.detail == "invalid signature"
+    _assert_sanitized_error_log(logger_stub, "Failed to generate CSV template")
+
+
+@pytest.mark.asyncio
+async def test_get_csv_import_template_sanitizes_generic_error(monkeypatch):
+    logger_stub = _patch_test_case_io(
+        monkeypatch,
+        RuntimeError("generic template exploded /private/tmp/prompt-studio-test-cases.db"),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await get_csv_import_template(
+            signature_id=3,
+            db=object(),
+            user_context={"user_id": "tester"},
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "Failed to generate CSV template"
+    _assert_sanitized_error_log(logger_stub, "Failed to generate CSV template")
 
 
 @pytest.mark.asyncio
 async def test_export_test_cases_maps_input_error(monkeypatch):
-    _patch_test_case_io(monkeypatch, InputError("invalid export filter"))
+    logger_stub = _patch_test_case_io(monkeypatch, InputError("invalid export filter"))
 
     with pytest.raises(HTTPException) as exc_info:
         await export_test_cases(
@@ -573,6 +597,27 @@ async def test_export_test_cases_maps_input_error(monkeypatch):
 
     assert exc_info.value.status_code == 400
     assert exc_info.value.detail == "invalid export filter"
+    _assert_sanitized_error_log(logger_stub, "Error exporting test cases")
+
+
+@pytest.mark.asyncio
+async def test_export_test_cases_sanitizes_generic_error(monkeypatch):
+    logger_stub = _patch_test_case_io(
+        monkeypatch,
+        RuntimeError("generic export exploded /private/tmp/prompt-studio-test-cases.db"),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await export_test_cases(
+            project_id=7,
+            export_request=TestCaseExportRequest(format="json"),
+            db=object(),
+            user_context={"user_id": "tester"},
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "Failed to export test cases"
+    _assert_sanitized_error_log(logger_stub, "Error exporting test cases")
 
 
 @pytest.mark.asyncio

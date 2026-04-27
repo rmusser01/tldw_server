@@ -837,13 +837,13 @@ async def get_csv_import_template(
             headers={"Content-Disposition": "attachment; filename=prompt_studio_test_cases_template.csv"}
         )
     except (DatabaseError, InputError, ConflictError) as e:
-        logger.error(f"Failed to generate CSV template: {e}")
+        logger.error("Failed to generate CSV template")
         raise map_db_error_to_http(
             e,
             default_detail="Failed to generate CSV template",
         ) from e
     except PROMPT_STUDIO_TEST_CASE_EXCEPTIONS as e:
-        logger.error(f"Failed to generate CSV template: {e}")
+        logger.error("Failed to generate CSV template")
         raise HTTPException(status_code=500, detail="Failed to generate CSV template") from e
 
 # Compatibility: run test cases endpoint returning {"results": [...]}
@@ -963,13 +963,13 @@ async def export_test_cases(
         )
 
     except (DatabaseError, InputError, ConflictError) as e:
-        logger.error(f"Error exporting test cases: {e}")
+        logger.error("Error exporting test cases")
         raise map_db_error_to_http(
             e,
             default_detail="Failed to export test cases",
         ) from e
     except PROMPT_STUDIO_TEST_CASE_EXCEPTIONS as e:
-        logger.error(f"Error exporting test cases: {e}")
+        logger.error("Error exporting test cases")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to export test cases"
