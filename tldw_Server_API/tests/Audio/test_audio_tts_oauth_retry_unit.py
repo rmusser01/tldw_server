@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 from fastapi import HTTPException
@@ -93,6 +94,72 @@ class _SuccessfulTTSService:
             yield b"generated audio"
 
         return _gen()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_list_tts_providers_failure_log_is_sanitized(monkeypatch):
+    class _FailingTTSService:
+        async def get_capabilities(self):
+            raise RuntimeError("providers backend leaked /private/tts-providers.json")
+
+        async def list_voices(self):  # pragma: no cover - get_capabilities fails first
+            return {}
+
+    fake_logger = MagicMock()
+    monkeypatch.setattr(audio_tts, "logger", fake_logger)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await audio_tts.list_tts_providers(
+            _make_request("/api/v1/audio/providers"),
+            tts_service=_FailingTTSService(),
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail["message"] == "Failed to list providers"
+    fake_logger.error.assert_called_once_with("Error listing TTS providers", exc_info=True)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_list_tts_voices_failure_log_is_sanitized(monkeypatch):
+    class _FailingTTSService:
+        async def list_voices(self):
+            raise RuntimeError("voices backend leaked /private/tts-voices.json")
+
+    fake_logger = MagicMock()
+    monkeypatch.setattr(audio_tts, "logger", fake_logger)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await audio_tts.list_tts_voices(
+            _make_request("/api/v1/audio/voices/catalog"),
+            tts_service=_FailingTTSService(),
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail["message"] == "Failed to list voices"
+    fake_logger.error.assert_called_once_with("Error listing TTS voices", exc_info=True)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_reset_tts_metrics_failure_log_is_sanitized(monkeypatch):
+    class _FailingTTSService:
+        def reset_metrics(self):
+            raise RuntimeError("metrics backend leaked /private/tts-metrics.json")
+
+    fake_logger = MagicMock()
+    monkeypatch.setattr(audio_tts, "logger", fake_logger)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await audio_tts.reset_tts_metrics(
+            _make_request("/api/v1/audio/reset-metrics"),
+            tts_service=_FailingTTSService(),
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail["message"] == "Failed to reset metrics"
+    fake_logger.error.assert_called_once_with("Error resetting metrics", exc_info=True)
 
 
 @pytest.mark.unit
