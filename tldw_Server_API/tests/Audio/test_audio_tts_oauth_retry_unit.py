@@ -25,6 +25,11 @@ class _DummyByokResolution:
         self.touch_calls += 1
 
 
+class _FailingTouchByokResolution(_DummyByokResolution):
+    async def touch_last_used(self):
+        raise RuntimeError("byok touch leaked /private/tts-byok.json")
+
+
 class _AuthRetryTTSService:
     def __init__(self, failures_before_success: int):
         self.failures_before_success = failures_before_success
@@ -299,6 +304,81 @@ async def test_audio_speech_history_write_failure_log_is_sanitized(monkeypatch):
 
     assert response.status_code == 200
     fake_logger.debug.assert_called_once_with("TTS history: failed to write record")
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_audio_speech_byok_touch_failure_log_is_sanitized(monkeypatch):
+    async def _resolve_tts_byok(*args, **kwargs):
+        _ = args, kwargs
+        return (1, {}, _FailingTouchByokResolution(api_key="byok-key", auth_source="byok"))
+
+    _patch_audio_shim(monkeypatch, _resolve_tts_byok)
+    fake_logger = MagicMock()
+    monkeypatch.setattr(audio_tts, "logger", fake_logger)
+
+    response = await audio_tts.create_speech(
+        _request_data(),
+        _make_request(),
+        tts_service=_SuccessfulTTSService(),
+        current_user=SimpleNamespace(id=1),
+        media_db=None,
+        usage_log=SimpleNamespace(log_event=lambda *args, **kwargs: None),
+    )
+
+    assert response.status_code == 200
+    fake_logger.debug.assert_called_once_with("Failed to update BYOK last_used timestamp")
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_audio_metadata_byok_touch_failure_log_is_sanitized(monkeypatch):
+    async def _resolve_tts_byok(*args, **kwargs):
+        _ = args, kwargs
+        return (1, {}, _FailingTouchByokResolution(api_key="byok-key", auth_source="byok"))
+
+    _patch_audio_shim(monkeypatch, _resolve_tts_byok)
+    fake_logger = MagicMock()
+    monkeypatch.setattr(audio_tts, "logger", fake_logger)
+
+    response = await audio_tts.create_speech_metadata(
+        _request_data(),
+        _make_request(path="/api/v1/audio/speech/metadata"),
+        tts_service=_SuccessfulTTSService(),
+        current_user=SimpleNamespace(id=1),
+        usage_log=SimpleNamespace(log_event=lambda *args, **kwargs: None),
+    )
+
+    assert response.status_code == 204
+    fake_logger.debug.assert_called_once_with("Failed to update BYOK last_used timestamp")
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_audio_speech_alignment_header_failure_log_is_sanitized(monkeypatch):
+    async def _resolve_tts_byok(*args, **kwargs):
+        _ = args, kwargs
+        return (1, {}, None)
+
+    request_data = _request_data()
+    object.__setattr__(request_data, "_tts_metadata", {"alignment": {"bad": object()}})
+
+    _patch_audio_shim(monkeypatch, _resolve_tts_byok)
+    fake_logger = MagicMock()
+    monkeypatch.setattr(audio_tts, "logger", fake_logger)
+
+    response = await audio_tts.create_speech(
+        request_data,
+        _make_request(),
+        tts_service=_SuccessfulTTSService(),
+        current_user=SimpleNamespace(id=1),
+        media_db=None,
+        usage_log=SimpleNamespace(log_event=lambda *args, **kwargs: None),
+    )
+
+    assert response.status_code == 200
+    assert "X-TTS-Alignment" not in response.headers
+    fake_logger.debug.assert_called_once_with("Failed to encode alignment metadata header")
 
 
 @pytest.mark.unit

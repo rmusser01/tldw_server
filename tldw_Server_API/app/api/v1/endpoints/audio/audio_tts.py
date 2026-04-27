@@ -715,8 +715,8 @@ async def create_speech(
     if byok_tts_resolution is not None:
         try:
             await byok_tts_resolution.touch_last_used()
-        except _AUDIO_TTS_NONCRITICAL_EXCEPTIONS as exc:
-            logger.debug(f"Failed to update BYOK last_used timestamp: {exc}")
+        except _AUDIO_TTS_NONCRITICAL_EXCEPTIONS:
+            logger.debug("Failed to update BYOK last_used timestamp")
 
     headers = {
         "Content-Disposition": f"attachment; filename=speech.{request_data.response_format}",
@@ -735,8 +735,8 @@ async def create_speech(
             alignment_b64 = base64.urlsafe_b64encode(alignment_json.encode("utf-8")).decode("ascii")
             headers["X-TTS-Alignment"] = alignment_b64
             headers["X-TTS-Alignment-Format"] = "json+base64"
-        except _AUDIO_TTS_NONCRITICAL_EXCEPTIONS as exc:
-            logger.debug(f"Failed to encode alignment metadata header: {exc}")
+        except _AUDIO_TTS_NONCRITICAL_EXCEPTIONS:
+            logger.debug("Failed to encode alignment metadata header")
 
     output_id: int | None = None
     artifact_ids: list[Any] | None = None
@@ -956,8 +956,8 @@ async def create_speech_metadata(
         if byok_tts_resolution is not None:
             try:
                 await byok_tts_resolution.touch_last_used()
-            except _AUDIO_TTS_NONCRITICAL_EXCEPTIONS as exc:
-                logger.debug(f"Failed to update BYOK last_used timestamp: {exc}")
+            except _AUDIO_TTS_NONCRITICAL_EXCEPTIONS:
+                logger.debug("Failed to update BYOK last_used timestamp")
 
     metadata = getattr(request_data, "_tts_metadata", None)
     alignment_payload = None
