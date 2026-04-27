@@ -231,6 +231,46 @@ def test_documents_process_usage_event_failure_log_is_sanitized(
     _assert_sanitized_debug_log(logger_stub, "Document process endpoint usage logging failed")
 
 
+def test_documents_process_rechunk_failure_log_is_sanitized(
+    client_with_single_user,
+    quota_service_stub,
+    monkeypatch,
+):
+    client, _ = client_with_single_user
+
+    import tldw_Server_API.app.api.v1.endpoints.media as media_mod
+    import tldw_Server_API.app.core.Chunking as chunking_mod
+    from tldw_Server_API.app.api.v1.endpoints.media import process_documents as process_documents_mod
+
+    logger_stub = _LoggerStub()
+
+    def _stub_process_document_content(**_kwargs):
+        return {
+            "status": "Success",
+            "content": "Hello document content for rechunking.",
+            "metadata": {"title": "stub-doc"},
+        }
+
+    def _fail_improved_chunking_process(*_args, **_kwargs):
+        raise RuntimeError("document rechunk exploded at /private/chunks")
+
+    monkeypatch.setattr(process_documents_mod, "logger", logger_stub)
+    monkeypatch.setattr(media_mod.docs, "process_document_content", _stub_process_document_content)
+    monkeypatch.setattr(chunking_mod, "improved_chunking_process", _fail_improved_chunking_process)
+
+    response = client.post(
+        "/api/v1/media/process-documents",
+        data={"perform_chunking": "true"},
+        files=[("files", ("note.txt", b"hi", "text/plain"))],
+    )
+
+    assert response.status_code == 200, response.text
+    _assert_sanitized_debug_log(
+        logger_stub,
+        "Re-chunking failed during metadata normalization",
+    )
+
+
 def test_documents_process_sanitizes_worker_failure(
     client_with_single_user,
     quota_service_stub,
@@ -367,6 +407,46 @@ def test_pdfs_process_usage_event_failure_log_is_sanitized(
 
     assert response.status_code == 200, response.text
     _assert_sanitized_debug_log(logger_stub, "PDF process endpoint usage logging failed")
+
+
+def test_pdfs_process_rechunk_failure_log_is_sanitized(
+    client_with_single_user,
+    quota_service_stub,
+    monkeypatch,
+):
+    client, _ = client_with_single_user
+
+    import tldw_Server_API.app.api.v1.endpoints.media as media_mod
+    import tldw_Server_API.app.core.Chunking as chunking_mod
+    from tldw_Server_API.app.api.v1.endpoints.media import process_pdfs as process_pdfs_mod
+
+    logger_stub = _LoggerStub()
+
+    async def _stub_process_pdf_task(**_kwargs):
+        return {
+            "status": "Success",
+            "content": "PDF text content for rechunking.",
+            "metadata": {"title": "stub-pdf"},
+        }
+
+    def _fail_improved_chunking_process(*_args, **_kwargs):
+        raise RuntimeError("pdf rechunk exploded at /private/chunks")
+
+    monkeypatch.setattr(process_pdfs_mod, "logger", logger_stub)
+    monkeypatch.setattr(media_mod.pdf_lib, "process_pdf_task", _stub_process_pdf_task)
+    monkeypatch.setattr(chunking_mod, "improved_chunking_process", _fail_improved_chunking_process)
+
+    response = client.post(
+        "/api/v1/media/process-pdfs",
+        data={"perform_chunking": "true"},
+        files=[("files", ("paper.pdf", b"%PDF-1.4\n", "application/pdf"))],
+    )
+
+    assert response.status_code == 200, response.text
+    _assert_sanitized_debug_log(
+        logger_stub,
+        "PDF process endpoint rechunking failed; returning original result",
+    )
 
 
 def test_pdfs_process_sanitizes_processor_failure(

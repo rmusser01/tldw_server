@@ -571,7 +571,7 @@ async def process_documents_endpoint(
 
                 res["chunks"] = chunks
     except Exception:
-        logger.debug("Re-chunking failed during metadata normalization", exc_info=True)
+        logger.debug("Re-chunking failed during metadata normalization")
 
     response = JSONResponse(status_code=final_status_code, content=batch_result)
     if legacy_signal is not None:

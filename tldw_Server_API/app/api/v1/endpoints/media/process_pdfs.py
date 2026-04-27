@@ -462,9 +462,9 @@ async def process_pdfs_endpoint(
                     chunks = _improved_chunking_process(text, chunk_options_dict)
 
                 res["chunks"] = chunks
-    except Exception as rechunk_error:
+    except Exception:
         # Never fail the endpoint due to re-chunking issues.
-        logger.debug("PDF process endpoint rechunking failed; returning original result", exc_info=rechunk_error)
+        logger.debug("PDF process endpoint rechunking failed; returning original result")
 
     response = JSONResponse(status_code=final_status_code, content=batch)
     if legacy_signal is not None:
