@@ -272,8 +272,8 @@ def _load_active_job(sync_state: dict[str, Any] | None) -> dict[str, Any] | None
         from tldw_Server_API.app.core.Jobs.manager import JobManager
 
         return JobManager().get_job(int(active_job_id))
-    except Exception as exc:
-        logger.warning("Failed to load active connectors job {}: {}", active_job_id, exc)
+    except Exception:
+        logger.warning("Failed to load active connectors job")
         return None
 
 
