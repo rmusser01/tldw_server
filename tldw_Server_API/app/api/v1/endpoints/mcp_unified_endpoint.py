@@ -208,7 +208,7 @@ def _get_client_ip(request: Optional[Request]) -> Optional[str]:
     try:
         return resolve_client_ip(request, get_settings())
     except _MCP_UNIFIED_NONCRITICAL_EXCEPTIONS:
-        logger.debug("Failed to extract client IP", exc_info=True)
+        logger.debug("Failed to extract client IP")
     return None
 
 
@@ -795,7 +795,7 @@ async def mcp_request(
             if response is not None:
                 response.headers["mcp-session-id"] = mcp_session_id
     except _MCP_UNIFIED_NONCRITICAL_EXCEPTIONS:
-        logger.debug("Failed to generate session ID for initialize request", exc_info=True)
+        logger.debug("Failed to generate session ID for initialize request")
 
     if auth.user:
         if auth.user.roles:
@@ -892,7 +892,7 @@ async def mcp_request_batch(
             if response is not None:
                 response.headers["mcp-session-id"] = mcp_session_id
     except _MCP_UNIFIED_NONCRITICAL_EXCEPTIONS:
-        logger.debug("Failed to generate session ID for batch initialize", exc_info=True)
+        logger.debug("Failed to generate session ID for batch initialize")
 
     # Build metadata for batch processing
     if auth.user:
