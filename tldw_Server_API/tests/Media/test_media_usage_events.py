@@ -540,3 +540,94 @@ def test_pdfs_process_sanitizes_prepared_file_read_failure(
     assert result["error"] == "Failed to read prepared file"
     assert "prepared read failed" not in response.text
     assert "/private/cache/paper.pdf" not in response.text
+
+
+def test_audios_process_usage_event_failure_log_is_sanitized(
+    client_with_single_user,
+    quota_service_stub,
+    monkeypatch,
+):
+    client, usage_logger = client_with_single_user
+
+    import tldw_Server_API.app.core.Ingestion_Media_Processing.audio_batch as audio_batch_mod
+    from tldw_Server_API.app.api.v1.endpoints.media import process_audios as process_audios_mod
+
+    logger_stub = _LoggerStub()
+
+    def _fail_usage_event(*_args, **_kwargs):
+        raise RuntimeError("usage logger exploded at /private/usage-events.db")
+
+    async def _stub_run_audio_batch(**_kwargs):
+        return {
+            "processed_count": 1,
+            "errors_count": 0,
+            "errors": [],
+            "results": [
+                {
+                    "status": "Success",
+                    "input_ref": "clip.mp3",
+                    "media_type": "audio",
+                    "content": "audio transcript",
+                    "metadata": {},
+                }
+            ],
+        }
+
+    monkeypatch.setattr(process_audios_mod, "logger", logger_stub)
+    monkeypatch.setattr(usage_logger, "log_event", _fail_usage_event)
+    monkeypatch.setattr(audio_batch_mod, "run_audio_batch", _stub_run_audio_batch)
+
+    response = client.post(
+        "/api/v1/media/process-audios",
+        data={"perform_chunking": "false"},
+        files=[("files", ("clip.mp3", b"ID3", "audio/mpeg"))],
+    )
+
+    assert response.status_code == 200, response.text
+    _assert_sanitized_debug_log(logger_stub, "Audio process endpoint usage logging failed")
+
+
+def test_videos_process_usage_event_failure_log_is_sanitized(
+    client_with_single_user,
+    quota_service_stub,
+    monkeypatch,
+):
+    client, usage_logger = client_with_single_user
+
+    import tldw_Server_API.app.core.Ingestion_Media_Processing.video_batch as video_batch_mod
+    from tldw_Server_API.app.api.v1.endpoints.media import process_videos as process_videos_mod
+
+    logger_stub = _LoggerStub()
+
+    def _fail_usage_event(*_args, **_kwargs):
+        raise RuntimeError("usage logger exploded at /private/usage-events.db")
+
+    async def _stub_run_video_batch(**_kwargs):
+        return {
+            "processed_count": 1,
+            "errors_count": 0,
+            "errors": [],
+            "results": [
+                {
+                    "status": "Success",
+                    "input_ref": "clip.mp4",
+                    "media_type": "video",
+                    "content": "video transcript",
+                    "metadata": {},
+                }
+            ],
+            "confabulation_results": None,
+        }
+
+    monkeypatch.setattr(process_videos_mod, "logger", logger_stub)
+    monkeypatch.setattr(usage_logger, "log_event", _fail_usage_event)
+    monkeypatch.setattr(video_batch_mod, "run_video_batch", _stub_run_video_batch)
+
+    response = client.post(
+        "/api/v1/media/process-videos",
+        data={"perform_chunking": "false"},
+        files=[("files", ("clip.mp4", b"\x00\x00\x00\x18ftypmp42", "video/mp4"))],
+    )
+
+    assert response.status_code == 200, response.text
+    _assert_sanitized_debug_log(logger_stub, "Video process endpoint usage logging failed")

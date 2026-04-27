@@ -94,9 +94,9 @@ async def process_audios_endpoint(
             tags=["no_db"],
             metadata={"has_urls": bool(form_data.urls), "has_files": bool(files)},
         )
-    except Exception as usage_log_error:
+    except Exception:
         # Usage logging is best-effort; do not fail the request.
-        logger.debug("Audio process endpoint usage logging failed", exc_info=usage_log_error)
+        logger.debug("Audio process endpoint usage logging failed")
 
     # Normalize the "urls=['']" sentinel used by some clients.
     legacy_urls_empty_sentinel_used = bool(form_data.urls and form_data.urls == [""])

@@ -105,9 +105,9 @@ async def process_videos_endpoint(
             tags=["no_db"],
             metadata={"has_urls": bool(form_data.urls), "has_files": bool(files)},
         )
-    except Exception as usage_log_error:
+    except Exception:
         # Usage logging is best-effort; do not fail the request.
-        logger.debug("Video process endpoint usage logging failed", exc_info=usage_log_error)
+        logger.debug("Video process endpoint usage logging failed")
 
     legacy_urls_empty_sentinel_used = bool(form_data.urls and form_data.urls == [""])
     if legacy_urls_empty_sentinel_used:
