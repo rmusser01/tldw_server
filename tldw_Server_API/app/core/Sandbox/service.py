@@ -1083,9 +1083,11 @@ class SandboxService:
 
             action_status = "planned"
             if not dry_run:
-                self._orch.delete_vz_session_control(session_id)
-                summary["deleted_session_controls"] += 1
-                action_status = "deleted"
+                if self._orch.delete_vz_session_control(session_id):
+                    summary["deleted_session_controls"] += 1
+                    action_status = "deleted"
+                else:
+                    action_status = "missing"
 
             action = {
                 "type": "delete_session_control",

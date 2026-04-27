@@ -235,7 +235,12 @@ def test_repair_stale_row_dry_run_plans_delete_without_mutation(monkeypatch) -> 
 
 def test_repair_stale_row_delete_calls_orchestrator(monkeypatch) -> None:
     deleted_session_ids: list[str] = []
-    orch = SimpleNamespace(delete_vz_session_control=deleted_session_ids.append)
+
+    def _delete_vz_session_control(session_id: str) -> bool:
+        deleted_session_ids.append(session_id)
+        return True
+
+    orch = SimpleNamespace(delete_vz_session_control=_delete_vz_session_control)
     service = _service_with_orchestrator(orch)
     monkeypatch.setattr(service, "_active_session_run_count", lambda session_id: 0)
     monkeypatch.setattr(
@@ -259,6 +264,134 @@ def test_repair_stale_row_delete_calls_orchestrator(monkeypatch) -> None:
     assert deleted_session_ids == ["sess-stale"]
     assert result["summary"]["deleted_session_controls"] == 1
     assert result["actions"][0]["status"] == "deleted"
+
+
+def test_repair_unhealthy_row_delete_calls_orchestrator(monkeypatch) -> None:
+    deleted_session_ids: list[str] = []
+
+    def _delete_vz_session_control(session_id: str) -> bool:
+        deleted_session_ids.append(session_id)
+        return True
+
+    orch = SimpleNamespace(delete_vz_session_control=_delete_vz_session_control)
+    service = _service_with_orchestrator(orch)
+    monkeypatch.setattr(service, "_active_session_run_count", lambda session_id: 0)
+    monkeypatch.setattr(
+        service_mod,
+        "collect_vz_reconciliation",
+        lambda *args, **kwargs: _reconciliation_report(
+            items=[
+                {
+                    "status": "unhealthy_vm",
+                    "session_id": "sess-unhealthy",
+                    "vm_id": "vm-unhealthy",
+                    "reason": "vm_unhealthy",
+                }
+            ]
+        ),
+        raising=True,
+    )
+
+    result = service.repair_macos_reconciliation(dry_run=False)
+
+    assert deleted_session_ids == ["sess-unhealthy"]
+    assert result["summary"]["unhealthy_session_controls"] == 1
+    assert result["summary"]["deleted_session_controls"] == 1
+    assert result["actions"] == [
+        {
+            "type": "delete_session_control",
+            "session_id": "sess-unhealthy",
+            "vm_id": "vm-unhealthy",
+            "status": "deleted",
+            "reason": "vm_unhealthy",
+        }
+    ]
+
+
+def test_repair_disabled_delete_flags_suppress_actions_and_mutation(monkeypatch) -> None:
+    deleted_session_ids: list[str] = []
+
+    def _delete_vz_session_control(session_id: str) -> bool:
+        deleted_session_ids.append(session_id)
+        return True
+
+    orch = SimpleNamespace(delete_vz_session_control=_delete_vz_session_control)
+    service = _service_with_orchestrator(orch)
+    monkeypatch.setattr(service, "_active_session_run_count", lambda session_id: 0)
+    monkeypatch.setattr(
+        service_mod,
+        "collect_vz_reconciliation",
+        lambda *args, **kwargs: _reconciliation_report(
+            items=[
+                {
+                    "status": "stale_session",
+                    "session_id": "sess-stale",
+                    "vm_id": "vm-missing",
+                    "reason": "vm_missing",
+                },
+                {
+                    "status": "unhealthy_vm",
+                    "session_id": "sess-unhealthy",
+                    "vm_id": "vm-unhealthy",
+                    "reason": "vm_unhealthy",
+                },
+            ]
+        ),
+        raising=True,
+    )
+
+    result = service.repair_macos_reconciliation(
+        delete_stale_session_controls=False,
+        delete_unhealthy_session_controls=False,
+        dry_run=False,
+    )
+
+    assert deleted_session_ids == []
+    assert result["summary"]["stale_session_controls"] == 1
+    assert result["summary"]["unhealthy_session_controls"] == 1
+    assert result["summary"]["deleted_session_controls"] == 0
+    assert result["actions"] == []
+
+
+def test_repair_delete_false_reports_missing_without_incrementing_deleted(monkeypatch) -> None:
+    deleted_session_ids: list[str] = []
+
+    def _delete_vz_session_control(session_id: str) -> bool:
+        deleted_session_ids.append(session_id)
+        return False
+
+    orch = SimpleNamespace(delete_vz_session_control=_delete_vz_session_control)
+    service = _service_with_orchestrator(orch)
+    monkeypatch.setattr(service, "_active_session_run_count", lambda session_id: 0)
+    monkeypatch.setattr(
+        service_mod,
+        "collect_vz_reconciliation",
+        lambda *args, **kwargs: _reconciliation_report(
+            items=[
+                {
+                    "status": "stale_session",
+                    "session_id": "sess-stale",
+                    "vm_id": "vm-missing",
+                    "reason": "vm_missing",
+                }
+            ]
+        ),
+        raising=True,
+    )
+
+    result = service.repair_macos_reconciliation(dry_run=False)
+
+    assert deleted_session_ids == ["sess-stale"]
+    assert result["summary"]["deleted_session_controls"] == 0
+    assert result["actions"] == [
+        {
+            "type": "delete_session_control",
+            "session_id": "sess-stale",
+            "vm_id": "vm-missing",
+            "status": "missing",
+            "reason": "vm_missing",
+        }
+    ]
 
 
 def test_repair_active_session_item_is_skipped(monkeypatch) -> None:
