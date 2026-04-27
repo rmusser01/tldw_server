@@ -645,8 +645,8 @@ async def get_embeddings_status(
                 if md_list:
                     first_md = md_list[0]
                     embedding_model = first_md.get("embedding_model") if isinstance(first_md, dict) else None
-        except _MEDIA_EMBEDDINGS_NONCRITICAL_EXCEPTIONS as e:
-            logger.warning(f"ChromaDB status check failed for media {media_id}: {e}")
+        except _MEDIA_EMBEDDINGS_NONCRITICAL_EXCEPTIONS:
+            logger.warning("ChromaDB status check failed")
 
         return EmbeddingsStatusResponse(
             media_id=media_id,

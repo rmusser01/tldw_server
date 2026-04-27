@@ -75,6 +75,36 @@ async def test_get_embeddings_status_sanitizes_backend_lookup_error(monkeypatch)
 
 
 @pytest.mark.asyncio
+async def test_get_embeddings_status_chroma_failure_log_is_sanitized(monkeypatch):
+    logger_stub = MagicMock()
+
+    class _FailingChromaDBManager:
+        def __init__(self, *_args, **_kwargs):
+            return None
+
+        def get_or_create_collection(self, *_args, **_kwargs):
+            raise RuntimeError("chroma status backend exploded at /private/chroma")
+
+    monkeypatch.setattr(media_embeddings, "logger", logger_stub)
+    monkeypatch.setattr(media_embeddings, "_user_embedding_config", lambda: {})
+    monkeypatch.setattr(
+        media_embeddings,
+        "get_media_by_id",
+        lambda *_args, **_kwargs: {"id": 123, "title": "Doc"},
+    )
+    monkeypatch.setattr(media_embeddings, "ChromaDBManager", _FailingChromaDBManager)
+
+    response = await media_embeddings.get_embeddings_status(
+        media_id=123,
+        db=object(),
+        current_user=_user(),
+    )
+
+    assert response.has_embeddings is False
+    logger_stub.warning.assert_called_once_with("ChromaDB status check failed")
+
+
+@pytest.mark.asyncio
 async def test_generate_embeddings_sanitizes_backend_lookup_error(monkeypatch):
     def _raise_backend_error(*_args, **_kwargs):
         raise RuntimeError("media backend exploded")
