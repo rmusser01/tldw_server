@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 import pytest
 from fastapi import HTTPException
 
@@ -64,3 +66,54 @@ async def test_run_benchmark_sanitizes_backend_fallback_log(monkeypatch: pytest.
     for marker in _BENCHMARK_SENSITIVE_MARKERS:
         assert marker not in str(exc_info.value.detail)
     _assert_sanitized_log(logger_stub, "Failed to run benchmark")
+
+
+async def test_run_benchmark_sanitizes_per_item_failure_log(monkeypatch: pytest.MonkeyPatch) -> None:
+    logger_stub = _LoggerStub()
+
+    class _Evaluator:
+        def format_for_custom_metric(self, item: dict) -> dict:
+            return {
+                "name": "demo-metric",
+                "description": "demo",
+                "evaluation_prompt": "score it",
+                "input_data": item,
+                "scoring_criteria": "score",
+            }
+
+    class _Registry:
+        def get(self, benchmark_name: str):
+            assert benchmark_name == "demo"
+            return SimpleNamespace(evaluation_type="custom")
+
+        def create_evaluator(self, benchmark_name: str):
+            assert benchmark_name == "demo"
+            return _Evaluator()
+
+    class _EvaluationManager:
+        async def evaluate_custom_metric(self, **_kwargs):
+            raise RuntimeError("benchmark item backend leaked /private/evals-benchmark.db")
+
+    monkeypatch.setattr(evaluations_benchmarks, "logger", logger_stub)
+    monkeypatch.setattr(evaluations_benchmarks, "get_registry", lambda: _Registry())
+    monkeypatch.setattr(evaluations_benchmarks, "load_benchmark_dataset", lambda *_args, **_kwargs: [{"id": "item-1"}])
+    monkeypatch.setattr(
+        evaluations_benchmarks,
+        "_get_evaluation_manager_for_user",
+        lambda _identity: _EvaluationManager(),
+    )
+    monkeypatch.setattr(
+        evaluations_benchmarks,
+        "get_evaluation_identity",
+        lambda _user: SimpleNamespace(created_by="created-by", user_scope="tenant-user"),
+    )
+
+    response = await evaluations_benchmarks.run_benchmark(
+        benchmark_name="demo",
+        request=evaluations_benchmarks.BenchmarkRunRequest(save_results=False, parallel=1),
+        user_id=object(),
+        current_user=_user(),
+    )
+
+    assert response.results_summary["failed"] == 1
+    _assert_sanitized_log(logger_stub, "Benchmark evaluation failed")

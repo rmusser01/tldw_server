@@ -164,7 +164,7 @@ async def run_benchmark(
             batch_results = await asyncio.gather(*tasks, return_exceptions=True)
             for item, result in zip(batch, batch_results):
                 if isinstance(result, Exception):
-                    logger.error("Benchmark evaluation failed for item_id={}: {}", item.get("id"), result)
+                    logger.error("Benchmark evaluation failed")
                     results.append({"item": item, "score": 0.0, "error": str(result)})
                 else:
                     results.append(
