@@ -2551,8 +2551,8 @@ async def record_watchlists_onboarding_telemetry(
         code = result.get("code")
         record_onboarding_ingest_result("accepted" if accepted else "rejected")
         return WatchlistOnboardingTelemetryIngestResponse(accepted=accepted, code=code)
-    except _WATCHLISTS_NONCRITICAL_EXCEPTIONS as exc:
-        logger.debug("watchlists onboarding telemetry ingest failed for user {}: {}", current_user.id, exc)
+    except _WATCHLISTS_NONCRITICAL_EXCEPTIONS:
+        logger.debug("watchlists onboarding telemetry ingest failed")
         record_onboarding_ingest_result("error")
         return WatchlistOnboardingTelemetryIngestResponse(
             accepted=False,
@@ -2585,7 +2585,7 @@ async def get_watchlists_onboarding_telemetry_summary(
         )
     except _WATCHLISTS_NONCRITICAL_EXCEPTIONS as exc:
         status_label = "error"
-        logger.error("watchlists onboarding telemetry summary failed for user {}: {}", current_user.id, exc)
+        logger.error("watchlists onboarding telemetry summary failed")
         raise HTTPException(
             status_code=500,
             detail="watchlists_onboarding_telemetry_summary_failed",
@@ -2705,8 +2705,8 @@ async def record_watchlists_ia_experiment_telemetry(
             first_seen_at=payload.first_seen_at,
             last_seen_at=payload.last_seen_at,
         )
-    except _WATCHLISTS_NONCRITICAL_EXCEPTIONS as exc:
-        logger.debug("watchlists IA telemetry ingest failed for user {}: {}", current_user.id, exc)
+    except _WATCHLISTS_NONCRITICAL_EXCEPTIONS:
+        logger.debug("watchlists IA telemetry ingest failed")
         accepted = False
     return WatchlistIaExperimentTelemetryIngestResponse(accepted=bool(accepted))
 
