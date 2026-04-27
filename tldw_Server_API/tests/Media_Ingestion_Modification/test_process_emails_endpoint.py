@@ -3,6 +3,30 @@ import zipfile
 import pytest
 
 
+class _LoggerStub:
+    def __init__(self) -> None:
+        self.debugs: list[str] = []
+        self.debug_kwargs: list[dict[str, object]] = []
+
+    def info(self, *_args: object, **_kwargs: object) -> None:
+        return None
+
+    def debug(self, message: str, *args: object, **kwargs: object) -> None:
+        self.debugs.append(message.format(*args, **kwargs) if args or kwargs else message)
+        self.debug_kwargs.append(dict(kwargs))
+
+
+def _assert_sanitized_debug_log(logger: _LoggerStub, expected: str) -> None:
+    target_kwargs = [
+        kwargs for message, kwargs in zip(logger.debugs, logger.debug_kwargs) if message == expected
+    ]
+    assert target_kwargs, logger.debugs
+    rendered = "\n".join(message for message in logger.debugs if message == expected)
+    assert "exploded" not in rendered
+    assert "/private/" not in rendered
+    assert all(not kwargs for kwargs in target_kwargs)
+
+
 def test_process_emails_endpoint_basic(client_user_only):
 
 
@@ -64,6 +88,48 @@ def test_process_emails_sanitizes_processor_failure(client_user_only, monkeypatc
     assert result["error"] == "Email processing failed"
     assert "email parser failed" not in response.text
     assert "/private/mail.eml" not in response.text
+
+
+def test_process_emails_rechunk_failure_log_is_sanitized(client_user_only, monkeypatch):
+    from tldw_Server_API.app.api.v1.endpoints.media import process_emails as process_emails_mod
+    import tldw_Server_API.app.core.Chunking as chunking_mod
+
+    logger_stub = _LoggerStub()
+
+    def stub_process_email_task(**_kwargs):
+        return {
+            "status": "Success",
+            "content": "Hello Bob, this is a test.",
+            "metadata": {"email": {"subject": "Test Email"}},
+        }
+
+    def fail_improved_chunking_process(*_args, **_kwargs):
+        raise RuntimeError("email rechunk exploded at /private/chunks")
+
+    monkeypatch.setattr(process_emails_mod, "logger", logger_stub)
+    monkeypatch.setattr(process_emails_mod.email_lib, "process_email_task", stub_process_email_task)
+    monkeypatch.setattr(chunking_mod, "improved_chunking_process", fail_improved_chunking_process)
+
+    content = (
+        b"From: Alice <alice@example.com>\r\n"
+        b"To: Bob <bob@example.com>\r\n"
+        b"Subject: Test Email\r\n"
+        b"MIME-Version: 1.0\r\n"
+        b"Content-Type: text/plain; charset=utf-8\r\n\r\n"
+        b"Hello Bob, this is a test.\r\n"
+    )
+    files = {
+        "files": ("test.eml", BytesIO(content), "message/rfc822"),
+    }
+
+    response = client_user_only.post(
+        "/api/v1/media/process-emails",
+        files=files,
+        data={"perform_chunking": "true"},
+    )
+
+    assert response.status_code == 200, response.text
+    _assert_sanitized_debug_log(logger_stub, "Optional email re-chunking failed")
 
 
 def _build_zip_of_emls() -> bytes:
