@@ -181,7 +181,7 @@ describe("useSmartScroll dock offset preservation", () => {
     expect(container.scrollTop).toBe(1480);
   });
 
-  it("restores the prior scroll position when the reserved dock offset grows while scrolled up", () => {
+  it("preserves the current scroll position when the reserved dock offset grows while scrolled up", () => {
     const container = createScrollContainer({
       scrollHeight: 2000,
       clientHeight: 600,
@@ -205,6 +205,6 @@ describe("useSmartScroll dock offset preservation", () => {
       rerender({ bottomOffsetPx: 160 });
     });
 
-    expect(container.scrollTop).toBe(900);
+    expect(container.scrollTop).toBe(980);
   });
 });

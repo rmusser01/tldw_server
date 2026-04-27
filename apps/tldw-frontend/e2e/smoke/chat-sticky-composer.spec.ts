@@ -1,20 +1,41 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 
 const bypassChatGates = async (page: Page) => {
+  await page.route('**/api/v1/llm/models/metadata**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ models: [] }),
+    });
+  });
+  await page.route('**/api/v1/llm/providers**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ providers: [] }),
+    });
+  });
+
   await page.addInitScript(() => {
-    try {
-      window.localStorage.setItem('assistant_setup_dismissed', 'true');
-      window.localStorage.setItem('__tldw_test_bypass', 'true');
-      window.localStorage.setItem('stickyChatInput', 'true');
-    } catch {
-      /* ignore */
-    }
+    const authConfig = {
+      serverUrl: 'http://127.0.0.1:8000',
+      authMode: 'single-user',
+      apiKey: 'THIS-IS-A-SECURE-KEY-123-FAKE-KEY',
+    };
+
+    window.localStorage.setItem('assistant_setup_dismissed', 'true');
+    window.localStorage.setItem('__tldw_first_run_complete', 'true');
+    window.localStorage.setItem('__tldw_test_bypass', 'true');
+    window.localStorage.setItem('tldwConfig', JSON.stringify(authConfig));
+    window.localStorage.setItem('apiKey', authConfig.apiKey);
+    window.localStorage.setItem('authMode', authConfig.authMode);
+    window.localStorage.setItem('stickyChatInput', 'true');
+    window.localStorage.setItem('playgroundComposerOptionsExpanded', 'false');
   });
 };
 
 const waitForStickyChat = async (page: Page) => {
   await page.goto('/chat', { waitUntil: 'domcontentloaded' });
-  await page.waitForLoadState('networkidle', { timeout: 30_000 }).catch(() => {});
   await expect(page.getByTestId('playground-chat-composer-dock')).toBeVisible({
     timeout: 30_000,
   });
@@ -25,6 +46,36 @@ const expectDockWithinViewport = async (page: Page) => {
   expect(dockBox).not.toBeNull();
   expect(dockBox!.y).toBeGreaterThanOrEqual(0);
   expect(dockBox!.y + dockBox!.height).toBeLessThanOrEqual(page.viewportSize()!.height);
+};
+
+const scrollTranscriptToBottom = async (page: Page, transcript: Locator) => {
+  const dock = page.getByTestId('playground-chat-composer-dock');
+
+  await expect(transcript).toBeVisible();
+  const forceScrollTranscript = () =>
+    transcript.evaluate((el) => {
+      let filler = el.querySelector<HTMLElement>('[data-testid="sticky-chat-scroll-filler"]');
+      if (!filler) {
+        filler = document.createElement('div');
+        filler.setAttribute('data-testid', 'sticky-chat-scroll-filler');
+        filler.style.flex = '0 0 auto';
+        el.appendChild(filler);
+      }
+
+      filler.style.height = `${Math.max(1200, el.clientHeight * 2)}px`;
+      const maxScrollTop = el.scrollHeight - el.clientHeight;
+      if (maxScrollTop <= 0) {
+        return 0;
+      }
+
+      el.scrollTop = maxScrollTop;
+      return el.scrollTop;
+    });
+
+  await expect.poll(forceScrollTranscript).toBeGreaterThan(0);
+  await forceScrollTranscript();
+  await expect(dock).toBeVisible();
+  await expectDockWithinViewport(page);
 };
 
 test.describe('chat sticky composer dock', () => {
@@ -38,8 +89,7 @@ test.describe('chat sticky composer dock', () => {
 
     const transcript = page.getByTestId('playground-chat-transcript');
     await expect(transcript).toBeVisible();
-
-    await expectDockWithinViewport(page);
+    await scrollTranscriptToBottom(page, transcript);
   });
 
   test('mobile-sized sticky /chat keeps the composer visible after focusing the input', async ({

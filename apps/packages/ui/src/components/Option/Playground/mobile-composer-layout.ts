@@ -77,10 +77,15 @@ export const resolveStickyComposerTextareaMaxHeight = (params: {
 }): number => {
   const viewportHeight = toFiniteNumber(params.viewportHeightPx);
   const keyboardInsetPx = toFiniteNumber(params.keyboardInsetPx) ?? 0;
-  const defaultMaxHeightPx = Math.max(0, Math.round(params.defaultMaxHeightPx));
+  const defaultMaxHeightPx = Math.max(
+    0,
+    Math.round(toFiniteNumber(params.defaultMaxHeightPx) ?? 0),
+  );
+  const maxCap = params.isMobileViewport ? 220 : 320;
+  const clampedDefaultMaxHeightPx = Math.min(maxCap, defaultMaxHeightPx);
 
   if (viewportHeight == null || viewportHeight <= 0) {
-    return defaultMaxHeightPx;
+    return clampedDefaultMaxHeightPx;
   }
 
   const availableViewportHeight = Math.max(
@@ -90,12 +95,11 @@ export const resolveStickyComposerTextareaMaxHeight = (params: {
     ),
   );
   const viewportRatio = params.isMobileViewport ? 0.22 : 0.33;
-  const maxCap = params.isMobileViewport ? 220 : 320;
   const targetHeight = Math.round(availableViewportHeight * viewportRatio);
 
   return Math.max(
-    defaultMaxHeightPx,
-    Math.min(maxCap, Math.max(defaultMaxHeightPx, targetHeight)),
+    clampedDefaultMaxHeightPx,
+    Math.min(maxCap, targetHeight),
   );
 };
 

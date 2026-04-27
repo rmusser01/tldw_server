@@ -1331,7 +1331,7 @@ export const Playground = () => {
     <div
       ref={drop}
       data-is-dragging={dropState === "dragging"}
-      className="relative flex h-full flex-col items-center bg-bg text-text data-[is-dragging=true]:bg-surface2"
+      className="relative flex h-full min-h-0 flex-col items-center bg-bg text-text data-[is-dragging=true]:bg-surface2"
       style={
         chatBackgroundImage
           ? {
@@ -1380,8 +1380,8 @@ export const Playground = () => {
         </div>
       )}
 
-      <div className="relative z-10 flex h-full w-full">
-        <div className="flex h-full min-w-0 flex-1 flex-col">
+      <div className="relative z-10 flex h-full min-h-0 w-full">
+        <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
           {parentMeta?.parentHistoryId && (
             <div className="flex w-full justify-center px-5 pt-2">
               <div className="inline-flex flex-wrap items-center justify-center gap-2">
@@ -1740,7 +1740,7 @@ export const Playground = () => {
             data-testid={
               stickyChatInput ? "playground-chat-composer-dock" : undefined
             }
-            className={`relative w-full ${
+            className={`relative w-full shrink-0 ${
               stickyChatInput
                 ? "sticky bottom-0 z-20 border-t border-border bg-surface/95 backdrop-blur"
                 : ""

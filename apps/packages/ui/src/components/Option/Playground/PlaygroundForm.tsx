@@ -31,20 +31,10 @@ import { useAntdNotification } from "@/hooks/useAntdNotification";
 import { useAudioSourceCatalog } from "@/hooks/useAudioSourceCatalog";
 import { useCanonicalConnectionConfig } from "@/hooks/useCanonicalConnectionConfig";
 import { useChatMoodBadgePreference } from "@/hooks/useChatMoodBadgePreference";
-import { AttachedResearchContextChip } from "./AttachedResearchContextChip";
-import { MentionsDropdown } from "./MentionsDropdown";
-import { ComposerTextarea } from "./ComposerTextarea";
-import { ComposerToolbar } from "./ComposerToolbar";
-// ContextFootprintPanel moved to PlaygroundContextWindowModal
-import { CompareToggle } from "./CompareToggle";
-import { useMobileComposerViewport } from "./useMobileComposerViewport";
 import {
   resolveStickyComposerTextareaMaxHeight,
   type ComposerDockLayoutMetrics,
 } from "./mobile-composer-layout";
-import { PASTED_TEXT_CHAR_LIMIT } from "@/utils/constant";
-import { isFireFoxPrivateMode } from "@/utils/is-private-mode";
-import { ChatQueuePanel } from "@/components/Common/ChatQueuePanel";
 import { useConnectionState } from "@/hooks/useConnectionState";
 import type { DictationModePreference } from "@/hooks/useDictationStrategy";
 import { useMcpTools } from "@/hooks/useMcpTools";

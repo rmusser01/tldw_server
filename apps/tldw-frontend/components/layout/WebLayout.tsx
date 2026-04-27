@@ -126,10 +126,8 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
   }, [demoEnabled]);
   const handleOpenNotifications = useCallback(() => navigate('/notifications'), [navigate]);
   const location = useLocation();
-  const { historyId, serverChatId } = useStoreMessageOption((state) => ({
-    historyId: state.historyId,
-    serverChatId: state.serverChatId,
-  }));
+  const historyId = useStoreMessageOption((state) => state.historyId);
+  const serverChatId = useStoreMessageOption((state) => state.serverChatId);
   const mobileSidebarPathRef = React.useRef(location.pathname);
   const { phase, isConnected } = useConnectionState();
   const { checkOnce } = useConnectionActions();

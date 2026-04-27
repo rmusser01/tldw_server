@@ -89,19 +89,21 @@ def test_speech_to_text_parakeet_onnx_error_sentinel_fails_fast(monkeypatch, tmp
 
     import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Nemo as nemo_mod
 
+    sentinel = (
+        "[Error: Transcription failed: Required inputs (['waveforms_lens']) "
+        "are missing from input feed (['waveforms']).]"
+    )
     monkeypatch.setattr(
         nemo_mod,
         "transcribe_with_parakeet",
-        lambda *_args, **_kwargs: (
-            "[Error: Transcription failed: Required inputs (['waveforms_lens']) "
-            "are missing from input feed (['waveforms']).]"
-        ),
+        lambda *_args, **_kwargs: sentinel,
     )
 
-    with pytest.raises(atlib.STTTranscriptionError, match="waveforms_lens"):
+    with pytest.raises(atlib.STTTranscriptionError, match="waveforms_lens") as exc_info:
         atlib.speech_to_text_parakeet(
             str(audio_file),
             variant="onnx",
             selected_source_lang="en",
             vad_filter=False,
         )
+    assert str(exc_info.value) == sentinel  # nosec B101

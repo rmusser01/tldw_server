@@ -123,11 +123,10 @@ export const useSmartScroll = (
     if (bottomOffsetDeltaPx === 0) return;
 
     const wasPinnedToBottom = isAtBottom(previousBottomOffsetPx);
-    const nextScrollTop = wasPinnedToBottom
-      ? container.scrollTop + bottomOffsetDeltaPx
-      : container.scrollTop - bottomOffsetDeltaPx;
-
-    container.scrollTop = Math.max(0, nextScrollTop);
+    if (wasPinnedToBottom) {
+      const nextScrollTop = container.scrollTop + bottomOffsetDeltaPx;
+      container.scrollTop = Math.max(0, nextScrollTop);
+    }
     lastScrollTop.current = container.scrollTop;
   }, [bottomOffsetPx, isAtBottom]);
 
