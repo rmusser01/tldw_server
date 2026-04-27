@@ -55,24 +55,15 @@ _NOTIFICATIONS_STREAM_NONCRITICAL_EXCEPTIONS = (
 async def _reconcile_snooze_task_best_effort(*, task_id: str, user_id: int) -> None:
     try:
         await get_reminders_scheduler().reconcile_task(task_id=task_id, user_id=user_id)
-    except _NOTIFICATIONS_STREAM_NONCRITICAL_EXCEPTIONS as exc:
-        logger.warning(
-            "notifications snooze reconcile_task failed task_id={} user_id={} error={}",
-            task_id,
-            user_id,
-            exc,
-        )
+    except _NOTIFICATIONS_STREAM_NONCRITICAL_EXCEPTIONS:
+        logger.warning("notifications snooze reconcile_task failed")
 
 
 async def _unschedule_snooze_task_best_effort(*, task_id: str) -> None:
     try:
         await get_reminders_scheduler().unschedule_task(task_id=task_id)
-    except _NOTIFICATIONS_STREAM_NONCRITICAL_EXCEPTIONS as exc:
-        logger.warning(
-            "notifications snooze unschedule_task failed task_id={} error={}",
-            task_id,
-            exc,
-        )
+    except _NOTIFICATIONS_STREAM_NONCRITICAL_EXCEPTIONS:
+        logger.warning("notifications snooze unschedule_task failed")
 
 
 def _notification_to_response(
