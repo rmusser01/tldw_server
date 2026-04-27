@@ -1022,12 +1022,7 @@ async def create_transcription(
                     segments_for_timing = artifact.get("segments") or []
                     transcribed_text = artifact.get("text", "")
                 except _AUDIO_TRANSCRIPTIONS_NONCRITICAL_EXCEPTIONS as e:
-                    logger.error(
-                        'Transcription failed for provider={}, model={}: {}',
-                        provider,
-                        model_for_provider,
-                        e,
-                    )
+                    logger.error("Transcription failed for STT provider")
                     raise HTTPException(
                         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                         detail=_dictation_error_detail(
