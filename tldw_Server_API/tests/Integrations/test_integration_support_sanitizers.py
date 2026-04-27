@@ -1,12 +1,21 @@
+import pytest
+
+
 class _LoggerStub:
     def __init__(self) -> None:
         self.debugs: list[str] = []
+        self.errors: list[str] = []
         self.warnings: list[str] = []
 
     def debug(self, message: str, *args, **kwargs) -> None:
         if args or kwargs:
             message = message.format(*args, **kwargs)
         self.debugs.append(message)
+
+    def error(self, message: str, *args, **kwargs) -> None:
+        if args or kwargs:
+            message = message.format(*args, **kwargs)
+        self.errors.append(message)
 
     def warning(self, message: str, *args, **kwargs) -> None:
         if args or kwargs:
@@ -113,3 +122,56 @@ def test_decrypt_telegram_payload_failure_log_is_sanitized(monkeypatch):
     assert "telegram-encrypted-secret" not in str(logger_stub.warnings)
     assert "telegram decrypt failed" not in str(logger_stub.warnings)
     assert "/private/telegram-secrets.db" not in str(logger_stub.warnings)
+
+
+@pytest.mark.asyncio
+async def test_telegram_webhook_scope_list_failure_log_is_sanitized(monkeypatch):
+    from tldw_Server_API.app.api.v1.endpoints import telegram_support
+
+    class _Repo:
+        async def list_secrets(self, *, provider: str):
+            raise RuntimeError("telegram config list exploded at /private/telegram-secrets.db")
+
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(telegram_support, "logger", logger_stub)
+
+    with pytest.raises(telegram_support.HTTPException) as exc_info:
+        await telegram_support._resolve_webhook_scope_from_secret(
+            repo=_Repo(),
+            webhook_secret="webhook-secret",
+        )
+
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.detail == "Telegram bot configuration is unavailable"
+    assert logger_stub.errors == ["Failed to list Telegram bot configs for webhook resolution"]
+    assert "telegram config list exploded" not in str(logger_stub.errors)
+    assert "/private/telegram-secrets.db" not in str(logger_stub.errors)
+
+
+@pytest.mark.asyncio
+async def test_telegram_webhook_scope_fetch_failure_log_is_sanitized(monkeypatch):
+    from tldw_Server_API.app.api.v1.endpoints import telegram_support
+
+    class _Repo:
+        async def list_secrets(self, *, provider: str):
+            return [{"scope_type": "team", "scope_id": 42}]
+
+        async def fetch_secret(self, scope_type: str, scope_id: int, provider: str):
+            raise RuntimeError("telegram config fetch exploded at /private/telegram-secrets.db")
+
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(telegram_support, "logger", logger_stub)
+
+    with pytest.raises(telegram_support.HTTPException) as exc_info:
+        await telegram_support._resolve_webhook_scope_from_secret(
+            repo=_Repo(),
+            webhook_secret="webhook-secret",
+        )
+
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.detail == "Telegram bot configuration is unavailable"
+    assert logger_stub.errors == ["Failed to load Telegram bot config for webhook resolution"]
+    assert "team" not in str(logger_stub.errors)
+    assert "42" not in str(logger_stub.errors)
+    assert "telegram config fetch exploded" not in str(logger_stub.errors)
+    assert "/private/telegram-secrets.db" not in str(logger_stub.errors)

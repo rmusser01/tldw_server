@@ -784,7 +784,7 @@ async def _resolve_webhook_scope_from_secret(
     try:
         rows = await repo.list_secrets(provider=_PROVIDER)
     except Exception as exc:
-        logger.error("Failed to list Telegram bot configs for webhook resolution: {}", exc)
+        logger.error("Failed to list Telegram bot configs for webhook resolution")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Telegram bot configuration is unavailable",
@@ -799,12 +799,7 @@ async def _resolve_webhook_scope_from_secret(
         try:
             secret_row = await repo.fetch_secret(scope_type, scope_id, _PROVIDER)
         except Exception as exc:
-            logger.error(
-                "Failed to load Telegram bot config for webhook resolution at {}:{}: {}",
-                scope_type,
-                scope_id,
-                exc,
-            )
+            logger.error("Failed to load Telegram bot config for webhook resolution")
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="Telegram bot configuration is unavailable",
