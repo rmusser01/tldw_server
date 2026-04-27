@@ -99,6 +99,23 @@ class _FailingJobManager:
         raise RuntimeError("study suggestions backend exploded at /private/study-jobs.db")
 
 
+class _FailingFlashcardDeckDB:
+    def __init__(self) -> None:
+        self.deleted_deck_ids: list[int] = []
+
+    def get_deck_by_name(self, name: str) -> None:
+        return None
+
+    def add_deck(self, name: str, description: str) -> int:
+        return 42
+
+    def add_flashcards_bulk(self, flashcards: list[dict[str, Any]]) -> None:
+        raise RuntimeError("flashcard insert failed at /private/study-suggestions.db")
+
+    def soft_delete_deck_by_id(self, deck_id: int) -> None:
+        self.deleted_deck_ids.append(int(deck_id))
+
+
 def _test_user() -> User:
     return User(id=1, username="tester", email="t@example.com", is_active=True, roles=["admin"], is_admin=True)
 
@@ -384,6 +401,27 @@ def test_flashcard_suggestions_enqueue_failure_log_is_sanitized(monkeypatch):
     warning_text = "\n".join(logger.warnings)
     assert "study suggestions backend exploded" not in warning_text  # nosec B101
     assert "/private/study-jobs.db" not in warning_text  # nosec B101
+
+
+def test_flashcard_follow_up_insert_failure_log_is_sanitized(monkeypatch):
+    endpoints_mod, _quizzes_mod, _flashcards_mod, _snapshot_service_mod, _jobs_mod, _actions_mod = _load_modules()
+    logger = _LoggerStub()
+    monkeypatch.setattr(endpoints_mod, "logger", logger)
+    note_db = _FailingFlashcardDeckDB()
+
+    with pytest.raises(RuntimeError, match="flashcard insert failed"):
+        endpoints_mod._persist_flashcard_deck(
+            note_db=note_db,
+            snapshot_row={"id": 99},
+            selected_topics=["renal basics"],
+            raw_flashcards=[{"front": "What filters blood?", "back": "Kidney."}],
+        )
+
+    assert note_db.deleted_deck_ids == [42]  # nosec B101
+    assert logger.warnings == ["Flashcard follow-up generation cleanup deleted deck after insert failure"]  # nosec B101
+    warning_text = "\n".join(logger.warnings)
+    assert "flashcard insert failed" not in warning_text  # nosec B101
+    assert "/private/study-suggestions.db" not in warning_text  # nosec B101
 
 
 def test_review_session_end_completes_session_and_enqueues_suggestions(
