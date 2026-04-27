@@ -206,7 +206,16 @@ def _serialize_step(
         legacy_attempt_count = int(step_run.get("attempt") or 0)
     except (TypeError, ValueError):
         legacy_attempt_count = 0
-    attempt_count = max(legacy_attempt_count, len(attempts))
+    highest_attempt_number = 0
+    for attempt in attempts:
+        try:
+            highest_attempt_number = max(
+                highest_attempt_number,
+                int(attempt.get("attempt_number") or 0),
+            )
+        except (TypeError, ValueError):
+            continue
+    attempt_count = max(legacy_attempt_count, len(attempts), highest_attempt_number)
     latest_failed_attempt = None
     for attempt in reversed(attempts):
         if str(attempt.get("status") or "") == "failed":

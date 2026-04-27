@@ -226,11 +226,18 @@ class _WFRecurringScheduler:
             logger.info(f"Workflows scheduler: registered {loaded} schedule(s)")
 
     def _get_db(self, user_id: int) -> WorkflowsSchedulerDB:
+        """Return a cached scheduler DB handle for a user-specific database."""
         if user_id not in self._db_cache:
             self._db_cache[user_id] = WorkflowsSchedulerDB(user_id=user_id)
         return self._db_cache[user_id]
 
     def _list_registered_schedules(self, user_id: int) -> list[WorkflowSchedule]:
+        """Return every persisted schedule visible in a user's scheduler DB.
+
+        Shared backends can expose schedules for more than one owner through a
+        single DB handle, so this intentionally uses ``user_id=None`` and pages
+        until the DB returns a short page.
+        """
         db = self._get_db(user_id)
         page_size = 1000
         offset = 0
@@ -244,6 +251,11 @@ class _WFRecurringScheduler:
 
     @staticmethod
     def _resolve_schedule_owner_id(schedule: WorkflowSchedule, *, fallback_user_id: int) -> int:
+        """Resolve the owner user id stored on a schedule.
+
+        Older rows can contain malformed owner values; in that case the caller's
+        enumerated user id is used so scheduling can continue.
+        """
         try:
             return int(schedule.user_id)
         except _WORKFLOWS_SCHED_NONCRITICAL_EXCEPTIONS:
@@ -299,6 +311,7 @@ class _WFRecurringScheduler:
             logger.debug(f"Workflows scheduler: failed to reconcile jobs: {e}")
 
     def _add_job(self, schedule: WorkflowSchedule, user_id: int | None = None) -> None:
+        """Register an APScheduler job for a recurring workflow schedule."""
         if not self._aps:
             return
         try:
@@ -461,7 +474,12 @@ class _WFRecurringScheduler:
         # Parse ACP config
         try:
             acp_config = _json.loads(s.acp_config_json) if isinstance(s.acp_config_json, str) else (s.acp_config_json or {})
-        except _WORKFLOWS_SCHED_NONCRITICAL_EXCEPTIONS:
+        except _WORKFLOWS_SCHED_NONCRITICAL_EXCEPTIONS as exc:
+            logger.warning(
+                "Workflows scheduler: malformed acp_config_json for ACP schedule {}: {}",
+                s.id,
+                exc,
+            )
             acp_config = {}
 
         payload = {

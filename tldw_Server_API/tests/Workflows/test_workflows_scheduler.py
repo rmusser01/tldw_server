@@ -586,3 +586,59 @@ async def test_run_schedule_mints_virtual_key_when_enabled_with_y(monkeypatch):
     assert payload.get("secrets", {}).get("jwt") == "vk-token-y"
 
     await svc.stop()
+
+
+@pytest.mark.asyncio
+async def test_run_acp_schedule_logs_malformed_acp_config_json(monkeypatch):
+    svc = workflows_scheduler_mod._WFRecurringScheduler()
+    schedule = WorkflowSchedule(
+        id="bad-acp-json",
+        tenant_id="default",
+        user_id="5",
+        workflow_id=None,
+        name="Bad ACP JSON",
+        cron="*/5 * * * *",
+        timezone="UTC",
+        inputs_json="{}",
+        run_mode="async",
+        validation_mode="block",
+        enabled=True,
+        require_online=False,
+        concurrency_mode="skip",
+        misfire_grace_sec=60,
+        coalesce=True,
+        jitter_sec=0,
+        acp_config_json="{not-json",
+        last_run_at=None,
+        next_run_at=None,
+        last_status=None,
+        created_at="2026-01-01T00:00:00+00:00",
+        updated_at="2026-01-01T00:00:00+00:00",
+    )
+    warnings: list[tuple[object, ...]] = []
+    captured: dict[str, Any] = {}
+
+    class _StubDB:
+        def get_schedule(self, schedule_id: str) -> WorkflowSchedule | None:
+            return schedule if schedule_id == "bad-acp-json" else None
+
+        def set_history(self, *_args: Any, **_kwargs: Any) -> None:
+            return None
+
+    class _StubScheduler:
+        async def submit(self, *args: Any, **kwargs: Any) -> str:
+            captured["payload"] = kwargs.get("payload")
+            return "task-bad-acp-json"
+
+    monkeypatch.setattr(svc, "_get_db", lambda uid: _StubDB())
+    monkeypatch.setattr(
+        workflows_scheduler_mod.logger,
+        "warning",
+        lambda *args, **kwargs: warnings.append(args),
+    )
+    svc._core_scheduler = _StubScheduler()  # type: ignore[attr-defined]
+
+    await svc._run_acp_schedule("bad-acp-json", 5)  # type: ignore[attr-defined]
+
+    assert captured["payload"]["prompt"] == ""
+    assert any("malformed acp_config_json" in str(args[0]) for args in warnings)
