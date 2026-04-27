@@ -1,0 +1,92 @@
+from unittest.mock import MagicMock
+
+import pytest
+from fastapi import HTTPException
+
+from tldw_Server_API.app.api.v1.endpoints import reading
+
+
+pytestmark = pytest.mark.unit
+
+
+@pytest.mark.asyncio
+async def test_create_saved_search_sanitizes_backend_log(monkeypatch):
+    logger_stub = MagicMock()
+
+    class _FailingDB:
+        def create_saved_search(self, **_kwargs):
+            raise RuntimeError("saved search create exploded at /private/collections.db")
+
+    monkeypatch.setattr(reading, "logger", logger_stub)
+    monkeypatch.setattr(reading, "_ensure_reading_saved_searches_enabled", lambda: None)
+
+    with pytest.raises(HTTPException) as excinfo:
+        await reading.create_reading_saved_search(
+            payload=reading.ReadingSavedSearchCreateRequest(name="Morning", query={"q": "ai"}),
+            collections_db=_FailingDB(),
+        )
+
+    assert excinfo.value.status_code == 400
+    assert excinfo.value.detail == "reading_saved_search_create_failed"
+    logger_stub.error.assert_called_once_with("reading_saved_search_create_failed")
+
+
+@pytest.mark.asyncio
+async def test_list_saved_searches_sanitizes_backend_log(monkeypatch):
+    logger_stub = MagicMock()
+
+    class _FailingDB:
+        def list_saved_searches(self, **_kwargs):
+            raise RuntimeError("saved search list exploded at /private/collections.db")
+
+    monkeypatch.setattr(reading, "logger", logger_stub)
+    monkeypatch.setattr(reading, "_ensure_reading_saved_searches_enabled", lambda: None)
+
+    with pytest.raises(HTTPException) as excinfo:
+        await reading.list_reading_saved_searches(limit=10, offset=0, collections_db=_FailingDB())
+
+    assert excinfo.value.status_code == 400
+    assert excinfo.value.detail == "reading_saved_search_list_failed"
+    logger_stub.error.assert_called_once_with("reading_saved_search_list_failed")
+
+
+@pytest.mark.asyncio
+async def test_update_saved_search_sanitizes_backend_log(monkeypatch):
+    logger_stub = MagicMock()
+
+    class _FailingDB:
+        def update_saved_search(self, *_args, **_kwargs):
+            raise RuntimeError("saved search update exploded at /private/collections.db")
+
+    monkeypatch.setattr(reading, "logger", logger_stub)
+    monkeypatch.setattr(reading, "_ensure_reading_saved_searches_enabled", lambda: None)
+
+    with pytest.raises(HTTPException) as excinfo:
+        await reading.update_reading_saved_search(
+            search_id=123,
+            payload=reading.ReadingSavedSearchUpdateRequest(query={"q": "ml"}),
+            collections_db=_FailingDB(),
+        )
+
+    assert excinfo.value.status_code == 400
+    assert excinfo.value.detail == "reading_saved_search_update_failed"
+    logger_stub.error.assert_called_once_with("reading_saved_search_update_failed")
+
+
+@pytest.mark.asyncio
+async def test_delete_saved_search_sanitizes_backend_log(monkeypatch):
+    logger_stub = MagicMock()
+
+    class _FailingDB:
+        def delete_saved_search(self, *_args, **_kwargs):
+            raise RuntimeError("saved search delete exploded at /private/collections.db")
+
+    monkeypatch.setattr(reading, "logger", logger_stub)
+    monkeypatch.setattr(reading, "_ensure_reading_saved_searches_enabled", lambda: None)
+
+    with pytest.raises(HTTPException) as excinfo:
+        await reading.delete_reading_saved_search(search_id=123, collections_db=_FailingDB())
+
+    assert excinfo.value.status_code == 400
+    assert excinfo.value.detail == "reading_saved_search_delete_failed"
+    logger_stub.error.assert_called_once_with("reading_saved_search_delete_failed")

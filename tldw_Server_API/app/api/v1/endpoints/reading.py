@@ -606,7 +606,7 @@ async def create_reading_saved_search(
             sort=payload.sort,
         )
     except _READING_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error(f"reading_saved_search_create_failed: {exc}")
+        logger.error("reading_saved_search_create_failed")
         raise HTTPException(status_code=400, detail="reading_saved_search_create_failed") from exc
     return _to_saved_search_response(row)
 
@@ -626,7 +626,7 @@ async def list_reading_saved_searches(
     try:
         rows, total = collections_db.list_saved_searches(limit=limit, offset=offset)
     except _READING_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error(f"reading_saved_search_list_failed: {exc}")
+        logger.error("reading_saved_search_list_failed")
         raise HTTPException(status_code=400, detail="reading_saved_search_list_failed") from exc
     return ReadingSavedSearchListResponse(
         items=[_to_saved_search_response(row) for row in rows],
@@ -660,7 +660,7 @@ async def update_reading_saved_search(
     except KeyError:
         raise HTTPException(status_code=404, detail="reading_saved_search_not_found") from None
     except _READING_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error(f"reading_saved_search_update_failed: {exc}")
+        logger.error("reading_saved_search_update_failed")
         raise HTTPException(status_code=400, detail="reading_saved_search_update_failed") from exc
     return _to_saved_search_response(row)
 
@@ -679,7 +679,7 @@ async def delete_reading_saved_search(
     try:
         ok = collections_db.delete_saved_search(search_id)
     except _READING_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error(f"reading_saved_search_delete_failed: {exc}")
+        logger.error("reading_saved_search_delete_failed")
         raise HTTPException(status_code=400, detail="reading_saved_search_delete_failed") from exc
     if not ok:
         raise HTTPException(status_code=404, detail="reading_saved_search_not_found")
