@@ -994,8 +994,8 @@ async def telegram_webhook_impl(
                 scope_type=scope.scope_type,
                 scope_id=scope.scope_id,
             )
-        except Exception as exc:
-            logger.error("Failed to mint Telegram execution identity: {}", exc)
+        except Exception:
+            logger.error("Failed to mint Telegram execution identity")
             return _telegram_webhook_error(
                 status.HTTP_503_SERVICE_UNAVAILABLE,
                 "execution_identity_unavailable",
