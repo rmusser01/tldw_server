@@ -1310,7 +1310,7 @@ async def _process_audio_command(
         )
 
     except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
-        logger.error(f"Transcription failed: {e}")
+        logger.error("Transcription failed")
         await websocket.send_json(
             WSErrorMessage(
                 error=f"Transcription failed: {e}",
