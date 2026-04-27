@@ -175,6 +175,25 @@ async def test_get_tts_health_surfaces_sanitized_omnivoice_sidecar_status(monkey
 
 
 @pytest.mark.asyncio
+async def test_get_tts_health_top_level_failure_log_is_sanitized(monkeypatch):
+    class _FailingTTSService:
+        def get_status(self):
+            raise RuntimeError("status leak /private/tts-status.json")
+
+    fake_logger = MagicMock()
+    monkeypatch.setattr(audio_health, "logger", fake_logger)
+
+    health = await audio_health.get_tts_health(
+        request=audio_health._build_internal_health_request("/api/v1/audio/health"),
+        tts_service=_FailingTTSService(),
+    )
+
+    assert health["status"] == "error"
+    assert health["message"] == "TTS health check failed"
+    fake_logger.error.assert_called_once_with("Error getting TTS health", exc_info=True)
+
+
+@pytest.mark.asyncio
 async def test_get_tts_health_envelope_enrichment_failure_log_is_sanitized(monkeypatch):
     class _FakeRegistry:
         def list_capabilities(self, include_disabled=True):
