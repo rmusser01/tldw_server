@@ -707,7 +707,7 @@ async def link_note_to_reading_item(
     except KeyError:
         raise HTTPException(status_code=404, detail="reading_item_not_found") from None
     except _READING_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error(f"reading_note_link_create_failed: {exc}")
+        logger.error("reading_note_link_create_failed")
         raise HTTPException(status_code=400, detail="reading_note_link_create_failed") from exc
     record_reading_note_linked(
         user_id=current_user.id,
@@ -735,7 +735,7 @@ async def list_reading_item_note_links(
     except KeyError:
         raise HTTPException(status_code=404, detail="reading_item_not_found") from None
     except _READING_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error(f"reading_note_link_list_failed: {exc}")
+        logger.error("reading_note_link_list_failed")
         raise HTTPException(status_code=400, detail="reading_note_link_list_failed") from exc
     return ReadingNoteLinksListResponse(
         item_id=item_id,
@@ -770,7 +770,7 @@ async def unlink_note_from_reading_item(
     except KeyError:
         raise HTTPException(status_code=404, detail="reading_item_not_found") from None
     except _READING_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error(f"reading_note_link_delete_failed: {exc}")
+        logger.error("reading_note_link_delete_failed")
         raise HTTPException(status_code=400, detail="reading_note_link_delete_failed") from exc
     if not ok:
         raise HTTPException(status_code=404, detail="reading_note_link_not_found")
