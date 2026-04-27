@@ -870,12 +870,12 @@ async def dispatch_run(
                 cwd=effective_cwd,
             )
         except Exception as reg_exc:
-            logger.warning("Failed to register orchestration ACP session {}: {}", session_id, reg_exc)
+            logger.warning("Failed to register orchestration ACP session")
 
     except HTTPException:
         raise
     except Exception as exc:
-        logger.error("Failed to create ACP session for task {}: {}", task_id, exc)
+        logger.error("Failed to create ACP session")
         # Create a failed run record
         run = await _run_sync(lambda: db.create_run(task_id, agent_type=agent_type))
         await _run_sync(lambda: db.fail_run(run.id, error=str(exc)))
@@ -915,7 +915,7 @@ async def dispatch_run(
             await _run_sync(lambda: db.transition_task(task_id, TaskStatus.COMPLETE))
 
     except Exception as exc:
-        logger.error("ACP prompt failed for task {}: {}", task_id, exc)
+        logger.error("ACP prompt failed")
         await _run_sync(lambda: db.fail_run(run.id, error=str(exc)))
         await _run_sync(lambda: db.transition_task(task_id, TaskStatus.TRIAGE))
         raise HTTPException(
