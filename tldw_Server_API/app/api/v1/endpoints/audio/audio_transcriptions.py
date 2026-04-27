@@ -578,11 +578,8 @@ async def create_transcription(
 
         try:
             return asyncio.create_task(_hb_loop())
-        except _AUDIO_TRANSCRIPTIONS_NONCRITICAL_EXCEPTIONS as exc:
-            logger.debug(
-                "audio.transcriptions: failed to start job heartbeat task; "
-                f"user_id={user_id}, error={exc}"
-            )
+        except _AUDIO_TRANSCRIPTIONS_NONCRITICAL_EXCEPTIONS:
+            logger.debug("audio.transcriptions failed to start job heartbeat task; continuing without heartbeat")
             return None
 
     # Resolve per-tier file size limit
