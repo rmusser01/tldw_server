@@ -144,6 +144,59 @@ async def test_run_benchmark_sanitizes_generic_failure(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_run_benchmark_sanitizes_item_evaluation_failure_log(monkeypatch):
+    logger_stub = _LoggerStub()
+
+    class _Registry:
+        def get(self, name):
+            return SimpleNamespace(evaluation_type="demo-eval")
+
+        def create_evaluator(self, name):
+            class _Evaluator:
+                def format_for_custom_metric(self, item):
+                    return {
+                        "name": "demo-metric",
+                        "description": "demo",
+                        "evaluation_prompt": "{question}",
+                        "input_data": {"question": item["question"]},
+                        "scoring_criteria": {"accuracy": "high"},
+                    }
+
+            return _Evaluator()
+
+    monkeypatch.setattr(benchmark_module, "get_registry", lambda: _Registry())
+    monkeypatch.setattr(
+        benchmark_module,
+        "load_benchmark_dataset",
+        lambda *args, **kwargs: [{"question": "What is 2+2?", "category": "math"}],
+    )
+    monkeypatch.setattr(
+        benchmark_module.evaluation_manager,
+        "evaluate_custom_metric",
+        AsyncMock(side_effect=RuntimeError("benchmark item exploded at /private/evals.db")),
+    )
+    monkeypatch.setattr(benchmark_module, "logger", logger_stub)
+
+    request = benchmark_module.BenchmarkRunRequest(
+        limit=1,
+        api_name="openai",
+        parallel=1,
+        save_results=False,
+    )
+
+    response = await benchmark_module.run_benchmark(
+        "demo-benchmark",
+        request,
+        user_id="user-1",
+    )
+
+    assert response.total_samples == 1
+    assert response.results_summary["successful"] == 0
+    assert response.results_summary["failed"] == 1
+    _assert_sanitized_error_log(logger_stub, "Benchmark item evaluation failed")
+
+
+@pytest.mark.asyncio
 async def test_evaluate_simpleqa_sanitizes_generic_failure(monkeypatch):
     from tldw_Server_API.app.core.Evaluations import simpleqa_eval
 

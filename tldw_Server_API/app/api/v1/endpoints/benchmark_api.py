@@ -264,7 +264,7 @@ async def run_benchmark(
             # Process results
             for item, result in zip(batch, batch_results):
                 if isinstance(result, Exception):
-                    logger.error(f"Evaluation failed for item: {result}")
+                    logger.error("Benchmark item evaluation failed")
                     results.append({
                         "item": item,
                         "score": 0.0,
