@@ -28,9 +28,13 @@ pytestmark = pytest.mark.unit
 class _LoggerStub:
     def __init__(self) -> None:
         self.errors: list[str] = []
+        self.warnings: list[str] = []
 
     def error(self, message: str, *args: Any, **kwargs: Any) -> None:
         self.errors.append(message.format(*args) if args else message)
+
+    def warning(self, message: str, *args: Any, **kwargs: Any) -> None:
+        self.warnings.append(message.format(*args) if args else message)
 
 
 def _insert_output_row_raw(
@@ -617,6 +621,63 @@ async def test_outputs_create_db_insert_failure_log_is_sanitized(monkeypatch):
     logged = "\n".join(logger.errors)
     assert "output insert exploded" not in logged
     assert "/private/outputs.db" not in logged
+
+
+@pytest.mark.asyncio
+async def test_outputs_create_insert_cleanup_failure_log_is_sanitized(monkeypatch):
+    class _Template:
+        id = 1
+        name = "Markdown Template"
+        body = "hello"
+        type = "newsletter_markdown"
+        format = "md"
+
+    class _CollectionsDB:
+        def get_output_template(self, _template_id: int):
+            return _Template()
+
+        def create_output_artifact(self, **_kwargs: Any):
+            raise RuntimeError("output insert exploded at /private/outputs.db")
+
+    class _OutputDir:
+        def mkdir(self, *args: Any, **kwargs: Any) -> None:
+            return None
+
+    class _OutputPath:
+        def write_text(self, *args: Any, **kwargs: Any) -> None:
+            return None
+
+    def _raise_cleanup_failure(_path: Any) -> None:
+        raise OSError("cleanup exploded at /private/output.md")
+
+    logger = _LoggerStub()
+    monkeypatch.setattr(outputs_endpoint, "logger", logger)
+    monkeypatch.setattr(outputs_endpoint, "render_output_template", lambda *_args: "rendered")
+    monkeypatch.setattr(outputs_endpoint, "_outputs_dir_for_user", lambda _user_id: _OutputDir())
+    monkeypatch.setattr(outputs_endpoint, "_resolve_output_path_for_user", lambda *_args: _OutputPath())
+    monkeypatch.setattr(outputs_endpoint.os, "remove", _raise_cleanup_failure)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await outputs_endpoint.create_output(
+            payload=outputs_endpoint.OutputCreateRequest(
+                template_id=1,
+                data={"items": []},
+                title="demo",
+            ),
+            current_user=User(id=123, username="tester", email=None, is_active=True),
+            cdb=_CollectionsDB(),
+            media_db=object(),
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "db_insert_failed"
+    assert logger.errors == ["outputs row insert failed"]
+    assert logger.warnings == ["outputs insert cleanup file removal failed"]
+    logged = "\n".join(logger.errors + logger.warnings)
+    assert "output insert exploded" not in logged
+    assert "cleanup exploded" not in logged
+    assert "/private/outputs.db" not in logged
+    assert "/private/output.md" not in logged
 
 
 def test_outputs_preview_with_inline_data_and_generate(client_with_user, tmp_path):

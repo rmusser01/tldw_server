@@ -345,8 +345,8 @@ async def create_output(
             logger.error("outputs row insert failed")
             try:
                 os.remove(path)
-            except _OUTPUTS_NONCRITICAL_EXCEPTIONS as cleanup_err:
-                logger.warning(f"failed to cleanup output file after DB insert failure: {path} err={cleanup_err}")
+            except _OUTPUTS_NONCRITICAL_EXCEPTIONS:
+                logger.warning("outputs insert cleanup file removal failed")
             raise HTTPException(status_code=500, detail="db_insert_failed") from exc
 
         outputs_created.append((row.id, path))
