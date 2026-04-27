@@ -685,6 +685,83 @@ async def test_outputs_create_insert_cleanup_failure_log_is_sanitized(monkeypatc
 
 
 @pytest.mark.asyncio
+async def test_outputs_create_variant_cleanup_failure_logs_are_sanitized(monkeypatch):
+    class _Template:
+        id = 1
+        name = "Markdown Template"
+        body = "hello"
+        type = "newsletter_markdown"
+        format = "md"
+
+    class _Row:
+        id = 777
+        title = "demo"
+        storage_path = "demo.md"
+        media_item_id = None
+        created_at = "2024-01-01T00:00:00"
+
+    class _CollectionsDB:
+        def get_output_template(self, _template_id: int):
+            return _Template()
+
+        def get_default_output_template_by_type(self, _template_type: str):
+            return None
+
+        def create_output_artifact(self, **_kwargs: Any):
+            return _Row()
+
+        def delete_output_artifact(self, _output_id: int, *, hard: bool) -> bool:
+            assert hard is True
+            raise RuntimeError("cleanup row exploded at /private/outputs.db")
+
+    class _OutputDir:
+        def mkdir(self, *args: Any, **kwargs: Any) -> None:
+            return None
+
+    class _OutputPath:
+        def write_text(self, *args: Any, **kwargs: Any) -> None:
+            return None
+
+        def exists(self) -> bool:
+            return True
+
+        def unlink(self) -> None:
+            raise OSError("cleanup file exploded at /private/output.md")
+
+    logger = _LoggerStub()
+    monkeypatch.setattr(outputs_endpoint, "logger", logger)
+    monkeypatch.setattr(outputs_endpoint, "render_output_template", lambda *_args: "rendered")
+    monkeypatch.setattr(outputs_endpoint, "_outputs_dir_for_user", lambda _user_id: _OutputDir())
+    monkeypatch.setattr(outputs_endpoint, "_resolve_output_path_for_user", lambda *_args: _OutputPath())
+
+    with pytest.raises(HTTPException) as exc_info:
+        await outputs_endpoint.create_output(
+            payload=outputs_endpoint.OutputCreateRequest(
+                template_id=1,
+                data={"items": []},
+                title="demo",
+                generate_mece=True,
+            ),
+            current_user=User(id=123, username="tester", email=None, is_active=True),
+            cdb=_CollectionsDB(),
+            media_db=object(),
+        )
+
+    assert exc_info.value.status_code == 404
+    assert exc_info.value.detail == "mece_template_not_found"
+    assert logger.warnings == [
+        "failed to cleanup output file",
+        "failed to cleanup output row",
+    ]
+    logged = "\n".join(logger.warnings)
+    assert "777" not in logged
+    assert "cleanup file exploded" not in logged
+    assert "cleanup row exploded" not in logged
+    assert "/private/output.md" not in logged
+    assert "/private/outputs.db" not in logged
+
+
+@pytest.mark.asyncio
 async def test_outputs_delete_tts_history_failure_log_is_sanitized(monkeypatch):
     class _CollectionsDB:
         def delete_output_artifact(self, _output_id: int, *, hard: bool) -> bool:

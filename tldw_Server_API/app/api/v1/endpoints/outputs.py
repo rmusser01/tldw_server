@@ -374,12 +374,12 @@ async def create_output(
             try:
                 if opath.exists():
                     opath.unlink()
-            except _OUTPUTS_NONCRITICAL_EXCEPTIONS as cleanup_err:
-                logger.warning(f"failed to cleanup output file {opath}: {cleanup_err}")
+            except _OUTPUTS_NONCRITICAL_EXCEPTIONS:
+                logger.warning("failed to cleanup output file")
             try:
                 cdb.delete_output_artifact(oid, hard=True)
-            except _OUTPUTS_NONCRITICAL_EXCEPTIONS as cleanup_err:
-                logger.warning(f"failed to cleanup output row {oid}: {cleanup_err}")
+            except _OUTPUTS_NONCRITICAL_EXCEPTIONS:
+                logger.warning("failed to cleanup output row")
 
     def _resolve_variant_template(template_id: int | None, template_type: str, detail: str):
         if template_id is not None:
