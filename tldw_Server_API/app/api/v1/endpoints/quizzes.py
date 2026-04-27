@@ -132,7 +132,7 @@ def _enqueue_study_suggestions_refresh(
     anchor_id: int,
 ) -> None:
     if jm is None:
-        logger.debug("Study-suggestions refresh enqueue skipped (no JobManager) for {}:{}", anchor_type, anchor_id)
+        logger.debug("Study-suggestions refresh enqueue skipped (no JobManager)")
         return
     try:
         jm.create_job(
@@ -622,7 +622,7 @@ async def respond_quiz_attempt_question_assistant(
     except (InputError, CharactersRAGDBError) as exc:
         raise map_db_error_to_http(exc, default_detail="Failed to generate study assistant response") from exc
     except (AttributeError, LookupError, OSError, RuntimeError, TypeError, ValueError) as exc:
-        logger.error(f"Unexpected quiz question assistant failure: {exc}")
+        logger.error("Unexpected quiz question assistant failure")
         raise HTTPException(status_code=500, detail="Failed to generate study assistant response") from exc
 
 
