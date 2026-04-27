@@ -809,7 +809,7 @@ async def add_source(
                     **sync_updates,
                 )
         except Exception as exc:
-            logger.warning(f"{provider} webhook provisioning failed for source {row.get('id')}: {exc}")
+            logger.warning("Connector webhook provisioning failed")
             await upsert_source_sync_state(
                 db,
                 source_id=int(row.get("id")),

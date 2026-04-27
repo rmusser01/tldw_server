@@ -148,3 +148,76 @@ async def test_add_source_policy_error_log_is_sanitized(monkeypatch):
     assert exc_info.value.status_code == 500
     assert exc_info.value.detail == "Source denied: policy evaluation failed"
     fake_logger.error.assert_called_once_with("Connector source policy evaluation failed")
+
+
+@pytest.mark.asyncio
+async def test_add_source_webhook_warning_log_is_sanitized(monkeypatch):
+    class _FailingWebhookConnector:
+        redirect_base = "http://localhost:8000"
+
+        async def subscribe_webhook(self, *args, **kwargs):
+            raise RuntimeError("webhook backend leaked /private/connectors-webhooks.db")
+
+    async def _get_account(db, user_id: int, account_id: int):
+        assert user_id == 7
+        assert account_id == 11
+        return {"id": 11, "provider": "drive"}
+
+    async def _create_source(db, **kwargs):
+        return {
+            "id": 123,
+            "account_id": kwargs["account_id"],
+            "provider": kwargs["provider"],
+            "remote_id": kwargs["remote_id"],
+            "type": kwargs["type_"],
+            "path": kwargs["path"],
+            "options": kwargs["options"],
+            "enabled": kwargs["enabled"],
+        }
+
+    async def _get_tokens(db, user_id: int, account_id: int):
+        assert user_id == 7
+        assert account_id == 11
+        return {"access_token": "token"}
+
+    sync_updates = []
+
+    async def _upsert_sync_state(db, **kwargs):
+        sync_updates.append(kwargs)
+
+    fake_logger = MagicMock()
+    monkeypatch.setattr(connectors, "logger", fake_logger)
+    monkeypatch.setattr(connectors, "get_account_for_user", _get_account)
+    monkeypatch.setattr(connectors, "evaluate_policy_constraints", lambda *args, **kwargs: (True, None))
+    monkeypatch.setattr(connectors, "create_source", _create_source)
+    monkeypatch.setattr(connectors, "get_account_tokens", _get_tokens)
+    monkeypatch.setattr(connectors, "get_connector_by_name", lambda provider: _FailingWebhookConnector())
+    monkeypatch.setattr(connectors, "upsert_source_sync_state", _upsert_sync_state)
+
+    payload = connectors.ConnectorSourceCreateRequest(
+        account_id=11,
+        provider="drive",
+        remote_id="root",
+        type="folder",
+        path="/Team Drive",
+    )
+    principal = AuthPrincipal(kind="user", user_id=7)
+
+    result = await connectors.add_source(
+        request=None,
+        payload=payload,
+        db=object(),
+        principal=principal,
+        org_policy={},
+    )
+
+    assert result.id == 123
+    assert sync_updates == [
+        {
+            "source_id": 123,
+            "sync_mode": "hybrid",
+            "webhook_status": "failed",
+            "last_error": "webhook backend leaked /private/connectors-webhooks.db",
+        }
+    ]
+    fake_logger.warning.assert_called_once_with("Connector webhook provisioning failed")
