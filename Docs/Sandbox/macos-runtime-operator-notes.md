@@ -95,15 +95,49 @@ Its current role is narrow:
 - expose a thin Linux-container wrapper around the same builder flow when
   direct Linux build tooling is not available on the host
 
-Expected operator flow later:
+Expected operator flow:
 
 1. Prepare a sealed template image per runtime family.
-2. Register the template in the sandbox image store.
+2. Register the template or canonical bundle in the sandbox image store.
 3. Create run-scoped clone manifests from that template.
 4. Hand clone metadata to the native helper for VM boot.
 5. Destroy the run-scoped clone state after completion.
 
-Today, the image store implements template registration plus deterministic run-clone manifests only.
+The image store is now filesystem-backed at:
+
+```text
+<image-store-root>/
+  templates/
+    <runtime>/
+      <template-name>/
+        manifest.json
+  runs/
+    <run-id>/
+```
+
+Template manifests include artifact paths, artifact size, SHA-256 hashes,
+labels, registration time, source path, and optional build provenance from a
+bundle `build-info.json`. The store remains an inventory and planning layer,
+not the bootability source of truth; helper `validate_template` still owns that.
+
+Minimal Python registration example:
+
+```python
+from tldw_Server_API.app.core.Sandbox.image_store import SandboxImageStore
+
+store = SandboxImageStore(root_path="/var/lib/tldw/sandbox-images")
+template_id = store.register_bundle(
+    runtime="vz_linux",
+    template_name="debian-bookworm-arm64",
+    bundle_path="/var/lib/tldw/vz-linux/debian-bookworm-arm64/bundle",
+    labels={"suite": "bookworm", "profile": "minimal"},
+)
+record = store.get_template(template_id)
+gc_plan = store.plan_garbage_collection(active_run_ids=set())
+```
+
+`plan_garbage_collection()` is dry-run only. It returns candidate records for
+inactive run directories and does not delete files.
 
 ## Networking
 
@@ -166,8 +200,33 @@ Current diagnostics are mixed-mode:
 
 ## Real Host E2E Smoke
 
-There is now an opt-in pytest smoke module for proving real `vz_linux`
-execution on a prepared Apple silicon macOS host:
+The preferred operator entrypoint for proving real `vz_linux` execution on a
+prepared Apple silicon macOS host is:
+
+```bash
+tools/vz-linux-image/scripts/run-host-e2e-smoke.sh \
+  --bundle /path/to/canonical/bundle \
+  --socket /tmp/tldw-vz-helper-e2e.sock \
+  --serial-log-dir /tmp/tldw-vz-serial-e2e \
+  --entitlements /path/to/helper.entitlements
+```
+
+Use `--dry-run` first to print the exact SwiftPM, codesign, helper, and pytest
+commands without starting VMs:
+
+```bash
+tools/vz-linux-image/scripts/run-host-e2e-smoke.sh \
+  --dry-run \
+  --bundle /path/to/canonical/bundle
+```
+
+The script validates the bundle, builds the Swift helper when the binary is
+missing, optionally ad hoc signs it with the supplied entitlements, runs the
+helper-daemon smoke, starts one helper daemon for real `vz_linux` E2E, verifies
+ephemeral execution, verifies same-session VM reuse, and stops the helper on
+exit.
+
+The underlying opt-in pytest module is still available directly:
 
 - `tldw_Server_API/tests/sandbox/test_vz_linux_real_host_e2e.py`
 
