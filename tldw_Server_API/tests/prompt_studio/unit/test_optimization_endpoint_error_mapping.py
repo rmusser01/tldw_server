@@ -34,12 +34,22 @@ class _BrokenListOptimizationsDb:
         raise DatabaseError("driver failed")
 
 
+class _BrokenListOptimizationsUnexpectedDb:
+    def list_optimizations(self, *_args, **_kwargs):
+        raise ValueError("prompt studio backend exploded at /private/prompt-studio.db")
+
+
 class _BrokenOptimizationLookupDb:
     def __init__(self, message: str = "driver failed") -> None:
         self.message = message
 
     def get_optimization(self, *_args, **_kwargs):
         raise DatabaseError(self.message)
+
+
+class _BrokenOptimizationLookupUnexpectedDb:
+    def get_optimization(self, *_args, **_kwargs):
+        raise ValueError("prompt studio backend exploded at /private/prompt-studio.db")
 
 
 class _BrokenCancelOptimizationUnexpectedDb:
@@ -166,6 +176,30 @@ async def test_list_optimizations_maps_database_error():
 
 
 @pytest.mark.asyncio
+async def test_list_optimizations_unexpected_error_log_is_sanitized(monkeypatch):
+    logger_stub = _EndpointLoggerStub()
+    monkeypatch.setattr(optimization_endpoint, "logger", logger_stub)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await list_optimizations(
+            project_id=7,
+            page=1,
+            per_page=20,
+            status_filter=None,
+            _=True,
+            db=_BrokenListOptimizationsUnexpectedDb(),
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "Failed to list optimizations"
+    _assert_sanitized_endpoint_error_log(
+        logger_stub,
+        "Unexpected error listing optimizations",
+        "prompt studio backend exploded",
+    )
+
+
+@pytest.mark.asyncio
 async def test_create_optimization_maps_database_error(monkeypatch):
     async def _allow_write_access(*_args, **_kwargs):
         return True
@@ -230,6 +264,27 @@ async def test_get_optimization_maps_database_error():
 
     assert exc_info.value.status_code == 500
     assert exc_info.value.detail == "Failed to get optimization"
+
+
+@pytest.mark.asyncio
+async def test_get_optimization_unexpected_error_log_is_sanitized(monkeypatch):
+    logger_stub = _EndpointLoggerStub()
+    monkeypatch.setattr(optimization_endpoint, "logger", logger_stub)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await get_optimization(
+            optimization_id=42,
+            db=_BrokenOptimizationLookupUnexpectedDb(),
+            user_context={"user_id": "tester", "is_admin": False},
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "Failed to get optimization"
+    _assert_sanitized_endpoint_error_log(
+        logger_stub,
+        "Unexpected error getting optimization",
+        "prompt studio backend exploded",
+    )
 
 
 @pytest.mark.asyncio
