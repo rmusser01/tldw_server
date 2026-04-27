@@ -475,6 +475,52 @@ async def test_outputs_create_directory_failure_log_is_sanitized(monkeypatch):
     assert "/private/generated-outputs" not in logged
 
 
+@pytest.mark.asyncio
+async def test_outputs_create_tts_generation_failure_log_is_sanitized(monkeypatch):
+    class _Template:
+        id = 1
+        name = "Audio Template"
+        body = "hello"
+        type = "tts_audio"
+        format = "mp3"
+
+    class _CollectionsDB:
+        def get_output_template(self, _template_id: int):
+            return _Template()
+
+    class _OutputDir:
+        def mkdir(self, *args: Any, **kwargs: Any) -> None:
+            return None
+
+    async def _raise_tts_failure(*args: Any, **kwargs: Any) -> None:
+        raise RuntimeError("tts backend exploded at /private/output-audio.mp3")
+
+    logger = _LoggerStub()
+    monkeypatch.setattr(outputs_endpoint, "logger", logger)
+    monkeypatch.setattr(outputs_endpoint, "render_output_template", lambda *_args: "rendered")
+    monkeypatch.setattr(outputs_endpoint, "_outputs_dir_for_user", lambda _user_id: _OutputDir())
+    monkeypatch.setattr(outputs_endpoint, "_write_tts_audio_file", _raise_tts_failure)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await outputs_endpoint.create_output(
+            payload=outputs_endpoint.OutputCreateRequest(
+                template_id=1,
+                data={"items": []},
+                title="demo",
+            ),
+            current_user=User(id=123, username="tester", email=None, is_active=True),
+            cdb=_CollectionsDB(),
+            media_db=object(),
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "tts_generation_failed"
+    assert logger.errors == ["outputs tts generation failed"]
+    logged = "\n".join(logger.errors)
+    assert "tts backend exploded" not in logged
+    assert "/private/output-audio.mp3" not in logged
+
+
 def test_outputs_preview_with_inline_data_and_generate(client_with_user, tmp_path):
 
     client = client_with_user

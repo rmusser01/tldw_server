@@ -315,7 +315,7 @@ async def create_output(
             except HTTPException:
                 raise
             except _OUTPUTS_NONCRITICAL_EXCEPTIONS as exc:
-                logger.error(f"TTS generation failed: {exc}")
+                logger.error("outputs tts generation failed")
                 raise HTTPException(status_code=500, detail="tts_generation_failed") from exc
         else:
             try:
