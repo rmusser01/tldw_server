@@ -1243,7 +1243,7 @@ async def websocket_voice_assistant(
         logger.info(f"Voice assistant WebSocket disconnected: session={session_id}")
 
     except (AttributeError, OSError, RuntimeError, TypeError, ValueError, asyncio.TimeoutError) as e:
-        logger.error(f"Voice assistant WebSocket error: {e}")
+        logger.error("Voice assistant WebSocket error")
         try:
             await websocket.send_json(
                 WSErrorMessage(
