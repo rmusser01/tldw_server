@@ -1332,8 +1332,8 @@ async def create_transcription(
                     increment_counter(
                         "app_warning_events_total", labels={"component": "audio", "event": "tempfile_remove_failed"}
                     )
-                except _AUDIO_TRANSCRIPTIONS_NONCRITICAL_EXCEPTIONS as m_err:
-                    logger.debug(f"metrics increment failed (audio tempfile_remove_failed): error={m_err}")
+                except _AUDIO_TRANSCRIPTIONS_NONCRITICAL_EXCEPTIONS:
+                    logger.debug("metrics increment failed (audio tempfile_remove_failed)")
 
 
 @router.post(
