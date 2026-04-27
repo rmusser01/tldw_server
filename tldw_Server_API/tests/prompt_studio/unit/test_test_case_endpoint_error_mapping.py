@@ -50,19 +50,26 @@ class _LoggerStub:
     def exception(self, *args, **kwargs):
         self.exception_calls.append((args, kwargs))
 
+    def info(self, *_args, **_kwargs):
+        return None
+
 
 _SENSITIVE_MARKERS = (
     "duplicate case",
+    "duplicate generated cases",
     "duplicate upload case",
     "generic import exploded",
     "generic export exploded",
+    "generic generation exploded",
     "generic template exploded",
     "generic upload exploded",
     "driver failed",
     "invalid export filter",
+    "invalid generation payload",
     "invalid import payload",
     "invalid signature",
     "unexpected list exploded",
+    "project 7",
     "/private/tmp/prompt-studio-test-cases.db",
 )
 
@@ -174,6 +181,25 @@ class _FakeUploadFile:
         return self._content
 
 
+class _LimitImportTestCaseManager:
+    def __init__(self, _db):
+        pass
+
+    def get_test_case_stats(self, _project_id: int):
+        return {"total": 9}
+
+
+class _SuccessfulImportTestCaseIO:
+    def __init__(self, _manager):
+        pass
+
+    def import_from_csv(self, **_kwargs):
+        return 2, []
+
+    def import_from_json(self, **_kwargs):
+        return 2, []
+
+
 def _patch_test_case_dependencies(
     monkeypatch: pytest.MonkeyPatch,
     manager_exc: Exception,
@@ -211,6 +237,34 @@ def _patch_test_case_dependencies(
     return logger_stub
 
 
+def _patch_successful_import_dependencies(monkeypatch: pytest.MonkeyPatch) -> _LoggerStub:
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(test_cases_endpoint, "logger", logger_stub, raising=True)
+    monkeypatch.setattr(
+        test_cases_endpoint,
+        "TestCaseManager",
+        _LimitImportTestCaseManager,
+        raising=True,
+    )
+    monkeypatch.setattr(
+        test_cases_endpoint,
+        "TestCaseIO",
+        _SuccessfulImportTestCaseIO,
+        raising=True,
+    )
+
+    async def _allow_write_access(*_args, **_kwargs):
+        return True
+
+    monkeypatch.setattr(
+        test_cases_endpoint,
+        "require_project_write_access",
+        _allow_write_access,
+        raising=True,
+    )
+    return logger_stub
+
+
 def _patch_test_case_io(
     monkeypatch: pytest.MonkeyPatch,
     io_exc: Exception,
@@ -233,15 +287,16 @@ def _patch_test_case_generator(
     generator_exc: Exception,
     *,
     manager_exc: Exception | None = None,
-) -> None:
+) -> _LoggerStub:
     effective_manager_exc = manager_exc or DatabaseError("manager should not be called")
-    _patch_test_case_dependencies(monkeypatch, effective_manager_exc)
+    logger_stub = _patch_test_case_dependencies(monkeypatch, effective_manager_exc)
     monkeypatch.setattr(
         test_cases_endpoint,
         "TestCaseGenerator",
         lambda manager: _BrokenTestCaseGenerator(manager, generator_exc),
         raising=True,
     )
+    return logger_stub
 
 
 class _SecurityConfig:
@@ -506,6 +561,27 @@ async def test_import_test_cases_sanitizes_generic_error(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_import_test_cases_limit_warning_log_is_sanitized(monkeypatch):
+    logger_stub = _patch_successful_import_dependencies(monkeypatch)
+
+    response = await import_test_cases(
+        import_data=TestCaseImportRequest(
+            project_id=7,
+            format="json",
+            data='{"test_cases":[]}',
+        ),
+        db=object(),
+        security_config=_SecurityConfig(),
+        user_context={"user_id": "tester"},
+    )
+
+    assert response.success is True
+    assert response.data["imported"] == 2
+    assert response.data["total_test_cases"] == 11
+    _assert_sanitized_warning_log(logger_stub, "Import would exceed test case limit")
+
+
+@pytest.mark.asyncio
 async def test_import_test_cases_csv_upload_maps_conflict_error(monkeypatch):
     logger_stub = _patch_test_case_io(monkeypatch, ConflictError("duplicate upload case"))
 
@@ -622,7 +698,7 @@ async def test_export_test_cases_sanitizes_generic_error(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_generate_test_cases_maps_conflict_error(monkeypatch):
-    _patch_test_case_generator(monkeypatch, ConflictError("duplicate generated cases"))
+    logger_stub = _patch_test_case_generator(monkeypatch, ConflictError("duplicate generated cases"))
 
     with pytest.raises(HTTPException) as exc_info:
         await generate_test_cases(
@@ -640,3 +716,56 @@ async def test_generate_test_cases_maps_conflict_error(monkeypatch):
 
     assert exc_info.value.status_code == 409
     assert exc_info.value.detail == "duplicate generated cases"
+    _assert_sanitized_error_log(logger_stub, "Error generating test cases")
+
+
+@pytest.mark.asyncio
+async def test_generate_test_cases_sanitizes_value_error(monkeypatch):
+    logger_stub = _patch_test_case_generator(
+        monkeypatch,
+        ValueError("invalid generation payload /private/tmp/prompt-studio-test-cases.db"),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await generate_test_cases(
+            generate_request=TestCaseGenerateRequest(
+                project_id=7,
+                signature_id=2,
+                num_cases=2,
+                generation_strategy="diverse",
+            ),
+            _rate=True,
+            db=object(),
+            security_config=_SecurityConfig(),
+            user_context={"user_id": "tester"},
+        )
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail == "Invalid test case generation request"
+    _assert_sanitized_warning_log(logger_stub, "Invalid test case generation request")
+
+
+@pytest.mark.asyncio
+async def test_generate_test_cases_sanitizes_generic_error(monkeypatch):
+    logger_stub = _patch_test_case_generator(
+        monkeypatch,
+        RuntimeError("generic generation exploded /private/tmp/prompt-studio-test-cases.db"),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await generate_test_cases(
+            generate_request=TestCaseGenerateRequest(
+                project_id=7,
+                signature_id=2,
+                num_cases=2,
+                generation_strategy="diverse",
+            ),
+            _rate=True,
+            db=object(),
+            security_config=_SecurityConfig(),
+            user_context={"user_id": "tester"},
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "Failed to generate test cases"
+    _assert_sanitized_error_log(logger_stub, "Error generating test cases")

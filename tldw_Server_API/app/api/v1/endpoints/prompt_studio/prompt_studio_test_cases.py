@@ -680,7 +680,7 @@ async def import_test_cases(
         # Check if we exceeded the limit
         new_total = current_count + imported
         if new_total > security_config.max_test_cases:
-            logger.warning(f"Import would exceed test case limit for project {import_data.project_id}")
+            logger.warning("Import would exceed test case limit")
 
         logger.info(f"User {user_context['user_id']} imported {imported} test cases")
 
@@ -1087,19 +1087,19 @@ async def generate_test_cases(
         )
 
     except ValueError as e:
-        logger.warning("Invalid test case generation request: {}", e)
+        logger.warning("Invalid test case generation request")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid test case generation request"
         ) from e
     except (DatabaseError, InputError, ConflictError) as e:
-        logger.error(f"Error generating test cases: {e}")
+        logger.error("Error generating test cases")
         raise map_db_error_to_http(
             e,
             default_detail="Failed to generate test cases",
         ) from e
     except PROMPT_STUDIO_TEST_CASE_EXCEPTIONS as e:
-        logger.error(f"Error generating test cases: {e}")
+        logger.error("Error generating test cases")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to generate test cases"
