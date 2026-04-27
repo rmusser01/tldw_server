@@ -103,7 +103,7 @@ class MessageStore:
 
         msg_id = msg_data.get('id') or self._db._generate_uuid()
 
-        required_fields = ['conversation_id', 'sender', 'content']
+        required_fields = ['conversation_id', 'sender']
         for field in required_fields:
             if field not in msg_data:
                 raise InputError(f"Required field '{field}' is missing for message.")  # noqa: TRY003
@@ -147,7 +147,7 @@ class MessageStore:
         try:
             with self._db.transaction():
                 conv_cursor = self._db.execute_query(
-                    "SELECT 1 FROM conversations WHERE id = ? AND deleted = 0",
+                    "SELECT 1 FROM conversations WHERE id = ? AND deleted = FALSE",
                     (msg_data['conversation_id'],),
                 )
                 if not conv_cursor.fetchone():
@@ -232,7 +232,7 @@ class MessageStore:
 
     def get_message_conversation_id(self, message_id: str) -> str | None:
         """Return the conversation_id for a message if it exists and is not deleted."""
-        query = "SELECT conversation_id FROM messages WHERE id = ? AND deleted = 0"
+        query = "SELECT conversation_id FROM messages WHERE id = ? AND deleted = FALSE"
         try:
             cursor = self._db.execute_query(query, (message_id,))
             row = cursor.fetchone()
@@ -267,7 +267,7 @@ class MessageStore:
             "m.version, m.client_id, m.deleted "
             "FROM messages m "
             "JOIN conversations c ON c.id = m.conversation_id "
-            "WHERE m.id = ? AND m.deleted = 0 AND c.deleted = 0"
+            "WHERE m.id = ? AND m.deleted = FALSE AND c.deleted = FALSE"
         )
         try:
             cursor = self._db.execute_query(query, (message_id,))
@@ -303,7 +303,7 @@ class MessageStore:
             raise InputError("order_by_timestamp must be 'ASC' or 'DESC'.")  # noqa: TRY003
 
         # The new query joins with conversations to check its 'deleted' status.
-        delete_clause = "" if include_deleted else "AND m.deleted = 0"
+        delete_clause = "" if include_deleted else "AND m.deleted = FALSE"
 
         query = """
             SELECT m.id, m.conversation_id, m.parent_message_id, m.sender, m.content,
@@ -313,7 +313,7 @@ class MessageStore:
             JOIN conversations c ON m.conversation_id = c.id
             WHERE m.conversation_id = ?
               {delete_clause}
-              AND c.deleted = 0
+              AND c.deleted = FALSE
             ORDER BY m.timestamp {order_by_timestamp}
             LIMIT ? OFFSET ?
         """.format_map(locals())  # nosec B608
@@ -340,7 +340,7 @@ class MessageStore:
             "SELECT COUNT(1) FROM messages m "
             "JOIN conversations c ON m.conversation_id = c.id "
             "WHERE m.conversation_id = ? AND m.parent_message_id IS NULL "
-            "AND m.deleted = 0 AND c.deleted = 0"
+            "AND m.deleted = FALSE AND c.deleted = FALSE"
         )
         try:
             cursor = self._db.execute_query(query, (conversation_id,))
@@ -372,8 +372,8 @@ class MessageStore:
             JOIN conversations c ON m.conversation_id = c.id
             WHERE m.conversation_id = ?
               AND m.parent_message_id IS NULL
-              AND m.deleted = 0
-              AND c.deleted = 0
+              AND m.deleted = FALSE
+              AND c.deleted = FALSE
             ORDER BY m.timestamp {order_by_timestamp}
             LIMIT ? OFFSET ?
         """.format_map(locals())  # nosec B608
@@ -409,8 +409,8 @@ class MessageStore:
             JOIN conversations c ON m.conversation_id = c.id
             WHERE m.conversation_id = ?
               AND m.parent_message_id IN ({placeholders})
-              AND m.deleted = 0
-              AND c.deleted = 0
+              AND m.deleted = FALSE
+              AND c.deleted = FALSE
             ORDER BY m.timestamp {order_by_timestamp}
         """.format_map(locals())  # nosec B608
         params = [conversation_id, *parent_ids]
@@ -549,7 +549,7 @@ class MessageStore:
         where_values = [message_id, expected_version]
         final_params_for_execute = tuple(current_params_for_set_clause + where_values)
 
-        query = f"UPDATE messages SET {', '.join(current_fields_to_update_sql)} WHERE id = ? AND version = ? AND deleted = 0"  # nosec B608
+        query = f"UPDATE messages SET {', '.join(current_fields_to_update_sql)} WHERE id = ? AND version = ? AND deleted = FALSE"  # nosec B608
 
         try:
             with self._db.transaction() as conn:
@@ -620,7 +620,7 @@ class MessageStore:
         now = self._db._get_current_utc_timestamp_iso()
         next_version_val = expected_version + 1
 
-        query = "UPDATE messages SET deleted = 1, last_modified = ?, version = ?, client_id = ? WHERE id = ? AND version = ? AND deleted = 0"
+        query = "UPDATE messages SET deleted = TRUE, last_modified = ?, version = ?, client_id = ? WHERE id = ? AND version = ? AND deleted = FALSE"
         params = (now, next_version_val, self._db.client_id, message_id, expected_version)
 
         try:
@@ -722,15 +722,16 @@ class MessageStore:
                 logger.error("PostgreSQL FTS search failed for messages term '{}': {}", content_query, exc)
                 raise
 
-        safe_search_term = f'"{content_query}"'
+        safe_literal = content_query.replace('"', '""')
+        safe_search_term = f'"{safe_literal}"' if '"' in content_query else safe_literal
         base_query = """
                      SELECT m.*
                      FROM messages_fts, messages m
                      WHERE messages_fts.rowid = m.rowid \
                        AND messages_fts MATCH ? \
-                       AND m.deleted = 0 \
+                       AND m.deleted = FALSE \
                      """
-        params_list = [content_query]
+        params_list = [safe_search_term]
         if conversation_id:
             base_query += " AND m.conversation_id = ?"
             params_list.append(conversation_id)
@@ -742,7 +743,7 @@ class MessageStore:
             cursor = self._db.execute_query(base_query, tuple(params_list))
             return [dict(row) for row in cursor.fetchall()]
         except CharactersRAGDBError as e:
-            logger.error(f"Error searching messages for content '{safe_search_term}': {e}")
+            logger.error("Error searching messages for content '{}': {}", safe_search_term, e)
             raise
 
     # ------------------------------------------------------------------
@@ -1041,11 +1042,11 @@ class MessageStore:
         base_query = (
             "SELECT COUNT(1) FROM messages m "
             "JOIN conversations c ON m.conversation_id = c.id "
-            "WHERE m.conversation_id = ? AND c.deleted = 0"
+            "WHERE m.conversation_id = ? AND c.deleted = FALSE"
         )
         params = [conversation_id]
         if not include_deleted:
-            base_query += " AND m.deleted = 0"
+            base_query += " AND m.deleted = FALSE"
         try:
             cursor = self._db.execute_query(base_query, tuple(params))
             row = cursor.fetchone()
@@ -1082,10 +1083,10 @@ class MessageStore:
             f"SELECT m.conversation_id, COUNT(1) as cnt "  # nosec B608
             f"FROM messages m "
             f"JOIN conversations c ON m.conversation_id = c.id "
-            f"WHERE m.conversation_id IN ({placeholders}) AND c.deleted = 0"
+            f"WHERE m.conversation_id IN ({placeholders}) AND c.deleted = FALSE"
         )
         if not include_deleted:
-            base_query += " AND m.deleted = 0"
+            base_query += " AND m.deleted = FALSE"
         base_query += " GROUP BY m.conversation_id"
         try:
             cursor = self._db.execute_query(base_query, tuple(conversation_ids))
@@ -1110,7 +1111,7 @@ class MessageStore:
         query = (
             "SELECT m.id, m.timestamp, m.content, m.sender "
             "FROM messages m JOIN conversations c ON m.conversation_id = c.id "
-            "WHERE m.conversation_id = ? AND m.deleted = 0 AND c.deleted = 0 "
+            "WHERE m.conversation_id = ? AND m.deleted = FALSE AND c.deleted = FALSE "
             "ORDER BY m.timestamp DESC LIMIT 1"
         )
         try:
@@ -1152,7 +1153,7 @@ class MessageStore:
         query = (
             "SELECT COUNT(1) FROM messages m "
             "JOIN conversations c ON m.conversation_id = c.id "
-            "WHERE m.conversation_id = ? AND m.deleted = 0 AND c.deleted = 0 "
+            "WHERE m.conversation_id = ? AND m.deleted = FALSE AND c.deleted = FALSE "
             "AND m.timestamp > ?"
         )
         try:

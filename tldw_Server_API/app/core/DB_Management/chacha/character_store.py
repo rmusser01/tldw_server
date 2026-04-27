@@ -1,3 +1,10 @@
+"""Character card persistence operations extracted from ``ChaChaNotes_DB``.
+
+This store owns character-card CRUD, search, tag normalization, and lifecycle
+updates while delegating connection, transaction, serialization, and backend
+adapter behavior to the parent ``CharactersRAGDB`` instance.
+"""
+
 from __future__ import annotations
 
 import json
@@ -36,6 +43,16 @@ class CharacterStore:
 
     def __init__(self, db: CharactersRAGDB) -> None:
         self._db = db
+
+    def _deleted_literal(self, deleted: bool) -> str:
+        """Return a backend-safe SQL literal for soft-delete predicates."""
+        if self._db.backend_type == BackendType.POSTGRESQL:
+            return "TRUE" if deleted else "FALSE"
+        return "1" if deleted else "0"
+
+    def _deleted_value(self, deleted: bool) -> bool | int:
+        """Return the backend-native value for a soft-delete flag."""
+        return deleted if self._db.backend_type == BackendType.POSTGRESQL else int(deleted)
 
     # ------------------------------------------------------------------
     # Character card creation
@@ -200,7 +217,7 @@ class CharacterStore:
         if include_deleted:
             params = (character_id,)
         else:
-            query += " AND deleted = 0"
+            query += f" AND deleted = {self._deleted_literal(False)}"
             params = (character_id,)
         try:
             cursor = self._db.execute_query(query, params)
@@ -229,9 +246,9 @@ class CharacterStore:
         Raises:
             CharactersRAGDBError: For database errors during fetching.
         """
-        query = "SELECT * FROM character_cards WHERE name = ? AND deleted = 0"
+        query = "SELECT * FROM character_cards WHERE name = ? AND deleted = ?"
         try:
-            cursor = self._db.execute_query(query, (name,))
+            cursor = self._db.execute_query(query, (name, self._deleted_value(False)))
             row = cursor.fetchone()
             return self._db._deserialize_row_fields(row, self._db._CHARACTER_CARD_JSON_FIELDS)
         except CharactersRAGDBError as e:
@@ -241,7 +258,7 @@ class CharacterStore:
                 )
                 try:
                     self._db.ensure_character_tables_ready()
-                    cursor = self._db.execute_query(query, (name,))
+                    cursor = self._db.execute_query(query, (name, self._deleted_value(False)))
                     row = cursor.fetchone()
                     return self._db._deserialize_row_fields(row, self._db._CHARACTER_CARD_JSON_FIELDS)
                 except (CharactersRAGDBError, SchemaError):
@@ -277,9 +294,9 @@ class CharacterStore:
         Raises:
             CharactersRAGDBError: For database errors during listing.
         """
-        query = "SELECT * FROM character_cards WHERE deleted = 0 ORDER BY name LIMIT ? OFFSET ?"
+        query = "SELECT * FROM character_cards WHERE deleted = ? ORDER BY name LIMIT ? OFFSET ?"
         try:
-            cursor = self._db.execute_query(query, (limit, offset))
+            cursor = self._db.execute_query(query, (self._deleted_value(False), limit, offset))
             rows = cursor.fetchall()
             return [self._db._deserialize_row_fields(row, self._db._CHARACTER_CARD_JSON_FIELDS) for row in rows if row]
         except CharactersRAGDBError as e:
@@ -744,15 +761,15 @@ class CharacterStore:
                 # Construct the final query
                 final_update_query = (
                     f"UPDATE character_cards SET {', '.join(set_clauses_sql)} "  # nosec B608
-                    "WHERE id = ? AND version = ? AND deleted = 0"
+                    f"WHERE id = ? AND version = ? AND deleted = {self._deleted_literal(False)}"
                 )
 
                 # WHERE clause parameters
                 where_params: list[Any] = [character_id, expected_version]
                 final_params = tuple(params_for_set_clause + where_params)
 
-                logger.debug(f"Executing SINGLE character update query: {final_update_query}")
-                logger.debug(f"Params: {final_params}")
+                logger.debug("Executing SINGLE character update query: {}", final_update_query)
+                logger.debug("Character update parameter count: {}", len(final_params))
 
                 cursor = conn.execute(final_update_query, final_params)
                 logger.debug(f"Character Update executed, rowcount: {cursor.rowcount}")
@@ -902,10 +919,18 @@ class CharacterStore:
         next_version_val = expected_version + 1
 
         query = (
-            "UPDATE character_cards SET deleted = 1, last_modified = ?, version = ?, "
-            "client_id = ? WHERE id = ? AND version = ? AND deleted = 0"
+            "UPDATE character_cards SET deleted = ?, last_modified = ?, version = ?, "
+            "client_id = ? WHERE id = ? AND version = ? AND deleted = ?"
         )
-        params = (now, next_version_val, self._db.client_id, character_id, expected_version)
+        params = (
+            self._deleted_value(True),
+            now,
+            next_version_val,
+            self._db.client_id,
+            character_id,
+            expected_version,
+            self._deleted_value(False),
+        )
 
         try:
             with self._db.transaction() as conn:
@@ -1038,10 +1063,18 @@ class CharacterStore:
         next_version_val = expected_version + 1
 
         query = (
-            "UPDATE character_cards SET deleted = 0, last_modified = ?, version = ?, "
-            "client_id = ? WHERE id = ? AND version = ? AND deleted = 1"
+            "UPDATE character_cards SET deleted = ?, last_modified = ?, version = ?, "
+            "client_id = ? WHERE id = ? AND version = ? AND deleted = ?"
         )
-        params = (now, next_version_val, self._db.client_id, character_id, expected_version)
+        params = (
+            self._deleted_value(False),
+            now,
+            next_version_val,
+            self._db.client_id,
+            character_id,
+            expected_version,
+            self._deleted_value(True),
+        )
 
         try:
             with self._db.transaction() as conn:
@@ -1248,18 +1281,19 @@ class CharacterStore:
 
         # Escape embedded quotes to avoid breaking the literal phrase wrapper
         safe_literal = search_term.replace('"', '""')
-        safe_search_term = f'"{safe_literal}"'
+        safe_search_term = f'"{safe_literal}"' if '"' in search_term else safe_literal
+        deleted_false = self._deleted_literal(False)
         query = """
                 SELECT cc.*
                 FROM character_cards_fts, character_cards cc
                 WHERE character_cards_fts.rowid = cc.id
                   AND character_cards_fts MATCH ?
-                  AND cc.deleted = 0
+                  AND cc.deleted = {deleted_false}
                 ORDER BY cc.last_modified DESC
                 LIMIT ?
-                """
+                """.format_map(locals())  # nosec B608
         try:
-            cursor = self._db.execute_query(query, (search_term, limit))
+            cursor = self._db.execute_query(query, (safe_search_term, limit))
             rows = cursor.fetchall()
             return [
                 self._db._deserialize_row_fields(row, self._db._CHARACTER_CARD_JSON_FIELDS)
@@ -1267,7 +1301,7 @@ class CharacterStore:
                 if row
             ]
         except CharactersRAGDBError as e:
-            logger.error(f"Error searching character cards for '{safe_search_term}': {e}")
+            logger.error("Error searching character cards for '{}': {}", safe_search_term, e)
             raise
 
     def search_character_cards_by_tags(self, tag_keywords: list[str], limit: int = 10) -> list[dict[str, Any]]:
@@ -1302,11 +1336,17 @@ class CharacterStore:
 
         # Check if SQLite supports JSON functions
         if self._check_json_support():
-            return self._search_cards_by_tags_json(normalized_tags, limit)
-        else:
-            # Fallback to loading and filtering in Python (original approach but optimized)
-            logger.warning("SQLite JSON functions not available, using fallback tag search method")
-            return self._search_cards_by_tags_fallback(normalized_tags, limit)
+            try:
+                return self._search_cards_by_tags_json(normalized_tags, limit)
+            except CharactersRAGDBError as exc:
+                logger.warning(
+                    "SQLite JSON tag search failed; falling back to Python tag filtering: {}",
+                    exc,
+                )
+
+        # Fallback to loading and filtering in Python (original approach but optimized).
+        logger.warning("SQLite JSON functions not available, using fallback tag search method")
+        return self._search_cards_by_tags_fallback(normalized_tags, limit)
 
     # ------------------------------------------------------------------
     # Private helpers for tag search
@@ -1338,19 +1378,30 @@ class CharacterStore:
         try:
             # Build query with JSON_EACH to extract and check tags
             placeholders = ','.join('?' for _ in normalized_tags)
+            fallback_like_clauses = " OR ".join("LOWER(COALESCE(cc.tags, '')) LIKE ?" for _ in normalized_tags)
+            deleted_false = self._deleted_literal(False)
             query = """
                 SELECT DISTINCT cc.*
-                FROM character_cards cc,
-                     json_each(cc.tags) je
-                WHERE cc.deleted = 0
+                FROM character_cards cc
+                WHERE cc.deleted = {deleted_false}
                   AND cc.tags IS NOT NULL
                   AND cc.tags != 'null'
-                  AND lower(trim(je.value)) IN ({placeholders})
+                  AND (
+                      (
+                          json_valid(cc.tags)
+                          AND EXISTS (
+                              SELECT 1
+                              FROM json_each(cc.tags) je
+                              WHERE lower(trim(je.value)) IN ({placeholders})
+                          )
+                      )
+                      OR {fallback_like_clauses}
+                  )
                 ORDER BY cc.name
                 LIMIT ?
             """.format_map(locals())  # nosec B608
 
-            params: list[Any] = normalized_tags + [limit]
+            params: list[Any] = normalized_tags + [f"%{tag}%" for tag in normalized_tags] + [limit]
             cursor = self._db.execute_query(query, params)
             rows = cursor.fetchall()
 
@@ -1386,8 +1437,8 @@ class CharacterStore:
 
             while len(results) < limit:
                 # Load cards in batches
-                query = "SELECT * FROM character_cards WHERE deleted = 0 ORDER BY name LIMIT ? OFFSET ?"
-                cursor = self._db.execute_query(query, (batch_size, offset))
+                query = "SELECT * FROM character_cards WHERE deleted = ? ORDER BY name LIMIT ? OFFSET ?"
+                cursor = self._db.execute_query(query, (self._deleted_value(False), batch_size, offset))
                 batch_rows = cursor.fetchall()
 
                 if not batch_rows:

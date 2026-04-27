@@ -81,7 +81,7 @@ def sample_card_data(name="Test Character", **kwargs) -> dict:
     return data
 
 
-def normalize_expected_character_tags(tags: Any) -> set[str]:
+def normalize_expected_character_tags(tags: Any) -> list[str]:
     """Mirror the public contract for stored character tags."""
     if isinstance(tags, str):
         try:
@@ -90,11 +90,27 @@ def normalize_expected_character_tags(tags: Any) -> set[str]:
             tags = [tags]
     if not isinstance(tags, list):
         tags = [] if tags is None else [tags]
-    return {
-        str(tag).strip()
-        for tag in tags
-        if tag is not None and str(tag).strip()
-    }
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for tag in tags:
+        if tag is None:
+            continue
+        tag_str = str(tag).strip()
+        if not tag_str or tag_str in seen:
+            continue
+        seen.add(tag_str)
+        normalized.append(tag_str)
+
+    folder_tag: str | None = None
+    non_folder_tags: list[str] = []
+    for tag in normalized:
+        if tag.startswith("__tldw_folder_id:"):
+            folder_tag = tag
+            continue
+        non_folder_tags.append(tag)
+    if folder_tag:
+        non_folder_tags.append(folder_tag)
+    return non_folder_tags
 
 
 # --- Helper for sample conversation data ---
@@ -533,7 +549,7 @@ class TestCharacterCardAddition:
                 try:
                     expected_deserialized = json.loads(original_value)
                     if key == "tags":
-                        assert set(retrieved_value or []) == normalize_expected_character_tags(
+                        assert list(retrieved_value or []) == normalize_expected_character_tags(
                             expected_deserialized
                         )
                     else:
@@ -544,7 +560,7 @@ class TestCharacterCardAddition:
                 assert retrieved_value is None
             elif isinstance(original_value, list) and key in ["tags", "alternate_greetings"]:
                 if key == "tags":
-                    assert set(retrieved_value or []) == normalize_expected_character_tags(original_value)
+                    assert list(retrieved_value or []) == normalize_expected_character_tags(original_value)
                 else:
                     assert set(retrieved_value or []) == set(original_value or [])
             else:  # dicts for extensions
@@ -762,7 +778,7 @@ class TestCharacterCardUpdate:
             def execute(self, query: str, params: tuple | list | dict | None = None):
                 if query.startswith("SELECT deleted, version, last_modified FROM character_cards WHERE id = ?"):
                     return FakeCursor(rows=[{"deleted": 1, "version": deleted_version, "last_modified": deleted_at}])
-                if query.startswith("UPDATE character_cards SET deleted = 0"):
+                if query.startswith("UPDATE character_cards SET deleted = ?"):
                     return FakeCursor(rowcount=0)
                 if query.startswith("SELECT version, deleted FROM character_cards WHERE id = ?"):
                     return FakeCursor(rows=[{"version": deleted_version + 1, "deleted": 0}])
@@ -841,19 +857,19 @@ class TestCharacterCardUpdate:
                     try:
                         expected_deserialized = json.loads(value)
                         if key == "tags":
-                            assert set(retrieved_value or []) == normalize_expected_character_tags(
+                            assert list(retrieved_value or []) == normalize_expected_character_tags(
                                 expected_deserialized
                             )
                         else:
                             assert retrieved_value == expected_deserialized
                     except json.JSONDecodeError:
                         if key == "tags":
-                            assert set(retrieved_value or []) == normalize_expected_character_tags(value)
+                            assert list(retrieved_value or []) == normalize_expected_character_tags(value)
                         else:
                             assert retrieved_value is None
                 elif isinstance(value, list) and key in ["tags", "alternate_greetings"]:
                     if key == "tags":
-                        assert set(retrieved_value or []) == normalize_expected_character_tags(value)
+                        assert list(retrieved_value or []) == normalize_expected_character_tags(value)
                     else:
                         assert set(retrieved_value or []) == set(value or [])
                 else:
@@ -1214,8 +1230,8 @@ class TestMessageCRUD:
         with pytest.raises(InputError, match="Message must have text content or image data."):
             db.add_message({"conversation_id": conv_id_for_msg, "sender": "user", "content": None})  # type: ignore
 
-        # Case 2: 'content' key is missing entirely -> should hit "Required field 'content' is missing"
-        with pytest.raises(InputError, match="Required field 'content' is missing for message."):
+        # Case 2: 'content' key is missing entirely and no image is provided.
+        with pytest.raises(InputError, match="Message must have text content or image data."):
             db.add_message({"conversation_id": conv_id_for_msg, "sender": "user"})
 
     def test_add_message_image_without_mime_type_fails(self, db: CharactersRAGDB, conv_id_for_msg: str):

@@ -27,6 +27,10 @@ class NoteStore:
     def __init__(self, db: CharactersRAGDB) -> None:
         self._db = db
 
+    def _deleted_value(self, deleted: bool) -> bool | int:
+        """Return the backend-native value for a soft-delete flag."""
+        return deleted if self._db.backend_type == BackendType.POSTGRESQL else int(deleted)
+
     # ------------------------------------------------------------------
     # Note creation
     # ------------------------------------------------------------------
@@ -160,12 +164,16 @@ class NoteStore:
         results: list[dict[str, Any]] = []
         for batch in self._db._chunk_list(note_ids, self._db._SQLITE_PARAM_LIMIT):
             ph = ",".join(["?"] * len(batch))
-            deleted_clause = "" if include_deleted else " AND deleted = 0"
+            params: list[Any] = list(batch)
+            deleted_clause = ""
+            if not include_deleted:
+                deleted_clause = " AND deleted = ?"
+                params.append(self._deleted_value(False))
             query = (
                 f"SELECT id, title, content, created_at, last_modified, deleted, conversation_id "  # nosec B608
                 f"FROM notes WHERE id IN ({ph}){deleted_clause}"
             )
-            cur = self._db.execute_query(query, tuple(batch))
+            cur = self._db.execute_query(query, tuple(params))
             for row in cur.fetchall():
                 r = dict(row) if hasattr(row, "keys") else {
                     "id": row[0], "title": row[1], "content": row[2],
@@ -177,9 +185,13 @@ class NoteStore:
 
     def get_all_note_ids_for_graph(self, include_deleted: bool = True, limit: int = 500) -> list[str]:
         """Return note IDs ordered by last_modified DESC, id ASC. For seedless graph."""
-        deleted_clause = "" if include_deleted else " WHERE deleted = 0"
+        params: list[Any] = [limit]
+        deleted_clause = ""
+        if not include_deleted:
+            deleted_clause = " WHERE deleted = ?"
+            params.insert(0, self._deleted_value(False))
         query = f"SELECT id FROM notes{deleted_clause} ORDER BY last_modified DESC, id ASC LIMIT ?"  # nosec B608
-        cur = self._db.execute_query(query, (limit,))
+        cur = self._db.execute_query(query, tuple(params))
         return [row[0] for row in cur.fetchall()]
 
     def get_note_tag_edges(self, note_ids: list[str]) -> list[dict[str, Any]]:
@@ -193,9 +205,9 @@ class NoteStore:
                 f"SELECT nk.note_id, k.id AS keyword_id, k.keyword "  # nosec B608
                 f"FROM note_keywords nk "
                 f"JOIN keywords k ON k.id = nk.keyword_id "
-                f"WHERE nk.note_id IN ({ph}) AND k.deleted = 0"
+                f"WHERE nk.note_id IN ({ph}) AND k.deleted = ?"
             )
-            cur = self._db.execute_query(query, tuple(batch))
+            cur = self._db.execute_query(query, tuple([*batch, self._deleted_value(False)]))
             for row in cur.fetchall():
                 r = dict(row) if hasattr(row, "keys") else {
                     "note_id": row[0], "keyword_id": row[1], "keyword": row[2],
@@ -238,9 +250,11 @@ class NoteStore:
         """Count total notes for seedless query gate."""
         if include_deleted:
             query = "SELECT COUNT(*) FROM notes"
+            params: tuple[Any, ...] | None = None
         else:
-            query = "SELECT COUNT(*) FROM notes WHERE deleted = 0"
-        cur = self._db.execute_query(query)
+            query = "SELECT COUNT(*) FROM notes WHERE deleted = ?"
+            params = (self._deleted_value(False),)
+        cur = self._db.execute_query(query, params)
         return cur.fetchone()[0]
 
     def count_notes_per_tag(self) -> dict[int, int]:
@@ -248,11 +262,11 @@ class NoteStore:
         query = (
             "SELECT nk.keyword_id, COUNT(DISTINCT nk.note_id) AS cnt "
             "FROM note_keywords nk "
-            "JOIN notes n ON n.id = nk.note_id AND n.deleted = 0 "
-            "JOIN keywords k ON k.id = nk.keyword_id AND k.deleted = 0 "
+            "JOIN notes n ON n.id = nk.note_id AND n.deleted = ? "
+            "JOIN keywords k ON k.id = nk.keyword_id AND k.deleted = ? "
             "GROUP BY nk.keyword_id"
         )
-        cur = self._db.execute_query(query)
+        cur = self._db.execute_query(query, (self._deleted_value(False), self._deleted_value(False)))
         return {row[0]: row[1] for row in cur.fetchall()}
 
     def get_note_source_info(self, note_ids: list[str]) -> list[dict[str, Any]]:

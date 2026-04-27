@@ -126,6 +126,25 @@ def test_message_store_add_and_fetch_roundtrip(db):
     assert store.get_message_conversation_id(message_id) == conversation_id
 
 
+def test_message_store_adds_image_only_message(db):
+    store = db["store"]
+    conversation_id = db["conversation_id"]
+
+    message_id = store.add_message(
+        {
+            "conversation_id": conversation_id,
+            "sender": "user",
+            "image_data": b"image-only",
+            "image_mime_type": "image/png",
+        }
+    )
+
+    stored = store.get_message_by_id(message_id)
+    assert stored is not None
+    assert stored["content"] == ""
+    assert stored["image_data"] == b"image-only"
+
+
 def test_message_store_metadata_and_citations_roundtrip(db):
     store = db["store"]
     conversation_id = db["conversation_id"]

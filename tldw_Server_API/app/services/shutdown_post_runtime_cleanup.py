@@ -41,7 +41,7 @@ async def _reset_media_db_cache(
         _reset_media_db_cache_service()
         logger.info("App Shutdown: Media DB cache cleared")
     except import_exceptions as exc:
-        logger.debug(f"App Shutdown: Media DB cache cleanup skipped/failed: {exc}")
+        logger.debug("App Shutdown: Media DB cache cleanup skipped/failed: {}", exc)
 
 
 async def _shutdown_content_backend(
@@ -52,7 +52,7 @@ async def _shutdown_content_backend(
         _shutdown_content_backend_service()
         logger.info("App Shutdown: Content DB backend pool closed")
     except guard_exceptions as exc:
-        logger.debug(f"App Shutdown: Content backend pool close skipped/failed: {exc}")
+        logger.debug("App Shutdown: Content backend pool close skipped/failed: {}", exc)
 
 
 async def _close_managed_backend_registries(
@@ -63,7 +63,7 @@ async def _close_managed_backend_registries(
         _close_all_backends_service()
         logger.info("App Shutdown: Database backend registries cleared")
     except guard_exceptions as exc:
-        logger.debug(f"App Shutdown: Database backend registry cleanup skipped/failed: {exc}")
+        logger.debug("App Shutdown: Database backend registry cleanup skipped/failed: {}", exc)
 
 
 async def _close_test_db_connections(

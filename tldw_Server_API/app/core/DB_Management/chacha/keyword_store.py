@@ -27,6 +27,12 @@ class KeywordStore:
     def __init__(self, db: CharactersRAGDB) -> None:
         self._db = db
 
+    def _deleted_literal(self, deleted: bool) -> str:
+        """Return a backend-safe SQL literal for soft-delete predicates."""
+        if self._db.backend_type == BackendType.POSTGRESQL:
+            return "TRUE" if deleted else "FALSE"
+        return "1" if deleted else "0"
+
     # ------------------------------------------------------------------
     # Keyword CRUD
     # ------------------------------------------------------------------
@@ -95,7 +101,10 @@ class KeywordStore:
     def count_keywords(self) -> int:
         """Return count of active (non-deleted) keywords."""
         keyword_table = self._db._map_table_for_backend("keywords")
-        query = f"SELECT COUNT(*) AS cnt FROM {keyword_table} WHERE deleted = 0"  # nosec B608
+        query = (
+            f"SELECT COUNT(*) AS cnt FROM {keyword_table} "  # nosec B608
+            f"WHERE deleted = {self._deleted_literal(False)}"
+        )
         try:
             cursor = self._db.execute_query(query)
             row = cursor.fetchone()
@@ -158,7 +167,7 @@ class KeywordStore:
                     )
 
                 duplicate = conn.execute(
-                    f"SELECT id FROM {keyword_table} WHERE deleted = 0 AND keyword = ? AND id <> ? LIMIT 1",  # nosec B608
+                    f"SELECT id FROM {keyword_table} WHERE deleted = {self._deleted_literal(False)} AND keyword = ? AND id <> ? LIMIT 1",  # nosec B608
                     (normalized_text, keyword_id),
                 ).fetchone()
                 if duplicate:
@@ -172,7 +181,7 @@ class KeywordStore:
                     (
                         f"UPDATE {keyword_table} "  # nosec B608
                         f"SET keyword = ?, last_modified = ?, version = ?, client_id = ? "
-                        f"WHERE id = ? AND version = ? AND deleted = 0"
+                        f"WHERE id = ? AND version = ? AND deleted = {self._deleted_literal(False)}"
                     ),
                     (
                         normalized_text,
@@ -191,7 +200,7 @@ class KeywordStore:
                     )
 
                 refreshed = conn.execute(
-                    f"SELECT * FROM {keyword_table} WHERE id = ? AND deleted = 0",  # nosec B608
+                    f"SELECT * FROM {keyword_table} WHERE id = ? AND deleted = {self._deleted_literal(False)}",  # nosec B608
                     (keyword_id,),
                 ).fetchone()
                 if not refreshed:
@@ -350,8 +359,8 @@ class KeywordStore:
                 soft_delete_cursor = conn.execute(
                     (
                         f"UPDATE {keyword_table} "  # nosec B608
-                        f"SET deleted = 1, last_modified = ?, version = ?, client_id = ? "
-                        f"WHERE id = ? AND version = ? AND deleted = 0"
+                        f"SET deleted = {self._deleted_literal(True)}, last_modified = ?, version = ?, client_id = ? "
+                        f"WHERE id = ? AND version = ? AND deleted = {self._deleted_literal(False)}"
                     ),
                     (
                         now_iso,
@@ -467,10 +476,11 @@ class KeywordStore:
 
         keyword_table = self._db._map_table_for_backend("keywords")
         escaped = search_term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        deleted_false = self._deleted_literal(False)
         query = """
             SELECT k.*
             FROM {keyword_table} k
-            WHERE k.deleted = 0
+            WHERE k.deleted = {deleted_false}
               AND k.keyword LIKE ? ESCAPE '\\'
             ORDER BY k.last_modified DESC
             LIMIT ?
@@ -619,12 +629,13 @@ class KeywordStore:
     def get_keywords_for_conversation(self, conversation_id: str) -> list[dict[str, Any]]:
         keyword_table = self._db._map_table_for_backend("keywords")
         order_clause = self._db._case_insensitive_order_clause("k.keyword")
+        deleted_false = self._deleted_literal(False)
         query = """
                 SELECT k.* \
                 FROM {keyword_table} k \
                          JOIN conversation_keywords ck ON k.id = ck.keyword_id
                 WHERE ck.conversation_id = ? \
-                  AND k.deleted = 0 \
+                  AND k.deleted = {deleted_false} \
                 {order_clause}
                 """.format_map(locals())  # nosec B608
         cursor = self._db.execute_query(query, (conversation_id,))
@@ -637,12 +648,13 @@ class KeywordStore:
         keyword_table = self._db._map_table_for_backend("keywords")
         placeholders = ",".join(["?"] * len(conversation_ids))
         order_expr = self._db._case_insensitive_order_expression("k.keyword")
+        deleted_false = self._deleted_literal(False)
         query = """
                 SELECT ck.conversation_id as conversation_id, k.* \
                 FROM {keyword_table} k \
                          JOIN conversation_keywords ck ON k.id = ck.keyword_id
                 WHERE ck.conversation_id IN ({placeholders}) \
-                  AND k.deleted = 0 \
+                  AND k.deleted = {deleted_false} \
                 ORDER BY ck.conversation_id, {order_expr}
                 """.format_map(locals())  # nosec B608
         cursor = self._db.execute_query(query, tuple(conversation_ids))
@@ -658,15 +670,16 @@ class KeywordStore:
         return result
 
     def get_conversations_for_keyword(self, keyword_id: int, limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
+        deleted_false = self._deleted_literal(False)
         query = """
                 SELECT c.* \
                 FROM conversations c \
                          JOIN conversation_keywords ck ON c.id = ck.conversation_id
                 WHERE ck.keyword_id = ? \
-                  AND c.deleted = 0
+                  AND c.deleted = {deleted_false}
                 ORDER BY c.last_modified DESC LIMIT ? \
                 OFFSET ? \
-                """
+                """.format_map(locals())  # nosec B608
         cursor = self._db.execute_query(query, (keyword_id, limit, offset))
         return [dict(row) for row in cursor.fetchall()]
 
@@ -693,12 +706,13 @@ class KeywordStore:
     def get_keywords_for_collection(self, collection_id: int) -> list[dict[str, Any]]:
         keyword_table = self._db._map_table_for_backend("keywords")
         order_clause = self._db._case_insensitive_order_clause("k.keyword")
+        deleted_false = self._deleted_literal(False)
         query = """
                 SELECT k.* \
                 FROM {keyword_table} k \
                          JOIN collection_keywords ck ON k.id = ck.keyword_id
                 WHERE ck.collection_id = ? \
-                  AND k.deleted = 0 \
+                  AND k.deleted = {deleted_false} \
                 {order_clause}
                 """.format_map(locals())  # nosec B608
         cursor = self._db.execute_query(query, (collection_id,))
@@ -706,12 +720,13 @@ class KeywordStore:
 
     def get_collections_for_keyword(self, keyword_id: int, limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
         order_clause = self._db._case_insensitive_order_clause("kc.name")
+        deleted_false = self._deleted_literal(False)
         query = """
                 SELECT kc.* \
                 FROM keyword_collections kc \
                          JOIN collection_keywords ck ON kc.id = ck.collection_id
                 WHERE ck.keyword_id = ? \
-                  AND kc.deleted = 0
+                  AND kc.deleted = {deleted_false}
                 {order_clause} LIMIT ? \
                 OFFSET ? \
                 """.format_map(locals())  # nosec B608
@@ -731,12 +746,13 @@ class KeywordStore:
     def get_keywords_for_note(self, note_id: str) -> list[dict[str, Any]]:  # note_id is str
         keyword_table = self._db._map_table_for_backend("keywords")
         order_clause = self._db._case_insensitive_order_clause("k.keyword")
+        deleted_false = self._deleted_literal(False)
         query = """
                 SELECT k.* \
                 FROM {keyword_table} k \
                          JOIN note_keywords nk ON k.id = nk.keyword_id
                 WHERE nk.note_id = ? \
-                  AND k.deleted = 0 \
+                  AND k.deleted = {deleted_false} \
                 {order_clause}
                 """.format_map(locals())  # nosec B608
         cursor = self._db.execute_query(query, (note_id,))
@@ -748,6 +764,7 @@ class KeywordStore:
             return {}
         keyword_table = self._db._map_table_for_backend("keywords")
         order_clause = self._db._case_insensitive_order_clause("k.keyword")
+        deleted_false = self._deleted_literal(False)
         out: dict[str, list[dict[str, Any]]] = {nid: [] for nid in note_ids}
         # SQLite has a default variable cap of 999; keep a buffer to be safe.
         max_vars = 900
@@ -759,7 +776,7 @@ class KeywordStore:
                     FROM {keyword_table} k \
                              JOIN note_keywords nk ON k.id = nk.keyword_id
                     WHERE nk.note_id IN ({placeholders}) \
-                      AND k.deleted = 0 \
+                      AND k.deleted = {deleted_false} \
                     {order_clause}
                     """.format_map(locals())  # nosec B608
             cursor = self._db.execute_query(query, tuple(batch))
@@ -773,14 +790,15 @@ class KeywordStore:
         return out
 
     def get_notes_for_keyword(self, keyword_id: int, limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
+        deleted_false = self._deleted_literal(False)
         query = """
                 SELECT n.* \
                 FROM notes n \
                          JOIN note_keywords nk ON n.id = nk.note_id
                 WHERE nk.keyword_id = ? \
-                  AND n.deleted = 0
+                  AND n.deleted = {deleted_false}
                 ORDER BY n.last_modified DESC LIMIT ? \
                 OFFSET ? \
-                """
+                """.format_map(locals())  # nosec B608
         cursor = self._db.execute_query(query, (keyword_id, limit, offset))
         return [dict(row) for row in cursor.fetchall()]

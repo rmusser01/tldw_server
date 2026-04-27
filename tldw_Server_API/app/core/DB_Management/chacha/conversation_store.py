@@ -1379,13 +1379,15 @@ class ConversationStore:
 
         normalized_limit = max(1, int(limit))
         normalized_offset = max(0, int(offset))
-        total_weight = (bm25_weight or 0.0) + (recency_weight or 0.0)
+        bm25_weight = max(bm25_weight or 0.0, 0.0)
+        recency_weight = max(recency_weight or 0.0, 0.0)
+        total_weight = bm25_weight + recency_weight
         if total_weight <= 0:
             normalized_bm25_weight = 0.65
             normalized_recency_weight = 0.35
         else:
-            normalized_bm25_weight = (bm25_weight or 0.0) / total_weight
-            normalized_recency_weight = (recency_weight or 0.0) / total_weight
+            normalized_bm25_weight = bm25_weight / total_weight
+            normalized_recency_weight = recency_weight / total_weight
 
         keyword_table = self._db._map_table_for_backend("keywords")
         use_deleted_text_search = safe_query is not None and (include_deleted or deleted_only)

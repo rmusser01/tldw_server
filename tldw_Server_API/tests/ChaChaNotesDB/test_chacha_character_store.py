@@ -167,6 +167,16 @@ class TestCharacterStoreSearch:
         assert len(results) >= 1
         assert any("Searchable" in r["name"] for r in results)
 
+    def test_search_by_term_uses_escaped_phrase(self, store):
+        store.add_character_card({"name": 'Quoted "Hero"'})
+        results = store.search_character_cards('Quoted "Hero"')
+        assert any(row["name"] == 'Quoted "Hero"' for row in results)
+
+    def test_tag_search_handles_legacy_non_json_tags(self, store):
+        card_id = store.add_character_card({"name": "Legacy Tagged", "tags": "legacy-tag"})
+        results = store.search_character_cards_by_tags(["legacy-tag"])
+        assert {row["id"] for row in results} == {card_id}
+
     def test_manage_tags_rename_updates_tag_search_results(self, store):
         first_id = store.add_character_card({"name": "Tagged One", "tags": ["old-tag", "shared"]})
         second_id = store.add_character_card({"name": "Tagged Two", "tags": ["shared"]})

@@ -76,7 +76,7 @@ def _fresh_client(test_mode: bool = False, user_db_base_dir: Optional[str] = Non
 
 def _managed_sqlite_backend_targets() -> set[str]:
     registry = getattr(backend_factory, "_sqlite_backend_registry", {})
-    return {str(signature[1]) for signature in registry.keys()}
+    return {str(signature[1]) for signature in registry}
 
 
 def _force_backend(pg: bool):
