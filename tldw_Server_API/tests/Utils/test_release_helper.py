@@ -558,6 +558,22 @@ def test_orchestrate_release_resumes_from_remote_tag_without_github_release() ->
     )
 
 
+def test_orchestrate_release_local_release_commit_only_reads_head_sha_once() -> None:
+    runner = StubReleaseRunner()
+    runner.release_state = "local_release_commit_only"
+    runner.head_sha = "release-commit-on-head"
+
+    result = orchestrate_release(
+        bump="patch",
+        runner=runner,
+        pyproject_path=REPO_ROOT / "pyproject.toml",
+        ci_gates_doc_path=REPO_ROOT / "Docs" / "Development" / "CI_REQUIRED_GATES.md",
+    )
+
+    assert result["release_commit_sha"] == "release-commit-on-head"
+    assert runner.operations.count("get_head_sha") == 1
+
+
 def test_orchestrate_release_reports_dry_run_without_created_release() -> None:
     runner = StubReleaseRunner()
     runner.dry_run = True

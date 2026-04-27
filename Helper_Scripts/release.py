@@ -309,13 +309,31 @@ def update_readme_release_references(readme_text: str, version: str) -> str:
 def update_mkdocs_version_metadata(mkdocs_text: str, version: str) -> str:
     """Update the MkDocs version and copyright metadata."""
 
-    version_pattern = r"(?m)^(  version: )v?\d+\.\d+\.\d+$"
+    lines = mkdocs_text.splitlines()
+    extra_index = next(
+        (index for index, line in enumerate(lines) if line.strip() == "extra:"),
+        None,
+    )
+    if extra_index is None:
+        raise ValueError("Missing MkDocs extra anchor")
 
-    updated_text, version_count = re.subn(version_pattern, rf"\g<1>v{version}", mkdocs_text)
-    if version_count == 0:
-        raise ValueError("Missing MkDocs version anchor")
+    extra_indent = len(lines[extra_index]) - len(lines[extra_index].lstrip(" "))
+    version_updated = False
+    for index in range(extra_index + 1, len(lines)):
+        line = lines[index]
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        indent = len(line) - len(line.lstrip(" "))
+        if indent <= extra_indent:
+            break
+        if stripped.startswith("version:"):
+            lines[index] = f"{line[:indent]}version: v{version}"
+            version_updated = True
+            break
+    if not version_updated:
+        raise ValueError("Missing MkDocs extra.version anchor")
 
-    lines = updated_text.splitlines()
     copyright_index = next(
         (index for index, line in enumerate(lines) if line.strip() == "copyright: |"),
         None,
@@ -323,17 +341,20 @@ def update_mkdocs_version_metadata(mkdocs_text: str, version: str) -> str:
     if copyright_index is None or copyright_index + 1 >= len(lines):
         raise ValueError("Missing MkDocs copyright anchor")
 
-    copyright_line = lines[copyright_index + 1]
-    updated_copyright_line, copyright_count = re.subn(
-        r"v?\d+\.\d+\.\d+",
-        f"v{version}",
-        copyright_line,
-        count=1,
-    )
-    if copyright_count == 0 or updated_copyright_line == copyright_line:
-        raise ValueError("Missing MkDocs copyright anchor")
+    copyright_indent = len(lines[copyright_index]) - len(lines[copyright_index].lstrip(" "))
+    copyright_count = 0
+    for index in range(copyright_index + 1, len(lines)):
+        line = lines[index]
+        stripped = line.strip()
+        if stripped:
+            indent = len(line) - len(line.lstrip(" "))
+            if indent <= copyright_indent:
+                break
+        lines[index], count = re.subn(r"v?\d+\.\d+\.\d+", f"v{version}", line)
+        copyright_count += count
+    if copyright_count == 0:
+        raise ValueError("Missing MkDocs copyright version anchor")
 
-    lines[copyright_index + 1] = updated_copyright_line
     updated_text = "\n".join(lines)
     if mkdocs_text.endswith("\n"):
         updated_text += "\n"

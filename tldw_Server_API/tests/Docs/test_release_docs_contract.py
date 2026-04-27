@@ -82,6 +82,36 @@ def test_mkdocs_version_metadata_does_not_depend_on_copyright_url() -> None:
     assert "v0.1.31 - <a href=\"https://example.com/project\">Project</a>" in updated_text
 
 
+def test_mkdocs_version_metadata_updates_version_inside_multiline_copyright() -> None:
+    mkdocs_text = (
+        "extra:\n"
+        "  generator: false\n"
+        "  version: v0.1.19\n"
+        "copyright: |\n"
+        "  Maintained by tldw_Server contributors.\n"
+        "  Release train: v0.1.19\n"
+        "  <a href=\"https://example.com/project\">Project</a>\n"
+    )
+
+    updated_text = update_mkdocs_version_metadata(mkdocs_text, "0.1.31")
+
+    assert "version: v0.1.31" in updated_text
+    assert "Release train: v0.1.31" in updated_text
+    assert "https://example.com/project" in updated_text
+
+
+def test_repository_release_metadata_matches_pyproject() -> None:
+    current_version = read_current_version(REPO_ROOT / "pyproject.toml")
+    readme_text = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+    mkdocs_text = (REPO_ROOT / "Docs" / "mkdocs.yml").read_text(encoding="utf-8")
+
+    assert f"`{current_version}` Beta status. Expect rough edges and please report issues." in readme_text
+    assert f"beyond `{current_version}`" in readme_text
+    assert f"post-`{current_version}` branch work" in readme_text
+    assert f"version: v{current_version}" in mkdocs_text
+    assert f"v{current_version}" in mkdocs_text
+
+
 def test_mkdocs_version_metadata_raises_for_missing_anchor() -> None:
     with pytest.raises(ValueError, match="(?i)mkdocs|anchor|version"):
         update_mkdocs_version_metadata("extra:\n  generator: false\n", "0.1.30")
