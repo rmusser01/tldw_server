@@ -453,7 +453,7 @@ async def websearch_endpoint(
         logger.warning(f"websearch endpoint config validation failed: {e}")
         raise HTTPException(status_code=422, detail=f"Websearch configuration error: {str(e)}") from e
     except Exception as e:
-        logger.error(f"websearch endpoint failed: {e}", exc_info=True)
+        logger.error("websearch endpoint failed")
         raise HTTPException(status_code=500, detail="Websearch failed") from e
 
 

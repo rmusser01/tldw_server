@@ -10,6 +10,7 @@ from tldw_Server_API.app.api.v1.schemas.research_schemas import (
     ArxivSearchRequestForm,
     SemanticScholarSearchRequestForm,
 )
+from tldw_Server_API.app.api.v1.schemas.websearch_schemas import WebSearchRequest
 
 
 class _LoggerStub:
@@ -205,3 +206,32 @@ async def test_semantic_scholar_search_endpoint_sanitizes_unexpected_error_log(
         logger_stub,
         "Unexpected error during Semantic Scholar search execution",
     )
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_websearch_endpoint_sanitizes_unexpected_error_log(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(research, "logger", logger_stub, raising=True)
+
+    def _fail_generate_and_search(*_args, **_kwargs):
+        raise RuntimeError("search backend exploded /private/research/search-cache.db")
+
+    monkeypatch.setattr(research, "generate_and_search", _fail_generate_and_search)
+
+    try:
+        with pytest.raises(HTTPException) as exc_info:
+            await research.websearch_endpoint(
+                payload=WebSearchRequest(query="rag", engine="google"),
+                request=None,
+                current_user=object(),
+                db=object(),
+            )
+    finally:
+        research.shutdown_websearch_executor(wait=True, cancel_futures=True)
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "Websearch failed"
+    _assert_sanitized_error_log(logger_stub, "websearch endpoint failed")
