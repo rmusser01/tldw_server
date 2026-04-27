@@ -127,21 +127,8 @@ def record_companion_activity_events_bulk(
             user_id=normalized_user_id,
             events=safe_events,
         )
-    except Exception as exc:
-        sample_event_types = [str(event.get("event_type", "")) for event in events[:3]]
-        sample_dedupe_keys = [
-            str(event.get("dedupe_key", ""))
-            for event in events[:3]
-            if str(event.get("dedupe_key", "")).strip()
-        ]
-        logger.warning(
-            "companion activity bulk capture skipped for user={} batch_size={} sample_event_types={} sample_dedupe_keys={} error={}",
-            normalized_user_id or str(user_id or ""),
-            len(events),
-            sample_event_types,
-            sample_dedupe_keys,
-            exc,
-        )
+    except Exception:
+        logger.warning("companion activity bulk capture skipped")
         return []
 
 
@@ -1070,8 +1057,8 @@ def _watchlist_item_tags(item: Any) -> list[str]:
             parsed = json.loads(raw_tags_json)
             if isinstance(parsed, list):
                 return [str(tag) for tag in parsed if str(tag).strip()]
-        except Exception as exc:
-            logger.debug("watchlist item tags_json parse skipped: {}", exc)
+        except Exception:
+            logger.debug("watchlist item tags_json parse skipped")
 
     return []
 
