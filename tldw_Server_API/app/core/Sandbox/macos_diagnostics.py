@@ -46,6 +46,8 @@ def _remediation_for_reasons(reasons: list[str]) -> str | None:
         return "Run this runtime on an Apple silicon macOS host."
     if "macos_virtualization_helper_unavailable" in reasons:
         return "Install or start the macOS virtualization helper service."
+    if "macos_virtualization_helper_protocol_mismatch" in reasons:
+        return "Update the macOS virtualization helper and Python client to compatible protocol versions."
     if "macos_helper_missing" in reasons:
         return "Configure the macOS virtualization helper and mark it ready."
     if _VZ_LINUX_TEMPLATE_MISSING_REASON in reasons or _VZ_MACOS_TEMPLATE_MISSING_REASON in reasons:

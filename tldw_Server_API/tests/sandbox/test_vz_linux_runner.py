@@ -67,6 +67,25 @@ def test_vz_linux_preflight_requires_execution_readiness(monkeypatch) -> None:
     assert calls == [{"runtime": "vz_linux", "network_policy": "deny_all"}]
 
 
+def test_vz_linux_preflight_classifies_protocol_mismatch(monkeypatch) -> None:
+    monkeypatch.setattr(vz_common.sys, "platform", "darwin")
+    monkeypatch.setattr(vz_common.platform, "machine", lambda: "arm64")
+    monkeypatch.delenv("TEST_MODE", raising=False)
+
+    class _FakeHelper:
+        def validate_vz_linux_host(self, request: dict[str, object]) -> dict[str, object]:
+            raise MacOSVirtualizationHelperProtocolError("macos_virtualization_helper_protocol_mismatch")
+
+    monkeypatch.setattr(vz_linux_module.VZLinuxRunner, "helper_client_cls", _FakeHelper)
+
+    result = VZLinuxRunner().preflight(network_policy="deny_all")
+
+    assert result.available is False
+    assert result.reasons == ["macos_virtualization_helper_protocol_mismatch"]
+    assert result.execution_mode == "none"
+    assert result.enforcement_ready == {"deny_all": False, "allowlist": False}
+
+
 def test_vz_linux_start_run_executes_real_ephemeral_vm_command(monkeypatch, tmp_path) -> None:
     monkeypatch.delenv("TLDW_SANDBOX_VZ_LINUX_FAKE_EXEC", raising=False)
     calls: list[tuple[str, dict[str, object]]] = []
