@@ -251,6 +251,7 @@ class OmniVoiceSidecarSupervisor:
         deadline = asyncio.get_running_loop().time() + self._healthcheck_timeout_seconds
         headers = build_sidecar_auth_headers(self._token)
         client = await self.get_http_client(timeout=self._healthcheck_interval_seconds)
+        last_http_error: httpx.HTTPError | None = None
 
         while asyncio.get_running_loop().time() < deadline:
             if self._process is not None and self._process.returncode is not None:
@@ -267,10 +268,16 @@ class OmniVoiceSidecarSupervisor:
                     payload = response.json()
                     if bool(payload.get("ready", True)):
                         return
-            except httpx.HTTPError:
-                pass
+            except httpx.HTTPError as exc:
+                last_http_error = exc
             await asyncio.sleep(self._healthcheck_interval_seconds)
 
+        if last_http_error is not None:
+            logger.debug(
+                "OmniVoice sidecar health polling failed; last HTTP error: {}",
+                last_http_error,
+            )
+            raise RuntimeError("OmniVoice sidecar did not reach /health") from last_http_error
         raise RuntimeError("OmniVoice sidecar did not reach /health")
 
     def _clear_process_state(self, process: asyncio.subprocess.Process | None = None) -> None:

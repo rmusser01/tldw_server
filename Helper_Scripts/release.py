@@ -153,6 +153,15 @@ def _parse_unreleased_changelog_subsections(changelog_text: str) -> dict[str, li
             current_section = candidate
             seen_structural_content = True
             continue
+        if raw_line[:1].isspace():
+            if current_section is None or not subsections[current_section]:
+                raise ValueError(
+                    "Indented changelog content in Unreleased must continue a bullet"
+                )
+            subsections[current_section][-1] = (
+                f"{subsections[current_section][-1]} {stripped_line}"
+            )
+            continue
         if stripped_line.startswith("- "):
             if current_section is None:
                 raise ValueError(
@@ -161,10 +170,6 @@ def _parse_unreleased_changelog_subsections(changelog_text: str) -> dict[str, li
             subsections[current_section].append(stripped_line[2:])
             seen_structural_content = True
             continue
-        if raw_line[:1].isspace():
-            raise ValueError(
-                "Wrapped or indented changelog content is not supported in Unreleased"
-            )
         raise ValueError("Unsupported content in Unreleased changelog slice")
 
     if not seen_structural_content:
@@ -766,9 +771,27 @@ class ShellReleaseRunner:
 
     def ensure_required_checks_green(self, sha: str, required_checks: list[str]) -> None:
         repo_slug = self._get_repo_slug()
-        payload = self._run_text(["gh", "api", f"repos/{repo_slug}/commits/{sha}/check-runs?per_page=100"])
+        payload = self._run_text(
+            [
+                "gh",
+                "api",
+                "--paginate",
+                "--slurp",
+                f"repos/{repo_slug}/commits/{sha}/check-runs?per_page=100",
+            ]
+        )
         data = json.loads(payload)
-        check_runs = data.get("check_runs", [])
+        if isinstance(data, list):
+            check_runs = [
+                check_run
+                for page in data
+                if isinstance(page, dict)
+                for check_run in page.get("check_runs", [])
+            ]
+        elif isinstance(data, dict):
+            check_runs = data.get("check_runs", [])
+        else:
+            raise RuntimeError("GitHub check-runs response had an unexpected shape")
         status_by_name = {
             str(check_run.get("name")): (
                 str(check_run.get("status")),

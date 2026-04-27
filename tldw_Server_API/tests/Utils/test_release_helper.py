@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import json
+import subprocess  # nosec B404
 import sys
 from pathlib import Path
-import subprocess  # nosec B404
 
 import pytest
 
@@ -200,6 +201,29 @@ def test_promote_changelog_unreleased_section_moves_content_and_resets_headings(
     assert promoted_text.index("## [Unreleased]") < promoted_text.index("## [0.1.30] - 2026-04-22")
 
 
+def test_promote_changelog_unreleased_section_preserves_wrapped_bullets() -> None:
+    changelog_text = (
+        "# Changelog\n\n"
+        "## [Unreleased]\n\n"
+        "### Added\n\n"
+        "- Add release helper core\n"
+        "  with continuation details\n"
+        "  - and a nested note\n\n"
+        "### Fixed\n\n"
+        "- Keep release output stable\n"
+    )
+
+    promoted_text, warnings = promote_changelog_unreleased_section(
+        changelog_text=changelog_text,
+        version="0.1.30",
+        release_date="2026-04-22",
+    )
+
+    assert warnings == []
+    assert "- Add release helper core with continuation details - and a nested note" in promoted_text
+    assert "- Keep release output stable" in promoted_text
+
+
 def test_promote_changelog_unreleased_section_rejects_exact_duplicates_within_subsection() -> None:
     changelog_text = (
         "# Changelog\n\n"
@@ -279,8 +303,7 @@ def test_promote_changelog_unreleased_section_rejects_headings_without_bullets()
             "# Changelog\n\n"
             "## [Unreleased]\n\n"
             "### Added\n\n"
-            "- Wrapped bullet text\n"
-            "  continues on the next line\n"
+            "Ambiguous subsection prose\n"
         ),
     ],
 )
@@ -764,3 +787,59 @@ def test_shell_release_runner_create_or_update_tag_uses_annotated_tag(monkeypatc
     runner.create_or_update_tag("1.2.3")
 
     assert recorded_commands == [["git", "tag", "-a", "v1.2.3", "-m", "v1.2.3"]]
+
+
+def test_shell_release_runner_required_checks_reads_paginated_check_runs(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    calls: list[list[str]] = []
+
+    def _fake_run_text(self: ShellReleaseRunner, args: list[str]) -> str:
+        calls.append(list(args))
+        if args[:3] == ["gh", "repo", "view"]:
+            return "example/repo"
+        if args[:2] == ["gh", "api"]:
+            return json.dumps(
+                [
+                    {
+                        "check_runs": [
+                            {
+                                "name": "backend-required",
+                                "status": "completed",
+                                "conclusion": "success",
+                            }
+                        ]
+                    },
+                    {
+                        "check_runs": [
+                            {
+                                "name": "security-required",
+                                "status": "completed",
+                                "conclusion": "success",
+                            }
+                        ]
+                    },
+                ]
+            )
+        raise AssertionError(f"Unexpected command: {args}")
+
+    monkeypatch.setattr(ShellReleaseRunner, "_run_text", _fake_run_text)
+
+    runner = ShellReleaseRunner(repo_root=tmp_path, dry_run=False)
+
+    runner.ensure_required_checks_green(
+        "abc123",
+        ["backend-required", "security-required"],
+    )
+
+    api_calls = [call for call in calls if call[:2] == ["gh", "api"]]
+    assert api_calls == [
+        [
+            "gh",
+            "api",
+            "--paginate",
+            "--slurp",
+            "repos/example/repo/commits/abc123/check-runs?per_page=100",
+        ]
+    ]
