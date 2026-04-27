@@ -965,11 +965,13 @@ async def test_get_dictionary_statistics_maps_input_error(monkeypatch: pytest.Mo
 
 @pytest.mark.asyncio
 async def test_get_dictionary_statistics_maps_database_error(monkeypatch: pytest.MonkeyPatch):
+    logger_stub = _patch_endpoint_logger(monkeypatch)
+
     def _get_dictionary(self, *_args, **_kwargs):
         return {"id": 42}
 
     def _get_statistics(self, *_args, **_kwargs):
-        raise CharactersRAGDBError("driver failed")
+        raise _database_failure()
 
     _patch_service(
         monkeypatch,
@@ -985,3 +987,31 @@ async def test_get_dictionary_statistics_maps_database_error(monkeypatch: pytest
 
     assert exc_info.value.status_code == 500
     assert exc_info.value.detail == "Failed to get dictionary statistics"
+    _assert_sanitized_log_call(logger_stub, "Error getting dictionary statistics")
+
+
+@pytest.mark.asyncio
+async def test_get_dictionary_statistics_sanitizes_unexpected_error_log(monkeypatch: pytest.MonkeyPatch):
+    logger_stub = _patch_endpoint_logger(monkeypatch)
+
+    def _get_dictionary(self, *_args, **_kwargs):
+        return {"id": 42}
+
+    def _get_statistics(self, *_args, **_kwargs):
+        raise _unexpected_failure()
+
+    _patch_service(
+        monkeypatch,
+        get_dictionary=_get_dictionary,
+        get_statistics=_get_statistics,
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await chat_dictionary_endpoints.get_dictionary_statistics(
+            dictionary_id=42,
+            db=object(),
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "Failed to get dictionary statistics"
+    _assert_sanitized_log_call(logger_stub, "Error getting dictionary statistics")

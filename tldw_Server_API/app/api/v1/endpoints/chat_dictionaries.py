@@ -1459,10 +1459,10 @@ async def get_dictionary_statistics(
         raise
     except (InputError, CharactersRAGDBError) as e:
         if isinstance(e, CharactersRAGDBError) and not isinstance(e, InputError):
-            logger.error("Error getting dictionary statistics: {}", e)
+            logger.error("Error getting dictionary statistics")
         raise map_db_error_to_http(e, default_detail="Failed to get dictionary statistics") from e
     except Exception as e:
-        logger.error(f"Error getting dictionary statistics: {e}")
+        logger.error("Error getting dictionary statistics")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to get dictionary statistics",
