@@ -721,6 +721,29 @@ def test_shell_release_runner_run_command_uses_absolute_executable_path(
     assert Path(recorded_commands[0][0]).is_absolute()
 
 
+def test_shell_release_runner_run_command_rejects_relative_resolved_executable(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    def _fake_which(executable: str) -> str:
+        assert executable == "git"
+        return "relative-bin/git"
+
+    def _fake_run(
+        command_args: list[str],
+        **kwargs: object,
+    ) -> subprocess.CompletedProcess[str]:
+        raise AssertionError(f"subprocess should not run relative command: {command_args}")
+
+    monkeypatch.setattr(release_module.shutil, "which", _fake_which)
+    monkeypatch.setattr(release_module.subprocess, "run", _fake_run)
+
+    runner = ShellReleaseRunner(repo_root=tmp_path, dry_run=False)
+
+    with pytest.raises(FileNotFoundError, match="absolute path"):
+        runner._run_command(["git", "status"])
+
+
 def test_shell_release_runner_create_or_update_tag_uses_annotated_tag(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     recorded_commands: list[list[str]] = []
 

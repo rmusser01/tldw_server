@@ -666,7 +666,12 @@ class ShellReleaseRunner:
         resolved_executable = executable if Path(executable).is_absolute() else shutil.which(executable)
         if resolved_executable is None:
             raise FileNotFoundError(f"Executable not found: {executable}")
-        command = [resolved_executable, *args[1:]]
+        resolved_path = Path(resolved_executable)
+        if not resolved_path.is_absolute():
+            raise FileNotFoundError(
+                f"Executable did not resolve to an absolute path: {executable}"
+            )
+        command = [str(resolved_path), *args[1:]]
         completed = subprocess.run(
             command,
             cwd=self.repo_root,
