@@ -67,6 +67,27 @@ class _StubChatDB:
         return 1
 
 
+class _FailingAddMessageChatDB(_StubChatDB):
+    def add_message(self, _msg_data: Dict[str, Any]) -> str:
+        raise RuntimeError("persist exploded at /private/tmp/speech-chat.db")
+
+
+class _LoggerStub:
+    def __init__(self) -> None:
+        self.debug_calls: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
+        self.error_calls: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
+        self.warning_calls: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
+
+    def debug(self, *args: Any, **kwargs: Any) -> None:
+        self.debug_calls.append((args, kwargs))
+
+    def error(self, *args: Any, **kwargs: Any) -> None:
+        self.error_calls.append((args, kwargs))
+
+    def warning(self, *args: Any, **kwargs: Any) -> None:
+        self.warning_calls.append((args, kwargs))
+
+
 class _StubTTSService:
     async def generate_speech(
         self,
@@ -116,6 +137,72 @@ def _encode_silence_base64(duration_sec: float = 0.1, sr: int = 16000) -> str:
     data = np.zeros(int(sr * duration_sec), dtype=np.float32)
     sf.write(buf, data, sr, format="WAV")
     return base64.b64encode(buf.getvalue()).decode("ascii")
+
+
+def _assert_log_sanitized(
+    calls: list[tuple[tuple[Any, ...], dict[str, Any]]],
+    expected_message: str,
+) -> None:
+    assert calls
+    messages = [args[0] for args, _kwargs in calls if args]
+    assert expected_message in messages
+    assert all(not kwargs.get("exc_info") for _args, kwargs in calls)
+    rendered = repr(calls)
+    assert "exploded" not in rendered
+    assert "/private/" not in rendered
+
+
+def _patch_speech_chat_success_path(
+    monkeypatch: pytest.MonkeyPatch,
+    speech_chat_service,
+    *,
+    transcript: str = "hello from audio",
+    assistant_text: str = "stub assistant reply",
+) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(
+        speech_chat_service,
+        "transcribe_audio",
+        lambda *_args, **_kwargs: transcript,
+    )
+    monkeypatch.setattr(
+        speech_chat_service, "get_registry", lambda: _NoAdapterRegistry(), raising=True
+    )
+
+    async def _fake_get_or_create_character_context(*_args, **_kwargs):
+        return {"id": 1, "name": "Test Character", "system_prompt": "You are helpful."}, 1
+
+    async def _fake_get_or_create_conversation(*_args, **_kwargs):
+        conv_id = _kwargs.get("conversation_id")
+        return conv_id or "conv-1", conv_id is None
+
+    async def _fake_load_history(*_args, **_kwargs):
+        return []
+
+    async def _fake_chat_api_call_async(**_kwargs):
+        return {
+            "choices": [
+                {"message": {"role": "assistant", "content": assistant_text}}
+            ],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+        }
+
+    monkeypatch.setattr(
+        speech_chat_service,
+        "get_or_create_character_context",
+        _fake_get_or_create_character_context,
+    )
+    monkeypatch.setattr(
+        speech_chat_service,
+        "get_or_create_conversation",
+        _fake_get_or_create_conversation,
+    )
+    monkeypatch.setattr(
+        speech_chat_service,
+        "load_conversation_history",
+        _fake_load_history,
+    )
+    monkeypatch.setattr(speech_chat_service, "chat_api_call_async", _fake_chat_api_call_async)
 
 
 def test_map_tts_provider_not_configured_sanitizes_detail():
@@ -373,6 +460,120 @@ async def test_run_speech_chat_turn_invokes_action_when_enabled(monkeypatch):
     assert resp.action_result.get("action") == "play_music"
     assert resp.action_result.get("status") == "ok"
     assert resp.action_result.get("result", {}).get("played") == "action transcript"
+
+
+@pytest.mark.asyncio
+async def test_run_speech_chat_turn_sanitizes_action_result_serialization_warning(monkeypatch):
+    from tldw_Server_API.app.core.Streaming import speech_chat_service
+
+    _patch_speech_chat_success_path(monkeypatch, speech_chat_service)
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(speech_chat_service, "logger", logger_stub, raising=True)
+
+    async def _fake_maybe_execute_action(**_kwargs):
+        return {"action": "leaky_action", "status": "ok"}
+
+    def _failing_json_dumps(_value):
+        raise TypeError("json serialization exploded at /private/tmp/action-result.json")
+
+    monkeypatch.setattr(
+        speech_chat_service,
+        "_maybe_execute_action",
+        _fake_maybe_execute_action,
+    )
+    monkeypatch.setattr(
+        speech_chat_service,
+        "json",
+        SimpleNamespace(dumps=_failing_json_dumps),
+    )
+
+    req = SpeechChatRequest(
+        session_id=None,
+        input_audio=_encode_silence_base64(),
+        input_audio_format="wav",
+        llm_config=SpeechChatLLMConfig(model="gpt-4o-mini", api_provider="openai"),
+    )
+
+    resp = await run_speech_chat_turn(
+        request_data=req,
+        current_user=_StubUser(),
+        chat_db=_StubChatDB(),
+        tts_service=_StubTTSService(),
+    )
+
+    assert resp.action_result == {"action": "leaky_action", "status": "ok"}
+    _assert_log_sanitized(
+        logger_stub.warning_calls,
+        "Failed to serialize action_result for chat history",
+    )
+
+
+@pytest.mark.asyncio
+async def test_run_speech_chat_turn_sanitizes_persistence_failure_error_log(monkeypatch):
+    from tldw_Server_API.app.core.Streaming import speech_chat_service
+
+    _patch_speech_chat_success_path(monkeypatch, speech_chat_service)
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(speech_chat_service, "logger", logger_stub, raising=True)
+
+    req = SpeechChatRequest(
+        session_id=None,
+        input_audio=_encode_silence_base64(),
+        input_audio_format="wav",
+        llm_config=SpeechChatLLMConfig(model="gpt-4o-mini", api_provider="openai"),
+    )
+
+    resp = await run_speech_chat_turn(
+        request_data=req,
+        current_user=_StubUser(),
+        chat_db=_FailingAddMessageChatDB(),
+        tts_service=_StubTTSService(),
+    )
+
+    assert resp.assistant_text == "stub assistant reply"
+    _assert_log_sanitized(
+        logger_stub.error_calls,
+        "Failed to persist speech chat messages",
+    )
+
+
+@pytest.mark.asyncio
+async def test_run_speech_chat_turn_sanitizes_latency_metric_debug_log(monkeypatch):
+    from tldw_Server_API.app.core.Streaming import speech_chat_service
+
+    _patch_speech_chat_success_path(monkeypatch, speech_chat_service)
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(speech_chat_service, "logger", logger_stub, raising=True)
+
+    class _FailingMetricsRegistry:
+        def observe(self, *_args, **_kwargs):
+            raise RuntimeError("metrics exploded at /private/tmp/audio-chat-metrics.db")
+
+    monkeypatch.setattr(
+        speech_chat_service,
+        "get_metrics_registry",
+        lambda: _FailingMetricsRegistry(),
+    )
+
+    req = SpeechChatRequest(
+        session_id=None,
+        input_audio=_encode_silence_base64(),
+        input_audio_format="wav",
+        llm_config=SpeechChatLLMConfig(model="gpt-4o-mini", api_provider="openai"),
+    )
+
+    resp = await run_speech_chat_turn(
+        request_data=req,
+        current_user=_StubUser(),
+        chat_db=_StubChatDB(),
+        tts_service=_StubTTSService(),
+    )
+
+    assert resp.assistant_text == "stub assistant reply"
+    _assert_log_sanitized(
+        logger_stub.debug_calls,
+        "Failed to record audio_chat_latency_seconds metric",
+    )
 
 
 @pytest.mark.asyncio

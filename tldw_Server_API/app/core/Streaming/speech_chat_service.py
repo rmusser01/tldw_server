@@ -658,8 +658,8 @@ async def run_speech_chat_turn(
         if action_result is not None:
             try:
                 tool_content = json.dumps(action_result)
-            except TypeError as exc:
-                logger.warning(f"Failed to serialize action_result for chat history: {exc}")
+            except TypeError:
+                logger.warning("Failed to serialize action_result for chat history")
             else:
                 chat_db.add_message(
                     {
@@ -669,8 +669,8 @@ async def run_speech_chat_turn(
                         "client_id": client_id,
                     }
                 )
-    except Exception as e:  # noqa: BLE001
-        logger.error(f"Failed to persist speech chat messages: {e}", exc_info=True)
+    except Exception:  # noqa: BLE001
+        logger.error("Failed to persist speech chat messages")
         # Do not fail the user-facing request solely due to DB persistence issues
 
     # --- TTS ---
@@ -746,8 +746,8 @@ async def run_speech_chat_turn(
                 "tts_provider": resolved_tts.provider,
             },
         )
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Failed to record audio_chat_latency_seconds metric: {e}")
+    except Exception:  # noqa: BLE001
+        logger.debug("Failed to record audio_chat_latency_seconds metric")
 
     return SpeechChatResponse(
         session_id=conversation_id,
