@@ -347,6 +347,38 @@ class SandboxAdminMacOSDiagnosticsResponse(BaseModel):
     reconciliation: SandboxAdminMacOSReconciliationDiagnostics | None = None
 
 
+class SandboxAdminMacOSReconciliationRepairRequest(BaseModel):
+    delete_stale_session_controls: bool = True
+    delete_unhealthy_session_controls: bool = True
+    terminate_orphaned_vms: bool = False
+    dry_run: bool = True
+
+
+class SandboxAdminMacOSReconciliationRepairAction(BaseModel):
+    type: str
+    session_id: str | None = None
+    vm_id: str | None = None
+    status: str
+    reason: str | None = None
+
+
+class SandboxAdminMacOSReconciliationRepairSummary(BaseModel):
+    stale_session_controls: int = 0
+    unhealthy_session_controls: int = 0
+    deleted_session_controls: int = 0
+    skipped_active_sessions: int = 0
+    orphaned_vms: int = 0
+    terminated_orphaned_vms: int = 0
+
+
+class SandboxAdminMacOSReconciliationRepairResponse(BaseModel):
+    dry_run: bool
+    helper: dict[str, object] = Field(default_factory=dict)
+    summary: SandboxAdminMacOSReconciliationRepairSummary
+    actions: list[SandboxAdminMacOSReconciliationRepairAction] = Field(default_factory=list)
+    reasons: list[str] = Field(default_factory=list)
+
+
 # Snapshot/Clone Schemas
 class SnapshotCreateResponse(BaseModel):
     """Response when creating a session snapshot."""

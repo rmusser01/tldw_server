@@ -1,0 +1,316 @@
+from __future__ import annotations
+
+from types import SimpleNamespace
+
+import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+from starlette.requests import Request
+
+from tldw_Server_API.app.api.v1.API_Deps import auth_deps
+from tldw_Server_API.app.api.v1.endpoints import sandbox as sandbox_mod
+from tldw_Server_API.app.core.AuthNZ.permissions import ROLE_ADMIN
+from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
+from tldw_Server_API.app.core.Sandbox import service as service_mod
+from tldw_Server_API.app.core.Sandbox.service import SandboxService
+
+
+def _make_principal(
+    *,
+    is_admin: bool,
+) -> AuthPrincipal:
+    return AuthPrincipal(
+        kind="user",
+        user_id=1,
+        api_key_id=None,
+        subject=None,
+        token_type="access",
+        jti=None,
+        roles=[ROLE_ADMIN] if is_admin else ["user"],
+        permissions=[],
+        is_admin=is_admin,
+        org_ids=[],
+        team_ids=[],
+    )
+
+
+def _build_app_with_overrides(principal: AuthPrincipal) -> FastAPI:
+    app = FastAPI()
+    app.include_router(sandbox_mod.router, prefix="/api/v1")
+
+    async def _fake_get_auth_principal(request: Request) -> AuthPrincipal:  # type: ignore[override]
+        request.state.auth = AuthContext(
+            principal=principal,
+            ip=(request.client.host if getattr(request, "client", None) else None),
+            user_agent=(request.headers.get("User-Agent") if getattr(request, "headers", None) else None),
+            request_id=(request.headers.get("X-Request-ID") if getattr(request, "headers", None) else None),
+        )
+        return principal
+
+    async def _fake_get_request_user() -> SimpleNamespace:
+        return SimpleNamespace(
+            id=1,
+            username="sandbox-admin",
+            is_active=True,
+            roles=list(principal.roles),
+            permissions=list(principal.permissions),
+            is_admin=principal.is_admin,
+            tenant_id="default",
+        )
+
+    app.dependency_overrides[auth_deps.get_auth_principal] = _fake_get_auth_principal
+    app.dependency_overrides[sandbox_mod.get_request_user] = _fake_get_request_user
+    return app
+
+
+def _repair_payload(*, dry_run: bool, action_status: str) -> dict[str, object]:
+    return {
+        "dry_run": dry_run,
+        "helper": {"ready": True, "protocol_version": "1", "helper_version": "0.1.0"},
+        "summary": {
+            "stale_session_controls": 1,
+            "unhealthy_session_controls": 0,
+            "deleted_session_controls": 0 if dry_run else 1,
+            "skipped_active_sessions": 0,
+            "orphaned_vms": 0,
+            "terminated_orphaned_vms": 0,
+        },
+        "actions": [{"type": "delete_session_control", "session_id": "sess-stale", "status": action_status}],
+        "reasons": [],
+    }
+
+
+def _reconciliation_report(
+    *,
+    items: list[dict[str, object]] | None = None,
+    reasons: list[str] | None = None,
+) -> dict[str, object]:
+    return {
+        "computed": not bool(reasons),
+        "persisted_sessions": 0,
+        "live_vms": 0,
+        "healthy_session_ids": [],
+        "stale_session_ids": [],
+        "unhealthy_session_ids": [],
+        "skipped_active_session_ids": [],
+        "orphaned_vm_ids": [],
+        "items": list(items or []),
+        "reasons": list(reasons or []),
+    }
+
+
+def _service_with_orchestrator(orch: SimpleNamespace) -> SandboxService:
+    service = SandboxService(enable_background_tasks=False)
+    service._orch = orch
+    return service
+
+
+def test_admin_reconciliation_repair_defaults_to_dry_run(monkeypatch) -> None:
+    fake_service = SimpleNamespace(
+        repair_macos_reconciliation=lambda **kwargs: _repair_payload(
+            dry_run=kwargs["dry_run"],
+            action_status="planned",
+        )
+    )
+    monkeypatch.setattr(sandbox_mod, "_service", fake_service, raising=True)
+
+    app = _build_app_with_overrides(_make_principal(is_admin=True))
+
+    with TestClient(app) as client:
+        resp = client.post("/api/v1/sandbox/admin/macos-reconciliation/repair", json={})
+
+    assert resp.status_code == 200
+    assert resp.json()["dry_run"] is True
+    assert resp.json()["actions"][0]["status"] == "planned"
+
+
+def test_admin_reconciliation_repair_dry_run_false_passes_through(monkeypatch) -> None:
+    seen_kwargs: dict[str, object] = {}
+
+    def _repair(**kwargs) -> dict[str, object]:
+        seen_kwargs.update(kwargs)
+        return _repair_payload(dry_run=kwargs["dry_run"], action_status="deleted")
+
+    monkeypatch.setattr(sandbox_mod, "_service", SimpleNamespace(repair_macos_reconciliation=_repair), raising=True)
+
+    app = _build_app_with_overrides(_make_principal(is_admin=True))
+
+    with TestClient(app) as client:
+        resp = client.post(
+            "/api/v1/sandbox/admin/macos-reconciliation/repair",
+            json={"dry_run": False},
+        )
+
+    assert resp.status_code == 200
+    assert seen_kwargs["dry_run"] is False
+    assert resp.json()["dry_run"] is False
+    assert resp.json()["actions"][0]["status"] == "deleted"
+
+
+def test_admin_reconciliation_repair_rejects_orphan_termination(monkeypatch) -> None:
+    def _repair(**kwargs) -> dict[str, object]:
+        raise service_mod.SandboxReconciliationRepairError("orphan_termination_not_supported", 400)
+
+    monkeypatch.setattr(sandbox_mod, "_service", SimpleNamespace(repair_macos_reconciliation=_repair), raising=True)
+
+    app = _build_app_with_overrides(_make_principal(is_admin=True))
+
+    with TestClient(app) as client:
+        resp = client.post(
+            "/api/v1/sandbox/admin/macos-reconciliation/repair",
+            json={"terminate_orphaned_vms": True},
+        )
+
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "orphan_termination_not_supported"
+
+
+def test_admin_reconciliation_repair_maps_service_unavailable_error(monkeypatch) -> None:
+    def _repair(**kwargs) -> dict[str, object]:
+        raise service_mod.SandboxReconciliationRepairError("macos_virtualization_helper_unavailable", 503)
+
+    monkeypatch.setattr(sandbox_mod, "_service", SimpleNamespace(repair_macos_reconciliation=_repair), raising=True)
+
+    app = _build_app_with_overrides(_make_principal(is_admin=True))
+
+    with TestClient(app) as client:
+        resp = client.post(
+            "/api/v1/sandbox/admin/macos-reconciliation/repair",
+            json={"dry_run": False},
+        )
+
+    assert resp.status_code == 503
+    assert resp.json()["detail"] == "macos_virtualization_helper_unavailable"
+
+
+def test_admin_reconciliation_repair_requires_admin(monkeypatch) -> None:
+    fake_service = SimpleNamespace(repair_macos_reconciliation=lambda **kwargs: _repair_payload(dry_run=True, action_status="planned"))
+    monkeypatch.setattr(sandbox_mod, "_service", fake_service, raising=True)
+
+    app = _build_app_with_overrides(_make_principal(is_admin=False))
+
+    with TestClient(app) as client:
+        resp = client.post("/api/v1/sandbox/admin/macos-reconciliation/repair", json={})
+
+    assert resp.status_code == 403
+
+
+def test_repair_stale_row_dry_run_plans_delete_without_mutation(monkeypatch) -> None:
+    deleted_session_ids: list[str] = []
+    orch = SimpleNamespace(delete_vz_session_control=deleted_session_ids.append)
+    service = _service_with_orchestrator(orch)
+    monkeypatch.setattr(service, "_active_session_run_count", lambda session_id: 0)
+    monkeypatch.setattr(
+        service_mod,
+        "collect_vz_reconciliation",
+        lambda *args, **kwargs: _reconciliation_report(
+            items=[
+                {
+                    "status": "stale_session",
+                    "session_id": "sess-stale",
+                    "vm_id": "vm-missing",
+                    "reason": "vm_missing",
+                }
+            ]
+        ),
+        raising=True,
+    )
+
+    result = service.repair_macos_reconciliation()
+
+    assert deleted_session_ids == []
+    assert result["dry_run"] is True
+    assert result["summary"]["stale_session_controls"] == 1
+    assert result["summary"]["deleted_session_controls"] == 0
+    assert result["actions"] == [
+        {
+            "type": "delete_session_control",
+            "session_id": "sess-stale",
+            "vm_id": "vm-missing",
+            "status": "planned",
+            "reason": "vm_missing",
+        }
+    ]
+
+
+def test_repair_stale_row_delete_calls_orchestrator(monkeypatch) -> None:
+    deleted_session_ids: list[str] = []
+    orch = SimpleNamespace(delete_vz_session_control=deleted_session_ids.append)
+    service = _service_with_orchestrator(orch)
+    monkeypatch.setattr(service, "_active_session_run_count", lambda session_id: 0)
+    monkeypatch.setattr(
+        service_mod,
+        "collect_vz_reconciliation",
+        lambda *args, **kwargs: _reconciliation_report(
+            items=[
+                {
+                    "status": "stale_session",
+                    "session_id": "sess-stale",
+                    "vm_id": "vm-missing",
+                    "reason": "vm_missing",
+                }
+            ]
+        ),
+        raising=True,
+    )
+
+    result = service.repair_macos_reconciliation(dry_run=False)
+
+    assert deleted_session_ids == ["sess-stale"]
+    assert result["summary"]["deleted_session_controls"] == 1
+    assert result["actions"][0]["status"] == "deleted"
+
+
+def test_repair_active_session_item_is_skipped(monkeypatch) -> None:
+    deleted_session_ids: list[str] = []
+    orch = SimpleNamespace(delete_vz_session_control=deleted_session_ids.append)
+    service = _service_with_orchestrator(orch)
+    monkeypatch.setattr(service, "_active_session_run_count", lambda session_id: 1)
+    monkeypatch.setattr(
+        service_mod,
+        "collect_vz_reconciliation",
+        lambda *args, **kwargs: _reconciliation_report(
+            items=[
+                {
+                    "status": "skipped_active_session",
+                    "session_id": "sess-active",
+                    "vm_id": "vm-missing",
+                    "reason": "active_session",
+                }
+            ]
+        ),
+        raising=True,
+    )
+
+    result = service.repair_macos_reconciliation(dry_run=False)
+
+    assert deleted_session_ids == []
+    assert result["summary"]["skipped_active_sessions"] == 1
+    assert result["actions"][0]["status"] == "skipped"
+    assert result["actions"][0]["reason"] == "active_session"
+
+
+@pytest.mark.parametrize(
+    "reason",
+    [
+        "macos_virtualization_helper_unavailable",
+        "macos_virtualization_helper_protocol_mismatch",
+    ],
+)
+def test_repair_helper_unavailable_or_protocol_mismatch_raises_for_mutating_run(monkeypatch, reason: str) -> None:
+    deleted_session_ids: list[str] = []
+    orch = SimpleNamespace(delete_vz_session_control=deleted_session_ids.append)
+    service = _service_with_orchestrator(orch)
+    monkeypatch.setattr(
+        service_mod,
+        "collect_vz_reconciliation",
+        lambda *args, **kwargs: _reconciliation_report(reasons=[reason]),
+        raising=True,
+    )
+
+    with pytest.raises(service_mod.SandboxReconciliationRepairError) as exc_info:
+        service.repair_macos_reconciliation(dry_run=False)
+
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.reason == reason
+    assert deleted_session_ids == []

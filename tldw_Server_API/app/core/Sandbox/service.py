@@ -55,6 +55,7 @@ from .runners.worktree_runner import WorktreeRunner, worktree_available
 from .snapshots import SnapshotManager
 from .store import get_store_mode
 from .streams import get_hub
+from .vz_reconciliation import collect_vz_reconciliation
 
 _SANDBOX_SERVICE_NONCRITICAL_EXCEPTIONS = (
     asyncio.CancelledError,
@@ -90,6 +91,13 @@ except Exception:
 
 _SANDBOX_WORKSPACE_FALLBACK_LOCKS: dict[str, threading.Lock] = {}
 _SANDBOX_WORKSPACE_FALLBACK_LOCKS_GUARD = threading.Lock()
+
+
+class SandboxReconciliationRepairError(RuntimeError):
+    def __init__(self, reason: str, status_code: int = 503) -> None:
+        self.reason = reason
+        self.status_code = int(status_code)
+        super().__init__(reason)
 
 
 def _get_sandbox_workspace_thread_lock(lock_path: str) -> threading.Lock:
@@ -994,6 +1002,108 @@ class SandboxService:
 
     def macos_diagnostics(self) -> dict[str, object]:
         return collect_macos_diagnostics(self._orch)
+
+    def repair_macos_reconciliation(
+        self,
+        *,
+        delete_stale_session_controls: bool = True,
+        delete_unhealthy_session_controls: bool = True,
+        terminate_orphaned_vms: bool = False,
+        dry_run: bool = True,
+    ) -> dict[str, object]:
+        if terminate_orphaned_vms:
+            raise SandboxReconciliationRepairError("orphan_termination_not_supported", 400)
+
+        report = collect_vz_reconciliation(
+            self._orch,
+            active_session_checker=lambda sid: self._active_session_run_count(sid) > 0,
+        )
+        reasons = [str(reason) for reason in list(report.get("reasons") or [])]
+        blocking_reasons = {
+            "macos_virtualization_helper_unavailable",
+            "macos_virtualization_helper_protocol_mismatch",
+        }
+        if not dry_run:
+            for reason in reasons:
+                if reason in blocking_reasons:
+                    raise SandboxReconciliationRepairError(reason, 503)
+
+        report_items = [item for item in list(report.get("items") or []) if isinstance(item, dict)]
+        stale_items = [item for item in report_items if str(item.get("status") or "").strip() == "stale_session"]
+        unhealthy_items = [item for item in report_items if str(item.get("status") or "").strip() == "unhealthy_vm"]
+        skipped_items = [item for item in report_items if str(item.get("status") or "").strip() == "skipped_active_session"]
+        orphaned_items = [item for item in report_items if str(item.get("status") or "").strip() == "orphaned_vm"]
+        actions: list[dict[str, object]] = []
+        summary: dict[str, int] = {
+            "stale_session_controls": max(len(list(report.get("stale_session_ids") or [])), len(stale_items)),
+            "unhealthy_session_controls": max(len(list(report.get("unhealthy_session_ids") or [])), len(unhealthy_items)),
+            "deleted_session_controls": 0,
+            "skipped_active_sessions": max(len(list(report.get("skipped_active_session_ids") or [])), len(skipped_items)),
+            "orphaned_vms": max(len(list(report.get("orphaned_vm_ids") or [])), len(orphaned_items)),
+            "terminated_orphaned_vms": 0,
+        }
+
+        for item in report_items:
+            status = str(item.get("status") or "").strip()
+            session_id = str(item.get("session_id") or "").strip()
+            vm_id = str(item.get("vm_id") or "").strip()
+            reason = str(item.get("reason") or "").strip()
+
+            if status == "skipped_active_session":
+                action = {
+                    "type": "delete_session_control",
+                    "session_id": session_id or None,
+                    "vm_id": vm_id or None,
+                    "status": "skipped",
+                    "reason": reason or "active_session",
+                }
+                logger.info("Skipping VZ reconciliation repair action: {}", action)
+                actions.append(action)
+                continue
+
+            should_delete = (
+                (status == "stale_session" and delete_stale_session_controls)
+                or (status == "unhealthy_vm" and delete_unhealthy_session_controls)
+            )
+            if not should_delete or not session_id:
+                continue
+
+            if self._active_session_run_count(session_id) > 0:
+                summary["skipped_active_sessions"] += 1
+                action = {
+                    "type": "delete_session_control",
+                    "session_id": session_id,
+                    "vm_id": vm_id or None,
+                    "status": "skipped",
+                    "reason": "active_session",
+                }
+                logger.info("Skipping VZ reconciliation repair action: {}", action)
+                actions.append(action)
+                continue
+
+            action_status = "planned"
+            if not dry_run:
+                self._orch.delete_vz_session_control(session_id)
+                summary["deleted_session_controls"] += 1
+                action_status = "deleted"
+
+            action = {
+                "type": "delete_session_control",
+                "session_id": session_id,
+                "vm_id": vm_id or None,
+                "status": action_status,
+                "reason": reason or None,
+            }
+            logger.info("VZ reconciliation repair action: {}", action)
+            actions.append(action)
+
+        return {
+            "dry_run": bool(dry_run),
+            "helper": {},
+            "summary": summary,
+            "actions": actions,
+            "reasons": reasons,
+        }
 
     def _audit_run_completion(self, *, user_id: str | int | None, run_id: str, status: RunStatus, spec_version: str, session_id: str | None) -> None:
         """Log a completion audit event in a fire-and-forget manner."""
