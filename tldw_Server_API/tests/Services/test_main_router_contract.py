@@ -126,6 +126,12 @@ def test_app_import_outside_explicit_pytest_runtime_has_no_duplicate_routes(
                 "main._fail_on_duplicate_route_method_pairs("
                 "main.app, context='subprocess-import'"
                 "); "
+                "vlm_routes = ["
+                "route for route in main.app.routes "
+                "if getattr(route, 'path', None) == '/api/v1/vlm/backends'"
+                "]; "
+                "assert len(vlm_routes) == 1, "
+                "f'expected one VLM route, found {len(vlm_routes)}'; "
                 "print('NO_DUPLICATES')"
             ),
         ],

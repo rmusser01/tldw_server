@@ -412,6 +412,7 @@ def test_iter_core_router_specs_populates_expected_specs(monkeypatch: pytest.Mon
     assert by_first_path["/llamacpp/public/completions"].route_key == "llamacpp"
     assert by_key["vlm"].prefix == "/api/v1"
     assert by_key["vlm"].tags == ("vlm",)
+    assert by_key["vlm"].route_key == "vlm"
     assert by_key["mcp-unified"].prefix == "/api/v1"
     assert by_key["mcp-unified"].tags == ("mcp-unified",)
     assert by_key["feedback"].prefix == "/api/v1/feedback"
