@@ -657,10 +657,10 @@ async def add_dictionary_entry(
     try:
         dict_data = service.get_dictionary(dictionary_id)
     except CharactersRAGDBError as e:
-        logger.error(f"Error retrieving dictionary before adding entry: {e}")
+        logger.error("Error retrieving dictionary before adding entry")
         raise map_db_error_to_http(e, default_detail="Failed to add dictionary entry") from e
     except Exception as e:
-        logger.error(f"Error retrieving dictionary before adding entry: {e}")
+        logger.error("Error retrieving dictionary before adding entry")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to add dictionary entry",
@@ -689,10 +689,10 @@ async def add_dictionary_entry(
         entry_data = next((item for item in created_entries if item.get("id") == entry_id), None)
     except (InputError, CharactersRAGDBError) as e:
         if isinstance(e, CharactersRAGDBError) and not isinstance(e, InputError):
-            logger.error("Error adding dictionary entry: {}", e)
+            logger.error("Error adding dictionary entry")
         raise map_db_error_to_http(e, default_detail="Failed to add dictionary entry") from e
     except Exception as e:
-        logger.error(f"Error adding dictionary entry: {e}")
+        logger.error("Error adding dictionary entry")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to add dictionary entry",
@@ -738,10 +738,10 @@ async def list_dictionary_entries(
     except HTTPException:
         raise
     except CharactersRAGDBError as e:
-        logger.error("Error listing dictionary entries: {}", e)
+        logger.error("Error listing dictionary entries")
         raise map_db_error_to_http(e, default_detail="Failed to list dictionary entries") from e
     except Exception as e:
-        logger.error(f"Error listing dictionary entries: {e}")
+        logger.error("Error listing dictionary entries")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to list dictionary entries",
@@ -862,10 +862,10 @@ async def update_dictionary_entry(
         updated_entry = next((item for item in refreshed_entries if item.get("id") == entry_id), None)
     except (InputError, CharactersRAGDBError) as e:
         if isinstance(e, CharactersRAGDBError) and not isinstance(e, InputError):
-            logger.error("Error updating dictionary entry: {}", e)
+            logger.error("Error updating dictionary entry")
         raise map_db_error_to_http(e, default_detail="Failed to update dictionary entry") from e
     except Exception as e:
-        logger.error(f"Error updating dictionary entry: {e}")
+        logger.error("Error updating dictionary entry")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to update dictionary entry",
@@ -896,10 +896,10 @@ async def delete_dictionary_entry(
     except HTTPException:
         raise
     except CharactersRAGDBError as e:
-        logger.error("Error deleting dictionary entry: {}", e)
+        logger.error("Error deleting dictionary entry")
         raise map_db_error_to_http(e, default_detail="Failed to delete dictionary entry") from e
     except Exception as e:
-        logger.error(f"Error deleting dictionary entry: {e}")
+        logger.error("Error deleting dictionary entry")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to delete dictionary entry",

@@ -96,6 +96,17 @@ def _build_update_payload() -> ChatDictionaryUpdate:
     return ChatDictionaryUpdate(name="Updated Dictionary")
 
 
+def _build_entry_create_payload() -> chat_dictionary_endpoints.DictionaryEntryCreate:
+    return chat_dictionary_endpoints.DictionaryEntryCreate(
+        pattern="hello",
+        replacement="world",
+    )
+
+
+def _build_entry_update_payload() -> chat_dictionary_endpoints.DictionaryEntryUpdate:
+    return chat_dictionary_endpoints.DictionaryEntryUpdate(replacement="updated")
+
+
 @pytest.mark.asyncio
 async def test_create_chat_dictionary_maps_conflict_error(monkeypatch: pytest.MonkeyPatch):
     def _create_dictionary(self, **_kwargs):
@@ -389,10 +400,7 @@ async def test_add_dictionary_entry_maps_input_error(monkeypatch: pytest.MonkeyP
     with pytest.raises(HTTPException) as exc_info:
         await chat_dictionary_endpoints.add_dictionary_entry(
             dictionary_id=42,
-            entry=chat_dictionary_endpoints.DictionaryEntryCreate(
-                pattern="hello",
-                replacement="world",
-            ),
+            entry=_build_entry_create_payload(),
             db=object(),
         )
 
@@ -401,12 +409,56 @@ async def test_add_dictionary_entry_maps_input_error(monkeypatch: pytest.MonkeyP
 
 
 @pytest.mark.asyncio
+async def test_add_dictionary_entry_lookup_maps_database_error(monkeypatch: pytest.MonkeyPatch):
+    logger_stub = _patch_endpoint_logger(monkeypatch)
+
+    def _get_dictionary(self, *_args, **_kwargs):
+        raise _database_failure()
+
+    _patch_service(monkeypatch, get_dictionary=_get_dictionary)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await chat_dictionary_endpoints.add_dictionary_entry(
+            dictionary_id=42,
+            entry=_build_entry_create_payload(),
+            db=object(),
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "Failed to add dictionary entry"
+    _assert_sanitized_log_call(logger_stub, "Error retrieving dictionary before adding entry")
+
+
+@pytest.mark.asyncio
+async def test_add_dictionary_entry_lookup_sanitizes_unexpected_error_log(monkeypatch: pytest.MonkeyPatch):
+    logger_stub = _patch_endpoint_logger(monkeypatch)
+
+    def _get_dictionary(self, *_args, **_kwargs):
+        raise _unexpected_failure()
+
+    _patch_service(monkeypatch, get_dictionary=_get_dictionary)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await chat_dictionary_endpoints.add_dictionary_entry(
+            dictionary_id=42,
+            entry=_build_entry_create_payload(),
+            db=object(),
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "Failed to add dictionary entry"
+    _assert_sanitized_log_call(logger_stub, "Error retrieving dictionary before adding entry")
+
+
+@pytest.mark.asyncio
 async def test_add_dictionary_entry_maps_database_error(monkeypatch: pytest.MonkeyPatch):
+    logger_stub = _patch_endpoint_logger(monkeypatch)
+
     def _get_dictionary(self, *_args, **_kwargs):
         return {"id": 42}
 
     def _add_entry(self, *_args, **_kwargs):
-        raise CharactersRAGDBError("driver failed")
+        raise _database_failure()
 
     _patch_service(
         monkeypatch,
@@ -417,21 +469,49 @@ async def test_add_dictionary_entry_maps_database_error(monkeypatch: pytest.Monk
     with pytest.raises(HTTPException) as exc_info:
         await chat_dictionary_endpoints.add_dictionary_entry(
             dictionary_id=42,
-            entry=chat_dictionary_endpoints.DictionaryEntryCreate(
-                pattern="hello",
-                replacement="world",
-            ),
+            entry=_build_entry_create_payload(),
             db=object(),
         )
 
     assert exc_info.value.status_code == 500
     assert exc_info.value.detail == "Failed to add dictionary entry"
+    _assert_sanitized_log_call(logger_stub, "Error adding dictionary entry")
+
+
+@pytest.mark.asyncio
+async def test_add_dictionary_entry_sanitizes_unexpected_error_log(monkeypatch: pytest.MonkeyPatch):
+    logger_stub = _patch_endpoint_logger(monkeypatch)
+
+    def _get_dictionary(self, *_args, **_kwargs):
+        return {"id": 42}
+
+    def _add_entry(self, *_args, **_kwargs):
+        raise _unexpected_failure()
+
+    _patch_service(
+        monkeypatch,
+        get_dictionary=_get_dictionary,
+        add_entry=_add_entry,
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await chat_dictionary_endpoints.add_dictionary_entry(
+            dictionary_id=42,
+            entry=_build_entry_create_payload(),
+            db=object(),
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "Failed to add dictionary entry"
+    _assert_sanitized_log_call(logger_stub, "Error adding dictionary entry")
 
 
 @pytest.mark.asyncio
 async def test_list_dictionary_entries_maps_database_error(monkeypatch: pytest.MonkeyPatch):
+    logger_stub = _patch_endpoint_logger(monkeypatch)
+
     def _get_dictionary(self, *_args, **_kwargs):
-        raise CharactersRAGDBError("driver failed")
+        raise _database_failure()
 
     _patch_service(monkeypatch, get_dictionary=_get_dictionary)
 
@@ -444,6 +524,35 @@ async def test_list_dictionary_entries_maps_database_error(monkeypatch: pytest.M
 
     assert exc_info.value.status_code == 500
     assert exc_info.value.detail == "Failed to list dictionary entries"
+    _assert_sanitized_log_call(logger_stub, "Error listing dictionary entries")
+
+
+@pytest.mark.asyncio
+async def test_list_dictionary_entries_sanitizes_unexpected_error_log(monkeypatch: pytest.MonkeyPatch):
+    logger_stub = _patch_endpoint_logger(monkeypatch)
+
+    def _get_dictionary(self, *_args, **_kwargs):
+        return {"id": 42}
+
+    def _get_entries(self, *_args, **_kwargs):
+        raise _unexpected_failure()
+
+    _patch_service(
+        monkeypatch,
+        get_dictionary=_get_dictionary,
+        get_entries=_get_entries,
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await chat_dictionary_endpoints.list_dictionary_entries(
+            dictionary_id=42,
+            group=None,
+            db=object(),
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "Failed to list dictionary entries"
+    _assert_sanitized_log_call(logger_stub, "Error listing dictionary entries")
 
 
 @pytest.mark.asyncio
@@ -456,7 +565,7 @@ async def test_update_dictionary_entry_maps_input_error(monkeypatch: pytest.Monk
     with pytest.raises(HTTPException) as exc_info:
         await chat_dictionary_endpoints.update_dictionary_entry(
             entry_id=42,
-            update=chat_dictionary_endpoints.DictionaryEntryUpdate(replacement="updated"),
+            update=_build_entry_update_payload(),
             db=object(),
         )
 
@@ -466,26 +575,52 @@ async def test_update_dictionary_entry_maps_input_error(monkeypatch: pytest.Monk
 
 @pytest.mark.asyncio
 async def test_update_dictionary_entry_maps_database_error(monkeypatch: pytest.MonkeyPatch):
+    logger_stub = _patch_endpoint_logger(monkeypatch)
+
     def _update_entry(self, *_args, **_kwargs):
-        raise CharactersRAGDBError("driver failed")
+        raise _database_failure()
 
     _patch_service(monkeypatch, update_entry=_update_entry)
 
     with pytest.raises(HTTPException) as exc_info:
         await chat_dictionary_endpoints.update_dictionary_entry(
             entry_id=42,
-            update=chat_dictionary_endpoints.DictionaryEntryUpdate(replacement="updated"),
+            update=_build_entry_update_payload(),
             db=object(),
         )
 
     assert exc_info.value.status_code == 500
     assert exc_info.value.detail == "Failed to update dictionary entry"
+    _assert_sanitized_log_call(logger_stub, "Error updating dictionary entry")
+
+
+@pytest.mark.asyncio
+async def test_update_dictionary_entry_sanitizes_unexpected_error_log(monkeypatch: pytest.MonkeyPatch):
+    logger_stub = _patch_endpoint_logger(monkeypatch)
+
+    def _update_entry(self, *_args, **_kwargs):
+        raise _unexpected_failure()
+
+    _patch_service(monkeypatch, update_entry=_update_entry)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await chat_dictionary_endpoints.update_dictionary_entry(
+            entry_id=42,
+            update=_build_entry_update_payload(),
+            db=object(),
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "Failed to update dictionary entry"
+    _assert_sanitized_log_call(logger_stub, "Error updating dictionary entry")
 
 
 @pytest.mark.asyncio
 async def test_delete_dictionary_entry_maps_database_error(monkeypatch: pytest.MonkeyPatch):
+    logger_stub = _patch_endpoint_logger(monkeypatch)
+
     def _delete_entry(self, *_args, **_kwargs):
-        raise CharactersRAGDBError("driver failed")
+        raise _database_failure()
 
     _patch_service(monkeypatch, delete_entry=_delete_entry)
 
@@ -497,6 +632,27 @@ async def test_delete_dictionary_entry_maps_database_error(monkeypatch: pytest.M
 
     assert exc_info.value.status_code == 500
     assert exc_info.value.detail == "Failed to delete dictionary entry"
+    _assert_sanitized_log_call(logger_stub, "Error deleting dictionary entry")
+
+
+@pytest.mark.asyncio
+async def test_delete_dictionary_entry_sanitizes_unexpected_error_log(monkeypatch: pytest.MonkeyPatch):
+    logger_stub = _patch_endpoint_logger(monkeypatch)
+
+    def _delete_entry(self, *_args, **_kwargs):
+        raise _unexpected_failure()
+
+    _patch_service(monkeypatch, delete_entry=_delete_entry)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await chat_dictionary_endpoints.delete_dictionary_entry(
+            entry_id=42,
+            db=object(),
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "Failed to delete dictionary entry"
+    _assert_sanitized_log_call(logger_stub, "Error deleting dictionary entry")
 
 
 @pytest.mark.asyncio
