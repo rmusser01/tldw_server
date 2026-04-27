@@ -342,7 +342,7 @@ async def create_output(
                 media_item_id=None,
             )
         except _OUTPUTS_NONCRITICAL_EXCEPTIONS as exc:
-            logger.error(f"failed to insert output row: {exc}")
+            logger.error("outputs row insert failed")
             try:
                 os.remove(path)
             except _OUTPUTS_NONCRITICAL_EXCEPTIONS as cleanup_err:
