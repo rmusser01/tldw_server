@@ -71,10 +71,12 @@ def test_sandbox_image_store_registers_bundle_reloads_and_plans_gc(tmp_path: Pat
 
 
 def test_sandbox_image_store_rejects_manifest_path_mismatch(tmp_path: Path) -> None:
+    artifact = tmp_path / "rootfs.img"
+    artifact.write_bytes(b"root")
     manifest_path = tmp_path / "store" / "templates" / "vz_linux" / "actual" / "manifest.json"
     manifest_path.parent.mkdir(parents=True)
     manifest_path.write_text(
-        json.dumps(_manifest_payload(runtime="vz_linux", template_name="declared")),
+        json.dumps(_manifest_payload(runtime="vz_linux", template_name="declared", disk_path=str(artifact))),
         encoding="utf-8",
     )
 
@@ -84,20 +86,59 @@ def test_sandbox_image_store_rejects_manifest_path_mismatch(tmp_path: Path) -> N
 
 def test_sandbox_image_store_rejects_manifest_id_overwrite_vector_on_reload(tmp_path: Path) -> None:
     store_root = tmp_path / "store"
+    first_artifact = tmp_path / "first.img"
+    second_artifact = tmp_path / "second.img"
+    first_artifact.write_bytes(b"one")
+    second_artifact.write_bytes(b"two")
     first_manifest = store_root / "templates" / "vz_linux" / "first" / "manifest.json"
     second_manifest = store_root / "templates" / "vz_linux" / "second" / "manifest.json"
     first_manifest.parent.mkdir(parents=True)
     second_manifest.parent.mkdir(parents=True)
     first_manifest.write_text(
-        json.dumps(_manifest_payload(runtime="vz_linux", template_name="first")),
+        json.dumps(_manifest_payload(runtime="vz_linux", template_name="first", disk_path=str(first_artifact))),
         encoding="utf-8",
     )
-    second_payload = _manifest_payload(runtime="vz_linux", template_name="second")
+    second_payload = _manifest_payload(runtime="vz_linux", template_name="second", disk_path=str(second_artifact))
     second_payload["template_id"] = "vz_linux:first"
     second_manifest.write_text(json.dumps(second_payload), encoding="utf-8")
 
     with pytest.raises(ImageStoreValidationError, match="manifest_path_mismatch"):
         SandboxImageStore(root_path=store_root)
+
+
+def test_sandbox_image_store_rejects_non_object_manifest_payload(tmp_path: Path) -> None:
+    manifest_path = tmp_path / "store" / "templates" / "vz_linux" / "bad" / "manifest.json"
+    manifest_path.parent.mkdir(parents=True)
+    manifest_path.write_text("[]", encoding="utf-8")
+
+    with pytest.raises(ImageStoreValidationError, match="manifest_expected_object"):
+        SandboxImageStore(root_path=tmp_path / "store")
+
+
+def test_sandbox_image_store_rejects_missing_manifest_artifact_path(tmp_path: Path) -> None:
+    manifest_path = tmp_path / "store" / "templates" / "vz_linux" / "bad" / "manifest.json"
+    manifest_path.parent.mkdir(parents=True)
+    missing_artifact = tmp_path / "missing-rootfs.img"
+    manifest_path.write_text(
+        json.dumps(_manifest_payload(runtime="vz_linux", template_name="bad", disk_path=str(missing_artifact))),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ImageStoreValidationError, match="manifest_artifact_missing"):
+        SandboxImageStore(root_path=tmp_path / "store")
+
+
+def test_sandbox_image_store_rejects_manifest_disk_paths_mismatch(tmp_path: Path) -> None:
+    artifact = tmp_path / "rootfs.img"
+    artifact.write_bytes(b"root")
+    manifest_path = tmp_path / "store" / "templates" / "vz_linux" / "bad" / "manifest.json"
+    manifest_path.parent.mkdir(parents=True)
+    payload = _manifest_payload(runtime="vz_linux", template_name="bad", disk_path=str(artifact))
+    payload["disk_paths"] = [str(tmp_path / "other-rootfs.img")]
+    manifest_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ImageStoreValidationError, match="manifest_disk_paths_mismatch"):
+        SandboxImageStore(root_path=tmp_path / "store")
 
 
 def test_sandbox_image_store_gc_plan_ignores_files_deleted_during_size_scan(

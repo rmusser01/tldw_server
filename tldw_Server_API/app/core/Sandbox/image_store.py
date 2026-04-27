@@ -292,6 +292,8 @@ class SandboxImageStore:
             payload = json.loads(manifest_path.read_text(encoding="utf-8"))
         except json.JSONDecodeError as exc:
             raise ImageStoreValidationError(f"manifest_invalid_json: {manifest_path}") from exc
+        if not isinstance(payload, dict):
+            raise ImageStoreValidationError(f"manifest_expected_object: {manifest_path}")
 
         if payload.get("schema_version") != MANIFEST_SCHEMA_VERSION:
             raise ImageStoreValidationError(f"manifest_unsupported_schema: {manifest_path}")
@@ -310,11 +312,18 @@ class SandboxImageStore:
             self._artifact_from_manifest_payload(artifact, manifest_path=manifest_path)
             for artifact in raw_artifacts
         ]
+        artifact_paths = self._validated_artifact_paths(artifacts, manifest_path=manifest_path)
+        raw_disk_paths = payload.get("disk_paths", [])
+        if not isinstance(raw_disk_paths, list):
+            raise ImageStoreValidationError(f"manifest_disk_paths_invalid: {manifest_path}")
+        disk_paths = [str(Path(str(path)).expanduser()) for path in raw_disk_paths]
+        if disk_paths != artifact_paths:
+            raise ImageStoreValidationError(f"manifest_disk_paths_mismatch: {manifest_path}")
         return TemplateRecord(
             template_id=str(payload["template_id"]),
             runtime=str(payload["runtime"]),
             template_name=str(payload["template_name"]),
-            disk_paths=[str(path) for path in payload.get("disk_paths", [])],
+            disk_paths=artifact_paths,
             source_path=payload.get("source_path"),
             labels=dict(payload.get("labels", {})),
             artifacts=artifacts,
@@ -322,6 +331,20 @@ class SandboxImageStore:
             registered_at=payload.get("registered_at"),
             manifest_path=str(manifest_path),
         )
+
+    def _validated_artifact_paths(
+        self,
+        artifacts: list[TemplateArtifact],
+        *,
+        manifest_path: Path,
+    ) -> list[str]:
+        artifact_paths = []
+        for artifact in artifacts:
+            artifact_path = Path(artifact.path).expanduser()
+            if not artifact_path.is_file():
+                raise ImageStoreValidationError(f"manifest_artifact_missing: {manifest_path}: {artifact_path}")
+            artifact_paths.append(str(artifact_path))
+        return artifact_paths
 
     def _artifact_from_manifest_payload(self, artifact: Any, *, manifest_path: Path) -> TemplateArtifact:
         if not isinstance(artifact, dict):

@@ -213,13 +213,15 @@ Canonical bundles can be registered in the sandbox image store for durable local
 inventory, artifact hashes, build provenance, and run-clone planning:
 
 ```python
+from pathlib import Path
+
 from tldw_Server_API.app.core.Sandbox.image_store import SandboxImageStore
 
 store = SandboxImageStore(root_path="/var/lib/tldw/sandbox-images")
 template_id = store.register_bundle(
     runtime="vz_linux",
     template_name="debian-bookworm-arm64",
-    bundle_path="${BUNDLE_DIR}",
+    bundle_path=Path("/path/to/vz-linux-bundle"),
     labels={"suite": "bookworm", "profile": "minimal"},
 )
 ```

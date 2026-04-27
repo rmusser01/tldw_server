@@ -186,12 +186,15 @@ prepare_socket_path() {
   if [[ -d "${SOCKET_PATH}" ]]; then
     die "helper socket path is a directory: ${SOCKET_PATH}"
   fi
-  if [[ -S "${SOCKET_PATH}" || -f "${SOCKET_PATH}" || -L "${SOCKET_PATH}" ]]; then
+  if [[ -L "${SOCKET_PATH}" ]]; then
+    die "helper socket path already exists and is not a UNIX socket: ${SOCKET_PATH}"
+  fi
+  if [[ -S "${SOCKET_PATH}" ]]; then
     rm -f "${SOCKET_PATH}"
     return 0
   fi
   if [[ -e "${SOCKET_PATH}" ]]; then
-    die "helper socket path exists and is not removable by this script: ${SOCKET_PATH}"
+    die "helper socket path already exists and is not a UNIX socket: ${SOCKET_PATH}"
   fi
 }
 
