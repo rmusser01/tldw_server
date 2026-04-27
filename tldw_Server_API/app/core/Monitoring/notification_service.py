@@ -254,9 +254,9 @@ class NotificationService:
         try:
             self._send_webhook(payload)
         except RetryError as e:
-            logger.info(f"Webhook notify failed: {e}")
+            logger.info("Webhook notify failed ({})", _safe_exception_label(e))
         except (OSError, RuntimeError, TypeError, ValueError) as e:
-            logger.info(f"Webhook notify failed: {e}")
+            logger.info("Webhook notify failed ({})", _safe_exception_label(e))
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=8), reraise=False)
     def _send_email(self, alert: TopicAlert) -> None:
@@ -345,9 +345,9 @@ class NotificationService:
         try:
             self._send_email(alert)
         except RetryError as e:
-            logger.info(f"Email notify failed: {e}")
+            logger.info("Email notify failed ({})", _safe_exception_label(e))
         except (OSError, RuntimeError, TypeError, ValueError, smtplib.SMTPException) as e:
-            logger.info(f"Email notify failed: {e}")
+            logger.info("Email notify failed ({})", _safe_exception_label(e))
 
 
 _notify_singleton: NotificationService | None = None

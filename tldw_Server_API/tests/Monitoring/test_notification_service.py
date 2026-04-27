@@ -257,13 +257,44 @@ def test_notification_send_webhook_invokes_fetch(monkeypatch):
 
 def test_send_webhook_safe_swallows_retry_exhaustion(monkeypatch):
     svc = NotificationService()
+    secret_detail = "webhook retry failed at /tmp/private-webhook-retry"
+    messages, sink_id = _capture_notification_logs("INFO")
     monkeypatch.setattr(
         svc,
         "_send_webhook",
-        lambda payload: (_ for _ in ()).throw(_retry_error("webhook boom")),
+        lambda payload: (_ for _ in ()).throw(_retry_error(secret_detail)),
     )
 
-    svc._send_webhook_safe({"event": "test"})
+    try:
+        svc._send_webhook_safe({"event": "test"})
+    finally:
+        notification_service.logger.remove(sink_id)
+
+    joined = "\n".join(messages)
+    assert "Webhook notify failed" in joined
+    assert secret_detail not in joined
+    assert "private-webhook-retry" not in joined
+
+
+def test_send_webhook_safe_sanitizes_runtime_failure_log(monkeypatch):
+    svc = NotificationService()
+    secret_detail = "webhook runtime failed at /tmp/private-webhook-runtime"
+    messages, sink_id = _capture_notification_logs("INFO")
+    monkeypatch.setattr(
+        svc,
+        "_send_webhook",
+        lambda payload: (_ for _ in ()).throw(RuntimeError(secret_detail)),
+    )
+
+    try:
+        svc._send_webhook_safe({"event": "test"})
+    finally:
+        notification_service.logger.remove(sink_id)
+
+    joined = "\n".join(messages)
+    assert "Webhook notify failed" in joined
+    assert secret_detail not in joined
+    assert "private-webhook-runtime" not in joined
 
 
 def test_send_email_safe_swallows_retry_exhaustion(monkeypatch):
@@ -279,13 +310,55 @@ def test_send_email_safe_swallows_retry_exhaustion(monkeypatch):
         pattern="cpu high",
         text_snippet="CPU at 95%",
     )
+    secret_detail = "email retry failed at /tmp/private-email-retry"
+    messages, sink_id = _capture_notification_logs("INFO")
     monkeypatch.setattr(
         svc,
         "_send_email",
-        lambda payload: (_ for _ in ()).throw(_retry_error("email boom")),
+        lambda payload: (_ for _ in ()).throw(_retry_error(secret_detail)),
     )
 
-    svc._send_email_safe(alert)
+    try:
+        svc._send_email_safe(alert)
+    finally:
+        notification_service.logger.remove(sink_id)
+
+    joined = "\n".join(messages)
+    assert "Email notify failed" in joined
+    assert secret_detail not in joined
+    assert "private-email-retry" not in joined
+
+
+def test_send_email_safe_sanitizes_runtime_failure_log(monkeypatch):
+    svc = NotificationService()
+    alert = TopicAlert(
+        user_id="u1",
+        scope_type="user",
+        scope_id="u1",
+        source="chat.input",
+        watchlist_id="watch-1",
+        rule_category="system",
+        rule_severity="critical",
+        pattern="cpu high",
+        text_snippet="CPU at 95%",
+    )
+    secret_detail = "email runtime failed at /tmp/private-email-runtime"
+    messages, sink_id = _capture_notification_logs("INFO")
+    monkeypatch.setattr(
+        svc,
+        "_send_email",
+        lambda payload: (_ for _ in ()).throw(RuntimeError(secret_detail)),
+    )
+
+    try:
+        svc._send_email_safe(alert)
+    finally:
+        notification_service.logger.remove(sink_id)
+
+    joined = "\n".join(messages)
+    assert "Email notify failed" in joined
+    assert secret_detail not in joined
+    assert "private-email-runtime" not in joined
 
 
 def test_notify_generic_only_schedules_webhook_path(monkeypatch, tmp_path):
