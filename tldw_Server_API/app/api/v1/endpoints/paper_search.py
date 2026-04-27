@@ -5126,7 +5126,7 @@ async def paper_search_arxiv_by_id(
     except HTTPException:
         raise
     except _PAPER_SEARCH_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Unexpected arXiv by-id error: {e}", exc_info=True)
+        logger.error("Unexpected arXiv by-id error")
         raise HTTPException(status_code=500, detail=_PROVIDER_UNEXPECTED_DETAIL) from e
 
 
@@ -5163,7 +5163,7 @@ async def paper_search_semantic_scholar_by_id(
     except HTTPException:
         raise
     except _PAPER_SEARCH_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Unexpected Semantic Scholar by-id error: {e}", exc_info=True)
+        logger.error("Unexpected Semantic Scholar by-id error")
         raise HTTPException(status_code=500, detail=_PROVIDER_UNEXPECTED_DETAIL) from e
 
 
@@ -5197,5 +5197,5 @@ async def paper_search_pubmed_by_id(
     except HTTPException:
         raise
     except _PAPER_SEARCH_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Unexpected PubMed by-id error: {e}", exc_info=True)
+        logger.error("Unexpected PubMed by-id error")
         raise HTTPException(status_code=500, detail=_PROVIDER_UNEXPECTED_DETAIL) from e
