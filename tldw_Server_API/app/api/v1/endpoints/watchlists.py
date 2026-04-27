@@ -2673,7 +2673,7 @@ async def get_watchlists_rc_telemetry_summary(
         )
     except _WATCHLISTS_NONCRITICAL_EXCEPTIONS as exc:
         status_label = "error"
-        logger.error("watchlists RC telemetry summary failed for user {}: {}", current_user.id, exc)
+        logger.error("watchlists RC telemetry summary failed")
         raise HTTPException(status_code=500, detail="watchlists_rc_telemetry_summary_failed") from exc
     finally:
         record_summary_request(
@@ -2725,7 +2725,7 @@ async def get_watchlists_ia_experiment_telemetry_summary(
     try:
         items = db.summarize_ia_experiment_events(since=since, until=until)
     except _WATCHLISTS_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error("watchlists IA telemetry summary failed for user {}: {}", current_user.id, exc)
+        logger.error("watchlists IA telemetry summary failed")
         raise HTTPException(status_code=500, detail="watchlists_ia_telemetry_summary_failed") from exc
     return WatchlistIaExperimentTelemetrySummaryResponse(items=items, since=since, until=until)
 
