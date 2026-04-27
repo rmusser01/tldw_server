@@ -211,18 +211,18 @@ def _audio_shim_attr(name: str):
         if hasattr(audio_pkg_shim, name):
             package_candidate = getattr(audio_pkg_shim, name)
     except _AUDIO_TRANSCRIPTIONS_NONCRITICAL_EXCEPTIONS:
-        logger.debug("audio_transcriptions shim package lookup failed for {}", name, exc_info=True)
+        logger.debug("audio_transcriptions shim package lookup failed")
     except Exception:
-        logger.debug("audio_transcriptions shim package lookup raised unexpected error for {}", name, exc_info=True)
+        logger.debug("audio_transcriptions shim package lookup raised unexpected error")
     try:
         from tldw_Server_API.app.api.v1.endpoints.audio import audio as audio_module_shim
 
         if hasattr(audio_module_shim, name):
             module_candidate = getattr(audio_module_shim, name)
     except _AUDIO_TRANSCRIPTIONS_NONCRITICAL_EXCEPTIONS:
-        logger.debug("audio_transcriptions shim module lookup failed for {}", name, exc_info=True)
+        logger.debug("audio_transcriptions shim module lookup failed")
     except Exception:
-        logger.debug("audio_transcriptions shim module lookup raised unexpected error for {}", name, exc_info=True)
+        logger.debug("audio_transcriptions shim module lookup raised unexpected error")
 
     if package_candidate is not None and module_candidate is not None:
         if package_candidate is module_candidate:

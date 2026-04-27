@@ -1,5 +1,6 @@
 import io
 import os as real_os
+from unittest.mock import call
 
 import numpy as np
 import pytest
@@ -216,6 +217,55 @@ def _setup_stubbed_audio_app(
     app.dependency_overrides[get_request_user] = _fake_get_request_user
     app.include_router(audio_router, prefix="/api/v1/audio")
     return app, captured
+
+
+@pytest.mark.unit
+def test_audio_transcriptions_sanitizes_shim_lookup_logs(monkeypatch):
+    import builtins
+    import tldw_Server_API.app.api.v1.endpoints.audio.audio_transcriptions as audio_tx
+
+    class _KwargLoggerStub:
+        def __init__(self) -> None:
+            self.debug_calls = []
+
+        def debug(self, message, *args, **kwargs) -> None:
+            self.debug_calls.append(call(message, *args, **kwargs))
+
+    original_import = builtins.__import__
+    scenarios = [
+        (
+            ImportError("package lookup leaked /private/audio-package.py"),
+            ArithmeticError("module lookup leaked /private/audio-module.py"),
+            [
+                call("audio_transcriptions shim package lookup failed"),
+                call("audio_transcriptions shim module lookup raised unexpected error"),
+            ],
+        ),
+        (
+            ArithmeticError("package lookup leaked /private/audio-package.py"),
+            ImportError("module lookup leaked /private/audio-module.py"),
+            [
+                call("audio_transcriptions shim package lookup raised unexpected error"),
+                call("audio_transcriptions shim module lookup failed"),
+            ],
+        ),
+    ]
+
+    for package_error, module_error, expected_calls in scenarios:
+        logger_stub = _KwargLoggerStub()
+        monkeypatch.setattr(audio_tx, "logger", logger_stub)
+
+        def _raising_import(name, globals=None, locals=None, fromlist=(), level=0):
+            if name == "tldw_Server_API.app.api.v1.endpoints" and "audio" in fromlist:
+                raise package_error
+            if name == "tldw_Server_API.app.api.v1.endpoints.audio" and "audio" in fromlist:
+                raise module_error
+            return original_import(name, globals, locals, fromlist, level)
+
+        monkeypatch.setattr(builtins, "__import__", _raising_import)
+
+        assert audio_tx._audio_shim_attr("sf") is audio_tx.sf
+        assert logger_stub.debug_calls == expected_calls
 
 
 @pytest.mark.unit
