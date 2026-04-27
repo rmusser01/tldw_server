@@ -243,6 +243,66 @@ async def test_audio_metadata_usage_log_failure_log_is_sanitized(monkeypatch):
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_audio_speech_history_hash_failure_log_is_sanitized(monkeypatch):
+    async def _resolve_tts_byok(*args, **kwargs):
+        _ = args, kwargs
+        return (1, {}, None)
+
+    def _fail_text_hash(*args, **kwargs):
+        _ = args, kwargs
+        raise RuntimeError("history hash leaked /private/tts-history-hash.json")
+
+    _patch_audio_shim(monkeypatch, _resolve_tts_byok)
+    fake_logger = MagicMock()
+    monkeypatch.setattr(audio_tts, "logger", fake_logger)
+    monkeypatch.setattr(audio_tts, "_tts_history_config", lambda: {"enabled": True, "store_text": True, "store_failed": True, "hash_key": None})
+    monkeypatch.setattr(audio_tts, "compute_tts_history_text_hash", _fail_text_hash)
+
+    response = await audio_tts.create_speech(
+        _request_data(),
+        _make_request(),
+        tts_service=_SuccessfulTTSService(),
+        current_user=SimpleNamespace(id=1),
+        media_db=SimpleNamespace(create_tts_history_entry=lambda **kwargs: None),
+        usage_log=SimpleNamespace(log_event=lambda *args, **kwargs: None),
+    )
+
+    assert response.status_code == 200
+    fake_logger.debug.assert_called_once_with("TTS history: failed to compute text hash")
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_audio_speech_history_write_failure_log_is_sanitized(monkeypatch):
+    async def _resolve_tts_byok(*args, **kwargs):
+        _ = args, kwargs
+        return (1, {}, None)
+
+    class _FailingMediaDB:
+        def create_tts_history_entry(self, **kwargs):  # noqa: ARG002
+            raise RuntimeError("history write leaked /private/tts-history-write.json")
+
+    _patch_audio_shim(monkeypatch, _resolve_tts_byok)
+    fake_logger = MagicMock()
+    monkeypatch.setattr(audio_tts, "logger", fake_logger)
+    monkeypatch.setattr(audio_tts, "_tts_history_config", lambda: {"enabled": True, "store_text": True, "store_failed": True, "hash_key": None})
+    monkeypatch.setattr(audio_tts, "compute_tts_history_text_hash", lambda *args, **kwargs: "safe-hash")
+
+    response = await audio_tts.create_speech(
+        _request_data(),
+        _make_request(),
+        tts_service=_SuccessfulTTSService(),
+        current_user=SimpleNamespace(id=1),
+        media_db=_FailingMediaDB(),
+        usage_log=SimpleNamespace(log_event=lambda *args, **kwargs: None),
+    )
+
+    assert response.status_code == 200
+    fake_logger.debug.assert_called_once_with("TTS history: failed to write record")
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_audio_speech_openai_oauth_auth_failure_retries_once(monkeypatch):
     force_flags: list[bool] = []
 

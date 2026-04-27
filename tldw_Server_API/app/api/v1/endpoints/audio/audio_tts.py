@@ -416,8 +416,8 @@ async def create_speech(
             return
         try:
             text_hash = compute_tts_history_text_hash(request_data.input, history_cfg.get("hash_key"))
-        except _AUDIO_TTS_NONCRITICAL_EXCEPTIONS as exc:
-            logger.debug("TTS history: failed to compute text hash: {} (request_id={})", exc, request_id)
+        except _AUDIO_TTS_NONCRITICAL_EXCEPTIONS:
+            logger.debug("TTS history: failed to compute text hash")
             return
         text_length = tts_history_text_length(request_data.input)
         text_value = request_data.input if history_cfg.get("store_text", True) else None
@@ -512,8 +512,8 @@ async def create_speech(
             except _AUDIO_TTS_NONCRITICAL_EXCEPTIONS:
                 pass
             history_written = True
-        except _AUDIO_TTS_NONCRITICAL_EXCEPTIONS as exc:
-            logger.debug("TTS history: failed to write record: {} (request_id={})", exc, request_id)
+        except _AUDIO_TTS_NONCRITICAL_EXCEPTIONS:
+            logger.debug("TTS history: failed to write record")
 
     def _build_speech_iter():
         return tts_service.generate_speech(
