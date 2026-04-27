@@ -1073,8 +1073,8 @@ async def websocket_voice_assistant(
             registry = get_voice_command_registry()
             registry.load_defaults()
             registry.refresh_user_commands(db, user_id, include_disabled=True)
-        except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as _db_err:
-            logger.warning(f"Voice assistant DB init failed (session={session_id}): {_db_err}")
+        except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
+            logger.warning("Voice assistant DB init failed")
 
         await websocket.send_json(
             WSAuthOKMessage(
