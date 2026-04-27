@@ -1,6 +1,10 @@
 from __future__ import annotations
 
-from tldw_Server_API.app.core.Sandbox.macos_virtualization.models import HelperExecReply, HelperVMReply
+from tldw_Server_API.app.core.Sandbox.macos_virtualization.models import (
+    HelperExecReply,
+    HelperVMReply,
+    HelperVMStatusReply,
+)
 from tldw_Server_API.app.core.Sandbox.models import RunPhase, RunSpec, RuntimeType
 import tldw_Server_API.app.core.Sandbox.runners.vz_linux_runner as vz_linux_module
 from tldw_Server_API.app.core.Sandbox.runners.vz_linux_runner import VZLinuxRunner
@@ -41,10 +45,28 @@ def test_vz_linux_session_reuses_existing_vm_for_second_run(monkeypatch, tmp_pat
     calls: list[str] = []
 
     class _FakeHelper:
+        def validate_template(self, request: dict[str, object]) -> dict[str, object]:
+            calls.append("validate_template")
+            return {
+                "ready": True,
+                "template_id": str(request["template"]),
+                "source": str(request["template"]),
+            }
+
         def create_vm(self, request: dict[str, object]) -> HelperVMReply:
             assert request["session_mode"] is True
             calls.append("create_vm")
             return HelperVMReply(vm_id="vm-session-1", state="created", details={"session_mode": True})
+
+        def get_vm_status(self, vm_id: str) -> HelperVMStatusReply:
+            calls.append(f"get_vm_status:{vm_id}")
+            return HelperVMStatusReply(
+                protocol_version="1",
+                helper_version="test",
+                vm_id=vm_id,
+                state="running",
+                healthy=True,
+            )
 
         def exec_guest(self, *, vm_id: str, request: dict[str, object]) -> HelperExecReply:
             del request
@@ -79,7 +101,13 @@ def test_vz_linux_session_reuses_existing_vm_for_second_run(monkeypatch, tmp_pat
 
     assert first.phase == RunPhase.completed
     assert second.phase == RunPhase.completed
-    assert calls == ["create_vm", "exec_guest:vm-session-1", "exec_guest:vm-session-1"]
+    assert calls == [
+        "validate_template",
+        "create_vm",
+        "exec_guest:vm-session-1",
+        "get_vm_status:vm-session-1",
+        "exec_guest:vm-session-1",
+    ]
     control = store.get_vz_session_control("sess-vz-1")
     assert control is not None
     assert control["vm_id"] == "vm-session-1"
