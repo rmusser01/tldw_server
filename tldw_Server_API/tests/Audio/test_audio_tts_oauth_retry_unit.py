@@ -332,6 +332,37 @@ async def test_audio_speech_byok_touch_failure_log_is_sanitized(monkeypatch):
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_audio_speech_streaming_byok_touch_failure_log_is_sanitized(monkeypatch):
+    async def _resolve_tts_byok(*args, **kwargs):
+        _ = args, kwargs
+        return (1, {}, _FailingTouchByokResolution(api_key="byok-key", auth_source="byok"))
+
+    request_data = _request_data()
+    request_data.stream = True
+
+    _patch_audio_shim(monkeypatch, _resolve_tts_byok)
+    fake_logger = MagicMock()
+    monkeypatch.setattr(audio_tts, "logger", fake_logger)
+
+    response = await audio_tts.create_speech(
+        request_data,
+        _make_request(),
+        tts_service=_SuccessfulTTSService(),
+        current_user=SimpleNamespace(id=1),
+        media_db=None,
+        usage_log=SimpleNamespace(log_event=lambda *args, **kwargs: None),
+    )
+    chunks = []
+    async for chunk in response.body_iterator:
+        chunks.append(chunk)
+
+    assert response.status_code == 200
+    assert chunks == [b"generated audio"]
+    fake_logger.debug.assert_called_once_with("Failed to update BYOK last_used timestamp")
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_audio_metadata_byok_touch_failure_log_is_sanitized(monkeypatch):
     async def _resolve_tts_byok(*args, **kwargs):
         _ = args, kwargs

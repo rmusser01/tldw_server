@@ -637,8 +637,8 @@ async def create_speech(
             if byok_tts_resolution is not None:
                 try:
                     await byok_tts_resolution.touch_last_used()
-                except _AUDIO_TTS_NONCRITICAL_EXCEPTIONS as exc:
-                    logger.debug(f"Failed to update BYOK last_used timestamp: {exc}")
+                except _AUDIO_TTS_NONCRITICAL_EXCEPTIONS:
+                    logger.debug("Failed to update BYOK last_used timestamp")
             status = "success"
             error_message = None
             if stream_failed:
