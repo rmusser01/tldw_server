@@ -818,6 +818,10 @@ export const WritingPlayground = () => {
   // =====================================================================
   // Speech (unique - not in hooks)
   // =====================================================================
+  const getCurrentEditorAdapter = React.useCallback((): WritingEditorAdapter | null => {
+    return activeEditorAdapterRef.current
+  }, [])
+
   const stopSpeech = React.useCallback(() => {
     if (typeof window !== "undefined" && window.speechSynthesis) {
       window.speechSynthesis.cancel()
@@ -968,10 +972,6 @@ export const WritingPlayground = () => {
     },
     [deleteSessionMutation, t]
   )
-
-  const getCurrentEditorAdapter = React.useCallback((): WritingEditorAdapter | null => {
-    return activeEditorAdapterRef.current
-  }, [])
 
   const focusEditorSelection = React.useCallback(
     (start: number, end: number) => {
