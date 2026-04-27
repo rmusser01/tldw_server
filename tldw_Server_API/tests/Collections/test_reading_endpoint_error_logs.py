@@ -269,3 +269,90 @@ async def test_import_reading_items_sanitizes_staged_cleanup_log(monkeypatch):
     assert excinfo.value.status_code == 500
     assert excinfo.value.detail == "reading_import_failed"
     logger_stub.debug.assert_called_once_with("reading_import_staged_file_cleanup_failed")
+
+
+@pytest.mark.asyncio
+async def test_save_reading_item_sanitizes_backend_log(monkeypatch):
+    logger_stub = MagicMock()
+
+    class _FailingService:
+        async def save_url(self, **_kwargs):
+            raise RuntimeError("reading save exploded at /private/collections.db")
+
+    monkeypatch.setattr(reading, "logger", logger_stub)
+    monkeypatch.setattr(reading, "_service_for_user", lambda _user: _FailingService())
+
+    with pytest.raises(HTTPException) as excinfo:
+        await reading.save_reading_item(
+            payload=reading.ReadingSaveRequest(url="https://example.test/article"),
+            current_user=SimpleNamespace(id=42),
+        )
+
+    assert excinfo.value.status_code == 400
+    assert excinfo.value.detail == "reading_save_failed"
+    logger_stub.error.assert_called_once_with("reading_save_failed")
+
+
+@pytest.mark.asyncio
+async def test_get_reading_item_sanitizes_backend_log(monkeypatch):
+    logger_stub = MagicMock()
+
+    class _FailingService:
+        def get_item(self, *_args, **_kwargs):
+            raise RuntimeError("reading get exploded at /private/collections.db")
+
+    monkeypatch.setattr(reading, "logger", logger_stub)
+    monkeypatch.setattr(reading, "_service_for_user", lambda _user: _FailingService())
+
+    with pytest.raises(HTTPException) as excinfo:
+        await reading.get_reading_item(item_id=123, current_user=SimpleNamespace(id=42))
+
+    assert excinfo.value.status_code == 400
+    assert excinfo.value.detail == "reading_get_failed"
+    logger_stub.error.assert_called_once_with("reading_get_failed")
+
+
+@pytest.mark.asyncio
+async def test_update_reading_item_sanitizes_backend_log(monkeypatch):
+    logger_stub = MagicMock()
+
+    class _FailingService:
+        def update_item(self, **_kwargs):
+            raise RuntimeError("reading update exploded at /private/collections.db")
+
+    monkeypatch.setattr(reading, "logger", logger_stub)
+    monkeypatch.setattr(reading, "_service_for_user", lambda _user: _FailingService())
+
+    with pytest.raises(HTTPException) as excinfo:
+        await reading.update_reading_item(
+            item_id=123,
+            payload=reading.ReadingUpdateRequest(status="read"),
+            current_user=SimpleNamespace(id=42),
+        )
+
+    assert excinfo.value.status_code == 400
+    assert excinfo.value.detail == "reading_update_failed"
+    logger_stub.error.assert_called_once_with("reading_update_failed")
+
+
+@pytest.mark.asyncio
+async def test_delete_reading_item_sanitizes_backend_log(monkeypatch):
+    logger_stub = MagicMock()
+
+    class _FailingService:
+        def update_item(self, *_args, **_kwargs):
+            raise RuntimeError("reading delete exploded at /private/collections.db")
+
+    monkeypatch.setattr(reading, "logger", logger_stub)
+    monkeypatch.setattr(reading, "_service_for_user", lambda _user: _FailingService())
+
+    with pytest.raises(HTTPException) as excinfo:
+        await reading.delete_reading_item(
+            item_id=123,
+            hard=False,
+            current_user=SimpleNamespace(id=42),
+        )
+
+    assert excinfo.value.status_code == 400
+    assert excinfo.value.detail == "reading_delete_failed"
+    logger_stub.error.assert_called_once_with("reading_delete_failed")

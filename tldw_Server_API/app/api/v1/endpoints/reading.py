@@ -518,7 +518,7 @@ async def save_reading_item(
         record_reading_item_saved(user_id=current_user.id, item=item)
         return item
     except _READING_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error(f"reading_save_failed: {exc}")
+        logger.error("reading_save_failed")
         raise HTTPException(status_code=400, detail="reading_save_failed") from exc
 
 
@@ -929,7 +929,7 @@ async def get_reading_item(
     except KeyError:
         raise HTTPException(status_code=404, detail="reading_item_not_found") from None
     except _READING_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error(f"reading_get_failed: {exc}")
+        logger.error("reading_get_failed")
         raise HTTPException(status_code=400, detail="reading_get_failed") from exc
     return _to_reading_detail(row)
 
@@ -1162,7 +1162,7 @@ async def update_reading_item(
     except KeyError:
         raise HTTPException(status_code=404, detail="reading_item_not_found") from None
     except _READING_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error(f"reading_update_failed: {exc}")
+        logger.error("reading_update_failed")
         raise HTTPException(status_code=400, detail="reading_update_failed") from exc
 
 
@@ -1190,7 +1190,7 @@ async def delete_reading_item(
     except KeyError:
         raise HTTPException(status_code=404, detail="reading_item_not_found") from None
     except _READING_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error(f"reading_delete_failed: {exc}")
+        logger.error("reading_delete_failed")
         raise HTTPException(status_code=400, detail="reading_delete_failed") from exc
 
 
