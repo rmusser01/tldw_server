@@ -810,7 +810,7 @@ async def get_stt_health(
             health["message"] = f"Model {resolved_model} is available and ready for use"
             health["estimated_size"] = None
         except Exception:
-            logger.exception(f"STT health warm-up failed for model={resolved_model}, device={device}")
+            logger.exception("STT health warm-up failed")
             warm_info = {
                 "ok": False,
                 "device": device,

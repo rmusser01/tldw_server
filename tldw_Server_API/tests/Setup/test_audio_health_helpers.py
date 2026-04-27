@@ -81,6 +81,51 @@ async def test_get_stt_health_sanitizes_suspicious_runtime_strings(mocker):
 
 
 @pytest.mark.asyncio
+async def test_get_stt_health_warmup_failure_log_is_sanitized(mocker, monkeypatch):
+    mocker.patch(
+        "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib.parse_transcription_model",
+        return_value=("whisper", None, None),
+    )
+    mocker.patch(
+        "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib.validate_whisper_model_identifier",
+        side_effect=lambda value: value,
+    )
+    mocker.patch(
+        "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Files.check_transcription_model_status",
+        return_value={
+            "available": True,
+            "usable": True,
+            "message": "ready",
+            "model": "whisper-1",
+        },
+    )
+    mocker.patch(
+        "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib.processing_choice",
+        "cpu",
+    )
+    mocker.patch(
+        "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib.get_whisper_model",
+        side_effect=RuntimeError("warm-up leak /private/whisper-model.bin"),
+    )
+
+    fake_logger = MagicMock()
+    monkeypatch.setattr(audio_health, "logger", fake_logger)
+
+    result = await audio_health.get_stt_health(
+        audio_health._build_internal_health_request("/api/v1/audio/transcriptions/health"),
+        model="whisper-1",
+        warm=True,
+    )
+
+    assert result["warm"] == {
+        "ok": False,
+        "device": "cpu",
+        "error": "Model initialization failed.",
+    }
+    fake_logger.exception.assert_called_once_with("STT health warm-up failed")
+
+
+@pytest.mark.asyncio
 async def test_get_tts_health_surfaces_sanitized_omnivoice_sidecar_status(monkeypatch):
     class _FakeRegistry:
         def list_capabilities(self, include_disabled=True):
