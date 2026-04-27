@@ -215,7 +215,7 @@ def process_and_ingest_arxiv_paper(paper_id, additional_keywords):
 
         return f"arXiv paper '{title}' ingested successfully."
     except Exception as e:
-        logger.error(f"Error processing arXiv paper {paper_id}: {e}", exc_info=True)
+        logger.error("Error processing arXiv paper")
         return "Error processing arXiv paper"
 #
 # End of arxiv_search_endpoint

@@ -34,7 +34,9 @@ class _LoggerStub:
 
 
 _SEARCH_SENSITIVE_MARKERS = (
+    "arxiv fetch exploded",
     "search backend exploded",
+    "/private/research/cache.xml",
     "/private/research/search-cache.db",
 )
 
@@ -133,9 +135,12 @@ def test_process_and_ingest_arxiv_paper_uses_media_repository_api(
 def test_process_and_ingest_arxiv_paper_sanitizes_fetch_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    logger_stub = _LoggerStub()
+
     def _fail_fetch(_paper_id):
         raise RuntimeError("arxiv fetch exploded at /private/research/cache.xml")
 
+    monkeypatch.setattr(research, "logger", logger_stub, raising=True)
     monkeypatch.setattr(research, "fetch_arxiv_xml", _fail_fetch)
 
     message = research.process_and_ingest_arxiv_paper("1234.5678", "ml,rag")
@@ -143,6 +148,7 @@ def test_process_and_ingest_arxiv_paper_sanitizes_fetch_failure(
     assert message == "Error processing arXiv paper"
     assert "arxiv fetch exploded" not in message
     assert "/private/research/cache.xml" not in message
+    _assert_sanitized_error_log(logger_stub, "Error processing arXiv paper")
 
 
 @pytest.mark.unit
