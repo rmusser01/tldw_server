@@ -762,6 +762,74 @@ async def test_outputs_create_variant_cleanup_failure_logs_are_sanitized(monkeyp
 
 
 @pytest.mark.asyncio
+async def test_outputs_create_generic_failure_log_is_sanitized(monkeypatch):
+    class _Template:
+        id = 1
+        name = "Markdown Template"
+        body = "hello"
+        type = "newsletter_markdown"
+        format = "md"
+
+    class _Row:
+        id = 777
+        title = "demo"
+        storage_path = "demo.md"
+        media_item_id = None
+        created_at = "2024-01-01T00:00:00"
+
+    class _CollectionsDB:
+        def get_output_template(self, template_id: int):
+            if template_id == 1:
+                return _Template()
+            raise RuntimeError("variant template backend exploded at /private/outputs.db")
+
+        def create_output_artifact(self, **_kwargs: Any):
+            return _Row()
+
+        def delete_output_artifact(self, _output_id: int, *, hard: bool) -> bool:
+            assert hard is True
+            return True
+
+    class _OutputDir:
+        def mkdir(self, *args: Any, **kwargs: Any) -> None:
+            return None
+
+    class _OutputPath:
+        def write_text(self, *args: Any, **kwargs: Any) -> None:
+            return None
+
+        def exists(self) -> bool:
+            return False
+
+    logger = _LoggerStub()
+    monkeypatch.setattr(outputs_endpoint, "logger", logger)
+    monkeypatch.setattr(outputs_endpoint, "render_output_template", lambda *_args: "rendered")
+    monkeypatch.setattr(outputs_endpoint, "_outputs_dir_for_user", lambda _user_id: _OutputDir())
+    monkeypatch.setattr(outputs_endpoint, "_resolve_output_path_for_user", lambda *_args: _OutputPath())
+
+    with pytest.raises(HTTPException) as exc_info:
+        await outputs_endpoint.create_output(
+            payload=outputs_endpoint.OutputCreateRequest(
+                template_id=1,
+                data={"items": []},
+                title="demo",
+                generate_mece=True,
+                mece_template_id=2,
+            ),
+            current_user=User(id=123, username="tester", email=None, is_active=True),
+            cdb=_CollectionsDB(),
+            media_db=object(),
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "output_create_failed"
+    assert logger.errors == ["outputs.create failed"]
+    logged = "\n".join(logger.errors + logger.warnings)
+    assert "variant template backend exploded" not in logged
+    assert "/private/outputs.db" not in logged
+
+
+@pytest.mark.asyncio
 async def test_outputs_delete_tts_history_failure_log_is_sanitized(monkeypatch):
     class _CollectionsDB:
         def delete_output_artifact(self, _output_id: int, *, hard: bool) -> bool:

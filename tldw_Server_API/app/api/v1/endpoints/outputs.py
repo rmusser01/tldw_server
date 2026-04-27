@@ -466,7 +466,7 @@ async def create_output(
         raise
     except _OUTPUTS_NONCRITICAL_EXCEPTIONS as e:
         _cleanup_outputs()
-        logger.error(f"outputs.create failed: {e}")
+        logger.error("outputs.create failed")
         raise HTTPException(status_code=500, detail="output_create_failed") from e
 
     return OutputArtifact(
