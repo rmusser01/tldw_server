@@ -64,6 +64,26 @@ class _FailingTranscriptionRegistry:
         return _FailingTranscriptionAdapter()
 
 
+class _ErrorSentinelTranscriptionAdapter:
+    def transcribe_batch(self, *_args, **_kwargs):
+        return {
+            "text": "[Error] provider leaked /private/audio.wav",
+            "language": "en",
+            "segments": [],
+            "diarization": {"enabled": False, "speakers": None},
+            "usage": {"duration_ms": None, "tokens": None},
+            "metadata": {"provider": "vibevoice", "model": "vibevoice-asr"},
+        }
+
+
+class _ErrorSentinelTranscriptionRegistry:
+    def resolve_provider_for_model(self, _model):
+        return "vibevoice", "vibevoice-asr", None
+
+    def get_adapter(self, _provider):
+        return _ErrorSentinelTranscriptionAdapter()
+
+
 def _make_wav_bytes(duration_sec: float = 0.1, sr: int = 16000) -> bytes:
     buf = io.BytesIO()
     data = np.zeros(int(sr * duration_sec), dtype=np.float32)
@@ -421,3 +441,46 @@ def test_audio_transcriptions_sanitizes_adapter_failure_log(
         if msg.startswith("Transcription failed")
     ]
     assert failure_logs == ["Transcription failed for STT provider"]
+
+
+@pytest.mark.unit
+def test_audio_transcriptions_sanitizes_error_sentinel_log(
+    monkeypatch,
+    bypass_api_limits,
+):
+    app, _captured = _setup_stubbed_audio_app(monkeypatch)
+    import tldw_Server_API.app.api.v1.endpoints.audio.audio_transcriptions as audio_tx
+    import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_provider_adapter as stt_adapter
+
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(audio_tx, "logger", logger_stub)
+    monkeypatch.setattr(
+        stt_adapter,
+        "get_stt_provider_registry",
+        lambda: _ErrorSentinelTranscriptionRegistry(),
+    )
+
+    with bypass_api_limits(app), TestClient(app) as client:
+        wav_bytes = _make_wav_bytes()
+        headers = {"X-API-KEY": TEST_API_KEY}
+        files = {"file": ("sample.wav", io.BytesIO(wav_bytes), "audio/wav")}
+        data = {
+            "model": "vibevoice-asr",
+            "response_format": "json",
+        }
+        resp = client.post(
+            "/api/v1/audio/transcriptions",
+            headers=headers,
+            files=files,
+            data=data,
+        )
+        if resp.status_code == 404:
+            pytest.skip("audio/transcriptions endpoint not mounted in this build")
+        assert resp.status_code == 500, resp.text
+
+    failure_logs = [
+        msg
+        for msg in logger_stub.errors
+        if msg.startswith("Transcription")
+    ]
+    assert failure_logs == ["Transcription returned error sentinel"]

@@ -822,7 +822,7 @@ async def create_transcription(
 
         def _raise_on_transcription_error(text: Any) -> None:
             if _is_transcription_error_message(text):
-                logger.error(f"Transcription failed: {text}")
+                logger.error("Transcription returned error sentinel")
                 raise HTTPException(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                     detail=_dictation_error_detail(
