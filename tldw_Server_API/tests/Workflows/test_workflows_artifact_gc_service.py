@@ -59,9 +59,16 @@ async def test_artifact_gc_appends_deletion_evidence(monkeypatch, tmp_path):
 
     stop_event = asyncio.Event()
     task = asyncio.create_task(gc_mod.run_workflows_artifact_gc_worker(stop_event))
-    await asyncio.sleep(0.2)
-    stop_event.set()
-    await asyncio.wait_for(task, timeout=3)
+
+    async def _wait_for_gc() -> None:
+        while artifact_path.exists() or db.get_artifact(artifact_id) is not None:
+            await asyncio.sleep(0.01)
+
+    try:
+        await asyncio.wait_for(_wait_for_gc(), timeout=3)
+    finally:
+        stop_event.set()
+        await asyncio.wait_for(task, timeout=3)
 
     assert not artifact_path.exists()
     assert db.get_artifact(artifact_id) is None

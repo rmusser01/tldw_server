@@ -1012,43 +1012,6 @@ class WorkflowsDatabase:
         backend = self.backend
         ident = backend.escape_identifier
         backend.execute(
-            f"CREATE TABLE IF NOT EXISTS {ident('workflow_step_attempts')} ("
-            f"{ident('attempt_id')} TEXT PRIMARY KEY,"
-            f"{ident('tenant_id')} TEXT NOT NULL,"
-            f"{ident('run_id')} TEXT NOT NULL,"
-            f"{ident('step_run_id')} TEXT NOT NULL,"
-            f"{ident('step_id')} TEXT NOT NULL,"
-            f"{ident('attempt_number')} INTEGER NOT NULL,"
-            f"{ident('status')} TEXT NOT NULL,"
-            f"{ident('reason_code_core')} TEXT,"
-            f"{ident('reason_code_detail')} TEXT,"
-            f"{ident('retryable')} BOOLEAN,"
-            f"{ident('error_summary')} TEXT,"
-            f"{ident('metadata_json')} JSONB,"
-            f"{ident('started_at')} TIMESTAMPTZ NOT NULL,"
-            f"{ident('ended_at')} TIMESTAMPTZ,"
-            f"UNIQUE ({ident('step_run_id')}, {ident('attempt_number')}),"
-            f"FOREIGN KEY ({ident('run_id')}) REFERENCES {ident('workflow_runs')}({ident('run_id')}) ON DELETE CASCADE,"
-            f"FOREIGN KEY ({ident('step_run_id')}) REFERENCES {ident('workflow_step_runs')}({ident('step_run_id')}) ON DELETE CASCADE"
-            ")",
-            connection=conn,
-        )
-        backend.execute(
-            f"CREATE INDEX IF NOT EXISTS {ident('idx_step_attempts_run_attempts')} "
-            f"ON {ident('workflow_step_attempts')} ({ident('run_id')}, {ident('attempt_number')}, {ident('started_at')})",
-            connection=conn,
-        )
-        backend.execute(
-            f"CREATE INDEX IF NOT EXISTS {ident('idx_step_attempts_run_step_attempts')} "
-            f"ON {ident('workflow_step_attempts')} ({ident('run_id')}, {ident('step_id')}, {ident('attempt_number')}, {ident('started_at')})",
-            connection=conn,
-        )
-        backend.execute(
-            f"CREATE INDEX IF NOT EXISTS {ident('idx_step_attempts_step_run_attempts')} "
-            f"ON {ident('workflow_step_attempts')} ({ident('step_run_id')}, {ident('attempt_number')}, {ident('started_at')})",
-            connection=conn,
-        )
-        backend.execute(
             f"CREATE TABLE IF NOT EXISTS {ident('workflow_research_waits')} ("
             f"{ident('wait_id')} TEXT PRIMARY KEY,"
             f"{ident('tenant_id')} TEXT NOT NULL,"
@@ -2569,8 +2532,22 @@ class WorkflowsDatabase:
         attempts: list[dict[str, Any]] = []
         for row in rows:
             data = self._row_to_dict(row)
-            with contextlib.suppress(_WORKFLOWS_DB_NONCRITICAL_EXCEPTIONS):
-                data["metadata_json"] = json.loads(data.get("metadata_json") or "{}")
+            metadata_raw = data.get("metadata_json")
+            if isinstance(metadata_raw, (dict, list)):
+                data["metadata_json"] = metadata_raw
+            elif not metadata_raw:
+                data["metadata_json"] = {}
+            else:
+                try:
+                    data["metadata_json"] = json.loads(str(metadata_raw))
+                except _WORKFLOWS_DB_NONCRITICAL_EXCEPTIONS as exc:
+                    logger.warning(
+                        "Workflows DB: malformed step attempt metadata_json run_id={} attempt_id={}: {}",
+                        run_id,
+                        data.get("attempt_id"),
+                        exc,
+                    )
+                    data["metadata_json"] = {}
             attempts.append(data)
         return attempts
 

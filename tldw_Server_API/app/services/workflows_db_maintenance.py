@@ -32,11 +32,44 @@ _WORKFLOWS_DB_MAINTENANCE_NONCRITICAL_EXCEPTIONS = (
 )
 
 
+_POSTGRES_WORKFLOW_VACUUM_TABLES = (
+    "workflows",
+    "workflow_runs",
+    "workflow_events",
+    "workflow_event_counters",
+    "workflow_step_runs",
+    "workflow_step_attempts",
+    "workflow_artifacts",
+    "workflow_research_waits",
+    "workflow_webhook_dlq",
+)
+
+
 def _env_bool(name: str, default: bool = False) -> bool:
     v = os.getenv(name, "")
     if not v:
         return default
     return is_truthy(v.lower())
+
+
+def _vacuum_postgres_workflow_tables(db: WorkflowsDatabase) -> None:
+    """Run VACUUM ANALYZE only for tables owned by the Workflows module."""
+    backend = db.backend
+    if backend is None:
+        return
+    conn = backend.connect()
+    old_autocommit = getattr(conn, "autocommit", False)
+    try:
+        with contextlib.suppress(_WORKFLOWS_DB_MAINTENANCE_NONCRITICAL_EXCEPTIONS):
+            conn.autocommit = True
+        cursor = conn.cursor()
+        ident = backend.escape_identifier
+        for table_name in _POSTGRES_WORKFLOW_VACUUM_TABLES:
+            cursor.execute(f"VACUUM ANALYZE {ident(table_name)}")
+    finally:
+        with contextlib.suppress(_WORKFLOWS_DB_MAINTENANCE_NONCRITICAL_EXCEPTIONS):
+            conn.autocommit = old_autocommit
+        backend.disconnect(conn)
 
 
 async def run_workflows_db_maintenance(stop_event: asyncio.Event) -> None:
@@ -67,8 +100,8 @@ async def run_workflows_db_maintenance(stop_event: asyncio.Event) -> None:
                 # Optional manual VACUUM ANALYZE - autovacuum normally covers this
                 if _env_bool("WORKFLOWS_POSTGRES_VACUUM", False):
                     try:
-                        db.backend.vacuum()  # type: ignore[union-attr]
-                        logger.info("Workflows DB maintenance: VACUUM ANALYZE completed for Postgres backend")
+                        _vacuum_postgres_workflow_tables(db)
+                        logger.info("Workflows DB maintenance: VACUUM ANALYZE completed for workflow Postgres tables")
                     except _WORKFLOWS_DB_MAINTENANCE_NONCRITICAL_EXCEPTIONS as e:
                         logger.warning(f"Workflows DB maintenance: Postgres VACUUM failed: {e}")
             else:

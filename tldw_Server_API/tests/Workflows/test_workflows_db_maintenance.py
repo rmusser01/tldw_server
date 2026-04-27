@@ -9,13 +9,34 @@ from tldw_Server_API.app.services import workflows_db_maintenance as maintenance
 
 
 @pytest.mark.asyncio
-async def test_postgres_maintenance_uses_backend_vacuum_without_transaction(monkeypatch):
-    calls = {"vacuum": 0, "transaction": 0}
+async def test_postgres_maintenance_vacuums_only_workflow_tables_without_transaction(monkeypatch):
+    calls = {"broad_vacuum": 0, "transaction": 0}
+    queries: list[str] = []
+
+    class _Cursor:
+        def execute(self, query: str) -> None:
+            queries.append(query)
+
+    class _Connection:
+        autocommit = False
+        closed = False
+
+        def cursor(self) -> _Cursor:
+            return _Cursor()
 
     class _StubBackend:
         def vacuum(self, connection=None):  # noqa: ANN001
-            assert connection is None
-            calls["vacuum"] += 1
+            calls["broad_vacuum"] += 1
+
+        def connect(self):
+            return _Connection()
+
+        def disconnect(self, connection):  # noqa: ANN001
+            connection.closed = True
+
+        @staticmethod
+        def escape_identifier(identifier: str) -> str:
+            return f'"{identifier}"'
 
         def transaction(self):  # noqa: ANN201
             calls["transaction"] += 1
@@ -36,5 +57,8 @@ async def test_postgres_maintenance_uses_backend_vacuum_without_transaction(monk
     stop_event.set()
     await asyncio.wait_for(task, timeout=2)
 
-    assert calls["vacuum"] >= 1
+    assert calls["broad_vacuum"] == 0
     assert calls["transaction"] == 0
+    assert queries
+    assert all(query.startswith("VACUUM ANALYZE") for query in queries)
+    assert all("workflow_" in query or '"workflows"' in query for query in queries)

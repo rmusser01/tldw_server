@@ -171,7 +171,16 @@ def record_webhook_delivery_event(
     step_run_id: str | None = None,
     strict: bool = False,
 ) -> None:
-    host = urlparse(url).hostname or ""
+    """Append webhook delivery evidence for a workflow run.
+
+    The persisted payload stores the destination host, delivery status, optional
+    HTTP code/reason/source fields, and never stores the full webhook URL. When
+    ``strict`` is true, append failures are re-raised after logging; otherwise
+    evidence remains best-effort so retry bookkeeping can continue.
+    """
+    parsed_url = urlparse(url)
+    host = parsed_url.hostname or ""
+    redacted_url = f"{parsed_url.scheme}://{parsed_url.netloc}/..." if parsed_url.netloc else "<invalid-url>"
     payload: dict[str, Any] = {"host": host, "status": status}
     if code is not None:
         payload["code"] = int(code)
@@ -185,7 +194,7 @@ def record_webhook_delivery_event(
         logger.warning(
             "Failed to append webhook_delivery evidence for run_id={} url={} status={}: {}",
             run_id,
-            url,
+            redacted_url,
             status,
             exc,
         )

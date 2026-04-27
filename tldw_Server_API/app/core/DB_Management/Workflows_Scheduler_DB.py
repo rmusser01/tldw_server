@@ -455,7 +455,8 @@ class WorkflowsSchedulerDB:
                     validation_mode=r.get("validation_mode") or "block", enabled=bool(r.get("enabled") in (1, True, "1")),
                     require_online=bool(r.get("require_online") in (1, True, "1")),
                     concurrency_mode=(r.get("concurrency_mode") or "skip"), misfire_grace_sec=int(r.get("misfire_grace_sec") or 300),
-                    coalesce=bool(r.get("coalesce") in (1, True, "1")), jitter_sec=int(r.get("jitter_sec") or 0), last_run_at=r.get("last_run_at"), next_run_at=r.get("next_run_at"),
+                    coalesce=bool(r.get("coalesce") in (1, True, "1")), jitter_sec=int(r.get("jitter_sec") or 0), acp_config_json=r.get("acp_config_json"),
+                    last_run_at=r.get("last_run_at"), next_run_at=r.get("next_run_at"),
                     last_status=r.get("last_status"), created_at=r.get("created_at"), updated_at=r.get("updated_at")
                 )
             )

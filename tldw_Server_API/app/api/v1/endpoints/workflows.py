@@ -2258,7 +2258,14 @@ async def run_adhoc(
     current_user: User = Depends(get_request_user),
     db: WorkflowsDatabase = Depends(_get_db),
     audit_service=Depends(get_audit_service_for_user),
-    _token_scope=Depends(auth_deps.require_token_scope("workflows", require_if_present=True, count_as="run")),
+    _token_scope: None = Depends(
+        auth_deps.require_token_scope(
+            "workflows",
+            require_if_present=True,
+            endpoint_id="workflows.run_adhoc",
+            count_as="run",
+        )
+    ),
 ):
     import os
     if os.getenv("WORKFLOWS_DISABLE_ADHOC", "false").lower() in {"1", "true", "yes"}:
@@ -2693,6 +2700,7 @@ async def replay_webhook_dlq(
 
     url = str(target.get("url") or "")
     tenant_id = str(target.get("tenant_id") or "default")
+    run_id_str = str(target.get("run_id") or "")
     try:
         body = json.loads(target.get("body_json") or "{}")
     except (json.JSONDecodeError, TypeError, ValueError) as exc:
@@ -2711,11 +2719,10 @@ async def replay_webhook_dlq(
             record_webhook_delivery_event(
                 db,
                 tenant_id=tenant_id,
-                run_id=str(target.get("run_id") or ""),
+                run_id=run_id_str,
                 url=url,
                 status="delivered",
                 source="dlq_replay",
-                strict=True,
             )
             db.delete_webhook_dlq(dlq_id=dlq_id)
         except sqlite3.Error as exc:
@@ -2784,12 +2791,11 @@ async def replay_webhook_dlq(
                     record_webhook_delivery_event(
                         db,
                         tenant_id=tenant_id,
-                        run_id=str(target.get("run_id") or ""),
+                        run_id=run_id_str,
                         url=url,
                         status="delivered",
                         code=status_code,
                         source="dlq_replay",
-                        strict=True,
                     )
                     db.delete_webhook_dlq(dlq_id=dlq_id)
                 except sqlite3.Error as exc:
@@ -2814,7 +2820,7 @@ async def replay_webhook_dlq(
                     record_webhook_delivery_event(
                         db,
                         tenant_id=tenant_id,
-                        run_id=str(target.get("run_id") or ""),
+                        run_id=run_id_str,
                         url=url,
                         status="failed",
                         code=status_code,
@@ -2869,7 +2875,7 @@ async def replay_webhook_dlq(
             record_webhook_delivery_event(
                 db,
                 tenant_id=tenant_id,
-                run_id=str(target.get("run_id") or ""),
+                run_id=run_id_str,
                 url=url,
                 status="failed",
                 reason=error_detail,

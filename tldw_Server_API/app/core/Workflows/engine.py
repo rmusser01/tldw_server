@@ -266,6 +266,13 @@ class WorkflowEngine:
         step_type: str,
         failure: Any | None = None,
     ) -> dict[str, Any]:
+        """Build metadata persisted with workflow step-attempt records.
+
+        The base payload records the step type and capability descriptor. When a
+        failure envelope is provided, selected classification fields are copied
+        to top-level metadata and the complete envelope is retained under
+        ``failure_envelope`` for investigation and operator diagnostics.
+        """
         metadata: dict[str, Any] = {
             "step_type": step_type,
             "step_capability": get_step_capability(step_type).to_dict(),
@@ -450,7 +457,7 @@ class WorkflowEngine:
     ) -> tuple[str, str]:
         run = self.db.get_run(run_id)
         if run is None:
-            return ("already_applied", "unknown")
+            return ("not_found", "unknown")
 
         current_status = str(getattr(run, "status", "unknown") or "unknown")
         if current_status == target_status:

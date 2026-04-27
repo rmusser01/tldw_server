@@ -49,6 +49,17 @@ def test_append_event_warns_on_persistence_failure(tmp_path, monkeypatch) -> Non
     assert "append_event failed" in str(warnings[0][0])
 
 
+def test_control_transition_reports_missing_run(tmp_path) -> None:
+    db = WorkflowsDatabase(str(tmp_path / "wf.db"))
+    engine = engine_mod.WorkflowEngine(db)
+
+    assert engine._control_transition(
+        "missing-run",
+        target_status="cancelled",
+        op_key="missing-run:cancel",
+    ) == ("not_found", "unknown")
+
+
 @pytest.mark.asyncio
 async def test_invalid_transition_sets_invariant_violation(tmp_path, monkeypatch) -> None:
     db = WorkflowsDatabase(str(tmp_path / "wf.db"))

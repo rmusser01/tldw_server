@@ -167,7 +167,8 @@ def test_run_adhoc_requires_workflows_scope_like_saved_run(tmp_path):
     )
 
     headers = {"Authorization": f"Bearer {token}"}
-    with TestClient(app, headers=headers) as client:
+    client = TestClient(app, headers=headers)
+    try:
         saved_resp = client.post(f"/api/v1/workflows/{workflow_id}/run", json={"inputs": {}})
         adhoc_resp = client.post(
             "/api/v1/workflows/run",
@@ -180,10 +181,62 @@ def test_run_adhoc_requires_workflows_scope_like_saved_run(tmp_path):
                 "inputs": {},
             },
         )
-
-    app.dependency_overrides.clear()
+    finally:
+        client.close()
+        app.dependency_overrides.clear()
 
     assert saved_resp.status_code == 403
+    assert adhoc_resp.status_code == 403
+
+
+def test_run_adhoc_rejects_virtual_key_excluded_by_endpoint_allowlist(tmp_path):
+    db = WorkflowsDatabase(str(tmp_path / "wf.db"))
+
+    async def override_user():
+        return User(
+            id=1,
+            username="tester",
+            email="t@e.com",
+            is_active=True,
+            is_admin=False,
+            roles=["user"],
+            tenant_id="default",
+        )
+
+    def override_db():
+        return db
+
+    app.dependency_overrides[get_request_user] = override_user
+    app.dependency_overrides[wf_mod._get_db] = override_db
+
+    jwt_service = JWTService(get_auth_settings())
+    token = jwt_service.create_virtual_access_token(
+        user_id=1,
+        username="tester",
+        role="user",
+        scope="workflows",
+        ttl_minutes=5,
+        additional_claims={"allowed_endpoints": ["workflows.run_saved"]},
+    )
+
+    headers = {"Authorization": f"Bearer {token}"}
+    client = TestClient(app, headers=headers)
+    try:
+        adhoc_resp = client.post(
+            "/api/v1/workflows/run",
+            json={
+                "definition": {
+                    "name": "adhoc",
+                    "version": 1,
+                    "steps": [{"id": "s1", "type": "prompt", "config": {"template": "hi"}}],
+                },
+                "inputs": {},
+            },
+        )
+    finally:
+        client.close()
+        app.dependency_overrides.clear()
+
     assert adhoc_resp.status_code == 403
 
 

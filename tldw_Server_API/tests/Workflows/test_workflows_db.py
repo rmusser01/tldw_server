@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from tldw_Server_API.app.core.DB_Management import Workflows_DB as workflows_db_mod
 from tldw_Server_API.app.core.DB_Management.Workflows_DB import WorkflowsDatabase
 
 
@@ -353,6 +354,74 @@ def test_workflow_step_attempt_rejects_duplicate_logical_attempt(tmp_path):
             status="running",
             metadata={"step_type": "prompt"},
         )
+
+
+def test_backend_v7_migration_does_not_create_step_attempts_table() -> None:
+    db = WorkflowsDatabase.__new__(WorkflowsDatabase)
+    queries: list[str] = []
+
+    class _Backend:
+        @staticmethod
+        def escape_identifier(identifier: str) -> str:
+            return f'"{identifier}"'
+
+        def execute(self, query: str, params=None, connection=None):  # noqa: ANN001
+            queries.append(query)
+
+    db.backend = _Backend()
+
+    db._backend_migrate_to_v7(object())
+
+    assert not any("workflow_step_attempts" in query for query in queries)
+    assert any("workflow_research_waits" in query for query in queries)
+
+
+def test_list_step_attempts_logs_malformed_metadata_json(tmp_path, monkeypatch):
+    db_path = tmp_path / "workflows.db"
+    db = WorkflowsDatabase(str(db_path))
+
+    db.create_run(
+        run_id="wf-run-bad-metadata",
+        tenant_id="tenant",
+        user_id="user",
+        inputs={},
+        workflow_id=None,
+        definition_version=1,
+        definition_snapshot={"name": "bad-metadata", "steps": []},
+    )
+    db.create_step_run(
+        step_run_id="wf-run-bad-metadata:s1:1",
+        tenant_id="tenant",
+        run_id="wf-run-bad-metadata",
+        step_id="s1",
+        name="Prompt step",
+        step_type="prompt",
+        status="running",
+        inputs={},
+    )
+    attempt_id = db.create_step_attempt(
+        tenant_id="tenant",
+        run_id="wf-run-bad-metadata",
+        step_run_id="wf-run-bad-metadata:s1:1",
+        step_id="s1",
+        attempt_number=1,
+        status="running",
+        metadata={"step_type": "prompt"},
+    )
+    db._conn.execute(
+        "UPDATE workflow_step_attempts SET metadata_json = ? WHERE attempt_id = ?",
+        ("{not-json", attempt_id),
+    )
+    db._conn.commit()
+
+    warnings: list[tuple[object, ...]] = []
+    monkeypatch.setattr(workflows_db_mod.logger, "warning", lambda *args, **kwargs: warnings.append(args))
+
+    attempts = db.list_step_attempts(run_id="wf-run-bad-metadata", step_id="s1")
+
+    assert attempts[0]["metadata_json"] == {}
+    assert warnings
+    assert "metadata_json" in str(warnings[0][0])
 
 
 def test_workflow_step_attempt_migration_rebuilds_legacy_contract(tmp_path):

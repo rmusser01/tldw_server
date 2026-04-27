@@ -11,6 +11,7 @@ from tldw_Server_API.app.main import app as fastapi_app
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.DB_Management.Workflows_Scheduler_DB import (
     WorkflowSchedule,
+    WorkflowsSchedulerDB,
 )
 from tldw_Server_API.app.core.DB_Management.backends.base import (
     DatabaseError as BackendDatabaseError,
@@ -20,6 +21,33 @@ from tldw_Server_API.app.services.workflows_scheduler import get_workflows_sched
 
 
 pytestmark = pytest.mark.unit
+
+
+def _schedule(schedule_id: str, *, inputs_json: str = "{}", user_id: str = "1") -> WorkflowSchedule:
+    return WorkflowSchedule(
+        id=schedule_id,
+        tenant_id="default",
+        user_id=user_id,
+        workflow_id=None,
+        name=schedule_id,
+        cron="*/5 * * * *",
+        timezone="UTC",
+        inputs_json=inputs_json,
+        run_mode="async",
+        validation_mode="block",
+        enabled=True,
+        require_online=False,
+        concurrency_mode="skip",
+        misfire_grace_sec=60,
+        coalesce=True,
+        jitter_sec=0,
+        acp_config_json=None,
+        last_run_at=None,
+        next_run_at=None,
+        last_status=None,
+        created_at="2026-01-01T00:00:00+00:00",
+        updated_at="2026-01-01T00:00:00+00:00",
+    )
 
 
 @pytest.fixture()
@@ -133,6 +161,59 @@ def test_next_run_persisted_after_create(client_admin):
     assert resp.status_code == 200, resp.text
     data = resp.json()
     assert isinstance(data.get("next_run_at"), str) and len(data["next_run_at"]) > 0
+
+
+def test_list_all_schedules_preserves_acp_config_json(monkeypatch, tmp_path):
+    monkeypatch.setenv("WORKFLOWS_SCHEDULER_SQLITE_PATH", str(tmp_path / "scheduler.db"))
+    db = WorkflowsSchedulerDB()
+    acp_config = '{"prompt":"summarize"}'
+
+    db.create_schedule(
+        id="acp-schedule",
+        tenant_id="default",
+        user_id="1",
+        workflow_id=None,
+        name="ACP schedule",
+        cron="*/5 * * * *",
+        timezone="UTC",
+        inputs={},
+        acp_config_json=acp_config,
+    )
+
+    schedules = db.list_all_schedules(limit=10)
+
+    assert len(schedules) == 1
+    assert schedules[0].acp_config_json == acp_config
+
+
+def test_build_schedule_payload_defaults_malformed_inputs_to_empty_dict():
+    payload = workflows_scheduler_mod.build_schedule_payload(_schedule("bad-json", inputs_json="{not-json"))
+
+    assert payload["inputs"] == {}
+    assert payload["workflow_id"] is None
+
+
+def test_list_registered_schedules_pages_until_short_page(monkeypatch):
+    svc = workflows_scheduler_mod._WFRecurringScheduler()
+    first_page = [_schedule(f"sched-{idx}") for idx in range(1000)]
+    second_page = [_schedule("sched-1000")]
+    calls: list[tuple[int, int]] = []
+
+    class _PagedDB:
+        def list_all_schedules(self, **kwargs):
+            calls.append((kwargs["limit"], kwargs["offset"]))
+            if kwargs["offset"] == 0:
+                return first_page
+            if kwargs["offset"] == 1000:
+                return second_page
+            return []
+
+    monkeypatch.setattr(svc, "_get_db", lambda uid: _PagedDB())
+
+    schedules = svc._list_registered_schedules(1)
+
+    assert len(schedules) == 1001
+    assert calls == [(1000, 0), (1000, 1000)]
 
 
 def test_get_tolerates_default_and_user_db_lookup_errors(monkeypatch, tmp_path):

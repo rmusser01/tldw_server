@@ -78,10 +78,12 @@ def client_with_investigation_db(tmp_path, auth_headers):
     app.dependency_overrides[get_request_user] = override_user
     app.dependency_overrides[wf_mod._get_db] = override_db
 
-    with TestClient(app, headers=auth_headers) as client:
+    client = TestClient(app, headers=auth_headers)
+    try:
         yield client, db, state
-
-    app.dependency_overrides.clear()
+    finally:
+        client.close()
+        app.dependency_overrides.clear()
 
 
 def _seed_failed_run(db: WorkflowsDatabase) -> str:
@@ -364,7 +366,7 @@ def test_investigation_endpoint_returns_primary_failure(client_with_investigatio
     assert resp.status_code == 200, resp.text
     data = resp.json()
     assert data["primary_failure"]["reason_code_core"] == "transient_network_error"
-    assert data["failed_step"]["attempt_count"] == 2
+    assert data["failed_step"]["attempt_count"] == 7
     assert data["failed_step"]["step_id"] == "s1"
     assert data["recommended_actions"]
     assert data["primary_failure"]["internal_detail"]["event_count"] >= 3
@@ -409,7 +411,7 @@ def test_steps_endpoint_returns_step_history(client_with_investigation_db: tuple
     assert resp.status_code == 200, resp.text
     data = resp.json()
     assert data["steps"][0]["step_id"] == "s1"
-    assert data["steps"][0]["attempt_count"] == 2
+    assert data["steps"][0]["attempt_count"] == 7
     assert data["steps"][0]["latest_failure"]["reason_code_core"] == "transient_network_error"
 
 

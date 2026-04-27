@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import builtins
 import contextlib
+import json
 import os
 import secrets
 from datetime import datetime, timedelta
@@ -70,9 +71,25 @@ _WORKFLOWS_SCHED_NONCRITICAL_EXCEPTIONS = (
 
 
 def build_schedule_payload(schedule: WorkflowSchedule) -> dict[str, Any]:
+    """Build the Scheduler payload for a recurring workflow schedule.
+
+    The returned payload preserves the workflow id, user/tenant routing fields,
+    execution mode, validation mode, and decoded inputs. Malformed persisted
+    ``inputs_json`` is treated as an empty dict so one corrupt schedule row does
+    not abort a scheduler fire.
+    """
+    try:
+        inputs = json.loads(schedule.inputs_json or "{}")
+    except _WORKFLOWS_SCHED_NONCRITICAL_EXCEPTIONS as exc:
+        logger.warning(
+            "Workflows scheduler: malformed inputs_json for schedule {}: {}",
+            schedule.id,
+            exc,
+        )
+        inputs = {}
     return {
         "workflow_id": schedule.workflow_id,
-        "inputs": __import__("json").loads(schedule.inputs_json or "{}"),
+        "inputs": inputs,
         "user_id": schedule.user_id,
         "tenant_id": schedule.tenant_id,
         "mode": schedule.run_mode,
@@ -81,6 +98,12 @@ def build_schedule_payload(schedule: WorkflowSchedule) -> dict[str, Any]:
 
 
 def resolve_schedule_submission_target(payload: dict[str, Any]) -> tuple[str, str]:
+    """Return the Scheduler handler and queue for a schedule payload.
+
+    Watchlist-backed schedules are identified by ``inputs.watchlist_job_id`` and
+    route to the watchlists queue; all other schedules route to the workflows
+    queue as standard workflow runs.
+    """
     inputs = payload.get("inputs")
     if isinstance(inputs, dict) and inputs.get("watchlist_job_id"):
         return "watchlist_run", "watchlists"
@@ -209,7 +232,15 @@ class _WFRecurringScheduler:
 
     def _list_registered_schedules(self, user_id: int) -> list[WorkflowSchedule]:
         db = self._get_db(user_id)
-        return db.list_all_schedules(user_id=None, limit=1000, offset=0)
+        page_size = 1000
+        offset = 0
+        schedules: list[WorkflowSchedule] = []
+        while True:
+            page = db.list_all_schedules(user_id=None, limit=page_size, offset=offset)
+            schedules.extend(page)
+            if len(page) < page_size:
+                return schedules
+            offset += len(page)
 
     @staticmethod
     def _resolve_schedule_owner_id(schedule: WorkflowSchedule, *, fallback_user_id: int) -> int:
