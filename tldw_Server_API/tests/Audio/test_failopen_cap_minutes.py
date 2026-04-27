@@ -1,6 +1,8 @@
+import importlib
 import os
 import types
 
+import loguru
 import pytest
 from fastapi import APIRouter
 
@@ -24,6 +26,7 @@ _SENSITIVE_LOG_MARKERS = (
     "audio config backend exploded",
     "streaming import leaked",
     "user id leaked",
+    "cannot import name",
     "/private/",
 )
 
@@ -284,3 +287,28 @@ async def test_aggregate_resolve_tts_byok_user_id_failure_log_is_sanitized(monke
 
     assert result == (None, None, None)
     _assert_sanitized_debug_log(logger_stub, "Failed to extract user_id from current_user")
+
+
+def test_aggregate_quota_helper_import_logs_are_sanitized(monkeypatch):
+    from tldw_Server_API.app.core.Usage import audio_quota
+
+    mod = _import_audio_aggregate_module(monkeypatch, cfg=_fake_cfg({}))
+    logger_stub = _LoggerStub()
+
+    with monkeypatch.context() as ctx:
+        ctx.setattr(loguru, "logger", logger_stub, raising=True)
+        ctx.delattr(audio_quota, "active_streams_count", raising=True)
+        ctx.delattr(audio_quota, "can_start_job", raising=True)
+        importlib.reload(mod)
+
+    importlib.reload(mod)
+
+    assert [args[0] for args, _kwargs in logger_stub.debug_calls if args] == [
+        "audio_quota optional helpers not available",
+        "audio_quota job helpers not available",
+    ]
+    assert all(not kwargs.get("exc_info") for _args, kwargs in logger_stub.debug_calls)
+
+    rendered_calls = repr(logger_stub.debug_calls)
+    for marker in _SENSITIVE_LOG_MARKERS:
+        assert marker not in rendered_calls

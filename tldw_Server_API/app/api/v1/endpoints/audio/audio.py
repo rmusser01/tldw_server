@@ -297,8 +297,8 @@ try:
     from tldw_Server_API.app.core.Usage.audio_quota import (
         heartbeat_stream as heartbeat_stream,
     )
-except ImportError as e:
-    logger.debug(f"audio_quota optional helpers not available: {e}")
+except ImportError:
+    logger.debug("audio_quota optional helpers not available")
 
 # Expose job quota helpers at module scope for tests to monkeypatch
 try:
@@ -314,5 +314,5 @@ try:
     from tldw_Server_API.app.core.Usage.audio_quota import (
         increment_jobs_started as increment_jobs_started,
     )
-except ImportError as e:
-    logger.debug(f"audio_quota job helpers not available: {e}")
+except ImportError:
+    logger.debug("audio_quota job helpers not available")
