@@ -43,6 +43,9 @@ _SENSITIVE_LOG_MARKERS = (
     "unexpected writing backend leaked",
     "/private/limits.db",
     "/private/writing.db",
+    "wordcloud backend leaked",
+    "wordcloud-private-id",
+    "/private/wordcloud.db",
 )
 
 
@@ -148,6 +151,79 @@ async def test_writing_enforce_rate_limit_sanitizes_backend_failure_log(monkeypa
     assert exc_info.value.detail == "Rate limiter unavailable"
     assert exc_info.value.headers == {"Retry-After": "60"}
     _assert_sanitized_error_log(logger_stub, "Rate limiter check failed")
+
+
+def test_writing_wordcloud_job_failure_log_is_sanitized(monkeypatch):
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(writing, "logger", logger_stub)
+
+    def _raise_compute_failure(_text, _options):
+        raise RuntimeError("wordcloud backend leaked /private/wordcloud.db")
+
+    class _DB:
+        def __init__(self):
+            self.status_calls = []
+            self.result_calls = []
+
+        def set_writing_wordcloud_status(self, *args):
+            self.status_calls.append(args)
+
+        def set_writing_wordcloud_result(self, *args, **kwargs):
+            self.result_calls.append((args, kwargs))
+
+    monkeypatch.setattr(writing, "_compute_wordcloud", _raise_compute_failure)
+    db = _DB()
+
+    writing._run_wordcloud_job(
+        db,
+        "wordcloud-private-id",
+        "alpha beta",
+        writing.WritingWordcloudOptions(),
+    )
+
+    assert db.result_calls == [
+        (
+            ("wordcloud-private-id",),
+            {
+                "status": writing.WORDCLOUD_STATUS_FAILED,
+                "error": writing.WORDCLOUD_GENERATION_FAILED_DETAIL,
+            },
+        )
+    ]
+    _assert_sanitized_error_log(logger_stub, "Wordcloud job failed")
+
+
+def test_writing_wordcloud_failure_persist_log_is_sanitized(monkeypatch):
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(writing, "logger", logger_stub)
+
+    def _raise_compute_failure(_text, _options):
+        raise RuntimeError("wordcloud backend leaked /private/wordcloud.db")
+
+    class _DB:
+        def set_writing_wordcloud_status(self, *_args):
+            return None
+
+        def set_writing_wordcloud_result(self, *_args, **_kwargs):
+            raise RuntimeError("wordcloud backend leaked /private/wordcloud.db")
+
+    monkeypatch.setattr(writing, "_compute_wordcloud", _raise_compute_failure)
+
+    writing._run_wordcloud_job(
+        _DB(),
+        "wordcloud-private-id",
+        "alpha beta",
+        writing.WritingWordcloudOptions(),
+    )
+
+    assert logger_stub.exception_calls == []
+    assert logger_stub.error_calls == [
+        (("Wordcloud job failed",), {}),
+        (("Failed to persist wordcloud failure",), {}),
+    ]
+    rendered_calls = repr(logger_stub.error_calls)
+    for marker in _SENSITIVE_LOG_MARKERS:
+        assert marker not in rendered_calls
 
 
 @pytest.mark.parametrize(

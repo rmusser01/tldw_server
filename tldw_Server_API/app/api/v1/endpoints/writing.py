@@ -803,7 +803,7 @@ def _run_wordcloud_job(
             error=None,
         )
     except _WRITING_NONCRITICAL_EXCEPTIONS as exc:
-        logger.exception("Wordcloud job failed for {}: {}", wordcloud_id, exc)
+        logger.error("Wordcloud job failed")
         try:
             db.set_writing_wordcloud_result(
                 wordcloud_id,
@@ -811,7 +811,7 @@ def _run_wordcloud_job(
                 error=WORDCLOUD_GENERATION_FAILED_DETAIL,
             )
         except _WRITING_NONCRITICAL_EXCEPTIONS:
-            logger.exception("Failed to persist wordcloud failure for {}", wordcloud_id)
+            logger.error("Failed to persist wordcloud failure")
 
 
 def _build_wordcloud_response_from_row(row: dict[str, Any], *, cached: bool) -> WritingWordcloudResponse:
