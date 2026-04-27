@@ -1,6 +1,7 @@
 """Integration tests for the sharing API endpoints."""
 from __future__ import annotations
 
+import builtins
 from contextlib import contextmanager
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -161,6 +162,40 @@ async def test_shared_with_me_workspace_name_resolution_log_is_sanitized(
 
     assert response.total == 1
     fake_logger.debug.assert_called_once_with("Failed to resolve shared workspace name")
+
+
+@pytest.mark.asyncio
+async def test_shared_with_me_workspace_name_population_log_is_sanitized(
+    repo,
+    test_user,
+    monkeypatch,
+):
+    from tldw_Server_API.app.api.v1.endpoints import sharing
+
+    await repo.create_share(
+        workspace_id="private-ws",
+        owner_user_id=2,
+        share_scope_type="team",
+        share_scope_id=10,
+        created_by=2,
+    )
+
+    real_import = builtins.__import__
+
+    def fail_chacha_owner_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if "ChaCha_Notes_DB_Deps" in name:
+            raise RuntimeError("workspace name import exploded at /private/owner-workspaces.db")
+        return real_import(name, globals, locals, fromlist, level)
+
+    fake_logger = MagicMock()
+    monkeypatch.setattr(sharing, "_get_repo", lambda: repo)
+    monkeypatch.setattr(builtins, "__import__", fail_chacha_owner_import)
+    monkeypatch.setattr(sharing, "logger", fake_logger)
+
+    response = await sharing.shared_with_me(user=test_user)
+
+    assert response.total == 1
+    fake_logger.debug.assert_called_once_with("Shared workspace name population skipped")
 
 
 @pytest.fixture

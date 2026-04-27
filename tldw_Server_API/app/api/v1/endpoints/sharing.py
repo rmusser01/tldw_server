@@ -435,8 +435,8 @@ async def shared_with_me(
                             item.workspace_name = ws.get("name")
                     except Exception:
                         logger.debug("Failed to resolve shared workspace name")
-        except Exception as exc:
-            logger.debug("Shared workspace name population skipped: {}", exc)
+        except Exception:
+            logger.debug("Shared workspace name population skipped")
 
     return SharedWithMeResponse(items=items, total=len(items))
 
