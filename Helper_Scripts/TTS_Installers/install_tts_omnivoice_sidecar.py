@@ -418,9 +418,9 @@ def install_sidecar_runtime(
     interpreter_path: Path,
     repo_root: Path,
     source_checkout: Path,
-    install_inference_deps: bool = False,
+    install_inference_deps: bool = True,
 ) -> None:
-    """Install the minimal sidecar runtime into the dedicated environment."""
+    """Install the sidecar runtime and OmniVoice source dependencies."""
 
     _run_checked_command([str(interpreter_path), "-m", "pip", "install", "--upgrade", "pip"])
     _run_checked_command(
@@ -444,7 +444,10 @@ def install_sidecar_runtime(
             "install",
         ]
         if not install_inference_deps:
-            install_command.append("--no-deps")
+            logger.warning(
+                "OmniVoice source dependencies are required in the sidecar venv; "
+                "installing dependencies despite install_inference_deps=False"
+            )
         install_command.extend(["-e", str(source_checkout)])
         _run_checked_command(install_command, cwd=repo_root)
 
@@ -461,7 +464,8 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument(
         "--install-inference-deps",
         action="store_true",
-        help="Install OmniVoice editable source with its dependency set instead of minimal sidecar-only dependencies.",
+        default=True,
+        help="Retained for compatibility; OmniVoice source dependencies are installed by default.",
     )
     return parser.parse_args(argv)
 

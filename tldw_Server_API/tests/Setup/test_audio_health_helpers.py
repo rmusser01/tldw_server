@@ -7,6 +7,12 @@ from unittest.mock import MagicMock
 from tldw_Server_API.app.api.v1.endpoints.audio import audio_health
 
 
+def test_public_tts_health_helpers_document_sanitization_contracts():
+    assert audio_health._sanitize_public_provider_detail.__doc__
+    assert audio_health._normalize_public_health_key.__doc__
+    assert audio_health._derive_omnivoice_supervisor_health.__doc__
+
+
 @pytest.mark.asyncio
 async def test_collect_setup_stt_health_normalizes_http_exception(mocker):
     mocker.patch.object(

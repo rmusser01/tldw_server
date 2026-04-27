@@ -22,6 +22,7 @@ from Helper_Scripts.release import (  # noqa: E402
     orchestrate_release,
     read_current_version,
     promote_changelog_unreleased_section,
+    update_pyproject_version,
     update_mkdocs_version_metadata,
     update_readme_release_references,
     update_release_notes_entry_point,
@@ -50,6 +51,14 @@ def test_bump_version_patch() -> None:
 
 def test_bump_version_minor() -> None:
     assert bump_version("0.1.30", "minor") == "0.2.0"
+
+
+def test_update_pyproject_version_supports_single_quoted_toml() -> None:
+    pyproject_text = "[project]\nname = \"example\"\nversion = '0.1.30'\n"
+
+    updated_text = update_pyproject_version(pyproject_text, "0.1.31")
+
+    assert updated_text == "[project]\nname = \"example\"\nversion = '0.1.31'\n"
 
 
 def test_extract_required_check_names() -> None:

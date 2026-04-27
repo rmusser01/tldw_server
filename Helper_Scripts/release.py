@@ -270,8 +270,8 @@ def update_pyproject_version(pyproject_text: str, version: str) -> str:
     """Update the package version in ``pyproject.toml``."""
 
     updated_text, count = re.subn(
-        r'(?m)^(version\s*=\s*")\d+\.\d+\.\d+(")$',
-        rf"\g<1>{version}\g<2>",
+        r'''(?m)^(version\s*=\s*)(["'])(\d+\.\d+\.\d+)(\2)$''',
+        rf"\g<1>\g<2>{version}\g<4>",
         pyproject_text,
         count=1,
     )

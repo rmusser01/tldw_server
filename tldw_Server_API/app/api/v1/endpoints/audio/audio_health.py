@@ -149,6 +149,8 @@ def _serialize_tts_caps_for_health(tts_service: TTSServiceV2, caps: Any) -> Any:
 
 
 def _sanitize_public_provider_detail(value: Any) -> Any:
+    """Remove sensitive keys and suspicious runtime diagnostics from public TTS health details."""
+
     if isinstance(value, str):
         if _SUSPICIOUS_PUBLIC_HEALTH_RE.search(value):
             return _SANITIZED_PUBLIC_HEALTH_MESSAGE
@@ -167,6 +169,8 @@ def _sanitize_public_provider_detail(value: Any) -> Any:
 
 
 def _normalize_public_health_key(value: Any) -> str:
+    """Normalize a provider-detail key before comparing it with the sensitive-key denylist."""
+
     return re.sub(r"[^a-z0-9]+", "", str(value or "").strip().lower())
 
 
@@ -179,6 +183,8 @@ def _derive_omnivoice_supervisor_health(
     tts_service: Any,
     current_detail: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
+    """Summarize OmniVoice sidecar supervisor state without exposing process internals."""
+
     current_detail = current_detail if isinstance(current_detail, dict) else {}
     availability = str(current_detail.get("availability") or "").strip().lower()
 

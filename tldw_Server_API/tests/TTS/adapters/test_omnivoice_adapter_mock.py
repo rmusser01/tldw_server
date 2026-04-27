@@ -1,12 +1,15 @@
 import asyncio
+import inspect
 import wave
 from io import BytesIO
 from pathlib import Path
+from typing import get_type_hints
 
 import httpx
 import pytest
 
 from tldw_Server_API.app.core.TTS.adapters.base import AudioFormat, ProviderStatus, TTSRequest
+from tldw_Server_API.app.core.TTS.adapters import omnivoice_adapter as omnivoice_adapter_module
 from tldw_Server_API.app.core.TTS.adapters.omnivoice_adapter import OmniVoiceAdapter
 from tldw_Server_API.app.core.TTS.tts_exceptions import TTSGenerationError
 
@@ -61,6 +64,12 @@ class _FakeClient:
         self.recorded["json"] = json
         self.recorded["headers"] = dict(headers or {})
         return self.response
+
+
+def test_omnivoice_adapter_documents_module_and_init_contract() -> None:
+    assert omnivoice_adapter_module.__doc__
+    assert inspect.signature(OmniVoiceAdapter.__init__).return_annotation != inspect.Signature.empty
+    assert get_type_hints(OmniVoiceAdapter.__init__)["return"] is type(None)
 
 
 @pytest.mark.asyncio
