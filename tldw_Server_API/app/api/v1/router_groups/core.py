@@ -329,7 +329,7 @@ def iter_core_router_specs() -> Iterable[RouterSpec]:
             router=llm_providers_router,
             prefix=f"{API_V1_PREFIX}",
             tags=("llm",),
-            route_key="llm-providers",
+            route_key="llm",
         ))
     except Exception as e:  # noqa: BLE001
         logger.debug(f"Skipping llm_providers router: {e}")

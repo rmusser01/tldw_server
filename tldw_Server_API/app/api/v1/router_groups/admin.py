@@ -6,7 +6,6 @@ from typing import Iterable
 from loguru import logger
 
 from tldw_Server_API.app.api.v1.router_groups.spec import RouterSpec
-from tldw_Server_API.app.core.testing import is_explicit_pytest_runtime as _is_explicit_pytest_runtime
 
 API_V1_PREFIX = "/api/v1"
 
@@ -31,8 +30,19 @@ def iter_admin_router_specs() -> Iterable[RouterSpec]:
     # Guardian and family safety endpoints
     try:
         from tldw_Server_API.app.api.v1.endpoints.family_wizard import router as family_wizard_router
+
+        specs.append(RouterSpec(
+            router=family_wizard_router,
+            prefix=f"{API_V1_PREFIX}/guardian",
+            tags=("guardian",),
+            route_key="guardian",
+            default_stable=False,
+        ))
+    except Exception as e:  # noqa: BLE001
+        logger.debug(f"Skipping family_wizard router: {e}")
+
+    try:
         from tldw_Server_API.app.api.v1.endpoints.guardian_controls import router as guardian_controls_router
-        from tldw_Server_API.app.api.v1.endpoints.self_monitoring import router as self_monitoring_router
 
         specs.append(RouterSpec(
             router=guardian_controls_router,
@@ -41,13 +51,12 @@ def iter_admin_router_specs() -> Iterable[RouterSpec]:
             route_key="guardian",
             default_stable=False,
         ))
-        specs.append(RouterSpec(
-            router=family_wizard_router,
-            prefix=f"{API_V1_PREFIX}/guardian",
-            tags=("guardian",),
-            route_key="guardian",
-            default_stable=False,
-        ))
+    except Exception as e:  # noqa: BLE001
+        logger.debug(f"Skipping guardian_controls router: {e}")
+
+    try:
+        from tldw_Server_API.app.api.v1.endpoints.self_monitoring import router as self_monitoring_router
+
         specs.append(RouterSpec(
             router=self_monitoring_router,
             prefix=f"{API_V1_PREFIX}/self-monitoring",
@@ -56,9 +65,9 @@ def iter_admin_router_specs() -> Iterable[RouterSpec]:
             default_stable=False,
         ))
     except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping guardian/self-monitoring routers: {e}")
+        logger.debug(f"Skipping self_monitoring router: {e}")
 
-    # Sandbox admin/ops endpoints are force-included in explicit pytest runtime.
+    # Sandbox admin/ops endpoints.
     try:
         from tldw_Server_API.app.api.v1.endpoints.sandbox import router as sandbox_router
 
@@ -66,7 +75,7 @@ def iter_admin_router_specs() -> Iterable[RouterSpec]:
             router=sandbox_router,
             prefix=f"{API_V1_PREFIX}",
             tags=("sandbox",),
-            route_key="" if _is_explicit_pytest_runtime() else "sandbox",
+            route_key="sandbox",
             default_stable=False,
         ))
     except Exception as e:  # noqa: BLE001

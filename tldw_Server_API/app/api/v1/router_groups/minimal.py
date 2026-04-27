@@ -5,17 +5,35 @@ integration tests working without importing the broader endpoint surface.
 """
 from __future__ import annotations
 
-from typing import Iterable
+import importlib
+from typing import Any, Iterable
 
 from loguru import logger
 
+from tldw_Server_API.app.api.v1.router_groups.factories import evaluations_router_factory
 from tldw_Server_API.app.api.v1.router_groups.spec import RouterSpec
 from tldw_Server_API.app.core.testing import (
+    audio_imports_enabled_for_runtime,
     env_flag_enabled as _env_flag_enabled,
     is_explicit_pytest_runtime as _is_explicit_pytest_runtime,
 )
 
 API_V1_PREFIX = "/api/v1"
+
+
+def _try_add_spec(
+    specs: list[RouterSpec],
+    import_path: str,
+    *,
+    log_name: str,
+    attr_name: str = "router",
+    **spec_kwargs: Any,
+) -> None:
+    try:
+        module = importlib.import_module(import_path)
+        specs.append(RouterSpec(router=getattr(module, attr_name), **spec_kwargs))
+    except Exception as e:  # noqa: BLE001
+        logger.debug(f"Skipping {log_name} router in minimal test app: {e}")
 
 
 def iter_minimal_test_router_specs() -> Iterable[RouterSpec]:
@@ -65,35 +83,24 @@ def _audio_jobs_imports_enabled_for_runtime() -> bool:
     return not _is_explicit_pytest_runtime() or _env_flag_enabled("MINIMAL_TEST_INCLUDE_AUDIO_JOBS")
 
 
-def _audio_imports_enabled_for_runtime() -> bool:
-    return not _is_explicit_pytest_runtime() or _env_flag_enabled("MINIMAL_TEST_INCLUDE_AUDIO")
-
-
 def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
     """Yield optional minimal-test router specs, skipping unavailable imports."""
     specs: list[RouterSpec] = []
 
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.llm_providers import router as llm_providers_router
-
-        specs.append(RouterSpec(
-            router=llm_providers_router,
-            prefix=f"{API_V1_PREFIX}",
-            tags=("llm",),
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping llm providers router in minimal test app: {e}")
-
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.mlx import router as mlx_router
-
-        specs.append(RouterSpec(
-            router=mlx_router,
-            prefix=f"{API_V1_PREFIX}",
-            tags=("llm",),
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping mlx router in minimal test app: {e}")
+    _try_add_spec(
+        specs,
+        "tldw_Server_API.app.api.v1.endpoints.llm_providers",
+        log_name="llm providers",
+        prefix=f"{API_V1_PREFIX}",
+        tags=("llm",),
+    )
+    _try_add_spec(
+        specs,
+        "tldw_Server_API.app.api.v1.endpoints.mlx",
+        log_name="mlx",
+        prefix=f"{API_V1_PREFIX}",
+        tags=("llm",),
+    )
 
     try:
         from tldw_Server_API.app.api.v1.endpoints.llamacpp import public_router as llamacpp_public_router
@@ -159,7 +166,7 @@ def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
     except Exception as e:  # noqa: BLE001
         logger.debug(f"Skipping media_embeddings router in minimal test app: {e}")
 
-    if _audio_imports_enabled_for_runtime():
+    if audio_imports_enabled_for_runtime():
         def _audio_router_factory():
             from tldw_Server_API.app.api.v1.endpoints.audio.audio import router as audio_router
 
@@ -501,7 +508,7 @@ def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
             tags=("notifications",),
         ))
     except Exception as e:  # noqa: BLE001
-        logger.debug("Skipping notifications router in minimal test app: {}", e)
+        logger.debug(f"Skipping notifications router in minimal test app: {e}")
 
     try:
         from tldw_Server_API.app.api.v1.endpoints.chatbooks import router as chatbooks_router
@@ -537,17 +544,10 @@ def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
             ),
         ])
     except Exception as e:  # noqa: BLE001
-        logger.debug("Skipping workflow routers in minimal test app: {}", e)
-
-    def _evaluations_router_factory():
-        from tldw_Server_API.app.api.v1.endpoints.evaluations.evaluations_unified import (
-            router as evaluations_router,
-        )
-
-        return evaluations_router
+        logger.debug(f"Skipping workflow routers in minimal test app: {e}")
 
     specs.append(RouterSpec(
-        router=_evaluations_router_factory,
+        router=evaluations_router_factory,
         prefix=f"{API_V1_PREFIX}",
         tags=("evaluations",),
         route_key="evaluations",
@@ -574,7 +574,7 @@ def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
             tags=("sharing",),
         ))
     except Exception as e:  # noqa: BLE001
-        logger.debug("Skipping sharing router in minimal test app: {}", e)
+        logger.debug(f"Skipping sharing router in minimal test app: {e}")
 
     try:
         from tldw_Server_API.app.api.v1.endpoints.personalization import router as personalization_router
@@ -648,7 +648,7 @@ def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
             tags=("persona-archetypes",),
         ))
     except Exception as e:  # noqa: BLE001
-        logger.debug("Skipping archetype router in minimal test app: {}", e)
+        logger.debug(f"Skipping archetype router in minimal test app: {e}")
 
     try:
         from tldw_Server_API.app.api.v1.endpoints.notes import router as notes_router
@@ -852,16 +852,17 @@ def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
         ))
     except Exception as e:  # noqa: BLE001
         logger.debug(f"Skipping admin router in minimal test app: {e}")
-        try:
-            from tldw_Server_API.app.api.v1.endpoints.admin.admin_byok import router as admin_byok_router
 
-            specs.append(RouterSpec(
-                router=admin_byok_router,
-                prefix=f"{API_V1_PREFIX}/admin",
-                tags=("admin",),
-            ))
-        except Exception as admin_byok_error:  # noqa: BLE001
-            logger.debug(f"Skipping admin_byok router in minimal test app: {admin_byok_error}")
+    try:
+        from tldw_Server_API.app.api.v1.endpoints.admin.admin_byok import router as admin_byok_router
+
+        specs.append(RouterSpec(
+            router=admin_byok_router,
+            prefix=f"{API_V1_PREFIX}/admin",
+            tags=("admin",),
+        ))
+    except Exception as admin_byok_error:  # noqa: BLE001
+        logger.debug(f"Skipping admin_byok router in minimal test app: {admin_byok_error}")
 
     try:
         from tldw_Server_API.app.api.v1.endpoints.orgs import router as orgs_router

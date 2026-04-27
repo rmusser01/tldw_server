@@ -117,6 +117,59 @@ def test_register_router_specs_resolves_lazy_router_after_route_policy(
     assert "/api/v1/lazy" in {route.path for route in app.routes}
 
 
+def test_register_router_specs_fails_closed_when_route_policy_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app = FastAPI()
+    router = APIRouter()
+
+    @router.get("/guarded")
+    def _guarded() -> dict[str, str]:
+        return {"status": "ok"}
+
+    def _raise_policy_error(route_key: str, default_stable: bool = True) -> bool:
+        raise RuntimeError(f"policy failed for {route_key}")
+
+    monkeypatch.setattr("tldw_Server_API.app.core.config.route_enabled", _raise_policy_error)
+
+    count = register_router_specs(
+        app,
+        [
+            RouterSpec(router=router, prefix="/api/v1", tags=("guarded",), route_key="guarded"),
+        ],
+    )
+
+    assert count == 0
+    assert "/api/v1/guarded" not in {route.path for route in app.routes}
+
+
+def test_register_router_specs_deduplicates_factory_routers_by_stable_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app = FastAPI()
+    calls = 0
+
+    def router_factory() -> APIRouter:
+        nonlocal calls
+        calls += 1
+        router = APIRouter()
+
+        @router.get("/factory")
+        def _factory() -> dict[str, str]:
+            return {"status": "ok"}
+
+        return router
+
+    monkeypatch.setattr("tldw_Server_API.app.core.config.route_enabled", lambda *_args, **_kwargs: True)
+
+    spec = RouterSpec(router=router_factory, prefix="/api/v1", tags=("factory",), route_key="factory")
+
+    assert register_router_specs(app, [spec]) == 1
+    assert register_router_specs(app, [spec]) == 0
+    assert calls == 1
+    assert [route.path for route in app.routes].count("/api/v1/factory") == 1
+
+
 def test_iter_core_router_specs_populates_expected_specs(monkeypatch: pytest.MonkeyPatch) -> None:
     _install_fake_router_module(
         monkeypatch,
@@ -339,8 +392,9 @@ def test_iter_core_router_specs_populates_expected_specs(monkeypatch: pytest.Mon
     assert by_first_path["/acp/multiplex"].tags == ("acp-multiplex",)
     assert by_first_path["/acp/multiplex"].route_key == "acp"
     assert by_first_path["/acp/multiplex"].default_stable is False
-    assert by_key["llm-providers"].prefix == "/api/v1"
-    assert by_key["llm-providers"].tags == ("llm",)
+    assert by_first_path["/llm/providers"].prefix == "/api/v1"
+    assert by_first_path["/llm/providers"].tags == ("llm",)
+    assert by_first_path["/llm/providers"].route_key == "llm"
     assert by_first_path["/mlx/health"].prefix == "/api/v1"
     assert by_first_path["/mlx/health"].tags == ("llm",)
     assert by_first_path["/mlx/health"].route_key == "llm"
@@ -364,6 +418,75 @@ def test_iter_core_router_specs_populates_expected_specs(monkeypatch: pytest.Mon
     assert by_key["feedback"].tags == ("feedback",)
     assert by_key["config"].prefix == "/api/v1"
     assert by_key["config"].tags == ("config",)
+
+
+def test_iter_content_router_specs_uses_canonical_rag_key_and_single_web_scraping_spec(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_fake_router_module(
+        monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.rag_unified",
+        path="/api/v1/rag/search",
+    )
+    _install_fake_router_module(
+        monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.web_scraping",
+        path="/api/v1/web/scrape",
+    )
+
+    specs = list(iter_content_router_specs())
+    by_first_path = {_first_router_path(spec.router): spec for spec in specs}
+    web_scraping_specs = [spec for spec in specs if spec.route_key == "web-scraping"]
+
+    assert by_first_path["/api/v1/rag/search"].route_key == "rag-unified"
+    assert len(web_scraping_specs) == 1
+    assert web_scraping_specs[0].prefix == "/api/v1"
+
+
+def test_iter_admin_router_specs_keeps_independent_guardian_imports(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_fake_router_module(
+        monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.family_wizard",
+        path="/family-wizard",
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "tldw_Server_API.app.api.v1.endpoints.guardian_controls",
+        ModuleType("tldw_Server_API.app.api.v1.endpoints.guardian_controls"),
+    )
+    _install_fake_router_module(
+        monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.self_monitoring",
+        path="/self-monitoring/status",
+    )
+
+    specs = list(iter_admin_router_specs())
+    by_first_path = {_first_router_path(spec.router): spec for spec in specs}
+
+    assert by_first_path["/family-wizard"].prefix == "/api/v1/guardian"
+    assert by_first_path["/family-wizard"].route_key == "guardian"
+    assert by_first_path["/self-monitoring/status"].prefix == "/api/v1/self-monitoring"
+    assert by_first_path["/self-monitoring/status"].route_key == "self-monitoring"
+    assert "/controls" not in by_first_path
+
+
+def test_iter_admin_router_specs_uses_policy_key_for_sandbox_in_pytest(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("PYTEST_CURRENT_TEST", "test_sandbox_policy")
+    _install_fake_router_module(
+        monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.sandbox",
+        path="/sandbox/status",
+    )
+
+    specs = list(iter_admin_router_specs())
+    by_first_path = {_first_router_path(spec.router): spec for spec in specs}
+
+    assert by_first_path["/sandbox/status"].route_key == "sandbox"
+    assert by_first_path["/sandbox/status"].default_stable is False
 
 
 def test_iter_minimal_test_router_specs_populates_expected_specs(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1745,8 +1868,8 @@ def test_iter_content_router_specs_populates_expected_specs(monkeypatch: pytest.
     by_tags = {spec.tags: spec for spec in specs}
     by_first_path = {_first_router_path(spec.router): spec for spec in specs}
 
-    assert by_key["rag"].prefix == ""
-    assert by_key["rag"].tags == ("rag-unified",)
+    assert by_key["rag-unified"].prefix == ""
+    assert by_key["rag-unified"].tags == ("rag-unified",)
     assert by_key["rag-health"].prefix == ""
     assert by_key["rag-health"].tags == ("rag-health",)
     assert by_key["prompts"].prefix == "/api/v1/prompts"
@@ -1866,9 +1989,8 @@ def test_iter_content_router_specs_populates_expected_specs(monkeypatch: pytest.
     assert by_key["ingestion-sources"].tags == ("ingestion-sources",)
     assert by_key["ingestion-sources"].default_stable is False
     web_scraping_specs = [spec for spec in specs if spec.route_key == "web-scraping"]
-    assert len(web_scraping_specs) == 2
+    assert len(web_scraping_specs) == 1
     assert {(spec.prefix, spec.tags) for spec in web_scraping_specs} == {
-        ("", ("web-scraping",)),
         ("/api/v1", ("web-scraping",)),
     }
     assert by_key["reading-highlights"].prefix == "/api/v1"
@@ -2047,7 +2169,7 @@ def test_iter_admin_router_specs_populates_expected_specs(monkeypatch: pytest.Mo
     assert by_key["self-monitoring"].default_stable is False
     assert by_first_path["/sandbox/status"].prefix == "/api/v1"
     assert by_first_path["/sandbox/status"].tags == ("sandbox",)
-    assert by_first_path["/sandbox/status"].route_key == ""
+    assert by_first_path["/sandbox/status"].route_key == "sandbox"
     assert by_first_path["/sandbox/status"].default_stable is False
     assert by_key["billing"].prefix == "/api/v1"
     assert by_key["billing"].tags == ("billing",)

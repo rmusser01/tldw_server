@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from fastapi import APIRouter
 
@@ -24,9 +24,14 @@ class RouterSpec:
     tags: tuple[str, ...] = ()
     route_key: str = ""
     default_stable: bool = True
+    _resolved_router: APIRouter | None = field(default=None, init=False, repr=False, compare=False)
 
     def resolve_router(self) -> APIRouter:
         """Resolve eager routers and lazy router factories to an APIRouter."""
+        if self._resolved_router is not None:
+            return self._resolved_router
         if isinstance(self.router, APIRouter):
             return self.router
-        return self.router()
+        router = self.router()
+        object.__setattr__(self, "_resolved_router", router)
+        return router

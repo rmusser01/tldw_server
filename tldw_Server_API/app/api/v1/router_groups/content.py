@@ -9,17 +9,12 @@ from typing import Iterable
 
 from loguru import logger
 
+from tldw_Server_API.app.api.v1.router_groups.factories import evaluations_router_factory
 from tldw_Server_API.app.api.v1.router_groups.spec import RouterSpec
-from tldw_Server_API.app.core.testing import (
-    env_flag_enabled as _env_flag_enabled,
-    is_explicit_pytest_runtime as _is_explicit_pytest_runtime,
-)
+from tldw_Server_API.app.core.testing import audio_imports_enabled_for_runtime
+from tldw_Server_API.app.core.testing import is_explicit_pytest_runtime as _is_explicit_pytest_runtime
 
 API_V1_PREFIX = "/api/v1"
-
-
-def _audio_imports_enabled_for_runtime() -> bool:
-    return not _is_explicit_pytest_runtime() or _env_flag_enabled("MINIMAL_TEST_INCLUDE_AUDIO")
 
 
 def iter_content_router_specs() -> Iterable[RouterSpec]:
@@ -28,14 +23,16 @@ def iter_content_router_specs() -> Iterable[RouterSpec]:
 
     # RAG unified endpoints (router has its own /api/v1/rag prefix)
     try:
-        from tldw_Server_API.app.api.v1.endpoints.rag_unified import router as rag_unified_router
+        from tldw_Server_API.app.api.v1.endpoints.rag_unified import (
+            router as rag_unified_router,
+        )
 
         specs.append(RouterSpec(
             router=rag_unified_router,
             tags=("rag-unified",),
-            route_key="rag",
+            route_key="rag-unified",
         ))
-    except Exception as e:  # noqa: BLE001
+    except ImportError as e:
         logger.debug(f"Skipping rag_unified router: {e}")
 
     # RAG health endpoints
@@ -104,7 +101,9 @@ def iter_content_router_specs() -> Iterable[RouterSpec]:
 
     # Media embeddings
     try:
-        from tldw_Server_API.app.api.v1.endpoints.media_embeddings import router as media_embeddings_router
+        from tldw_Server_API.app.api.v1.endpoints.media_embeddings import (
+            router as media_embeddings_router,
+        )
 
         specs.append(RouterSpec(
             router=media_embeddings_router,
@@ -117,15 +116,8 @@ def iter_content_router_specs() -> Iterable[RouterSpec]:
 
     # Evaluations and OCR are lazy so route policy can disable them before
     # importing modules with heavier optional dependencies.
-    def _evaluations_router_factory():
-        from tldw_Server_API.app.api.v1.endpoints.evaluations.evaluations_unified import (
-            router as evaluations_router,
-        )
-
-        return evaluations_router
-
     specs.append(RouterSpec(
-        router=_evaluations_router_factory,
+        router=evaluations_router_factory,
         prefix=f"{API_V1_PREFIX}",
         tags=("evaluations",),
         route_key="evaluations",
@@ -157,7 +149,7 @@ def iter_content_router_specs() -> Iterable[RouterSpec]:
         logger.debug(f"Skipping media router: {e}")
 
     # Audio endpoints can import heavyweight optional transcriber dependencies.
-    if _audio_imports_enabled_for_runtime():
+    if audio_imports_enabled_for_runtime():
         try:
             from tldw_Server_API.app.api.v1.endpoints.audio.audio import router as audio_router
             from tldw_Server_API.app.api.v1.endpoints.audio.audio import ws_router as audio_ws_router
@@ -578,23 +570,25 @@ def iter_content_router_specs() -> Iterable[RouterSpec]:
         from tldw_Server_API.app.api.v1.endpoints.kanban.kanban_search import router as kanban_search_router
         from tldw_Server_API.app.api.v1.endpoints.kanban.kanban_workflow import router as kanban_workflow_router
 
-        for router in (
-            kanban_boards_router,
-            kanban_lists_router,
-            kanban_cards_router,
-            kanban_labels_router,
-            kanban_checklists_router,
-            kanban_comments_router,
-            kanban_search_router,
-            kanban_links_router,
-            kanban_workflow_router,
-        ):
-            specs.append(RouterSpec(
-                router=router,
+        specs.extend([
+            RouterSpec(
+                router=kanban_router,
                 prefix=f"{API_V1_PREFIX}/kanban",
                 tags=("kanban",),
                 route_key="kanban",
-            ))
+            )
+            for kanban_router in (
+                kanban_boards_router,
+                kanban_lists_router,
+                kanban_cards_router,
+                kanban_labels_router,
+                kanban_checklists_router,
+                kanban_comments_router,
+                kanban_search_router,
+                kanban_links_router,
+                kanban_workflow_router,
+            )
+        ])
     except ImportError as e:
         logger.debug(f"Kanban endpoints unavailable; skipping import: {e}")
 
@@ -630,11 +624,6 @@ def iter_content_router_specs() -> Iterable[RouterSpec]:
     try:
         from tldw_Server_API.app.api.v1.endpoints.web_scraping import router as web_scraping_router
 
-        specs.append(RouterSpec(
-            router=web_scraping_router,
-            tags=("web-scraping",),
-            route_key="web-scraping",
-        ))
         specs.append(RouterSpec(
             router=web_scraping_router,
             prefix=f"{API_V1_PREFIX}",
