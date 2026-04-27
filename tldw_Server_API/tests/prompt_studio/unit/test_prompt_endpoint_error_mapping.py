@@ -30,12 +30,20 @@ pytestmark = pytest.mark.unit
 
 class _LoggerStub:
     def __init__(self):
+        self.debug_calls = []
         self.error_calls = []
+        self.info_calls = []
         self.warning_calls = []
         self.exception_calls = []
 
+    def debug(self, *args, **kwargs):
+        self.debug_calls.append((args, kwargs))
+
     def error(self, *args, **kwargs):
         self.error_calls.append((args, kwargs))
+
+    def info(self, *args, **kwargs):
+        self.info_calls.append((args, kwargs))
 
     def warning(self, *args, **kwargs):
         self.warning_calls.append((args, kwargs))
@@ -84,6 +92,30 @@ class _BrokenCreatePromptDb:
 
     def create_prompt(self, **_kwargs):
         raise self._create_exc
+
+
+class _CheckpointFailureCreatePromptDb:
+    def lookup_idempotency(self, *_args, **_kwargs):
+        raise _database_failure()
+
+    def create_prompt(self, **_kwargs):
+        return {
+            "id": 42,
+            "project_id": 7,
+            "name": "Prompt Name",
+            "system_prompt": "system",
+            "user_prompt": "{task}",
+            "prompt_format": "legacy",
+            "prompt_schema_version": None,
+            "prompt_definition": None,
+            "signature_id": None,
+            "version_number": 1,
+            "parent_version_id": None,
+            "change_description": "initial version",
+        }
+
+    def record_idempotency(self, *_args, **_kwargs):
+        return None
 
 
 class _BrokenListPromptsDb:
@@ -243,6 +275,82 @@ async def test_create_prompt_maps_database_error(monkeypatch):
         logger_stub,
         "Prompt studio storage error creating prompt",
     )
+
+
+@pytest.mark.asyncio
+async def test_create_prompt_idempotency_lookup_failure_log_is_sanitized(monkeypatch):
+    logger_stub = _patch_endpoint_logger(monkeypatch)
+
+    async def _allow_write_access(*_args, **_kwargs):
+        return True
+
+    monkeypatch.setattr(
+        prompts_endpoint,
+        "require_project_write_access",
+        _allow_write_access,
+        raising=True,
+    )
+    monkeypatch.setattr(
+        prompts_endpoint,
+        "_prepare_prompt_record_fields",
+        lambda **_kwargs: {
+            "system_prompt": "system",
+            "user_prompt": "{task}",
+            "prompt_format": "legacy",
+            "prompt_schema_version": None,
+            "prompt_definition": None,
+        },
+        raising=True,
+    )
+    monkeypatch.setattr(
+        prompts_endpoint,
+        "_validate_prompt_lengths",
+        lambda **_kwargs: None,
+        raising=True,
+    )
+    monkeypatch.setattr(
+        prompts_endpoint,
+        "_get_signature_for_project",
+        lambda **_kwargs: None,
+        raising=True,
+    )
+    monkeypatch.setattr(
+        prompts_endpoint,
+        "convert_legacy_prompt_to_definition",
+        lambda **_kwargs: object(),
+        raising=True,
+    )
+    monkeypatch.setattr(
+        prompts_endpoint,
+        "_validate_prompt_content",
+        lambda **_kwargs: None,
+        raising=True,
+    )
+
+    response = await create_prompt(
+        prompt_data=PromptCreate(
+            project_id=7,
+            name="Prompt Name",
+            system_prompt="system",
+            user_prompt="{task}",
+            change_description="initial version",
+        ),
+        db=_CheckpointFailureCreatePromptDb(),
+        security_config=object(),
+        user_context={"user_id": "tester", "client_id": "client-1"},
+        idempotency_key="idempotency-key",
+    )
+
+    assert response.success is True
+    assert response.data.id == 42
+    assert logger_stub.debug_calls
+    assert (
+        ("Prompt Studio checkpoint sync failed after prompt create",),
+        {},
+    ) in logger_stub.debug_calls
+    rendered_calls = repr(logger_stub.debug_calls)
+    for marker in _SENSITIVE_MARKERS:
+        assert marker not in rendered_calls
 
 
 @pytest.mark.asyncio
