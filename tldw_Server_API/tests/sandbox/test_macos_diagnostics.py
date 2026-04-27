@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import tldw_Server_API.app.core.Sandbox.macos_diagnostics as diagnostics_module
+import tldw_Server_API.app.core.Sandbox.vz_reconciliation as reconciliation_module
 from tldw_Server_API.app.core.Sandbox.models import RuntimeType
 from tldw_Server_API.app.core.Sandbox.macos_virtualization.models import (
     HelperPingReply,
     HelperVMListReply,
     HelperVMStatusReply,
+)
+from tldw_Server_API.app.core.Sandbox.macos_virtualization.helper_client import (
+    MacOSVirtualizationHelperProtocolError,
 )
 from tldw_Server_API.app.core.Sandbox.runtime_capabilities import RuntimePreflightResult
 
@@ -65,8 +69,20 @@ def _sample_diagnostics_payload() -> dict:
             "computed": True,
             "persisted_sessions": 1,
             "live_vms": 1,
+            "healthy_session_ids": ["sess-live"],
             "stale_session_ids": [],
+            "unhealthy_session_ids": [],
+            "skipped_active_session_ids": [],
             "orphaned_vm_ids": [],
+            "items": [
+                {
+                    "status": "healthy",
+                    "session_id": "sess-live",
+                    "vm_id": "vm-live",
+                    "state": "running",
+                    "healthy": True,
+                }
+            ],
             "reasons": [],
         },
     }
@@ -313,6 +329,20 @@ def test_admin_schema_accepts_macos_diagnostics_payload() -> None:
     assert model.runtimes["vz_linux"].execution_mode == "fake"
     assert model.reconciliation is not None
     assert model.reconciliation.computed is True
+    assert model.reconciliation.healthy_session_ids == ["sess-live"]
+    assert model.reconciliation.items
+
+
+def test_collect_macos_diagnostics_classifies_helper_protocol_mismatch(monkeypatch) -> None:
+    class _FakeHelper:
+        def ping(self):
+            raise MacOSVirtualizationHelperProtocolError("macos_virtualization_helper_protocol_mismatch")
+
+    monkeypatch.setattr(diagnostics_module, "MacOSVirtualizationHelperClient", _FakeHelper)
+
+    data = diagnostics_module.collect_macos_diagnostics()
+
+    assert "macos_virtualization_helper_protocol_mismatch" in data["helper"]["reasons"]
 
 
 def test_collect_macos_diagnostics_reports_reconciliation_mismatches(monkeypatch) -> None:
@@ -360,6 +390,7 @@ def test_collect_macos_diagnostics_reports_reconciliation_mismatches(monkeypatch
             ]
 
     monkeypatch.setattr(diagnostics_module, "MacOSVirtualizationHelperClient", _FakeHelper)
+    monkeypatch.setattr(reconciliation_module, "MacOSVirtualizationHelperClient", _FakeHelper)
     monkeypatch.setattr(
         diagnostics_module,
         "collect_runtime_preflights",
@@ -391,5 +422,7 @@ def test_collect_macos_diagnostics_reports_reconciliation_mismatches(monkeypatch
     assert data["reconciliation"]["computed"] is True
     assert data["reconciliation"]["persisted_sessions"] == 2
     assert data["reconciliation"]["live_vms"] == 1
+    assert data["reconciliation"]["healthy_session_ids"] == ["sess-live"]
     assert data["reconciliation"]["stale_session_ids"] == ["sess-stale"]
+    assert data["reconciliation"]["items"]
     assert data["reconciliation"]["orphaned_vm_ids"] == []

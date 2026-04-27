@@ -313,14 +313,27 @@ class SandboxAdminMacOSRuntimeDiagnostics(BaseModel):
     remediation: str | None = None
 
 
+class SandboxAdminMacOSReconciliationItem(BaseModel):
+    status: str
+    session_id: str | None = None
+    vm_id: str | None = None
+    state: str | None = None
+    healthy: bool | None = None
+    reason: str | None = None
+
+
 class SandboxAdminMacOSReconciliationDiagnostics(BaseModel):
     """Admin-facing comparison between persisted VZ session state and live helper VMs."""
 
     computed: bool
     persisted_sessions: int
     live_vms: int
+    healthy_session_ids: list[str] = Field(default_factory=list)
     stale_session_ids: list[str] = Field(default_factory=list)
+    unhealthy_session_ids: list[str] = Field(default_factory=list)
+    skipped_active_session_ids: list[str] = Field(default_factory=list)
     orphaned_vm_ids: list[str] = Field(default_factory=list)
+    items: list[SandboxAdminMacOSReconciliationItem] = Field(default_factory=list)
     reasons: list[str] = Field(default_factory=list)
 
 
