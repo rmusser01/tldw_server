@@ -265,8 +265,8 @@ def _acp_record_audit_event(
         )
         # Flush when buffer reaches threshold to balance durability vs performance
         audit_db.flush_if_needed(threshold=10)
-    except Exception as exc:
-        logger.warning("ACP audit persistence failed: {}", exc)
+    except Exception:
+        logger.warning("ACP audit persistence failed")
     logger.info(
         "ACP audit event action={} user_id={} session_id={}",
         event["action"],

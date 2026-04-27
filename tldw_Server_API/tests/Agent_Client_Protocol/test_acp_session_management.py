@@ -270,6 +270,35 @@ def test_audit_db_double_flush_is_idempotent():
         db.close()
 
 
+def test_acp_record_audit_event_sanitizes_persistence_failure(monkeypatch):
+    import tldw_Server_API.app.api.v1.endpoints.agent_client_protocol as acp_endpoints
+    import tldw_Server_API.app.core.DB_Management.ACP_Audit_DB as audit_db_module
+
+    warnings: list[str] = []
+
+    def _fail_audit_db():
+        raise RuntimeError("audit backend exploded at /private/audit.db")
+
+    monkeypatch.setattr(audit_db_module, "get_acp_audit_db", _fail_audit_db)
+    monkeypatch.setattr(
+        acp_endpoints.logger,
+        "warning",
+        lambda message, *args, **kwargs: warnings.append(str(message).format(*args)),
+    )
+    monkeypatch.setattr(acp_endpoints.logger, "info", lambda *args, **kwargs: None)
+
+    event = acp_endpoints._acp_record_audit_event(
+        action="session_new",
+        user_id=1,
+        session_id="audit-sanitizer-session",
+        metadata={"source": "unit"},
+    )
+
+    assert event["action"] == "session_new"
+    assert event["session_id"] == "audit-sanitizer-session"
+    assert warnings == ["ACP audit persistence failed"]
+
+
 @pytest.mark.asyncio
 async def test_permission_response_audit_records_policy_snapshot_fingerprint(monkeypatch):
     import tldw_Server_API.app.api.v1.endpoints.agent_client_protocol as acp_endpoints
