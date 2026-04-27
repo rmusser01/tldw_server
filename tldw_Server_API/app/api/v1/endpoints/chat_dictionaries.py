@@ -1277,7 +1277,7 @@ async def list_dictionary_activity(
         logger.error("Error listing dictionary activity")
         raise map_db_error_to_http(e, default_detail="Failed to list dictionary activity") from e
     except Exception as e:
-        logger.error(f"Error listing dictionary activity: {e}")
+        logger.error("Error listing dictionary activity")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to list dictionary activity",
@@ -1328,7 +1328,7 @@ async def list_dictionary_versions(
         logger.error("Error listing dictionary versions")
         raise map_db_error_to_http(e, default_detail="Failed to list dictionary versions") from e
     except Exception as e:
-        logger.error(f"Error listing dictionary versions: {e}")
+        logger.error("Error listing dictionary versions")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to list dictionary versions",
@@ -1391,7 +1391,7 @@ async def get_dictionary_version(
         logger.error("Error reading dictionary revision")
         raise map_db_error_to_http(e, default_detail="Failed to read dictionary revision") from e
     except Exception as e:
-        logger.error(f"Error reading dictionary revision: {e}")
+        logger.error("Error reading dictionary revision")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to read dictionary revision",
@@ -1430,7 +1430,7 @@ async def revert_dictionary_version(
         logger.error("Error reverting dictionary revision")
         raise map_db_error_to_http(e, default_detail="Failed to revert dictionary revision") from e
     except Exception as e:
-        logger.error(f"Error reverting dictionary revision: {e}")
+        logger.error("Error reverting dictionary revision")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to revert dictionary revision",

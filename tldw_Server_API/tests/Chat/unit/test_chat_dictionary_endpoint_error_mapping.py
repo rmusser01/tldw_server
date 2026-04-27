@@ -44,6 +44,10 @@ def _database_failure() -> CharactersRAGDBError:
     return CharactersRAGDBError("driver failed /private/tmp/chat-dictionaries.db")
 
 
+def _unexpected_failure() -> RuntimeError:
+    return RuntimeError("driver failed /private/tmp/chat-dictionaries.db")
+
+
 def _patch_endpoint_logger(monkeypatch: pytest.MonkeyPatch) -> _LoggerStub:
     logger_stub = _LoggerStub()
     monkeypatch.setattr(chat_dictionary_endpoints, "logger", logger_stub, raising=True)
@@ -692,6 +696,35 @@ async def test_list_dictionary_activity_maps_database_error(monkeypatch: pytest.
 
 
 @pytest.mark.asyncio
+async def test_list_dictionary_activity_sanitizes_unexpected_error_log(monkeypatch: pytest.MonkeyPatch):
+    logger_stub = _patch_endpoint_logger(monkeypatch)
+
+    def _get_dictionary(self, *_args, **_kwargs):
+        return {"id": 42}
+
+    def _list_transform_activity(self, *_args, **_kwargs):
+        raise _unexpected_failure()
+
+    _patch_service(
+        monkeypatch,
+        get_dictionary=_get_dictionary,
+        list_transform_activity=_list_transform_activity,
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await chat_dictionary_endpoints.list_dictionary_activity(
+            dictionary_id=42,
+            limit=10,
+            offset=0,
+            db=object(),
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "Failed to list dictionary activity"
+    _assert_sanitized_log_call(logger_stub, "Error listing dictionary activity")
+
+
+@pytest.mark.asyncio
 async def test_list_dictionary_versions_maps_database_error(monkeypatch: pytest.MonkeyPatch):
     logger_stub = _patch_endpoint_logger(monkeypatch)
 
@@ -721,11 +754,61 @@ async def test_list_dictionary_versions_maps_database_error(monkeypatch: pytest.
 
 
 @pytest.mark.asyncio
+async def test_list_dictionary_versions_sanitizes_unexpected_error_log(monkeypatch: pytest.MonkeyPatch):
+    logger_stub = _patch_endpoint_logger(monkeypatch)
+
+    def _get_dictionary(self, *_args, **_kwargs):
+        return {"id": 42}
+
+    def _list_dictionary_versions(self, *_args, **_kwargs):
+        raise _unexpected_failure()
+
+    _patch_service(
+        monkeypatch,
+        get_dictionary=_get_dictionary,
+        list_dictionary_versions=_list_dictionary_versions,
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await chat_dictionary_endpoints.list_dictionary_versions(
+            dictionary_id=42,
+            limit=10,
+            offset=0,
+            db=object(),
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "Failed to list dictionary versions"
+    _assert_sanitized_log_call(logger_stub, "Error listing dictionary versions")
+
+
+@pytest.mark.asyncio
 async def test_get_dictionary_version_maps_database_error(monkeypatch: pytest.MonkeyPatch):
     logger_stub = _patch_endpoint_logger(monkeypatch)
 
     def _get_dictionary_version(self, *_args, **_kwargs):
         raise _database_failure()
+
+    _patch_service(monkeypatch, get_dictionary_version=_get_dictionary_version)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await chat_dictionary_endpoints.get_dictionary_version(
+            dictionary_id=42,
+            revision=3,
+            db=object(),
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "Failed to read dictionary revision"
+    _assert_sanitized_log_call(logger_stub, "Error reading dictionary revision")
+
+
+@pytest.mark.asyncio
+async def test_get_dictionary_version_sanitizes_unexpected_error_log(monkeypatch: pytest.MonkeyPatch):
+    logger_stub = _patch_endpoint_logger(monkeypatch)
+
+    def _get_dictionary_version(self, *_args, **_kwargs):
+        raise _unexpected_failure()
 
     _patch_service(monkeypatch, get_dictionary_version=_get_dictionary_version)
 
@@ -801,6 +884,27 @@ async def test_revert_dictionary_version_maps_database_error(monkeypatch: pytest
 
     def _revert_dictionary_to_revision(self, *_args, **_kwargs):
         raise _database_failure()
+
+    _patch_service(monkeypatch, revert_dictionary_to_revision=_revert_dictionary_to_revision)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await chat_dictionary_endpoints.revert_dictionary_version(
+            dictionary_id=42,
+            revision=3,
+            db=object(),
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "Failed to revert dictionary revision"
+    _assert_sanitized_log_call(logger_stub, "Error reverting dictionary revision")
+
+
+@pytest.mark.asyncio
+async def test_revert_dictionary_version_sanitizes_unexpected_error_log(monkeypatch: pytest.MonkeyPatch):
+    logger_stub = _patch_endpoint_logger(monkeypatch)
+
+    def _revert_dictionary_to_revision(self, *_args, **_kwargs):
+        raise _unexpected_failure()
 
     _patch_service(monkeypatch, revert_dictionary_to_revision=_revert_dictionary_to_revision)
 
