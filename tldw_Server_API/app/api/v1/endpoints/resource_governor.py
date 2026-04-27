@@ -264,8 +264,8 @@ async def upsert_policy(
         except _RG_ENDPOINT_NONCRITICAL_EXCEPTIONS:
             logger.debug("Policy upsert refresh skipped")
         return JSONResponse({"status": "ok", "policy_id": policy_id})
-    except PolicyVersionConflictError as e:
-        logger.debug(f"upsert_policy version conflict for {policy_id}: {e}")
+    except PolicyVersionConflictError:
+        logger.debug("upsert_policy version conflict")
         return JSONResponse(
             {
                 "status": "conflict",
@@ -327,8 +327,8 @@ async def delete_policy(
         except _RG_ENDPOINT_NONCRITICAL_EXCEPTIONS:
             logger.debug("Policy delete refresh skipped")
         return JSONResponse({"status": "ok", "deleted": int(deleted)})
-    except PolicyVersionConflictError as e:
-        logger.debug(f"delete_policy version conflict for {policy_id}: {e}")
+    except PolicyVersionConflictError:
+        logger.debug("delete_policy version conflict")
         return JSONResponse(
             {
                 "status": "conflict",

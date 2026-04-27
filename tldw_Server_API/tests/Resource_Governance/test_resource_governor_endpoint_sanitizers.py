@@ -133,3 +133,48 @@ async def test_delete_policy_refresh_failure_log_is_sanitized(
 
     assert response.status_code == 200
     _assert_sanitized_debug_log(logger_stub, "Policy delete refresh skipped")
+
+
+@pytest.mark.asyncio
+async def test_upsert_policy_version_conflict_log_is_sanitized(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.api.v1.endpoints import resource_governor
+
+    class _ConflictPolicyAdmin:
+        async def upsert_policy(self, *_args: Any, **_kwargs: Any) -> None:
+            raise resource_governor.PolicyVersionConflictError("safe.policy", 2, 3)
+
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(resource_governor, "logger", logger_stub)
+    monkeypatch.setattr(resource_governor, "AuthNZPolicyAdmin", _ConflictPolicyAdmin)
+
+    response = await resource_governor.upsert_policy(
+        "safe.policy",
+        resource_governor.PolicyUpsertRequest(payload={"requests": {"rpm": 1}}, version=2),
+    )
+
+    assert response.status_code == 409
+    assert response.body
+    _assert_sanitized_debug_log(logger_stub, "upsert_policy version conflict")
+
+
+@pytest.mark.asyncio
+async def test_delete_policy_version_conflict_log_is_sanitized(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.api.v1.endpoints import resource_governor
+
+    class _ConflictPolicyAdmin:
+        async def delete_policy(self, *_args: Any, **_kwargs: Any) -> bool:
+            raise resource_governor.PolicyVersionConflictError("safe.policy", 2, 3)
+
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(resource_governor, "logger", logger_stub)
+    monkeypatch.setattr(resource_governor, "AuthNZPolicyAdmin", _ConflictPolicyAdmin)
+
+    response = await resource_governor.delete_policy("safe.policy", version=2)
+
+    assert response.status_code == 409
+    assert response.body
+    _assert_sanitized_debug_log(logger_stub, "delete_policy version conflict")
