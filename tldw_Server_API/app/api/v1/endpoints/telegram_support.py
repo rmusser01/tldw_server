@@ -643,8 +643,8 @@ async def _handle_telegram_approval_callback_query(
     now = datetime.now(timezone.utc)
     try:
         approvals_repo = await get_telegram_approvals_repo()
-    except Exception as exc:
-        logger.error("Failed to resolve Telegram approvals repo: {}", exc)
+    except Exception:
+        logger.error("Failed to resolve Telegram approvals repo")
         return _telegram_webhook_error(
             status.HTTP_503_SERVICE_UNAVAILABLE,
             "approval_service_unavailable",
@@ -694,8 +694,8 @@ async def _handle_telegram_approval_callback_query(
 
         try:
             approval_service = await get_approval_service()
-        except Exception as exc:
-            logger.error("Failed to resolve Telegram approval service: {}", exc)
+        except Exception:
+            logger.error("Failed to resolve Telegram approval service")
             return _telegram_webhook_error(
                 status.HTTP_503_SERVICE_UNAVAILABLE,
                 "approval_service_unavailable",
@@ -728,8 +728,8 @@ async def _handle_telegram_approval_callback_query(
                 "scope_key": consumed_pending.get("scope_key"),
             },
         )
-    except Exception as exc:
-        logger.error("Failed to persist Telegram approval decision: {}", exc)
+    except Exception:
+        logger.error("Failed to persist Telegram approval decision")
         return _telegram_webhook_error(
             status.HTTP_503_SERVICE_UNAVAILABLE,
             "approval_service_unavailable",
