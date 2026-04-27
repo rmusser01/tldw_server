@@ -57,6 +57,10 @@ jobs:
               if (cd "$req_dir" && cyclonedx-py requirements "$req_file" "${pyproject_args[@]}" -o "$out_file"); then
                 return 0
               fi
+              echo "cyclonedx-py positional requirements failed; trying -i form"
+              if (cd "$req_dir" && cyclonedx-py requirements -i "$req_file" "${pyproject_args[@]}" -o "$out_file"); then
+                return 0
+              fi
               echo "cyclonedx-py failed; will try fallbacks"
             fi
 
@@ -64,6 +68,10 @@ jobs:
             if python -c "import importlib.util, sys; sys.exit(0 if importlib.util.find_spec('cyclonedx_py') else 1)" >/dev/null 2>&1; then
               echo "Using python -m cyclonedx_py"
               if (cd "$req_dir" && python -m cyclonedx_py requirements "$req_file" "${pyproject_args[@]}" -o "$out_file"); then
+                return 0
+              fi
+              echo "python -m cyclonedx_py positional requirements failed; trying -i form"
+              if (cd "$req_dir" && python -m cyclonedx_py requirements -i "$req_file" "${pyproject_args[@]}" -o "$out_file"); then
                 return 0
               fi
               echo "python -m cyclonedx_py failed; trying legacy CLI"
@@ -90,33 +98,31 @@ jobs:
             return 1
           }
 
-          gen_from_pyproject() {
-            local project_file="$1"
-            local tmp_req
-            tmp_req="$(mktemp)"
-            python - "$project_file" "$tmp_req" <<'PY'
+          gen_requirements_from_pyproject() {
+            local pyproject="$1"
+            local generated_req
+            generated_req="$(mktemp)"
+            python - "$pyproject" "$generated_req" <<'PY'
           import sys
           import tomllib
           from pathlib import Path
 
-          project_file = Path(sys.argv[1])
-          out_file = Path(sys.argv[2])
-          data = tomllib.loads(project_file.read_text(encoding="utf-8"))
-          dependencies = data.get("project", {}).get("dependencies", [])
-          out_file.write_text("\n".join(dependencies) + "\n", encoding="utf-8")
+          pyproject = Path(sys.argv[1])
+          generated_req = Path(sys.argv[2])
+          data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+          dependencies = data.get("project", {}).get("dependencies") or []
+          dependencies = [str(dependency).strip() for dependency in dependencies if str(dependency).strip()]
+          if not dependencies:
+              raise SystemExit(f"No [project].dependencies entries found in {pyproject}")
+
+          generated_req.write_text("\n".join(dependencies) + "\n", encoding="utf-8")
+          print(f"Wrote {len(dependencies)} requirements from {pyproject} to {generated_req}")
           PY
-
-            if [ ! -s "$tmp_req" ]; then
-              echo "No project dependencies found in ${project_file}" >&2
-              rm -f "$tmp_req"
-              return 1
-            fi
-
-            if gen_from_requirements "$tmp_req"; then
-              rm -f "$tmp_req"
+            if gen_from_requirements "$generated_req"; then
+              rm -f "$generated_req"
               return 0
             fi
-            rm -f "$tmp_req"
+            rm -f "$generated_req"
             return 1
           }
 
@@ -125,9 +131,9 @@ jobs:
           elif [ -f "$repo_root/requirements.txt" ]; then
             gen_from_requirements "$repo_root/requirements.txt"
           elif [ -f "$repo_root/pyproject.toml" ]; then
-            gen_from_pyproject "$repo_root/pyproject.toml"
+            gen_requirements_from_pyproject "$repo_root/pyproject.toml"
           else
-            echo "No requirements file or pyproject.toml found; cannot generate SBOM" >&2
+            echo "No Python dependency source found; cannot generate SBOM" >&2
             exit 1
           fi
 

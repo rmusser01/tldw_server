@@ -9,7 +9,7 @@ This guide sets up and uses the repository's PyPI release flow for the `tldw-ser
   - `make pypi-check`
 - CI packaging validation:
   - `.github/workflows/pypi-package.yml`
-- Release publishing workflow (Trusted Publishing):
+- Manual PyPI publishing workflow (Trusted Publishing):
   - `.github/workflows/publish-pypi.yml`
 
 ## One-Time Setup (PyPI)
@@ -50,11 +50,16 @@ python -c "import tldw_Server_API; print('ok')"
 1. Bump version in `pyproject.toml`.
 2. Create and push a Git tag (for example `v0.1.22`).
 3. Publish a GitHub Release from that tag.
-4. GitHub Actions runs `publish-pypi.yml` and uploads to PyPI using OIDC.
+4. GitHub Actions runs `publish-docker.yml` for Docker release publication.
 
-For preflight/testing, run `publish-pypi.yml` manually from Actions and choose `testpypi`.
+For PyPI publishing in this rollout, run `publish-pypi.yml` manually from Actions, select the release tag/ref that matches the GitHub Release and Docker release publish, and choose:
+
+- `testpypi` for TestPyPI
+- `pypi` for the real PyPI publish
 
 ## Notes
 
+- `publish-pypi.yml` is manual-dispatch-only in this rollout; GitHub Release publication no longer triggers PyPI uploads.
+- Pushing to `main` continues to republish rolling GHCR snapshots through `publish-ghcr-main.yml` before and independently of GitHub Release publication.
 - The default dependency set is intentionally broad and may be heavy for minimal installs.
 - If you want a lighter default install later, move optional feature stacks (for example some STT/TTS stacks) into extras and keep base runtime lean.

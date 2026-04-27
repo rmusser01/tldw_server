@@ -1,6 +1,6 @@
 ## tldw_server Release Checklist
 
-This document provides a practical checklist for preparing a full tldw_server release. It is meant to be a living document: keep it up to date as the project evolves and adapt the scope (for example, use a subset for small bugfix releases).
+This document is the broad readiness checklist for preparing a full tldw_server release. The authoritative operator path lives in [Docs/Development/Release_Process.md](Development/Release_Process.md); use that document for the actual release command flow, then use this checklist to confirm scope, readiness, and follow-through. Keep this checklist up to date as the project evolves and adapt the scope (for example, use a subset for small bugfix releases).
 
 ---
 

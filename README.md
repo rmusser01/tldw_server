@@ -892,7 +892,8 @@ Examples
 │   ├── cli/                      # CLI entry points
 │   ├── Config_Files/             # config.txt, example YAMLs, migration helpers
 │   ├── Databases/                # Default DBs (runtime data; some are gitignored)
-│   └── tests/                    # Pytest suite
+│   ├── tests/                    # Pytest suite
+│   └── requirements.txt          # Legacy pin set (prefer pyproject extras)
 ├── admin-ui/                     # Admin dashboard
 ├── apps/tldw-frontend/                # Next.js WebUI (primary web client)
 ├── Docs/                         # Documentation (API, Development, RAG, AuthNZ, TTS, etc.)

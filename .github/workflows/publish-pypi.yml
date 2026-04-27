@@ -1,8 +1,6 @@
 name: Publish PyPI Package
 
 on:
-  release:
-    types: [published]
   workflow_dispatch:
     inputs:
       target:
@@ -71,7 +69,7 @@ jobs:
   publish-pypi:
     name: Publish to PyPI
     needs: build
-    if: ${{ github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.target == 'pypi') }}
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.target == 'pypi' }}
     runs-on: ubuntu-latest
     permissions:
       id-token: write
