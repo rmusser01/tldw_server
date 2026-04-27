@@ -22,7 +22,7 @@
 - `docker`: general-purpose default runtime with existing interactive support.
 - `firecracker`: VM-oriented Linux isolation path.
 - `lima`: strict macOS-host VM path with explicit deny-all readiness checks.
-- `vz_linux`: Apple `Virtualization.framework` Linux guest runtime on Apple silicon macOS hosts, with real helper-backed ephemeral execution and session VM reuse.
+- `vz_linux`: Apple `Virtualization.framework` Linux guest runtime on prepared Apple silicon macOS hosts, with real helper-backed boot, guest command execution, and session VM reuse when helper/template readiness passes.
 - `vz_macos`: Apple `Virtualization.framework` macOS guest scaffold on Apple silicon macOS hosts.
 - `seatbelt`: host-local process isolation runtime for conservative trusted macOS workflows, compatibility-gated by deprecated `sandbox-exec`.
 
@@ -57,15 +57,18 @@ Trust-level rules:
 Current limitations:
 
 - `vz_macos` real `Virtualization.framework` execution is not implemented yet.
-- `vz_linux` requires helper/template readiness and reports `execution_mode=real` when the helper-backed path is available.
+- `vz_linux` requires helper/template readiness and reports `execution_mode=real` when the helper-backed boot and guest execution path is available.
 - `vz_macos` still requires helper/template readiness plus `*_FAKE_EXEC=1`; otherwise discovery reports `real_execution_not_implemented`.
 - Strict allowlist networking is not implemented for `vz_linux`, `vz_macos`, or `seatbelt`.
 - `seatbelt` discovery may be `available=True` while `strict_deny_all_supported=False`; deny-all is a best-effort host policy claim, not a VM-grade guarantee.
 - `seatbelt` control files and isolated `HOME`/temp dirs live outside the writable workspace and are removed after each run.
 - `seatbelt` real execution still depends on deprecated `sandbox-exec` and may be blocked by an enclosing sandbox even on macOS hosts.
 - `vz_linux` supports session VM reuse through persisted VZ session-control metadata; `vz_macos` does not.
-- `vz_linux` admin diagnostics now include reconciliation data comparing persisted VZ session-control rows against live helper VM state.
-- the helper daemon and guest protocol are now real at the socket/stream level, but the actual `Virtualization.framework` boot driver and vsock transport binding are still incomplete.
+- `vz_linux` admin diagnostics include reconciliation data comparing persisted VZ session-control rows against live helper VM state.
+- `vz_linux` repair is explicit and admin-only through `POST /api/v1/sandbox/admin/macos-reconciliation/repair`; diagnostics do not mutate state.
+- `vz_linux` repair defaults to dry-run, skips active sessions, can delete stale or unhealthy inactive persisted session-control rows when requested, and does not terminate orphan helper VMs yet.
+- Helper unavailable or protocol mismatch conditions fail closed and block mutating repair.
+- Orphan VM termination and launchd/managed helper lifecycle are future work, not automatic repair behavior.
 - helper-backed template validation now distinguishes canonical bundles from
   raw-disk compatibility mode through `boot_mode` and `validation_strength`.
 - `SandboxImageStore` persists template manifests under
@@ -87,13 +90,18 @@ Current limitations:
   - `/api/v1/sandbox/health`
   - `/api/v1/sandbox/runtimes`
   - `/api/v1/sandbox/admin/macos-diagnostics`
+  - `POST /api/v1/sandbox/admin/macos-reconciliation/repair`
   - `/api/v1/sandbox/runs`
 
 `/api/v1/sandbox/runtimes` is the summarized discovery surface used by clients and ACP.
 `/api/v1/sandbox/admin/macos-diagnostics` is an admin-only diagnostics surface for
 operator troubleshooting and exposes helper/template readiness details that are not
 included in the public discovery payload, plus reconciliation data for persisted
-`vz_linux` session-control rows versus live helper VM state.
+`vz_linux` session-control rows versus live helper VM state. It is read-only.
+`POST /api/v1/sandbox/admin/macos-reconciliation/repair` is the separate
+admin-only repair surface. Repair defaults to dry-run, skips active sessions,
+can delete stale or unhealthy inactive persisted session-control rows when
+requested, and currently leaves orphan helper VMs running for manual handling.
 
 Selected configuration knobs:
 

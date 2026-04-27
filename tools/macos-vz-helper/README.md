@@ -1,6 +1,6 @@
 # macOS VZ Helper
 
-This directory is the planned home for the first-party native macOS helper used by the
+This directory contains the first-party native macOS helper used by the
 `vz_linux` sandbox runtime.
 
 ## Scope
@@ -20,7 +20,9 @@ The first helper slice is not a generic macOS sandbox backend:
 - no `vz_macos` support yet
 - no `seatbelt` support here
 - no second persistence layer for sandbox sessions
-- no APFS clone manager in the first transport slice
+- no APFS clone execution path yet
+- no launchd or managed helper lifecycle yet
+- no automatic orphan VM termination during admin repair yet
 
 Python remains authoritative for sandbox admission, session identity, artifacts, and ACP
 integration. The helper only owns runtime VM facts and control-plane operations.
