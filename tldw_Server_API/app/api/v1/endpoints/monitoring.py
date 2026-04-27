@@ -208,7 +208,7 @@ async def upsert_watchlist(payload: Watchlist) -> WatchlistUpsertResponse:
         # Propagate existing HTTP errors without masking them
         raise
     except Exception as e:  # Generic 500 handler
-        logger.exception("Failed to upsert watchlist")
+        logger.error("Failed to upsert watchlist")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to upsert watchlist",
