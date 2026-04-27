@@ -10,6 +10,11 @@ export default defineConfig({
       '@': path.resolve(__dirname, '../packages/ui/src'),
       '~': path.resolve(__dirname, '../packages/ui/src'),
       '@web': path.resolve(__dirname, '.'),
+      '@plasmohq/storage/hook': path.resolve(
+        __dirname,
+        './extension/shims/plasmo-storage-hook.tsx'
+      ),
+      '@plasmohq/storage': path.resolve(__dirname, './extension/shims/plasmo-storage.ts'),
       'wxt/browser': path.resolve(__dirname, './extension/shims/wxt-browser.ts'),
       'react-router-dom': path.resolve(
         __dirname,
