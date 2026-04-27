@@ -801,6 +801,75 @@ async def test_outputs_purge_file_delete_failure_log_is_sanitized(monkeypatch):
     assert "/private/output.md" not in logged
 
 
+@pytest.mark.asyncio
+async def test_outputs_update_old_file_cleanup_failure_log_is_sanitized(monkeypatch):
+    class _Row:
+        id = 777
+        title = "Old Output"
+        type = "newsletter_markdown"
+        format = "md"
+        storage_path = "old-output.md"
+        media_item_id = None
+        created_at = "2024-01-01T00:00:00"
+
+    class _CollectionsDB:
+        def get_output_artifact(self, _output_id: int):
+            return _Row()
+
+    class _OutputPath:
+        def __init__(self, name: str) -> None:
+            self.name = name
+
+        @property
+        def suffix(self) -> str:
+            return "." + self.name.rsplit(".", 1)[-1]
+
+        @property
+        def stem(self) -> str:
+            return self.name.rsplit(".", 1)[0]
+
+        def read_text(self, **_kwargs: Any) -> str:
+            return "# hello"
+
+        def write_text(self, *_args: Any, **_kwargs: Any) -> None:
+            return None
+
+        def resolve(self) -> str:
+            return f"/private/outputs/{self.name}"
+
+        def exists(self) -> bool:
+            return True
+
+        def unlink(self) -> None:
+            raise OSError("old output cleanup exploded at /private/outputs/old-output.md")
+
+    def _resolve_path(_user_id: int, name: str) -> _OutputPath:
+        return _OutputPath(name)
+
+    def _update_output_artifact_db(**kwargs: Any):
+        assert kwargs["new_format"] == "html"
+        return _Row()
+
+    logger = _LoggerStub()
+    monkeypatch.setattr(outputs_endpoint, "logger", logger)
+    monkeypatch.setattr(outputs_endpoint, "_resolve_output_path_for_user", _resolve_path)
+    monkeypatch.setattr(outputs_endpoint, "update_output_artifact_db", _update_output_artifact_db)
+
+    result = await outputs_endpoint.update_output(
+        output_id=777,
+        payload=outputs_endpoint.OutputUpdateRequest(format="html"),
+        current_user=User(id=123, username="tester", email=None, is_active=True),
+        cdb=_CollectionsDB(),
+    )
+
+    assert result.id == 777
+    assert logger.warnings == ["failed to remove old output file"]
+    logged = "\n".join(logger.warnings)
+    assert "old-output.md" not in logged
+    assert "old output cleanup exploded" not in logged
+    assert "/private/outputs" not in logged
+
+
 def test_outputs_preview_with_inline_data_and_generate(client_with_user, tmp_path):
 
     client = client_with_user

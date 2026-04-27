@@ -752,8 +752,8 @@ async def update_output(
             if target_path.resolve() != source_path.resolve() and source_path.exists():
                 try:
                     source_path.unlink()
-                except _OUTPUTS_NONCRITICAL_EXCEPTIONS as _unlink_err:
-                    logger.warning(f"failed to remove old output file {source_path}: {_unlink_err}")
+                except _OUTPUTS_NONCRITICAL_EXCEPTIONS:
+                    logger.warning("failed to remove old output file")
             new_path = new_filename
             new_format = payload.format
         except _OUTPUTS_NONCRITICAL_EXCEPTIONS:
