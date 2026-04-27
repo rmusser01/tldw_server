@@ -100,9 +100,9 @@ async def process_code_endpoint(
             # TEST_MODE diagnostics for upload validation behavior
             try:
                 if is_test_mode() and upload_errors:
-                    logger.warning(f"TEST_MODE: process-code upload_errors={upload_errors}")
-            except Exception as test_mode_log_error:
-                logger.debug("Failed to emit TEST_MODE upload diagnostics", exc_info=test_mode_log_error)
+                    logger.warning("TEST_MODE: process-code upload errors")
+            except Exception:
+                logger.debug("Failed to emit TEST_MODE upload diagnostics")
 
             for err in upload_errors:
                 batch["results"].append(
@@ -226,12 +226,9 @@ async def process_code_endpoint(
                     # TEST_MODE diagnostics for read errors after successful save
                     try:
                         if is_test_mode():
-                            logger.warning(
-                                "TEST_MODE: process-code read-error "
-                                f"file='{filename}' path='{local_path}': {type(exc).__name__}: {exc}"
-                            )
-                    except Exception as test_mode_log_error:
-                        logger.debug("Failed to emit TEST_MODE read-error diagnostics", exc_info=test_mode_log_error)
+                            logger.warning("TEST_MODE: process-code read error")
+                    except Exception:
+                        logger.debug("Failed to emit TEST_MODE read-error diagnostics")
                     results.append(
                         {
                             "status": "Error",

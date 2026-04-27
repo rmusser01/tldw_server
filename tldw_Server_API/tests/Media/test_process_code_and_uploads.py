@@ -13,6 +13,7 @@ class _LoggerStub:
     def __init__(self) -> None:
         self.debugs: list[str] = []
         self.debug_kwargs: list[dict[str, object]] = []
+        self.warnings: list[str] = []
 
     def info(self, *_args: object, **_kwargs: object) -> None:
         return None
@@ -20,6 +21,14 @@ class _LoggerStub:
     def debug(self, message: str, *args: object, **kwargs: object) -> None:
         self.debugs.append(message.format(*args, **kwargs) if args or kwargs else message)
         self.debug_kwargs.append(dict(kwargs))
+
+    def warning(self, message: str, *args: object, **kwargs: object) -> None:
+        self.warnings.append(message.format(*args, **kwargs) if args or kwargs else message)
+
+
+class _WarningFailingLoggerStub(_LoggerStub):
+    def warning(self, *_args: object, **_kwargs: object) -> None:
+        raise RuntimeError("test-mode diagnostics logger exploded at /private/logger")
 
 
 def _assert_sanitized_debug_log(logger: _LoggerStub, expected: str) -> None:
@@ -31,6 +40,13 @@ def _assert_sanitized_debug_log(logger: _LoggerStub, expected: str) -> None:
     assert "exploded" not in rendered
     assert "/private/" not in rendered
     assert all(not kwargs for kwargs in target_kwargs)
+
+
+def _assert_sanitized_warning_log(logger: _LoggerStub, expected: str) -> None:
+    assert expected in logger.warnings
+    rendered = "\n".join(logger.warnings)
+    assert "exploded" not in rendered
+    assert "/private/" not in rendered
 
 
 def test_process_code_js_lines(client_with_single_user):
@@ -189,19 +205,86 @@ def test_process_code_logs_upload_errors_when_test_mode_is_single_letter_y(
 
     client, _ = client_with_single_user
     monkeypatch.setenv("TEST_MODE", "y")
-    logged: list[str] = []
-    monkeypatch.setattr(
-        process_code_mod.logger,
-        "warning",
-        lambda message, *args, **kwargs: logged.append(str(message)),
-        raising=True,
-    )
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(process_code_mod, "logger", logger_stub)
 
     files = [("files", ("bad.exe", b"MZ\x90\x00", "application/octet-stream"))]
     response = client.post("/api/v1/media/process-code", files=files, data={})
 
     assert response.status_code in (200, 207), response.text
-    assert any("TEST_MODE: process-code upload_errors=" in msg for msg in logged)
+    _assert_sanitized_warning_log(logger_stub, "TEST_MODE: process-code upload errors")
+
+
+def test_process_code_upload_diagnostic_failure_log_is_sanitized(
+    client_with_single_user,
+    monkeypatch,
+):
+    from tldw_Server_API.app.api.v1.endpoints.media import process_code as process_code_mod
+
+    client, _ = client_with_single_user
+    monkeypatch.setenv("TEST_MODE", "y")
+    logger_stub = _WarningFailingLoggerStub()
+    monkeypatch.setattr(process_code_mod, "logger", logger_stub)
+
+    files = [("files", ("bad.exe", b"MZ\x90\x00", "application/octet-stream"))]
+    response = client.post("/api/v1/media/process-code", files=files, data={})
+
+    assert response.status_code in (200, 207), response.text
+    _assert_sanitized_debug_log(logger_stub, "Failed to emit TEST_MODE upload diagnostics")
+
+
+def test_process_code_read_error_test_mode_log_is_sanitized(
+    client_with_single_user,
+    monkeypatch,
+):
+    from tldw_Server_API.app.api.v1.endpoints.media import process_code as process_code_mod
+
+    client, _ = client_with_single_user
+    monkeypatch.setenv("TEST_MODE", "y")
+    logger_stub = _LoggerStub()
+
+    def fail_read_text_safe(_path):
+        raise RuntimeError("read failed at /private/source.py")
+
+    monkeypatch.setattr(process_code_mod, "logger", logger_stub)
+    monkeypatch.setattr(process_code_mod, "read_text_safe", fail_read_text_safe)
+
+    files = [("files", ("script.py", b"print('hi')\n", "text/x-python"))]
+    response = client.post(
+        "/api/v1/media/process-code",
+        files=files,
+        data={"perform_chunking": "false"},
+    )
+
+    assert response.status_code == 207, response.text
+    _assert_sanitized_warning_log(logger_stub, "TEST_MODE: process-code read error")
+
+
+def test_process_code_read_error_diagnostic_failure_log_is_sanitized(
+    client_with_single_user,
+    monkeypatch,
+):
+    from tldw_Server_API.app.api.v1.endpoints.media import process_code as process_code_mod
+
+    client, _ = client_with_single_user
+    monkeypatch.setenv("TEST_MODE", "y")
+    logger_stub = _WarningFailingLoggerStub()
+
+    def fail_read_text_safe(_path):
+        raise RuntimeError("read failed at /private/source.py")
+
+    monkeypatch.setattr(process_code_mod, "logger", logger_stub)
+    monkeypatch.setattr(process_code_mod, "read_text_safe", fail_read_text_safe)
+
+    files = [("files", ("script.py", b"print('hi')\n", "text/x-python"))]
+    response = client.post(
+        "/api/v1/media/process-code",
+        files=files,
+        data={"perform_chunking": "false"},
+    )
+
+    assert response.status_code == 207, response.text
+    _assert_sanitized_debug_log(logger_stub, "Failed to emit TEST_MODE read-error diagnostics")
 
 
 def test_process_code_chunk_line_bounds_failure_log_is_sanitized(
