@@ -10,15 +10,17 @@ from tldw_Server_API.app.api.v1.schemas.translate_schemas import TranslateReques
 class _LoggerStub:
     def __init__(self) -> None:
         self.errors: list[str] = []
+        self.error_kwargs: list[dict[str, object]] = []
 
     def debug(self, *_args, **_kwargs) -> None:
         return None
 
-    def error(self, message: str, *args, **_kwargs) -> None:
+    def error(self, message: str, *args, **kwargs) -> None:
         if args:
             self.errors.append(str(message).format(*args))
         else:
             self.errors.append(str(message))
+        self.error_kwargs.append(dict(kwargs))
 
 
 def _assert_sanitized_error_log(logger_stub: _LoggerStub, expected_message: str) -> None:
@@ -26,6 +28,7 @@ def _assert_sanitized_error_log(logger_stub: _LoggerStub, expected_message: str)
     rendered = " ".join(logger_stub.errors)
     assert "/private/" not in rendered
     assert "exploded" not in rendered
+    assert all(not kwargs for kwargs in logger_stub.error_kwargs)
 
 
 @pytest.mark.asyncio

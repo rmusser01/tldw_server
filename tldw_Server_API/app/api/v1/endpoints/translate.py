@@ -139,7 +139,7 @@ async def translate_text(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error("Unexpected translation error", exc_info=True)
+        logger.error("Unexpected translation error")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Translation failed",
