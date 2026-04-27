@@ -19,6 +19,15 @@ class _FakeOrchestrator:
         return list(self._rows)
 
 
+class _NoListerOrchestrator:
+    pass
+
+
+class _RaisingOrchestrator:
+    def list_vz_session_controls(self) -> list[dict[str, object]]:
+        raise RuntimeError("store unavailable")
+
+
 class _FakeHelper:
     def __init__(self, vms: list[HelperVMStatusReply]) -> None:
         self._vms = vms
@@ -134,3 +143,93 @@ def test_reconciliation_marks_active_stale_sessions_as_skipped():
     assert report["skipped_active_session_ids"] == ["sess-active"]
     assert report["stale_session_ids"] == ["sess-stale"]
     assert any(item["status"] == "skipped_active_session" for item in report["items"])
+
+
+def test_reconciliation_marks_active_unhealthy_sessions_as_skipped():
+    report = collect_vz_reconciliation(
+        orchestrator=_FakeOrchestrator(
+            [
+                {"id": "sess-active", "vm_id": "vm-unhealthy"},
+                {"id": "sess-unhealthy", "vm_id": "vm-also-unhealthy"},
+            ]
+        ),
+        helper_client=_FakeHelper(
+            [
+                _vm("vm-unhealthy", state="running", healthy=False),
+                _vm("vm-also-unhealthy", state="running", healthy=False),
+            ]
+        ),
+        active_session_checker=lambda sid: sid == "sess-active",
+    )
+
+    assert report["computed"] is True
+    assert report["skipped_active_session_ids"] == ["sess-active"]
+    assert report["unhealthy_session_ids"] == ["sess-unhealthy"]
+    assert any(item["status"] == "skipped_active_session" for item in report["items"])
+    assert not any(
+        item["status"] == "unhealthy_vm" and item.get("session_id") == "sess-active"
+        for item in report["items"]
+    )
+
+
+def test_reconciliation_unavailable_without_orchestrator():
+    report = collect_vz_reconciliation(orchestrator=None, helper_client=_FakeHelper([]))
+
+    assert report == {
+        "computed": False,
+        "persisted_sessions": 0,
+        "live_vms": 0,
+        "healthy_session_ids": [],
+        "stale_session_ids": [],
+        "unhealthy_session_ids": [],
+        "skipped_active_session_ids": [],
+        "orphaned_vm_ids": [],
+        "items": [],
+        "reasons": ["vz_reconciliation_unavailable"],
+    }
+
+
+def test_reconciliation_unavailable_when_lister_missing_or_raising():
+    for orchestrator in (_NoListerOrchestrator(), _RaisingOrchestrator()):
+        report = collect_vz_reconciliation(orchestrator=orchestrator, helper_client=_FakeHelper([]))
+
+        assert report["computed"] is False
+        assert report["reasons"] == ["vz_reconciliation_unavailable"]
+
+
+def test_reconciliation_orders_id_lists_and_items_deterministically():
+    report = collect_vz_reconciliation(
+        orchestrator=_FakeOrchestrator(
+            [
+                {"id": "sess-stale-b", "vm_id": "vm-missing-b"},
+                {"id": "sess-unhealthy-b", "vm_id": "vm-unhealthy-b"},
+                {"id": "sess-stale-a", "vm_id": "vm-missing-a"},
+                {"id": "sess-healthy-b", "vm_id": "vm-healthy-b"},
+                {"id": "sess-unhealthy-a", "vm_id": "vm-unhealthy-a"},
+                {"id": "sess-healthy-a", "vm_id": "vm-healthy-a"},
+            ]
+        ),
+        helper_client=_FakeHelper(
+            [
+                _vm("vm-orphan-b", healthy=True),
+                _vm("vm-unhealthy-b", healthy=False),
+                _vm("vm-healthy-b", healthy=True),
+                _vm("vm-unhealthy-a", healthy=False),
+                _vm("vm-orphan-a", healthy=True),
+                _vm("vm-healthy-a", healthy=True),
+            ]
+        ),
+    )
+
+    assert report["healthy_session_ids"] == ["sess-healthy-a", "sess-healthy-b"]
+    assert report["stale_session_ids"] == ["sess-stale-a", "sess-stale-b"]
+    assert report["unhealthy_session_ids"] == ["sess-unhealthy-a", "sess-unhealthy-b"]
+    assert report["orphaned_vm_ids"] == ["vm-orphan-a", "vm-orphan-b"]
+    assert report["items"] == sorted(
+        report["items"],
+        key=lambda item: (
+            str(item.get("status") or ""),
+            str(item.get("session_id") or ""),
+            str(item.get("vm_id") or ""),
+        ),
+    )

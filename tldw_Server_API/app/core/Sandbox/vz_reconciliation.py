@@ -135,9 +135,10 @@ def collect_vz_reconciliation(
     items: list[dict[str, object]] = []
 
     for session_id, vm_id in persisted_vm_by_session.items():
+        is_active_session = active_session_checker is not None and active_session_checker(session_id)
         vm = live_vm_by_id.get(vm_id)
         if vm is None:
-            if active_session_checker is not None and active_session_checker(session_id):
+            if is_active_session:
                 skipped_active_session_ids.append(session_id)
                 _append_item(
                     items,
@@ -168,6 +169,19 @@ def collect_vz_reconciliation(
                 vm_id=vm_id,
                 state=state,
                 healthy=healthy,
+            )
+            continue
+
+        if is_active_session:
+            skipped_active_session_ids.append(session_id)
+            _append_item(
+                items,
+                status="skipped_active_session",
+                session_id=session_id,
+                vm_id=vm_id,
+                state=state,
+                healthy=healthy,
+                reason="active_session",
             )
             continue
 
