@@ -64,7 +64,7 @@ def test_migration_v39_to_latest_creates_persona_buddies_table(db_path: Path) ->
 
     fk_targets = {(row["table"], row["from"], row["to"]) for row in foreign_keys}
 
-    assert schema_version == 40
+    assert schema_version == CharactersRAGDB._CURRENT_SCHEMA_VERSION
     assert "persona_buddies" in tables
     assert "source_fingerprint" in buddy_columns
     assert "derivation_version" in buddy_columns
@@ -209,7 +209,7 @@ def test_get_persona_buddy_surfaces_resolver_failures(
     ensure_persona_buddy_for_profile(db_instance, profile)
 
     monkeypatch.setattr(
-        "tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB.resolve_persona_buddy_profile",
+        "tldw_Server_API.app.core.DB_Management.chacha.persona_state_store.resolve_persona_buddy_profile",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(ValueError("invalid resolved profile")),
     )
 
@@ -232,7 +232,7 @@ def test_get_persona_buddy_uses_backend_aware_deleted_filter_for_postgres(
         captured["params"] = params
         return _Cursor()
 
-    monkeypatch.setattr(db_instance, "backend_type", BackendType.POSTGRESQL)
+    monkeypatch.setattr(type(db_instance), "backend_type", BackendType.POSTGRESQL)
     monkeypatch.setattr(db_instance, "execute_query", _fake_execute_query)
 
     assert (
@@ -315,7 +315,7 @@ def test_restore_persona_profile_uses_backend_aware_deleted_filter_for_postgres(
     def _fake_transaction():
         yield _Conn()
 
-    monkeypatch.setattr(db_instance, "backend_type", BackendType.POSTGRESQL)
+    monkeypatch.setattr(type(db_instance), "backend_type", BackendType.POSTGRESQL)
     monkeypatch.setattr(db_instance, "transaction", _fake_transaction)
     monkeypatch.setattr(db_instance, "_prepare_backend_statement", lambda query, params: (query, params))
 
