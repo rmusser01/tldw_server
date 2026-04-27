@@ -538,7 +538,7 @@ async def parse_audiobook_source(
                 custom_pattern=request.custom_chapter_pattern,
             )
         except Exception as exc:
-            logger.warning("Chapter detection failed: {}", exc)
+            logger.warning("Chapter detection failed")
             raise HTTPException(status_code=400, detail="chapter_detection_failed") from exc
 
     if tag_result.chapter_markers or tag_result.voice_markers or tag_result.speed_markers or tag_result.ts_markers:
