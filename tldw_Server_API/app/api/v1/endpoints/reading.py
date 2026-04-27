@@ -1274,7 +1274,7 @@ async def create_reading_archive(
     try:
         out_dir.mkdir(parents=True, exist_ok=True)
     except _READING_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error(f"reading_archive: failed to create outputs dir: {exc}")
+        logger.error("reading_archive_outputs_dir_failed")
         raise HTTPException(status_code=500, detail="storage_unavailable") from exc
 
     ts = datetime.now(tz=timezone.utc).strftime("%Y%m%d_%H%M%S")
@@ -1286,7 +1286,7 @@ async def create_reading_archive(
     try:
         path.write_text(content, encoding="utf-8")
     except _READING_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error(f"reading_archive: failed to write archive file: {exc}")
+        logger.error("reading_archive_write_failed")
         raise HTTPException(status_code=500, detail="reading_archive_write_failed") from exc
 
     retention_until = _resolve_archive_retention(payload)
@@ -1309,11 +1309,11 @@ async def create_reading_archive(
             retention_until=retention_until,
         )
     except _READING_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error(f"reading_archive: failed to insert output record: {exc}")
+        logger.error("reading_archive_db_failed")
         try:
             path.unlink(missing_ok=True)
-        except OSError as cleanup_exc:
-            logger.warning(f"reading_archive: failed to cleanup file after DB error: {cleanup_exc}")
+        except OSError:
+            logger.warning("reading_archive_cleanup_failed")
         raise HTTPException(status_code=500, detail="reading_archive_db_failed") from exc
 
     return ReadingArchiveResponse(

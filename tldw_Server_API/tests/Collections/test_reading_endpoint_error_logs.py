@@ -475,3 +475,136 @@ async def test_tts_reading_item_sanitizes_fetch_log(monkeypatch):
     assert excinfo.value.status_code == 400
     assert excinfo.value.detail == "reading_item_fetch_failed"
     logger_stub.error.assert_called_once_with("reading_tts_get_failed")
+
+
+class _ArchiveService:
+    def __init__(self, collections):
+        self.collections = collections
+
+    def get_item(self, *_args, **_kwargs):
+        return _reading_action_row()
+
+
+@pytest.mark.asyncio
+async def test_create_reading_archive_sanitizes_outputs_dir_log(monkeypatch):
+    logger_stub = MagicMock()
+
+    class _FailingDir:
+        def mkdir(self, **_kwargs):
+            raise RuntimeError("mkdir exploded at /private/reading-outputs")
+
+    monkeypatch.setattr(reading, "logger", logger_stub)
+    monkeypatch.setattr(reading, "_service_for_user", lambda _user: _ArchiveService(collections=object()))
+    monkeypatch.setattr(reading, "_outputs_dir_for_user", lambda _user_id: _FailingDir())
+
+    with pytest.raises(HTTPException) as excinfo:
+        await reading.create_reading_archive(
+            item_id=123,
+            payload=reading.ReadingArchiveCreateRequest(format="md", source="text"),
+            current_user=SimpleNamespace(id=42),
+        )
+
+    assert excinfo.value.status_code == 500
+    assert excinfo.value.detail == "storage_unavailable"
+    logger_stub.error.assert_called_once_with("reading_archive_outputs_dir_failed")
+
+
+@pytest.mark.asyncio
+async def test_create_reading_archive_sanitizes_write_log(monkeypatch):
+    logger_stub = MagicMock()
+
+    class _OutputDir:
+        def mkdir(self, **_kwargs):
+            return None
+
+    class _FailingPath:
+        def write_text(self, *_args, **_kwargs):
+            raise OSError("write exploded at /private/reading-outputs/archive.md")
+
+    monkeypatch.setattr(reading, "logger", logger_stub)
+    monkeypatch.setattr(reading, "_service_for_user", lambda _user: _ArchiveService(collections=object()))
+    monkeypatch.setattr(reading, "_outputs_dir_for_user", lambda _user_id: _OutputDir())
+    monkeypatch.setattr(reading, "_resolve_output_path_for_user", lambda *_args, **_kwargs: _FailingPath())
+
+    with pytest.raises(HTTPException) as excinfo:
+        await reading.create_reading_archive(
+            item_id=123,
+            payload=reading.ReadingArchiveCreateRequest(format="md", source="text"),
+            current_user=SimpleNamespace(id=42),
+        )
+
+    assert excinfo.value.status_code == 500
+    assert excinfo.value.detail == "reading_archive_write_failed"
+    logger_stub.error.assert_called_once_with("reading_archive_write_failed")
+
+
+@pytest.mark.asyncio
+async def test_create_reading_archive_sanitizes_db_insert_log(monkeypatch):
+    logger_stub = MagicMock()
+
+    class _OutputDir:
+        def mkdir(self, **_kwargs):
+            return None
+
+    class _Path:
+        def write_text(self, *_args, **_kwargs):
+            return None
+
+        def unlink(self, **_kwargs):
+            return None
+
+    class _FailingCollections:
+        def create_output_artifact(self, **_kwargs):
+            raise RuntimeError("output insert exploded at /private/collections.db")
+
+    monkeypatch.setattr(reading, "logger", logger_stub)
+    monkeypatch.setattr(reading, "_service_for_user", lambda _user: _ArchiveService(_FailingCollections()))
+    monkeypatch.setattr(reading, "_outputs_dir_for_user", lambda _user_id: _OutputDir())
+    monkeypatch.setattr(reading, "_resolve_output_path_for_user", lambda *_args, **_kwargs: _Path())
+
+    with pytest.raises(HTTPException) as excinfo:
+        await reading.create_reading_archive(
+            item_id=123,
+            payload=reading.ReadingArchiveCreateRequest(format="md", source="text"),
+            current_user=SimpleNamespace(id=42),
+        )
+
+    assert excinfo.value.status_code == 500
+    assert excinfo.value.detail == "reading_archive_db_failed"
+    logger_stub.error.assert_called_once_with("reading_archive_db_failed")
+
+
+@pytest.mark.asyncio
+async def test_create_reading_archive_sanitizes_cleanup_log(monkeypatch):
+    logger_stub = MagicMock()
+
+    class _OutputDir:
+        def mkdir(self, **_kwargs):
+            return None
+
+    class _Path:
+        def write_text(self, *_args, **_kwargs):
+            return None
+
+        def unlink(self, **_kwargs):
+            raise OSError("cleanup exploded at /private/reading-outputs/archive.md")
+
+    class _FailingCollections:
+        def create_output_artifact(self, **_kwargs):
+            raise RuntimeError("output insert exploded at /private/collections.db")
+
+    monkeypatch.setattr(reading, "logger", logger_stub)
+    monkeypatch.setattr(reading, "_service_for_user", lambda _user: _ArchiveService(_FailingCollections()))
+    monkeypatch.setattr(reading, "_outputs_dir_for_user", lambda _user_id: _OutputDir())
+    monkeypatch.setattr(reading, "_resolve_output_path_for_user", lambda *_args, **_kwargs: _Path())
+
+    with pytest.raises(HTTPException) as excinfo:
+        await reading.create_reading_archive(
+            item_id=123,
+            payload=reading.ReadingArchiveCreateRequest(format="md", source="text"),
+            current_user=SimpleNamespace(id=42),
+        )
+
+    assert excinfo.value.status_code == 500
+    assert excinfo.value.detail == "reading_archive_db_failed"
+    logger_stub.warning.assert_called_once_with("reading_archive_cleanup_failed")
