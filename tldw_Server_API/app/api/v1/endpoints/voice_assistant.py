@@ -1531,7 +1531,7 @@ async def _stream_workflow_progress(
                 )
 
     except (AttributeError, OSError, RuntimeError, TypeError, ValueError, asyncio.TimeoutError) as e:
-        logger.error(f"Workflow progress streaming failed: {e}")
+        logger.error("Workflow progress streaming failed")
         await websocket.send_json(
             WSErrorMessage(
                 error=f"Workflow progress failed: {e}",
