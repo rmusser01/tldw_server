@@ -1751,7 +1751,7 @@ async def check_mcp_connection(
         raise
     except Exception:
         logger.opt(exception=True).warning(
-            "MCP connection test failed for {}", req.url
+            "MCP connection test failed for {}", catalog_probe_url
         )
         return MCPConnectionTestResponse(reachable=False, error="Connection failed")
 

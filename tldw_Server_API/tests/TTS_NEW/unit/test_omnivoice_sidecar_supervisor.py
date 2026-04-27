@@ -228,8 +228,11 @@ async def test_supervisor_readiness_polling_fails_cleanly_when_sidecar_never_rea
         async def __aexit__(self, exc_type, exc, tb):
             return False
 
-        async def get(self, url, *, headers=None):  # noqa: ARG002
+        async def get(self, url, *, headers=None, timeout=None):  # noqa: ARG002
             raise httpx.ConnectError("not ready")
+
+        async def post(self, url, *, headers=None):  # noqa: ARG002
+            return httpx.Response(500)
 
     async def _fake_create_subprocess_exec(*args, **kwargs):  # noqa: ARG001
         return _FakeProcess()
@@ -255,9 +258,13 @@ async def test_supervisor_readiness_polling_fails_cleanly_when_sidecar_never_rea
         repo_root=tmp_path,
     )
 
-    with pytest.raises(RuntimeError, match="health"):
+    with pytest.raises(RuntimeError, match="health") as excinfo:
         await supervisor.ensure_started()
 
+    root_cause = excinfo.value
+    while root_cause.__cause__ is not None:
+        root_cause = root_cause.__cause__
+    assert isinstance(root_cause, httpx.ConnectError)  # nosec B101
     assert supervisor.last_failure_at is not None  # nosec B101
 
 
