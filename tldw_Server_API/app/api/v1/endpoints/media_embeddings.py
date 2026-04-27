@@ -60,11 +60,8 @@ def _user_embedding_config() -> dict[str, Any]:
     cfg = settings.get("EMBEDDING_CONFIG", {}).copy()
     try:
         user_db_base_dir = str(DatabasePaths.get_user_db_base_dir())
-    except Exception as exc:
-        logger.warning(
-            "Falling back to USER_DB_BASE_DIR setting after user DB base resolution failed: {}",
-            exc,
-        )
+    except Exception:
+        logger.warning("Falling back to USER_DB_BASE_DIR setting after user DB base resolution failed")
         user_db_base_dir = settings.get("USER_DB_BASE_DIR")
     cfg["USER_DB_BASE_DIR"] = user_db_base_dir
     return cfg
@@ -131,7 +128,7 @@ def _embeddings_jobs_backend() -> str:
     raw = (os.getenv("EMBEDDINGS_JOBS_BACKEND") or os.getenv("TLDW_JOBS_BACKEND") or "").strip().lower()
     if raw in {"jobs", "core", ""}:
         return "jobs"
-    logger.warning("Embeddings jobs backend override {} ignored; core Jobs is the only backend.", raw)
+    logger.warning("Embeddings jobs backend override ignored; core Jobs is the only backend")
     return "jobs"
 
 

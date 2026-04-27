@@ -20,6 +20,38 @@ def _user() -> User:
     return User(id="user-1", username="user-1", email="user-1@example.com", is_active=True, is_admin=True)
 
 
+def test_user_embedding_config_sanitizes_user_db_base_fallback_log(monkeypatch):
+    logger_stub = MagicMock()
+
+    def _raise_path_error():
+        raise RuntimeError("user db base exploded at /private/user/db")
+
+    monkeypatch.setattr(media_embeddings, "logger", logger_stub)
+    monkeypatch.setattr(media_embeddings.DatabasePaths, "get_user_db_base_dir", _raise_path_error)
+    monkeypatch.setitem(media_embeddings.settings, "EMBEDDING_CONFIG", {})
+    monkeypatch.setitem(media_embeddings.settings, "USER_DB_BASE_DIR", "/tmp/fallback-user-db")
+
+    config = media_embeddings._user_embedding_config()
+
+    assert config["USER_DB_BASE_DIR"] == "/tmp/fallback-user-db"
+    logger_stub.warning.assert_called_once_with(
+        "Falling back to USER_DB_BASE_DIR setting after user DB base resolution failed"
+    )
+
+
+def test_embeddings_jobs_backend_sanitizes_ignored_override_log(monkeypatch):
+    logger_stub = MagicMock()
+
+    monkeypatch.setattr(media_embeddings, "logger", logger_stub)
+    monkeypatch.setenv("EMBEDDINGS_JOBS_BACKEND", "legacy:/private/backend")
+    monkeypatch.delenv("TLDW_JOBS_BACKEND", raising=False)
+
+    assert media_embeddings._embeddings_jobs_backend() == "jobs"
+    logger_stub.warning.assert_called_once_with(
+        "Embeddings jobs backend override ignored; core Jobs is the only backend"
+    )
+
+
 @pytest.mark.asyncio
 async def test_get_media_content_sanitizes_backend_lookup_error(monkeypatch):
     logger_stub = MagicMock()
