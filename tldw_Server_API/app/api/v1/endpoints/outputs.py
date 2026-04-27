@@ -836,8 +836,8 @@ async def purge_outputs(
                     files_deleted += 1
             except HTTPException as e:
                 logger.warning(f"outputs.purge: invalid output path for {rid}: {e.detail}")
-            except _OUTPUTS_NONCRITICAL_EXCEPTIONS as del_err:
-                logger.warning(f"outputs.purge: failed to delete file {pth}: {del_err}")
+            except _OUTPUTS_NONCRITICAL_EXCEPTIONS:
+                logger.warning("outputs.purge: failed to delete file")
                 continue
 
     removed = 0

@@ -767,6 +767,40 @@ async def test_outputs_purge_db_delete_failure_log_is_sanitized(monkeypatch):
     assert "/private/outputs.db" not in logged
 
 
+@pytest.mark.asyncio
+async def test_outputs_purge_file_delete_failure_log_is_sanitized(monkeypatch):
+    class _CollectionsDB:
+        user_id = 123
+
+    class _OutputPath:
+        def exists(self) -> bool:
+            return True
+
+        def unlink(self) -> None:
+            raise OSError("purge file delete exploded at /private/output.md")
+
+    logger = _LoggerStub()
+    monkeypatch.setattr(outputs_endpoint, "logger", logger)
+    monkeypatch.setattr(outputs_endpoint, "find_outputs_to_purge", lambda **_kwargs: {777: "output.md"})
+    monkeypatch.setattr(outputs_endpoint, "delete_outputs_by_ids", lambda **_kwargs: 1)
+    monkeypatch.setattr(outputs_endpoint, "_normalize_output_storage_path_for_user", lambda **_kwargs: "output.md")
+    monkeypatch.setattr(outputs_endpoint, "_resolve_output_path_for_user", lambda *_args: _OutputPath())
+
+    result = await outputs_endpoint.purge_outputs(
+        payload=outputs_endpoint.OutputsPurgeRequest(delete_files=True),
+        current_user=User(id=123, username="tester", email=None, is_active=True),
+        cdb=_CollectionsDB(),
+    )
+
+    assert result == {"removed": 1, "files_deleted": 0}
+    assert logger.warnings == ["outputs.purge: failed to delete file"]
+    logged = "\n".join(logger.warnings)
+    assert "777" not in logged
+    assert "output.md" not in logged
+    assert "purge file delete exploded" not in logged
+    assert "/private/output.md" not in logged
+
+
 def test_outputs_preview_with_inline_data_and_generate(client_with_user, tmp_path):
 
     client = client_with_user
