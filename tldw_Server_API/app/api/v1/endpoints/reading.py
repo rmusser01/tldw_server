@@ -814,7 +814,7 @@ async def import_reading_items(
     try:
         raw = await file.read()
     except _READING_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error(f"reading_import_read_failed: {exc}")
+        logger.error("reading_import_read_failed")
         raise HTTPException(status_code=400, detail="reading_import_failed") from exc
     if not raw:
         raise HTTPException(status_code=400, detail="reading_import_empty")
@@ -844,12 +844,12 @@ async def import_reading_items(
             max_retries=3,
         )
     except _READING_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error(f"reading_import_job_create_failed: {exc}")
+        logger.error("reading_import_job_create_failed")
         if staged_path is not None:
             try:
                 staged_path.unlink(missing_ok=True)
-            except OSError as cleanup_exc:
-                logger.debug(f"Failed to cleanup staged file: {cleanup_exc}")
+            except OSError:
+                logger.debug("reading_import_staged_file_cleanup_failed")
         raise HTTPException(status_code=500, detail="reading_import_failed") from exc
 
     return ReadingImportJobResponse(

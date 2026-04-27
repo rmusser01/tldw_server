@@ -169,3 +169,103 @@ async def test_delete_note_link_sanitizes_backend_log(monkeypatch):
     assert excinfo.value.status_code == 400
     assert excinfo.value.detail == "reading_note_link_delete_failed"
     logger_stub.error.assert_called_once_with("reading_note_link_delete_failed")
+
+
+@pytest.mark.asyncio
+async def test_import_reading_items_sanitizes_file_read_log(monkeypatch):
+    logger_stub = MagicMock()
+
+    class _UnreadableUpload:
+        filename = "reading.csv"
+
+        async def read(self):
+            raise RuntimeError("import read exploded at /private/uploads/reading.csv")
+
+    monkeypatch.setattr(reading, "logger", logger_stub)
+
+    with pytest.raises(HTTPException) as excinfo:
+        await reading.import_reading_items(
+            file=_UnreadableUpload(),
+            source="auto",
+            merge_tags=True,
+            current_user=SimpleNamespace(id=42),
+            jm=object(),
+        )
+
+    assert excinfo.value.status_code == 400
+    assert excinfo.value.detail == "reading_import_failed"
+    logger_stub.error.assert_called_once_with("reading_import_read_failed")
+
+
+@pytest.mark.asyncio
+async def test_import_reading_items_sanitizes_job_create_log(monkeypatch):
+    logger_stub = MagicMock()
+
+    class _Upload:
+        filename = "reading.csv"
+
+        async def read(self):
+            return b"url,title\nhttps://example.test,Example"
+
+    class _StagedPath:
+        name = "reading-import-token.csv"
+
+        def unlink(self, **_kwargs):
+            return None
+
+    class _FailingJobManager:
+        def create_job(self, **_kwargs):
+            raise RuntimeError("job create exploded at /private/jobs.db")
+
+    monkeypatch.setattr(reading, "logger", logger_stub)
+    monkeypatch.setattr(reading, "stage_reading_import_file", lambda **_kwargs: _StagedPath())
+
+    with pytest.raises(HTTPException) as excinfo:
+        await reading.import_reading_items(
+            file=_Upload(),
+            source="auto",
+            merge_tags=True,
+            current_user=SimpleNamespace(id=42),
+            jm=_FailingJobManager(),
+        )
+
+    assert excinfo.value.status_code == 500
+    assert excinfo.value.detail == "reading_import_failed"
+    logger_stub.error.assert_called_once_with("reading_import_job_create_failed")
+
+
+@pytest.mark.asyncio
+async def test_import_reading_items_sanitizes_staged_cleanup_log(monkeypatch):
+    logger_stub = MagicMock()
+
+    class _Upload:
+        filename = "reading.csv"
+
+        async def read(self):
+            return b"url,title\nhttps://example.test,Example"
+
+    class _StagedPath:
+        name = "reading-import-token.csv"
+
+        def unlink(self, **_kwargs):
+            raise OSError("cleanup exploded at /private/staged/reading.csv")
+
+    class _FailingJobManager:
+        def create_job(self, **_kwargs):
+            raise RuntimeError("job create exploded at /private/jobs.db")
+
+    monkeypatch.setattr(reading, "logger", logger_stub)
+    monkeypatch.setattr(reading, "stage_reading_import_file", lambda **_kwargs: _StagedPath())
+
+    with pytest.raises(HTTPException) as excinfo:
+        await reading.import_reading_items(
+            file=_Upload(),
+            source="auto",
+            merge_tags=True,
+            current_user=SimpleNamespace(id=42),
+            jm=_FailingJobManager(),
+        )
+
+    assert excinfo.value.status_code == 500
+    assert excinfo.value.detail == "reading_import_failed"
+    logger_stub.debug.assert_called_once_with("reading_import_staged_file_cleanup_failed")
