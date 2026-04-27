@@ -8,6 +8,7 @@ from difflib import SequenceMatcher
 import json
 from pathlib import Path
 import re
+import shutil
 # Bandit B404 is expected here because the helper shells out to fixed git/gh commands.
 import subprocess  # nosec B404
 from typing import Any, Mapping, Protocol, Sequence
@@ -168,6 +169,8 @@ def _parse_unreleased_changelog_subsections(changelog_text: str) -> dict[str, li
 
     if not seen_structural_content:
         raise ValueError("Unreleased changelog section is empty or malformed")
+    if sum(len(bullets) for bullets in subsections.values()) == 0:
+        raise ValueError("Unreleased changelog section has no bullets")
 
     return subsections
 
@@ -321,9 +324,6 @@ def update_mkdocs_version_metadata(mkdocs_text: str, version: str) -> str:
         raise ValueError("Missing MkDocs copyright anchor")
 
     copyright_line = lines[copyright_index + 1]
-    if "https://github.com/rmusser01/tldw_server" not in copyright_line:
-        raise ValueError("Missing MkDocs copyright anchor")
-
     updated_copyright_line, copyright_count = re.subn(
         r"v?\d+\.\d+\.\d+",
         f"v{version}",
@@ -450,7 +450,11 @@ class ReleaseRunner(Protocol):
 
     def push_tag(self, version: str) -> None: ...
 
-    def create_github_release(self, version: str) -> None: ...
+    def prepare_release_notes_from_tag(self, version: str) -> None: ...
+
+    def get_metadata_warnings(self) -> list[str]: ...
+
+    def create_github_release(self, version: str) -> bool: ...
 
 
 def _call_runner_if_present(runner: object, method_name: str, *args: object) -> object | None:
@@ -458,6 +462,51 @@ def _call_runner_if_present(runner: object, method_name: str, *args: object) -> 
     if method is None:
         return None
     return method(*args)
+
+
+def _runner_dry_run(runner: object) -> bool:
+    return bool(getattr(runner, "dry_run", False))
+
+
+def _runner_metadata_warnings(runner: object) -> list[str]:
+    warnings = _call_runner_if_present(runner, "get_metadata_warnings")
+    if isinstance(warnings, list):
+        return [str(warning) for warning in warnings]
+    return []
+
+
+def _create_github_release(runner: ReleaseRunner, version: str) -> bool:
+    created = runner.create_github_release(version)
+    if isinstance(created, bool):
+        return created
+    return not _runner_dry_run(runner)
+
+
+def _release_result(
+    *,
+    branch: str,
+    current_version: str,
+    next_version: str,
+    required_checks: list[str],
+    state: str,
+    validated_sha: str,
+    release_commit_sha: str | None,
+    github_release_created: bool,
+    dry_run: bool,
+    warnings: list[str],
+) -> dict[str, Any]:
+    return {
+        "branch": branch,
+        "current_version": current_version,
+        "next_version": next_version,
+        "required_checks": required_checks,
+        "state": state,
+        "validated_sha": validated_sha,
+        "release_commit_sha": release_commit_sha,
+        "github_release_created": github_release_created,
+        "dry_run": dry_run,
+        "warnings": warnings,
+    }
 
 
 def orchestrate_release(
@@ -481,34 +530,40 @@ def orchestrate_release(
 
     _call_runner_if_present(runner, "ensure_github_auth")
 
+    dry_run = _runner_dry_run(runner)
+    warnings: list[str] = []
     github_release_created = False
     release_commit_sha: str | None = None
 
     if state == "existing_github_release":
-        return {
-            "branch": branch,
-            "current_version": current_version,
-            "next_version": next_version,
-            "required_checks": required_checks,
-            "state": state,
-            "validated_sha": validated_sha,
-            "release_commit_sha": None,
-            "github_release_created": False,
-        }
+        return _release_result(
+            branch=branch,
+            current_version=current_version,
+            next_version=next_version,
+            required_checks=required_checks,
+            state=state,
+            validated_sha=validated_sha,
+            release_commit_sha=None,
+            github_release_created=False,
+            dry_run=dry_run,
+            warnings=warnings,
+        )
 
     if state == "remote_tag_without_github_release":
-        runner.create_github_release(next_version)
-        github_release_created = True
-        return {
-            "branch": branch,
-            "current_version": current_version,
-            "next_version": next_version,
-            "required_checks": required_checks,
-            "state": state,
-            "validated_sha": validated_sha,
-            "release_commit_sha": None,
-            "github_release_created": github_release_created,
-        }
+        _call_runner_if_present(runner, "prepare_release_notes_from_tag", next_version)
+        github_release_created = _create_github_release(runner, next_version)
+        return _release_result(
+            branch=branch,
+            current_version=current_version,
+            next_version=next_version,
+            required_checks=required_checks,
+            state=state,
+            validated_sha=validated_sha,
+            release_commit_sha=None,
+            github_release_created=github_release_created,
+            dry_run=dry_run,
+            warnings=warnings,
+        )
 
     if state == "fresh":
         head_sha = _call_runner_if_present(runner, "get_head_sha")
@@ -517,6 +572,7 @@ def orchestrate_release(
 
         runner.ensure_required_checks_green(validated_sha, required_checks)
         runner.prepare_metadata(current_version, next_version)
+        warnings = _runner_metadata_warnings(runner)
         release_commit_sha = runner.create_release_commit(next_version)
         runner.create_or_update_tag(next_version)
     elif state == "local_release_commit_only":
@@ -551,19 +607,20 @@ def orchestrate_release(
         raise
 
     runner.push_tag(next_version)
-    runner.create_github_release(next_version)
-    github_release_created = True
+    github_release_created = _create_github_release(runner, next_version)
 
-    return {
-        "branch": branch,
-        "current_version": current_version,
-        "next_version": next_version,
-        "required_checks": required_checks,
-        "state": state,
-        "validated_sha": validated_sha,
-        "release_commit_sha": release_commit_sha,
-        "github_release_created": github_release_created,
-    }
+    return _release_result(
+        branch=branch,
+        current_version=current_version,
+        next_version=next_version,
+        required_checks=required_checks,
+        state=state,
+        validated_sha=validated_sha,
+        release_commit_sha=release_commit_sha,
+        github_release_created=github_release_created,
+        dry_run=dry_run,
+        warnings=warnings,
+    )
 
 
 class ShellReleaseRunner:
@@ -574,6 +631,7 @@ class ShellReleaseRunner:
         self.dry_run = dry_run
         self._prepared_paths: list[Path] = []
         self._release_notes_body: str | None = None
+        self._metadata_warnings: list[str] = []
         self._release_date = datetime.now(timezone.utc).date().isoformat()
         self._repo_slug: str | None = None
 
@@ -584,8 +642,15 @@ class ShellReleaseRunner:
         check: bool = True,
         capture_output: bool = True,
     ) -> subprocess.CompletedProcess[str]:
+        if not args:
+            raise ValueError("Command arguments must not be empty")
+        executable = args[0]
+        resolved_executable = executable if Path(executable).is_absolute() else shutil.which(executable)
+        if resolved_executable is None:
+            raise FileNotFoundError(f"Executable not found: {executable}")
+        command = [resolved_executable, *args[1:]]
         completed = subprocess.run(
-            list(args),
+            command,
             cwd=self.repo_root,
             text=True,
             capture_output=capture_output,
@@ -725,6 +790,7 @@ class ShellReleaseRunner:
             version=next_version,
             release_date=self._release_date,
         )
+        self._metadata_warnings = list(warnings)
 
         updated_readme = update_readme_release_references(readme_text, next_version)
         updated_mkdocs = update_mkdocs_version_metadata(mkdocs_text, next_version)
@@ -750,6 +816,15 @@ class ShellReleaseRunner:
         readme_path.write_text(updated_readme, encoding="utf-8")
         mkdocs_path.write_text(updated_mkdocs, encoding="utf-8")
         release_notes_path.write_text(updated_release_notes, encoding="utf-8")
+
+    def get_metadata_warnings(self) -> list[str]:
+        return list(self._metadata_warnings)
+
+    def prepare_release_notes_from_tag(self, version: str) -> None:
+        tag_name = release_tag_name(version)
+        self._run_command(["git", "fetch", "origin", "--tags"])
+        changelog_text = self._run_text(["git", "show", f"{tag_name}:CHANGELOG.md"])
+        self._release_notes_body = extract_release_notes_for_version(changelog_text, version)
 
     def create_release_commit(self, next_version: str) -> str:
         if not self._prepared_paths:
@@ -779,7 +854,7 @@ class ShellReleaseRunner:
             return
         self._run_command(["git", "push", "origin", release_tag_name(version)])
 
-    def create_github_release(self, version: str) -> None:
+    def create_github_release(self, version: str) -> bool:
         if self._release_notes_body is None:
             changelog_path = self.repo_root / "CHANGELOG.md"
             self._release_notes_body = extract_release_notes_for_version(
@@ -788,7 +863,7 @@ class ShellReleaseRunner:
             )
 
         if self.dry_run:
-            return
+            return False
 
         tag_name = release_tag_name(version)
         self._run_command(
@@ -804,6 +879,7 @@ class ShellReleaseRunner:
                 self._release_notes_body,
             ]
         )
+        return True
 
 
 def _build_argument_parser() -> argparse.ArgumentParser:

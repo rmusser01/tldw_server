@@ -67,6 +67,21 @@ def test_mkdocs_version_metadata_updates_coherently() -> None:
     assert "© 2024-2025 tldw_Server" in updated_text
 
 
+def test_mkdocs_version_metadata_does_not_depend_on_copyright_url() -> None:
+    mkdocs_text = (
+        "extra:\n"
+        "  generator: false\n"
+        "  version: v0.1.19\n"
+        "copyright: |\n"
+        "  © 2024-2025 tldw_Server - v0.1.19 - <a href=\"https://example.com/project\">Project</a>\n"
+    )
+
+    updated_text = update_mkdocs_version_metadata(mkdocs_text, "0.1.31")
+
+    assert "version: v0.1.31" in updated_text
+    assert "v0.1.31 - <a href=\"https://example.com/project\">Project</a>" in updated_text
+
+
 def test_mkdocs_version_metadata_raises_for_missing_anchor() -> None:
     with pytest.raises(ValueError, match="(?i)mkdocs|anchor|version"):
         update_mkdocs_version_metadata("extra:\n  generator: false\n", "0.1.30")

@@ -10,6 +10,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+import Helper_Scripts.release as release_module  # noqa: E402
 from Helper_Scripts.release import (  # noqa: E402
     ShellReleaseRunner,
     bump_version,
@@ -27,7 +28,7 @@ from Helper_Scripts.release import (  # noqa: E402
 )
 
 
-def test_read_current_version_from_pyproject(tmp_path: Path):
+def test_read_current_version_from_pyproject(tmp_path: Path) -> None:
     pyproject = tmp_path / "pyproject.toml"
     pyproject.write_text(
         """
@@ -42,15 +43,15 @@ version = "9.8.7"
     assert read_current_version(pyproject) == "9.8.7"
 
 
-def test_bump_version_patch():
+def test_bump_version_patch() -> None:
     assert bump_version("0.1.30", "patch") == "0.1.31"
 
 
-def test_bump_version_minor():
+def test_bump_version_minor() -> None:
     assert bump_version("0.1.30", "minor") == "0.2.0"
 
 
-def test_extract_required_check_names():
+def test_extract_required_check_names() -> None:
     checks = extract_required_check_names(
         REPO_ROOT / "Docs" / "Development" / "CI_REQUIRED_GATES.md"
     )
@@ -64,7 +65,7 @@ def test_extract_required_check_names():
     ]
 
 
-def test_extract_required_check_names_ignores_nested_subsections(tmp_path: Path):
+def test_extract_required_check_names_ignores_nested_subsections(tmp_path: Path) -> None:
     doc = tmp_path / "CI_REQUIRED_GATES.md"
     doc.write_text(
         """
@@ -119,7 +120,7 @@ No enumerated checks here.
 def test_extract_required_check_names_fails_closed_when_section_missing_or_empty(
     tmp_path: Path,
     doc_text: str,
-):
+) -> None:
     doc = tmp_path / "CI_REQUIRED_GATES.md"
     doc.write_text(doc_text, encoding="utf-8")
 
@@ -127,18 +128,18 @@ def test_extract_required_check_names_fails_closed_when_section_missing_or_empty
         extract_required_check_names(doc)
 
 
-def test_normalize_bullet_text_collapses_internal_whitespace():
+def test_normalize_bullet_text_collapses_internal_whitespace() -> None:
     assert normalize_bullet_text("  Add   release   notes \n with tabs\t") == (
         "Add release notes with tabs"
     )
 
 
-def test_validate_release_branch_rejects_unsupported_branch():
+def test_validate_release_branch_rejects_unsupported_branch() -> None:
     with pytest.raises(ValueError, match="main"):
         validate_release_branch("dev")
 
 
-def test_find_exact_duplicate_bullets_only_within_same_section():
+def test_find_exact_duplicate_bullets_only_within_same_section() -> None:
     duplicate_bullets = find_exact_duplicate_bullets(
         {
             "Added": [
@@ -162,7 +163,7 @@ def test_find_exact_duplicate_bullets_only_within_same_section():
     ]
 
 
-def test_promote_changelog_unreleased_section_moves_content_and_resets_headings():
+def test_promote_changelog_unreleased_section_moves_content_and_resets_headings() -> None:
     changelog_text = (
         "# Changelog\n\n"
         "## [Unreleased]\n\n"
@@ -199,7 +200,7 @@ def test_promote_changelog_unreleased_section_moves_content_and_resets_headings(
     assert promoted_text.index("## [Unreleased]") < promoted_text.index("## [0.1.30] - 2026-04-22")
 
 
-def test_promote_changelog_unreleased_section_rejects_exact_duplicates_within_subsection():
+def test_promote_changelog_unreleased_section_rejects_exact_duplicates_within_subsection() -> None:
     changelog_text = (
         "# Changelog\n\n"
         "## [Unreleased]\n\n"
@@ -218,7 +219,7 @@ def test_promote_changelog_unreleased_section_rejects_exact_duplicates_within_su
         )
 
 
-def test_promote_changelog_unreleased_section_reports_cross_section_near_duplicates_as_warnings():
+def test_promote_changelog_unreleased_section_reports_cross_section_near_duplicates_as_warnings() -> None:
     changelog_text = (
         "# Changelog\n\n"
         "## [Unreleased]\n\n"
@@ -237,6 +238,27 @@ def test_promote_changelog_unreleased_section_reports_cross_section_near_duplica
     assert "## [0.1.30] - 2026-04-22" in promoted_text
     assert warnings
     assert any("Added" in warning and "Changed" in warning for warning in warnings)
+
+
+def test_promote_changelog_unreleased_section_rejects_headings_without_bullets() -> None:
+    changelog_text = (
+        "# Changelog\n\n"
+        "## [Unreleased]\n\n"
+        "### Added\n\n"
+        "### Changed\n\n"
+        "### Fixed\n\n"
+        "### Removed\n\n"
+        "## [0.1.30] - 2026-04-20\n\n"
+        "### Added\n\n"
+        "- Existing release entry\n"
+    )
+
+    with pytest.raises(ValueError, match="(?i)unreleased.*no bullets|no bullets"):
+        promote_changelog_unreleased_section(
+            changelog_text=changelog_text,
+            version="0.1.31",
+            release_date="2026-04-27",
+        )
 
 
 @pytest.mark.parametrize(
@@ -262,7 +284,7 @@ def test_promote_changelog_unreleased_section_reports_cross_section_near_duplica
         ),
     ],
 )
-def test_promote_changelog_unreleased_section_rejects_unsupported_content(unsupported_slice: str):
+def test_promote_changelog_unreleased_section_rejects_unsupported_content(unsupported_slice: str) -> None:
     with pytest.raises(ValueError, match="(?i)unreleased|unsupported|ambiguous"):
         promote_changelog_unreleased_section(
             changelog_text=unsupported_slice,
@@ -271,22 +293,22 @@ def test_promote_changelog_unreleased_section_rejects_unsupported_content(unsupp
         )
 
 
-def test_update_readme_release_references_raises_when_expected_anchors_missing():
+def test_update_readme_release_references_raises_when_expected_anchors_missing() -> None:
     with pytest.raises(ValueError, match="(?i)readme|release line|anchor"):
         update_readme_release_references("README without current release anchors", "0.1.30")
 
 
-def test_update_mkdocs_version_metadata_raises_when_expected_anchors_missing():
+def test_update_mkdocs_version_metadata_raises_when_expected_anchors_missing() -> None:
     with pytest.raises(ValueError, match="(?i)mkdocs|anchor|version"):
         update_mkdocs_version_metadata("extra:\n  generator: false\n", "0.1.30")
 
 
-def test_update_release_notes_entry_point_raises_when_anchor_missing():
+def test_update_release_notes_entry_point_raises_when_anchor_missing() -> None:
     with pytest.raises(ValueError, match="(?i)release notes|anchor"):
         update_release_notes_entry_point("Published release notes entry point.", "Docs/Development/Release_Process.md")
 
 
-def test_classify_release_state_rejects_inconsistent_snapshot():
+def test_classify_release_state_rejects_inconsistent_snapshot() -> None:
     with pytest.raises(ValueError, match="inconsistent"):
         classify_release_state(
             local_release_commit_exists=True,
@@ -337,13 +359,14 @@ def test_classify_release_state_rejects_inconsistent_snapshot():
         ),
     ],
 )
-def test_classify_release_state(kwargs: dict[str, bool], expected: str):
+def test_classify_release_state(kwargs: dict[str, bool], expected: str) -> None:
     assert classify_release_state(**kwargs) == expected
 
 
 class StubReleaseRunner:
     def __init__(self) -> None:
         self.branch = "main"
+        self.dry_run = False
         self.worktree_clean = True
         self.origin_main_sha = "abc123prebump"
         self.head_sha = self.origin_main_sha
@@ -360,7 +383,9 @@ class StubReleaseRunner:
         self.remote_main_sha = self.origin_main_sha
         self.push_main_error: str | None = None
         self.recorded_check_sha: list[str] = []
+        self.metadata_warnings: list[str] = []
         self.metadata_prepared = False
+        self.release_notes_from_tag_prepared = False
         self.commit_created = False
         self.tag_created = False
         self.github_release_created = False
@@ -411,6 +436,14 @@ class StubReleaseRunner:
         self.operations.append(f"prepare_metadata:{current_version}->{next_version}")
         self.metadata_prepared = True
 
+    def get_metadata_warnings(self) -> list[str]:
+        self.operations.append("get_metadata_warnings")
+        return self.metadata_warnings
+
+    def prepare_release_notes_from_tag(self, version: str) -> None:
+        self.operations.append(f"prepare_release_notes_from_tag:{version}")
+        self.release_notes_from_tag_prepared = True
+
     def create_release_commit(self, next_version: str) -> str:
         self.operations.append(f"create_release_commit:{next_version}")
         self.commit_created = True
@@ -434,12 +467,15 @@ class StubReleaseRunner:
         self.operations.append(f"push_tag:{version}")
         self.pushed_tag = True
 
-    def create_github_release(self, version: str) -> None:
+    def create_github_release(self, version: str) -> bool:
         self.operations.append(f"create_github_release:{version}")
+        if self.dry_run:
+            return False
         self.github_release_created = True
+        return True
 
 
-def test_orchestrate_release_requires_main_branch():
+def test_orchestrate_release_requires_main_branch() -> None:
     runner = StubReleaseRunner()
     runner.branch = "dev"
 
@@ -455,7 +491,7 @@ def test_orchestrate_release_requires_main_branch():
     assert "prepare_metadata" not in " ".join(runner.operations)
 
 
-def test_orchestrate_release_requires_clean_worktree():
+def test_orchestrate_release_requires_clean_worktree() -> None:
     runner = StubReleaseRunner()
     runner.worktree_clean = False
 
@@ -475,7 +511,7 @@ def test_orchestrate_release_requires_clean_worktree():
     assert runner.metadata_prepared is False
 
 
-def test_orchestrate_release_hard_aborts_on_non_fast_forward_push_failure():
+def test_orchestrate_release_hard_aborts_on_non_fast_forward_push_failure() -> None:
     runner = StubReleaseRunner()
     runner.remote_main_sha = "def456moved"
     runner.push_main_error = "git push origin main failed: non-fast-forward"
@@ -497,7 +533,7 @@ def test_orchestrate_release_hard_aborts_on_non_fast_forward_push_failure():
     assert runner.operations.count("fetch_origin_main") == 1
 
 
-def test_orchestrate_release_resumes_from_remote_tag_without_github_release():
+def test_orchestrate_release_resumes_from_remote_tag_without_github_release() -> None:
     runner = StubReleaseRunner()
     runner.release_state = "remote_tag_without_github_release"
 
@@ -510,15 +546,51 @@ def test_orchestrate_release_resumes_from_remote_tag_without_github_release():
 
     assert result["state"] == "remote_tag_without_github_release"
     assert result["github_release_created"] is True
+    assert runner.release_notes_from_tag_prepared is True
     assert runner.github_release_created is True
     assert runner.commit_created is False
     assert runner.tag_created is False
     assert runner.pushed_main is False
     assert runner.pushed_tag is False
     assert "prepare_metadata" not in " ".join(runner.operations)
+    assert runner.operations.index("prepare_release_notes_from_tag:0.1.32") < runner.operations.index(
+        "create_github_release:0.1.32"
+    )
 
 
-def test_orchestrate_release_uses_prebump_origin_main_sha_for_required_checks_only():
+def test_orchestrate_release_reports_dry_run_without_created_release() -> None:
+    runner = StubReleaseRunner()
+    runner.dry_run = True
+
+    result = orchestrate_release(
+        bump="patch",
+        runner=runner,
+        pyproject_path=REPO_ROOT / "pyproject.toml",
+        ci_gates_doc_path=REPO_ROOT / "Docs" / "Development" / "CI_REQUIRED_GATES.md",
+    )
+
+    assert result["dry_run"] is True
+    assert result["github_release_created"] is False
+    assert runner.github_release_created is False
+
+
+def test_orchestrate_release_includes_metadata_warnings() -> None:
+    runner = StubReleaseRunner()
+    runner.metadata_warnings = [
+        "Near-duplicate changelog bullets across Added and Changed: 'a' ~ 'a docs'"
+    ]
+
+    result = orchestrate_release(
+        bump="patch",
+        runner=runner,
+        pyproject_path=REPO_ROOT / "pyproject.toml",
+        ci_gates_doc_path=REPO_ROOT / "Docs" / "Development" / "CI_REQUIRED_GATES.md",
+    )
+
+    assert result["warnings"] == runner.metadata_warnings
+
+
+def test_orchestrate_release_uses_prebump_origin_main_sha_for_required_checks_only() -> None:
     runner = StubReleaseRunner()
 
     result = orchestrate_release(
@@ -537,7 +609,7 @@ def test_orchestrate_release_uses_prebump_origin_main_sha_for_required_checks_on
     assert runner.github_release_created is True
 
 
-def test_orchestrate_release_local_tag_only_fails_closed_when_tag_points_behind_head():
+def test_orchestrate_release_local_tag_only_fails_closed_when_tag_points_behind_head() -> None:
     runner = StubReleaseRunner()
     runner.release_state = "local_tag_only"
     runner.head_sha = "newer-head-commit"
@@ -556,7 +628,7 @@ def test_orchestrate_release_local_tag_only_fails_closed_when_tag_points_behind_
     assert runner.github_release_created is False
 
 
-def test_shell_release_runner_prepare_metadata_allows_cross_section_warning(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+def test_shell_release_runner_prepare_metadata_allows_cross_section_warning(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     repo_root = tmp_path
     (repo_root / "Docs" / "Published").mkdir(parents=True)
 
@@ -606,10 +678,34 @@ version = "0.1.30"
     assert runner._release_notes_body is not None
     assert "## [0.1.31] - " in runner._release_notes_body
     assert "Add release helper core docs and metadata" in runner._release_notes_body
+    assert runner.get_metadata_warnings()
     assert all("Docs/site" not in str(path) for path in runner._prepared_paths)
 
 
-def test_shell_release_runner_create_or_update_tag_uses_annotated_tag(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+def test_shell_release_runner_run_command_uses_absolute_executable_path(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    recorded_commands: list[list[str]] = []
+
+    def _fake_run(
+        command_args: list[str],
+        **kwargs: object,
+    ) -> subprocess.CompletedProcess[str]:
+        recorded_commands.append(list(command_args))
+        return subprocess.CompletedProcess(command_args, 0, "ok", "")
+
+    monkeypatch.setattr(release_module.subprocess, "run", _fake_run)
+
+    runner = ShellReleaseRunner(repo_root=tmp_path, dry_run=False)
+
+    runner._run_command(["git", "status"])
+
+    assert recorded_commands
+    assert Path(recorded_commands[0][0]).is_absolute()
+
+
+def test_shell_release_runner_create_or_update_tag_uses_annotated_tag(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     recorded_commands: list[list[str]] = []
 
     def _fake_run_command(
