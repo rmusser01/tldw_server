@@ -144,6 +144,87 @@ async def test_delete_embeddings_sanitizes_backend_lookup_error(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_delete_embeddings_sanitizes_where_delete_fallback_log(monkeypatch):
+    logger_stub = MagicMock()
+
+    class _FallbackCollection:
+        def __init__(self):
+            self._where_delete_attempted = False
+
+        def delete(self, **kwargs):
+            if "where" in kwargs:
+                self._where_delete_attempted = True
+                raise RuntimeError("where delete backend exploded at /private/chroma")
+            return None
+
+        def get(self, **_kwargs):
+            if self._where_delete_attempted:
+                self._where_delete_attempted = False
+                return {"ids": ["embedding-123"]}
+            return {"ids": []}
+
+    collection = _FallbackCollection()
+
+    class _ChromaDBManager:
+        def __init__(self, *_args, **_kwargs):
+            return None
+
+        def get_or_create_collection(self, *_args, **_kwargs):
+            return collection
+
+    monkeypatch.setattr(media_embeddings, "logger", logger_stub)
+    monkeypatch.setattr(media_embeddings, "_user_embedding_config", lambda: {})
+    monkeypatch.setattr(media_embeddings, "get_media_by_id", lambda *_args, **_kwargs: {"id": 123})
+    monkeypatch.setattr(media_embeddings, "ChromaDBManager", _ChromaDBManager)
+    monkeypatch.setattr(media_embeddings, "invalidate_rag_caches", lambda *_args, **_kwargs: None)
+
+    response = await media_embeddings.delete_embeddings(
+        media_id=123,
+        db=object(),
+        current_user=_user(),
+    )
+
+    assert response["status"] == "success"
+    logger_stub.warning.assert_called_once_with(
+        "Where-delete failed for media embeddings, falling back to id delete"
+    )
+
+
+@pytest.mark.asyncio
+async def test_delete_embeddings_sanitizes_verify_failure_log(monkeypatch):
+    logger_stub = MagicMock()
+
+    class _VerifyFailCollection:
+        def delete(self, **_kwargs):
+            return None
+
+        def get(self, **_kwargs):
+            raise RuntimeError("verify backend exploded at /private/chroma")
+
+    class _ChromaDBManager:
+        def __init__(self, *_args, **_kwargs):
+            return None
+
+        def get_or_create_collection(self, *_args, **_kwargs):
+            return _VerifyFailCollection()
+
+    monkeypatch.setattr(media_embeddings, "logger", logger_stub)
+    monkeypatch.setattr(media_embeddings, "_user_embedding_config", lambda: {})
+    monkeypatch.setattr(media_embeddings, "get_media_by_id", lambda *_args, **_kwargs: {"id": 123})
+    monkeypatch.setattr(media_embeddings, "ChromaDBManager", _ChromaDBManager)
+    monkeypatch.setattr(media_embeddings, "invalidate_rag_caches", lambda *_args, **_kwargs: None)
+
+    response = await media_embeddings.delete_embeddings(
+        media_id=123,
+        db=object(),
+        current_user=_user(),
+    )
+
+    assert response["status"] == "success"
+    logger_stub.warning.assert_called_once_with("Failed to verify embeddings delete")
+
+
+@pytest.mark.asyncio
 async def test_generate_embeddings_fails_when_job_create_raises(monkeypatch):
     class _FailingAdapter:
         def create_job(self, **_kwargs):

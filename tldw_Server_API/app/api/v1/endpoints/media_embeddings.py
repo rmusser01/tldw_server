@@ -979,9 +979,9 @@ async def delete_embeddings(
         try:
             # Use where-based delete if supported
             collection.delete(where={"media_id": str(media_id)})
-        except _MEDIA_EMBEDDINGS_NONCRITICAL_EXCEPTIONS as e:
+        except _MEDIA_EMBEDDINGS_NONCRITICAL_EXCEPTIONS:
             # Fall back to fetching IDs then deleting by ids
-            logger.warning(f"Where-delete failed, falling back to id-based delete: {e}")
+            logger.warning("Where-delete failed for media embeddings, falling back to id delete")
             data = collection.get(where={"media_id": str(media_id)}, include=["metadatas"], limit=100000)
             ids = (data or {}).get("ids") or []
             if ids:
@@ -991,8 +991,8 @@ async def delete_embeddings(
             remaining_ids = (remaining or {}).get("ids") or []
             if remaining_ids:
                 collection.delete(ids=remaining_ids)
-        except _MEDIA_EMBEDDINGS_NONCRITICAL_EXCEPTIONS as e:
-            logger.warning(f"Failed to verify embeddings delete for media {media_id}: {e}")
+        except _MEDIA_EMBEDDINGS_NONCRITICAL_EXCEPTIONS:
+            logger.warning("Failed to verify embeddings delete")
 
         invalidate_rag_caches(current_user, media_id=media_id)
 
