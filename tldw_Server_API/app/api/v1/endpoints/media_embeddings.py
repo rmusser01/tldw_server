@@ -512,7 +512,7 @@ async def generate_embeddings_for_media(
             )
         except Exception:
             if embedding_model != FALLBACK_EMBEDDING_MODEL:
-                logger.warning(f"Failed with {embedding_model}, trying fallback {FALLBACK_EMBEDDING_MODEL}")
+                logger.warning("Primary embedding generation failed; trying fallback model")
                 try:
                     embeddings = await create_embeddings_batch_async(
                         texts=chunk_texts,
@@ -521,7 +521,7 @@ async def generate_embeddings_for_media(
                         metadata=request_metadata,
                     )
                 except Exception as exc:
-                    logger.error(f"Fallback embedding generation failed: {exc}", exc_info=True)
+                    logger.error("Fallback embedding generation failed")
                     return {
                         "status": "error",
                         "message": "Failed to generate embeddings",
@@ -572,10 +572,10 @@ async def generate_embeddings_for_media(
             _store_embeddings(
                 model_name=embedding_model,
                 provider_name=embedding_provider,
-                embeddings_to_store=embeddings,
-            )
+            embeddings_to_store=embeddings,
+        )
         except Exception as exc:
-            logger.error(f"Error storing primary embeddings: {exc}")
+            logger.error("Error storing primary embeddings")
             return _storage_failure_result(exc, len(embeddings) if embeddings else 0)
 
         return {
@@ -585,8 +585,8 @@ async def generate_embeddings_for_media(
             "chunks_processed": len(chunks),
         }
 
-    except _MEDIA_EMBEDDINGS_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Error generating embeddings: {e}", exc_info=True)
+    except _MEDIA_EMBEDDINGS_NONCRITICAL_EXCEPTIONS:
+        logger.error("Error generating embeddings")
         return {
             "status": "error",
             "message": "Failed to generate embeddings",
