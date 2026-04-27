@@ -10,8 +10,12 @@ from tldw_Server_API.app.api.v1.endpoints import llm_providers as llm_endpoints
 
 class _LoggerStub:
     def __init__(self) -> None:
+        self.debugs: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = []
         self.errors: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = []
         self.warnings: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = []
+
+    def debug(self, message: str, *args: Any, **kwargs: Any) -> None:
+        self.debugs.append((str(message), args, kwargs))
 
     def error(self, message: str, *args: Any, **kwargs: Any) -> None:
         self.errors.append((str(message), args, kwargs))
@@ -31,6 +35,88 @@ def _assert_sanitized_log(
     rendered = " ".join(record[0] for record in records)
     assert "exploded" not in rendered
     assert "/private/" not in rendered
+    assert "private-provider" not in rendered
+    assert "127.0.0.1" not in rendered
+
+
+class _FakeModelResponse:
+    status_code = 503
+
+    def close(self) -> None:
+        return None
+
+
+class _UnexpectedModelDiscoveryError(Exception):
+    pass
+
+
+def test_discover_models_from_endpoint_sanitizes_http_status_log(monkeypatch):
+    logger_stub = _LoggerStub()
+
+    monkeypatch.setattr(llm_endpoints, "logger", logger_stub)
+    monkeypatch.setattr(
+        llm_endpoints,
+        "_http_fetch",
+        lambda **_kwargs: _FakeModelResponse(),
+    )
+    llm_endpoints._LOCAL_MODEL_CACHE.clear()
+
+    models = llm_endpoints.discover_models_from_endpoint(
+        "private-provider",
+        "http://127.0.0.1:1234/v1",
+    )
+
+    assert models == []
+    _assert_sanitized_log(
+        logger_stub.debugs,
+        "Model discovery endpoint returned an error status",
+    )
+
+
+def test_discover_models_from_endpoint_sanitizes_noncritical_error_log(monkeypatch):
+    logger_stub = _LoggerStub()
+
+    def boom(**_kwargs):
+        raise RuntimeError("model discovery backend exploded at /private/llm-providers.db")
+
+    monkeypatch.setattr(llm_endpoints, "logger", logger_stub)
+    monkeypatch.setattr(llm_endpoints, "_http_fetch", boom)
+    llm_endpoints._LOCAL_MODEL_CACHE.clear()
+
+    models = llm_endpoints.discover_models_from_endpoint(
+        "private-provider",
+        "http://127.0.0.1:1234/v1",
+    )
+
+    assert models == []
+    _assert_sanitized_log(
+        logger_stub.debugs,
+        "Model discovery endpoint query failed",
+    )
+
+
+def test_discover_models_from_endpoint_sanitizes_unexpected_error_log(monkeypatch):
+    logger_stub = _LoggerStub()
+
+    def boom(**_kwargs):
+        raise _UnexpectedModelDiscoveryError(
+            "unexpected model discovery exploded at /private/llm-providers.db"
+        )
+
+    monkeypatch.setattr(llm_endpoints, "logger", logger_stub)
+    monkeypatch.setattr(llm_endpoints, "_http_fetch", boom)
+    llm_endpoints._LOCAL_MODEL_CACHE.clear()
+
+    models = llm_endpoints.discover_models_from_endpoint(
+        "private-provider",
+        "http://127.0.0.1:1234/v1",
+    )
+
+    assert models == []
+    _assert_sanitized_log(
+        logger_stub.debugs,
+        "Model discovery endpoint query failed unexpectedly",
+    )
 
 
 def test_get_configured_providers_sanitizes_generic_failure_log(monkeypatch):

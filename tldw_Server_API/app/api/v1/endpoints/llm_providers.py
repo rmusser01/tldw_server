@@ -1133,7 +1133,7 @@ def discover_models_from_endpoint(
             )
             try:
                 if resp.status_code >= 400:
-                    logger.debug(f"[Model discovery] {provider}: {url} responded with {resp.status_code}")
+                    logger.debug("Model discovery endpoint returned an error status")
                     continue
                 discovered = _extract_models_from_response(resp.json())
                 if discovered:
@@ -1143,11 +1143,11 @@ def discover_models_from_endpoint(
                 close = getattr(resp, "close", None)
                 if callable(close):
                     close()
-        except _LLM_PROVIDERS_NONCRITICAL_EXCEPTIONS as exc:
-            logger.debug(f"[Model discovery] {provider}: error querying {url}: {exc}")
+        except _LLM_PROVIDERS_NONCRITICAL_EXCEPTIONS:
+            logger.debug("Model discovery endpoint query failed")
             continue
-        except Exception as exc:  # noqa: BLE001 - best-effort local discovery must fail open
-            logger.debug(f"[Model discovery] {provider}: unexpected error querying {url}: {exc}")
+        except Exception:  # noqa: BLE001 - best-effort local discovery must fail open
+            logger.debug("Model discovery endpoint query failed unexpectedly")
             continue
 
     _LOCAL_MODEL_CACHE[cache_key] = (now, discovered)
