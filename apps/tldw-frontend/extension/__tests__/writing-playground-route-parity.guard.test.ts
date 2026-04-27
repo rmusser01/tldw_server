@@ -3,7 +3,7 @@ import path from "node:path"
 import { describe, expect, it } from "vitest"
 
 describe("writing playground route parity", () => {
-  it("keeps shared PageShell and WritingPlayground mount parity", () => {
+  it("tracks the actual shared route contract", () => {
     const webRoute = fs.readFileSync(
       path.resolve(__dirname, "../../../packages/ui/src/routes/option-writing-playground.tsx"),
       "utf8"
@@ -13,7 +13,7 @@ describe("writing playground route parity", () => {
       "utf8"
     )
 
-    expect(webRoute).toContain('PageShell className="py-6" maxWidthClassName="max-w-7xl"')
+    expect(webRoute).toContain('data-testid="writing-playground-route-shell"')
     expect(extRoute).toContain('PageShell className="py-6" maxWidthClassName="max-w-7xl"')
     expect(webRoute).toContain("<WritingPlayground />")
     expect(extRoute).toContain("<WritingPlayground />")

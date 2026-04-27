@@ -5,12 +5,17 @@ from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.Setup.audio_bundle_catalog import get_audio_bundle_catalog
-from tldw_Server_API.app.main import app
 import tldw_Server_API.app.api.v1.endpoints.setup as setup_endpoint
 
 
-def _make_client():
-    return TestClient(app)
+@pytest.fixture
+def make_client():
+    def _make_client():
+        from tldw_Server_API.app.main import app
+
+        return TestClient(app)
+
+    return _make_client
 
 
 class _BundleCatalogStub:
@@ -101,6 +106,60 @@ def _admin_audio_installer_setup(monkeypatch):
         _fake_verify_audio_bundle_async,
     )
 
+    monkeypatch.setattr(
+        setup_endpoint.install_manager,
+        "get_omnivoice_setup_status",
+        lambda: {
+            "provider": "omnivoice",
+            "enabled": True,
+            "runtime": "sidecar",
+            "runtime_mode": "real",
+            "model_id": "k2-fsa/OmniVoice",
+            "source_checkout": "../OmniVoice",
+            "source_checkout_exists": True,
+            "runtime_installed": True,
+            "missing_runtime_components": [],
+            "weights_cached": False,
+            "weights_cache_path": "hf-cache/models--k2-fsa--OmniVoice",
+            "python_path": "models/omnivoice_sidecar/.venv/bin/python",
+            "runtime_path": "models/omnivoice_sidecar/runtime",
+            "logs_path": "models/omnivoice_sidecar/logs",
+            "sidecar": {"runtime": "sidecar", "sidecar_state": "idle_stopped"},
+        },
+    )
+    monkeypatch.setattr(
+        setup_endpoint.install_manager,
+        "predownload_omnivoice_assets",
+        lambda: {
+            "success": True,
+            "provider": "omnivoice",
+            "action": "predownload",
+            "status": "completed",
+            "detail": "Prefetched k2-fsa/OmniVoice into the local Hugging Face cache.",
+            "snapshot_path": "hf-cache/snapshots/omnivoice",
+            "health": None,
+            "omnivoice": setup_endpoint.install_manager.get_omnivoice_setup_status(),
+        },
+    )
+
+    async def _fake_warmup_omnivoice_sidecar_async():
+        return {
+            "success": True,
+            "provider": "omnivoice",
+            "action": "warmup",
+            "status": "ready",
+            "detail": "OmniVoice sidecar warmup completed.",
+            "snapshot_path": None,
+            "health": {"ready": True, "model_loaded": True, "runtime_mode": "real"},
+            "omnivoice": setup_endpoint.install_manager.get_omnivoice_setup_status(),
+        }
+
+    monkeypatch.setattr(
+        setup_endpoint.install_manager,
+        "warmup_omnivoice_sidecar_async",
+        _fake_warmup_omnivoice_sidecar_async,
+    )
+
     return captured
 
 
@@ -109,6 +168,7 @@ def _admin_audio_installer_setup(monkeypatch):
     [
         ("get", "/api/v1/setup/admin/install-status", None),
         ("get", "/api/v1/setup/admin/audio/recommendations", None),
+        ("get", "/api/v1/setup/admin/audio/providers/omnivoice/status", None),
         (
             "post",
             "/api/v1/setup/admin/audio/provision",
@@ -119,11 +179,17 @@ def _admin_audio_installer_setup(monkeypatch):
             "/api/v1/setup/admin/audio/verify",
             {"bundle_id": "cpu_local", "resource_profile": "balanced"},
         ),
+        (
+            "post",
+            "/api/v1/setup/admin/audio/providers/omnivoice/action",
+            {"action": "warmup"},
+        ),
     ],
 )
 def test_admin_audio_installer_routes_remain_available_after_setup_completed(
     monkeypatch,
     _admin_audio_installer_setup,
+    make_client,
     method,
     path,
     json_body,
@@ -135,7 +201,7 @@ def test_admin_audio_installer_routes_remain_available_after_setup_completed(
     )
 
     request_kwargs = {"json": json_body} if json_body is not None else {}
-    with _make_client() as client:
+    with make_client() as client:
         response = getattr(client, method)(path, **request_kwargs)
 
     assert response.status_code == 200
@@ -146,6 +212,7 @@ def test_admin_audio_installer_routes_remain_available_after_setup_completed(
     [
         ("get", "/api/v1/setup/admin/install-status", None),
         ("get", "/api/v1/setup/admin/audio/recommendations", None),
+        ("get", "/api/v1/setup/admin/audio/providers/omnivoice/status", None),
         (
             "post",
             "/api/v1/setup/admin/audio/provision",
@@ -156,11 +223,17 @@ def test_admin_audio_installer_routes_remain_available_after_setup_completed(
             "/api/v1/setup/admin/audio/verify",
             {"bundle_id": "cpu_local", "resource_profile": "balanced"},
         ),
+        (
+            "post",
+            "/api/v1/setup/admin/audio/providers/omnivoice/action",
+            {"action": "predownload"},
+        ),
     ],
 )
 def test_admin_audio_installer_routes_stay_unavailable_without_setup_or_completion(
     monkeypatch,
     _admin_audio_installer_setup,
+    make_client,
     method,
     path,
     json_body,
@@ -172,7 +245,7 @@ def test_admin_audio_installer_routes_stay_unavailable_without_setup_or_completi
     )
 
     request_kwargs = {"json": json_body} if json_body is not None else {}
-    with _make_client() as client:
+    with make_client() as client:
         response = getattr(client, method)(path, **request_kwargs)
 
     assert response.status_code == 404
@@ -181,6 +254,7 @@ def test_admin_audio_installer_routes_stay_unavailable_without_setup_or_completi
 def test_admin_audio_recommendations_include_curated_tts_choices(
     monkeypatch,
     _admin_audio_installer_setup,
+    make_client,
 ):
     monkeypatch.setattr(
         setup_endpoint.setup_manager,
@@ -188,7 +262,7 @@ def test_admin_audio_recommendations_include_curated_tts_choices(
         lambda: {"enabled": True, "setup_completed": False, "needs_setup": True},
     )
 
-    with _make_client() as client:
+    with make_client() as client:
         response = client.get("/api/v1/setup/admin/audio/recommendations")
 
     assert response.status_code == 200
@@ -198,9 +272,45 @@ def test_admin_audio_recommendations_include_curated_tts_choices(
     assert {choice["choice_id"] for choice in profile["tts_choices"]} == {"kokoro", "kitten_tts"}
 
 
+def test_admin_omnivoice_status_and_actions_use_shared_setup_contract(
+    monkeypatch,
+    _admin_audio_installer_setup,
+    make_client,
+):
+    monkeypatch.setattr(
+        setup_endpoint.setup_manager,
+        "get_status_snapshot",
+        lambda: {"enabled": True, "setup_completed": False, "needs_setup": True},
+    )
+
+    with make_client() as client:
+        status_response = client.get("/api/v1/setup/admin/audio/providers/omnivoice/status")
+        predownload_response = client.post(
+            "/api/v1/setup/admin/audio/providers/omnivoice/action",
+            json={"action": "predownload"},
+        )
+        warmup_response = client.post(
+            "/api/v1/setup/admin/audio/providers/omnivoice/action",
+            json={"action": "warmup"},
+        )
+
+    assert status_response.status_code == 200
+    assert status_response.json()["provider"] == "omnivoice"
+    assert status_response.json()["runtime_installed"] is True
+
+    assert predownload_response.status_code == 200
+    assert predownload_response.json()["action"] == "predownload"
+    assert predownload_response.json()["snapshot_path"] == "hf-cache/snapshots/omnivoice"
+
+    assert warmup_response.status_code == 200
+    assert warmup_response.json()["action"] == "warmup"
+    assert warmup_response.json()["health"]["model_loaded"] is True
+
+
 def test_admin_audio_provision_and_verify_accept_tts_choice(
     monkeypatch,
     _admin_audio_installer_setup,
+    make_client,
 ):
     captured = {}
 
@@ -209,15 +319,18 @@ def test_admin_audio_provision_and_verify_accept_tts_choice(
         "get_status_snapshot",
         lambda: {"enabled": True, "setup_completed": False, "needs_setup": True},
     )
-    monkeypatch.setattr(
-        setup_endpoint,
-        "_execute_audio_bundle_provision",
-        lambda payload, allow_completed_when_disabled=False: {
+    async def _fake_execute_audio_bundle_provision(payload, allow_completed_when_disabled=False):
+        return {
             "status": "completed",
             "bundle_id": payload.bundle_id,
             "resource_profile": payload.resource_profile,
             "tts_choice": payload.tts_choice,
-        },
+        }
+
+    monkeypatch.setattr(
+        setup_endpoint,
+        "_execute_audio_bundle_provision",
+        _fake_execute_audio_bundle_provision,
     )
 
     async def _fake_execute_audio_bundle_verification(payload, allow_completed_when_disabled=False):
@@ -235,7 +348,7 @@ def test_admin_audio_provision_and_verify_accept_tts_choice(
         _fake_execute_audio_bundle_verification,
     )
 
-    with _make_client() as client:
+    with make_client() as client:
         provision_response = client.post(
             "/api/v1/setup/admin/audio/provision",
             json={
@@ -260,7 +373,7 @@ def test_admin_audio_provision_and_verify_accept_tts_choice(
     assert captured["verify_tts_choice"] == "kitten_tts"
 
 
-def test_setup_complete_accepts_direct_omnivoice_install_plan(monkeypatch):
+def test_setup_complete_accepts_direct_omnivoice_install_plan(monkeypatch, make_client):
     install_calls = []
 
     monkeypatch.setattr(
@@ -276,7 +389,7 @@ def test_setup_complete_accepts_direct_omnivoice_install_plan(monkeypatch):
         lambda payload: install_calls.append(payload),
     )
 
-    with _make_client() as client:
+    with make_client() as client:
         response = client.post(
             "/api/v1/setup/complete",
             json={
@@ -303,6 +416,7 @@ def test_setup_complete_accepts_direct_omnivoice_install_plan(monkeypatch):
 def test_admin_audio_provision_rejects_invalid_tts_choice_with_400(
     monkeypatch,
     _admin_audio_installer_setup,
+    make_client,
 ):
     monkeypatch.setattr(
         setup_endpoint.setup_manager,
@@ -315,7 +429,7 @@ def test_admin_audio_provision_rejects_invalid_tts_choice_with_400(
         lambda *args, **kwargs: (_ for _ in ()).throw(ValueError("Unknown curated TTS choice 'bogus_choice'")),
     )
 
-    with _make_client() as client:
+    with make_client() as client:
         response = client.post(
             "/api/v1/setup/admin/audio/provision",
             json={
@@ -332,6 +446,7 @@ def test_admin_audio_provision_rejects_invalid_tts_choice_with_400(
 def test_admin_audio_verify_rejects_invalid_tts_choice_with_400(
     monkeypatch,
     _admin_audio_installer_setup,
+    make_client,
 ):
     monkeypatch.setattr(
         setup_endpoint.setup_manager,
@@ -348,7 +463,7 @@ def test_admin_audio_verify_rejects_invalid_tts_choice_with_400(
         _raise_invalid_choice,
     )
 
-    with _make_client() as client:
+    with make_client() as client:
         response = client.post(
             "/api/v1/setup/admin/audio/verify",
             json={
@@ -365,6 +480,7 @@ def test_admin_audio_verify_rejects_invalid_tts_choice_with_400(
 def test_audio_pack_export_rejects_invalid_tts_choice_with_400(
     monkeypatch,
     _admin_audio_installer_setup,
+    make_client,
 ):
     monkeypatch.setattr(
         setup_endpoint.setup_manager,
@@ -382,7 +498,7 @@ def test_audio_pack_export_rejects_invalid_tts_choice_with_400(
         lambda **kwargs: (_ for _ in ()).throw(ValueError("Unknown curated TTS choice 'bogus_choice'")),
     )
 
-    with _make_client() as client:
+    with make_client() as client:
         response = client.post(
             "/api/v1/setup/audio/packs/export",
             json={
@@ -399,6 +515,7 @@ def test_audio_pack_export_rejects_invalid_tts_choice_with_400(
 def test_audio_pack_import_rejects_invalid_tts_choice_with_400(
     monkeypatch,
     _admin_audio_installer_setup,
+    make_client,
 ):
     monkeypatch.setattr(
         setup_endpoint.setup_manager,
@@ -411,10 +528,10 @@ def test_audio_pack_import_rejects_invalid_tts_choice_with_400(
         lambda *args, **kwargs: (_ for _ in ()).throw(ValueError("Unknown curated TTS choice 'bogus_choice'")),
     )
 
-    with _make_client() as client:
+    with make_client() as client:
         response = client.post(
             "/api/v1/setup/audio/packs/import",
-            json={"pack_path": "/tmp/invalid-audio-pack.json"},
+            json={"pack_path": "invalid-audio-pack.json"},
         )
 
     assert response.status_code == 400

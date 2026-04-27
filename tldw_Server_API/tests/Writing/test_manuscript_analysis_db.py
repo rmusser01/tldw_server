@@ -20,6 +20,13 @@ def mdb(tmp_path):
     return ManuscriptDBHelper(db)
 
 
+def _analysis_row(mdb, analysis_id):
+    return mdb.db.execute_query(
+        "SELECT * FROM manuscript_ai_analyses WHERE id = ?",
+        (analysis_id,),
+    ).fetchone()
+
+
 class TestAnalysisCRUD:
     def test_create_and_get(self, mdb):
         pid = mdb.create_project("Novel")
@@ -112,6 +119,47 @@ class TestAnalysisCRUD:
         analyses = mdb.list_analyses(pid)
         assert len(analyses) == 0
 
+    def test_deleted_project_hides_cached_analysis_reads(self, mdb):
+        pid = mdb.create_project("Novel")
+        aid = mdb.create_analysis(pid, "project", pid, "consistency", {})
+
+        mdb.soft_delete_project(pid, expected_version=1)
+
+        assert mdb.get_analysis(aid) is None
+        assert mdb.list_analyses(pid) == []
+
+    def test_active_part_scope_analysis_remains_visible(self, mdb):
+        pid = mdb.create_project("Novel")
+        part_id = mdb.create_part(pid, "Part I")
+        aid = mdb.create_analysis(pid, "part", part_id, "structure", {"notes": []})
+
+        analysis = mdb.get_analysis(aid)
+
+        assert analysis is not None
+        assert analysis["scope_type"] == "part"
+        assert [item["id"] for item in mdb.list_analyses(pid)] == [aid]
+
+    def test_deleted_scene_scope_hides_cached_analysis_reads(self, mdb):
+        pid = mdb.create_project("Novel")
+        ch_id = mdb.create_chapter(pid, "Ch1")
+        sid = mdb.create_scene(ch_id, pid, title="S1", content_json="{}", content_plain="text")
+        aid = mdb.create_analysis(pid, "scene", sid, "pacing", {"pacing": 0.5})
+
+        mdb.soft_delete_scene(sid, expected_version=1)
+
+        assert mdb.get_analysis(aid) is None
+        assert mdb.list_analyses(pid) == []
+
+    def test_deleted_part_scope_hides_cached_analysis_reads(self, mdb):
+        pid = mdb.create_project("Novel")
+        part_id = mdb.create_part(pid, "Part I")
+        aid = mdb.create_analysis(pid, "part", part_id, "structure", {"notes": []})
+
+        mdb.soft_delete_part(part_id, expected_version=1)
+
+        assert mdb.get_analysis(aid) is None
+        assert mdb.list_analyses(pid, include_stale=True) == []
+
     def test_mark_stale(self, mdb):
         pid = mdb.create_project("Novel")
         ch_id = mdb.create_chapter(pid, "Ch1")
@@ -181,6 +229,62 @@ class TestAnalysisCRUD:
         mdb.update_scene(sid, {"title": "S1 Renamed"}, expected_version=1)
         # Analysis should still be fresh
         assert mdb.get_analysis(aid)["stale"] == 0
+
+    def test_project_analyses_stale_after_character_role_and_world_kind_changes(self, mdb):
+        pid = mdb.create_project("Novel")
+        character_id = mdb.create_character(pid, "Alice", role="supporting")
+        world_info_id = mdb.create_world_info(pid, "location", "Town")
+
+        character_analysis_id = mdb.create_analysis(pid, "project", pid, "consistency", {})
+        mdb.update_character(character_id, {"role": "protagonist"}, expected_version=1)
+        assert mdb.get_analysis(character_analysis_id)["stale"] == 1
+
+        world_analysis_id = mdb.create_analysis(pid, "project", pid, "consistency", {})
+        mdb.update_world_info(world_info_id, {"kind": "faction"}, expected_version=1)
+        assert mdb.get_analysis(world_analysis_id)["stale"] == 1
+
+    def test_part_delete_stales_project_analysis(self, mdb):
+        pid = mdb.create_project("Novel")
+        part_id = mdb.create_part(pid, "Part I")
+        chapter_one = mdb.create_chapter(pid, "Chapter 1", part_id=part_id)
+        chapter_two = mdb.create_chapter(pid, "Chapter 2", part_id=part_id)
+        project_analysis_id = mdb.create_analysis(pid, "project", pid, "consistency", {})
+        chapter_analysis_one_id = mdb.create_analysis(pid, "chapter", chapter_one, "structure", {})
+        chapter_analysis_two_id = mdb.create_analysis(pid, "chapter", chapter_two, "structure", {})
+
+        mdb.soft_delete_part(part_id, expected_version=1)
+
+        assert mdb.get_analysis(project_analysis_id)["stale"] == 1
+        assert _analysis_row(mdb, chapter_analysis_one_id)["stale"] == 1
+        assert _analysis_row(mdb, chapter_analysis_two_id)["stale"] == 1
+
+    def test_chapter_delete_stales_chapter_and_project_analyses(self, mdb):
+        pid = mdb.create_project("Novel")
+        chapter_id = mdb.create_chapter(pid, "Chapter 1")
+        project_analysis_id = mdb.create_analysis(pid, "project", pid, "consistency", {})
+        chapter_analysis_one_id = mdb.create_analysis(pid, "chapter", chapter_id, "structure", {})
+        chapter_analysis_two_id = mdb.create_analysis(pid, "chapter", chapter_id, "pacing", {})
+
+        mdb.soft_delete_chapter(chapter_id, expected_version=1)
+
+        assert mdb.get_analysis(project_analysis_id)["stale"] == 1
+        assert _analysis_row(mdb, chapter_analysis_one_id)["stale"] == 1
+        assert _analysis_row(mdb, chapter_analysis_two_id)["stale"] == 1
+
+    def test_chapter_reparent_stales_project_analysis(self, mdb):
+        pid = mdb.create_project("Novel")
+        part_a = mdb.create_part(pid, "Part A")
+        part_b = mdb.create_part(pid, "Part B")
+        chapter_id = mdb.create_chapter(pid, "Chapter 1", part_id=part_a)
+        analysis_id = mdb.create_analysis(pid, "project", pid, "consistency", {})
+
+        mdb.reorder_items(
+            "chapter",
+            [{"id": chapter_id, "sort_order": 0, "part_id": part_b}],
+            project_id=pid,
+        )
+
+        assert mdb.get_analysis(analysis_id)["stale"] == 1
 
     def test_analysis_sync_log_includes_result_json_on_create_and_update(self, mdb):
         pid = mdb.create_project("Novel")

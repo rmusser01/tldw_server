@@ -113,8 +113,8 @@ def map_db_error_to_http(
     input_status: int | None = None,
     not_found_status: int | None = None,
     default_detail: str = "Database error occurred",
-    input_detail: str = "Invalid input",
-    conflict_detail: str = "Conflict detected",
+    input_detail: str | None = None,
+    conflict_detail: str | None = None,
     data_integrity_detail: str = "Data integrity violation",
     log_context: str | None = None,
 ) -> HTTPException:
@@ -132,11 +132,14 @@ def map_db_error_to_http(
     - DatabaseError-like -> 500 Internal Server Error
     - other Exception    -> 500 Internal Server Error
 
-    `input_detail`, `conflict_detail`, and `data_integrity_detail` let call
-    sites keep stable, endpoint-specific client messages instead of exposing
-    raw DB exception strings. `log_context` lets callers preserve request
-    identifiers such as `media_id` in server-side logs.
+    `input_detail` and `conflict_detail` let call sites keep stable,
+    endpoint-specific client messages instead of exposing raw DB exception
+    strings. If omitted, the exception message is preserved for compatibility,
+    with a safe generic fallback for empty messages. `log_context` lets callers
+    preserve request identifiers such as `media_id` in server-side logs.
+    `data_integrity_detail` provides the safe client message for 422 responses.
     """
+
     def _log_db_mapping_error(label: str) -> None:
         message = f"{log_context}: {label}" if log_context else label
         logger.error(message, exc_info=True)
@@ -155,7 +158,7 @@ def map_db_error_to_http(
             _log_db_mapping_error("InputError from DB layer")
         return HTTPException(
             status_code=resolved_input_status,
-            detail=input_detail,
+            detail=input_detail if input_detail is not None else str(exc) or "Invalid input",
         )
     if isinstance(exc, _NOT_FOUND_ERROR_TYPES):
         return HTTPException(
@@ -170,7 +173,7 @@ def map_db_error_to_http(
     if isinstance(exc, _CONFLICT_ERROR_TYPES):
         return HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=conflict_detail,
+            detail=(conflict_detail if conflict_detail is not None else str(exc) or "Conflict detected"),
         )
     if isinstance(exc, _SCHEMA_ERROR_TYPES):
         # Schema issues are serious; log with stack trace.

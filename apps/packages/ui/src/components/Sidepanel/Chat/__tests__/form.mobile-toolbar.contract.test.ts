@@ -28,4 +28,10 @@ describe("sidepanel chat compact toolbar contract", () => {
     expect(chatFormSource).toContain("playground:actions.speechShort")
     expect(chatFormSource).toContain("playground:composer.stopShort")
   })
+
+  it("keeps image attach as a first-class pro toolbar control", () => {
+    expect(chatFormSource).toContain('data-testid="chat-attach-image"')
+    expect(chatFormSource).toContain('aria-label="Attach image"')
+    expect(chatFormSource).toContain("min-h-[44px] min-w-[44px]")
+  })
 })

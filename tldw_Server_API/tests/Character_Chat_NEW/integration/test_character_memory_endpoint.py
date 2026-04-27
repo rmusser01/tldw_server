@@ -103,6 +103,63 @@ def test_extract_character_memories_allows_owned_chat_by_client_id(
     assert response.json() == {"extracted": 0, "skipped_duplicates": 0, "memories": []}
 
 
+def test_extract_character_memories_allows_string_owner_client_id(
+    test_client: TestClient,
+    auth_headers,
+    character_db,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Allow extraction when a tenant-style string user ID owns the chat."""
+    from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_current_user
+    from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+    from tldw_Server_API.app.main import app
+
+    tenant_user = User(
+        id="tenant-user",
+        username="tenant-user",
+        email="tenant@example.com",
+        is_active=True,
+    )
+
+    async def _tenant_user() -> User:
+        return tenant_user
+
+    monkeypatch.setitem(app.dependency_overrides, get_request_user, _tenant_user)
+    monkeypatch.setitem(app.dependency_overrides, get_current_user, _tenant_user)
+
+    character_id = _create_character(test_client, auth_headers, name="String Owner Memory Character")
+    chat_id = _create_conversation(
+        character_db,
+        character_id=character_id,
+        client_id="tenant-user",
+        title="String Owner Memory Chat",
+    )
+    character_db.add_message(
+        {
+            "id": str(uuid.uuid4()),
+            "conversation_id": chat_id,
+            "sender": "user",
+            "content": "Remember that I prefer string tenant IDs.",
+            "client_id": "tenant-user",
+            "version": 1,
+        }
+    )
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Character_Chat.modules.character_memory_extraction.extract_character_memories",
+        lambda **_: SimpleNamespace(unique=[], total_parsed=0, duplicates_skipped=0),
+    )
+
+    response = test_client.post(
+        f"/api/v1/characters/{character_id}/memories/extract",
+        json={"chat_id": chat_id, "provider": "openai", "model": "test-model"},
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"extracted": 0, "skipped_duplicates": 0, "memories": []}
+
+
 def test_extract_character_memories_rejects_foreign_chat(
     test_client: TestClient,
     auth_headers,

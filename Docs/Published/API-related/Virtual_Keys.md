@@ -217,11 +217,11 @@ Helper CLI
 - Mint and export a scoped token for the scheduler service:
 ```bash
 python -m Helper_Scripts.AuthNZ.mint_virtual_key \
-  --user-id 1 --username admin --role admin \
+  --user-id 1 --username tldw-admin --role admin \
   --scope workflows --ttl-minutes 30 --print-export
 # or write to dotenv
 python -m Helper_Scripts.AuthNZ.mint_virtual_key \
-  --user-id 1 --username admin --role admin \
+  --user-id 1 --username tldw-admin --role admin \
   --dotenv tldw_Server_API/Config_Files/workflows.env
 ```
 

@@ -121,6 +121,7 @@ async def test_omnivoice_generate_posts_narrow_internal_payload_and_returns_wav(
         voice="auto",
         format=AudioFormat.WAV,
         stream=False,
+        speed=1.35,
         extra_params={"reference_text": "ignored for auto mode", "temperature": 0.3},
     )
 
@@ -134,6 +135,7 @@ async def test_omnivoice_generate_posts_narrow_internal_payload_and_returns_wav(
         "mode": "auto",
         "voice": "auto",
         "sample_rate": 24000,
+        "speed": 1.35,
     }
 
 
@@ -191,6 +193,7 @@ async def test_omnivoice_clone_request_materializes_reference_audio_but_sends_na
         "reference_audio_path": str(transient_path),
         "reference_text": "reference transcript",
         "sample_rate": 24000,
+        "speed": 1.0,
     }
     assert transient_path.parent == tmp_path
     assert transient_path.exists() is False

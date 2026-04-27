@@ -159,6 +159,52 @@ def test_full_manuscript_crud(client: TestClient):
     assert resp.json()["word_count"] == 0
 
 
+def test_deleted_project_hides_descendant_reads_and_search_results(client: TestClient):
+    project = client.post(
+        f"{PREFIX}/projects",
+        json={"title": "Deleted Project Read Boundary"},
+    ).json()
+    project_id = project["id"]
+
+    chapter = client.post(
+        f"{PREFIX}/projects/{project_id}/chapters",
+        json={"title": "Chapter One"},
+    ).json()
+    chapter_id = chapter["id"]
+
+    scene = client.post(
+        f"{PREFIX}/chapters/{chapter_id}/scenes",
+        json={
+            "title": "Opening Scene",
+            "content_plain": "A quiet dragon watched the valley from above",
+        },
+    ).json()
+    scene_id = scene["id"]
+
+    project_state = client.get(f"{PREFIX}/projects/{project_id}")
+    assert project_state.status_code == 200, project_state.text
+
+    delete_resp = client.delete(
+        f"{PREFIX}/projects/{project_id}",
+        headers={"expected-version": str(project_state.json()["version"])},
+    )
+    assert delete_resp.status_code == 204, delete_resp.text
+
+    scene_resp = client.get(f"{PREFIX}/scenes/{scene_id}")
+    assert scene_resp.status_code == 404, scene_resp.text
+
+    list_resp = client.get(f"{PREFIX}/chapters/{chapter_id}/scenes")
+    assert list_resp.status_code == 200, list_resp.text
+    assert list_resp.json() == []
+
+    search_resp = client.get(
+        f"{PREFIX}/projects/{project_id}/search",
+        params={"q": "dragon"},
+    )
+    assert search_resp.status_code == 200, search_resp.text
+    assert search_resp.json()["results"] == []
+
+
 def test_project_list_and_filter(client: TestClient):
     """Create multiple projects, list all, then filter by status."""
 

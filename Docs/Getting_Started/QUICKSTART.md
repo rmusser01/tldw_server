@@ -9,18 +9,18 @@ Are you using Docker?
 |
 +-- Yes --> Are you setting up for one person or a team?
 |   |
-|   +-- One person ----> Section A: Docker Single-User (recommended)
+|   +-- One person ----> Section A: Docker single-user + WebUI (recommended)
 |   |
-|   +-- Team / org ----> Section B: Docker Multi-User
+|   +-- Team / org ----> Section B: Docker multi-user + Postgres
 |
-+-- No ---------------> Section C: Local Installation
++-- No ---------------> Section C: Local single-user
 ```
 
 > After your server is running, skip to [Adding LLM Providers](#adding-llm-providers) and [Verify Your Setup](#verify-your-setup).
 
 ---
 
-## Section A: Docker Single-User (Recommended)
+## Section A: Docker single-user + WebUI (Recommended)
 
 **Time: ~2 minutes**
 
@@ -29,23 +29,19 @@ Are you using Docker?
 - Docker Engine + Docker Compose (Docker Desktop includes both)
 - Git
 
-> **Windows:** Use WSL2 or Git Bash. The `make` targets require a Unix-like shell.
+> **Windows:** Use WSL2 for the documented make commands. If you prefer PowerShell, run the equivalent tldw-setup command shown under each step and start Docker Desktop before Docker profiles.
 
 ### Steps
 
 ```bash
-# 1. Clone the repo
 git clone https://github.com/rmusser01/tldw_server.git
 cd tldw_server
-
-# 2. Copy the environment template
-cp tldw_Server_API/Config_Files/.env.example tldw_Server_API/Config_Files/.env
-
-# 3. Start everything (API + WebUI)
-make quickstart
+make setup-docker-single
+make start-docker-single
+make verify-docker-single
 ```
 
-That single command builds and starts the API server and the Next.js WebUI. The Docker entrypoint auto-generates a secure API key if the placeholder value is still in `.env`.
+`make quickstart` is the shortest alias for the same Docker single-user + WebUI lifecycle.
 
 ### What you get
 
@@ -65,13 +61,13 @@ make show-api-key
 
 ### Data storage
 
-By default, application data lives in Docker named volumes (`app-data`, `chroma-data`, `postgres_data`, `redis_data`). `docker compose down` preserves them; `docker compose down -v` deletes them.
+By default, application data lives in Docker named volumes (`app-data`, `redis_data`). No nested named volume is mounted under `/app/Databases/user_databases`. `docker compose down` preserves named volumes; `docker compose down -v` deletes them.
 
 For host-visible storage instead, see the `docker-compose.host-storage.yml` variant in the Docker Single-User guide.
 
 ---
 
-## Section B: Docker Multi-User
+## Section B: Docker multi-user + Postgres
 
 **Time: ~10 minutes**
 
@@ -83,51 +79,13 @@ For host-visible storage instead, see the `docker-compose.host-storage.yml` vari
 ### Steps
 
 ```bash
-# 1. Clone the repo
 git clone https://github.com/rmusser01/tldw_server.git
 cd tldw_server
-
-# 2. Copy the environment template
-cp tldw_Server_API/Config_Files/.env.example tldw_Server_API/Config_Files/.env
-```
-
-**3. Edit `tldw_Server_API/Config_Files/.env` and set these values:**
-
-```bash
-AUTH_MODE=multi_user
-
-# Database (the bundled Postgres container works out of the box)
-DATABASE_URL=postgresql://tldw_user:TestPassword123!@postgres:5432/tldw_users
-```
-
-**4. Generate and set the required secrets.** Run each command, then paste the output into `.env`:
-
-```bash
-python -c "import secrets; print(secrets.token_urlsafe(32))"
-# Paste as:  JWT_SECRET_KEY=<output>
-
-python -c "import secrets; print(secrets.token_urlsafe(32))"
-# Paste as:  MCP_JWT_SECRET=<output>
-
-python -c "import secrets; print(secrets.token_urlsafe(32))"
-# Paste as:  MCP_API_KEY_SALT=<output>
-```
-
-All three must be unique values.
-
-**5. Start the server:**
-
-```bash
-docker compose --env-file tldw_Server_API/Config_Files/.env \
-  -f Dockerfiles/docker-compose.yml up -d --build
-```
-
-**6. (Optional) Add the WebUI overlay:**
-
-```bash
-docker compose --env-file tldw_Server_API/Config_Files/.env \
-  -f Dockerfiles/docker-compose.yml \
-  -f Dockerfiles/docker-compose.webui.yml up -d --build
+export ADMIN_USERNAME=tldw-admin
+export ADMIN_PASSWORD="$(python3 -c 'import secrets; print(secrets.token_urlsafe(24))')"
+make setup-docker-multi
+make start-docker-multi
+make verify-docker-multi
 ```
 
 ### What you get
@@ -140,28 +98,36 @@ docker compose --env-file tldw_Server_API/Config_Files/.env \
 
 ### Next: create the first admin user
 
-Set `ADMIN_USERNAME` and `ADMIN_PASSWORD` in your `.env` before running quickstart to create the admin user automatically, or run the CLI after startup:
+Set `ADMIN_USERNAME` and the generated `ADMIN_PASSWORD` before `make setup-docker-multi` to create the first admin automatically. Keep the variables in the same shell so the manual login example can reuse them:
 
 ```bash
-docker compose exec app python -m tldw_Server_API.app.core.AuthNZ.create_admin \
-  --username admin --password <your-password>
+JWT=$(
+  curl -sS -X POST http://127.0.0.1:8000/api/v1/auth/login \
+    -H "Content-Type: application/x-www-form-urlencoded" \
+    -d "username=$ADMIN_USERNAME" \
+    -d "password=$ADMIN_PASSWORD" | jq -r '.access_token'
+)
+
+curl -sS http://127.0.0.1:8000/api/v1/auth/me \
+  -H "Authorization: Bearer $JWT"
 ```
 
 For full details see `Docs/User_Guides/Server/Multi-User_Postgres_Setup.md`.
 
 ### External Postgres
 
-To use your own Postgres instead of the bundled container, point `DATABASE_URL` to your instance:
+The public profile uses the bundled Postgres service by default. Advanced operators who already run Postgres can set the override URLs in `tldw_Server_API/Config_Files/.env` before `make start-docker-multi`:
 
 ```bash
-DATABASE_URL=postgresql://your_user:your_pass@your-host:5432/your_db
+TLDW_DATABASE_URL_OVERRIDE=postgresql://your_user:your_pass@your-host:5432/tldw_users
+TLDW_JOBS_DB_URL_OVERRIDE=postgresql://your_user:your_pass@your-host:5432/tldw_jobs
 ```
 
 The user must have `CREATE TABLE` permissions.
 
 ---
 
-## Section C: Local Installation (No Docker)
+## Section C: Local single-user (No Docker)
 
 **Time: ~15 minutes**
 
@@ -171,28 +137,28 @@ The user must have `CREATE TABLE` permissions.
 - FFmpeg (`ffmpeg -version` to check)
 - Git
 
-> **Windows:** Use WSL2 or Git Bash.
+> **Windows:** Use WSL2 for the documented make commands. If you prefer PowerShell, run the equivalent tldw-setup command shown under each step and start Docker Desktop before Docker profiles.
 
 ### Steps
 
 ```bash
-# 1. Clone the repo
 git clone https://github.com/rmusser01/tldw_server.git
 cd tldw_server
-
-# 2. Install into a virtual environment
-make quickstart-install
-
-# 3. Start the server
-make quickstart-local
+make install-local
+make setup-local-single
+make start-local-single
 ```
 
-The install target creates a `.venv`, installs dependencies, and copies `.env.example` to `.env` if missing. The server starts at http://127.0.0.1:8000.
+The install target creates a `.venv`, installs dependencies, and `make setup-local-single` configures single-user auth. The server starts at http://127.0.0.1:8000. In another terminal, run:
+
+```bash
+make verify-local-single
+```
 
 If your default `python3` is older than 3.10:
 
 ```bash
-make quickstart-install PYTHON=python3.12
+make install-local PYTHON=python3.12
 ```
 
 ### What you get
@@ -234,12 +200,12 @@ COHERE_API_KEY=...
 **2. Restart:**
 
 ```bash
-# Docker
-docker compose -f Dockerfiles/docker-compose.yml -f Dockerfiles/docker-compose.webui.yml up -d
+# Docker single-user + WebUI
+make start-docker-single
 
 # Local
 # Stop the server (Ctrl+C) and re-run:
-make quickstart-local
+make start-local-single
 ```
 
 **3. Verify the provider is available:**
@@ -269,15 +235,26 @@ curl -sS http://localhost:8000/api/v1/config/quickstart
 curl -sS http://localhost:8080 > /dev/null && echo "webui-ok"
 ```
 
-### Try your first API call
+### Try first-value ingest/search
 
 ```bash
 API_KEY=$(make show-api-key)
 
-curl http://localhost:8000/api/v1/chat/completions \
+printf '# tldw onboarding verification\n\nThis sample verifies ingest and search with tldw-onboarding-verification-unique.\n' > /tmp/tldw-onboarding-verification.md
+
+curl -sS -X POST http://localhost:8000/api/v1/media/add \
+  -H "X-API-Key: $API_KEY" \
+  -F "media_type=document" \
+  -F "title=tldw onboarding verification" \
+  -F "keywords=onboarding,verification" \
+  -F "perform_analysis=false" \
+  -F "perform_chunking=true" \
+  -F "files=@/tmp/tldw-onboarding-verification.md;type=text/markdown"
+
+curl -sS -X POST http://localhost:8000/api/v1/media/search \
   -H "X-API-Key: $API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"model": "gpt-4o-mini", "messages": [{"role": "user", "content": "Hello!"}]}'
+  -d '{"query": "tldw-onboarding-verification-unique", "fields": ["title", "content"]}'
 ```
 
 ---
@@ -301,7 +278,7 @@ Restart the server, then visit http://localhost:8000/setup. The wizard walks you
 ### Docker containers do not start
 
 ```bash
-docker compose -f Dockerfiles/docker-compose.yml logs --tail=200
+docker compose -f Dockerfiles/docker-compose.single-user.yml -f Dockerfiles/docker-compose.webui.yml logs --tail=200
 ```
 
 ### Port 8000 or 8080 already in use
@@ -320,8 +297,8 @@ Stop the conflicting process, or change the host port mapping in the compose fil
 
 ### Multi-user: cannot connect to Postgres
 
-- Confirm `DATABASE_URL` is correct and the Postgres container (or external instance) is reachable
-- Check: `docker compose -f Dockerfiles/docker-compose.yml logs postgres --tail=50`
+- Confirm the bundled Postgres container is healthy, or verify `TLDW_DATABASE_URL_OVERRIDE` / `TLDW_JOBS_DB_URL_OVERRIDE` if you intentionally use external databases
+- Check: `docker compose -f Dockerfiles/docker-compose.multi-user-postgres.yml logs postgres --tail=50`
 
 ### Docker ignores host config changes
 
@@ -329,7 +306,8 @@ The stock Docker image bakes in `Config_Files` at build time. After editing file
 
 ```bash
 docker compose --env-file tldw_Server_API/Config_Files/.env \
-  -f Dockerfiles/docker-compose.yml up -d --build
+  -f Dockerfiles/docker-compose.single-user.yml \
+  -f Dockerfiles/docker-compose.webui.yml up -d --build
 ```
 
 ---

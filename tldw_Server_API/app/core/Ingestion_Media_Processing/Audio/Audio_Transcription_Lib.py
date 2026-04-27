@@ -2539,6 +2539,7 @@ def parse_transcription_model(model_name: str) -> tuple:
 
     Examples:
     - "parakeet-mlx" -> ("parakeet", "parakeet", "mlx")
+    - "parakeet-tdt-0.6b-v3-onnx" -> ("parakeet", "parakeet", "onnx")
     - "parakeet-onnx" -> ("parakeet", "parakeet", "onnx")
     - "parakeet-cuda" -> ("parakeet", "parakeet", "cuda")
     - "parakeet-standard" -> ("parakeet", "parakeet", "standard")
@@ -3051,6 +3052,8 @@ def speech_to_text_parakeet(
 
         # Transcribe with Parakeet
         text = transcribe_with_parakeet(audio_data, sample_rate, variant)
+        if isinstance(text, str) and _looks_like_error_text(text):
+            raise STTTranscriptionError(text)
 
         # Convert to segment format with sentence-level segmentation
         return create_segments_from_text(text, audio_duration, segmentation="sentence")

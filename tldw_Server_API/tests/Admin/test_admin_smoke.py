@@ -2,6 +2,8 @@ import os
 import tempfile
 import importlib
 import asyncio
+import shutil
+from contextlib import suppress
 from uuid import uuid4
 from pathlib import Path
 from typing import Optional
@@ -12,6 +14,20 @@ from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool
 from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
 from tldw_Server_API.app.core.AuthNZ.initialize import ensure_single_user_rbac_seed_if_needed
+from tldw_Server_API.app.core.DB_Management.backends import factory as backend_factory
+from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+
+
+def _reset_media_storage_state() -> None:
+    """Close media/content DB handles before temp user DB roots are removed."""
+    with suppress(ImportError, OSError, RuntimeError, TypeError, ValueError):
+        from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import reset_media_db_cache
+
+        reset_media_db_cache()
+    with suppress(ImportError, OSError, RuntimeError, TypeError, ValueError):
+        from tldw_Server_API.app.core.DB_Management.DB_Manager import shutdown_content_backend
+
+        shutdown_content_backend()
 
 
 def _fresh_client(test_mode: bool = False, user_db_base_dir: Optional[str] = None) -> TestClient:
@@ -37,6 +53,7 @@ def _fresh_client(test_mode: bool = False, user_db_base_dir: Optional[str] = Non
         asyncio.run(reset_db_pool())
     except Exception:
         _ = None
+    _reset_media_storage_state()
 
     # Ensure schema migrations and RBAC seed exist on the fresh database
     ensure_authnz_tables(Path(tmp_path))
@@ -55,6 +72,11 @@ def _fresh_client(test_mode: bool = False, user_db_base_dir: Optional[str] = Non
     client = TestClient(app_main.app, headers={"X-API-KEY": os.environ["SINGLE_USER_API_KEY"]})
     client._tmp_auth_db_path = tmp_path  # type: ignore[attr-defined]
     return client
+
+
+def _managed_sqlite_backend_targets() -> set[str]:
+    registry = getattr(backend_factory, "_sqlite_backend_registry", {})
+    return {str(signature[1]) for signature in registry}
 
 
 def _force_backend(pg: bool):
@@ -151,15 +173,43 @@ def test_admin_kanban_fts_maintenance_smoke():
 
 
     with tempfile.TemporaryDirectory(prefix="kanban_admin_smoke_") as tmp_user_db_dir:
+        try:
+            with _fresh_client(test_mode=True, user_db_base_dir=tmp_user_db_dir) as client:
+                resp_opt = client.post("/api/v1/admin/kanban/fts/optimize", params={"user_id": 1})
+                assert resp_opt.status_code == 200, resp_opt.text
+                payload_opt = resp_opt.json()
+                assert payload_opt["user_id"] == 1
+                assert payload_opt["action"] == "optimize"
+
+                resp_rebuild = client.post("/api/v1/admin/kanban/fts/rebuild", params={"user_id": 1})
+                assert resp_rebuild.status_code == 200, resp_rebuild.text
+                payload_rebuild = resp_rebuild.json()
+                assert payload_rebuild["user_id"] == 1
+                assert payload_rebuild["action"] == "rebuild"
+        finally:
+            _reset_media_storage_state()
+
+
+def test_admin_kanban_fts_maintenance_shutdown_releases_temp_media_backend():
+    tmp_user_db_dir = tempfile.mkdtemp(prefix="kanban_admin_smoke_")
+    temp_media_db_path = str(
+        (Path(tmp_user_db_dir).resolve() / "1" / DatabasePaths.MEDIA_DB_NAME).resolve()
+    )
+
+    try:
         with _fresh_client(test_mode=True, user_db_base_dir=tmp_user_db_dir) as client:
             resp_opt = client.post("/api/v1/admin/kanban/fts/optimize", params={"user_id": 1})
             assert resp_opt.status_code == 200, resp_opt.text
-            payload_opt = resp_opt.json()
-            assert payload_opt["user_id"] == 1
-            assert payload_opt["action"] == "optimize"
 
             resp_rebuild = client.post("/api/v1/admin/kanban/fts/rebuild", params={"user_id": 1})
             assert resp_rebuild.status_code == 200, resp_rebuild.text
-            payload_rebuild = resp_rebuild.json()
-            assert payload_rebuild["user_id"] == 1
-            assert payload_rebuild["action"] == "rebuild"
+
+        assert temp_media_db_path not in _managed_sqlite_backend_targets()
+    finally:
+        leaked_targets = sorted(_managed_sqlite_backend_targets())
+        if leaked_targets:
+            backend_factory.reset_managed_sqlite_backends(
+                mode="hard",
+                sqlite_targets=leaked_targets,
+            )
+        shutil.rmtree(tmp_user_db_dir, ignore_errors=True)

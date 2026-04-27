@@ -309,6 +309,43 @@ def test_omnivoice_install_routes_to_sidecar_installer(monkeypatch):
     ]
 
 
+def test_omnivoice_install_fails_when_config_patch_is_skipped(monkeypatch):
+    from Helper_Scripts.TTS_Installers import install_tts_omnivoice_sidecar as installer
+
+    monkeypatch.setattr(
+        installer,
+        "resolve_source_checkout",
+        lambda repo_root=None: Path("/tmp/OmniVoice"),
+        raising=True,
+    )
+    monkeypatch.setattr(
+        installer,
+        "build_runtime_layout",
+        lambda runtime_base, repo_root=None: types.SimpleNamespace(
+            runtime_base=Path(runtime_base),
+            venv_dir=Path(runtime_base) / ".venv",
+            runtime_dir=Path(runtime_base) / "runtime",
+            logs_dir=Path(runtime_base) / "logs",
+            interpreter_path=Path(runtime_base) / ".venv" / "bin" / "python",
+        ),
+        raising=True,
+    )
+    monkeypatch.setattr(installer, "create_runtime_layout", lambda layout: None, raising=True)
+    monkeypatch.setattr(installer, "clone_repository", lambda repo_url, source_dir: None, raising=True)
+    monkeypatch.setattr(installer, "create_virtualenv", lambda venv_dir: None, raising=True)
+    monkeypatch.setattr(
+        installer,
+        "install_sidecar_runtime",
+        lambda *, interpreter_path, repo_root, source_checkout: None,
+        raising=True,
+    )
+    monkeypatch.setattr(installer, "validate_runtime_layout", lambda layout: [], raising=True)
+    monkeypatch.setattr(installer, "patch_tts_config", lambda **kwargs: False, raising=True)
+
+    with pytest.raises(RuntimeError, match="OmniVoice provider configuration"):
+        install_manager._install_omnivoice()
+
+
 def test_omnivoice_install_checks_download_policy_before_running_installer(monkeypatch):
     calls: list[tuple[str, object]] = []
 

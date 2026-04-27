@@ -259,8 +259,8 @@ Local service backends (Kobold, LLaMA, Oobabooga, Tabby, vLLM, Ollama, Aphrodite
 Common: `max_tokens`, `local_api_timeout`, `local_api_retries`, `local_api_retry_delay`, `streaming`, `temperature`, `top_p`, `min_p`.
 
 ## [STT-Settings]
-- `default_batch_transcription_model` (str): explicit batch/offline default model id when requests omit `model` (default: `parakeet-onnx`).
-- `default_streaming_transcription_model` (str): explicit WebSocket streaming default model id when clients omit `model` (default: `parakeet-onnx`).
+- `default_batch_transcription_model` (str): explicit batch/offline default model id when requests omit `model` (default: `parakeet-tdt-0.6b-v3-onnx`; legacy alias `parakeet-onnx` is still accepted).
+- `default_streaming_transcription_model` (str): explicit WebSocket streaming default model id when clients omit `model` (default: `parakeet-tdt-0.6b-v3-onnx`; legacy alias `parakeet-onnx` is still accepted).
 - `default_transcriber` (str): legacy provider default (`faster-whisper|parakeet|canary|...`) used for compatibility when explicit model defaults are absent.
 - `nemo_model_variant` (str), `nemo_device` (str), `nemo_cache_dir` (path)
 - `nemo_chunk_duration|nemo_overlap_duration` (sec)

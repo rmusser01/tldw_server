@@ -1125,9 +1125,9 @@ log_output_file =
 [STT-Settings]
 default_transcriber = parakeet
 default_stt_provider = parakeet
-default_batch_transcription_model = parakeet-onnx
-default_streaming_transcription_model = parakeet-onnx
-nemo_model_variant = mlx
+default_batch_transcription_model = parakeet-tdt-0.6b-v3-onnx
+default_streaming_transcription_model = parakeet-tdt-0.6b-v3-onnx
+nemo_model_variant = onnx
 nemo_device = cpu
 nemo_cache_dir = ./models/nemo
 nemo_chunk_duration = 120
