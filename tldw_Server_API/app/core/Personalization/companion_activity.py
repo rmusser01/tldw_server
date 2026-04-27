@@ -91,10 +91,10 @@ def record_companion_activity(
         if _unique_conflict(exc):
             logger.debug("companion activity duplicate skipped: {}", dedupe_key)
             return None
-        logger.debug("companion activity insert skipped: {}", exc)
+        logger.debug("companion activity insert skipped")
         return None
-    except Exception as exc:
-        logger.debug("companion activity capture skipped: {}", exc)
+    except Exception:
+        logger.debug("companion activity capture skipped")
         return None
 
 
@@ -1061,8 +1061,8 @@ def _watchlist_item_tags(item: Any) -> list[str]:
             tags = tags_fn()
             if isinstance(tags, list):
                 return [str(tag) for tag in tags if str(tag).strip()]
-        except Exception as exc:
-            logger.debug("watchlist item tags() lookup skipped: {}", exc)
+        except Exception:
+            logger.debug("watchlist item tags() lookup skipped")
 
     raw_tags_json = _value(item, "tags_json")
     if isinstance(raw_tags_json, str) and raw_tags_json.strip():
