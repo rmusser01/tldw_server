@@ -547,7 +547,7 @@ async def generate_embeddings_for_media(
                         embeddings_to_store=embeddings,
                     )
                 except Exception as exc:
-                    logger.error(f"Error storing fallback embeddings: {exc}")
+                    logger.error("Error storing fallback embeddings")
                     return _storage_failure_result(exc, len(embeddings) if embeddings else 0)
 
                 return {

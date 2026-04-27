@@ -148,6 +148,51 @@ async def test_generation_failure_sanitizes_fallback_failure(monkeypatch, tmp_pa
 
 
 @pytest.mark.asyncio
+async def test_generation_failure_sanitizes_fallback_storage_log(monkeypatch, tmp_path):
+    logger_stub = MagicMock()
+
+    async def fake_create_embeddings_batch_async(*, texts, provider, model_id, metadata):
+        if provider == "primary-provider":
+            raise RuntimeError("primary provider failed")
+        return [[0.7, 0.8, 0.9] for _ in texts]
+
+    class FakeChromaDBManager:
+        def __init__(self, *, user_id, user_embedding_config):
+            self.user_id = user_id
+            self.user_embedding_config = user_embedding_config
+
+        def store_in_chroma(self, *args, **kwargs):
+            raise RuntimeError("fallback chroma write failed at /private/chroma")
+
+    monkeypatch.setattr(
+        embeddings_v5_production_enhanced,
+        "create_embeddings_batch_async",
+        fake_create_embeddings_batch_async,
+        raising=True,
+    )
+    monkeypatch.setattr(media_embeddings, "chunk_media_content", lambda *_args, **_kwargs: [{"text": "hello", "index": 0, "start": 0, "end": 5}])
+    monkeypatch.setattr(media_embeddings, "ChromaDBManager", FakeChromaDBManager)
+    monkeypatch.setattr(media_embeddings, "logger", logger_stub)
+    monkeypatch.setattr(media_embeddings, "_user_embedding_config", lambda: {"USER_DB_BASE_DIR": str(tmp_path / "user-db")})
+
+    result = await media_embeddings.generate_embeddings_for_media(
+        media_id=13,
+        media_content={
+            "media_item": {"title": "Doc", "author": "Author", "metadata": {}},
+            "content": {"content": "hello"},
+        },
+        embedding_model="primary-model",
+        embedding_provider="primary-provider",
+        chunk_size=1000,
+        chunk_overlap=200,
+        user_id="tenant-5",
+    )
+
+    assert result["status"] == "error"
+    logger_stub.error.assert_called_once_with("Error storing fallback embeddings")
+
+
+@pytest.mark.asyncio
 async def test_generation_failure_sanitizes_outer_error_log(monkeypatch):
     logger_stub = MagicMock()
 
