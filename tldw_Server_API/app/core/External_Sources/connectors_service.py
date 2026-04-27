@@ -187,8 +187,8 @@ def _protect_oauth_state_metadata(metadata: dict[str, Any] | None) -> dict[str, 
         envelope = encrypt_json_blob(dict(metadata))
         if envelope:
             return envelope
-    except _CONNECTORS_NONCRITICAL_EXCEPTIONS as exc:
-        logger.debug("Failed to encrypt oauth state metadata: {}", exc)
+    except _CONNECTORS_NONCRITICAL_EXCEPTIONS:
+        logger.debug("Failed to encrypt oauth state metadata")
     return dict(metadata)
 
 
@@ -204,8 +204,8 @@ def _unprotect_oauth_state_metadata(metadata: Any) -> dict[str, Any]:
         decrypted = decrypt_json_blob(parsed_metadata)
         if isinstance(decrypted, dict):
             return decrypted
-    except _CONNECTORS_NONCRITICAL_EXCEPTIONS as exc:
-        logger.debug("Failed to decrypt oauth state metadata: {}", exc)
+    except _CONNECTORS_NONCRITICAL_EXCEPTIONS:
+        logger.debug("Failed to decrypt oauth state metadata")
     return {}
 
 
