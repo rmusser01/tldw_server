@@ -1,9 +1,14 @@
 import { useRef, useEffect, useState, useCallback, useMemo } from "react"
 
+type SmartScrollOptions = {
+  bottomOffsetPx?: number
+}
+
 export const useSmartScroll = (
   messages: any[],
   streaming: boolean,
-  threshold: number = 100 
+  threshold: number = 100,
+  options: SmartScrollOptions = {}
 ) => {
   const containerRef = useRef<HTMLDivElement>(null)
   const [isAutoScrollEnabled, setIsAutoScrollEnabled] = useState(true)
@@ -11,13 +16,20 @@ export const useSmartScroll = (
   const lastScrollTop = useRef(0)
   const lastScrollHeight = useRef(0)
   const isScrollingProgrammatically = useRef(false)
+  const bottomOffsetPx = Math.max(0, Math.round(options.bottomOffsetPx ?? 0))
+  const bottomOffsetPxRef = useRef(bottomOffsetPx)
+  const previousBottomOffsetPxRef = useRef(bottomOffsetPx)
 
-  const isAtBottom = useCallback(() => {
+  useEffect(() => {
+    bottomOffsetPxRef.current = bottomOffsetPx
+  }, [bottomOffsetPx])
+
+  const isAtBottom = useCallback((offsetPx: number = bottomOffsetPxRef.current) => {
     const container = containerRef.current
     if (!container) return false
 
     const { scrollTop, scrollHeight, clientHeight } = container
-    return scrollHeight - scrollTop - clientHeight <= threshold
+    return scrollHeight - scrollTop - clientHeight - offsetPx <= threshold
   }, [threshold])
 
   const scrollToBottom = useCallback((smooth: boolean = false) => {
@@ -98,6 +110,24 @@ export const useSmartScroll = (
     }
   }, [messages, isAutoScrollEnabled, scrollToBottom, streaming, isAtBottom])
 
+  useEffect(() => {
+    const container = containerRef.current
+    const previousBottomOffsetPx = previousBottomOffsetPxRef.current
+    previousBottomOffsetPxRef.current = bottomOffsetPx
+
+    if (!container) return
+    const bottomOffsetDeltaPx = bottomOffsetPx - previousBottomOffsetPx
+    if (bottomOffsetDeltaPx === 0) return
+
+    const wasPinnedToBottom = isAtBottom(previousBottomOffsetPx)
+    const nextScrollTop = wasPinnedToBottom
+      ? container.scrollTop + bottomOffsetDeltaPx
+      : container.scrollTop - bottomOffsetDeltaPx
+
+    container.scrollTop = Math.max(0, nextScrollTop)
+    lastScrollTop.current = container.scrollTop
+  }, [bottomOffsetPx, isAtBottom])
+
   const autoScrollToBottom = useCallback(() => {
     setIsAutoScrollEnabled(true)
     scrollToBottom(true)
@@ -106,7 +136,7 @@ export const useSmartScroll = (
   const isAutoScrollToBottom = useMemo(
     () => isAutoScrollEnabled && isAtBottom(),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally re-evaluate when messages or streaming change
-    [isAutoScrollEnabled, messages, streaming]
+    [bottomOffsetPx, isAutoScrollEnabled, messages, streaming]
   )
 
   return {

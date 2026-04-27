@@ -65,6 +65,10 @@ import {
 } from "@/utils/settings-return"
 import { useChatSurfaceCoordinatorStore } from "@/store/chat-surface-coordinator"
 import { useNavigate } from "react-router-dom"
+import {
+  resolveComposerBottomOffsetPx,
+  type ComposerDockLayoutMetrics
+} from "./mobile-composer-layout"
 
 const toText = (value: unknown): string =>
   typeof value === "string" ? value : String(value)
@@ -93,6 +97,7 @@ export const Playground = () => {
   const threadSearchInputRef = React.useRef<HTMLInputElement>(null)
   const shortcutsTriggerRef = React.useRef<HTMLButtonElement>(null)
   const shortcutsCloseRef = React.useRef<HTMLButtonElement>(null)
+  const composerDockRef = React.useRef<HTMLDivElement>(null)
   const [droppedFiles, setDroppedFiles] = React.useState<File[]>([])
   const [attachedResearchContext, setAttachedResearchContext] =
     React.useState<AttachedResearchContext | null>(null)
@@ -106,6 +111,8 @@ export const Playground = () => {
     React.useState<string | null>(null)
   const [dismissedReturnedResearchRunId, setDismissedReturnedResearchRunId] =
     React.useState<string | null>(null)
+  const [composerDockMetrics, setComposerDockMetrics] =
+    React.useState<ComposerDockLayoutMetrics | null>(null)
   const { t } = useTranslation(["playground", "common"])
   const [chatBackgroundImage] = useSetting(CHAT_BACKGROUND_IMAGE_SETTING)
   const [stickyChatInput] = useStorage(
@@ -134,8 +141,30 @@ export const Playground = () => {
     compareFeatureEnabled
   } = useMessageOption()
   const { setSystemPrompt } = useStoreChatModelSettings()
+  const composerBottomOffsetPx = stickyChatInput
+    ? resolveComposerBottomOffsetPx(composerDockMetrics)
+    : 0
+  const handleComposerLayoutChange = React.useCallback(
+    (metrics: ComposerDockLayoutMetrics) => {
+      if (metrics.occupiedHeightPx === 0 && metrics.keyboardInsetPx === 0) {
+        setComposerDockMetrics(null)
+        return
+      }
+
+      const dockEl = composerDockRef.current
+      setComposerDockMetrics({
+        occupiedHeightPx: dockEl
+          ? Math.round(dockEl.getBoundingClientRect().height)
+          : metrics.occupiedHeightPx,
+        keyboardInsetPx: metrics.keyboardInsetPx
+      })
+    },
+    []
+  )
   const { containerRef, isAutoScrollToBottom, autoScrollToBottom } =
-    useSmartScroll(messages, streaming, 120)
+    useSmartScroll(messages, streaming, 120, {
+      bottomOffsetPx: composerBottomOffsetPx
+    })
   const [dropState, setDropState] = React.useState<
     "idle" | "dragging" | "error"
   >("idle")
@@ -1623,6 +1652,7 @@ export const Playground = () => {
             </div>
           </div>
           <div
+            ref={composerDockRef}
             data-testid={stickyChatInput ? "playground-chat-composer-dock" : undefined}
             className={`relative w-full ${
               stickyChatInput
@@ -1648,6 +1678,10 @@ export const Playground = () => {
             )}
             <PlaygroundForm
               droppedFiles={droppedFiles}
+              stickyDockEnabled={stickyChatInput}
+              onComposerLayoutChange={
+                stickyChatInput ? handleComposerLayoutChange : undefined
+              }
               attachedResearchContext={attachedResearchContext}
               attachedResearchContextBaseline={attachedResearchContextBaseline}
               attachedResearchContextPinned={attachedResearchContextPinned}

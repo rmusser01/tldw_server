@@ -56,6 +56,8 @@ export interface UseComposerInputDeps {
   handleTextChange: (value: string, cursorPosition: number) => void
   /** Pro mode */
   isProMode: boolean
+  /** Sticky dock-specific textarea cap */
+  textareaMaxHeightOverride?: number
 }
 
 // ---------------------------------------------------------------------------
@@ -85,7 +87,8 @@ export function useComposerInput(deps: UseComposerInputDeps) {
     selectionFromPointerRef,
     tabMentionsEnabled,
     handleTextChange,
-    isProMode
+    isProMode,
+    textareaMaxHeightOverride
   } = deps
 
   // --- Shared text/draft/focus primitive ---
@@ -96,6 +99,7 @@ export function useComposerInput(deps: UseComposerInputDeps) {
     draftKey: "tldw:playgroundChatDraft",
     textareaRef,
     isProMode,
+    maxHeight: textareaMaxHeightOverride,
     getDraftMetadata: () => ({
       wasExpanded: hasExpandedLargeText,
       collapsedRange: collapsedRange

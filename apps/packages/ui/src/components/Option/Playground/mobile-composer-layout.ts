@@ -12,6 +12,11 @@ export type MobileComposerViewportState = {
   keyboardOpen: boolean
 }
 
+export type ComposerDockLayoutMetrics = {
+  occupiedHeightPx: number
+  keyboardInsetPx: number
+}
+
 export const computeKeyboardInsetPx = (params: {
   layoutViewportHeight: number
   visualViewportHeight: number
@@ -63,4 +68,56 @@ export const resolveMobileComposerViewportState = (params: {
       thresholdPx: params.thresholdPx
     })
   }
+}
+
+export const resolveStickyComposerTextareaMaxHeight = (params: {
+  viewportHeightPx: number
+  keyboardInsetPx?: number
+  isMobileViewport: boolean
+  defaultMaxHeightPx: number
+}): number => {
+  const viewportHeight = toFiniteNumber(params.viewportHeightPx)
+  const keyboardInsetPx = toFiniteNumber(params.keyboardInsetPx) ?? 0
+  const defaultMaxHeightPx = Math.max(
+    0,
+    Math.round(params.defaultMaxHeightPx)
+  )
+
+  if (viewportHeight == null || viewportHeight <= 0) {
+    return defaultMaxHeightPx
+  }
+
+  const availableViewportHeight = Math.max(
+    0,
+    Math.round(
+      viewportHeight - (params.isMobileViewport ? keyboardInsetPx : 0)
+    )
+  )
+  const viewportRatio = params.isMobileViewport ? 0.22 : 0.33
+  const maxCap = params.isMobileViewport ? 220 : 320
+  const targetHeight = Math.round(availableViewportHeight * viewportRatio)
+
+  return Math.max(
+    defaultMaxHeightPx,
+    Math.min(maxCap, Math.max(defaultMaxHeightPx, targetHeight))
+  )
+}
+
+export const resolveComposerBottomOffsetPx = (
+  metrics: ComposerDockLayoutMetrics | null | undefined
+): number => {
+  if (!metrics) {
+    return 0
+  }
+
+  const occupiedHeightPx = Math.max(
+    0,
+    Math.round(toFiniteNumber(metrics.occupiedHeightPx) ?? 0)
+  )
+  const keyboardInsetPx = Math.max(
+    0,
+    Math.round(toFiniteNumber(metrics.keyboardInsetPx) ?? 0)
+  )
+
+  return occupiedHeightPx + keyboardInsetPx
 }

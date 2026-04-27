@@ -31,6 +31,20 @@ import { useAntdNotification } from "@/hooks/useAntdNotification"
 import { useAudioSourceCatalog } from "@/hooks/useAudioSourceCatalog"
 import { useCanonicalConnectionConfig } from "@/hooks/useCanonicalConnectionConfig"
 import { useChatMoodBadgePreference } from "@/hooks/useChatMoodBadgePreference"
+import { AttachedResearchContextChip } from "./AttachedResearchContextChip"
+import { MentionsDropdown } from "./MentionsDropdown"
+import { ComposerTextarea } from "./ComposerTextarea"
+import { ComposerToolbar } from "./ComposerToolbar"
+// ContextFootprintPanel moved to PlaygroundContextWindowModal
+import { CompareToggle } from "./CompareToggle"
+import { useMobileComposerViewport } from "./useMobileComposerViewport"
+import {
+  resolveStickyComposerTextareaMaxHeight,
+  type ComposerDockLayoutMetrics
+} from "./mobile-composer-layout"
+import { PASTED_TEXT_CHAR_LIMIT } from "@/utils/constant"
+import { isFireFoxPrivateMode } from "@/utils/is-private-mode"
+import { ChatQueuePanel } from "@/components/Common/ChatQueuePanel"
 import { useConnectionState } from "@/hooks/useConnectionState"
 import type { DictationModePreference } from "@/hooks/useDictationStrategy"
 import { useMcpTools } from "@/hooks/useMcpTools"
@@ -220,6 +234,8 @@ type Props = {
     context: AttachedResearchContext
   ) => void
   onPrepareResearchFollowUp?: (target: ResearchFollowUpTarget) => void
+  stickyDockEnabled?: boolean
+  onComposerLayoutChange?: (metrics: ComposerDockLayoutMetrics) => void
 }
 
 type DefaultCharacterPreferenceQueryResult = {
@@ -233,6 +249,8 @@ type PlaygroundQueuedSourceContext = {
 }
 
 const FOLLOW_UP_RESEARCH_PROMPT_PREFIX = "Follow up on this research:"
+const CASUAL_COMPOSER_MAX_HEIGHT_PX = 120
+const PRO_COMPOSER_MAX_HEIGHT_PX = 160
 
 const buildFollowUpResearchBackground = (
   context: AttachedResearchContext
@@ -387,7 +405,9 @@ export const PlaygroundForm = ({
   onRestorePinnedResearchContext,
   onPinAttachedResearchContextHistory,
   onSelectAttachedResearchContextHistory,
-  onPrepareResearchFollowUp
+  onPrepareResearchFollowUp,
+  stickyDockEnabled = false,
+  onComposerLayoutChange
 }: Props) => {
   const { t } = useTranslation(["playground", "common", "option"])
   const notificationApi = useAntdNotification()
@@ -534,6 +554,9 @@ export const PlaygroundForm = ({
   const [autoSubmitVoiceMessage] = useStorage("autoSubmitVoiceMessage", false)
   const isMobileViewport = useMobile()
   const mobileComposerViewport = useMobileComposerViewport(isMobileViewport)
+  const [viewportHeightPx, setViewportHeightPx] = React.useState(() =>
+    typeof window === "undefined" ? 0 : window.innerHeight
+  )
   const [openModelSettings, setOpenModelSettings] = React.useState(false)
   const [openActorSettings, setOpenActorSettings] = React.useState(false)
   const [noticesExpanded, setNoticesExpanded] = React.useState(false)
@@ -887,6 +910,29 @@ export const PlaygroundForm = ({
   // showServerPersistenceHint and serverSaveInFlightRef moved to usePlaygroundPersistence
   const uiMode = useUiModeStore((state) => state.mode)
   const isProMode = uiMode === "pro"
+
+  React.useEffect(() => {
+    if (typeof window === "undefined") return
+
+    const updateViewportHeight = () => {
+      setViewportHeightPx((previousHeightPx) => {
+        const nextHeightPx = window.innerHeight
+        return previousHeightPx === nextHeightPx
+          ? previousHeightPx
+          : nextHeightPx
+      })
+    }
+
+    updateViewportHeight()
+    window.addEventListener("resize", updateViewportHeight)
+    window.visualViewport?.addEventListener("resize", updateViewportHeight)
+
+    return () => {
+      window.removeEventListener("resize", updateViewportHeight)
+      window.visualViewport?.removeEventListener("resize", updateViewportHeight)
+    }
+  }, [])
+
   const [contextToolsOpen, setContextToolsOpen] = useStorage(
     "playgroundKnowledgeSearchOpen",
     false
@@ -1483,6 +1529,27 @@ export const PlaygroundForm = ({
     restoreMessageValue: restoreCollapseState
   } = msgCollapse
 
+  const stickyTextareaMaxHeight = React.useMemo(() => {
+    if (!stickyDockEnabled) {
+      return undefined
+    }
+
+    return resolveStickyComposerTextareaMaxHeight({
+      viewportHeightPx,
+      keyboardInsetPx: mobileComposerViewport.keyboardInsetPx,
+      isMobileViewport,
+      defaultMaxHeightPx: isProMode
+        ? PRO_COMPOSER_MAX_HEIGHT_PX
+        : CASUAL_COMPOSER_MAX_HEIGHT_PX
+    })
+  }, [
+    isMobileViewport,
+    isProMode,
+    mobileComposerViewport.keyboardInsetPx,
+    stickyDockEnabled,
+    viewportHeightPx
+  ])
+
   const composerInput = useComposerInput({
     textareaRef,
     isMessageCollapsed,
@@ -1505,7 +1572,8 @@ export const PlaygroundForm = ({
     selectionFromPointerRef,
     tabMentionsEnabled,
     handleTextChange,
-    isProMode
+    isProMode,
+    textareaMaxHeightOverride: stickyTextareaMaxHeight
   })
   const {
     form,
@@ -3681,6 +3749,7 @@ export const PlaygroundForm = ({
   const composerShellRef = React.useRef<HTMLDivElement>(null)
 
   const keepComposerBottomInView = React.useCallback(() => {
+    if (stickyDockEnabled) return
     if (typeof window === "undefined") return
     const composerEl = composerShellRef.current
     if (!composerEl) return
@@ -3725,7 +3794,74 @@ export const PlaygroundForm = ({
     }
 
     adjustAncestor(scrollingElement)
-  }, [])
+  }, [stickyDockEnabled])
+
+  const notifyComposerLayoutChange = React.useCallback(() => {
+    if (!onComposerLayoutChange) return
+
+    const composerEl = composerShellRef.current
+    onComposerLayoutChange({
+      occupiedHeightPx: composerEl
+        ? Math.round(composerEl.getBoundingClientRect().height)
+        : 0,
+      keyboardInsetPx:
+        stickyDockEnabled && isMobileViewport
+          ? mobileComposerViewport.keyboardInsetPx
+          : 0
+    })
+  }, [
+    isMobileViewport,
+    mobileComposerViewport.keyboardInsetPx,
+    onComposerLayoutChange,
+    stickyDockEnabled
+  ])
+
+  React.useEffect(() => {
+    if (!onComposerLayoutChange) return
+    if (typeof window === "undefined") return
+
+    let rafId = 0
+    const scheduleMeasurement = () => {
+      if (rafId) {
+        window.cancelAnimationFrame(rafId)
+      }
+      rafId = window.requestAnimationFrame(() => {
+        rafId = 0
+        notifyComposerLayoutChange()
+      })
+    }
+
+    const composerEl = composerShellRef.current
+    scheduleMeasurement()
+
+    const resizeObserver =
+      typeof ResizeObserver !== "undefined" && composerEl
+        ? new ResizeObserver(() => {
+            scheduleMeasurement()
+          })
+        : null
+    resizeObserver?.observe(composerEl)
+    window.addEventListener("resize", scheduleMeasurement)
+
+    return () => {
+      if (rafId) {
+        window.cancelAnimationFrame(rafId)
+      }
+      resizeObserver?.disconnect()
+      window.removeEventListener("resize", scheduleMeasurement)
+    }
+  }, [notifyComposerLayoutChange, onComposerLayoutChange])
+
+  React.useEffect(() => {
+    if (!onComposerLayoutChange) return
+
+    return () => {
+      onComposerLayoutChange({
+        occupiedHeightPx: 0,
+        keyboardInsetPx: 0
+      })
+    }
+  }, [onComposerLayoutChange])
 
   const previousActionBarVisibleRef = React.useRef(actionBarVisible)
 
