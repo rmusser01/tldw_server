@@ -23,9 +23,13 @@ class _SubtitleCollectionsDb:
     def __init__(
         self,
         *,
+        cached_missing_output: bool = False,
+        fail_prune: bool = False,
         fail_usage: bool = False,
         fail_artifact_link: bool = False,
     ) -> None:
+        self.cached_missing_output = cached_missing_output
+        self.fail_prune = fail_prune
         self.fail_usage = fail_usage
         self.fail_artifact_link = fail_artifact_link
 
@@ -35,8 +39,14 @@ class _SubtitleCollectionsDb:
         *,
         format_: str,
         include_deleted: bool,
-    ) -> None:
+    ) -> SimpleNamespace | None:
+        if self.cached_missing_output:
+            return SimpleNamespace(id=11, storage_path="missing_cached_subtitle.srt")
         return None
+
+    def delete_output_artifact(self, output_id: int, *, hard: bool = False) -> None:
+        if self.fail_prune:
+            raise RuntimeError("subtitle cache prune leaked /private/audiobooks/cache.db")
 
     def create_output_artifact(self, **kwargs: Any) -> SimpleNamespace:
         return SimpleNamespace(id=42, storage_path=kwargs["storage_path"])
@@ -94,6 +104,26 @@ async def test_export_subtitles_sanitizes_usage_increment_failure_log(
     assert response.status_code == 200
     assert logger.warning_messages == ["audiobook_quota: failed to increment subtitle usage"]
     assert "/private/audiobooks/quota.db" not in logger.warning_messages[0]
+
+
+@pytest.mark.asyncio
+async def test_export_subtitles_sanitizes_missing_cache_prune_failure_log(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    logger = _LoggerStub()
+    monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path / "user_dbs"))
+    monkeypatch.setattr(ab, "logger", logger)
+
+    response = await ab.export_subtitles(
+        request=_subtitle_request(),
+        _current_user=_user(),
+        collections_db=_SubtitleCollectionsDb(cached_missing_output=True, fail_prune=True),
+    )
+
+    assert response.status_code == 200
+    assert logger.warning_messages == ["audiobook subtitles: failed to prune missing cache output"]
+    assert "/private/audiobooks/cache.db" not in logger.warning_messages[0]
 
 
 @pytest.mark.asyncio

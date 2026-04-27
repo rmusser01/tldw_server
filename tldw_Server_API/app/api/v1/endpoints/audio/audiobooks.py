@@ -1008,8 +1008,8 @@ async def export_subtitles(
                 return response
             try:
                 collections_db.delete_output_artifact(cached_row.id, hard=True)
-            except _AUDIOBOOKS_DB_OPERATION_EXCEPTIONS as exc:
-                logger.warning("audiobook subtitles: failed to prune missing cache output: {}", exc)
+            except _AUDIOBOOKS_DB_OPERATION_EXCEPTIONS:
+                logger.warning("audiobook subtitles: failed to prune missing cache output")
 
     try:
         content = generate_subtitles(
