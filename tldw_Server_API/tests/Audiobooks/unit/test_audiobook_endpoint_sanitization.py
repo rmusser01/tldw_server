@@ -13,7 +13,11 @@ pytestmark = pytest.mark.unit
 
 class _LoggerStub:
     def __init__(self) -> None:
+        self.debug_messages: list[str] = []
         self.warning_messages: list[str] = []
+
+    def debug(self, message: str, *args: Any, **kwargs: Any) -> None:
+        self.debug_messages.append(message.format(*args) if args else message)
 
     def warning(self, message: str, *args: Any, **kwargs: Any) -> None:
         self.warning_messages.append(message.format(*args) if args else message)
@@ -61,6 +65,24 @@ class _SubtitleCollectionsDb:
     def create_audiobook_artifact(self, **kwargs: Any) -> None:
         if self.fail_artifact_link:
             raise RuntimeError("subtitle artifact link leaked /private/audiobooks/artifacts.db")
+
+
+class _BrokenPayloadItem:
+    def pop(self, *args: Any, **kwargs: Any) -> None:
+        raise AttributeError("subtitle override leaked /private/audiobooks/request.json")
+
+
+class _AudiobookJobManagerStub:
+    def create_job(self, **kwargs: Any) -> dict[str, Any]:
+        return {"id": 123, "status": "queued"}
+
+
+class _AudiobookJobRequestStub:
+    queue = None
+    items = [SimpleNamespace(subtitles=None, model_fields_set=set())]
+
+    def model_dump(self) -> dict[str, Any]:
+        return {"project_title": "Example", "items": [_BrokenPayloadItem()]}
 
 
 def _subtitle_request(**kwargs: Any) -> ab.SubtitleExportRequest:
@@ -144,3 +166,22 @@ async def test_export_subtitles_sanitizes_artifact_link_failure_log(
     assert response.status_code == 200
     assert logger.warning_messages == ["audiobook subtitles: failed to link artifact"]
     assert "/private/audiobooks/artifacts.db" not in logger.warning_messages[0]
+
+
+@pytest.mark.asyncio
+async def test_create_audiobook_job_sanitizes_subtitle_override_cleanup_log(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    logger = _LoggerStub()
+    monkeypatch.setattr(ab, "logger", logger)
+    monkeypatch.setattr(ab, "_get_job_manager", lambda: _AudiobookJobManagerStub())
+
+    response = await ab.create_audiobook_job(
+        request=_AudiobookJobRequestStub(),
+        _current_user=_user(),
+    )
+
+    assert response.job_id == 123
+    assert response.status == "queued"
+    assert logger.debug_messages == ["Failed to remove subtitle override"]
+    assert "/private/audiobooks/request.json" not in logger.debug_messages[0]

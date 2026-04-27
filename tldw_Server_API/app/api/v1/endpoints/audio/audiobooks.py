@@ -585,8 +585,8 @@ async def create_audiobook_job(
                 try:
                     if isinstance(payload.get("items"), list):
                         payload["items"][idx].pop("subtitles", None)
-                except _AUDIOBOOKS_COERCE_EXCEPTIONS as exc:
-                    logger.debug("Failed to remove subtitle override at index {}: {}", idx, exc)
+                except _AUDIOBOOKS_COERCE_EXCEPTIONS:
+                    logger.debug("Failed to remove subtitle override")
 
     job_manager = _get_job_manager()
     batch_group = request.queue.batch_group if request.queue is not None else None
