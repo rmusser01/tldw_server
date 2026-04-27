@@ -1,0 +1,27 @@
+#!/bin/sh
+set -eu
+
+export_from_cmdline() {
+  key="$1"
+  prefix="systemd.setenv=${key}="
+  for arg in $(cat /proc/cmdline); do
+    case "$arg" in
+      "${prefix}"*)
+        value="${arg#"$prefix"}"
+        export "${key}=${value}"
+        return 0
+        ;;
+    esac
+  done
+  return 0
+}
+
+export_from_cmdline TLDW_AGENT_GUEST_VM_ID
+export_from_cmdline TLDW_AGENT_GUEST_CONNECTION_TOKEN
+export_from_cmdline TLDW_AGENT_GUEST_HOST_VSOCK_PORT
+export_from_cmdline TLDW_AGENT_GUEST_WORKSPACE_ROOT
+
+: "${TLDW_AGENT_GUEST_WORKSPACE_ROOT:=/workspace}"
+export TLDW_AGENT_GUEST_WORKSPACE_ROOT
+
+exec /usr/local/bin/tldw-agent-guest

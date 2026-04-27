@@ -37,6 +37,10 @@ from .models import (
     SessionSpec,
     TrustLevel,
 )
+from .macos_virtualization.helper_client import (
+    MacOSVirtualizationHelperClient,
+    MacOSVirtualizationHelperFailure,
+)
 from .macos_diagnostics import collect_macos_diagnostics
 from .orchestrator import SandboxOrchestrator, SessionActiveRunsConflict
 from .policy import SandboxPolicy, SandboxPolicyConfig, compute_policy_hash
@@ -280,10 +284,11 @@ class SandboxService:
         spec: RunSpec,
         workspace_path: str | None,
     ) -> RunStatus:
-        preflight = VZLinuxRunner().preflight(network_policy=spec.network_policy)
+        runner = VZLinuxRunner(session_control_store=self._orch)
+        preflight = runner.preflight(network_policy=spec.network_policy)
         if not preflight.available:
             raise SandboxPolicy.RuntimeUnavailable(RuntimeType.vz_linux, reasons=list(preflight.reasons or []))
-        return VZLinuxRunner().start_run(run_id, spec, workspace_path)
+        return runner.start_run(run_id, spec, workspace_path)
 
     def _start_vz_macos_run_with_execution_preflight(
         self,
@@ -988,7 +993,7 @@ class SandboxService:
         ]
 
     def macos_diagnostics(self) -> dict[str, object]:
-        return collect_macos_diagnostics()
+        return collect_macos_diagnostics(self._orch)
 
     def _audit_run_completion(self, *, user_id: str | int | None, run_id: str, status: RunStatus, spec_version: str, session_id: str | None) -> None:
         """Log a completion audit event in a fire-and-forget manner."""
@@ -1922,9 +1927,27 @@ class SandboxService:
         session_root = os.path.dirname(ws_path) if os.path.basename(ws_path) == "workspace" else ws_path
         shutil.rmtree(session_root, ignore_errors=True)
 
+    def _cleanup_vz_session_control(self, session_id: str) -> None:
+        control = self._orch.get_vz_session_control(session_id)
+        if not isinstance(control, dict):
+            return
+        runtime = str(control.get("runtime") or "").strip().lower()
+        vm_id = str(control.get("vm_id") or "").strip()
+        if runtime in {RuntimeType.vz_linux.value, RuntimeType.vz_macos.value} and vm_id:
+            try:
+                terminated = bool(MacOSVirtualizationHelperClient().terminate_vm(vm_id))
+            except MacOSVirtualizationHelperFailure as exc:
+                if exc.error_code not in {"vm_not_found", "already_terminated"}:
+                    raise
+                terminated = False
+            if not terminated:
+                logger.info("{} session vm {} already absent during cleanup", runtime, vm_id)
+        self._orch.delete_vz_session_control(session_id)
+
     def _destroy_session_serialized(self, session_id: str) -> bool:
         ws = self._orch.get_session_workspace_path(session_id)
         if not ws:
+            self._cleanup_vz_session_control(session_id)
             destroyed = bool(self._orch.destroy_session(session_id))
             if destroyed:
                 with contextlib.suppress(_SANDBOX_SERVICE_NONCRITICAL_EXCEPTIONS):
@@ -1934,6 +1957,7 @@ class SandboxService:
 
         destroyed = False
         with self._workspace_operation_lock(session_id, ws):
+            self._cleanup_vz_session_control(session_id)
             destroyed = bool(self._orch.destroy_session(session_id, remove_workspace_tree=False))
             if destroyed:
                 with contextlib.suppress(_SANDBOX_SERVICE_NONCRITICAL_EXCEPTIONS):

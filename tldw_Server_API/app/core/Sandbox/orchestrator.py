@@ -1409,6 +1409,35 @@ class SandboxOrchestrator:
             )
             return []
 
+    def put_vz_session_control(
+        self,
+        *,
+        session_id: str,
+        runtime: str,
+        vm_id: str,
+        template_id: str | None,
+        workspace_mount: str | None,
+        agent_ready: bool,
+    ) -> None:
+        self._store.put_vz_session_control(
+            session_id=str(session_id),
+            runtime=str(runtime),
+            vm_id=str(vm_id),
+            template_id=(str(template_id) if template_id is not None else None),
+            workspace_mount=(str(workspace_mount) if workspace_mount is not None else None),
+            agent_ready=bool(agent_ready),
+        )
+
+    def get_vz_session_control(self, session_id: str) -> dict[str, Any] | None:
+        return self._store.get_vz_session_control(str(session_id))
+
+    def delete_vz_session_control(self, session_id: str) -> bool:
+        return bool(self._store.delete_vz_session_control(str(session_id)))
+
+    def list_vz_session_controls(self) -> list[dict[str, Any]]:
+        rows = self._store.list_vz_session_controls()
+        return [dict(row) for row in rows if isinstance(row, dict)]
+
     # -----------------
     # Admin listing helpers
     # -----------------

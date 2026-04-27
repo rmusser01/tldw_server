@@ -1,0 +1,192 @@
+# vz_linux Reference Image
+
+This directory holds the first reproducible local image/rootfs path for the
+`vz_linux` helper and guest-agent roadmap.
+
+## Current Scope
+
+The current slice is intentionally narrow:
+
+- build the guest-mode `tldw-agent`
+- install it plus the guest service and workspace mount units into a rootfs-like directory
+- emit a canonical bundle directory with `manifest.json`, `kernel`, optional
+  `initrd`, and `rootfs.img`
+- verify the staged layout with a smoke-check script
+
+This is not yet a full distro image factory. It is the reproducible artifact path
+that later VM/image work will consume.
+
+## Inputs
+
+- `TLDW_VZ_LINUX_IMAGE_ROOTFS`
+  - rootfs directory to install into and verify
+- `TLDW_VZ_LINUX_BUNDLE_KERNEL`
+  - source kernel file to copy into the canonical bundle
+- `TLDW_VZ_LINUX_BUNDLE_ROOTFS_IMAGE`
+  - source rootfs disk image to copy into the canonical bundle
+- `TLDW_VZ_LINUX_BUNDLE_INITRD`
+  - optional initrd file to copy into the canonical bundle
+
+## Builder Profiles
+
+The Debian builder path uses repo-owned plain-text package profiles:
+
+- `profiles/minimal.packages`
+  - canonical reference image profile
+- `profiles/debug.packages`
+  - additive troubleshooting profile layered on top of `minimal`
+
+Defaults and profile composition helpers live in
+`scripts/builder-defaults.sh`.
+
+Current pinned defaults:
+
+- suite: `bookworm`
+- architecture: `arm64`
+- kernel package: `linux-image-arm64`
+
+## Debian Rootfs Builder
+
+`scripts/build-debian-rootfs.sh` is the first Linux-native entrypoint for
+turning Debian inputs into a prepared rootfs directory.
+
+Example dry run:
+
+```bash
+./scripts/build-debian-rootfs.sh --dry-run --profile minimal --output-rootfs /tmp/vz-rootfs
+```
+
+Real execution is Linux-only and currently expects root privileges for
+`debootstrap`, chrooted package installation, and rootfs preparation.
+
+The canonical staging path now also installs boot/debug affordances into the
+rootfs:
+
+- `/etc/modules-load.d/vsock.conf`
+- `serial-getty@ttyS0.service` enablement
+- `tldw-agent-guest.service`
+- `workspace.mount`
+
+## Rootfs Image Packing
+
+`scripts/pack-rootfs-image.sh` turns a prepared rootfs directory into
+`rootfs.img`.
+
+The canonical packing path is directory-to-ext4 via `mke2fs -d`, which keeps
+the source rootfs directory intact and avoids turning image packing into a
+loop-mount-only workflow.
+
+Example dry run:
+
+```bash
+./scripts/pack-rootfs-image.sh --dry-run --rootfs /tmp/vz-rootfs --output-image /tmp/rootfs.img
+```
+
+## Kernel And Initrd Extraction
+
+`scripts/extract-kernel-artifacts.sh` copies the booted kernel and matching
+initrd out of a prepared rootfs into the canonical bundle artifact names:
+
+- `kernel`
+- `initrd`
+
+Example dry run:
+
+```bash
+./scripts/extract-kernel-artifacts.sh --dry-run --rootfs /tmp/vz-rootfs --output-dir /tmp/vz-boot
+```
+
+## Top-Level Debian Bundle Builder
+
+`scripts/build-debian-bundle.sh` orchestrates the whole canonical builder flow:
+
+1. build a Debian rootfs directory
+2. pack it into `rootfs.img`
+3. extract `kernel` and `initrd`
+4. assemble the final canonical bundle
+5. emit `build-info.json`
+
+Example dry run:
+
+```bash
+./scripts/build-debian-bundle.sh --dry-run --output-dir /tmp/vz-linux-build
+```
+
+The dry run still writes `build-info.json` so provenance can be inspected
+without a privileged Linux build host.
+
+## Container Wrapper
+
+`scripts/run-linux-builder-container.sh` is a thin wrapper around the native
+Linux builder. It exists for execution convenience only and must not become a
+second build implementation.
+
+Example dry run:
+
+```bash
+./scripts/run-linux-builder-container.sh --dry-run --output-dir /tmp/vz-linux-build
+```
+
+## Quick Start
+
+```bash
+ROOTFS="$(mktemp -d "${TMPDIR:-/tmp}/vz-linux-rootfs.XXXXXX")"
+KERNEL="$(mktemp "${TMPDIR:-/tmp}/vz-linux-kernel.XXXXXX")"
+ROOTFS_IMG="$(mktemp "${TMPDIR:-/tmp}/vz-linux-rootfs-img.XXXXXX")"
+BUNDLE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/vz-linux-bundle.XXXXXX")"
+
+printf 'kernel' > "${KERNEL}"
+printf 'rootfs' > "${ROOTFS_IMG}"
+
+./scripts/install-agent.sh "${ROOTFS}"
+TLDW_VZ_LINUX_IMAGE_ROOTFS="${ROOTFS}" bash ./scripts/smoke-check.sh
+TLDW_VZ_LINUX_IMAGE_ROOTFS="${ROOTFS}" \
+TLDW_VZ_LINUX_BUNDLE_KERNEL="${KERNEL}" \
+TLDW_VZ_LINUX_BUNDLE_ROOTFS_IMAGE="${ROOTFS_IMG}" \
+bash ./scripts/build-bundle.sh "${BUNDLE_DIR}"
+```
+
+## Expected Layout
+
+```text
+<rootfs>/
+  workspace/
+  usr/
+    local/
+      bin/
+        tldw-agent-guest
+  etc/
+    systemd/
+      system/
+        tldw-agent-guest.service
+        workspace.mount
+        multi-user.target.wants/
+          tldw-agent-guest.service
+          workspace.mount
+
+<bundle>/
+  manifest.json
+  kernel
+  rootfs.img
+  initrd  # optional
+```
+
+The install script now also stages `/workspace`, installs `workspace.mount`,
+and enables both `workspace.mount` and `tldw-agent-guest.service` by creating
+the expected `multi-user.target.wants/` symlinks inside the rootfs.
+
+## Helper Smoke
+
+The canonical bundle can also drive the host-gated helper smoke:
+
+```bash
+TLDW_SANDBOX_MACOS_HELPER_DAEMON_SMOKE=1 \
+TLDW_SANDBOX_VZ_LINUX_BUNDLE_SMOKE=1 \
+TLDW_SANDBOX_VZ_LINUX_BUNDLE_PATH="${BUNDLE_DIR}" \
+source ../../.venv/bin/activate && \
+python -m pytest tldw_Server_API/tests/sandbox/test_macos_virtualization_helper_daemon_host_gated.py -q
+```
+
+At the current slice, a prepared host should validate the canonical bundle and
+move past the old `boot_not_implemented` path. The likely remaining ceiling is
+guest readiness until the real vsock guest transport is wired.

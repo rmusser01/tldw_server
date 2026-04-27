@@ -289,6 +289,8 @@ class SandboxAdminMacOSHelperDiagnostics(BaseModel):
     executable: bool
     ready: bool
     transport: str | None = None
+    protocol_version: str | None = None
+    helper_version: str | None = None
     reasons: list[str] = Field(default_factory=list)
 
 
@@ -311,6 +313,17 @@ class SandboxAdminMacOSRuntimeDiagnostics(BaseModel):
     remediation: str | None = None
 
 
+class SandboxAdminMacOSReconciliationDiagnostics(BaseModel):
+    """Admin-facing comparison between persisted VZ session state and live helper VMs."""
+
+    computed: bool
+    persisted_sessions: int
+    live_vms: int
+    stale_session_ids: list[str] = Field(default_factory=list)
+    orphaned_vm_ids: list[str] = Field(default_factory=list)
+    reasons: list[str] = Field(default_factory=list)
+
+
 class SandboxAdminMacOSDiagnosticsResponse(BaseModel):
     """Structured admin response for macOS sandbox diagnostics."""
 
@@ -318,6 +331,7 @@ class SandboxAdminMacOSDiagnosticsResponse(BaseModel):
     helper: SandboxAdminMacOSHelperDiagnostics
     templates: dict[str, SandboxAdminMacOSTemplateDiagnostics] = Field(default_factory=dict)
     runtimes: dict[str, SandboxAdminMacOSRuntimeDiagnostics] = Field(default_factory=dict)
+    reconciliation: SandboxAdminMacOSReconciliationDiagnostics | None = None
 
 
 # Snapshot/Clone Schemas
