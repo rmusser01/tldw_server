@@ -1396,8 +1396,8 @@ async def export_reading_items(
         if include_highlights:
             try:
                 highlights = service.collections.list_highlights_by_item(item_id=row.id)
-            except _READING_NONCRITICAL_EXCEPTIONS as exc:
-                logger.debug(f"Failed to fetch highlights for item {row.id}: {exc}")
+            except _READING_NONCRITICAL_EXCEPTIONS:
+                logger.debug("reading_export_highlights_fetch_failed")
                 highlights = []
             payload["highlights"] = [_serialize_highlight_row(h) for h in highlights]
         return payload

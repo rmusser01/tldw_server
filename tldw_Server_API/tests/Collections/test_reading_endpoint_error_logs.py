@@ -376,6 +376,7 @@ def _reading_action_row() -> SimpleNamespace:
         updated_at=None,
         read_at=None,
         content_hash="hash",
+        origin_type="web",
         metadata_json='{"text": "Action body text"}',
     )
 
@@ -608,3 +609,30 @@ async def test_create_reading_archive_sanitizes_cleanup_log(monkeypatch):
     assert excinfo.value.status_code == 500
     assert excinfo.value.detail == "reading_archive_db_failed"
     logger_stub.warning.assert_called_once_with("reading_archive_cleanup_failed")
+
+
+@pytest.mark.asyncio
+async def test_export_reading_items_sanitizes_highlights_log(monkeypatch):
+    logger_stub = MagicMock()
+
+    class _FailingCollections:
+        def list_highlights_by_item(self, **_kwargs):
+            raise RuntimeError("highlight lookup exploded at /private/highlights.db")
+
+    class _Service:
+        collections = _FailingCollections()
+
+        def list_items(self, **_kwargs):
+            return [_reading_action_row()], 1
+
+    monkeypatch.setattr(reading, "logger", logger_stub)
+    monkeypatch.setattr(reading, "_service_for_user", lambda _user: _Service())
+
+    response = await reading.export_reading_items(
+        include_highlights=True,
+        format="jsonl",
+        current_user=SimpleNamespace(id=42),
+    )
+
+    assert response.status_code == 200
+    logger_stub.debug.assert_called_once_with("reading_export_highlights_fetch_failed")
