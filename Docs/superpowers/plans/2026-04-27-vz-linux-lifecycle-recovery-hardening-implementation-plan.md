@@ -52,7 +52,7 @@
 - Create: `tldw_Server_API/app/core/Sandbox/vz_reconciliation.py`
 - Create: `tldw_Server_API/tests/sandbox/test_vz_reconciliation.py`
 
-- [ ] **Step 1: Write failing tests for reconciliation categories**
+- [x] **Step 1: Write failing tests for reconciliation categories**
 
 Create `tldw_Server_API/tests/sandbox/test_vz_reconciliation.py` with fake orchestrator/helper classes.
 
@@ -106,7 +106,7 @@ def test_reconciliation_marks_active_stale_sessions_as_skipped():
     assert any(item["status"] == "skipped_active_session" for item in report["items"])
 ```
 
-- [ ] **Step 2: Run tests and verify they fail**
+- [x] **Step 2: Run tests and verify they fail**
 
 Run:
 
@@ -116,7 +116,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/sandbox/test
 
 Expected: fail with import error for `vz_reconciliation` or missing `collect_vz_reconciliation`.
 
-- [ ] **Step 3: Implement `vz_reconciliation.py`**
+- [x] **Step 3: Implement `vz_reconciliation.py`**
 
 Implement a side-effect-free module:
 
@@ -174,7 +174,7 @@ Implementation rules:
 - Sort all ID lists for deterministic tests.
 - Include per-item dictionaries with `status`, `session_id`, `vm_id`, `state`, `healthy`, and `reason` where available.
 
-- [ ] **Step 4: Run Task 1 tests**
+- [x] **Step 4: Run Task 1 tests**
 
 Run:
 
@@ -184,7 +184,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/sandbox/test
 
 Expected: all Task 1 tests pass.
 
-- [ ] **Step 5: Commit Task 1**
+- [x] **Step 5: Commit Task 1**
 
 ```bash
 git add tldw_Server_API/app/core/Sandbox/vz_reconciliation.py tldw_Server_API/tests/sandbox/test_vz_reconciliation.py
@@ -199,7 +199,7 @@ git commit -m "feat(sandbox): add vz reconciliation report"
 - Modify: `tldw_Server_API/tests/sandbox/test_macos_diagnostics.py`
 - Modify: `tldw_Server_API/tests/sandbox/test_admin_macos_diagnostics.py`
 
-- [ ] **Step 1: Write failing diagnostics/schema tests**
+- [x] **Step 1: Write failing diagnostics/schema tests**
 
 Update `test_collect_macos_diagnostics_reports_reconciliation_mismatches` to assert additive fields:
 
@@ -231,7 +231,7 @@ Update schema tests so `SandboxAdminMacOSDiagnosticsResponse` accepts:
 - `skipped_active_session_ids`
 - `items`
 
-- [ ] **Step 2: Run tests and verify they fail**
+- [x] **Step 2: Run tests and verify they fail**
 
 Run:
 
@@ -244,7 +244,7 @@ source .venv/bin/activate && python -m pytest \
 
 Expected: fail on missing fields or uncaught protocol mismatch.
 
-- [ ] **Step 3: Update Pydantic schemas**
+- [x] **Step 3: Update Pydantic schemas**
 
 In `sandbox_schemas.py`, add:
 
@@ -267,7 +267,7 @@ skipped_active_session_ids: list[str] = Field(default_factory=list)
 items: list[SandboxAdminMacOSReconciliationItem] = Field(default_factory=list)
 ```
 
-- [ ] **Step 4: Update diagnostics implementation**
+- [x] **Step 4: Update diagnostics implementation**
 
 In `macos_diagnostics.py`:
 
@@ -283,7 +283,7 @@ return collect_vz_reconciliation(orchestrator)
 
 Keep diagnostics read-only.
 
-- [ ] **Step 5: Run diagnostics tests**
+- [x] **Step 5: Run diagnostics tests**
 
 Run:
 
@@ -297,7 +297,7 @@ source .venv/bin/activate && python -m pytest \
 
 Expected: all pass.
 
-- [ ] **Step 6: Commit Task 2**
+- [x] **Step 6: Commit Task 2**
 
 ```bash
 git add \
@@ -316,7 +316,7 @@ git commit -m "feat(sandbox): surface vz reconciliation diagnostics"
 - Modify: `tldw_Server_API/app/api/v1/endpoints/sandbox.py`
 - Create: `tldw_Server_API/tests/sandbox/test_admin_macos_reconciliation_repair.py`
 
-- [ ] **Step 1: Write failing service/API tests**
+- [x] **Step 1: Write failing service/API tests**
 
 Create `test_admin_macos_reconciliation_repair.py`.
 
@@ -354,7 +354,7 @@ Service-level tests should instantiate `SandboxService`, monkeypatch `collect_vz
 - active session item is skipped
 - helper unavailable/protocol mismatch with `dry_run=False` raises a service error that endpoint maps to 503
 
-- [ ] **Step 2: Run tests and verify they fail**
+- [x] **Step 2: Run tests and verify they fail**
 
 Run:
 
@@ -364,7 +364,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/sandbox/test
 
 Expected: fail because schemas/service/endpoint do not exist.
 
-- [ ] **Step 3: Add schemas**
+- [x] **Step 3: Add schemas**
 
 In `sandbox_schemas.py`, add request and response models near admin diagnostics:
 
@@ -401,7 +401,7 @@ class SandboxAdminMacOSReconciliationRepairResponse(BaseModel):
     reasons: list[str] = Field(default_factory=list)
 ```
 
-- [ ] **Step 4: Add service repair method**
+- [x] **Step 4: Add service repair method**
 
 In `service.py`:
 
@@ -442,7 +442,7 @@ Rules:
 
 Do not terminate orphaned VMs.
 
-- [ ] **Step 5: Add endpoint**
+- [x] **Step 5: Add endpoint**
 
 In `endpoints/sandbox.py`:
 
@@ -468,7 +468,7 @@ async def admin_repair_macos_reconciliation(
     return SandboxAdminMacOSReconciliationRepairResponse.model_validate(payload)
 ```
 
-- [ ] **Step 6: Run repair tests**
+- [x] **Step 6: Run repair tests**
 
 Run:
 
@@ -481,7 +481,7 @@ source .venv/bin/activate && python -m pytest \
 
 Expected: all pass.
 
-- [ ] **Step 7: Commit Task 3**
+- [x] **Step 7: Commit Task 3**
 
 ```bash
 git add \
@@ -498,7 +498,7 @@ git commit -m "feat(sandbox): add explicit vz reconciliation repair"
 - Modify: `tldw_Server_API/app/core/Sandbox/runners/vz_linux_runner.py`
 - Modify: `tldw_Server_API/tests/sandbox/test_vz_linux_runner.py`
 
-- [ ] **Step 1: Write failing runner tests**
+- [x] **Step 1: Write failing runner tests**
 
 Add tests:
 
@@ -530,7 +530,7 @@ def test_vz_linux_session_reuse_protocol_mismatch_does_not_delete_control(...):
     ...
 ```
 
-- [ ] **Step 2: Run tests and verify current behavior**
+- [x] **Step 2: Run tests and verify current behavior**
 
 Run:
 
@@ -540,7 +540,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/sandbox/test
 
 Expected: tests may already pass for deletion behavior but may fail on explicit protocol-mismatch message if not imported/caught clearly. Keep them as regression coverage either way.
 
-- [ ] **Step 3: Make runner intent explicit**
+- [x] **Step 3: Make runner intent explicit**
 
 In `vz_linux_runner.py`:
 
@@ -555,7 +555,7 @@ The behavior must stay:
 - helper unavailable exception: fail without deleting
 - protocol mismatch exception: fail without deleting
 
-- [ ] **Step 4: Run runner tests**
+- [x] **Step 4: Run runner tests**
 
 Run:
 
@@ -565,7 +565,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/sandbox/test
 
 Expected: all pass.
 
-- [ ] **Step 5: Commit Task 4**
+- [x] **Step 5: Commit Task 4**
 
 ```bash
 git add tldw_Server_API/app/core/Sandbox/runners/vz_linux_runner.py tldw_Server_API/tests/sandbox/test_vz_linux_runner.py
@@ -579,7 +579,7 @@ git commit -m "fix(sandbox): fail closed on vz session helper mismatch"
 - Modify: `Docs/Sandbox/macos-runtime-operator-notes.md`
 - Optionally modify: `tools/macos-vz-helper/README.md`
 
-- [ ] **Step 1: Update stale current-state language**
+- [x] **Step 1: Update stale current-state language**
 
 Remove or replace claims that:
 
@@ -593,7 +593,7 @@ Replace with:
 - guest `tldw-agent` connects over vsock
 - operator smoke validates ephemeral execution and same-session reuse
 
-- [ ] **Step 2: Document reconciliation split**
+- [x] **Step 2: Document reconciliation split**
 
 Add documentation that:
 
@@ -603,7 +603,7 @@ Add documentation that:
 - dry-run is default
 - orphan VM termination is report-only until helper VM metadata is richer
 
-- [ ] **Step 3: Run doc grep checks**
+- [x] **Step 3: Run doc grep checks**
 
 Run:
 
@@ -614,7 +614,7 @@ rg -n "boot path.*incomplete|vsock.*incomplete|real vsock transport binding.*inc
 
 Expected: no stale incomplete claims remain, except if explicitly described as historical context.
 
-- [ ] **Step 4: Commit Task 5**
+- [x] **Step 4: Commit Task 5**
 
 ```bash
 git add \
@@ -631,7 +631,7 @@ If `tools/macos-vz-helper/README.md` was not changed, omit it from `git add`.
 **Files:**
 - No source changes unless verification finds issues.
 
-- [ ] **Step 1: Run focused sandbox tests**
+- [x] **Step 1: Run focused sandbox tests**
 
 Run:
 
@@ -649,7 +649,7 @@ source .venv/bin/activate && python -m pytest \
 
 Expected: all pass.
 
-- [ ] **Step 2: Run helper-client regression tests**
+- [x] **Step 2: Run helper-client regression tests**
 
 Run:
 
@@ -661,7 +661,7 @@ source .venv/bin/activate && python -m pytest \
 
 Expected: all pass.
 
-- [ ] **Step 3: Run Bandit on touched code**
+- [x] **Step 3: Run Bandit on touched code**
 
 Run:
 
@@ -677,7 +677,7 @@ source .venv/bin/activate && python -m bandit \
 
 Expected: no new high/medium findings in touched code. If Bandit is not installed, install/use the project dev environment only after approval if needed.
 
-- [ ] **Step 4: Run formatting/whitespace checks**
+- [x] **Step 4: Run formatting/whitespace checks**
 
 Run:
 
@@ -687,7 +687,7 @@ git diff --check
 
 Expected: no output.
 
-- [ ] **Step 5: Review final diff**
+- [x] **Step 5: Review final diff**
 
 Run:
 
@@ -705,7 +705,7 @@ Check:
 - helper unavailable/protocol mismatch does not delete metadata
 - docs match current real VZ/vsock state
 
-- [ ] **Step 6: Final commit if needed**
+- [x] **Step 6: Final commit if needed**
 
 If verification fixes were needed:
 
