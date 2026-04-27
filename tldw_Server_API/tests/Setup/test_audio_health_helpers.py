@@ -174,6 +174,27 @@ async def test_get_tts_health_surfaces_sanitized_omnivoice_sidecar_status(monkey
     assert envelope["runtime"] == "sidecar"
 
 
+def test_tts_health_capability_serializer_failure_log_is_sanitized(monkeypatch):
+    class _FailingTTSService:
+        def _serialize_capabilities(self, _caps):
+            raise RuntimeError("capability serializer exploded at /private/tts-caps.json")
+
+    fake_logger = MagicMock()
+    monkeypatch.setattr(audio_health, "logger", fake_logger)
+
+    result = audio_health._serialize_tts_caps_for_health(
+        _FailingTTSService(),
+        {"provider": "kokoro", "voices": ["af_heart"]},
+    )
+
+    assert result == {"provider": "kokoro", "voices": ["af_heart"]}
+    fake_logger.debug.assert_called_once()
+    message = fake_logger.debug.call_args.args[0]
+    assert "exploded" not in message
+    assert "/private/" not in message
+    assert not fake_logger.debug.call_args.kwargs
+
+
 @pytest.mark.asyncio
 async def test_get_tts_health_derives_omnivoice_backoff_state_from_supervisor(monkeypatch):
     class _FakeRegistry:

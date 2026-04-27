@@ -130,8 +130,8 @@ def _serialize_tts_caps_for_health(tts_service: TTSServiceV2, caps: Any) -> Any:
     if callable(serializer):
         try:
             return serializer(caps)
-        except Exception as exc:
-            logger.debug(f"TTS health capabilities serialization failed via service helper: {exc}")
+        except Exception:
+            logger.debug("TTS health capabilities serialization failed via service helper")
     if isinstance(caps, dict):
         return dict(caps)
     try:
