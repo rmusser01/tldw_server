@@ -1062,8 +1062,8 @@ async def create_transcription(
             )
 
             transcribed_text = _cv_post(transcribed_text)
-        except _AUDIO_TRANSCRIPTIONS_NONCRITICAL_EXCEPTIONS as exc:
-            logger.debug(f"Custom vocabulary postprocessing failed; continuing without it: {exc}")
+        except _AUDIO_TRANSCRIPTIONS_NONCRITICAL_EXCEPTIONS:
+            logger.debug("Custom vocabulary postprocessing failed; continuing without it")
 
         raw_transcribed_text = transcribed_text
         raw_timed_segments = _normalize_timed_segments(segments_for_timing)
