@@ -91,9 +91,16 @@ def _install_simple_tracing_manager(monkeypatch):
     class StubManager:
         def __init__(self):
             self.latest_span = StubSpan()
+            self.latest_attributes = None
 
         @contextlib.contextmanager
         def span(self, *args, **kwargs):
+            self.latest_attributes = kwargs.get("attributes")
+            yield self.latest_span
+
+        @contextlib.asynccontextmanager
+        async def async_span(self, *args, **kwargs):
+            self.latest_attributes = kwargs.get("attributes")
             yield self.latest_span
 
     manager = StubManager()
@@ -138,6 +145,53 @@ def test_trace_operation_records_exception_once_with_real_manager(monkeypatch):
     assert tracer.latest_span is not None
     assert len(tracer.latest_span.recorded) == 1
     assert len(tracer.latest_span.statuses) == 1
+
+
+@pytest.mark.asyncio
+async def test_trace_operation_async_arg_serialization_debug_log_does_not_leak_raw_exception(monkeypatch):
+    manager = _install_simple_tracing_manager(monkeypatch)
+    debug_messages = []
+
+    def exploding_dumps(value):
+        raise RuntimeError("trace backend exploded /private/trace.db")
+
+    monkeypatch.setattr(traces_module, "json", types.SimpleNamespace(dumps=exploding_dumps))
+    monkeypatch.setattr(traces_module.logger, "debug", debug_messages.append)
+
+    @traces_module.trace_operation(name="async.args", record_args=True)
+    async def work(value):
+        return f"ok:{value}"
+
+    assert await work("input") == "ok:input"
+    assert manager.latest_attributes == {
+        "function": "work",
+        "module": __name__,
+    }
+    assert debug_messages == ["trace_operation arg serialization failed"]
+    assert "trace backend exploded" not in debug_messages[0]
+    assert "/private/trace.db" not in debug_messages[0]
+
+
+@pytest.mark.asyncio
+async def test_trace_operation_async_result_serialization_debug_log_does_not_leak_raw_exception(monkeypatch):
+    manager = _install_simple_tracing_manager(monkeypatch)
+    debug_messages = []
+
+    def exploding_dumps(value):
+        raise RuntimeError("trace backend exploded /private/trace.db")
+
+    monkeypatch.setattr(traces_module, "json", types.SimpleNamespace(dumps=exploding_dumps))
+    monkeypatch.setattr(traces_module.logger, "debug", debug_messages.append)
+
+    @traces_module.trace_operation(name="async.result", record_result=True)
+    async def work():
+        return {"status": "ok"}
+
+    assert await work() == {"status": "ok"}
+    assert manager.latest_span.attributes == {}
+    assert debug_messages == ["trace_operation result serialization failed"]
+    assert "trace backend exploded" not in debug_messages[0]
+    assert "/private/trace.db" not in debug_messages[0]
 
 
 def test_trace_operation_arg_serialization_debug_log_does_not_leak_raw_exception(monkeypatch):
