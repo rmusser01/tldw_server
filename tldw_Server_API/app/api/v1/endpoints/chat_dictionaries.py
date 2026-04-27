@@ -963,7 +963,7 @@ async def bulk_dictionary_entry_operations(
     except InputError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
     except Exception as e:
-        logger.error(f"Error performing bulk entry operation: {e}")
+        logger.error("Error performing bulk entry operation")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to perform bulk entry operation",
@@ -1011,7 +1011,7 @@ async def reorder_dictionary_entries(
             logger.error("Error reordering dictionary entries")
         raise map_db_error_to_http(e, default_detail="Failed to reorder dictionary entries") from e
     except Exception as e:
-        logger.error(f"Error reordering dictionary entries: {e}")
+        logger.error("Error reordering dictionary entries")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to reorder dictionary entries",
@@ -1068,10 +1068,10 @@ async def process_text_with_dictionaries(
         )
     except (InputError, CharactersRAGDBError) as e:
         if isinstance(e, CharactersRAGDBError) and not isinstance(e, InputError):
-            logger.error("Error processing text: {}", e)
+            logger.error("Error processing text")
         raise map_db_error_to_http(e, default_detail="Failed to process text") from e
     except Exception as e:
-        logger.error(f"Error processing text: {e}")
+        logger.error("Error processing text")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to process text",

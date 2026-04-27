@@ -674,8 +674,10 @@ async def test_process_text_with_dictionaries_maps_input_error(monkeypatch: pyte
 
 @pytest.mark.asyncio
 async def test_process_text_with_dictionaries_maps_database_error(monkeypatch: pytest.MonkeyPatch):
+    logger_stub = _patch_endpoint_logger(monkeypatch)
+
     def _process_text(self, *_args, **_kwargs):
-        raise CharactersRAGDBError("driver failed")
+        raise _database_failure()
 
     _patch_service(monkeypatch, process_text=_process_text)
 
@@ -687,6 +689,29 @@ async def test_process_text_with_dictionaries_maps_database_error(monkeypatch: p
 
     assert exc_info.value.status_code == 500
     assert exc_info.value.detail == "Failed to process text"
+    _assert_sanitized_log_call(logger_stub, "Error processing text")
+
+
+@pytest.mark.asyncio
+async def test_process_text_with_dictionaries_sanitizes_unexpected_error_log(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    logger_stub = _patch_endpoint_logger(monkeypatch)
+
+    def _process_text(self, *_args, **_kwargs):
+        raise _unexpected_failure()
+
+    _patch_service(monkeypatch, process_text=_process_text)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await chat_dictionary_endpoints.process_text_with_dictionaries(
+            request=chat_dictionary_endpoints.ProcessTextRequest(text="hello"),
+            db=object(),
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "Failed to process text"
+    _assert_sanitized_log_call(logger_stub, "Error processing text")
 
 
 @pytest.mark.asyncio
@@ -888,6 +913,33 @@ async def test_bulk_dictionary_entry_operations_treats_db_error_as_partial_failu
 
 
 @pytest.mark.asyncio
+async def test_bulk_dictionary_entry_operations_sanitizes_unexpected_error_log(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    logger_stub = _patch_endpoint_logger(monkeypatch)
+
+    class _FailingBulkOperation:
+        operation = "activate"
+        group_name = None
+
+        @property
+        def entry_ids(self):
+            raise _unexpected_failure()
+
+    _patch_service(monkeypatch)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await chat_dictionary_endpoints.bulk_dictionary_entry_operations(
+            operation=_FailingBulkOperation(),
+            db=object(),
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "Failed to perform bulk entry operation"
+    _assert_sanitized_log_call(logger_stub, "Error performing bulk entry operation")
+
+
+@pytest.mark.asyncio
 async def test_reorder_dictionary_entries_maps_input_error(monkeypatch: pytest.MonkeyPatch):
     def _get_dictionary(self, *_args, **_kwargs):
         return {"id": 42}
@@ -921,6 +973,34 @@ async def test_reorder_dictionary_entries_maps_database_error(monkeypatch: pytes
 
     def _reorder_entries(self, *_args, **_kwargs):
         raise _database_failure()
+
+    _patch_service(
+        monkeypatch,
+        get_dictionary=_get_dictionary,
+        reorder_entries=_reorder_entries,
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await chat_dictionary_endpoints.reorder_dictionary_entries(
+            dictionary_id=42,
+            reorder_request=chat_dictionary_endpoints.DictionaryEntryReorderRequest(entry_ids=[1]),
+            db=object(),
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "Failed to reorder dictionary entries"
+    _assert_sanitized_log_call(logger_stub, "Error reordering dictionary entries")
+
+
+@pytest.mark.asyncio
+async def test_reorder_dictionary_entries_sanitizes_unexpected_error_log(monkeypatch: pytest.MonkeyPatch):
+    logger_stub = _patch_endpoint_logger(monkeypatch)
+
+    def _get_dictionary(self, *_args, **_kwargs):
+        return {"id": 42}
+
+    def _reorder_entries(self, *_args, **_kwargs):
+        raise _unexpected_failure()
 
     _patch_service(
         monkeypatch,
