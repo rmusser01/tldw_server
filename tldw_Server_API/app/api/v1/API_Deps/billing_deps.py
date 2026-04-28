@@ -180,8 +180,8 @@ async def resolve_org_id_for_principal(principal: AuthPrincipal) -> int | None:
         if _allow_orgless_billing_access():
             return None
         raise
-    except Exception as exc:
-        logger.debug(f"resolve_org_id_for_principal failed: {exc}")
+    except Exception:
+        logger.debug("resolve_org_id_for_principal failed")
         return None
 
 
@@ -391,8 +391,8 @@ async def add_billing_headers(
         response.headers["X-Billing-Plan-Api-Limit"] = str(limits.get("api_calls_day", "unlimited"))
         response.headers["X-Billing-Api-Usage-Today"] = str(usage.api_calls_today)
 
-    except Exception as exc:
-        logger.debug(f"Failed to add billing headers: {exc}")
+    except Exception:
+        logger.debug("Failed to add billing headers")
 
 
 class LimitEnforcer:
