@@ -224,7 +224,7 @@ class AudioProcessor:
                 Path(tmp_path).unlink(missing_ok=True)
 
         except _AUDIO_PROCESS_EXCEPTIONS as e:
-            logger.error(f"Audio validation error: {e}")
+            logger.error("Audio validation error ({})", type(e).__name__)
             return False, f"Failed to validate audio: {e}", info
 
     def convert_audio(
@@ -427,7 +427,7 @@ class AudioProcessor:
                 Path(tmp_path).unlink(missing_ok=True)
 
         except _AUDIO_PROCESS_EXCEPTIONS as e:
-            logger.error(f"Failed to extract clean segment: {e}")
+            logger.error("Failed to extract clean segment ({})", type(e).__name__)
             return audio_bytes
 
 
@@ -482,7 +482,7 @@ def process_voice_reference(
         return audio_bytes, None
 
     except _AUDIO_PROCESS_EXCEPTIONS as e:
-        logger.error(f"Failed to process voice reference: {e}")
+        logger.error("Failed to process voice reference ({})", type(e).__name__)
         return None, str(e)
 
 
@@ -530,7 +530,7 @@ async def process_voice_reference_async(
         return audio_bytes, None
 
     except _AUDIO_PROCESS_EXCEPTIONS as e:
-        logger.error(f"Failed to process voice reference (async): {e}")
+        logger.error("Failed to process voice reference (async) ({})", type(e).__name__)
         return None, str(e)
 
 def split_text_into_chunks(
