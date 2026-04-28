@@ -255,8 +255,8 @@ class CloneService:
                         idempotency_key=t.get("idempotency_key"),
                         set_as_latest=is_latest_run,
                     )
-            except Exception as exc:
-                logger.warning(f"Failed to copy transcripts for media {media_id}: {exc}")
+            except Exception:
+                logger.warning(f"Failed to copy transcripts for media {media_id}")
 
             return str(new_media_id)
         except Exception as exc:

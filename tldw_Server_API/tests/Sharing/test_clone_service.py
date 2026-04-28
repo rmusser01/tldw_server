@@ -187,6 +187,49 @@ def test_copy_media_deep_copies_transcripts():
     }
 
 
+def test_copy_media_transcript_failure_log_is_sanitized():
+    """Transcript copy is fail-open, but logs must not expose backend details."""
+    media_row = {
+        "url": "",
+        "title": "T",
+        "type": "text",
+        "content": "c",
+        "keywords": "",
+        "prompt": "",
+        "transcription_model": "",
+        "author": "",
+        "ingestion_date": "",
+    }
+    svc, _, _, _, _ = _make_service(
+        src_media_items=media_row,
+        add_result=(10, "u10", "ok"),
+    )
+    sensitive_error = RuntimeError(
+        "sqlite:///tmp/private/media.db password=supersecret token=abc123"
+    )
+
+    with (
+        patch(
+            "tldw_Server_API.app.core.Sharing.clone_service.get_media_transcripts",
+            side_effect=sensitive_error,
+        ),
+        patch("tldw_Server_API.app.core.Sharing.clone_service.logger") as fake_logger,
+    ):
+        new_id = svc._copy_media_item("30")
+
+    logged_text = " ".join(
+        str(part)
+        for call in fake_logger.warning.call_args_list
+        for part in call.args
+    )
+    assert new_id == "10"
+    assert "Failed to copy transcripts for media 30" in logged_text
+    assert "sqlite://" not in logged_text
+    assert "/tmp/private/media.db" not in logged_text
+    assert "supersecret" not in logged_text
+    assert "abc123" not in logged_text
+
+
 def test_copy_media_falls_back_to_last_transcript_when_latest_pointer_dangles():
     media_row = {
         "url": "",
