@@ -764,7 +764,11 @@ class TTSAdapterRegistry:
                 if self._failure_retry_seconds is not None:
                     self._schedule_retry(provider)
             except _TTS_REGISTRY_ADAPTER_EXCEPTIONS as e:
-                logger.debug(f"Error getting capabilities for {provider.value}: {e}")
+                logger.debug(
+                    "Error getting capabilities for {} ({})",
+                    provider.value,
+                    e.__class__.__name__,
+                )
                 if self._failure_retry_seconds is not None:
                     self._schedule_retry(provider)
 
@@ -920,7 +924,11 @@ class TTSAdapterRegistry:
                 try:
                     await resource_manager.unregister_model(provider.value)
                 except _TTS_REGISTRY_NONCRITICAL_EXCEPTIONS as e:
-                    logger.warning(f"Error unregistering {provider.value} from resource manager: {e}")
+                    logger.warning(
+                        "Error unregistering {} from resource manager ({})",
+                        provider.value,
+                        e.__class__.__name__,
+                    )
 
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
@@ -935,7 +943,10 @@ class TTSAdapterRegistry:
             try:
                 await resource_manager.cleanup_all()
             except _TTS_REGISTRY_NONCRITICAL_EXCEPTIONS as e:
-                logger.warning(f"Error during resource manager cleanup: {e}")
+                logger.warning(
+                    "Error during resource manager cleanup ({})",
+                    e.__class__.__name__,
+                )
 
         logger.info("All TTS adapters closed")
 
