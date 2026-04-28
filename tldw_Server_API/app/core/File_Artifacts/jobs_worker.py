@@ -104,7 +104,7 @@ async def _handle_export_job(job: dict[str, Any]) -> dict[str, Any]:
                 "expires_at": export_info.expires_at.isoformat() if export_info.expires_at else None,
             }
         except Exception as exc:
-            logger.error("file_artifacts worker: export failed file_id={} error={}", file_id, exc)
+            logger.error("file_artifacts worker: export failed error_type={}", type(exc).__name__)
             try:
                 cdb.update_file_artifact_export(
                     file_id,
@@ -118,7 +118,10 @@ async def _handle_export_job(job: dict[str, Any]) -> dict[str, Any]:
                     export_consumed_at=None,
                 )
             except Exception as reset_exc:
-                logger.warning("file_artifacts worker: failed to reset export status for {}: {}", file_id, reset_exc)
+                logger.warning(
+                    "file_artifacts worker: failed to reset export status error_type={}",
+                    type(reset_exc).__name__,
+                )
             raise FileArtifactsJobError(str(exc), retryable=False) from exc
 
 
