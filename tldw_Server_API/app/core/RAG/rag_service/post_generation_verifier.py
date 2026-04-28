@@ -281,8 +281,8 @@ class PostGenerationVerifier:
         try:
             from tldw_Server_API.app.core.Claims_Extraction.monitoring import record_postcheck_metrics
             record_postcheck_metrics(total, unsupported)
-        except Exception as metrics_error:  # noqa: BLE001 - metrics best-effort
-            logger.debug("Post-generation verifier metrics recording failed", exc_info=metrics_error)
+        except Exception:  # noqa: BLE001 - metrics best-effort
+            logger.debug("Post-generation verifier metrics recording failed")
 
         # Decide if we should attempt a repair
         if ratio <= self._threshold or self._max_retries <= 0:
@@ -328,8 +328,8 @@ class PostGenerationVerifier:
                                     expanded = await expand_fn(query, strategies=["acronym", "synonym", "domain"])  # light expansion
                                     if isinstance(expanded, list):
                                         candidate_queries.extend([q for q in expanded if isinstance(q, str) and q.strip()])
-                            except Exception as expansion_error:  # noqa: BLE001 - expansion best-effort
-                                logger.debug("Adaptive fix query expansion failed; continuing", exc_info=expansion_error)
+                            except Exception:  # noqa: BLE001 - expansion best-effort
+                                logger.debug("Adaptive fix query expansion failed; continuing")
                             # Optional HyDE vector for the base query
                             hyde_vector = None
                             try:
@@ -449,8 +449,8 @@ class PostGenerationVerifier:
             outcome.new_answer = new_answer
             try:
                 increment_counter("rag_adaptive_fix_success_total", 1)
-            except Exception as metrics_error:  # noqa: BLE001 - metrics best-effort
-                logger.debug("Post-generation adaptive-fix success metric failed", exc_info=metrics_error)
+            except Exception:  # noqa: BLE001 - metrics best-effort
+                logger.debug("Post-generation adaptive-fix success metric failed")
             observe_histogram("rag_postcheck_duration_seconds", time.time() - start_ts, labels={"outcome": "fixed"})
         else:
             observe_histogram("rag_postcheck_duration_seconds", time.time() - start_ts, labels={"outcome": "unfixed"})
