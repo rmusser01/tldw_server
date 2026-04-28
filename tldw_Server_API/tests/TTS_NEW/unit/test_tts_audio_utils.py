@@ -1,5 +1,9 @@
+import sys
+import types
+
 import numpy as np
 
+from tldw_Server_API.app.core.TTS import audio_utils
 from tldw_Server_API.app.core.TTS.audio_utils import (
     analyze_audio_signal,
     compute_audio_peak,
@@ -63,3 +67,59 @@ def test_evaluate_audio_quality_flags_silence_and_short_duration():
     assert metrics["rms"] == 0.0
     assert any("low_levels" in w for w in warnings)
     assert any("trailing_silence_ms" in w for w in warnings)
+
+
+def test_convert_audio_fallback_log_sanitizes_exception_text(monkeypatch):
+    processor = audio_utils.AudioProcessor.__new__(audio_utils.AudioProcessor)
+    processor.ffmpeg_available = False
+    processor.librosa_available = True
+    audio_bytes = b"original audio"
+    secret_detail = "/Users/example/private/voice-clone-token-sk-test.wav"
+    logged_messages: list[str] = []
+
+    def fail_load(*args, **kwargs):
+        raise RuntimeError(f"failed to decode {secret_detail}")
+
+    fake_librosa = types.SimpleNamespace(load=fail_load)
+    fake_soundfile = types.SimpleNamespace(write=lambda *args, **kwargs: None)
+    monkeypatch.setitem(sys.modules, "librosa", fake_librosa)
+    monkeypatch.setitem(sys.modules, "soundfile", fake_soundfile)
+
+    sink_id = audio_utils.logger.add(
+        lambda message: logged_messages.append(message.record["message"]),
+        level="ERROR",
+    )
+    try:
+        result = processor.convert_audio(audio_bytes)
+    finally:
+        audio_utils.logger.remove(sink_id)
+
+    assert result == audio_bytes
+    assert any("Audio conversion failed" in message for message in logged_messages)
+    assert all(secret_detail not in message for message in logged_messages)
+
+
+def test_check_ffmpeg_fallback_log_sanitizes_exception_text(monkeypatch):
+    processor = audio_utils.AudioProcessor.__new__(audio_utils.AudioProcessor)
+    processor.ffmpeg_path = None
+    secret_detail = "/Users/example/private/ffmpeg-token-sk-test"
+    logged_messages: list[str] = []
+
+    def fail_run(*args, **kwargs):
+        raise RuntimeError(f"ffmpeg probe failed at {secret_detail}")
+
+    monkeypatch.setattr(audio_utils.shutil, "which", lambda _name: "/usr/bin/ffmpeg")
+    monkeypatch.setattr(audio_utils.subprocess, "run", fail_run)
+
+    sink_id = audio_utils.logger.add(
+        lambda message: logged_messages.append(message.record["message"]),
+        level="WARNING",
+    )
+    try:
+        result = processor._check_ffmpeg()
+    finally:
+        audio_utils.logger.remove(sink_id)
+
+    assert result is False
+    assert any("ffmpeg not found or not runnable" in message for message in logged_messages)
+    assert all(secret_detail not in message for message in logged_messages)
