@@ -3,6 +3,7 @@ import concurrent.futures
 import time
 
 import pytest
+from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps import Audit_DB_Deps as deps
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
@@ -37,6 +38,22 @@ class _StoppingService:
 
     async def stop(self) -> None:
         self.stopped = True
+
+
+class _SensitiveFailingStopService:
+    def __init__(self, loop: asyncio.AbstractEventLoop) -> None:
+        self._loop = loop
+        self.db_path = "/tmp/audit-secret-token/Media_DB_v2.db"
+        self.storage_mode = "per_user"
+
+    @property
+    def owner_loop(self):
+        return self._loop
+
+    async def stop(self) -> None:
+        raise RuntimeError(
+            "failed opening /tmp/audit-secret-token/Media_DB_v2.db with password=hunter2"
+        )
 
 
 class _BlockingStopService:
@@ -210,6 +227,32 @@ async def test_shutdown_all_audit_services_returns_summary_and_can_raise(monkeyp
     assert summary.errors
     assert "stop failed" in summary.errors[0]
     assert state.cache == {}
+
+
+@pytest.mark.asyncio
+async def test_shutdown_all_audit_services_logs_sanitized_stop_failure(monkeypatch):
+    loop = asyncio.get_running_loop()
+    service = _SensitiveFailingStopService(loop)
+    state = deps._LoopState(cache={1: service}, loop=loop)
+    messages = []
+    sink_id = logger.add(messages.append, format="{message}")
+
+    monkeypatch.setattr(deps, "_all_loop_states", lambda: [state])
+
+    try:
+        summary = await deps.shutdown_all_audit_services(raise_on_error=False)
+    finally:
+        logger.remove(sink_id)
+
+    rendered_logs = "\n".join(messages)
+
+    assert summary.error_count == 1
+    assert "password=hunter2" in summary.errors[0]
+    assert "/tmp/audit-secret-token/Media_DB_v2.db" in summary.errors[0]
+    assert "password=hunter2" not in rendered_logs
+    assert "/tmp/audit-secret-token/Media_DB_v2.db" not in rendered_logs
+    assert "RuntimeError" in rendered_logs
+
 
 @pytest.mark.asyncio
 async def test_shutdown_all_audit_services_runs_stop_fan_out_concurrently(monkeypatch):

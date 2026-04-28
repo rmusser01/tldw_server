@@ -206,7 +206,12 @@ async def _stop_audit_service_instance(
         logger.error(timeout_label)
         return False, True, timeout_label, exc
     except Exception as exc:
-        logger.error(f"Error shutting down audit service ({label}): {exc}", exc_info=True)
+        logger.error(
+            "Error shutting down audit service ({}): {}",
+            label,
+            type(exc).__name__,
+            exc_info=True,
+        )
         return False, False, f"{type(exc).__name__}: {exc}", exc
 
 
@@ -1025,9 +1030,8 @@ async def shutdown_all_audit_services(*, raise_on_error: bool = True) -> AuditSh
         logger.info(f"Shutting down audit services for {total_instances} instances...")
 
         def _service_label(service: UnifiedAuditService) -> str:
-            db_path = getattr(service, "db_path", None)
             storage_mode = getattr(service, "storage_mode", None)
-            return f"id={id(service)} db_path={db_path} storage_mode={storage_mode}"
+            return f"id={id(service)} storage_mode={storage_mode}"
 
         if services:
             stop_tasks = [
