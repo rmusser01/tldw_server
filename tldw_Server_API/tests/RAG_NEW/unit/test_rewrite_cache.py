@@ -1,10 +1,14 @@
 from pathlib import Path
 
 import pytest
+from loguru import logger
 
+from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.RAG.rag_service.rewrite_cache import (
     RewriteCache,
     _is_relative_to,
+    _normalize_query,
+    _safe_path,
 )
 
 pytestmark = pytest.mark.unit
@@ -94,3 +98,77 @@ def test_rewrite_cache_corpus_scopes_entries(tmp_path, monkeypatch):
     assert any("tenant-b rewrite" == r for r in out_b)
     assert all("tenant-b rewrite" != r for r in out_a)
     assert all("tenant-a rewrite" != r for r in out_b)
+
+
+def test_safe_path_resolution_log_omits_raw_exception_details(monkeypatch):
+    secret_path = "/tmp/rewrite-cache/secret-token-123/cache.jsonl"
+    messages: list[str] = []
+    sink_id = logger.add(messages.append, format="{message}")
+
+    def fail_path_resolution(user_id):
+        raise OSError(f"cannot access {secret_path}")
+
+    monkeypatch.delenv("RAG_REWRITE_CACHE_PATH", raising=False)
+    monkeypatch.setattr(DatabasePaths, "get_user_rewrite_cache_path", fail_path_resolution)
+
+    try:
+        with pytest.raises(OSError, match="secret-token-123"):
+            _safe_path("user-with-secret-token-123")
+    finally:
+        logger.remove(sink_id)
+
+    logged = "\n".join(messages)
+    assert "Rewrite cache: failed to resolve cache path" in logged
+    assert "secret-token-123" not in logged
+    assert secret_path not in logged
+
+
+def test_normalize_query_fallback_log_omits_raw_exception_details():
+    secret_token = "normalizer-secret-token-456"
+    messages: list[str] = []
+    sink_id = logger.add(messages.append, format="{message}")
+
+    class BadQuery:
+        def strip(self):
+            raise AttributeError(f"cannot strip {secret_token}")
+
+        def __bool__(self):
+            return True
+
+    query = BadQuery()
+    try:
+        assert _normalize_query(query) is query
+    finally:
+        logger.remove(sink_id)
+
+    logged = "\n".join(messages)
+    assert "Rewrite cache: failed to normalize query; returning fallback" in logged
+    assert secret_token not in logged
+
+
+def test_put_persist_failure_log_omits_raw_exception_details(tmp_path, monkeypatch):
+    secret_path = tmp_path / "secret-token-789" / "rc.jsonl"
+    messages: list[str] = []
+    sink_id = logger.add(messages.append, format="{message}")
+
+    original_open = Path.open
+
+    def fail_open(self, *args, **kwargs):
+        if self == secret_path:
+            raise OSError(f"cannot write {secret_path}")
+        return original_open(self, *args, **kwargs)
+
+    monkeypatch.setenv("RAG_REWRITE_CACHE_PATH", str(secret_path))
+    monkeypatch.setattr(Path, "open", fail_open)
+    rc = RewriteCache()
+
+    try:
+        rc.put("What is CUDA?", ["nvidia cuda"], intent="FACTUAL", corpus="ml")
+    finally:
+        logger.remove(sink_id)
+
+    assert rc.get("What is CUDA?", intent="FACTUAL", corpus="ml") == ["nvidia cuda"]
+    logged = "\n".join(messages)
+    assert "Failed to persist rewrite cache" in logged
+    assert "secret-token-789" not in logged
+    assert str(secret_path) not in logged
