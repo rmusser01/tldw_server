@@ -839,8 +839,8 @@ class CitationGenerator:
 
         except ImportError:
             logger.debug("Evidence chains module not available")
-        except Exception as e:
-            logger.warning(f"Evidence chain building failed: {e}")
+        except Exception:
+            logger.warning("Evidence chain building failed")
 
         return citations, chain_result
 
