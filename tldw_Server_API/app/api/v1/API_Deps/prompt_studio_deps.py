@@ -229,7 +229,10 @@ async def get_prompt_studio_user(
                 )
                 await apply_prompt_studio_quota_policy(user_context["user_id"])
             except _PROMPT_STUDIO_CONTEXT_EXCEPTIONS as exc:
-                logger.debug("Prompt Studio quota policy lookup failed: {}", exc)
+                logger.debug(
+                    "Prompt Studio quota policy lookup failed; error_type={}",
+                    type(exc).__name__,
+                )
             return user_context
     except _PROMPT_STUDIO_CONTEXT_EXCEPTIONS:
         # Ignore and fall through to standard handling
@@ -360,7 +363,10 @@ async def get_prompt_studio_user(
         )
         await apply_prompt_studio_quota_policy(user_context["user_id"])
     except _PROMPT_STUDIO_CONTEXT_EXCEPTIONS as exc:
-        logger.debug("Prompt Studio quota policy lookup failed: {}", exc)
+        logger.debug(
+            "Prompt Studio quota policy lookup failed; error_type={}",
+            type(exc).__name__,
+        )
 
     return user_context
 
@@ -514,7 +520,10 @@ async def check_rate_limit(
         if user_context.get("rg_policy_id"):
             return True
     except _PROMPT_STUDIO_CONTEXT_EXCEPTIONS as exc:
-        logger.debug("Prompt Studio rate-limit bypass: failed to read rg_policy_id from user_context: {}", exc)
+        logger.debug(
+            "Prompt Studio rate-limit bypass: failed to read rg_policy_id from user_context; error_type={}",
+            type(exc).__name__,
+        )
 
     user_id = str(user_context.get("user_id", "anonymous"))
 
@@ -550,9 +559,9 @@ async def check_rate_limit(
                 globals()["_PROMPT_STUDIO_RATE_LIMIT_SHIM_LOGGED"] = True
                 logger.warning(
                     "Prompt Studio shared rate limiter unavailable; local fallback limiter is retired. "
-                    "Denying request (fail-closed). operation={} error={}",
+                    "Denying request (fail-closed). operation={} error_type={}",
                     operation,
-                    e,
+                    type(e).__name__,
                 )
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
