@@ -283,3 +283,45 @@ def test_image_adapter_export_sanitizes_unexpected_backend_failure_log(monkeypat
     assert leaked_path not in joined
     assert leaked_token not in joined
     assert "unexpected backend traceback" not in joined
+
+
+def test_image_adapter_reference_resolution_fallback_log_omits_raw_exception_details(monkeypatch):
+    leaked_path = "/Users/private/reference-images/source.png"
+    leaked_token = "token=ref-secret-123"
+    cfg = SimpleNamespace(reference_image_supported_models={"modelstudio": ["qwen-image-edit"]})
+    messages: list[str] = []
+
+    async def fail_resolution(*args, **kwargs):
+        raise RuntimeError(f"reference image failed from {leaked_path} with {leaked_token}")
+
+    monkeypatch.setattr(image_adapter_module, "get_image_generation_config", lambda: cfg)
+    monkeypatch.setattr(image_adapter_module, "resolve_reference_image", fail_resolution)
+    sink_id = image_adapter_module.logger.add(
+        lambda message: messages.append(str(message.record.get("message") or "")),
+        level="WARNING",
+        format="{message}",
+    )
+    token = image_adapter_module.set_image_adapter_request_context(collections_db=SimpleNamespace(), user_id=321)
+
+    try:
+        with pytest.raises(
+            image_adapter_module.FileArtifactsValidationError,
+            match="reference_image_invalid",
+        ):
+            ImageAdapter()._resolve_reference_image(  # noqa: SLF001 - direct fallback branch coverage
+                {
+                    "backend": "modelstudio",
+                    "model": "qwen-image-edit-v1",
+                    "reference_file_id": 17,
+                },
+                backend="modelstudio",
+            )
+    finally:
+        image_adapter_module.reset_image_adapter_request_context(token)
+        image_adapter_module.logger.remove(sink_id)
+
+    joined = "\n".join(messages)
+    assert "image adapter: reference image resolution failed" in joined
+    assert leaked_path not in joined
+    assert leaked_token not in joined
+    assert "reference image failed from" not in joined

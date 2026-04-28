@@ -289,7 +289,7 @@ class ImageAdapter:
         except FileArtifactsValidationError:
             raise
         except Exception as exc:
-            logger.warning("image adapter: reference image resolution failed: {}", exc)
+            logger.warning("image adapter: reference image resolution failed")
             raise FileArtifactsValidationError("reference_image_invalid") from exc
 
     @staticmethod
