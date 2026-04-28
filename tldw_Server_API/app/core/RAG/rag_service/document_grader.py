@@ -292,8 +292,10 @@ class DocumentGrader:
                 method="llm",
             )
 
-        except (StructuredOutputParseError, ValueError, KeyError) as e:
-            logger.warning(f"Failed to parse grading response for doc {doc_id}: {e}")
+        except (StructuredOutputParseError, ValueError, KeyError):
+            logger.warning(
+                f"Failed to parse grading response for doc {doc_id}; using heuristic fallback"
+            )
             # Fall back to heuristic parsing
             return self._heuristic_parse(doc_id, raw_response, latency_ms, fallback_score)
 

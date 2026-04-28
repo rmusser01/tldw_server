@@ -24,6 +24,7 @@ from tldw_Server_API.app.core.RAG.rag_service.document_grader import (
     GradingBatchResult,
     grade_and_filter_documents,
     _resolve_grading_config,
+    StructuredOutputParseError,
 )
 
 
@@ -212,6 +213,51 @@ class TestDocumentGrader:
         assert result.method == "llm_heuristic"
         # "relevant" and "useful" are in the response
         assert result.is_relevant is True
+
+    @pytest.mark.asyncio
+    async def test_grade_document_parse_fallback_sanitizes_parser_error_logs(self):
+        """Test parse fallback logs avoid raw parser exception details."""
+        leaked_path = "/Users/example/private/grading-response.json"
+        leaked_token = "sk-test-parser-secret"
+        parser_error = (
+            f"parser failed while reading {leaked_path} "
+            f"with token {leaked_token}"
+        )
+
+        def analyze(*args, **kwargs):
+            return (
+                f"This relevant useful response references {leaked_path} "
+                f"and token {leaked_token}"
+            )
+
+        captured_logs = []
+        sink_id = logger.add(captured_logs.append, format="{message}")
+        try:
+            with patch(
+                "tldw_Server_API.app.core.RAG.rag_service.document_grader.parse_structured_output",
+                side_effect=StructuredOutputParseError(parser_error),
+            ):
+                grader = DocumentGrader(analyze_fn=analyze)
+                doc = MockDocument(id="parse_safe_doc", content="Content", score=0.1)
+
+                result = await grader.grade_document("Query", doc)
+        finally:
+            logger.remove(sink_id)
+
+        assert result.method == "llm_heuristic"
+        assert result.is_relevant is True
+        assert result.relevance_score == 0.7
+        assert result.reasoning == "Heuristic parsing from LLM response"
+
+        combined_result_text = f"{result.reasoning} {result.metadata}"
+        combined_log_text = " ".join(str(message) for message in captured_logs)
+        for leaked_fragment in (
+            parser_error,
+            leaked_path,
+            leaked_token,
+        ):
+            assert leaked_fragment not in combined_result_text
+            assert leaked_fragment not in combined_log_text
 
     @pytest.mark.asyncio
     async def test_grade_document_fallback_to_score(self):
