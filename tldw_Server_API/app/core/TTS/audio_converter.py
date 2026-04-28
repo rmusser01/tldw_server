@@ -328,8 +328,8 @@ class AudioConverter:
             logger.info(f"Converted {input_path.name} to {target_format}")
             return True
 
-        except _AUDIO_CONVERSION_EXCEPTIONS as e:
-            logger.error(f"Format conversion error: {e}")
+        except _AUDIO_CONVERSION_EXCEPTIONS:
+            logger.error("Format conversion error")
             return False
 
     @staticmethod
@@ -362,8 +362,8 @@ class AudioConverter:
 
             return is_valid, duration
 
-        except _AUDIO_CONVERSION_EXCEPTIONS as e:
-            logger.error(f"Duration validation error: {e}")
+        except _AUDIO_CONVERSION_EXCEPTIONS:
+            logger.error("Duration validation error")
             return False, 0.0
 
     @staticmethod
@@ -456,8 +456,8 @@ class AudioConverter:
 
             return info
 
-        except _AUDIO_CONVERSION_EXCEPTIONS as e:
-            logger.error(f"Error getting audio info: {e}")
+        except _AUDIO_CONVERSION_EXCEPTIONS:
+            logger.error("Error getting audio info")
             return info
 
     @staticmethod
@@ -529,8 +529,8 @@ class AudioConverter:
             logger.info(f"Normalized audio to {target_level} LUFS")
             return True
 
-        except _AUDIO_CONVERSION_EXCEPTIONS as e:
-            logger.error(f"Audio normalization error: {e}")
+        except _AUDIO_CONVERSION_EXCEPTIONS:
+            logger.error("Audio normalization error")
             return False
 
     @staticmethod
@@ -694,8 +694,8 @@ class AudioConverter:
             logger.info(f"Extracted {duration}s segment starting at {start_time}s")
             return True
 
-        except _AUDIO_CONVERSION_EXCEPTIONS as e:
-            logger.error(f"Segment extraction error: {e}")
+        except _AUDIO_CONVERSION_EXCEPTIONS:
+            logger.error("Segment extraction error")
             return False
 
     @staticmethod
@@ -740,8 +740,8 @@ class AudioConverter:
             logger.info(f"Resampled audio to {target_sample_rate}Hz")
             return True
 
-        except _AUDIO_CONVERSION_EXCEPTIONS as e:
-            logger.error(f"Resampling error: {e}")
+        except _AUDIO_CONVERSION_EXCEPTIONS:
+            logger.error("Resampling error")
             return False
 
     @staticmethod
