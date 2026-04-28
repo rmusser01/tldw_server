@@ -93,7 +93,7 @@ class ShareAuditService:
                 user_agent=user_agent,
             )
         except Exception as exc:
-            logger.error(f"ShareAuditService.log failed for {event_type}: {exc}")
+            logger.error(f"ShareAuditService.log failed; exception_type={type(exc).__name__}")
             raise AuditLogError(f"Failed to log share audit event: {event_type}") from exc
 
     async def query(
