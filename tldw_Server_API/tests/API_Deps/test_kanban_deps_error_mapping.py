@@ -127,3 +127,22 @@ def test_shutdown_kanban_executor_sanitizes_shutdown_failure_log(monkeypatch):
         "debug",
         "Kanban executor shutdown error",
     )
+
+
+def test_handle_kanban_db_error_sanitizes_unexpected_operation_log(monkeypatch):
+    logger_stub = _LoggerStub()
+
+    monkeypatch.setattr(kanban_deps, "logger", logger_stub)
+
+    exc = kanban_deps.handle_kanban_db_error(
+        RuntimeError("kanban backend exploded at /private/db/path SECRET_TOKEN")
+    )
+
+    assert exc.status_code == 500
+    assert exc.detail == "An unexpected error occurred"
+    _assert_log_omits_raw_exception(
+        logger_stub,
+        "error",
+        "Unexpected error in Kanban operation",
+    )
+    assert all(not kwargs.get("exc_info") for _level, _message, _args, kwargs in logger_stub.messages)

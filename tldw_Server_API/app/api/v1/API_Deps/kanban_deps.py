@@ -344,7 +344,7 @@ def handle_kanban_db_error(e: Exception) -> HTTPException:
     if isinstance(e, (NotFoundError, InputError, ConflictError, KanbanDBError)):
         return map_db_error_to_http(e, default_detail="Kanban operation failed")
 
-    logger.error(f"Unexpected error in Kanban operation: {e}", exc_info=True)
+    logger.error("Unexpected error in Kanban operation")
     return HTTPException(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         detail="An unexpected error occurred"
