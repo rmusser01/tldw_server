@@ -218,6 +218,106 @@ def test_map_tts_provider_not_configured_sanitizes_detail():
     assert "/private/tts/config.json" not in str(mapped.detail)
 
 
+def test_decode_base64_audio_sanitizes_decode_warning(monkeypatch):
+    from tldw_Server_API.app.core.Streaming import speech_chat_service
+
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(speech_chat_service, "logger", logger_stub, raising=True)
+
+    def _failing_b64decode(*_args, **_kwargs):
+        raise ValueError("decode exploded at /private/tmp/input-audio-secret.wav")
+
+    monkeypatch.setattr(
+        speech_chat_service.base64,
+        "b64decode",
+        _failing_b64decode,
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        speech_chat_service._decode_base64_audio("not-base64")
+
+    assert exc_info.value.status_code == status.HTTP_400_BAD_REQUEST
+    assert exc_info.value.detail == "Invalid base64 encoding for input_audio"
+    _assert_log_sanitized(
+        logger_stub.warning_calls,
+        "Failed to decode base64 audio",
+    )
+
+
+def test_load_audio_to_mono_np_sanitizes_decode_warning(monkeypatch):
+    from tldw_Server_API.app.core.Streaming import speech_chat_service
+
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(speech_chat_service, "logger", logger_stub, raising=True)
+
+    def _failing_sf_read(*_args, **_kwargs):
+        raise RuntimeError("soundfile exploded at /private/tmp/input-audio-secret.wav")
+
+    monkeypatch.setattr(speech_chat_service.sf, "read", _failing_sf_read)
+
+    with pytest.raises(HTTPException) as exc_info:
+        speech_chat_service._load_audio_to_mono_np(b"corrupt-audio")
+
+    assert exc_info.value.status_code == status.HTTP_400_BAD_REQUEST
+    assert exc_info.value.detail == "Unsupported or corrupt audio format in input_audio"
+    _assert_log_sanitized(
+        logger_stub.warning_calls,
+        "Failed to read audio bytes for speech chat",
+    )
+
+
+def test_validate_audio_constraints_sanitizes_max_bytes_parse_fallback_log(monkeypatch):
+    from tldw_Server_API.app.core.Streaming import speech_chat_service
+
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(speech_chat_service, "logger", logger_stub, raising=True)
+    monkeypatch.setenv(
+        "AUDIO_CHAT_MAX_BYTES",
+        "/private/tmp/input-audio-secret exploded",
+    )
+    monkeypatch.delenv("AUDIO_CHAT_MAX_DURATION_SEC", raising=False)
+
+    with pytest.raises(HTTPException) as exc_info:
+        speech_chat_service._validate_audio_constraints(
+            audio_bytes=b"x" * (20 * 1024 * 1024 + 1),
+            duration_sec=0.1,
+            input_format="wav",
+        )
+
+    assert exc_info.value.status_code == status.HTTP_413_REQUEST_ENTITY_TOO_LARGE
+    assert exc_info.value.detail == "input_audio exceeds size limit for speech chat"
+    _assert_log_sanitized(
+        logger_stub.debug_calls,
+        "AUDIO_CHAT_MAX_BYTES parse failed; using default 20MB",
+    )
+
+
+def test_validate_audio_constraints_sanitizes_max_duration_parse_fallback_log(monkeypatch):
+    from tldw_Server_API.app.core.Streaming import speech_chat_service
+
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(speech_chat_service, "logger", logger_stub, raising=True)
+    monkeypatch.delenv("AUDIO_CHAT_MAX_BYTES", raising=False)
+    monkeypatch.setenv(
+        "AUDIO_CHAT_MAX_DURATION_SEC",
+        "/private/tmp/input-audio-secret exploded",
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        speech_chat_service._validate_audio_constraints(
+            audio_bytes=b"x",
+            duration_sec=121.0,
+            input_format="wav",
+        )
+
+    assert exc_info.value.status_code == status.HTTP_400_BAD_REQUEST
+    assert exc_info.value.detail == "input_audio duration exceeds allowed limit for speech chat"
+    _assert_log_sanitized(
+        logger_stub.debug_calls,
+        "AUDIO_CHAT_MAX_DURATION_SEC parse failed; using default 120s",
+    )
+
+
 @pytest.mark.asyncio
 async def test_run_speech_chat_turn_happy_path(monkeypatch):
     # Stub STT to return fixed transcript

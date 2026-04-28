@@ -107,7 +107,7 @@ def _decode_base64_audio(data: str) -> bytes:
     try:
         return base64.b64decode(data, validate=True)
     except Exception as e:  # noqa: BLE001
-        logger.warning(f"Failed to decode base64 audio: {e}")
+        logger.warning("Failed to decode base64 audio")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid base64 encoding for input_audio",
@@ -124,7 +124,7 @@ def _load_audio_to_mono_np(audio_bytes: bytes) -> tuple[np.ndarray, int]:
         with io.BytesIO(audio_bytes) as buf:
             audio, sample_rate = sf.read(buf, dtype="float32", always_2d=False)
     except Exception as e:  # noqa: BLE001
-        logger.warning(f"Failed to read audio bytes for speech chat: {e}")
+        logger.warning("Failed to read audio bytes for speech chat")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Unsupported or corrupt audio format in input_audio",
@@ -166,10 +166,8 @@ def _validate_audio_constraints(
     if _raw_max_bytes is not None:
         try:
             max_bytes = int(_raw_max_bytes)
-        except (ValueError, TypeError) as exc:
-            logger.debug(
-                f"AUDIO_CHAT_MAX_BYTES parse failed ({_raw_max_bytes!r}); using default 20MB: {exc}"
-            )
+        except (ValueError, TypeError):
+            logger.debug("AUDIO_CHAT_MAX_BYTES parse failed; using default 20MB")
             max_bytes = 20 * 1024 * 1024
     else:
         max_bytes = 20 * 1024 * 1024
@@ -184,10 +182,8 @@ def _validate_audio_constraints(
     if _raw_max_duration is not None:
         try:
             max_duration = float(_raw_max_duration)
-        except (ValueError, TypeError) as exc:
-            logger.debug(
-                f"AUDIO_CHAT_MAX_DURATION_SEC parse failed ({_raw_max_duration!r}); using default 120s: {exc}"
-            )
+        except (ValueError, TypeError):
+            logger.debug("AUDIO_CHAT_MAX_DURATION_SEC parse failed; using default 120s")
             max_duration = 120.0
     else:
         max_duration = 120.0
