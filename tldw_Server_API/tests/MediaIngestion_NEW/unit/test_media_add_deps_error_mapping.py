@@ -13,6 +13,7 @@ _SENSITIVE_MARKERS = (
     "/private/tmp",
     "secret-token",
     "raw-secret-value",
+    "form backend exploded",
     "Traceback",
     "JSONDecodeError",
     "ValueError",
@@ -43,6 +44,14 @@ class _LoguruCapture:
             if message.record["level"].name == "DEBUG"
         ]
 
+    @property
+    def error_records(self):
+        return [
+            message.record
+            for message in self.records
+            if message.record["level"].name == "ERROR"
+        ]
+
 
 def _render_log_record(record) -> str:
     return " ".join(
@@ -58,6 +67,23 @@ def _assert_debug_log_is_sanitized(capture: _LoguruCapture, expected_message: st
     matching_records = [
         record
         for record in capture.debug_records
+        if record["message"] == expected_message
+    ]
+    assert len(matching_records) == 1
+
+    record = matching_records[0]
+    assert "exc_info" not in record["extra"]
+    assert record["exception"] is None
+
+    rendered_record = _render_log_record(record)
+    for marker in _SENSITIVE_MARKERS:
+        assert marker not in rendered_record
+
+
+def _assert_error_log_is_sanitized(capture: _LoguruCapture, expected_message: str):
+    matching_records = [
+        record
+        for record in capture.error_records
         if record["message"] == expected_message
     ]
     assert len(matching_records) == 1
@@ -90,15 +116,20 @@ def _form_kwargs(**overrides):
 @pytest.mark.asyncio
 async def test_get_add_media_form_sanitizes_unexpected_form_error(monkeypatch):
     def _raise_form_error(**_kwargs):
-        raise RuntimeError("form backend exploded")
+        raise RuntimeError("form backend exploded /private/tmp/raw-secret-value?token=secret-token")
 
     monkeypatch.setattr(media_add_deps, "AddMediaForm", _raise_form_error)
 
-    with pytest.raises(HTTPException) as excinfo:
-        await media_add_deps.get_add_media_form(media_type="video", transcription_model=None)
+    with _LoguruCapture() as logs:
+        with pytest.raises(HTTPException) as excinfo:
+            await media_add_deps.get_add_media_form(media_type="video", transcription_model=None)
 
     assert excinfo.value.status_code == 500
     assert excinfo.value.detail == "Internal server error during form processing"
+    _assert_error_log_is_sanitized(
+        logs,
+        "Unexpected error creating AddMediaForm: RuntimeError",
+    )
 
 
 @pytest.mark.asyncio

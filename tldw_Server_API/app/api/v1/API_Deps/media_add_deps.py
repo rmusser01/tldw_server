@@ -429,8 +429,7 @@ async def get_add_media_form(
     except Exception as exc:
         logger.error(
             "Unexpected error creating AddMediaForm: {}",
-            exc,
-            exc_info=True,
+            type(exc).__name__,
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
