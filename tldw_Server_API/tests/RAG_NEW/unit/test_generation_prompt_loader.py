@@ -16,11 +16,17 @@ pytestmark = pytest.mark.unit
 class _LoggerStub:
     def __init__(self) -> None:
         self.debugs: list[str] = []
+        self.errors: list[str] = []
 
     def debug(self, message: str, *args: object, **kwargs: object) -> None:
         if args or kwargs:
             message = message.format(*args, **kwargs)
         self.debugs.append(message)
+
+    def error(self, message: str, *args: object, **kwargs: object) -> None:
+        if args or kwargs:
+            message = message.format(*args, **kwargs)
+        self.errors.append(message)
 
 
 def test_prompt_templates_load_switchable_profile_prompt_keys() -> None:
@@ -127,6 +133,41 @@ async def test_generate_streaming_response_ignores_non_generator_kwargs(
     assert captured_configs == [
         {"provider": "openai", "model": "gpt-4o-mini", "streaming": True}
     ]
+
+
+@pytest.mark.asyncio
+async def test_llm_generator_error_log_sanitizes_provider_exception(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    logger_stub = _LoggerStub()
+    generator = generation_mod.LLMGenerator(
+        generation_mod.GenerationConfig(
+            provider="openai",
+            model="gpt-4o-mini",
+            fallback_enabled=False,
+        )
+    )
+
+    async def _fail_call_llm(_prompt: str, **_kwargs: Any) -> str:
+        raise RuntimeError(
+            "provider failed at /private/rag-generation/provider.log "
+            "api_key=sk-test-private-token"
+        )
+
+    monkeypatch.setattr(generator, "_call_llm", _fail_call_llm)
+    monkeypatch.setattr(generation_mod, "logger", logger_stub)
+
+    with pytest.raises(RuntimeError):
+        await generator.generate(
+            SimpleNamespace(documents=[]),
+            "query containing sk-test-private-token",
+        )
+
+    assert logger_stub.errors == ["Error generating response"]
+    rendered = "\n".join(logger_stub.errors)
+    assert "provider failed" not in rendered
+    assert "/private/rag-generation/provider.log" not in rendered
+    assert "sk-test-private-token" not in rendered
 
 
 @pytest.mark.asyncio

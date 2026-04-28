@@ -371,8 +371,8 @@ class LLMGenerator(BaseGenerator):
                 }
             )
 
-        except Exception as e:
-            logger.error(f"Error generating response: {e}")
+        except Exception:
+            logger.error("Error generating response")
 
             # Try fallback if enabled
             if self.config.fallback_enabled:
