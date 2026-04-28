@@ -58,6 +58,12 @@ def _is_timeout_error(exc: Exception) -> bool:
     name = exc.__class__.__name__.lower()
     return "timeout" in name
 
+
+def _safe_exception_label(exc: BaseException) -> str:
+    """Return a non-sensitive exception identifier for logs."""
+    return type(exc).__name__
+
+
 class OpenAIAdapter(TTSAdapter):
     """Adapter for OpenAI's TTS API.
     Note: This class implements all abstract methods so it can be instantiated
@@ -204,7 +210,8 @@ class OpenAIAdapter(TTSAdapter):
                     )
                 except Exception as exc:
                     logger.warning(
-                        f"{self.provider_name}: Unexpected error during API key verification on init: {exc}. "
+                        f"{self.provider_name}: Unexpected error during API key verification on init; "
+                        f"exception_type={_safe_exception_label(exc)}. "
                         "Continuing initialization."
                     )
 
@@ -334,7 +341,10 @@ class OpenAIAdapter(TTSAdapter):
                 error_msg = error_content.decode()
             except Exception:
                 error_msg = ""
-        logger.error(f"{self.provider_name} API error: {status_code} - {error_msg}")
+        logger.error(
+            f"{self.provider_name} API error: {status_code}; "
+            f"exception_type={_safe_exception_label(e)}; response body redacted"
+        )
 
         if status_code == 401:
             # Standardize message and provider fields
@@ -363,7 +373,10 @@ class OpenAIAdapter(TTSAdapter):
         if _is_http_status_error(e):
             await self._handle_http_status_error(e)
         if isinstance(e, (CoreNetworkError, RetryExhaustedError)) or _is_httpx_exception(e):
-            logger.error(f"{self.provider_name} network/timeout error: {e}")
+            logger.error(
+                f"{self.provider_name} network/timeout error; "
+                f"exception_type={_safe_exception_label(e)}"
+            )
             reason = str(e) or e.__class__.__name__
             if _is_timeout_error(e) or "timeout" in reason.lower():
                 raise timeout_error(self.provider_name, timeout_seconds=60.0) from e
@@ -378,7 +391,10 @@ class OpenAIAdapter(TTSAdapter):
                 TTSTimeoutError,
             ),
         ):
-            logger.error(f"{self.provider_name} unexpected error: {e}")
+            logger.error(
+                f"{self.provider_name} unexpected error; "
+                f"exception_type={_safe_exception_label(e)}"
+            )
             raise TTSProviderError(
                 f"Unexpected error in {self.provider_name}",
                 provider=self.provider_name,
@@ -416,7 +432,10 @@ class OpenAIAdapter(TTSAdapter):
                 except Exception as stream_close_error:
                     logger.debug("OpenAI TTS response close after stream failed", exc_info=stream_close_error)
         except Exception as e:
-            logger.error(f"{self.provider_name} streaming error: {e}")
+            logger.error(
+                f"{self.provider_name} streaming error; "
+                f"exception_type={_safe_exception_label(e)}"
+            )
             await self._raise_normalized_request_error(e)
 
     async def _generate_complete(

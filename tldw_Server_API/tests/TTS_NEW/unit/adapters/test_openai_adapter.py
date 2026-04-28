@@ -14,6 +14,7 @@ from tldw_Server_API.app.core.TTS.adapters.openai_adapter import (
     OpenAIAdapter as OpenAITTSAdapter,
     OpenAITTSAdapter as ProductionOpenAITTSAdapter,
 )
+from tldw_Server_API.app.core.TTS.adapters import openai_adapter as openai_mod
 from tldw_Server_API.app.core.TTS.adapters.base import (
     TTSRequest,
     TTSResponse,
@@ -28,6 +29,7 @@ from tldw_Server_API.app.core.TTS.tts_exceptions import (
     TTSNetworkError,
     TTSAuthenticationError,
     TTSProviderInitializationError,
+    TTSProviderError,
 )
 
 # ========================================================================
@@ -122,6 +124,40 @@ class TestOpenAIAdapterInitialization:
             with pytest.raises(TTSProviderInitializationError):
                 await adapter.initialize()
         assert adapter.status == adapter.status.ERROR
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    @patch("tldw_Server_API.app.core.TTS.adapters.openai_adapter.get_resource_manager")
+    async def test_api_key_verify_unexpected_error_log_sanitizes_exception_text(self, mock_get_resource_manager):
+        raw_marker = "RAW_OPENAI_INIT_VERIFY_SECRET_MARKER"
+        logged_messages: list[str] = []
+        mock_client = AsyncMock()
+        rm = AsyncMock()
+        rm.get_http_client = AsyncMock(return_value=mock_client)
+        mock_get_resource_manager.return_value = rm
+
+        adapter = OpenAITTSAdapter({
+            "openai_api_key": "test-key",
+            "verify_api_key_on_init": True,
+        })
+        sink_id = openai_mod.logger.add(
+            lambda message: logged_messages.append(message.record["message"]),
+            level="WARNING",
+        )
+
+        try:
+            with patch.object(
+                OpenAITTSAdapter,
+                "_generate_complete",
+                new=AsyncMock(side_effect=RuntimeError(raw_marker)),
+            ):
+                assert await adapter.initialize() is True
+        finally:
+            openai_mod.logger.remove(sink_id)
+
+        assert any("Unexpected error during API key verification on init" in message for message in logged_messages)
+        assert all(raw_marker not in message for message in logged_messages)
+        assert all("RuntimeError" in message for message in logged_messages)
 
     @pytest.mark.unit
     @pytest.mark.asyncio
@@ -428,6 +464,103 @@ class TestStreamingGeneration:
 
 class TestErrorHandling:
     """Test error handling in OpenAI adapter."""
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_http_status_error_log_sanitizes_response_body_text(self):
+        raw_marker = "RAW_OPENAI_HTTP_BODY_SECRET_MARKER"
+        logged_messages: list[str] = []
+        mock_response = MagicMock()
+        mock_response.status_code = 500
+        mock_response.headers = {}
+        mock_response.aread = AsyncMock(return_value=f'{{"error":"{raw_marker}"}}'.encode())
+        error = httpx.HTTPStatusError("500", request=Mock(), response=mock_response)
+        adapter = OpenAITTSAdapter({"openai_api_key": "test-key"})
+        sink_id = openai_mod.logger.add(
+            lambda message: logged_messages.append(message.record["message"]),
+            level="ERROR",
+        )
+
+        try:
+            with pytest.raises(TTSProviderError) as exc_info:
+                await adapter._handle_http_status_error(error)
+        finally:
+            openai_mod.logger.remove(sink_id)
+
+        assert raw_marker in str(exc_info.value)
+        assert any("OpenAI API error: 500" in message for message in logged_messages)
+        assert all(raw_marker not in message for message in logged_messages)
+        assert all("HTTPStatusError" in message for message in logged_messages)
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_network_error_log_sanitizes_exception_text(self):
+        raw_marker = "RAW_OPENAI_NETWORK_SECRET_MARKER"
+        logged_messages: list[str] = []
+        adapter = OpenAITTSAdapter({"openai_api_key": "test-key"})
+        error = httpx.ConnectError(raw_marker)
+        sink_id = openai_mod.logger.add(
+            lambda message: logged_messages.append(message.record["message"]),
+            level="ERROR",
+        )
+
+        try:
+            with pytest.raises(TTSNetworkError):
+                await adapter._raise_normalized_request_error(error)
+        finally:
+            openai_mod.logger.remove(sink_id)
+
+        assert any("network/timeout error" in message for message in logged_messages)
+        assert all(raw_marker not in message for message in logged_messages)
+        assert all("ConnectError" in message for message in logged_messages)
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_unexpected_error_log_sanitizes_exception_text(self):
+        raw_marker = "RAW_OPENAI_UNEXPECTED_SECRET_MARKER"
+        logged_messages: list[str] = []
+        adapter = OpenAITTSAdapter({"openai_api_key": "test-key"})
+        sink_id = openai_mod.logger.add(
+            lambda message: logged_messages.append(message.record["message"]),
+            level="ERROR",
+        )
+
+        try:
+            with pytest.raises(TTSProviderError) as exc_info:
+                await adapter._raise_normalized_request_error(RuntimeError(raw_marker))
+        finally:
+            openai_mod.logger.remove(sink_id)
+
+        assert exc_info.value.details["error"] == raw_marker
+        assert any("unexpected error" in message for message in logged_messages)
+        assert all(raw_marker not in message for message in logged_messages)
+        assert all("RuntimeError" in message for message in logged_messages)
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    @patch('tldw_Server_API.app.core.TTS.adapters.openai_adapter.apost')
+    async def test_streaming_error_log_sanitizes_exception_text(self, mock_post):
+        raw_marker = "RAW_OPENAI_STREAM_SECRET_MARKER"
+        logged_messages: list[str] = []
+        mock_post.side_effect = RuntimeError(raw_marker)
+        adapter = OpenAITTSAdapter({"openai_api_key": "test-key"})
+        sink_id = openai_mod.logger.add(
+            lambda message: logged_messages.append(message.record["message"]),
+            level="ERROR",
+        )
+
+        try:
+            stream = adapter._stream_audio(headers={}, payload={})
+            with pytest.raises(TTSProviderError):
+                async for _chunk in stream:
+                    pass
+        finally:
+            openai_mod.logger.remove(sink_id)
+
+        assert any("streaming error" in message for message in logged_messages)
+        assert any("unexpected error" in message for message in logged_messages)
+        assert all(raw_marker not in message for message in logged_messages)
+        assert all("RuntimeError" in message for message in logged_messages)
 
     @pytest.mark.unit
     @patch('tldw_Server_API.app.core.TTS.adapters.openai_adapter.apost')
