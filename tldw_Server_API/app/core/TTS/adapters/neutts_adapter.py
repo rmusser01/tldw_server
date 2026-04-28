@@ -121,7 +121,10 @@ class NeuTTSAdapter(TTSAdapter):
             return True
 
         except ImportError as e:
-            logger.error(f"NeuTTS import error: {e}")
+            logger.error(
+                "NeuTTS import error; exception_type={}",
+                _safe_exception_label(e),
+            )
             raise TTSModelLoadError(
                 "NeuTTS dependencies missing",
                 provider=self.provider_name,

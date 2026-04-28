@@ -1,6 +1,7 @@
 import sys
 import types
 import asyncio
+import builtins
 import numpy as np
 import pytest
 
@@ -85,6 +86,33 @@ def _capture_neutts_logs(level: str = "DEBUG") -> tuple[list[str], int]:
         level=level,
     )
     return messages, sink_id
+
+
+@pytest.mark.asyncio
+async def test_neutts_import_failure_log_sanitizes_exception_text(monkeypatch):
+    raw_marker = "RAW_NEUTTS_IMPORT_SECRET_MARKER token=secret"
+    real_import = builtins.__import__
+
+    def fail_neutts_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "tldw_Server_API.app.core.TTS.vendors.neuttsair.neutts":
+            raise ImportError(raw_marker)
+        return real_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", fail_neutts_import)
+    adapter = NeuTTSAdapter(config={})
+    messages, sink_id = _capture_neutts_logs(level="ERROR")
+
+    try:
+        with pytest.raises(TTSModelLoadError) as exc_info:
+            await adapter.initialize()
+    finally:
+        neutts_mod.logger.remove(sink_id)
+
+    assert raw_marker in exc_info.value.details["error"]
+    rendered_logs = "\n".join(messages)
+    assert "NeuTTS import error" in rendered_logs
+    assert "RAW_NEUTTS_IMPORT_SECRET_MARKER" not in rendered_logs
+    assert "token=secret" not in rendered_logs
 
 
 @pytest.mark.asyncio
