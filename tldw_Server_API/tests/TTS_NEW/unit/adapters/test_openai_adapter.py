@@ -162,6 +162,98 @@ class TestOpenAIAdapterInitialization:
     @pytest.mark.unit
     @pytest.mark.asyncio
     @patch("tldw_Server_API.app.core.TTS.adapters.openai_adapter.get_resource_manager")
+    async def test_initialization_failure_log_sanitizes_exception_text(self, mock_get_resource_manager):
+        raw_marker = "RAW_OPENAI_INIT_FAILURE_SECRET_MARKER"
+        logged_messages: list[str] = []
+        mock_get_resource_manager.side_effect = RuntimeError(raw_marker)
+        adapter = OpenAITTSAdapter({"openai_api_key": "test-key"})
+        sink_id = openai_mod.logger.add(
+            lambda message: logged_messages.append(message.record["message"]),
+            level="ERROR",
+        )
+
+        try:
+            with pytest.raises(TTSProviderInitializationError) as exc_info:
+                await adapter.initialize()
+        finally:
+            openai_mod.logger.remove(sink_id)
+
+        assert exc_info.value.details["error"] == raw_marker
+        assert any("Initialization failed" in message for message in logged_messages)
+        assert all(raw_marker not in message for message in logged_messages)
+        assert all("RuntimeError" in message for message in logged_messages)
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    @patch("tldw_Server_API.app.core.TTS.adapters.openai_adapter.get_resource_manager")
+    async def test_api_key_verify_auth_failure_log_sanitizes_exception_text(self, mock_get_resource_manager):
+        raw_marker = "RAW_OPENAI_INIT_VERIFY_AUTH_SECRET_MARKER"
+        logged_messages: list[str] = []
+        mock_client = AsyncMock()
+        rm = AsyncMock()
+        rm.get_http_client = AsyncMock(return_value=mock_client)
+        mock_get_resource_manager.return_value = rm
+        adapter = OpenAITTSAdapter({
+            "openai_api_key": "bad-key",
+            "verify_api_key_on_init": True,
+        })
+        sink_id = openai_mod.logger.add(
+            lambda message: logged_messages.append(message.record["message"]),
+            level="ERROR",
+        )
+
+        try:
+            with patch.object(
+                OpenAITTSAdapter,
+                "_generate_complete",
+                new=AsyncMock(side_effect=TTSAuthenticationError(raw_marker, provider="openai")),
+            ):
+                with pytest.raises(TTSProviderInitializationError) as exc_info:
+                    await adapter.initialize()
+        finally:
+            openai_mod.logger.remove(sink_id)
+
+        assert str(exc_info.value) == "Failed to initialize OpenAI"
+        assert any("API key verification failed during initialization" in message for message in logged_messages)
+        assert all(raw_marker not in message for message in logged_messages)
+        assert any("TTSAuthenticationError" in message for message in logged_messages)
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    @patch("tldw_Server_API.app.core.TTS.adapters.openai_adapter.get_resource_manager")
+    async def test_api_key_verify_nonfatal_log_sanitizes_exception_text(self, mock_get_resource_manager):
+        raw_marker = "RAW_OPENAI_INIT_VERIFY_NONFATAL_SECRET_MARKER"
+        logged_messages: list[str] = []
+        mock_client = AsyncMock()
+        rm = AsyncMock()
+        rm.get_http_client = AsyncMock(return_value=mock_client)
+        mock_get_resource_manager.return_value = rm
+        adapter = OpenAITTSAdapter({
+            "openai_api_key": "test-key",
+            "verify_api_key_on_init": True,
+        })
+        sink_id = openai_mod.logger.add(
+            lambda message: logged_messages.append(message.record["message"]),
+            level="WARNING",
+        )
+
+        try:
+            with patch.object(
+                OpenAITTSAdapter,
+                "_generate_complete",
+                new=AsyncMock(side_effect=TTSNetworkError(raw_marker, provider="openai")),
+            ):
+                assert await adapter.initialize() is True
+        finally:
+            openai_mod.logger.remove(sink_id)
+
+        assert any("API key verification during initialization did not succeed" in message for message in logged_messages)
+        assert all(raw_marker not in message for message in logged_messages)
+        assert all("TTSNetworkError" in message for message in logged_messages)
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    @patch("tldw_Server_API.app.core.TTS.adapters.openai_adapter.get_resource_manager")
     async def test_adapter_initialization_with_api_key_verify_http_401_auth_failure(self, mock_get_resource_manager):
         """
         HTTP 401 during verify-on-init should be treated as a fatal auth failure
@@ -559,6 +651,92 @@ class TestErrorHandling:
 
         assert any("streaming error" in message for message in logged_messages)
         assert any("unexpected error" in message for message in logged_messages)
+        assert all(raw_marker not in message for message in logged_messages)
+        assert all("RuntimeError" in message for message in logged_messages)
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    @patch("tldw_Server_API.app.core.TTS.adapters.openai_adapter.validate_tts_request")
+    async def test_request_validation_failure_log_sanitizes_exception_text(self, mock_validate):
+        raw_marker = "RAW_OPENAI_VALIDATION_SECRET_MARKER"
+        logged_messages: list[str] = []
+        mock_validate.side_effect = TTSValidationError(raw_marker, provider="openai")
+        adapter = OpenAITTSAdapter({"openai_api_key": "test-key"})
+        request = TTSRequest(text="Test", voice="alloy", stream=False)
+        sink_id = openai_mod.logger.add(
+            lambda message: logged_messages.append(message.record["message"]),
+            level="ERROR",
+        )
+
+        try:
+            with pytest.raises(TTSValidationError) as exc_info:
+                await adapter.generate(request)
+        finally:
+            openai_mod.logger.remove(sink_id)
+
+        assert raw_marker in str(exc_info.value)
+        assert any("request validation failed" in message for message in logged_messages)
+        assert all(raw_marker not in message for message in logged_messages)
+        assert all("TTSValidationError" in message for message in logged_messages)
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_stream_close_debug_log_sanitizes_exception_text(self):
+        raw_marker = "RAW_OPENAI_STREAM_CLOSE_SECRET_MARKER"
+        logged_messages: list[str] = []
+
+        async def mock_iter_with_size(chunk_size=1024):
+            yield b"chunk"
+
+        mock_response = AsyncMock()
+        mock_response.aiter_bytes = mock_iter_with_size
+        mock_response.raise_for_status = MagicMock()
+        mock_response.aclose = AsyncMock(side_effect=RuntimeError(raw_marker))
+
+        adapter = OpenAITTSAdapter({"openai_api_key": "test-key"})
+        sink_id = openai_mod.logger.add(
+            lambda message: logged_messages.append(str(message)),
+            level="DEBUG",
+        )
+
+        try:
+            with patch("tldw_Server_API.app.core.TTS.adapters.openai_adapter.apost", new=AsyncMock(return_value=mock_response)):
+                chunks = [chunk async for chunk in adapter._stream_audio(headers={}, payload={})]
+        finally:
+            openai_mod.logger.remove(sink_id)
+
+        assert chunks == [b"chunk"]
+        assert any("response close after stream failed" in message for message in logged_messages)
+        assert all(raw_marker not in message for message in logged_messages)
+        assert any("RuntimeError" in message for message in logged_messages)
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_cleanup_warning_log_sanitizes_exception_text(self):
+        raw_marker = "RAW_OPENAI_CLEANUP_SECRET_MARKER"
+        logged_messages: list[str] = []
+
+        class CleanupFailureAdapter(OpenAITTSAdapter):
+            @property
+            def client(self):
+                return None
+
+            @client.setter
+            def client(self, value):
+                raise RuntimeError(raw_marker)
+
+        adapter = object.__new__(CleanupFailureAdapter)
+        sink_id = openai_mod.logger.add(
+            lambda message: logged_messages.append(message.record["message"]),
+            level="WARNING",
+        )
+
+        try:
+            await adapter._cleanup_resources()
+        finally:
+            openai_mod.logger.remove(sink_id)
+
+        assert any("Error during cleanup" in message for message in logged_messages)
         assert all(raw_marker not in message for message in logged_messages)
         assert all("RuntimeError" in message for message in logged_messages)
 

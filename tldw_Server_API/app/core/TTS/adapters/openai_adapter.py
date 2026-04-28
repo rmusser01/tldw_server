@@ -195,7 +195,10 @@ class OpenAIAdapter(TTSAdapter):
                         await self._handle_http_status_error(e)
                     logger.info(f"{self.provider_name}: API key verified during initialization")
                 except TTSAuthenticationError as auth_exc:
-                    logger.error(f"{self.provider_name}: API key verification failed during initialization: {auth_exc}")
+                    logger.error(
+                        f"{self.provider_name}: API key verification failed during initialization; "
+                        f"exception_type={_safe_exception_label(auth_exc)}"
+                    )
                     self._status = ProviderStatus.ERROR
                     raise TTSProviderInitializationError(
                         f"Failed to initialize {self.provider_name}: authentication failed",
@@ -205,7 +208,7 @@ class OpenAIAdapter(TTSAdapter):
                 except (TTSRateLimitError, TTSNetworkError, TTSTimeoutError, TTSProviderError) as non_fatal:
                     logger.warning(
                         f"{self.provider_name}: API key verification during initialization did not succeed "
-                        f"({type(non_fatal).__name__}: {non_fatal}). Continuing initialization; "
+                        f"(exception_type={_safe_exception_label(non_fatal)}). Continuing initialization; "
                         "the first real request will surface any persistent issues."
                     )
                 except Exception as exc:
@@ -225,7 +228,10 @@ class OpenAIAdapter(TTSAdapter):
         except TTSProviderNotConfiguredError:
             return False
         except Exception as e:
-            logger.error(f"{self.provider_name}: Initialization failed: {e}")
+            logger.error(
+                f"{self.provider_name}: Initialization failed; "
+                f"exception_type={_safe_exception_label(e)}"
+            )
             self._status = ProviderStatus.ERROR
             raise TTSProviderInitializationError(
                 f"Failed to initialize {self.provider_name}",
@@ -275,7 +281,10 @@ class OpenAIAdapter(TTSAdapter):
         try:
             validate_tts_request(request, provider=self.provider_key)
         except Exception as e:
-            logger.error(f"{self.provider_name} request validation failed: {e}")
+            logger.error(
+                f"{self.provider_name} request validation failed; "
+                f"exception_type={_safe_exception_label(e)}"
+            )
             raise
 
         # Map voice if needed
@@ -430,7 +439,10 @@ class OpenAIAdapter(TTSAdapter):
                     if hasattr(response, "aclose"):
                         await response.aclose()  # type: ignore[func-returns-value]
                 except Exception as stream_close_error:
-                    logger.debug("OpenAI TTS response close after stream failed", exc_info=stream_close_error)
+                    logger.debug(
+                        "OpenAI TTS response close after stream failed; "
+                        f"exception_type={_safe_exception_label(stream_close_error)}"
+                    )
         except Exception as e:
             logger.error(
                 f"{self.provider_name} streaming error; "
@@ -464,7 +476,10 @@ class OpenAIAdapter(TTSAdapter):
             self.client = None
             logger.debug(f"{self.provider_name}: Resources cleaned up")
         except Exception as e:
-            logger.warning(f"{self.provider_name}: Error during cleanup: {e}")
+            logger.warning(
+                f"{self.provider_name}: Error during cleanup; "
+                f"exception_type={_safe_exception_label(e)}"
+            )
 
     def map_voice(self, voice_id: str) -> str:
         """Map generic voice ID to OpenAI voice"""
