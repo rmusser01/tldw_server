@@ -104,12 +104,12 @@ def downweight_injection_docs(docs: list[Document], strength: float = 0.5) -> di
                 try:
                     s = float(getattr(d, "score", 0.0) or 0.0)
                 except (TypeError, ValueError):
-                    logger.debug("Failed to parse doc score for injection downweight", exc_info=True)
+                    logger.debug("Failed to parse doc score for injection downweight")
                     s = 0.0
                 d.score = s * max(0.05, min(1.0, float(strength)))
                 affected += 1
         except (AttributeError, TypeError, ValueError):
-            logger.debug("Guardrail processing failed during injection downweight", exc_info=True)
+            logger.debug("Guardrail processing failed during injection downweight")
             continue
     return {"total": total, "affected": affected}
 
@@ -619,7 +619,7 @@ def apply_content_policy(
     - mode: "redact" (replace matches), "drop" (remove doc), "annotate" (metadata only)
     """
     allowed = {t.strip().lower() for t in (policy_types or [])}
-    redact_token = "[REDACTED]"
+    redact_token = "[REDACTED]"  # nosec B105
     dropped = 0
     affected = 0
     kept: list[Document] = []
@@ -692,7 +692,7 @@ def sanitize_html_allowlist(text: str, allowed_tags: list[str] | None = None, al
         stripper.feed(text)
         return stripper.get_data()
     except (TypeError, ValueError):
-        logger.debug("Guardrail HTML sanitizer failed; falling back to plain text", exc_info=True)
+        logger.debug("Guardrail HTML sanitizer failed; falling back to plain text")
         # On parser failure, return plain text fallback
         return re.sub(r"<[^>]+>", "", text)
 
