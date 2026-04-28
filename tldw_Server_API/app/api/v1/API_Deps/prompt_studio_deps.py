@@ -135,7 +135,11 @@ def _get_or_create_prompt_studio_db(user_id: str, client_id: str) -> PromptStudi
             logger.info("Created new PromptStudioDatabase instance for user {}", user_id)
             return db_instance
         except _PROMPT_STUDIO_DB_EXCEPTIONS as e:
-            logger.error(f"Failed to create PromptStudioDatabase for user {user_id}: {e}")
+            logger.error(
+                "Failed to create PromptStudioDatabase for user {}; error_type={}",
+                user_id,
+                type(e).__name__,
+            )
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to initialize database"
@@ -578,7 +582,10 @@ def shutdown_prompt_studio_deps():
                 if hasattr(db_instance, 'close'):
                     db_instance.close()
             except _PROMPT_STUDIO_DB_EXCEPTIONS as e:
-                logger.error(f"Error closing database instance: {e}")
+                logger.error(
+                    "Error closing database instance; error_type={}",
+                    type(e).__name__,
+                )
 
         _db_instances_cache.clear()
         logger.info("Prompt Studio dependencies cleaned up")

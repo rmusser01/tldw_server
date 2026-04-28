@@ -98,6 +98,55 @@ def test_backend_signature_in_cache_includes_connection(monkeypatch, tmp_path):
     assert third is instance_a
 
 
+def test_get_or_create_prompt_studio_db_logs_safe_creation_failure(monkeypatch, tmp_path):
+    sensitive_text = "database password leaked: sk-secret-value"
+    db_path = tmp_path / "u-789" / "prompt_studio.db"
+
+    def fake_path(user_id: str):
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        return db_path
+
+    def fail_create(*_args, **_kwargs):
+        raise RuntimeError(sensitive_text)
+
+    logger_mock = MagicMock()
+    monkeypatch.setattr(deps, "_get_prompt_studio_db_path_for_user", fake_path)
+    monkeypatch.setattr(deps, "get_content_backend_instance", lambda: None)
+    monkeypatch.setattr(deps, "create_prompt_studio_database", fail_create)
+    monkeypatch.setattr(deps, "logger", logger_mock)
+
+    with pytest.raises(HTTPException) as exc_info:
+        deps._get_or_create_prompt_studio_db("user-789", "client-xyz")
+
+    assert exc_info.value.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+    assert exc_info.value.detail == "Failed to initialize database"
+    logged_text = " ".join(str(call) for call in logger_mock.error.call_args_list)
+    assert sensitive_text not in logged_text
+    assert "Failed to create PromptStudioDatabase for user" in logged_text
+
+
+def test_shutdown_prompt_studio_deps_logs_safe_close_failure(monkeypatch):
+    sensitive_text = "close failed for token sk-close-secret"
+
+    class BrokenCloseDb:
+        def close(self):
+            raise RuntimeError(sensitive_text)
+
+    logger_mock = MagicMock()
+    monkeypatch.setattr(deps, "logger", logger_mock)
+
+    with deps._db_lock:
+        deps._db_instances_cache["broken"] = BrokenCloseDb()
+
+    deps.shutdown_prompt_studio_deps()
+
+    logged_text = " ".join(str(call) for call in logger_mock.error.call_args_list)
+    assert sensitive_text not in logged_text
+    assert "Error closing database instance" in logged_text
+    with deps._db_lock:
+        assert not deps._db_instances_cache
+
+
 @pytest.mark.asyncio
 async def test_require_project_access_maps_database_error():
     class BrokenProjectDb:
