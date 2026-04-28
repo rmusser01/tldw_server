@@ -1,3 +1,5 @@
+"""Build normalized retrieval policy objects from resolved RAG requests."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field

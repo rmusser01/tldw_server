@@ -90,6 +90,8 @@ _BATCH_ROUND2_DEFAULT_FIELDS = {
     "enable_image_search",
     "enable_video_search",
 }
+
+
 def _search_agent_setting(env_key: str, config_key: str) -> Optional[str]:
     """Read Search-Agent setting with env-over-config precedence."""
     env_value = os.getenv(env_key)
@@ -110,6 +112,7 @@ def _build_unified_pipeline_kwargs(
     resolved_request: Optional[ResolvedRAGRequest] = None,
     retrieval_plan: Optional[RetrievalPlan] = None,
 ) -> dict[str, Any]:
+    """Translate a resolved standard request into core pipeline keyword arguments."""
     if resolved_request is None:
         resolved_request = resolve_rag_request(
             request,
@@ -146,6 +149,7 @@ def _build_batch_pipeline_kwargs(
     resolved_request: Optional[ResolvedRAGRequest] = None,
     retrieval_plan: Optional[RetrievalPlan] = None,
 ) -> dict[str, Any]:
+    """Translate a resolved batch request into shared batch pipeline options."""
     if resolved_request is None:
         resolved_request = resolve_rag_request(
             request,
@@ -178,6 +182,7 @@ def _build_standard_request_bundle(
     media_db: Any,
     chacha_db: CharactersRAGDB,
 ) -> ResolvedRequestBundle:
+    """Resolve a standard request once and attach endpoint-owned pipeline resources."""
     return build_request_bundle(
         request=request,
         current_user=current_user,
@@ -203,6 +208,7 @@ def _build_batch_request_bundle(
     current_user: Optional[User],
     db_paths: dict[str, Optional[str]],
 ) -> ResolvedRequestBundle:
+    """Resolve a batch request once and attach endpoint-owned pipeline paths."""
     return build_request_bundle(
         request=request,
         current_user=current_user,
@@ -227,6 +233,7 @@ def _build_resume_batch_request(
     remaining_queries: list[str],
     max_concurrent: int,
 ) -> UnifiedBatchRequest:
+    """Rebuild a batch request from persisted checkpoint config and remaining work."""
     request_payload = dict(checkpoint_config or {})
     request_payload["queries"] = list(remaining_queries)
     request_payload["max_concurrent"] = max_concurrent
@@ -238,6 +245,7 @@ _CHECKPOINT_UNSUPPORTED = object()
 
 
 def _checkpoint_safe_value(value: Any) -> Any:
+    """Return a JSON-persistable checkpoint value or the unsupported sentinel."""
     if value is None or isinstance(value, (str, int, float, bool)):
         return value
     if isinstance(value, dict):
@@ -260,6 +268,7 @@ def _checkpoint_safe_value(value: Any) -> Any:
 
 
 def _sanitize_checkpoint_config_for_persistence(config: dict[str, Any]) -> dict[str, Any]:
+    """Drop runtime-only objects before persisting batch checkpoint config."""
     sanitized: dict[str, Any] = {}
     for key, value in dict(config or {}).items():
         safe_value = _checkpoint_safe_value(value)

@@ -2,6 +2,7 @@ from typing import Any
 
 import pytest
 
+import tldw_Server_API.app.core.RAG.rag_service.streaming_executor as streaming_executor
 from tldw_Server_API.app.core.RAG.rag_service.request_resolution import ResolvedRAGRequest
 from tldw_Server_API.app.core.RAG.rag_service.retrieval_plan import RetrievalPlan
 from tldw_Server_API.app.core.RAG.rag_service.streaming_executor import (
@@ -207,3 +208,30 @@ async def test_stream_rag_events_skips_standard_prefetch_for_agentic_strategy():
     assert calls == ["agentic"]  # nosec B101
     assert [event["type"] for event in events] == ["plan", "contexts", "reasoning", "delta"]  # nosec B101
     assert events[1]["contexts"][0]["id"] == "agentic-doc"  # nosec B101
+
+
+def test_generation_config_logs_config_load_failures(monkeypatch: pytest.MonkeyPatch) -> None:
+    events: list[tuple[str, object]] = []
+
+    class FakeLogger:
+        def opt(self, **kwargs: object) -> "FakeLogger":
+            events.append(("opt", kwargs))
+            return self
+
+        def warning(self, message: str) -> None:
+            events.append(("warning", message))
+
+    def fail_load_and_log_configs() -> dict[str, Any]:
+        raise RuntimeError("config unavailable")
+
+    import tldw_Server_API.app.core.config as core_config
+
+    monkeypatch.setattr(core_config, "load_and_log_configs", fail_load_and_log_configs)
+    monkeypatch.setattr(streaming_executor, "logger", FakeLogger())
+
+    config = streaming_executor._generation_config(payload={}, request_defaults={})
+
+    assert config["provider"] == "openai"  # nosec B101
+    assert config["model"] == "gpt-4o-mini"  # nosec B101
+    assert any(name == "opt" for name, _ in events)  # nosec B101
+    assert ("warning", "RAG streaming config load failed; using request/env defaults") in events  # nosec B101

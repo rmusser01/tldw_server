@@ -331,7 +331,7 @@ def _generation_config(
 
         cfg = load_and_log_configs() or {}
     except Exception as config_error:  # noqa: BLE001 - config load is best-effort in streaming path
-        logger.opt(exception=config_error).debug(
+        logger.opt(exception=config_error).warning(
             "RAG streaming config load failed; using request/env defaults"
         )
         cfg = {}

@@ -7,8 +7,10 @@ from fastapi import BackgroundTasks
 
 from tldw_Server_API.app.api.v1.endpoints import rag_unified
 import tldw_Server_API.app.api.v1.endpoints.rag_unified as rag_ep
+import tldw_Server_API.app.core.RAG.rag_service as rag_service
 from tldw_Server_API.app.core.RAG.rag_service.request_bundle import ResolvedRequestBundle
 from tldw_Server_API.app.core.RAG.rag_service.request_resolution import ResolvedRAGRequest
+import tldw_Server_API.app.core.RAG.rag_service.retrieval_plan as retrieval_plan_module
 from tldw_Server_API.app.core.RAG.rag_service.retrieval_plan import RetrievalPlan
 from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import UnifiedSearchResult
 
@@ -151,6 +153,32 @@ def test_checkpoint_config_sanitizer_drops_non_primitive_pipeline_objects() -> N
         "items": ["ok", 2],
     }
     json.dumps(sanitized)
+
+
+def test_rag_endpoint_private_helpers_keep_docstrings() -> None:
+    helper_names = (
+        "_build_unified_pipeline_kwargs",
+        "_build_batch_pipeline_kwargs",
+        "_build_standard_request_bundle",
+        "_build_batch_request_bundle",
+        "_build_resume_batch_request",
+        "_checkpoint_safe_value",
+        "_sanitize_checkpoint_config_for_persistence",
+    )
+
+    for helper_name in helper_names:
+        assert inspect.getdoc(getattr(rag_ep, helper_name)), f"{helper_name} lacks a docstring"  # nosec B101
+
+
+def test_retrieval_plan_module_has_docstring() -> None:
+    assert inspect.getdoc(retrieval_plan_module)  # nosec B101
+
+
+def test_rag_service_lazy_getattr_is_type_annotated() -> None:
+    signature = inspect.signature(rag_service.__getattr__)
+
+    assert signature.parameters["name"].annotation is str  # nosec B101
+    assert signature.return_annotation is not inspect.Signature.empty  # nosec B101
 
 
 @pytest.mark.asyncio
