@@ -224,11 +224,8 @@ async def _execute_action(action_name: str, transcript: str, current_user: User)
     registry = get_module_registry()
     try:
         module = await registry.find_module_for_tool(action_name)
-    except Exception as exc:  # noqa: BLE001  # defensive: action failures must not break speech chat
-        logger.warning(
-            f"Action lookup failed: action={action_name}, error={exc}",
-            exc_info=True,
-        )
+    except Exception:  # noqa: BLE001  # defensive: action failures must not break speech chat
+        logger.warning("Action lookup failed during speech chat")
         return {
             "action": action_name,
             "status": "error",
@@ -252,11 +249,8 @@ async def _execute_action(action_name: str, transcript: str, current_user: User)
             "result": result,
             "user_id": user_id,
         }
-    except Exception as exc:  # noqa: BLE001  # defensive: action failures must not break speech chat
-        logger.warning(
-            f"Action execution failed: action={action_name}, error={exc}",
-            exc_info=True,
-        )
+    except Exception:  # noqa: BLE001  # defensive: action failures must not break speech chat
+        logger.warning("Action execution failed during speech chat")
         return {
             "action": action_name,
             "status": "error",
@@ -324,31 +318,31 @@ def _strip_whisper_metadata_header_from_text(text: str) -> str:
 def _map_tts_exception(exc: Exception) -> HTTPException:
     """Map TTS exceptions to HTTPException consistent with /audio/speech."""
     if isinstance(exc, TTSInvalidVoiceReferenceError):
-        logger.warning(f"TTS voice reference error in speech chat: {exc}")
+        logger.warning("TTS voice reference error in speech chat")
         return HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc))
     if isinstance(exc, TTSValidationError):
-        logger.warning(f"TTS validation error in speech chat: {exc}")
+        logger.warning("TTS validation error in speech chat")
         return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
     if isinstance(exc, TTSProviderNotConfiguredError):
-        logger.error(f"TTS provider not configured in speech chat: {exc}")
+        logger.error("TTS provider not configured in speech chat")
         return HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="TTS service unavailable",
         )
     if isinstance(exc, TTSAuthenticationError):
-        logger.error(f"TTS authentication error in speech chat: {exc}")
+        logger.error("TTS authentication error in speech chat")
         return HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="TTS provider authentication failed",
         )
     if isinstance(exc, TTSRateLimitError):
-        logger.warning(f"TTS rate limit exceeded in speech chat: {exc}")
+        logger.warning("TTS rate limit exceeded in speech chat")
         return HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="TTS provider rate limit exceeded. Please try again later.",
         )
     if isinstance(exc, TTSQuotaExceededError):
-        logger.warning(f"TTS quota exceeded in speech chat: {exc}")
+        logger.warning("TTS quota exceeded in speech chat")
         return HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,
             detail="TTS quota exceeded. Please review your plan or quota.",
@@ -356,13 +350,13 @@ def _map_tts_exception(exc: Exception) -> HTTPException:
 
     # Fallback for other TTSError subclasses and unexpected errors
     if isinstance(exc, TTSError):
-        logger.error(f"TTS error in speech chat: {exc}")
+        logger.error("TTS provider error in speech chat")
         return HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="TTS provider error while generating speech",
         )
 
-    logger.error(f"Unexpected TTS error in speech chat: {exc}")
+    logger.error("Unexpected TTS error in speech chat")
     return HTTPException(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         detail="Unexpected error during TTS generation",
@@ -417,7 +411,7 @@ async def run_speech_chat_turn(
     except HTTPException:
         raise
     except Exception as e:  # noqa: BLE001
-        logger.error(f"Speech chat STT failed: {e}", exc_info=True)
+        logger.error("Speech chat STT failed")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Transcription failed for speech chat",
@@ -431,7 +425,7 @@ async def run_speech_chat_turn(
         )
 
     if _is_transcription_error(transcript):
-        logger.error(f"Speech chat STT returned error sentinel: {transcript}")
+        logger.error("Speech chat STT returned error sentinel")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Transcription failed for speech chat. Please try again or verify STT configuration in config.txt.",
@@ -494,8 +488,8 @@ async def run_speech_chat_turn(
             limit=20,
             loop=loop,
         )
-    except Exception as e:  # noqa: BLE001
-        logger.error(f"Failed to load conversation history for speech chat: {e}", exc_info=True)
+    except Exception:  # noqa: BLE001
+        logger.error("Failed to load conversation history for speech chat")
         history_messages = []
 
     # --- LLM call ---
@@ -597,7 +591,7 @@ async def run_speech_chat_turn(
     except HTTPException:
         raise
     except Exception as e:  # noqa: BLE001
-        logger.error(f"Speech chat LLM call failed: {e}", exc_info=True)
+        logger.error("Speech chat LLM call failed")
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="LLM provider error during speech chat",
