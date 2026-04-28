@@ -315,6 +315,40 @@ async def test_get_or_create_does_not_recache_service_after_shutdown(monkeypatch
 
 
 @pytest.mark.asyncio
+async def test_get_or_create_init_failure_logs_sanitized_backend_error(monkeypatch):
+    state = deps._LoopState(cache={}, loop=asyncio.get_running_loop())
+    wait_event = asyncio.Event()
+    state.initializing_events[123] = wait_event
+    messages = []
+    sink_id = logger.add(messages.append, format="{message}")
+
+    async def _fake_create(_user_id):
+        raise RuntimeError(
+            "failed opening /tmp/audit-secret-token/Audit_DB.db with password=hunter2"
+        )
+
+    monkeypatch.setattr(deps, "_resolve_audit_storage_mode", lambda: "per_user")
+    monkeypatch.setattr(deps, "_state_for_loop", lambda: state)
+    monkeypatch.setattr(deps, "_create_audit_service_for_user", _fake_create)
+
+    try:
+        with pytest.raises(RuntimeError):
+            await deps._get_or_create_audit_service_for_key(123)
+    finally:
+        logger.remove(sink_id)
+
+    rendered_logs = "\n".join(messages)
+
+    assert state.cache.get(123) is None
+    assert 123 not in state.initializing_users
+    assert 123 not in state.initializing_events
+    assert wait_event.is_set()
+    assert "RuntimeError" in rendered_logs
+    assert "password=hunter2" not in rendered_logs
+    assert "/tmp/audit-secret-token/Audit_DB.db" not in rendered_logs
+
+
+@pytest.mark.asyncio
 async def test_shutdown_user_audit_service_signals_cross_loop_waiters_threadsafe(monkeypatch):
     signal_loop = _ThreadsafeSignalLoopStub()
     signal_event = _ThreadsafeSignalEventStub()

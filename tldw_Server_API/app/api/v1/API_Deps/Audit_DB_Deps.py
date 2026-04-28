@@ -795,7 +795,11 @@ async def _get_or_create_audit_service_for_key(user_id: Optional[Union[int, str]
             logger.info(f"Audit service created and cached successfully for user {user_id}")
 
         except Exception as e:
-            logger.error(f"Failed to initialize audit service for user {user_id}: {e}", exc_info=True)
+            logger.error(
+                "Failed to initialize audit service for user {} ({})",
+                user_id,
+                type(e).__name__,
+            )
             raise
         finally:
             # Clean up initialization tracking and signal waiters
