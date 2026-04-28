@@ -32,10 +32,18 @@ def _make_wav_bytes(duration_seconds: float = 0.2, sample_rate: int = 16000) -> 
 
 def _capture_index_tts_logs(level: str = "DEBUG") -> tuple[list[str], int]:
     messages: list[str] = []
+
+    def capture(message):
+        exception = message.record.get("exception")
+        exception_text = ""
+        if exception:
+            exception_text = f"\n{exception.type.__name__}: {exception.value}"
+        messages.append(
+            f"{message.record['message']}\n{message.record.get('extra', {})}{exception_text}"
+        )
+
     sink_id = index_tts_mod.logger.add(
-        lambda message: messages.append(
-            f"{message.record['message']}\n{message.record.get('extra', {})}"
-        ),
+        capture,
         level=level,
     )
     return messages, sink_id
@@ -282,6 +290,73 @@ async def test_generate_streaming_wav(adapter, monkeypatch):
         collected.extend(chunk)
 
     assert collected  # Should receive streamed bytes
+
+
+@pytest.mark.asyncio
+async def test_generate_streaming_failure_log_sanitizes_exception_text(adapter):
+    raw_marker = "RAW_INDEX_TTS_STREAMING_SECRET_MARKER token=secret"
+
+    def fake_infer(*args, **kwargs):
+        def iterator():
+            yield np.ones(16, dtype=np.int16)
+            raise RuntimeError(raw_marker)
+
+        return iterator()
+
+    adapter._engine.infer = fake_infer
+    request = TTSRequest(
+        text="Stream request",
+        voice="demo",
+        format=AudioFormat.WAV,
+        speed=1.0,
+        voice_reference=_make_wav_bytes(),
+        stream=True,
+    )
+    messages, sink_id = _capture_index_tts_logs(level="ERROR")
+
+    try:
+        response = await adapter.generate(request)
+        assert response.audio_stream is not None
+        with pytest.raises(TTSGenerationError) as exc_info:
+            async for _ in response.audio_stream:
+                pass
+    finally:
+        index_tts_mod.logger.remove(sink_id)
+
+    assert raw_marker in exc_info.value.details["error"]
+    rendered_logs = "\n".join(messages)
+    assert "IndexTTS2 streaming failed" in rendered_logs
+    assert "RAW_INDEX_TTS_STREAMING_SECRET_MARKER" not in rendered_logs
+    assert "token=secret" not in rendered_logs
+
+
+def test_streaming_chunk_conversion_error_log_sanitizes_exception_text(adapter):
+    raw_marker = "RAW_INDEX_TTS_CHUNK_CONVERSION_SECRET_MARKER token=secret"
+
+    class BadChunk:
+        def __array__(self, dtype=None):
+            raise RuntimeError(raw_marker)
+
+    writer = MagicMock()
+    result = None
+    messages, sink_id = _capture_index_tts_logs(level="WARNING")
+
+    try:
+        result = adapter._convert_stream_chunk(
+            BadChunk(),
+            index_tts_mod.AudioNormalizer(),
+            writer,
+            target_sample_rate=adapter.STREAM_SAMPLE_RATE,
+        )
+    finally:
+        index_tts_mod.logger.remove(sink_id)
+
+    assert result == b""
+    writer.write_chunk.assert_not_called()
+    rendered_logs = "\n".join(messages)
+    assert "IndexTTS2 streaming chunk conversion error" in rendered_logs
+    assert "RAW_INDEX_TTS_CHUNK_CONVERSION_SECRET_MARKER" not in rendered_logs
+    assert "token=secret" not in rendered_logs
 
 
 def test_streaming_numpy_resample_fallback_log_sanitizes_exception_text(adapter, monkeypatch):

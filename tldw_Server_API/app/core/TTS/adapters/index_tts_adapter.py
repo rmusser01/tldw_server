@@ -452,7 +452,10 @@ class IndexTTS2Adapter(TTSAdapter):
                 if final_bytes:
                     yield final_bytes
             except Exception as exc:
-                logger.error("IndexTTS2 streaming failed: {}", exc, exc_info=True)
+                logger.error(
+                    "IndexTTS2 streaming failed; exception_type={}",
+                    _safe_exception_label(exc),
+                )
                 raise TTSGenerationError(
                     "IndexTTS2 streaming failed",
                     provider=self.provider_name,
@@ -478,7 +481,10 @@ class IndexTTS2Adapter(TTSAdapter):
         try:
             np_chunk = chunk.detach().cpu().numpy() if hasattr(chunk, "detach") else np.asarray(chunk)
         except Exception as exc:
-            logger.warning("IndexTTS2 streaming chunk conversion error: {}", exc)
+            logger.warning(
+                "IndexTTS2 streaming chunk conversion error; exception_type={}",
+                _safe_exception_label(exc),
+            )
             return b""
 
         np_chunk = np.squeeze(np_chunk)
