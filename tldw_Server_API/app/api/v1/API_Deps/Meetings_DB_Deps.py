@@ -54,14 +54,14 @@ def _extract_websocket_credentials(
         if auth_header and auth_header.lower().startswith("bearer ") and not resolved_token:
             resolved_token = auth_header.split(" ", 1)[1].strip()
     except Exception as exc:
-        logger.debug("Unable to parse websocket authorization header: {}", exc)
+        logger.debug("Unable to parse websocket authorization header: {}", type(exc).__name__)
 
     try:
         api_key_header = websocket.headers.get("x-api-key") or websocket.headers.get("X-API-KEY")
         if api_key_header and not resolved_api_key:
             resolved_api_key = api_key_header.strip()
     except Exception as exc:
-        logger.debug("Unable to parse websocket API key header: {}", exc)
+        logger.debug("Unable to parse websocket API key header: {}", type(exc).__name__)
 
     try:
         proto_header = websocket.headers.get("sec-websocket-protocol") or websocket.headers.get("Sec-WebSocket-Protocol")
@@ -70,7 +70,7 @@ def _extract_websocket_credentials(
             if len(parts) >= 2 and parts[0].lower() == "bearer" and parts[1]:
                 resolved_token = parts[1]
     except Exception as exc:
-        logger.debug("Unable to parse websocket subprotocol auth token: {}", exc)
+        logger.debug("Unable to parse websocket subprotocol auth token: {}", type(exc).__name__)
 
     return resolved_token, resolved_api_key
 
