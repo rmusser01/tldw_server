@@ -470,7 +470,7 @@ class SemanticCache:
 
                 logger.info(f"Saved semantic cache state ({len(self._cache)} entries)")
         except (OSError, RuntimeError, TypeError, ValueError) as e:
-            logger.error(f"Failed to save semantic cache: {e}")
+            logger.error(f"Failed to save semantic cache: {type(e).__name__}")
 
     def load(self) -> None:
         """Load cache state from disk."""
@@ -524,7 +524,7 @@ class SemanticCache:
         except FileNotFoundError:
             logger.debug(f"No cache file found at {self.persist_path}")
         except (json.JSONDecodeError, OSError, RuntimeError, TypeError, ValueError) as e:
-            logger.error(f"Failed to load semantic cache: {e}")
+            logger.error(f"Failed to load semantic cache: {type(e).__name__}")
 
 
 class AdaptiveCache(SemanticCache):
