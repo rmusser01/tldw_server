@@ -36,7 +36,16 @@ def _assert_log_omits_raw_exception(logger_stub, expected_level, expected_messag
         level == expected_level and expected_message in message
         for level, message, _args, _kwargs in logger_stub.messages
     )
-    rendered = "\n".join(message for _level, message, _args, _kwargs in logger_stub.messages)
+    rendered = "\n".join(
+        " ".join(
+            [
+                message,
+                " ".join(str(arg) for arg in args),
+                " ".join(f"{key}={value}" for key, value in kwargs.items()),
+            ]
+        )
+        for _level, message, args, kwargs in logger_stub.messages
+    )
     assert "/private/db/path" not in rendered
     assert "SECRET_TOKEN" not in rendered
     assert "backend exploded" not in rendered
@@ -260,3 +269,24 @@ def test_shutdown_chacha_executor_sanitizes_shutdown_failure_log(monkeypatch):
         "debug",
         "ChaChaNotes executor shutdown error",
     )
+
+
+@pytest.mark.asyncio
+async def test_warm_chacha_db_for_user_sanitizes_fail_open_log(monkeypatch):
+    logger_stub = _LoggerStub()
+
+    async def fail_init(*args, **kwargs):
+        raise RuntimeError("chacha backend exploded at /private/db/path SECRET_TOKEN")
+
+    monkeypatch.setattr(deps, "logger", logger_stub)
+    monkeypatch.setattr(deps, "_get_or_init_db_instance", fail_init)
+
+    await deps.warm_chacha_db_for_user(4242)
+
+    _assert_log_omits_raw_exception(
+        logger_stub,
+        "warning",
+        "Warm-up for ChaChaNotes failed",
+    )
+    rendered = "\n".join(message for _level, message, _args, _kwargs in logger_stub.messages)
+    assert "4242" not in rendered

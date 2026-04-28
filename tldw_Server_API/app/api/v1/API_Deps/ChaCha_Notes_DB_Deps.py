@@ -494,7 +494,7 @@ async def warm_chacha_db_for_user(user_id: int, client_id: str | None = None) ->
         _chacha_default_char_tasks.add(task)
         task.add_done_callback(_chacha_default_char_tasks.discard)
     except (HTTPException, OSError, RuntimeError, ValueError, TypeError) as e:
-        logger.warning(f"Warm-up for ChaChaNotes user {user_id} failed: {e}")
+        logger.warning("Warm-up for ChaChaNotes failed ({})", type(e).__name__)
 
 
 async def get_chacha_db_for_user_id(user_id: int, client_id: str | None = None) -> CharactersRAGDB:
