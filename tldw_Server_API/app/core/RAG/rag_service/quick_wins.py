@@ -329,8 +329,8 @@ class CostTracker:
         # Initialize tokenizer for counting
         try:
             self.tokenizer = tiktoken.encoding_for_model("gpt-3.5-turbo")
-        except Exception as e:
-            logger.debug(f"Falling back to base tokenizer: error={e}")
+        except Exception:
+            logger.debug("Falling back to base tokenizer")
             self.tokenizer = tiktoken.get_encoding("cl100k_base")
 
     def count_tokens(self, text: str) -> int:
@@ -663,13 +663,13 @@ class WebhookNotifier:
                 logger.warning(f"Webhook failed with status {resp.status_code}")
 
             return success
-        except Exception as e:
-            logger.error(f"Webhook error: {e}")
+        except Exception:
+            logger.error("Webhook error")
 
             self.webhook_history.append({
                 "url": webhook_url,
                 "event": event_type,
-                "error": str(e),
+                "error": "webhook_request_failed",
                 "timestamp": datetime.now(),
                 "success": False
             })
