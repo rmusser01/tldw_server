@@ -571,8 +571,8 @@ class AudioConverter:
                 output_path.parent.mkdir(parents=True, exist_ok=True)
                 output_path.write_bytes(input_path.read_bytes())
                 return True
-            except _AUDIO_CONVERSION_EXCEPTIONS as exc:
-                logger.error(f"Time-stretch noop copy failed: {exc}")
+            except _AUDIO_CONVERSION_EXCEPTIONS:
+                logger.error("Time-stretch noop copy failed")
                 return False
         try:
             output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -593,8 +593,8 @@ class AudioConverter:
                 return False
             logger.info(f"Time-stretch applied (ratio: {speed_ratio})")
             return True
-        except _AUDIO_CONVERSION_EXCEPTIONS as e:
-            logger.error(f"Time-stretch error: {e}")
+        except _AUDIO_CONVERSION_EXCEPTIONS:
+            logger.error("Time-stretch error")
             return False
 
     @staticmethod
