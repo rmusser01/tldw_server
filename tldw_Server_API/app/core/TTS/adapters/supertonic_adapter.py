@@ -42,6 +42,11 @@ from .base import (
 # Supertonic Adapter Implementation
 
 
+def _safe_exception_label(exc: BaseException) -> str:
+    """Return a non-sensitive exception identifier for logs."""
+    return type(exc).__name__
+
+
 class SupertonicOnnxAdapter(TTSAdapter):
     """Adapter for the Supertonic ONNX TTS engine."""
 
@@ -166,7 +171,10 @@ class SupertonicOnnxAdapter(TTSAdapter):
             if asyncio.iscoroutine(register_result):
                 await register_result
         except Exception as registration_error:
-            logger.debug("Supertonic provider registration failed; continuing", exc_info=registration_error)
+            logger.debug(
+                "Supertonic provider registration failed; continuing; exception_type={}",
+                _safe_exception_label(registration_error),
+            )
 
         # Sample rate from engine if available
         try:
@@ -379,7 +387,10 @@ class SupertonicOnnxAdapter(TTSAdapter):
                 arr = arr[:end_idx]
         except Exception as trim_error:
             # If duration is unavailable, fall back to full array
-            logger.debug("Supertonic audio trim by duration failed; using untrimmed audio", exc_info=trim_error)
+            logger.debug(
+                "Supertonic audio trim by duration failed; using untrimmed audio; exception_type={}",
+                _safe_exception_label(trim_error),
+            )
         return arr
 
     def _build_stream(self, audio_bytes: bytes) -> AsyncGenerator[bytes, None]:
