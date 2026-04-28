@@ -254,8 +254,8 @@ class FastGroundednessGrader:
                 metadata={"error": "timeout"},
             )
 
-        except (AttributeError, ConnectionError, OSError, RuntimeError, TypeError, ValueError) as e:
-            logger.warning(f"Fast groundedness check failed: {e}")
+        except (AttributeError, ConnectionError, OSError, RuntimeError, TypeError, ValueError):
+            logger.warning("Fast groundedness check failed; using heuristic fallback")
             return self._heuristic_groundedness(query, answer, documents, start_time)
 
     def _build_sources_text(self, documents: list[Any], max_chars: int = 3000) -> str:
@@ -309,8 +309,8 @@ class FastGroundednessGrader:
                     method="llm",
                 )
 
-        except (StructuredOutputParseError, AttributeError, TypeError, ValueError) as e:
-            logger.debug(f"Failed to parse groundedness response: {e}")
+        except (StructuredOutputParseError, AttributeError, TypeError, ValueError):
+            logger.debug("Failed to parse groundedness response; using parse fallback")
 
         # Default on parse failure
         return FastGroundednessResult(
@@ -487,8 +487,8 @@ class UtilityGrader:
                 metadata={"error": "timeout"},
             )
 
-        except (AttributeError, ConnectionError, OSError, RuntimeError, TypeError, ValueError) as e:
-            logger.warning(f"Utility grading failed: {e}")
+        except (AttributeError, ConnectionError, OSError, RuntimeError, TypeError, ValueError):
+            logger.warning("Utility grading failed; using heuristic fallback")
             return self._heuristic_utility(query, answer, start_time)
 
     def _parse_utility_response(self, raw_response: Any, latency_ms: int) -> UtilityResult:
@@ -519,8 +519,8 @@ class UtilityGrader:
                     method="llm",
                 )
 
-        except (StructuredOutputParseError, AttributeError, TypeError, ValueError) as e:
-            logger.debug(f"Failed to parse utility response: {e}")
+        except (StructuredOutputParseError, AttributeError, TypeError, ValueError):
+            logger.debug("Failed to parse utility response; using parse fallback")
 
         # Default on parse failure
         return UtilityResult(
