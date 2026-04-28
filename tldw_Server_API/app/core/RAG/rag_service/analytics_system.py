@@ -1273,10 +1273,10 @@ async def apply_feedback_boost(context: Any, **kwargs) -> Any:
         from .user_personalization_store import UserPersonalizationStore
         store = UserPersonalizationStore(user_id)
         context.documents = store.boost_documents(context.documents, corpus=context.config.get("index_namespace"))
-    except ValueError as e:
-        logger.debug(f"Feedback boost skipped for user_id={user_id}: {e}")
-    except (AttributeError, OSError, RuntimeError, TypeError) as e:
-        logger.debug(f"Feedback boost failed: {e}")
+    except ValueError:
+        logger.debug("Feedback boost skipped")
+    except (AttributeError, OSError, RuntimeError, TypeError):
+        logger.debug("Feedback boost failed")
     else:
         return context
     return context

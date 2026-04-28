@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import sys
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 from typing import Any
 
 import pytest
@@ -410,3 +410,61 @@ async def test_unified_feedback_implicit_outer_failure_log_is_sanitized(
 
     assert result is None
     _assert_sanitized_records(records, "Implicit interaction recording failed")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("store_factory", "expected_message"),
+    [
+        (
+            lambda: type(
+                "_InvalidBoostStore",
+                (),
+                {
+                    "__init__": lambda self, _user_id: (_ for _ in ()).throw(
+                        ValueError(f"backend exploded at {_SECRET_PATH}?token={_SECRET_TOKEN}")
+                    )
+                },
+            ),
+            "Feedback boost skipped",
+        ),
+        (
+            lambda: type(
+                "_FailingBoostStore",
+                (),
+                {
+                    "__init__": lambda self, _user_id: None,
+                    "boost_documents": lambda self, _documents, corpus=None: (_ for _ in ()).throw(
+                        RuntimeError(f"backend exploded at {_SECRET_PATH}?token={_SECRET_TOKEN}")
+                    ),
+                },
+            ),
+            "Feedback boost failed",
+        ),
+    ],
+)
+async def test_apply_feedback_boost_logs_are_sanitized(
+    monkeypatch: pytest.MonkeyPatch,
+    store_factory: Any,
+    expected_message: str,
+) -> None:
+    _install_personalization_module(monkeypatch, store_factory())
+    documents = [SimpleNamespace(id=f"doc-{_SECRET_TOKEN}")]
+    context = SimpleNamespace(
+        config={
+            "feedback": {"apply_boost": True},
+            "user_id": _SECRET_USER_ID,
+            "index_namespace": f"corpus-{_SECRET_TOKEN}",
+        },
+        documents=documents,
+    )
+    records, sink_id = _capture_log_records("DEBUG")
+
+    try:
+        result = await analytics_system.apply_feedback_boost(context)
+    finally:
+        analytics_system.logger.remove(sink_id)
+
+    assert result is context
+    assert context.documents is documents
+    _assert_sanitized_records(records, expected_message)
