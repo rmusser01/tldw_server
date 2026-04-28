@@ -185,7 +185,7 @@ async def web_search_fallback(
         )
 
     except Exception as e:  # noqa: BLE001 - fallback should be resilient to unexpected failures
-        logger.warning(f"Web search fallback failed: {e}")
+        logger.warning("Web search fallback failed: search execution error")
         return WebFallbackResult(
             documents=[],
             search_time_ms=int((time.time() - start_time) * 1000),

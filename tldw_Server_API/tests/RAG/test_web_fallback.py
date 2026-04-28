@@ -364,6 +364,38 @@ class TestWebSearchFallback:
             # Should handle the error gracefully
             assert result.documents == []
 
+    @pytest.mark.asyncio
+    async def test_fallback_failure_log_sanitizes_exception_details(self):
+        """Test fallback failure log does not expose raw exception details."""
+        secret = "sk-web-fallback-secret-456"
+        private_path = "/tmp/private/user_databases/42/Media_DB_v2.db"
+        sensitive_query = "summarize private token"
+        raw_error = RuntimeError(f"failed opening {private_path} with api_key={secret} query={sensitive_query}")
+        messages = []
+        sink_id = web_fallback_module.logger.add(
+            lambda message: messages.append(message.record["message"]),
+            level="WARNING",
+        )
+
+        try:
+            with patch(
+                "tldw_Server_API.app.core.RAG.rag_service.web_fallback.asyncio.to_thread",
+                side_effect=raw_error,
+            ):
+                result = await web_search_fallback(sensitive_query)
+        finally:
+            web_fallback_module.logger.remove(sink_id)
+
+        assert result.documents == []
+        assert result.metadata == {"error": str(raw_error)}
+
+        log_text = "\n".join(messages)
+        assert "Web search fallback failed" in log_text
+        assert "failed opening" not in log_text
+        assert private_path not in log_text
+        assert secret not in log_text
+        assert sensitive_query not in log_text
+
 
 class TestFallbackToWebSearch:
     """Tests for the convenience fallback_to_web_search function."""
