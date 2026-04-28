@@ -145,8 +145,8 @@ Let me explain:"""
         """Load prompt snippets from rag.prompts.* with a small process cache."""
         try:
             prompt_text = load_prompt("rag", name)
-        except Exception as exc:  # noqa: BLE001 - prompt loading must remain best-effort
-            logger.debug(f"Prompt loader failed for rag prompt '{name}': {exc}")
+        except Exception:  # noqa: BLE001 - prompt loading must remain best-effort
+            logger.debug("Prompt loader failed for rag prompt '{}'", name)
             return None
         if isinstance(prompt_text, str) and prompt_text.strip():
             return prompt_text.strip()

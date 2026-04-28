@@ -13,6 +13,16 @@ from tldw_Server_API.app.core.RAG.rag_service.generation import PromptTemplates
 pytestmark = pytest.mark.unit
 
 
+class _LoggerStub:
+    def __init__(self) -> None:
+        self.debugs: list[str] = []
+
+    def debug(self, message: str, *args: object, **kwargs: object) -> None:
+        if args or kwargs:
+            message = message.format(*args, **kwargs)
+        self.debugs.append(message)
+
+
 def test_prompt_templates_load_switchable_profile_prompt_keys() -> None:
     text = PromptTemplates.get_template("instruction_tuned")
 
@@ -26,6 +36,34 @@ def test_prompt_templates_falls_back_to_default_for_unknown_key() -> None:
 
     assert "Context:" in unknown
     assert "Question:" in unknown
+
+
+def test_prompt_templates_sanitizes_loader_failure_log(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    logger_stub = _LoggerStub()
+
+    def _fail_load_prompt(_category: str, _name: str) -> str:
+        raise RuntimeError(
+            "prompt loader failed at /private/prompts/rag.yaml "
+            "api_key=sk-test-private-token"
+        )
+
+    PromptTemplates._load_rag_prompt_cached.cache_clear()
+    monkeypatch.setattr(generation_mod, "load_prompt", _fail_load_prompt)
+    monkeypatch.setattr(generation_mod, "logger", logger_stub)
+
+    try:
+        text = PromptTemplates.get_template("instruction_tuned")
+    finally:
+        PromptTemplates._load_rag_prompt_cached.cache_clear()
+
+    assert text == PromptTemplates.DEFAULT
+    assert logger_stub.debugs == ["Prompt loader failed for rag prompt 'instruction_tuned'"]
+    rendered = "\n".join(logger_stub.debugs)
+    assert "prompt loader failed at" not in rendered
+    assert "/private/prompts/rag.yaml" not in rendered
+    assert "sk-test-private-token" not in rendered
 
 
 @pytest.mark.asyncio
