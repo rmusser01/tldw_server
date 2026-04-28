@@ -20,12 +20,28 @@ def _user(user_id: int = 42) -> User:
     return User(id=user_id, username="slides-user")
 
 
-def _capture_slides_dep_logs(level: str = "ERROR") -> tuple[list[str], int]:
+def _capture_slides_dep_logs(
+    level: str = "ERROR",
+    log_format: str = "{message}",
+) -> tuple[list[str], int]:
     messages: list[str] = []
     sink_id = deps.logger.add(
         lambda message: messages.append(str(message.record.get("message") or "")),
         level=level,
-        format="{message}",
+        format=log_format,
+    )
+    return messages, sink_id
+
+
+def _capture_formatted_slides_dep_logs(
+    level: str = "ERROR",
+    log_format: str = "{message}\n{exception}",
+) -> tuple[list[str], int]:
+    messages: list[str] = []
+    sink_id = deps.logger.add(
+        lambda message: messages.append(str(message)),
+        level=level,
+        format=log_format,
     )
     return messages, sink_id
 
@@ -183,3 +199,53 @@ def test_get_slides_db_sanitizes_evicted_close_failure_logs(monkeypatch):
         _RAW_DETAIL,
         "backend exploded",
     )
+
+
+def test_try_get_slides_db_sanitizes_http_exception_fallback_logs(monkeypatch):
+    def fail_resolve(*args, **kwargs):
+        raise HTTPException(status_code=503, detail=_RAW_DETAIL)
+
+    monkeypatch.setattr(deps, "get_slides_db_for_user", fail_resolve)
+    messages, sink_id = _capture_slides_dep_logs(level="DEBUG")
+    try:
+        result = deps.try_get_slides_db_for_user(current_user=_user(_SENSITIVE_USER_ID))
+    finally:
+        deps.logger.remove(sink_id)
+
+    assert result is None
+
+    rendered_logs = "\n".join(messages)
+    _assert_sensitive_text_not_logged(
+        rendered_logs,
+        str(_SENSITIVE_USER_ID),
+        _PRIVATE_PATH,
+        _SECRET_TOKEN,
+        _RAW_DETAIL,
+        "backend exploded",
+    )
+    assert "status_code=503" in rendered_logs
+
+
+def test_try_get_slides_db_sanitizes_unexpected_exception_fallback_logs(monkeypatch):
+    def fail_resolve(*args, **kwargs):
+        raise RuntimeError(_RAW_DETAIL)
+
+    monkeypatch.setattr(deps, "get_slides_db_for_user", fail_resolve)
+    messages, sink_id = _capture_formatted_slides_dep_logs(level="ERROR")
+    try:
+        result = deps.try_get_slides_db_for_user(current_user=_user(_SENSITIVE_USER_ID))
+    finally:
+        deps.logger.remove(sink_id)
+
+    assert result is None
+
+    rendered_logs = "\n".join(messages)
+    _assert_sensitive_text_not_logged(
+        rendered_logs,
+        str(_SENSITIVE_USER_ID),
+        _PRIVATE_PATH,
+        _SECRET_TOKEN,
+        _RAW_DETAIL,
+        "backend exploded",
+    )
+    assert "error_type=RuntimeError" in rendered_logs

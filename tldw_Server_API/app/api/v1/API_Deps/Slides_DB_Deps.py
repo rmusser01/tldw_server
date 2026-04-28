@@ -91,15 +91,13 @@ def try_get_slides_db_for_user(
         return get_slides_db_for_user(current_user=current_user)
     except HTTPException as exc:
         logger.debug(
-            "Slides DB unavailable for user {}: {}",
-            getattr(current_user, "id", None),
-            exc,
+            "Slides DB unavailable during best-effort lookup; status_code={}",
+            exc.status_code,
         )
         return None
     except Exception as exc:
-        logger.exception(
-            "Unexpected Slides DB init failure for user {}: {}",
-            getattr(current_user, "id", None),
-            exc,
+        logger.error(
+            "Unexpected Slides DB init failure during best-effort lookup; error_type={}",
+            type(exc).__name__,
         )
         return None
