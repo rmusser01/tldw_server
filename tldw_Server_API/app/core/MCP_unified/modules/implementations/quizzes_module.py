@@ -478,11 +478,8 @@ class QuizzesModule(BaseModule):
     def _cleanup_generated_quiz(self, db: CharactersRAGDB, quiz_id: int, *, reason: str) -> bool:
         try:
             deleted = db.delete_quiz(quiz_id, hard_delete=True)
-        except Exception as exc:
-            logger.error(
-                f"Exception during cleanup of generated quiz {quiz_id} after {reason}: {exc}",
-                exc_info=True,
-            )
+        except Exception:
+            logger.error(f"Exception during cleanup of generated quiz {quiz_id}; details redacted")
             return False
         if not deleted:
             logger.error(f"Failed to clean up generated quiz {quiz_id} after {reason}")
@@ -950,7 +947,7 @@ class QuizzesModule(BaseModule):
             response_text = await self._call_llm(prompt, provider=provider, model=model)
             questions_data = self._parse_generated_questions(response_text)
         except _QUIZZES_MODULE_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"Quiz generation failed: {e}")
+            logger.error("Quiz generation failed; details redacted")
             raise ValueError(f"Failed to generate quiz: {e}") from e
 
         # Create quiz and questions
@@ -974,8 +971,8 @@ class QuizzesModule(BaseModule):
                 if not media:
                     return None
                 return media.get("content") or media.get("transcript") or media.get("summary")
-        except _QUIZZES_MODULE_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"Failed to get media content: {e}")
+        except _QUIZZES_MODULE_NONCRITICAL_EXCEPTIONS:
+            logger.error("Failed to get media content; details redacted")
             return None
 
     def _build_generation_prompt(
@@ -1021,7 +1018,7 @@ Return ONLY the JSON array, no other text."""
                 return json.loads(json_match.group())
             return json.loads(response)
         except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse generated questions: {e}")
+            logger.error("Failed to parse generated questions; details redacted")
             raise ValueError("Failed to parse generated questions from LLM response") from e
 
     def _resolve_llm_settings(self, args: dict[str, Any]) -> tuple[str, Optional[str]]:
@@ -1100,8 +1097,8 @@ Return ONLY the JSON array, no other text."""
                 try:
                     self._validate_question_payload(q, require_core_fields=True)
                     valid_questions.append(q)
-                except _QUIZZES_MODULE_NONCRITICAL_EXCEPTIONS as e:
-                    logger.warning(f"Failed to validate generated question {i}: {e}")
+                except _QUIZZES_MODULE_NONCRITICAL_EXCEPTIONS:
+                    logger.warning(f"Failed to validate generated question {i}; details redacted")
 
             if not valid_questions:
                 raise ValueError("Failed to generate quiz: no valid questions were created")
@@ -1129,8 +1126,8 @@ Return ONLY the JSON array, no other text."""
                             client_id=client_id,
                         )
                         created_questions.append(qid)
-                    except _QUIZZES_MODULE_NONCRITICAL_EXCEPTIONS as e:
-                        logger.warning(f"Failed to create question {i}: {e}")
+                    except _QUIZZES_MODULE_NONCRITICAL_EXCEPTIONS:
+                        logger.warning(f"Failed to create question {i}; details redacted")
             except Exception:
                 self._cleanup_generated_quiz(
                     db,
