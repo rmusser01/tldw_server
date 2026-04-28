@@ -114,7 +114,11 @@ def _get_db_path_for_user(user_id: int) -> Path:
     try:
         return DatabasePaths.get_media_db_path(user_id)
     except Exception as e:
-        logger.error(f"Could not resolve database directory for user_id {user_id}: {e}", exc_info=True)
+        logger.error(
+            "Could not resolve database directory ({})",
+            type(e).__name__,
+            exc_info=True,
+        )
         raise OSError(f"Could not initialize storage directory for user {user_id}.") from e
 
 def _get_or_create_media_db_factory(current_user: User) -> MediaDbFactory:
@@ -222,18 +226,28 @@ def _get_or_create_media_db_factory(current_user: User) -> MediaDbFactory:
                 pass
 
         except (DatabaseError, SchemaError) as e:
-            log_path = db_path or f"directory for user_id {user_id}"
-            logger.error(f"Failed to initialize database for user {user_id} at {log_path}: {e}", exc_info=True)
+            logger.error(
+                "Failed to initialize database ({})",
+                type(e).__name__,
+                exc_info=True,
+            )
             raise map_db_error_to_http(e, default_detail="Media DB unavailable") from e
         except OSError as e:
-            logger.error(f"Failed to get DB path for user {user_id}: {e}", exc_info=True)
+            logger.error(
+                "Failed to get DB path ({})",
+                type(e).__name__,
+                exc_info=True,
+            )
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Media DB unavailable",
             ) from e
         except Exception as e:
-            log_path = db_path or f"directory for user_id {user_id}"
-            logger.error(f"Unexpected error initializing database for user {user_id} at {log_path}: {e}", exc_info=True)
+            logger.error(
+                "Unexpected error initializing database ({})",
+                type(e).__name__,
+                exc_info=True,
+            )
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="An unexpected error occurred during database setup for user."
