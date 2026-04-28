@@ -135,7 +135,10 @@ def _get_or_create_media_db_factory(current_user: User) -> MediaDbFactory:
     try:
         shared_backend = get_content_backend_instance()
     except RuntimeError as exc:
-        logger.error(f"Content backend initialization failed: {exc}")
+        logger.error(
+            "Content backend initialization failed ({})",
+            type(exc).__name__,
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="PostgreSQL content backend required but unavailable. Check server logs."
