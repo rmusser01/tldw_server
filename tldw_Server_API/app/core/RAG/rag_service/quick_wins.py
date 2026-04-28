@@ -818,7 +818,7 @@ async def spell_check_query(context: Any, **kwargs) -> Any:
                 try:
                     setattr(context, "metadata", metadata)
                 except Exception as metadata_attach_error:
-                    logger.debug("Quick wins failed to attach metadata mapping to context", exc_info=metadata_attach_error)
+                    logger.debug("Quick wins failed to attach metadata mapping to context")
             metadata["original_query_before_correction"] = query_text
             context.query = result["corrected"]
             metadata["spell_corrections"] = result["corrections"]

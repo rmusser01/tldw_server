@@ -36,6 +36,18 @@ class _NoopDebug:
         return None
 
 
+class _RecordingLogger:
+    def __init__(self):
+        self.debugs = []
+        self.infos = []
+
+    def debug(self, message, *args, **kwargs):
+        self.debugs.append({"message": message, "args": args, "kwargs": kwargs})
+
+    def info(self, message, *args, **kwargs):
+        self.infos.append({"message": message, "args": args, "kwargs": kwargs})
+
+
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_spell_check_query_accepts_raw_string(monkeypatch):
@@ -63,6 +75,52 @@ async def test_spell_check_query_context_still_supported(monkeypatch):
     assert out is context
     assert context.query == "the query"
     assert context.metadata.get("original_query_before_correction") == "teh query"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_spell_check_query_metadata_attach_failure_log_is_sanitized(monkeypatch):
+    class _ContextWithRejectingMetadata:
+        def __init__(self):
+            self.config = {"spell_check": {"enabled": True, "auto_correct": True}}
+            self.query = "teh query"
+            self._metadata = "not-a-dict"
+            self.metadata_set_attempts = 0
+
+        @property
+        def metadata(self):
+            return self._metadata
+
+        @metadata.setter
+        def metadata(self, _value):
+            self.metadata_set_attempts += 1
+            raise RuntimeError("cannot attach metadata for /tmp/source token=secret")
+
+    logger = _RecordingLogger()
+    monkeypatch.setattr(qw, "get_spell_checker", lambda: _FakeChecker())
+    monkeypatch.setattr(qw, "get_debug_mode", lambda: _NoopDebug())
+    monkeypatch.setattr(qw, "logger", logger)
+
+    context = _ContextWithRejectingMetadata()
+
+    out = await qw.spell_check_query(context)
+
+    assert out is context
+    assert context.query == "the query"
+    assert context.metadata == "not-a-dict"
+    assert context.metadata_set_attempts == 1
+    assert logger.debugs == [
+        {
+            "message": "Quick wins failed to attach metadata mapping to context",
+            "args": (),
+            "kwargs": {},
+        }
+    ]
+    rendered_logs = repr(logger.debugs)
+    assert "/tmp/source" not in rendered_logs
+    assert "token=secret" not in rendered_logs
+    assert "cannot attach metadata" not in rendered_logs
+    assert "exc_info" not in rendered_logs
 
 
 @pytest.mark.unit
