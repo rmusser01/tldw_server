@@ -24,7 +24,10 @@ async def get_watchlists_db_for_user(
             db.ensure_schema()
         except Exception as schema_error:
             # Best-effort; creation may have already occurred or be gated by init
-            logger.debug("Watchlists DB schema ensure failed in dependency setup", exc_info=schema_error)
+            logger.debug(
+                "Watchlists DB schema ensure failed in dependency setup: error_type={}",
+                type(schema_error).__name__,
+            )
         return db
     except DatabaseError as e:
         logger.error(

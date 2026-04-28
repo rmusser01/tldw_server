@@ -36,6 +36,29 @@ def _capture_error_messages(module_logger):
         module_logger.remove(sink_id)
 
 
+@contextmanager
+def _capture_debug_records(module_logger):
+    rendered_records: list[str] = []
+
+    def capture(message):
+        rendered_records.append(
+            "\n".join(
+                (
+                    str(message.record.get("message") or ""),
+                    str(message.record.get("extra") or ""),
+                    str(message.record.get("exception") or ""),
+                    str(message),
+                )
+            )
+        )
+
+    sink_id = module_logger.add(capture, level="DEBUG", format="{message}")
+    try:
+        yield rendered_records
+    finally:
+        module_logger.remove(sink_id)
+
+
 @pytest.mark.asyncio
 async def test_get_collections_db_maps_backend_database_error(monkeypatch):
     class FailingCollectionsDatabase:
@@ -144,6 +167,39 @@ async def test_get_watchlists_db_logs_safe_initialization_failure(
     assert "sqlite failed" not in rendered_logs
     assert "/Users/alice/private/watchlists.db" not in rendered_logs
     assert "super-secret" not in rendered_logs
+
+
+@pytest.mark.asyncio
+async def test_get_watchlists_db_schema_ensure_fallback_log_is_sanitized(monkeypatch):
+    sensitive_message = (
+        "schema failed at /Users/alice/private/watchlists.db "
+        "with token=super-secret"
+    )
+
+    class WatchlistsDbWithSchemaFailure:
+        def ensure_schema(self):
+            raise RuntimeError(sensitive_message)
+
+    returned_db = WatchlistsDbWithSchemaFailure()
+
+    class WatchlistsDatabaseFactory:
+        @staticmethod
+        def for_user(user_id):
+            return returned_db
+
+    monkeypatch.setattr(watchlists_deps, "WatchlistsDatabase", WatchlistsDatabaseFactory)
+
+    with _capture_debug_records(watchlists_deps.logger) as records:
+        db = await watchlists_deps.get_watchlists_db_for_user(current_user=_user())
+
+    assert db is returned_db
+    rendered_logs = "\n".join(records)
+    assert "Watchlists DB schema ensure failed in dependency setup" in rendered_logs
+    assert "schema failed" not in rendered_logs
+    assert "/Users/alice/private/watchlists.db" not in rendered_logs
+    assert "super-secret" not in rendered_logs
+    assert "Traceback" not in rendered_logs
+    assert "exc_info" not in rendered_logs
 
 
 class _FakeSqliteBackend:
