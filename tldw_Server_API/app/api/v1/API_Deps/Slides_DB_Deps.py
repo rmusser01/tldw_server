@@ -31,7 +31,10 @@ def cleanup_slides_db_cache() -> None:
             try:
                 db.close_connection()
             except Exception as exc:
-                logger.warning("Failed to close Slides DB for user {} on shutdown: {}", user_id, exc)
+                logger.warning(
+                    "Failed to close Slides DB connection on shutdown; error_type={}",
+                    type(exc).__name__,
+                )
         _slides_db_instances.clear()
 
 
@@ -56,19 +59,24 @@ def get_slides_db_for_user(
                     oldest_db.close_connection()
                 except Exception as exc:
                     logger.warning(
-                        "Failed to close Slides DB for evicted user {}: {}",
-                        oldest_key,
-                        exc,
+                        "Failed to close evicted Slides DB connection; error_type={}",
+                        type(exc).__name__,
                     )
             db_path = _get_slides_db_path_for_user(user_id)
             db_instance = SlidesDatabase(db_path=str(db_path), client_id=str(current_user.id))
             _slides_db_instances[db_key] = db_instance
             return db_instance
         except (SlidesDatabaseError, SchemaError) as exc:
-            logger.error("Failed to initialize Slides DB for user {}: {}", user_id, exc)
+            logger.error(
+                "Failed to initialize Slides DB; error_type={}",
+                type(exc).__name__,
+            )
             raise map_db_error_to_http(exc, default_detail="Slides DB unavailable") from exc
         except Exception as exc:
-            logger.error("Unexpected Slides DB init failure for user {}: {}", user_id, exc)
+            logger.error(
+                "Unexpected Slides DB init failure; error_type={}",
+                type(exc).__name__,
+            )
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Slides DB unavailable",
