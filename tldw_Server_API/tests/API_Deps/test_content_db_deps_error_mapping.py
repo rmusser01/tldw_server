@@ -1,3 +1,4 @@
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -21,6 +22,20 @@ def _user() -> User:
     return User(id=24, username="content-user")
 
 
+@contextmanager
+def _capture_error_messages(module_logger):
+    messages: list[str] = []
+    sink_id = module_logger.add(
+        lambda message: messages.append(str(message.record.get("message") or "")),
+        level="ERROR",
+        format="{message}",
+    )
+    try:
+        yield messages
+    finally:
+        module_logger.remove(sink_id)
+
+
 @pytest.mark.asyncio
 async def test_get_collections_db_maps_backend_database_error(monkeypatch):
     class FailingCollectionsDatabase:
@@ -38,6 +53,45 @@ async def test_get_collections_db_maps_backend_database_error(monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("exception_factory", "expected_type"),
+    (
+        (lambda message: BackendDatabaseError(message), "DatabaseError"),
+        (lambda message: RuntimeError(message), "RuntimeError"),
+    ),
+)
+async def test_get_collections_db_logs_safe_initialization_failure(
+    monkeypatch,
+    exception_factory,
+    expected_type,
+):
+    sensitive_message = (
+        "sqlite failed at /Users/alice/private/collections.db "
+        "with password=super-secret"
+    )
+
+    class FailingCollectionsDatabase:
+        @staticmethod
+        def for_user(user_id):
+            raise exception_factory(sensitive_message)
+
+    monkeypatch.setattr(collections_deps, "CollectionsDatabase", FailingCollectionsDatabase)
+
+    with _capture_error_messages(collections_deps.logger) as messages:
+        with pytest.raises(HTTPException) as exc_info:
+            await collections_deps.get_collections_db_for_user(current_user=_user())
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "Collections DB unavailable"
+
+    rendered_logs = "\n".join(messages)
+    assert f"error_type={expected_type}" in rendered_logs
+    assert "sqlite failed" not in rendered_logs
+    assert "/Users/alice/private/collections.db" not in rendered_logs
+    assert "super-secret" not in rendered_logs
+
+
+@pytest.mark.asyncio
 async def test_get_watchlists_db_maps_backend_database_error(monkeypatch):
     class FailingWatchlistsDatabase:
         @staticmethod
@@ -51,6 +105,45 @@ async def test_get_watchlists_db_maps_backend_database_error(monkeypatch):
 
     assert exc_info.value.status_code == 500
     assert exc_info.value.detail == "Watchlists DB unavailable"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("exception_factory", "expected_type"),
+    (
+        (lambda message: BackendDatabaseError(message), "DatabaseError"),
+        (lambda message: RuntimeError(message), "RuntimeError"),
+    ),
+)
+async def test_get_watchlists_db_logs_safe_initialization_failure(
+    monkeypatch,
+    exception_factory,
+    expected_type,
+):
+    sensitive_message = (
+        "sqlite failed at /Users/alice/private/watchlists.db "
+        "with password=super-secret"
+    )
+
+    class FailingWatchlistsDatabase:
+        @staticmethod
+        def for_user(user_id):
+            raise exception_factory(sensitive_message)
+
+    monkeypatch.setattr(watchlists_deps, "WatchlistsDatabase", FailingWatchlistsDatabase)
+
+    with _capture_error_messages(watchlists_deps.logger) as messages:
+        with pytest.raises(HTTPException) as exc_info:
+            await watchlists_deps.get_watchlists_db_for_user(current_user=_user())
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "Watchlists DB unavailable"
+
+    rendered_logs = "\n".join(messages)
+    assert f"error_type={expected_type}" in rendered_logs
+    assert "sqlite failed" not in rendered_logs
+    assert "/Users/alice/private/watchlists.db" not in rendered_logs
+    assert "super-secret" not in rendered_logs
 
 
 class _FakeSqliteBackend:

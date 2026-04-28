@@ -27,8 +27,16 @@ async def get_watchlists_db_for_user(
             logger.debug("Watchlists DB schema ensure failed in dependency setup", exc_info=schema_error)
         return db
     except DatabaseError as e:
-        logger.error(f"Failed to init Watchlists DB for user {current_user.id}: {e}")
+        logger.error(
+            "Failed to init Watchlists DB for user {}: error_type={}",
+            current_user.id,
+            type(e).__name__,
+        )
         raise map_db_error_to_http(e, default_detail="Watchlists DB unavailable") from e
     except Exception as e:
-        logger.error(f"Failed to init Watchlists DB for user {current_user.id}: {e}")
+        logger.error(
+            "Failed to init Watchlists DB for user {}: error_type={}",
+            current_user.id,
+            type(e).__name__,
+        )
         raise HTTPException(status_code=500, detail="Watchlists DB unavailable") from e

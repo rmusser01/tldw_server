@@ -25,10 +25,18 @@ async def get_collections_db_for_user(
     try:
         return CollectionsDatabase.for_user(user_id=current_user.id)
     except DatabaseError as e:
-        logger.error(f"Failed to initialize Collections DB for user {current_user.id}: {e}")
+        logger.error(
+            "Failed to initialize Collections DB for user {}: error_type={}",
+            current_user.id,
+            type(e).__name__,
+        )
         raise map_db_error_to_http(e, default_detail="Collections DB unavailable") from e
     except Exception as e:
-        logger.error(f"Failed to initialize Collections DB for user {current_user.id}: {e}")
+        logger.error(
+            "Failed to initialize Collections DB for user {}: error_type={}",
+            current_user.id,
+            type(e).__name__,
+        )
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Collections DB unavailable") from e
 
 
