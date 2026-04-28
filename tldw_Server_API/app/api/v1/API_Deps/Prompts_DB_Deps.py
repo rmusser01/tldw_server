@@ -90,11 +90,8 @@ def _close_prompts_db_instance_sync(
         )
     except (DatabaseError, OSError, RuntimeError, ValueError, TypeError) as exc:
         logger.error(
-            'Error closing PromptsDatabase instance for cache_key={} (reason={}): {}',
-            cache_key,
-            reason,
-            exc,
-            exc_info=True,
+            "Failed to close PromptsDatabase instance",
+            error_type=type(exc).__name__,
         )
 
 
@@ -111,11 +108,8 @@ def _enqueue_prompts_db_close(
         _pending_close_queue.put_nowait((cache_key, db_instance, reason))
     except (asyncio.QueueFull, RuntimeError) as exc:
         logger.error(
-            'Failed to enqueue PromptsDatabase close for cache_key={} (reason={}): {}',
-            cache_key,
-            reason,
-            exc,
-            exc_info=True,
+            "Failed to enqueue PromptsDatabase close",
+            error_type=type(exc).__name__,
         )
 
 
@@ -153,11 +147,8 @@ async def _process_pending_closes() -> None:
             raise
         except (DatabaseError, OSError, RuntimeError, ValueError, TypeError) as exc:
             logger.error(
-                'Error processing PromptsDatabase close for cache_key={} (reason={}): {}',
-                cache_key,
-                reason,
-                exc,
-                exc_info=True,
+                "Failed to process pending PromptsDatabase close",
+                error_type=type(exc).__name__,
             )
         finally:
             queue.task_done()
@@ -236,10 +227,8 @@ class _EvictingLRUCache(LRUCache):
                 self._on_evict(cache_key, value)
             except (OSError, RuntimeError, ValueError, TypeError, KeyError) as exc:
                 logger.error(
-                    'Prompts DB cache eviction callback failed for {}: {}',
-                    cache_key,
-                    exc,
-                    exc_info=True,
+                    "Prompts DB cache eviction callback failed",
+                    error_type=type(exc).__name__,
                 )
         return cache_key, value
 
@@ -436,8 +425,8 @@ async def close_all_cached_prompts_db_instances() -> None:
                 logger.info(f"Closed PromptsDatabase connection for cache_key {cache_key}.")
             except (DatabaseError, OSError, RuntimeError, ValueError, TypeError) as e:
                 logger.error(
-                    f"Error closing PromptsDatabase instance for cache_key {cache_key}: {e}",
-                    exc_info=True,
+                    "Failed to close cached PromptsDatabase instance",
+                    error_type=type(e).__name__,
                 )
         _user_db_instances.clear()
         _user_db_locks.clear()  # Clear user-specific locks as well
