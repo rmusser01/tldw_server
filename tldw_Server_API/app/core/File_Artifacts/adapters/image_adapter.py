@@ -245,10 +245,10 @@ class ImageAdapter:
         except ImageBackendUnavailableError as exc:
             raise FileArtifactsError("image_backend_unavailable", detail=str(exc)) from exc
         except ImageGenerationError as exc:
-            raise FileArtifactsError("image_generation_failed", detail=str(exc)) from exc
+            raise FileArtifactsError("image_generation_failed", detail="image_generation_failed") from exc
         except Exception as exc:
-            logger.warning("image adapter: backend generate failed: {}", exc)
-            raise FileArtifactsError("image_generation_failed", detail=str(exc)) from exc
+            logger.warning("image adapter: backend generate failed")
+            raise FileArtifactsError("image_generation_failed", detail="image_generation_failed") from exc
 
         return ExportResult(
             status="ready",
