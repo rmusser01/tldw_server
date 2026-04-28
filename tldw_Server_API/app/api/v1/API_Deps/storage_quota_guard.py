@@ -103,7 +103,7 @@ async def guard_storage_quota(
         )
     except _NONCRITICAL as exc:
         # Fail-open: log and allow
-        logger.warning("Storage quota guard failed (fail-open): {}", exc)
+        logger.warning("Storage quota guard failed (fail-open): {}", type(exc).__name__)
         return
 
     if not result.get("allowed", True):
