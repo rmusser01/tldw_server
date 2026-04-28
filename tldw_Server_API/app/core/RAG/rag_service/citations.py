@@ -437,9 +437,9 @@ class AcademicCitationFormatter:
             try:
                 # Try common date formats
                 dt = datetime.fromisoformat(str(date))
-            except Exception as e:
+            except Exception:
                 # Fallback to string representation with a warning metric
-                logger.debug(f"Citation date parse failed; returning raw. value={date}, error={e}")
+                logger.debug("Citation date parse failed; returning raw")
                 try:
                     get_metrics_registry().increment(
                         "app_warning_events_total",
