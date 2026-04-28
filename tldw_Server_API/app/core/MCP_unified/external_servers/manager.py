@@ -174,7 +174,11 @@ class ExternalServerManager:
             try:
                 await adapter.close()
             except Exception as exc:
-                logger.warning(f"External MCP adapter close failed for {server_id}: {exc}")
+                logger.warning(
+                    "External MCP adapter close failed for {}; error_type={}",
+                    server_id,
+                    type(exc).__name__,
+                )
         self._adapters = {}
         self._virtual_tools = {}
         self._discovery_errors = {}
