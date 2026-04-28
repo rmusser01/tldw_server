@@ -5,6 +5,7 @@ import numpy as np
 import pytest
 
 from tldw_Server_API.app.core.TTS.adapters.base import AudioFormat, TTSRequest
+from tldw_Server_API.app.core.TTS.adapters import supertonic2_adapter as supertonic2_mod
 from tldw_Server_API.app.core.TTS.adapters.supertonic2_adapter import Supertonic2OnnxAdapter
 from tldw_Server_API.app.core.TTS.tts_exceptions import TTSModelNotFoundError
 
@@ -36,6 +37,17 @@ def _inject_vendor(monkeypatch, engine: _DummyEngine, call_log: dict):
     module.load_text_to_speech = load_text_to_speech
     module.load_voice_style = load_voice_style
     monkeypatch.setitem(sys.modules, "tldw_Server_API.app.core.TTS.vendors.supertonic2", module)
+
+
+def _capture_supertonic2_logs(level: str = "DEBUG") -> tuple[list[str], int]:
+    messages: list[str] = []
+    sink_id = supertonic2_mod.logger.add(
+        lambda message: messages.append(
+            f"{message.record['message']}\n{message.record.get('extra', {})}"
+        ),
+        level=level,
+    )
+    return messages, sink_id
 
 
 @pytest.mark.asyncio
@@ -168,3 +180,78 @@ async def test_supertonic2_missing_default_voice(monkeypatch, tmp_path):
 
     with pytest.raises(TTSModelNotFoundError):
         await adapter.ensure_initialized()
+
+
+@pytest.mark.asyncio
+async def test_supertonic2_registration_failure_log_sanitizes_exception_extra(monkeypatch, tmp_path):
+    raw_marker = "RAW_SUPERTONIC2_REGISTER_SECRET_MARKER token=secret"
+    onnx_dir = tmp_path / "onnx"
+    onnx_dir.mkdir()
+    voices_dir = tmp_path / "voices"
+    voices_dir.mkdir()
+    (voices_dir / "M1.json").write_text("{}")
+
+    engine = _DummyEngine(sample_rate=24000)
+    call_log = {}
+    _inject_vendor(monkeypatch, engine, call_log)
+
+    class FailingResourceManager:
+        def register_model(self, **kwargs):
+            raise RuntimeError(raw_marker)
+
+    async def get_failing_resource_manager():
+        return FailingResourceManager()
+
+    from tldw_Server_API.app.core.TTS import tts_resource_manager
+
+    monkeypatch.setattr(tts_resource_manager, "get_resource_manager", get_failing_resource_manager)
+    adapter = Supertonic2OnnxAdapter(
+        {
+            "model_path": str(onnx_dir),
+            "sample_rate": 24000,
+            "extra_params": {
+                "voice_styles_dir": str(voices_dir),
+                "default_voice": "supertonic2_m1",
+                "voice_files": {
+                    "supertonic2_m1": "M1.json",
+                },
+            },
+        }
+    )
+    messages, sink_id = _capture_supertonic2_logs()
+
+    try:
+        assert await adapter.initialize() is True
+    finally:
+        supertonic2_mod.logger.remove(sink_id)
+        await adapter.close()
+
+    rendered_logs = "\n".join(messages)
+    assert "Supertonic2 provider registration failed" in rendered_logs
+    assert "RuntimeError" in rendered_logs
+    assert "RAW_SUPERTONIC2_REGISTER_SECRET_MARKER" not in rendered_logs
+    assert "token=secret" not in rendered_logs
+
+
+def test_supertonic2_audio_trim_failure_log_sanitizes_exception_extra():
+    raw_marker = "RAW_SUPERTONIC2_TRIM_SECRET_MARKER token=secret"
+
+    class LeakyDuration:
+        def __float__(self):
+            raise RuntimeError(raw_marker)
+
+    adapter = Supertonic2OnnxAdapter()
+    wav = np.arange(5, dtype=np.float32)
+    messages, sink_id = _capture_supertonic2_logs()
+
+    try:
+        result = adapter._prepare_audio_array(wav, LeakyDuration())
+    finally:
+        supertonic2_mod.logger.remove(sink_id)
+
+    np.testing.assert_array_equal(result, wav)
+    rendered_logs = "\n".join(messages)
+    assert "Supertonic2 audio trim by duration failed" in rendered_logs
+    assert "RuntimeError" in rendered_logs
+    assert "RAW_SUPERTONIC2_TRIM_SECRET_MARKER" not in rendered_logs
+    assert "token=secret" not in rendered_logs
