@@ -98,7 +98,7 @@ class XlsxAdapter:
         try:
             from openpyxl import Workbook
         except Exception as exc:
-            raise FileArtifactsError("xlsx_export_unavailable", detail=str(exc)) from exc
+            raise FileArtifactsError("xlsx_export_unavailable", detail="xlsx export backend unavailable") from exc
 
         sheets = structured.get("sheets") or []
         wb = Workbook()
