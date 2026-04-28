@@ -125,7 +125,7 @@ def _maybe_dump_traceback(reason: str) -> None:
         logger.warning(f"ChaChaNotes watchdog dump triggered: {reason}")
         faulthandler.dump_traceback(file=sys.stderr)
     except (OSError, RuntimeError, ValueError) as dump_err:
-        logger.debug(f"Faulthandler dump failed: {dump_err}")
+        logger.debug("Faulthandler dump failed ({})", type(dump_err).__name__)
 
 
 def _track_default_character_future(future: asyncio.Future) -> None:
@@ -253,7 +253,7 @@ def _create_and_prepare_db(user_id: int, client_id: str) -> CharactersRAGDB:
     try:
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     except OSError as _mk2:
-        logger.debug(f"Secondary ensure for ChaChaNotes parent failed softly: {_mk2}")
+        logger.debug("Secondary ensure for ChaChaNotes parent failed softly ({})", type(_mk2).__name__)
     logger.info(f"Initializing CharactersRAGDB instance for user {user_id} at path: {db_path}")
     db_instance = CharactersRAGDB(db_path=str(db_path), client_id=str(client_id))
     _apply_sqlite_tuning(db_instance)
@@ -285,8 +285,8 @@ async def _ensure_default_character_async(db_instance: CharactersRAGDB, user_id:
     ) as e:
         _record_default_character(False)
         logger.warning(
-            f"Error ensuring default character for user {user_id}: {e}. Continuing; will retry on next access.",
-            exc_info=True,
+            "Error ensuring default character ({}); continuing; will retry on next access.",
+            type(e).__name__,
         )
 
 
@@ -334,19 +334,25 @@ def _ensure_default_character(db_instance: CharactersRAGDB) -> Optional[int]:
                 )
                 return None
     except ConflictError as e:  # Should only happen if get_character_card_by_name had an issue or race condition
-        logger.warning(f"Conflict error while ensuring default character (likely race condition, re-fetching): {e}")
+        logger.warning("Conflict error while ensuring default character ({}); re-fetching.", type(e).__name__)
         # Re-fetch, as it might have been created by another thread.
         refetched_char = db_instance.get_character_card_by_name(DEFAULT_CHARACTER_NAME)
         if refetched_char:
             return refetched_char["id"]
-        logger.error(f"Still could not get/create default character after conflict: {e}")
+        logger.error("Still could not get/create default character after conflict ({})", type(e).__name__)
         return None
     except (CharactersRAGDBError, SchemaError, InputError) as e:
-        logger.error(f"Database error while ensuring default character '{DEFAULT_CHARACTER_NAME}': {e}", exc_info=True)
+        logger.error(
+            "Database error while ensuring default character '{}' ({})",
+            DEFAULT_CHARACTER_NAME,
+            type(e).__name__,
+        )
         return None  # Indicate failure
     except (AttributeError, KeyError, TypeError, ValueError, OSError, RuntimeError) as e_gen:
         logger.error(
-            f"Unexpected error while ensuring default character '{DEFAULT_CHARACTER_NAME}': {e_gen}", exc_info=True
+            "Unexpected error while ensuring default character '{}' ({})",
+            DEFAULT_CHARACTER_NAME,
+            type(e_gen).__name__,
         )
         return None
 

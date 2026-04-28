@@ -49,6 +49,7 @@ def _assert_log_omits_raw_exception(logger_stub, expected_level, expected_messag
     assert "/private/db/path" not in rendered
     assert "SECRET_TOKEN" not in rendered
     assert "backend exploded" not in rendered
+    assert not any(kwargs.get("exc_info") is True for _level, _message, _args, kwargs in logger_stub.messages)
 
 
 def _patch_chacha_init_failure(monkeypatch, tmp_path: Path, exc: Exception) -> None:
@@ -290,3 +291,149 @@ async def test_warm_chacha_db_for_user_sanitizes_fail_open_log(monkeypatch):
     )
     rendered = "\n".join(message for _level, message, _args, _kwargs in logger_stub.messages)
     assert "4242" not in rendered
+
+
+def test_maybe_dump_traceback_sanitizes_dump_failure_log(monkeypatch):
+    logger_stub = _LoggerStub()
+
+    def fail_dump_traceback(*_args, **_kwargs):
+        raise RuntimeError("chacha backend exploded at /private/db/path SECRET_TOKEN")
+
+    monkeypatch.setattr(deps, "logger", logger_stub)
+    monkeypatch.setattr(deps.faulthandler, "dump_traceback", fail_dump_traceback)
+    monkeypatch.setitem(deps._CHACHA_HEALTH, "last_warn_dump", None)
+
+    deps._maybe_dump_traceback("watchdog test")
+
+    _assert_log_omits_raw_exception(
+        logger_stub,
+        "debug",
+        "Faulthandler dump failed",
+    )
+
+
+def test_create_and_prepare_db_sanitizes_secondary_mkdir_failure_log(monkeypatch, tmp_path):
+    logger_stub = _LoggerStub()
+    safe_db_path = tmp_path / "safe-chacha" / "ChaChaNotes.db"
+    original_mkdir = deps.Path.mkdir
+
+    class _DBInstance:
+        pass
+
+    def fail_parent_mkdir(self, *args, **kwargs):
+        if self == safe_db_path.parent:
+            raise OSError("chacha backend exploded at /private/db/path SECRET_TOKEN")
+        return original_mkdir(self, *args, **kwargs)
+
+    def make_db(*, db_path, client_id):
+        assert db_path == str(safe_db_path)
+        assert client_id == "safe-client"
+        return _DBInstance()
+
+    monkeypatch.setattr(deps, "logger", logger_stub)
+    monkeypatch.setattr(deps, "_get_chacha_db_path_for_user", lambda _user_id: safe_db_path)
+    monkeypatch.setattr(deps.Path, "mkdir", fail_parent_mkdir)
+    monkeypatch.setattr(deps, "CharactersRAGDB", make_db)
+    monkeypatch.setattr(deps, "_apply_sqlite_tuning", lambda _db_instance: None)
+
+    assert isinstance(deps._create_and_prepare_db(4242, "safe-client"), _DBInstance)
+
+    _assert_log_omits_raw_exception(
+        logger_stub,
+        "debug",
+        "Secondary ensure for ChaChaNotes parent failed softly",
+    )
+
+
+@pytest.mark.asyncio
+async def test_ensure_default_character_async_sanitizes_failure_log(monkeypatch):
+    logger_stub = _LoggerStub()
+
+    def fail_default_character(_db_instance):
+        raise RuntimeError("chacha backend exploded at /private/db/path SECRET_TOKEN")
+
+    monkeypatch.setattr(deps, "logger", logger_stub)
+    monkeypatch.setattr(deps, "_ensure_default_character", fail_default_character)
+
+    await deps._ensure_default_character_async(object(), 4242)
+
+    _assert_log_omits_raw_exception(
+        logger_stub,
+        "warning",
+        "Error ensuring default character",
+    )
+    rendered = "\n".join(
+        " ".join([message, " ".join(str(arg) for arg in args)])
+        for _level, message, args, _kwargs in logger_stub.messages
+    )
+    assert "4242" not in rendered
+
+
+def test_ensure_default_character_sanitizes_conflict_fallback_logs(monkeypatch):
+    logger_stub = _LoggerStub()
+
+    class _DBInstance:
+        client_id = "safe-client"
+
+        def __init__(self):
+            self.fetch_count = 0
+
+        def ensure_character_tables_ready(self):
+            return None
+
+        def get_character_card_by_name(self, _name):
+            self.fetch_count += 1
+            if self.fetch_count == 1:
+                raise ConflictError("chacha backend exploded at /private/db/path SECRET_TOKEN")
+            return None
+
+    monkeypatch.setattr(deps, "logger", logger_stub)
+
+    assert deps._ensure_default_character(_DBInstance()) is None
+
+    _assert_log_omits_raw_exception(
+        logger_stub,
+        "warning",
+        "Conflict error while ensuring default character",
+    )
+    _assert_log_omits_raw_exception(
+        logger_stub,
+        "error",
+        "Still could not get/create default character after conflict",
+    )
+
+
+def test_ensure_default_character_sanitizes_database_failure_log(monkeypatch):
+    logger_stub = _LoggerStub()
+
+    class _DBInstance:
+        def ensure_character_tables_ready(self):
+            raise CharactersRAGDBError("chacha backend exploded at /private/db/path SECRET_TOKEN")
+
+    monkeypatch.setattr(deps, "logger", logger_stub)
+
+    assert deps._ensure_default_character(_DBInstance()) is None
+
+    _assert_log_omits_raw_exception(
+        logger_stub,
+        "error",
+        "Database error while ensuring default character",
+    )
+
+
+def test_ensure_default_character_sanitizes_unexpected_failure_log(monkeypatch):
+    logger_stub = _LoggerStub()
+
+    class _DBInstance:
+        def ensure_character_tables_ready(self):
+            raise RuntimeError("chacha backend exploded at /private/db/path SECRET_TOKEN")
+
+    monkeypatch.setattr(deps, "logger", logger_stub)
+
+    assert deps._ensure_default_character(_DBInstance()) is None
+
+    _assert_log_omits_raw_exception(
+        logger_stub,
+        "error",
+        "Unexpected error while ensuring default character",
+    )
