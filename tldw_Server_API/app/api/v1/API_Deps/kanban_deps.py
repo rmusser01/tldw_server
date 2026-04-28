@@ -169,10 +169,10 @@ def _health_check_instance(db_instance: KanbanDB) -> bool:
     except sqlite3.OperationalError as e:
         if "database is locked" in str(e).lower():
             return True
-        logger.warning(f"Kanban health probe failed: {e}")
+        logger.warning("Kanban health probe failed")
         return False
-    except Exception as e:
-        logger.warning(f"Kanban health probe failed: {e}")
+    except Exception:
+        logger.warning("Kanban health probe failed")
         return False
 
 
@@ -240,7 +240,7 @@ async def _get_or_init_db_instance(user_id: int) -> KanbanDB:
     except Exception as e:
         duration_ms = (time.perf_counter() - start) * 1000
         _record_init(duration_ms, False, e)
-        logger.error(f"Kanban DB initialization failed for user {user_id}: {e}")
+        logger.error(f"Kanban DB initialization failed for user {user_id}")
         if isinstance(e, (InputError, ConflictError)) or (
             isinstance(e, KanbanDBError) and not isinstance(e, NotFoundError)
         ):
@@ -302,8 +302,8 @@ def close_all_kanban_db_instances() -> None:
         if callable(close_method):
             try:
                 close_method()
-            except Exception as e:
-                logger.debug(f"Error closing KanbanDB instance {cache_key}: {e}")
+            except Exception:
+                logger.debug(f"Error closing KanbanDB instance {cache_key}")
 
     logger.info("All KanbanDB instances closed and cache cleared.")
 
@@ -325,8 +325,8 @@ def shutdown_kanban_executor(wait: bool = False) -> None:
     try:
         executor.shutdown(wait=wait, cancel_futures=True)
         logger.info("Kanban executor shut down successfully.")
-    except Exception as e:
-        logger.debug(f"Kanban executor shutdown error: {e}")
+    except Exception:
+        logger.debug("Kanban executor shutdown error")
 
 
 # --- Exception Handlers (for use in endpoints) ---
