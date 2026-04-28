@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from tldw_Server_API.app.core.RAG.rag_service import web_fallback as web_fallback_module
 from tldw_Server_API.app.core.RAG.rag_service.web_fallback import (
     WebFallbackConfig,
     WebFallbackResult,
@@ -194,6 +195,41 @@ class TestConvertWebResultsToDocuments:
 
         assert len(docs) == 1
         assert "Valid content" in docs[0].content
+
+    def test_convert_skips_failed_result_and_sanitizes_conversion_log(self):
+        """Test failed result conversion skips item without logging sensitive exception details."""
+        secret = "sk-web-fallback-secret-123"
+        private_path = "/tmp/private/user_databases/42/Media_DB_v2.db"
+
+        class SecretBearingResult(dict):
+            def get(self, key, default=None):
+                raise RuntimeError(f"failed opening {private_path} with api_key={secret}")
+
+        raw_results = [
+            {"title": "First", "snippet": "First result", "url": "https://example.com/1"},
+            SecretBearingResult(),
+            {"title": "Second", "snippet": "Second result", "url": "https://example.com/2"},
+        ]
+        messages = []
+        sink_id = web_fallback_module.logger.add(
+            lambda message: messages.append(message.record["message"]),
+            level="WARNING",
+        )
+
+        try:
+            docs = _convert_web_results_to_documents(raw_results, "test", 2000)
+        finally:
+            web_fallback_module.logger.remove(sink_id)
+
+        assert len(docs) == 2
+        assert "First result" in docs[0].content
+        assert "Second result" in docs[1].content
+
+        log_text = "\n".join(messages)
+        assert "Failed to convert web result 1:" in log_text
+        assert "failed opening" not in log_text
+        assert private_path not in log_text
+        assert secret not in log_text
 
 
 class TestMergeWebResults:

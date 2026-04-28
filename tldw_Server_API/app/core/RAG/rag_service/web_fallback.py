@@ -263,8 +263,8 @@ def _convert_web_results_to_documents(
             )
             documents.append(doc)
 
-        except Exception as e:  # noqa: BLE001 - best-effort conversion of results
-            logger.warning(f"Failed to convert web result {idx}: {e}")
+        except Exception:  # noqa: BLE001 - best-effort conversion of results
+            logger.warning("Failed to convert web result {}: conversion error", idx)
             continue
 
     return documents
