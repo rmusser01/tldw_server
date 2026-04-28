@@ -222,8 +222,8 @@ class ChromaDBOptimizer:
                 where,
                 include
             ))
-        except Exception as e:
-            logger.error(f"ChromaDB search failed: {e}")
+        except Exception:
+            logger.error("ChromaDB search failed")
             result = {"ids": [[]], "distances": [[]], "documents": [[]], "metadatas": [[]]}
 
         # Cache result
@@ -510,8 +510,8 @@ class ChromaDBOptimizer:
 
             if batch_num % 10 == 0:  # Log every 10th batch
                 logger.debug(f"Added batch {batch_num} ({len(documents)} documents)")
-        except Exception as e:
-            logger.error(f"Failed to add batch {batch_num}: {e}")
+        except Exception:
+            logger.error(f"Failed to add batch {batch_num}")
             raise
 
     def get_collection_strategy(self, num_documents: int,
@@ -574,8 +574,8 @@ class ChromaDBOptimizer:
                 # 2. Optimize storage for frequently accessed metadata
                 # 3. Consider denormalization for performance
 
-        except Exception as e:
-            logger.warning(f"Could not optimize metadata indexing: {e}")
+        except Exception:
+            logger.warning("Could not optimize metadata indexing")
 
     def get_stats(self) -> dict[str, Any]:
         """Get optimization statistics"""
