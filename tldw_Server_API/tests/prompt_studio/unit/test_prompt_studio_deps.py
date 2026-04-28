@@ -162,3 +162,28 @@ async def test_require_project_access_maps_database_error():
 
     assert exc_info.value.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
     assert exc_info.value.detail == "Database error"
+
+
+@pytest.mark.asyncio
+async def test_require_project_access_logs_safe_database_error(monkeypatch):
+    sensitive_text = "lookup failed with password=super-secret-token"
+
+    class BrokenProjectDb:
+        def get_project(self, project_id: int):
+            raise DatabaseError(sensitive_text)
+
+    logger_mock = MagicMock()
+    monkeypatch.setattr(deps, "logger", logger_mock)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await deps.require_project_access(
+            project_id=42,
+            user_context={"user_id": "user-1", "is_admin": False},
+            db=BrokenProjectDb(),
+        )
+
+    assert exc_info.value.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+    assert exc_info.value.detail == "Database error"
+    logged_text = " ".join(str(call) for call in logger_mock.error.call_args_list)
+    assert sensitive_text not in logged_text
+    assert "Database error checking project access" in logged_text

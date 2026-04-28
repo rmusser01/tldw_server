@@ -439,7 +439,10 @@ async def require_project_access(
         return True
 
     except DatabaseError as e:
-        logger.error(f"Database error checking project access: {e}")
+        logger.error(
+            "Database error checking project access; error_type={}",
+            type(e).__name__,
+        )
         raise map_db_error_to_http(e, default_detail="Database error") from e
 
 async def require_project_write_access(
