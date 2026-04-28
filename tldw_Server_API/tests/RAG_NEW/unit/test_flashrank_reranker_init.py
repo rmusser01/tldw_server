@@ -7,10 +7,44 @@ import pytest
 from tldw_Server_API.app.core.RAG.rag_service import advanced_reranking as ar
 
 
+class _RecordingLogger:
+    def __init__(self):
+        self.debug_calls = []
+
+    def debug(self, *args, **kwargs):
+        self.debug_calls.append((args, kwargs))
+
+
 @pytest.mark.unit
 def test_flashrank_cache_dir_defaults_to_repo_models_dir():
     resolved = Path(ar._resolve_flashrank_cache_dir(None))
     assert resolved == ar._repo_root_dir() / "models" / "flashrank"
+
+
+@pytest.mark.unit
+def test_flashrank_config_lookup_failure_logs_sanitized_debug(monkeypatch):
+    recording_logger = _RecordingLogger()
+
+    def _raise_sensitive_config_error():
+        raise RuntimeError("config failed for /tmp/source token=secret")
+
+    monkeypatch.delenv("RAG_FLASHRANK_MODEL_NAME", raising=False)
+    monkeypatch.delenv("RAG_FLASHRANK_CACHE_DIR", raising=False)
+    monkeypatch.setattr(ar, "logger", recording_logger)
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.config.load_comprehensive_config",
+        _raise_sensitive_config_error,
+    )
+
+    defaults = ar._load_flashrank_defaults_from_config()
+
+    assert defaults == ("ms-marco-TinyBERT-L-2-v2", None)
+    assert recording_logger.debug_calls
+    assert all(not kwargs.get("exc_info") for _args, kwargs in recording_logger.debug_calls)
+
+    rendered_calls = repr(recording_logger.debug_calls)
+    assert "/tmp/source" not in rendered_calls
+    assert "token=secret" not in rendered_calls
 
 
 @pytest.mark.unit

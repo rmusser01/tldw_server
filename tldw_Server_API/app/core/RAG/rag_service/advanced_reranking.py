@@ -118,8 +118,8 @@ def _load_flashrank_defaults_from_config() -> tuple[str, Optional[str]]:
                 model_name = cp.get("RAG", "flashrank_model_name", fallback=None)
             if not cache_dir:
                 cache_dir = cp.get("RAG", "flashrank_cache_dir", fallback=None)
-    except Exception as config_lookup_error:  # noqa: BLE001 - best effort lookup
-        logger.debug("FlashRank config lookup failed; using defaults", exc_info=config_lookup_error)
+    except Exception:  # noqa: BLE001 - best effort lookup
+        logger.debug("FlashRank config lookup failed; using defaults")
 
     return (model_name or "ms-marco-TinyBERT-L-2-v2"), cache_dir
 
