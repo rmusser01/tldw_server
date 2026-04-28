@@ -499,7 +499,10 @@ def get_config() -> MCPConfig:
         logger.info("MCP configuration loaded successfully")
         return config
     except Exception as e:
-        logger.error(f"Failed to load configuration: {e}")
+        logger.error(
+            "Failed to load configuration ({})",
+            type(e).__name__,
+        )
         raise
 
 
@@ -580,5 +583,8 @@ def validate_config() -> bool:
         return True
 
     except _MCP_CONFIG_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Configuration validation failed: {e}")
+        logger.error(
+            "Configuration validation failed ({})",
+            type(e).__name__,
+        )
         return False
