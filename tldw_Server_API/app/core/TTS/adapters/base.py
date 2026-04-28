@@ -358,7 +358,10 @@ class TTSAdapter(ABC):
                     self._status = ProviderStatus.ERROR
                 return success
             except Exception as e:
-                logger.error(f"{self.provider_name} initialization failed: {e}")
+                logger.error(
+                    f"{self.provider_name} initialization failed; "
+                    f"exception_type={type(e).__name__}"
+                )
                 self._status = ProviderStatus.ERROR
                 return False
 
@@ -417,7 +420,10 @@ class TTSAdapter(ABC):
             self._status = ProviderStatus.DISABLED
             logger.info(f"{self.provider_name} adapter closed")
         except Exception as e:
-            logger.error(f"Error closing {self.provider_name} adapter: {e}")
+            logger.error(
+                f"Error closing {self.provider_name} adapter; "
+                f"exception_type={type(e).__name__}"
+            )
 
     async def _cleanup_resources(self):  # noqa: B027
         """Override this method for adapter-specific cleanup"""

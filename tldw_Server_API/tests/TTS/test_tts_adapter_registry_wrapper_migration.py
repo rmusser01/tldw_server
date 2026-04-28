@@ -14,6 +14,7 @@ from tldw_Server_API.app.core.TTS.adapters.base import (
     TTSRequest,
     TTSResponse,
 )
+from tldw_Server_API.app.core.TTS.tts_exceptions import TTSError
 
 
 pytestmark = pytest.mark.unit
@@ -62,6 +63,37 @@ class _FailingStaticCapabilityAdapter(_MockAdapterV1):
         raise RuntimeError(
             "capability fallback leaked /Users/example/private/token-sk-tts-caps"
         )
+
+
+class _FailingOverrideInitializationAdapter(_MockAdapterV1):
+    async def ensure_initialized(self) -> bool:
+        raise RuntimeError(
+            "override init leaked /Users/example/private/token-sk-tts-overrides"
+        )
+
+
+class _FailingRuntimeInitializationAdapter(_MockAdapterV1):
+    async def ensure_initialized(self) -> bool:
+        raise RuntimeError(
+            "runtime init leaked /Users/example/private/token-sk-tts-runtime"
+        )
+
+
+class _FailingTTSInitializationAdapter(_MockAdapterV1):
+    async def ensure_initialized(self) -> bool:
+        raise TTSError(
+            "tts init leaked /Users/example/private/token-sk-tts-error",
+            provider="mock",
+        )
+
+
+class _NonCriticalResourceManager:
+    class _MemoryMonitor:
+        @staticmethod
+        def is_memory_critical() -> bool:
+            return False
+
+    memory_monitor = _MemoryMonitor()
 
 
 @pytest.mark.asyncio
@@ -147,6 +179,99 @@ async def test_registry_list_capabilities_excludes_disabled_when_requested() -> 
 
     enabled_entries = await registry.list_capabilities(include_disabled=False)
     assert enabled_entries == []
+
+
+@pytest.mark.asyncio
+async def test_registry_create_adapter_with_overrides_sanitizes_initialization_failure_log() -> None:
+    registry = TTSAdapterRegistry(config={"mock_enabled": True}, include_defaults=False)
+    registry.register_adapter(TTSProvider.MOCK, _FailingOverrideInitializationAdapter)
+    secret = "/Users/example/private/token-sk-tts-overrides"
+    logged_messages: list[str] = []
+
+    sink_id = adapter_registry.logger.add(
+        lambda message: logged_messages.append(message.record["message"]),
+        level="ERROR",
+    )
+    try:
+        adapter = await registry.create_adapter_with_overrides(
+            TTSProvider.MOCK,
+            overrides={"voice": "test"},
+        )
+    finally:
+        adapter_registry.logger.remove(sink_id)
+
+    assert adapter is None
+    assert any(
+        "Error initializing mock adapter with overrides" in message
+        for message in logged_messages
+    )
+    assert all(secret not in message for message in logged_messages)
+    assert all("override init leaked" not in message for message in logged_messages)
+    assert all("RuntimeError" in message for message in logged_messages)
+
+
+@pytest.mark.asyncio
+async def test_registry_initialize_adapter_sanitizes_non_tts_failure_log(monkeypatch) -> None:
+    registry = TTSAdapterRegistry(config={"mock_enabled": True}, include_defaults=False)
+    registry.register_adapter(TTSProvider.MOCK, _FailingRuntimeInitializationAdapter)
+    secret = "/Users/example/private/token-sk-tts-runtime"
+    logged_messages: list[str] = []
+
+    async def _get_resource_manager() -> _NonCriticalResourceManager:
+        return _NonCriticalResourceManager()
+
+    monkeypatch.setattr(adapter_registry, "get_resource_manager", _get_resource_manager)
+
+    sink_id = adapter_registry.logger.add(
+        lambda message: logged_messages.append(message.record["message"]),
+        level="ERROR",
+    )
+    try:
+        initialized = await registry._initialize_adapter(TTSProvider.MOCK)
+    finally:
+        adapter_registry.logger.remove(sink_id)
+
+    assert initialized is False
+    assert TTSProvider.MOCK not in registry._adapters
+    assert any(
+        "Error initializing mock adapter" in message
+        for message in logged_messages
+    )
+    assert all(secret not in message for message in logged_messages)
+    assert all("runtime init leaked" not in message for message in logged_messages)
+    assert all("RuntimeError" in message for message in logged_messages)
+
+
+@pytest.mark.asyncio
+async def test_registry_initialize_adapter_sanitizes_tts_failure_log_and_reraises(monkeypatch) -> None:
+    registry = TTSAdapterRegistry(config={"mock_enabled": True}, include_defaults=False)
+    registry.register_adapter(TTSProvider.MOCK, _FailingTTSInitializationAdapter)
+    secret = "/Users/example/private/token-sk-tts-error"
+    logged_messages: list[str] = []
+
+    async def _get_resource_manager() -> _NonCriticalResourceManager:
+        return _NonCriticalResourceManager()
+
+    monkeypatch.setattr(adapter_registry, "get_resource_manager", _get_resource_manager)
+
+    sink_id = adapter_registry.logger.add(
+        lambda message: logged_messages.append(message.record["message"]),
+        level="ERROR",
+    )
+    try:
+        with pytest.raises(TTSError):
+            await registry._initialize_adapter(TTSProvider.MOCK)
+    finally:
+        adapter_registry.logger.remove(sink_id)
+
+    assert TTSProvider.MOCK not in registry._adapters
+    assert any(
+        "Error initializing mock adapter" in message
+        for message in logged_messages
+    )
+    assert all(secret not in message for message in logged_messages)
+    assert all("tts init leaked" not in message for message in logged_messages)
+    assert all("TTSError" in message for message in logged_messages)
 
 
 @pytest.mark.asyncio

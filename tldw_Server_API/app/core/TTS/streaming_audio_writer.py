@@ -329,7 +329,7 @@ class StreamingAudioWriter:
 
             logger.debug(
                 f"StreamingAudioWriter finalize: format=wav (file-backed), "
-                f"wav_bytes={len(data)}, pcm_path={pcm_path}"
+                f"wav_bytes={len(data)}"
             )
             return data
         finally:
@@ -338,7 +338,9 @@ class StreamingAudioWriter:
                     try:
                         os.remove(path)
                     except OSError as e:
-                        logger.debug(f"Error removing temp WAV file {path}: {e}")
+                        logger.debug(
+                            f"Error removing temp WAV file; exception_type={type(e).__name__}"
+                        )
             self._wav_file_path = None
 
 

@@ -5,7 +5,9 @@
 import asyncio
 import contextlib
 import os
-import subprocess
+import shutil
+# Fixed ffmpeg/ffprobe probes resolve executables and do not use shell.
+import subprocess  # nosec B404
 import tempfile
 from pathlib import Path
 from typing import Any, Optional
@@ -262,8 +264,8 @@ class AudioConverter:
         except FileNotFoundError:
             logger.error("FFmpeg not found. Please install FFmpeg.")
             raise AudioConversionError("FFmpeg is required for audio conversion") from None
-        except _AUDIO_CONVERSION_EXCEPTIONS as e:
-            logger.error(f"Audio conversion error: {e}")
+        except _AUDIO_CONVERSION_EXCEPTIONS:
+            logger.error("Audio conversion error")
             return False
 
     @staticmethod
@@ -397,8 +399,8 @@ class AudioConverter:
                 logger.error(f"Could not get duration: {stderr.decode()}")
                 return 0.0
 
-        except _AUDIO_CONVERSION_EXCEPTIONS as e:
-            logger.error(f"Error getting duration: {e}")
+        except _AUDIO_CONVERSION_EXCEPTIONS:
+            logger.error("Error getting duration")
             return 0.0
 
     @staticmethod
@@ -642,8 +644,8 @@ class AudioConverter:
             logger.info(f"Trimmed silence from audio (threshold: {threshold}dB)")
             return True
 
-        except _AUDIO_CONVERSION_EXCEPTIONS as e:
-            logger.error(f"Silence trimming error: {e}")
+        except _AUDIO_CONVERSION_EXCEPTIONS:
+            logger.error("Silence trimming error")
             return False
 
     @staticmethod
@@ -745,9 +747,14 @@ class AudioConverter:
     @staticmethod
     def check_ffmpeg_installed() -> bool:
         """Check if FFmpeg is installed and available."""
+        ffmpeg_path = shutil.which("ffmpeg")
+        if not ffmpeg_path:
+            return False
+
         try:
-            result = subprocess.run(
-                ['ffmpeg', '-version'],
+            # Fixed executable and arguments, no shell.
+            result = subprocess.run(  # nosec B603
+                [ffmpeg_path, '-version'],
                 capture_output=True,
                 text=True,
                 timeout=5
@@ -759,9 +766,14 @@ class AudioConverter:
     @staticmethod
     def check_ffprobe_installed() -> bool:
         """Check if FFprobe is installed and available."""
+        ffprobe_path = shutil.which("ffprobe")
+        if not ffprobe_path:
+            return False
+
         try:
-            result = subprocess.run(
-                ['ffprobe', '-version'],
+            # Fixed executable and arguments, no shell.
+            result = subprocess.run(  # nosec B603
+                [ffprobe_path, '-version'],
                 capture_output=True,
                 text=True,
                 timeout=5

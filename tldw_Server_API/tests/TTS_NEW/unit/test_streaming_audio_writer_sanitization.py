@@ -83,6 +83,35 @@ def test_close_wav_temp_file_removal_log_sanitizes_path_and_exception_text(monke
     assert all("OSError" in message for message in logged_messages)
 
 
+def test_finalize_wav_file_cleanup_log_sanitizes_path_and_exception_text(monkeypatch, tmp_path):
+    writer = StreamingAudioWriter(format="wav", sample_rate=24000)
+    secret_path = tmp_path / "wav-finalizer-token-sk-test.pcm"
+    secret_path.write_bytes(b"\x00\x00")
+    writer._wav_file_path = str(secret_path)
+    logged_messages, sink_id = _capture_logs("DEBUG")
+
+    def fail_remove(path):
+        raise OSError(f"cannot remove finalizer path {path}")
+
+    monkeypatch.setattr(streaming_audio_writer.os, "remove", fail_remove)
+
+    try:
+        data = writer._finalize_wav_from_file()
+    finally:
+        streaming_audio_writer.logger.remove(sink_id)
+        writer._wav_file_path = None
+        secret_path.unlink(missing_ok=True)
+
+    assert data.startswith(b"RIFF")
+    removal_messages = [
+        message for message in logged_messages if "Error removing temp WAV file" in message
+    ]
+    assert removal_messages
+    assert all(str(secret_path) not in message for message in logged_messages)
+    assert all("cannot remove finalizer path" not in message for message in logged_messages)
+    assert all("OSError" in message for message in removal_messages)
+
+
 def test_wav_spill_success_log_sanitizes_temp_path():
     writer = StreamingAudioWriter(
         format="wav",

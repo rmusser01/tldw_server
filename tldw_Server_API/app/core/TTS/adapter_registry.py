@@ -47,6 +47,12 @@ _TTS_REGISTRY_ADAPTER_EXCEPTIONS: tuple[type[BaseException], ...] = (
     TTSError,
 ) + _TTS_REGISTRY_NONCRITICAL_EXCEPTIONS
 
+
+def _safe_exception_label(exc: BaseException) -> str:
+    """Return a non-sensitive exception identifier for logs."""
+    return type(exc).__name__
+
+
 class TTSProvider(Enum):
     """
     Enumeration of TTS providers known to the service.
@@ -572,7 +578,11 @@ class TTSAdapterRegistry:
         try:
             success = await adapter.ensure_initialized()
         except _TTS_REGISTRY_ADAPTER_EXCEPTIONS as exc:
-            logger.error(f"Error initializing {resolved_provider.value} adapter with overrides: {exc}")
+            logger.error(
+                "Error initializing {} adapter with overrides ({})",
+                resolved_provider.value,
+                _safe_exception_label(exc),
+            )
             return None
         if not success:
             logger.error(f"Failed to initialize {resolved_provider.value} adapter with overrides")
@@ -665,9 +675,17 @@ class TTSAdapterRegistry:
 
         except Exception as e:
             if isinstance(e, TTSError):
-                logger.error(f"Error initializing {provider.value} adapter: {e}")
+                logger.error(
+                    "Error initializing {} adapter ({})",
+                    provider.value,
+                    _safe_exception_label(e),
+                )
                 raise
-            logger.error(f"Error initializing {provider.value} adapter: {e}")
+            logger.error(
+                "Error initializing {} adapter ({})",
+                provider.value,
+                _safe_exception_label(e),
+            )
             # Don't store failed adapter - it will be retried next time
             return False
 

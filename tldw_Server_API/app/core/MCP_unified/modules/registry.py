@@ -16,6 +16,11 @@ from loguru import logger
 from .base import BaseModule, HealthStatus, ModuleConfig, ModuleHealth
 
 
+def _exception_type_name(error: BaseException) -> str:
+    """Return safe exception metadata for logs without backend detail."""
+    return type(error).__name__
+
+
 class ModuleStatus(str, Enum):
     """Module registration status"""
     PENDING = "pending"
@@ -127,7 +132,7 @@ class ModuleRegistry:
                 await self.check_all_health()
                 await asyncio.sleep(self._health_check_interval)
             except Exception as e:
-                logger.error(f"Error in health monitor loop: {e}")
+                logger.error(f"Error in health monitor loop ({_exception_type_name(e)})")
                 await asyncio.sleep(10)  # Short delay on error
 
     async def register_module(
@@ -166,7 +171,7 @@ class ModuleRegistry:
             try:
                 await self._initialize_module(registration)
             except Exception as e:
-                logger.error(f"Failed to initialize module {module_id}: {e}")
+                logger.error(f"Failed to initialize module {module_id} ({_exception_type_name(e)})")
                 registration.status = ModuleStatus.ERROR
                 registration.error_message = str(e)
 
@@ -201,7 +206,7 @@ class ModuleRegistry:
             registration.last_health_check = datetime.now(timezone.utc)
 
         except Exception as e:
-            logger.error(f"Module initialization failed: {registration.module_id} - {e}")
+            logger.error(f"Module initialization failed: {registration.module_id} ({_exception_type_name(e)})")
             registration.status = ModuleStatus.ERROR
             registration.error_message = str(e)
             raise
@@ -234,7 +239,7 @@ class ModuleRegistry:
                     logger.debug(f"Registered prompt {prompt_name} -> {module_id}")
 
         except Exception as e:
-            logger.error(f"Failed to update registries for {module_id}: {e}")
+            logger.error(f"Failed to update registries for {module_id} ({_exception_type_name(e)})")
 
     async def unregister_module(self, module_id: str) -> None:
         """Unregister a module"""
@@ -251,7 +256,7 @@ class ModuleRegistry:
                 try:
                     await registration.module_instance.shutdown()
                 except Exception as e:
-                    logger.error(f"Error shutting down module {module_id}: {e}")
+                    logger.error(f"Error shutting down module {module_id} ({_exception_type_name(e)})")
 
             # Remove from registries
             self._tool_registry = {k: v for k, v in self._tool_registry.items() if v != module_id}
@@ -453,7 +458,7 @@ class ModuleRegistry:
 
             for (module_id, _task), result in zip(shutdown_work, results, strict=True):
                 if isinstance(result, Exception):
-                    logger.error(f"Error shutting down module {module_id}: {result}")
+                    logger.error(f"Error shutting down module {module_id} ({_exception_type_name(result)})")
 
         # Clear all registrations
         async with self._lock:
@@ -497,7 +502,7 @@ class ModuleRegistry:
                 method = getattr(module, operation)
                 return await module.execute_with_circuit_breaker(method, *args, **kwargs)
             except Exception as e:
-                logger.warning(f"Primary module {primary_module_id} failed: {e}")
+                logger.warning(f"Primary module {primary_module_id} failed ({_exception_type_name(e)})")
                 errors.append((primary_module_id, str(e)))
 
         # Try fallback modules
@@ -508,7 +513,7 @@ class ModuleRegistry:
                     method = getattr(module, operation)
                     return await module.execute_with_circuit_breaker(method, *args, **kwargs)
                 except Exception as e:
-                    logger.warning(f"Fallback module {module_id} failed: {e}")
+                    logger.warning(f"Fallback module {module_id} failed ({_exception_type_name(e)})")
                     errors.append((module_id, str(e)))
 
         # All modules failed
