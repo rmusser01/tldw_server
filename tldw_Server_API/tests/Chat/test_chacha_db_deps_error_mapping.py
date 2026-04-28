@@ -11,6 +11,35 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     InputError,
     SchemaError,
 )
+from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
+
+
+class _LoggerStub:
+    def __init__(self):
+        self.messages = []
+
+    def debug(self, message, *args, **kwargs):
+        self.messages.append(("debug", str(message), args, kwargs))
+
+    def info(self, message, *args, **kwargs):
+        self.messages.append(("info", str(message), args, kwargs))
+
+    def warning(self, message, *args, **kwargs):
+        self.messages.append(("warning", str(message), args, kwargs))
+
+    def error(self, message, *args, **kwargs):
+        self.messages.append(("error", str(message), args, kwargs))
+
+
+def _assert_log_omits_raw_exception(logger_stub, expected_level, expected_message):
+    assert any(
+        level == expected_level and expected_message in message
+        for level, message, _args, _kwargs in logger_stub.messages
+    )
+    rendered = "\n".join(message for _level, message, _args, _kwargs in logger_stub.messages)
+    assert "/private/db/path" not in rendered
+    assert "SECRET_TOKEN" not in rendered
+    assert "backend exploded" not in rendered
 
 
 def _patch_chacha_init_failure(monkeypatch, tmp_path: Path, exc: Exception) -> None:
@@ -154,3 +183,80 @@ async def test_get_or_init_chacha_db_waiter_keeps_input_init_errors_as_500(monke
 
     assert exc_info.value.status_code == 500
     assert exc_info.value.detail == "invalid bootstrap state"
+
+
+def test_chacha_tuning_sanitizes_fail_open_log(monkeypatch):
+    logger_stub = _LoggerStub()
+
+    class _DBInstance:
+        backend_type = BackendType.SQLITE
+
+        def get_connection(self):
+            raise RuntimeError("chacha backend exploded at /private/db/path SECRET_TOKEN")
+
+    monkeypatch.setattr(deps, "logger", logger_stub)
+
+    deps._apply_sqlite_tuning(_DBInstance())
+
+    _assert_log_omits_raw_exception(
+        logger_stub,
+        "debug",
+        "ChaChaNotes tuning skipped",
+    )
+
+
+def test_chacha_health_probe_sanitizes_failure_log(monkeypatch):
+    logger_stub = _LoggerStub()
+
+    class _DBInstance:
+        def get_connection(self):
+            raise RuntimeError("chacha backend exploded at /private/db/path SECRET_TOKEN")
+
+    monkeypatch.setattr(deps, "logger", logger_stub)
+
+    assert deps._health_check_instance(_DBInstance()) is False
+    _assert_log_omits_raw_exception(
+        logger_stub,
+        "warning",
+        "ChaChaNotes health probe failed",
+    )
+
+
+def test_close_all_chacha_db_instances_sanitizes_close_failure_log(monkeypatch):
+    logger_stub = _LoggerStub()
+
+    class _DBInstance:
+        def close_all_connections(self):
+            raise RuntimeError("chacha backend exploded at /private/db/path SECRET_TOKEN")
+
+    monkeypatch.setattr(deps, "logger", logger_stub)
+    with deps._chacha_db_lock:
+        deps._chacha_db_instances["/private/db/path/chacha.db"] = _DBInstance()
+
+    deps.close_all_chacha_db_instances()
+
+    _assert_log_omits_raw_exception(
+        logger_stub,
+        "error",
+        "Error closing ChaChaNotesDB instance",
+    )
+
+
+def test_shutdown_chacha_executor_sanitizes_shutdown_failure_log(monkeypatch):
+    logger_stub = _LoggerStub()
+
+    class _Executor:
+        def shutdown(self, **_kwargs):
+            raise RuntimeError("chacha backend exploded at /private/db/path SECRET_TOKEN")
+
+    monkeypatch.setattr(deps, "logger", logger_stub)
+    monkeypatch.setattr(deps, "_CHACHA_EXECUTOR", _Executor())
+    monkeypatch.setattr(deps, "_CHACHA_EXECUTOR_SHUTDOWN", False)
+
+    deps.shutdown_chacha_executor(wait=False)
+
+    _assert_log_omits_raw_exception(
+        logger_stub,
+        "debug",
+        "ChaChaNotes executor shutdown error",
+    )

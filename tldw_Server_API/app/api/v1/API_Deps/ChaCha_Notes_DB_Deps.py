@@ -226,7 +226,7 @@ def _apply_sqlite_tuning(db_instance: CharactersRAGDB) -> None:
             temp_store=None,
         )
     except (CharactersRAGDBError, sqlite3.Error, OSError, RuntimeError, ValueError) as e:
-        logger.debug(f"ChaChaNotes tuning skipped: {e}")
+        logger.debug("ChaChaNotes tuning skipped ({})", type(e).__name__)
 
 
 def _health_check_instance(db_instance: CharactersRAGDB) -> bool:
@@ -243,7 +243,7 @@ def _health_check_instance(db_instance: CharactersRAGDB) -> bool:
         conn.execute("SELECT 1")
         return True
     except (CharactersRAGDBError, sqlite3.Error, OSError, RuntimeError, ValueError) as e:
-        logger.warning(f"ChaChaNotes health probe failed: {e}")
+        logger.warning("ChaChaNotes health probe failed ({})", type(e).__name__)
         return False
 
 
@@ -589,7 +589,7 @@ def close_all_chacha_db_instances():
                 db_instance.close_all_connections()
                 logger.info(f"Closed ChaChaNotesDB instance for user {user_id}.")
             except (CharactersRAGDBError, OSError, RuntimeError, ValueError, TypeError) as e:
-                logger.error(f"Error closing ChaChaNotesDB instance for user {user_id}: {e}", exc_info=True)
+                logger.error("Error closing ChaChaNotesDB instance ({})", type(e).__name__)
         pending_init_events = list(_chacha_db_init_events.values())
         pending_shutdown_errors = {
             cache_key: _ChaChaInitializationAborted(_CHACHA_SHUTDOWN_INIT_ERROR_DETAIL)
@@ -675,7 +675,7 @@ def shutdown_chacha_executor(wait: bool = False) -> None:
     try:
         executor.shutdown(wait=wait, cancel_futures=True)
     except (RuntimeError, OSError, ValueError) as e:
-        logger.debug(f"ChaChaNotes executor shutdown error: {e}")
+        logger.debug("ChaChaNotes executor shutdown error ({})", type(e).__name__)
 
 
 # Example of how to register for shutdown event in FastAPI:
