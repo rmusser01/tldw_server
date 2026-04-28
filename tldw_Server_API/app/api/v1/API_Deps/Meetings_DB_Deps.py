@@ -27,10 +27,17 @@ async def get_meetings_db_for_user(
     try:
         return MeetingsDatabase.for_user(user_id=current_user.id)
     except (MeetingsDatabaseError, SchemaError) as exc:
-        logger.error(f"Failed to init Meetings DB for user {current_user.id}: {exc}")
+        logger.error(
+            "Failed to init Meetings DB for user {}: {}",
+            current_user.id,
+            type(exc).__name__,
+        )
         raise map_db_error_to_http(exc, default_detail="Meetings DB unavailable") from exc
     except Exception as exc:
-        logger.error(f"Failed to init Meetings DB for user {current_user.id}: {exc}")
+        logger.error(
+            "Failed to init Meetings DB for user {}: unexpected initialization error",
+            current_user.id,
+        )
         raise HTTPException(status_code=500, detail="Meetings DB unavailable") from exc
 
 
@@ -105,8 +112,15 @@ async def get_meetings_db_for_websocket(
     try:
         return MeetingsDatabase.for_user(user_id=current_user.id)
     except (MeetingsDatabaseError, SchemaError) as exc:
-        logger.error(f"Failed to init Meetings DB for websocket user {current_user.id}: {exc}")
+        logger.error(
+            "Failed to init Meetings DB for websocket user {}: {}",
+            current_user.id,
+            type(exc).__name__,
+        )
         raise map_db_error_to_http(exc, default_detail="Meetings DB unavailable") from exc
     except Exception as exc:
-        logger.error(f"Failed to init Meetings DB for websocket user {current_user.id}: {exc}")
+        logger.error(
+            "Failed to init Meetings DB for websocket user {}: unexpected initialization error",
+            current_user.id,
+        )
         raise HTTPException(status_code=500, detail="Meetings DB unavailable") from exc
