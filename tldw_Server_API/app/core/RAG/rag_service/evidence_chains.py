@@ -389,8 +389,8 @@ class EvidenceChainBuilder:
 
             return facts[:5]
 
-        except Exception as e:
-            logger.warning(f"LLM fact extraction failed: {e}")
+        except Exception:
+            logger.warning("LLM fact extraction failed")
             raise
 
     def _find_supporting_nodes(
