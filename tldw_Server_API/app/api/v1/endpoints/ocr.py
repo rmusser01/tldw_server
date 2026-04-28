@@ -51,7 +51,7 @@ def _record_backend_discovery_error(
     backend_name: str,
     exc: Exception,
 ) -> None:
-    logging.error(f"OCR backend discovery failed for {backend_name}: {exc}", exc_info=True)
+    logging.error("OCR backend discovery failed for {}", backend_name)
     out.setdefault(backend_name, {})
     out[backend_name]["error"] = str(exc)
 
