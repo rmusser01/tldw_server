@@ -145,7 +145,10 @@ class TTSRequest:
                 elif self.speed > 4.0:
                     self.speed = 4.0
         except Exception as speed_validation_error:
-            logger.debug("Voice settings speed normalization failed", exc_info=speed_validation_error)
+            logger.debug(
+                "Voice settings speed normalization failed; exception_type={}",
+                type(speed_validation_error).__name__,
+            )
         try:
             self._original_pitch = self.pitch
         except Exception:
@@ -161,14 +164,20 @@ class TTSRequest:
             if isinstance(self.model, str):
                 self.model = self.model.lower()
         except Exception as casing_error:
-            logger.debug("TTS provider/model lowercase normalization failed", exc_info=casing_error)
+            logger.debug(
+                "TTS provider/model lowercase normalization failed; exception_type={}",
+                type(casing_error).__name__,
+            )
         # If voice_settings arrives as a plain dict (from round-trip), coerce to VoiceSettings
         try:
             if isinstance(self.voice_settings, dict):
                 self.voice_settings = VoiceSettings(**self.voice_settings)
         except Exception as settings_coercion_error:
             # If coercion fails, leave as-is; validation layer may catch it later
-            logger.debug("Voice settings coercion from dict failed", exc_info=settings_coercion_error)
+            logger.debug(
+                "Voice settings coercion from dict failed; exception_type={}",
+                type(settings_coercion_error).__name__,
+            )
 
     def dict(self) -> dict[str, Any]:
         """Return a dictionary representation (compat with tests)."""

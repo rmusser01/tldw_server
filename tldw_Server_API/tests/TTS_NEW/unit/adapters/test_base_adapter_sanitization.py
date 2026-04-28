@@ -10,6 +10,19 @@ from tldw_Server_API.app.core.TTS.adapters.base import (
 )
 
 
+class _BadComparable:
+    def __lt__(self, _other):
+        raise RuntimeError("speed normalization leaked token=secret")
+
+    def __gt__(self, _other):
+        raise RuntimeError("speed normalization leaked token=secret")
+
+
+class _BadLowerStr(str):
+    def lower(self):
+        raise RuntimeError("lowercase normalization leaked token=secret")
+
+
 class _FailingInitializeAdapter(TTSAdapter):
     provider_name = "failing-init"
 
@@ -37,6 +50,53 @@ class _FailingCleanupAdapter(_FailingInitializeAdapter):
 
     async def _cleanup_resources(self):
         raise RuntimeError("cleanup backend exploded token=secret")
+
+
+def _capture_debug_messages_and_extra(call):
+    records: list[str] = []
+    sink_id = base_mod.logger.add(
+        lambda message: records.append(
+            f"{message.record['message']}\n{message.record.get('extra', {})}"
+        ),
+        level="DEBUG",
+    )
+    try:
+        call()
+    finally:
+        base_mod.logger.remove(sink_id)
+    return "\n".join(records)
+
+
+def test_request_speed_normalization_log_sanitizes_exception_extra():
+    log_output = _capture_debug_messages_and_extra(
+        lambda: TTSRequest(text="hello", speed=_BadComparable())
+    )
+
+    assert "Voice settings speed normalization failed" in log_output
+    assert "speed normalization leaked" not in log_output
+    assert "token=secret" not in log_output
+
+
+def test_request_provider_model_lowercase_log_sanitizes_exception_extra():
+    log_output = _capture_debug_messages_and_extra(
+        lambda: TTSRequest(text="hello", provider=_BadLowerStr("Provider"))
+    )
+
+    assert "TTS provider/model lowercase normalization failed" in log_output
+    assert "lowercase normalization leaked" not in log_output
+    assert "token=secret" not in log_output
+
+
+def test_request_voice_settings_coercion_log_sanitizes_exception_extra():
+    log_output = _capture_debug_messages_and_extra(
+        lambda: TTSRequest(
+            text="hello",
+            voice_settings={"unexpected token=secret": "value"},
+        )
+    )
+
+    assert "Voice settings coercion from dict failed" in log_output
+    assert "unexpected token=secret" not in log_output
 
 
 @pytest.mark.asyncio
