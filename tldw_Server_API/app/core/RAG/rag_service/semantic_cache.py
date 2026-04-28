@@ -154,8 +154,8 @@ class SemanticCache:
                 embedding_array = embedding_array / norm
 
             return embedding_array
-        except (AttributeError, TypeError, ValueError, RuntimeError, np.linalg.LinAlgError) as e:
-            logger.error(f"Failed to generate embedding: {e}")
+        except (AttributeError, TypeError, ValueError, RuntimeError, np.linalg.LinAlgError):
+            logger.error("Failed to generate embedding")
             return None
 
     def _compute_similarity(self, embedding1: np.ndarray, embedding2: np.ndarray) -> float:
