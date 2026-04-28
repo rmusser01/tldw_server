@@ -8,6 +8,7 @@ including media database, notes, prompts, and character cards.
 
 import asyncio
 import contextlib
+import copy
 from difflib import SequenceMatcher
 import json
 import os
@@ -16,7 +17,7 @@ import sqlite3
 import time
 import urllib.parse as _urlparse
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, Optional
@@ -35,6 +36,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.errors import (
 )
 
 from .types import DataSource, Document
+from .retrieval_plan import RetrievalPlan
 from .utils import get_float_env as _get_float_env
 from .utils import normalize_scores as _normalize_scores
 from .vector_stores import (
@@ -444,6 +446,72 @@ class RetrievalConfig:
     chunk_language: Optional[str] = None
 
 
+_RETRIEVAL_PLAN_SEARCH_MODES = frozenset({"fts", "vector", "hybrid"})
+_RETRIEVAL_PLAN_SOURCE_ALIASES = {
+    "character": DataSource.CHARACTER_CARDS,
+    "characters": DataSource.CHARACTER_CARDS,
+    "character_cards_db": DataSource.CHARACTER_CARDS,
+    "chats": DataSource.CHARACTER_CARDS,
+    "chat": DataSource.CHARACTER_CARDS,
+    "notes_db": DataSource.NOTES,
+    "media": DataSource.MEDIA_DB,
+    "media_db_path": DataSource.MEDIA_DB,
+    "kanban_db": DataSource.KANBAN,
+}
+
+
+def _normalize_plan_sources(plan: RetrievalPlan) -> list[DataSource]:
+    normalized: list[DataSource] = []
+    for raw_source in plan.sources:
+        try:
+            if isinstance(raw_source, DataSource):
+                source = raw_source
+            else:
+                source_text = str(raw_source).strip().lower()
+                source = _RETRIEVAL_PLAN_SOURCE_ALIASES.get(source_text) or DataSource(source_text)
+        except (TypeError, ValueError):
+            continue
+        if source not in normalized:
+            normalized.append(source)
+    return normalized
+
+
+def _config_from_retrieval_plan(
+    config: Optional[RetrievalConfig],
+    plan: RetrievalPlan,
+) -> RetrievalConfig:
+    effective = replace(config or RetrievalConfig())
+
+    try:
+        plan_top_k = int(plan.top_k)
+    except (TypeError, ValueError):
+        plan_top_k = int(effective.max_results or 10)
+    effective.max_results = max(1, plan_top_k)
+
+    try:
+        effective.min_score = float(plan.min_score)
+    except (TypeError, ValueError):
+        pass
+
+    search_mode = str(plan.search_mode or "").strip().lower()
+    if search_mode in _RETRIEVAL_PLAN_SEARCH_MODES:
+        effective.use_fts = search_mode in {"fts", "hybrid"}
+        effective.use_vector = search_mode in {"vector", "hybrid"}
+
+    return effective
+
+
+def _index_namespace_from_retrieval_plan(
+    plan: RetrievalPlan,
+    sources: list[DataSource],
+) -> Optional[str]:
+    if plan.index_namespace is not None:
+        return plan.index_namespace
+    if DataSource.MEDIA_DB in sources:
+        return plan.collection_names.get(DataSource.MEDIA_DB.value)
+    return None
+
+
 class BaseRetriever(ABC):
     """Base class for database-specific retrievers."""
 
@@ -646,6 +714,12 @@ class MediaDBRetriever(BaseRetriever):
             if not validated_path:
                 return None
             return create_media_database("rag_service", db_path=validated_path)
+        except MediaDatabaseError as exc:
+            message = str(exc).lower()
+            if "no such column" in message or "schema" in message:
+                logger.debug("Skipping Media DB adapter attach for incompatible schema: {}", exc)
+                return None
+            raise
         except (
             AttributeError,
             OSError,
@@ -3137,6 +3211,7 @@ class MultiDatabaseRetriever:
         sources: Optional[list[DataSource]] = None,
         config: Optional[RetrievalConfig] = None,
         index_namespace: Optional[str] = None,
+        retrieval_plan: Optional[RetrievalPlan] = None,
         # Optional per-source restrictions
         allowed_media_ids: Optional[list[int]] = None,
         allowed_note_ids: Optional[list[str]] = None,
@@ -3153,6 +3228,17 @@ class MultiDatabaseRetriever:
         Returns:
             A list of `Document` objects sorted by score (desc), capped by config.max_results if provided.
         """
+        plan_sources: list[DataSource] = []
+        if retrieval_plan is not None:
+            plan_sources = _normalize_plan_sources(retrieval_plan)
+            if plan_sources:
+                sources = plan_sources
+            config = _config_from_retrieval_plan(config, retrieval_plan)
+            index_namespace = _index_namespace_from_retrieval_plan(
+                retrieval_plan,
+                plan_sources,
+            )
+
         # Normalize the sources list
         ds_list: list[DataSource]
         if sources is None:
@@ -3172,14 +3258,31 @@ class MultiDatabaseRetriever:
         documents: list[Document] = []
         tasks: list[Any] = []
 
+        async def _run_with_config(
+            retriever: BaseRetriever,
+            operation: Any,
+            *args: Any,
+            **kwargs: Any,
+        ) -> Any:
+            if config is None:
+                return await operation(*args, **kwargs)
+            operation_name = getattr(operation, "__name__", None)
+            if isinstance(operation_name, str) and hasattr(retriever, operation_name):
+                call_retriever = copy.copy(retriever)
+                call_retriever.config = config
+                return await getattr(call_retriever, operation_name)(*args, **kwargs)
+            previous_config = getattr(retriever, "config", None)
+            retriever.config = config
+            try:
+                return await operation(*args, **kwargs)
+            finally:
+                retriever.config = previous_config
+
         # Prepare async tasks for each source
         for src in ds_list:
             retr = self.retrievers.get(src)
             if retr is None:
                 continue
-            # Apply per-call config if provided
-            if config is not None:
-                retr.config = config
 
             # Prefer hybrid/vector when requested and available for Media DB
             if (
@@ -3189,7 +3292,9 @@ class MultiDatabaseRetriever:
                 and getattr(config, "use_fts", False)
                 and hasattr(retr, "retrieve_hybrid")
             ):
-                tasks.append(retr.retrieve_hybrid(
+                tasks.append(_run_with_config(
+                    retr,
+                    retr.retrieve_hybrid,
                     query=query,
                     index_namespace=index_namespace,
                     allowed_media_ids=allowed_media_ids,
@@ -3200,7 +3305,9 @@ class MultiDatabaseRetriever:
                 and getattr(config, "use_vector", False)
                 and hasattr(retr, "_retrieve_vector")
             ):
-                tasks.append(retr._retrieve_vector(
+                tasks.append(_run_with_config(
+                    retr,
+                    retr._retrieve_vector,
                     query,
                     index_namespace=index_namespace,
                     allowed_media_ids=allowed_media_ids,
@@ -3211,15 +3318,30 @@ class MultiDatabaseRetriever:
                 and getattr(config, "use_fts", True)
                 and hasattr(retr, "_retrieve_fts")
             ):
-                tasks.append(retr._retrieve_fts(query, allowed_media_ids=allowed_media_ids))
+                tasks.append(_run_with_config(
+                    retr,
+                    retr._retrieve_fts,
+                    query,
+                    allowed_media_ids=allowed_media_ids,
+                ))
             else:
                 # Generic retrieve; pass through allowed IDs where applicable
                 if isinstance(retr, NotesDBRetriever):
-                    tasks.append(retr.retrieve(query, allowed_note_ids=allowed_note_ids))
+                    tasks.append(_run_with_config(
+                        retr,
+                        retr.retrieve,
+                        query,
+                        allowed_note_ids=allowed_note_ids,
+                    ))
                 elif isinstance(retr, MediaDBRetriever):
-                    tasks.append(retr.retrieve(query, allowed_media_ids=allowed_media_ids))
+                    tasks.append(_run_with_config(
+                        retr,
+                        retr.retrieve,
+                        query,
+                        allowed_media_ids=allowed_media_ids,
+                    ))
                 else:
-                    tasks.append(retr.retrieve(query))
+                    tasks.append(_run_with_config(retr, retr.retrieve, query))
 
         # Execute all retrievals concurrently
         if tasks:
@@ -3245,6 +3367,19 @@ class MultiDatabaseRetriever:
             documents = documents[: int(config.max_results)]
 
         return documents
+
+    async def retrieve_from_plan(
+        self,
+        plan: RetrievalPlan,
+        **kwargs: Any,
+    ) -> list[Document]:
+        """Retrieve documents using a normalized retrieval plan."""
+
+        return await self.retrieve(
+            plan.query,
+            retrieval_plan=plan,
+            **kwargs,
+        )
 
     async def retrieve_with_fusion(
         self,

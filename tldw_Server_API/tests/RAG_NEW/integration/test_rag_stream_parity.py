@@ -192,6 +192,137 @@ def test_rag_streaming_generation_provider_override(
     assert generation_config["model"] == "llama-3.3-70b-versatile"
 
 
+def test_rag_streaming_generation_uses_shared_resolved_payload(
+    monkeypatch: pytest.MonkeyPatch,
+    client_with_stream_overrides: TestClient,
+) -> None:
+    import tldw_Server_API.app.api.v1.endpoints.rag_unified as rag_ep
+    from tldw_Server_API.app.core.RAG.rag_service.request_bundle import ResolvedRequestBundle
+    from tldw_Server_API.app.core.RAG.rag_service.request_resolution import ResolvedRAGRequest
+    from tldw_Server_API.app.core.RAG.rag_service.retrieval_plan import build_retrieval_plan
+
+    captured = {"pipeline_kwargs": None, "generation_config": None}
+
+    async def fake_unified_pipeline(**kwargs: Any) -> Any:
+        from tldw_Server_API.app.core.RAG.rag_service.types import DataSource, Document
+
+        captured["pipeline_kwargs"] = kwargs
+        return rag_ep.UnifiedSearchResult(
+            documents=[
+                Document(
+                    id="doc-1",
+                    content="Resolved defaults context",
+                    metadata={"title": "Doc"},
+                    source=DataSource.MEDIA_DB,
+                    score=0.8,
+                )
+            ],
+            query=str(kwargs.get("query", "")),
+            expanded_queries=[],
+            metadata={},
+            timings={},
+            citations=[],
+            feedback_id=None,
+            generated_answer=None,
+            cache_hit=False,
+            errors=[],
+            security_report=None,
+            total_time=0.0,
+        )
+
+    async def fake_generate_streaming_response(context: Any, **kwargs: Any) -> Any:  # noqa: ARG001
+        captured["generation_config"] = context.config.get("generation")
+
+        async def _gen():
+            yield "chunk"
+
+        context.stream_generator = _gen()
+        context.metadata = {"streaming": True}
+        return context
+
+    def _resolved_request_for_test(query: str) -> ResolvedRAGRequest:
+        payload = {
+            "query": query,
+            "strategy": "standard",
+            "sources": ["media_db"],
+            "search_mode": "hybrid",
+            "top_k": 4,
+            "min_score": 0.25,
+            "generation_prompt": "resolved-prompt",
+            "max_generation_tokens": 777,
+            "generation_model": "resolved-model",
+            "generation_provider": "resolved-provider",
+            "enable_generation": True,
+            "index_namespace": "resolved-namespace",
+            "user_id": "1",
+            "feedback_user_id": "1",
+        }
+        return ResolvedRAGRequest(
+            query=query,
+            strategy="standard",
+            payload=payload,
+            index_namespace="resolved-namespace",
+            rag_profile="fast",
+            user_id="1",
+            feedback_user_id="1",
+        )
+
+    def fake_build_standard_request_bundle(
+        request: Any,
+        *,
+        current_user: Any,  # noqa: ARG001
+        db_paths: dict[str, Any],
+        media_db: Any,
+        chacha_db: Any,
+    ) -> ResolvedRequestBundle:
+        resolved_request = _resolved_request_for_test(request.query)
+        retrieval_plan = build_retrieval_plan(resolved_request)
+        pipeline_kwargs = rag_ep._build_unified_pipeline_kwargs(
+            request=request,
+            db_paths=db_paths,
+            media_db=media_db,
+            chacha_db=chacha_db,
+            current_user=current_user,
+            resolved_request=resolved_request,
+            retrieval_plan=retrieval_plan,
+        )
+        return ResolvedRequestBundle(
+            resolved_request=resolved_request,
+            retrieval_plan=retrieval_plan,
+            pipeline_kwargs=pipeline_kwargs,
+        )
+
+    monkeypatch.setattr(rag_ep, "_build_standard_request_bundle", fake_build_standard_request_bundle)
+    monkeypatch.setattr(rag_ep, "unified_rag_pipeline", fake_unified_pipeline)
+    monkeypatch.setattr(rag_ep, "generate_streaming_response", fake_generate_streaming_response)
+
+    payload = {
+        "query": "Shared contract generation defaults",
+        "enable_generation": True,
+    }
+
+    with client_with_stream_overrides.stream("POST", "/api/v1/rag/search/stream", json=payload) as resp:
+        assert resp.status_code == 200
+        next(resp.iter_lines(), None)
+
+    pipeline_kwargs = captured["pipeline_kwargs"]
+    assert pipeline_kwargs is not None
+    assert pipeline_kwargs["index_namespace"] == "resolved-namespace"
+    assert pipeline_kwargs["top_k"] == 4
+    assert pipeline_kwargs["min_score"] == 0.25
+    assert pipeline_kwargs["resolved_request"].index_namespace == "resolved-namespace"
+    assert pipeline_kwargs["retrieval_plan"].index_namespace == "resolved-namespace"
+    assert pipeline_kwargs["retrieval_plan"].top_k == 4
+    assert pipeline_kwargs["retrieval_plan"].min_score == 0.25
+
+    generation_config = captured["generation_config"]
+    assert generation_config is not None
+    assert generation_config["provider"] == "resolved-provider"
+    assert generation_config["model"] == "resolved-model"
+    assert generation_config["max_tokens"] == 777
+    assert generation_config["prompt_template"] == "resolved-prompt"
+
+
 def test_rag_streaming_emits_research_progress_before_generation(
     monkeypatch: pytest.MonkeyPatch,
     client_with_stream_overrides: TestClient,
@@ -536,3 +667,172 @@ def test_rag_streaming_agentic_path_uses_profile_resolved_defaults(
     agentic_kwargs = captured["agentic_kwargs"]
     assert agentic_kwargs is not None
     assert agentic_kwargs["top_k"] == 6
+
+
+def test_rag_streaming_agentic_path_uses_bundle_contracts_without_re_resolving(
+    monkeypatch: pytest.MonkeyPatch,
+    client_with_stream_overrides: TestClient,
+) -> None:
+    from types import SimpleNamespace
+
+    import tldw_Server_API.app.api.v1.endpoints.rag_unified as rag_ep
+    from tldw_Server_API.app.core.RAG.rag_service.request_bundle import ResolvedRequestBundle
+    from tldw_Server_API.app.core.RAG.rag_service.request_resolution import ResolvedRAGRequest
+    from tldw_Server_API.app.core.RAG.rag_service.retrieval_plan import RetrievalPlan
+    from tldw_Server_API.app.core.RAG.rag_service.types import DataSource, Document
+
+    canonical_resolved = ResolvedRAGRequest(
+        query="bundle agentic query",
+        strategy="agentic",
+        payload={
+            "query": "bundle agentic query",
+            "strategy": "agentic",
+            "sources": ["notes"],
+            "search_mode": "vector",
+            "top_k": 5,
+            "min_score": 0.17,
+            "debug_mode": True,
+            "index_namespace": "bundle-tenant",
+            "user_id": "1",
+            "feedback_user_id": "1",
+        },
+        index_namespace="bundle-tenant",
+        rag_profile="balanced",
+        user_id="1",
+        feedback_user_id="1",
+    )
+    canonical_plan = RetrievalPlan(
+        query="bundle agentic query",
+        sources=("notes",),
+        search_mode="vector",
+        top_k=5,
+        min_score=0.17,
+        index_namespace="bundle-tenant",
+    )
+    bundle = ResolvedRequestBundle(
+        resolved_request=canonical_resolved,
+        retrieval_plan=canonical_plan,
+        pipeline_kwargs={
+            "query": canonical_resolved.query,
+            "sources": list(canonical_plan.sources),
+            "search_mode": canonical_plan.search_mode,
+            "top_k": canonical_plan.top_k,
+            "min_score": canonical_plan.min_score,
+            "index_namespace": canonical_plan.index_namespace,
+            "media_db_path": "stub_media.db",
+            "notes_db_path": "stub_chacha.db",
+            "character_db_path": "stub_chacha.db",
+            "kanban_db_path": None,
+            "enable_generation": True,
+            "resolved_request": canonical_resolved,
+            "retrieval_plan": canonical_plan,
+            "user_id": "1",
+            "feedback_user_id": "1",
+        },
+    )
+
+    captured: dict[str, Any] = {
+        "agentic_kwargs": None,
+        "context_builder_calls": 0,
+    }
+
+    def fake_build_standard_request_bundle(*args: Any, **kwargs: Any) -> ResolvedRequestBundle:  # noqa: ARG001
+        return bundle
+
+    def fake_build_agentic_execution_context(*, resolved_request, retrieval_plan, payload_override=None):  # noqa: ANN001
+        captured["context_builder_calls"] = int(captured["context_builder_calls"]) + 1
+        captured["context_builder_resolved_request"] = resolved_request
+        captured["context_builder_retrieval_plan"] = retrieval_plan
+        payload = dict(payload_override or resolved_request.payload)
+        payload["agentic_enable_tools"] = True
+        payload["agentic_max_tool_calls"] = 9
+        payload["agentic_coverage_target"] = 0.88
+        return (
+            payload,
+            rag_ep.AgenticConfig(
+                top_k_docs=3,
+                enable_tools=True,
+                max_tool_calls=9,
+                coverage_target=0.88,
+            ),
+        )
+
+    async def fake_unified_rag_pipeline(**kwargs: Any) -> Any:  # noqa: ARG001
+        return rag_ep.UnifiedSearchResult(
+            documents=[
+                Document(
+                    id="doc-prefetch-1",
+                    content="prefetched",
+                    metadata={"title": "Prefetch"},
+                    source=DataSource.NOTES,
+                    score=0.9,
+                )
+            ],
+            query=canonical_resolved.query,
+            expanded_queries=[],
+            metadata={},
+            timings={},
+            citations=[],
+            feedback_id=None,
+            generated_answer=None,
+            cache_hit=False,
+            errors=[],
+            security_report=None,
+            total_time=0.0,
+        )
+
+    async def fake_agentic_rag_pipeline(**kwargs: Any) -> Any:
+        captured["agentic_kwargs"] = kwargs
+        return SimpleNamespace(
+            documents=[
+                Document(
+                    id="agentic-doc",
+                    content="agentic",
+                    metadata={"title": "Agentic"},
+                    source=DataSource.NOTES,
+                    score=0.95,
+                )
+            ],
+            metadata={"agentic_metrics": {"steps": 1}, "provenance": []},
+        )
+
+    async def fake_generate_streaming_response(context: Any, **kwargs: Any) -> Any:  # noqa: ARG001
+        async def _gen():
+            yield "chunk"
+
+        context.stream_generator = _gen()
+        context.metadata = {"streaming": True}
+        return context
+
+    monkeypatch.setattr(rag_ep, "_build_standard_request_bundle", fake_build_standard_request_bundle)
+    monkeypatch.setattr(rag_ep, "build_agentic_execution_context", fake_build_agentic_execution_context)
+    monkeypatch.setattr(rag_ep, "unified_rag_pipeline", fake_unified_rag_pipeline)
+    monkeypatch.setattr(rag_ep, "agentic_rag_pipeline", fake_agentic_rag_pipeline)
+    monkeypatch.setattr(rag_ep, "generate_streaming_response", fake_generate_streaming_response)
+
+    payload = {
+        "query": "stream via bundle",
+        "strategy": "agentic",
+        "enable_generation": True,
+    }
+
+    with client_with_stream_overrides.stream("POST", "/api/v1/rag/search/stream", json=payload) as resp:
+        assert resp.status_code == 200
+        next(resp.iter_lines(), None)
+
+    assert captured["context_builder_calls"] == 1
+    agentic_kwargs = captured["agentic_kwargs"]
+    assert agentic_kwargs is not None
+    assert captured["context_builder_resolved_request"] is canonical_resolved
+    assert captured["context_builder_retrieval_plan"] is canonical_plan
+    assert agentic_kwargs["resolved_request"] is canonical_resolved
+    assert agentic_kwargs["retrieval_plan"] is canonical_plan
+    assert agentic_kwargs["query"] == "bundle agentic query"
+    assert agentic_kwargs["sources"] == ["notes"]
+    assert agentic_kwargs["search_mode"] == "vector"
+    assert agentic_kwargs["top_k"] == 5
+    assert agentic_kwargs["min_score"] == 0.17
+    assert agentic_kwargs["index_namespace"] == "bundle-tenant"
+    assert agentic_kwargs["agentic"].enable_tools is True
+    assert agentic_kwargs["agentic"].max_tool_calls == 9
+    assert agentic_kwargs["agentic"].coverage_target == 0.88

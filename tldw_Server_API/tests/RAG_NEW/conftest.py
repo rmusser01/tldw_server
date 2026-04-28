@@ -7,6 +7,7 @@ Focused on testing only the unified pipeline that's actually in use.
 # Note: pgvector fixtures are registered at the top-level tests/conftest.py.
 # Keep this file free of pytest_plugins to avoid pytest deprecation warnings.
 
+import sys
 import tempfile
 from pathlib import Path
 from typing import Dict, Any, Generator
@@ -65,6 +66,30 @@ def _disable_limit_enforcement(monkeypatch):
     monkeypatch.setenv("LIMIT_ENFORCEMENT_ENABLED", "false")
 
     yield
+
+
+@pytest.fixture(autouse=True)
+def _reset_main_app_lifecycle_between_rag_tests():
+    """Keep lifespan-driven RAG tests from leaving the shared app draining."""
+    def _reset_if_main_app_loaded() -> None:
+        main_module = sys.modules.get("tldw_Server_API.app.main")
+        app = getattr(main_module, "app", None) if main_module is not None else None
+        if app is None:
+            return
+        try:
+            from tldw_Server_API.app.core.Jobs.manager import JobManager
+            from tldw_Server_API.app.services.app_lifecycle import reset_lifecycle_state
+
+            reset_lifecycle_state(app)
+            JobManager.set_acquire_gate(False)
+        except Exception as exc:
+            raise RuntimeError("Lifecycle reset failed in RAG_NEW autouse fixture") from exc
+
+    _reset_if_main_app_loaded()
+
+    yield
+
+    _reset_if_main_app_loaded()
 
 # =====================================================================
 # Cross-suite fixtures (mirrors Embeddings fixtures used by RAG tests)

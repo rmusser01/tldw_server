@@ -177,6 +177,7 @@ class TestUnifiedPipelineUnit:
             assert result.metadata["pre_rerank_documents"][0]["content"].startswith("Paris is the capital of France.")
             assert len(result.metadata["pre_rerank_documents"][0]["content"]) < len(docs[0].content)
             assert result.metadata["pre_rerank_documents"][0]["metadata"]["media_id"] == "media-1"
+            assert "reranked_documents" in result.metadata
 
     @pytest.mark.unit
     @pytest.mark.asyncio

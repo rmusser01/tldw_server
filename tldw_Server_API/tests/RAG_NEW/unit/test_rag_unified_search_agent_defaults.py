@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 import tldw_Server_API.app.api.v1.endpoints.rag_unified as rag_ep
 from tldw_Server_API.app.api.v1.schemas.rag_schemas_unified import UnifiedBatchRequest, UnifiedRAGRequest
+from tldw_Server_API.app.core.RAG.rag_service.request_resolution import resolve_rag_request
 
 
 pytestmark = pytest.mark.unit
@@ -228,6 +229,24 @@ def test_resolve_implicit_feedback_user_id_maps_single_user_alias_without_user(m
 
     assert resolved == "7"
 
+
+def test_core_request_resolution_matches_endpoint_single_user_alias(monkeypatch):
+    monkeypatch.setattr(
+        rag_ep.DatabasePaths,
+        "get_single_user_id",
+        staticmethod(lambda: 7),
+    )
+
+    endpoint_value = rag_ep._resolve_implicit_feedback_user_id("single_user", None)
+    core_resolved = resolve_rag_request(
+        {"query": "q", "user_id": "single_user"},
+        current_user=None,
+        get_profile_kwargs_fn=lambda _: {},
+        single_user_id_resolver=rag_ep.DatabasePaths.get_single_user_id,
+    )
+
+    assert endpoint_value == core_resolved.user_id
+
 def test_batch_round2_defaults_apply_when_fields_omitted(monkeypatch):
     for env_key in (
         "SEARCH_SUGGESTIONS",
@@ -251,17 +270,43 @@ def test_batch_round2_defaults_apply_when_fields_omitted(monkeypatch):
     )
 
     request = UnifiedBatchRequest(queries=["q1"])
-    payload = {}
-    rag_ep._apply_search_agent_defaults(
+    kwargs = rag_ep._build_batch_pipeline_kwargs(
         request,
-        payload,
-        allowed_fields=rag_ep._BATCH_ROUND2_DEFAULT_FIELDS,
+        db_paths=_EMPTY_DB_PATHS,
+        current_user=None,
     )
 
-    assert payload["enable_suggestions"] is True
-    assert payload["enable_structured_response"] is True
-    assert payload["enable_image_search"] is False
-    assert payload["enable_video_search"] is True
+    assert kwargs["enable_suggestions"] is True
+    assert kwargs["enable_structured_response"] is True
+    assert kwargs["enable_image_search"] is False
+    assert kwargs["enable_video_search"] is True
+
+
+def test_build_batch_kwargs_uses_core_user_normalization_when_single_user_resolution_fails(
+    monkeypatch,
+):
+    def _raise_single_user_id():
+        raise RuntimeError("single-user id unavailable")
+
+    monkeypatch.setattr(
+        rag_ep.DatabasePaths,
+        "get_single_user_id",
+        staticmethod(_raise_single_user_id),
+    )
+
+    kwargs = rag_ep._build_batch_pipeline_kwargs(
+        request=UnifiedBatchRequest(
+            queries=["q1"],
+            user_id="single_user",
+            feedback_user_id="single_user",
+        ),
+        db_paths=_EMPTY_DB_PATHS,
+        current_user=None,
+    )
+
+    assert kwargs["user_id"] is None
+    assert kwargs["feedback_user_id"] is None
+    assert "query" not in kwargs
 
 def test_rag_profile_applies_defaults_when_fields_omitted():
     request = UnifiedRAGRequest(query="profile apply", rag_profile="fast")
