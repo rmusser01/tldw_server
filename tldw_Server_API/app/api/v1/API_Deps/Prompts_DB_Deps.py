@@ -388,8 +388,11 @@ async def get_prompts_db_for_user(
             return db_instance
 
         except (DatabaseError, SchemaError, InputError, ConflictError) as e:
-            log_path_str = str(db_path) if db_path else f"directory for user_id {user_id}"
-            logger.error(f"Failed to initialize PromptsDatabase for user {user_id} at {log_path_str}: {e}", exc_info=True)
+            logger.error(
+                "Failed to initialize PromptsDatabase",
+                user_id=user_id,
+                error_type=type(e).__name__,
+            )
             raise map_db_error_to_http(
                 e,
                 default_detail="Prompts DB unavailable",
@@ -398,14 +401,21 @@ async def get_prompts_db_for_user(
                 conflict_detail="Prompts DB unavailable",
             ) from e
         except OSError as e:
-            logger.error(f"Failed to get PromptsDatabase path for user {user_id}: {e}", exc_info=True)
+            logger.error(
+                "Failed to get PromptsDatabase path",
+                user_id=user_id,
+                error_type=type(e).__name__,
+            )
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Prompts DB unavailable",
             ) from e
         except Exception as e:
-            log_path_str = str(db_path) if db_path else f"directory for user_id {user_id}"
-            logger.error(f"Unexpected error initializing PromptsDatabase for user {user_id} at {log_path_str}: {e}", exc_info=True)
+            logger.error(
+                "Unexpected error initializing PromptsDatabase",
+                user_id=user_id,
+                error_type=type(e).__name__,
+            )
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="An unexpected error occurred during prompts database setup."
