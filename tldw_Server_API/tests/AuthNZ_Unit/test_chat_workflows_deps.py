@@ -1,11 +1,29 @@
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
-from fastapi import Depends, FastAPI
+import pytest
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.api.v1.API_Deps import chat_workflows_deps as deps
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
+
+
+@contextmanager
+def _capture_dependency_error_logs() -> Iterator[list[str]]:
+    messages: list[str] = []
+    sink_id = deps.logger.add(
+        lambda message: messages.append(str(message)),
+        filter=lambda record: record["name"] == deps.__name__,
+        format="{message}",
+        level="ERROR",
+    )
+    try:
+        yield messages
+    finally:
+        deps.logger.remove(sink_id)
 
 
 def _make_app() -> FastAPI:
@@ -93,6 +111,40 @@ def test_chat_workflows_db_cache_is_scoped_per_app(monkeypatch):
     assert len(created) == 2
 
 
+def test_chat_workflows_db_create_failure_log_is_sanitized(monkeypatch):
+    raw_user_id = "raw-user-token-42"
+    raw_marker = "create raw marker"
+    raw_path = "/private/chat-workflows-create.db"
+    raw_token = "secret-token-create"
+
+    def fake_create_chat_workflows_database(*, client_id, db_path, backend):
+        raise RuntimeError(f"{raw_marker} {raw_path} {raw_token}")
+
+    monkeypatch.setattr(deps, "create_chat_workflows_database", fake_create_chat_workflows_database, raising=True)
+    monkeypatch.setattr(deps, "get_content_backend_instance", lambda: None, raising=True)
+    monkeypatch.setattr(
+        deps.DatabasePaths,
+        "get_chat_workflows_db_path",
+        staticmethod(lambda user_id: Path(f"/tmp/{user_id}.db")),
+    )
+
+    app = FastAPI()
+
+    with _capture_dependency_error_logs() as messages:
+        with pytest.raises(HTTPException) as exc:
+            deps._get_or_create_chat_workflows_db(app, raw_user_id, "web")
+
+    rendered = "\n".join(messages)
+    assert raw_marker not in rendered
+    assert raw_path not in rendered
+    assert raw_token not in rendered
+    assert raw_user_id not in rendered
+    assert "Failed to create ChatWorkflowsDatabase" in rendered
+    assert "RuntimeError" in rendered
+    assert exc.value.status_code == 500
+    assert exc.value.detail == "Failed to initialize chat workflows database"
+
+
 def test_shutdown_chat_workflows_deps_closes_only_target_app_instances(monkeypatch):
     class FakeDB:
         def __init__(self, label: str):
@@ -127,3 +179,45 @@ def test_shutdown_chat_workflows_deps_closes_only_target_app_instances(monkeypat
     refreshed = deps._get_or_create_chat_workflows_db(app_one, "user-1", "web")
 
     assert refreshed is not first
+
+
+def test_shutdown_chat_workflows_deps_close_failure_log_is_sanitized(monkeypatch):
+    raw_marker = "shutdown raw marker"
+    raw_path = "/private/chat-workflows-shutdown.db"
+    raw_token = "secret-token-shutdown"
+
+    class FailingCloseDB:
+        def __init__(self) -> None:
+            self.close_attempts = 0
+
+        def close(self) -> None:
+            self.close_attempts += 1
+            raise RuntimeError(f"{raw_marker} {raw_path} {raw_token}")
+
+    failing_db = FailingCloseDB()
+
+    def fake_create_chat_workflows_database(*, client_id, db_path, backend):
+        return failing_db
+
+    monkeypatch.setattr(deps, "create_chat_workflows_database", fake_create_chat_workflows_database, raising=True)
+    monkeypatch.setattr(deps, "get_content_backend_instance", lambda: None, raising=True)
+    monkeypatch.setattr(
+        deps.DatabasePaths,
+        "get_chat_workflows_db_path",
+        staticmethod(lambda user_id: Path(f"/tmp/{user_id}.db")),
+    )
+
+    app = FastAPI()
+    deps._get_or_create_chat_workflows_db(app, "shutdown-user", "web")
+
+    with _capture_dependency_error_logs() as messages:
+        deps.shutdown_chat_workflows_deps(app)
+
+    rendered = "\n".join(messages)
+    assert raw_marker not in rendered
+    assert raw_path not in rendered
+    assert raw_token not in rendered
+    assert "Failed to close ChatWorkflowsDatabase during shutdown" in rendered
+    assert "RuntimeError" in rendered
+    assert failing_db.close_attempts == 1
+    assert not hasattr(app.state, deps._APP_STATE_KEY)
