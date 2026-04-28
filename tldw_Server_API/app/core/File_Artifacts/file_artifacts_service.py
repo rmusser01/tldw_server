@@ -482,7 +482,7 @@ class FileArtifactsService:
             if file_path.exists():
                 file_path.unlink()
         except Exception as exc:
-            logger.warning("file_artifacts: failed to delete export file {}: {}", storage_path, exc)
+            logger.warning("file_artifacts: failed to delete export file error_type={}", type(exc).__name__)
 
     @staticmethod
     def _default_title(file_type: str) -> str:
@@ -550,7 +550,7 @@ class FileArtifactsService:
         try:
             self._cdb.delete_file_artifact(file_id, hard=True)
         except Exception as exc:
-            logger.warning("file_artifacts: failed to rollback file artifact {}: {}", file_id, exc)
+            logger.warning("file_artifacts: failed to rollback file artifact error_type={}", type(exc).__name__)
 
     @staticmethod
     def _validate_export_request(*, adapter: FileAdapter, export_req: FileExportRequest) -> None:

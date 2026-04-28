@@ -1,9 +1,11 @@
 import shutil
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from tldw_Server_API.app.core.File_Artifacts import file_artifacts_service as service_mod
 from tldw_Server_API.app.api.v1.schemas.file_artifacts_schemas import (
     FileCreateOptions,
     FileCreateRequest,
@@ -91,3 +93,44 @@ async def test_inline_export_skips_generated_file_registration(monkeypatch: pyte
     )
 
     assert register_mock.await_count == 0
+
+
+def test_delete_temp_export_file_failure_log_omits_raw_path_and_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    logger_mock = MagicMock()
+    monkeypatch.setattr(service_mod, "logger", logger_mock)
+    cdb = MagicMock()
+    cdb.resolve_temp_output_storage_path.side_effect = RuntimeError("delete leaked /private/delete-token")
+    service = FileArtifactsService(cdb, user_id=1)
+
+    service._delete_temp_export_file("tenant/path/raw-delete-token.csv")
+
+    logger_mock.warning.assert_called_once_with(
+        "file_artifacts: failed to delete export file error_type={}",
+        "RuntimeError",
+    )
+    rendered_log_call = str(logger_mock.warning.call_args)
+    assert "raw-delete-token" not in rendered_log_call
+    assert "/private/delete-token" not in rendered_log_call
+
+
+def test_rollback_failure_log_omits_raw_file_id_and_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    logger_mock = MagicMock()
+    monkeypatch.setattr(service_mod, "logger", logger_mock)
+    cdb = MagicMock()
+    cdb.get_file_artifact.return_value = SimpleNamespace(export_storage_path="existing-export.csv")
+    cdb.delete_file_artifact.side_effect = RuntimeError("rollback leaked /private/rollback-token")
+    service = FileArtifactsService(cdb, user_id=1)
+    delete_mock = MagicMock()
+    monkeypatch.setattr(service, "_delete_temp_export_file", delete_mock)
+
+    service._rollback_artifact(987654321)
+
+    delete_mock.assert_called_once_with("existing-export.csv")
+    cdb.delete_file_artifact.assert_called_once_with(987654321, hard=True)
+    logger_mock.warning.assert_called_once_with(
+        "file_artifacts: failed to rollback file artifact error_type={}",
+        "RuntimeError",
+    )
+    rendered_log_call = str(logger_mock.warning.call_args)
+    assert "987654321" not in rendered_log_call
+    assert "/private/rollback-token" not in rendered_log_call
