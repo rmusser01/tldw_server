@@ -58,8 +58,8 @@ def load_module_yaml(
             return data, path
         logger.warning(f"Module YAML for {module_name} is not a mapping: {path}")
         return {}, path
-    except Exception as exc:
-        logger.warning(f"Failed to load module YAML for {module_name}: {exc}")
+    except Exception:
+        logger.warning(f"Failed to load module YAML for {module_name}")
         return {}, path
 
 
