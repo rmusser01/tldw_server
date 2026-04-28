@@ -396,8 +396,8 @@ class TTSConfigManager:
 
             return config_dict
 
-        except Exception as e:
-            logger.error(f"Error loading config.txt: {e}")
+        except Exception:
+            logger.error("Error loading config.txt")
             return {}
 
     def _load_env_overrides(self) -> dict[str, Any]:
