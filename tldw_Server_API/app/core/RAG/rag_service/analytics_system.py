@@ -441,8 +441,8 @@ class UserFeedbackStore:
                 for statement in statements:
                     conn.execute(statement)
                 self._ensure_issues_column(conn)
-        except (BackendDatabaseError, CharactersRAGDBError, AttributeError, OSError, RuntimeError, TypeError, ValueError) as exc:
-            logger.error(f"Failed to initialize feedback schema: {exc}", exc_info=True)
+        except (BackendDatabaseError, CharactersRAGDBError, AttributeError, OSError, RuntimeError, TypeError, ValueError):
+            logger.error("Failed to initialize feedback schema")
 
     def _ensure_issues_column(self, conn: Any) -> None:
         """Backfill `issues` on pre-existing schemas created before this field existed."""
@@ -512,8 +512,8 @@ class UserFeedbackStore:
                         user_notes,
                     ),
                 )
-        except (BackendDatabaseError, CharactersRAGDBError, AttributeError, OSError, RuntimeError, TypeError, ValueError) as exc:
-            logger.error(f"Failed to add feedback: {exc}")
+        except (BackendDatabaseError, CharactersRAGDBError, AttributeError, OSError, RuntimeError, TypeError, ValueError):
+            logger.error("Failed to add feedback")
             raise
         else:
             logger.info(f"Added feedback {feedback_id} for conversation {conversation_id}")
@@ -783,8 +783,8 @@ class UserFeedbackStore:
                         conn.execute(update_sql, (json.dumps(updated_issues), updated_notes, feedback_id))
 
                     result = {"issues": updated_issues, "user_notes": updated_notes}
-        except (BackendDatabaseError, CharactersRAGDBError, AttributeError, OSError, RuntimeError, TypeError, ValueError) as exc:
-            logger.error(f"Failed to merge feedback update: {exc}")
+        except (BackendDatabaseError, CharactersRAGDBError, AttributeError, OSError, RuntimeError, TypeError, ValueError):
+            logger.error("Failed to merge feedback update")
         else:
             return result
         return None
@@ -814,8 +814,8 @@ class UserFeedbackStore:
                 helpful_value = fb.get("helpful")
                 fb["helpful"] = None if helpful_value is None else bool(helpful_value)
                 feedback.append(fb)
-        except (BackendDatabaseError, CharactersRAGDBError, AttributeError, OSError, RuntimeError, TypeError, ValueError) as exc:
-            logger.error(f"Failed to get conversation feedback: {exc}")
+        except (BackendDatabaseError, CharactersRAGDBError, AttributeError, OSError, RuntimeError, TypeError, ValueError):
+            logger.error("Failed to get conversation feedback")
         else:
             return feedback
         return []
@@ -838,8 +838,8 @@ class UserFeedbackStore:
             helpful_value = fb.get("helpful")
             fb["helpful"] = None if helpful_value is None else bool(helpful_value)
             return fb
-        except (BackendDatabaseError, CharactersRAGDBError, AttributeError, OSError, RuntimeError, TypeError, ValueError) as exc:
-            logger.error(f"Failed to get feedback by id: {exc}")
+        except (BackendDatabaseError, CharactersRAGDBError, AttributeError, OSError, RuntimeError, TypeError, ValueError):
+            logger.error("Failed to get feedback by id")
             return None
 
     async def delete_feedback(self, feedback_id: str) -> bool:
@@ -853,8 +853,8 @@ class UserFeedbackStore:
                 cursor = conn.execute(delete_sql, (feedback_id,))
                 deleted = getattr(cursor, "rowcount", 0) or 0
                 return deleted > 0
-        except (BackendDatabaseError, CharactersRAGDBError, AttributeError, OSError, RuntimeError, TypeError, ValueError) as exc:
-            logger.error(f"Failed to delete feedback {feedback_id}: {exc}")
+        except (BackendDatabaseError, CharactersRAGDBError, AttributeError, OSError, RuntimeError, TypeError, ValueError):
+            logger.error("Failed to delete feedback")
             raise
 
 
@@ -1053,10 +1053,10 @@ class UnifiedFeedbackSystem:
                     dwell_ms=dwell_ms,
                     query=query,
                 )
-            except ValueError as e:
-                logger.debug(f"Personalization store update skipped for user_id={user_id}: {e}")
-            except (AttributeError, OSError, RuntimeError, TypeError) as e:
-                logger.debug(f"Personalization store update failed: {e}")
+            except ValueError:
+                logger.debug("Personalization store update skipped")
+            except (AttributeError, OSError, RuntimeError, TypeError):
+                logger.debug("Personalization store update failed")
 
             # Emit anonymized analytics
             if self.enable_analytics and self.analytics:
@@ -1094,8 +1094,8 @@ class UnifiedFeedbackSystem:
                     metrics=metrics,
                 )
                 await self.analytics.record_event(evt)
-        except (BackendDatabaseError, AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
-            logger.debug(f"Implicit interaction recording failed: {e}")
+        except (BackendDatabaseError, AttributeError, OSError, RuntimeError, TypeError, ValueError):
+            logger.debug("Implicit interaction recording failed")
 
     async def record_search(
         self,
