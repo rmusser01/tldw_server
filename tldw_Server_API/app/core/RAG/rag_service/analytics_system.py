@@ -138,8 +138,8 @@ class AnalyticsStore:
             await asyncio.get_event_loop().run_in_executor(
                 None, self.db.record_search, search_data
             )
-        except (BackendDatabaseError, AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
-            logger.error(f"Failed to record search analytics: {e}")
+        except (BackendDatabaseError, AttributeError, OSError, RuntimeError, TypeError, ValueError):
+            logger.error("Failed to record search analytics")
         else:
             return True
         return False
@@ -158,8 +158,8 @@ class AnalyticsStore:
             await asyncio.get_event_loop().run_in_executor(
                 None, self.db.record_feedback, feedback_data
             )
-        except (BackendDatabaseError, AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
-            logger.error(f"Failed to record feedback: {e}")
+        except (BackendDatabaseError, AttributeError, OSError, RuntimeError, TypeError, ValueError):
+            logger.error("Failed to record feedback")
         else:
             return True
         return False
@@ -179,8 +179,8 @@ class AnalyticsStore:
             await asyncio.get_event_loop().run_in_executor(
                 None, self.db.record_event, payload
             )
-        except (BackendDatabaseError, AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
-            logger.error(f"Failed to record analytics event: {e}")
+        except (BackendDatabaseError, AttributeError, OSError, RuntimeError, TypeError, ValueError):
+            logger.error("Failed to record analytics event")
         else:
             return True
         return False
@@ -256,8 +256,8 @@ class AnalyticsStore:
             await asyncio.get_event_loop().run_in_executor(
                 None, self.db.record_document_performance, payload
             )
-        except (BackendDatabaseError, AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
-            logger.error(f"Failed to record document performance: {e}")
+        except (BackendDatabaseError, AttributeError, OSError, RuntimeError, TypeError, ValueError):
+            logger.error("Failed to record document performance")
         else:
             return True
         return False
@@ -280,8 +280,8 @@ class AnalyticsStore:
             await asyncio.get_event_loop().run_in_executor(
                 None, self.db.record_error, payload
             )
-        except (BackendDatabaseError, AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
-            logger.error(f"Failed to record error: {e}")
+        except (BackendDatabaseError, AttributeError, OSError, RuntimeError, TypeError, ValueError):
+            logger.error("Failed to record error")
         else:
             return True
         return False
@@ -300,8 +300,8 @@ class AnalyticsStore:
             await asyncio.get_event_loop().run_in_executor(
                 None, self.db.record_feature_usage, feature_data
             )
-        except (BackendDatabaseError, AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
-            logger.error(f"Failed to record feature usage: {e}")
+        except (BackendDatabaseError, AttributeError, OSError, RuntimeError, TypeError, ValueError):
+            logger.error("Failed to record feature usage")
         else:
             return True
         return False
@@ -320,8 +320,8 @@ class AnalyticsStore:
             summary = await asyncio.get_event_loop().run_in_executor(
                 None, self.db.get_analytics_summary, days
             )
-        except (BackendDatabaseError, AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
-            logger.error(f"Failed to get analytics summary: {e}")
+        except (BackendDatabaseError, AttributeError, OSError, RuntimeError, TypeError, ValueError):
+            logger.error("Failed to get analytics summary")
         else:
             return summary
         return {}
@@ -340,8 +340,8 @@ class AnalyticsStore:
             deleted = await asyncio.get_event_loop().run_in_executor(
                 None, self.db.cleanup_old_data, days_to_keep
             )
-        except (BackendDatabaseError, AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
-            logger.error(f"Failed to cleanup old data: {e}")
+        except (BackendDatabaseError, AttributeError, OSError, RuntimeError, TypeError, ValueError):
+            logger.error("Failed to cleanup old data")
         else:
             return deleted
         return 0
