@@ -540,6 +540,9 @@ class QuizzesModule(BaseModule):
         except _QUIZZES_MODULE_NONCRITICAL_EXCEPTIONS:
             return "mcp_quizzes"
 
+    def _log_db_close_failure(self) -> None:
+        logger.debug("Failed to close DB")
+
     # Quiz CRUD
 
     async def _list_quizzes(self, args: dict[str, Any], context: Any) -> dict[str, Any]:
@@ -582,8 +585,8 @@ class QuizzesModule(BaseModule):
         finally:
             try:
                 db.close_all_connections()
-            except _QUIZZES_MODULE_NONCRITICAL_EXCEPTIONS as exc:
-                logger.debug(f"Failed to close DB: {exc}")
+            except _QUIZZES_MODULE_NONCRITICAL_EXCEPTIONS:
+                self._log_db_close_failure()
 
     async def _get_quiz(self, args: dict[str, Any], context: Any) -> dict[str, Any]:
         quiz_id = args.get("quiz_id")
@@ -599,8 +602,8 @@ class QuizzesModule(BaseModule):
         finally:
             try:
                 db.close_all_connections()
-            except _QUIZZES_MODULE_NONCRITICAL_EXCEPTIONS as exc:
-                logger.debug(f"Failed to close DB: {exc}")
+            except _QUIZZES_MODULE_NONCRITICAL_EXCEPTIONS:
+                self._log_db_close_failure()
 
     async def _create_quiz(self, args: dict[str, Any], context: Any) -> dict[str, Any]:
         return await asyncio.to_thread(self._create_quiz_sync, context, args)
@@ -623,8 +626,8 @@ class QuizzesModule(BaseModule):
         finally:
             try:
                 db.close_all_connections()
-            except _QUIZZES_MODULE_NONCRITICAL_EXCEPTIONS as exc:
-                logger.debug(f"Failed to close DB: {exc}")
+            except _QUIZZES_MODULE_NONCRITICAL_EXCEPTIONS:
+                self._log_db_close_failure()
 
     async def _update_quiz(self, args: dict[str, Any], context: Any) -> dict[str, Any]:
         return await asyncio.to_thread(self._update_quiz_sync, context, args)
@@ -656,8 +659,8 @@ class QuizzesModule(BaseModule):
         finally:
             try:
                 db.close_all_connections()
-            except _QUIZZES_MODULE_NONCRITICAL_EXCEPTIONS as exc:
-                logger.debug(f"Failed to close DB: {exc}")
+            except _QUIZZES_MODULE_NONCRITICAL_EXCEPTIONS:
+                self._log_db_close_failure()
 
     async def _delete_quiz(self, args: dict[str, Any], context: Any) -> dict[str, Any]:
         return await asyncio.to_thread(self._delete_quiz_sync, context, args)
@@ -685,8 +688,8 @@ class QuizzesModule(BaseModule):
         finally:
             try:
                 db.close_all_connections()
-            except _QUIZZES_MODULE_NONCRITICAL_EXCEPTIONS as exc:
-                logger.debug(f"Failed to close DB: {exc}")
+            except _QUIZZES_MODULE_NONCRITICAL_EXCEPTIONS:
+                self._log_db_close_failure()
 
     # Questions
 
@@ -720,8 +723,8 @@ class QuizzesModule(BaseModule):
         finally:
             try:
                 db.close_all_connections()
-            except _QUIZZES_MODULE_NONCRITICAL_EXCEPTIONS as exc:
-                logger.debug(f"Failed to close DB: {exc}")
+            except _QUIZZES_MODULE_NONCRITICAL_EXCEPTIONS:
+                self._log_db_close_failure()
 
     async def _create_question(self, args: dict[str, Any], context: Any) -> dict[str, Any]:
         return await asyncio.to_thread(self._create_question_sync, context, args)
@@ -749,8 +752,8 @@ class QuizzesModule(BaseModule):
         finally:
             try:
                 db.close_all_connections()
-            except _QUIZZES_MODULE_NONCRITICAL_EXCEPTIONS as exc:
-                logger.debug(f"Failed to close DB: {exc}")
+            except _QUIZZES_MODULE_NONCRITICAL_EXCEPTIONS:
+                self._log_db_close_failure()
 
     async def _update_question(self, args: dict[str, Any], context: Any) -> dict[str, Any]:
         return await asyncio.to_thread(self._update_question_sync, context, args)
@@ -782,8 +785,8 @@ class QuizzesModule(BaseModule):
         finally:
             try:
                 db.close_all_connections()
-            except _QUIZZES_MODULE_NONCRITICAL_EXCEPTIONS as exc:
-                logger.debug(f"Failed to close DB: {exc}")
+            except _QUIZZES_MODULE_NONCRITICAL_EXCEPTIONS:
+                self._log_db_close_failure()
 
     async def _delete_question(self, args: dict[str, Any], context: Any) -> dict[str, Any]:
         return await asyncio.to_thread(self._delete_question_sync, context, args)
@@ -811,8 +814,8 @@ class QuizzesModule(BaseModule):
         finally:
             try:
                 db.close_all_connections()
-            except _QUIZZES_MODULE_NONCRITICAL_EXCEPTIONS as exc:
-                logger.debug(f"Failed to close DB: {exc}")
+            except _QUIZZES_MODULE_NONCRITICAL_EXCEPTIONS:
+                self._log_db_close_failure()
 
     # Attempts
 
@@ -833,8 +836,8 @@ class QuizzesModule(BaseModule):
         finally:
             try:
                 db.close_all_connections()
-            except _QUIZZES_MODULE_NONCRITICAL_EXCEPTIONS as exc:
-                logger.debug(f"Failed to close DB: {exc}")
+            except _QUIZZES_MODULE_NONCRITICAL_EXCEPTIONS:
+                self._log_db_close_failure()
 
     async def _submit_attempt(self, args: dict[str, Any], context: Any) -> dict[str, Any]:
         return await asyncio.to_thread(self._submit_attempt_sync, context, args)
@@ -854,8 +857,8 @@ class QuizzesModule(BaseModule):
         finally:
             try:
                 db.close_all_connections()
-            except _QUIZZES_MODULE_NONCRITICAL_EXCEPTIONS as exc:
-                logger.debug(f"Failed to close DB: {exc}")
+            except _QUIZZES_MODULE_NONCRITICAL_EXCEPTIONS:
+                self._log_db_close_failure()
 
     async def _list_attempts(self, args: dict[str, Any], context: Any) -> dict[str, Any]:
         return await asyncio.to_thread(self._list_attempts_sync, context, args)
@@ -883,8 +886,8 @@ class QuizzesModule(BaseModule):
         finally:
             try:
                 db.close_all_connections()
-            except _QUIZZES_MODULE_NONCRITICAL_EXCEPTIONS as exc:
-                logger.debug(f"Failed to close DB: {exc}")
+            except _QUIZZES_MODULE_NONCRITICAL_EXCEPTIONS:
+                self._log_db_close_failure()
 
     async def _get_attempt(self, args: dict[str, Any], context: Any) -> dict[str, Any]:
         return await asyncio.to_thread(self._get_attempt_sync, context, args)
@@ -906,8 +909,8 @@ class QuizzesModule(BaseModule):
         finally:
             try:
                 db.close_all_connections()
-            except _QUIZZES_MODULE_NONCRITICAL_EXCEPTIONS as exc:
-                logger.debug(f"Failed to close DB: {exc}")
+            except _QUIZZES_MODULE_NONCRITICAL_EXCEPTIONS:
+                self._log_db_close_failure()
 
     # Generation
 
@@ -1154,5 +1157,5 @@ Return ONLY the JSON array, no other text."""
         finally:
             try:
                 db.close_all_connections()
-            except _QUIZZES_MODULE_NONCRITICAL_EXCEPTIONS as exc:
-                logger.debug(f"Failed to close DB: {exc}")
+            except _QUIZZES_MODULE_NONCRITICAL_EXCEPTIONS:
+                self._log_db_close_failure()
