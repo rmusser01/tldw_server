@@ -253,7 +253,10 @@ async def _authenticate_api_key_from_request(request: Request, api_key: str) -> 
                     db_path = settings.DATABASE_URL.replace("sqlite:///", "")
                     _ensure_authnz_tables(_Path(db_path))
             except _AUTH_DEPS_NONCRITICAL_EXCEPTIONS as _ensure_err:
-                logger.debug("AuthNZ test fallback: ensure_authnz_tables skipped/failed: {}", _ensure_err)
+                logger.debug(
+                    "AuthNZ test fallback: ensure_authnz_tables skipped/failed: error_type={}",
+                    type(_ensure_err).__name__,
+                )
             fixed_id = getattr(settings, "SINGLE_USER_FIXED_ID", 1)
             user = {
                 "id": fixed_id,
@@ -1371,7 +1374,7 @@ async def get_auth_principal(
     except HTTPException:
         raise
     except _AUTH_DEPS_NONCRITICAL_EXCEPTIONS as exc:
-        logger.debug("Maintenance guard skipped: {}", exc)
+        logger.debug("Maintenance guard skipped: error_type={}", type(exc).__name__)
     return principal
 
 
@@ -1973,7 +1976,7 @@ async def enforce_rbac_rate_limit(
         else:
             logger.debug("RBAC rate-limit: no configured limits for user {}, resource {}", user_id, resource)
     except _AUTH_DEPS_NONCRITICAL_EXCEPTIONS as e:
-        logger.debug("RBAC rate-limit selection failed: {}", e)
+        logger.debug("RBAC rate-limit selection failed: error_type={}", type(e).__name__)
 
 
 def rbac_rate_limit(resource: str):
