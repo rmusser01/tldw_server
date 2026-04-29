@@ -738,7 +738,11 @@ async def get_current_user(
     x_api_key: Optional[str] = Header(None, alias="X-API-KEY")
 ) -> dict[str, Any]:
     """
-    Resolve and return the current authenticated user.
+    Legacy compatibility shim that resolves and returns a user dictionary.
+
+    New or migrated route code should prefer ``CurrentPrincipal`` /
+    ``get_auth_principal`` unless the endpoint still requires dictionary-shaped
+    user data for backwards compatibility.
 
     Supports Bearer JWT authentication and API keys via `X-API-KEY` or
     Authorization Bearer (non-JWT tokens). If an upstream dependency already
@@ -1560,7 +1564,10 @@ async def get_current_active_user(
     current_user: dict[str, Any] = Depends(get_current_user)
 ) -> dict[str, Any]:
     """
-    Get current active user (verified and not locked)
+    Legacy compatibility shim that returns an active user dictionary.
+
+    New or migrated route code should prefer ``CurrentPrincipal`` /
+    ``get_auth_principal`` unless dictionary-shaped user data is still needed.
 
     Args:
         current_user: Current authenticated user
