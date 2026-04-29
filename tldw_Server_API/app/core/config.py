@@ -1946,27 +1946,6 @@ def load_settings():
         "PERSONA_DEFAULT_PERSONA": (lambda _cp: (
             _cp.get('persona', 'default_persona', fallback='Research Assistant') if _cp and _cp.has_section('persona') else 'Research Assistant'
         ))(load_comprehensive_config()),
-        "PERSONA_VOICE": (lambda _cp: (
-            _cp.get('persona', 'voice', fallback='default') if _cp and _cp.has_section('persona') else 'default'
-        ))(load_comprehensive_config()),
-        "PERSONA_STT": (lambda _cp: (
-            _cp.get('persona', 'stt', fallback='faster_whisper') if _cp and _cp.has_section('persona') else 'faster_whisper'
-        ))(load_comprehensive_config()),
-        "PERSONA_MAX_TOOL_STEPS": (lambda _cp: (
-            int(_cp.get('persona', 'max_tool_steps', fallback='3')) if _cp and _cp.has_section('persona') else 3
-        ))(load_comprehensive_config()),
-        "PERSONA_MEMORY_READ_MODE": (lambda _env, _cp: (
-            str(_env).strip().lower() if _env is not None else (
-                _cp.get('persona', 'persona_memory_read_mode', fallback='legacy_only').strip().lower()
-                if _cp and _cp.has_section('persona') else 'legacy_only'
-            )
-        ))(os.getenv('PERSONA_MEMORY_READ_MODE'), load_comprehensive_config()),
-        "PERSONA_MEMORY_WRITE_MODE": (lambda _env, _cp: (
-            str(_env).strip().lower() if _env is not None else (
-                _cp.get('persona', 'persona_memory_write_mode', fallback='legacy_only').strip().lower()
-                if _cp and _cp.has_section('persona') else 'legacy_only'
-            )
-        )(load_comprehensive_config()),
         "PERSONA_VOICE": (
             lambda _cp: (
                 _cp.get("persona", "voice", fallback="default") if _cp and _cp.has_section("persona") else "default"

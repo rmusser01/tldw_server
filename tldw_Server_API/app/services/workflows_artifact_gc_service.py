@@ -51,11 +51,8 @@ def _record_artifact_gc_event(
     try:
         db.append_event(tenant_id, run_id, "artifact_gc", payload)
     except _GC_NONCRITICAL_EXCEPTIONS as exc:
-        logger.warning(
-            "Artifact GC: failed to append workflow evidence for artifact_id={} run_id={}: {}",
-            artifact_id,
-            run_id,
-            exc,
+        logger.bind(error_type=type(exc).__name__).warning(
+            "Artifact GC: failed to append workflow evidence"
         )
 
 
@@ -97,7 +94,9 @@ async def run_workflows_artifact_gc_worker(stop_event: asyncio.Event) -> None:
                                 fp.unlink()
                                 file_deleted = True
                         except OSError as fe:
-                            logger.warning(f"Artifact GC: failed to delete file {fp}: {fe}")
+                            logger.bind(error_type=type(fe).__name__).warning(
+                                "Artifact GC: failed to delete artifact file"
+                            )
                     db.delete_artifact(artifact_id)
                     _record_artifact_gc_event(
                         db,

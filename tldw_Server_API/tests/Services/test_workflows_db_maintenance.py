@@ -171,16 +171,22 @@ async def test_outer_loop_failure_log_is_sanitized(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_postgres_vacuum_failure_log_is_sanitized(monkeypatch):
-    class _FakeTransaction:
-        def __enter__(self) -> object:
-            return object()
+    class _FakeCursor:
+        def execute(self, query: str) -> None:
+            raise RuntimeError("postgres vacuum leaked /tmp/workflows-pg-secret sk-live-pg")
 
-        def __exit__(self, exc_type: Any, exc: Any, traceback: Any) -> bool:
-            return False
+    class _FakeConnection:
+        autocommit = False
+
+        def cursor(self) -> _FakeCursor:
+            return _FakeCursor()
 
     class _FakeBackend:
-        def transaction(self) -> _FakeTransaction:
-            return _FakeTransaction()
+        def connect(self) -> _FakeConnection:
+            return _FakeConnection()
+
+        def disconnect(self, connection: _FakeConnection) -> None:
+            pass
 
         def escape_identifier(self, table: str) -> str:
             return f'"{table}"'
@@ -188,9 +194,6 @@ async def test_postgres_vacuum_failure_log_is_sanitized(monkeypatch):
     class _FakePostgresDB:
         backend = _FakeBackend()
         backend_type = BackendType.POSTGRESQL
-
-        def _execute_backend(self, query: str, connection: object) -> None:
-            raise RuntimeError("postgres vacuum leaked /tmp/workflows-pg-secret sk-live-pg")
 
     logger = _LoggerStub()
     monkeypatch.setenv("WORKFLOWS_POSTGRES_VACUUM", "true")

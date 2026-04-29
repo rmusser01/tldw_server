@@ -71,7 +71,9 @@ async def test_file_delete_failure_log_is_sanitized(monkeypatch, tmp_path):
 
     assert db.deleted == ["artifact-file-id"]
     assert "Artifact GC: failed to delete artifact file" in logger.warnings
-    assert logger.binds[-1] == {"error_type": "OSError"}
+    assert "Artifact GC: failed to append workflow evidence" in logger.warnings
+    assert {"error_type": "OSError"} in logger.binds
+    assert {"error_type": "AttributeError"} in logger.binds
     rendered = "\n".join(logger.infos + logger.warnings)
     assert str(artifact_path) not in rendered
     assert "sk-live-artifact-token" not in rendered
