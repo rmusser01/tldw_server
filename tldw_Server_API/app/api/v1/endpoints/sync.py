@@ -229,7 +229,9 @@ async def send_changes_to_client(
             latest_id = latest_row[0] if latest_row and latest_row[0] is not None else 0
             return changes_raw_list, latest_id
         except (DatabaseError, sqlite3.Error) as db_err:
-            logger.error(f"[{user_id.username}] Sync DB error in _get_changes_sync for client {client_id}: {db_err}", exc_info=True)
+            logger.bind(error_type=type(db_err).__name__).error(
+                "Sync DB error in _get_changes_sync"
+            )
             # Re-raise to be caught by the main handler
             raise
 
@@ -252,10 +254,11 @@ async def send_changes_to_client(
                       row_change_id = dict(row_dict).get("change_id", "N/A")
                   except Exception as change_id_error:
                       logger.debug("Failed to extract change_id from sync log row during validation error path", exc_info=change_id_error)
-                  logger.error(
-                      f"[{user_id.username}] Error validating sync log entry data "
-                      f"(ID: {row_change_id}) against model: {pydantic_err}",
-                      exc_info=True,
+                  logger.bind(
+                      error_type=type(pydantic_err).__name__,
+                      change_id=row_change_id,
+                  ).error(
+                      "Invalid sync log entry encountered during /sync/get validation"
                   )
                   if isinstance(row_change_id, int):
                       invalid_rows.append(row_change_id)
@@ -275,13 +278,17 @@ async def send_changes_to_client(
         )
 
     except DatabaseError as e: # Catch mapped DB-layer errors raised from sync helper
-        logger.error(f"Database error getting changes for user '{user_id.username}', client '{client_id}': {e}", exc_info=True)
+        logger.bind(error_type=type(e).__name__).error(
+            "Database error getting changes from sync store"
+        )
         raise map_db_error_to_http(
             e,
             default_detail="Failed to retrieve changes from database.",
         ) from e
     except sqlite3.Error as e: # Catch raw sqlite errors raised from sync helper
-        logger.error(f"Database error getting changes for user '{user_id.username}', client '{client_id}': {e}", exc_info=True)
+        logger.bind(error_type=type(e).__name__).error(
+            "Database error getting changes from sync store"
+        )
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to retrieve changes from database.") from e
     except HTTPException:
         raise
