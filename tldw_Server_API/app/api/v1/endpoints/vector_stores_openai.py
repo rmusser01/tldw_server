@@ -19,10 +19,10 @@ from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    RequirePermission,
+    RequireRole,
     get_auth_principal,
     rbac_rate_limit,
-    require_permissions,
-    require_roles,
 )
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.core.AuthNZ.permissions import SYSTEM_CONFIGURE
@@ -511,8 +511,8 @@ async def list_vector_stores(
 @router.get(
     "/vector_stores/admin/users",
     dependencies=[
-        Depends(require_roles("admin")),
-        Depends(require_permissions(SYSTEM_CONFIGURE)),
+        Depends(RequireRole("admin")),
+        Depends(RequirePermission(SYSTEM_CONFIGURE)),
         Depends(RBAC_VECTOR_ADMIN),
     ],
 )
@@ -978,8 +978,8 @@ class HNSWEfSearchRequest(BaseModel):
 @router.get(
     "/vector_stores/{store_id}/admin/index_info",
     dependencies=[
-        Depends(require_roles("admin")),
-        Depends(require_permissions(SYSTEM_CONFIGURE)),
+        Depends(RequireRole("admin")),
+        Depends(RequirePermission(SYSTEM_CONFIGURE)),
         Depends(RBAC_VECTOR_ADMIN),
     ],
 )
@@ -1005,8 +1005,8 @@ async def get_index_info(
 @router.post(
     "/vector_stores/admin/hnsw_ef_search",
     dependencies=[
-        Depends(require_roles("admin")),
-        Depends(require_permissions(SYSTEM_CONFIGURE)),
+        Depends(RequireRole("admin")),
+        Depends(RequirePermission(SYSTEM_CONFIGURE)),
         Depends(RBAC_VECTOR_ADMIN),
     ],
 )
@@ -1034,8 +1034,8 @@ class RebuildIndexRequest(BaseModel):
 @router.post(
     "/vector_stores/{store_id}/admin/rebuild_index",
     dependencies=[
-        Depends(require_roles("admin")),
-        Depends(require_permissions(SYSTEM_CONFIGURE)),
+        Depends(RequireRole("admin")),
+        Depends(RequirePermission(SYSTEM_CONFIGURE)),
         Depends(RBAC_VECTOR_ADMIN),
     ],
 )
@@ -1070,8 +1070,8 @@ class DeleteByFilterRequest(BaseModel):
 @router.post(
     "/vector_stores/{store_id}/admin/delete_by_filter",
     dependencies=[
-        Depends(require_roles("admin")),
-        Depends(require_permissions(SYSTEM_CONFIGURE)),
+        Depends(RequireRole("admin")),
+        Depends(RequirePermission(SYSTEM_CONFIGURE)),
         Depends(RBAC_VECTOR_ADMIN),
     ],
 )
@@ -1128,8 +1128,8 @@ async def delete_by_filter(
 @router.get(
     "/vector_stores/admin/health",
     dependencies=[
-        Depends(require_roles("admin")),
-        Depends(require_permissions(SYSTEM_CONFIGURE)),
+        Depends(RequireRole("admin")),
+        Depends(RequirePermission(SYSTEM_CONFIGURE)),
         Depends(RBAC_VECTOR_ADMIN),
     ],
 )
