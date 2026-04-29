@@ -138,6 +138,8 @@ def _build_real_principal_app() -> FastAPI:
             "kind": principal.kind,
             "user_id": principal.user_id,
             "api_key_id": principal.api_key_id,
+            "subject": principal.subject,
+            "token_type": principal.token_type,
             "roles": principal.roles,
             "permissions": principal.permissions,
             "state_principal_id": getattr(state_principal, "principal_id", None),
@@ -231,6 +233,39 @@ def test_current_principal_alias_preserves_missing_credentials_401() -> None:
     assert response.status_code == 401
     assert response.json()["detail"] == "Not authenticated (provide Bearer token or X-API-KEY)"
     assert response.headers.get("WWW-Authenticate") == "Bearer"
+
+
+def test_current_principal_alias_populates_state_for_single_user_api_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core.AuthNZ.settings import get_settings, reset_settings
+
+    with monkeypatch.context() as env:
+        env.setenv("AUTH_MODE", "single_user")
+        env.setenv("SINGLE_USER_API_KEY", "phase34-single-user-key")
+        reset_settings()
+        settings = get_settings()
+
+        response = TestClient(_build_real_principal_app()).get(
+            "/current-principal",
+            headers={"X-API-KEY": "phase34-single-user-key"},
+        )
+
+    reset_settings()
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["kind"] == "user"
+    assert payload["user_id"] == settings.SINGLE_USER_FIXED_ID
+    assert payload["api_key_id"] is None
+    assert payload["subject"] == "single_user"
+    assert payload["token_type"] == "api_key"
+    assert "admin" in payload["roles"]
+    assert payload["permissions"]
+    assert payload["principal_id"] == payload["state_principal_id"]
+    assert payload["cached_user_id"] == settings.SINGLE_USER_FIXED_ID
+    assert payload["state_user_id"] == settings.SINGLE_USER_FIXED_ID
+    assert payload["state_api_key_id"] is None
 
 
 def test_current_principal_alias_populates_state_for_multi_user_jwt(
