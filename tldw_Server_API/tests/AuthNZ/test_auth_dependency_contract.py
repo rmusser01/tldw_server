@@ -353,6 +353,23 @@ def test_evaluations_unified_router_uses_standard_role_factory_alias() -> None:
     assert not hasattr(evaluations_unified, "require_roles")
 
 
+@pytest.mark.parametrize(
+    "module_name",
+    [
+        "evaluations_crud",
+        "evaluations_embeddings_abtest",
+        "evaluations_rag_pipeline",
+    ],
+)
+def test_evaluations_leaf_routers_use_standard_token_scope_alias(module_name: str) -> None:
+    module = importlib.import_module(
+        f"tldw_Server_API.app.api.v1.endpoints.evaluations.{module_name}",
+    )
+
+    assert module.TokenScopeGuard is auth_deps.TokenScopeGuard
+    assert not hasattr(module, "require_token_scope")
+
+
 def test_admin_tools_router_uses_standard_role_factory_alias() -> None:
     from tldw_Server_API.app.api.v1.endpoints.admin import admin_tools
 
@@ -504,6 +521,13 @@ def test_media_leaf_routers_use_standard_permission_factory_alias(module_name: s
 
     assert module.RequirePermission is auth_deps.RequirePermission
     assert not hasattr(module, "require_permissions")
+
+
+def test_media_ingest_web_content_router_uses_standard_token_scope_alias() -> None:
+    from tldw_Server_API.app.api.v1.endpoints.media import ingest_web_content
+
+    assert ingest_web_content.TokenScopeGuard is auth_deps.TokenScopeGuard
+    assert not hasattr(ingest_web_content, "require_token_scope")
 
 
 def test_notes_graph_router_uses_standard_permission_factory_alias() -> None:
