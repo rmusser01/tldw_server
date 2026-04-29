@@ -17,10 +17,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response,
 from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    RequirePermission,
     check_rate_limit,
     get_auth_principal,
     rbac_rate_limit,
-    require_permissions,
 )
 from tldw_Server_API.app.api.v1.API_Deps.Collections_DB_Deps import get_collections_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
@@ -435,7 +435,7 @@ def _build_table_detail_response(
     response_model=Union[DataTableGenerateResponse, DataTableDetailResponse],
     summary="Submit a data table generation job",
     dependencies=[
-        Depends(require_permissions(MEDIA_CREATE)),
+        Depends(RequirePermission(MEDIA_CREATE)),
         Depends(rbac_rate_limit("data_tables.generate")),
     ],
 )
@@ -595,7 +595,7 @@ async def generate_data_table(
     response_model=DataTablesListResponse,
     summary="List data tables",
     dependencies=[
-        Depends(require_permissions(MEDIA_READ)),
+        Depends(RequirePermission(MEDIA_READ)),
         Depends(rbac_rate_limit("data_tables.list")),
     ],
 )
@@ -678,7 +678,7 @@ async def list_data_tables(
     "/{table_uuid}",
     response_model=DataTableDetailResponse,
     summary="Get a data table by UUID",
-    dependencies=[Depends(require_permissions(MEDIA_READ)), Depends(check_rate_limit)],
+    dependencies=[Depends(RequirePermission(MEDIA_READ)), Depends(check_rate_limit)],
 )
 async def get_data_table(
     table_uuid: str,
@@ -720,7 +720,7 @@ async def get_data_table(
     response_model=DataTableExportResponse,
     summary="Export a data table",
     dependencies=[
-        Depends(require_permissions(MEDIA_READ)),
+        Depends(RequirePermission(MEDIA_READ)),
         Depends(rbac_rate_limit("data_tables.export")),
     ],
 )
@@ -846,7 +846,7 @@ async def export_data_table(
     response_model=DataTableDetailResponse,
     summary="Update data table content",
     dependencies=[
-        Depends(require_permissions(MEDIA_UPDATE)),
+        Depends(RequirePermission(MEDIA_UPDATE)),
         Depends(rbac_rate_limit("data_tables.update_content")),
     ],
 )
@@ -983,7 +983,7 @@ async def update_data_table_content(
     response_model=DataTableSummary,
     summary="Update data table metadata",
     dependencies=[
-        Depends(require_permissions(MEDIA_UPDATE)),
+        Depends(RequirePermission(MEDIA_UPDATE)),
         Depends(rbac_rate_limit("data_tables.update")),
     ],
 )
@@ -1028,7 +1028,7 @@ async def update_data_table(
     response_model=DataTableDeleteResponse,
     summary="Delete a data table",
     dependencies=[
-        Depends(require_permissions(MEDIA_DELETE)),
+        Depends(RequirePermission(MEDIA_DELETE)),
         Depends(rbac_rate_limit("data_tables.delete")),
     ],
 )
@@ -1062,7 +1062,7 @@ async def delete_data_table(
     response_model=Union[DataTableGenerateResponse, DataTableDetailResponse],
     summary="Regenerate a data table from stored sources",
     dependencies=[
-        Depends(require_permissions(MEDIA_UPDATE)),
+        Depends(RequirePermission(MEDIA_UPDATE)),
         Depends(rbac_rate_limit("data_tables.regenerate")),
     ],
 )
@@ -1211,7 +1211,7 @@ async def regenerate_data_table(
     response_model=DataTableJobStatus,
     summary="Get data table job status",
     dependencies=[
-        Depends(require_permissions(MEDIA_READ)),
+        Depends(RequirePermission(MEDIA_READ)),
         Depends(rbac_rate_limit("data_tables.jobs.get")),
     ],
 )
@@ -1253,7 +1253,7 @@ async def get_data_table_job(
     response_model=DataTableJobCancelResponse,
     summary="Cancel a data table job",
     dependencies=[
-        Depends(require_permissions(MEDIA_UPDATE)),
+        Depends(RequirePermission(MEDIA_UPDATE)),
         Depends(rbac_rate_limit("data_tables.jobs.cancel")),
     ],
 )
