@@ -12,8 +12,8 @@ from fastapi import APIRouter, Depends, Query
 from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    RequireRole,
     get_auth_principal,
-    require_roles,
 )
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
@@ -23,7 +23,7 @@ from tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo import AuthnzOrgsTeam
 router = APIRouter(
     prefix="/billing",
     tags=["billing"],
-    dependencies=[Depends(require_roles("admin"))],
+    dependencies=[Depends(RequireRole("admin"))],
 )
 
 
