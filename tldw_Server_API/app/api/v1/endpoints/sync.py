@@ -293,7 +293,9 @@ async def send_changes_to_client(
     except HTTPException:
         raise
     except Exception as e: # Catch unexpected errors
-        logger.error(f"Unexpected server error getting changes for user '{user_id.username}', client '{client_id}': {e}", exc_info=True)
+        logger.bind(error_type=type(e).__name__).error(
+            "Unexpected server error getting changes from sync store"
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Internal server error while retrieving sync changes.",

@@ -220,6 +220,38 @@ async def test_send_changes_sanitizes_unexpected_exception(memory_db_factory, mo
 
 
 @pytest.mark.asyncio
+async def test_send_changes_unexpected_error_log_is_sanitized(memory_db_factory, monkeypatch):
+    db = memory_db_factory("server-test-client")
+    messages, sink_id = _capture_sync_endpoint_logs()
+
+    async def _fake_to_thread(*_args, **_kwargs):
+        raise RuntimeError("unexpected sync failed for sync-user client_sender_1 /private/sync.db")
+
+    monkeypatch.setattr(sync_endpoints.asyncio, "to_thread", _fake_to_thread)
+
+    try:
+        with pytest.raises(HTTPException) as exc_info:
+            await sync_endpoints.send_changes_to_client(
+                client_id="client_sender_1",
+                since_change_id=0,
+                user_id=_DummyUser("sync-user"),
+                db=db,
+            )
+    finally:
+        sync_endpoints.logger.remove(sink_id)
+
+    assert exc_info.value.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+    assert exc_info.value.detail == "Internal server error while retrieving sync changes."
+    joined = "\n".join(messages)
+    assert "unexpected sync failed for sync-user client_sender_1 /private/sync.db" not in joined
+    assert "sync-user" not in joined
+    assert "client_sender_1" not in joined
+    assert "/private/sync.db" not in joined
+    assert "Unexpected server error getting changes from sync store" in joined
+    assert "error_type': 'RuntimeError'" in joined
+
+
+@pytest.mark.asyncio
 async def test_send_changes_preserves_database_error_detail(memory_db_factory, monkeypatch):
     """DatabaseError should keep the dedicated /sync/get 500 detail."""
     db = memory_db_factory("server-test-client")

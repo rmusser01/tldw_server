@@ -188,12 +188,16 @@ Result:
 - Landed in `jobs_metrics_service.py` with direct coverage in `tldw_Server_API/tests/Services/test_jobs_metrics_service.py`.
 - Verification passed with `3 passed` for the focused sanitizer file, `3 passed` for adjacent jobs metrics coverage, source-scope Bandit clean, touched-source raw warning scan clean, and `git diff --check` clean.
 
-### Stage 4: Sync Decision
+### Stage 4: Sync Decision (Complete)
 
 Goal: decide whether the sync tail is still Phase 3.3.
 Success criteria:
 - identify log-only branches versus returned-error/public-contract branches
 - either land one narrow log-only sync tranche or explicitly defer sync tail to a Phase 3.4 sync contract plan
+Result:
+- Landed the isolated `/sync/get` unexpected outer exception log because it is log-only and keeps the existing sanitized `500` response detail.
+- Deferred the transaction rollback, batch-apply, single-change SQLite, and column-inspection branches because their raw exception text is coupled to returned `errors` lists or per-change diagnostics and needs a sync contract pass.
+- Verification passed with the focused regression, the full sync endpoint error file, source-scope Bandit, source-only raw scan for the `/sync/get` log, and `git diff --check`.
 
 ### Stage 5: Closure
 
