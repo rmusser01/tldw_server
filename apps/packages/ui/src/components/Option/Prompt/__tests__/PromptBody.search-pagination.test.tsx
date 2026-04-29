@@ -362,12 +362,33 @@ vi.mock("../PromptActionsMenu", () => ({
       >
         view history
       </button>
+      {props?.onRetrySync && (
+        <button
+          type="button"
+          data-testid={`mock-retry-sync-${props?.promptId || "unknown"}`}
+          onClick={() => props.onRetrySync()}
+        >
+          retry sync
+        </button>
+      )}
     </div>
   )
 }))
 
 vi.mock("../SyncStatusBadge", () => ({
-  SyncStatusBadge: () => <span data-testid="mock-sync-status-badge" />
+  SyncStatusBadge: (props: any) => (
+    <span data-testid="mock-sync-status-badge">
+      {props?.onRetry && (
+        <button
+          type="button"
+          data-testid="mock-sync-status-retry"
+          onClick={() => props.onRetry()}
+        >
+          retry status
+        </button>
+      )}
+    </span>
+  )
 }))
 
 vi.mock("../ConflictResolutionModal", () => ({
@@ -1191,6 +1212,118 @@ describe("PromptBody server search and pagination", () => {
     await waitFor(() => {
       expect(screen.getByTestId("table-selected-count")).toHaveTextContent("1")
     })
+  })
+
+  it("wires per-prompt retry from pending sync badges and row actions", async () => {
+    state.prompts = [
+      {
+        id: "pending-retry",
+        name: "Pending Retry Prompt",
+        title: "Pending Retry Prompt",
+        content: "Needs sync retry",
+        is_system: false,
+        createdAt: 100,
+        updatedAt: 150,
+        serverId: 201,
+        studioProjectId: 77,
+        syncStatus: "pending",
+        sourceSystem: "workspace"
+      }
+    ]
+    mocks.getAllPrompts.mockResolvedValue(state.prompts)
+    mocks.pushToStudio.mockResolvedValue({ success: true, syncStatus: "synced" })
+
+    renderPromptBody()
+    await waitFor(() => {
+      expect(screen.getByTestId("table-row-count")).toHaveTextContent("1")
+    })
+
+    fireEvent.click(screen.getByTestId("mock-sync-status-retry"))
+
+    await waitFor(() => {
+      expect(mocks.pushToStudio).toHaveBeenCalledWith("pending-retry", 77)
+    })
+    await waitFor(() => {
+      expect(screen.queryByTestId("prompts-batch-sync-status")).not.toBeInTheDocument()
+    })
+
+    mocks.pushToStudio.mockClear()
+    fireEvent.click(screen.getByTestId("mock-retry-sync-pending-retry"))
+
+    await waitFor(() => {
+      expect(mocks.pushToStudio).toHaveBeenCalledWith("pending-retry", 77)
+    })
+  })
+
+  it("does not start overlapping per-prompt retry runs", async () => {
+    state.prompts = [
+      {
+        id: "pending-retry",
+        name: "Pending Retry Prompt",
+        title: "Pending Retry Prompt",
+        content: "Needs sync retry",
+        is_system: false,
+        createdAt: 100,
+        updatedAt: 150,
+        serverId: 201,
+        studioProjectId: 77,
+        syncStatus: "pending",
+        sourceSystem: "workspace"
+      }
+    ]
+    mocks.getAllPrompts.mockResolvedValue(state.prompts)
+    let resolvePush: (() => void) | undefined
+    mocks.pushToStudio.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolvePush = () => resolve({ success: true, syncStatus: "synced" })
+        })
+    )
+
+    renderPromptBody()
+    await waitFor(() => {
+      expect(screen.getByTestId("table-row-count")).toHaveTextContent("1")
+    })
+
+    const retryButton = screen.getByTestId("mock-sync-status-retry")
+    fireEvent.click(retryButton)
+    fireEvent.click(retryButton)
+
+    await waitFor(() => {
+      expect(mocks.pushToStudio).toHaveBeenCalledTimes(1)
+    })
+
+    resolvePush?.()
+    await waitFor(() => {
+      expect(screen.queryByTestId("prompts-batch-sync-status")).not.toBeInTheDocument()
+    })
+  })
+
+  it("does not expose per-prompt retry for pending copilot prompts", async () => {
+    state.prompts = [
+      {
+        id: "copilot-pending",
+        name: "Copilot Pending Prompt",
+        title: "Copilot Pending Prompt",
+        content: "Managed prompt",
+        is_system: false,
+        createdAt: 100,
+        updatedAt: 150,
+        serverId: 301,
+        studioProjectId: 77,
+        syncStatus: "pending",
+        sourceSystem: "copilot"
+      }
+    ]
+    mocks.getAllPrompts.mockResolvedValue(state.prompts)
+
+    renderPromptBody()
+    await waitFor(() => {
+      expect(screen.getByTestId("table-row-count")).toHaveTextContent("1")
+    })
+
+    expect(screen.queryByTestId("mock-sync-status-retry")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("mock-retry-sync-copilot-pending")).not.toBeInTheDocument()
   })
 
   it("preserves use-in-chat modal behavior and navigates with both prompt parts", async () => {

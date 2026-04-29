@@ -56,6 +56,10 @@ import {
 import {
   type TagMatchMode
 } from "./custom-prompts-utils"
+import {
+  buildSyncBatchPlan,
+  type SyncBatchTask
+} from "./sync-batch-utils"
 // filterCopilotPrompts moved to usePromptInteractions hook
 import {
   filterTrashPromptsByName,
@@ -1004,6 +1008,61 @@ export const PromptBody = () => {
     [currentPage, resultsPerPage]
   )
 
+  const buildPromptRetryTaskById = React.useCallback(
+    (id: string): SyncBatchTask | null => {
+      if (!isOnline) return null
+
+      const promptRecord = getPromptRecordById(id)
+      if (!promptRecord || promptRecord.syncStatus !== "pending") return null
+
+      const plan = buildSyncBatchPlan([
+        {
+          prompt: {
+            id: String(promptRecord.id || id),
+            name: promptRecord.name,
+            title: promptRecord.title,
+            syncStatus: promptRecord.syncStatus,
+            sourceSystem: promptRecord.sourceSystem,
+            serverId: promptRecord.serverId,
+            studioProjectId: promptRecord.studioProjectId
+          },
+          syncStatus: promptRecord.syncStatus
+        }
+      ])
+
+      return plan.tasks[0] || null
+    },
+    [getPromptRecordById, isOnline]
+  )
+
+  const canRetryPromptSync = React.useCallback(
+    (row: PromptRowVM) => {
+      if (sync.batchSyncState.running) return false
+      if (row.syncStatus !== "pending" || row.sourceSystem === "copilot") {
+        return false
+      }
+      return buildPromptRetryTaskById(row.id) !== null
+    },
+    [buildPromptRetryTaskById, sync.batchSyncState.running]
+  )
+
+  const handleRetryPromptSyncById = React.useCallback(
+    (id: string) => {
+      if (sync.batchSyncState.running) return
+      const task = buildPromptRetryTaskById(id)
+      if (!task) return
+      void sync.runBatchSync([task])
+    },
+    [buildPromptRetryTaskById, sync.batchSyncState.running, sync.runBatchSync]
+  )
+
+  const handleRetryPromptSync = React.useCallback(
+    (row: PromptRowVM) => {
+      handleRetryPromptSyncById(row.id)
+    },
+    [handleRetryPromptSyncById]
+  )
+
   const renderCustomPromptTitleMeta = React.useCallback(
     (row: PromptRowVM) => {
       if (!isCompactViewport) return null
@@ -1033,13 +1092,26 @@ export const PromptBody = () => {
                     ? () => sync.openConflictResolution(row.id)
                     : undefined
                 }
+                onRetry={
+                  canRetryPromptSync(row)
+                    ? () => handleRetryPromptSync(row)
+                    : undefined
+                }
               />
             </span>
           </Tooltip>
         </div>
       )
     },
-    [formatRelativePromptTime, isCompactViewport, isOnline, sync.openConflictResolution, t]
+    [
+      canRetryPromptSync,
+      formatRelativePromptTime,
+      handleRetryPromptSync,
+      isCompactViewport,
+      isOnline,
+      sync.openConflictResolution,
+      t
+    ]
   )
 
   const renderCustomPromptActions = React.useCallback(
@@ -1120,6 +1192,13 @@ export const PromptBody = () => {
                 }
               : undefined
           }
+          onRetrySync={
+            canRetryPromptSync(row)
+              ? () => {
+                  handleRetryPromptSync(row)
+                }
+              : undefined
+          }
         />
       )
     },
@@ -1131,7 +1210,9 @@ export const PromptBody = () => {
       handleUsePromptInChat,
       isFireFoxPrivateMode,
       isOnline,
-      sync
+      sync,
+      canRetryPromptSync,
+      handleRetryPromptSync
     ]
   )
 
@@ -1848,6 +1929,8 @@ export const PromptBody = () => {
             onEdit={editor.handleEditPromptById}
             onToggleFavorite={editor.handleTogglePromptFavorite}
             onOpenConflictResolution={sync.openConflictResolution}
+            canRetrySync={canRetryPromptSync}
+            onRetrySync={handleRetryPromptSyncById}
             renderActions={renderCustomPromptActions}
             renderTitleMeta={renderCustomPromptTitleMeta}
             favoriteButtonTestId={(row) => `prompt-favorite-${row.id}`}
