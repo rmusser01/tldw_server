@@ -284,7 +284,7 @@ owned_job_pollers: list[_ManagedJobPoller] = worker_inventory.handles
 worker_inventory.publish()
 ```
 
-The `owned_job_pollers` name is transitional; the underlying list contains all managed phases. `_quiesce_owned_job_pollers_for_shutdown(...)` and `_stop_registered_job_pollers(...)` must filter to `ShutdownPhase.JOB_POLLER_QUIESCE`, while background shutdown uses `worker_inventory.handles_for_phase(ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN)`. This avoids losing background workers when `_replace_owned_job_poller_inventory(...)` refreshes the job-poller slice after startup.
+The `owned_job_pollers` name is transitional; the underlying list contains all managed phases. `_quiesce_owned_job_pollers_for_shutdown(...)` and `_stop_registered_job_pollers(...)` must filter to `WorkerShutdownPhase.JOB_POLLER_QUIESCE`, while background shutdown uses `worker_inventory.handles_for_phase(WorkerShutdownPhase.BACKGROUND_WORKER_SHUTDOWN)`. This avoids losing background workers when `_replace_owned_job_poller_inventory(...)` refreshes the job-poller slice after startup.
 
 - [ ] **Step 5: Register the four startup blocks through `start_stop_event_worker`**
 
