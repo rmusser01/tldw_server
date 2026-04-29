@@ -249,7 +249,7 @@ class DocumentGrader:
 
         except Exception as e:
             logger.warning(f"Document grading failed for doc {doc_id}; using fallback")
-            return self._fallback_to_score(doc_id, doc_score, start_time, error=str(e))
+            return self._fallback_to_score(doc_id, doc_score, start_time, error="grading_error")
 
     def _parse_grading_response(
         self,

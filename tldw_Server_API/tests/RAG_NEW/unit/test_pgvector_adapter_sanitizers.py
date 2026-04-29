@@ -1,5 +1,8 @@
 """Sanitizer coverage for PGVector adapter fallback logs."""
 
+import sys
+import types
+
 import pytest
 
 from tldw_Server_API.app.core.RAG.rag_service.vector_stores import pgvector_adapter
@@ -218,6 +221,85 @@ async def test_register_vector_failure_log_omits_raw_exception_and_stays_best_ef
     assert adapter._vector_cls is None
     assert logger_stub.debug_records
     _assert_no_sensitive_fragments(repr(logger_stub.debug_records))
+
+
+@pytest.mark.asyncio
+async def test_initialize_pool_fallback_log_omits_raw_exception_and_uses_single_connection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    logger_stub = _LoggerStub()
+    adapter = _adapter()
+    connection = object()
+
+    psycopg = types.ModuleType("psycopg")
+    psycopg.connect = lambda _dsn: connection
+
+    psycopg_pool = types.ModuleType("psycopg_pool")
+
+    class _FailingConnectionPool:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            raise _sensitive_error("pool init")
+
+    psycopg_pool.ConnectionPool = _FailingConnectionPool
+
+    async def _noop_register_vector_support() -> None:
+        pass
+
+    async def _noop_exec(_sql: str, _params: tuple[object, ...] | None = None) -> None:
+        pass
+
+    monkeypatch.setattr(pgvector_adapter, "logger", logger_stub)
+    monkeypatch.setitem(sys.modules, "psycopg", psycopg)
+    monkeypatch.setitem(sys.modules, "psycopg_pool", psycopg_pool)
+    monkeypatch.setattr(adapter, "_register_vector_support", _noop_register_vector_support)
+    monkeypatch.setattr(adapter, "_exec", _noop_exec)
+
+    await adapter.initialize()
+
+    assert adapter._pool is None
+    assert adapter._conn is connection
+    assert adapter._driver == "psycopg"
+    assert adapter._initialized is True
+    _assert_debug_records_sanitized(logger_stub)
+
+
+@pytest.mark.asyncio
+async def test_initialize_psycopg_connect_fallback_log_omits_raw_exception_and_uses_psycopg2(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    logger_stub = _LoggerStub()
+    adapter = _adapter()
+    connection = object()
+
+    psycopg = types.ModuleType("psycopg")
+
+    def _fail_psycopg_connect(_dsn: str) -> object:
+        raise _sensitive_error("psycopg connect")
+
+    psycopg.connect = _fail_psycopg_connect
+    psycopg2 = types.ModuleType("psycopg2")
+    psycopg2.connect = lambda _dsn: connection
+
+    async def _noop_register_vector_support() -> None:
+        pass
+
+    async def _noop_exec(_sql: str, _params: tuple[object, ...] | None = None) -> None:
+        pass
+
+    monkeypatch.setattr(pgvector_adapter, "logger", logger_stub)
+    monkeypatch.setitem(sys.modules, "psycopg", psycopg)
+    monkeypatch.delitem(sys.modules, "psycopg_pool", raising=False)
+    monkeypatch.setitem(sys.modules, "psycopg2", psycopg2)
+    monkeypatch.setattr(adapter, "_register_vector_support", _noop_register_vector_support)
+    monkeypatch.setattr(adapter, "_exec", _noop_exec)
+
+    await adapter.initialize()
+
+    assert adapter._pool is None
+    assert adapter._conn is connection
+    assert adapter._driver == "psycopg2"
+    assert adapter._initialized is True
+    _assert_debug_records_sanitized(logger_stub)
 
 
 @pytest.mark.asyncio

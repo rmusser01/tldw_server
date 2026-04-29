@@ -321,6 +321,53 @@ class TestDocumentGrader:
             assert leaked_fragment not in combined_log_text
 
     @pytest.mark.asyncio
+    async def test_grade_document_score_fallback_passes_sanitized_error_label(self, monkeypatch):
+        """Test score fallback boundary receives a fixed label for provider failures."""
+        leaked_error = (
+            "provider failed while reading /Users/example/private/request.json "
+            "with token sk-test-boundary-secret"
+        )
+        fallback_errors = []
+
+        def failing_analyze(*args, **kwargs):
+            raise RuntimeError(leaked_error)
+
+        original_fallback = DocumentGrader._fallback_to_score
+
+        def tracking_fallback(self, doc_id, doc_score, start_time, error=None):
+            fallback_errors.append(error)
+            return original_fallback(self, doc_id, doc_score, start_time, error)
+
+        monkeypatch.setattr(DocumentGrader, "_fallback_to_score", tracking_fallback)
+
+        captured_logs = []
+        sink_id = logger.add(captured_logs.append, format="{message}")
+        try:
+            config = GradingConfig(fallback_to_score=True, fallback_min_score=0.4)
+            grader = DocumentGrader(analyze_fn=failing_analyze, config=config)
+            doc = MockDocument(id="safe_doc", content="Content", score=0.8)
+
+            result = await grader.grade_document("Query", doc)
+        finally:
+            logger.remove(sink_id)
+
+        assert fallback_errors == ["grading_error"]
+        assert result.method == "score_fallback"
+        assert result.is_relevant is True
+        assert result.relevance_score == 0.8
+        assert result.metadata == {"error": "grading_error"}
+
+        combined_result_text = f"{result.reasoning} {result.metadata}"
+        combined_log_text = " ".join(str(message) for message in captured_logs)
+        for leaked_fragment in (
+            leaked_error,
+            "/Users/example/private/request.json",
+            "sk-test-boundary-secret",
+        ):
+            assert leaked_fragment not in combined_result_text
+            assert leaked_fragment not in combined_log_text
+
+    @pytest.mark.asyncio
     async def test_grade_document_fallback_disabled(self):
         """Test behavior when fallback is disabled and LLM fails."""
         def failing_analyze(*args, **kwargs):

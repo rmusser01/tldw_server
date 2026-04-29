@@ -111,7 +111,10 @@ class PGVectorAdapter(VectorStoreAdapter):
                         )
                         self._driver = 'psycopg_pool'
                     except Exception as exc:  # noqa: BLE001 - fallback to single connection
-                        logger.debug("psycopg_pool init failed; falling back to single connection", exc_info=exc)
+                        logger.debug(
+                            "psycopg_pool init failed; falling back to single connection (error_type={})",
+                            type(exc).__name__,
+                        )
                         self._pool = None
                 except ImportError:
                     self._pool = None
@@ -131,7 +134,10 @@ class PGVectorAdapter(VectorStoreAdapter):
                 )
                 self._driver = 'psycopg2'
             except Exception as exc:  # noqa: BLE001 - fallback to psycopg2 on psycopg failure
-                logger.debug("psycopg connect failed; falling back to psycopg2", exc_info=exc)
+                logger.debug(
+                    "psycopg connect failed; falling back to psycopg2 (error_type={})",
+                    type(exc).__name__,
+                )
                 import psycopg2
                 self._conn = await asyncio.get_event_loop().run_in_executor(
                     None,
