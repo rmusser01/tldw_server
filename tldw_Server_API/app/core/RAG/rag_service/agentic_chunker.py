@@ -348,8 +348,8 @@ async def agentic_rag_pipeline(
             )
             if fallback_docs:
                 docs = fallback_docs
-        except (AttributeError, ConnectionError, OSError, RuntimeError, TypeError, ValueError, TimeoutError) as _fb_err:
-            logger.warning(f"Agentic Media DB fallback retrieval failed: {_fb_err}")
+        except (AttributeError, ConnectionError, OSError, RuntimeError, TypeError, ValueError, TimeoutError):
+            logger.warning("Agentic Media DB fallback retrieval failed")
 
     # Optional: VLM late chunking to add table/figure hints for PDFs
     if cfg.agentic_enable_vlm_late_chunking and docs:
@@ -448,8 +448,8 @@ async def agentic_rag_pipeline(
                         )
                 if added:
                     docs.extend(added)
-        except (ImportError, AttributeError, OSError, RuntimeError, TypeError, ValueError, TimeoutError) as e:
-            logger.debug(f"Agentic VLM late chunking skipped: {e}")
+        except (ImportError, AttributeError, OSError, RuntimeError, TypeError, ValueError, TimeoutError):
+            logger.debug("Agentic VLM late chunking skipped")
 
     # 3) Cache key
     def _hashable_doc(d: Document) -> str:
@@ -632,7 +632,7 @@ async def agentic_rag_pipeline(
             ans = gen_out["answer"] if isinstance(gen_out, dict) else str(gen_out)
             result.generated_answer = ans
         except (ImportError, AttributeError, ConnectionError, RuntimeError, TypeError, ValueError, TimeoutError) as e:
-            logger.warning(f"Agentic generation failed: {e}")
+            logger.warning("Agentic generation failed")
             result.errors.append(str(e))
 
     # Guardrails and verification: hard citations + numeric fidelity + optional claims/NLI

@@ -11,12 +11,13 @@ from tldw_Server_API.app.core.RAG.rag_service.types import Document
 class _RecordingLogger:
     def __init__(self):
         self.error_calls = []
+        self.warning_calls = []
 
     def error(self, *args, **kwargs):
         self.error_calls.append((args, kwargs))
 
     def warning(self, *args, **kwargs):
-        pass
+        self.warning_calls.append((args, kwargs))
 
     def info(self, *args, **kwargs):
         pass
@@ -81,6 +82,62 @@ def test_transformers_rerank_fallback_log_is_sanitized(monkeypatch):
     assert "Transformers cross-encoder reranking failed" in rendered_calls
     assert "/private/hf-cache" not in rendered_calls
     assert "token=secret" not in rendered_calls
+
+
+@pytest.mark.unit
+def test_transformers_model_load_fallback_warning_is_sanitized(monkeypatch):
+    sensitive_model_id = "/private/hf-cache/acme-reranker?token=model-secret"
+
+    class _FailingCrossEncoder:
+        def __init__(self, *_args, **_kwargs):
+            raise RuntimeError("sentence-transformers read /private/st-cache token=st-secret")
+
+    class _FailingTokenizer:
+        @staticmethod
+        def from_pretrained(*_args, **_kwargs):
+            raise RuntimeError("tokenizer read /private/hf-cache token=loader-secret")
+
+    class _UnusedModel:
+        @staticmethod
+        def from_pretrained(*_args, **_kwargs):  # pragma: no cover - tokenizer fails first
+            raise AssertionError("model loader should not be reached")
+
+    logger = _RecordingLogger()
+    monkeypatch.setattr(ar, "logger", logger)
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.config.load_and_log_configs",
+        lambda: {"TRUSTED_HF_REMOTE_CODE_MODELS": []},
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "sentence_transformers",
+        types.SimpleNamespace(CrossEncoder=_FailingCrossEncoder),
+    )
+    monkeypatch.setitem(sys.modules, "torch", types.SimpleNamespace())
+    monkeypatch.setitem(
+        sys.modules,
+        "transformers",
+        types.SimpleNamespace(
+            AutoModelForSequenceClassification=_UnusedModel,
+            AutoTokenizer=_FailingTokenizer,
+        ),
+    )
+
+    reranker = ar.TransformersCrossEncoderReranker(
+        ar.RerankingConfig(model_name=sensitive_model_id, top_k=1)
+    )
+    result = asyncio.run(reranker.rerank("query", _documents()))
+
+    assert reranker._ce is None
+    assert not hasattr(reranker, "_model")
+    assert [item.document.id for item in result] == ["doc-1"]
+    rendered_calls = repr(logger.warning_calls)
+    assert "Failed to load transformers reranker model" in rendered_calls
+    assert sensitive_model_id not in rendered_calls
+    assert "/private/hf-cache" not in rendered_calls
+    assert "token=model-secret" not in rendered_calls
+    assert "token=loader-secret" not in rendered_calls
+    assert "sentence-transformers read" not in rendered_calls
 
 
 @pytest.mark.unit

@@ -6,6 +6,7 @@ from tldw_Server_API.app.core.RAG.rag_service import chromadb_optimizer
 from tldw_Server_API.app.core.RAG.rag_service.chromadb_optimizer import (
     ChromaDBOptimizationConfig,
     ChromaDBOptimizer,
+    OptimizedChromaStore,
 )
 
 
@@ -54,6 +55,29 @@ class _FailingMetadataCollection:
         raise RuntimeError("chromadb failed /tmp/source token=secret")
 
 
+class _FailingGetCollectionClient:
+    def get_collection(self, _collection_name: str) -> None:
+        raise RuntimeError("chromadb failed /tmp/source token=secret")
+
+    def create_collection(self, *_args: object, **_kwargs: object) -> object:
+        return object()
+
+
+class _PersistentClientFactory:
+    def __call__(self, *_args: object, **_kwargs: object) -> _FailingGetCollectionClient:
+        return _FailingGetCollectionClient()
+
+
+class _CountingCollection:
+    def count(self) -> int:
+        return 0
+
+
+class _FailingBatchOptimizer:
+    async def batch_add_optimized(self, *_args: object, **_kwargs: object) -> None:
+        raise RuntimeError("chromadb failed /tmp/source token=secret")
+
+
 def _assert_records_are_sanitized(
     logger_stub: _RecordingLogger,
     expected_records: list[tuple[str, str]],
@@ -97,6 +121,58 @@ async def test_search_with_cache_failure_returns_empty_result_and_sanitizes_log(
         [
             ("info", "Initialized ChromaDB optimizer"),
             ("error", "ChromaDB search failed"),
+        ],
+    )
+
+
+def test_client_get_collection_fallback_sanitizes_log(monkeypatch: pytest.MonkeyPatch) -> None:
+    logger_stub = _RecordingLogger()
+    monkeypatch.setattr(chromadb_optimizer, "logger", logger_stub)
+    monkeypatch.setattr(chromadb_optimizer, "CHROMADB_AVAILABLE", True)
+    monkeypatch.setattr(
+        chromadb_optimizer,
+        "chromadb",
+        type("FakeChromaModule", (), {"PersistentClient": _PersistentClientFactory()})(),
+    )
+    monkeypatch.setattr(chromadb_optimizer, "Settings", lambda **_kwargs: object())
+
+    client = OptimizedChromaStore("/tmp/source", "private_collection")
+    client.optimizer.executor.shutdown(wait=True)
+
+    assert client.collection is not None
+    _assert_records_are_sanitized(
+        logger_stub,
+        [
+            ("info", "Initialized ChromaDB optimizer"),
+            ("debug", "Chroma get_collection failed, creating new collection"),
+        ],
+    )
+
+
+@pytest.mark.asyncio
+async def test_client_add_documents_failure_returns_false_and_sanitizes_log(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    logger_stub = _RecordingLogger()
+    monkeypatch.setattr(chromadb_optimizer, "logger", logger_stub)
+
+    client = OptimizedChromaStore.__new__(OptimizedChromaStore)
+    client.config = ChromaDBOptimizationConfig()
+    client.collection = _CountingCollection()
+    client.optimizer = _FailingBatchOptimizer()
+
+    result = await client.add_documents(
+        documents=["doc"],
+        embeddings=[[0.1]],
+        metadatas=[{"source": "private"}],
+        ids=["doc-1"],
+    )
+
+    assert result is False
+    _assert_records_are_sanitized(
+        logger_stub,
+        [
+            ("error", "Failed to add documents"),
         ],
     )
 

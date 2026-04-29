@@ -671,7 +671,7 @@ class TransformersCrossEncoderReranker(BaseReranker):
                         self._model.to(self._device)
                     logger.info(f"Loaded cross-encoder model via transformers: {model_id}")
             except Exception as e:  # noqa: BLE001 - model loading best-effort
-                logger.warning(f"Failed to load transformers reranker model '{model_id}': {e}")
+                logger.warning("Failed to load transformers reranker model (error_type={})", type(e).__name__)
 
     async def rerank(
         self,
