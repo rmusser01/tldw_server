@@ -71,7 +71,7 @@ The Evaluations module provides a unified, API- and CLI-driven system for model 
 
 - Configuration & AuthNZ
   - Rate limits: `evaluations_auth.check_evaluation_rate_limit`; per-user limits + `GET /rate-limits`
-  - RBAC: `rbac_rate_limit`, `require_token_scope` on sensitive endpoints; admin checks for A/B runs and cleanup
+  - RBAC: `rbac_rate_limit`, `TokenScopeGuard` on sensitive endpoints; admin checks for A/B runs and cleanup
   - Canonical identity: route and Jobs code should derive one `EvaluationIdentity` via `get_evaluation_identity()` / `evaluations_identity_from_user()` and then use:
     - `user_scope` for per-user service binding and DB path selection
     - `created_by` for ownership filters and idempotency rows

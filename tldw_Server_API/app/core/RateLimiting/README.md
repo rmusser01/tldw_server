@@ -7,7 +7,7 @@
   - RG middleware enforces request caps using route_map (path + tag matching).
   - Ingress rate limiting is enforced exclusively by RG (no legacy ingress decorators).
   - RBAC rate-limit selector (logs strictest user/role limits for a resource; enforcement path stubbed).
-  - Token scope dependency (`require_token_scope`) with usage counting hints (`count_as="call"|"run"`).
+  - Token scope dependency (`TokenScopeGuard`) with usage counting hints (`count_as="call"|"run"`).
 - Inputs/Outputs:
   - Input: HTTP requests (and contextual user/role data).
   - Output: Allow or HTTP 429 with `Retry-After` header (where applicable).
@@ -40,7 +40,7 @@
 ## 3. Developer-Related/Relevant Information for Contributors
 
 - Folder Structure
-  - `app/api/v1/API_Deps/auth_deps.py` — `rbac_rate_limit` and `require_token_scope` dependencies.
+  - `app/api/v1/API_Deps/auth_deps.py` — `rbac_rate_limit` and `TokenScopeGuard` dependencies.
 - Extension Points
 - Use RG policy entries + route_map for new endpoints. For resource-scoped behavior, add `Depends(rbac_rate_limit("<resource>"))`.
   - To enable true RBAC enforcement, extend `enforce_rbac_rate_limit` to check counters and raise 429 based on selected limits.
