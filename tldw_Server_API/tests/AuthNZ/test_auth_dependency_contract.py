@@ -563,7 +563,9 @@ def test_chat_router_uses_standard_permission_factory_alias() -> None:
     from tldw_Server_API.app.api.v1.endpoints import chat
 
     assert chat.RequirePermission is auth_deps.RequirePermission
+    assert chat.TokenScopeGuard is auth_deps.TokenScopeGuard
     assert not hasattr(chat, "require_permissions")
+    assert not hasattr(chat, "require_token_scope")
 
 
 def test_agent_orchestration_router_uses_standard_token_scope_alias() -> None:
