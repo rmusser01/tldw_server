@@ -10,6 +10,7 @@ from starlette.requests import Request
 from tldw_Server_API.app.api.v1.API_Deps import auth_deps
 from tldw_Server_API.app.api.v1.endpoints import llamacpp as lp
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
+from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Exceptions import InferenceError
 
 
 def _admin_principal() -> AuthPrincipal:
@@ -118,6 +119,28 @@ class _ExplodingManagedStub:
 
     async def list_models(self):
         raise RuntimeError("llamacpp backend exploded at /private/llama.cpp")
+
+
+class _InferenceErrorManagedStub:
+    logger = _Logger()
+
+    def __init__(self) -> None:
+        self.llamacpp = self
+
+    async def start_server(self, **kwargs: Any):
+        raise InferenceError("backend exploded at /private/llama.cpp with api_key=abc123")
+
+    async def stop_server(self, **kwargs: Any):
+        raise InferenceError("backend exploded at /private/llama.cpp with api_key=abc123")
+
+    async def get_server_status(self, **kwargs: Any):
+        raise InferenceError("backend exploded at /private/llama.cpp with api_key=abc123")
+
+    def get_metrics(self):
+        raise InferenceError("backend exploded at /private/llama.cpp with api_key=abc123")
+
+    async def list_models(self):
+        raise InferenceError("backend exploded at /private/llama.cpp with api_key=abc123")
 
 
 class _ExplodingLlamafileMetricsStub:
@@ -321,6 +344,38 @@ def test_llamacpp_management_generic_failure_logs_are_sanitized(
     logged = "\n".join(logger.errors)
     assert "llamacpp backend exploded" not in logged
     assert "/private/llama.cpp" not in logged
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("method", "path", "payload"),
+    [
+        ("post", "/api/v1/llamacpp/start_server", {"model_filename": "mock.gguf", "server_args": {}}),
+        ("post", "/api/v1/llamacpp/stop_server", {}),
+        ("get", "/api/v1/llamacpp/status", None),
+        ("get", "/api/v1/llamacpp/metrics", None),
+        ("get", "/api/v1/llamacpp/models", None),
+    ],
+)
+def test_llamacpp_management_inference_errors_return_safe_unavailable_detail(
+    method: str,
+    path: str,
+    payload: dict[str, Any] | None,
+):
+    app = _make_app_with_manager(_InferenceErrorManagedStub())
+    request_kwargs: dict[str, Any] = {}
+    if payload is not None:
+        request_kwargs["json"] = payload
+
+    with TestClient(app) as client:
+        response = client.request(method, path, **request_kwargs)
+
+    assert response.status_code == 503
+    detail = response.json()["detail"]
+    assert "managed llama.cpp backend is not configured" in detail.lower()
+    assert "backend exploded" not in detail
+    assert "/private/llama.cpp" not in detail
+    assert "api_key" not in detail.lower()
 
 
 @pytest.mark.unit

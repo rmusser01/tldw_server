@@ -71,7 +71,8 @@ def _resolve_llm_manager(request: Request) -> LLMInferenceManager:
 def _llamacpp_unavailable(detail: Optional[str] = None) -> HTTPException:
     base = "Managed llama.cpp backend is not configured."
     guidance = "Enable [LlamaCpp] enabled=true in Config_Files/config.txt and restart the server."
-    message = f"{base} ({detail}) {guidance}" if detail else f"{base} {guidance}"
+    safe_detail = "backend unavailable" if detail else None
+    message = f"{base} ({safe_detail}) {guidance}" if safe_detail else f"{base} {guidance}"
     return HTTPException(status_code=503, detail=message)
 
 
