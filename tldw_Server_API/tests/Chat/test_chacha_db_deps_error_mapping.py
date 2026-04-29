@@ -437,3 +437,32 @@ def test_ensure_default_character_sanitizes_unexpected_failure_log(monkeypatch):
         "error",
         "Unexpected error while ensuring default character",
     )
+
+
+def test_chacha_health_last_error_uses_safe_error_type():
+    with deps._CHACHA_HEALTH_LOCK:
+        deps._CHACHA_HEALTH.update(
+            {
+                "init_attempts": 0,
+                "init_failures": 0,
+                "last_init_ms": None,
+                "last_error": None,
+                "last_warn_dump": None,
+                "cached_instances": 0,
+                "default_char_ensures": 0,
+                "default_char_failures": 0,
+                "warm_startups": 0,
+            }
+        )
+
+    deps._record_init(
+        9.5,
+        False,
+        RuntimeError("chacha backend exploded at /private/db/path SECRET_TOKEN"),
+    )
+
+    snapshot = deps.get_chacha_health_snapshot()
+    assert snapshot["last_error"] == "RuntimeError"
+    assert "chacha backend exploded" not in str(snapshot)
+    assert "/private/" not in str(snapshot)
+    assert "SECRET_TOKEN" not in str(snapshot)

@@ -58,6 +58,10 @@ _CHACHA_SHUTTING_DOWN = False
 _CHACHA_SHUTDOWN_LOCK = threading.Lock()
 
 
+def _safe_chacha_health_error(error: Exception | None) -> str:
+    return type(error).__name__ if error else "unknown error"
+
+
 def _set_chacha_shutting_down(value: bool) -> None:
     global _CHACHA_SHUTTING_DOWN
     with _CHACHA_SHUTDOWN_LOCK:
@@ -102,7 +106,7 @@ def _record_init(duration_ms: float, success: bool, error: Exception | None = No
             _CHACHA_HEALTH["last_error"] = None
         else:
             _CHACHA_HEALTH["init_failures"] += 1
-            _CHACHA_HEALTH["last_error"] = str(error) if error else "unknown error"
+            _CHACHA_HEALTH["last_error"] = _safe_chacha_health_error(error)
 
 
 def _record_default_character(success: bool) -> None:

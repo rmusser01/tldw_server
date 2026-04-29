@@ -72,6 +72,10 @@ _KANBAN_HEALTH: dict[str, Any] = {
 _KANBAN_RECENT_INIT_FAILURES = deque(maxlen=_KANBAN_HEALTH_MAX_RECENT_FAILURES)
 
 
+def _safe_kanban_health_error(error: Optional[Exception]) -> str:
+    return type(error).__name__ if error else "unknown error"
+
+
 def _get_kanban_executor() -> ThreadPoolExecutor:
     """
     Return a live executor for Kanban DB work.
@@ -101,7 +105,7 @@ def _record_init(duration_ms: float, success: bool, error: Optional[Exception] =
             _KANBAN_HEALTH["last_success_ts"] = now_ts
         else:
             _KANBAN_HEALTH["init_failures"] += 1
-            _KANBAN_HEALTH["last_error"] = str(error) if error else "unknown error"
+            _KANBAN_HEALTH["last_error"] = _safe_kanban_health_error(error)
             _KANBAN_HEALTH["last_failure_ts"] = now_ts
             _KANBAN_RECENT_INIT_FAILURES.append(now_ts)
 
