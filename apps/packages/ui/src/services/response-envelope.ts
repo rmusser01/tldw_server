@@ -38,6 +38,10 @@ const isApiResponseDataWrapper = (
   hasEnvelopeKey(value) &&
   hasOnlyEnvelopeKeys(value)
 
+/**
+ * Detects the canonical opt-in API response envelope without treating legacy
+ * success-shaped payloads as envelopes.
+ */
 export const isApiResponseEnvelope = (
   value: unknown
 ): value is ApiResponseEnvelope<unknown> => {
@@ -47,6 +51,9 @@ export const isApiResponseEnvelope = (
   return hasEnvelopeKey(value)
 }
 
+/**
+ * Unwraps canonical response envelopes while preserving non-envelope payloads.
+ */
 export function unwrapApiResponseEnvelope<T>(value: ApiResponseEnvelope<T>): T | null
 export function unwrapApiResponseEnvelope<T>(value: T): T
 export function unwrapApiResponseEnvelope(value: null): null
@@ -60,6 +67,9 @@ export function unwrapApiResponseEnvelope<T>(
   return value as T | null | undefined
 }
 
+/**
+ * Unwraps canonical envelopes and transitional response-body data wrappers.
+ */
 export function unwrapApiResponseData<T>(
   value: ApiResponseEnvelope<T> | ApiResponseDataWrapper<T>
 ): T | null
