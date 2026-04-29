@@ -70,6 +70,8 @@ async def _fake_get_auth_principal(request: Request) -> AuthPrincipal:
     request.state.api_key_id = principal.api_key_id
     request.state.org_ids = list(principal.org_ids)
     request.state.team_ids = list(principal.team_ids)
+    if hasattr(request.app.state, "api_key_scope"):
+        request.state._api_key_scope = request.app.state.api_key_scope
     return principal
 
 
@@ -122,6 +124,12 @@ def _build_app(principal: AuthPrincipal) -> FastAPI:
         principal: AuthPrincipal = Depends(RequirePermission("media.read", "skills.read")),
     ):
         return {"permissions": principal.permissions}
+
+    @app.get("/api-key-scope")
+    async def api_key_scope(
+        principal: AuthPrincipal = Depends(RequireApiKeyScope("write")),
+    ):
+        return {"kind": principal.kind, "api_key_id": principal.api_key_id}
 
     return app
 
@@ -225,6 +233,27 @@ def test_factory_aliases_are_documented_existing_factories() -> None:
     assert RequirePermission is auth_deps.require_permissions
     assert RequireApiKeyScope is auth_deps.require_api_key_scope
     assert TokenScopeGuard is auth_deps.require_token_scope
+
+
+def test_api_key_scope_factory_alias_preserves_jwt_bypass_and_scope_checks() -> None:
+    jwt_response = TestClient(_build_app(_principal(kind="user", api_key_id=None))).get(
+        "/api-key-scope",
+    )
+
+    api_key_app = _build_app(_principal(kind="api_key", api_key_id=123))
+    api_key_app.state.api_key_scope = "write"
+    api_key_response = TestClient(api_key_app).get("/api-key-scope")
+
+    limited_key_app = _build_app(_principal(kind="api_key", api_key_id=456))
+    limited_key_app.state.api_key_scope = "read"
+    limited_key_response = TestClient(limited_key_app).get("/api-key-scope")
+
+    assert jwt_response.status_code == 200
+    assert jwt_response.json() == {"kind": "user", "api_key_id": None}
+    assert api_key_response.status_code == 200
+    assert api_key_response.json() == {"kind": "api_key", "api_key_id": 123}
+    assert limited_key_response.status_code == 403
+    assert "API key lacks required scope" in limited_key_response.json()["detail"]
 
 
 def test_current_principal_alias_preserves_missing_credentials_401() -> None:
