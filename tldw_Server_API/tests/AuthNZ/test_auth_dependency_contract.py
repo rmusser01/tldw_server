@@ -438,6 +438,13 @@ def test_notifications_router_uses_standard_permission_factory_alias() -> None:
     assert not hasattr(notifications, "require_permissions")
 
 
+def test_mcp_unified_router_uses_standard_permission_factory_alias() -> None:
+    from tldw_Server_API.app.api.v1.endpoints import mcp_unified_endpoint
+
+    assert mcp_unified_endpoint.RequirePermission is auth_deps.RequirePermission
+    assert not hasattr(mcp_unified_endpoint, "require_permissions")
+
+
 def test_api_key_scope_factory_alias_preserves_jwt_bypass_and_scope_checks() -> None:
     jwt_response = TestClient(_build_app(_principal(kind="user", api_key_id=None))).get(
         "/api-key-scope",

@@ -22,9 +22,9 @@ from loguru import logger
 from pydantic import BaseModel, Field
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    RequirePermission,
     get_auth_principal,
     get_db_transaction,
-    require_permissions,
 )
 from tldw_Server_API.app.api.v1.schemas.admin_schemas import ToolCatalogResponse
 from tldw_Server_API.app.core.AuthNZ.api_key_manager import get_api_key_manager
@@ -938,7 +938,7 @@ async def get_server_status(
 
 @router.get("/metrics", response_model=ServerMetricsResponse)
 async def get_server_metrics(
-    _principal: AuthPrincipal = Depends(require_permissions(SYSTEM_LOGS)),
+    _principal: AuthPrincipal = Depends(RequirePermission(SYSTEM_LOGS)),
     _guard: None = Depends(enforce_http_security),
 ):
     """
@@ -961,14 +961,14 @@ async def get_server_metrics(
 
 @router.get("/metrics/prometheus")
 async def get_prometheus_metrics(
-    _principal: AuthPrincipal = Depends(require_permissions(SYSTEM_LOGS)),
+    _principal: AuthPrincipal = Depends(RequirePermission(SYSTEM_LOGS)),
     _guard: None = Depends(enforce_http_security),
 ):
     """
     Prometheus scrape endpoint for MCP metrics.
 
     Security: Requires an authenticated principal with the `system.logs`
-    permission (or admin-style claims via require_permissions). External
+    permission (or admin-style claims via the standard permission dependency). External
     ingress or Prometheus-side configuration should be used to handle any
     additional network-level access controls.
     """
@@ -1298,7 +1298,7 @@ async def list_modules(
 @router.get("/modules/health")
 async def get_modules_health(
     http_request: Request,
-    principal: AuthPrincipal = Depends(require_permissions(SYSTEM_LOGS)),
+    principal: AuthPrincipal = Depends(RequirePermission(SYSTEM_LOGS)),
     _guard: None = Depends(enforce_http_security),
 ):
     """
