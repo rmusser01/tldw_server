@@ -9,7 +9,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Request
 from loguru import logger
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import require_roles
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import RequireRole
 from tldw_Server_API.app.core.AuthNZ.alerting import (
     get_security_alert_dispatcher as _core_get_security_alert_dispatcher,
 )
@@ -107,7 +107,7 @@ _authnz_migration_lock = asyncio.Lock()
 router = APIRouter(
     prefix="/admin",
     tags=["admin"],
-    dependencies=[Depends(require_roles("admin"))],  # All endpoints require admin role
+    dependencies=[Depends(RequireRole("admin"))],  # All endpoints require admin role
     responses={403: {"description": "Not authorized"}},
 )
 

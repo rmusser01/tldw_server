@@ -367,6 +367,13 @@ def test_admin_personalization_router_uses_standard_role_factory_alias() -> None
     assert not hasattr(admin_personalization, "require_roles")
 
 
+def test_admin_package_router_uses_standard_role_factory_alias() -> None:
+    from tldw_Server_API.app.api.v1.endpoints import admin
+
+    assert admin.RequireRole is auth_deps.RequireRole
+    assert not hasattr(admin, "require_roles")
+
+
 def test_resource_governor_router_uses_standard_role_factory_alias() -> None:
     from tldw_Server_API.app.api.v1.endpoints import resource_governor
 
