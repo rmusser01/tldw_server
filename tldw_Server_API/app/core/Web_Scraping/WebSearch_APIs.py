@@ -1678,8 +1678,8 @@ def test_perform_websearch_google():
         print(f"Test 2: {test_2}")
         test_3 = perform_websearch("google", "What is the capital of France?", "US", "en", "en", 10)
         print(f"Test 3: {test_3}")
-    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS as e:
-        print(f"Error performing google searches: {str(e)}")
+    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS:
+        print("Error performing google searches")
     pass
 
 
@@ -1693,8 +1693,8 @@ def test_perform_websearch_brave():
     try:
         test_7 = perform_websearch("brave", "What is the capital of France?", "US", "en", "en", 10)
         print(f"Test 7: {test_7}")
-    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS as e:
-        print(f"Error performing brave searches: {str(e)}")
+    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS:
+        print("Error performing brave searches")
 
 
 def test_perform_websearch_ddg():
@@ -1704,8 +1704,8 @@ def test_perform_websearch_ddg():
         print(f"Test 6: {test_6}")
         test_7 = perform_websearch("duckduckgo", "What is the capital of France?", "US", "en", "en", 10, date_range="y")
         print(f"Test 7: {test_7}")
-    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS as e:
-        print(f"Error performing duckduckgo searches: {str(e)}")
+    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS:
+        print("Error performing duckduckgo searches")
 
 
 # FIXME
@@ -1714,8 +1714,8 @@ def test_perform_websearch_kagi():
     try:
         test_8 = perform_websearch("kagi", "What is the capital of France?", "US", "en", "en", 10)
         print(f"Test 8: {test_8}")
-    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS as e:
-        print(f"Error performing kagi searches: {str(e)}")
+    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS:
+        print("Error performing kagi searches")
 
 # FIXME
 def test_perform_websearch_serper():
@@ -1723,8 +1723,8 @@ def test_perform_websearch_serper():
     try:
         test_9 = perform_websearch("serper", "What is the capital of France?", "US", "en", "en", 10)
         print(f"Test 9: {test_9}")
-    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS as e:
-        print(f"Error performing serper searches: {str(e)}")
+    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS:
+        print("Error performing serper searches")
 
 # FIXME
 def test_perform_websearch_tavily():
@@ -1732,8 +1732,8 @@ def test_perform_websearch_tavily():
     try:
         test_10 = perform_websearch("tavily", "What is the capital of France?", "US", "en", "en", 10)
         print(f"Test 10: {test_10}")
-    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS as e:
-        print(f"Error performing tavily searches: {str(e)}")
+    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS:
+        print("Error performing tavily searches")
 
 
 # FIXME
@@ -1742,8 +1742,8 @@ def test_perform_websearch_searx():
     try:
         test_11 = perform_websearch("searx", "What is the capital of France?", "US", "en", "en", 10)
         print(f"Test 11: {test_11}")
-    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS as e:
-        print(f"Error performing searx searches: {str(e)}")
+    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS:
+        print("Error performing searx searches")
 
 
 # FIXME
@@ -1752,8 +1752,8 @@ def test_perform_websearch_yandex():
     try:
         test_12 = perform_websearch("yandex", "What is the capital of France?", "US", "en", "en", 10)
         print(f"Test 12: {test_12}")
-    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS as e:
-        print(f"Error performing yandex searches: {str(e)}")
+    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS:
+        print("Error performing yandex searches")
     pass
 
 #

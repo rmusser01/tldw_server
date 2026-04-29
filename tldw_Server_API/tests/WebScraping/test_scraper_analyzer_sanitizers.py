@@ -1,5 +1,6 @@
 import pytest
 
+from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as article_extractor
 from tldw_Server_API.app.core.Web_Scraping.scraper_analyzers.analyzers import (
     behavioral_detector,
     captcha_detector,
@@ -10,6 +11,16 @@ from tldw_Server_API.app.core.Web_Scraping.scraper_analyzers.analyzers import (
 
 
 pytestmark = pytest.mark.unit
+
+
+_LEAKY_ERROR = "backend exploded at /tmp/secret-token with api_key=abc123"
+
+
+def _assert_safe_text(value):
+    text = str(value)
+    assert "backend exploded" not in text
+    assert "/tmp/secret-token" not in text
+    assert "api_key" not in text.lower()
 
 
 def test_captcha_detector_sanitizes_defensive_failures(monkeypatch):
@@ -67,3 +78,86 @@ async def test_rate_limit_profiler_sanitizes_defensive_failures(monkeypatch):
     result = await rate_limit_profiler.profile_rate_limits("https://example.com", crawl_delay=0)
 
     assert result == {"status": "error", "message": "Rate limit profiling failed."}
+
+
+def test_article_pipeline_schema_import_failure_sanitizes_trace_detail(monkeypatch):
+    original_import = __import__
+
+    def fail_fetchers_import(name, *args, **kwargs):
+        if name == "tldw_Server_API.app.core.Watchlists.fetchers":
+            raise ImportError(_LEAKY_ERROR)
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr("builtins.__import__", fail_fetchers_import)
+
+    result = article_extractor.extract_article_with_pipeline(
+        "<html><body><h1>Title</h1></body></html>",
+        "https://example.com/post",
+        strategy_order=["schema"],
+        schema_rules={"title_xpath": "//h1"},
+    )
+
+    trace_entry = result["extraction_trace"][0]
+    assert trace_entry["reason"] == "schema_import_error"
+    _assert_safe_text(trace_entry)
+
+
+def test_article_pipeline_schema_failure_sanitizes_trace_detail(monkeypatch):
+    from tldw_Server_API.app.core.Watchlists import fetchers
+
+    def fail_extract(*_args, **_kwargs):
+        raise RuntimeError(_LEAKY_ERROR)
+
+    monkeypatch.setattr(fetchers, "extract_schema_fields", fail_extract)
+
+    result = article_extractor.extract_article_with_pipeline(
+        """
+        <html>
+          <body>
+            <article>
+              <h1>Example Title</h1>
+              <p>First paragraph.</p>
+            </article>
+          </body>
+        </html>
+        """,
+        "https://example.com/post",
+        strategy_order=["schema"],
+        schema_rules={"title_xpath": "//article//h1", "content_xpath": "//article//p"},
+    )
+
+    trace_entry = result["extraction_trace"][0]
+    assert trace_entry["reason"] == "schema_error"
+    _assert_safe_text(trace_entry)
+
+
+def test_article_pipeline_handler_failure_sanitizes_trace_detail():
+    def fail_handler(*_args, **_kwargs):
+        raise RuntimeError(_LEAKY_ERROR)
+
+    result = article_extractor.extract_article_with_pipeline(
+        "<html><body><p>Body</p></body></html>",
+        "https://example.com/post",
+        strategy_order=["schema"],
+        handler=fail_handler,
+    )
+
+    trace_entry = result["extraction_trace"][0]
+    assert trace_entry["reason"] == "handler_error"
+    _assert_safe_text(trace_entry)
+
+
+def test_article_pipeline_fallback_extractor_failure_sanitizes_trace_detail():
+    def fail_extractor(*_args, **_kwargs):
+        raise RuntimeError(_LEAKY_ERROR)
+
+    result = article_extractor.extract_article_with_pipeline(
+        "<html><body><p>Body</p></body></html>",
+        "https://example.com/post",
+        strategy_order=["trafilatura"],
+        fallback_extractor=fail_extractor,
+    )
+
+    trace_entry = result["extraction_trace"][0]
+    assert trace_entry["reason"] == "extractor_error"
+    _assert_safe_text(trace_entry)
