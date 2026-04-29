@@ -16,10 +16,10 @@ from loguru import logger
 from pydantic import BaseModel, Field
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    RequirePermission,
+    RequireRole,
     get_auth_principal,
     get_db_transaction,
-    require_permissions,
-    require_roles,
 )
 from tldw_Server_API.app.api.v1.API_Deps.setup_deps import (
     require_local_setup_access,
@@ -173,8 +173,8 @@ async def require_admin_and_system_configure(
     - Other principals must hold the ``admin`` role and the SYSTEM_CONFIGURE
       permission to pass.
     """
-    role_checker = require_roles("admin")
-    perm_checker = require_permissions(SYSTEM_CONFIGURE)
+    role_checker = RequireRole("admin")
+    perm_checker = RequirePermission(SYSTEM_CONFIGURE)
 
     principal = await role_checker(principal)
     principal = await perm_checker(principal)
