@@ -129,7 +129,7 @@ The scout lane exists to keep the aggressive execution model disciplined.
 
 Its input candidate set should come from:
 
-1. the current remaining grep/audit output for raw fallback leaks
+1. the current remaining grep/audit output for raw fallback leaks, captured in the parent coordination notes at the start of the wave
 2. the existing Phase 3.3 plan backlog and prior deferred items
 3. nearby files suggested by completed worker tranches, but only when they remain disjoint and Phase-3.3-shaped
 
@@ -146,7 +146,8 @@ Each decision should include:
 - existing test file reviewed
 - why it is or is not conservative enough
 
-Every `defer` or `reject` decision must be recorded in the active Phase 3.3 plan before the scout lane is recycled onto a new candidate. This prevents the same borderline files from being repeatedly re-triaged.
+The scout lane must return its `approve/defer/reject` decisions in its own handoff artifact or completion message, not by editing the shared plan directly.
+Every `defer` or `reject` decision must then be copied by the parent into the active Phase 3.3 plan before the scout lane is recycled onto a new candidate. This prevents the same borderline files from being repeatedly re-triaged while preserving the parent-only plan ownership rule.
 
 ## Integration Model
 
