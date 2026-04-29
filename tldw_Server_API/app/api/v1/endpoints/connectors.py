@@ -13,11 +13,11 @@ from loguru import logger
 from starlette.status import HTTP_403_FORBIDDEN, HTTP_500_INTERNAL_SERVER_ERROR
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    RequirePermission,
+    RequireRole,
     get_auth_principal,
     get_db_transaction,
     get_org_policy_from_principal,
-    require_permissions,
-    require_roles,
 )
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.api.v1.schemas.connectors import (
@@ -1146,8 +1146,8 @@ async def get_job_status(job_id: int) -> dict[str, Any]:
     response_model=ConnectorPolicy,
     dependencies=[
         Depends(get_auth_principal),
-        Depends(require_roles("admin")),
-        Depends(require_permissions(SYSTEM_CONFIGURE)),
+        Depends(RequireRole("admin")),
+        Depends(RequirePermission(SYSTEM_CONFIGURE)),
     ],
 )
 async def get_org_policy(
@@ -1179,8 +1179,8 @@ async def get_org_policy(
     response_model=ConnectorPolicy,
     dependencies=[
         Depends(get_auth_principal),
-        Depends(require_roles("admin")),
-        Depends(require_permissions(SYSTEM_CONFIGURE)),
+        Depends(RequireRole("admin")),
+        Depends(RequirePermission(SYSTEM_CONFIGURE)),
     ],
 )
 async def upsert_org_policy(
