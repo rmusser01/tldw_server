@@ -12,6 +12,7 @@ from typing import Any
 class LifespanWorkerRuntimeState:
     """Mutable worker/task runtime state shared across startup and shutdown."""
 
+    worker_inventory: Any | None = None
     owned_job_pollers: list[Any] = field(default_factory=list)
     cleanup_task: Any | None = None
     chatbooks_cleanup_task: Any | None = None
@@ -107,6 +108,7 @@ class LifespanWorkerRuntimeState:
     connectors_sync_sched_task: Any | None = None
 
     def apply_startup_worker_bootstrap_handles(self, handles: Any) -> None:
+        self.worker_inventory = getattr(handles, "worker_inventory", None)
         self.owned_job_pollers = list(getattr(handles, "owned_job_pollers", []) or [])
         _copy_known_fields(self, getattr(handles, "startup_worker_group_handles", None))
         _copy_known_fields(self, getattr(handles, "startup_service_tail_handles", None))

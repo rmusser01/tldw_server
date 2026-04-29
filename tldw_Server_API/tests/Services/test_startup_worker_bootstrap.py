@@ -16,10 +16,6 @@ async def test_initialize_startup_worker_bootstrap_runs_helpers_in_order_and_ret
 
     calls: list[tuple[str, dict[str, object]]] = []
 
-    def _record_prepare_owned_job_pollers(**kwargs):
-        calls.append(("owned_job_pollers", kwargs))
-        return ["poller"]
-
     def _record_load_app_settings() -> str:
         calls.append(("app_settings", {}))
         return "settings"
@@ -32,11 +28,6 @@ async def test_initialize_startup_worker_bootstrap_runs_helpers_in_order_and_ret
         calls.append(("service_tail", kwargs))
         return SimpleNamespace(jobs_metrics_task="jobs-metrics-task")
 
-    monkeypatch.setattr(
-        startup_bootstrap,
-        "_prepare_startup_owned_job_pollers",
-        _record_prepare_owned_job_pollers,
-    )
     monkeypatch.setattr(startup_bootstrap, "_load_app_settings", _record_load_app_settings)
     monkeypatch.setattr(startup_bootstrap, "_start_worker_groups", _record_start_worker_groups)
     monkeypatch.setattr(
@@ -61,34 +52,33 @@ async def test_initialize_startup_worker_bootstrap_runs_helpers_in_order_and_ret
     )
 
     assert [name for name, _ in calls] == [
-        "owned_job_pollers",
         "app_settings",
         "worker_groups",
         "service_tail",
     ]
-    assert calls[0][1]["app"] == "app"
-    assert calls[0][1]["publish_shutdown_job_poller_inventory"] == "publish-inventory"
+    assert calls[1][1]["app"] == "app"
+    assert calls[1][1]["app_settings"] == "settings"
+    assert calls[1][1]["test_mode"] is True
+    assert calls[1][1]["route_enabled"] == "route-enabled"
+    assert calls[1][1]["owned_job_pollers"] == []
+    assert calls[1][1]["register_owned_job_poller"] == "register-poller"
+    assert calls[1][1]["startup_guard_exceptions"] == (RuntimeError,)
     assert calls[2][1]["app"] == "app"
     assert calls[2][1]["app_settings"] == "settings"
-    assert calls[2][1]["test_mode"] is True
-    assert calls[2][1]["route_enabled"] == "route-enabled"
-    assert calls[2][1]["owned_job_pollers"] == ["poller"]
+    assert calls[2][1]["run_pg_rls_auto_ensure"] == "run-pg-ensure"
+    assert calls[2][1]["owned_job_pollers"] == []
+    assert calls[2][1]["worker_inventory"].handles is calls[2][1]["owned_job_pollers"]
     assert calls[2][1]["register_owned_job_poller"] == "register-poller"
+    assert calls[2][1]["startup_worker_group_handles"].cleanup_task == "cleanup-task"
+    assert calls[2][1]["replace_owned_job_poller_inventory"] == "replace-inventory"
+    assert calls[2][1]["test_mode"] is True
+    assert calls[2][1]["logger"] == "logger"
+    assert calls[2][1]["startup_api_key_log_value"] == "api-key"
+    assert calls[2][1]["shared_is_truthy"] == "truthy"
     assert calls[2][1]["startup_guard_exceptions"] == (RuntimeError,)
-    assert calls[3][1]["app"] == "app"
-    assert calls[3][1]["app_settings"] == "settings"
-    assert calls[3][1]["run_pg_rls_auto_ensure"] == "run-pg-ensure"
-    assert calls[3][1]["owned_job_pollers"] == ["poller"]
-    assert calls[3][1]["register_owned_job_poller"] == "register-poller"
-    assert calls[3][1]["startup_worker_group_handles"].cleanup_task == "cleanup-task"
-    assert calls[3][1]["replace_owned_job_poller_inventory"] == "replace-inventory"
-    assert calls[3][1]["test_mode"] is True
-    assert calls[3][1]["logger"] == "logger"
-    assert calls[3][1]["startup_api_key_log_value"] == "api-key"
-    assert calls[3][1]["shared_is_truthy"] == "truthy"
-    assert calls[3][1]["startup_guard_exceptions"] == (RuntimeError,)
-    assert calls[3][1]["import_exceptions"] == (ImportError,)
+    assert calls[2][1]["import_exceptions"] == (ImportError,)
     assert handles.app_settings == "settings"
-    assert handles.owned_job_pollers == ["poller"]
+    assert handles.owned_job_pollers == []
+    assert handles.worker_inventory is calls[2][1]["worker_inventory"]
     assert handles.startup_worker_group_handles.cleanup_task == "cleanup-task"
     assert handles.startup_service_tail_handles.jobs_metrics_task == "jobs-metrics-task"

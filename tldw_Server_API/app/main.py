@@ -39,7 +39,7 @@ from tldw_Server_API.app.core.startup_logging import (
 from tldw_Server_API.app.api.v1.router_registry import include_router_idempotent, register_router_specs
 from tldw_Server_API.app.services.app_lifecycle import (
     mark_lifecycle_shutdown,
-    mark_lifecycle_startup,
+    mark_lifecycle_startup,  # noqa: F401 - re-exported for lifecycle contract tests.
     get_or_create_lifecycle_state,
 )
 from tldw_Server_API.app.services import shutdown_coordinated_runtime as _shutdown_coordinated_runtime
@@ -375,9 +375,14 @@ async def _quiesce_owned_job_pollers_for_shutdown(
     Jobs acquire gate, so the bounded wait drains already-leased work rather
     than allowing new in-process pollers to claim fresh jobs.
     """
+    job_poller_handles = [
+        handle
+        for handle in handles
+        if _is_job_poller_quiesce(handle)
+    ]
     await _shutdown_owned_job_pollers.quiesce_owned_job_pollers_for_shutdown(
         app,
-        handles,
+        job_poller_handles,
         wait_for_leases_sec=wait_for_leases_sec,
         count_active_processing=count_active_processing,
         stop_registered_job_pollers=_stop_registered_job_pollers,
@@ -1145,11 +1150,8 @@ else:
 
 # Metrics and Telemetry - import directly and fail fast on errors
 # Core helpers - import directly (fail fast if missing)
-from tldw_Server_API.app.core.Evaluations.evaluation_manager import get_cached_evaluation_manager
 from tldw_Server_API.app.core.Metrics import (
-    OTEL_AVAILABLE,
     get_metrics_registry,
-    initialize_telemetry,
     track_metrics,
 )
 from tldw_Server_API.app.core.Setup.setup_manager import needs_setup

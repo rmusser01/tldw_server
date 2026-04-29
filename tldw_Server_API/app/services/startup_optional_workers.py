@@ -45,16 +45,32 @@ class OptionalWorkerStartupHandles:
     jobs_integrity_task: Any | None = None
 
 
-async def start_optional_workers() -> OptionalWorkerStartupHandles:
+async def start_optional_workers(
+    *,
+    worker_inventory: Any | None = None,
+) -> OptionalWorkerStartupHandles:
     """Start optional stop-event workers and return the task/stop handles."""
-    jobs_metrics_reconcile_stop, jobs_metrics_reconcile_task = await _start_jobs_metrics_reconcile_worker()
-    jobs_crypto_rotate_stop_event, jobs_crypto_rotate_task = await _start_jobs_crypto_rotate_worker()
+    if worker_inventory is None:
+        jobs_metrics_reconcile_stop, jobs_metrics_reconcile_task = await _start_jobs_metrics_reconcile_worker()
+        jobs_crypto_rotate_stop_event, jobs_crypto_rotate_task = await _start_jobs_crypto_rotate_worker()
+    else:
+        jobs_metrics_reconcile_stop, jobs_metrics_reconcile_task = await _start_jobs_metrics_reconcile_worker(
+            worker_inventory=worker_inventory,
+        )
+        jobs_crypto_rotate_stop_event, jobs_crypto_rotate_task = await _start_jobs_crypto_rotate_worker(
+            worker_inventory=worker_inventory,
+        )
     jobs_webhooks_stop_event, jobs_webhooks_task = await _start_jobs_webhooks_worker()
     meetings_webhook_dlq_stop_event, meetings_webhook_dlq_task = await _start_meetings_webhook_dlq_worker()
     workflows_dlq_stop_event, workflows_dlq_task = await _start_workflows_webhook_dlq_worker()
     workflows_gc_stop_event, workflows_gc_task = await _start_workflows_artifact_gc_worker()
     workflows_maint_stop_event, workflows_maint_task = await _start_workflows_db_maintenance_worker()
-    jobs_integrity_stop_event, jobs_integrity_task = await _start_jobs_integrity_sweeper()
+    if worker_inventory is None:
+        jobs_integrity_stop_event, jobs_integrity_task = await _start_jobs_integrity_sweeper()
+    else:
+        jobs_integrity_stop_event, jobs_integrity_task = await _start_jobs_integrity_sweeper(
+            worker_inventory=worker_inventory,
+        )
     return OptionalWorkerStartupHandles(
         jobs_metrics_reconcile_stop=jobs_metrics_reconcile_stop,
         jobs_metrics_reconcile_task=jobs_metrics_reconcile_task,
@@ -83,11 +99,30 @@ def _create_task(awaitable: Any) -> Any:
     return asyncio.create_task(awaitable)
 
 
-async def _start_jobs_metrics_reconcile_worker() -> tuple[Any | None, Any | None]:
+async def _start_jobs_metrics_reconcile_worker(
+    *,
+    worker_inventory: Any | None = None,
+) -> tuple[Any | None, Any | None]:
     try:
         if not _env_flag_enabled("JOBS_METRICS_RECONCILE_ENABLE"):
             logger.info("Jobs metrics reconcile worker disabled by flag (JOBS_METRICS_RECONCILE_ENABLE)")
             return None, None
+        if worker_inventory is not None:
+            from tldw_Server_API.app.services.lifecycle_workers import (
+                ShutdownPhase,
+                start_stop_event_worker,
+            )
+
+            task, stop_event = await start_stop_event_worker(
+                worker_inventory,
+                name="jobs_metrics_reconcile_task",
+                task_name="jobs_metrics_reconcile_task",
+                coroutine_factory=_run_jobs_metrics_reconcile_service,
+                category="jobs",
+                shutdown_phase=ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN,
+            )
+            logger.info("Jobs metrics reconcile worker started with explicit stop_event signal")
+            return stop_event, task
         stop_event = _make_event()
         task = _create_task(_run_jobs_metrics_reconcile_service(stop_event))
         logger.info("Jobs metrics reconcile worker started with explicit stop_event signal")
@@ -97,11 +132,30 @@ async def _start_jobs_metrics_reconcile_worker() -> tuple[Any | None, Any | None
         return None, None
 
 
-async def _start_jobs_crypto_rotate_worker() -> tuple[Any | None, Any | None]:
+async def _start_jobs_crypto_rotate_worker(
+    *,
+    worker_inventory: Any | None = None,
+) -> tuple[Any | None, Any | None]:
     try:
         if not _env_flag_enabled("JOBS_CRYPTO_ROTATE_SERVICE_ENABLED"):
             logger.info("Jobs crypto rotate worker disabled by flag")
             return None, None
+        if worker_inventory is not None:
+            from tldw_Server_API.app.services.lifecycle_workers import (
+                ShutdownPhase,
+                start_stop_event_worker,
+            )
+
+            task, stop_event = await start_stop_event_worker(
+                worker_inventory,
+                name="jobs_crypto_rotate_task",
+                task_name="jobs_crypto_rotate_task",
+                coroutine_factory=_run_jobs_crypto_rotate_service,
+                category="jobs",
+                shutdown_phase=ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN,
+            )
+            logger.info("Jobs crypto rotate worker started with explicit stop_event signal")
+            return stop_event, task
         stop_event = _make_event()
         task = _create_task(_run_jobs_crypto_rotate_service(stop_event))
         logger.info("Jobs crypto rotate worker started with explicit stop_event signal")
@@ -181,11 +235,30 @@ async def _start_workflows_db_maintenance_worker() -> tuple[Any | None, Any | No
         return None, None
 
 
-async def _start_jobs_integrity_sweeper() -> tuple[Any | None, Any | None]:
+async def _start_jobs_integrity_sweeper(
+    *,
+    worker_inventory: Any | None = None,
+) -> tuple[Any | None, Any | None]:
     try:
         if not _env_flag_enabled("JOBS_INTEGRITY_SWEEP_ENABLED"):
             logger.info("Jobs integrity sweeper disabled by flag")
             return None, None
+        if worker_inventory is not None:
+            from tldw_Server_API.app.services.lifecycle_workers import (
+                ShutdownPhase,
+                start_stop_event_worker,
+            )
+
+            task, stop_event = await start_stop_event_worker(
+                worker_inventory,
+                name="jobs_integrity_task",
+                task_name="jobs_integrity_task",
+                coroutine_factory=_run_jobs_integrity_sweeper_service,
+                category="jobs",
+                shutdown_phase=ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN,
+            )
+            logger.info("Jobs integrity sweeper started with explicit stop_event signal")
+            return stop_event, task
         stop_event = _make_event()
         task = _create_task(_run_jobs_integrity_sweeper_service(stop_event))
         logger.info("Jobs integrity sweeper started with explicit stop_event signal")

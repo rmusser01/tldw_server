@@ -220,43 +220,41 @@ def test_lifespan_startup_delegates_owned_job_pollers(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from tldw_Server_API.app import main as main_module
-    from tldw_Server_API.app.services import startup_owned_job_pollers
+    from tldw_Server_API.app.services import startup_service_tail
     from tldw_Server_API.app.services import startup_worker_groups
 
     app = main_module.app
-    owned_job_poller_calls: list[dict[str, object]] = []
     worker_group_calls: list[dict[str, object]] = []
-    sentinel_owned_job_pollers = [object()]
-
-    def _fake_prepare_startup_owned_job_pollers(**kwargs):
-        owned_job_poller_calls.append(kwargs)
-        return sentinel_owned_job_pollers
+    service_tail_calls: list[dict[str, object]] = []
 
     async def _fake_start_worker_groups(**kwargs):
         worker_group_calls.append(kwargs)
         return startup_worker_groups.StartupWorkerGroupHandles()
 
-    monkeypatch.setattr(
-        startup_owned_job_pollers,
-        "prepare_startup_owned_job_pollers",
-        _fake_prepare_startup_owned_job_pollers,
-    )
+    async def _fake_initialize_startup_service_tail(**kwargs):
+        service_tail_calls.append(kwargs)
+        return startup_service_tail.StartupServiceTailHandles()
+
     monkeypatch.setattr(
         startup_worker_groups,
         "start_worker_groups",
         _fake_start_worker_groups,
     )
+    monkeypatch.setattr(
+        startup_service_tail,
+        "initialize_startup_service_tail",
+        _fake_initialize_startup_service_tail,
+    )
 
     with TestClient(app) as client:
         assert client.get("/health").status_code == 200
 
-    assert len(owned_job_poller_calls) == 1
-    assert owned_job_poller_calls[0]["app"] is app
-    assert owned_job_poller_calls[0]["publish_shutdown_job_poller_inventory"] is (
-        main_module._publish_shutdown_job_poller_inventory
-    )
     assert len(worker_group_calls) == 1
-    assert worker_group_calls[0]["owned_job_pollers"] is sentinel_owned_job_pollers
+    assert len(service_tail_calls) == 1
+    owned_job_pollers = worker_group_calls[0]["owned_job_pollers"]
+    assert isinstance(owned_job_pollers, list)
+    assert service_tail_calls[0]["owned_job_pollers"] is owned_job_pollers
+    assert service_tail_calls[0]["worker_inventory"].handles is owned_job_pollers
 
 
 @pytest.mark.integration

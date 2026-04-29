@@ -33,9 +33,17 @@ class RuntimeMonitorHandles:
     loop_lag_task: Any | None = None
 
 
-async def start_runtime_monitors() -> RuntimeMonitorHandles:
+async def start_runtime_monitors(
+    *,
+    worker_inventory: Any | None = None,
+) -> RuntimeMonitorHandles:
     """Start small runtime monitor tasks and return explicit handles."""
-    jobs_metrics_stop_event, jobs_metrics_task = await _start_jobs_metrics_gauge_worker()
+    if worker_inventory is None:
+        jobs_metrics_stop_event, jobs_metrics_task = await _start_jobs_metrics_gauge_worker()
+    else:
+        jobs_metrics_stop_event, jobs_metrics_task = await _start_jobs_metrics_gauge_worker(
+            worker_inventory=worker_inventory,
+        )
     loop_lag_stop_event, loop_lag_task = await _start_loop_lag_watchdog()
     return RuntimeMonitorHandles(
         jobs_metrics_stop_event=jobs_metrics_stop_event,
@@ -53,12 +61,31 @@ def _create_task(awaitable: Any) -> Any:
     return asyncio.create_task(awaitable)
 
 
-async def _start_jobs_metrics_gauge_worker() -> tuple[Any | None, Any | None]:
+async def _start_jobs_metrics_gauge_worker(
+    *,
+    worker_inventory: Any | None = None,
+) -> tuple[Any | None, Any | None]:
     try:
         enabled = _is_truthy(os.getenv("JOBS_METRICS_GAUGES_ENABLED", "true"))
         if not enabled:
             logger.info("Jobs metrics gauge worker disabled by flag")
             return None, None
+        if worker_inventory is not None:
+            from tldw_Server_API.app.services.lifecycle_workers import (
+                ShutdownPhase,
+                start_stop_event_worker,
+            )
+
+            task, stop_event = await start_stop_event_worker(
+                worker_inventory,
+                name="jobs_metrics_task",
+                task_name="jobs_metrics_task",
+                coroutine_factory=_run_jobs_metrics_gauges_service,
+                category="jobs",
+                shutdown_phase=ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN,
+            )
+            logger.info("Jobs metrics gauge worker started with explicit stop_event signal")
+            return stop_event, task
         stop_event = _make_event()
         task = _create_task(_run_jobs_metrics_gauges_service(stop_event))
         logger.info("Jobs metrics gauge worker started with explicit stop_event signal")
