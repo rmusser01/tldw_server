@@ -42,7 +42,7 @@ async def aggregate_llm_usage_daily(db_pool: DatabasePool | None = None, day: st
 
         logger.debug(f"llm_usage_daily aggregated for {day_val.isoformat()}")
     except _LLM_USAGE_AGGREGATOR_NONCRITICAL_EXCEPTIONS as e:
-        logger.debug(f"llm_usage_daily aggregation skipped/failed: {e}")
+        logger.bind(error_type=type(e).__name__).debug("llm_usage_daily aggregation skipped/failed")
 
 
 async def _aggregator_loop(stop_event: asyncio.Event):

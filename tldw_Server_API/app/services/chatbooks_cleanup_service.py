@@ -27,7 +27,9 @@ def _enumerate_user_ids() -> list[int]:
     try:
         base = DatabasePaths.get_user_db_base_dir()
     except _CHATBOOKS_NONCRITICAL_EXCEPTIONS as exc:
-        logger.debug(f"chatbooks_cleanup: failed to resolve user db base dir: {exc}")
+        logger.bind(error_type=type(exc).__name__).debug(
+            "chatbooks_cleanup: failed to resolve user db base dir"
+        )
         return []
 
     uids: list[int] = []

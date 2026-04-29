@@ -152,3 +152,35 @@ async def test_llm_aggregate_sqlite(monkeypatch):
     assert int(row1["errors"]) == 1
     assert int(row1["total_tokens"]) == 170
     assert float(row1["total_cost_usd"]) > 0.0
+
+
+@pytest.mark.asyncio
+async def test_aggregate_llm_usage_daily_failure_log_is_sanitized(monkeypatch):
+    import tldw_Server_API.app.services.llm_usage_aggregator as llm_usage_aggregator
+
+    class _ExplodingRepo:
+        def __init__(self, _pool):
+            pass
+
+        async def aggregate_llm_usage_daily_for_day(self, *, day):
+            _ = day
+            raise RuntimeError("llm usage backend exploded at /tmp/llm-usage-secret-token")
+
+    records: list[str] = []
+    sink_id = llm_usage_aggregator.logger.add(
+        lambda message: records.append(str(message)),
+        level="DEBUG",
+        format="{message} {extra}",
+    )
+    monkeypatch.setattr(llm_usage_aggregator, "AuthnzUsageRepo", _ExplodingRepo)
+
+    try:
+        await llm_usage_aggregator.aggregate_llm_usage_daily(db_pool=object(), day="2026-04-29")
+    finally:
+        llm_usage_aggregator.logger.remove(sink_id)
+
+    rendered = "\n".join(records)
+    assert "llm_usage_daily aggregation skipped/failed" in rendered
+    assert "RuntimeError" in rendered
+    assert "llm usage backend exploded" not in rendered
+    assert "/tmp/llm-usage-secret-token" not in rendered

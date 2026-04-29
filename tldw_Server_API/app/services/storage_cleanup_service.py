@@ -138,7 +138,7 @@ async def cleanup_expired_files(
                     logger.debug(f"Deleted expired file: {resolved_path}")
 
             except _STORAGE_CLEANUP_EXCEPTIONS as exc:
-                logger.warning(f"Failed to cleanup expired file {file_id}: {exc}")
+                logger.bind(error_type=type(exc).__name__).warning("Failed to cleanup expired file")
 
     except _STORAGE_CLEANUP_EXCEPTIONS as exc:
         logger.error(f"cleanup_expired_files failed: {exc}")

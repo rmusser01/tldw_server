@@ -135,15 +135,15 @@ async def run_audio_transcribe_gpu_worker(stop_event: asyncio.Event | None = Non
             try:
                 if job:
                     jm.fail_job(int(job["id"]), error=str(e), retryable=True, backoff_seconds=15, worker_id=worker_id, lease_id=str(job.get("lease_id")))
-            except Exception as fail_job_error:
-                logger.debug("Audio GPU worker failed to mark job as failed", exc_info=fail_job_error)
-            logger.error(f"Audio GPU worker error: {e}")
+            except Exception:
+                logger.debug("Audio GPU worker failed to mark job as failed")
+            logger.error("Audio GPU worker error")
         finally:
             try:
                 if acquired_slot and owner is not None:
                     await finish_job(int(owner))
-            except Exception as finish_job_error:
-                logger.debug("Audio GPU worker failed to release owner slot", exc_info=finish_job_error)
+            except Exception:
+                logger.debug("Audio GPU worker failed to release owner slot")
 
 
 if __name__ == "__main__":

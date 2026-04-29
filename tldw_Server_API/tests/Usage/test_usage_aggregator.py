@@ -173,3 +173,35 @@ async def test_aggregate_postgres_branch():
 
     rows = await pool.fetchall("SELECT user_id, day, requests, errors, bytes_total, latency_avg_ms FROM usage_daily WHERE day = $1", day)
     assert any(dict(r)["user_id"] == 3 and dict(r)["requests"] == 2 and dict(r)["errors"] == 1 for r in rows)
+
+
+@pytest.mark.asyncio
+async def test_aggregate_usage_daily_failure_log_is_sanitized(monkeypatch):
+    import tldw_Server_API.app.services.usage_aggregator as usage_aggregator
+
+    class _ExplodingRepo:
+        def __init__(self, _pool):
+            pass
+
+        async def aggregate_usage_daily_for_day(self, *, day):
+            _ = day
+            raise RuntimeError("usage backend exploded at /tmp/usage-secret-token")
+
+    records: list[str] = []
+    sink_id = usage_aggregator.logger.add(
+        lambda message: records.append(str(message)),
+        level="DEBUG",
+        format="{message} {extra}",
+    )
+    monkeypatch.setattr(usage_aggregator, "AuthnzUsageRepo", _ExplodingRepo)
+
+    try:
+        await usage_aggregator.aggregate_usage_daily(db_pool=object(), day="2026-04-29")
+    finally:
+        usage_aggregator.logger.remove(sink_id)
+
+    rendered = "\n".join(records)
+    assert "usage_daily aggregation skipped/failed" in rendered
+    assert "RuntimeError" in rendered
+    assert "usage backend exploded" not in rendered
+    assert "/tmp/usage-secret-token" not in rendered
