@@ -525,6 +525,13 @@ def test_vector_stores_router_uses_standard_auth_factory_aliases() -> None:
     assert not hasattr(vector_stores_openai, "require_permissions")
 
 
+def test_rag_unified_router_uses_standard_permission_factory_alias() -> None:
+    from tldw_Server_API.app.api.v1.endpoints import rag_unified
+
+    assert rag_unified.RequirePermission is auth_deps.RequirePermission
+    assert not hasattr(rag_unified, "require_permissions")
+
+
 def test_api_key_scope_factory_alias_preserves_jwt_bypass_and_scope_checks() -> None:
     jwt_response = TestClient(_build_app(_principal(kind="user", api_key_id=None))).get(
         "/api-key-scope",
