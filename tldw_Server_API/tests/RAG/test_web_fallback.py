@@ -387,7 +387,7 @@ class TestWebSearchFallback:
             web_fallback_module.logger.remove(sink_id)
 
         assert result.documents == []
-        assert result.metadata == {"error": str(raw_error)}
+        assert result.metadata == {"error": "search_failed"}
 
         log_text = "\n".join(messages)
         assert "Web search fallback failed" in log_text

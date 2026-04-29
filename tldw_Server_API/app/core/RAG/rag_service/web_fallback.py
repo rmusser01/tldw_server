@@ -192,7 +192,7 @@ async def web_search_fallback(
             result_count=0,
             engine_used=config.engine,
             query_used=query,
-            metadata={"error": str(e)},
+            metadata={"error": "search_failed"},
         )
 
 

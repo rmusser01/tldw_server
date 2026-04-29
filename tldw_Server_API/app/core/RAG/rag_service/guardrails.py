@@ -174,7 +174,7 @@ def _extract_numeric_tokens(text: str) -> set[str]:
             unit = _WORD_MULTIPLIERS.get(word.lower(), "")
             toks.append(f"{num}{unit}")
     except (TypeError, re.error):
-        logger.debug("Guardrail numeric word-pair extraction failed", exc_info=True)
+        logger.debug("Guardrail numeric word-pair extraction failed")
     base: set[str] = set()
     expanded: set[str] = set()
     for raw in toks:
@@ -208,7 +208,7 @@ def _extract_numeric_tokens(text: str) -> set[str]:
                     canonical = str(int(round(num * factor)))
                     expanded.add(canonical)
                 except (TypeError, ValueError):
-                    logger.debug("Guardrail numeric expansion failed", exc_info=True)
+                    logger.debug("Guardrail numeric expansion failed")
         except (TypeError, ValueError):
             logger.debug("Guardrail numeric expansion setup failed", exc_info=True)
     return base | expanded
@@ -257,7 +257,7 @@ def check_numeric_fidelity(answer: str, docs: list[Document]) -> NumericFidelity
                 factor = {"k": 1_000, "m": 1_000_000, "b": 1_000_000_000}[unit]
                 out.add(str(int(round(num * factor))))
         except (TypeError, ValueError):
-            logger.debug("Guardrail numeric alias expansion failed", exc_info=True)
+            logger.debug("Guardrail numeric alias expansion failed")
         return out
     present = set()
     for n in answer_nums:
@@ -486,7 +486,7 @@ def build_hard_citations(
                             "end": int(cit.get("end", 0)),
                         })
                     except (TypeError, ValueError):
-                        logger.debug("Guardrail citation mapping failed for claim", exc_info=True)
+                        logger.debug("Guardrail citation mapping failed for claim")
                         continue
                 if entry_claim["citations"]:
                     supported += 1
@@ -516,7 +516,7 @@ def build_hard_citations(
                         "end": int(end),
                     })
             except (AttributeError, TypeError, ValueError):
-                logger.debug("Guardrail hard citation mapping failed", exc_info=True)
+                logger.debug("Guardrail hard citation mapping failed")
                 continue
         if entry_sentence["citations"]:
             supported += 1
@@ -540,7 +540,7 @@ def _verify_offsets(doc_text: str, start: int, end: int, target: str) -> bool:
             return re.sub(r"\s+", " ", (x or "").strip())
         return _norm(segment) in {_norm(target), _norm(target[: len(segment)])}
     except (TypeError, ValueError):
-        logger.debug("Guardrail offset verification failed", exc_info=True)
+        logger.debug("Guardrail offset verification failed")
         return False
 
 
@@ -575,7 +575,7 @@ def build_quote_citations(answer: str, docs: list[Document]) -> dict[str, Any]:
                         "verified": bool(verified),
                     })
             except (AttributeError, TypeError, ValueError):
-                logger.debug("Guardrail quote citation mapping failed", exc_info=True)
+                logger.debug("Guardrail quote citation mapping failed")
                 continue
         if entry_quote["citations"]:
             supported += 1

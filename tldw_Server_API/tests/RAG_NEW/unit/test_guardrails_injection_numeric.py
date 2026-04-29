@@ -108,6 +108,104 @@ def test_html_allowlist_parser_fallback_logs_without_traceback(monkeypatch):
     _assert_debug_logs_are_sanitized(recording_logger)
 
 
+@pytest.mark.unit
+def test_numeric_word_pair_fallback_logs_without_traceback(monkeypatch):
+    recording_logger = _RecordingLogger()
+    monkeypatch.setattr(guardrails, "logger", recording_logger)
+
+    def fail_findall(*args, **kwargs):
+        raise guardrails.re.error("raw numeric regex failure /tmp/source token=secret")
+
+    monkeypatch.setattr(guardrails.re, "findall", fail_findall)
+
+    result = guardrails._extract_numeric_tokens("3 million users")
+
+    assert isinstance(result, set)
+    _assert_debug_logs_are_sanitized(recording_logger)
+
+
+@pytest.mark.unit
+def test_numeric_unit_expansion_fallback_logs_without_traceback(monkeypatch):
+    recording_logger = _RecordingLogger()
+    monkeypatch.setattr(guardrails, "logger", recording_logger)
+    monkeypatch.setattr(guardrails, "_normalize_number_token", lambda _raw: "not-a-numberk")
+
+    result = guardrails._extract_numeric_tokens("123k")
+
+    assert "not-a-numberk" in result
+    _assert_debug_logs_are_sanitized(recording_logger)
+
+
+@pytest.mark.unit
+def test_numeric_alias_expansion_fallback_logs_without_traceback(monkeypatch):
+    recording_logger = _RecordingLogger()
+    monkeypatch.setattr(guardrails, "logger", recording_logger)
+    extracted = iter([{"not-a-numberk"}, set()])
+    monkeypatch.setattr(guardrails, "_extract_numeric_tokens", lambda _text: next(extracted))
+
+    result = check_numeric_fidelity("answer", [Document(id="d", content="source", metadata={})])
+
+    assert result.missing == {"not-a-numberk"}
+    _assert_debug_logs_are_sanitized(recording_logger)
+
+
+@pytest.mark.unit
+def test_claims_payload_citation_mapping_fallback_logs_without_traceback(monkeypatch):
+    recording_logger = _RecordingLogger()
+    monkeypatch.setattr(guardrails, "logger", recording_logger)
+
+    result = build_hard_citations(
+        "This sentence is long enough.",
+        [],
+        claims_payload=[
+            {
+                "text": "This claim is long enough.",
+                "citations": [
+                    {
+                        "doc_id": "doc",
+                        "start": "bad /tmp/source token=secret",
+                        "end": 10,
+                    }
+                ],
+            }
+        ],
+    )
+
+    assert result["supported"] == 0
+    _assert_debug_logs_are_sanitized(recording_logger)
+
+
+@pytest.mark.unit
+def test_hard_citation_mapping_fallback_logs_without_traceback(monkeypatch):
+    recording_logger = _RecordingLogger()
+    monkeypatch.setattr(guardrails, "logger", recording_logger)
+
+    result = build_hard_citations("This sentence is long enough.", [_BrokenContentDoc()])
+
+    assert result["supported"] == 0
+    _assert_debug_logs_are_sanitized(recording_logger)
+
+
+@pytest.mark.unit
+def test_offset_verification_fallback_logs_without_traceback(monkeypatch):
+    recording_logger = _RecordingLogger()
+    monkeypatch.setattr(guardrails, "logger", recording_logger)
+
+    assert guardrails._verify_offsets("source text", "bad /tmp/source token=secret", 4, "source") is False
+    _assert_debug_logs_are_sanitized(recording_logger)
+
+
+@pytest.mark.unit
+def test_quote_citation_mapping_fallback_logs_without_traceback(monkeypatch):
+    recording_logger = _RecordingLogger()
+    monkeypatch.setattr(guardrails, "logger", recording_logger)
+
+    result = guardrails.build_quote_citations('"quoted text"', [_BrokenContentDoc()])
+
+    assert result["supported"] == 0
+    _assert_debug_logs_are_sanitized(recording_logger)
+
+
 def test_numeric_fidelity_detects_missing_tokens():
 
 
