@@ -112,6 +112,8 @@ Use the recommended current-model extension.
 
 Create `tldw_Server_API/app/services/lifecycle_workers.py` to hold reusable lifecycle primitives currently embedded in `main.py`. The first implementation should keep startup policy in `main.py` and extract mechanics only. That means service-specific imports, environment flag checks, sidecar-mode decisions, and route-key enablement checks remain close to their existing code until tests prove a broader extraction is safe.
 
+Move shared lifecycle exception policy into a small neutral module, for example `tldw_Server_API/app/services/lifecycle_exceptions.py`, before extracting helper code. `main.py` can keep its private `_STARTUP_GUARD_EXCEPTIONS` alias during transition, but `lifecycle_workers.py` must not import private symbols from `main.py` or redefine an equivalent tuple. `asyncio.CancelledError` must stay outside the guarded exception tuple so cancellation behavior remains explicit.
+
 ## Components
 
 ### ManagedWorker
@@ -125,8 +127,14 @@ Fields:
 - `stop_event`
 - `timeout_sec`
 - `category`
+- `shutdown_phase`
 
-`category` should be optional and used for diagnostics only. Existing app-state inventory consumers must continue to see `name`, `task_name`, `has_stop_event`, and `timeout_sec`.
+`category` should be optional and used for diagnostics only. `shutdown_phase` is operational and determines which shutdown step owns the worker. Initial values should be limited to:
+
+- `job_poller_quiesce` for workers that should participate in the existing early Jobs acquire-gate and optional lease-wait path
+- `background_worker_shutdown` for ordinary stop-event loops that should be stopped in the later background-worker teardown window
+
+Existing app-state job-poller inventory consumers must continue to see `name`, `task_name`, `has_stop_event`, and `timeout_sec` for `job_poller_quiesce` workers.
 
 ### WorkerInventory
 
@@ -136,7 +144,8 @@ Responsibilities:
 
 - hold `ManagedWorker` records
 - register workers after successful startup
-- publish inventory to `app.state._tldw_shutdown_job_poller_inventory`
+- publish full worker inventory to `app.state._tldw_shutdown_worker_inventory`
+- publish a filtered compatibility inventory to `app.state._tldw_shutdown_job_poller_inventory` for `job_poller_quiesce` workers only
 - expose handles to the shutdown path
 - tolerate app-state publication failures as best-effort metadata failures
 
@@ -146,9 +155,9 @@ Helper for repeated startup mechanics.
 
 Responsibilities:
 
-- accept a worker name, coroutine factory, timeout, and logger labels
+- accept a worker name, coroutine factory, timeout, shutdown phase, and logger labels
 - create the stop event
-- create the task
+- create the task with a stable task name
 - register the task in `WorkerInventory`
 - return the task and stop event to callers that still need local references during transition
 
@@ -164,15 +173,15 @@ Responsibilities:
 - wait up to each worker timeout
 - cancel workers that do not exit
 - continue stopping remaining workers after individual failures
-- record quiesced worker names for compatibility with existing late-stop fallback logic
+- record stopped worker names for compatibility with existing late-stop fallback logic
 
-This should preserve the current behavior of `_stop_registered_job_pollers(...)` before the old private helper is removed or renamed.
+This should preserve the current behavior of `_stop_registered_job_pollers(...)` for `job_poller_quiesce` workers before the old private helper is removed or renamed. Non-job workers should use the same stop mechanics but a different shutdown phase so they are not coupled to Jobs lease waiting.
 
 ## Startup Flow
 
 1. `main.py` creates a `WorkerInventory(app)` near the existing `owned_job_pollers` initialization point.
 2. `main.py` evaluates the same environment flags and route defaults it evaluates today.
-3. For compatible enabled workers, `main.py` calls `start_stop_event_worker(...)`.
+3. For compatible enabled workers, `main.py` calls `start_stop_event_worker(...)` with an explicit `shutdown_phase`.
 4. The helper creates an `asyncio.Event`, starts the task, registers the handle, and republishes app-state inventory.
 5. Disabled workers and startup failures retain equivalent logging to the current implementation.
 
@@ -181,11 +190,12 @@ For the first migration batch, `main.py` should keep enough returned local task 
 ## Shutdown Flow
 
 1. The existing transition handoff still marks lifecycle shutdown and closes the Jobs acquire gate.
-2. The early worker quiesce path calls the extracted `stop_registered_workers(...)` through the current `_quiesce_owned_job_pollers_for_shutdown(...)` behavior or a compatible renamed wrapper.
-3. Registered workers are stopped concurrently.
-4. App-state quiesced names are published so legacy fallback logic can skip already-stopped workers.
-5. Direct late-stop branches remain only for non-migrated workers or as explicit fallback during transition.
-6. Once tests prove a worker is inventory-owned, its duplicate manual teardown block should be removed.
+2. The early job-poller quiesce path calls the extracted `stop_registered_workers(...)` only for `job_poller_quiesce` workers through the current `_quiesce_owned_job_pollers_for_shutdown(...)` behavior or a compatible renamed wrapper.
+3. Later in the existing background-worker shutdown window, `stop_registered_workers(...)` stops `background_worker_shutdown` workers.
+4. Registered workers within each phase are stopped concurrently.
+5. App-state stopped names are published per phase so legacy fallback logic can skip already-stopped workers.
+6. Direct late-stop branches remain only for non-migrated workers or as explicit fallback during transition.
+7. Once tests prove a worker is inventory-owned in the correct phase, its duplicate manual teardown block should be removed.
 
 The core invariant is one owner per worker. A migrated worker should not have both an inventory-owned stop path and an unguarded duplicate late-stop path.
 
@@ -196,6 +206,7 @@ Startup:
 - optional worker startup failures remain non-fatal
 - the same guarded exception posture should be preserved
 - disabled workers continue to log why they did not start
+- shared guarded exceptions are imported from the neutral lifecycle exception module, not from `main.py`
 
 Shutdown:
 
@@ -211,33 +222,39 @@ Shutdown:
 
 ### Stage 1: Extract Lifecycle Primitives
 
-Create `lifecycle_workers.py` with `ManagedWorker`, `WorkerInventory`, and extracted stop behavior. Keep compatibility wrappers or aliases in `main.py` if needed so existing tests can be moved incrementally.
+Create `lifecycle_exceptions.py` and `lifecycle_workers.py` with `ManagedWorker`, `WorkerInventory`, phased inventory publication, and extracted stop behavior. Keep compatibility wrappers or aliases in `main.py` if needed so existing tests can be moved incrementally.
 
 Success criteria:
 
 - existing shutdown job-poller tests still pass
-- app-state inventory shape is unchanged
+- filtered job-poller app-state inventory shape is unchanged
+- full worker inventory is available separately from the filtered job-poller compatibility inventory
 - zero behavior change for started workers
 
 ### Stage 2: Migrate Compatible Stop-Event Workers
 
-Move the simplest direct stop-event workers first. Good first candidates are workers that already expose a single stop event and a direct task:
+Move one small Jobs-domain batch first. The first implementation batch should be limited to workers that already expose a single stop event and a direct task, but do not need the early job-poller lease-wait phase:
 
 - jobs metrics gauges
 - jobs metrics reconcile
 - jobs crypto rotate
+- jobs integrity
+
+These should use `background_worker_shutdown`, not `job_poller_quiesce`.
+
+Defer the following candidates until phased ownership is proven by the first batch:
+
 - jobs webhooks
 - meetings webhook DLQ
 - workflows DLQ
 - workflows artifact GC
 - workflows DB maintenance
-- jobs integrity
 - TTS history cleanup
 
 Success criteria:
 
 - each migrated worker appears in inventory when enabled
-- each migrated worker stops through the inventory path
+- each migrated worker stops through the inventory path in the `background_worker_shutdown` phase
 - duplicate late-stop branches are removed or explicitly guarded as fallback
 
 ### Stage 3: Reassess Custom Loops And Schedulers
@@ -257,8 +274,10 @@ Scheduler-style services should get a separate design or implementation slice if
 Automated tests:
 
 - unit tests for `WorkerInventory` registration and inventory publication
+- unit tests proving `job_poller_quiesce` workers appear in the filtered compatibility inventory and `background_worker_shutdown` workers do not
 - unit tests for concurrent stop behavior, timeout fallback, cancellation, and quiesced-name recording
-- integration tests extending `test_main_shutdown_job_pollers.py` so migrated workers appear in inventory when their flags are enabled
+- integration tests extending `test_main_shutdown_job_pollers.py` so migrated workers appear in the full worker inventory when their flags are enabled
+- regression tests proving background-phase workers stop in the later background-worker shutdown window rather than the early job-poller quiesce path
 - lifespan smoke coverage showing startup and shutdown remain reentrant
 - regression tests proving already-quiesced workers are not stopped twice by unguarded late branches
 
@@ -267,13 +286,13 @@ Verification commands for implementation planning should include:
 - targeted pytest for the new lifecycle helper tests
 - targeted pytest for `tldw_Server_API/tests/Services/test_main_shutdown_job_pollers.py`
 - targeted pytest for `tldw_Server_API/tests/Services/test_main_lifecycle_contract.py`
-- Bandit on `tldw_Server_API/app/main.py`, `tldw_Server_API/app/services/lifecycle_workers.py`, and touched tests
+- Bandit on `tldw_Server_API/app/main.py`, `tldw_Server_API/app/services/lifecycle_exceptions.py`, `tldw_Server_API/app/services/lifecycle_workers.py`, and touched tests
 
 ## Acceptance Criteria
 
 - A current-code lifecycle helper exists and does not depend on the stale WorkerRegistry design.
-- App-state worker inventory remains backward compatible.
-- At least one coherent batch of remaining stop-event workers is migrated into the shared inventory and shutdown path.
+- App-state job-poller inventory remains backward compatible, with a separate full worker inventory for non-job workers.
+- The first Jobs-domain background-worker batch (`jobs_metrics`, `jobs_metrics_reconcile`, `jobs_crypto_rotate`, and `jobs_integrity`) is migrated into the shared inventory and shutdown path.
 - Migrated workers no longer require duplicated unguarded late-stop code in `main.py`.
 - Startup and shutdown behavior remains compatible with current environment flags and sidecar mode.
 - Targeted service lifecycle tests pass.
