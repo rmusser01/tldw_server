@@ -16,6 +16,7 @@ from tldw_Server_API.app.services import admin_maintenance_rotation_jobs_worker
 from tldw_Server_API.app.services import connectors_worker
 from tldw_Server_API.app.services import core_jobs_worker
 from tldw_Server_API.app.services import jobs_metrics_service
+from tldw_Server_API.app.services import lifecycle_workers
 from tldw_Server_API.app.services import media_ingest_jobs_worker
 from tldw_Server_API.app.services import privilege_snapshot_worker
 from tldw_Server_API.app.services import reminder_jobs_worker
@@ -220,7 +221,11 @@ async def test_stop_registered_job_pollers_timeout_fallback_stays_bounded(
         raise asyncio.TimeoutError
 
     monkeypatch.setattr(main_module.asyncio, "wait_for", _fake_wait_for)
-    monkeypatch.setattr(main_module.logger, "warning", lambda *args, **kwargs: warnings.append(args))
+    monkeypatch.setattr(
+        lifecycle_workers.logger,
+        "warning",
+        lambda *args, **kwargs: warnings.append(args),
+    )
 
     await main_module._stop_registered_job_pollers(
         app,
@@ -321,7 +326,11 @@ async def test_stop_registered_job_pollers_continues_when_cancelled_task_raises(
         return await awaitable
 
     monkeypatch.setattr(main_module.asyncio, "wait_for", _fake_wait_for)
-    monkeypatch.setattr(main_module.logger, "warning", lambda *args, **kwargs: warnings.append(args))
+    monkeypatch.setattr(
+        lifecycle_workers.logger,
+        "warning",
+        lambda *args, **kwargs: warnings.append(args),
+    )
 
     raising_task = asyncio.create_task(_raise_after_cancel(), name="raising-poller")
     cooperative_task = asyncio.create_task(_cooperative(cooperative_stop_event), name="cooperative-poller")
@@ -463,6 +472,9 @@ async def test_publish_shutdown_job_poller_inventory_captures_registered_metadat
         )
     ]
 
+    shutdown_phase = getattr(handles[0], "shutdown_phase", "job_poller_quiesce")
+    assert shutdown_phase == "job_poller_quiesce"  # nosec B101
+
     main_module._publish_shutdown_job_poller_inventory(app, handles)
 
     assert getattr(app.state, "_tldw_shutdown_job_poller_inventory") == [
@@ -471,6 +483,16 @@ async def test_publish_shutdown_job_poller_inventory_captures_registered_metadat
             "task_name": "connectors-worker",
             "has_stop_event": True,
             "timeout_sec": 7.5,
+        }
+    ]
+    assert getattr(app.state, "_tldw_shutdown_worker_inventory") == [  # nosec B101
+        {
+            "name": "connectors_jobs_task",
+            "task_name": "connectors-worker",
+            "has_stop_event": True,
+            "timeout_sec": 7.5,
+            "category": None,
+            "shutdown_phase": "job_poller_quiesce",
         }
     ]
 

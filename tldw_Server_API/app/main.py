@@ -45,6 +45,13 @@ from tldw_Server_API.app.services.app_lifecycle import (
 from tldw_Server_API.app.services import shutdown_coordinated_runtime as _shutdown_coordinated_runtime
 from tldw_Server_API.app.services import shutdown_owned_job_pollers as _shutdown_owned_job_pollers
 from tldw_Server_API.app.services import startup_pg_rls as _startup_pg_rls
+from tldw_Server_API.app.services.lifecycle_exceptions import LIFECYCLE_GUARD_EXCEPTIONS
+from tldw_Server_API.app.services.lifecycle_workers import (
+    ManagedWorker,
+    ShutdownPhase as WorkerShutdownPhase,
+    publish_worker_inventory,
+    stop_registered_workers,
+)
 from tldw_Server_API.app.core.testing import (
     env_flag_enabled as _shared_env_flag_enabled,
 )
@@ -98,13 +105,7 @@ _IO_EXCEPTIONS = (
     ValueError,
     AttributeError,
 )
-_STARTUP_GUARD_EXCEPTIONS = (
-    AttributeError,
-    OSError,
-    RuntimeError,
-    TypeError,
-    ValueError,
-)
+_STARTUP_GUARD_EXCEPTIONS = LIFECYCLE_GUARD_EXCEPTIONS
 _REQUEST_GUARD_EXCEPTIONS = (
     AttributeError,
     KeyError,
@@ -228,19 +229,24 @@ async def _run_coordinated_shutdown(
         import_exceptions=_IMPORT_EXCEPTIONS,
     )
 
-_ManagedJobPoller = _shutdown_owned_job_pollers.ManagedJobPoller
+_ManagedJobPoller = ManagedWorker
+
+
+def _is_job_poller_quiesce(handle: ManagedWorker) -> bool:
+    """Return whether a lifecycle-managed worker belongs to the job-poller phase."""
+    shutdown_phase = getattr(handle, "shutdown_phase", WorkerShutdownPhase.JOB_POLLER_QUIESCE)
+    return shutdown_phase in {
+        WorkerShutdownPhase.JOB_POLLER_QUIESCE,
+        WorkerShutdownPhase.JOB_POLLER_QUIESCE.value,
+    }
 
 
 def _publish_shutdown_job_poller_inventory(
     app: FastAPI,
     handles: list[_ManagedJobPoller],
 ) -> None:
-    """Expose shutdown-owned job poller metadata on app.state."""
-    _shutdown_owned_job_pollers.publish_shutdown_job_poller_inventory(
-        app,
-        handles,
-        guard_exceptions=_STARTUP_GUARD_EXCEPTIONS,
-    )
+    """Expose shutdown-owned worker metadata on app.state."""
+    publish_worker_inventory(app, handles)
 
 
 def _register_owned_job_poller(
@@ -253,15 +259,19 @@ def _register_owned_job_poller(
     timeout_sec: float = 5.0,
 ) -> None:
     """Register one shutdown-owned job poller and refresh app-state inventory."""
-    _shutdown_owned_job_pollers.register_owned_job_poller(
-        app,
-        handles,
-        name=name,
-        task=task,
-        stop_event=stop_event,
-        timeout_sec=timeout_sec,
-        publish_inventory=_publish_shutdown_job_poller_inventory,
+    if task is None:
+        return
+    handles.append(
+        ManagedWorker(
+            name=name,
+            task=task,
+            stop_event=stop_event,
+            timeout_sec=timeout_sec,
+            shutdown_phase=WorkerShutdownPhase.JOB_POLLER_QUIESCE,
+        )
     )
+    _publish_shutdown_job_poller_inventory(app, handles)
+
 
 def _replace_owned_job_poller_inventory(
     app: FastAPI,
@@ -270,13 +280,24 @@ def _replace_owned_job_poller_inventory(
     registrations: list[tuple[str, asyncio.Task[Any] | None, asyncio.Event | None, float]],
 ) -> None:
     """Replace the managed job-poller inventory with the current owned poller set."""
-    _shutdown_owned_job_pollers.replace_owned_job_poller_inventory(
-        app,
-        handles,
-        registrations=registrations,
-        register_owned_job_poller_fn=_register_owned_job_poller,
-        publish_inventory=_publish_shutdown_job_poller_inventory,
-    )
+    replacement_handles = [
+        ManagedWorker(
+            name=name,
+            task=task,
+            stop_event=stop_event,
+            timeout_sec=timeout_sec,
+            shutdown_phase=WorkerShutdownPhase.JOB_POLLER_QUIESCE,
+        )
+        for name, task, stop_event, timeout_sec in registrations
+        if task is not None
+    ]
+    handles[:] = [
+        handle
+        for handle in handles
+        if not _is_job_poller_quiesce(handle)
+    ]
+    handles.extend(replacement_handles)
+    _publish_shutdown_job_poller_inventory(app, handles)
 
 def _record_shutdown_timing_segment(
     app: FastAPI,
@@ -328,12 +349,16 @@ async def _stop_registered_job_pollers(
     handles: list[_ManagedJobPoller],
 ) -> None:
     """Stop registered job pollers, preferring explicit stop events."""
-    await _shutdown_owned_job_pollers.stop_registered_job_pollers(
+    job_poller_handles = [
+        handle
+        for handle in handles
+        if _is_job_poller_quiesce(handle)
+    ]
+    await stop_registered_workers(
         app,
-        handles,
-        logger_obj=logger,
-        guard_exceptions=_STARTUP_GUARD_EXCEPTIONS,
-        asyncio_module=asyncio,
+        job_poller_handles,
+        stopped_names_attr="_tldw_shutdown_quiesced_job_poller_names",
+        log_label="job poller",
     )
 
 
