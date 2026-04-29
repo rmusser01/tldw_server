@@ -573,6 +573,13 @@ def test_agent_orchestration_router_uses_standard_token_scope_alias() -> None:
     assert not hasattr(agent_orchestration, "require_token_scope")
 
 
+def test_agent_client_protocol_router_uses_standard_token_scope_alias() -> None:
+    from tldw_Server_API.app.api.v1.endpoints import agent_client_protocol
+
+    assert agent_client_protocol.TokenScopeGuard is auth_deps.TokenScopeGuard
+    assert not hasattr(agent_client_protocol, "require_token_scope")
+
+
 def test_vector_stores_router_uses_standard_auth_factory_aliases() -> None:
     from tldw_Server_API.app.api.v1.endpoints import vector_stores_openai
 

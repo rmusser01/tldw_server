@@ -17,7 +17,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket
 from fastapi.responses import StreamingResponse
 from loguru import logger
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import require_token_scope
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import TokenScopeGuard
 from tldw_Server_API.app.api.v1.endpoints._in_memory_limits import SlidingWindowLimiter
 from tldw_Server_API.app.api.v1.schemas.agent_client_protocol import (
     ACPAgentInfo,
@@ -1379,7 +1379,7 @@ def _check_agent_availability(agent_type: str) -> dict[str, Any]:
 @router.get(
     "/health",
     response_model=ACPHealthResponse,
-    dependencies=[Depends(require_token_scope("any", require_if_present=True, endpoint_id="acp.health"))],
+    dependencies=[Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="acp.health"))],
 )
 async def acp_health(
     user: User = Depends(get_request_user),
@@ -1477,7 +1477,7 @@ async def acp_health(
 
 @router.get(
     "/setup-guide",
-    dependencies=[Depends(require_token_scope("any", require_if_present=True, endpoint_id="acp.setup_guide"))],
+    dependencies=[Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="acp.setup_guide"))],
 )
 async def acp_setup_guide(
     agent_type: str | None = Query(default=None, description="Filter to a specific agent type"),
@@ -1673,7 +1673,7 @@ async def _get_available_agents() -> tuple[list[ACPAgentInfo], str]:
 @router.get(
     "/agents",
     response_model=ACPAgentListResponse,
-    dependencies=[Depends(require_token_scope("any", require_if_present=True, endpoint_id="acp.agents.list"))],
+    dependencies=[Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="acp.agents.list"))],
 )
 async def acp_list_agents(
     user: User = Depends(get_request_user),
@@ -1693,7 +1693,7 @@ async def acp_list_agents(
 @router.post(
     "/agents/register",
     response_model=ACPAgentRegistrationResponse,
-    dependencies=[Depends(require_token_scope("any", require_if_present=True, endpoint_id="acp.agents.register"))],
+    dependencies=[Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="acp.agents.register"))],
 )
 async def acp_register_agent(
     request: ACPAgentRegisterRequest,
@@ -1730,7 +1730,7 @@ async def acp_register_agent(
 @router.delete(
     "/agents/{agent_type}",
     response_model=ACPAgentRegistrationResponse,
-    dependencies=[Depends(require_token_scope("any", require_if_present=True, endpoint_id="acp.agents.manage"))],
+    dependencies=[Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="acp.agents.manage"))],
 )
 async def acp_deregister_agent(
     agent_type: str,
@@ -1755,7 +1755,7 @@ async def acp_deregister_agent(
 @router.put(
     "/agents/{agent_type}",
     response_model=ACPAgentRegistrationResponse,
-    dependencies=[Depends(require_token_scope("any", require_if_present=True, endpoint_id="acp.agents.manage"))],
+    dependencies=[Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="acp.agents.manage"))],
 )
 async def acp_update_agent(
     agent_type: str,
@@ -1782,7 +1782,7 @@ async def acp_update_agent(
 @router.get(
     "/agents/health",
     response_model=ACPAgentHealthResponse,
-    dependencies=[Depends(require_token_scope("any", require_if_present=True, endpoint_id="acp.agents.health"))],
+    dependencies=[Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="acp.agents.health"))],
 )
 async def acp_agents_health(
     user: User = Depends(get_request_user),
@@ -1832,7 +1832,7 @@ def _generate_session_name(cwd: str) -> str:
 @router.post(
     "/sessions/new",
     response_model=ACPSessionNewResponse,
-    dependencies=[Depends(require_token_scope("any", require_if_present=True, endpoint_id="acp.sessions.manage"))],
+    dependencies=[Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="acp.sessions.manage"))],
 )
 async def acp_session_new(
     payload: ACPSessionNewRequest,
@@ -2014,7 +2014,7 @@ async def acp_session_new(
 @router.post(
     "/sessions/prompt",
     response_model=ACPSessionPromptResponse,
-    dependencies=[Depends(require_token_scope("any", require_if_present=True, endpoint_id="acp.sessions.manage"))],
+    dependencies=[Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="acp.sessions.manage"))],
 )
 async def acp_session_prompt(
     payload: ACPSessionPromptRequest,
@@ -2086,7 +2086,7 @@ async def acp_session_prompt(
 
 @router.post(
     "/sessions/cancel",
-    dependencies=[Depends(require_token_scope("any", require_if_present=True, endpoint_id="acp.sessions.manage"))],
+    dependencies=[Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="acp.sessions.manage"))],
 )
 async def acp_session_cancel(
     payload: ACPSessionCancelRequest,
@@ -2119,7 +2119,7 @@ async def acp_session_cancel(
 
 @router.post(
     "/sessions/close",
-    dependencies=[Depends(require_token_scope("any", require_if_present=True, endpoint_id="acp.sessions.manage"))],
+    dependencies=[Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="acp.sessions.manage"))],
 )
 async def acp_session_close(
     payload: ACPSessionCloseRequest,
@@ -2182,7 +2182,7 @@ async def acp_session_close(
 
 @router.post(
     "/sessions/{session_id}/teardown",
-    dependencies=[Depends(require_token_scope("any", require_if_present=True, endpoint_id="acp.sessions.manage"))],
+    dependencies=[Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="acp.sessions.manage"))],
 )
 async def acp_session_teardown(
     session_id: str,
@@ -2231,7 +2231,7 @@ async def acp_session_teardown(
 
 @router.get(
     "/sessions/{session_id}/reconciliation",
-    dependencies=[Depends(require_token_scope("any", require_if_present=True, endpoint_id="acp.sessions.read"))],
+    dependencies=[Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="acp.sessions.read"))],
 )
 async def acp_session_reconciliation(
     session_id: str,
@@ -2250,7 +2250,7 @@ async def acp_session_reconciliation(
 
 @router.post(
     "/sessions/{session_id}/reconcile",
-    dependencies=[Depends(require_token_scope("any", require_if_present=True, endpoint_id="acp.sessions.manage"))],
+    dependencies=[Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="acp.sessions.manage"))],
 )
 async def acp_session_reconcile(
     session_id: str,
@@ -2303,7 +2303,7 @@ async def acp_session_reconcile(
 @router.get(
     "/sessions/{session_id}/updates",
     response_model=ACPSessionUpdatesResponse,
-    dependencies=[Depends(require_token_scope("any", require_if_present=True, endpoint_id="acp.sessions.read"))],
+    dependencies=[Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="acp.sessions.read"))],
 )
 async def acp_session_updates(
     session_id: str,
@@ -2331,7 +2331,7 @@ async def acp_session_updates(
 @router.get(
     "/sessions",
     response_model=ACPSessionListResponse,
-    dependencies=[Depends(require_token_scope("any", require_if_present=True, endpoint_id="acp.sessions.read"))],
+    dependencies=[Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="acp.sessions.read"))],
 )
 async def acp_list_sessions(
     status_filter: str | None = Query(default=None, alias="status"),
@@ -2363,7 +2363,7 @@ async def acp_list_sessions(
 @router.get(
     "/sessions/{session_id}/detail",
     response_model=ACPSessionDetailResponse,
-    dependencies=[Depends(require_token_scope("any", require_if_present=True, endpoint_id="acp.sessions.read"))],
+    dependencies=[Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="acp.sessions.read"))],
 )
 async def acp_session_detail(
     session_id: str,
@@ -2387,7 +2387,7 @@ async def acp_session_detail(
 @router.get(
     "/sessions/{session_id}/usage",
     response_model=ACPSessionUsageResponse,
-    dependencies=[Depends(require_token_scope("any", require_if_present=True, endpoint_id="acp.sessions.read"))],
+    dependencies=[Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="acp.sessions.read"))],
 )
 async def acp_session_usage(
     session_id: str,
@@ -2424,7 +2424,7 @@ async def acp_session_usage(
 
 @router.get(
     "/sessions/{session_id}/events",
-    dependencies=[Depends(require_token_scope("any", require_if_present=True, endpoint_id="acp.sessions.read"))],
+    dependencies=[Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="acp.sessions.read"))],
 )
 async def acp_session_events(
     session_id: str,
@@ -2484,7 +2484,7 @@ async def acp_session_events(
 
 @router.get(
     "/sessions/{session_id}/events/stream",
-    dependencies=[Depends(require_token_scope("any", require_if_present=True, endpoint_id="acp.sessions.read"))],
+    dependencies=[Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="acp.sessions.read"))],
 )
 async def acp_session_events_stream(
     request: Request,
@@ -2549,7 +2549,7 @@ async def acp_session_events_stream(
 
 @router.get(
     "/sessions/{session_id}/artifacts",
-    dependencies=[Depends(require_token_scope("any", require_if_present=True, endpoint_id="acp.sessions.read"))],
+    dependencies=[Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="acp.sessions.read"))],
 )
 async def acp_session_artifacts(
     session_id: str,
@@ -2594,7 +2594,7 @@ async def acp_session_artifacts(
 
 @router.get(
     "/sessions/{session_id}/diagnostics",
-    dependencies=[Depends(require_token_scope("any", require_if_present=True, endpoint_id="acp.sessions.read"))],
+    dependencies=[Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="acp.sessions.read"))],
 )
 async def acp_session_diagnostics(
     session_id: str,
@@ -2626,7 +2626,7 @@ async def acp_session_diagnostics(
 
 @router.get(
     "/sessions/{session_id}/audit",
-    dependencies=[Depends(require_token_scope("any", require_if_present=True, endpoint_id="acp.sessions.read"))],
+    dependencies=[Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="acp.sessions.read"))],
 )
 async def acp_session_audit(
     session_id: str,
@@ -2652,7 +2652,7 @@ async def acp_session_audit(
 @router.post(
     "/sessions/{session_id}/fork",
     response_model=ACPSessionForkResponse,
-    dependencies=[Depends(require_token_scope("any", require_if_present=True, endpoint_id="acp.sessions.manage"))],
+    dependencies=[Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="acp.sessions.manage"))],
 )
 async def acp_session_fork(
     session_id: str,
@@ -2743,7 +2743,7 @@ async def acp_session_fork(
 @router.post(
     "/sessions/prompt-async",
     response_model=ACPAsyncPromptResponse,
-    dependencies=[Depends(require_token_scope("any", require_if_present=True, endpoint_id="acp.sessions.prompt_async"))],
+    dependencies=[Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="acp.sessions.prompt_async"))],
 )
 async def acp_prompt_async(
     body: ACPAsyncPromptRequest,
@@ -2789,7 +2789,7 @@ async def acp_prompt_async(
 @router.get(
     "/tasks/{task_id}",
     response_model=ACPTaskStatusResponse,
-    dependencies=[Depends(require_token_scope("any", require_if_present=True, endpoint_id="acp.tasks.status"))],
+    dependencies=[Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="acp.tasks.status"))],
 )
 async def acp_task_status(
     task_id: str,
@@ -2845,7 +2845,7 @@ async def acp_task_status(
 
 @router.get(
     "/runs",
-    dependencies=[Depends(require_token_scope("any", require_if_present=True, endpoint_id="acp.runs.list"))],
+    dependencies=[Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="acp.runs.list"))],
 )
 async def list_acp_runs(
     user: User = Depends(get_request_user),
@@ -2872,7 +2872,7 @@ async def list_acp_runs(
 
 @router.get(
     "/runs/aggregate",
-    dependencies=[Depends(require_token_scope("any", require_if_present=True, endpoint_id="acp.runs.aggregate"))],
+    dependencies=[Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="acp.runs.aggregate"))],
 )
 async def aggregate_acp_runs(
     user: User = Depends(get_request_user),
@@ -2940,7 +2940,7 @@ async def _ensure_checkpoint_consumer(session_id: str) -> CheckpointConsumer:
 @router.post(
     "/sessions/{session_id}/rollback",
     response_model=ACPRollbackResponse,
-    dependencies=[Depends(require_token_scope("any", require_if_present=True, endpoint_id="acp.sessions.manage"))],
+    dependencies=[Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="acp.sessions.manage"))],
 )
 async def acp_session_rollback(
     session_id: str,
@@ -3047,7 +3047,7 @@ async def acp_session_rollback(
 @router.get(
     "/sessions/{session_id}/checkpoints",
     response_model=ACPCheckpointListResponse,
-    dependencies=[Depends(require_token_scope("any", require_if_present=True, endpoint_id="acp.sessions.manage"))],
+    dependencies=[Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="acp.sessions.manage"))],
 )
 async def acp_session_checkpoints(
     session_id: str,
