@@ -539,6 +539,13 @@ def test_data_tables_router_uses_standard_permission_factory_alias() -> None:
     assert not hasattr(data_tables, "require_permissions")
 
 
+def test_chat_workflows_router_uses_standard_permission_factory_alias() -> None:
+    from tldw_Server_API.app.api.v1.endpoints import chat_workflows
+
+    assert chat_workflows.RequirePermission is auth_deps.RequirePermission
+    assert not hasattr(chat_workflows, "auth_deps")
+
+
 def test_api_key_scope_factory_alias_preserves_jwt_bypass_and_scope_checks() -> None:
     jwt_response = TestClient(_build_app(_principal(kind="user", api_key_id=None))).get(
         "/api-key-scope",
