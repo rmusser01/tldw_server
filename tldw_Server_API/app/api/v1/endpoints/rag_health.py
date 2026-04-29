@@ -11,7 +11,7 @@ from typing import Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from loguru import logger
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import require_permissions
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import RequirePermission
 from tldw_Server_API.app.core.AuthNZ.permissions import SYSTEM_LOGS
 
 # Import RAG components
@@ -194,7 +194,7 @@ async def readiness_check() -> dict[str, Any]:
 @router.get(
     "/cache/stats",
     summary="Get cache statistics",
-    dependencies=[Depends(require_permissions(SYSTEM_LOGS))],
+    dependencies=[Depends(RequirePermission(SYSTEM_LOGS))],
 )
 async def get_cache_statistics() -> dict[str, Any]:
     """
@@ -243,7 +243,7 @@ async def get_cache_statistics() -> dict[str, Any]:
 @router.post(
     "/cache/clear",
     summary="Clear cache",
-    dependencies=[Depends(require_permissions(SYSTEM_LOGS))],
+    dependencies=[Depends(RequirePermission(SYSTEM_LOGS))],
 )
 async def clear_cache() -> dict[str, str]:
     """
@@ -273,7 +273,7 @@ async def clear_cache() -> dict[str, str]:
 @router.get(
     "/cache/warm",
     summary="Get cache warming status",
-    dependencies=[Depends(require_permissions(SYSTEM_LOGS))],
+    dependencies=[Depends(RequirePermission(SYSTEM_LOGS))],
 )
 async def get_cache_warming_status() -> dict[str, Any]:
     """Get status of cache warming operations."""
@@ -305,7 +305,7 @@ async def get_cache_warming_status() -> dict[str, Any]:
 @router.get(
     "/metrics/summary",
     summary="Get metrics summary",
-    dependencies=[Depends(require_permissions(SYSTEM_LOGS))],
+    dependencies=[Depends(RequirePermission(SYSTEM_LOGS))],
 )
 async def get_metrics_summary() -> dict[str, Any]:
     """Get summary of RAG pipeline metrics."""
@@ -344,7 +344,7 @@ async def get_metrics_summary() -> dict[str, Any]:
 @router.get(
     "/costs/summary",
     summary="Get cost tracking summary",
-    dependencies=[Depends(require_permissions(SYSTEM_LOGS))],
+    dependencies=[Depends(RequirePermission(SYSTEM_LOGS))],
 )
 async def get_cost_summary() -> dict[str, Any]:
     """Get summary of LLM API costs."""
@@ -390,7 +390,7 @@ async def get_cost_summary() -> dict[str, Any]:
 @router.get(
     "/batch/jobs",
     summary="Get batch job statuses",
-    dependencies=[Depends(require_permissions(SYSTEM_LOGS))],
+    dependencies=[Depends(RequirePermission(SYSTEM_LOGS))],
 )
 async def get_batch_jobs() -> dict[str, Any]:
     """Get status of all batch processing jobs."""
@@ -429,7 +429,7 @@ async def get_batch_jobs() -> dict[str, Any]:
 @router.post(
     "/quality-gate",
     summary="Run quality gate evaluation",
-    dependencies=[Depends(require_permissions(SYSTEM_LOGS))],
+    dependencies=[Depends(RequirePermission(SYSTEM_LOGS))],
 )
 async def quality_gate_endpoint(
     metrics: dict[str, float],
@@ -463,7 +463,7 @@ async def quality_gate_endpoint(
 @router.post(
     "/baseline/save",
     summary="Save metric baseline",
-    dependencies=[Depends(require_permissions(SYSTEM_LOGS))],
+    dependencies=[Depends(RequirePermission(SYSTEM_LOGS))],
 )
 async def save_baseline_endpoint(
     metrics: dict[str, float],
@@ -506,7 +506,7 @@ async def save_baseline_endpoint(
 @router.get(
     "/regression/check",
     summary="Check for metric regression",
-    dependencies=[Depends(require_permissions(SYSTEM_LOGS))],
+    dependencies=[Depends(RequirePermission(SYSTEM_LOGS))],
 )
 async def check_regression_endpoint(
     baseline_id: str = "latest",
@@ -555,7 +555,7 @@ async def check_regression_endpoint(
 @router.post(
     "/regression/check",
     summary="Check for metric regression with current values",
-    dependencies=[Depends(require_permissions(SYSTEM_LOGS))],
+    dependencies=[Depends(RequirePermission(SYSTEM_LOGS))],
 )
 async def check_regression_post_endpoint(
     current_metrics: dict[str, float],
