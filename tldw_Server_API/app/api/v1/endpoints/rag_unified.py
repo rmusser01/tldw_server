@@ -23,7 +23,7 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     check_rate_limit,
     get_auth_principal,
     rbac_rate_limit,
-    require_token_scope,
+    TokenScopeGuard,
 )
 from tldw_Server_API.app.api.v1.API_Deps.billing_deps import require_within_limit
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
@@ -1014,7 +1014,7 @@ async def list_vlm_backends():
         Depends(check_rate_limit),
         Depends(rbac_rate_limit("rag.search")),
         Depends(RequirePermission(MEDIA_READ)),
-        Depends(require_token_scope("any", require_if_present=True, endpoint_id="rag.search", count_as="call")),
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="rag.search", count_as="call")),
         Depends(require_within_limit(LimitCategory.RAG_QUERIES_DAY, 1)),
     ]
 )

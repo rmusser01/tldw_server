@@ -12,7 +12,7 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     check_rate_limit,
     get_request_user,
     rbac_rate_limit,
-    require_token_scope,
+    TokenScopeGuard,
 )
 from tldw_Server_API.app.api.v1.API_Deps.billing_deps import require_within_limit
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
@@ -99,7 +99,7 @@ def _connector_acl_allows(current_user: User, target_id: str) -> bool:
         Depends(check_rate_limit),
         Depends(rbac_rate_limit("text2sql.query")),
         Depends(RequirePermission(SQL_READ)),
-        Depends(require_token_scope("any", require_if_present=True, endpoint_id="text2sql.query", count_as="call")),
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="text2sql.query", count_as="call")),
         Depends(require_within_limit(LimitCategory.RAG_QUERIES_DAY, 1)),
     ],
 )

@@ -408,7 +408,9 @@ def test_text2sql_router_uses_standard_permission_factory_alias() -> None:
     from tldw_Server_API.app.api.v1.endpoints import text2sql
 
     assert text2sql.RequirePermission is auth_deps.RequirePermission
+    assert text2sql.TokenScopeGuard is auth_deps.TokenScopeGuard
     assert not hasattr(text2sql, "require_permissions")
+    assert not hasattr(text2sql, "require_token_scope")
 
 
 def test_rag_health_router_uses_standard_permission_factory_alias() -> None:
@@ -471,7 +473,9 @@ def test_scheduler_workflows_router_uses_standard_permission_factory_alias() -> 
     from tldw_Server_API.app.api.v1.endpoints import scheduler_workflows
 
     assert scheduler_workflows.RequirePermission is auth_deps.RequirePermission
+    assert scheduler_workflows.TokenScopeGuard is auth_deps.TokenScopeGuard
     assert not hasattr(scheduler_workflows, "require_permissions")
+    assert not hasattr(scheduler_workflows, "require_token_scope")
 
 
 def test_tools_router_uses_standard_permission_factory_alias() -> None:
@@ -506,7 +510,9 @@ def test_notes_graph_router_uses_standard_permission_factory_alias() -> None:
     from tldw_Server_API.app.api.v1.endpoints import notes_graph
 
     assert notes_graph.RequirePermission is auth_deps.RequirePermission
+    assert notes_graph.TokenScopeGuard is auth_deps.TokenScopeGuard
     assert not hasattr(notes_graph, "require_permissions")
+    assert not hasattr(notes_graph, "require_token_scope")
 
 
 def test_chat_router_uses_standard_permission_factory_alias() -> None:
@@ -538,7 +544,9 @@ def test_rag_unified_router_uses_standard_permission_factory_alias() -> None:
     from tldw_Server_API.app.api.v1.endpoints import rag_unified
 
     assert rag_unified.RequirePermission is auth_deps.RequirePermission
+    assert rag_unified.TokenScopeGuard is auth_deps.TokenScopeGuard
     assert not hasattr(rag_unified, "require_permissions")
+    assert not hasattr(rag_unified, "require_token_scope")
 
 
 def test_data_tables_router_uses_standard_permission_factory_alias() -> None:
