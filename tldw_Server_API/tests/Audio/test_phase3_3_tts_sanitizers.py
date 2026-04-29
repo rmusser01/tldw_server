@@ -9,9 +9,11 @@ from starlette import status
 import pytest
 
 from tldw_Server_API.app.core.Audio import tts_service
+from tldw_Server_API.app.core.TTS.adapters.base import AudioFormat, TTSRequest
 from tldw_Server_API.app.core.TTS.tts_exceptions import (
     TTSError,
     TTSAuthenticationError,
+    TTSGenerationError,
     TTSInvalidVoiceReferenceError,
     TTSModelLoadError,
     TTSModelNotFoundError,
@@ -25,6 +27,7 @@ from tldw_Server_API.app.core.TTS.tts_exceptions import (
     TTSTimeoutError,
     TTSValidationError,
 )
+from tldw_Server_API.app.core.TTS.tts_service_v2 import TTSServiceV2
 
 
 pytestmark = pytest.mark.unit
@@ -182,3 +185,35 @@ def test_speech_request_validation_log_does_not_leak_raw_exception(
     }
     rendered = "\n".join(records)
     _assert_safe_log(rendered)
+
+
+@pytest.mark.asyncio
+async def test_tts_v2_fallback_generation_error_does_not_leak_raw_exception():
+    class _Factory:
+        registry = type(
+            "_Registry",
+            (),
+            {"config": {"performance": {"max_concurrent_generations": 1, "stream_errors_as_audio": False}}},
+        )()
+
+    class _FailingFallbackAdapter:
+        provider_name = "fallback_provider"
+
+        async def generate(self, request: TTSRequest):
+            raise RuntimeError(_LEAK)
+
+    service = TTSServiceV2(factory=_Factory())
+    request = TTSRequest(
+        text="hello",
+        voice="alloy",
+        format=AudioFormat.MP3,
+        stream=False,
+    )
+
+    with pytest.raises(TTSGenerationError) as raised:
+        async for _chunk in service._generate_with_adapter(_FailingFallbackAdapter(), request):
+            pass
+
+    assert "All providers failed" in str(raised.value)
+    assert "backend exploded" not in str(raised.value)
+    assert "/tmp/secret-token" not in str(raised.value)
