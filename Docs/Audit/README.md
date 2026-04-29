@@ -212,6 +212,16 @@ python -m tldw_Server_API.app.core.Audit.audit_shared_migration \
 
 Discovery scans `USER_DB_BASE_DIR/*/audit/unified_audit.db`, plus `USER_DB_BASE_DIR/<AUDIT_ETL_USER_SUBPATH>/*/audit/unified_audit.db` when configured, and `Databases/unified_audit.db` if present. The migration is idempotent (deduped by `event_id`), preserves timestamps and metadata, and resumes using per-source checkpoints stored in the shared DB. Locked/corrupt sources are skipped with warnings and reported in the summary logs.
 
+## Legacy Compatibility And Deprecation
+
+Unified audit is the authoritative audit persistence layer for new durable audit work. Domain-specific audit tables may remain temporarily as compatibility projections, historical import sources, or best-effort mirrors, but new code should not treat them as co-primary stores once the same domain has a unified audit contract.
+
+`api_key_audit_log` is deprecated as an authoritative source for API-key management history. API-key create, virtual-create, rotate, and revoke operations now use unified audit as the mandatory source of truth; the legacy table is only a best-effort compatibility mirror while admin reads and historical imports are migrated. New API-key management code must not require a successful `api_key_audit_log` write after the unified audit event has persisted.
+
+`share_audit_log` is also a compatibility source/projection for Sharing audit history. Normal Sharing audit persistence should go through the Sharing unified-audit adapter, with direct legacy writes limited to import, migration, or narrowly scoped compatibility tests.
+
+Logger-only records, including records emitted with `extra={"audit": True}`, are diagnostic logs unless they are also backed by a `UnifiedAuditService` event. Security-relevant logger-only paths should be migrated to unified audit or renamed so they are not mistaken for durable audit evidence.
+
 ## Operational Notes
 
 - Deterministic ordering with `timestamp DESC, event_id DESC` supports paginated UIs.
