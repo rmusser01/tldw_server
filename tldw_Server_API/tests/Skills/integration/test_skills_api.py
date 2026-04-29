@@ -124,6 +124,32 @@ def principal_client(tmp_path, monkeypatch):
         chacha_db.close_connection()
 
 
+@pytest.fixture()
+def auth_path_client(tmp_path, monkeypatch):
+    """Provide a TestClient that leaves get_auth_principal on the real auth path."""
+    from tldw_Server_API.app.main import app as fastapi_app
+
+    user_base = tmp_path / "user_databases" / str(TEST_USER_ID)
+    user_base.mkdir(parents=True)
+    monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path / "user_databases"))
+
+    db_path = user_base / "ChaChaNotes.db"
+    chacha_db = CharactersRAGDB(db_path=db_path, client_id="auth_path_test_client")
+
+    def override_chacha_db():
+        return chacha_db
+
+    monkeypatch.setattr(DatabasePaths, "get_user_base_directory", staticmethod(lambda uid: user_base))
+    fastapi_app.dependency_overrides[get_chacha_db_for_user] = override_chacha_db
+
+    try:
+        with TestClient(fastapi_app) as c:
+            yield c
+    finally:
+        fastapi_app.dependency_overrides.clear()
+        chacha_db.close_connection()
+
+
 SAMPLE_SKILL = """---
 name: test-skill
 description: A test skill for API integration
@@ -157,6 +183,105 @@ class TestListSkills:
 
     def test_list_skills_uses_current_principal_alias(self, principal_client):
         r = principal_client.get(f"{SKILLS_PREFIX}/")
+        assert r.status_code == 200, r.text
+        data = r.json()
+        assert data["skills"] == []
+        assert data["total"] == 0
+
+    def test_list_skills_current_principal_accepts_single_user_api_key(
+        self,
+        auth_path_client,
+        monkeypatch,
+    ):
+        from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
+
+        with monkeypatch.context() as env:
+            env.setenv("AUTH_MODE", "single_user")
+            env.setenv("SINGLE_USER_API_KEY", "phase34-skills-single-user-key")
+            reset_settings()
+
+            r = auth_path_client.get(
+                f"{SKILLS_PREFIX}/",
+                headers={"X-API-KEY": "phase34-skills-single-user-key"},
+            )
+
+        reset_settings()
+
+        assert r.status_code == 200, r.text
+        data = r.json()
+        assert data["skills"] == []
+        assert data["total"] == 0
+
+    def test_list_skills_current_principal_accepts_jwt(
+        self,
+        auth_path_client,
+        monkeypatch,
+    ):
+        from tldw_Server_API.app.core.AuthNZ import User_DB_Handling as udh
+        from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
+
+        async def fake_verify_jwt_and_fetch_user(request: Request, token: str) -> User:
+            assert token == "jwt.header.signature"
+            request.state.user_id = TEST_USER_ID
+            request.state.org_ids = []
+            request.state.team_ids = []
+            return User(
+                id=TEST_USER_ID,
+                username="skills-jwt-user",
+                roles=["user"],
+                permissions=["skills.read"],
+            )
+
+        monkeypatch.setattr(udh, "verify_jwt_and_fetch_user", fake_verify_jwt_and_fetch_user)
+
+        with monkeypatch.context() as env:
+            env.setenv("AUTH_MODE", "multi_user")
+            reset_settings()
+            r = auth_path_client.get(
+                f"{SKILLS_PREFIX}/",
+                headers={"Authorization": "Bearer jwt.header.signature"},
+            )
+
+        reset_settings()
+
+        assert r.status_code == 200, r.text
+        data = r.json()
+        assert data["skills"] == []
+        assert data["total"] == 0
+
+    def test_list_skills_current_principal_accepts_api_key(
+        self,
+        auth_path_client,
+        monkeypatch,
+    ):
+        from tldw_Server_API.app.core.AuthNZ import User_DB_Handling as udh
+        from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
+
+        async def fake_authenticate_api_key_user(request: Request, api_key: str) -> User:
+            assert api_key == "phase34-skills-api-key"
+            request.state.user_id = TEST_USER_ID
+            request.state.api_key_id = 321
+            request.state.org_ids = []
+            request.state.team_ids = []
+            return User(
+                id=TEST_USER_ID,
+                username="skills-api-key-user",
+                roles=["automation"],
+                permissions=["skills.read"],
+            )
+
+        monkeypatch.setattr(udh, "authenticate_api_key_user", fake_authenticate_api_key_user)
+
+        with monkeypatch.context() as env:
+            env.setenv("AUTH_MODE", "multi_user")
+            reset_settings()
+            r = auth_path_client.get(
+                f"{SKILLS_PREFIX}/",
+                headers={"X-API-KEY": "phase34-skills-api-key"},
+            )
+
+        reset_settings()
+
         assert r.status_code == 200, r.text
         data = r.json()
         assert data["skills"] == []
