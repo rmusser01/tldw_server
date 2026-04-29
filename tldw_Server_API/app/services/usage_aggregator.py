@@ -60,7 +60,7 @@ async def _aggregator_loop(stop_event: asyncio.Event):
             except asyncio.TimeoutError:
                 continue
     except _USAGE_AGGREGATOR_NONCRITICAL_EXCEPTIONS as e:
-        logger.warning(f"Usage aggregator loop exited: {e}")
+        logger.bind(error_type=type(e).__name__).warning("Usage aggregator loop exited")
 
 
 async def start_usage_aggregator() -> asyncio.Task | None:

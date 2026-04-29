@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import asyncio
 import os
 from datetime import datetime, timezone
 import uuid
 import pytest
 
-from tldw_Server_API.app.services.llm_usage_aggregator import aggregate_llm_usage_daily
+from tldw_Server_API.app.services.llm_usage_aggregator import (
+    _aggregator_loop,
+    aggregate_llm_usage_daily,
+)
 
 
 async def _ensure_llm_tables(pool):
@@ -184,3 +188,35 @@ async def test_aggregate_llm_usage_daily_failure_log_is_sanitized(monkeypatch):
     assert "RuntimeError" in rendered
     assert "llm usage backend exploded" not in rendered
     assert "/tmp/llm-usage-secret-token" not in rendered
+
+
+@pytest.mark.asyncio
+async def test_aggregator_loop_outer_failure_log_is_sanitized(monkeypatch):
+    import tldw_Server_API.app.services.llm_usage_aggregator as llm_usage_aggregator
+
+    class _Settings:
+        LLM_USAGE_AGGREGATOR_ENABLED = True
+        LLM_USAGE_AGGREGATOR_INTERVAL_MINUTES = 60
+
+    async def _explode():
+        raise RuntimeError("loop exit leaked /tmp/llm-loop-secret")
+
+    records: list[str] = []
+    sink_id = llm_usage_aggregator.logger.add(
+        lambda message: records.append(str(message)),
+        level="INFO",
+        format="{message} {extra}",
+    )
+    monkeypatch.setattr(llm_usage_aggregator, "get_settings", lambda: _Settings())
+    monkeypatch.setattr(llm_usage_aggregator, "aggregate_llm_usage_daily", _explode)
+
+    try:
+        await _aggregator_loop(asyncio.Event())
+    finally:
+        llm_usage_aggregator.logger.remove(sink_id)
+
+    rendered = "\n".join(records)
+    assert "LLM usage aggregator loop exited" in rendered
+    assert "RuntimeError" in rendered
+    assert "loop exit leaked" not in rendered
+    assert "/tmp/llm-loop-secret" not in rendered

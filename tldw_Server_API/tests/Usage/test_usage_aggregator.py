@@ -205,3 +205,35 @@ async def test_aggregate_usage_daily_failure_log_is_sanitized(monkeypatch):
     assert "RuntimeError" in rendered
     assert "usage backend exploded" not in rendered
     assert "/tmp/usage-secret-token" not in rendered
+
+
+@pytest.mark.asyncio
+async def test_aggregator_loop_outer_exception_log_is_sanitized(monkeypatch):
+    import tldw_Server_API.app.services.usage_aggregator as usage_aggregator
+
+    class _Settings:
+        USAGE_LOG_ENABLED = True
+        USAGE_AGGREGATOR_INTERVAL_MINUTES = 60
+
+    async def _explode():
+        raise RuntimeError("loop exploded at /tmp/usage-secret-token")
+
+    records: list[str] = []
+    sink_id = usage_aggregator.logger.add(
+        lambda message: records.append(str(message)),
+        level="DEBUG",
+        format="{message} {extra}",
+    )
+    monkeypatch.setattr(usage_aggregator, "get_settings", lambda: _Settings())
+    monkeypatch.setattr(usage_aggregator, "aggregate_usage_daily", _explode)
+
+    try:
+        await usage_aggregator._aggregator_loop(asyncio.Event())
+    finally:
+        usage_aggregator.logger.remove(sink_id)
+
+    rendered = "\n".join(records)
+    assert "Usage aggregator loop exited" in rendered
+    assert "RuntimeError" in rendered
+    assert "loop exploded" not in rendered
+    assert "/tmp/usage-secret-token" not in rendered
