@@ -27,7 +27,7 @@ from tldw_Server_API.app.api.v1.schemas.outputs_templates_schemas import (
     TemplatePreviewResponse,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.api import search_media
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, User
 from tldw_Server_API.app.services.outputs_service import (
     build_items_context_from_content_items,
     render_output_template,

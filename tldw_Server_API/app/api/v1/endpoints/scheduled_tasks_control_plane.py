@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Path, status
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, rbac_rate_limit, RequirePermission, User
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import RequirePermission, rbac_rate_limit
 from tldw_Server_API.app.api.v1.schemas.reminders_schemas import (
     ReminderTaskCreateRequest,
     ReminderTaskUpdateRequest,
@@ -12,7 +12,6 @@ from tldw_Server_API.app.api.v1.schemas.scheduled_tasks_control_plane_schemas im
     ScheduledTaskDeleteResponse,
     ScheduledTaskListResponse,
 )
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.AuthNZ.permissions import TASKS_CONTROL, TASKS_READ
 from tldw_Server_API.app.services.scheduled_tasks_control_plane_service import ScheduledTasksControlPlaneService
 

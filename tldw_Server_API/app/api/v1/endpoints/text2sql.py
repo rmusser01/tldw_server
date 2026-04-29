@@ -6,14 +6,8 @@ import asyncio
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, get_request_user, rbac_rate_limit, RequirePermission, TokenScopeGuard, User
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
-    RequirePermission,
-    check_rate_limit,
-    get_request_user,
-    rbac_rate_limit,
-    TokenScopeGuard,
-)
 from tldw_Server_API.app.api.v1.API_Deps.billing_deps import require_within_limit
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.api.v1.schemas.text2sql_schemas import (
@@ -24,7 +18,6 @@ from tldw_Server_API.app.core.AuthNZ.permissions import (
     SQL_READ,
     SQL_TARGET_ANY,
 )
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
 from tldw_Server_API.app.core.Billing.enforcement import LimitCategory
 from tldw_Server_API.app.core.Text2SQL.executor import SqliteReadOnlyExecutor
 from tldw_Server_API.app.core.Text2SQL.service import Text2SQLCoreService

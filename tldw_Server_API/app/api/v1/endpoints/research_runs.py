@@ -17,7 +17,7 @@ from tldw_Server_API.app.api.v1.schemas.research_runs_schemas import (
     ResearchRunListItemResponse,
     ResearchRunResponse,
 )
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, User
 from tldw_Server_API.app.core.Research.streaming import (
     diff_stream_events,
     initial_stream_events,

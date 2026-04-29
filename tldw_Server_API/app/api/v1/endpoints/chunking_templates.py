@@ -25,7 +25,7 @@ from tldw_Server_API.app.api.v1.schemas.chunking_templates_schemas import (
     TemplateValidationError,
     TemplateValidationResponse,
 )
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, User
 from tldw_Server_API.app.core.Chunking.chunker import Chunker
 from tldw_Server_API.app.core.Chunking.regex_safety import check_pattern as _rx_check
 from tldw_Server_API.app.core.Chunking.regex_safety import compile_flags as _rx_flags

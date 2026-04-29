@@ -24,7 +24,7 @@ from tldw_Server_API.app.api.v1.schemas.reading_highlights_schemas import (
     HighlightCreateRequest,
     HighlightUpdateRequest,
 )
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, User
 from tldw_Server_API.app.core.Collections.utils import (
     build_highlight_context,
     find_highlight_span,

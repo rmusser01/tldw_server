@@ -22,7 +22,7 @@ from tldw_Server_API.app.api.v1.schemas.evaluation_schemas_unified import (
     WebhookTestRequest,
     WebhookTestResponse,
 )
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User
 from tldw_Server_API.app.core.Evaluations.unified_evaluation_service import (
     get_unified_evaluation_service_for_user,
 )

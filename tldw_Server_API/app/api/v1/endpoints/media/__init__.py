@@ -54,7 +54,7 @@ from tldw_Server_API.app.api.v1.API_Deps.personalization_deps import get_usage_e
 from tldw_Server_API.app.api.v1.API_Deps.validations_deps import (
     file_validator_instance,
 )
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user
 TemplateClassifier = _optional_import_attr(
     "tldw_Server_API.app.core.Chunking.templates",
     "TemplateClassifier",

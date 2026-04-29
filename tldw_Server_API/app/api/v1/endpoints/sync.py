@@ -30,7 +30,7 @@ from tldw_Server_API.app.api.v1.schemas.sync_server_models import (
     SyncLogEntry,
 )
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, User
 
 #
 # DB Mgmt

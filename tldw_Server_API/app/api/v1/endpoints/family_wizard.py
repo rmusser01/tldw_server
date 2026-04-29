@@ -6,8 +6,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_registration_service_dep, get_request_user, User
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_registration_service_dep
 from tldw_Server_API.app.api.v1.API_Deps.guardian_deps import (
     get_guardian_db_for_user,
     get_guardian_db_for_user_id,
@@ -36,7 +36,6 @@ from tldw_Server_API.app.api.v1.schemas.family_wizard_schemas import (
     RelationshipDraftResponse,
 )
 from tldw_Server_API.app.api.v1.schemas.guardian_schemas import DetailResponse
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.DB_Management.Guardian_DB import GuardianDB
 from tldw_Server_API.app.core.Moderation.family_wizard_materializer import (
     materialize_pending_plans_for_relationship,

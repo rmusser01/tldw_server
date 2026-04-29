@@ -17,7 +17,7 @@ from tldw_Server_API.app.api.v1.schemas.collections_feeds_schemas import (
     CollectionsFeedsListResponse,
     CollectionsFeedUpdateRequest,
 )
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, User
 from tldw_Server_API.app.core.DB_Management.Watchlists_DB import WatchlistsDatabase
 from tldw_Server_API.app.core.Personalization import (
     record_watchlist_source_created,

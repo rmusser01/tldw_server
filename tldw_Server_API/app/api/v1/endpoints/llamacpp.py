@@ -9,9 +9,8 @@ from typing import Any, Optional
 # Thid-party Libraries
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, get_request_user, RequireRole, User
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import RequireRole, check_rate_limit
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.Local_LLM.LlamaCpp_Handler import LlamaCppHandler
 
 #

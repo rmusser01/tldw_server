@@ -2,12 +2,8 @@ from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import Response
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import AdminPrincipal, get_auth_principal, get_request_user, RequirePermission, User
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
-    AdminPrincipal,
-    RequirePermission,
-    get_auth_principal,
-)
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.api.v1.schemas.claims_schemas import (
     ClaimNotificationResponse,
@@ -40,7 +36,6 @@ from tldw_Server_API.app.api.v1.schemas.claims_schemas import (
 )
 from tldw_Server_API.app.core.AuthNZ.permissions import SYSTEM_CONFIGURE
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.Claims_Extraction import claims_service
 from tldw_Server_API.app.core.Claims_Extraction.claims_rebuild_service import get_claims_rebuild_service
 

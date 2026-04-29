@@ -16,7 +16,7 @@ from tldw_Server_API.app.api.v1.schemas.items_schemas import (
     ItemsListResponse,
 )
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, User
 from tldw_Server_API.app.core.DB_Management.Collections_DB import ContentItemRow
 from tldw_Server_API.app.core.DB_Management.media_db.api import search_media
 from tldw_Server_API.app.core.DB_Management.media_db.errors import (

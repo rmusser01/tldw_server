@@ -9,8 +9,8 @@ from urllib.parse import parse_qs, urlencode
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse
 from loguru import logger
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, RequireRole, User
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import RequireRole
 from tldw_Server_API.app.api.v1.endpoints.slack_oauth_admin import (
     slack_admin_delete_installation_impl,
     slack_admin_get_policy_impl,
@@ -63,7 +63,6 @@ from tldw_Server_API.app.core.AuthNZ.repos import (
     get_workspace_provider_installations_repo as _get_workspace_provider_installations_repo_impl,
 )
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter
 
 router = APIRouter(prefix="/slack", tags=["slack"])

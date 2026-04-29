@@ -19,8 +19,7 @@ from tldw_Server_API.app.api.v1.schemas.ingestion_sources import (
     IngestionSourceResponse,
     IngestionSourceSyncTriggerResponse,
 )
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, get_request_user, User
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
