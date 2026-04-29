@@ -70,13 +70,21 @@ async def simulate_rate_limit(*, db: Any, user_id: int, endpoint: str) -> dict[s
     try:
         user_limits = await fetch_user_rate_limits(db=db, user_id=user_id)
     except _RATE_LIMITS_SERVICE_NONCRITICAL_EXCEPTIONS as exc:
-        logger.warning("simulate-rate-limit: failed to fetch user limits for {}: {}", user_id, exc)
+        logger.warning(
+            "simulate-rate-limit: failed to fetch user limits for {} exception_type={}",
+            user_id,
+            type(exc).__name__,
+        )
 
     role_limits: list[dict[str, Any]] = []
     try:
         role_limits = await fetch_role_rate_limits(db=db, user_id=user_id)
     except _RATE_LIMITS_SERVICE_NONCRITICAL_EXCEPTIONS as exc:
-        logger.warning("simulate-rate-limit: failed to fetch role limits for {}: {}", user_id, exc)
+        logger.warning(
+            "simulate-rate-limit: failed to fetch role limits for {} exception_type={}",
+            user_id,
+            type(exc).__name__,
+        )
 
     matching_user = [limit_row for limit_row in user_limits if _matches_endpoint(limit_row, endpoint)]
     matching_role = [limit_row for limit_row in role_limits if _matches_endpoint(limit_row, endpoint)]

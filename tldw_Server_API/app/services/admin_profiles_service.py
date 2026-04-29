@@ -605,7 +605,9 @@ async def list_user_profiles(
                     timeout_ms,
                 )
     except Exception as telemetry_error:
-        logger.debug("Bulk profile update telemetry failed; continuing", exc_info=telemetry_error)
+        logger.bind(error_type=type(telemetry_error).__name__).debug(
+            "Bulk profile update telemetry failed; continuing"
+        )
 
     audit_metadata = {
         "filters": {
@@ -704,7 +706,10 @@ async def get_user_profile(
     except HTTPException:
         raise
     except Exception as exc:
-        logger.error(f"Failed to build profile for user {user_id}: {exc}")
+        logger.bind(error_type=type(exc).__name__).error(
+            "Failed to build profile for user {}",
+            user_id,
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to retrieve user profile",
@@ -976,7 +981,10 @@ async def bulk_update_user_profiles(
                 )
             )
         except Exception as exc:
-            logger.error("Bulk profile update failed for user {}: {}", user_id, exc)
+            logger.bind(error_type=type(exc).__name__).error(
+                "Bulk profile update failed for user {}",
+                user_id,
+            )
             failed_count += 1
             results.append(
                 UserProfileBulkUpdateUserResult(
@@ -994,7 +1002,9 @@ async def bulk_update_user_profiles(
                 labels={"dry_run": str(payload.dry_run).lower()},
             )
     except Exception as metrics_error:
-        logger.debug("Bulk profile update metrics emission failed; continuing", exc_info=metrics_error)
+        logger.bind(error_type=type(metrics_error).__name__).debug(
+            "Bulk profile update metrics emission failed; continuing"
+        )
 
     response = UserProfileBulkUpdateResponse(
         total_targets=total_targets,

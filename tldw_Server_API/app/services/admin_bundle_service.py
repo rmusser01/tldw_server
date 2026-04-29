@@ -195,7 +195,9 @@ def _get_app_version() -> str | None:
         from importlib.metadata import version
         return version("tldw_Server_API")
     except Exception as metadata_error:
-        logger.debug("Failed to resolve app version from package metadata", exc_info=metadata_error)
+        logger.bind(error_type=type(metadata_error).__name__).debug(
+            "Failed to resolve app version from package metadata"
+        )
     try:
         import tomllib
         pyproject = os.path.join(
@@ -207,7 +209,9 @@ def _get_app_version() -> str | None:
                 data = tomllib.load(f)
             return data.get("project", {}).get("version")
     except Exception as pyproject_error:
-        logger.debug("Failed to resolve app version from pyproject", exc_info=pyproject_error)
+        logger.bind(error_type=type(pyproject_error).__name__).debug(
+            "Failed to resolve app version from pyproject"
+        )
     return None
 
 
@@ -295,7 +299,9 @@ def _read_manifest_cached(zip_path: str) -> dict[str, Any]:
             with open(sc, encoding="utf-8") as f:
                 return json.loads(f.read())
         except Exception as sidecar_error:
-            logger.debug("Failed to read bundle sidecar manifest; falling back to ZIP", exc_info=sidecar_error)
+            logger.bind(error_type=type(sidecar_error).__name__).debug(
+                "Failed to read bundle sidecar manifest; falling back to ZIP"
+            )
     return _read_manifest_from_zip(zip_path)
 
 
