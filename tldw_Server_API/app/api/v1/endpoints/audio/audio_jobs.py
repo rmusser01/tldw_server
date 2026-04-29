@@ -24,9 +24,9 @@ import contextlib
 from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    RequirePermission,
+    RequireRole,
     get_auth_principal,
-    require_permissions,
-    require_roles,
 )
 from tldw_Server_API.app.core.AuthNZ.permissions import SYSTEM_MAINTENANCE
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
@@ -58,8 +58,8 @@ _job_manager_lock = threading.Lock()
 _ADMIN_CLAIM_PERMISSIONS = frozenset({"*", "system.configure"})
 
 _ADMIN_DEPS = [
-    Depends(require_roles("admin")),
-    Depends(require_permissions(SYSTEM_MAINTENANCE)),
+    Depends(RequireRole("admin")),
+    Depends(RequirePermission(SYSTEM_MAINTENANCE)),
 ]
 
 _AUDIO_JOBS_NONCRITICAL_EXCEPTIONS = (

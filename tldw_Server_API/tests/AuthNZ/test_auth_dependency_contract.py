@@ -327,6 +327,15 @@ def test_claims_router_uses_standard_admin_principal_alias() -> None:
     assert not hasattr(claims, "require_permissions")
 
 
+def test_audio_jobs_router_uses_standard_admin_dependency_aliases() -> None:
+    from tldw_Server_API.app.api.v1.endpoints.audio import audio_jobs
+
+    assert audio_jobs.RequireRole is auth_deps.RequireRole
+    assert audio_jobs.RequirePermission is auth_deps.RequirePermission
+    assert not hasattr(audio_jobs, "require_roles")
+    assert not hasattr(audio_jobs, "require_permissions")
+
+
 def test_api_key_scope_factory_alias_preserves_jwt_bypass_and_scope_checks() -> None:
     jwt_response = TestClient(_build_app(_principal(kind="user", api_key_id=None))).get(
         "/api-key-scope",
