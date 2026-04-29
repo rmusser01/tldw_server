@@ -63,6 +63,11 @@ _WEBSEARCH_RUNTIME_EXCEPTIONS = (
 )
 
 
+def _set_processing_error(output_dict: dict[str, Any], message: str) -> None:
+    output_dict["processing_error"] = message
+    logging.error(message)
+
+
 def _websearch_browser_headers(
         *,
         accept_lang: str = "en-US,en;q=0.5",
@@ -1189,8 +1194,11 @@ def process_web_search_results(search_results: dict, search_engine: str) -> dict
             raise ValueError(f"Error: Invalid Search Engine Name {search_engine}")
 
     except _WEBSEARCH_PARSE_EXCEPTIONS as e:
-        web_search_results_dict["processing_error"] = f"Error processing search results: {str(e)}"
-        logging.error(f"Error in process_web_search_results: {str(e)}")
+        error_text = str(e)
+        if error_text.startswith("Error: Invalid Search Engine Name "):
+            _set_processing_error(web_search_results_dict, error_text)
+        else:
+            _set_processing_error(web_search_results_dict, "Error processing search results")
 
     return web_search_results_dict
 
@@ -1350,9 +1358,8 @@ def parse_bing_results(raw_results: dict, output_dict: dict) -> None:
                 for item in raw_results["relatedSearches"].get("value", [])
             ]
 
-    except _WEBSEARCH_PARSE_EXCEPTIONS as e:
-        logging.error(f"Error processing Bing results: {str(e)}")
-        output_dict["processing_error"] = f"Error processing Bing results: {str(e)}"
+    except _WEBSEARCH_PARSE_EXCEPTIONS:
+        _set_processing_error(output_dict, "Error processing Bing results")
 
 
 ######################### Brave Search #########################
@@ -1476,9 +1483,8 @@ def parse_brave_results(raw_results: dict, output_dict: dict) -> None:
         if "mixed" in raw_results:
             output_dict["family_friendly"] = raw_results.get("family_friendly", True)
 
-    except _WEBSEARCH_PARSE_EXCEPTIONS as e:
-        logging.error(f"Error processing Brave results: {str(e)}")
-        output_dict["processing_error"] = f"Error processing Brave results: {str(e)}"
+    except _WEBSEARCH_PARSE_EXCEPTIONS:
+        _set_processing_error(output_dict, "Error processing Brave results")
 
 
 ######################### DuckDuckGo Search #########################
@@ -1621,9 +1627,8 @@ def parse_duckduckgo_results(raw_results: dict, output_dict: dict) -> None:
         # Update total results count
         output_dict["total_results_found"] = len(output_dict["results"])
 
-    except _WEBSEARCH_PARSE_EXCEPTIONS as e:
-        logging.error(f"Error processing DuckDuckGo results: {str(e)}")
-        output_dict["processing_error"] = f"Error processing DuckDuckGo results: {str(e)}"
+    except _WEBSEARCH_PARSE_EXCEPTIONS:
+        _set_processing_error(output_dict, "Error processing DuckDuckGo results")
 
 
 def extract_domain(url: str) -> str:
@@ -1868,9 +1873,8 @@ def parse_google_results(raw_results: dict, output_dict: dict) -> None:
             .get("startIndex", 1)
         }
 
-    except _WEBSEARCH_PARSE_EXCEPTIONS as e:
-        logging.error(f"Error processing Google results: {str(e)}")
-        output_dict["processing_error"] = f"Error processing Google results: {str(e)}"
+    except _WEBSEARCH_PARSE_EXCEPTIONS:
+        _set_processing_error(output_dict, "Error processing Google results")
 
 
 
@@ -1954,8 +1958,8 @@ def parse_kagi_results(raw_results: dict, output_dict: dict) -> None:
                 if item.get("t") == 0
             ])
 
-    except _WEBSEARCH_PARSE_EXCEPTIONS as e:
-        output_dict["processing_error"] = f"Error processing Kagi results: {str(e)}"
+    except _WEBSEARCH_PARSE_EXCEPTIONS:
+        _set_processing_error(output_dict, "Error processing Kagi results")
 
 
 
