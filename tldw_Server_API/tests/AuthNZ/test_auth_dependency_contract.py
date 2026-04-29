@@ -494,6 +494,13 @@ def test_media_leaf_routers_use_standard_permission_factory_alias(module_name: s
     assert not hasattr(module, "require_permissions")
 
 
+def test_notes_graph_router_uses_standard_permission_factory_alias() -> None:
+    from tldw_Server_API.app.api.v1.endpoints import notes_graph
+
+    assert notes_graph.RequirePermission is auth_deps.RequirePermission
+    assert not hasattr(notes_graph, "require_permissions")
+
+
 def test_api_key_scope_factory_alias_preserves_jwt_bypass_and_scope_checks() -> None:
     jwt_response = TestClient(_build_app(_principal(kind="user", api_key_id=None))).get(
         "/api-key-scope",
