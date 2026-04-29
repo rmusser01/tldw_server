@@ -382,6 +382,13 @@ def test_setup_router_uses_standard_auth_factory_aliases() -> None:
     assert not hasattr(setup, "require_permissions")
 
 
+def test_admin_circuit_breakers_router_uses_standard_permission_factory_alias() -> None:
+    from tldw_Server_API.app.api.v1.endpoints.admin import admin_circuit_breakers
+
+    assert admin_circuit_breakers.RequirePermission is auth_deps.RequirePermission
+    assert not hasattr(admin_circuit_breakers, "require_permissions")
+
+
 def test_api_key_scope_factory_alias_preserves_jwt_bypass_and_scope_checks() -> None:
     jwt_response = TestClient(_build_app(_principal(kind="user", api_key_id=None))).get(
         "/api-key-scope",
