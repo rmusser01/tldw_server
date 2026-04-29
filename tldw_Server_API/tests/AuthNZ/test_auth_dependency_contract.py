@@ -417,6 +417,13 @@ def test_audit_router_uses_standard_permission_factory_alias() -> None:
     assert not hasattr(audit, "require_permissions")
 
 
+def test_scheduled_tasks_control_plane_router_uses_standard_permission_factory_alias() -> None:
+    from tldw_Server_API.app.api.v1.endpoints import scheduled_tasks_control_plane
+
+    assert scheduled_tasks_control_plane.RequirePermission is auth_deps.RequirePermission
+    assert not hasattr(scheduled_tasks_control_plane, "require_permissions")
+
+
 def test_api_key_scope_factory_alias_preserves_jwt_bypass_and_scope_checks() -> None:
     jwt_response = TestClient(_build_app(_principal(kind="user", api_key_id=None))).get(
         "/api-key-scope",

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Path, status
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import rbac_rate_limit, require_permissions
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import RequirePermission, rbac_rate_limit
 from tldw_Server_API.app.api.v1.schemas.reminders_schemas import (
     ReminderTaskCreateRequest,
     ReminderTaskUpdateRequest,
@@ -30,7 +30,7 @@ def get_scheduled_tasks_control_plane_service() -> ScheduledTasksControlPlaneSer
 )
 async def list_scheduled_tasks(
     current_user: User = Depends(get_request_user),
-    _principal=Depends(require_permissions(TASKS_READ)),  # noqa: B008
+    _principal=Depends(RequirePermission(TASKS_READ)),  # noqa: B008
     service: ScheduledTasksControlPlaneService = Depends(get_scheduled_tasks_control_plane_service),
 ) -> ScheduledTaskListResponse:
     return await service.list_tasks(user_id=int(current_user.id))
@@ -44,7 +44,7 @@ async def list_scheduled_tasks(
 async def get_scheduled_task(
     task_id: str = Path(..., min_length=1),
     current_user: User = Depends(get_request_user),
-    _principal=Depends(require_permissions(TASKS_READ)),  # noqa: B008
+    _principal=Depends(RequirePermission(TASKS_READ)),  # noqa: B008
     service: ScheduledTasksControlPlaneService = Depends(get_scheduled_tasks_control_plane_service),
 ) -> ScheduledTask:
     try:
@@ -62,7 +62,7 @@ async def get_scheduled_task(
 async def create_scheduled_task_reminder(
     payload: ReminderTaskCreateRequest,
     current_user: User = Depends(get_request_user),
-    _principal=Depends(require_permissions(TASKS_CONTROL)),  # noqa: B008
+    _principal=Depends(RequirePermission(TASKS_CONTROL)),  # noqa: B008
     service: ScheduledTasksControlPlaneService = Depends(get_scheduled_tasks_control_plane_service),
 ) -> ScheduledTask:
     return await service.create_reminder(user_id=int(current_user.id), payload=payload)
@@ -77,7 +77,7 @@ async def update_scheduled_task_reminder(
     payload: ReminderTaskUpdateRequest,
     task_id: str = Path(..., min_length=1),
     current_user: User = Depends(get_request_user),
-    _principal=Depends(require_permissions(TASKS_CONTROL)),  # noqa: B008
+    _principal=Depends(RequirePermission(TASKS_CONTROL)),  # noqa: B008
     service: ScheduledTasksControlPlaneService = Depends(get_scheduled_tasks_control_plane_service),
 ) -> ScheduledTask:
     try:
@@ -94,7 +94,7 @@ async def update_scheduled_task_reminder(
 async def delete_scheduled_task_reminder(
     task_id: str = Path(..., min_length=1),
     current_user: User = Depends(get_request_user),
-    _principal=Depends(require_permissions(TASKS_CONTROL)),  # noqa: B008
+    _principal=Depends(RequirePermission(TASKS_CONTROL)),  # noqa: B008
     service: ScheduledTasksControlPlaneService = Depends(get_scheduled_tasks_control_plane_service),
 ) -> ScheduledTaskDeleteResponse:
     return await service.delete_reminder(user_id=int(current_user.id), task_id=task_id)
