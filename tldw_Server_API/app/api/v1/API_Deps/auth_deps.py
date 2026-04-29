@@ -10,7 +10,7 @@ import time
 from collections import deque
 from collections.abc import AsyncGenerator, Awaitable, Mapping
 from datetime import datetime, timezone
-from typing import Any, Callable, Optional
+from typing import Annotated, Any, Callable, Optional
 from weakref import WeakKeyDictionary
 
 #
@@ -2500,6 +2500,36 @@ def require_token_scope(
         )
 
     return _checker
+
+
+#######################################################################################################################
+#
+# Phase 3.4 Standard Auth Dependency Surface
+
+CurrentPrincipal = Annotated[AuthPrincipal, Depends(get_auth_principal)]
+"""Route dependency alias that resolves and returns the current AuthPrincipal."""
+
+CurrentUserDict = Annotated[dict[str, Any], Depends(get_current_active_user)]
+"""Legacy route dependency alias for endpoints that still require user dictionaries."""
+
+_require_admin_principal = require_roles("admin")
+AdminPrincipal = Annotated[AuthPrincipal, Depends(_require_admin_principal)]
+"""Route dependency alias that returns an AuthPrincipal after admin role checks."""
+
+ServicePrincipal = Annotated[AuthPrincipal, Depends(require_service_principal)]
+"""Route dependency alias that returns an AuthPrincipal after service-principal checks."""
+
+RequireRole = require_roles
+"""Standard role-guard factory; returns an AuthPrincipal on success."""
+
+RequirePermission = require_permissions
+"""Standard permission-guard factory; returns an AuthPrincipal on success."""
+
+RequireApiKeyScope = require_api_key_scope
+"""Standard API-key-scope guard factory; returns an AuthPrincipal on success."""
+
+TokenScopeGuard = require_token_scope
+"""Standard token-scope guard factory for dependency lists; returns None on success."""
 #
 # End of auth_deps.py
 #######################################################################################################################
