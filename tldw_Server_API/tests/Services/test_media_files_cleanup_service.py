@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import contextlib
 from pathlib import Path
 from types import SimpleNamespace
@@ -148,4 +149,49 @@ def test_collect_known_storage_paths_uses_managed_media_database(
     }
     assert fake_db.get_connection().queries == [
         "SELECT storage_path FROM MediaFiles WHERE storage_path IS NOT NULL"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_cleanup_loop_failure_log_is_sanitized(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    records, sink_id = _capture_logs()
+    metrics_calls: list[tuple[str, dict[str, object]]] = []
+    sleep_calls = {"count": 0}
+
+    async def _fake_cleanup_orphaned_files():
+        raise RuntimeError("cannot clean /tmp/media-loop-secret")
+
+    async def _fake_sleep(_seconds: float) -> None:
+        sleep_calls["count"] += 1
+        if sleep_calls["count"] >= 2:
+            raise asyncio.CancelledError
+
+    monkeypatch.setattr(cleanup, "cleanup_orphaned_files", _fake_cleanup_orphaned_files)
+    monkeypatch.setattr(cleanup.asyncio, "sleep", _fake_sleep)
+    monkeypatch.setattr(
+        cleanup,
+        "get_metrics_registry",
+        lambda: SimpleNamespace(
+            increment=lambda metric, **kwargs: metrics_calls.append((metric, kwargs))
+        ),
+    )
+
+    try:
+        with contextlib.suppress(asyncio.CancelledError):
+            await cleanup._cleanup_loop()
+    finally:
+        logger.remove(sink_id)
+
+    rendered = "\n".join(records)
+    assert "cannot clean" not in rendered
+    assert "/tmp/media-loop-secret" not in rendered
+    assert "media_files_cleanup: error in cleanup cycle" in rendered
+    assert "RuntimeError" in rendered
+    assert metrics_calls == [
+        (
+            "media_files_cleanup_runs_total",
+            {"labels": {"status": "error"}},
+        )
     ]

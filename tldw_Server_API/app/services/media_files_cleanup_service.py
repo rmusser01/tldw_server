@@ -286,7 +286,9 @@ async def _cleanup_loop():
             logger.info("media_files_cleanup: task cancelled")
             break
         except _MEDIA_CLEANUP_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"media_files_cleanup: error in cleanup cycle: {e}")
+            logger.bind(error_type=type(e).__name__).error(
+                "media_files_cleanup: error in cleanup cycle"
+            )
             with contextlib.suppress(_MEDIA_CLEANUP_NONCRITICAL_EXCEPTIONS):
                 get_metrics_registry().increment(
                     "media_files_cleanup_runs_total",
