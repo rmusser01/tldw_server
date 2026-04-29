@@ -276,6 +276,13 @@ def test_factory_aliases_are_documented_existing_factories() -> None:
     assert TokenScopeGuard is auth_deps.require_token_scope
 
 
+def test_config_admin_router_uses_standard_role_factory_alias() -> None:
+    from tldw_Server_API.app.api.v1.endpoints import config_admin
+
+    assert config_admin.RequireRole is auth_deps.RequireRole
+    assert not hasattr(config_admin, "require_roles")
+
+
 def test_api_key_scope_factory_alias_preserves_jwt_bypass_and_scope_checks() -> None:
     jwt_response = TestClient(_build_app(_principal(kind="user", api_key_id=None))).get(
         "/api-key-scope",
