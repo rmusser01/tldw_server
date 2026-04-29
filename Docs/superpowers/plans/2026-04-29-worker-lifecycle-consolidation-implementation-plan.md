@@ -191,7 +191,7 @@ Near the existing imports and private guard definitions, import:
 from tldw_Server_API.app.services.lifecycle_exceptions import LIFECYCLE_GUARD_EXCEPTIONS
 from tldw_Server_API.app.services.lifecycle_workers import (
     ManagedWorker,
-    ShutdownPhase,
+    ShutdownPhase as WorkerShutdownPhase,
     WorkerInventory,
     publish_worker_inventory,
     start_stop_event_worker,
@@ -212,9 +212,11 @@ _ManagedJobPoller = ManagedWorker
 Then update:
 
 - `_publish_shutdown_job_poller_inventory(...)` to delegate to `publish_worker_inventory(...)`
-- `_register_owned_job_poller(...)` to append a `ManagedWorker(..., shutdown_phase=ShutdownPhase.JOB_POLLER_QUIESCE)`
-- `_replace_owned_job_poller_inventory(...)` to replace only `ShutdownPhase.JOB_POLLER_QUIESCE` handles, preserving any already-registered non-job phases, then publish both inventory views
-- `_stop_registered_job_pollers(...)` to filter `handles` to `ShutdownPhase.JOB_POLLER_QUIESCE` and call `stop_registered_workers(..., stopped_names_attr="_tldw_shutdown_quiesced_job_poller_names", log_label="job poller")`
+- `_register_owned_job_poller(...)` to append a `ManagedWorker(..., shutdown_phase=WorkerShutdownPhase.JOB_POLLER_QUIESCE)`
+- `_replace_owned_job_poller_inventory(...)` to replace only `WorkerShutdownPhase.JOB_POLLER_QUIESCE` handles, preserving any already-registered non-job phases, then publish both inventory views
+- `_stop_registered_job_pollers(...)` to filter `handles` to `WorkerShutdownPhase.JOB_POLLER_QUIESCE` and call `stop_registered_workers(..., stopped_names_attr="_tldw_shutdown_quiesced_job_poller_names", log_label="job poller")`
+
+Use the `WorkerShutdownPhase` alias consistently in `main.py`. Do not import lifecycle `ShutdownPhase` under the bare name because the lifespan shutdown block already imports `ShutdownPhase` from `shutdown_coordinator`, which would make `ShutdownPhase` a local name and break earlier startup references.
 
 - [ ] **Step 5: Run current shutdown job-poller tests**
 
@@ -260,6 +262,7 @@ Add a test proving background workers are not stopped by early job-poller quiesc
 - open and close `TestClient(app)`
 - assert the spy did not receive any of the four background worker names
 - assert all four fake worker stop events were set by shutdown
+- assert each fake worker observed exactly one stop signal or completion path, so idempotent stop events cannot hide duplicate ownership by legacy late-stop branches
 
 - [ ] **Step 3: Run new tests to verify failure**
 
@@ -302,11 +305,11 @@ jobs_metrics_task, jobs_metrics_stop_event = await start_stop_event_worker(
     coroutine_factory=_run_jobs_metrics,
     timeout_sec=5.0,
     category="jobs",
-    shutdown_phase=ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN,
+    shutdown_phase=WorkerShutdownPhase.BACKGROUND_WORKER_SHUTDOWN,
 )
 ```
 
-Use equivalent names for the other three workers. Keep the existing environment flag checks and log messages.
+Use equivalent names for the other three workers. Keep the existing environment flag checks and log messages. Use `WorkerShutdownPhase.BACKGROUND_WORKER_SHUTDOWN` everywhere in `main.py`.
 
 - [ ] **Step 6: Stop background-phase workers in the existing shutdown window**
 
@@ -315,7 +318,7 @@ After `_quiesce_owned_job_pollers_for_shutdown(...)` and before the direct legac
 ```python
 await stop_registered_workers(
     app,
-    worker_inventory.handles_for_phase(ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN),
+    worker_inventory.handles_for_phase(WorkerShutdownPhase.BACKGROUND_WORKER_SHUTDOWN),
     stopped_names_attr="_tldw_shutdown_stopped_background_worker_names",
     log_label="background worker",
 )
