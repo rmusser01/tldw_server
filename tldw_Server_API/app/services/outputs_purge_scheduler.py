@@ -159,9 +159,13 @@ async def _purge_for_user(user_id: int, delete_files: bool, grace_days: int) -> 
                     p.unlink()
                     files_deleted += 1
             except StoragePathValidationError as e:
-                logger.warning(f"outputs_purge: invalid output path for output {rid}: {pth} error={e}")
+                logger.bind(error_type=type(e).__name__).warning(
+                    f"outputs_purge: invalid output path for output {rid}"
+                )
             except (OSError, PermissionError) as e:
-                logger.warning(f"outputs_purge: failed to delete file for output {rid}: {pth} error={e}")
+                logger.bind(error_type=type(e).__name__).warning(
+                    f"outputs_purge: failed to delete file for output {rid}"
+                )
                 try:
                     get_metrics_registry().increment(
                         "app_warning_events_total",
@@ -183,9 +187,13 @@ async def _purge_for_user(user_id: int, delete_files: bool, grace_days: int) -> 
                             output_id=int(rid),
                         )
                     except _OUTPUTS_PURGE_NONCRITICAL_EXCEPTIONS as exc:
-                        logger.debug(f"outputs_purge: failed to update tts_history for output {rid}: {exc}")
+                        logger.bind(error_type=type(exc).__name__).debug(
+                            f"outputs_purge: failed to update tts_history for output {rid}"
+                        )
         except _OUTPUTS_PURGE_NONCRITICAL_EXCEPTIONS as exc:
-            logger.debug(f"outputs_purge: failed to open Media DB for history update: {exc}")
+            logger.bind(error_type=type(exc).__name__).debug(
+                "outputs_purge: failed to open Media DB for history update"
+            )
     removed = 0
     if ids:
         placeholders = ",".join(["?"] * len(ids))
@@ -199,7 +207,9 @@ async def _purge_for_user(user_id: int, delete_files: bool, grace_days: int) -> 
             )
             removed = len(ids)
         except _OUTPUTS_PURGE_NONCRITICAL_EXCEPTIONS as e:
-            logger.warning(f"outputs_purge: DB delete failed for user {user_id}: {e}")
+            logger.bind(error_type=type(e).__name__).warning(
+                f"outputs_purge: DB delete failed for user {user_id}"
+            )
             try:
                 get_metrics_registry().increment(
                     "app_exception_events_total",

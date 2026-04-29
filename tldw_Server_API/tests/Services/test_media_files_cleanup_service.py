@@ -266,3 +266,39 @@ async def test_cleanup_loop_failure_log_is_sanitized(
             {"labels": {"status": "error"}},
         )
     ]
+
+
+@pytest.mark.asyncio
+async def test_cleanup_loop_success_result_log_is_sanitized(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    records, sink_id = _capture_logs()
+    sleep_calls = {"count": 0}
+
+    async def _fake_cleanup_orphaned_files():
+        return {
+            "status": "completed",
+            "files_removed": 0,
+            "bytes_freed": 0,
+            "errors": ["/tmp/media-loop-secret"],
+        }
+
+    async def _fake_sleep(_seconds: float) -> None:
+        sleep_calls["count"] += 1
+        if sleep_calls["count"] >= 2:
+            raise asyncio.CancelledError
+
+    monkeypatch.setattr(cleanup, "cleanup_orphaned_files", _fake_cleanup_orphaned_files)
+    monkeypatch.setattr(cleanup.asyncio, "sleep", _fake_sleep)
+
+    try:
+        with contextlib.suppress(asyncio.CancelledError):
+            await cleanup._cleanup_loop()
+    finally:
+        logger.remove(sink_id)
+
+    rendered = "\n".join(records)
+    assert "/tmp/media-loop-secret" not in rendered
+    assert "media_files_cleanup: cycle completed" in rendered
+    assert "files_removed=0" in rendered
+    assert "bytes_freed=0" in rendered

@@ -56,10 +56,9 @@ async def run_ingestion_sources_cleanup_once() -> dict[str, int]:
             results["pruned"] += 1
         except _NONCRITICAL_EXCEPTIONS as exc:
             results["failed"] += 1
-            logger.warning(
-                "Ingestion sources cleanup failed for source_id={}: {}",
+            logger.bind(error_type=type(exc).__name__).warning(
+                "Ingestion sources cleanup failed for source_id={}",
                 source_id,
-                exc,
             )
     return results
 
@@ -83,7 +82,7 @@ async def run_ingestion_sources_cleanup_loop(stop_event: asyncio.Event | None = 
                     results["failed"],
                 )
         except _NONCRITICAL_EXCEPTIONS as exc:
-            logger.warning("Ingestion sources cleanup loop error: {}", exc)
+            logger.bind(error_type=type(exc).__name__).warning("Ingestion sources cleanup loop error")
         await asyncio.sleep(interval_sec)
 
 

@@ -1,5 +1,6 @@
 import asyncio
 import contextlib
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
@@ -300,6 +301,237 @@ async def test_purge_for_user_deleted_candidate_query_warning_is_sanitized(monke
             {"labels": {"component": "outputs_purge", "event": "select_deleted_candidates_failed"}},
         )
     ]
+
+
+@pytest.mark.asyncio
+async def test_purge_for_user_invalid_output_path_warning_is_sanitized(monkeypatch):
+    class _Backend:
+        def execute(self, query, params):
+            if "retention_until" in query:
+                return SimpleNamespace(rows=[{"id": 12, "storage_path": "reports/file.txt"}])
+            if "deleted = 1" in query:
+                return SimpleNamespace(rows=[])
+            if query.startswith("DELETE FROM outputs"):
+                return SimpleNamespace(rows=[])
+            raise AssertionError(f"Unexpected query: {query}")
+
+    logger = _LoggerStub()
+    metrics = _MetricsStub()
+    monkeypatch.setattr(scheduler, "logger", logger)
+    monkeypatch.setattr(scheduler, "get_metrics_registry", lambda: metrics)
+    monkeypatch.setattr(
+        scheduler.CollectionsDatabase,
+        "for_user",
+        lambda user_id: SimpleNamespace(backend=_Backend()),
+    )
+    monkeypatch.setattr(
+        scheduler,
+        "normalize_output_storage_path",
+        lambda user_id, pth: (_ for _ in ()).throw(
+            scheduler.StoragePathValidationError("bad path /tmp/invalid-output-path sk-live-invalid")
+        ),
+    )
+    monkeypatch.setattr(scheduler.DatabasePaths, "get_media_db_path", lambda user_id: f"/tmp/media-{user_id}.db")
+
+    @contextlib.contextmanager
+    def _fake_managed_media_database(client_id, **kwargs):
+        yield SimpleNamespace(mark_tts_history_artifacts_deleted_for_output=lambda **kwargs: None)
+
+    monkeypatch.setattr(scheduler, "managed_media_database", _fake_managed_media_database, raising=False)
+
+    removed, files_deleted = await scheduler._purge_for_user(user_id=7, delete_files=True, grace_days=30)
+
+    assert (removed, files_deleted) == (1, 0)
+    assert logger.warnings[0] == "outputs_purge: invalid output path for output 12"
+    assert logger.binds[0] == {"error_type": "StoragePathValidationError"}
+    logged = "\n".join(logger.debugs + logger.infos + logger.warnings)
+    assert "/tmp/invalid-output-path" not in logged
+    assert "sk-live-invalid" not in logged
+
+
+@pytest.mark.asyncio
+async def test_purge_for_user_file_delete_warning_is_sanitized(monkeypatch, tmp_path):
+    class _Backend:
+        def execute(self, query, params):
+            if "retention_until" in query:
+                return SimpleNamespace(rows=[{"id": 12, "storage_path": "reports/file.txt"}])
+            if "deleted = 1" in query:
+                return SimpleNamespace(rows=[])
+            if query.startswith("DELETE FROM outputs"):
+                return SimpleNamespace(rows=[])
+            raise AssertionError(f"Unexpected query: {query}")
+
+    logger = _LoggerStub()
+    metrics = _MetricsStub()
+    monkeypatch.setattr(scheduler, "logger", logger)
+    monkeypatch.setattr(scheduler, "get_metrics_registry", lambda: metrics)
+    monkeypatch.setattr(
+        scheduler.CollectionsDatabase,
+        "for_user",
+        lambda user_id: SimpleNamespace(backend=_Backend()),
+    )
+    monkeypatch.setattr(scheduler, "normalize_output_storage_path", lambda user_id, pth: "reports/file.txt")
+    outputs_dir = tmp_path / "outputs"
+    outputs_dir.mkdir()
+    target = outputs_dir / "reports" / "file.txt"
+    target.parent.mkdir(parents=True)
+    target.write_text("payload")
+    monkeypatch.setattr(scheduler.DatabasePaths, "get_user_outputs_dir", lambda user_id: outputs_dir)
+    monkeypatch.setattr(scheduler.DatabasePaths, "get_media_db_path", lambda user_id: f"/tmp/media-{user_id}.db")
+
+    original_unlink = Path.unlink
+
+    def _patched_unlink(self, *args, **kwargs):
+        if self == target:
+            raise PermissionError("cannot unlink /tmp/output-delete-secret sk-live-delete")
+        return original_unlink(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", _patched_unlink)
+
+    @contextlib.contextmanager
+    def _fake_managed_media_database(client_id, **kwargs):
+        yield SimpleNamespace(mark_tts_history_artifacts_deleted_for_output=lambda **kwargs: None)
+
+    monkeypatch.setattr(scheduler, "managed_media_database", _fake_managed_media_database, raising=False)
+
+    removed, files_deleted = await scheduler._purge_for_user(user_id=7, delete_files=True, grace_days=30)
+
+    assert (removed, files_deleted) == (1, 0)
+    assert logger.warnings[0] == "outputs_purge: failed to delete file for output 12"
+    assert logger.binds[0] == {"error_type": "PermissionError"}
+    logged = "\n".join(logger.debugs + logger.infos + logger.warnings)
+    assert "/tmp/output-delete-secret" not in logged
+    assert "sk-live-delete" not in logged
+    assert metrics.calls[0] == (
+        "app_warning_events_total",
+        {"labels": {"component": "outputs_purge", "event": "file_delete_failed"}},
+    )
+
+
+@pytest.mark.asyncio
+async def test_purge_for_user_tts_history_update_debug_is_sanitized(monkeypatch):
+    class _Backend:
+        def execute(self, query, params):
+            if "retention_until" in query:
+                return SimpleNamespace(rows=[{"id": 12, "storage_path": "reports/file.txt"}])
+            if "deleted = 1" in query:
+                return SimpleNamespace(rows=[])
+            if query.startswith("DELETE FROM outputs"):
+                return SimpleNamespace(rows=[])
+            raise AssertionError(f"Unexpected query: {query}")
+
+    logger = _LoggerStub()
+    metrics = _MetricsStub()
+    monkeypatch.setattr(scheduler, "logger", logger)
+    monkeypatch.setattr(scheduler, "get_metrics_registry", lambda: metrics)
+    monkeypatch.setattr(
+        scheduler.CollectionsDatabase,
+        "for_user",
+        lambda user_id: SimpleNamespace(backend=_Backend()),
+    )
+    monkeypatch.setattr(scheduler.DatabasePaths, "get_media_db_path", lambda user_id: f"/tmp/media-{user_id}.db")
+
+    @contextlib.contextmanager
+    def _fake_managed_media_database(client_id, **kwargs):
+        yield SimpleNamespace(
+            mark_tts_history_artifacts_deleted_for_output=lambda **kwargs: (_ for _ in ()).throw(
+                RuntimeError("cannot update /tmp/tts-history-secret sk-live-tts")
+            )
+        )
+
+    monkeypatch.setattr(scheduler, "managed_media_database", _fake_managed_media_database, raising=False)
+
+    removed, files_deleted = await scheduler._purge_for_user(user_id=7, delete_files=False, grace_days=30)
+
+    assert (removed, files_deleted) == (1, 0)
+    assert logger.debugs[0] == "outputs_purge: failed to update tts_history for output 12"
+    assert logger.binds[0] == {"error_type": "RuntimeError"}
+    logged = "\n".join(logger.debugs + logger.infos + logger.warnings)
+    assert "/tmp/tts-history-secret" not in logged
+    assert "sk-live-tts" not in logged
+
+
+@pytest.mark.asyncio
+async def test_purge_for_user_media_db_open_debug_is_sanitized(monkeypatch):
+    class _Backend:
+        def execute(self, query, params):
+            if "retention_until" in query:
+                return SimpleNamespace(rows=[{"id": 12, "storage_path": "reports/file.txt"}])
+            if "deleted = 1" in query:
+                return SimpleNamespace(rows=[])
+            if query.startswith("DELETE FROM outputs"):
+                return SimpleNamespace(rows=[])
+            raise AssertionError(f"Unexpected query: {query}")
+
+    logger = _LoggerStub()
+    metrics = _MetricsStub()
+    monkeypatch.setattr(scheduler, "logger", logger)
+    monkeypatch.setattr(scheduler, "get_metrics_registry", lambda: metrics)
+    monkeypatch.setattr(
+        scheduler.CollectionsDatabase,
+        "for_user",
+        lambda user_id: SimpleNamespace(backend=_Backend()),
+    )
+    monkeypatch.setattr(scheduler.DatabasePaths, "get_media_db_path", lambda user_id: f"/tmp/media-{user_id}.db")
+
+    @contextlib.contextmanager
+    def _fake_managed_media_database(client_id, **kwargs):
+        raise RuntimeError("cannot open /tmp/media-db-secret sk-live-media-db")
+        yield
+
+    monkeypatch.setattr(scheduler, "managed_media_database", _fake_managed_media_database, raising=False)
+
+    removed, files_deleted = await scheduler._purge_for_user(user_id=7, delete_files=False, grace_days=30)
+
+    assert (removed, files_deleted) == (1, 0)
+    assert logger.debugs[0] == "outputs_purge: failed to open Media DB for history update"
+    assert logger.binds[0] == {"error_type": "RuntimeError"}
+    logged = "\n".join(logger.debugs + logger.infos + logger.warnings)
+    assert "/tmp/media-db-secret" not in logged
+    assert "sk-live-media-db" not in logged
+
+
+@pytest.mark.asyncio
+async def test_purge_for_user_db_delete_warning_is_sanitized(monkeypatch):
+    class _Backend:
+        def execute(self, query, params):
+            if "retention_until" in query:
+                return SimpleNamespace(rows=[{"id": 12, "storage_path": "reports/file.txt"}])
+            if "deleted = 1" in query:
+                return SimpleNamespace(rows=[])
+            if query.startswith("DELETE FROM outputs"):
+                raise RuntimeError("cannot delete /tmp/db-delete-secret sk-live-db-delete")
+            raise AssertionError(f"Unexpected query: {query}")
+
+    logger = _LoggerStub()
+    metrics = _MetricsStub()
+    monkeypatch.setattr(scheduler, "logger", logger)
+    monkeypatch.setattr(scheduler, "get_metrics_registry", lambda: metrics)
+    monkeypatch.setattr(
+        scheduler.CollectionsDatabase,
+        "for_user",
+        lambda user_id: SimpleNamespace(backend=_Backend()),
+    )
+    monkeypatch.setattr(scheduler.DatabasePaths, "get_media_db_path", lambda user_id: f"/tmp/media-{user_id}.db")
+
+    @contextlib.contextmanager
+    def _fake_managed_media_database(client_id, **kwargs):
+        yield SimpleNamespace(mark_tts_history_artifacts_deleted_for_output=lambda **kwargs: None)
+
+    monkeypatch.setattr(scheduler, "managed_media_database", _fake_managed_media_database, raising=False)
+
+    removed, files_deleted = await scheduler._purge_for_user(user_id=7, delete_files=False, grace_days=30)
+
+    assert (removed, files_deleted) == (0, 0)
+    assert logger.warnings[0] == "outputs_purge: DB delete failed for user 7"
+    assert logger.binds[0] == {"error_type": "RuntimeError"}
+    logged = "\n".join(logger.debugs + logger.infos + logger.warnings)
+    assert "/tmp/db-delete-secret" not in logged
+    assert "sk-live-db-delete" not in logged
+    assert metrics.calls[0] == (
+        "app_exception_events_total",
+        {"labels": {"component": "outputs_purge", "event": "db_delete_failed"}},
+    )
 
 
 @pytest.mark.asyncio

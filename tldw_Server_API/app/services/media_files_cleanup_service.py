@@ -285,7 +285,12 @@ async def _cleanup_loop():
     while True:
         try:
             result = await cleanup_orphaned_files()
-            logger.debug(f"media_files_cleanup: cycle completed: {result}")
+            logger.debug(
+                "media_files_cleanup: cycle completed "
+                f"status={result.get('status')} "
+                f"files_removed={result.get('files_removed')} "
+                f"bytes_freed={result.get('bytes_freed')}"
+            )
         except asyncio.CancelledError:
             logger.info("media_files_cleanup: task cancelled")
             break
