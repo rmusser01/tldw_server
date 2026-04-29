@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -18,6 +19,7 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     TokenScopeGuard,
 )
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
+from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
 
 
 pytestmark = pytest.mark.unit
@@ -124,6 +126,30 @@ def _build_app(principal: AuthPrincipal) -> FastAPI:
     return app
 
 
+def _build_real_principal_app() -> FastAPI:
+    app = FastAPI()
+
+    @app.get("/current-principal")
+    async def current_principal(request: Request, principal: CurrentPrincipal):
+        auth_ctx = getattr(request.state, "auth", None)
+        state_principal = getattr(auth_ctx, "principal", None)
+        cached_user = getattr(request.state, "_auth_user", None)
+        return {
+            "kind": principal.kind,
+            "user_id": principal.user_id,
+            "api_key_id": principal.api_key_id,
+            "roles": principal.roles,
+            "permissions": principal.permissions,
+            "state_principal_id": getattr(state_principal, "principal_id", None),
+            "principal_id": principal.principal_id,
+            "cached_user_id": getattr(cached_user, "id", None),
+            "state_user_id": getattr(request.state, "user_id", None),
+            "state_api_key_id": getattr(request.state, "api_key_id", None),
+        }
+
+    return app
+
+
 def test_current_principal_alias_returns_principal_and_preserves_request_state() -> None:
     app = _build_app(
         _principal(roles=["user"], permissions=["media.read"], subject="user:42"),
@@ -197,3 +223,98 @@ def test_factory_aliases_are_documented_existing_factories() -> None:
     assert RequirePermission is auth_deps.require_permissions
     assert RequireApiKeyScope is auth_deps.require_api_key_scope
     assert TokenScopeGuard is auth_deps.require_token_scope
+
+
+def test_current_principal_alias_preserves_missing_credentials_401() -> None:
+    response = TestClient(_build_real_principal_app()).get("/current-principal")
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Not authenticated (provide Bearer token or X-API-KEY)"
+    assert response.headers.get("WWW-Authenticate") == "Bearer"
+
+
+def test_current_principal_alias_populates_state_for_multi_user_jwt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core.AuthNZ import User_DB_Handling as udh
+    from tldw_Server_API.app.core.AuthNZ import auth_principal_resolver as resolver
+
+    async def fake_verify_jwt_and_fetch_user(request: Request, token: str) -> User:
+        assert token == "jwt.header.signature"
+        request.state.user_id = 17
+        request.state.org_ids = [3]
+        request.state.team_ids = [5]
+        return User(
+            id=17,
+            username="jwt-user",
+            roles=["editor"],
+            permissions=["skills.read"],
+        )
+
+    monkeypatch.setattr(
+        resolver,
+        "get_settings",
+        lambda: SimpleNamespace(AUTH_MODE="multi_user", PII_REDACT_LOGS=False),
+    )
+    monkeypatch.setattr(udh, "verify_jwt_and_fetch_user", fake_verify_jwt_and_fetch_user)
+
+    response = TestClient(_build_real_principal_app()).get(
+        "/current-principal",
+        headers={"Authorization": "Bearer jwt.header.signature"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["kind"] == "user"
+    assert payload["user_id"] == 17
+    assert payload["api_key_id"] is None
+    assert set(payload["roles"]) == {"editor", "user"}
+    assert payload["permissions"] == ["skills.read"]
+    assert payload["principal_id"] == payload["state_principal_id"]
+    assert payload["cached_user_id"] == 17
+    assert payload["state_user_id"] == 17
+    assert payload["state_api_key_id"] is None
+
+
+def test_current_principal_alias_populates_state_for_api_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core.AuthNZ import User_DB_Handling as udh
+    from tldw_Server_API.app.core.AuthNZ import auth_principal_resolver as resolver
+
+    async def fake_authenticate_api_key_user(request: Request, api_key: str) -> User:
+        assert api_key == "test-api-key"
+        request.state.user_id = 33
+        request.state.api_key_id = 123
+        request.state.org_ids = [7]
+        request.state.team_ids = [11]
+        return User(
+            id=33,
+            username="api-key-user",
+            roles=["automation"],
+            permissions=["skills.read", "skills.write"],
+        )
+
+    monkeypatch.setattr(
+        resolver,
+        "get_settings",
+        lambda: SimpleNamespace(AUTH_MODE="multi_user", PII_REDACT_LOGS=False),
+    )
+    monkeypatch.setattr(udh, "authenticate_api_key_user", fake_authenticate_api_key_user)
+
+    response = TestClient(_build_real_principal_app()).get(
+        "/current-principal",
+        headers={"X-API-KEY": "test-api-key"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["kind"] == "api_key"
+    assert payload["user_id"] == 33
+    assert payload["api_key_id"] == 123
+    assert set(payload["roles"]) == {"automation", "user"}
+    assert payload["permissions"] == ["skills.read", "skills.write"]
+    assert payload["principal_id"] == payload["state_principal_id"]
+    assert payload["cached_user_id"] == 33
+    assert payload["state_user_id"] == 33
+    assert payload["state_api_key_id"] == 123
