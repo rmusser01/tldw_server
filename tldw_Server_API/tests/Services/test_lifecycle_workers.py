@@ -141,6 +141,91 @@ async def test_start_stop_event_worker_registers_named_task_and_stop_event() -> 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_worker_inventory_phase_helpers_accept_raw_string_phases() -> None:
+    from tldw_Server_API.app.services.lifecycle_workers import (
+        ManagedWorker,
+        ShutdownPhase,
+        WorkerInventory,
+    )
+
+    app = FastAPI()
+    job_stop_event = asyncio.Event()
+    background_stop_event = asyncio.Event()
+    replacement_stop_event = asyncio.Event()
+    job_task = asyncio.create_task(_wait_for_stop(job_stop_event), name="job-task")
+    background_task = asyncio.create_task(
+        _wait_for_stop(background_stop_event),
+        name="background-task",
+    )
+    replacement_task = asyncio.create_task(
+        _wait_for_stop(replacement_stop_event),
+        name="replacement-task",
+    )
+
+    try:
+        inventory = WorkerInventory(
+            app,
+            [
+                ManagedWorker(
+                    name="job_worker",
+                    task=job_task,
+                    stop_event=job_stop_event,
+                    shutdown_phase=ShutdownPhase.JOB_POLLER_QUIESCE,
+                ),
+                ManagedWorker(
+                    name="background_worker",
+                    task=background_task,
+                    stop_event=background_stop_event,
+                    shutdown_phase=ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN,
+                ),
+            ],
+        )
+
+        assert [
+            handle.name
+            for handle in inventory.handles_for_phase("job_poller_quiesce")
+        ] == ["job_worker"]
+
+        inventory.replace_phase(
+            "job_poller_quiesce",
+            [
+                ManagedWorker(
+                    name="replacement_job_worker",
+                    task=replacement_task,
+                    stop_event=replacement_stop_event,
+                    shutdown_phase=ShutdownPhase.JOB_POLLER_QUIESCE,
+                )
+            ],
+        )
+
+        assert [handle.name for handle in inventory.handles] == [
+            "background_worker",
+            "replacement_job_worker",
+        ]
+        assert [
+            handle.name
+            for handle in inventory.handles_for_phase("job_poller_quiesce")
+        ] == ["replacement_job_worker"]
+        assert app.state._tldw_shutdown_job_poller_inventory == [
+            {
+                "name": "replacement_job_worker",
+                "task_name": "replacement-task",
+                "has_stop_event": True,
+                "timeout_sec": 5.0,
+            }
+        ]
+    finally:
+        job_stop_event.set()
+        background_stop_event.set()
+        replacement_stop_event.set()
+        await asyncio.wait_for(
+            asyncio.gather(job_task, background_task, replacement_task),
+            timeout=1,
+        )
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_stop_registered_workers_sets_events_and_waits_concurrently() -> None:
     from tldw_Server_API.app.services.lifecycle_workers import (
         ManagedWorker,
@@ -184,6 +269,59 @@ async def test_stop_registered_workers_sets_events_and_waits_concurrently() -> N
     assert stop_b.is_set() is True
     assert elapsed < 0.2
     assert app.state._tldw_stopped_worker_names == ["worker_a", "worker_b"]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_stop_registered_workers_logs_runtime_error_after_timeout_as_worker_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.services import lifecycle_workers
+    from tldw_Server_API.app.services.lifecycle_workers import ManagedWorker
+
+    app = FastAPI()
+    stop_event = asyncio.Event()
+    warnings: list[tuple[object, ...]] = []
+    debug_calls: list[tuple[object, ...]] = []
+
+    async def _raises_after_cancel(stop_event: asyncio.Event) -> None:
+        await stop_event.wait()
+        try:
+            await asyncio.Future()
+        except asyncio.CancelledError as exc:
+            raise RuntimeError("cancel failure") from exc
+
+    monkeypatch.setattr(
+        lifecycle_workers.logger,
+        "warning",
+        lambda *args, **kwargs: warnings.append(args),
+    )
+    monkeypatch.setattr(
+        lifecycle_workers.logger,
+        "debug",
+        lambda *args, **kwargs: debug_calls.append(args),
+    )
+
+    task = asyncio.create_task(_raises_after_cancel(stop_event), name="raising-task")
+    await asyncio.sleep(0)
+
+    await lifecycle_workers.stop_registered_workers(
+        app,
+        [
+            ManagedWorker(
+                name="raising_worker",
+                task=task,
+                stop_event=stop_event,
+                timeout_sec=0.01,
+            )
+        ],
+        stopped_names_attr="_tldw_stopped_worker_names",
+        log_label="test worker",
+    )
+
+    assert any("raised after cancellation" in str(args[0]) for args in warnings)
+    assert not any("guard triggered" in str(args[0]) for args in debug_calls)
+    assert app.state._tldw_stopped_worker_names == ["raising_worker"]
 
 
 @pytest.mark.unit

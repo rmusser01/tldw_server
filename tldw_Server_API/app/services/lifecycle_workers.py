@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-from contextlib import suppress
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Awaitable, Callable, Sequence
@@ -51,22 +50,24 @@ class WorkerInventory:
 
     def replace_phase(
         self,
-        shutdown_phase: ShutdownPhase,
+        shutdown_phase: ShutdownPhase | str,
         handles: Sequence[ManagedWorker],
     ) -> None:
+        target_phase = _normalize_shutdown_phase(shutdown_phase)
         self._handles[:] = [
             handle
             for handle in self._handles
-            if _normalize_shutdown_phase(handle.shutdown_phase) is not shutdown_phase
+            if _normalize_shutdown_phase(handle.shutdown_phase) is not target_phase
         ]
         self._handles.extend(handles)
         self.publish()
 
-    def handles_for_phase(self, shutdown_phase: ShutdownPhase) -> list[ManagedWorker]:
+    def handles_for_phase(self, shutdown_phase: ShutdownPhase | str) -> list[ManagedWorker]:
+        target_phase = _normalize_shutdown_phase(shutdown_phase)
         return [
             handle
             for handle in self._handles
-            if _normalize_shutdown_phase(handle.shutdown_phase) is shutdown_phase
+            if _normalize_shutdown_phase(handle.shutdown_phase) is target_phase
         ]
 
     def publish(self) -> None:
@@ -137,13 +138,6 @@ async def stop_registered_workers(
                     log_label,
                     handle.name,
                 )
-            except LIFECYCLE_GUARD_EXCEPTIONS as exc:
-                logger.debug(
-                    "App Shutdown: {} cancel guard triggered for {}: {}",
-                    log_label,
-                    handle.name,
-                    exc,
-                )
             except Exception as exc:
                 logger.warning(
                     "App Shutdown: {} {} raised after cancellation: {}",
@@ -151,13 +145,6 @@ async def stop_registered_workers(
                     handle.name,
                     exc,
                 )
-        except LIFECYCLE_GUARD_EXCEPTIONS as exc:
-            logger.debug(
-                "App Shutdown: {} stop guard triggered for {}: {}",
-                log_label,
-                handle.name,
-                exc,
-            )
         except Exception as exc:
             logger.warning(
                 "App Shutdown: {} {} exited during shutdown: {}",
@@ -171,8 +158,15 @@ async def stop_registered_workers(
         if handle.stop_event is not None:
             handle.stop_event.set()
         else:
-            with suppress(*LIFECYCLE_GUARD_EXCEPTIONS):
+            try:
                 handle.task.cancel()
+            except Exception as exc:
+                logger.warning(
+                    "App Shutdown: {} {} cancel request failed: {}",
+                    log_label,
+                    handle.name,
+                    exc,
+                )
 
     stopped_results = await asyncio.gather(
         *(_await_worker_shutdown(handle) for handle in handles),
