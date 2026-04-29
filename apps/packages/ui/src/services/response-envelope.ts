@@ -15,21 +15,26 @@ export type ApiResponseDataWrapper<T> = {
   metadata?: ApiEnvelopeMetadata | null
 }
 
+/** Checks object-owned keys without matching prototype properties. */
 const hasOwn = (value: Record<string, unknown>, key: string): boolean =>
   Object.prototype.hasOwnProperty.call(value, key)
 
+/** Narrows unknown values to plain response-like records. */
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === "object" && !Array.isArray(value)
 
 const envelopeKeys = ["data", "error", "error_code", "metadata"] as const
 const envelopeKeySet = new Set<string>(envelopeKeys)
 
+/** Detects at least one canonical envelope payload key. */
 const hasEnvelopeKey = (value: Record<string, unknown>): boolean =>
   envelopeKeys.some((key) => hasOwn(value, key))
 
+/** Ensures transitional wrappers do not hide unrelated domain fields. */
 const hasOnlyEnvelopeKeys = (value: Record<string, unknown>): boolean =>
   Object.keys(value).every((key) => envelopeKeySet.has(key))
 
+/** Detects legacy data-wrapper responses that are safe to unwrap generically. */
 const isApiResponseDataWrapper = (
   value: unknown
 ): value is ApiResponseDataWrapper<unknown> =>
