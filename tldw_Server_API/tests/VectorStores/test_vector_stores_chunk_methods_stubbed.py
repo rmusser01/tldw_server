@@ -153,7 +153,8 @@ async def test_create_from_media_sanitizes_embedding_failure(monkeypatch):
     monkeypatch.setattr(vs, "_count_tokens", lambda _text, _model_id: 1)
     monkeypatch.setattr(vs, "init_batches_db", lambda _uid: None)
     monkeypatch.setattr(vs, "db_create_batch", lambda *args, **kwargs: None)
-    monkeypatch.setattr(vs, "db_update_batch", lambda *args, **kwargs: None)
+    updates = []
+    monkeypatch.setattr(vs, "db_update_batch", lambda *args, **kwargs: updates.append(kwargs))
 
     payload = vs.CreateFromMediaRequest(
         store_name="ignore",
@@ -171,22 +172,33 @@ async def test_create_from_media_sanitizes_embedding_failure(monkeypatch):
 
     assert excinfo.value.status_code == 500
     assert excinfo.value.detail == "Failed to generate embeddings for media content"
+    assert updates[-1]["error"] == "Failed to generate embeddings for media content"
+    assert "embedding backend exploded" not in str(updates)
 
 
 @pytest.mark.asyncio
 async def test_upsert_vectors_batch_sanitizes_unexpected_failure(monkeypatch):
     import tldw_Server_API.app.api.v1.endpoints.vector_stores_openai as vs
 
+    class LoggerStub:
+        def __init__(self):
+            self.errors = []
+
+        def error(self, *args, **kwargs):
+            self.errors.append((args, kwargs))
+
     async def _fail_upsert_vectors(*_args, **_kwargs):
         raise RuntimeError("vector batch backend exploded at /private/chroma/batches")
 
     updates = []
+    logger_stub = LoggerStub()
 
     monkeypatch.setattr(vs, "resolve_user_id_for_request", lambda *_args, **_kwargs: 1)
     monkeypatch.setattr(vs, "init_batches_db", lambda _uid: None)
     monkeypatch.setattr(vs, "db_create_batch", lambda *args, **kwargs: None)
     monkeypatch.setattr(vs, "db_update_batch", lambda *args, **kwargs: updates.append(kwargs))
     monkeypatch.setattr(vs, "upsert_vectors", _fail_upsert_vectors)
+    monkeypatch.setattr(vs, "logger", logger_stub)
     vs._BATCH_STATUS.clear()
 
     payload = vs.UpsertVectorsRequest(
@@ -203,6 +215,11 @@ async def test_upsert_vectors_batch_sanitizes_unexpected_failure(monkeypatch):
     assert updates[-1]["error"] == "Vector batch upsert failed"
     assert "vector batch backend exploded" not in str(batch)
     assert "/private/chroma/batches" not in str(batch)
+    assert logger_stub.errors
+    assert logger_stub.errors[-1][0][0] == "Vector batch upsert failed for batch {}"
+    assert logger_stub.errors[-1][1].get("exc_info") is None
+    assert "vector batch backend exploded" not in repr(logger_stub.errors)
+    assert "/private/chroma/batches" not in repr(logger_stub.errors)
 
 
 @pytest.mark.asyncio

@@ -1469,7 +1469,7 @@ async def upsert_vectors_batch(
             logger.warning(f"Failed to persist batch failure: {_e}")
         raise
     except _VECTORSTORE_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Vector batch upsert failed for batch {batch_id}: {e}", exc_info=True)
+        logger.error("Vector batch upsert failed for batch {}", batch_id)
         safe_error = "Vector batch upsert failed"
         _BATCH_STATUS[batch_id].update({"status": "failed", "error": safe_error})
         try:
@@ -1789,7 +1789,12 @@ async def create_store_from_media(
             embed_fn = _get_embeddings_fn()
             vecs = await loop.run_in_executor(None, embed_fn, subtexts, app_config, model_id)
         except _VECTORSTORE_NONCRITICAL_EXCEPTIONS as e:
-            db_update_batch(batch_id, user_id=uid, status='failed', error=str(e))
+            db_update_batch(
+                batch_id,
+                user_id=uid,
+                status='failed',
+                error="Failed to generate embeddings for media content",
+            )
             raise HTTPException(
                 500,
                 detail="Failed to generate embeddings for media content",
