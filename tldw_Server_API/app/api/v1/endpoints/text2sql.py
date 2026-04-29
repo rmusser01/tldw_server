@@ -8,10 +8,10 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    RequirePermission,
     check_rate_limit,
     get_request_user,
     rbac_rate_limit,
-    require_permissions,
     require_token_scope,
 )
 from tldw_Server_API.app.api.v1.API_Deps.billing_deps import require_within_limit
@@ -98,7 +98,7 @@ def _connector_acl_allows(current_user: User, target_id: str) -> bool:
     dependencies=[
         Depends(check_rate_limit),
         Depends(rbac_rate_limit("text2sql.query")),
-        Depends(require_permissions(SQL_READ)),
+        Depends(RequirePermission(SQL_READ)),
         Depends(require_token_scope("any", require_if_present=True, endpoint_id="text2sql.query", count_as="call")),
         Depends(require_within_limit(LimitCategory.RAG_QUERIES_DAY, 1)),
     ],
