@@ -31,7 +31,7 @@ This branch already contains many completed local Phase 3.3 tranches, including 
 
 Those changes form the current local checkpoint and should be treated as the integration baseline for the remaining work.
 
-Before any new parallel lane work begins, the parent should first checkpoint these already-verified local edits into a dedicated implementation commit. That checkpoint commit becomes the practical baseline for all remaining Phase 3.3 lane work.
+Before any new parallel lane work begins, the parent must first checkpoint these already-verified local edits into a dedicated implementation commit. That checkpoint commit becomes the practical baseline for all remaining Phase 3.3 lane work, and no new worker lane may start from a dirty or partially integrated baseline.
 
 ## Scope
 
@@ -79,7 +79,7 @@ Reason:
 - it already has dedicated error-contract coverage in `tldw_Server_API/tests/MediaDB2/test_sync_endpoint_errors.py`
 - the remaining Phase 3.3-shaped work appears to be log/fallback sanitization rather than broad behavior redesign
 
-This lane must remain narrowly bounded and must not expand into unrelated endpoint cleanup.
+This lane must remain narrowly bounded and must not expand into unrelated endpoint cleanup. For `sync.py`, that means no helper extraction, no query/path refactors, no schema changes, no response-shape changes, and no opportunistic cleanup outside the covered fallback/log branches and their directly adjacent tests.
 
 ### Tier 3: Borderline Or Deferred Candidates
 
@@ -114,7 +114,7 @@ Each lane owns a disjoint write scope:
 - its corresponding focused test file(s)
 - no overlap with other active lanes
 
-No two lanes may edit the same source file, the same direct regression file, or the shared phase plan at the same time.
+No two lanes may edit the same source file, the same direct regression file, or the shared phase plan at the same time. No two lanes may edit the same shared helper, shared utility, shared fixture, shared test helper, or adjacent support module at the same time either. If a tranche requires changing a shared helper to land cleanly, that helper becomes part of the shard ownership and blocks other concurrent lanes from touching it.
 
 Workers must not:
 
@@ -146,6 +146,8 @@ Each decision should include:
 - existing test file reviewed
 - why it is or is not conservative enough
 
+Every `defer` or `reject` decision must be recorded in the active Phase 3.3 plan before the scout lane is recycled onto a new candidate. This prevents the same borderline files from being repeatedly re-triaged.
+
 ## Integration Model
 
 The parent remains the only integrator.
@@ -154,11 +156,12 @@ After each wave:
 
 1. review returned diffs for scope drift
 2. integrate only completed, independently verified shards
-3. run one parent verification sweep across all touched files in the merged wave
-4. run one touched-scope Bandit scan
-5. run `git diff --check`
-6. update the Phase 3.3 plan with `**Recent Update**` entries
-7. commit locally in one logical batch
+3. confirm the merged touched-file set still matches the approved shard ownership and did not silently broaden into adjacent files
+4. run one parent verification sweep across all touched files in the merged wave
+5. run one touched-scope Bandit scan
+6. run `git diff --check`
+7. update the Phase 3.3 plan with `**Recent Update**` entries
+8. commit locally in one logical batch
 
 The parent should not commit partially merged overlapping work.
 
