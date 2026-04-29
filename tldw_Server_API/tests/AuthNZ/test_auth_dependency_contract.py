@@ -566,6 +566,13 @@ def test_chat_router_uses_standard_permission_factory_alias() -> None:
     assert not hasattr(chat, "require_permissions")
 
 
+def test_agent_orchestration_router_uses_standard_token_scope_alias() -> None:
+    from tldw_Server_API.app.api.v1.endpoints import agent_orchestration
+
+    assert agent_orchestration.TokenScopeGuard is auth_deps.TokenScopeGuard
+    assert not hasattr(agent_orchestration, "require_token_scope")
+
+
 def test_vector_stores_router_uses_standard_auth_factory_aliases() -> None:
     from tldw_Server_API.app.api.v1.endpoints import vector_stores_openai
 
