@@ -362,7 +362,9 @@ def _effective_retention_days(policy_key: str, requested_days: int) -> int:
             if effective_days < primary_days:
                 effective_days = primary_days
         except Exception as retention_floor_error:
-            logger.debug("Failed to apply privilege snapshot retention floor", exc_info=retention_floor_error)
+            logger.bind(error_type=type(retention_floor_error).__name__).debug(
+                "Failed to apply privilege snapshot retention floor"
+            )
     return effective_days
 
 

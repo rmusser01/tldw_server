@@ -219,7 +219,10 @@ def _estimate_total_db_size(datasets: list[str], user_id: int | None) -> int:
             if os.path.isfile(db_path):
                 total += os.path.getsize(db_path)
         except Exception as size_error:
-            logger.debug("Failed to estimate dataset DB size for {}", ds, exc_info=size_error)
+            logger.bind(error_type=type(size_error).__name__).debug(
+                "Failed to estimate dataset DB size for {}",
+                ds,
+            )
     return max(total, 1024)  # at least 1 KB estimate
 
 

@@ -102,8 +102,21 @@ def _get_bulk_confirm_threshold() -> int:
                 if raw_cfg:
                     return max(1, int(raw_cfg))
     except Exception as threshold_error:
-        logger.debug("Failed to load bulk-update threshold from config; using default", exc_info=threshold_error)
+        logger.bind(error_type=type(threshold_error).__name__).debug(
+            "Failed to load bulk-update threshold from config; using default"
+        )
     return 1000
+
+
+def _coerce_bulk_candidate_user_id(user: Any) -> int | None:
+    """Return a candidate user id, or None when a malformed repo row should be skipped."""
+    try:
+        return int(user.get("id"))
+    except Exception as user_id_error:
+        logger.bind(error_type=type(user_id_error).__name__).debug(
+            "Skipping bulk user candidate with invalid id"
+        )
+        return None
 
 
 def _profile_error_response(
@@ -462,10 +475,10 @@ async def _load_bulk_user_candidates(
             org_ids=org_ids,
         )
         for user in users:
-            try:
-                target_ids.add(int(user.get("id")))
-            except Exception:
+            user_id = _coerce_bulk_candidate_user_id(user)
+            if user_id is None:
                 continue
+            target_ids.add(user_id)
         offset += limit
         if len(target_ids) >= total:
             break
