@@ -318,6 +318,15 @@ def test_integrations_control_plane_router_uses_standard_role_factory_alias() ->
     assert not hasattr(integrations_control_plane, "require_roles")
 
 
+def test_claims_router_uses_standard_admin_principal_alias() -> None:
+    from tldw_Server_API.app.api.v1.endpoints import claims
+
+    assert claims.AdminPrincipal is auth_deps.AdminPrincipal
+    assert claims.RequirePermission is auth_deps.RequirePermission
+    assert not hasattr(claims, "require_roles")
+    assert not hasattr(claims, "require_permissions")
+
+
 def test_api_key_scope_factory_alias_preserves_jwt_bypass_and_scope_checks() -> None:
     jwt_response = TestClient(_build_app(_principal(kind="user", api_key_id=None))).get(
         "/api-key-scope",
