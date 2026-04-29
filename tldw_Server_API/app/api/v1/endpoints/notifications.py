@@ -12,7 +12,7 @@ from fastapi.responses import StreamingResponse
 from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps.Collections_DB_Deps import get_collections_db_for_user
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import rbac_rate_limit, require_permissions
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import RequirePermission, rbac_rate_limit
 from tldw_Server_API.app.api.v1.schemas.reminders_schemas import (
     NotificationCancelSnoozeResponse,
     NotificationDismissResponse,
@@ -159,7 +159,7 @@ async def list_notifications(
     include_archived: bool = Query(False),
     only_snoozed: bool = Query(False),
     db: CollectionsDatabase = Depends(get_collections_db_for_user),
-    _principal=Depends(require_permissions(NOTIFICATIONS_READ)),  # noqa: B008
+    _principal=Depends(RequirePermission(NOTIFICATIONS_READ)),  # noqa: B008
 ) -> NotificationsListResponse:
     """List notifications for the authenticated user."""
 
@@ -193,7 +193,7 @@ async def list_notifications(
 )
 async def unread_count(
     db: CollectionsDatabase = Depends(get_collections_db_for_user),
-    _principal=Depends(require_permissions(NOTIFICATIONS_READ)),  # noqa: B008
+    _principal=Depends(RequirePermission(NOTIFICATIONS_READ)),  # noqa: B008
 ) -> NotificationsUnreadCountResponse:
     """Return unread notification count for the authenticated user."""
 
@@ -208,7 +208,7 @@ async def unread_count(
 async def mark_read(
     payload: NotificationsMarkReadRequest,
     db: CollectionsDatabase = Depends(get_collections_db_for_user),
-    _principal=Depends(require_permissions(NOTIFICATIONS_CONTROL)),  # noqa: B008
+    _principal=Depends(RequirePermission(NOTIFICATIONS_CONTROL)),  # noqa: B008
 ) -> NotificationsMarkReadResponse:
     """Mark one or more notifications as read."""
 
@@ -224,7 +224,7 @@ async def mark_read(
 async def dismiss_notification(
     notification_id: int = Path(..., ge=1),
     db: CollectionsDatabase = Depends(get_collections_db_for_user),
-    _principal=Depends(require_permissions(NOTIFICATIONS_CONTROL)),  # noqa: B008
+    _principal=Depends(RequirePermission(NOTIFICATIONS_CONTROL)),  # noqa: B008
 ) -> NotificationDismissResponse:
     """Dismiss a notification from the active inbox view."""
 
@@ -240,7 +240,7 @@ async def snooze_notification(
     payload: NotificationSnoozeRequest,
     notification_id: int = Path(..., ge=1),
     db: CollectionsDatabase = Depends(get_collections_db_for_user),
-    _principal=Depends(require_permissions(NOTIFICATIONS_CONTROL)),  # noqa: B008
+    _principal=Depends(RequirePermission(NOTIFICATIONS_CONTROL)),  # noqa: B008
 ) -> NotificationSnoozeResponse:
     """Create a one-time reminder derived from an existing notification."""
 
@@ -266,7 +266,7 @@ async def snooze_notification(
 async def cancel_notification_snooze(
     notification_id: int = Path(..., ge=1),
     db: CollectionsDatabase = Depends(get_collections_db_for_user),
-    _principal=Depends(require_permissions(NOTIFICATIONS_CONTROL)),  # noqa: B008
+    _principal=Depends(RequirePermission(NOTIFICATIONS_CONTROL)),  # noqa: B008
 ) -> NotificationCancelSnoozeResponse:
     """Cancel any active snooze reminder derived from an existing notification."""
 
@@ -292,7 +292,7 @@ async def cancel_notification_snooze(
 )
 async def get_preferences(
     db: CollectionsDatabase = Depends(get_collections_db_for_user),
-    _principal=Depends(require_permissions(NOTIFICATIONS_READ)),  # noqa: B008
+    _principal=Depends(RequirePermission(NOTIFICATIONS_READ)),  # noqa: B008
 ) -> NotificationPreferencesResponse:
     """Fetch notification preference flags for the current user."""
 
@@ -314,7 +314,7 @@ async def get_preferences(
 async def patch_preferences(
     payload: NotificationPreferencesUpdateRequest,
     db: CollectionsDatabase = Depends(get_collections_db_for_user),
-    _principal=Depends(require_permissions(NOTIFICATIONS_CONTROL)),  # noqa: B008
+    _principal=Depends(RequirePermission(NOTIFICATIONS_CONTROL)),  # noqa: B008
 ) -> NotificationPreferencesResponse:
     """Update notification preference flags for the current user."""
 
@@ -340,7 +340,7 @@ async def stream_notifications(
     after: int = Query(0, ge=0),
     last_event_id: str | None = Header(None, alias="Last-Event-ID"),
     db: CollectionsDatabase = Depends(get_collections_db_for_user),
-    _principal=Depends(require_permissions(NOTIFICATIONS_READ)),  # noqa: B008
+    _principal=Depends(RequirePermission(NOTIFICATIONS_READ)),  # noqa: B008
 ) -> StreamingResponse:
     """Stream live notification events via Server-Sent Events."""
 
