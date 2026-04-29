@@ -345,6 +345,13 @@ def test_connectors_router_uses_standard_admin_dependency_aliases() -> None:
     assert not hasattr(connectors, "require_permissions")
 
 
+def test_evaluations_unified_router_uses_standard_role_factory_alias() -> None:
+    from tldw_Server_API.app.api.v1.endpoints.evaluations import evaluations_unified
+
+    assert evaluations_unified.RequireRole is auth_deps.RequireRole
+    assert not hasattr(evaluations_unified, "require_roles")
+
+
 def test_api_key_scope_factory_alias_preserves_jwt_bypass_and_scope_checks() -> None:
     jwt_response = TestClient(_build_app(_principal(kind="user", api_key_id=None))).get(
         "/api-key-scope",

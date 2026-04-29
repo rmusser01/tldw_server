@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query
 from fastapi.routing import APIRoute
 from loguru import logger
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import rbac_rate_limit, require_roles
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import RequireRole, rbac_rate_limit
 
 # Import unified schemas
 from tldw_Server_API.app.api.v1.schemas.evaluation_schemas_unified import (
@@ -536,7 +536,7 @@ async def delete_embeddings_abtest(
 @router.get(
     "/embeddings/abtest/{test_id}/export",
     dependencies=[
-        Depends(require_roles("admin")),
+        Depends(RequireRole("admin")),
         Depends(rbac_rate_limit("evals.abtest.export")),
     ],
 )
