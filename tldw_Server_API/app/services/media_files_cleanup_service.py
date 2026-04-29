@@ -72,7 +72,9 @@ def _enumerate_user_ids() -> list[int]:
     try:
         base = DatabasePaths.get_user_db_base_dir()
     except _MEDIA_CLEANUP_NONCRITICAL_EXCEPTIONS as exc:
-        logger.debug(f"media_files_cleanup: failed to resolve user db base dir: {exc}")
+        logger.bind(error_type=type(exc).__name__).debug(
+            "media_files_cleanup: failed to resolve user db base dir"
+        )
         return []
 
     uids: list[int] = []
@@ -112,8 +114,11 @@ def _collect_known_storage_paths(user_id: int) -> set[str]:
                 path = row[0] if isinstance(row, (list, tuple)) else row.get("storage_path")
                 if path:
                     known_paths.add(path)
-    except _MEDIA_CLEANUP_NONCRITICAL_EXCEPTIONS as e:
-        logger.warning(f"media_files_cleanup: failed to query MediaFiles for user {user_id}: {e}")
+    except _MEDIA_CLEANUP_NONCRITICAL_EXCEPTIONS as exc:
+        logger.bind(error_type=type(exc).__name__).warning(
+            "media_files_cleanup: failed to query MediaFiles for user {user_id}",
+            user_id=user_id,
+        )
 
     return known_paths
 

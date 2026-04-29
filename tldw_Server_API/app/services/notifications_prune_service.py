@@ -55,8 +55,10 @@ def _int_env(name: str, default: int) -> int:
         return default
     try:
         return int(raw)
-    except (TypeError, ValueError):
-        logger.debug(f"notifications_prune: invalid {name}={raw!r}; defaulting to {default}")
+    except (TypeError, ValueError) as exc:
+        logger.bind(error_type=type(exc).__name__).debug(
+            f"notifications_prune: invalid {name}; defaulting to {default}"
+        )
         return default
 
 
@@ -82,7 +84,9 @@ def _enumerate_user_ids() -> list[int]:
         try:
             user_ids = [DatabasePaths.get_single_user_id()]
         except _NOTIFICATIONS_PRUNE_NONCRITICAL_EXCEPTIONS as exc:
-            logger.debug(f"notifications_prune: failed to derive single user id: {exc}")
+            logger.bind(error_type=type(exc).__name__).debug(
+                "notifications_prune: failed to derive single user id"
+            )
             user_ids = []
     return sorted(set(user_ids))
 

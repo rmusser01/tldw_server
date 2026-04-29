@@ -63,7 +63,9 @@ def _enumerate_user_ids() -> list[int]:
             )
         except _OUTPUTS_PURGE_NONCRITICAL_EXCEPTIONS:
             logger.debug("metrics increment failed for outputs_purge settings read failure")
-        logger.debug(f"outputs_purge: failed to resolve user db base dir: {e}")
+        logger.bind(error_type=type(e).__name__).debug(
+            "outputs_purge: failed to resolve user db base dir"
+        )
         return []
     uids: list[int] = []
     for p in base.iterdir():
@@ -71,7 +73,7 @@ def _enumerate_user_ids() -> list[int]:
             try:
                 uids.append(int(p.name))
             except (TypeError, ValueError) as e:
-                logger.debug(f"outputs_purge: skipping non-int user dir {p.name}: {e}")
+                logger.debug("outputs_purge: skipping non-int user dir")
                 try:
                     get_metrics_registry().increment(
                         "app_warning_events_total",
@@ -83,7 +85,9 @@ def _enumerate_user_ids() -> list[int]:
         try:
             uids = [DatabasePaths.get_single_user_id()]
         except _OUTPUTS_PURGE_NONCRITICAL_EXCEPTIONS as e:
-            logger.debug(f"outputs_purge: failed to derive single_user_id: {e}")
+            logger.bind(error_type=type(e).__name__).debug(
+                "outputs_purge: failed to derive single_user_id"
+            )
             try:
                 get_metrics_registry().increment(
                     "app_warning_events_total",
@@ -210,13 +214,17 @@ async def start_outputs_purge_scheduler() -> asyncio.Task | None:
     try:
         interval = int(os.getenv("OUTPUTS_PURGE_INTERVAL_SEC", "86400"))
     except (TypeError, ValueError) as e:
-        logger.debug(f"outputs_purge: invalid OUTPUTS_PURGE_INTERVAL_SEC; using default: {e}")
+        logger.bind(error_type=type(e).__name__).debug(
+            "outputs_purge: invalid OUTPUTS_PURGE_INTERVAL_SEC; using default"
+        )
         interval = 86400
     delete_files = env_flag_enabled("OUTPUTS_PURGE_DELETE_FILES")
     try:
         grace_days = int(os.getenv("OUTPUTS_PURGE_GRACE_DAYS", "30"))
     except (TypeError, ValueError) as e:
-        logger.debug(f"outputs_purge: invalid OUTPUTS_PURGE_GRACE_DAYS; using default: {e}")
+        logger.bind(error_type=type(e).__name__).debug(
+            "outputs_purge: invalid OUTPUTS_PURGE_GRACE_DAYS; using default"
+        )
         grace_days = 30
 
     async def _runner():

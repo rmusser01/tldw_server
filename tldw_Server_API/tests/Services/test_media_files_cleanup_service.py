@@ -5,11 +5,14 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from loguru import logger
 
 from tldw_Server_API.app.services import media_files_cleanup_service as cleanup
 
 
 pytestmark = pytest.mark.unit
+
+_LEAK = "cleanup failed for /tmp/secret-media-token"
 
 
 class _FakeCursor:
@@ -36,6 +39,60 @@ class _FakeCleanupDb:
 
     def get_connection(self):
         return self._connection
+
+
+def _capture_logs():
+    records: list[str] = []
+    sink_id = logger.add(lambda message: records.append(str(message)), format="{message} {extra}")
+    return records, sink_id
+
+
+def _assert_log_sanitized(rendered: str) -> None:
+    assert "cleanup failed" not in rendered
+    assert "/tmp/secret-media-token" not in rendered
+    assert "RuntimeError" in rendered
+
+
+def test_enumerate_user_ids_base_dir_failure_log_is_sanitized(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _fail_get_user_db_base_dir():
+        raise RuntimeError(_LEAK)
+
+    monkeypatch.setattr(
+        cleanup.DatabasePaths,
+        "get_user_db_base_dir",
+        _fail_get_user_db_base_dir,
+    )
+
+    records, sink_id = _capture_logs()
+    try:
+        assert cleanup._enumerate_user_ids() == []
+    finally:
+        logger.remove(sink_id)
+
+    _assert_log_sanitized("\n".join(records))
+
+
+def test_collect_known_storage_paths_query_failure_log_is_sanitized(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _fail_get_media_db_path(_user_id):
+        raise RuntimeError(_LEAK)
+
+    monkeypatch.setattr(
+        cleanup.DatabasePaths,
+        "get_media_db_path",
+        _fail_get_media_db_path,
+    )
+
+    records, sink_id = _capture_logs()
+    try:
+        assert cleanup._collect_known_storage_paths(77) == set()
+    finally:
+        logger.remove(sink_id)
+
+    _assert_log_sanitized("\n".join(records))
 
 
 def test_collect_known_storage_paths_uses_managed_media_database(

@@ -140,3 +140,70 @@ def test_enumerate_user_ids_sanitizes_base_dir_resolution_failure(monkeypatch):
     assert matching
     assert all(secret_path not in record["message"] for record in matching)
     assert matching[-1]["extra"]["error_type"] == "RuntimeError"
+
+
+def test_enumerate_user_ids_sanitizes_single_user_fallback_failure(monkeypatch, tmp_path):
+    secret_path = "/tmp/private/single-user-token-xyz"
+    records: list[dict[str, object]] = []
+    sink_id = logger.add(
+        lambda message: records.append(message.record),
+        level="DEBUG",
+        format="{message}",
+    )
+
+    monkeypatch.setattr(
+        notifications_prune_service.DatabasePaths,
+        "get_user_db_base_dir",
+        lambda: tmp_path,
+    )
+
+    def fail_single_user_id():
+        raise RuntimeError(f"cannot derive {secret_path}")
+
+    monkeypatch.setattr(
+        notifications_prune_service.DatabasePaths,
+        "get_single_user_id",
+        fail_single_user_id,
+    )
+    try:
+        assert notifications_prune_service._enumerate_user_ids() == []
+    finally:
+        logger.remove(sink_id)
+
+    matching = [
+        record
+        for record in records
+        if "notifications_prune: failed to derive single user id" in record["message"]
+    ]
+    assert matching
+    assert all(secret_path not in record["message"] for record in matching)
+    assert matching[-1]["extra"]["error_type"] == "RuntimeError"
+
+
+def test_int_env_sanitizes_invalid_raw_value(monkeypatch):
+    secret_value = "not-an-int /tmp/private-notification-token sk-live-notify"
+    records: list[dict[str, object]] = []
+    sink_id = logger.add(
+        lambda message: records.append(message.record),
+        level="DEBUG",
+        format="{message}",
+    )
+    monkeypatch.setenv("NOTIFICATIONS_PRUNE_INTERVAL_SEC", secret_value)
+
+    try:
+        assert notifications_prune_service._int_env("NOTIFICATIONS_PRUNE_INTERVAL_SEC", 3600) == 3600
+    finally:
+        logger.remove(sink_id)
+
+    matching = [
+        record
+        for record in records
+        if "notifications_prune: invalid NOTIFICATIONS_PRUNE_INTERVAL_SEC" in record["message"]
+    ]
+    assert matching
+    rendered = "\n".join(record["message"] for record in matching)
+    assert secret_value not in rendered
+    assert "/tmp/private-notification-token" not in rendered
+    assert "sk-live-notify" not in rendered
+    assert "defaulting to 3600" in rendered
+    assert matching[-1]["extra"]["error_type"] == "ValueError"
