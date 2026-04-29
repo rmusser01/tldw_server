@@ -112,9 +112,12 @@ Monitoring emits alerts without changing moderation behavior or endpoint results
 - Local JSONL file sink gated by severity threshold.
 - Topic-alert notifications may also make best-effort webhook/email attempts when configured.
 - Generic notifications use the JSONL sink plus optional webhook dispatch; they do not send email in the current batch.
-- Digest modes buffer items in memory, and `flush_digest()` currently clears buffered items and returns the count only.
+- Topic-alert notifications sent through `notify()` remain immediate. Digest mode applies to generic/guardian payloads routed through `notify_or_batch()`.
+- Digest modes buffer generic/guardian items in memory by recipient. `hourly` and `daily` select the batching bucket; they do not run their own scheduler, so callers invoke `flush_digest()` at the intended cadence.
+- On flush, each selected recipient gets one compiled `monitoring_digest` payload per recipient through the generic notification path. Generic notifications use the JSONL sink plus optional webhook dispatch, so digest delivery follows that same local-first path.
+- `flush_digest()` returns the number of buffered items successfully processed. Failed digest deliveries are requeued for a later flush instead of being dropped; webhook dispatch keeps the existing best-effort retry behavior behind the generic notification path.
 - Configure via env or config:
-  - `MONITORING_NOTIFY_ENABLED`, `MONITORING_NOTIFY_MIN_SEVERITY`, `MONITORING_NOTIFY_FILE`
+  - `MONITORING_NOTIFY_ENABLED`, `MONITORING_NOTIFY_MIN_SEVERITY`, `MONITORING_NOTIFY_FILE`, `MONITORING_NOTIFY_DIGEST_MODE`
   - `MONITORING_NOTIFY_WEBHOOK_URL`, `MONITORING_NOTIFY_EMAIL_TO`, `MONITORING_NOTIFY_SMTP_HOST`, `MONITORING_NOTIFY_EMAIL_FROM`
 
 ## Alert Lifecycle
