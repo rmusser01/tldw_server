@@ -29,6 +29,7 @@ from fastapi.responses import Response
 from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import CurrentPrincipal
 
 # Local Imports
 from tldw_Server_API.app.api.v1.schemas.skills_schemas import (
@@ -42,7 +43,6 @@ from tldw_Server_API.app.api.v1.schemas.skills_schemas import (
     SkillSummary,
     SkillUpdate,
 )
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.Skills.exceptions import (
@@ -58,19 +58,19 @@ router = APIRouter()
 
 
 async def get_skills_service(
-    current_user: User = Depends(get_request_user),
+    principal: CurrentPrincipal,
     chacha_db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> SkillsService:
     """
     FastAPI dependency to get the SkillsService instance for the identified user.
     """
-    if not current_user or not isinstance(current_user.id, int):
+    if not isinstance(principal.user_id, int):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="User identification failed for Skills service.",
         )
 
-    user_id = current_user.id
+    user_id = principal.user_id
     user_base_dir = DatabasePaths.get_user_base_directory(user_id)
 
     return SkillsService(user_id=user_id, base_path=user_base_dir, db=chacha_db)
@@ -432,8 +432,8 @@ async def export_skill(
 async def execute_skill(
     skill_name: str,
     request: SkillExecuteRequest,
+    principal: CurrentPrincipal,
     service: SkillsService = Depends(get_skills_service),
-    current_user: User = Depends(get_request_user),
 ):
     """
     Execute a skill with optional arguments.
@@ -446,7 +446,7 @@ async def execute_skill(
 
         executor = SkillExecutor()
         ctx = None
-        if current_user and getattr(current_user, "id", None) is not None:
+        if isinstance(principal.user_id, int):
             # Populate full RequestContext for fork mode support
             try:
                 from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import DEFAULT_LLM_PROVIDER
@@ -459,7 +459,7 @@ async def execute_skill(
             except Exception:
                 app_config = None
             ctx = RequestContext(
-                user_id=current_user.id,
+                user_id=principal.user_id,
                 default_provider=default_provider,
                 app_config=app_config,
                 client_id=getattr(service.db, "client_id", None) if getattr(service, "db", None) else None,
