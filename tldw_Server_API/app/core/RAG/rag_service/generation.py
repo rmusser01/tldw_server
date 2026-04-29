@@ -708,8 +708,8 @@ async def generate_streaming_response(context: Any, **kwargs) -> Any:
                             context.metadata["claims_overlay"] = claims_out
                             last_emit = len(buffer)
                             last_emit_time = now
-                        except Exception as claims_overlay_error:  # noqa: BLE001 - claims overlay best-effort
-                            logger.debug("Claims overlay enrichment failed during streaming generation", exc_info=claims_overlay_error)
+                        except Exception:  # noqa: BLE001 - claims overlay best-effort
+                            logger.debug("Claims overlay enrichment failed during streaming generation")
                 # done
                 return
 

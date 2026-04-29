@@ -317,8 +317,8 @@ class ChromaDBAdapter(VectorStoreAdapter):
             try:
                 if hasattr(embs, 'tolist'):
                     embs = embs.tolist()
-            except Exception as vector_convert_error:  # noqa: BLE001 - best-effort conversion
-                logger.debug("Chroma adapter failed to convert embeddings to list", exc_info=vector_convert_error)
+            except Exception:  # noqa: BLE001 - best-effort conversion
+                logger.debug("Chroma adapter failed to convert embeddings to list")
             for i, vid in enumerate(data_dict['ids']):
                 vec: list[float] = []
                 try:
@@ -514,8 +514,8 @@ class ChromaDBAdapter(VectorStoreAdapter):
                 if emb_list:
                     try:
                         dimension = len(emb_list[0])
-                    except Exception as shape_error:  # noqa: BLE001 - best-effort shape inspection
-                        logger.debug("Chroma adapter failed to inspect embedding shape", exc_info=shape_error)
+                    except Exception:  # noqa: BLE001 - best-effort shape inspection
+                        logger.debug("Chroma adapter failed to inspect embedding shape")
             if dimension is None:
                 dimension = self.config.embedding_dim
         except Exception:  # noqa: BLE001 - surface as adapter error

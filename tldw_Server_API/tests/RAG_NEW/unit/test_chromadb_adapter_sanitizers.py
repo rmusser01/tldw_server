@@ -49,6 +49,9 @@ class _RecordingLogger:
     def warning(self, message: str, *args: object, **kwargs: object) -> None:
         self.records.append(("warning", str(message), args, dict(kwargs)))
 
+    def debug(self, message: str, *args: object, **kwargs: object) -> None:
+        self.records.append(("debug", str(message), args, dict(kwargs)))
+
 
 class _NamedCollection:
     def __init__(self, name: str) -> None:
@@ -96,6 +99,58 @@ class _FailingDeleteVectorsClient:
     def get_collection(self, *, name: str) -> _FailingDeleteVectorsCollection:
         assert name == _PRIVATE_COLLECTION
         return _FailingDeleteVectorsCollection()
+
+
+class _PrivateFailingEmbeddings:
+    def tolist(self) -> list[list[float]]:
+        raise RuntimeError(_PRIVATE_EXCEPTION)
+
+    def __getitem__(self, _index: int) -> list[float]:
+        raise RuntimeError(_PRIVATE_EXCEPTION)
+
+
+class _FailingEmbeddingsListCollection:
+    def count(self) -> int:
+        return 1
+
+    def get(self, *_args: object, **_kwargs: object) -> dict[str, object]:
+        return {
+            "ids": ["vec-1"],
+            "embeddings": _PrivateFailingEmbeddings(),
+            "documents": ["private document"],
+            "metadatas": [{"source": "/tmp/source", "token": "secret"}],
+        }
+
+
+class _FailingEmbeddingsListManager:
+    def get_or_create_collection(self, collection_name: str) -> _FailingEmbeddingsListCollection:
+        assert collection_name == _PRIVATE_COLLECTION
+        return _FailingEmbeddingsListCollection()
+
+
+class _PrivateFailingEmbeddingShape:
+    def __len__(self) -> int:
+        raise RuntimeError(_PRIVATE_EXCEPTION)
+
+
+class _FailingEmbeddingShapeStatsCollection:
+    metadata: dict[str, object] = {}
+
+    def count(self) -> int:
+        return 1
+
+    def get(self, *_args: object, **_kwargs: object) -> dict[str, object]:
+        return {"embeddings": [_PrivateFailingEmbeddingShape()]}
+
+
+class _FailingEmbeddingShapeStatsClient:
+    def get_collection(self, *, name: str) -> _FailingEmbeddingShapeStatsCollection:
+        assert name == _PRIVATE_COLLECTION
+        return _FailingEmbeddingShapeStatsCollection()
+
+
+class _FailingEmbeddingShapeStatsManager:
+    client = _FailingEmbeddingShapeStatsClient()
 
 
 class _ListedFailingSearchClient:
@@ -312,6 +367,39 @@ async def test_delete_vectors_failure_reraises_and_sanitizes_log(
 
 
 @pytest.mark.asyncio
+async def test_list_vectors_embedding_conversion_fallback_sanitizes_debug_log(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    logger_stub = _RecordingLogger()
+    monkeypatch.setattr(chromadb_adapter, "logger", logger_stub)
+    adapter = _adapter_with_manager(_FailingEmbeddingsListManager())
+
+    result = await adapter.list_vectors_with_embeddings_paginated(
+        _PRIVATE_COLLECTION,
+        limit=1,
+        offset=0,
+    )
+
+    assert result == {
+        "items": [
+            {
+                "id": "vec-1",
+                "vector": [],
+                "content": "private document",
+                "metadata": {"source": "/tmp/source", "token": "secret"},
+            },
+        ],
+        "total": 1,
+    }
+    _assert_records_are_sanitized(
+        logger_stub,
+        [
+            ("debug", "Chroma adapter failed to convert embeddings to list"),
+        ],
+    )
+
+
+@pytest.mark.asyncio
 async def test_search_failure_reraises_and_sanitizes_log(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -385,6 +473,31 @@ async def test_get_collection_stats_failure_reraises_and_sanitizes_log(
         logger_stub,
         [
             ("error", "Failed to get ChromaDB collection stats"),
+        ],
+    )
+
+
+@pytest.mark.asyncio
+async def test_get_collection_stats_embedding_shape_fallback_sanitizes_debug_log(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    logger_stub = _RecordingLogger()
+    monkeypatch.setattr(chromadb_adapter, "logger", logger_stub)
+    adapter = _adapter_with_manager(_FailingEmbeddingShapeStatsManager())
+
+    result = await adapter.get_collection_stats(_PRIVATE_COLLECTION)
+
+    assert result == {
+        "name": _PRIVATE_COLLECTION,
+        "count": 1,
+        "dimension": 2,
+        "metadata": {},
+        "distance_metric": "cosine",
+    }
+    _assert_records_are_sanitized(
+        logger_stub,
+        [
+            ("debug", "Chroma adapter failed to inspect embedding shape"),
         ],
     )
 

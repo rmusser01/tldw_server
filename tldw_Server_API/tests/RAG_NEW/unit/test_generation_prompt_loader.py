@@ -16,12 +16,14 @@ pytestmark = pytest.mark.unit
 class _LoggerStub:
     def __init__(self) -> None:
         self.debugs: list[str] = []
+        self.debug_kwargs: list[dict[str, object]] = []
         self.errors: list[str] = []
 
     def debug(self, message: str, *args: object, **kwargs: object) -> None:
         if args or kwargs:
             message = message.format(*args, **kwargs)
         self.debugs.append(message)
+        self.debug_kwargs.append(dict(kwargs))
 
     def error(self, message: str, *args: object, **kwargs: object) -> None:
         if args or kwargs:
@@ -208,3 +210,54 @@ async def test_streaming_generator_ignores_finish_only_openai_chunks(
     chunks = [chunk async for chunk in generator.generate_stream(ctx, ctx.query)]
 
     assert chunks == ["Machine learning "]
+
+
+@pytest.mark.asyncio
+async def test_streaming_claims_overlay_debug_log_omits_raw_exception(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    logger_stub = _LoggerStub()
+
+    class _StubGenerator:
+        async def generate_stream(self, _context: Any, _query: str) -> AsyncIterator[str]:
+            yield (
+                "Sentence one has enough padding to start the overlay buffer "
+                "with a complete sentence and a meaningful amount of content. "
+            )
+            yield (
+                "Sentence two also has enough padding to force the claims overlay path "
+                "without exposing private tokens. Additional neutral padding ensures the "
+                "buffer exceeds the overlay threshold used by streaming generation."
+            )
+
+    class _ExplodingClaimsEngine:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        async def run(self, *_args: object, **_kwargs: object) -> dict[str, object]:
+            raise RuntimeError(
+                "claims overlay failed at /private/rag/claims.db token=secret-token"
+            )
+
+    monkeypatch.setattr(generation_mod, "create_generator", lambda _config: _StubGenerator())
+    monkeypatch.setattr(generation_mod, "ClaimsEngine", _ExplodingClaimsEngine)
+    monkeypatch.setattr(generation_mod, "logger", logger_stub)
+
+    ctx = SimpleNamespace(
+        config={"generation": {"provider": "openai", "model": "gpt-4o-mini"}},
+        query="claims overlay sanitizer",
+        metadata={},
+        documents=[],
+    )
+
+    result = await generation_mod.generate_streaming_response(ctx, enable_claims=True)
+    chunks = [chunk async for chunk in result.stream_generator]
+
+    assert "".join(chunks).startswith("Sentence one")
+    assert "claims_overlay" not in result.metadata
+    assert logger_stub.debugs == ["Claims overlay enrichment failed during streaming generation"]
+    assert logger_stub.debug_kwargs == [{}]
+    rendered = "\n".join(logger_stub.debugs) + repr(logger_stub.debug_kwargs)
+    assert "/private/" not in rendered
+    assert "secret-token" not in rendered
+    assert "claims overlay failed" not in rendered

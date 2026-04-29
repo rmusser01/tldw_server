@@ -303,14 +303,14 @@ class PGVectorAdapter(VectorStoreAdapter):
                 await self._exec(
                     f"CREATE INDEX IF NOT EXISTS {tbl}_embedding_ivf ON {tbl} USING ivfflat (embedding {ops})"
                 )
-            except Exception as index_error:  # noqa: BLE001 - index creation best-effort
+            except Exception:  # noqa: BLE001 - index creation best-effort
                 # If both fail, continue without an ANN index (still usable for brute-force)
-                logger.debug("pgvector index creation failed; continuing without ANN index", exc_info=index_error)
+                logger.debug("pgvector index creation failed; continuing without ANN index")
         # Analyze to help planner (best-effort)
         try:
             await self._exec(f"ANALYZE {tbl}")
-        except Exception as analyze_error:  # noqa: BLE001 - analyze best-effort
-            logger.debug("pgvector analyze after collection creation failed", exc_info=analyze_error)
+        except Exception:  # noqa: BLE001 - analyze best-effort
+            logger.debug("pgvector analyze after collection creation failed")
 
     async def delete_collection(self, collection_name: str) -> None:
         tbl = self._sanitize_collection(collection_name)
@@ -346,8 +346,8 @@ class PGVectorAdapter(VectorStoreAdapter):
                 try:
                     try:
                         cur.execute(f"SET hnsw.ef_search = {int(ef)}")
-                    except Exception as e:  # noqa: BLE001 - best-effort session tuning
-                        logger.debug("pgvector.upsert: SET hnsw.ef_search failed", exc_info=e)
+                    except Exception:  # noqa: BLE001 - best-effort session tuning
+                        logger.debug("pgvector.upsert: SET hnsw.ef_search failed")
                     args = [(_id, doc, JsonDumper.dumps(meta), vec) for _id, doc, meta, vec in values]
                     cur.executemany(
                         f"INSERT INTO {tbl}(id, content, metadata, embedding) VALUES (%s, %s, %s, %s) "  # nosec B608
@@ -358,15 +358,15 @@ class PGVectorAdapter(VectorStoreAdapter):
                 finally:
                     try:
                         cur.close()
-                    except Exception as e:  # noqa: BLE001 - cursor close best-effort
-                        logger.debug("pgvector.upsert: cursor close failed", exc_info=e)
+                    except Exception:  # noqa: BLE001 - cursor close best-effort
+                        logger.debug("pgvector.upsert: cursor close failed")
         # Observe rows + latency
         with self._H_UPSERT_LAT.labels(collection=tbl).time():
             await asyncio.get_event_loop().run_in_executor(None, _batch, self._borrow_conn(), None if self._pool else self._borrow_conn(), self._ef_search)
         try:
             self._C_ROWS_UPSERTED.labels(collection=tbl).inc(len(values))
-        except Exception as e:  # noqa: BLE001 - metrics best-effort
-            logger.debug("pgvector.upsert: metrics increment failed", exc_info=e)
+        except Exception:  # noqa: BLE001 - metrics best-effort
+            logger.debug("pgvector.upsert: metrics increment failed")
 
     async def delete_vectors(self, collection_name: str, ids: list[str]) -> None:
         tbl = self._sanitize_collection(collection_name)
@@ -382,14 +382,14 @@ class PGVectorAdapter(VectorStoreAdapter):
                 finally:
                     try:
                         cur.close()
-                    except Exception as e:  # noqa: BLE001 - cursor close best-effort
-                        logger.debug("pgvector.delete_vectors: cursor close failed", exc_info=e)
+                    except Exception:  # noqa: BLE001 - cursor close best-effort
+                        logger.debug("pgvector.delete_vectors: cursor close failed")
         with self._H_DELETE_LAT.labels(collection=tbl).time():
             rc = await asyncio.get_event_loop().run_in_executor(None, _batch, self._borrow_conn(), None if self._pool else self._borrow_conn(), self._ef_search)
         try:
             self._C_ROWS_DELETED.labels(collection=tbl).inc(int(rc))
-        except Exception as e:  # noqa: BLE001 - metrics best-effort
-            logger.debug("pgvector.delete_vectors: metrics increment failed", exc_info=e)
+        except Exception:  # noqa: BLE001 - metrics best-effort
+            logger.debug("pgvector.delete_vectors: metrics increment failed")
 
     async def delete_by_filter(self, collection_name: str, filter: dict[str, Any]) -> int:
         """Delete rows matching a JSONB metadata filter; returns affected row count."""
@@ -406,8 +406,8 @@ class PGVectorAdapter(VectorStoreAdapter):
                 try:
                     try:
                         cur.execute(f"SET hnsw.ef_search = {int(ef)}")
-                    except Exception as e:  # noqa: BLE001 - best-effort session tuning
-                        logger.debug("pgvector.delete_by_filter: SET hnsw.ef_search failed", exc_info=e)
+                    except Exception:  # noqa: BLE001 - best-effort session tuning
+                        logger.debug("pgvector.delete_by_filter: SET hnsw.ef_search failed")
                     cur.execute(f"DELETE FROM {tbl}{where_sql}", tuple(params))  # nosec B608
                     rc = getattr(cur, 'rowcount', 0)
                     conn.commit()
@@ -415,14 +415,14 @@ class PGVectorAdapter(VectorStoreAdapter):
                 finally:
                     try:
                         cur.close()
-                    except Exception as e:  # noqa: BLE001 - cursor close best-effort
-                        logger.debug("pgvector.delete_by_filter: cursor close failed", exc_info=e)
+                    except Exception:  # noqa: BLE001 - cursor close best-effort
+                        logger.debug("pgvector.delete_by_filter: cursor close failed")
         with self._H_DELETE_LAT.labels(collection=tbl).time():
             rc = await asyncio.get_event_loop().run_in_executor(None, _run, self._borrow_conn(), None if self._pool else self._borrow_conn(), self._ef_search)
         try:
             self._C_ROWS_DELETED.labels(collection=tbl).inc(int(rc or 0))
-        except Exception as e:  # noqa: BLE001 - metrics best-effort
-            logger.debug("pgvector.delete_by_filter: metrics increment failed", exc_info=e)
+        except Exception:  # noqa: BLE001 - metrics best-effort
+            logger.debug("pgvector.delete_by_filter: metrics increment failed")
         try:
             return int(rc)
         except (TypeError, ValueError):

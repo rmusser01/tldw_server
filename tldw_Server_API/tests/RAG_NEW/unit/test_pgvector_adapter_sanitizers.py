@@ -42,6 +42,7 @@ def _adapter() -> PGVectorAdapter:
 
 
 def _assert_no_sensitive_fragments(rendered_log: str) -> None:
+    assert "RAW_EXCEPTION_MARKER" not in rendered_log
     assert "topsecret" not in rendered_log
     assert "pgvector.sqlite" not in rendered_log
     assert "/var/lib/tldw/private" not in rendered_log
@@ -51,7 +52,7 @@ def _assert_no_sensitive_fragments(rendered_log: str) -> None:
 
 def _sensitive_error(action: str) -> RuntimeError:
     return RuntimeError(
-        f"{action} failed for postgresql://user:topsecret@db.example/app "
+        f"RAW_EXCEPTION_MARKER {action} failed for postgresql://user:topsecret@db.example/app "
         "using /var/lib/tldw/private/pgvector.sqlite?token=secret-token"
     )
 
@@ -75,18 +76,26 @@ class _FakeCursor:
         sql_error: Exception | None = None,
         close_error: Exception | None = None,
         rows: list[tuple[object, ...]] | None = None,
+        rowcount: int = 0,
     ) -> None:
         self.set_error = set_error
         self.sql_error = sql_error
         self.close_error = close_error
         self.rows = rows or []
+        self.rowcount = rowcount
         self.executed: list[tuple[str, tuple[object, ...]]] = []
+        self.executemany_calls: list[tuple[str, list[tuple[object, ...]]]] = []
 
     def execute(self, sql: str, params: tuple[object, ...] = ()) -> None:
         self.executed.append((sql, params))
         if sql.startswith("SET hnsw.ef_search") and self.set_error is not None:
             raise self.set_error
         if not sql.startswith("SET hnsw.ef_search") and self.sql_error is not None:
+            raise self.sql_error
+
+    def executemany(self, sql: str, args: list[tuple[object, ...]]) -> None:
+        self.executemany_calls.append((sql, args))
+        if self.sql_error is not None:
             raise self.sql_error
 
     def fetchall(self) -> list[tuple[object, ...]]:
@@ -130,6 +139,30 @@ def _assert_debug_records_sanitized(logger_stub: _LoggerStub) -> None:
     rendered_log = repr(logger_stub.debug_records)
     assert "exc_info" not in rendered_log
     _assert_no_sensitive_fragments(rendered_log)
+
+
+class _NoopTimer:
+    def __enter__(self) -> "_NoopTimer":
+        return self
+
+    def __exit__(self, exc_type: object, exc: object, tb: object) -> bool:
+        return False
+
+
+class _NoopHistogram:
+    def labels(self, **_kwargs: object) -> "_NoopHistogram":
+        return self
+
+    def time(self) -> _NoopTimer:
+        return _NoopTimer()
+
+
+class _FailingCounter:
+    def labels(self, **_kwargs: object) -> "_FailingCounter":
+        return self
+
+    def inc(self, _amount: int) -> None:
+        raise _sensitive_error("metrics increment")
 
 
 @pytest.mark.asyncio
@@ -308,4 +341,129 @@ async def test_exec_cursor_close_failure_log_omits_raw_exception_and_is_swallowe
     await adapter._exec("SELECT 1", ())
 
     assert conn.committed is True
+    _assert_debug_records_sanitized(logger_stub)
+
+
+@pytest.mark.asyncio
+async def test_create_collection_index_failure_log_omits_raw_exception_and_is_swallowed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    logger_stub = _LoggerStub()
+    adapter = _adapter()
+    calls: list[str] = []
+
+    async def _fake_exec(sql: str, params: tuple[object, ...] | None = None) -> None:
+        del params
+        calls.append(sql)
+        if "CREATE INDEX" in sql:
+            raise _sensitive_error("create index")
+
+    monkeypatch.setattr(pgvector_adapter, "logger", logger_stub)
+    monkeypatch.setattr(adapter, "_exec", _fake_exec)
+
+    await adapter.create_collection("private collection")
+
+    assert any("CREATE TABLE" in call for call in calls)
+    assert any("USING hnsw" in call for call in calls)
+    assert any("USING ivfflat" in call for call in calls)
+    assert any(call.startswith("ANALYZE") for call in calls)
+    _assert_debug_records_sanitized(logger_stub)
+
+
+@pytest.mark.asyncio
+async def test_create_collection_analyze_failure_log_omits_raw_exception_and_is_swallowed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    logger_stub = _LoggerStub()
+    adapter = _adapter()
+
+    async def _fake_exec(sql: str, params: tuple[object, ...] | None = None) -> None:
+        del params
+        if sql.startswith("ANALYZE"):
+            raise _sensitive_error("analyze")
+
+    monkeypatch.setattr(pgvector_adapter, "logger", logger_stub)
+    monkeypatch.setattr(adapter, "_exec", _fake_exec)
+
+    await adapter.create_collection("private collection")
+
+    _assert_debug_records_sanitized(logger_stub)
+
+
+@pytest.mark.asyncio
+async def test_upsert_operation_fallback_logs_omit_raw_exception_and_are_swallowed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    logger_stub = _LoggerStub()
+    adapter = _adapter()
+    cursor = _FakeCursor(
+        set_error=_sensitive_error("upsert SET hnsw"),
+        close_error=_sensitive_error("upsert cursor close"),
+    )
+    conn = _FakeConnection(cursor)
+
+    monkeypatch.setattr(pgvector_adapter, "logger", logger_stub)
+    monkeypatch.setattr(adapter, "_H_UPSERT_LAT", _NoopHistogram())
+    monkeypatch.setattr(adapter, "_C_ROWS_UPSERTED", _FailingCounter())
+    _borrow_adapter_conn(monkeypatch, adapter, conn)
+
+    await adapter.upsert_vectors(
+        "private collection",
+        ["id-1"],
+        [[1.0, 2.0, 3.0]],
+        ["document"],
+        [{"source": "test"}],
+    )
+
+    assert conn.committed is True
+    assert cursor.executemany_calls
+    assert len(logger_stub.debug_records) == 3
+    _assert_debug_records_sanitized(logger_stub)
+
+
+@pytest.mark.asyncio
+async def test_delete_vectors_operation_fallback_logs_omit_raw_exception_and_are_swallowed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    logger_stub = _LoggerStub()
+    adapter = _adapter()
+    cursor = _FakeCursor(close_error=_sensitive_error("delete cursor close"), rowcount=1)
+    conn = _FakeConnection(cursor)
+
+    monkeypatch.setattr(pgvector_adapter, "logger", logger_stub)
+    monkeypatch.setattr(adapter, "_H_DELETE_LAT", _NoopHistogram())
+    monkeypatch.setattr(adapter, "_C_ROWS_DELETED", _FailingCounter())
+    _borrow_adapter_conn(monkeypatch, adapter, conn)
+
+    await adapter.delete_vectors("private collection", ["id-1"])
+
+    assert conn.committed is True
+    assert cursor.executemany_calls
+    assert len(logger_stub.debug_records) == 2
+    _assert_debug_records_sanitized(logger_stub)
+
+
+@pytest.mark.asyncio
+async def test_delete_by_filter_operation_fallback_logs_omit_raw_exception_and_are_swallowed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    logger_stub = _LoggerStub()
+    adapter = _adapter()
+    cursor = _FakeCursor(
+        set_error=_sensitive_error("delete_by_filter SET hnsw"),
+        close_error=_sensitive_error("delete_by_filter cursor close"),
+        rowcount=1,
+    )
+    conn = _FakeConnection(cursor)
+
+    monkeypatch.setattr(pgvector_adapter, "logger", logger_stub)
+    monkeypatch.setattr(adapter, "_H_DELETE_LAT", _NoopHistogram())
+    monkeypatch.setattr(adapter, "_C_ROWS_DELETED", _FailingCounter())
+    _borrow_adapter_conn(monkeypatch, adapter, conn)
+
+    result = await adapter.delete_by_filter("private collection", {"source": "test"})
+
+    assert result == 1
+    assert conn.committed is True
+    assert len(logger_stub.debug_records) == 3
     _assert_debug_records_sanitized(logger_stub)
