@@ -52,7 +52,7 @@ Related Schemas
   - Endpoints: `/api/v1/scheduler/workflows` provide CRUD + dry-run + run-now.
   - Presence gating, concurrency mode (skip vs queue), jitter, misfire/coalesce, next‑run persistence handled in service.
 - Security & RBAC
-  - Endpoint gates: claim-first dependencies (`require_permissions(...)`) plus token scope (`require_token_scope("workflows", ...)`) on scheduler routes; per‑user scoping for definitions/runs.
+  - Endpoint gates: claim-first dependencies (`RequirePermission(...)`) plus token scope (`TokenScopeGuard("workflows", ...)`) on scheduler routes; per‑user scoping for definitions/runs.
   - Optional minting of short‑lived virtual keys for scheduled runs (env‑gated) in `workflows_scheduler`.
 - Configuration
   - `WORKFLOWS_SCHEDULER_ENABLED`, `WORKFLOWS_SCHEDULER_TZ`, `WORKFLOWS_SCHEDULER_RESCAN_SEC`, `WORKFLOWS_SCHEDULER_DATABASE_URL`, `WORKFLOWS_SCHEDULER_SQLITE_PATH`.

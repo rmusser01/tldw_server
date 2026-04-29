@@ -25,7 +25,7 @@
 - Architecture & Data Flow
   - RG middleware + route_map: tldw_Server_API/app/core/Resource_Governance/middleware_simple.py
   - RBAC selector: `rbac_rate_limit(resource)` returns a dependency that logs selected limits from `rbac_user_rate_limits` and `rbac_role_rate_limits` but does not enforce yet: tldw_Server_API/app/api/v1/API_Deps/auth_deps.py:994
-  - Token-scope enforcement: `require_token_scope(scope, ..., endpoint_id=..., count_as=...)` injects scoped virtual-key checks and emits usage hints: tldw_Server_API/app/api/v1/API_Deps/auth_deps.py:1040
+  - Token-scope enforcement: `TokenScopeGuard(scope, ..., endpoint_id=..., count_as=...)` injects scoped virtual-key checks and emits usage hints: tldw_Server_API/app/api/v1/API_Deps/auth_deps.py:1040
 
 - Configuration
   - Testing bypass: `RG_ENABLED` defaults off in tests; set `RG_ENABLED=1` to enforce in CI.
