@@ -2,11 +2,11 @@
 
 ## 1. Descriptive of Current Feature Set
 
-- Purpose: Topic Monitoring and lightweight notifications for watchlist‑based text scanning, plus admin APIs to manage watchlists and view alerts. (Metrics/tracing are covered in the Metrics module.)
+- Purpose: Topic Monitoring and lightweight notifications for watchlist‑based text scanning, plus operational APIs to manage watchlists and view alerts. (Metrics/tracing are covered in the Metrics module.)
 - Capabilities:
   - Topic Monitoring Service: scans text against configured watchlists; creates alerts; de‑duplicates within a time window; supports `global`/`user`/`team`/`org` scopes.
   - Notification Service (Phase 1): local‑first JSONL sink; optional webhook/email stubs with retries; severity threshold.
-  - Admin endpoints to CRUD watchlists, list/mark alerts, and inspect/update notification settings.
+  - Operational monitoring endpoints to CRUD watchlists, list/mark alerts, and inspect/update notification settings.
 - Inputs/Outputs:
   - Input: free‑text strings from various sources (chat input/output, ingestion summaries, notes, RAG results).
   - Output: persisted `topic_alerts` rows and JSONL notification records; optional webhook/email sends.
@@ -59,6 +59,11 @@
   - Alert metadata is JSON‑encoded/decoded with fallback on parse failures.
   - Admin endpoints use claim-first authorization (`get_auth_principal` + `RequireRole("admin")` / `RequirePermission(...)`) and validate inputs.
 
+- Permission Model
+  - `/api/v1/monitoring/*` routes require `system.logs`. These routes expose operational watchlist, alert, and notification APIs under the non-`/admin` prefix.
+  - `/api/v1/admin/monitoring/*` routes inherit the admin role gate from the parent admin router. Use this surface for shared alert-rule administration, overlay mutations, and alert history.
+  - Public monitoring means non-`/admin` prefix, not anonymous access. There is no unauthenticated public monitoring surface.
+
 ## 3. Developer-Related/Relevant Information for Contributors
 
 - Folder Structure
@@ -74,7 +79,9 @@
   - Metrics JSON/Prometheus shape (observability): tldw_Server_API/tests/Monitoring/test_metrics_endpoints.py:1
 - Local Dev Tips
   - Enable notifications locally with `MONITORING_NOTIFY_ENABLED=true` and set `MONITORING_NOTIFY_FILE` to a temp path to inspect JSONL.
-  - Use the admin APIs to manage watchlists; reload via `/api/v1/monitoring/reload` after file edits.
+  - Use `/api/v1/monitoring/*` APIs to manage watchlists, alerts, and notification settings with a principal that has the `system.logs` permission.
+  - Use `/api/v1/admin/monitoring/*` only for shared admin-only alert rules, overlay mutations, and alert history.
+  - In local AuthNZ tests, grant `SYSTEM_LOGS` from `tldw_Server_API.app.core.AuthNZ.permissions`; reload via `/api/v1/monitoring/reload` after file edits.
 - Pitfalls & Gotchas
   - Webhook/email sends are best‑effort and may be disabled in restricted environments; rely on JSONL for auditability.
   - Public alert mutation endpoints return the authoritative merged alert state in `{status, id, item}`.
