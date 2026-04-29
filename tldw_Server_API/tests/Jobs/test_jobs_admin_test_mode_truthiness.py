@@ -75,6 +75,11 @@ def _build_app(monkeypatch: pytest.MonkeyPatch) -> FastAPI:
     return app
 
 
+def test_jobs_admin_router_uses_standard_role_factory_alias() -> None:
+    assert jobs_mod.RequireRole is auth_deps.RequireRole
+    assert not hasattr(jobs_mod, "require_roles")
+
+
 def test_prune_skips_confirm_when_tldw_test_mode_is_y(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("TEST_MODE", "0")
     monkeypatch.setenv("TLDW_TEST_MODE", "y")
