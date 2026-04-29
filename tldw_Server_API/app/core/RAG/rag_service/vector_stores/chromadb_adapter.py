@@ -242,8 +242,8 @@ class ChromaDBAdapter(VectorStoreAdapter):
             delete = getattr(collection, 'delete', None)
             if callable(delete):
                 delete(where=filter)
-        except Exception as e:  # noqa: BLE001 - best-effort delete
-            logger.error(f"Failed to delete by filter in '{collection_name}': {e}")
+        except Exception:  # noqa: BLE001 - best-effort delete
+            logger.error("Failed to delete ChromaDB vectors by filter")
         else:
             return 0
         return 0
@@ -391,8 +391,8 @@ class ChromaDBAdapter(VectorStoreAdapter):
                     )
                     search_results.append(result)
 
-        except Exception as e:  # noqa: BLE001 - surface as adapter error
-            logger.error(f"Failed to search in collection '{collection_name}': {e}")
+        except Exception:  # noqa: BLE001 - surface as adapter error
+            logger.error("Failed to search ChromaDB collection")
             raise
         else:
             return search_results
@@ -457,8 +457,8 @@ class ChromaDBAdapter(VectorStoreAdapter):
                     for result in results:
                         result.metadata["source_collection"] = collection_name
                     all_results.extend(results)
-                except Exception as e:  # noqa: BLE001 - best-effort per-collection search
-                    logger.warning(f"Failed to search collection '{collection_name}': {e}")
+                except Exception:  # noqa: BLE001 - best-effort per-collection search
+                    logger.warning("Failed to search ChromaDB collection during multi-search")
                     continue
 
             # Sort by score and return top k overall
@@ -518,8 +518,8 @@ class ChromaDBAdapter(VectorStoreAdapter):
                         logger.debug("Chroma adapter failed to inspect embedding shape", exc_info=shape_error)
             if dimension is None:
                 dimension = self.config.embedding_dim
-        except Exception as e:  # noqa: BLE001 - surface as adapter error
-            logger.error(f"Failed to get stats for collection '{collection_name}': {e}")
+        except Exception:  # noqa: BLE001 - surface as adapter error
+            logger.error("Failed to get ChromaDB collection stats")
             raise
         else:
             return {

@@ -6,6 +6,7 @@ import types
 import pytest
 
 from tldw_Server_API.app.core.RAG.rag_service import agentic_chunker as ac
+from tldw_Server_API.app.core.RAG.rag_service import claims as claims_mod
 from tldw_Server_API.app.core.RAG.rag_service import database_retrievers
 from tldw_Server_API.app.core.RAG.rag_service import generation as generation_mod
 from tldw_Server_API.app.core.RAG.rag_service.types import DataSource, Document
@@ -210,3 +211,51 @@ async def test_generation_fallback_warning_omits_raw_exception_but_preserves_res
     assert result.errors == [_SENSITIVE_MESSAGE]
     assert logger_stub.warnings == ["Agentic generation failed"]
     _assert_no_sensitive_log_fragments(logger_stub.warnings)
+
+
+@pytest.mark.asyncio
+async def test_claims_verification_skip_debug_omits_raw_exception(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(ac, "logger", logger_stub)
+
+    class _DocRetriever:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+        async def retrieve(self, *args: object, **kwargs: object) -> list[Document]:
+            return [_doc()]
+
+    class _AnswerGenerator:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+        async def generate(self, *args: object, **kwargs: object) -> dict[str, str]:
+            return {"answer": "Attention lets transformers connect distant tokens."}
+
+    class _ExplodingClaimsEngine:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+        async def run(self, *args: object, **kwargs: object) -> dict[str, object]:
+            raise RuntimeError(_SENSITIVE_MESSAGE)
+
+    monkeypatch.setattr(ac, "MultiDatabaseRetriever", _DocRetriever)
+    monkeypatch.setattr(generation_mod, "AnswerGenerator", _AnswerGenerator)
+    monkeypatch.setattr(claims_mod, "ClaimsEngine", _ExplodingClaimsEngine, raising=False)
+
+    result = await ac.agentic_rag_pipeline(
+        query="claims sanitizer",
+        sources=["media_db"],
+        search_mode="fts",
+        agentic=ac.AgenticConfig(top_k_docs=1, enable_metrics=False),
+        enable_generation=True,
+        enable_claims=True,
+        enable_citations=False,
+    )
+
+    assert result.generated_answer == "Attention lets transformers connect distant tokens."
+    assert "claims" not in result.metadata
+    assert logger_stub.debugs == ["Agentic claims verification skipped"]
+    _assert_no_sensitive_log_fragments(logger_stub.debugs)

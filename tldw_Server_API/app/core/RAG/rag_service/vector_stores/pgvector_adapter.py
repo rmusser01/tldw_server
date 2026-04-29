@@ -145,8 +145,8 @@ class PGVectorAdapter(VectorStoreAdapter):
             await self._exec("CREATE EXTENSION IF NOT EXISTS vector")
             self._initialized = True
             logger.info("PGVector adapter initialized")
-        except Exception as e:  # noqa: BLE001 - initialization should not raise
-            logger.error(f"Failed to initialize PGVector adapter: {e}")
+        except Exception:  # noqa: BLE001 - initialization should not raise
+            logger.error("Failed to initialize PGVector adapter")
             self._conn = None
             self._pool = None
             self._initialized = False
@@ -195,8 +195,8 @@ class PGVectorAdapter(VectorStoreAdapter):
                 return
             self._vector_cls = _PgVector
             logger.debug("Registered pgvector type with psycopg")
-        except Exception as exc:  # noqa: BLE001 - registration best-effort
-            logger.debug(f"pgvector registration failed: {exc}")
+        except Exception:  # noqa: BLE001 - registration best-effort
+            logger.debug("pgvector registration failed")
             self._vector_cls = None
 
     def _serialize_vector(self, vector: list[float]) -> str:

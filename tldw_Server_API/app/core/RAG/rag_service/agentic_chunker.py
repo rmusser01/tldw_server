@@ -667,8 +667,8 @@ async def agentic_rag_pipeline(
                 claims_payload = claims_run.get("claims")
                 result.metadata["claims"] = claims_payload
                 result.metadata["factuality"] = claims_run.get("summary")
-            except (ImportError, AttributeError, ConnectionError, RuntimeError, TypeError, ValueError, TimeoutError) as _e:
-                logger.debug(f"Agentic claims verification skipped: {_e}")
+            except (ImportError, AttributeError, ConnectionError, RuntimeError, TypeError, ValueError, TimeoutError):
+                logger.debug("Agentic claims verification skipped")
 
         # Hard citations using assembled spans
         try:
