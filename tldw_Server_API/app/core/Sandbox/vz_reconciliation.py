@@ -7,12 +7,14 @@ from loguru import logger
 
 from .macos_virtualization.helper_client import (
     MacOSVirtualizationHelperClient,
+    MacOSVirtualizationHelperFailure,
     MacOSVirtualizationHelperProtocolError,
     MacOSVirtualizationHelperUnavailable,
 )
 
 REASON_HELPER_UNAVAILABLE = "macos_virtualization_helper_unavailable"
 REASON_PROTOCOL_MISMATCH = "macos_virtualization_helper_protocol_mismatch"
+REASON_HELPER_FAILURE = "macos_virtualization_helper_failure"
 REASON_RECONCILIATION_UNAVAILABLE = "vz_reconciliation_unavailable"
 
 
@@ -109,6 +111,10 @@ def collect_vz_reconciliation(
         return report
     except MacOSVirtualizationHelperProtocolError:
         report["reasons"] = [REASON_PROTOCOL_MISMATCH]
+        return report
+    except MacOSVirtualizationHelperFailure as exc:
+        logger.debug("VZ helper returned failure for reconciliation: {}", exc.error_code)
+        report["reasons"] = [REASON_HELPER_FAILURE]
         return report
     except Exception as exc:
         logger.debug("Unable to collect VZ helper VM list for reconciliation: {}", exc)

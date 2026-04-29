@@ -343,6 +343,7 @@ def test_collect_macos_diagnostics_classifies_helper_protocol_mismatch(monkeypat
     data = diagnostics_module.collect_macos_diagnostics()
 
     assert "macos_virtualization_helper_protocol_mismatch" in data["helper"]["reasons"]
+    assert "macos_helper_missing" not in data["helper"]["reasons"]
     assert (
         diagnostics_module._remediation_for_reasons(["macos_virtualization_helper_protocol_mismatch"])
         == "Update the macOS virtualization helper and Python client to compatible protocol versions."

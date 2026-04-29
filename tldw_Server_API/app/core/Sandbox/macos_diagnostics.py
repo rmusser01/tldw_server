@@ -112,7 +112,13 @@ def probe_helper() -> dict[str, object]:
     except MacOSVirtualizationHelperProtocolError:
         reasons.append("macos_virtualization_helper_protocol_mismatch")
 
-    if not ready and "macos_virtualization_helper_unavailable" not in reasons:
+    if not ready and not any(
+        reason in reasons
+        for reason in (
+            "macos_virtualization_helper_unavailable",
+            "macos_virtualization_helper_protocol_mismatch",
+        )
+    ):
         reasons.append("macos_helper_missing")
 
     return {

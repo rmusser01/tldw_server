@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from tldw_Server_API.app.core.Sandbox.macos_virtualization.helper_client import (
+    MacOSVirtualizationHelperFailure,
     MacOSVirtualizationHelperProtocolError,
     MacOSVirtualizationHelperUnavailable,
 )
@@ -58,6 +59,11 @@ class _UnavailableHelper:
 class _ProtocolMismatchHelper:
     def list_vms(self) -> HelperVMListReply:
         raise MacOSVirtualizationHelperProtocolError("helper protocol mismatch")
+
+
+class _FailureHelper:
+    def list_vms(self) -> HelperVMListReply:
+        raise MacOSVirtualizationHelperFailure("helper_internal_error", "list failed")
 
 
 def _vm(vm_id: str, *, state: str = "running", healthy: bool = True) -> HelperVMStatusReply:
@@ -125,6 +131,16 @@ def test_reconciliation_classifies_protocol_mismatch():
 
     assert report["computed"] is False
     assert "macos_virtualization_helper_protocol_mismatch" in report["reasons"]
+
+
+def test_reconciliation_classifies_helper_failure():
+    report = collect_vz_reconciliation(
+        orchestrator=_FakeOrchestrator([{"id": "sess-live", "vm_id": "vm-live"}]),
+        helper_client=_FailureHelper(),
+    )
+
+    assert report["computed"] is False
+    assert report["reasons"] == ["macos_virtualization_helper_failure"]
 
 
 def test_reconciliation_marks_active_stale_sessions_as_skipped():

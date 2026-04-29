@@ -2248,7 +2248,7 @@ async def admin_repair_macos_reconciliation(
     _current_user: User = Depends(get_request_user),
 ) -> SandboxAdminMacOSReconciliationRepairResponse:
     try:
-        payload = _service.repair_macos_reconciliation(**request.model_dump())
+        payload = await asyncio.to_thread(_service.repair_macos_reconciliation, **request.model_dump())
     except SandboxReconciliationRepairError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.reason) from exc
     return SandboxAdminMacOSReconciliationRepairResponse.model_validate(payload)

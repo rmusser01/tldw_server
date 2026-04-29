@@ -41,7 +41,7 @@ from .macos_virtualization.helper_client import (
     MacOSVirtualizationHelperClient,
     MacOSVirtualizationHelperFailure,
 )
-from .macos_diagnostics import collect_macos_diagnostics
+from .macos_diagnostics import collect_macos_diagnostics, probe_helper
 from .orchestrator import SandboxOrchestrator, SessionActiveRunsConflict
 from .policy import SandboxPolicy, SandboxPolicyConfig, compute_policy_hash
 from .runtime_capabilities import RuntimePreflightResult, collect_runtime_preflights
@@ -1014,6 +1014,7 @@ class SandboxService:
         if terminate_orphaned_vms:
             raise SandboxReconciliationRepairError("orphan_termination_not_supported", 400)
 
+        helper_status = probe_helper()
         report = collect_vz_reconciliation(
             self._orch,
             active_session_checker=lambda sid: self._active_session_run_count(sid) > 0,
@@ -1035,11 +1036,11 @@ class SandboxService:
         orphaned_items = [item for item in report_items if str(item.get("status") or "").strip() == "orphaned_vm"]
         actions: list[dict[str, object]] = []
         summary: dict[str, int] = {
-            "stale_session_controls": max(len(list(report.get("stale_session_ids") or [])), len(stale_items)),
-            "unhealthy_session_controls": max(len(list(report.get("unhealthy_session_ids") or [])), len(unhealthy_items)),
+            "stale_session_controls": len(stale_items),
+            "unhealthy_session_controls": len(unhealthy_items),
             "deleted_session_controls": 0,
-            "skipped_active_sessions": max(len(list(report.get("skipped_active_session_ids") or [])), len(skipped_items)),
-            "orphaned_vms": max(len(list(report.get("orphaned_vm_ids") or [])), len(orphaned_items)),
+            "skipped_active_sessions": len(skipped_items),
+            "orphaned_vms": len(orphaned_items),
             "terminated_orphaned_vms": 0,
         }
 
@@ -1083,7 +1084,12 @@ class SandboxService:
 
             action_status = "planned"
             if not dry_run:
-                if self._orch.delete_vz_session_control(session_id):
+                try:
+                    deleted = bool(self._orch.delete_vz_session_control(session_id))
+                except Exception as exc:
+                    logger.exception("VZ reconciliation repair delete failed for session_id={}", session_id)
+                    raise SandboxReconciliationRepairError("vz_session_control_delete_failed", 503) from exc
+                if deleted:
                     summary["deleted_session_controls"] += 1
                     action_status = "deleted"
                 else:
@@ -1101,7 +1107,7 @@ class SandboxService:
 
         return {
             "dry_run": bool(dry_run),
-            "helper": {},
+            "helper": helper_status,
             "summary": summary,
             "actions": actions,
             "reasons": reasons,
