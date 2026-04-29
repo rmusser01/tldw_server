@@ -4,6 +4,7 @@ import shutil
 import hashlib
 from datetime import datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -759,6 +760,80 @@ async def test_outputs_create_variant_cleanup_failure_logs_are_sanitized(monkeyp
     assert "cleanup row exploded" not in logged
     assert "/private/output.md" not in logged
     assert "/private/outputs.db" not in logged
+
+
+@pytest.mark.asyncio
+async def test_outputs_list_invalid_path_fallback_log_is_sanitized(monkeypatch):
+    row = SimpleNamespace(
+        id=777,
+        title="legacy",
+        type="newsletter_markdown",
+        format="md",
+        storage_path="../private/output.md",
+        media_item_id=None,
+        created_at=datetime.utcnow().replace(microsecond=0).isoformat(),
+        workspace_tag=None,
+    )
+
+    class _CollectionsDB:
+        def list_output_artifacts(self, **_kwargs: Any):
+            return [row], 1
+
+    def _raise_invalid_path(**_kwargs: Any) -> str:
+        raise HTTPException(status_code=400, detail="invalid path /private/output.md")
+
+    logger = _LoggerStub()
+    monkeypatch.setattr(outputs_endpoint, "logger", logger)
+    monkeypatch.setattr(outputs_endpoint, "_normalize_output_storage_path_for_user", _raise_invalid_path)
+
+    result = await outputs_endpoint.list_outputs(
+        _current_user=User(id=123, username="tester", email=None, is_active=True),
+        cdb=_CollectionsDB(),
+    )
+
+    assert result.items[0].storage_path == "../private/output.md"
+    assert logger.warnings == ["outputs.list: invalid storage path skipped"]
+    logged = "\n".join(logger.warnings)
+    assert "777" not in logged
+    assert "invalid path" not in logged
+    assert "/private/output.md" not in logged
+
+
+@pytest.mark.asyncio
+async def test_outputs_list_deleted_invalid_path_fallback_log_is_sanitized(monkeypatch):
+    row = SimpleNamespace(
+        id=888,
+        title="deleted",
+        type="newsletter_markdown",
+        format="md",
+        storage_path="../private/deleted.md",
+        media_item_id=None,
+        created_at=datetime.utcnow().replace(microsecond=0).isoformat(),
+        workspace_tag=None,
+    )
+
+    class _CollectionsDB:
+        def list_output_artifacts(self, **_kwargs: Any):
+            return [row], 1
+
+    def _raise_invalid_path(**_kwargs: Any) -> str:
+        raise HTTPException(status_code=400, detail="invalid path /private/deleted.md")
+
+    logger = _LoggerStub()
+    monkeypatch.setattr(outputs_endpoint, "logger", logger)
+    monkeypatch.setattr(outputs_endpoint, "_normalize_output_storage_path_for_user", _raise_invalid_path)
+
+    result = await outputs_endpoint.list_deleted_outputs(
+        _current_user=User(id=123, username="tester", email=None, is_active=True),
+        cdb=_CollectionsDB(),
+    )
+
+    assert result.items[0].storage_path == "../private/deleted.md"
+    assert logger.warnings == ["outputs.list_deleted: invalid storage path skipped"]
+    logged = "\n".join(logger.warnings)
+    assert "888" not in logged
+    assert "invalid path" not in logged
+    assert "/private/deleted.md" not in logged
 
 
 @pytest.mark.asyncio

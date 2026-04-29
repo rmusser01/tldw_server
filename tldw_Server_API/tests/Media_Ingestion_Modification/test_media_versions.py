@@ -5,6 +5,7 @@
 import sys
 import time
 import uuid
+from unittest.mock import MagicMock
 import pytest
 #
 # Third-party Libraries
@@ -717,6 +718,62 @@ class TestMediaVersionEndpoints:
         )
         assert response.status_code == status.HTTP_404_NOT_FOUND
         assert "not found or deleted." in response.json().get("detail", "")
+
+    def test_patch_metadata_unexpected_error_log_is_sanitized(self, monkeypatch):
+        """Unexpected metadata patch failures must not leak raw exception details to logs."""
+        logger_mock = MagicMock()
+        monkeypatch.setattr(media_versions_endpoint, "logger", logger_mock)
+
+        def _raise_leaky_failure(*_args, **_kwargs):
+            raise RuntimeError("metadata patch leaked /private/tmp/media.db token=secret-patch-token")
+
+        monkeypatch.setattr(
+            media_versions_endpoint,
+            "get_document_version",
+            _raise_leaky_failure,
+            raising=True,
+        )
+
+        response = self.client.patch(
+            f"/api/v1/media/{self.media_id}/metadata",
+            json={"safe_metadata": {"reviewed": True}},
+        )
+
+        assert response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+        assert response.json()["detail"] == "Failed to update metadata"
+        rendered_calls = repr(logger_mock.error.call_args_list)
+        assert "Error patching safe metadata for media {}" in rendered_calls
+        assert "/private/tmp/media.db" not in rendered_calls
+        assert "secret-patch-token" not in rendered_calls
+        assert all(not kwargs.get("exc_info") for _args, kwargs in logger_mock.error.call_args_list)
+
+    def test_put_version_metadata_unexpected_error_log_is_sanitized(self, monkeypatch):
+        """Unexpected version metadata update failures must not leak raw exception details to logs."""
+        logger_mock = MagicMock()
+        monkeypatch.setattr(media_versions_endpoint, "logger", logger_mock)
+
+        def _raise_leaky_failure(*_args, **_kwargs):
+            raise RuntimeError("version metadata leaked /private/tmp/version.db token=secret-put-token")
+
+        monkeypatch.setattr(
+            media_versions_endpoint,
+            "get_document_version",
+            _raise_leaky_failure,
+            raising=True,
+        )
+
+        response = self.client.put(
+            f"/api/v1/media/{self.media_id}/versions/1/metadata",
+            json={"safe_metadata": {"reviewed": True}},
+        )
+
+        assert response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+        assert response.json()["detail"] == "Failed to update version metadata"
+        rendered_calls = repr(logger_mock.error.call_args_list)
+        assert "Error updating metadata for media {} v{}" in rendered_calls
+        assert "/private/tmp/version.db" not in rendered_calls
+        assert "secret-put-token" not in rendered_calls
+        assert all(not kwargs.get("exc_info") for _args, kwargs in logger_mock.error.call_args_list)
 
 
 class TestMediaListDetailEndpoints:

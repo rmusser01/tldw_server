@@ -2072,7 +2072,7 @@ async def acp_session_prompt(
     except HTTPException:
         raise
     except ACPResponseError as exc:
-        logger.error("ACP session/prompt failed for user {}: {}", user.id, exc)
+        logger.error("ACP session/prompt failed for user {}", user.id)
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="ACP prompt failed",
@@ -2098,7 +2098,7 @@ async def acp_session_cancel(
         await _require_session_access(client, session_id=payload.session_id, user_id=int(user.id))
         await client.cancel(payload.session_id)
     except ACPResponseError as exc:
-        logger.error("ACP session/cancel failed for user {}: {}", user.id, exc)
+        logger.error("ACP session/cancel failed for user {}", user.id)
         _acp_record_audit_event(
             action="cancel_failed",
             user_id=int(user.id),
@@ -2136,7 +2136,7 @@ async def acp_session_close(
         await _require_session_access(client, session_id=payload.session_id, user_id=int(user.id))
         await client.close_session(payload.session_id)
     except ACPResponseError as exc:
-        logger.error("ACP session/close failed for user {}: {}", user.id, exc)
+        logger.error("ACP session/close failed for user {}", user.id)
         _acp_mark_reconciliation(
             session_id=payload.session_id,
             status_value="teardown_failed",

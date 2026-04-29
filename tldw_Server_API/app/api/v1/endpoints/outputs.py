@@ -135,8 +135,8 @@ async def list_outputs(
                 output_id=r.id,
                 storage_path=r.storage_path,
             )
-        except HTTPException as exc:
-            logger.warning(f"outputs.list: invalid storage path for {r.id}: {exc.detail}")
+        except HTTPException:
+            logger.warning("outputs.list: invalid storage path skipped")
             storage_path = r.storage_path
         items.append(
             OutputArtifact(
@@ -178,8 +178,8 @@ async def list_deleted_outputs(
                 storage_path=r.storage_path,
                 update_db=False,
             )
-        except HTTPException as exc:
-            logger.warning(f"outputs.list_deleted: invalid storage path for {r.id}: {exc.detail}")
+        except HTTPException:
+            logger.warning("outputs.list_deleted: invalid storage path skipped")
             storage_path = r.storage_path
         items.append(
             OutputArtifact(

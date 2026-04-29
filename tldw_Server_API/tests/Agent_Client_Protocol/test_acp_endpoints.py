@@ -251,15 +251,22 @@ def test_acp_session_cancel_and_close(client_user_only, stub_runner_client):
 def test_acp_session_prompt_sanitizes_runtime_errors(client_user_only, monkeypatch):
     import tldw_Server_API.app.api.v1.endpoints.agent_client_protocol as acp_endpoints
 
+    leaked = "sk-prompt-secret /tmp/acp-prompt-workspace"
+    error_logs = []
+
     class ErrorRunnerClient(StubRunnerClient):
         async def prompt(self, session_id: str, prompt):
             _ = (session_id, prompt)
-            raise ACPResponseError("prompt backend exploded")
+            raise ACPResponseError(leaked)
 
     async def _get_runner_client():
         return ErrorRunnerClient()
 
+    def _capture_error(*args, **kwargs):
+        error_logs.append((args, kwargs))
+
     monkeypatch.setattr(acp_endpoints, "get_runner_client", _get_runner_client)
+    monkeypatch.setattr(acp_endpoints.logger, "error", _capture_error)
 
     resp = client_user_only.post(
         "/api/v1/acp/sessions/prompt",
@@ -268,20 +275,29 @@ def test_acp_session_prompt_sanitizes_runtime_errors(client_user_only, monkeypat
 
     assert resp.status_code == 502
     assert resp.json()["detail"] == "ACP prompt failed"
+    assert error_logs
+    assert leaked not in str(error_logs)
 
 
 def test_acp_session_cancel_sanitizes_runtime_errors(client_user_only, monkeypatch):
     import tldw_Server_API.app.api.v1.endpoints.agent_client_protocol as acp_endpoints
 
+    leaked = "cancel token sk-cancel-secret /Users/example/private"
+    error_logs = []
+
     class ErrorRunnerClient(StubRunnerClient):
         async def cancel(self, session_id: str) -> None:
             _ = session_id
-            raise ACPResponseError("cancel backend exploded")
+            raise ACPResponseError(leaked)
 
     async def _get_runner_client():
         return ErrorRunnerClient()
 
+    def _capture_error(*args, **kwargs):
+        error_logs.append((args, kwargs))
+
     monkeypatch.setattr(acp_endpoints, "get_runner_client", _get_runner_client)
+    monkeypatch.setattr(acp_endpoints.logger, "error", _capture_error)
 
     resp = client_user_only.post(
         "/api/v1/acp/sessions/cancel",
@@ -290,20 +306,29 @@ def test_acp_session_cancel_sanitizes_runtime_errors(client_user_only, monkeypat
 
     assert resp.status_code == 502
     assert resp.json()["detail"] == "ACP session cancel failed"
+    assert error_logs
+    assert leaked not in str(error_logs)
 
 
 def test_acp_session_close_sanitizes_runtime_errors(client_user_only, monkeypatch):
     import tldw_Server_API.app.api.v1.endpoints.agent_client_protocol as acp_endpoints
 
+    leaked = "close token sk-close-secret /var/tmp/acp-close-workspace"
+    error_logs = []
+
     class ErrorRunnerClient(StubRunnerClient):
         async def close_session(self, session_id: str) -> None:
             _ = session_id
-            raise ACPResponseError("close backend exploded")
+            raise ACPResponseError(leaked)
 
     async def _get_runner_client():
         return ErrorRunnerClient()
 
+    def _capture_error(*args, **kwargs):
+        error_logs.append((args, kwargs))
+
     monkeypatch.setattr(acp_endpoints, "get_runner_client", _get_runner_client)
+    monkeypatch.setattr(acp_endpoints.logger, "error", _capture_error)
 
     resp = client_user_only.post(
         "/api/v1/acp/sessions/close",
@@ -312,6 +337,8 @@ def test_acp_session_close_sanitizes_runtime_errors(client_user_only, monkeypatc
 
     assert resp.status_code == 502
     assert resp.json()["detail"] == "ACP session close failed"
+    assert error_logs
+    assert leaked not in str(error_logs)
 
 
 def test_acp_session_teardown_sanitizes_runtime_errors(client_user_only, monkeypatch):

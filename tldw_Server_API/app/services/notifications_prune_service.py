@@ -64,7 +64,9 @@ def _enumerate_user_ids() -> list[int]:
     try:
         base = DatabasePaths.get_user_db_base_dir()
     except _NOTIFICATIONS_PRUNE_NONCRITICAL_EXCEPTIONS as exc:
-        logger.debug(f"notifications_prune: failed to resolve user db base dir: {exc}")
+        logger.bind(error_type=type(exc).__name__).debug(
+            "notifications_prune: failed to resolve user db base dir"
+        )
         return []
 
     user_ids: list[int] = []

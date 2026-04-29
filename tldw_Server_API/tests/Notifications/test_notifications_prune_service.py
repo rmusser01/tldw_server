@@ -3,9 +3,11 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 import pytest
+from loguru import logger
 
 from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
 from tldw_Server_API.app.core.config import settings
+from tldw_Server_API.app.services import notifications_prune_service
 from tldw_Server_API.app.services.notifications_prune_service import NotificationsPruneService
 
 
@@ -106,3 +108,35 @@ async def test_prune_uses_read_acceleration_window(notifications_base):
 
     assert summary["archived"] == 1
     assert summary["deleted"] == 0
+
+
+def test_enumerate_user_ids_sanitizes_base_dir_resolution_failure(monkeypatch):
+    secret_path = "/tmp/private/user-db-token-abc123"
+    records: list[dict[str, object]] = []
+    sink_id = logger.add(
+        lambda message: records.append(message.record),
+        level="DEBUG",
+        format="{message}",
+    )
+
+    def fail_base_dir():
+        raise RuntimeError(f"cannot inspect {secret_path}")
+
+    monkeypatch.setattr(
+        notifications_prune_service.DatabasePaths,
+        "get_user_db_base_dir",
+        fail_base_dir,
+    )
+    try:
+        assert notifications_prune_service._enumerate_user_ids() == []
+    finally:
+        logger.remove(sink_id)
+
+    matching = [
+        record
+        for record in records
+        if "notifications_prune: failed to resolve user db base dir" in record["message"]
+    ]
+    assert matching
+    assert all(secret_path not in record["message"] for record in matching)
+    assert matching[-1]["extra"]["error_type"] == "RuntimeError"

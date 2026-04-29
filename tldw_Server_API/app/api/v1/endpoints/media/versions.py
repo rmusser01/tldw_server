@@ -767,10 +767,8 @@ async def patch_metadata(
         raise
     except Exception as exc:  # pragma: no cover - defensive
         logger.error(
-            "Error patching safe metadata for media {}: {}",
+            "Error patching safe metadata for media {}",
             media_id,
-            exc,
-            exc_info=True,
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -870,11 +868,9 @@ async def put_version_metadata(
         raise
     except Exception as exc:  # pragma: no cover - defensive
         logger.error(
-            "Error updating metadata for media {} v{}: {}",
+            "Error updating metadata for media {} v{}",
             media_id,
             version_number,
-            exc,
-            exc_info=True,
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
