@@ -167,7 +167,9 @@ async def start_notifications_prune_scheduler() -> asyncio.Task | None:
                         summary["deleted"],
                     )
             except _NOTIFICATIONS_PRUNE_NONCRITICAL_EXCEPTIONS as exc:
-                logger.warning(f"Notifications prune run failed: {exc}")
+                logger.bind(error_type=type(exc).__name__).warning(
+                    "Notifications prune run failed"
+                )
             await asyncio.sleep(interval)
 
     task = asyncio.create_task(_runner(), name="notifications_prune_scheduler")

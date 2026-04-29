@@ -96,6 +96,31 @@ def test_collect_known_storage_paths_query_failure_log_is_sanitized(
     _assert_log_sanitized("\n".join(records))
 
 
+def test_get_storage_base_path_config_failure_log_is_sanitized(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _fail_load_comprehensive_config():
+        raise RuntimeError(_LEAK)
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.config.load_comprehensive_config",
+        _fail_load_comprehensive_config,
+    )
+
+    records, sink_id = _capture_logs()
+    try:
+        fallback_path = cleanup._get_storage_base_path()
+    finally:
+        logger.remove(sink_id)
+
+    assert fallback_path is not None
+    rendered = "\n".join(records)
+    assert "cleanup failed" not in rendered
+    assert "/tmp/secret-media-token" not in rendered
+    assert "failed to read storage path from config" in rendered
+    assert "RuntimeError" in rendered
+
+
 def test_collect_known_storage_paths_uses_managed_media_database(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -150,6 +175,52 @@ def test_collect_known_storage_paths_uses_managed_media_database(
     assert fake_db.get_connection().queries == [
         "SELECT storage_path FROM MediaFiles WHERE storage_path IS NOT NULL"
     ]
+
+
+@pytest.mark.asyncio
+async def test_cleanup_orphaned_files_removal_failure_log_is_sanitized(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    storage_base = tmp_path / "media_storage"
+    orphan_path = storage_base / "1" / "media" / "99" / "secret-file.txt"
+    orphan_path.parent.mkdir(parents=True)
+    orphan_path.write_text("payload")
+
+    def _fail_unlink():
+        raise RuntimeError(_LEAK)
+
+    monkeypatch.setattr(cleanup, "_get_storage_base_path", lambda: storage_base)
+    monkeypatch.setattr(cleanup, "_enumerate_user_ids", lambda: [])
+    monkeypatch.setattr(cleanup, "GRACE_PERIOD_DAYS", 0)
+    monkeypatch.setattr(Path, "unlink", lambda self: _fail_unlink() if self == orphan_path else None)
+    monkeypatch.setattr(
+        cleanup,
+        "get_metrics_registry",
+        lambda: SimpleNamespace(
+            increment=lambda *args, **kwargs: None,
+            observe=lambda *args, **kwargs: None,
+        ),
+    )
+
+    records, sink_id = _capture_logs()
+    try:
+        result = await cleanup.cleanup_orphaned_files()
+    finally:
+        logger.remove(sink_id)
+
+    assert result == {
+        "status": "completed",
+        "files_removed": 0,
+        "bytes_freed": 0,
+        "errors": [str(orphan_path)],
+    }
+    rendered = "\n".join(records)
+    assert "cleanup failed" not in rendered
+    assert "/tmp/secret-media-token" not in rendered
+    assert str(orphan_path) not in rendered
+    assert "failed to remove orphaned media file" in rendered
+    assert "RuntimeError" in rendered
 
 
 @pytest.mark.asyncio

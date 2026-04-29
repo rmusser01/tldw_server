@@ -135,6 +135,30 @@ def test_enumerate_user_ids_skips_non_int_dir_without_echoing_name(
     assert "tts_history_cleanup: skipping non-int user dir" in rendered
 
 
+def test_purge_with_db_failure_log_is_sanitized() -> None:
+    records: list[str] = []
+    sink_id = logger.add(lambda message: records.append(str(message)), format="{message} {extra}")
+
+    class _FakeDb:
+        def purge_tts_history_for_user(self, *, user_id: str, retention_days: int, max_rows: int) -> int:
+            assert retention_days == 30
+            assert max_rows == 100
+            if user_id == "11":
+                return 4
+            raise RuntimeError("db locked at /tmp/tts-purge-secret-token")
+
+    try:
+        assert cleanup._purge_with_db(_FakeDb(), ["11", "22"], retention_days=30, max_rows=100) == 4
+    finally:
+        logger.remove(sink_id)
+
+    rendered = "\n".join(records)
+    assert "db locked" not in rendered
+    assert "/tmp/tts-purge-secret-token" not in rendered
+    assert "tts_history_cleanup: purge failed for user 22" in rendered
+    assert "RuntimeError" in rendered
+
+
 @pytest.mark.asyncio
 async def test_cleanup_loop_disabled_when_interval_nonpositive(monkeypatch: pytest.MonkeyPatch) -> None:
     _clear_history_cleanup_env(monkeypatch)

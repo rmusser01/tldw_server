@@ -15,6 +15,7 @@ class _LoggerStub:
     def __init__(self) -> None:
         self.debugs: list[str] = []
         self.infos: list[str] = []
+        self.warnings: list[str] = []
         self.binds: list[dict[str, Any]] = []
 
     def bind(self, **kwargs: Any):
@@ -26,6 +27,9 @@ class _LoggerStub:
 
     def info(self, message: str, *args: Any, **kwargs: Any) -> None:
         self.infos.append(message.format(*args) if args else message)
+
+    def warning(self, message: str, *args: Any, **kwargs: Any) -> None:
+        self.warnings.append(message.format(*args) if args else message)
 
 
 class _MetricsStub:
@@ -114,6 +118,49 @@ async def test_outputs_purge_scheduler_invalid_env_logs_are_sanitized(monkeypatc
     assert "sk-live-grace" not in logged
 
 
+@pytest.mark.asyncio
+async def test_outputs_purge_scheduler_runner_failure_log_is_sanitized(monkeypatch):
+    monkeypatch.setenv("OUTPUTS_PURGE_ENABLED", "true")
+    monkeypatch.setenv("OUTPUTS_PURGE_INTERVAL_SEC", "1")
+
+    logger = _LoggerStub()
+    metrics = _MetricsStub()
+    monkeypatch.setattr(scheduler, "logger", logger)
+    monkeypatch.setattr(scheduler, "get_metrics_registry", lambda: metrics)
+
+    def _fail_enumerate_user_ids():
+        raise RuntimeError("secret /tmp/outputs-runner-path sk-live-runner")
+
+    monkeypatch.setattr(scheduler, "_enumerate_user_ids", _fail_enumerate_user_ids)
+
+    sleep_calls = {"count": 0}
+
+    async def _fake_sleep(_seconds: float):
+        sleep_calls["count"] += 1
+        if sleep_calls["count"] >= 2:
+            raise asyncio.CancelledError
+        return None
+
+    monkeypatch.setattr(scheduler.asyncio, "sleep", _fake_sleep)
+
+    task = await scheduler.start_outputs_purge_scheduler()
+    assert task is not None
+    with contextlib.suppress(asyncio.CancelledError):
+        await task
+
+    assert logger.debugs == ["Outputs purge run failed"]
+    assert logger.binds[-1] == {"error_type": "RuntimeError"}
+    logged = "\n".join(logger.debugs + logger.infos + logger.warnings)
+    assert "/tmp/outputs-runner-path" not in logged
+    assert "sk-live-runner" not in logged
+    assert metrics.calls == [
+        (
+            "app_exception_events_total",
+            {"labels": {"component": "outputs_purge", "event": "purge_run_failed"}},
+        )
+    ]
+
+
 def test_enumerate_user_ids_base_dir_failure_log_is_sanitized(monkeypatch):
     logger = _LoggerStub()
     metrics = _MetricsStub()
@@ -179,6 +226,78 @@ def test_enumerate_user_ids_skips_non_int_dir_without_echoing_name(monkeypatch, 
         (
             "app_warning_events_total",
             {"labels": {"component": "outputs_purge", "event": "invalid_user_dir_name"}},
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_purge_for_user_retention_candidate_query_warning_is_sanitized(monkeypatch):
+    class _FailingBackend:
+        def execute(self, query, params):
+            if "retention_until" in query:
+                raise RuntimeError("secret /tmp/retention-path sk-live-retention")
+            if "deleted = 1" in query:
+                return SimpleNamespace(rows=[])
+            raise AssertionError(f"Unexpected query: {query}")
+
+    logger = _LoggerStub()
+    metrics = _MetricsStub()
+    monkeypatch.setattr(scheduler, "logger", logger)
+    monkeypatch.setattr(scheduler, "get_metrics_registry", lambda: metrics)
+    monkeypatch.setattr(
+        scheduler.CollectionsDatabase,
+        "for_user",
+        lambda user_id: SimpleNamespace(backend=_FailingBackend()),
+    )
+
+    removed, files_deleted = await scheduler._purge_for_user(user_id=7, delete_files=False, grace_days=30)
+
+    assert (removed, files_deleted) == (0, 0)
+    assert logger.warnings == ["outputs_purge: error selecting retention candidates for user 7"]
+    assert logger.binds[-1] == {"error_type": "RuntimeError"}
+    logged = "\n".join(logger.debugs + logger.infos + logger.warnings)
+    assert "/tmp/retention-path" not in logged
+    assert "sk-live-retention" not in logged
+    assert metrics.calls == [
+        (
+            "app_exception_events_total",
+            {"labels": {"component": "outputs_purge", "event": "select_retention_candidates_failed"}},
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_purge_for_user_deleted_candidate_query_warning_is_sanitized(monkeypatch):
+    class _FailingBackend:
+        def execute(self, query, params):
+            if "retention_until" in query:
+                return SimpleNamespace(rows=[])
+            if "deleted = 1" in query:
+                raise RuntimeError("secret /tmp/deleted-path sk-live-deleted")
+            raise AssertionError(f"Unexpected query: {query}")
+
+    logger = _LoggerStub()
+    metrics = _MetricsStub()
+    monkeypatch.setattr(scheduler, "logger", logger)
+    monkeypatch.setattr(scheduler, "get_metrics_registry", lambda: metrics)
+    monkeypatch.setattr(
+        scheduler.CollectionsDatabase,
+        "for_user",
+        lambda user_id: SimpleNamespace(backend=_FailingBackend()),
+    )
+
+    removed, files_deleted = await scheduler._purge_for_user(user_id=7, delete_files=False, grace_days=30)
+
+    assert (removed, files_deleted) == (0, 0)
+    assert logger.warnings == ["outputs_purge: error selecting deleted candidates for user 7"]
+    assert logger.binds[-1] == {"error_type": "RuntimeError"}
+    logged = "\n".join(logger.debugs + logger.infos + logger.warnings)
+    assert "/tmp/deleted-path" not in logged
+    assert "sk-live-deleted" not in logged
+    assert metrics.calls == [
+        (
+            "app_exception_events_total",
+            {"labels": {"component": "outputs_purge", "event": "select_deleted_candidates_failed"}},
         )
     ]
 

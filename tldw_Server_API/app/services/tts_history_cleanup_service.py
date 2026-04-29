@@ -145,7 +145,9 @@ def _purge_with_db(db: Any, user_ids: Iterable[str], retention_days: int, max_ro
             )
             removed_total += removed
         except _TTS_HISTORY_CLEANUP_NONCRITICAL_EXCEPTIONS as exc:
-            logger.debug(f"tts_history_cleanup: purge failed for user {uid}: {exc}")
+            logger.bind(error_type=type(exc).__name__).debug(
+                f"tts_history_cleanup: purge failed for user {uid}"
+            )
     return removed_total
 
 

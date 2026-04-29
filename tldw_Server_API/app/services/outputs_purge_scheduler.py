@@ -118,7 +118,9 @@ async def _purge_for_user(user_id: int, delete_files: bool, grace_days: int) -> 
             ids.add(rid)
             paths[rid] = row["storage_path"] if isinstance(row, dict) else row[1]
     except _OUTPUTS_PURGE_NONCRITICAL_EXCEPTIONS as e:
-        logger.warning(f"outputs_purge: error selecting retention candidates for user {user_id}: {e}")
+        logger.bind(error_type=type(e).__name__).warning(
+            f"outputs_purge: error selecting retention candidates for user {user_id}"
+        )
         try:
             get_metrics_registry().increment(
                 "app_exception_events_total",
@@ -136,7 +138,9 @@ async def _purge_for_user(user_id: int, delete_files: bool, grace_days: int) -> 
             ids.add(rid)
             paths[rid] = row["storage_path"] if isinstance(row, dict) else row[1]
     except _OUTPUTS_PURGE_NONCRITICAL_EXCEPTIONS as e:
-        logger.warning(f"outputs_purge: error selecting deleted candidates for user {user_id}: {e}")
+        logger.bind(error_type=type(e).__name__).warning(
+            f"outputs_purge: error selecting deleted candidates for user {user_id}"
+        )
         try:
             get_metrics_registry().increment(
                 "app_exception_events_total",
@@ -241,7 +245,7 @@ async def start_outputs_purge_scheduler() -> asyncio.Task | None:
                 if total_removed or total_files:
                     logger.info(f"Outputs purge: removed={total_removed} files_deleted={total_files}")
             except _OUTPUTS_PURGE_NONCRITICAL_EXCEPTIONS as e:
-                logger.debug(f"Outputs purge run failed: {e}")
+                logger.bind(error_type=type(e).__name__).debug("Outputs purge run failed")
                 try:
                     get_metrics_registry().increment(
                         "app_exception_events_total",

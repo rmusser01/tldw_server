@@ -59,8 +59,10 @@ def _get_storage_base_path() -> Path | None:
         storage_path = config.get("media_storage_path") or config.get("storage_path")
         if storage_path:
             return Path(storage_path)
-    except _MEDIA_CLEANUP_NONCRITICAL_EXCEPTIONS as e:
-        logger.debug(f"media_files_cleanup: failed to read storage path from config: {e}")
+    except _MEDIA_CLEANUP_NONCRITICAL_EXCEPTIONS as exc:
+        logger.bind(error_type=type(exc).__name__).debug(
+            "media_files_cleanup: failed to read storage path from config"
+        )
 
     # Fallback to default location
     project_root = Path(__file__).resolve().parents[3]
@@ -238,8 +240,10 @@ async def cleanup_orphaned_files() -> dict:
             except OSError:
                 pass
 
-        except _MEDIA_CLEANUP_NONCRITICAL_EXCEPTIONS as e:
-            logger.warning(f"media_files_cleanup: failed to remove {file_path}: {e}")
+        except _MEDIA_CLEANUP_NONCRITICAL_EXCEPTIONS as exc:
+            logger.bind(error_type=type(exc).__name__).warning(
+                "media_files_cleanup: failed to remove orphaned media file"
+            )
             errors.append(str(file_path))
 
     # Record metrics

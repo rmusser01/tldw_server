@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import contextlib
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -207,3 +209,49 @@ def test_int_env_sanitizes_invalid_raw_value(monkeypatch):
     assert "sk-live-notify" not in rendered
     assert "defaulting to 3600" in rendered
     assert matching[-1]["extra"]["error_type"] == "ValueError"
+
+
+@pytest.mark.asyncio
+async def test_notifications_prune_runner_failure_log_is_sanitized(monkeypatch):
+    secret_path = "/tmp/private/notifications-run-secret"
+    records: list[dict[str, object]] = []
+    sink_id = logger.add(
+        lambda message: records.append(message.record),
+        level="DEBUG",
+        format="{message}",
+    )
+
+    monkeypatch.setenv("NOTIFICATIONS_PRUNE_ENABLED", "true")
+    monkeypatch.setenv("NOTIFICATIONS_PRUNE_INTERVAL_SEC", "1")
+
+    async def _fail_run_once(self, *, user_ids=None):
+        raise RuntimeError(f"cannot prune {secret_path}")
+
+    sleep_calls = {"count": 0}
+
+    async def _fake_sleep(_seconds: float) -> None:
+        sleep_calls["count"] += 1
+        if sleep_calls["count"] >= 2:
+            raise asyncio.CancelledError
+
+    monkeypatch.setattr(NotificationsPruneService, "run_once", _fail_run_once)
+    monkeypatch.setattr(notifications_prune_service.asyncio, "sleep", _fake_sleep)
+
+    try:
+        task = await notifications_prune_service.start_notifications_prune_scheduler()
+        assert task is not None
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+    finally:
+        logger.remove(sink_id)
+
+    matching = [
+        record
+        for record in records
+        if "Notifications prune run failed" in record["message"]
+    ]
+    assert matching
+    rendered = "\n".join(record["message"] for record in matching)
+    assert "cannot prune" not in rendered
+    assert secret_path not in rendered
+    assert matching[-1]["extra"]["error_type"] == "RuntimeError"
