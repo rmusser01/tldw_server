@@ -7,7 +7,7 @@ from fastapi.responses import StreamingResponse
 from loguru import logger
 from starlette import status
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, require_token_scope
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, TokenScopeGuard
 from tldw_Server_API.app.api.v1.endpoints.audio.audio_tts import get_tts_service
 from tldw_Server_API.app.api.v1.schemas.audio_schemas import (
     OpenAISpeechRequest,
@@ -43,7 +43,7 @@ VOICE_COUNTER_TYPE = "voice_call"
     dependencies=[
         Depends(check_rate_limit),
         Depends(
-            require_token_scope(
+            TokenScopeGuard(
                 "any",
                 require_if_present=True,
                 endpoint_id=VOICE_SCOPE_UPLOAD,
@@ -119,7 +119,7 @@ async def upload_voice(
     dependencies=[
         Depends(check_rate_limit),
         Depends(
-            require_token_scope(
+            TokenScopeGuard(
                 "any",
                 require_if_present=True,
                 endpoint_id=VOICE_SCOPE_ENCODE,
@@ -167,7 +167,7 @@ async def encode_voice_reference(
     dependencies=[
         Depends(check_rate_limit),
         Depends(
-            require_token_scope(
+            TokenScopeGuard(
                 "any",
                 require_if_present=True,
                 endpoint_id=VOICE_SCOPE_LIST,
@@ -201,7 +201,7 @@ async def list_voices(request: Request, current_user: User = Depends(get_request
     dependencies=[
         Depends(check_rate_limit),
         Depends(
-            require_token_scope(
+            TokenScopeGuard(
                 "any",
                 require_if_present=True,
                 endpoint_id=VOICE_SCOPE_GET,
@@ -242,7 +242,7 @@ async def get_voice_details(
     dependencies=[
         Depends(check_rate_limit),
         Depends(
-            require_token_scope(
+            TokenScopeGuard(
                 "any",
                 require_if_present=True,
                 endpoint_id=VOICE_SCOPE_DELETE,
@@ -285,7 +285,7 @@ async def delete_voice(
     dependencies=[
         Depends(check_rate_limit),
         Depends(
-            require_token_scope(
+            TokenScopeGuard(
                 "any",
                 require_if_present=True,
                 endpoint_id=VOICE_SCOPE_PREVIEW,

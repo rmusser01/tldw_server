@@ -8,7 +8,7 @@ import soundfile as sf
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse, Response
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, require_token_scope
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, TokenScopeGuard
 from tldw_Server_API.app.api.v1.schemas.audio_schemas import (
     AudioTokenizerDecodeRequest,
     AudioTokenizerEncodeRequest,
@@ -64,7 +64,7 @@ def _audio_shim_attr(name: str):
     dependencies=[
         Depends(check_rate_limit),
         Depends(
-            require_token_scope(
+            TokenScopeGuard(
                 "audio.tokenizer",
                 require_if_present=True,
                 endpoint_id="audio.tokenizer.encode",
@@ -80,7 +80,8 @@ async def encode_audio_tokenizer(
     request_id = ensure_request_id(request)
     settings = _audio_shim_attr("_get_qwen3_tokenizer_settings")()
     tokenizer_model = settings["tokenizer_model"]
-    token_format = "list"
+    # Response format label, not a credential.
+    token_format = "list"  # nosec B105
     sample_rate_hint: Optional[int] = None
 
     content_type = (request.headers.get("content-type") or "").lower()
@@ -182,7 +183,7 @@ async def encode_audio_tokenizer(
     dependencies=[
         Depends(check_rate_limit),
         Depends(
-            require_token_scope(
+            TokenScopeGuard(
                 "audio.tokenizer",
                 require_if_present=True,
                 endpoint_id="audio.tokenizer.decode",

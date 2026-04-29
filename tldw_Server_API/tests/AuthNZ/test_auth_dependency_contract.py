@@ -337,6 +337,26 @@ def test_audio_jobs_router_uses_standard_admin_dependency_aliases() -> None:
     assert not hasattr(audio_jobs, "require_permissions")
 
 
+@pytest.mark.parametrize(
+    "module_name",
+    [
+        "audio_history",
+        "audio_streaming",
+        "audio_tokenizer",
+        "audio_transcriptions",
+        "audio_tts",
+        "audio_voices",
+    ],
+)
+def test_audio_leaf_routers_use_standard_token_scope_alias(module_name: str) -> None:
+    module = importlib.import_module(
+        f"tldw_Server_API.app.api.v1.endpoints.audio.{module_name}",
+    )
+
+    assert module.TokenScopeGuard is auth_deps.TokenScopeGuard
+    assert not hasattr(module, "require_token_scope")
+
+
 def test_connectors_router_uses_standard_admin_dependency_aliases() -> None:
     from tldw_Server_API.app.api.v1.endpoints import connectors
 

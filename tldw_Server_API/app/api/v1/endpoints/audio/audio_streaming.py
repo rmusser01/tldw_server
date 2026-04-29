@@ -19,7 +19,7 @@ from fastapi.responses import JSONResponse
 from loguru import logger
 from starlette import status
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import require_token_scope
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import TokenScopeGuard
 from tldw_Server_API.app.api.v1.API_Deps.billing_deps import resolve_org_id_for_principal
 from tldw_Server_API.app.core.Resource_Governance import cost_units
 from tldw_Server_API.app.core.Billing.enforcement import (
@@ -759,7 +759,7 @@ async def _finish_job(user_id: int):
     summary="Non-streaming Speech-to-Speech chat (STT → LLM → TTS)",
     dependencies=[
         Depends(
-            require_token_scope(
+            TokenScopeGuard(
                 "any",
                 require_if_present=True,
                 endpoint_id="audio.chat",

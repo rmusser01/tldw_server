@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from loguru import logger
 from starlette import status
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, require_token_scope
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, TokenScopeGuard
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.api.v1.schemas.audio_schemas import (
@@ -107,7 +107,7 @@ def _parse_json_field(raw: Any) -> Any:
     summary="List TTS history entries.",
     dependencies=[
         Depends(check_rate_limit),
-        Depends(require_token_scope("any", require_if_present=True, endpoint_id="audio.history", count_as="call")),
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="audio.history", count_as="call")),
     ],
     response_model=TTSHistoryListResponse,
 )
@@ -285,7 +285,7 @@ async def list_tts_history(
     summary="Get TTS history entry details.",
     dependencies=[
         Depends(check_rate_limit),
-        Depends(require_token_scope("any", require_if_present=True, endpoint_id="audio.history", count_as="call")),
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="audio.history", count_as="call")),
     ],
     response_model=TTSHistoryDetailResponse,
 )
@@ -354,7 +354,7 @@ async def get_tts_history_entry(
     summary="Update TTS history entry fields.",
     dependencies=[
         Depends(check_rate_limit),
-        Depends(require_token_scope("any", require_if_present=True, endpoint_id="audio.history", count_as="call")),
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="audio.history", count_as="call")),
     ],
 )
 async def update_tts_history_entry(
@@ -381,7 +381,7 @@ async def update_tts_history_entry(
     summary="Delete a TTS history entry (soft delete).",
     dependencies=[
         Depends(check_rate_limit),
-        Depends(require_token_scope("any", require_if_present=True, endpoint_id="audio.history", count_as="call")),
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="audio.history", count_as="call")),
     ],
 )
 async def delete_tts_history_entry(
