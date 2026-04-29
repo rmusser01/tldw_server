@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse
 from loguru import logger
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import require_roles
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import RequireRole
 from tldw_Server_API.app.api.v1.endpoints.slack_oauth_admin import (
     slack_admin_delete_installation_impl,
     slack_admin_get_policy_impl,
@@ -49,6 +49,7 @@ from tldw_Server_API.app.api.v1.endpoints.slack_support import (
     _public_installation_record,
     _rate_limit_key_for_commands,
     _rate_limit_key_for_events,
+    _reset_slack_state_for_tests,
     _resolve_slack_actor_id,
     _safe_int,
     _set_slack_policy,
@@ -513,7 +514,7 @@ async def slack_oauth_callback(
 
 @router.get(
     "/admin/policy",
-    dependencies=[Depends(require_roles("admin"))],
+    dependencies=[Depends(RequireRole("admin"))],
 )
 async def slack_admin_get_policy(
     team_id: str | None = Query(default=None),
@@ -527,7 +528,7 @@ async def slack_admin_get_policy(
 
 @router.put(
     "/admin/policy",
-    dependencies=[Depends(require_roles("admin"))],
+    dependencies=[Depends(RequireRole("admin"))],
 )
 async def slack_admin_set_policy(
     payload: dict[str, Any] | None = None,
@@ -540,7 +541,7 @@ async def slack_admin_set_policy(
     )
 
 
-@router.get("/admin/installations", dependencies=[Depends(require_roles("admin"))])
+@router.get("/admin/installations", dependencies=[Depends(RequireRole("admin"))])
 async def slack_admin_list_installations(
     user: User = Depends(get_request_user),
 ):
@@ -553,7 +554,7 @@ async def slack_admin_list_installations(
     )
 
 
-@router.delete("/admin/installations/{team_id}", dependencies=[Depends(require_roles("admin"))])
+@router.delete("/admin/installations/{team_id}", dependencies=[Depends(RequireRole("admin"))])
 async def slack_admin_delete_installation(
     request: Request,
     team_id: str,
@@ -572,7 +573,7 @@ async def slack_admin_delete_installation(
     )
 
 
-@router.put("/admin/installations/{team_id}", dependencies=[Depends(require_roles("admin"))])
+@router.put("/admin/installations/{team_id}", dependencies=[Depends(RequireRole("admin"))])
 async def slack_admin_set_installation_state(
     request: Request,
     team_id: str,
