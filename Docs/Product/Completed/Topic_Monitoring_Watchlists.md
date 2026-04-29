@@ -70,6 +70,8 @@ Goal: Provide a configurable, privacy-respecting content monitoring feature that
 - `DELETE /api/v1/monitoring/watchlists/{id}` delete watchlist (admin)
 - `GET  /api/v1/monitoring/alerts`            list alerts (admin; filters: user_id, since, unread)
 - `POST /api/v1/monitoring/alerts/{id}/read`  mark alert as read (admin)
+- `POST /api/v1/monitoring/alerts/{id}/acknowledge` acknowledge alert (admin)
+- `DELETE /api/v1/monitoring/alerts/{id}` dismiss alert (admin)
 - `POST /api/v1/monitoring/reload`            reload config file (admin)
 
 ## Reload Semantics (Phase 1)
@@ -111,9 +113,10 @@ Monitoring emits alerts without changing moderation behavior or endpoint results
   - `MONITORING_NOTIFY_WEBHOOK_URL`, `MONITORING_NOTIFY_EMAIL_TO`, `MONITORING_NOTIFY_SMTP_HOST`, `MONITORING_NOTIFY_EMAIL_FROM`
 
 ## Alert Lifecycle
-- `POST /api/v1/monitoring/alerts/{id}/read` and `POST /api/v1/monitoring/alerts/{id}/acknowledge` currently return the same minimal `{status, id}` acknowledgement.
-- `DELETE /api/v1/monitoring/alerts/{id}` returns the same minimal acknowledgement after dismissing the alert.
-- Re-list alerts for authoritative merged state after any mutation.
+- Mutation responses include the authoritative merged alert state as `{status, id, item}`.
+- `read` marks the runtime alert as read without setting `acknowledged_at`.
+- `acknowledge` marks the runtime alert as read and records `acknowledged_at`.
+- `dismiss` marks the runtime alert as read and records `dismissed_at`.
 
 ## Phase 2 (planned)
 - Delivery channels: email, webhook, Slack.
