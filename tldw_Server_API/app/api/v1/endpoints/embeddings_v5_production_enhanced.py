@@ -47,9 +47,9 @@ from pydantic import BaseModel, Field
 
 from tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps import get_audit_service_for_user
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    RequirePermission,
+    RequireRole,
     rbac_rate_limit,
-    require_permissions,
-    require_roles,
 )
 from tldw_Server_API.app.api.v1.API_Deps.billing_deps import require_within_limit
 from tldw_Server_API.app.core.Billing.enforcement import LimitCategory
@@ -1304,7 +1304,7 @@ class CompactorRunResponse(BaseModel):
     "/embeddings/compactor/run",
     response_model=CompactorRunResponse,
     summary="Run a one-shot vector compaction for a user (admin only)",
-    dependencies=[Depends(require_permissions(EMBEDDINGS_ADMIN))],
+    dependencies=[Depends(RequirePermission(EMBEDDINGS_ADMIN))],
 )
 async def run_compactor_once(
     req: CompactorRunRequest,
@@ -3226,8 +3226,8 @@ class PriorityBumpRequest(BaseModel):
     "/embeddings/job/priority/bump",
     summary="Override/bump job priority for routing into priority queues (best-effort)",
     dependencies=[
-        Depends(require_roles("admin")),
-        Depends(require_permissions(EMBEDDINGS_ADMIN)),
+        Depends(RequireRole("admin")),
+        Depends(RequirePermission(EMBEDDINGS_ADMIN)),
     ],
 )
 async def bump_job_priority(
@@ -3300,7 +3300,7 @@ class CollectionStatsResponse(BaseModel):
 @router.post(
     "/embeddings/models/warmup",
     summary="Warmup (preload) an embedding model (admin)",
-    dependencies=[Depends(require_roles("admin")), Depends(require_permissions(SYSTEM_CONFIGURE))],
+    dependencies=[Depends(RequireRole("admin")), Depends(RequirePermission(SYSTEM_CONFIGURE))],
 )
 async def warmup_model(
     payload: ModelActionRequest,
@@ -3332,7 +3332,7 @@ async def warmup_model(
 @router.post(
     "/embeddings/models/download",
     summary="Download/prepare a model (admin)",
-    dependencies=[Depends(require_roles("admin")), Depends(require_permissions(SYSTEM_CONFIGURE))],
+    dependencies=[Depends(RequireRole("admin")), Depends(RequirePermission(SYSTEM_CONFIGURE))],
 )
 async def download_model(
     payload: ModelActionRequest,
@@ -3364,7 +3364,7 @@ async def download_model(
 @router.delete(
     "/embeddings/cache",
     summary="Clear embedding cache (admin only)",
-    dependencies=[Depends(require_roles("admin")), Depends(require_permissions(SYSTEM_CONFIGURE))],
+    dependencies=[Depends(RequireRole("admin")), Depends(RequirePermission(SYSTEM_CONFIGURE))],
 )
 async def clear_cache(
     current_user: User = Depends(get_request_user),
@@ -3599,7 +3599,7 @@ async def health_check():
 @router.get(
     "/embeddings/circuit-breakers",
     summary="Get circuit breaker status (admin only)",
-    dependencies=[Depends(require_roles("admin")), Depends(require_permissions(SYSTEM_CONFIGURE))],
+    dependencies=[Depends(RequireRole("admin")), Depends(RequirePermission(SYSTEM_CONFIGURE))],
 )
 async def get_circuit_breakers(
     _current_user: User = Depends(get_request_user),
@@ -3611,7 +3611,7 @@ async def get_circuit_breakers(
 @router.post(
     "/embeddings/circuit-breakers/{provider}/reset",
     summary="Reset circuit breaker (admin only)",
-    dependencies=[Depends(require_roles("admin")), Depends(require_permissions(SYSTEM_CONFIGURE))],
+    dependencies=[Depends(RequireRole("admin")), Depends(RequirePermission(SYSTEM_CONFIGURE))],
 )
 async def reset_circuit_breaker(
     provider: str,
@@ -3645,7 +3645,7 @@ async def reset_circuit_breaker(
 @router.get(
     "/embeddings/metrics",
     summary="Get service metrics (admin only)",
-    dependencies=[Depends(require_roles("admin")), Depends(require_permissions(SYSTEM_CONFIGURE))],
+    dependencies=[Depends(RequireRole("admin")), Depends(RequirePermission(SYSTEM_CONFIGURE))],
 )
 async def get_metrics(
     request: Request,
@@ -3758,7 +3758,7 @@ def _redact_obj(obj: Any, depth: int = 0) -> Any:
 @router.get(
     "/embeddings/dlq",
     summary="List DLQ items for a stage (admin only)",
-    dependencies=[Depends(require_permissions(EMBEDDINGS_ADMIN))],
+    dependencies=[Depends(RequirePermission(EMBEDDINGS_ADMIN))],
 )
 async def list_dlq_items(
     stage: str = Query("embedding", description="Stage: chunking|embedding|storage|content"),
@@ -3841,7 +3841,7 @@ class DLQRequeueRequest(BaseModel):
 @router.post(
     "/embeddings/dlq/requeue",
     summary="Requeue a DLQ item to its live stream (admin only)",
-    dependencies=[Depends(require_permissions(EMBEDDINGS_ADMIN))],
+    dependencies=[Depends(RequirePermission(EMBEDDINGS_ADMIN))],
 )
 async def requeue_dlq_item(
     req: DLQRequeueRequest,
@@ -3939,7 +3939,7 @@ class DLQRequeueBulkRequest(BaseModel):
 @router.post(
     "/embeddings/dlq/requeue/bulk",
     summary="Bulk requeue DLQ items to live stream (admin only)",
-    dependencies=[Depends(require_permissions(EMBEDDINGS_ADMIN))],
+    dependencies=[Depends(RequirePermission(EMBEDDINGS_ADMIN))],
 )
 async def requeue_dlq_bulk(
     req: DLQRequeueBulkRequest,
@@ -4038,7 +4038,7 @@ async def requeue_dlq_bulk(
 @router.get(
     "/embeddings/dlq/stats",
     summary="DLQ and queue depths (admin only)",
-    dependencies=[Depends(require_permissions(EMBEDDINGS_ADMIN))],
+    dependencies=[Depends(RequirePermission(EMBEDDINGS_ADMIN))],
 )
 async def get_dlq_stats(
     current_user: User = Depends(get_request_user),
@@ -4115,7 +4115,7 @@ def _dlq_state_key(stream: str, entry_id: str) -> str:
 @router.post(
     "/embeddings/dlq/state",
     summary="Set DLQ quarantine state (admin only)",
-    dependencies=[Depends(require_permissions(EMBEDDINGS_ADMIN))],
+    dependencies=[Depends(RequirePermission(EMBEDDINGS_ADMIN))],
 )
 async def set_dlq_state(req: DLQStateSetRequest, current_user: User = Depends(get_request_user)):
     client = await _get_redis_client()
@@ -4180,7 +4180,7 @@ def _stage_key(stage: str, suffix: str) -> str:
 @router.get(
     "/embeddings/stage/status",
     summary="Get per-stage pause/drain flags (admin only)",
-    dependencies=[Depends(require_permissions(EMBEDDINGS_ADMIN))],
+    dependencies=[Depends(RequirePermission(EMBEDDINGS_ADMIN))],
 )
 async def get_stage_status(current_user: User = Depends(get_request_user)):
     client = await _get_redis_client()
@@ -4201,7 +4201,7 @@ async def get_stage_status(current_user: User = Depends(get_request_user)):
 @router.post(
     "/embeddings/stage/control",
     summary="Pause/Resume/Drain a stage (admin only)",
-    dependencies=[Depends(require_permissions(EMBEDDINGS_ADMIN))],
+    dependencies=[Depends(RequirePermission(EMBEDDINGS_ADMIN))],
 )
 async def control_stage(req: StageControlRequest, current_user: User = Depends(get_request_user)):
     client = await _get_redis_client()
@@ -4259,7 +4259,7 @@ def _skip_key(job_id: str) -> str:
 @router.post(
     "/embeddings/job/skip",
     summary="Mark a job_id as skipped (admin only)",
-    dependencies=[Depends(require_permissions(EMBEDDINGS_ADMIN))],
+    dependencies=[Depends(RequirePermission(EMBEDDINGS_ADMIN))],
 )
 async def mark_job_skipped(req: JobSkipRequest, current_user: User = Depends(get_request_user)):
     client = await _get_redis_client()
@@ -4292,7 +4292,7 @@ async def mark_job_skipped(req: JobSkipRequest, current_user: User = Depends(get
 @router.get(
     "/embeddings/job/skip/status",
     summary="Check if a job_id is marked as skipped (admin only)",
-    dependencies=[Depends(require_permissions(EMBEDDINGS_ADMIN))],
+    dependencies=[Depends(RequirePermission(EMBEDDINGS_ADMIN))],
 )
 async def get_job_skip_status(job_id: str = Query(..., description="Job ID to check"), current_user: User = Depends(get_request_user)):
     client = await _get_redis_client()
@@ -4319,7 +4319,7 @@ class LedgerEntry(BaseModel):
 @router.get(
     "/embeddings/ledger/status",
     summary="Inspect ledger entries by idempotency_key/dedupe_key (admin only)",
-    dependencies=[Depends(require_permissions(EMBEDDINGS_ADMIN))],
+    dependencies=[Depends(RequirePermission(EMBEDDINGS_ADMIN))],
 )
 async def get_ledger_status(
     idempotency_key: str | None = Query(default=None),
@@ -4406,7 +4406,7 @@ class ReembedScheduleResponse(BaseModel):
     "/embeddings/reembed/schedule",
     response_model=ReembedScheduleResponse,
     summary="Schedule a re-embed expansion job (admin only)",
-    dependencies=[Depends(require_permissions(EMBEDDINGS_ADMIN))],
+    dependencies=[Depends(RequirePermission(EMBEDDINGS_ADMIN))],
 )
 async def schedule_reembed(
     req: ReembedScheduleRequest,
@@ -4637,7 +4637,7 @@ async def _sse_orchestrator_stream(client: aioredis.Redis):
 @router.get(
     "/embeddings/orchestrator/events",
     summary="SSE: embeddings orchestrator live summary (admin only)",
-    dependencies=[Depends(require_permissions(EMBEDDINGS_ADMIN))],
+    dependencies=[Depends(RequirePermission(EMBEDDINGS_ADMIN))],
 )
 async def orchestrator_events(_current_user: User = Depends(get_request_user)):
     # Admin/embeddings-admin gate is enforced via AuthNZ permissions; _current_user is used for audit context.
@@ -4727,7 +4727,7 @@ async def orchestrator_events(_current_user: User = Depends(get_request_user)):
 @router.get(
     "/embeddings/orchestrator/summary",
     summary="Orchestrator summary for polling (admin only)",
-    dependencies=[Depends(require_permissions(EMBEDDINGS_ADMIN))],
+    dependencies=[Depends(RequirePermission(EMBEDDINGS_ADMIN))],
 )
 async def orchestrator_summary(current_user: User = Depends(get_request_user)):
     """Return a snapshot identical to the SSE payload.

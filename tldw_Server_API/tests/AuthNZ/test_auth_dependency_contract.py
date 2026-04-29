@@ -525,6 +525,15 @@ def test_vector_stores_router_uses_standard_auth_factory_aliases() -> None:
     assert not hasattr(vector_stores_openai, "require_permissions")
 
 
+def test_embeddings_v5_router_uses_standard_auth_factory_aliases() -> None:
+    from tldw_Server_API.app.api.v1.endpoints import embeddings_v5_production_enhanced
+
+    assert embeddings_v5_production_enhanced.RequireRole is auth_deps.RequireRole
+    assert embeddings_v5_production_enhanced.RequirePermission is auth_deps.RequirePermission
+    assert not hasattr(embeddings_v5_production_enhanced, "require_roles")
+    assert not hasattr(embeddings_v5_production_enhanced, "require_permissions")
+
+
 def test_rag_unified_router_uses_standard_permission_factory_alias() -> None:
     from tldw_Server_API.app.api.v1.endpoints import rag_unified
 
