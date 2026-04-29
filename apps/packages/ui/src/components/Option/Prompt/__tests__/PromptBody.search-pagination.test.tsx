@@ -4,7 +4,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { notification } from "antd"
 import { MemoryRouter, useLocation, useSearchParams } from "react-router-dom"
-import { PromptBody } from "../index"
+import {
+  PromptBody,
+  PROMPTS_COPILOT_HELP_STORAGE_KEY as COPILOT_HELP_STORAGE_KEY
+} from "../index"
 
 const state = vi.hoisted(() => ({
   isOnline: true,
@@ -2079,6 +2082,30 @@ describe("PromptBody server search and pagination", () => {
     await waitFor(() => {
       expect(screen.getByTestId("table-row-count")).toHaveTextContent("1")
     })
+  })
+
+  it("shows dismissible help on the copilot prompts tab", async () => {
+    renderPromptBody(["/prompts?tab=copilot"])
+
+    const help = await screen.findByTestId("prompts-copilot-help")
+    expect(help).toHaveTextContent("Copilot prompts")
+    expect(help).toHaveTextContent(
+      "server-provided prompt templates for common tasks"
+    )
+
+    fireEvent.click(screen.getByTestId("prompts-copilot-help-dismiss"))
+
+    expect(screen.queryByTestId("prompts-copilot-help")).not.toBeInTheDocument()
+    expect(window.localStorage.getItem(COPILOT_HELP_STORAGE_KEY)).toBe("true")
+  })
+
+  it("keeps copilot help dismissed after reload", async () => {
+    window.localStorage.setItem(COPILOT_HELP_STORAGE_KEY, "true")
+
+    renderPromptBody(["/prompts?tab=copilot"])
+
+    await screen.findByTestId("prompt-location-search")
+    expect(screen.queryByTestId("prompts-copilot-help")).not.toBeInTheDocument()
   })
 
   it("copies a copilot prompt into custom drawer defaults", async () => {
