@@ -19,10 +19,10 @@ from pydantic import BaseModel, Field
 from starlette.responses import JSONResponse
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    RequirePermission,
     check_rate_limit,
     get_auth_principal,
     rbac_rate_limit,
-    require_permissions,
 )
 from tldw_Server_API.app.api.v1.API_Deps.billing_deps import require_within_limit
 from tldw_Server_API.app.api.v1.API_Deps.storage_quota_guard import guard_storage_quota
@@ -409,7 +409,7 @@ def _resolve_batch_or_session_id(
     summary="Submit async media ingestion jobs (one job per item)",
     tags=["Media Ingestion Jobs"],
     dependencies=[
-        Depends(require_permissions(MEDIA_CREATE)),
+        Depends(RequirePermission(MEDIA_CREATE)),
         Depends(rbac_rate_limit("media.create")),
         Depends(guard_storage_quota),
         # Pessimistic pre-check: verifies at least 1 MB of storage quota

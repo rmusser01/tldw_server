@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib
 from types import SimpleNamespace
 from typing import Any
 
@@ -464,6 +465,26 @@ def test_tools_router_uses_standard_permission_factory_alias() -> None:
 
     assert tools.RequirePermission is auth_deps.RequirePermission
     assert not hasattr(tools, "auth_deps")
+
+
+@pytest.mark.parametrize(
+    "module_name",
+    [
+        "add",
+        "listing",
+        "process_web_scraping",
+        "process_videos",
+        "reprocess",
+        "ingest_jobs",
+    ],
+)
+def test_media_leaf_routers_use_standard_permission_factory_alias(module_name: str) -> None:
+    module = importlib.import_module(
+        f"tldw_Server_API.app.api.v1.endpoints.media.{module_name}",
+    )
+
+    assert module.RequirePermission is auth_deps.RequirePermission
+    assert not hasattr(module, "require_permissions")
 
 
 def test_api_key_scope_factory_alias_preserves_jwt_bypass_and_scope_checks() -> None:
