@@ -193,8 +193,11 @@ def _extract_numeric_tokens(text: str) -> set[str]:
                 core = canon.replace(",", "").replace("_", "").replace(".", "")
                 if core and core.isdigit():
                     expanded.add(core)
-        except (TypeError, ValueError):
-            logger.debug("Guardrail numeric canonicalization failed", exc_info=True)
+        except (TypeError, ValueError) as numeric_error:
+            logger.debug(
+                "Guardrail numeric canonicalization failed",
+                error_type=type(numeric_error).__name__,
+            )
         # Add expansion for k/m/b to canonical integer string for matching against raw numbers
         try:
             unit = nrm[-1] if nrm and nrm[-1] in {"k", "m", "b", "%"} else ""
@@ -209,8 +212,11 @@ def _extract_numeric_tokens(text: str) -> set[str]:
                     expanded.add(canonical)
                 except (TypeError, ValueError):
                     logger.debug("Guardrail numeric expansion failed")
-        except (TypeError, ValueError):
-            logger.debug("Guardrail numeric expansion setup failed", exc_info=True)
+        except (TypeError, ValueError) as numeric_error:
+            logger.debug(
+                "Guardrail numeric expansion setup failed",
+                error_type=type(numeric_error).__name__,
+            )
     return base | expanded
 
 
