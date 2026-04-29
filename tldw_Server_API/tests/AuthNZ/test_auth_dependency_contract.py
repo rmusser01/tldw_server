@@ -483,6 +483,7 @@ def test_tools_router_uses_standard_permission_factory_alias() -> None:
         "process_videos",
         "reprocess",
         "ingest_jobs",
+        "item",
     ],
 )
 def test_media_leaf_routers_use_standard_permission_factory_alias(module_name: str) -> None:
