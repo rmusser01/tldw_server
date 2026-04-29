@@ -109,6 +109,12 @@ def _make_app_with_registry(registry: _RegistryStub) -> FastAPI:
 
 
 @pytest.mark.unit
+def test_mlx_management_uses_standard_role_factory_alias():
+    assert mlx_ep.RequireRole is auth_deps.RequireRole
+    assert not hasattr(mlx_ep, "require_roles")
+
+
+@pytest.mark.unit
 def test_mlx_load_uses_default_model_path_and_adds_backend(monkeypatch):
     registry = _RegistryStub(load_result={"active": True, "model": "stub-model"})
     monkeypatch.setattr(mlx_ep, "_default_settings", lambda: {"model_path": "stub-model"})

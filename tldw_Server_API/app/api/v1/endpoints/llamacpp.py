@@ -10,7 +10,7 @@ from typing import Any, Optional
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, require_roles
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import RequireRole, check_rate_limit
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.Local_LLM.LlamaCpp_Handler import LlamaCppHandler
 
@@ -98,7 +98,7 @@ def _log_sanitized_manager_error(llm_manager: LLMInferenceManager, message: str)
 @router.post(
     "/llamacpp/start_server",
     summary="Start or Swap Llama.cpp Server Model",
-    dependencies=[Depends(check_rate_limit), Depends(require_roles("admin"))],
+    dependencies=[Depends(check_rate_limit), Depends(RequireRole("admin"))],
 )
 async def start_llamacpp_server_endpoint(
     model_filename: str = Body(
@@ -138,7 +138,7 @@ async def start_llamacpp_server_endpoint(
 @router.post(
     "/llamacpp/stop_server",
     summary="Stop Llama.cpp Server",
-    dependencies=[Depends(check_rate_limit), Depends(require_roles("admin"))],
+    dependencies=[Depends(check_rate_limit), Depends(RequireRole("admin"))],
 )
 async def stop_llamacpp_server_endpoint(llm_manager: LLMInferenceManager = Depends(_resolve_llm_manager)):
     try:
@@ -162,7 +162,7 @@ async def stop_llamacpp_server_endpoint(llm_manager: LLMInferenceManager = Depen
 @router.get(
     "/llamacpp/status",
     summary="Get Llama.cpp Server Status",
-    dependencies=[Depends(check_rate_limit), Depends(require_roles("admin"))],
+    dependencies=[Depends(check_rate_limit), Depends(RequireRole("admin"))],
 )
 async def get_llamacpp_status_endpoint(llm_manager: LLMInferenceManager = Depends(_resolve_llm_manager)):
     try:
@@ -186,7 +186,7 @@ async def get_llamacpp_status_endpoint(llm_manager: LLMInferenceManager = Depend
 @router.get(
     "/llamacpp/metrics",
     summary="Get Llama.cpp Metrics",
-    dependencies=[Depends(check_rate_limit), Depends(require_roles("admin"))],
+    dependencies=[Depends(check_rate_limit), Depends(RequireRole("admin"))],
 )
 async def get_llamacpp_metrics_endpoint(llm_manager: LLMInferenceManager = Depends(_resolve_llm_manager)):
     try:
@@ -225,7 +225,7 @@ async def get_llamafile_metrics_endpoint(llm_manager: LLMInferenceManager = Depe
 @router.get(
     "/llamacpp/models",
     summary="List available Llama.cpp models",
-    dependencies=[Depends(check_rate_limit), Depends(require_roles("admin"))],
+    dependencies=[Depends(check_rate_limit), Depends(RequireRole("admin"))],
 )
 async def list_llamacpp_models_endpoint(llm_manager: LLMInferenceManager = Depends(_resolve_llm_manager)):
     try:
