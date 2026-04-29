@@ -111,11 +111,13 @@ async def run_workflows_artifact_gc_worker(stop_event: asyncio.Event) -> None:
                     )
                     deleted += 1
                 except _GC_NONCRITICAL_EXCEPTIONS as e:
-                    logger.warning(f"Artifact GC: error deleting artifact {r.get('artifact_id')}: {e}")
+                    logger.bind(error_type=type(e).__name__).warning(
+                        "Artifact GC: error deleting artifact"
+                    )
             if deleted:
                 logger.info(f"Artifact GC: deleted {deleted} artifacts older than {retention_days} days")
         except _GC_NONCRITICAL_EXCEPTIONS as e:
-            logger.warning(f"Artifact GC loop error: {e}")
+            logger.bind(error_type=type(e).__name__).warning("Artifact GC loop error")
 
         with contextlib.suppress(asyncio.TimeoutError):
             await asyncio.wait_for(stop_event.wait(), timeout=interval)

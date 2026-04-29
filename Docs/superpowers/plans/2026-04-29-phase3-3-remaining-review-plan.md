@@ -153,7 +153,7 @@ These are ingestion/provider processing modules rather than the remaining conser
 
 ## Execution Stages
 
-### Stage 1: Batch A
+### Stage 1: Batch A (Complete)
 
 Goal: land `workflows_artifact_gc_service.py`.
 Success criteria:
@@ -161,6 +161,9 @@ Success criteria:
 - service logs fixed messages plus `error_type`
 - no raw file paths, artifact IDs, tokens, or exception text in touched fallback logs
 - focused pytest, source-scope Bandit, and `git diff --check` pass
+Result:
+- Landed in `workflows_artifact_gc_service.py` with direct coverage in `tldw_Server_API/tests/Services/test_workflows_artifact_gc_service.py`.
+- Verification passed with `3 passed`, source-scope Bandit clean, touched-source raw warning scan clean, and `git diff --check` clean.
 
 ### Stage 2: Batch B
 
