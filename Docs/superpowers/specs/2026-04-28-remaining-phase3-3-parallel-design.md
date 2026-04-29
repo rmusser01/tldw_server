@@ -31,6 +31,8 @@ This branch already contains many completed local Phase 3.3 tranches, including 
 
 Those changes form the current local checkpoint and should be treated as the integration baseline for the remaining work.
 
+Before any new parallel lane work begins, the parent should first checkpoint these already-verified local edits into a dedicated implementation commit. That checkpoint commit becomes the practical baseline for all remaining Phase 3.3 lane work.
+
 ## Scope
 
 This design covers only the remaining `Phase 3.3` work.
@@ -56,7 +58,7 @@ These are the preferred parallel candidates.
 
 Selection rules:
 
-- roughly small file size and narrow responsibility
+- roughly small file size and narrow responsibility, usually a source file under about `150-200 LOC`
 - direct unit tests already exist, or cheap direct tests can be added
 - remaining work is classic fallback/log sanitization
 - no public response-shape change is needed
@@ -73,7 +75,7 @@ The current primary example is:
 
 Reason:
 
-- it is larger than the service tranches
+- it is larger than the service tranches, but still has a dedicated focused error-contract harness
 - it already has dedicated error-contract coverage in `tldw_Server_API/tests/MediaDB2/test_sync_endpoint_errors.py`
 - the remaining Phase 3.3-shaped work appears to be log/fallback sanitization rather than broad behavior redesign
 
@@ -124,6 +126,12 @@ Workers must not:
 ### Scout Lane Responsibilities
 
 The scout lane exists to keep the aggressive execution model disciplined.
+
+Its input candidate set should come from:
+
+1. the current remaining grep/audit output for raw fallback leaks
+2. the existing Phase 3.3 plan backlog and prior deferred items
+3. nearby files suggested by completed worker tranches, but only when they remain disjoint and Phase-3.3-shaped
 
 Its output for each candidate must be one of:
 
