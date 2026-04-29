@@ -8,7 +8,7 @@ from fastapi.responses import StreamingResponse
 from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps import get_audit_service_for_user
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal, require_permissions
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import RequirePermission, get_auth_principal
 from tldw_Server_API.app.core.Audit.unified_audit_service import (
     AuditEventCategory,
     AuditEventType,
@@ -195,7 +195,7 @@ def _sanitize_filename(name: str, default_name: str) -> str:
 @router.get(
     "/audit/export",
     summary="Export audit events (JSON/JSONL/CSV)",
-    dependencies=[Depends(require_permissions(SYSTEM_LOGS))],
+    dependencies=[Depends(RequirePermission(SYSTEM_LOGS))],
 )
 async def export_audit_events(
     format: str = Query("json"),
@@ -345,7 +345,7 @@ async def export_audit_events(
 @router.get(
     "/audit/count",
     summary="Count audit events for pagination",
-    dependencies=[Depends(require_permissions(SYSTEM_LOGS))],
+    dependencies=[Depends(RequirePermission(SYSTEM_LOGS))],
 )
 async def count_audit_events(
     start_time: str | None = Query(None, description="ISO8601 start timestamp"),
