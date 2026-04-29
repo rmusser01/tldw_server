@@ -560,6 +560,15 @@ def test_slides_router_uses_standard_permission_factory_alias() -> None:
     assert not hasattr(slides, "require_permissions")
 
 
+def test_workflows_router_uses_standard_auth_factory_aliases() -> None:
+    from tldw_Server_API.app.api.v1.endpoints import workflows
+
+    assert workflows.RequireRole is auth_deps.RequireRole
+    assert workflows.RequirePermission is auth_deps.RequirePermission
+    assert workflows.TokenScopeGuard is auth_deps.TokenScopeGuard
+    assert not hasattr(workflows, "auth_deps")
+
+
 def test_api_key_scope_factory_alias_preserves_jwt_bypass_and_scope_checks() -> None:
     jwt_response = TestClient(_build_app(_principal(kind="user", api_key_id=None))).get(
         "/api-key-scope",

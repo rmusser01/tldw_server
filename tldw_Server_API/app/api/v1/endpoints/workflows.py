@@ -31,7 +31,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from loguru import logger
 from pydantic import BaseModel, Field, ValidationError
 
-from tldw_Server_API.app.api.v1.API_Deps import auth_deps
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import RequirePermission, RequireRole, TokenScopeGuard
 from tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps import get_audit_service_for_user
 from tldw_Server_API.app.api.v1.schemas.workflows import (
     AdhocRunRequest,
@@ -1568,7 +1568,7 @@ async def list_definitions(
 @router.post(
     "/preflight",
     response_model=WorkflowPreflightResponse,
-    dependencies=[Depends(auth_deps.require_permissions(WORKFLOWS_RUNS_READ))],
+    dependencies=[Depends(RequirePermission(WORKFLOWS_RUNS_READ))],
 )
 async def preflight_definition(
     body: WorkflowPreflightRequest,
@@ -1728,8 +1728,8 @@ class VirtualKeyRequest(BaseModel):
     "/auth/virtual-key",
     summary="Mint a short-lived JWT for workflows (multi-user)",
     dependencies=[
-        Depends(auth_deps.require_roles("admin")),
-        Depends(auth_deps.require_permissions(WORKFLOWS_ADMIN)),
+        Depends(RequireRole("admin")),
+        Depends(RequirePermission(WORKFLOWS_ADMIN)),
     ],
 )
 async def workflows_virtual_key(
@@ -1786,13 +1786,11 @@ async def workflows_virtual_key(
 
 import contextlib
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import require_token_scope
-
 
 @router.post(
     "/{workflow_id}/run",
     response_model=WorkflowRunResponse,
-    dependencies=[Depends(require_token_scope("workflows", require_if_present=True, endpoint_id="workflows.run_saved", count_as="run"))],
+    dependencies=[Depends(TokenScopeGuard("workflows", require_if_present=True, endpoint_id="workflows.run_saved", count_as="run"))],
 )
 async def run_saved(
     workflow_id: int,
@@ -2026,7 +2024,7 @@ async def run_saved(
     "/runs",
     response_model=WorkflowRunListResponse,
     dependencies=[
-        Depends(auth_deps.require_permissions(WORKFLOWS_RUNS_READ)),
+        Depends(RequirePermission(WORKFLOWS_RUNS_READ)),
     ],
     openapi_extra={
         "x-codeSamples": [
@@ -2259,7 +2257,7 @@ async def run_adhoc(
     db: WorkflowsDatabase = Depends(_get_db),
     audit_service=Depends(get_audit_service_for_user),
     _token_scope: None = Depends(
-        auth_deps.require_token_scope(
+        TokenScopeGuard(
             "workflows",
             require_if_present=True,
             endpoint_id="workflows.run_adhoc",
@@ -2395,7 +2393,7 @@ async def run_adhoc(
     "/runs/{run_id}",
     response_model=WorkflowRunResponse,
     dependencies=[
-        Depends(auth_deps.require_permissions(WORKFLOWS_RUNS_READ)),
+        Depends(RequirePermission(WORKFLOWS_RUNS_READ)),
     ],
 )
 async def get_run(
@@ -2486,7 +2484,7 @@ async def get_run(
             }
         ]
     },
-    dependencies=[Depends(auth_deps.require_permissions(WORKFLOWS_RUNS_READ))],
+    dependencies=[Depends(RequirePermission(WORKFLOWS_RUNS_READ))],
 )
 async def get_run_events(
     run_id: str,
@@ -2581,7 +2579,7 @@ async def get_run_events(
 @router.get(
     "/runs/{run_id}/webhooks/deliveries",
     dependencies=[
-        Depends(auth_deps.require_permissions(WORKFLOWS_RUNS_READ)),
+        Depends(RequirePermission(WORKFLOWS_RUNS_READ)),
     ],
 )
 async def get_run_webhook_deliveries(
@@ -2619,8 +2617,8 @@ async def get_run_webhook_deliveries(
         # Permission-first gate so failures clearly attribute the missing
         # workflows.runs.control permission in error details, even when the
         # principal also lacks the admin role.
-        Depends(auth_deps.require_permissions(WORKFLOWS_RUNS_CONTROL)),
-        Depends(auth_deps.require_roles("admin")),
+        Depends(RequirePermission(WORKFLOWS_RUNS_CONTROL)),
+        Depends(RequireRole("admin")),
     ],
 )
 async def list_webhook_dlq(
@@ -2658,8 +2656,8 @@ async def list_webhook_dlq(
 @router.post(
     "/webhooks/dlq/{dlq_id}/replay",
     dependencies=[
-        Depends(auth_deps.require_roles("admin")),
-        Depends(auth_deps.require_permissions(WORKFLOWS_RUNS_CONTROL)),
+        Depends(RequireRole("admin")),
+        Depends(RequirePermission(WORKFLOWS_RUNS_CONTROL)),
     ],
 )
 async def replay_webhook_dlq(
@@ -2946,7 +2944,7 @@ def _resolve_artifact_file_path(
 @router.get(
     "/runs/{run_id}/artifacts",
     dependencies=[
-        Depends(auth_deps.require_permissions(WORKFLOWS_RUNS_READ)),
+        Depends(RequirePermission(WORKFLOWS_RUNS_READ)),
     ],
 )
 async def get_run_artifacts(
@@ -2984,7 +2982,7 @@ async def get_run_artifacts(
 @router.get(
     "/runs/{run_id}/artifacts/manifest",
     dependencies=[
-        Depends(auth_deps.require_permissions(WORKFLOWS_RUNS_READ)),
+        Depends(RequirePermission(WORKFLOWS_RUNS_READ)),
     ],
 )
 async def get_run_artifacts_manifest(
@@ -3064,7 +3062,7 @@ class VerifyBatchRequest(BaseModel):
 @router.post(
     "/runs/{run_id}/artifacts/verify-batch",
     dependencies=[
-        Depends(auth_deps.require_permissions(WORKFLOWS_RUNS_READ)),
+        Depends(RequirePermission(WORKFLOWS_RUNS_READ)),
     ],
 )
 async def verify_artifacts_batch(
@@ -3145,7 +3143,7 @@ async def verify_artifacts_batch(
 @router.get(
     "/artifacts/{artifact_id}/download",
     dependencies=[
-        Depends(auth_deps.require_permissions(WORKFLOWS_RUNS_READ)),
+        Depends(RequirePermission(WORKFLOWS_RUNS_READ)),
     ],
 )
 async def download_artifact(
@@ -3329,7 +3327,7 @@ async def download_artifact(
 @router.get(
     "/runs/{run_id}/artifacts/download",
     dependencies=[
-        Depends(auth_deps.require_permissions(WORKFLOWS_RUNS_READ)),
+        Depends(RequirePermission(WORKFLOWS_RUNS_READ)),
     ],
 )
 async def download_run_artifacts_zip(
@@ -3459,7 +3457,7 @@ async def get_chunker_options():
 @router.get(
     "/runs/{run_id}/investigation",
     response_model=WorkflowRunInvestigationResponse,
-    dependencies=[Depends(auth_deps.require_permissions(WORKFLOWS_RUNS_READ))],
+    dependencies=[Depends(RequirePermission(WORKFLOWS_RUNS_READ))],
 )
 async def get_run_investigation(
     run_id: str,
@@ -3480,7 +3478,7 @@ async def get_run_investigation(
 @router.get(
     "/runs/{run_id}/steps",
     response_model=WorkflowRunStepsResponse,
-    dependencies=[Depends(auth_deps.require_permissions(WORKFLOWS_RUNS_READ))],
+    dependencies=[Depends(RequirePermission(WORKFLOWS_RUNS_READ))],
 )
 async def get_run_steps(
     run_id: str,
@@ -3501,7 +3499,7 @@ async def get_run_steps(
 @router.get(
     "/runs/{run_id}/steps/{step_id}/attempts",
     response_model=WorkflowStepAttemptsResponse,
-    dependencies=[Depends(auth_deps.require_permissions(WORKFLOWS_RUNS_READ))],
+    dependencies=[Depends(RequirePermission(WORKFLOWS_RUNS_READ))],
 )
 async def get_step_attempts(
     run_id: str,
@@ -3524,7 +3522,7 @@ async def get_step_attempts(
 @router.post(
     "/runs/{run_id}/{action}",
     dependencies=[
-        Depends(auth_deps.require_permissions(WORKFLOWS_RUNS_CONTROL)),
+        Depends(RequirePermission(WORKFLOWS_RUNS_CONTROL)),
     ],
 )
 async def control_run(
@@ -4191,7 +4189,7 @@ async def get_workflow_template_legacy(name: str) -> dict[str, Any]:
 @router.get(
     "/config",
     dependencies=[
-        Depends(auth_deps.require_permissions(WORKFLOWS_ADMIN)),
+        Depends(RequirePermission(WORKFLOWS_ADMIN)),
     ],
 )
 async def get_workflows_config(
@@ -4254,7 +4252,7 @@ async def get_workflows_config(
 @router.post(
     "/runs/{run_id}/retry",
     dependencies=[
-        Depends(auth_deps.require_permissions(WORKFLOWS_RUNS_CONTROL)),
+        Depends(RequirePermission(WORKFLOWS_RUNS_CONTROL)),
     ],
 )
 async def retry_run(
@@ -4284,7 +4282,7 @@ async def retry_run(
 @router.get(
     "/{workflow_id}",
     dependencies=[
-        Depends(auth_deps.require_permissions(WORKFLOWS_RUNS_READ)),
+        Depends(RequirePermission(WORKFLOWS_RUNS_READ)),
     ],
 )
 async def get_definition(
@@ -4330,7 +4328,7 @@ class HumanReviewPayload(BaseModel):
 @router.post(
     "/runs/{run_id}/steps/{step_id}/approve",
     dependencies=[
-        Depends(auth_deps.require_permissions(WORKFLOWS_RUNS_CONTROL)),
+        Depends(RequirePermission(WORKFLOWS_RUNS_CONTROL)),
     ],
 )
 async def approve_step(
@@ -4397,7 +4395,7 @@ async def approve_step(
 @router.post(
     "/runs/{run_id}/steps/{step_id}/reject",
     dependencies=[
-        Depends(auth_deps.require_permissions(WORKFLOWS_RUNS_CONTROL)),
+        Depends(RequirePermission(WORKFLOWS_RUNS_CONTROL)),
     ],
 )
 async def reject_step(
