@@ -338,7 +338,7 @@ class FlashRankReranker(BaseReranker):
             return scored_docs[:self.config.top_k]
 
         except Exception as e:  # noqa: BLE001 - fallback to original order
-            logger.error(f"FlashRank reranking failed: {e}")
+            logger.error("FlashRank reranking failed (error_type={})", type(e).__name__)
             # Fallback to original order
             return [
                 ScoredDocument(
@@ -543,7 +543,7 @@ class LlamaCppReranker(BaseReranker):
             return scored[: self.config.top_k]
 
         except Exception as e:  # noqa: BLE001 - fallback to original order
-            logger.error(f"LlamaCppReranker failed: {e}")
+            logger.error("LlamaCppReranker failed (error_type={})", type(e).__name__)
             return [
                 ScoredDocument(
                     document=doc,
@@ -748,7 +748,7 @@ class TransformersCrossEncoderReranker(BaseReranker):
             scored_out.sort(key=lambda x: x.rerank_score, reverse=True)
             return scored_out[: self.config.top_k]
         except Exception as e:  # noqa: BLE001 - fallback to original order
-            logger.error(f"Transformers cross-encoder reranking failed: {e}")
+            logger.error("Transformers cross-encoder reranking failed (error_type={})", type(e).__name__)
             return [
                 ScoredDocument(
                     document=doc,

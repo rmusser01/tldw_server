@@ -173,10 +173,10 @@ class DocumentProcessor:
             return enhanced_chunks
 
         except (ChunkingError, InvalidInputError) as e:
-            logger.error(f"Chunking error: {e}")
+            logger.error(f"Chunking error during document processing: {type(e).__name__}")
             return []
         except Exception as e:
-            logger.error(f"Unexpected error during document processing: {e}")
+            logger.error(f"Unexpected error during document processing: {type(e).__name__}")
             return []
 
     def _clean_artifacts(self, content: str) -> str:
