@@ -452,6 +452,13 @@ def test_billing_router_uses_standard_role_factory_alias() -> None:
     assert not hasattr(billing, "require_roles")
 
 
+def test_scheduler_workflows_router_uses_standard_permission_factory_alias() -> None:
+    from tldw_Server_API.app.api.v1.endpoints import scheduler_workflows
+
+    assert scheduler_workflows.RequirePermission is auth_deps.RequirePermission
+    assert not hasattr(scheduler_workflows, "require_permissions")
+
+
 def test_api_key_scope_factory_alias_preserves_jwt_bypass_and_scope_checks() -> None:
     jwt_response = TestClient(_build_app(_principal(kind="user", api_key_id=None))).get(
         "/api-key-scope",

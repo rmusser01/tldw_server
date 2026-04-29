@@ -8,8 +8,8 @@ from loguru import logger
 from pydantic import BaseModel, Field
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    RequirePermission,
     get_auth_principal,
-    require_permissions,
     require_token_scope,
 )
 from tldw_Server_API.app.core.AuthNZ.permissions import WORKFLOWS_ADMIN
@@ -29,7 +29,7 @@ _ADMIN_RESCAN_SCOPE_DEP = require_token_scope(
     require_if_present=True,
     endpoint_id="scheduler.workflows.admin_rescan",
 )
-_ADMIN_RESCAN_PERMISSIONS_DEP = require_permissions(WORKFLOWS_ADMIN)
+_ADMIN_RESCAN_PERMISSIONS_DEP = RequirePermission(WORKFLOWS_ADMIN)
 
 
 class ScheduleCreateRequest(BaseModel):
