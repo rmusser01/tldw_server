@@ -192,9 +192,7 @@ from tldw_Server_API.app.services.lifecycle_exceptions import LIFECYCLE_GUARD_EX
 from tldw_Server_API.app.services.lifecycle_workers import (
     ManagedWorker,
     ShutdownPhase as WorkerShutdownPhase,
-    WorkerInventory,
     publish_worker_inventory,
-    start_stop_event_worker,
     stop_registered_workers,
 )
 ```
@@ -217,6 +215,8 @@ Then update:
 - `_stop_registered_job_pollers(...)` to filter `handles` to `WorkerShutdownPhase.JOB_POLLER_QUIESCE` and call `stop_registered_workers(..., stopped_names_attr="_tldw_shutdown_quiesced_job_poller_names", log_label="job poller")`
 
 Use the `WorkerShutdownPhase` alias consistently in `main.py`. Do not import lifecycle `ShutdownPhase` under the bare name because the lifespan shutdown block already imports `ShutdownPhase` from `shutdown_coordinator`, which would make `ShutdownPhase` a local name and break earlier startup references.
+
+Do not import `WorkerInventory` or `start_stop_event_worker` in Task 2. They are not used until Task 3, and importing them early creates lint failures for unused imports.
 
 - [ ] **Step 5: Run current shutdown job-poller tests**
 
@@ -279,6 +279,8 @@ Expected: FAIL because the workers are still directly created and not inventory-
 Near the existing `owned_job_pollers` initialization, create one worker inventory and preserve the current local name for compatibility with existing helpers and tests:
 
 ```python
+from tldw_Server_API.app.services.lifecycle_workers import WorkerInventory
+
 worker_inventory = WorkerInventory(app)
 owned_job_pollers: list[_ManagedJobPoller] = worker_inventory.handles
 worker_inventory.publish()
@@ -298,6 +300,8 @@ Replace direct `asyncio.Event()` plus `asyncio.create_task(...)` in the startup 
 Use:
 
 ```python
+from tldw_Server_API.app.services.lifecycle_workers import start_stop_event_worker
+
 jobs_metrics_task, jobs_metrics_stop_event = await start_stop_event_worker(
     worker_inventory,
     name="jobs_metrics_task",
