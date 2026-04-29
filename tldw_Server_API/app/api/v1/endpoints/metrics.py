@@ -9,7 +9,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from loguru import logger
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import require_roles
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import RequireRole
 import tldw_Server_API.app.core.Chat.chat_metrics as chat_metrics
 from tldw_Server_API.app.core.Chat.chat_metrics import get_chat_metrics
 from tldw_Server_API.app.core.Metrics.metrics_manager import get_metrics_registry
@@ -246,7 +246,7 @@ async def get_chat_metrics_endpoint() -> dict[str, Any]:
     "/metrics/reset",
     summary="Reset registry metrics (admin only)",
     response_model=dict[str, str],
-    dependencies=[Depends(require_roles("admin"))],
+    dependencies=[Depends(RequireRole("admin"))],
 )
 async def reset_metrics() -> dict[str, str]:
     """
