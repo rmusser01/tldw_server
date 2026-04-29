@@ -212,9 +212,9 @@ from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel, Field, ValidationError
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    RequirePermission,
     get_auth_principal,
     rbac_rate_limit,
-    require_permissions,
     require_token_scope,
 )
 from tldw_Server_API.app.api.v1.API_Deps.llm_routing_deps import (
@@ -4448,7 +4448,7 @@ async def create_chat_completion(
     tags=["chat"],
     dependencies=[
         Depends(rbac_rate_limit("chat.queue.status")),
-        Depends(require_permissions(SYSTEM_LOGS)),
+        Depends(RequirePermission(SYSTEM_LOGS)),
     ],
 )
 async def get_chat_queue_status():
@@ -4473,7 +4473,7 @@ async def get_chat_queue_status():
     tags=["chat"],
     dependencies=[
         Depends(rbac_rate_limit("chat.queue.activity")),
-        Depends(require_permissions(SYSTEM_LOGS)),
+        Depends(RequirePermission(SYSTEM_LOGS)),
     ],
 )
 async def get_chat_queue_activity(
