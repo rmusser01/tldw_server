@@ -160,6 +160,47 @@ def _build_real_principal_app() -> FastAPI:
     return app
 
 
+class _FakeJwtService:
+    def __init__(self, payload: dict[str, Any]) -> None:
+        self.payload = payload
+
+    def decode_access_token(self, token: str) -> dict[str, Any]:
+        assert token == "jwt.header.signature"
+        return dict(self.payload)
+
+
+class _FakeSessionManager:
+    async def is_token_blacklisted(self, token: str, jti: str | None = None) -> bool:
+        assert token == "jwt.header.signature"
+        return False
+
+
+def _build_token_scope_app(payload: dict[str, Any]) -> FastAPI:
+    app = FastAPI()
+
+    async def fake_jwt_service() -> _FakeJwtService:
+        return _FakeJwtService(payload)
+
+    async def fake_db_pool() -> object:
+        return object()
+
+    app.dependency_overrides[auth_deps.get_jwt_service_dep] = fake_jwt_service
+    app.dependency_overrides[auth_deps.get_db_pool] = fake_db_pool
+
+    @app.get("/token-scope")
+    async def token_scope(
+        request: Request,
+        _: None = Depends(TokenScopeGuard("skills.run", allow_admin_bypass=False)),
+    ):
+        return {
+            "scope_enforced": getattr(request.state, "_token_scope_enforced", None),
+            "scope_claim": getattr(request.state, "_token_scope_claim", None),
+            "scope_required": getattr(request.state, "_token_scope_required", None),
+        }
+
+    return app
+
+
 def test_current_principal_alias_returns_principal_and_preserves_request_state() -> None:
     app = _build_app(
         _principal(roles=["user"], permissions=["media.read"], subject="user:42"),
@@ -254,6 +295,45 @@ def test_api_key_scope_factory_alias_preserves_jwt_bypass_and_scope_checks() -> 
     assert api_key_response.json() == {"kind": "api_key", "api_key_id": 123}
     assert limited_key_response.status_code == 403
     assert "API key lacks required scope" in limited_key_response.json()["detail"]
+
+
+def test_token_scope_guard_alias_preserves_scoped_jwt_success_and_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core.AuthNZ import session_manager
+
+    async def fake_session_manager() -> _FakeSessionManager:
+        return _FakeSessionManager()
+
+    monkeypatch.setattr(session_manager, "get_session_manager", fake_session_manager)
+
+    scoped_response = TestClient(
+        _build_token_scope_app({"scope": "skills.run", "jti": "token-1"}),
+    ).get(
+        "/token-scope",
+        headers={"Authorization": "Bearer jwt.header.signature"},
+    )
+    invalid_scope_response = TestClient(
+        _build_token_scope_app({"scope": "wrong.scope", "jti": "token-2"}),
+    ).get(
+        "/token-scope",
+        headers={"Authorization": "Bearer jwt.header.signature"},
+    )
+    missing_credentials_response = TestClient(
+        _build_token_scope_app({"scope": "skills.run", "jti": "token-3"}),
+    ).get("/token-scope")
+
+    assert scoped_response.status_code == 200
+    assert scoped_response.json() == {
+        "scope_enforced": True,
+        "scope_claim": "skills.run",
+        "scope_required": "skills.run",
+    }
+    assert invalid_scope_response.status_code == 403
+    assert invalid_scope_response.json()["detail"] == "Forbidden: invalid token scope"
+    assert missing_credentials_response.status_code == 401
+    assert missing_credentials_response.json()["detail"] == "Authentication required"
+    assert missing_credentials_response.headers.get("WWW-Authenticate") == "Bearer"
 
 
 def test_current_principal_alias_preserves_missing_credentials_401() -> None:
