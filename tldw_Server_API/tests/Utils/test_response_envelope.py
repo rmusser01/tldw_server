@@ -46,6 +46,7 @@ def test_error_envelope_serializes_standard_contract() -> None:
 def test_is_response_envelope_accepts_only_wrapped_payloads() -> None:
     assert is_response_envelope({"success": True, "data": {"id": 1}})
     assert is_response_envelope({"success": False, "error": "Nope"})
+    assert is_response_envelope({"success": True, "metadata": {"request_id": "req-3"}})
 
     assert not is_response_envelope({"success": True, "file_id": "generated-file"})
     assert not is_response_envelope({"data": {"id": 1}})

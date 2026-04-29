@@ -21,13 +21,30 @@ const hasOwn = (value: Record<string, unknown>, key: string): boolean =>
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === "object" && !Array.isArray(value)
 
+const envelopeKeys = ["data", "error", "error_code", "metadata"] as const
+const envelopeKeySet = new Set<string>(envelopeKeys)
+
+const hasEnvelopeKey = (value: Record<string, unknown>): boolean =>
+  envelopeKeys.some((key) => hasOwn(value, key))
+
+const hasOnlyEnvelopeKeys = (value: Record<string, unknown>): boolean =>
+  Object.keys(value).every((key) => envelopeKeySet.has(key))
+
+const isApiResponseDataWrapper = (
+  value: unknown
+): value is ApiResponseDataWrapper<unknown> =>
+  isRecord(value) &&
+  !hasOwn(value, "success") &&
+  hasEnvelopeKey(value) &&
+  hasOnlyEnvelopeKeys(value)
+
 export const isApiResponseEnvelope = (
   value: unknown
 ): value is ApiResponseEnvelope<unknown> => {
   if (!isRecord(value) || typeof value.success !== "boolean") {
     return false
   }
-  return hasOwn(value, "data") || hasOwn(value, "error") || hasOwn(value, "error_code")
+  return hasEnvelopeKey(value)
 }
 
 export function unwrapApiResponseEnvelope<T>(value: ApiResponseEnvelope<T>): T | null
@@ -55,7 +72,7 @@ export function unwrapApiResponseData<T>(
   if (isApiResponseEnvelope(value)) {
     return (value as ApiResponseEnvelope<T>).data ?? null
   }
-  if (isRecord(value) && hasOwn(value, "data")) {
+  if (isApiResponseDataWrapper(value)) {
     return (value as ApiResponseDataWrapper<T>).data ?? null
   }
   return value as T | null | undefined

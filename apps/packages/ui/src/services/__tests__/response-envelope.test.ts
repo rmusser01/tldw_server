@@ -29,6 +29,16 @@ describe("response envelope helpers", () => {
     expect(unwrapApiResponseEnvelope(payload)).toBeNull()
   })
 
+  it("detects metadata-only canonical envelopes", () => {
+    const payload = {
+      success: true,
+      metadata: { request_id: "req-2" }
+    }
+
+    expect(isApiResponseEnvelope(payload)).toBe(true)
+    expect(unwrapApiResponseEnvelope(payload)).toBeNull()
+  })
+
   it("leaves legacy success-shaped endpoint payloads unchanged", () => {
     const payload = {
       success: true,
@@ -48,5 +58,24 @@ describe("response envelope helpers", () => {
     expect(isApiResponseEnvelope(payload)).toBe(false)
     expect(unwrapApiResponseEnvelope(payload)).toBe(payload)
     expect(unwrapApiResponseData(payload)).toEqual({ id: 9, name: "Existing response" })
+  })
+
+  it("returns null for transitional error-only wrappers", () => {
+    const payload = {
+      error: "Failed to load"
+    }
+
+    expect(isApiResponseEnvelope(payload)).toBe(false)
+    expect(unwrapApiResponseData<number>(payload)).toBeNull()
+  })
+
+  it("does not unwrap domain objects that happen to contain data", () => {
+    const payload = {
+      id: "domain-object",
+      data: "domain field"
+    }
+
+    expect(isApiResponseEnvelope(payload)).toBe(false)
+    expect(unwrapApiResponseData(payload)).toBe(payload)
   })
 })

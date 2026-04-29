@@ -10,7 +10,7 @@ from tldw_Server_API.app.api.v1.schemas.response_envelope import ResponseEnvelop
 
 T = TypeVar("T")
 
-_ENVELOPE_PAYLOAD_KEYS = frozenset(("data", "error", "error_code"))
+_ENVELOPE_PAYLOAD_KEYS = frozenset(("data", "error", "error_code", "metadata"))
 
 
 def envelope_success(
@@ -46,7 +46,7 @@ def is_response_envelope(value: object) -> bool:
     """Return true only for canonical envelope-shaped mappings.
 
     Several legacy endpoints return domain payloads with a top-level
-    ``success`` flag. Requiring at least one canonical envelope payload key
+    ``success`` flag. Requiring at least one canonical envelope contract key
     avoids misclassifying those legacy shapes before migration.
     """
 
