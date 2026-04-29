@@ -148,6 +148,7 @@ const PROMPTS_VIEW_MODE_STORAGE_KEY = "tldw-prompts-view-mode-v1"
 const PROMPTS_GALLERY_DENSITY_STORAGE_KEY = "tldw-prompts-gallery-density-v1"
 export const PROMPTS_COPILOT_HELP_STORAGE_KEY = "tldw-prompts-copilot-help-dismissed-v1"
 const PROMPTS_MOBILE_BREAKPOINT_PX = 768
+const EMPTY_TRASH_CONFIRM_TOKEN = "DELETE"
 
 const readPromptSortState = (): PromptSortState => {
   if (typeof window === "undefined") {
@@ -259,6 +260,9 @@ export const PromptBody = () => {
       : false
   )
   const [trashSearchText, setTrashSearchText] = useState("")
+  const [emptyTrashConfirmOpen, setEmptyTrashConfirmOpen] = useState(false)
+  const [emptyTrashConfirmText, setEmptyTrashConfirmText] = useState("")
+  const emptyTrashSubmittingRef = useRef(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [savedView, setSavedView] = useState<PromptSavedView>("all")
   const [historyDrawerOpen, setHistoryDrawerOpen] = useState(false)
@@ -355,6 +359,32 @@ export const PromptBody = () => {
     t,
     setSelectedRowKeys: bulk.setSelectedRowKeys
   })
+
+  const openEmptyTrashConfirm = React.useCallback(() => {
+    emptyTrashSubmittingRef.current = false
+    setEmptyTrashConfirmText("")
+    setEmptyTrashConfirmOpen(true)
+  }, [])
+
+  const closeEmptyTrashConfirm = React.useCallback(() => {
+    emptyTrashSubmittingRef.current = false
+    setEmptyTrashConfirmOpen(false)
+    setEmptyTrashConfirmText("")
+  }, [])
+
+  const handleEmptyTrashConfirm = React.useCallback(() => {
+    if (
+      emptyTrashConfirmText !== EMPTY_TRASH_CONFIRM_TOKEN ||
+      editor.isEmptyingTrash ||
+      emptyTrashSubmittingRef.current
+    ) {
+      return
+    }
+    emptyTrashSubmittingRef.current = true
+    setEmptyTrashConfirmOpen(false)
+    setEmptyTrashConfirmText("")
+    editor.emptyTrashMutation()
+  }, [editor.emptyTrashMutation, editor.isEmptyingTrash, emptyTrashConfirmText])
 
   const interactions = usePromptInteractions({
     queryClient,
@@ -1727,7 +1757,7 @@ export const PromptBody = () => {
             type="info"
             showIcon
             className="mb-3"
-            message={t("managePrompts.search.localSubset", {
+            title={t("managePrompts.search.localSubset", {
               defaultValue: "Showing synced local matches only"
             })}
             description={t("managePrompts.search.localSubsetDesc", {
@@ -2171,19 +2201,7 @@ export const PromptBody = () => {
                   </span>
                 </div>
                 <button
-                  onClick={async () => {
-                    const ok = await confirmDanger({
-                      title: t("managePrompts.trash.emptyConfirmTitle", { defaultValue: "Empty Trash?" }),
-                      content: t("managePrompts.trash.emptyConfirmContent", {
-                        defaultValue: "This will permanently delete {{count}} prompts. This action cannot be undone.",
-                        count: trashCount
-                      }),
-                      okText: t("managePrompts.trash.emptyTrash", { defaultValue: "Empty Trash" }),
-                      cancelText: t("common:cancel", { defaultValue: "Cancel" })
-                    })
-                    if (!ok) return
-                    editor.emptyTrashMutation()
-                  }}
+                  onClick={openEmptyTrashConfirm}
                   disabled={editor.isEmptyingTrash}
                   className="inline-flex items-center gap-1 px-2 py-1 text-sm rounded border border-danger/30 text-danger hover:bg-danger/10 disabled:opacity-50">
                   <Trash2 className="size-3" />
@@ -2792,6 +2810,62 @@ export const PromptBody = () => {
             </button>
           </Form.Item>
         </Form>
+      </Modal>
+
+      <Modal
+        title={t("managePrompts.trash.emptyConfirmTitle", { defaultValue: "Empty Trash?" })}
+        open={emptyTrashConfirmOpen}
+        onCancel={closeEmptyTrashConfirm}
+        onOk={handleEmptyTrashConfirm}
+        okText={t("managePrompts.trash.emptyTrash", { defaultValue: "Empty Trash" })}
+        cancelText={t("common:cancel", { defaultValue: "Cancel" })}
+        okButtonProps={{
+          danger: true,
+          disabled:
+            emptyTrashConfirmText !== EMPTY_TRASH_CONFIRM_TOKEN ||
+            editor.isEmptyingTrash,
+          loading: editor.isEmptyingTrash
+        }}
+        maskClosable={false}
+        data-testid="prompts-empty-trash-confirm-modal"
+      >
+        <div className="space-y-3" data-testid="prompts-empty-trash-confirm">
+          <Alert
+            type="error"
+            showIcon
+            title={t("managePrompts.trash.emptyConfirmWarningTitle", {
+              defaultValue: "This permanently deletes every prompt in trash"
+            })}
+            description={t("managePrompts.trash.emptyConfirmContent", {
+              defaultValue:
+                "This will permanently delete {{count}} prompts. This action cannot be undone.",
+              count: Array.isArray(trashData) ? trashData.length : 0
+            })}
+          />
+          <label
+            className="block text-sm font-medium text-text"
+            htmlFor="prompts-empty-trash-confirm-input"
+          >
+            {t("managePrompts.trash.emptyConfirmTypeLabel", {
+              defaultValue: "Type DELETE to confirm"
+            })}
+          </label>
+          <Input
+            id="prompts-empty-trash-confirm-input"
+            value={emptyTrashConfirmText}
+            onChange={(event) => setEmptyTrashConfirmText(event.target.value)}
+            onPressEnter={handleEmptyTrashConfirm}
+            placeholder={EMPTY_TRASH_CONFIRM_TOKEN}
+            autoComplete="off"
+            data-testid="prompts-empty-trash-confirm-input"
+          />
+          <p className="text-xs text-text-muted">
+            {t("managePrompts.trash.emptyConfirmScope", {
+              defaultValue:
+                "Individual prompt deletes still use the standard confirmation."
+            })}
+          </p>
+        </div>
       </Modal>
 
       <Modal

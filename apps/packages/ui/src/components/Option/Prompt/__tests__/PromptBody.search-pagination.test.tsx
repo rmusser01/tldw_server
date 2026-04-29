@@ -1,5 +1,5 @@
 import React from "react"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { notification } from "antd"
@@ -1974,6 +1974,46 @@ describe("PromptBody server search and pagination", () => {
     await waitFor(() => {
       expect(mocks.restorePrompt).toHaveBeenCalled()
       expect(mocks.restorePrompt.mock.calls.at(-1)?.[0]).toBe("trash-row")
+    })
+  })
+
+  it("requires typing DELETE before emptying all trashed prompts", async () => {
+    const deletedAt = 1_700_000_000_000
+    mocks.getDeletedPrompts.mockResolvedValue([
+      { id: "trash-1", name: "Trash 1", content: "one", deletedAt },
+      { id: "trash-2", name: "Trash 2", content: "two", deletedAt }
+    ])
+    mocks.emptyTrash.mockResolvedValue(2)
+
+    renderPromptBody(["/prompts?tab=trash"])
+
+    await waitFor(() => {
+      expect(screen.getByTestId("table-row-count")).toHaveTextContent("2")
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: "Empty Trash" }))
+
+    const confirmBody = await screen.findByTestId("prompts-empty-trash-confirm")
+    expect(confirmBody).toHaveTextContent("This permanently deletes every prompt in trash")
+    const confirmButton = screen.getAllByRole("button", { name: "Empty Trash" }).at(-1)
+    expect(confirmButton).toBeDisabled()
+    expect(mocks.emptyTrash).not.toHaveBeenCalled()
+
+    fireEvent.change(within(confirmBody).getByTestId("prompts-empty-trash-confirm-input"), {
+      target: { value: "delete" }
+    })
+    expect(confirmButton).toBeDisabled()
+
+    fireEvent.change(within(confirmBody).getByTestId("prompts-empty-trash-confirm-input"), {
+      target: { value: "DELETE" }
+    })
+    expect(confirmButton).not.toBeDisabled()
+
+    fireEvent.click(confirmButton!)
+    fireEvent.click(confirmButton!)
+
+    await waitFor(() => {
+      expect(mocks.emptyTrash).toHaveBeenCalledTimes(1)
     })
   })
 
