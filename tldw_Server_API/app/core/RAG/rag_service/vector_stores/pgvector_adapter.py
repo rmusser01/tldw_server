@@ -222,21 +222,21 @@ class PGVectorAdapter(VectorStoreAdapter):
                 try:
                     try:
                         cur.execute(f"SET hnsw.ef_search = {int(ef)}")
-                    except Exception as e:  # noqa: BLE001 - best-effort session tuning
-                        logger.debug("pgvector._exec: SET hnsw.ef_search failed", exc_info=e)
+                    except Exception:  # noqa: BLE001 - best-effort session tuning
+                        logger.debug("pgvector._exec: SET hnsw.ef_search failed")
                     cur.execute(sql, params or ())
                     conn.commit()
                 except Exception:  # noqa: BLE001 - re-raise after rollback
                     try:
                         conn.rollback()
-                    except Exception as rb_e:  # noqa: BLE001 - rollback best-effort
-                        logger.debug("pgvector._exec: rollback failed", exc_info=rb_e)
+                    except Exception:  # noqa: BLE001 - rollback best-effort
+                        logger.debug("pgvector._exec: rollback failed")
                     raise
                 finally:
                     try:
                         cur.close()
-                    except Exception as e:  # noqa: BLE001 - cursor close best-effort
-                        logger.debug("pgvector._exec: cursor close failed", exc_info=e)
+                    except Exception:  # noqa: BLE001 - cursor close best-effort
+                        logger.debug("pgvector._exec: cursor close failed")
         await asyncio.get_event_loop().run_in_executor(
             None,
             _run,
@@ -253,23 +253,23 @@ class PGVectorAdapter(VectorStoreAdapter):
                 try:
                     try:
                         cur.execute(f"SET hnsw.ef_search = {int(ef)}")
-                    except Exception as e:  # noqa: BLE001 - best-effort session tuning
-                        logger.debug("pgvector._query: SET hnsw.ef_search failed", exc_info=e)
+                    except Exception:  # noqa: BLE001 - best-effort session tuning
+                        logger.debug("pgvector._query: SET hnsw.ef_search failed")
                     cur.execute(sql, params or ())
                     rows = cur.fetchall()
                 except Exception:
                     try:
                         conn.rollback()
-                    except Exception as rb_e:  # noqa: BLE001 - rollback best-effort
-                        logger.debug("pgvector._query: rollback failed", exc_info=rb_e)
+                    except Exception:  # noqa: BLE001 - rollback best-effort
+                        logger.debug("pgvector._query: rollback failed")
                     raise
                 else:
                     return rows
                 finally:
                     try:
                         cur.close()
-                    except Exception as e:  # noqa: BLE001 - cursor close best-effort
-                        logger.debug("pgvector._query: cursor close failed", exc_info=e)
+                    except Exception:  # noqa: BLE001 - cursor close best-effort
+                        logger.debug("pgvector._query: cursor close failed")
         return await asyncio.get_event_loop().run_in_executor(
             None,
             _run,

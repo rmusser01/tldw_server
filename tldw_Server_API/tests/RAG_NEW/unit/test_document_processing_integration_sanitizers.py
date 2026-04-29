@@ -13,9 +13,13 @@ pytestmark = pytest.mark.unit
 class _LoggerStub:
     def __init__(self) -> None:
         self.errors: list[str] = []
+        self.debugs: list[str] = []
 
     def error(self, message: str) -> None:
         self.errors.append(str(message))
+
+    def debug(self, message: str) -> None:
+        self.debugs.append(str(message))
 
 
 def _processor() -> DocumentProcessor:
@@ -87,3 +91,31 @@ async def test_unexpected_processing_fallback_log_omits_raw_exception_details(
     assert "/private/" not in joined
     assert "secret-token" not in joined
     assert "unexpected failure" not in joined
+
+
+def test_mojibake_fix_fallback_debug_omits_raw_exception_details(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(dpi, "logger", logger_stub)
+
+    class _ExplodingText(str):
+        def replace(self, *_args: object, **_kwargs: object) -> "_ExplodingText":
+            return self
+
+        def encode(self, *_args: object, **_kwargs: object) -> bytes:
+            raise UnicodeError(
+                "mojibake repair failed for /private/rag/source.txt token=secret-token"
+            )
+
+    content = _ExplodingText("Safe visible content")
+    fixed = DocumentProcessor()._fix_encoding(content)
+
+    assert fixed == content
+    assert logger_stub.debugs == [
+        "Mojibake fix failed; returning replacements-only content"
+    ]
+    joined = "\n".join(logger_stub.debugs)
+    assert "/private/" not in joined
+    assert "secret-token" not in joined
+    assert "mojibake repair failed" not in joined

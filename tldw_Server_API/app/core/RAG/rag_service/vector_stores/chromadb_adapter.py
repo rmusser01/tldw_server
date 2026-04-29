@@ -78,8 +78,8 @@ class ChromaDBAdapter(VectorStoreAdapter):
             self._loop = asyncio.get_event_loop()
             logger.info(f"ChromaDB adapter initialized for user {self.config.user_id}")
 
-        except Exception as e:  # noqa: BLE001 - surface initialization failures
-            logger.error(f"Failed to initialize ChromaDB adapter: {e}")
+        except Exception:  # noqa: BLE001 - surface initialization failures
+            logger.error("Failed to initialize ChromaDB adapter")
             raise
 
     async def create_collection(self, collection_name: str, metadata: Optional[dict[str, Any]] = None) -> None:
@@ -114,8 +114,8 @@ class ChromaDBAdapter(VectorStoreAdapter):
 
             logger.info(f"Created/accessed collection '{collection_name}'")
 
-        except Exception as e:
-            logger.error(f"Failed to create collection '{collection_name}': {e}")
+        except Exception:
+            logger.error("Failed to create ChromaDB collection")
             raise
 
     async def delete_collection(self, collection_name: str) -> None:
@@ -132,8 +132,8 @@ class ChromaDBAdapter(VectorStoreAdapter):
             manager = self._require_manager()
             manager.client.delete_collection(name=collection_name)
             logger.info(f"Deleted collection '{collection_name}'")
-        except Exception as e:
-            logger.error(f"Failed to delete collection '{collection_name}': {e}")
+        except Exception:
+            logger.error("Failed to delete ChromaDB collection")
             raise
 
     async def list_collections(self) -> list[str]:
@@ -150,8 +150,8 @@ class ChromaDBAdapter(VectorStoreAdapter):
             manager = self._require_manager()
             collections = manager.client.list_collections()
             return [col.name for col in collections]
-        except Exception as e:
-            logger.error(f"Failed to list collections: {e}")
+        except Exception:
+            logger.error("Failed to list ChromaDB collections")
             raise
 
     async def upsert_vectors(
@@ -194,8 +194,8 @@ class ChromaDBAdapter(VectorStoreAdapter):
                     metadatas=metadatas
                 )
             logger.info(f"Upserted {len(vectors)} vectors to collection '{collection_name}'")
-        except Exception as e:
-            logger.error(f"Failed to upsert vectors to '{collection_name}': {e}")
+        except Exception:
+            logger.error("Failed to upsert ChromaDB vectors")
             raise
 
     async def delete_vectors(self, collection_name: str, ids: list[str]) -> None:
@@ -225,8 +225,8 @@ class ChromaDBAdapter(VectorStoreAdapter):
                 raise
             collection.delete(ids=ids)
             logger.info(f"Deleted {len(ids)} vectors from collection '{collection_name}'")
-        except Exception as e:
-            logger.error(f"Failed to delete vectors from '{collection_name}': {e}")
+        except Exception:
+            logger.error("Failed to delete ChromaDB vectors")
             raise
 
     async def delete_by_filter(self, collection_name: str, filter: dict[str, Any]) -> int:
@@ -465,8 +465,8 @@ class ChromaDBAdapter(VectorStoreAdapter):
             all_results.sort(key=lambda x: x.score, reverse=True)
             return all_results[:k]
 
-        except Exception as e:  # noqa: BLE001 - surface as adapter error
-            logger.error(f"Failed to perform multi-search: {e}")
+        except Exception:  # noqa: BLE001 - surface as adapter error
+            logger.error("Failed to perform ChromaDB multi-search")
             raise
 
     async def get_collection_stats(self, collection_name: str) -> dict[str, Any]:
