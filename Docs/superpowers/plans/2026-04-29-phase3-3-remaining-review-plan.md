@@ -165,7 +165,7 @@ Result:
 - Landed in `workflows_artifact_gc_service.py` with direct coverage in `tldw_Server_API/tests/Services/test_workflows_artifact_gc_service.py`.
 - Verification passed with `3 passed`, source-scope Bandit clean, touched-source raw warning scan clean, and `git diff --check` clean.
 
-### Stage 2: Batch B
+### Stage 2: Batch B (Complete)
 
 Goal: land `workflows_db_maintenance.py` if fake DB setup stays small.
 Success criteria:
@@ -173,6 +173,9 @@ Success criteria:
 - optional Postgres fake-backend branch if it is cheap
 - fallback behavior and stop-event loop semantics unchanged
 - focused pytest, source-scope Bandit, and `git diff --check` pass
+Result:
+- Landed in `workflows_db_maintenance.py` with direct coverage in `tldw_Server_API/tests/Services/test_workflows_db_maintenance.py`.
+- Verification passed with `6 passed`, source-scope Bandit clean, touched-source raw warning scan clean, and `git diff --check` clean.
 
 ### Stage 3: Batch C
 
