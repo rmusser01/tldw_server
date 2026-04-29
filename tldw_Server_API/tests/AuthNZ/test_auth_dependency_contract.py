@@ -403,6 +403,13 @@ def test_rag_health_router_uses_standard_permission_factory_alias() -> None:
     assert not hasattr(rag_health, "require_permissions")
 
 
+def test_monitoring_router_uses_standard_permission_factory_alias() -> None:
+    from tldw_Server_API.app.api.v1.endpoints import monitoring
+
+    assert monitoring.RequirePermission is auth_deps.RequirePermission
+    assert not hasattr(monitoring, "require_permissions")
+
+
 def test_api_key_scope_factory_alias_preserves_jwt_bypass_and_scope_checks() -> None:
     jwt_response = TestClient(_build_app(_principal(kind="user", api_key_id=None))).get(
         "/api-key-scope",

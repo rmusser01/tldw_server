@@ -15,7 +15,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from loguru import logger
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal, require_permissions
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import RequirePermission, get_auth_principal
 from tldw_Server_API.app.api.v1.schemas.monitoring_schemas import (
     AlertItem,
     AlertsListResponse,
@@ -51,7 +51,7 @@ _TOPIC_MONITORING_DB: TopicMonitoringDB | None = None
 
 # All monitoring routes require SYSTEM_LOGS permission via this dependency.
 router = APIRouter(
-    dependencies=[Depends(require_permissions(SYSTEM_LOGS))],
+    dependencies=[Depends(RequirePermission(SYSTEM_LOGS))],
 )
 
 
