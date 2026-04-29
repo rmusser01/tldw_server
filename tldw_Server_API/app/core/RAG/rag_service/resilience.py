@@ -529,7 +529,7 @@ class ErrorRecoveryCoordinator:
                     "component": e.component,
                     "operation": e.operation,
                     "timestamp": e.timestamp,
-                    "error": str(e.error)
+                    "error": "Error details unavailable"
                 }
                 for e in list(self.error_history)[-10:]
             ]

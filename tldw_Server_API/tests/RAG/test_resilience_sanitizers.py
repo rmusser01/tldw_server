@@ -7,6 +7,8 @@ import pytest
 from tldw_Server_API.app.core.RAG.rag_service import resilience
 from tldw_Server_API.app.core.RAG.rag_service.resilience import (
     CircuitBreaker,
+    ErrorContext,
+    ErrorRecoveryCoordinator,
     FallbackChain,
     HealthMonitor,
     HealthStatus,
@@ -194,3 +196,31 @@ async def test_pipeline_health_check_logs_do_not_expose_exception_details():
     assert "Health check failed for 'retriever'" in joined
     _assert_not_leaked(messages, "rag-pipeline-health.db", "secret-pipeline-health-token")
     assert result.metadata["health_retriever"] == "unknown"
+
+
+def test_recovery_stats_recent_errors_do_not_expose_exception_details() -> None:
+    coordinator = ErrorRecoveryCoordinator()
+    coordinator.record_error(
+        ErrorContext(
+            component="retriever",
+            operation="search",
+            timestamp=123.0,
+            attempt=1,
+            error=RuntimeError(
+                "retriever failed at /private/rag-recovery.db?token=secret-recovery-token"
+            ),
+        )
+    )
+
+    stats = coordinator.get_recovery_stats()
+
+    assert stats["recent_errors"] == [
+        {
+            "component": "retriever",
+            "operation": "search",
+            "timestamp": stats["recent_errors"][0]["timestamp"],
+            "error": "Error details unavailable",
+        }
+    ]
+    assert "rag-recovery.db" not in repr(stats)
+    assert "secret-recovery-token" not in repr(stats)

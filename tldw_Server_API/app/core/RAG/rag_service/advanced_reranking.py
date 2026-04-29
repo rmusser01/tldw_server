@@ -796,7 +796,10 @@ class Qwen3CausalLMReranker(BaseReranker):
             try:
                 self.model.to(self._device)
             except Exception as device_move_error:  # noqa: BLE001 - device move best-effort
-                logger.debug("LLM scoring reranker device move failed; keeping default device", exc_info=device_move_error)
+                logger.debug(
+                    "LLM scoring reranker device move failed; keeping default device (error_type={})",
+                    type(device_move_error).__name__,
+                )
 
         # Yes/No token ids
         self.token_false_id = self.tokenizer.convert_tokens_to_ids("no")
@@ -1321,7 +1324,10 @@ class LLMReranker(BaseReranker):
                 from .metrics_collector import get_metrics_collector  # lazy import to avoid heavy deps when unused
                 get_metrics_collector().increment(name, value)
             except Exception as metrics_error:  # noqa: BLE001 - metrics best-effort
-                logger.debug("LLM reranker local metrics increment failed", exc_info=metrics_error)
+                logger.debug(
+                    "LLM reranker local metrics increment failed (error_type={})",
+                    type(metrics_error).__name__,
+                )
             # Also export to central metrics registry (Prometheus/OTel) when available
             try:
                 from tldw_Server_API.app.core.Metrics.metrics_manager import increment_counter
@@ -1335,7 +1341,10 @@ class LLMReranker(BaseReranker):
                 if metric_name:
                     increment_counter(metric_name, value, labels={"strategy": "llm_scoring"})
             except Exception as metrics_error:  # noqa: BLE001 - metrics best-effort
-                logger.debug("LLM reranker central metrics increment failed", exc_info=metrics_error)
+                logger.debug(
+                    "LLM reranker central metrics increment failed (error_type={})",
+                    type(metrics_error).__name__,
+                )
         try:
             per_call_timeout = float(os.getenv("RAG_LLM_RERANK_TIMEOUT_SEC", "10"))
         except (TypeError, ValueError):
@@ -1405,7 +1414,10 @@ class LLMReranker(BaseReranker):
         try:
             _inc_counter("reranker.llm.docs_scored", len(scores))
         except Exception as metrics_error:  # noqa: BLE001 - metrics best-effort
-            logger.debug("LLM reranker docs_scored metric failed", exc_info=metrics_error)
+            logger.debug(
+                "LLM reranker docs_scored metric failed (error_type={})",
+                type(metrics_error).__name__,
+            )
 
         # Normalize to [0,1]
         try:
@@ -1585,7 +1597,10 @@ class TwoTierReranker(BaseReranker):
             from tldw_Server_API.app.core.Metrics.metrics_manager import observe_histogram
             observe_histogram("rag_phase_duration_seconds", ce_dt, labels={"phase": "rerank_fast", "difficulty": "na"})
         except Exception as metrics_error:  # noqa: BLE001 - metrics best-effort
-            logger.debug("Two-tier reranker cross-encoder duration metric failed", exc_info=metrics_error)
+            logger.debug(
+                "Two-tier reranker cross-encoder duration metric failed (error_type={})",
+                type(metrics_error).__name__,
+            )
 
         # Track CE scores in a map, and record sentinel CE score
         ce_scores: dict[str, float] = {}
@@ -1614,7 +1629,10 @@ class TwoTierReranker(BaseReranker):
             from tldw_Server_API.app.core.Metrics.metrics_manager import observe_histogram
             observe_histogram("rag_phase_duration_seconds", llm_dt, labels={"phase": "rerank_llm", "difficulty": "na"})
         except Exception as metrics_error:  # noqa: BLE001 - metrics best-effort
-            logger.debug("Two-tier reranker llm duration metric failed", exc_info=metrics_error)
+            logger.debug(
+                "Two-tier reranker llm duration metric failed (error_type={})",
+                type(metrics_error).__name__,
+            )
 
         # Map LLM scores and capture sentinel
         llm_scores: dict[str, float] = {}

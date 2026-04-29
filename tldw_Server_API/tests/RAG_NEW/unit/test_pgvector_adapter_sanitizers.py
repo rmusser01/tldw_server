@@ -391,6 +391,158 @@ async def test_create_collection_analyze_failure_log_omits_raw_exception_and_is_
 
 
 @pytest.mark.asyncio
+async def test_rebuild_index_drop_fallback_logs_omit_raw_exception_and_return_index_info(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    logger_stub = _LoggerStub()
+    adapter = _adapter()
+    expected_info = {"backend": "pgvector", "index_type": "none"}
+
+    async def _fake_query(sql: str, params: tuple[object, ...] | None = None) -> list[tuple[str]]:
+        if "tablename" in sql:
+            return [("private_embedding_hnsw",)]
+        if "indexname" in sql:
+            return [("CREATE INDEX private_embedding_hnsw ON vs_private USING hnsw (embedding)",)]
+        return []
+
+    async def _fake_exec(sql: str, params: tuple[object, ...] | None = None) -> None:
+        del params
+        if sql.startswith("DROP INDEX"):
+            raise _sensitive_error("drop index")
+        if sql.startswith("ANALYZE"):
+            raise _sensitive_error("analyze after drop")
+
+    async def _fake_index_info(collection_name: str) -> dict[str, str]:
+        assert collection_name == "private collection"
+        return expected_info
+
+    monkeypatch.setattr(pgvector_adapter, "logger", logger_stub)
+    monkeypatch.setattr(adapter, "_query", _fake_query)
+    monkeypatch.setattr(adapter, "_exec", _fake_exec)
+    monkeypatch.setattr(adapter, "get_index_info", _fake_index_info)
+
+    result = await adapter.rebuild_index("private collection", index_type="drop")
+
+    assert result == expected_info
+    assert len(logger_stub.debug_records) == 2
+    _assert_debug_records_sanitized(logger_stub)
+
+
+@pytest.mark.asyncio
+async def test_rebuild_index_optimize_analyze_fallback_log_omits_raw_exception_and_returns_index_info(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    logger_stub = _LoggerStub()
+    adapter = _adapter()
+    expected_info = {"backend": "pgvector", "index_type": "hnsw"}
+
+    async def _fake_query(sql: str, params: tuple[object, ...] | None = None) -> list[tuple[str]]:
+        del sql, params
+        return []
+
+    async def _fake_exec(sql: str, params: tuple[object, ...] | None = None) -> None:
+        del params
+        if sql.startswith("ANALYZE"):
+            raise _sensitive_error("analyze after optimize")
+
+    async def _fake_index_info(collection_name: str) -> dict[str, str]:
+        assert collection_name == "private collection"
+        return expected_info
+
+    monkeypatch.setattr(pgvector_adapter, "logger", logger_stub)
+    monkeypatch.setattr(adapter, "_query", _fake_query)
+    monkeypatch.setattr(adapter, "_exec", _fake_exec)
+    monkeypatch.setattr(adapter, "get_index_info", _fake_index_info)
+
+    result = await adapter.rebuild_index("private collection", index_type="hnsw")
+
+    assert result == expected_info
+    _assert_debug_records_sanitized(logger_stub)
+
+
+@pytest.mark.asyncio
+async def test_optimize_collection_analyze_fallback_log_omits_raw_exception_and_is_swallowed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    logger_stub = _LoggerStub()
+    adapter = _adapter()
+
+    async def _fake_exec(sql: str, params: tuple[object, ...] | None = None) -> None:
+        del params
+        assert sql.startswith("ANALYZE")
+        raise _sensitive_error("optimize collection analyze")
+
+    monkeypatch.setattr(pgvector_adapter, "logger", logger_stub)
+    monkeypatch.setattr(adapter, "_exec", _fake_exec)
+
+    result = await adapter.optimize_collection("private collection")
+
+    assert result is None
+    _assert_debug_records_sanitized(logger_stub)
+
+
+@pytest.mark.asyncio
+async def test_close_fallback_logs_omit_raw_exception_and_clear_connections(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    logger_stub = _LoggerStub()
+    adapter = _adapter()
+    adapter._initialized = True
+
+    class _FailingPool:
+        def close(self) -> None:
+            raise _sensitive_error("pool close")
+
+    class _FailingConnection:
+        def close(self) -> None:
+            raise _sensitive_error("connection close")
+
+    adapter._pool = _FailingPool()
+    adapter._conn = _FailingConnection()
+
+    monkeypatch.setattr(pgvector_adapter, "logger", logger_stub)
+
+    result = await adapter.close()
+
+    assert result is None
+    assert adapter._pool is None
+    assert adapter._conn is None
+    assert adapter._initialized is False
+    assert len(logger_stub.debug_records) == 2
+    _assert_debug_records_sanitized(logger_stub)
+
+
+@pytest.mark.asyncio
+async def test_health_pool_stats_fallback_log_omits_raw_exception_and_preserves_status(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    logger_stub = _LoggerStub()
+    adapter = _adapter()
+    adapter._driver = "psycopg_pool"
+
+    class _FailingStatsPool:
+        def __getattribute__(self, name: str) -> object:
+            if name == "min_size":
+                raise _sensitive_error("pool stats")
+            return super().__getattribute__(name)
+
+    async def _fake_query(sql: str, params: tuple[object, ...] | None = None) -> list[tuple[int]]:
+        assert sql == "SELECT 1"
+        assert params is None
+        return [(1,)]
+
+    adapter._pool = _FailingStatsPool()
+
+    monkeypatch.setattr(pgvector_adapter, "logger", logger_stub)
+    monkeypatch.setattr(adapter, "_query", _fake_query)
+
+    result = await adapter.health()
+
+    assert result == {"driver": "psycopg_pool", "ok": True}
+    _assert_debug_records_sanitized(logger_stub)
+
+
+@pytest.mark.asyncio
 async def test_upsert_operation_fallback_logs_omit_raw_exception_and_are_swallowed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
