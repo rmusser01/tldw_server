@@ -367,6 +367,13 @@ def test_admin_personalization_router_uses_standard_role_factory_alias() -> None
     assert not hasattr(admin_personalization, "require_roles")
 
 
+def test_admin_byok_router_uses_standard_role_factory_alias() -> None:
+    from tldw_Server_API.app.api.v1.endpoints.admin import admin_byok
+
+    assert admin_byok.RequireRole is auth_deps.RequireRole
+    assert not hasattr(admin_byok, "require_roles")
+
+
 def test_admin_package_router_uses_standard_role_factory_alias() -> None:
     from tldw_Server_API.app.api.v1.endpoints import admin
 
