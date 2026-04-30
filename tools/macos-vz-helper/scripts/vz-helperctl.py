@@ -3,6 +3,7 @@
 
 import argparse
 import json
+import os
 import plistlib
 import stat
 import sys
@@ -76,7 +77,10 @@ def ensure_private_dir(path: Path, dry_run: bool = False) -> CheckResult:
     if path.exists():
         if not path.is_dir():
             return CheckResult(ok=False, reason="helper_directory_unsafe")
-        if path.stat().st_mode & 0o022:
+        path_stat = path.stat()
+        if path_stat.st_uid != os.getuid():
+            return CheckResult(ok=False, reason="helper_directory_owner_mismatch")
+        if path_stat.st_mode & 0o022:
             return CheckResult(ok=False, reason="helper_directory_not_private")
         return CheckResult(ok=True)
 
@@ -89,7 +93,10 @@ def ensure_private_dir(path: Path, dry_run: bool = False) -> CheckResult:
     except OSError:
         pass
 
-    if path.stat().st_mode & 0o022:
+    path_stat = path.stat()
+    if path_stat.st_uid != os.getuid():
+        return CheckResult(ok=False, reason="helper_directory_owner_mismatch")
+    if path_stat.st_mode & 0o022:
         return CheckResult(ok=False, reason="helper_directory_not_private")
     return CheckResult(ok=True)
 

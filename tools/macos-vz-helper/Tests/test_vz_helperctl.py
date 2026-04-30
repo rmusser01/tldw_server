@@ -1,4 +1,5 @@
 import importlib.util
+import os
 import plistlib
 from pathlib import Path
 from unittest import TestCase
@@ -58,6 +59,64 @@ def test_validate_socket_path_refuses_regular_file_without_altering_contents(tmp
 
     CASE.assertEqual(result, helperctl.CheckResult(ok=False, reason="helper_socket_unsafe"))
     CASE.assertEqual(socket_path.read_text(encoding="utf-8"), "do not alter")
+
+
+def test_ensure_private_dir_creates_owner_only_directory(tmp_path):
+    helperctl = load_helperctl()
+    runtime_dir = tmp_path / "runtime"
+
+    result = helperctl.ensure_private_dir(runtime_dir)
+
+    CASE.assertEqual(result, helperctl.CheckResult(ok=True))
+    CASE.assertTrue(runtime_dir.is_dir())
+    CASE.assertEqual(runtime_dir.stat().st_mode & 0o777, 0o700)
+
+
+def test_ensure_private_dir_refuses_symlink(tmp_path):
+    helperctl = load_helperctl()
+    target = tmp_path / "target"
+    link = tmp_path / "runtime"
+    target.mkdir()
+    link.symlink_to(target, target_is_directory=True)
+
+    result = helperctl.ensure_private_dir(link)
+
+    CASE.assertEqual(result, helperctl.CheckResult(ok=False, reason="helper_directory_unsafe"))
+
+
+def test_ensure_private_dir_refuses_regular_file(tmp_path):
+    helperctl = load_helperctl()
+    runtime_dir = tmp_path / "runtime"
+    runtime_dir.write_text("not a directory", encoding="utf-8")
+
+    result = helperctl.ensure_private_dir(runtime_dir)
+
+    CASE.assertEqual(result, helperctl.CheckResult(ok=False, reason="helper_directory_unsafe"))
+    CASE.assertEqual(runtime_dir.read_text(encoding="utf-8"), "not a directory")
+
+
+def test_ensure_private_dir_refuses_group_writable_existing_dir_without_chmod(tmp_path):
+    helperctl = load_helperctl()
+    runtime_dir = tmp_path / "runtime"
+    runtime_dir.mkdir(mode=0o777)
+    runtime_dir.chmod(0o777)
+
+    result = helperctl.ensure_private_dir(runtime_dir)
+
+    CASE.assertEqual(result, helperctl.CheckResult(ok=False, reason="helper_directory_not_private"))
+    CASE.assertEqual(runtime_dir.stat().st_mode & 0o777, 0o777)
+
+
+def test_ensure_private_dir_refuses_non_owner(monkeypatch, tmp_path):
+    helperctl = load_helperctl()
+    runtime_dir = tmp_path / "runtime"
+    runtime_dir.mkdir(mode=0o700)
+
+    monkeypatch.setattr(os, "getuid", lambda: runtime_dir.stat().st_uid + 1)
+
+    result = helperctl.ensure_private_dir(runtime_dir)
+
+    CASE.assertEqual(result, helperctl.CheckResult(ok=False, reason="helper_directory_owner_mismatch"))
 
 
 def test_render_launchd_plist_includes_required_fields(tmp_path):
