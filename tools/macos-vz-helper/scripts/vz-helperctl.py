@@ -184,6 +184,11 @@ def _plist_command(args: argparse.Namespace) -> int:
     log_dir = Path(args.log_dir) if args.log_dir else paths.log_dir
     helper_path = Path(args.helper_path) if args.helper_path else DEFAULT_HELPER
 
+    socket_result = validate_socket_path(socket_path)
+    if not socket_result.ok:
+        print(f"socket_path: not ok {socket_result.reason}", file=sys.stderr)
+        return 1
+
     if not args.dry_run:
         socket_directory_result = ensure_private_dir(socket_path.parent)
         if not socket_directory_result.ok:

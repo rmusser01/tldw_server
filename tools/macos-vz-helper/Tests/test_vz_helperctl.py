@@ -291,6 +291,60 @@ def test_plist_cli_rejects_unsafe_socket_parent_when_not_dry_run(tmp_path, capsy
     CASE.assertEqual(runtime_dir.stat().st_mode & 0o777, 0o755)
 
 
+def test_plist_cli_rejects_regular_file_socket_path(tmp_path, capsys):
+    helperctl = load_helperctl()
+    helper_path = tmp_path / "macos-vz-helper"
+    runtime_dir = tmp_path / "runtime"
+    runtime_dir.mkdir(mode=0o700)
+    socket_path = runtime_dir / "helper.sock"
+    socket_path.write_text("do not replace", encoding="utf-8")
+
+    code = helperctl.main(
+        [
+            "plist",
+            "--helper",
+            str(helper_path),
+            "--socket",
+            str(socket_path),
+            "--log-dir",
+            str(tmp_path / "logs"),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    CASE.assertEqual(code, 1)
+    CASE.assertIn("socket_path: not ok helper_socket_unsafe", captured.err)
+    CASE.assertEqual(socket_path.read_text(encoding="utf-8"), "do not replace")
+
+
+def test_plist_cli_rejects_symlink_socket_path(tmp_path, capsys):
+    helperctl = load_helperctl()
+    helper_path = tmp_path / "macos-vz-helper"
+    runtime_dir = tmp_path / "runtime"
+    runtime_dir.mkdir(mode=0o700)
+    target = runtime_dir / "target"
+    target.write_text("target", encoding="utf-8")
+    socket_path = runtime_dir / "helper.sock"
+    socket_path.symlink_to(target)
+
+    code = helperctl.main(
+        [
+            "plist",
+            "--helper",
+            str(helper_path),
+            "--socket",
+            str(socket_path),
+            "--log-dir",
+            str(tmp_path / "logs"),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    CASE.assertEqual(code, 1)
+    CASE.assertIn("socket_path: not ok helper_socket_unsafe", captured.err)
+    CASE.assertTrue(socket_path.is_symlink())
+
+
 def test_check_cli_accepts_operator_socket_flag(tmp_path, capsys):
     helperctl = load_helperctl()
     socket_path = tmp_path / "runtime" / "helper.sock"
