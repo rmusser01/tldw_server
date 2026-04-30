@@ -271,7 +271,12 @@ def test_install_kitten_tts_prefetch_uses_configured_cache_dir(monkeypatch):
     ]
 
 
-def test_omnivoice_install_routes_to_sidecar_installer(monkeypatch, tmp_path):
+def _patch_omnivoice_sidecar_installer(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    *,
+    config_patched: bool,
+) -> list[tuple[str, object]]:
     from Helper_Scripts.TTS_Installers import install_tts_omnivoice_sidecar as installer
 
     calls: list[tuple[str, object]] = []
@@ -330,8 +335,18 @@ def test_omnivoice_install_routes_to_sidecar_installer(monkeypatch, tmp_path):
     monkeypatch.setattr(
         installer,
         "patch_tts_config",
-        lambda **kwargs: calls.append(("patch_tts_config", kwargs["config_path"])) or True,
+        lambda **kwargs: calls.append(("patch_tts_config", kwargs["config_path"])) or config_patched,
         raising=True,
+    )
+
+    return calls
+
+
+def test_omnivoice_install_routes_to_sidecar_installer(monkeypatch, tmp_path):
+    calls = _patch_omnivoice_sidecar_installer(
+        monkeypatch,
+        tmp_path,
+        config_patched=True,
     )
 
     install_manager._install_omnivoice()
@@ -346,6 +361,22 @@ def test_omnivoice_install_routes_to_sidecar_installer(monkeypatch, tmp_path):
         "validate_runtime_layout",
         "patch_tts_config",
     ]
+
+
+def test_omnivoice_install_fails_when_config_patch_does_not_update_provider(
+    monkeypatch,
+    tmp_path,
+):
+    calls = _patch_omnivoice_sidecar_installer(
+        monkeypatch,
+        tmp_path,
+        config_patched=False,
+    )
+
+    with pytest.raises(RuntimeError, match="provider configuration could not be updated"):
+        install_manager._install_omnivoice()
+
+    assert [entry[0] for entry in calls][-1] == "patch_tts_config"
 
 
 def test_omnivoice_install_checks_download_policy_before_running_installer(monkeypatch):

@@ -33,6 +33,9 @@ from tldw_Server_API.app.core.DB_Management.db_errors import (
     NotFoundError as UnifiedNotFoundError,
     SchemaError as UnifiedSchemaError,
 )
+from tldw_Server_API.app.core.DB_Management.backends.base import (
+    DatabaseError as BackendDatabaseError,
+)
 
 # Legacy media_db hierarchy (backward compat — checked after unified)
 from tldw_Server_API.app.core.DB_Management.media_db.errors import (
@@ -58,7 +61,11 @@ _NOT_FOUND_ERROR_TYPES: tuple[type, ...] = (UnifiedNotFoundError,)
 _DATA_INTEGRITY_ERROR_TYPES: tuple[type, ...] = (UnifiedDataIntegrityError,)
 
 # All DatabaseError-like base types (catch-all for DB layer)
-_DATABASE_ERROR_TYPES: tuple[type, ...] = (UnifiedDatabaseError, DatabaseError)
+_DATABASE_ERROR_TYPES: tuple[type, ...] = (
+    UnifiedDatabaseError,
+    BackendDatabaseError,
+    DatabaseError,
+)
 
 # Extend with module-specific types that don't inherit from the unified base yet
 try:
@@ -106,6 +113,34 @@ try:
 except ImportError:
     pass
 
+try:
+    from tldw_Server_API.app.core.DB_Management.Meetings_DB import (
+        InputError as MeetingsInputError,
+        MeetingsDatabaseError,
+        SchemaError as MeetingsSchemaError,
+    )
+
+    _INPUT_ERROR_TYPES = (*_INPUT_ERROR_TYPES, MeetingsInputError)
+    _SCHEMA_ERROR_TYPES = (*_SCHEMA_ERROR_TYPES, MeetingsSchemaError)
+    _DATABASE_ERROR_TYPES = (*_DATABASE_ERROR_TYPES, MeetingsDatabaseError)
+except ImportError:
+    pass
+
+try:
+    from tldw_Server_API.app.core.Slides.slides_db import (
+        ConflictError as SlidesConflictError,
+        InputError as SlidesInputError,
+        SchemaError as SlidesSchemaError,
+        SlidesDatabaseError,
+    )
+
+    _INPUT_ERROR_TYPES = (*_INPUT_ERROR_TYPES, SlidesInputError)
+    _CONFLICT_ERROR_TYPES = (*_CONFLICT_ERROR_TYPES, SlidesConflictError)
+    _SCHEMA_ERROR_TYPES = (*_SCHEMA_ERROR_TYPES, SlidesSchemaError)
+    _DATABASE_ERROR_TYPES = (*_DATABASE_ERROR_TYPES, SlidesDatabaseError)
+except ImportError:
+    pass
+
 
 def map_db_error_to_http(
     exc: Exception,
@@ -117,6 +152,7 @@ def map_db_error_to_http(
     conflict_detail: str | None = None,
     data_integrity_detail: str = "Data integrity violation",
     log_context: str | None = None,
+    log_error: bool = True,
     input_detail_attr: str | None = None,
     input_status_code: int | None = None,
     conflict_status_code: int | None = None,
@@ -142,11 +178,15 @@ def map_db_error_to_http(
     endpoint-specific client messages instead of exposing raw DB exception
     strings. If omitted, the exception message is preserved for compatibility,
     with a safe generic fallback for empty messages. `log_context` lets callers
-    preserve request identifiers such as `media_id` in server-side logs.
-    `data_integrity_detail` provides the safe client message for 422 responses.
+    preserve request identifiers such as `media_id` in server-side logs, while
+    `log_error=False` lets callers avoid duplicate stack traces when they have
+    already logged context. `data_integrity_detail` provides the safe client
+    message for 422 responses.
     """
 
     def _log_db_mapping_error(label: str) -> None:
+        if not log_error:
+            return
         message = f"{log_context}: {label}" if log_context else label
         logger.error(message, exc_info=True)
 
@@ -160,7 +200,36 @@ def map_db_error_to_http(
     )
 
     if isinstance(exc, _INPUT_ERROR_TYPES):
-        if resolved_input_status >= status.HTTP_500_INTERNAL_SERVER_ERROR:
+        detail = str(exc) or "Invalid input"
+        if input_detail_attr:
+            attr_detail = getattr(exc, input_detail_attr, None)
+            if isinstance(attr_detail, str) and attr_detail.strip():
+                detail = attr_detail
+
+        if not_found_substrings and any(
+            substring.lower() in detail.lower()
+            for substring in not_found_substrings
+        ):
+            status_code = status.HTTP_404_NOT_FOUND
+        elif payload_too_large_substrings and any(
+            substring.lower() in detail.lower()
+            for substring in payload_too_large_substrings
+        ):
+            status_code = status.HTTP_413_CONTENT_TOO_LARGE
+        else:
+            status_code = (
+                input_status
+                if input_status is not None
+                else (
+                    input_status_code
+                    if input_status_code is not None
+                    else resolved_input_status
+                )
+            )
+
+        if input_detail is not None:
+            detail = input_detail
+        if status_code >= status.HTTP_500_INTERNAL_SERVER_ERROR:
             _log_db_mapping_error("InputError from DB layer")
         return HTTPException(status_code=status_code, detail=detail)
 
@@ -169,17 +238,13 @@ def map_db_error_to_http(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=str(exc) or "Resource not found",
         )
-    if isinstance(exc, _NOT_FOUND_ERROR_TYPES):
-        return HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Resource not found",
-        )
     if isinstance(exc, _DATA_INTEGRITY_ERROR_TYPES):
         return HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=data_integrity_detail,
         )
     if isinstance(exc, _CONFLICT_ERROR_TYPES):
+        detail = conflict_detail or str(exc) or "Conflict detected"
         return HTTPException(
             status_code=conflict_status_code or status.HTTP_409_CONFLICT,
             detail=detail,

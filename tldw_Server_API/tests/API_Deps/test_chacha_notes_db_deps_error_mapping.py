@@ -1,3 +1,4 @@
+from collections.abc import Iterator
 import threading
 
 import pytest
@@ -10,7 +11,7 @@ pytestmark = pytest.mark.unit
 
 
 @pytest.fixture(autouse=True)
-def clear_chacha_dependency_state():
+def clear_chacha_dependency_state() -> Iterator[None]:
     with chacha_deps._chacha_db_lock:
         chacha_deps._chacha_db_instances.clear()
         chacha_deps._chacha_db_init_events.clear()

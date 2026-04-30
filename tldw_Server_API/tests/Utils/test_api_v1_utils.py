@@ -13,11 +13,25 @@ from tldw_Server_API.app.core.DB_Management.Kanban_DB import (
     KanbanDBError,
     NotFoundError as KanbanNotFoundError,
 )
+from tldw_Server_API.app.core.DB_Management.backends.base import (
+    DatabaseError as BackendDatabaseError,
+)
+from tldw_Server_API.app.core.DB_Management.Meetings_DB import (
+    InputError as MeetingsInputError,
+    MeetingsDatabaseError,
+    SchemaError as MeetingsSchemaError,
+)
 from tldw_Server_API.app.core.DB_Management.Prompts_DB import (
     ConflictError as PromptsConflictError,
     DatabaseError as PromptsDatabaseError,
     InputError as PromptsInputError,
     SchemaError as PromptsSchemaError,
+)
+from tldw_Server_API.app.core.Slides.slides_db import (
+    ConflictError as SlidesConflictError,
+    InputError as SlidesInputError,
+    SchemaError as SlidesSchemaError,
+    SlidesDatabaseError,
 )
 from tldw_Server_API.app.core.DB_Management.db_errors import (
     ConflictError as UnifiedConflictError,
@@ -290,6 +304,7 @@ def test_http_error_mapping_can_override_conflict_error_detail():
         (UnifiedInputError("bad"), 400),
         (UnifiedConflictError("conflict"), 409),
         (UnifiedNotFoundError("missing"), 404),
+        (UnifiedDataIntegrityError("bad data"), 422),
         (UnifiedSchemaError("schema"), 500),
         (KanbanInputError("bad"), 400),
         (KanbanConflictError("conflict"), 409),
@@ -310,6 +325,8 @@ def test_http_error_mapping_can_override_conflict_error_detail():
 def test_http_error_mapping_handles_cross_module_db_errors(exc, expected_status):
     http_exc = http_errors.map_db_error_to_http(exc, default_detail="db fallback")
     assert http_exc.status_code == expected_status
+    if isinstance(exc, UnifiedDataIntegrityError):
+        assert http_exc.detail == "Data integrity violation"
 
 
 @pytest.mark.parametrize(
@@ -374,42 +391,20 @@ def test_http_error_mapping_logs_database_errors_with_context(monkeypatch):
     assert "delete_media_item media_id=42" in logged_calls[0][0]
 
 
-@pytest.mark.parametrize(
-    ("exc", "expected_status"),
-    [
-        (UnifiedInputError("bad"), 400),
-        (UnifiedConflictError("conflict"), 409),
-        (UnifiedNotFoundError("missing"), 404),
-        (UnifiedDataIntegrityError("bad data"), 422),
-        (UnifiedSchemaError("schema"), 500),
-        (KanbanInputError("bad"), 400),
-        (KanbanConflictError("conflict"), 409),
-        (KanbanNotFoundError("missing"), 404),
-        (ChaChaInputError("bad"), 400),
-        (ChaChaConflictError("conflict"), 409),
-        (ChaChaSchemaError("schema"), 500),
-        (PromptsInputError("bad"), 400),
-        (PromptsConflictError("conflict"), 409),
-        (PromptsSchemaError("schema"), 500),
-    ],
-)
-def test_http_error_mapping_handles_cross_module_db_errors(exc, expected_status):
-    http_exc = http_errors.map_db_error_to_http(exc, default_detail="db fallback")
-    assert http_exc.status_code == expected_status
-    if isinstance(exc, (UnifiedNotFoundError, KanbanNotFoundError)):
-        assert http_exc.detail == "Resource not found"
+def test_http_error_mapping_can_skip_database_error_logging(monkeypatch):
+    logged_calls = []
 
+    def _fake_error(message, *args, **kwargs):
+        logged_calls.append((message, args, kwargs))
 
-@pytest.mark.parametrize(
-    "exc",
-    [
-        UnifiedDatabaseError("db"),
-        KanbanDBError("db"),
-        CharactersRAGDBError("db"),
-        PromptsDatabaseError("db"),
-    ],
-)
-def test_http_error_mapping_uses_default_detail_for_database_base_errors(exc):
-    http_exc = http_errors.map_db_error_to_http(exc, default_detail="db fallback")
+    monkeypatch.setattr(http_errors.logger, "error", _fake_error)
+
+    http_exc = http_errors.map_db_error_to_http(
+        DatabaseError("write failed"),
+        default_detail="Database error moving media to trash",
+        log_error=False,
+    )
+
     assert http_exc.status_code == 500
-    assert http_exc.detail == "db fallback"
+    assert http_exc.detail == "Database error moving media to trash"
+    assert logged_calls == []
