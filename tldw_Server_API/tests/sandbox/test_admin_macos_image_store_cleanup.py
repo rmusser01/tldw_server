@@ -12,6 +12,7 @@ from tldw_Server_API.app.api.v1.API_Deps import auth_deps
 from tldw_Server_API.app.api.v1.endpoints import sandbox as sandbox_mod
 from tldw_Server_API.app.core.AuthNZ.permissions import ROLE_ADMIN
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
+from tldw_Server_API.app.core.Sandbox import service as service_mod
 from tldw_Server_API.app.core.Sandbox.image_store import SandboxImageStore
 from tldw_Server_API.app.core.Sandbox.service import SandboxService
 
@@ -185,10 +186,14 @@ def test_admin_macos_image_store_cleanup_dry_run_false_passes_through(monkeypatc
     app = _build_app_with_overrides(_make_principal(is_admin=True))
 
     with TestClient(app) as client:
-        resp = client.post("/api/v1/sandbox/admin/macos-image-store/cleanup", json={"dry_run": False})
+        resp = client.post(
+            "/api/v1/sandbox/admin/macos-image-store/cleanup",
+            json={"dry_run": False, "confirm_all": True},
+        )
 
     assert resp.status_code == 200
     assert seen_kwargs["dry_run"] is False
+    assert seen_kwargs["confirm_all"] is True
     assert resp.json()["dry_run"] is False
     assert resp.json()["summary"]["deleted_actions"] == 1
     assert resp.json()["actions"][0]["status"] == "deleted"
@@ -216,6 +221,23 @@ def test_admin_macos_image_store_cleanup_filter_fields_pass_through(monkeypatch)
     assert resp.status_code == 200
     assert seen_kwargs["action_types"] == ["remove_run_manifest"]
     assert seen_kwargs["run_ids"] == ["run-manifest-only"]
+
+
+def test_admin_macos_image_store_cleanup_maps_confirmation_error(monkeypatch) -> None:
+    def _cleanup(**kwargs) -> dict[str, object]:
+        raise service_mod.SandboxImageStoreCleanupError(
+            "image_store_cleanup_confirmation_required",
+            400,
+        )
+
+    monkeypatch.setattr(sandbox_mod, "_service", SimpleNamespace(cleanup_macos_image_store=_cleanup), raising=True)
+    app = _build_app_with_overrides(_make_principal(is_admin=True))
+
+    with TestClient(app) as client:
+        resp = client.post("/api/v1/sandbox/admin/macos-image-store/cleanup", json={"dry_run": False})
+
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "image_store_cleanup_confirmation_required"
 
 
 def test_admin_macos_image_store_cleanup_requires_admin(monkeypatch) -> None:
@@ -251,7 +273,7 @@ def test_service_cleanup_macos_image_store_mutates_planned_candidates_only(monke
     _seed_store(root)
     monkeypatch.setattr(service, "macos_diagnostics", lambda: _diagnostics_payload(root))
 
-    result = service.cleanup_macos_image_store(dry_run=False)
+    result = service.cleanup_macos_image_store(dry_run=False, confirm_all=True)
 
     assert result["dry_run"] is False
     assert result["summary"] == {
@@ -268,6 +290,22 @@ def test_service_cleanup_macos_image_store_mutates_planned_candidates_only(monke
     assert not (root / "runs" / "run-inactive").exists()
     assert (root / "runs" / "run-blocked").exists()
     assert result["reasons"] == ["live_vm_matches_blocked_cleanup"]
+
+
+def test_service_cleanup_macos_image_store_requires_confirmation_for_unfiltered_mutation(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    service = SandboxService(enable_background_tasks=False)
+    root = tmp_path / "store"
+    _seed_store(root)
+    monkeypatch.setattr(service, "macos_diagnostics", lambda: _diagnostics_payload(root))
+
+    with pytest.raises(service_mod.SandboxImageStoreCleanupError, match="image_store_cleanup_confirmation_required"):
+        service.cleanup_macos_image_store(dry_run=False)
+
+    assert (root / "runs" / "run-manifest-only").exists()
+    assert (root / "runs" / "run-inactive").exists()
 
 
 def test_service_cleanup_macos_image_store_filters_by_action_type(monkeypatch, tmp_path: Path) -> None:

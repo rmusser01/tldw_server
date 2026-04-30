@@ -160,6 +160,10 @@ The admin image-store surfaces now split planning from mutation:
 - `POST /api/v1/sandbox/admin/macos-image-store/cleanup`: explicit admin action
   surface that defaults to `dry_run=true` and reuses the same candidate plan
 
+When `dry_run=false`, the request must either include at least one filter
+(`action_types` or `run_ids`) or set `confirm_all=true`. This keeps broad
+cleanup of every planned candidate explicit.
+
 Mutating cleanup only applies to already planned candidates that do not match a
 live VM. It currently supports:
 

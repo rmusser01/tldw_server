@@ -104,6 +104,13 @@ class SandboxReconciliationRepairError(RuntimeError):
         super().__init__(reason)
 
 
+class SandboxImageStoreCleanupError(RuntimeError):
+    def __init__(self, reason: str, status_code: int = 400) -> None:
+        self.reason = reason
+        self.status_code = int(status_code)
+        super().__init__(reason)
+
+
 def _get_sandbox_workspace_thread_lock(lock_path: str) -> threading.Lock:
     key = str(os.path.abspath(lock_path))
     with _SANDBOX_WORKSPACE_FALLBACK_LOCKS_GUARD:
@@ -1089,6 +1096,7 @@ class SandboxService:
         self,
         *,
         dry_run: bool = True,
+        confirm_all: bool = False,
         action_types: list[str] | None = None,
         run_ids: list[str] | None = None,
     ) -> dict[str, object]:
@@ -1119,6 +1127,7 @@ class SandboxService:
                 action for action in actions if str(action.get("run_id") or "").strip() in allowed_run_ids
             ]
         summary["planned_actions"] = len(actions)
+        has_filters = bool(allowed_action_types or allowed_run_ids)
 
         if dry_run:
             return {
@@ -1128,6 +1137,12 @@ class SandboxService:
                 "actions": actions,
                 "reasons": list(plan.get("reasons") or []),
             }
+
+        if not has_filters and not confirm_all:
+            raise SandboxImageStoreCleanupError(
+                "image_store_cleanup_confirmation_required",
+                400,
+            )
 
         root_path = str(image_store.get("root_path") or "").strip()
         if not root_path:

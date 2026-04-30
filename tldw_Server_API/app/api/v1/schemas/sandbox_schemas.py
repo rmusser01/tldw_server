@@ -466,6 +466,7 @@ class SandboxAdminMacOSImageStoreCleanupPlanResponse(BaseModel):
 
 class SandboxAdminMacOSImageStoreCleanupRequest(BaseModel):
     dry_run: bool = True
+    confirm_all: bool = False
     action_types: list[str] | None = None
     run_ids: list[str] | None = None
 

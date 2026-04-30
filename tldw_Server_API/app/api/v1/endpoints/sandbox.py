@@ -82,7 +82,11 @@ from tldw_Server_API.app.core.Sandbox.orchestrator import (
     SessionActiveRunsConflict,
 )
 from tldw_Server_API.app.core.Sandbox.policy import SandboxPolicy
-from tldw_Server_API.app.core.Sandbox.service import SandboxReconciliationRepairError, SandboxService
+from tldw_Server_API.app.core.Sandbox.service import (
+    SandboxImageStoreCleanupError,
+    SandboxReconciliationRepairError,
+    SandboxService,
+)
 from tldw_Server_API.app.core.Sandbox.streams import get_hub
 from tldw_Server_API.app.core.Streaming.streams import WebSocketStream
 from tldw_Server_API.app.core.testing import (
@@ -2290,7 +2294,10 @@ async def admin_macos_image_store_cleanup(
     _principal: AuthPrincipal = Depends(RequireRole("admin")),
     _current_user: User = Depends(get_request_user),
 ) -> SandboxAdminMacOSImageStoreCleanupResponse:
-    payload = await asyncio.to_thread(_service.cleanup_macos_image_store, **request.model_dump())
+    try:
+        payload = await asyncio.to_thread(_service.cleanup_macos_image_store, **request.model_dump())
+    except SandboxImageStoreCleanupError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.reason) from exc
     return SandboxAdminMacOSImageStoreCleanupResponse.model_validate(payload)
 
 

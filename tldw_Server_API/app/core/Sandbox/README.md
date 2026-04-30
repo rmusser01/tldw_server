@@ -66,7 +66,7 @@ Current limitations:
 - `vz_linux` supports session VM reuse through persisted VZ session-control metadata; `vz_macos` does not.
 - `vz_linux` admin diagnostics include reconciliation data comparing persisted VZ session-control rows against live helper VM state.
 - `vz_linux` admin diagnostics also include a read-only image-store block that correlates persisted run manifests and dry-run GC classifications with reconciliation/helper state.
-- `vz_linux` also exposes `GET /api/v1/sandbox/admin/macos-image-store/cleanup-plan` for read-only GC action planning and `POST /api/v1/sandbox/admin/macos-image-store/cleanup` for explicit admin cleanup, which defaults to `dry_run=true`.
+- `vz_linux` also exposes `GET /api/v1/sandbox/admin/macos-image-store/cleanup-plan` for read-only GC action planning and `POST /api/v1/sandbox/admin/macos-image-store/cleanup` for explicit admin cleanup, which defaults to `dry_run=true`; unfiltered mutating cleanup requires `confirm_all=true`.
 - `vz_linux` admin diagnostics now also project an additive
   `startup_warning_summary` field from the app-owned startup warning registry;
   low-level diagnostics collection remains app-agnostic.
