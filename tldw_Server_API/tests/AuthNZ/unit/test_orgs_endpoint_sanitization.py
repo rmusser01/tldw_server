@@ -306,6 +306,59 @@ async def test_list_invites_includes_canonical_pagination(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_list_my_orgs_includes_canonical_pagination(monkeypatch):
+    from tldw_Server_API.app.api.v1.endpoints import orgs
+
+    class _Repo:
+        def __init__(self, db_pool) -> None:  # noqa: ARG002
+            pass
+
+        async def list_org_memberships_for_user(self, user_id):
+            assert user_id == 7
+            return [{"org_id": 11}, {"org_id": 22}]
+
+        async def list_organizations(self, **kwargs):
+            assert kwargs["with_total"] is True
+            assert kwargs["limit"] == 1000
+            assert kwargs["offset"] == 0
+            return (
+                [
+                    {"id": 11, "name": "Alpha", "slug": "alpha", "owner_user_id": 7},
+                    {"id": 22, "name": "Beta", "slug": "beta", "owner_user_id": 8},
+                    {"id": 33, "name": "Gamma", "slug": "gamma", "owner_user_id": 9},
+                ],
+                3,
+            )
+
+    async def _fake_get_db_pool():
+        return object()
+
+    monkeypatch.setattr(orgs, "get_db_pool", _fake_get_db_pool)
+    monkeypatch.setattr(orgs, "AuthnzOrgsTeamsRepo", _Repo)
+
+    response = await orgs.list_my_orgs(
+        principal=SimpleNamespace(user_id=7),
+        limit=1,
+        offset=0,
+    )
+
+    assert response.total == 2
+    assert response.limit == 1
+    assert response.offset == 0
+    assert response.has_more is True
+    assert response.pagination.model_dump() == {
+        "mode": "offset",
+        "limit": 1,
+        "offset": 0,
+        "total": 2,
+        "has_more": True,
+        "next_offset": 1,
+    }
+    assert len(response.items) == 1
+    assert response.items[0].id == 11
+
+
+@pytest.mark.asyncio
 async def test_accept_invite_audit_failure_log_is_sanitized(monkeypatch):
     from tldw_Server_API.app.api.v1.endpoints import orgs
     from tldw_Server_API.app.api.v1.schemas.org_team_schemas import OrgInviteAcceptRequest

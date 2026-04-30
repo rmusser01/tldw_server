@@ -117,6 +117,12 @@ async def list_my_orgs(
             limit=limit,
             offset=offset,
             has_more=False,
+            pagination=build_offset_pagination_meta(
+                limit=limit,
+                offset=offset,
+                total=0,
+                count=0,
+            ),
         )
 
     # Fetch org details
@@ -137,6 +143,12 @@ async def list_my_orgs(
         limit=limit,
         offset=offset,
         has_more=offset + limit < len(user_orgs),
+        pagination=build_offset_pagination_meta(
+            limit=limit,
+            offset=offset,
+            total=len(user_orgs),
+            count=len(paginated),
+        ),
     )
 
 
