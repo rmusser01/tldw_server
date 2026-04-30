@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from pydantic import BaseModel, Field
+from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
 
 
 class WatchlistRule(BaseModel):
@@ -73,6 +74,7 @@ class AlertItem(BaseModel):
 class AlertsListResponse(BaseModel):
     items: list[AlertItem]
     total: int | None = None  # Optional future enhancement
+    pagination: OffsetPaginationMeta
 
 
 class MarkReadResponse(BaseModel):
