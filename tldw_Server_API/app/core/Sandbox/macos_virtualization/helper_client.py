@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import socket
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +15,7 @@ from .models import (
     HelperVMListReply,
     HelperVMReply,
     HelperVMStatusReply,
+    _bool_field,
     parse_helper_host_validation,
     parse_helper_ping,
     parse_helper_vm_list,
@@ -88,8 +90,11 @@ class MacOSVirtualizationHelperClient:
     def create_vm(self, request: dict[str, Any]) -> HelperVMReply:
         if is_truthy(os.getenv("TEST_MODE")):
             vm_name = str(request.get("vm_name") or "").strip() or "vm-test"
-            runtime = str(request.get("runtime") or "").strip()
+            runtime = str(request.get("runtime") or "").strip() or "vz_linux"
             template_path = str(request.get("template") or request.get("template_path") or "").strip()
+            raw_session_mode = request.get("session_mode")
+            session_mode = _bool_field({"session_mode": raw_session_mode}, "session_mode")
+            created_at = str(request.get("created_at") or "").strip() or datetime.now(timezone.utc).isoformat()
             return parse_helper_vm_reply(
                 {
                     "vm_id": vm_name,
@@ -99,10 +104,10 @@ class MacOSVirtualizationHelperClient:
                         "runtime": runtime,
                         "run_id": request.get("run_id") or "",
                         "session_id": request.get("session_id") or "",
-                        "session_mode": bool(request.get("session_mode")),
+                        "session_mode": session_mode,
                         "template_path": template_path,
                         "workspace_path": request.get("workspace_path") or "",
-                        "created_at": request.get("created_at") or "",
+                        "created_at": created_at,
                     },
                     "details": {"runtime": runtime or None, "transport": "vsock"},
                 }

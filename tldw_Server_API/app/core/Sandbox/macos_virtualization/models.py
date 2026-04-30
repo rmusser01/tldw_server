@@ -5,21 +5,29 @@ from typing import Any
 
 
 def _str_field(payload: dict[str, Any], key: str, default: str = "") -> str:
+    """Return a string field only when the payload value is already a string."""
     value = payload.get(key)
     if value is None:
         return default
-    return str(value)
+    if isinstance(value, str):
+        return value
+    return default
 
 
 def _bool_field(payload: dict[str, Any], key: str, default: bool = False) -> bool:
+    """Parse helper booleans without promoting malformed values to trusted truthy values."""
     value = payload.get(key)
     if value is None:
         return default
     if isinstance(value, bool):
         return value
     if isinstance(value, str):
-        return value.strip().lower() in {"1", "true", "yes", "on"}
-    return bool(value)
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off", ""}:
+            return False
+    return default
 
 
 def _dict_field(payload: dict[str, Any], key: str = "details") -> dict[str, Any]:
@@ -38,6 +46,8 @@ def _list_field(payload: dict[str, Any], key: str) -> list[str]:
 
 @dataclass(slots=True)
 class HelperVMMetadata:
+    """Ownership metadata returned by the helper for a live VM record."""
+
     owner: str = "unknown"
     runtime: str = ""
     run_id: str = ""
@@ -53,8 +63,25 @@ class HelperVMMetadata:
 
 
 def _metadata_field(payload: dict[str, Any]) -> HelperVMMetadata:
+    """Parse helper VM metadata, downgrading malformed payloads to unknown ownership."""
     raw = payload.get("metadata")
     if not isinstance(raw, dict):
+        return HelperVMMetadata()
+    string_keys = (
+        "owner",
+        "runtime",
+        "run_id",
+        "session_id",
+        "template_path",
+        "workspace_path",
+        "created_at",
+    )
+    for key in string_keys:
+        value = raw.get(key)
+        if value is not None and not isinstance(value, str):
+            return HelperVMMetadata()
+    session_mode_value = raw.get("session_mode")
+    if session_mode_value is not None and not isinstance(session_mode_value, (bool, str)):
         return HelperVMMetadata()
     return HelperVMMetadata(
         owner=_str_field(raw, "owner", "unknown").strip() or "unknown",
@@ -146,6 +173,7 @@ def parse_helper_host_validation(payload: dict[str, Any]) -> HelperHostValidatio
 
 
 def parse_helper_vm_reply(payload: dict[str, Any]) -> HelperVMReply:
+    """Parse a `create_vm` helper reply into the normalized Python response model."""
     return HelperVMReply(
         vm_id=_str_field(payload, "vm_id").strip(),
         state=_str_field(payload, "state").strip(),

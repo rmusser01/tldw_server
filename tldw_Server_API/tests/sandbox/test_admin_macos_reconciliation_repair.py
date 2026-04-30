@@ -645,12 +645,13 @@ def test_repair_orphan_vm_termination_false_reports_missing(monkeypatch: pytest.
 @pytest.mark.parametrize(
     ("status", "reason"),
     [
+        ("owned_orphaned_vm", "owned_orphan"),
         ("unknown_orphaned_vm", "unknown_ownership"),
         ("foreign_orphaned_vm", "foreign_owner"),
         ("orphaned_vm", "session_missing"),
     ],
 )
-def test_repair_non_owned_orphan_vm_skips_without_helper_call(
+def test_repair_ineligible_or_unknown_orphan_vm_skips_without_helper_call(
     monkeypatch: pytest.MonkeyPatch,
     status: str,
     reason: str,

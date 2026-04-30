@@ -22,6 +22,12 @@ STATUS_FOREIGN_ORPHAN = "foreign_orphaned_vm"
 REASON_OWNED_ORPHAN = "owned_orphan"
 REASON_UNKNOWN_OWNERSHIP = "unknown_ownership"
 REASON_FOREIGN_OWNER = "foreign_owner"
+ORPHAN_STATUSES = {
+    STATUS_OWNED_ORPHAN,
+    STATUS_UNKNOWN_ORPHAN,
+    STATUS_FOREIGN_ORPHAN,
+    "orphaned_vm",
+}
 
 
 def _empty_report() -> dict[str, object]:
@@ -85,6 +91,7 @@ def _sort_items(items: list[dict[str, object]]) -> list[dict[str, object]]:
 
 
 def _classify_orphan_vm(vm: object) -> tuple[str, bool, str]:
+    """Return orphan classification, repair eligibility, and reason for a live helper VM."""
     metadata = getattr(vm, "metadata", None)
     owner = _clean_id(getattr(metadata, "owner", ""))
     runtime = _clean_id(getattr(metadata, "runtime", ""))
