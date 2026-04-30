@@ -12,6 +12,7 @@ final class HelperService {
     private let templateValidator: TemplateValidator
     private let registry: VMRegistry
     private let vmManager: VZLinuxVMManager
+    private let metadataDateFormatter = ISO8601DateFormatter()
 
     init(
         hostFacts: HostFacts = HostFacts(isMacOS: true, isAppleSilicon: true),
@@ -78,19 +79,27 @@ final class HelperService {
         vmID: String,
         templatePath: String,
         workspacePath: String,
-        readinessTimeoutSeconds: TimeInterval
+        readinessTimeoutSeconds: TimeInterval,
+        metadata: VMOwnershipMetadata = .unknown
     ) throws -> HelperVMResponse {
+        let normalizedMetadata = normalizeMetadata(
+            metadata,
+            templatePath: templatePath,
+            workspacePath: workspacePath
+        )
         let record = try vmManager.createVM(
             vmID: vmID,
             templatePath: templatePath,
             workspacePath: workspacePath,
-            readinessTimeoutSeconds: readinessTimeoutSeconds
+            readinessTimeoutSeconds: readinessTimeoutSeconds,
+            metadata: normalizedMetadata
         )
         return HelperVMResponse(
             protocolVersion: protocolVersion,
             helperVersion: helperVersion,
             vmID: record.vmID,
             state: record.state,
+            metadata: record.metadata,
             details: ["transport": "vsock"]
         )
     }
@@ -105,6 +114,7 @@ final class HelperService {
             vmID: record.vmID,
             state: record.state,
             healthy: record.healthy,
+            metadata: record.metadata,
             details: ["transport": "vsock"]
         )
     }
@@ -117,6 +127,7 @@ final class HelperService {
                 vmID: record.vmID,
                 state: record.state,
                 healthy: record.healthy,
+                metadata: record.metadata,
                 details: ["transport": "vsock"]
             )
         }
@@ -152,6 +163,23 @@ final class HelperService {
             stdout: result.stdout,
             stderr: result.stderr,
             details: ["transport": "vsock", "vm_id": vmID]
+        )
+    }
+
+    private func normalizeMetadata(
+        _ metadata: VMOwnershipMetadata,
+        templatePath: String,
+        workspacePath: String
+    ) -> VMOwnershipMetadata {
+        VMOwnershipMetadata(
+            owner: metadata.owner.isEmpty ? "unknown" : metadata.owner,
+            runtime: metadata.runtime.isEmpty ? "vz_linux" : metadata.runtime,
+            runID: metadata.runID,
+            sessionID: metadata.sessionID,
+            sessionMode: metadata.sessionMode,
+            templatePath: metadata.templatePath.isEmpty ? templatePath : metadata.templatePath,
+            workspacePath: metadata.workspacePath.isEmpty ? workspacePath : metadata.workspacePath,
+            createdAt: metadata.createdAt.isEmpty ? metadataDateFormatter.string(from: Date()) : metadata.createdAt
         )
     }
 }

@@ -105,6 +105,7 @@ struct HelperVMResponse: Encodable {
     let helperVersion: String
     let vmID: String
     let state: String
+    let metadata: VMOwnershipMetadata
     let details: [String: String]
 
     private enum CodingKeys: String, CodingKey {
@@ -112,6 +113,7 @@ struct HelperVMResponse: Encodable {
         case helperVersion = "helper_version"
         case vmID = "vm_id"
         case state
+        case metadata
         case details
     }
 }
@@ -122,6 +124,7 @@ struct HelperVMStatusResponse: Encodable {
     let vmID: String
     let state: String
     let healthy: Bool
+    let metadata: VMOwnershipMetadata
     let details: [String: String]
 
     private enum CodingKeys: String, CodingKey {
@@ -130,6 +133,7 @@ struct HelperVMStatusResponse: Encodable {
         case vmID = "vm_id"
         case state
         case healthy
+        case metadata
         case details
     }
 }

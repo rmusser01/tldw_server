@@ -38,9 +38,10 @@ final class VZLinuxVMManager {
         vmID: String,
         templatePath: String,
         workspacePath: String,
-        readinessTimeoutSeconds: TimeInterval
+        readinessTimeoutSeconds: TimeInterval,
+        metadata: VMOwnershipMetadata = .unknown
     ) throws -> VMRecord {
-        registry.upsert(vmID: vmID, state: "booting", healthy: false)
+        registry.upsert(vmID: vmID, state: "booting", healthy: false, metadata: metadata)
         do {
             try bootDriver.boot(
                 vmID: vmID,
@@ -50,7 +51,12 @@ final class VZLinuxVMManager {
             )
             try guestBridge.waitUntilReady(vmID: vmID, timeoutSeconds: readinessTimeoutSeconds)
             registry.upsert(vmID: vmID, state: "running", healthy: true)
-            return VMRecord(vmID: vmID, state: "running", healthy: true)
+            return registry.status(vmID: vmID) ?? VMRecord(
+                vmID: vmID,
+                state: "running",
+                healthy: true,
+                metadata: metadata
+            )
         } catch {
             try? bootDriver.stop(vmID: vmID)
             registry.remove(vmID: vmID)
