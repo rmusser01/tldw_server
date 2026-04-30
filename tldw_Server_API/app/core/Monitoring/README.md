@@ -77,6 +77,7 @@
   - Use the admin APIs to manage watchlists; reload via `/api/v1/monitoring/reload` after file edits.
 - Pitfalls & Gotchas
   - Webhook/email sends are best‑effort and may be disabled in restricted environments; rely on JSONL for auditability.
-  - Public alert mutation endpoints return minimal acknowledgements; re-list alerts for authoritative merged state.
+  - Public alert mutation endpoints return the authoritative merged alert state in `{status, id, item}`.
+  - `read` marks the runtime alert as read without setting `acknowledged_at`; `acknowledge` records `acknowledged_at`; `dismiss` records `dismissed_at`.
   - Large texts are truncated for scanning; test your rules with realistic snippets.
   - Regex complexity can impact performance; prefer literals or well‑scoped regexes.
