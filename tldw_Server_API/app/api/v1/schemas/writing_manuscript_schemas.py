@@ -689,3 +689,29 @@ class ManuscriptAnalysisResponse(BaseModel):
 class ManuscriptAnalysisListResponse(BaseModel):
     analyses: list[ManuscriptAnalysisResponse]
     total: int
+
+
+class ManuscriptVersionCreateRequest(BaseModel):
+    label: str | None = Field(None, max_length=255, description="Optional human label for this manual snapshot")
+
+
+class ManuscriptVersionResponse(BaseModel):
+    id: str
+    entity_type: Literal["manuscript", "chapter", "scene"]
+    entity_id: str
+    project_id: str
+    version_number: int
+    label: str | None = None
+    payload: dict[str, Any]
+    created_at: datetime
+    client_id: str
+
+
+class ManuscriptVersionListResponse(BaseModel):
+    versions: list[ManuscriptVersionResponse]
+    total: int
+
+
+class ManuscriptTrashListResponse(BaseModel):
+    items: list[dict[str, Any]]
+    total: int

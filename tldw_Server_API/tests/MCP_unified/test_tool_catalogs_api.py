@@ -279,20 +279,24 @@ def _ensure_tables_for_users():
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_org_team_scoped_catalog_management():
+async def test_org_team_scoped_catalog_management(tmp_path, monkeypatch):
     # Configure test env
-    os.environ["TEST_MODE"] = "true"
-    os.environ["MCP_ALLOWED_IPS"] = "[]"
-    os.environ.setdefault("SINGLE_USER_API_KEY", "CHANGE_ME_TO_SECURE_API_KEY")
-    os.environ["MCP_ENABLE_MEDIA_MODULE"] = "true"
-    os.environ["DATABASE_URL"] = "sqlite:///./Databases/users_mcp_catalogs_test.db"
+    monkeypatch.setenv("TEST_MODE", "true")
+    monkeypatch.setenv("AUTH_MODE", "multi_user")
+    monkeypatch.setenv("JWT_SECRET_KEY", "test-mcp-catalogs-multi-user-secret-1234567890")
+    monkeypatch.setenv("MCP_ALLOWED_IPS", "[]")
+    monkeypatch.setenv("MCP_ENABLE_MEDIA_MODULE", "true")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'users_mcp_catalogs_test.db'}")
+    monkeypatch.setenv("VIRTUAL_KEYS_ENABLED", "true")
 
     # Reset settings and DB pool to honor DATABASE_URL for this test
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
     from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool, get_db_pool
+    from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     reset_settings()
     await reset_db_pool()
     pool = await get_db_pool()
+    ensure_authnz_tables(Path(pool.db_path))
 
     # Clear cached MCP config and IP allowlist controller to pick up env
     try:
@@ -306,21 +310,39 @@ async def test_org_team_scoped_catalog_management():
     # Start app
     from fastapi.testclient import TestClient
     from tldw_Server_API.app.main import app
+    from tldw_Server_API.app.services.app_lifecycle import reset_lifecycle_state
+
+    reset_lifecycle_state(app)
     client = TestClient(app)
 
-    # Ensure base tables and a single-user admin row
+    # Ensure base tables and concrete multi-user principals.
     _ensure_tables_for_users()
-    _ensure_single_user_row()
-    # App startup ensures AuthNZ migrations when using SQLite
-
-    admin_key = os.getenv("SINGLE_USER_TEST_API_KEY", "test-api-key-12345")
-    admin_headers = {"X-API-KEY": admin_key}
-
-    # Create two test users directly in SQLite (non-admin)
     db_path = _get_db_path_from_env()
     with sqlite3.connect(str(db_path)) as conn:
+        admin_id = _create_user(conn, "admin_tcat", "admin@example.com", role="admin")
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(users)")}
+        updates = []
+        values: list[Any] = []
+        for column in ("is_superuser", "is_verified", "email_verified"):
+            if column in columns:
+                updates.append(f"{column} = ?")
+                values.append(1)
+        if updates:
+            values.append(admin_id)
+            conn.execute(f"UPDATE users SET {', '.join(updates)} WHERE id = ?", values)  # nosec B608
         robert_id = _create_user(conn, "robert_tcat", "robert@example.com")
         sally_id = _create_user(conn, "sally_tcat", "sally@example.com")
+
+    from tldw_Server_API.app.core.AuthNZ.api_key_manager import APIKeyManager
+
+    api_key_manager = APIKeyManager()
+    await api_key_manager.initialize()
+    admin_virtual_key = await api_key_manager.create_virtual_key(
+        user_id=admin_id,
+        name="vk-admin-catalog-fixture",
+        scope="admin",
+    )
+    admin_headers = {"X-API-KEY": admin_virtual_key["key"]}
 
     # Provision API keys for both users via admin endpoints
     r_vk_r = client.post(f"/api/v1/admin/users/{robert_id}/virtual-keys", headers=admin_headers, json={"name": "vk-robert"})

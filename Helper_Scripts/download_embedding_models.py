@@ -24,13 +24,13 @@ from __future__ import annotations
 
 import argparse
 import sys
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable, List
 
 try:
     from huggingface_hub import snapshot_download
     from huggingface_hub.utils import HfHubHTTPError
-except ImportError as exc:  # pragma: no cover - handled by runtime message
+except ImportError:  # pragma: no cover - handled by runtime message
     print(
         "ERROR: huggingface_hub is required. Install it with 'pip install huggingface_hub'.",
         file=sys.stderr,
@@ -38,7 +38,7 @@ except ImportError as exc:  # pragma: no cover - handled by runtime message
     sys.exit(1)
 
 # Core models the application uses out of the box.
-DEFAULT_MODEL_IDS: List[str] = [
+DEFAULT_MODEL_IDS: list[str] = [
     "sentence-transformers/all-MiniLM-L6-v2",
     "sentence-transformers/all-mpnet-base-v2",
     "BAAI/bge-small-en-v1.5",
@@ -61,7 +61,7 @@ def download_models(
 
     for model_id in model_ids:
         local_dir = target_dir / _normalise_subdir(model_id)
-        print(f"→ Downloading {model_id!r} into {local_dir}")
+        print(f"Downloading {model_id!r} into {local_dir}")
         try:
             kwargs = {
                 "repo_id": model_id,
@@ -72,9 +72,9 @@ def download_models(
                 kwargs["allow_patterns"] = allow
             snapshot_download(**kwargs)  # nosec B615
         except HfHubHTTPError as err:
-            print(f"  ! Failed to download {model_id}: {err}", file=sys.stderr)
+            print(f"  Failed to download {model_id}: {err}", file=sys.stderr)
         else:
-            print(f"  ✓ Ready: {local_dir}")
+            print(f"  Ready: {local_dir}")
 
 
 def parse_args() -> argparse.Namespace:
@@ -117,7 +117,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
 
-    model_ids: List[str] = []
+    model_ids: list[str] = []
     if not args.skip_defaults:
         model_ids.extend(DEFAULT_MODEL_IDS)
     if args.models:

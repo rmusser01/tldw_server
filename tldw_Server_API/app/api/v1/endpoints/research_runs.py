@@ -83,12 +83,18 @@ async def create_research_run(
 @router.get("/runs", response_model=list[ResearchRunListItemResponse], summary="List deep research runs")
 async def list_research_runs(
     limit: int = Query(25, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    status: str | None = Query(None, min_length=1),
+    session_id: str | None = Query(None, min_length=1),
     current_user: User = Depends(get_request_user),
     service: ResearchService = Depends(get_research_service),
 ) -> list[ResearchRunListItemResponse]:
     sessions = service.list_sessions(
         owner_user_id=str(current_user.id),
         limit=limit,
+        offset=offset,
+        status=status,
+        session_id=session_id,
     )
     return [ResearchRunListItemResponse.model_validate(session) for session in sessions]
 
@@ -107,6 +113,22 @@ async def get_research_run(
     except (KeyError, ValueError) as exc:
         _raise_research_http_error(exc)
     return ResearchRunResponse.model_validate(session)
+
+
+@router.delete("/runs/{session_id}", summary="Delete a deep research run")
+async def delete_research_run(
+    session_id: str = Path(..., min_length=1),
+    current_user: User = Depends(get_request_user),
+    service: ResearchService = Depends(get_research_service),
+) -> dict[str, bool]:
+    try:
+        deleted = service.delete_run(
+            owner_user_id=str(current_user.id),
+            session_id=session_id,
+        )
+    except (KeyError, ValueError) as exc:
+        _raise_research_http_error(exc)
+    return {"deleted": bool(deleted)}
 
 
 @router.get("/runs/{session_id}/events/stream", summary="Stream live deep research run events")

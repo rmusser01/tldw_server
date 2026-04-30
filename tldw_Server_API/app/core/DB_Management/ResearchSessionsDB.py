@@ -612,17 +612,35 @@ class ResearchSessionsDB:
             ).fetchone()
         return self._session_from_row(row)
 
-    def list_sessions(self, owner_user_id: str, *, limit: int = 25) -> list[ResearchSessionRow]:
+    def list_sessions(
+        self,
+        owner_user_id: str,
+        *,
+        limit: int = 25,
+        offset: int = 0,
+        status: str | None = None,
+        session_id: str | None = None,
+    ) -> list[ResearchSessionRow]:
         bounded_limit = max(1, int(limit))
+        bounded_offset = max(0, int(offset))
+        clauses = ["owner_user_id = ?"]
+        params: list[Any] = [str(owner_user_id)]
+        if session_id:
+            clauses.append("id = ?")
+            params.append(str(session_id))
+        if status:
+            clauses.append("status = ?")
+            params.append(str(status))
+        params.extend([bounded_limit, bounded_offset])
         with self._connect() as conn:
             rows = conn.execute(
-                """
+                f"""
                 SELECT * FROM research_sessions
-                WHERE owner_user_id = ?
+                WHERE {' AND '.join(clauses)}
                 ORDER BY created_at DESC, id DESC
-                LIMIT ?
+                LIMIT ? OFFSET ?
                 """,
-                (str(owner_user_id), bounded_limit),
+                tuple(params),
             ).fetchall()
         return [session for row in rows if (session := self._session_from_row(row)) is not None]
 

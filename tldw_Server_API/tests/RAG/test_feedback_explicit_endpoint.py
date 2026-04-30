@@ -252,6 +252,31 @@ def test_list_feedback_returns_entries(feedback_setup):
 
 
 @pytest.mark.integration
+def test_get_feedback_returns_single_entry(feedback_setup):
+    client, _db, conversation_id, message_id = feedback_setup
+
+    payload = {
+        "conversation_id": conversation_id,
+        "message_id": message_id,
+        "feedback_type": "helpful",
+        "helpful": True,
+        "issues": ["not_relevant"],
+        "user_notes": "Detail note",
+    }
+    create_resp = client.post("/api/v1/feedback/explicit", json=payload)
+    assert create_resp.status_code == status.HTTP_200_OK
+    feedback_id = create_resp.json()["feedback_id"]
+
+    resp = client.get(f"/api/v1/feedback/{feedback_id}")
+    assert resp.status_code == status.HTTP_200_OK
+    data = resp.json()
+    assert data["id"] == feedback_id
+    assert data["conversation_id"] == conversation_id
+    assert data["message_id"] == message_id
+    assert data["user_notes"] == "Detail note"
+
+
+@pytest.mark.integration
 def test_list_feedback_not_found_for_missing_conversation(feedback_setup):
     client, _db, _conversation_id, _message_id = feedback_setup
 

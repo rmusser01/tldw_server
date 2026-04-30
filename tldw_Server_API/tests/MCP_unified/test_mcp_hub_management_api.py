@@ -12,6 +12,7 @@ from tldw_Server_API.app.api.v1.API_Deps import auth_deps
 from tldw_Server_API.app.api.v1.endpoints import mcp_hub_management
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.exceptions import BadRequestError, ResourceNotFoundError
+from tldw_Server_API.app.services import mcp_hub_service
 
 
 def _make_principal(
@@ -491,6 +492,85 @@ def _build_app(
     app.dependency_overrides[mcp_hub_management.get_mcp_hub_service] = lambda: _FakeService()
     app.dependency_overrides[mcp_hub_management.get_mcp_credential_broker_service] = lambda: _FakeBrokerService()
     return app
+
+
+@pytest.mark.asyncio
+async def test_mcp_hub_events_stream_replays_governance_audit_events() -> None:
+    event_id = await mcp_hub_service.publish_mcp_hub_event(
+        event_type="mcp_hub.external_server.created",
+        action="external_server.created",
+        actor_id=1,
+        resource_type="mcp_external_server",
+        resource_id="docs",
+        metadata={"owner_scope_type": "team", "owner_scope_id": 7},
+    )
+    app = _build_app(
+        principal=_make_principal(roles=["admin"], permissions=[]),
+        fail_with_401=False,
+    )
+
+    with TestClient(app) as client:
+        resp = client.get(
+            "/api/v1/mcp/hub/events/stream",
+            params={"replay": "true", "limit": "1", "event_type": "mcp_hub.external_server.created"},
+        )
+
+    assert resp.status_code == 200
+    assert "text/event-stream" in resp.headers.get("content-type", "")
+    assert f"id: {event_id}" in resp.text
+    assert "event: mcp_hub.external_server.created" in resp.text
+    assert '"resource_type": "mcp_external_server"' in resp.text
+    assert '"resource_id": "docs"' in resp.text
+
+
+@pytest.mark.asyncio
+async def test_mcp_hub_durable_audit_replay_survives_event_ring_eviction(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("AUDIT_STORAGE_MODE", "shared")
+    monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path / "user_dbs"))
+    monkeypatch.setattr(
+        mcp_hub_service,
+        "_mcp_hub_event_bus",
+        mcp_hub_service.McpHubEventBus(max_events=1),
+        raising=False,
+    )
+
+    from tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps import shutdown_all_audit_services
+
+    await shutdown_all_audit_services()
+    try:
+        await mcp_hub_service.emit_mcp_hub_audit(
+            action="external_server.created",
+            actor_id=1,
+            resource_type="mcp_external_server",
+            resource_id="docs-old",
+            metadata={"owner_scope_type": "global", "owner_scope_id": None},
+        )
+        first_event = (await (await mcp_hub_service.get_mcp_hub_event_bus()).replay(limit=1))[0]
+
+        await mcp_hub_service.emit_mcp_hub_audit(
+            action="external_server.updated",
+            actor_id=1,
+            resource_type="mcp_external_server",
+            resource_id="docs-new",
+            metadata={"owner_scope_type": "global", "owner_scope_id": None},
+        )
+
+        ring_events = await (await mcp_hub_service.get_mcp_hub_event_bus()).replay()
+        assert [event["resource_id"] for event in ring_events] == ["docs-new"]
+
+        replayed = await mcp_hub_service.replay_mcp_hub_audit_events(
+            principal_user_id=1,
+            after_event_id=str(first_event["event_id"]),
+            event_types={"mcp_hub.external_server.updated"},
+            limit=10,
+        )
+    finally:
+        await shutdown_all_audit_services()
+        monkeypatch.setattr(mcp_hub_service, "_mcp_hub_event_bus", None, raising=False)
+
+    assert [event["resource_id"] for event in replayed] == ["docs-new"]
+    assert replayed[0]["event_type"] == "mcp_hub.external_server.updated"
+    assert replayed[0]["source"] == "mcp_hub.audit"
 
 
 @pytest.mark.asyncio

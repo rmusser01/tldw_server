@@ -54,6 +54,7 @@ from tldw_Server_API.app.api.v1.schemas.flashcards import (
 from tldw_Server_API.app.api.v1.schemas.study_packs import (
     StudyPackCreateJobRequest,
     StudyPackJobAcceptedResponse,
+    StudyPackJobListResponse,
     StudyPackJobStatusResponse,
     StudyPackSummaryResponse,
 )
@@ -775,6 +776,29 @@ def update_deck(
         raise map_db_error_to_http(e) from e
     except (InputError, CharactersRAGDBError) as exc:
         raise map_db_error_to_http(exc, default_detail="Failed to update deck") from exc
+
+
+@router.delete("/decks/{deck_id}")
+def delete_deck(
+    deck_id: int,
+    expected_version: int = Query(..., ge=1),
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+):
+    try:
+        deck = db.get_deck(deck_id)
+        if not deck or deck.get("deleted"):
+            raise HTTPException(status_code=404, detail="Deck not found")
+        if int(deck.get("version") or 0) != int(expected_version):
+            raise ConflictError("Version mismatch deleting deck", entity="decks", identifier=deck_id)
+        db.soft_delete_deck_by_id(deck_id)
+        return {"deleted": True}
+    except HTTPException:
+        raise
+    except ConflictError as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
+    except CharactersRAGDBError as e:
+        logger.error(f"Failed to delete deck: {e}")
+        raise HTTPException(status_code=500, detail="Failed to delete deck") from e
 
 
 @router.post("/assets", response_model=FlashcardAssetMetadata)
@@ -1893,6 +1917,31 @@ def create_study_pack_job(
         return {"job": _serialize_study_pack_job(job)}
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/study-packs/jobs", response_model=StudyPackJobListResponse)
+def list_study_pack_jobs(
+    status: Optional[str] = Query(None),
+    limit: int = Query(100, ge=1, le=1000),
+    current_user: User = Depends(get_request_user),
+    principal: AuthPrincipal = Depends(get_auth_principal),
+    jm: JobManager = Depends(get_job_manager),
+):
+    jobs = jm.list_jobs(
+        domain=STUDY_PACKS_DOMAIN,
+        queue=study_pack_jobs_queue(),
+        status=status,
+        owner_user_id=str(current_user.id),
+        job_type=STUDY_PACKS_JOB_TYPE,
+        limit=limit,
+        sort_by="created_at",
+        sort_order="desc",
+    )
+    visible_jobs: list[dict[str, Any]] = []
+    for job in jobs:
+        _ensure_study_pack_job_access(job, current_user=current_user, principal=principal)
+        visible_jobs.append(_serialize_study_pack_job(job))
+    return {"jobs": visible_jobs, "total": len(visible_jobs)}
 
 
 @router.get("/study-packs/jobs/{job_id}", response_model=StudyPackJobStatusResponse)

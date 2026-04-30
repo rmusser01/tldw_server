@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import asyncio
+from collections import deque
+from datetime import datetime, timezone
 import inspect
 import json
 import os
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from loguru import logger
 
@@ -54,6 +58,214 @@ async def _await_if_needed(value: Any) -> Any:
     return value
 
 
+class McpHubEventBus:
+    """Bounded in-process stream for MCP Hub governance events.
+
+    Durable audit remains the source of record. This bus exposes the same
+    mutation events to live UI clients with bounded replay for reconnects.
+    """
+
+    def __init__(self, *, max_events: int = 512, max_queue_size: int = 256) -> None:
+        self._events: deque[dict[str, Any]] = deque(maxlen=max_events)
+        self._subscribers: list[asyncio.Queue[dict[str, Any] | None]] = []
+        self._lock = asyncio.Lock()
+        self._max_queue_size = max_queue_size
+
+    async def publish(self, event: dict[str, Any]) -> str:
+        payload = dict(event)
+        event_id = str(payload.get("event_id") or uuid4())
+        payload["event_id"] = event_id
+        payload.setdefault("source", "mcp_hub")
+        payload.setdefault("created_at", datetime.now(timezone.utc).isoformat())
+
+        async with self._lock:
+            self._events.append(dict(payload))
+            dead: list[asyncio.Queue[dict[str, Any] | None]] = []
+            for queue in self._subscribers:
+                try:
+                    queue.put_nowait(dict(payload))
+                except asyncio.QueueFull:
+                    try:
+                        queue.get_nowait()
+                        queue.put_nowait(dict(payload))
+                    except (asyncio.QueueEmpty, asyncio.QueueFull):
+                        dead.append(queue)
+            for queue in dead:
+                try:
+                    self._subscribers.remove(queue)
+                except ValueError:
+                    pass
+        return event_id
+
+    async def subscribe(self) -> asyncio.Queue[dict[str, Any] | None]:
+        queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue(maxsize=self._max_queue_size)
+        async with self._lock:
+            self._subscribers.append(queue)
+        return queue
+
+    async def unsubscribe(self, queue: asyncio.Queue[dict[str, Any] | None]) -> None:
+        async with self._lock:
+            try:
+                self._subscribers.remove(queue)
+            except ValueError:
+                pass
+
+    async def replay(
+        self,
+        *,
+        after_event_id: str | None = None,
+        event_types: set[str] | None = None,
+        limit: int | None = None,
+    ) -> list[dict[str, Any]]:
+        async with self._lock:
+            events = [dict(event) for event in self._events]
+
+        if after_event_id:
+            start_index = None
+            for index, event in enumerate(events):
+                if str(event.get("event_id") or "") == str(after_event_id):
+                    start_index = index + 1
+                    break
+            events = events[start_index:] if start_index is not None else []
+
+        if event_types:
+            events = [event for event in events if str(event.get("event_type") or "") in event_types]
+        if limit is not None:
+            events = events[: max(0, limit)]
+        return events
+
+
+_mcp_hub_event_bus: McpHubEventBus | None = None
+_mcp_hub_event_bus_lock = asyncio.Lock()
+
+
+async def get_mcp_hub_event_bus() -> McpHubEventBus:
+    global _mcp_hub_event_bus
+    if _mcp_hub_event_bus is None:
+        async with _mcp_hub_event_bus_lock:
+            if _mcp_hub_event_bus is None:
+                _mcp_hub_event_bus = McpHubEventBus()
+    return _mcp_hub_event_bus
+
+
+async def publish_mcp_hub_event(
+    *,
+    event_type: str,
+    action: str,
+    actor_id: int | None,
+    resource_type: str,
+    resource_id: str,
+    metadata: dict[str, Any] | None = None,
+    event_id: str | None = None,
+) -> str:
+    bus = await get_mcp_hub_event_bus()
+    return await bus.publish(
+        {
+            "event_id": event_id,
+            "event_type": event_type,
+            "action": action,
+            "actor_id": actor_id,
+            "resource_type": resource_type,
+            "resource_id": resource_id,
+            "metadata": dict(metadata or {}),
+        }
+    )
+
+
+def _load_audit_json_object(raw: Any) -> dict[str, Any]:
+    if isinstance(raw, dict):
+        return dict(raw)
+    if isinstance(raw, str) and raw.strip():
+        try:
+            parsed = json.loads(raw)
+            if isinstance(parsed, dict):
+                return parsed
+        except (TypeError, ValueError):
+            return {}
+    return {}
+
+
+def _audit_row_to_mcp_hub_event(row: dict[str, Any]) -> dict[str, Any] | None:
+    metadata = _load_audit_json_object(row.get("metadata"))
+    action = str(metadata.get("action") or row.get("action") or "").strip()
+    resource_type = str(metadata.get("resource_type") or row.get("resource_type") or "").strip()
+    resource_id = str(metadata.get("resource_id") or row.get("resource_id") or "").strip()
+    if not action or not resource_type or not resource_id:
+        return None
+
+    event_type = f"mcp_hub.{action}"
+    actor_id = metadata.get("actor_id")
+    if actor_id is None:
+        actor_id = row.get("context_user_id") or row.get("tenant_user_id")
+    try:
+        actor_id = int(actor_id) if actor_id is not None else None
+    except (TypeError, ValueError):
+        actor_id = None
+
+    event = {
+        "event_id": str(row.get("event_id") or ""),
+        "event_type": event_type,
+        "action": action,
+        "actor_id": actor_id,
+        "resource_type": resource_type,
+        "resource_id": resource_id,
+        "metadata": metadata,
+        "source": "mcp_hub.audit",
+        "created_at": row.get("timestamp") or row.get("created_at"),
+    }
+    owner_scope_type = metadata.get("owner_scope_type")
+    owner_scope_id = metadata.get("owner_scope_id")
+    if owner_scope_type is not None:
+        event["owner_scope_type"] = owner_scope_type
+    if owner_scope_id is not None:
+        event["owner_scope_id"] = owner_scope_id
+    return event
+
+
+async def replay_mcp_hub_audit_events(
+    *,
+    principal_user_id: int | None,
+    after_event_id: str | None = None,
+    event_types: set[str] | None = None,
+    limit: int | None = None,
+) -> list[dict[str, Any]]:
+    """Replay MCP Hub events from durable unified audit storage.
+
+    The live event bus is intentionally bounded. This helper reconstructs the
+    public MCP Hub SSE event shape from the durable audit rows written by
+    `emit_mcp_hub_audit`.
+    """
+    query_limit = max(limit or 1000, 1000)
+    query_limit = min(query_limit, 5000)
+    svc = await get_or_create_audit_service_for_user_id_optional(principal_user_id)
+    rows = await svc.query_events(
+        event_types=[AuditEventType.CONFIG_CHANGED],
+        categories=[AuditEventCategory.SYSTEM],
+        endpoint="/api/v1/mcp/hub",
+        limit=query_limit,
+        allow_cross_tenant=True,
+    )
+    events = [
+        event
+        for row in reversed(rows)
+        if (event := _audit_row_to_mcp_hub_event(dict(row))) is not None
+    ]
+
+    if after_event_id:
+        start_index = None
+        for index, event in enumerate(events):
+            if str(event.get("event_id") or "") == str(after_event_id):
+                start_index = index + 1
+                break
+        events = events[start_index:] if start_index is not None else []
+
+    if event_types:
+        events = [event for event in events if str(event.get("event_type") or "") in event_types]
+    if limit is not None:
+        events = events[: max(0, limit)]
+    return events
+
+
 async def emit_mcp_hub_audit(
     *,
     action: str,
@@ -70,7 +282,7 @@ async def emit_mcp_hub_audit(
             endpoint="/api/v1/mcp/hub",
             method="INTERNAL",
         )
-        await svc.log_event(
+        audit_event_id = await svc.log_event(
             event_type=AuditEventType.CONFIG_CHANGED,
             category=AuditEventCategory.SYSTEM,
             context=ctx,
@@ -86,6 +298,15 @@ async def emit_mcp_hub_audit(
             },
         )
         await svc.flush(raise_on_failure=False)
+        await publish_mcp_hub_event(
+            event_id=audit_event_id,
+            event_type=f"mcp_hub.{action}",
+            action=action,
+            actor_id=actor_id,
+            resource_type=resource_type,
+            resource_id=resource_id,
+            metadata=metadata,
+        )
     except Exception as exc:
         logger.warning("MCP hub audit emission failed for action={}: {}", action, exc)
 

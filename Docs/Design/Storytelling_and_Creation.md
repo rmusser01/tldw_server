@@ -21,6 +21,10 @@ https://github.com/ChicagoDave/sharpee
 https://github.com/Bobby-Gray/open-tabletop-gm?tab=readme-ov-file
 https://huggingface.co/Sukino/SillyTavern-Settings-and-Presets/blob/main/Banned%20Tokens.txt
 https://github.com/sam-paech/antislop-sampler/blob/main/slop_phrase_prob_adjustments_full_list.json
+https://github.com/envy-ai/ai_rpg
+https://github.com/ptone/scion-athenaeum?tab=readme-ov-file
+
+
 
 ### Storytelling
 

@@ -41,6 +41,27 @@ def test_get_user_base_directory_resolves_relative(monkeypatch, tmp_path):
     _expect_true(expected.exists(), "relative user dir should be created")
 
 
+def test_get_user_base_directory_only_logs_on_first_directory_creation(monkeypatch, tmp_path):
+    monkeypatch.setitem(settings, "USER_DB_BASE_DIR", str(tmp_path / "user_dbs"))
+
+    debug_messages: list[str] = []
+    monkeypatch.setattr(
+        db_path_utils.logger,
+        "debug",
+        lambda message: debug_messages.append(str(message)),
+    )
+
+    user_dir = DatabasePaths.get_user_base_directory(11)
+    repeated_user_dir = DatabasePaths.get_user_base_directory(11)
+
+    _expect_equal(repeated_user_dir, user_dir, "repeated user dir lookup should return the same path")
+    _expect_equal(
+        debug_messages,
+        [f"Created user directory: {user_dir}"],
+        "user directory creation should only log once for an existing path",
+    )
+
+
 def test_get_user_base_directory_single_user_none_resolves_fixed_id(monkeypatch, tmp_path):
     monkeypatch.setenv("AUTH_MODE", "single_user")
     monkeypatch.setitem(settings, "SINGLE_USER_FIXED_ID", "42")
