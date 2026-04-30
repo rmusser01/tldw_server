@@ -4,6 +4,8 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field, field_validator
 
+from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
+
 
 class OrganizationCreateRequest(BaseModel):
     name: str = Field(..., min_length=2)
@@ -27,6 +29,7 @@ class OrganizationListResponse(BaseModel):
     limit: int
     offset: int
     has_more: bool
+    pagination: OffsetPaginationMeta
 
 
 class TeamCreateRequest(BaseModel):

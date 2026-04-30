@@ -76,6 +76,9 @@ def test_admin_orgs_list_with_total_and_search(monkeypatch, tmp_path, authnz_sch
             assert isinstance(data.get("total"), int)
             assert data.get("limit") == 2
             assert data.get("offset") == 0
+            assert data["pagination"]["total"] == data["total"]
+            assert data["pagination"]["limit"] == 2
+            assert data["pagination"]["offset"] == 0
             # If total > 2, has_more should be True
             assert data.get("has_more") == (data["total"] > 2)
 

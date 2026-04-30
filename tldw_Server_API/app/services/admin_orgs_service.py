@@ -6,6 +6,7 @@ from typing import Any
 from fastapi import HTTPException, status
 from loguru import logger
 
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.schemas.org_team_schemas import (
     OrganizationCreateRequest,
     OrganizationResponse,
@@ -285,13 +286,20 @@ async def list_orgs(
         items = [OrganizationResponse(**r).model_dump() for r in rows]
 
         if wants_wrapper:
+            total_count = int(total or 0)
             has_more = (offset + len(items)) < int(total or 0)
             return {
                 "items": items,
-                "total": int(total or 0),
+                "total": total_count,
                 "limit": limit,
                 "offset": offset,
                 "has_more": has_more,
+                "pagination": build_offset_pagination_meta(
+                    total=total_count,
+                    limit=limit,
+                    offset=offset,
+                    count=len(items),
+                ),
             }
         return items
     except HTTPException:
