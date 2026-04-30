@@ -1032,7 +1032,15 @@ class SandboxService:
         stale_items = [item for item in report_items if str(item.get("status") or "").strip() == "stale_session"]
         unhealthy_items = [item for item in report_items if str(item.get("status") or "").strip() == "unhealthy_vm"]
         skipped_items = [item for item in report_items if str(item.get("status") or "").strip() == "skipped_active_session"]
-        orphaned_items = [item for item in report_items if str(item.get("status") or "").strip() == "orphaned_vm"]
+        orphan_statuses = {
+            "owned_orphaned_vm",
+            "unknown_orphaned_vm",
+            "foreign_orphaned_vm",
+            "orphaned_vm",
+        }
+        orphaned_items = [
+            item for item in report_items if str(item.get("status") or "").strip() in orphan_statuses
+        ]
         actions: list[dict[str, object]] = []
         summary: dict[str, int] = {
             "stale_session_controls": len(stale_items),
@@ -1062,8 +1070,24 @@ class SandboxService:
                 actions.append(action)
                 continue
 
-            if status == "orphaned_vm":
+            if status in orphan_statuses:
                 if not terminate_orphaned_vms or not vm_id:
+                    continue
+
+                termination_eligible = status == "owned_orphaned_vm" and bool(item.get("termination_eligible"))
+                if status == "orphaned_vm":
+                    termination_eligible = bool(item.get("termination_eligible")) and reason == "owned_orphan"
+                if not termination_eligible:
+                    action = {
+                        "type": "skip_orphaned_vm",
+                        "session_id": None,
+                        "vm_id": vm_id,
+                        "status": "skipped",
+                        "reason": reason or "unknown_ownership",
+                        "termination_eligible": False,
+                    }
+                    logger.info("Skipping VZ reconciliation orphan repair action: {}", action)
+                    actions.append(action)
                     continue
 
                 action_status = "planned"
@@ -1102,6 +1126,7 @@ class SandboxService:
                     "vm_id": vm_id,
                     "status": action_status,
                     "reason": reason or None,
+                    "termination_eligible": True,
                 }
                 logger.info("VZ reconciliation repair action: {}", action)
                 actions.append(action)

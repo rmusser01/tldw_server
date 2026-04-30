@@ -96,12 +96,15 @@ def _reconciliation_report(
         "live_vms": 0,
         "healthy_session_ids": [],
         "stale_session_ids": [],
-        "unhealthy_session_ids": [],
-        "skipped_active_session_ids": [],
-        "orphaned_vm_ids": [],
-        "items": list(items or []),
-        "reasons": list(reasons or []),
-    }
+            "unhealthy_session_ids": [],
+            "skipped_active_session_ids": [],
+            "orphaned_vm_ids": [],
+            "owned_orphaned_vm_ids": [],
+            "unknown_orphaned_vm_ids": [],
+            "foreign_orphaned_vm_ids": [],
+            "items": list(items or []),
+            "reasons": list(reasons or []),
+        }
 
 
 def _service_with_orchestrator(orch: SimpleNamespace) -> SandboxService:
@@ -510,9 +513,10 @@ def test_repair_orphan_vm_dry_run_plans_termination_without_helper_call(
         lambda *args, **kwargs: _reconciliation_report(
             items=[
                 {
-                    "status": "orphaned_vm",
+                    "status": "owned_orphaned_vm",
                     "vm_id": "vm-orphan",
-                    "reason": "session_missing",
+                    "reason": "owned_orphan",
+                    "termination_eligible": True,
                 }
             ]
         ),
@@ -536,7 +540,8 @@ def test_repair_orphan_vm_dry_run_plans_termination_without_helper_call(
             "session_id": None,
             "vm_id": "vm-orphan",
             "status": "planned",
-            "reason": "session_missing",
+            "reason": "owned_orphan",
+            "termination_eligible": True,
         }
     ]
 
@@ -552,9 +557,10 @@ def test_repair_orphan_vm_mutating_run_calls_helper(monkeypatch: pytest.MonkeyPa
         lambda *args, **kwargs: _reconciliation_report(
             items=[
                 {
-                    "status": "orphaned_vm",
+                    "status": "owned_orphaned_vm",
                     "vm_id": "vm-orphan",
-                    "reason": "session_missing",
+                    "reason": "owned_orphan",
+                    "termination_eligible": True,
                 }
             ]
         ),
@@ -586,7 +592,8 @@ def test_repair_orphan_vm_mutating_run_calls_helper(monkeypatch: pytest.MonkeyPa
             "session_id": None,
             "vm_id": "vm-orphan",
             "status": "terminated",
-            "reason": "session_missing",
+            "reason": "owned_orphan",
+            "termination_eligible": True,
         }
     ]
 
@@ -602,9 +609,10 @@ def test_repair_orphan_vm_termination_false_reports_missing(monkeypatch: pytest.
         lambda *args, **kwargs: _reconciliation_report(
             items=[
                 {
-                    "status": "orphaned_vm",
+                    "status": "owned_orphaned_vm",
                     "vm_id": "vm-orphan",
-                    "reason": "session_missing",
+                    "reason": "owned_orphan",
+                    "termination_eligible": True,
                 }
             ]
         ),
@@ -631,6 +639,90 @@ def test_repair_orphan_vm_termination_false_reports_missing(monkeypatch: pytest.
     assert result["summary"]["orphaned_vms"] == 1
     assert result["summary"]["terminated_orphaned_vms"] == 0
     assert result["actions"][0]["status"] == "missing"
+    assert result["actions"][0]["termination_eligible"] is True
+
+
+@pytest.mark.parametrize(
+    ("status", "reason"),
+    [
+        ("unknown_orphaned_vm", "unknown_ownership"),
+        ("foreign_orphaned_vm", "foreign_owner"),
+        ("orphaned_vm", "session_missing"),
+    ],
+)
+def test_repair_non_owned_orphan_vm_skips_without_helper_call(
+    monkeypatch: pytest.MonkeyPatch,
+    status: str,
+    reason: str,
+) -> None:
+    terminated_vm_ids: list[str] = []
+    orch = SimpleNamespace(delete_vz_session_control=lambda session_id: True)
+    service = _service_with_orchestrator(orch)
+    monkeypatch.setattr(service, "_active_session_run_count", lambda session_id: 0)
+    monkeypatch.setattr(
+        service_mod,
+        "collect_vz_reconciliation",
+        lambda *args, **kwargs: _reconciliation_report(
+            items=[
+                {
+                    "status": status,
+                    "vm_id": "vm-skip",
+                    "reason": reason,
+                    "termination_eligible": False,
+                }
+            ]
+        ),
+        raising=True,
+    )
+    monkeypatch.setattr(
+        service_mod,
+        "MacOSVirtualizationHelperClient",
+        lambda: SimpleNamespace(terminate_vm=terminated_vm_ids.append),
+        raising=True,
+    )
+
+    result = service.repair_macos_reconciliation(
+        terminate_orphaned_vms=True,
+        dry_run=False,
+    )
+
+    assert terminated_vm_ids == []
+    assert result["summary"]["orphaned_vms"] == 1
+    assert result["summary"]["terminated_orphaned_vms"] == 0
+    assert result["actions"] == [
+        {
+            "type": "skip_orphaned_vm",
+            "session_id": None,
+            "vm_id": "vm-skip",
+            "status": "skipped",
+            "reason": reason,
+            "termination_eligible": False,
+        }
+    ]
+
+
+def test_repair_summary_counts_all_orphan_statuses(monkeypatch: pytest.MonkeyPatch) -> None:
+    orch = SimpleNamespace(delete_vz_session_control=lambda session_id: True)
+    service = _service_with_orchestrator(orch)
+    monkeypatch.setattr(service, "_active_session_run_count", lambda session_id: 0)
+    monkeypatch.setattr(
+        service_mod,
+        "collect_vz_reconciliation",
+        lambda *args, **kwargs: _reconciliation_report(
+            items=[
+                {"status": "owned_orphaned_vm", "vm_id": "vm-owned", "termination_eligible": True},
+                {"status": "unknown_orphaned_vm", "vm_id": "vm-unknown", "termination_eligible": False},
+                {"status": "foreign_orphaned_vm", "vm_id": "vm-foreign", "termination_eligible": False},
+                {"status": "orphaned_vm", "vm_id": "vm-legacy", "termination_eligible": False},
+            ]
+        ),
+        raising=True,
+    )
+
+    result = service.repair_macos_reconciliation()
+
+    assert result["summary"]["orphaned_vms"] == 4
+    assert result["actions"] == []
 
 
 @pytest.mark.parametrize(
@@ -664,9 +756,10 @@ def test_repair_orphan_vm_termination_helper_errors_preserve_reason(
         lambda *args, **kwargs: _reconciliation_report(
             items=[
                 {
-                    "status": "orphaned_vm",
+                    "status": "owned_orphaned_vm",
                     "vm_id": "vm-orphan",
-                    "reason": "session_missing",
+                    "reason": "owned_orphan",
+                    "termination_eligible": True,
                 }
             ]
         ),
@@ -705,9 +798,10 @@ def test_repair_orphan_vm_termination_unexpected_exception_maps_to_fallback(
         lambda *args, **kwargs: _reconciliation_report(
             items=[
                 {
-                    "status": "orphaned_vm",
+                    "status": "owned_orphaned_vm",
                     "vm_id": "vm-orphan",
-                    "reason": "session_missing",
+                    "reason": "owned_orphan",
+                    "termination_eligible": True,
                 }
             ]
         ),

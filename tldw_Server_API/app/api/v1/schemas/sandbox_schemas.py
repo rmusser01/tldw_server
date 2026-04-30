@@ -364,6 +364,7 @@ class SandboxAdminMacOSReconciliationRepairAction(BaseModel):
     vm_id: str | None = None
     status: str
     reason: str | None = None
+    termination_eligible: bool | None = None
 
 
 class SandboxAdminMacOSReconciliationRepairSummary(BaseModel):
