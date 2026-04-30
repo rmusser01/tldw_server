@@ -329,6 +329,17 @@ def test_manuscript_version_history_and_trash_restore(client: TestClient):
     assert final_resp.status_code == 200, final_resp.text
 
 
+def test_manuscript_restore_endpoints_reject_invalid_entity_type(client: TestClient):
+    restore_version_resp = client.post(f"{PREFIX}/invalid/entity-1/versions/1/restore")
+    assert restore_version_resp.status_code == 422
+
+    list_trash_resp = client.get(f"{PREFIX}/trash", params={"entity_type": "invalid"})
+    assert list_trash_resp.status_code == 422
+
+    restore_trash_resp = client.post(f"{PREFIX}/trash/invalid/entity-1/restore")
+    assert restore_trash_resp.status_code == 422
+
+
 def test_project_settings_round_trip(client: TestClient):
     """Project settings survive create/get/list responses."""
     settings = {"theme": "dark", "editor": {"mode": "focus"}}

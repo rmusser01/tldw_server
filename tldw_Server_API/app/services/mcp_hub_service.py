@@ -245,6 +245,7 @@ async def replay_mcp_hub_audit_events(
     after_event_id: str | None = None,
     event_types: set[str] | None = None,
     limit: int | None = None,
+    allow_cross_tenant: bool = False,
 ) -> list[dict[str, Any]]:
     """Replay MCP Hub events from durable unified audit storage.
 
@@ -260,7 +261,8 @@ async def replay_mcp_hub_audit_events(
         categories=[AuditEventCategory.SYSTEM],
         endpoint="/api/v1/mcp/hub",
         limit=query_limit,
-        allow_cross_tenant=True,
+        user_id=None if allow_cross_tenant else (str(principal_user_id) if principal_user_id is not None else None),
+        allow_cross_tenant=allow_cross_tenant,
     )
     events = [
         event

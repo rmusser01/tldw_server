@@ -625,6 +625,7 @@ async def test_mcp_hub_durable_audit_replay_survives_event_ring_eviction(tmp_pat
             after_event_id=str(first_event["event_id"]),
             event_types={"mcp_hub.external_server.updated"},
             limit=10,
+            allow_cross_tenant=True,
         )
     finally:
         await shutdown_all_audit_services()
@@ -633,6 +634,77 @@ async def test_mcp_hub_durable_audit_replay_survives_event_ring_eviction(tmp_pat
     assert [event["resource_id"] for event in replayed] == ["docs-new"]
     assert replayed[0]["event_type"] == "mcp_hub.external_server.updated"
     assert replayed[0]["source"] == "mcp_hub.audit"
+
+
+@pytest.mark.asyncio
+async def test_mcp_hub_durable_replay_scopes_non_admin_queries(monkeypatch) -> None:
+    captured: dict[str, Any] = {}
+
+    class _AuditService:
+        async def query_events(self, **kwargs: Any) -> list[dict[str, Any]]:
+            captured.update(kwargs)
+            return [
+                {
+                    "event_id": "evt_user_1",
+                    "timestamp": "2026-04-30T00:00:00Z",
+                    "metadata": json.dumps(
+                        {
+                            "action": "external_server.updated",
+                            "actor_id": 1,
+                            "resource_type": "mcp_external_server",
+                            "resource_id": "docs",
+                            "owner_scope_type": "user",
+                            "owner_scope_id": 1,
+                        }
+                    ),
+                }
+            ]
+
+    async def _fake_audit_service(principal_user_id: int | None) -> _AuditService:
+        assert principal_user_id == 1
+        return _AuditService()
+
+    monkeypatch.setattr(
+        mcp_hub_service,
+        "get_or_create_audit_service_for_user_id_optional",
+        _fake_audit_service,
+    )
+
+    replayed = await mcp_hub_service.replay_mcp_hub_audit_events(principal_user_id=1, limit=10)
+
+    assert captured["user_id"] == "1"
+    assert captured["allow_cross_tenant"] is False
+    assert replayed[0]["resource_id"] == "docs"
+
+
+@pytest.mark.asyncio
+async def test_mcp_hub_durable_replay_allows_admin_cross_tenant_queries(monkeypatch) -> None:
+    captured: dict[str, Any] = {}
+
+    class _AuditService:
+        async def query_events(self, **kwargs: Any) -> list[dict[str, Any]]:
+            captured.update(kwargs)
+            return []
+
+    async def _fake_audit_service(principal_user_id: int | None) -> _AuditService:
+        assert principal_user_id == 1
+        return _AuditService()
+
+    monkeypatch.setattr(
+        mcp_hub_service,
+        "get_or_create_audit_service_for_user_id_optional",
+        _fake_audit_service,
+    )
+
+    replayed = await mcp_hub_service.replay_mcp_hub_audit_events(
+        principal_user_id=1,
+        limit=10,
+        allow_cross_tenant=True,
+    )
+
+    assert replayed == []
+    assert captured["user_id"] is None
+    assert captured["allow_cross_tenant"] is True
 
 
 @pytest.mark.asyncio

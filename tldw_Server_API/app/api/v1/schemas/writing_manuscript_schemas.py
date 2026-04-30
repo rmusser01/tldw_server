@@ -715,3 +715,14 @@ class ManuscriptVersionListResponse(BaseModel):
 class ManuscriptTrashListResponse(BaseModel):
     items: list[dict[str, Any]]
     total: int
+
+
+class ManuscriptRestoredEntityResponse(BaseModel):
+    """Typed response for restored project/manuscript/chapter/scene records."""
+
+    model_config = ConfigDict(extra="allow")
+
+    id: str
+    title: str
+    deleted: bool
+    version: int

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import sqlite3
-import contextlib
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -637,8 +636,15 @@ class ResearchService:
             manager = self._job_manager if self._job_manager is not None else self._job_manager_for_session()
             cancel_job = getattr(manager, "cancel_job", None)
             if callable(cancel_job):
-                with contextlib.suppress(Exception):
+                try:
                     cancel_job(numeric_job_id, reason="research_run_deleted")
+                except Exception as exc:
+                    logger.warning(
+                        "Failed to cancel active research job {} while deleting session {}: {}",
+                        numeric_job_id,
+                        session_id,
+                        exc,
+                    )
         return db.delete_session_cascade(session_id)
 
     def delete_run(self, *, owner_user_id: str, session_id: str) -> bool:

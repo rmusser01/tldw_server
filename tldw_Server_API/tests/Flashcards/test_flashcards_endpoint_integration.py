@@ -687,6 +687,7 @@ def test_list_study_pack_jobs_returns_current_user_jobs(client_with_flashcards_d
     class StubJobManager:
         def __init__(self):
             self.calls = []
+            self.count_calls = []
 
         def list_jobs(self, **kwargs):
             self.calls.append(kwargs)
@@ -700,6 +701,10 @@ def test_list_study_pack_jobs_returns_current_user_jobs(client_with_flashcards_d
                     "owner_user_id": "1",
                 }
             ]
+
+        def count_jobs(self, **kwargs):
+            self.count_calls.append(kwargs)
+            return 3
 
     stub = StubJobManager()
     client_with_flashcards_db.app.dependency_overrides[get_job_manager] = lambda: stub
@@ -721,7 +726,7 @@ def test_list_study_pack_jobs_returns_current_user_jobs(client_with_flashcards_d
                 "job_type": STUDY_PACKS_JOB_TYPE,
             }
         ],
-        "total": 1,
+        "total": 3,
     }
     assert stub.calls == [
         {
@@ -733,6 +738,15 @@ def test_list_study_pack_jobs_returns_current_user_jobs(client_with_flashcards_d
             "limit": 25,
             "sort_by": "created_at",
             "sort_order": "desc",
+        }
+    ]
+    assert stub.count_calls == [
+        {
+            "domain": STUDY_PACKS_DOMAIN,
+            "queue": study_pack_jobs_queue(),
+            "status": "queued",
+            "owner_user_id": "1",
+            "job_type": STUDY_PACKS_JOB_TYPE,
         }
     ]
 

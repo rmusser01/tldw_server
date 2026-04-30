@@ -2701,6 +2701,7 @@ async def stream_mcp_hub_events(
                     after_event_id=after_event_id,
                     event_types=event_types,
                     limit=None,
+                    allow_cross_tenant=_is_mutation_allowed(principal),
                 )
                 for event in durable_replayed:
                     if not _event_matches_visible_scope(event, visible_scopes):

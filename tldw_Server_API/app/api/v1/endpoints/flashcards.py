@@ -20,6 +20,7 @@ from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import DEFAULT_LLM_
 from tldw_Server_API.app.api.v1.schemas.flashcards import (
     Deck,
     DeckCreate,
+    DeckDeleteResponse,
     DeckUpdate,
     Flashcard,
     FlashcardAnalyticsSummaryResponse,
@@ -778,12 +779,12 @@ def update_deck(
         raise map_db_error_to_http(exc, default_detail="Failed to update deck") from exc
 
 
-@router.delete("/decks/{deck_id}")
+@router.delete("/decks/{deck_id}", response_model=DeckDeleteResponse)
 def delete_deck(
     deck_id: int,
     expected_version: int = Query(..., ge=1),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
-):
+) -> DeckDeleteResponse:
     try:
         deck = db.get_deck(deck_id)
         if not deck or deck.get("deleted"):
@@ -791,7 +792,7 @@ def delete_deck(
         if int(deck.get("version") or 0) != int(expected_version):
             raise ConflictError("Version mismatch deleting deck", entity="decks", identifier=deck_id)
         db.soft_delete_deck_by_id(deck_id)
-        return {"deleted": True}
+        return DeckDeleteResponse(deleted=True)
     except HTTPException:
         raise
     except ConflictError as e:
@@ -1926,7 +1927,7 @@ def list_study_pack_jobs(
     current_user: User = Depends(get_request_user),
     principal: AuthPrincipal = Depends(get_auth_principal),
     jm: JobManager = Depends(get_job_manager),
-):
+) -> StudyPackJobListResponse:
     jobs = jm.list_jobs(
         domain=STUDY_PACKS_DOMAIN,
         queue=study_pack_jobs_queue(),
@@ -1941,7 +1942,14 @@ def list_study_pack_jobs(
     for job in jobs:
         _ensure_study_pack_job_access(job, current_user=current_user, principal=principal)
         visible_jobs.append(_serialize_study_pack_job(job))
-    return {"jobs": visible_jobs, "total": len(visible_jobs)}
+    total = jm.count_jobs(
+        domain=STUDY_PACKS_DOMAIN,
+        queue=study_pack_jobs_queue(),
+        status=status,
+        owner_user_id=str(current_user.id),
+        job_type=STUDY_PACKS_JOB_TYPE,
+    )
+    return StudyPackJobListResponse(jobs=visible_jobs, total=total)
 
 
 @router.get("/study-packs/jobs/{job_id}", response_model=StudyPackJobStatusResponse)
