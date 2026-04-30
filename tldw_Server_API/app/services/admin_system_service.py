@@ -8,6 +8,7 @@ from typing import Any, Literal
 from fastapi import HTTPException
 from loguru import logger
 
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.schemas.admin_schemas import (
     ActivitySummaryResponse,
     AuditLogResponse,
@@ -513,7 +514,13 @@ async def get_audit_log(
         if org_id is not None:
             org_ids = [org_id] if org_ids is None else [org_id] if org_id in org_ids else []
         if org_ids is not None and len(org_ids) == 0:
-            return AuditLogResponse(entries=[], total=0, limit=limit, offset=offset)
+            return AuditLogResponse(
+                entries=[],
+                total=0,
+                limit=limit,
+                offset=offset,
+                pagination=build_offset_pagination_meta(total=0, limit=limit, offset=offset, count=0),
+            )
 
         if user_id:
             await admin_scope_service.enforce_admin_user_scope(principal, user_id, require_hierarchy=False)
@@ -675,7 +682,19 @@ async def get_audit_log(
                 }
                 entries.append(entry)
 
-        return AuditLogResponse(entries=entries, total=int(total or 0), limit=limit, offset=offset)
+        total_count = int(total or 0)
+        return AuditLogResponse(
+            entries=entries,
+            total=total_count,
+            limit=limit,
+            offset=offset,
+            pagination=build_offset_pagination_meta(
+                total=total_count,
+                limit=limit,
+                offset=offset,
+                count=len(entries),
+            ),
+        )
 
     except HTTPException:
         raise
@@ -744,7 +763,13 @@ async def list_system_logs(
     if org_id is not None:
         org_ids = [org_id] if org_ids is None else [org_id] if org_id in org_ids else []
     if org_ids is not None and len(org_ids) == 0:
-        return SystemLogsResponse(items=[], total=0, limit=limit, offset=offset)
+        return SystemLogsResponse(
+            items=[],
+            total=0,
+            limit=limit,
+            offset=offset,
+            pagination=build_offset_pagination_meta(total=0, limit=limit, offset=offset, count=0),
+        )
 
     items, total = query_system_logs(
         start=start_dt,
@@ -763,6 +788,12 @@ async def list_system_logs(
         total=total,
         limit=limit,
         offset=offset,
+        pagination=build_offset_pagination_meta(
+            total=total,
+            limit=limit,
+            offset=offset,
+            count=len(items),
+        ),
     )
 
 

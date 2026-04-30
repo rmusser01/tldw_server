@@ -47,6 +47,9 @@ async def test_admin_system_ops_endpoints(monkeypatch, tmp_path):
         if logs_resp.status_code == 200:
             payload = logs_resp.json()
             assert "items" in payload
+            assert payload["pagination"]["limit"] == 100
+            assert payload["pagination"]["offset"] == 0
+            assert payload["pagination"]["total"] >= 1
             assert any("System ops log test entry" in (item.get("message") or "") for item in payload["items"])
         else:
             # Some deployments do not mount system logs endpoints.
@@ -69,6 +72,15 @@ async def test_admin_system_ops_endpoints(monkeypatch, tmp_path):
         maint_get = client.get("/api/v1/admin/maintenance")
         assert maint_get.status_code == 200, maint_get.text
         assert maint_get.json()["enabled"] is True
+
+        audit_log_resp = client.get("/api/v1/admin/audit-log")
+        if audit_log_resp.status_code == 200:
+            audit_payload = audit_log_resp.json()
+            assert audit_payload["pagination"]["limit"] == 100
+            assert audit_payload["pagination"]["offset"] == 0
+            assert audit_payload["pagination"]["total"] == audit_payload["total"]
+        else:
+            assert audit_log_resp.status_code == 404, audit_log_resp.text
 
         flag_resp = client.put(
             "/api/v1/admin/feature-flags/ops-test",

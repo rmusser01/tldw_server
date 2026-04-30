@@ -555,6 +555,7 @@ class AuditLogResponse(BaseModel):
     total: int
     limit: int
     offset: int
+    pagination: OffsetPaginationMeta
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -1188,6 +1189,7 @@ class SystemLogsResponse(BaseModel):
     total: int
     limit: int
     offset: int
+    pagination: OffsetPaginationMeta
 
     model_config = ConfigDict(from_attributes=True)
 
