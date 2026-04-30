@@ -47,14 +47,14 @@ jobs:
             out_file="$repo_root/sbom-python.cdx.json"
             echo "Generating Python SBOM from ${req}"
 
-            # Try modern CLI first: cyclonedx-py requirements -i <file>
+            # Try modern CLI first: cyclonedx-py requirements <file>
             if command -v cyclonedx-py >/dev/null 2>&1; then
               echo "Using cyclonedx-py"
-              if (cd "$req_dir" && cyclonedx-py requirements -i "$req_file" -o "$out_file"); then
+              if (cd "$req_dir" && cyclonedx-py requirements "$req_file" -o "$out_file"); then
                 return 0
               fi
-              echo "cyclonedx-py positional requirements failed; trying -i form"
-              if (cd "$req_dir" && cyclonedx-py requirements -i "$req_file" "${pyproject_args[@]}" -o "$out_file"); then
+              echo "cyclonedx-py positional requirements failed; trying stdin form"
+              if (cd "$req_dir" && cyclonedx-py requirements - -o "$out_file" < "$req_file"); then
                 return 0
               fi
               echo "cyclonedx-py failed; will try fallbacks"
@@ -63,20 +63,20 @@ jobs:
             # Module invocation for modern CLI (avoid depending on CLI binary layout)
             if python -c "import importlib.util, sys; sys.exit(0 if importlib.util.find_spec('cyclonedx_py') else 1)" >/dev/null 2>&1; then
               echo "Using python -m cyclonedx_py"
-              if (cd "$req_dir" && python -m cyclonedx_py requirements -i "$req_file" -o "$out_file"); then
+              if (cd "$req_dir" && python -m cyclonedx_py requirements "$req_file" -o "$out_file"); then
                 return 0
               fi
-              echo "python -m cyclonedx_py positional requirements failed; trying -i form"
-              if (cd "$req_dir" && python -m cyclonedx_py requirements -i "$req_file" "${pyproject_args[@]}" -o "$out_file"); then
+              echo "python -m cyclonedx_py positional requirements failed; trying stdin form"
+              if (cd "$req_dir" && python -m cyclonedx_py requirements - -o "$out_file" < "$req_file"); then
                 return 0
               fi
               echo "python -m cyclonedx_py failed; trying legacy CLI"
             fi
 
-            # Legacy CLI: cyclonedx-bom -r <file>
+            # Legacy CLI: cyclonedx-bom -r -i <file>
             if command -v cyclonedx-bom >/dev/null 2>&1; then
               echo "Using cyclonedx-bom (legacy)"
-              if (cd "$req_dir" && cyclonedx-bom -r "$req_file" -o "$out_file"); then
+              if (cd "$req_dir" && cyclonedx-bom -r -i "$req_file" -o "$out_file"); then
                 return 0
               fi
               echo "cyclonedx-bom failed; trying legacy module"
@@ -85,7 +85,7 @@ jobs:
             # Legacy module invocation
             if python -c "import importlib.util, sys; sys.exit(0 if importlib.util.find_spec('cyclonedx_bom') else 1)" >/dev/null 2>&1; then
               echo "Using python -m cyclonedx_bom (legacy)"
-              if (cd "$req_dir" && python -m cyclonedx_bom -r "$req_file" -o "$out_file"); then
+              if (cd "$req_dir" && python -m cyclonedx_bom -r -i "$req_file" -o "$out_file"); then
                 return 0
               fi
             fi
