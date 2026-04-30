@@ -121,7 +121,10 @@ def test_fake_helper_supports_vz_linux_vm_create_and_exec(monkeypatch) -> None:
             "run_id": "run-1",
             "session_id": "session-1",
             "session_mode": True,
+            "template_id": "vz_linux:debian-bookworm-arm64",
             "template": "/tmp/template.img",
+            "run_manifest_path": "/tmp/image-store/runs/run-1/manifest.json",
+            "planning_source": "image_store",
             "workspace_path": "/tmp/workspace",
         }
     )
@@ -132,7 +135,10 @@ def test_fake_helper_supports_vz_linux_vm_create_and_exec(monkeypatch) -> None:
     assert created.metadata.run_id == "run-1"
     assert created.metadata.session_id == "session-1"
     assert created.metadata.session_mode is True
+    assert created.metadata.template_id == "vz_linux:debian-bookworm-arm64"
     assert created.metadata.template_path == "/tmp/template.img"
+    assert created.metadata.run_manifest_path == "/tmp/image-store/runs/run-1/manifest.json"
+    assert created.metadata.planning_source == "image_store"
     assert created.metadata.workspace_path == "/tmp/workspace"
     assert created.metadata.created_at != ""
     assert created.details["runtime"] == "vz_linux"
@@ -403,7 +409,10 @@ def test_socket_helper_supports_ping_validate_create_exec_status_and_terminate(m
                     "run_id": "run-1",
                     "session_id": "",
                     "session_mode": False,
+                    "template_id": "vz_linux:debian-bookworm-arm64",
                     "template_path": "/tmp/template.img",
+                    "run_manifest_path": "/tmp/image-store/runs/run-1/manifest.json",
+                    "planning_source": "image_store",
                     "workspace_path": "/tmp/workspace",
                     "created_at": "2026-04-30T18:00:00Z",
                 },
@@ -437,7 +446,15 @@ def test_socket_helper_supports_ping_validate_create_exec_status_and_terminate(m
 
     ping = client.ping()
     host = client.validate_vz_linux_host({"network_policy": "deny_all"})
-    vm = client.create_vm({"runtime": "vz_linux", "vm_name": "run-1"})
+    vm = client.create_vm(
+        {
+            "runtime": "vz_linux",
+            "vm_name": "run-1",
+            "template_id": "vz_linux:debian-bookworm-arm64",
+            "run_manifest_path": "/tmp/image-store/runs/run-1/manifest.json",
+            "planning_source": "image_store",
+        }
+    )
     exec_reply = client.exec_guest(vm_id=vm.vm_id, request={"argv": ["/bin/echo", "ok"]})
     status = client.get_vm_status("vm-transport-1")
     terminated = client.terminate_vm("vm-transport-1")
@@ -447,6 +464,9 @@ def test_socket_helper_supports_ping_validate_create_exec_status_and_terminate(m
     assert vm.vm_id == "vm-transport-1"
     assert vm.metadata.owner == "tldw"
     assert vm.metadata.run_id == "run-1"
+    assert vm.metadata.template_id == "vz_linux:debian-bookworm-arm64"
+    assert vm.metadata.run_manifest_path == "/tmp/image-store/runs/run-1/manifest.json"
+    assert vm.metadata.planning_source == "image_store"
     assert exec_reply.stdout == b"ok\n"
     assert status.vm_id == "vm-transport-1"
     assert terminated is True
@@ -458,6 +478,9 @@ def test_socket_helper_supports_ping_validate_create_exec_status_and_terminate(m
         "get_vm_status",
         "terminate_vm",
     ]
+    assert requests[2]["request"]["template_id"] == "vz_linux:debian-bookworm-arm64"
+    assert requests[2]["request"]["run_manifest_path"] == "/tmp/image-store/runs/run-1/manifest.json"
+    assert requests[2]["request"]["planning_source"] == "image_store"
 
 
 def test_socket_helper_raises_protocol_error_for_mismatched_protocol(monkeypatch) -> None:

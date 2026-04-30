@@ -215,6 +215,11 @@ def test_vz_linux_start_run_uses_image_store_template_id_when_configured(monkeyp
     assert status.phase == RunPhase.completed
     assert calls[0][1]["template"] == str(bundle)
     assert calls[1][1]["template"] == str(bundle)
+    assert calls[1][1]["template_id"] == template_id
+    assert calls[1][1]["planning_source"] == "image_store"
+    assert calls[1][1]["run_manifest_path"] == str(
+        store_root / "runs" / "vz-run-with-store" / "manifest.json"
+    )
     persisted_manifest = SandboxImageStore(root_path=store_root).get_run_clone_manifest(
         "vz-run-with-store"
     )

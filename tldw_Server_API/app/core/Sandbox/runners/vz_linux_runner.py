@@ -222,19 +222,23 @@ class VZLinuxRunner(VZBaseRunner):
         *,
         base_image: str | None,
         run_id: str,
-    ) -> tuple[str, SandboxImageStore | None]:
+    ) -> tuple[str, dict[str, str]]:
         template_text = str(base_image or "").strip()
         store = self._image_store()
         if store is None or not template_text:
-            return template_text, None
+            return template_text, {}
 
         record = store.get_template(template_text)
         if record is None:
-            return template_text, store
+            return template_text, {}
         if not record.source_path:
             raise RuntimeError("image_store_template_source_missing")
-        store.prepare_run_clone(template_id=record.template_id, run_id=run_id)
-        return record.source_path, store
+        run_manifest = store.prepare_run_clone(template_id=record.template_id, run_id=run_id)
+        return record.source_path, {
+            "planning_source": "image_store",
+            "run_manifest_path": str(store.root_path / "runs" / run_manifest.run_id / "manifest.json"),
+            "template_id": record.template_id,
+        }
 
     @classmethod
     def cancel_run(cls, run_id: str) -> bool:
@@ -298,7 +302,7 @@ class VZLinuxRunner(VZBaseRunner):
             self._write_inline_files(workspace, spec.files_inline)
 
             helper = self.helper_client_cls()
-            template_request, _image_store = self._resolve_template_request(
+            template_request, template_request_metadata = self._resolve_template_request(
                 base_image=spec.base_image,
                 run_id=run_id,
             )
@@ -347,9 +351,11 @@ class VZLinuxRunner(VZBaseRunner):
                         "session_mode": session_mode,
                         "workspace_path": workspace,
                         "workspace_mount": "virtiofs",
+                        "template_id": template_ref,
                         "template": template_source,
                         "network_policy": str(spec.network_policy or "deny_all").strip().lower() or "deny_all",
                         "timeout_sec": int(spec.startup_timeout_sec or spec.timeout_sec or 300),
+                        **template_request_metadata,
                     }
                 )
                 vm_id = vm.vm_id

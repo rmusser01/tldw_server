@@ -177,7 +177,10 @@ final class HelperService {
             runID: metadata.runID,
             sessionID: metadata.sessionID,
             sessionMode: metadata.sessionMode,
+            templateID: metadata.templateID,
             templatePath: metadata.templatePath.isEmpty ? templatePath : metadata.templatePath,
+            runManifestPath: metadata.runManifestPath,
+            planningSource: metadata.planningSource,
             workspacePath: metadata.workspacePath.isEmpty ? workspacePath : metadata.workspacePath,
             createdAt: metadata.createdAt.isEmpty ? metadataDateFormatter.string(from: Date()) : metadata.createdAt
         )

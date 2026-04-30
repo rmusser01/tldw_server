@@ -20,7 +20,10 @@ import Testing
         runID: "run-1",
         sessionID: "session-1",
         sessionMode: true,
+        templateID: "vz_linux:bundle",
         templatePath: "/tmp/bundle",
+        runManifestPath: "/tmp/image-store/runs/run-1/manifest.json",
+        planningSource: "image_store",
         workspacePath: "/tmp/workspace",
         createdAt: "2026-04-30T18:00:00Z"
     )
@@ -29,6 +32,7 @@ import Testing
 
     #expect(registry.status(vmID: "vm-1")?.metadata.owner == "tldw")
     #expect(registry.status(vmID: "vm-1")?.metadata.runID == "run-1")
+    #expect(registry.status(vmID: "vm-1")?.metadata.templateID == "vz_linux:bundle")
 }
 
 @Test func vmRegistryPreservesMetadataAcrossStateUpdates() throws {
@@ -39,7 +43,10 @@ import Testing
         runID: "run-1",
         sessionID: "",
         sessionMode: false,
+        templateID: "vz_linux:bundle",
         templatePath: "/tmp/bundle",
+        runManifestPath: "/tmp/image-store/runs/run-1/manifest.json",
+        planningSource: "image_store",
         workspacePath: "/tmp/workspace",
         createdAt: "2026-04-30T18:00:00Z"
     )

@@ -81,7 +81,10 @@ Every failure response should include:
     "run_id": "run-123",
     "session_id": "session-456",
     "session_mode": true,
+    "template_id": "vz_linux:bundle",
     "template_path": "/var/lib/tldw/vz-linux/debian-arm64",
+    "run_manifest_path": "/var/lib/tldw/image-store/runs/run-123/manifest.json",
+    "planning_source": "image_store",
     "workspace_path": "/tmp/tldw-vz-linux-workspace",
     "created_at": "2026-04-30T18:00:00Z"
   },
@@ -171,7 +174,10 @@ Response:
         "run_id": "run-123",
         "session_id": "session-456",
         "session_mode": true,
+        "template_id": "vz_linux:bundle",
         "template_path": "/var/lib/tldw/vz-linux/debian-arm64",
+        "run_manifest_path": "/var/lib/tldw/image-store/runs/run-123/manifest.json",
+        "planning_source": "image_store",
         "workspace_path": "/tmp/tldw-vz-linux-workspace",
         "created_at": "2026-04-30T18:00:00Z"
       },

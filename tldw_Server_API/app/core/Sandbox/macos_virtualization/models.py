@@ -53,7 +53,10 @@ class HelperVMMetadata:
     run_id: str = ""
     session_id: str = ""
     session_mode: bool = False
+    template_id: str = ""
     template_path: str = ""
+    run_manifest_path: str = ""
+    planning_source: str = ""
     workspace_path: str = ""
     created_at: str = ""
 
@@ -72,7 +75,10 @@ def _metadata_field(payload: dict[str, Any]) -> HelperVMMetadata:
         "runtime",
         "run_id",
         "session_id",
+        "template_id",
         "template_path",
+        "run_manifest_path",
+        "planning_source",
         "workspace_path",
         "created_at",
     )
@@ -89,7 +95,10 @@ def _metadata_field(payload: dict[str, Any]) -> HelperVMMetadata:
         run_id=_str_field(raw, "run_id").strip(),
         session_id=_str_field(raw, "session_id").strip(),
         session_mode=_bool_field(raw, "session_mode"),
+        template_id=_str_field(raw, "template_id").strip(),
         template_path=_str_field(raw, "template_path").strip(),
+        run_manifest_path=_str_field(raw, "run_manifest_path").strip(),
+        planning_source=_str_field(raw, "planning_source").strip(),
         workspace_path=_str_field(raw, "workspace_path").strip(),
         created_at=_str_field(raw, "created_at").strip(),
     )
