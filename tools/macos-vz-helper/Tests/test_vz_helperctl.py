@@ -146,6 +146,19 @@ def test_ensure_private_dir_refuses_symlink(tmp_path):
     CASE.assertEqual(result, helperctl.CheckResult(ok=False, reason="helper_directory_unsafe"))
 
 
+def test_ensure_private_dir_refuses_missing_child_under_symlink_parent(tmp_path):
+    helperctl = load_helperctl()
+    target = tmp_path / "target"
+    link = tmp_path / "runtime"
+    target.mkdir()
+    link.symlink_to(target, target_is_directory=True)
+
+    result = helperctl.ensure_private_dir(link / "child")
+
+    CASE.assertEqual(result, helperctl.CheckResult(ok=False, reason="helper_directory_unsafe"))
+    CASE.assertFalse((target / "child").exists())
+
+
 def test_ensure_private_dir_refuses_regular_file(tmp_path):
     helperctl = load_helperctl()
     runtime_dir = tmp_path / "runtime"
@@ -155,6 +168,17 @@ def test_ensure_private_dir_refuses_regular_file(tmp_path):
 
     CASE.assertEqual(result, helperctl.CheckResult(ok=False, reason="helper_directory_unsafe"))
     CASE.assertEqual(runtime_dir.read_text(encoding="utf-8"), "not a directory")
+
+
+def test_ensure_private_dir_refuses_missing_child_under_file_parent(tmp_path):
+    helperctl = load_helperctl()
+    runtime_file = tmp_path / "runtime"
+    runtime_file.write_text("not a directory", encoding="utf-8")
+
+    result = helperctl.ensure_private_dir(runtime_file / "child")
+
+    CASE.assertEqual(result, helperctl.CheckResult(ok=False, reason="helper_directory_unsafe"))
+    CASE.assertEqual(runtime_file.read_text(encoding="utf-8"), "not a directory")
 
 
 def test_ensure_private_dir_refuses_group_or_other_accessible_existing_dir_without_chmod(tmp_path):

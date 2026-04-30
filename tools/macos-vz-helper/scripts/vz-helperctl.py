@@ -89,6 +89,11 @@ def ensure_private_dir(path: Path, dry_run: bool = False) -> CheckResult:
             break
         current = parent
 
+    if current != path:
+        parent_result = _validate_private_dir(current)
+        if not parent_result.ok:
+            return parent_result
+
     for directory in reversed(missing_dirs):
         if directory.exists():
             result = _validate_private_dir(directory)
