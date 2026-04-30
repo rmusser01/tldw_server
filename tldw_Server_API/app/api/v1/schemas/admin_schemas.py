@@ -1470,6 +1470,7 @@ class WebhookListResponse(BaseModel):
     """Response for webhook listing."""
     items: list[WebhookItem]
     total: int
+    pagination: OffsetPaginationMeta
 
     model_config = ConfigDict(from_attributes=True)
 

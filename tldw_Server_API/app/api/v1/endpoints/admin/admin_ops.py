@@ -899,9 +899,16 @@ async def list_webhooks(
     """List all configured webhooks (secrets redacted)."""
     _require_platform_admin(principal)
     items = svc_list_webhooks()
+    limit = len(items)
     return WebhookListResponse(
         items=[WebhookItem(**item) for item in items],
         total=len(items),
+        pagination=build_offset_pagination_meta(
+            total=len(items),
+            limit=limit,
+            offset=0,
+            count=len(items),
+        ),
     )
 
 

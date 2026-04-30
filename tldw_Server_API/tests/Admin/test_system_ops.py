@@ -175,6 +175,25 @@ async def test_admin_system_ops_endpoints(monkeypatch, tmp_path):
         delete_resp = client.delete(f"/api/v1/admin/incidents/{incident_id}")
         assert delete_resp.status_code == 200, delete_resp.text
 
+        webhook_create_resp = client.post(
+            "/api/v1/admin/webhooks",
+            json={
+                "url": "https://example.com/webhook",
+                "events": ["incident.created"],
+                "enabled": True,
+            },
+        )
+        assert webhook_create_resp.status_code == 200, webhook_create_resp.text
+
+        webhooks_resp = client.get("/api/v1/admin/webhooks")
+        assert webhooks_resp.status_code == 200, webhooks_resp.text
+        webhook_payload = webhooks_resp.json()
+        assert webhook_payload["total"] >= 1
+        assert webhook_payload["pagination"]["total"] >= 1
+        assert webhook_payload["pagination"]["offset"] == 0
+        assert webhook_payload["pagination"]["limit"] >= 1
+        assert any(item["url"] == "https://example.com/webhook" for item in webhook_payload["items"])
+
         # Reset maintenance state for subsequent tests
         client.put(
             "/api/v1/admin/maintenance",
