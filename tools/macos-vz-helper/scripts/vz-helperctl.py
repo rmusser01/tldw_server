@@ -91,6 +91,9 @@ def ensure_private_dir(path: Path, dry_run: bool = False) -> CheckResult:
         current = parent
 
     if current != path:
+        # The nearest existing private directory is the trust boundary. Parents
+        # above it may be shared system/user directories, but they cannot expose
+        # descendants without execute permission on this boundary.
         parent_result = _validate_private_dir(current)
         if not parent_result.ok:
             return parent_result

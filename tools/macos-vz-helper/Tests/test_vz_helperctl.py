@@ -215,6 +215,36 @@ def test_ensure_private_dir_dry_run_refuses_missing_child_under_unsafe_parent(tm
     CASE.assertFalse((runtime_dir / "child").exists())
 
 
+def test_ensure_private_dir_allows_missing_child_under_private_boundary(tmp_path):
+    helperctl = load_helperctl()
+    shared_parent = tmp_path / "shared"
+    shared_parent.mkdir(mode=0o755)
+    shared_parent.chmod(0o755)
+    private_parent = shared_parent / "private"
+    private_parent.mkdir(mode=0o700)
+    private_parent.chmod(0o700)
+
+    result = helperctl.ensure_private_dir(private_parent / "child")
+
+    CASE.assertEqual(result, helperctl.CheckResult(ok=True))
+    CASE.assertEqual((private_parent / "child").stat().st_mode & 0o777, 0o700)
+
+
+def test_ensure_private_dir_dry_run_allows_missing_child_under_private_boundary(tmp_path):
+    helperctl = load_helperctl()
+    shared_parent = tmp_path / "shared"
+    shared_parent.mkdir(mode=0o755)
+    shared_parent.chmod(0o755)
+    private_parent = shared_parent / "private"
+    private_parent.mkdir(mode=0o700)
+    private_parent.chmod(0o700)
+
+    result = helperctl.ensure_private_dir(private_parent / "child", dry_run=True)
+
+    CASE.assertEqual(result, helperctl.CheckResult(ok=True))
+    CASE.assertFalse((private_parent / "child").exists())
+
+
 def test_ensure_private_dir_refuses_group_or_other_accessible_existing_dir_without_chmod(tmp_path):
     helperctl = load_helperctl()
     runtime_dir = tmp_path / "runtime"
