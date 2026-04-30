@@ -33,10 +33,15 @@ from tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps import (
     require_project_access,
     require_project_write_access,
 )
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_page_pagination_meta
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 
 # Local imports
-from tldw_Server_API.app.api.v1.schemas.prompt_studio_base import ListResponse, StandardResponse
+from tldw_Server_API.app.api.v1.schemas.prompt_studio_base import (
+    ListResponse,
+    PageListResponse,
+    StandardResponse,
+)
 from tldw_Server_API.app.api.v1.schemas.prompt_studio_project import (
     PromptCreate,
     StructuredPromptConvertRequest,
@@ -482,7 +487,7 @@ async def create_prompt(
 
 @router.get(
     "/list/{project_id}",
-    response_model=ListResponse,
+    response_model=PageListResponse,
     openapi_extra={
         "responses": {
             "200": {
@@ -519,7 +524,7 @@ async def list_prompts(
     include_deleted: bool = Query(False, description="Include deleted prompts"),
     _: bool = Depends(require_project_access),
     db: PromptStudioDatabase = Depends(get_prompt_studio_db)
-) -> ListResponse:
+) -> PageListResponse:
     """
     List prompts in a project.
 
@@ -542,10 +547,16 @@ async def list_prompts(
         )
         prompts = [PromptResponse(**prompt) for prompt in result.get("prompts", [])]
 
-        return ListResponse(
+        return PageListResponse(
             success=True,
             data=prompts,
             metadata=result.get("pagination", {}),
+            pagination=build_page_pagination_meta(
+                page=result["pagination"]["page"],
+                per_page=result["pagination"]["per_page"],
+                total=result["pagination"]["total"],
+                total_pages=result["pagination"]["total_pages"],
+            ),
         )
 
     except (DatabaseError, InputError) as e:
@@ -565,7 +576,7 @@ async def list_prompts(
         ) from e
 
 # Simple alias that mirrors the canonical list response shape
-@router.get("", response_model=ListResponse)
+@router.get("", response_model=PageListResponse)
 async def list_prompts_simple(
     project_id: int = Query(..., description="Project ID"),
     page: int = Query(1, ge=1, description="Page number"),
@@ -573,7 +584,7 @@ async def list_prompts_simple(
     include_deleted: bool = Query(False, description="Include deleted prompts"),
     _: bool = Depends(require_project_access),
     db: PromptStudioDatabase = Depends(get_prompt_studio_db)
-) -> ListResponse:
+) -> PageListResponse:
     return await list_prompts(project_id, page, per_page, include_deleted, True, db)  # type: ignore[arg-type]
 
 # Simple execute endpoint used by tests
