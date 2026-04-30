@@ -660,3 +660,56 @@ def test_start_helper_passes_managed_log_paths_to_process_starter(tmp_path):
     CASE.assertEqual(received["env"]["TLDW_SANDBOX_VZ_LINUX_SERIAL_LOG_DIR"], str(log_dir / "serial"))
     CASE.assertEqual(received["kwargs"]["stdout_path"], log_dir / "helper.stdout.log")
     CASE.assertEqual(received["kwargs"]["stderr_path"], log_dir / "helper.stderr.log")
+
+
+def test_status_helper_checks_entitlements_before_ping(tmp_path):
+    helperctl = load_helperctl()
+    helper = tmp_path / "macos-vz-helper"
+    socket_path = tmp_path / "runtime" / "helper.sock"
+    pid_file = tmp_path / "runtime" / "helper.pid"
+    entitlements = tmp_path / "helper.entitlements"
+    helper.write_text("#!/bin/sh\n", encoding="utf-8")
+    entitlements.write_text("<plist/>", encoding="utf-8")
+    pid_file.parent.mkdir(mode=0o700)
+    pid_file.write_text("1234\n", encoding="utf-8")
+    ping_calls = []
+
+    result = helperctl.status_helper(
+        helper,
+        socket_path,
+        pid_file,
+        entitlements_path=entitlements,
+        entitlement_checker=lambda helper_path, entitlements_path: helperctl.CheckResult(
+            False, "helper_entitlements_mismatch"
+        ),
+        ping_checker=lambda path: ping_calls.append(path) or helperctl.CheckResult(True),
+        process_lookup=lambda pid: helperctl.ProcessInfo(pid=pid, command=str(helper)),
+    )
+
+    CASE.assertEqual(result, helperctl.CheckResult(ok=False, reason="helper_entitlements_mismatch"))
+    CASE.assertEqual(ping_calls, [])
+
+
+def test_status_cli_accepts_entitlements_flag(tmp_path, capsys):
+    helperctl = load_helperctl()
+    helper = tmp_path / "macos-vz-helper"
+    entitlements = tmp_path / "missing.entitlements"
+    helper.write_text("#!/bin/sh\n", encoding="utf-8")
+
+    code = helperctl.main(
+        [
+            "status",
+            "--helper",
+            str(helper),
+            "--socket",
+            str(tmp_path / "runtime" / "helper.sock"),
+            "--pid-file",
+            str(tmp_path / "runtime" / "helper.pid"),
+            "--entitlements",
+            str(entitlements),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    CASE.assertEqual(code, 1)
+    CASE.assertIn("helper_entitlements_missing", captured.out)

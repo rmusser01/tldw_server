@@ -427,6 +427,8 @@ def status_helper(
     socket_path: Path,
     pid_file: Path,
     *,
+    entitlements_path: Path | None = None,
+    entitlement_checker: Callable[[Path, Path | None], CheckResult] = compare_entitlements,
     ping_checker: Callable[[Path], CheckResult] = _ping_helper,
     process_lookup: Callable[[int], ProcessInfo | None] = lookup_process,
 ) -> CheckResult:
@@ -438,6 +440,9 @@ def status_helper(
         return pid_result
     if pid_result.reason == "helper_pid_stale":
         return pid_result
+    entitlement_result = entitlement_checker(helper_path, entitlements_path)
+    if not entitlement_result.ok:
+        return entitlement_result
     if not pid_file.exists():
         return CheckResult(ok=True, reason="helper_not_running")
     return ping_checker(socket_path)
@@ -552,6 +557,7 @@ def _status_command(args: argparse.Namespace) -> int:
         Path(args.helper_path) if args.helper_path else DEFAULT_HELPER,
         Path(args.socket_path) if args.socket_path else paths.socket_path,
         Path(args.pid_file) if args.pid_file else paths.pid_file,
+        entitlements_path=Path(args.entitlements) if args.entitlements else None,
     )
     _print_results([("status", result)], as_json=args.json)
     return 0 if result.ok else 1
@@ -619,6 +625,7 @@ def build_parser() -> argparse.ArgumentParser:
     status.add_argument("--helper", "--helper-path", dest="helper_path")
     status.add_argument("--socket", "--socket-path", dest="socket_path")
     status.add_argument("--pid-file")
+    status.add_argument("--entitlements")
     status.add_argument("--json", action="store_true")
     status.set_defaults(func=_status_command)
 
