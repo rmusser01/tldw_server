@@ -12,6 +12,8 @@ enum UnixSocketServerError: Error {
     case acceptFailed(Int32)
     case readFailed(Int32)
     case writeFailed(Int32)
+    case unsafeSocketPath(String)
+    case existingSocketPathIsNotSocket(String)
 }
 
 final class UnixSocketServer {
@@ -36,11 +38,7 @@ final class UnixSocketServer {
         if isRunning {
             return
         }
-        try FileManager.default.createDirectory(
-            at: URL(fileURLWithPath: socketPath).deletingLastPathComponent(),
-            withIntermediateDirectories: true
-        )
-        unlink(socketPath)
+        try prepareSocketPath()
 
         let socketFD = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
         guard socketFD >= 0 else {
@@ -200,6 +198,31 @@ final class UnixSocketServer {
         guard Darwin.listen(socketFD, SOMAXCONN) == 0 else {
             throw UnixSocketServerError.listenFailed(errno)
         }
+    }
+
+    private func prepareSocketPath() throws {
+        try FileManager.default.createDirectory(
+            at: URL(fileURLWithPath: socketPath).deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+
+        var existing = stat()
+        let statResult = lstat(socketPath, &existing)
+        if statResult != 0 {
+            if errno == ENOENT {
+                return
+            }
+            throw UnixSocketServerError.unsafeSocketPath(socketPath)
+        }
+
+        let type = existing.st_mode & S_IFMT
+        if type == S_IFLNK {
+            throw UnixSocketServerError.unsafeSocketPath(socketPath)
+        }
+        if type != S_IFSOCK {
+            throw UnixSocketServerError.existingSocketPathIsNotSocket(socketPath)
+        }
+        unlink(socketPath)
     }
 
     private func handleConnection(clientFD: Int32) throws {
