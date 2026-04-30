@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 import pytest
 from fastapi import FastAPI
+from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 from starlette.requests import Request
 
@@ -106,6 +108,50 @@ def _make_app_with_registry(registry: _RegistryStub) -> FastAPI:
     app.dependency_overrides[mlx_ep.check_rate_limit] = _fake_check_rate_limit
     app.dependency_overrides[mlx_ep._resolve_mlx_registry] = lambda: registry
     return app
+
+
+def _route_for_path(path: str) -> APIRoute:
+    matches = [
+        route
+        for route in mlx_ep.router.routes
+        if isinstance(route, APIRoute) and route.path == path
+    ]
+    assert len(matches) == 1
+    return matches[0]
+
+
+def _role_guard_dependencies(route: APIRoute) -> list[Callable[..., Any]]:
+    expected_checker_code = auth_deps.RequireRole("admin").__code__
+    return [
+        dependency.dependency
+        for dependency in route.dependencies
+        if getattr(dependency.dependency, "__code__", None) is expected_checker_code
+    ]
+
+
+def _dependency_requires_roles(dependency: Callable[..., Any], roles: list[str]) -> bool:
+    closure_values = [
+        cell.cell_contents
+        for cell in getattr(dependency, "__closure__", None) or ()
+    ]
+    return roles in closure_values
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/llm/providers/mlx/load",
+        "/llm/providers/mlx/unload",
+        "/llm/providers/mlx/status",
+    ],
+)
+def test_mlx_management_uses_standard_role_factory_alias(path: str) -> None:
+    assert mlx_ep.RequireRole is auth_deps.RequireRole
+    assert not hasattr(mlx_ep, "require_roles")
+    role_guards = _role_guard_dependencies(_route_for_path(path))
+    assert len(role_guards) == 1
+    assert _dependency_requires_roles(role_guards[0], ["admin"])
 
 
 @pytest.mark.unit

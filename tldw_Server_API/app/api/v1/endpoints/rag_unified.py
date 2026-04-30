@@ -19,11 +19,11 @@ from fastapi.responses import StreamingResponse
 from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    RequirePermission,
     check_rate_limit,
     get_auth_principal,
     rbac_rate_limit,
-    require_permissions,
-    require_token_scope,
+    TokenScopeGuard,
 )
 from tldw_Server_API.app.api.v1.API_Deps.billing_deps import require_within_limit
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
@@ -1013,8 +1013,8 @@ async def list_vlm_backends():
     dependencies=[
         Depends(check_rate_limit),
         Depends(rbac_rate_limit("rag.search")),
-        Depends(require_permissions(MEDIA_READ)),
-        Depends(require_token_scope("any", require_if_present=True, endpoint_id="rag.search", count_as="call")),
+        Depends(RequirePermission(MEDIA_READ)),
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="rag.search", count_as="call")),
         Depends(require_within_limit(LimitCategory.RAG_QUERIES_DAY, 1)),
     ]
 )
@@ -1242,7 +1242,7 @@ async def rag_implicit_feedback(
     response_description="Batch processing results",
     dependencies=[
         Depends(check_rate_limit),
-        Depends(require_permissions(MEDIA_READ)),
+        Depends(RequirePermission(MEDIA_READ)),
     ]
 )
 async def unified_batch_endpoint(
@@ -1443,7 +1443,7 @@ async def unified_batch_endpoint(
     response_description="Search results",
     dependencies=[
         Depends(check_rate_limit),
-        Depends(require_permissions(MEDIA_READ)),
+        Depends(RequirePermission(MEDIA_READ)),
         Depends(require_within_limit(LimitCategory.RAG_QUERIES_DAY, 1)),
     ]
 )
@@ -1536,7 +1536,7 @@ async def simple_search_endpoint(
     description="Resume a batch RAG operation from a checkpoint.",
     dependencies=[
         Depends(check_rate_limit),
-        Depends(require_permissions(MEDIA_READ)),
+        Depends(RequirePermission(MEDIA_READ)),
     ],
 )
 async def resume_batch_endpoint(
@@ -1733,7 +1733,7 @@ async def resume_batch_endpoint(
     description="Stream generated answer chunks with optional incremental claim overlay events (NDJSON)",
     dependencies=[
         Depends(check_rate_limit),
-        Depends(require_permissions(MEDIA_READ)),
+        Depends(RequirePermission(MEDIA_READ)),
         Depends(require_within_limit(LimitCategory.RAG_QUERIES_DAY, 1)),
     ]
 )
@@ -1819,7 +1819,7 @@ async def unified_search_stream_endpoint(
     - Performance analysis
     """,
     response_description="Full search results with analysis",
-    dependencies=[Depends(check_rate_limit), Depends(require_permissions(MEDIA_READ))]
+    dependencies=[Depends(check_rate_limit), Depends(RequirePermission(MEDIA_READ))]
 )
 async def advanced_search_endpoint(
     request: Request,

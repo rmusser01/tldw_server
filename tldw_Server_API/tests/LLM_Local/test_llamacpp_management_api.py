@@ -180,6 +180,12 @@ def _make_app_with_manager(manager) -> FastAPI:  # noqa: ANN001
 
 
 @pytest.mark.unit
+def test_llamacpp_management_uses_standard_role_factory_alias():
+    assert lp.RequireRole is auth_deps.RequireRole
+    assert not hasattr(lp, "require_roles")
+
+
+@pytest.mark.unit
 def test_llamacpp_start_server_happy_path():
     app = _make_app_with_manager(_ManagedStub())
 

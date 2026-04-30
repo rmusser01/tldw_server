@@ -22,8 +22,8 @@ from fastapi.responses import StreamingResponse
 
 from tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps import get_audit_service_for_user
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    RequireRole,
     get_auth_principal,
-    require_roles,
 )
 from tldw_Server_API.app.core.Audit.unified_audit_service import AuditContext, AuditEventType
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
@@ -57,7 +57,7 @@ _JOBS_ADMIN_NONCRITICAL_EXCEPTIONS = (
 )
 
 router = APIRouter(
-    dependencies=[Depends(require_roles("admin"))],
+    dependencies=[Depends(RequireRole("admin"))],
 )
 
 
@@ -151,7 +151,7 @@ def _enforce_domain_scope_unified(
     Unified domain-scoped RBAC enforcement for jobs admin endpoints.
 
     All jobs-admin endpoints in this module use this helper alongside the
-    router-level require_roles(\"admin\") guard. It always derives the
+    router-level RequireRole(\"admin\") guard. It always derives the
     admin_user from the AuthPrincipal so callers can reuse the same user
     mapping for downstream operations (e.g., Postgres RLS). When
     JOBS_DOMAIN_RBAC_PRINCIPAL is enabled, enforcement is driven from the

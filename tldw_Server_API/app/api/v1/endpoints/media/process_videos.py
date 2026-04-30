@@ -17,8 +17,8 @@ from loguru import logger
 from starlette.responses import JSONResponse
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    RequirePermission,
     rbac_rate_limit,
-    require_permissions,
 )
 from tldw_Server_API.app.api.v1.API_Deps.billing_deps import propagate_billing_headers, require_within_limit
 from tldw_Server_API.app.api.v1.API_Deps.storage_quota_guard import guard_storage_quota
@@ -63,7 +63,7 @@ router = APIRouter()
     summary="Transcribe / chunk / analyse videos and return the full artefacts (no DB write)",
     tags=["Media Processing (No DB)"],
     dependencies=[
-        Depends(require_permissions(MEDIA_CREATE)),
+        Depends(RequirePermission(MEDIA_CREATE)),
         Depends(rbac_rate_limit("media.create")),
         Depends(guard_storage_quota),
         Depends(require_within_limit(LimitCategory.STORAGE_MB, 1)),

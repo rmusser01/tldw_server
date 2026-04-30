@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse
 from loguru import logger
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import require_roles
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import RequireRole
 from tldw_Server_API.app.api.v1.endpoints.discord_oauth_admin import (
     discord_admin_delete_installation_impl,
     discord_admin_get_policy_impl,
@@ -47,6 +47,7 @@ from tldw_Server_API.app.api.v1.endpoints.discord_support import (
     _parse_discord_interaction_command,
     _public_installation_record,
     _rate_limit_key,
+    _reset_discord_state_for_tests,
     _resolve_discord_actor_id,
     _safe_int,
     _set_discord_policy,
@@ -424,7 +425,7 @@ async def discord_oauth_callback(
 
 @router.get(
     "/admin/policy",
-    dependencies=[Depends(require_roles("admin"))],
+    dependencies=[Depends(RequireRole("admin"))],
 )
 async def discord_admin_get_policy(
     guild_id: str | None = Query(default=None),
@@ -438,7 +439,7 @@ async def discord_admin_get_policy(
 
 @router.put(
     "/admin/policy",
-    dependencies=[Depends(require_roles("admin"))],
+    dependencies=[Depends(RequireRole("admin"))],
 )
 async def discord_admin_set_policy(
     payload: dict[str, Any] | None = None,
@@ -451,7 +452,7 @@ async def discord_admin_set_policy(
     )
 
 
-@router.get("/admin/installations", dependencies=[Depends(require_roles("admin"))])
+@router.get("/admin/installations", dependencies=[Depends(RequireRole("admin"))])
 async def discord_admin_list_installations(
     user: User = Depends(get_request_user),
 ):
@@ -464,7 +465,7 @@ async def discord_admin_list_installations(
     )
 
 
-@router.delete("/admin/installations/{guild_id}", dependencies=[Depends(require_roles("admin"))])
+@router.delete("/admin/installations/{guild_id}", dependencies=[Depends(RequireRole("admin"))])
 async def discord_admin_delete_installation(
     request: Request,
     guild_id: str,
@@ -483,7 +484,7 @@ async def discord_admin_delete_installation(
     )
 
 
-@router.put("/admin/installations/{guild_id}", dependencies=[Depends(require_roles("admin"))])
+@router.put("/admin/installations/{guild_id}", dependencies=[Depends(RequireRole("admin"))])
 async def discord_admin_set_installation_state(
     request: Request,
     guild_id: str,

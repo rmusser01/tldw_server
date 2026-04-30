@@ -10,7 +10,7 @@ import time
 from collections import deque
 from collections.abc import AsyncGenerator, Awaitable, Mapping
 from datetime import datetime, timezone
-from typing import Any, Callable, Optional
+from typing import Annotated, Any, Callable, Optional
 from weakref import WeakKeyDictionary
 
 #
@@ -738,7 +738,11 @@ async def get_current_user(
     x_api_key: Optional[str] = Header(None, alias="X-API-KEY")
 ) -> dict[str, Any]:
     """
-    Resolve and return the current authenticated user.
+    Legacy compatibility shim that resolves and returns a user dictionary.
+
+    New or migrated route code should prefer ``CurrentPrincipal`` /
+    ``get_auth_principal`` unless the endpoint still requires dictionary-shaped
+    user data for backwards compatibility.
 
     Supports Bearer JWT authentication and API keys via `X-API-KEY` or
     Authorization Bearer (non-JWT tokens). If an upstream dependency already
@@ -1560,7 +1564,10 @@ async def get_current_active_user(
     current_user: dict[str, Any] = Depends(get_current_user)
 ) -> dict[str, Any]:
     """
-    Get current active user (verified and not locked)
+    Legacy compatibility shim that returns an active user dictionary.
+
+    New or migrated route code should prefer ``CurrentPrincipal`` /
+    ``get_auth_principal`` unless dictionary-shaped user data is still needed.
 
     Args:
         current_user: Current authenticated user
@@ -2500,6 +2507,36 @@ def require_token_scope(
         )
 
     return _checker
+
+
+#######################################################################################################################
+#
+# Phase 3.4 Standard Auth Dependency Surface
+
+CurrentPrincipal = Annotated[AuthPrincipal, Depends(get_auth_principal)]
+"""Route dependency alias that resolves and returns the current AuthPrincipal."""
+
+CurrentUserDict = Annotated[dict[str, Any], Depends(get_current_active_user)]
+"""Legacy route dependency alias for endpoints that still require user dictionaries."""
+
+_require_admin_principal = require_roles("admin")
+AdminPrincipal = Annotated[AuthPrincipal, Depends(_require_admin_principal)]
+"""Route dependency alias that returns an AuthPrincipal after admin role checks."""
+
+ServicePrincipal = Annotated[AuthPrincipal, Depends(require_service_principal)]
+"""Route dependency alias that returns an AuthPrincipal after service-principal checks."""
+
+RequireRole = require_roles
+"""Standard role-guard factory; returns an AuthPrincipal on success."""
+
+RequirePermission = require_permissions
+"""Standard permission-guard factory; returns an AuthPrincipal on success."""
+
+RequireApiKeyScope = require_api_key_scope
+"""Standard API-key-scope guard factory; returns an AuthPrincipal on success."""
+
+TokenScopeGuard = require_token_scope
+"""Standard token-scope guard factory for dependency lists; returns None on success."""
 #
 # End of auth_deps.py
 #######################################################################################################################

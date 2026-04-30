@@ -10,8 +10,8 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, 
 from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
-    require_permissions,
-    require_roles,
+    RequirePermission,
+    RequireRole,
 )
 from tldw_Server_API.app.api.v1.schemas.moderation_schemas import (
     BlocklistAppendRequest,
@@ -40,8 +40,8 @@ from tldw_Server_API.app.core.Moderation.supervised_policy import (
 
 router = APIRouter(
     dependencies=[
-        Depends(require_roles("admin")),
-        Depends(require_permissions(SYSTEM_CONFIGURE)),
+        Depends(RequireRole("admin")),
+        Depends(RequirePermission(SYSTEM_CONFIGURE)),
     ]
 )
 

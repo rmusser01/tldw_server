@@ -12,7 +12,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from loguru import logger
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, require_roles
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import RequireRole, check_rate_limit
 from tldw_Server_API.app.api.v1.schemas.config_schemas import (
     ConfigValue,
     EffectiveConfigResponse,
@@ -36,7 +36,7 @@ from tldw_Server_API.app.core.TTS.tts_config import get_tts_config_manager
 router = APIRouter(
     prefix="/admin/config",
     tags=["admin", "config"],
-    dependencies=[Depends(check_rate_limit), Depends(require_roles("admin"))],
+    dependencies=[Depends(check_rate_limit), Depends(RequireRole("admin"))],
 )
 
 _SENSITIVE_KEY_PATTERN = re.compile(

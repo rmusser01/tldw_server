@@ -19,7 +19,7 @@ from fastapi.encoders import jsonable_encoder
 from loguru import logger
 from pydantic import ValidationError
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import rbac_rate_limit, require_permissions
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import RequirePermission, rbac_rate_limit
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user, get_chacha_db_for_user_id
 from tldw_Server_API.app.api.v1.API_Deps.Collections_DB_Deps import get_collections_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
@@ -1139,7 +1139,7 @@ def _generate_presentation(
     response_model=PresentationResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Create a presentation",
-    dependencies=[Depends(require_permissions(MEDIA_CREATE)), Depends(rbac_rate_limit("slides.create"))],
+    dependencies=[Depends(RequirePermission(MEDIA_CREATE)), Depends(rbac_rate_limit("slides.create"))],
 )
 async def create_presentation(
     request: PresentationCreateRequest,
@@ -1199,7 +1199,7 @@ async def create_presentation(
     "/presentations",
     response_model=PresentationListResponse,
     summary="List presentations",
-    dependencies=[Depends(require_permissions(MEDIA_READ)), Depends(rbac_rate_limit("slides.list"))],
+    dependencies=[Depends(RequirePermission(MEDIA_READ)), Depends(rbac_rate_limit("slides.list"))],
 )
 async def list_presentations(
     limit: int = Query(50, ge=1, le=200),
@@ -1228,7 +1228,7 @@ async def list_presentations(
     "/presentations/search",
     response_model=PresentationSearchResponse,
     summary="Search presentations",
-    dependencies=[Depends(require_permissions(MEDIA_READ)), Depends(rbac_rate_limit("slides.search"))],
+    dependencies=[Depends(RequirePermission(MEDIA_READ)), Depends(rbac_rate_limit("slides.search"))],
 )
 async def search_presentations(
     q: str = Query(..., min_length=1),
@@ -1250,7 +1250,7 @@ async def search_presentations(
     "/presentations/{presentation_id}",
     response_model=PresentationResponse,
     summary="Get presentation",
-    dependencies=[Depends(require_permissions(MEDIA_READ)), Depends(rbac_rate_limit("slides.get"))],
+    dependencies=[Depends(RequirePermission(MEDIA_READ)), Depends(rbac_rate_limit("slides.get"))],
 )
 async def get_presentation(
     presentation_id: str,
@@ -1271,7 +1271,7 @@ async def get_presentation(
     "/presentations/{presentation_id}",
     response_model=PresentationResponse,
     summary="Update presentation",
-    dependencies=[Depends(require_permissions(MEDIA_UPDATE)), Depends(rbac_rate_limit("slides.update"))],
+    dependencies=[Depends(RequirePermission(MEDIA_UPDATE)), Depends(rbac_rate_limit("slides.update"))],
 )
 async def update_presentation(
     presentation_id: str,
@@ -1341,7 +1341,7 @@ async def update_presentation(
     "/presentations/{presentation_id}",
     response_model=PresentationResponse,
     summary="Patch presentation",
-    dependencies=[Depends(require_permissions(MEDIA_UPDATE)), Depends(rbac_rate_limit("slides.update"))],
+    dependencies=[Depends(RequirePermission(MEDIA_UPDATE)), Depends(rbac_rate_limit("slides.update"))],
 )
 async def patch_presentation(
     presentation_id: str,
@@ -1447,7 +1447,7 @@ async def patch_presentation(
     "/presentations/{presentation_id}/reorder",
     response_model=PresentationResponse,
     summary="Reorder slides in a presentation",
-    dependencies=[Depends(require_permissions(MEDIA_UPDATE)), Depends(rbac_rate_limit("slides.update"))],
+    dependencies=[Depends(RequirePermission(MEDIA_UPDATE)), Depends(rbac_rate_limit("slides.update"))],
 )
 async def reorder_presentation(
     presentation_id: str,
@@ -1501,7 +1501,7 @@ async def reorder_presentation(
     "/presentations/{presentation_id}",
     response_model=PresentationResponse,
     summary="Soft delete presentation",
-    dependencies=[Depends(require_permissions(MEDIA_DELETE)), Depends(rbac_rate_limit("slides.delete"))],
+    dependencies=[Depends(RequirePermission(MEDIA_DELETE)), Depends(rbac_rate_limit("slides.delete"))],
 )
 async def delete_presentation(
     presentation_id: str,
@@ -1527,7 +1527,7 @@ async def delete_presentation(
     "/presentations/{presentation_id}/restore",
     response_model=PresentationResponse,
     summary="Restore soft-deleted presentation",
-    dependencies=[Depends(require_permissions(MEDIA_UPDATE)), Depends(rbac_rate_limit("slides.restore"))],
+    dependencies=[Depends(RequirePermission(MEDIA_UPDATE)), Depends(rbac_rate_limit("slides.restore"))],
 )
 async def restore_presentation(
     presentation_id: str,
@@ -1553,7 +1553,7 @@ async def restore_presentation(
     "/templates",
     response_model=SlidesTemplateListResponse,
     summary="List slide templates",
-    dependencies=[Depends(require_permissions(MEDIA_READ)), Depends(rbac_rate_limit("slides.templates.list"))],
+    dependencies=[Depends(RequirePermission(MEDIA_READ)), Depends(rbac_rate_limit("slides.templates.list"))],
 )
 async def list_templates() -> SlidesTemplateListResponse:
     try:
@@ -1567,7 +1567,7 @@ async def list_templates() -> SlidesTemplateListResponse:
     "/templates/{template_id}",
     response_model=SlidesTemplateResponse,
     summary="Get slide template",
-    dependencies=[Depends(require_permissions(MEDIA_READ)), Depends(rbac_rate_limit("slides.templates.get"))],
+    dependencies=[Depends(RequirePermission(MEDIA_READ)), Depends(rbac_rate_limit("slides.templates.get"))],
 )
 async def get_template(template_id: str) -> SlidesTemplateResponse:
     try:
@@ -1583,7 +1583,7 @@ async def get_template(template_id: str) -> SlidesTemplateResponse:
     "/styles",
     response_model=VisualStyleListResponse,
     summary="List visual styles",
-    dependencies=[Depends(require_permissions(MEDIA_READ)), Depends(rbac_rate_limit("slides.styles.list"))],
+    dependencies=[Depends(RequirePermission(MEDIA_READ)), Depends(rbac_rate_limit("slides.styles.list"))],
 )
 async def list_visual_styles(
     limit: int = Query(50, ge=1, le=500),
@@ -1617,7 +1617,7 @@ async def list_visual_styles(
     "/styles/{style_id}",
     response_model=VisualStyleResponse,
     summary="Get visual style",
-    dependencies=[Depends(require_permissions(MEDIA_READ)), Depends(rbac_rate_limit("slides.styles.get"))],
+    dependencies=[Depends(RequirePermission(MEDIA_READ)), Depends(rbac_rate_limit("slides.styles.get"))],
 )
 async def get_visual_style(
     style_id: str,
@@ -1631,7 +1631,7 @@ async def get_visual_style(
     response_model=VisualStyleResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Create visual style",
-    dependencies=[Depends(require_permissions(MEDIA_CREATE)), Depends(rbac_rate_limit("slides.styles.create"))],
+    dependencies=[Depends(RequirePermission(MEDIA_CREATE)), Depends(rbac_rate_limit("slides.styles.create"))],
 )
 async def create_visual_style(
     request: VisualStyleCreateRequest,
@@ -1658,7 +1658,7 @@ async def create_visual_style(
     "/styles/{style_id}",
     response_model=VisualStyleResponse,
     summary="Patch visual style",
-    dependencies=[Depends(require_permissions(MEDIA_UPDATE)), Depends(rbac_rate_limit("slides.styles.update"))],
+    dependencies=[Depends(RequirePermission(MEDIA_UPDATE)), Depends(rbac_rate_limit("slides.styles.update"))],
 )
 async def patch_visual_style(
     style_id: str,
@@ -1749,7 +1749,7 @@ async def patch_visual_style(
     "/styles/{style_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Delete visual style",
-    dependencies=[Depends(require_permissions(MEDIA_DELETE)), Depends(rbac_rate_limit("slides.styles.delete"))],
+    dependencies=[Depends(RequirePermission(MEDIA_DELETE)), Depends(rbac_rate_limit("slides.styles.delete"))],
 )
 async def delete_visual_style(
     style_id: str,
@@ -1773,7 +1773,7 @@ async def delete_visual_style(
     "/presentations/{presentation_id}/versions",
     response_model=PresentationVersionListResponse,
     summary="List presentation versions",
-    dependencies=[Depends(require_permissions(MEDIA_READ)), Depends(rbac_rate_limit("slides.versions.list"))],
+    dependencies=[Depends(RequirePermission(MEDIA_READ)), Depends(rbac_rate_limit("slides.versions.list"))],
 )
 async def list_presentation_versions(
     presentation_id: str,
@@ -1804,7 +1804,7 @@ async def list_presentation_versions(
     "/presentations/{presentation_id}/versions/{version}",
     response_model=PresentationResponse,
     summary="Get presentation version",
-    dependencies=[Depends(require_permissions(MEDIA_READ)), Depends(rbac_rate_limit("slides.versions.get"))],
+    dependencies=[Depends(RequirePermission(MEDIA_READ)), Depends(rbac_rate_limit("slides.versions.get"))],
 )
 async def get_presentation_version(
     presentation_id: str,
@@ -1823,7 +1823,7 @@ async def get_presentation_version(
     "/presentations/{presentation_id}/versions/{version}/restore",
     response_model=PresentationResponse,
     summary="Restore presentation to a previous version",
-    dependencies=[Depends(require_permissions(MEDIA_UPDATE)), Depends(rbac_rate_limit("slides.versions.restore"))],
+    dependencies=[Depends(RequirePermission(MEDIA_UPDATE)), Depends(rbac_rate_limit("slides.versions.restore"))],
 )
 async def restore_presentation_version(
     presentation_id: str,
@@ -1894,7 +1894,7 @@ async def restore_presentation_version(
     response_model=PresentationRenderJobResponse,
     status_code=status.HTTP_202_ACCEPTED,
     summary="Submit a presentation render job",
-    dependencies=[Depends(require_permissions(MEDIA_UPDATE)), Depends(rbac_rate_limit("slides.render.submit"))],
+    dependencies=[Depends(RequirePermission(MEDIA_UPDATE)), Depends(rbac_rate_limit("slides.render.submit"))],
 )
 async def submit_presentation_render_job(
     presentation_id: str,
@@ -1947,7 +1947,7 @@ async def submit_presentation_render_job(
     "/render-jobs/{job_id}",
     response_model=PresentationRenderJobStatusResponse,
     summary="Get presentation render job status",
-    dependencies=[Depends(require_permissions(MEDIA_READ)), Depends(rbac_rate_limit("slides.render.status"))],
+    dependencies=[Depends(RequirePermission(MEDIA_READ)), Depends(rbac_rate_limit("slides.render.status"))],
 )
 async def get_presentation_render_job_status(
     job_id: int,
@@ -1987,7 +1987,7 @@ async def get_presentation_render_job_status(
     "/presentations/{presentation_id}/render-artifacts",
     response_model=PresentationRenderArtifactListResponse,
     summary="List presentation render artifacts",
-    dependencies=[Depends(require_permissions(MEDIA_READ)), Depends(rbac_rate_limit("slides.render.artifacts"))],
+    dependencies=[Depends(RequirePermission(MEDIA_READ)), Depends(rbac_rate_limit("slides.render.artifacts"))],
 )
 async def list_presentation_render_artifacts(
     presentation_id: str,
@@ -2033,7 +2033,7 @@ async def list_presentation_render_artifacts(
     "/generate",
     response_model=PresentationResponse,
     summary="Generate slides from prompt",
-    dependencies=[Depends(require_permissions(MEDIA_CREATE)), Depends(rbac_rate_limit("slides.generate"))],
+    dependencies=[Depends(RequirePermission(MEDIA_CREATE)), Depends(rbac_rate_limit("slides.generate"))],
 )
 async def generate_from_prompt(
     request: GenerateFromPromptRequest,
@@ -2058,7 +2058,7 @@ async def generate_from_prompt(
     "/generate/from-chat",
     response_model=PresentationResponse,
     summary="Generate slides from chat conversation",
-    dependencies=[Depends(require_permissions(MEDIA_CREATE)), Depends(rbac_rate_limit("slides.generate"))],
+    dependencies=[Depends(RequirePermission(MEDIA_CREATE)), Depends(rbac_rate_limit("slides.generate"))],
 )
 async def generate_from_chat(
     request: GenerateFromChatRequest,
@@ -2093,7 +2093,7 @@ async def generate_from_chat(
     "/generate/from-media",
     response_model=PresentationResponse,
     summary="Generate slides from media transcript",
-    dependencies=[Depends(require_permissions(MEDIA_CREATE)), Depends(rbac_rate_limit("slides.generate"))],
+    dependencies=[Depends(RequirePermission(MEDIA_CREATE)), Depends(rbac_rate_limit("slides.generate"))],
 )
 async def generate_from_media(
     request: GenerateFromMediaRequest,
@@ -2136,7 +2136,7 @@ async def generate_from_media(
     "/generate/from-notes",
     response_model=PresentationResponse,
     summary="Generate slides from notes",
-    dependencies=[Depends(require_permissions(MEDIA_CREATE)), Depends(rbac_rate_limit("slides.generate"))],
+    dependencies=[Depends(RequirePermission(MEDIA_CREATE)), Depends(rbac_rate_limit("slides.generate"))],
 )
 async def generate_from_notes(
     request: GenerateFromNotesRequest,
@@ -2176,7 +2176,7 @@ async def generate_from_notes(
     "/generate/from-rag",
     response_model=PresentationResponse,
     summary="Generate slides from RAG results",
-    dependencies=[Depends(require_permissions(MEDIA_CREATE)), Depends(rbac_rate_limit("slides.generate"))],
+    dependencies=[Depends(RequirePermission(MEDIA_CREATE)), Depends(rbac_rate_limit("slides.generate"))],
 )
 async def generate_from_rag(
     request: GenerateFromRagRequest,
@@ -2218,7 +2218,7 @@ async def generate_from_rag(
 @router.get(
     "/presentations/{presentation_id}/export",
     summary="Export presentation",
-    dependencies=[Depends(require_permissions(MEDIA_READ)), Depends(rbac_rate_limit("slides.export"))],
+    dependencies=[Depends(RequirePermission(MEDIA_READ)), Depends(rbac_rate_limit("slides.export"))],
 )
 async def export_presentation(
     presentation_id: str,

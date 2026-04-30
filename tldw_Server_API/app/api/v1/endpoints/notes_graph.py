@@ -5,9 +5,9 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
 from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    RequirePermission,
     rbac_rate_limit,
-    require_permissions,
-    require_token_scope,
+    TokenScopeGuard,
 )
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
@@ -102,8 +102,8 @@ async def get_notes_graph(
     current_user: User = Depends(get_request_user),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
     _: None = Depends(rbac_rate_limit("notes.graph.read")),
-    __: None = Depends(require_permissions(NOTES_GRAPH_READ)),
-    ___: None = Depends(require_token_scope("notes", require_if_present=True, endpoint_id="notes.graph.read")),
+    __: None = Depends(RequirePermission(NOTES_GRAPH_READ)),
+    ___: None = Depends(TokenScopeGuard("notes", require_if_present=True, endpoint_id="notes.graph.read")),
 ):
     """Return a bounded subgraph of notes, tags, and sources."""
     if not NOTES_GRAPH_ENABLED():
@@ -166,8 +166,8 @@ async def get_note_neighbors(
     current_user: User = Depends(get_request_user),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
     _: None = Depends(rbac_rate_limit("notes.graph.read")),
-    __: None = Depends(require_permissions(NOTES_GRAPH_READ)),
-    ___: None = Depends(require_token_scope("notes", require_if_present=True, endpoint_id="notes.graph.read")),
+    __: None = Depends(RequirePermission(NOTES_GRAPH_READ)),
+    ___: None = Depends(TokenScopeGuard("notes", require_if_present=True, endpoint_id="notes.graph.read")),
 ):
     """Return a radius=1 ego network for the given note."""
     if not NOTES_GRAPH_ENABLED():
@@ -245,8 +245,8 @@ async def create_manual_link(
     current_user: User = Depends(get_request_user),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
     _: None = Depends(rbac_rate_limit("notes.graph.write")),
-    __: None = Depends(require_permissions(NOTES_GRAPH_WRITE)),
-    ___: None = Depends(require_token_scope("notes", require_if_present=True, endpoint_id="notes.graph.write")),
+    __: None = Depends(RequirePermission(NOTES_GRAPH_WRITE)),
+    ___: None = Depends(TokenScopeGuard("notes", require_if_present=True, endpoint_id="notes.graph.write")),
 ) -> dict[str, Any]:
     """
     Create a manual link in the user's ChaChaNotes DB. Populates created_by.
@@ -305,8 +305,8 @@ async def delete_manual_link(
     current_user: User = Depends(get_request_user),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
     _: None = Depends(rbac_rate_limit("notes.graph.write")),
-    __: None = Depends(require_permissions(NOTES_GRAPH_WRITE)),
-    ___: None = Depends(require_token_scope("notes", require_if_present=True, endpoint_id="notes.graph.write")),
+    __: None = Depends(RequirePermission(NOTES_GRAPH_WRITE)),
+    ___: None = Depends(TokenScopeGuard("notes", require_if_present=True, endpoint_id="notes.graph.write")),
 ) -> dict[str, Any]:
     """
     Delete a manual link by id for the current user.

@@ -15,7 +15,7 @@ from fastapi import (
 )
 from loguru import logger
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import rbac_rate_limit, require_permissions
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import RequirePermission, rbac_rate_limit
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import (
     get_media_db_for_user,
     try_get_media_db_for_user,
@@ -508,7 +508,7 @@ async def list_media_trash_endpoint(
     "/trash/empty",
     summary="Empty media trash",
     dependencies=[
-        Depends(require_permissions(MEDIA_DELETE)),
+        Depends(RequirePermission(MEDIA_DELETE)),
         Depends(rbac_rate_limit("media.delete")),
     ],
 )

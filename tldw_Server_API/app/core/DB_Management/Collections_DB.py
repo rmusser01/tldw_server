@@ -399,11 +399,7 @@ def _decorate_collections_public_operations(cls: type["CollectionsDatabase"]) ->
     for name, attribute in list(vars(cls).items()):
         if name.startswith("_") or name in {"ensure_schema", "transaction"}:
             continue
-        if isinstance(attribute, type):
-            continue
-        if isinstance(attribute, (classmethod, staticmethod, property)):
-            continue
-        if isinstance(attribute, type):
+        if isinstance(attribute, (classmethod, staticmethod, property, type)):
             continue
         if not callable(attribute):
             continue

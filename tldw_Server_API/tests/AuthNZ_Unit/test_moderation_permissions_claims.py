@@ -81,6 +81,13 @@ def _build_app(
     return app
 
 
+def test_moderation_router_uses_standard_auth_factory_aliases() -> None:
+    assert moderation_mod.RequireRole is auth_deps.RequireRole
+    assert moderation_mod.RequirePermission is auth_deps.RequirePermission
+    assert not hasattr(moderation_mod, "require_roles")
+    assert not hasattr(moderation_mod, "require_permissions")
+
+
 @pytest.mark.asyncio
 async def test_moderation_users_401_when_principal_unavailable():
     app = _build_app(principal=None, fail_with_401=True)

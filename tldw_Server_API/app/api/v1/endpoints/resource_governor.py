@@ -8,7 +8,7 @@ from fastapi import APIRouter, Body, Depends, Path, Query
 from fastapi.responses import JSONResponse
 from loguru import logger
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import require_roles
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import RequireRole
 from tldw_Server_API.app.main import app as _app
 
 router = APIRouter()
@@ -70,7 +70,7 @@ def _get_or_init_governor() -> Any | None:
 
 @router.get(
     "/resource-governor/policy",
-    dependencies=[Depends(require_roles("admin"))],
+    dependencies=[Depends(RequireRole("admin"))],
 )
 async def get_resource_governor_policy(
     include: str | None = Query(None, description="Include extra data: 'ids' or 'full'"),
@@ -195,7 +195,7 @@ async def get_resource_governor_policy(
         return JSONResponse({"status": "error", "error": "internal server error"}, status_code=500)
 
 
-# --- Policy admin endpoints (gated by require_roles('admin')) ---
+# --- Policy admin endpoints (gated by RequireRole('admin')) ---
 from pydantic import BaseModel, Field
 
 from tldw_Server_API.app.core.Resource_Governance.policy_admin import (
@@ -211,7 +211,7 @@ class PolicyUpsertRequest(BaseModel):
 
 @router.put(
     "/resource-governor/policy/{policy_id}",
-    dependencies=[Depends(require_roles("admin"))],
+    dependencies=[Depends(RequireRole("admin"))],
 )
 async def upsert_policy(
     policy_id: str = Path(..., description="Policy identifier, e.g., 'chat.default'"),
@@ -274,7 +274,7 @@ async def upsert_policy(
 
 @router.delete(
     "/resource-governor/policy/{policy_id}",
-    dependencies=[Depends(require_roles("admin"))],
+    dependencies=[Depends(RequireRole("admin"))],
 )
 async def delete_policy(
     policy_id: str = Path(..., description="Policy identifier"),
@@ -337,7 +337,7 @@ async def delete_policy(
 
 @router.get(
     "/resource-governor/policies",
-    dependencies=[Depends(require_roles("admin"))],
+    dependencies=[Depends(RequireRole("admin"))],
 )
 async def list_policies():
     try:
@@ -351,7 +351,7 @@ async def list_policies():
 
 @router.get(
     "/resource-governor/policy/{policy_id}",
-    dependencies=[Depends(require_roles("admin"))],
+    dependencies=[Depends(RequireRole("admin"))],
 )
 async def get_policy(policy_id: str = Path(..., description="Policy identifier")):
     try:
@@ -368,7 +368,7 @@ async def get_policy(policy_id: str = Path(..., description="Policy identifier")
 # --- Diagnostics (admin) ---
 @router.get(
     "/resource-governor/diag/peek",
-    dependencies=[Depends(require_roles("admin"))],
+    dependencies=[Depends(RequireRole("admin"))],
 )
 async def rg_diag_peek(
     entity: str = Query(..., description="Entity key, e.g., 'user:123'"),
@@ -397,7 +397,7 @@ async def rg_diag_peek(
 
 @router.get(
     "/resource-governor/diag/query",
-    dependencies=[Depends(require_roles("admin"))],
+    dependencies=[Depends(RequireRole("admin"))],
 )
 async def rg_diag_query(
     entity: str = Query(..., description="Entity key, e.g., 'user:123'"),
@@ -418,7 +418,7 @@ async def rg_diag_query(
 
 @router.get(
     "/resource-governor/diag/media-budget",
-    dependencies=[Depends(require_roles("admin"))],
+    dependencies=[Depends(RequireRole("admin"))],
 )
 async def rg_diag_media_budget(
     user_id: int = Query(..., ge=1, description="User id to inspect, e.g., 123"),
@@ -545,7 +545,7 @@ async def rg_diag_media_budget(
 
 @router.get(
     "/resource-governor/diag/capabilities",
-    dependencies=[Depends(require_roles("admin"))],
+    dependencies=[Depends(RequireRole("admin"))],
 )
 async def rg_diag_capabilities():
     """Tiny capability probe to report whether Lua or fallback paths are in use."""
@@ -570,7 +570,7 @@ async def rg_diag_capabilities():
 
 @router.get(
     "/diag/coverage",
-    dependencies=[Depends(require_roles("admin"))],
+    dependencies=[Depends(RequireRole("admin"))],
     summary="Resource Governor endpoint coverage audit",
 )
 async def rg_coverage_audit():

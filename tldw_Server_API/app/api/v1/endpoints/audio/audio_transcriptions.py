@@ -22,7 +22,7 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     check_rate_limit,
     get_auth_principal,
     get_db_transaction,
-    require_token_scope,
+    TokenScopeGuard,
 )
 from tldw_Server_API.app.api.v1.API_Deps.billing_deps import get_billing_org_id, require_within_limit
 from tldw_Server_API.app.core.Resource_Governance import cost_units
@@ -441,7 +441,7 @@ def _dictation_error_detail(
     dependencies=[
         Depends(check_rate_limit),
         Depends(
-            require_token_scope("any", require_if_present=True, endpoint_id="audio.transcriptions", count_as="call")
+            TokenScopeGuard("any", require_if_present=True, endpoint_id="audio.transcriptions", count_as="call")
         ),
         Depends(require_within_limit(LimitCategory.API_CALLS_DAY, 1)),
         # Pessimistic pre-check: verifies at least 1 minute of transcription
@@ -1344,7 +1344,7 @@ async def create_transcription(
     },
     dependencies=[
         Depends(check_rate_limit),
-        Depends(require_token_scope("any", require_if_present=True, endpoint_id="audio.translations", count_as="call")),
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="audio.translations", count_as="call")),
         Depends(require_within_limit(LimitCategory.API_CALLS_DAY, 1)),
         # Pessimistic pre-check: verifies at least 1 minute of transcription
         # quota remains.  Actual duration is unknown until after processing,

@@ -6,8 +6,11 @@
 import os
 from collections.abc import Iterator
 from contextlib import contextmanager
+from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
+from fastapi import Request
 from fastapi.testclient import TestClient
 
 # Keep module-level app import lightweight for this suite.
@@ -22,7 +25,9 @@ _routes_disable.update({"media", "audio", "audio-websocket"})
 os.environ["ROUTES_DISABLE"] = ",".join(sorted(_routes_disable))
 
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
+from tldw_Server_API.app.api.v1.API_Deps import auth_deps
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.Skills.exceptions import SkillsError
@@ -35,7 +40,7 @@ TEST_USER_ID = 999
 
 
 @pytest.fixture()
-def client(tmp_path, monkeypatch):
+def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
     """Provide a TestClient with mocked auth and isolated user database."""
     from tldw_Server_API.app.main import app as fastapi_app
 
@@ -46,16 +51,96 @@ def client(tmp_path, monkeypatch):
     db_path = user_base / "ChaChaNotes.db"
     chacha_db = CharactersRAGDB(db_path=db_path, client_id="test_client")
 
-    async def override_user():
+    async def override_user() -> User:
         return User(id=TEST_USER_ID, username="skills-test-user", email=None, is_active=True)
 
-    def override_chacha_db():
+    def override_chacha_db() -> CharactersRAGDB:
         return chacha_db
 
     # Monkeypatch DatabasePaths so SkillsService gets our temp dir
     monkeypatch.setattr(DatabasePaths, "get_user_base_directory", staticmethod(lambda uid: user_base))
 
     fastapi_app.dependency_overrides[get_request_user] = override_user
+    fastapi_app.dependency_overrides[get_chacha_db_for_user] = override_chacha_db
+
+    try:
+        with TestClient(fastapi_app) as c:
+            yield c
+    finally:
+        fastapi_app.dependency_overrides.clear()
+        chacha_db.close_connection()
+
+
+@pytest.fixture()
+def principal_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
+    """Provide a TestClient that authenticates skills routes through AuthPrincipal only."""
+    from tldw_Server_API.app.main import app as fastapi_app
+
+    user_base = tmp_path / "user_databases" / str(TEST_USER_ID)
+    user_base.mkdir(parents=True)
+    monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path / "user_databases"))
+
+    db_path = user_base / "ChaChaNotes.db"
+    chacha_db = CharactersRAGDB(db_path=db_path, client_id="principal_test_client")
+
+    principal = AuthPrincipal(
+        kind="user",
+        user_id=TEST_USER_ID,
+        username="skills-principal-user",
+        roles=["user"],
+        permissions=["skills.read", "skills.write"],
+        subject=f"user:{TEST_USER_ID}",
+        token_type="access",
+    )
+
+    async def override_principal(request: Request) -> AuthPrincipal:
+        request.state.auth = AuthContext(principal=principal)
+        request.state._auth_user = {
+            "id": principal.user_id,
+            "username": principal.username,
+            "roles": list(principal.roles),
+            "permissions": list(principal.permissions),
+            "is_active": True,
+            "is_verified": True,
+        }
+        request.state.user_id = principal.user_id
+        request.state.api_key_id = principal.api_key_id
+        request.state.org_ids = list(principal.org_ids)
+        request.state.team_ids = list(principal.team_ids)
+        return principal
+
+    def override_chacha_db() -> CharactersRAGDB:
+        return chacha_db
+
+    monkeypatch.setattr(DatabasePaths, "get_user_base_directory", staticmethod(lambda uid: user_base))
+
+    fastapi_app.dependency_overrides[auth_deps.get_auth_principal] = override_principal
+    fastapi_app.dependency_overrides[get_chacha_db_for_user] = override_chacha_db
+
+    try:
+        with TestClient(fastapi_app) as c:
+            yield c
+    finally:
+        fastapi_app.dependency_overrides.clear()
+        chacha_db.close_connection()
+
+
+@pytest.fixture()
+def auth_path_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
+    """Provide a TestClient that leaves get_auth_principal on the real auth path."""
+    from tldw_Server_API.app.main import app as fastapi_app
+
+    user_base = tmp_path / "user_databases" / str(TEST_USER_ID)
+    user_base.mkdir(parents=True)
+    monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path / "user_databases"))
+
+    db_path = user_base / "ChaChaNotes.db"
+    chacha_db = CharactersRAGDB(db_path=db_path, client_id="auth_path_test_client")
+
+    def override_chacha_db() -> CharactersRAGDB:
+        return chacha_db
+
+    monkeypatch.setattr(DatabasePaths, "get_user_base_directory", staticmethod(lambda uid: user_base))
     fastapi_app.dependency_overrides[get_chacha_db_for_user] = override_chacha_db
 
     try:
@@ -92,6 +177,112 @@ def _capture_skills_endpoint_errors() -> Iterator[list[str]]:
 class TestListSkills:
     def test_list_skills_empty(self, client):
         r = client.get(f"{SKILLS_PREFIX}/")
+        assert r.status_code == 200, r.text
+        data = r.json()
+        assert data["skills"] == []
+        assert data["total"] == 0
+
+    def test_list_skills_uses_current_principal_alias(self, principal_client):
+        r = principal_client.get(f"{SKILLS_PREFIX}/")
+        assert r.status_code == 200, r.text
+        data = r.json()
+        assert data["skills"] == []
+        assert data["total"] == 0
+
+    def test_list_skills_current_principal_accepts_single_user_api_key(
+        self,
+        auth_path_client,
+        monkeypatch,
+    ):
+        from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
+
+        with monkeypatch.context() as env:
+            env.setenv("AUTH_MODE", "single_user")
+            env.setenv("SINGLE_USER_API_KEY", "phase34-skills-single-user-key")
+            reset_settings()
+
+            r = auth_path_client.get(
+                f"{SKILLS_PREFIX}/",
+                headers={"X-API-KEY": "phase34-skills-single-user-key"},
+            )
+
+        reset_settings()
+
+        assert r.status_code == 200, r.text
+        data = r.json()
+        assert data["skills"] == []
+        assert data["total"] == 0
+
+    def test_list_skills_current_principal_accepts_jwt(
+        self,
+        auth_path_client,
+        monkeypatch,
+    ):
+        from tldw_Server_API.app.core.AuthNZ import User_DB_Handling as udh
+        from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
+
+        async def fake_verify_jwt_and_fetch_user(request: Request, token: str) -> User:
+            assert token == "jwt.header.signature"
+            request.state.user_id = TEST_USER_ID
+            request.state.org_ids = []
+            request.state.team_ids = []
+            return User(
+                id=TEST_USER_ID,
+                username="skills-jwt-user",
+                roles=["user"],
+                permissions=["skills.read"],
+            )
+
+        monkeypatch.setattr(udh, "verify_jwt_and_fetch_user", fake_verify_jwt_and_fetch_user)
+
+        with monkeypatch.context() as env:
+            env.setenv("AUTH_MODE", "multi_user")
+            reset_settings()
+            r = auth_path_client.get(
+                f"{SKILLS_PREFIX}/",
+                headers={"Authorization": "Bearer jwt.header.signature"},
+            )
+
+        reset_settings()
+
+        assert r.status_code == 200, r.text
+        data = r.json()
+        assert data["skills"] == []
+        assert data["total"] == 0
+
+    def test_list_skills_current_principal_accepts_api_key(
+        self,
+        auth_path_client,
+        monkeypatch,
+    ):
+        from tldw_Server_API.app.core.AuthNZ import User_DB_Handling as udh
+        from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
+
+        async def fake_authenticate_api_key_user(request: Request, api_key: str) -> User:
+            assert api_key == "phase34-skills-api-key"
+            request.state.user_id = TEST_USER_ID
+            request.state.api_key_id = 321
+            request.state.org_ids = []
+            request.state.team_ids = []
+            return User(
+                id=TEST_USER_ID,
+                username="skills-api-key-user",
+                roles=["automation"],
+                permissions=["skills.read"],
+            )
+
+        monkeypatch.setattr(udh, "authenticate_api_key_user", fake_authenticate_api_key_user)
+
+        with monkeypatch.context() as env:
+            env.setenv("AUTH_MODE", "multi_user")
+            reset_settings()
+            r = auth_path_client.get(
+                f"{SKILLS_PREFIX}/",
+                headers={"X-API-KEY": "phase34-skills-api-key"},
+            )
+
+        reset_settings()
+
         assert r.status_code == 200, r.text
         data = r.json()
         assert data["skills"] == []
@@ -559,6 +750,42 @@ class TestExecuteSkill:
         assert "Error executing skill" in joined
         assert "skills backend exploded" not in joined
         assert "/private/" not in joined
+
+    def test_execute_skill_request_context_uses_current_principal_alias(
+        self,
+        principal_client,
+        monkeypatch,
+    ):
+        create_resp = principal_client.post(
+            f"{SKILLS_PREFIX}/",
+            json={"name": "principal-exec-skill", "content": "Do: $ARGUMENTS"},
+        )
+        assert create_resp.status_code == 201, create_resp.text
+        observed = {}
+
+        async def fake_execute(self, *, skill_data, arguments, context):
+            observed["user_id"] = context.user_id if context else None
+            return SimpleNamespace(
+                skill_name=skill_data["name"],
+                rendered_prompt=f"rendered {arguments}",
+                allowed_tools=[],
+                model_override=None,
+                execution_mode="inline",
+                fork_output=None,
+            )
+
+        monkeypatch.setattr(
+            "tldw_Server_API.app.api.v1.endpoints.skills.SkillExecutor.execute",
+            fake_execute,
+        )
+
+        r = principal_client.post(
+            f"{SKILLS_PREFIX}/principal-exec-skill/execute",
+            json={"args": "principal args"},
+        )
+
+        assert r.status_code == 200, r.text
+        assert observed["user_id"] == TEST_USER_ID
 
 
 class TestContextPayload:

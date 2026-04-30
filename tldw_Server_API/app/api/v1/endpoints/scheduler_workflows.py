@@ -8,9 +8,9 @@ from loguru import logger
 from pydantic import BaseModel, Field
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    RequirePermission,
     get_auth_principal,
-    require_permissions,
-    require_token_scope,
+    TokenScopeGuard,
 )
 from tldw_Server_API.app.core.AuthNZ.permissions import WORKFLOWS_ADMIN
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
@@ -24,12 +24,12 @@ from tldw_Server_API.app.services.workflows_scheduler import (
 
 router = APIRouter(prefix="/api/v1/scheduler/workflows", tags=["scheduler", "workflows"])
 
-_ADMIN_RESCAN_SCOPE_DEP = require_token_scope(
+_ADMIN_RESCAN_SCOPE_DEP = TokenScopeGuard(
     "workflows",
     require_if_present=True,
     endpoint_id="scheduler.workflows.admin_rescan",
 )
-_ADMIN_RESCAN_PERMISSIONS_DEP = require_permissions(WORKFLOWS_ADMIN)
+_ADMIN_RESCAN_PERMISSIONS_DEP = RequirePermission(WORKFLOWS_ADMIN)
 
 
 class ScheduleCreateRequest(BaseModel):
@@ -130,7 +130,7 @@ def _is_scheduler_admin_user(current_user: User) -> bool:
     "",
     response_model=dict[str, str],
     status_code=201,
-    dependencies=[Depends(require_token_scope("workflows", require_if_present=True, endpoint_id="scheduler.workflows.create"))],
+    dependencies=[Depends(TokenScopeGuard("workflows", require_if_present=True, endpoint_id="scheduler.workflows.create"))],
 )
 async def create_schedule(
     body: ScheduleCreateRequest,
@@ -194,7 +194,7 @@ async def admin_rescan(
 @router.get(
     "",
     response_model=list[ScheduleResponse],
-    dependencies=[Depends(require_token_scope("workflows", require_if_present=True, endpoint_id="scheduler.workflows.list"))],
+    dependencies=[Depends(TokenScopeGuard("workflows", require_if_present=True, endpoint_id="scheduler.workflows.list"))],
 )
 async def list_schedules(
     owner: str | None = Query(None, description="Admin-only: filter by owner user_id"),
@@ -248,7 +248,7 @@ async def list_schedules(
 @router.get(
     "/{schedule_id}",
     response_model=ScheduleResponse,
-    dependencies=[Depends(require_token_scope("workflows", require_if_present=True, endpoint_id="scheduler.workflows.get"))],
+    dependencies=[Depends(TokenScopeGuard("workflows", require_if_present=True, endpoint_id="scheduler.workflows.get"))],
 )
 async def get_schedule(
     schedule_id: str,
@@ -309,7 +309,7 @@ async def get_schedule(
 @router.patch(
     "/{schedule_id}",
     response_model=dict[str, bool],
-    dependencies=[Depends(require_token_scope("workflows", require_if_present=True, endpoint_id="scheduler.workflows.update"))],
+    dependencies=[Depends(TokenScopeGuard("workflows", require_if_present=True, endpoint_id="scheduler.workflows.update"))],
 )
 async def update_schedule(
     schedule_id: str,
@@ -354,7 +354,7 @@ async def update_schedule(
 @router.delete(
     "/{schedule_id}",
     response_model=dict[str, bool],
-    dependencies=[Depends(require_token_scope("workflows", require_if_present=True, endpoint_id="scheduler.workflows.delete"))],
+    dependencies=[Depends(TokenScopeGuard("workflows", require_if_present=True, endpoint_id="scheduler.workflows.delete"))],
 )
 async def delete_schedule(
     schedule_id: str,
@@ -374,7 +374,7 @@ async def delete_schedule(
 @router.post(
     "/{schedule_id}/run-now",
     response_model=dict[str, str],
-    dependencies=[Depends(require_token_scope("workflows", require_if_present=True, require_schedule_match=True, schedule_path_param="schedule_id", allow_admin_bypass=True, endpoint_id="scheduler.workflows.run_now", count_as="run"))],
+    dependencies=[Depends(TokenScopeGuard("workflows", require_if_present=True, require_schedule_match=True, schedule_path_param="schedule_id", allow_admin_bypass=True, endpoint_id="scheduler.workflows.run_now", count_as="run"))],
 )
 async def run_now(
     schedule_id: str,
@@ -411,7 +411,7 @@ class DryRunRequest(BaseModel):
 @router.post(
     "/dry-run",
     response_model=dict[str, Any],
-    dependencies=[Depends(require_token_scope("workflows", require_if_present=True, endpoint_id="scheduler.workflows.dry_run"))],
+    dependencies=[Depends(TokenScopeGuard("workflows", require_if_present=True, endpoint_id="scheduler.workflows.dry_run"))],
 )
 async def dry_run_schedule(body: DryRunRequest, current_user: User = Depends(get_request_user)):
     """Validate cron/timezone and return next run time and echo inputs.

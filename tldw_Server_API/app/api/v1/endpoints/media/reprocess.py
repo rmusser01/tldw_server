@@ -7,7 +7,7 @@ from typing import Any
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Path, status
 from loguru import logger
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import rbac_rate_limit, require_permissions
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import RequirePermission, rbac_rate_limit
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.api.v1.endpoints import media_embeddings as embeddings_endpoint
 from tldw_Server_API.app.api.v1.schemas.media_request_models import ReprocessMediaRequest
@@ -188,7 +188,7 @@ async def _generate_embeddings(
 @router.post(
     "/{media_id:int}/reprocess",
     dependencies=[
-        Depends(require_permissions(MEDIA_UPDATE)),
+        Depends(RequirePermission(MEDIA_UPDATE)),
         Depends(rbac_rate_limit("media.update")),
     ],
     status_code=status.HTTP_200_OK,

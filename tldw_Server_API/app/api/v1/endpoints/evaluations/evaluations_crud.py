@@ -11,7 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     rbac_rate_limit,
-    require_token_scope,
+    TokenScopeGuard,
 )
 from tldw_Server_API.app.api.v1.endpoints.evaluations.evaluations_auth import (
     check_evaluation_rate_limit,
@@ -280,7 +280,7 @@ async def delete_evaluation(
     dependencies=[
         Depends(require_eval_permissions(EVALS_MANAGE)),
         Depends(check_evaluation_rate_limit),
-        Depends(require_token_scope(
+        Depends(TokenScopeGuard(
             "workflows",
             require_if_present=True,
             require_schedule_match=False,

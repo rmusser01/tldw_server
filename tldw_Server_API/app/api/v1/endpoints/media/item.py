@@ -6,7 +6,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, Request, Response, status
 from loguru import logger
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import rbac_rate_limit, require_permissions
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import RequirePermission, rbac_rate_limit
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.api.v1.schemas.media_request_models import (
     MediaKeywordsUpdateRequest,
@@ -164,7 +164,7 @@ async def get_media_item(
         status.HTTP_409_CONFLICT: {"description": "Media could not be moved to trash"},
     },
     dependencies=[
-        Depends(require_permissions(MEDIA_DELETE)),
+        Depends(RequirePermission(MEDIA_DELETE)),
         Depends(rbac_rate_limit("media.delete")),
     ],
 )
@@ -236,7 +236,7 @@ async def delete_media_item(
         status.HTTP_409_CONFLICT: {"description": "Media could not be restored from trash"},
     },
     dependencies=[
-        Depends(require_permissions(MEDIA_DELETE)),
+        Depends(RequirePermission(MEDIA_DELETE)),
         Depends(rbac_rate_limit("media.delete")),
     ],
 )
@@ -329,7 +329,7 @@ async def restore_media_item(
         status.HTTP_409_CONFLICT: {"description": "Media is not in trash"},
     },
     dependencies=[
-        Depends(require_permissions(MEDIA_DELETE)),
+        Depends(RequirePermission(MEDIA_DELETE)),
         Depends(rbac_rate_limit("media.delete")),
     ],
 )
@@ -674,7 +674,7 @@ async def update_media_item(
     response_model=MediaKeywordsResponse,
     summary="Update media keywords (add/remove/set)",
     dependencies=[
-        Depends(require_permissions(MEDIA_UPDATE)),
+        Depends(RequirePermission(MEDIA_UPDATE)),
         Depends(rbac_rate_limit("media.update")),
     ],
 )
