@@ -6,6 +6,7 @@ from tldw_Server_API.app.core.Sandbox.macos_virtualization.helper_client import 
     MacOSVirtualizationHelperUnavailable,
 )
 from tldw_Server_API.app.core.Sandbox.macos_virtualization.models import (
+    HelperVMMetadata,
     HelperVMListReply,
     HelperVMStatusReply,
 )
@@ -66,13 +67,41 @@ class _FailureHelper:
         raise MacOSVirtualizationHelperFailure("helper_internal_error", "list failed")
 
 
-def _vm(vm_id: str, *, state: str = "running", healthy: bool = True) -> HelperVMStatusReply:
+def _metadata(
+    *,
+    owner: str = "tldw",
+    runtime: str = "vz_linux",
+    run_id: str = "run-owned",
+    session_id: str = "",
+    session_mode: bool = False,
+    created_at: str = "2026-04-30T18:00:00Z",
+) -> HelperVMMetadata:
+    return HelperVMMetadata(
+        owner=owner,
+        runtime=runtime,
+        run_id=run_id,
+        session_id=session_id,
+        session_mode=session_mode,
+        template_path="/tmp/template",
+        workspace_path="/tmp/workspace",
+        created_at=created_at,
+    )
+
+
+def _vm(
+    vm_id: str,
+    *,
+    state: str = "running",
+    healthy: bool = True,
+    metadata: HelperVMMetadata | None = None,
+) -> HelperVMStatusReply:
     return HelperVMStatusReply(
         protocol_version="1",
         helper_version="0.1.0",
         vm_id=vm_id,
         state=state,
         healthy=healthy,
+        metadata=metadata or HelperVMMetadata(),
     )
 
 
@@ -107,10 +136,65 @@ def test_reconciliation_reports_healthy_stale_unhealthy_and_orphaned_vms():
         "healthy",
         "stale_session",
         "unhealthy_vm",
-        "orphaned_vm",
+        "unknown_orphaned_vm",
     }
     assert helper.terminated_vm_ids == []
     assert helper.deleted_vm_ids == []
+
+
+def test_reconciliation_classifies_orphaned_vms_by_ownership_metadata():
+    helper = _FakeHelper(
+        [
+            _vm("vm-owned", metadata=_metadata(run_id="run-owned")),
+            _vm("vm-unknown"),
+            _vm("vm-foreign-owner", metadata=_metadata(owner="other", run_id="run-foreign-owner")),
+            _vm("vm-foreign-runtime", metadata=_metadata(runtime="vz_macos", run_id="run-foreign-runtime")),
+            _vm("vm-missing-run", metadata=_metadata(run_id="")),
+            _vm("vm-missing-created", metadata=_metadata(run_id="run-missing-created", created_at="")),
+            _vm(
+                "vm-missing-session",
+                metadata=_metadata(run_id="run-missing-session", session_mode=True, session_id=""),
+            ),
+        ]
+    )
+
+    report = collect_vz_reconciliation(
+        orchestrator=_FakeOrchestrator([]),
+        helper_client=helper,
+    )
+
+    assert report["orphaned_vm_ids"] == [
+        "vm-foreign-owner",
+        "vm-foreign-runtime",
+        "vm-missing-created",
+        "vm-missing-run",
+        "vm-missing-session",
+        "vm-owned",
+        "vm-unknown",
+    ]
+    assert report["owned_orphaned_vm_ids"] == ["vm-owned"]
+    assert report["unknown_orphaned_vm_ids"] == [
+        "vm-missing-created",
+        "vm-missing-run",
+        "vm-missing-session",
+        "vm-unknown",
+    ]
+    assert report["foreign_orphaned_vm_ids"] == ["vm-foreign-owner", "vm-foreign-runtime"]
+
+    items_by_vm = {str(item["vm_id"]): item for item in report["items"] if "vm_id" in item}
+    assert items_by_vm["vm-owned"]["status"] == "owned_orphaned_vm"
+    assert items_by_vm["vm-owned"]["reason"] == "owned_orphan"
+    assert items_by_vm["vm-owned"]["termination_eligible"] is True
+    assert items_by_vm["vm-unknown"]["status"] == "unknown_orphaned_vm"
+    assert items_by_vm["vm-unknown"]["reason"] == "unknown_ownership"
+    assert items_by_vm["vm-unknown"]["termination_eligible"] is False
+    assert items_by_vm["vm-missing-run"]["status"] == "unknown_orphaned_vm"
+    assert items_by_vm["vm-missing-created"]["status"] == "unknown_orphaned_vm"
+    assert items_by_vm["vm-missing-session"]["status"] == "unknown_orphaned_vm"
+    assert items_by_vm["vm-foreign-owner"]["status"] == "foreign_orphaned_vm"
+    assert items_by_vm["vm-foreign-owner"]["reason"] == "foreign_owner"
+    assert items_by_vm["vm-foreign-owner"]["termination_eligible"] is False
+    assert items_by_vm["vm-foreign-runtime"]["status"] == "foreign_orphaned_vm"
 
 
 def test_reconciliation_classifies_helper_unavailable():
@@ -200,6 +284,9 @@ def test_reconciliation_unavailable_without_orchestrator():
         "unhealthy_session_ids": [],
         "skipped_active_session_ids": [],
         "orphaned_vm_ids": [],
+        "owned_orphaned_vm_ids": [],
+        "unknown_orphaned_vm_ids": [],
+        "foreign_orphaned_vm_ids": [],
         "items": [],
         "reasons": ["vz_reconciliation_unavailable"],
     }
@@ -241,6 +328,9 @@ def test_reconciliation_orders_id_lists_and_items_deterministically():
     assert report["stale_session_ids"] == ["sess-stale-a", "sess-stale-b"]
     assert report["unhealthy_session_ids"] == ["sess-unhealthy-a", "sess-unhealthy-b"]
     assert report["orphaned_vm_ids"] == ["vm-orphan-a", "vm-orphan-b"]
+    assert report["unknown_orphaned_vm_ids"] == ["vm-orphan-a", "vm-orphan-b"]
+    assert report["owned_orphaned_vm_ids"] == []
+    assert report["foreign_orphaned_vm_ids"] == []
     assert report["items"] == sorted(
         report["items"],
         key=lambda item: (

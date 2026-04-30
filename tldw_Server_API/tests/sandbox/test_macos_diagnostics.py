@@ -74,6 +74,9 @@ def _sample_diagnostics_payload() -> dict:
             "unhealthy_session_ids": [],
             "skipped_active_session_ids": [],
             "orphaned_vm_ids": [],
+            "owned_orphaned_vm_ids": [],
+            "unknown_orphaned_vm_ids": [],
+            "foreign_orphaned_vm_ids": [],
             "items": [
                 {
                     "status": "healthy",
@@ -330,6 +333,7 @@ def test_admin_schema_accepts_macos_diagnostics_payload() -> None:
     assert model.reconciliation is not None
     assert model.reconciliation.computed is True
     assert model.reconciliation.healthy_session_ids == ["sess-live"]
+    assert model.reconciliation.owned_orphaned_vm_ids == []
     assert model.reconciliation.items
 
 

@@ -115,13 +115,26 @@ def test_fake_helper_supports_vz_linux_vm_create_and_exec(monkeypatch) -> None:
     client = MacOSVirtualizationHelperClient()
     created = client.create_vm(
         {
+            "owner": "tldw",
             "runtime": "vz_linux",
             "vm_name": "vz-linux-run-1",
+            "run_id": "run-1",
+            "session_id": "session-1",
             "session_mode": True,
+            "template": "/tmp/template.img",
+            "workspace_path": "/tmp/workspace",
         }
     )
 
     assert created.state == "created"
+    assert created.metadata.owner == "tldw"
+    assert created.metadata.runtime == "vz_linux"
+    assert created.metadata.run_id == "run-1"
+    assert created.metadata.session_id == "session-1"
+    assert created.metadata.session_mode is True
+    assert created.metadata.template_path == "/tmp/template.img"
+    assert created.metadata.workspace_path == "/tmp/workspace"
+    assert created.metadata.created_at != ""
     assert created.details["runtime"] == "vz_linux"
     assert created.details["transport"] == "vsock"
 
@@ -235,6 +248,100 @@ def test_parse_helper_vm_status_returns_runtime_state() -> None:
     assert result.details["runtime"] == "vz_linux"
 
 
+def test_parse_helper_vm_status_reads_metadata() -> None:
+    result = parse_helper_vm_status(
+        {
+            "protocol_version": "1",
+            "helper_version": "0.1.0",
+            "vm_id": "vm-123",
+            "state": "running",
+            "healthy": True,
+            "metadata": {
+                "owner": "tldw",
+                "runtime": "vz_linux",
+                "run_id": "run-1",
+                "session_id": "session-1",
+                "session_mode": True,
+                "template_path": "/tmp/bundle",
+                "workspace_path": "/tmp/workspace",
+                "created_at": "2026-04-30T18:00:00Z",
+            },
+        }
+    )
+
+    assert result.metadata.owner == "tldw"
+    assert result.metadata.runtime == "vz_linux"
+    assert result.metadata.run_id == "run-1"
+    assert result.metadata.session_id == "session-1"
+    assert result.metadata.session_mode is True
+    assert result.metadata.template_path == "/tmp/bundle"
+    assert result.metadata.workspace_path == "/tmp/workspace"
+    assert result.metadata.created_at == "2026-04-30T18:00:00Z"
+    assert result.metadata.has_tldw_owner is True
+
+
+@pytest.mark.parametrize("metadata", [None, "invalid", ["invalid"]])
+def test_parse_helper_vm_status_defaults_missing_or_malformed_metadata_to_unknown(metadata) -> None:
+    payload = {
+        "protocol_version": "1",
+        "helper_version": "0.1.0",
+        "vm_id": "vm-123",
+        "state": "running",
+        "healthy": True,
+    }
+    if metadata is not None:
+        payload["metadata"] = metadata
+
+    result = parse_helper_vm_status(payload)
+
+    assert result.metadata.owner == "unknown"
+    assert result.metadata.runtime == ""
+    assert result.metadata.has_tldw_owner is False
+
+
+def test_parse_helper_vm_status_downgrades_non_string_metadata_fields_to_unknown() -> None:
+    result = parse_helper_vm_status(
+        {
+            "protocol_version": "1",
+            "helper_version": "0.1.0",
+            "vm_id": "vm-123",
+            "state": "running",
+            "healthy": True,
+            "metadata": {
+                "owner": ["tldw"],
+                "runtime": "vz_linux",
+                "run_id": "run-1",
+            },
+        }
+    )
+
+    assert result.metadata.owner == "unknown"
+    assert result.metadata.runtime == ""
+    assert result.metadata.has_tldw_owner is False
+
+
+def test_fake_helper_create_vm_normalizes_string_session_mode_and_created_at(monkeypatch) -> None:
+    monkeypatch.setenv("TEST_MODE", "1")
+
+    client = MacOSVirtualizationHelperClient()
+    created = client.create_vm(
+        {
+            "owner": "tldw",
+            "runtime": "",
+            "vm_name": "vz-linux-run-2",
+            "run_id": "run-2",
+            "session_id": "",
+            "session_mode": "false",
+            "template": "/tmp/template.img",
+            "workspace_path": "/tmp/workspace",
+        }
+    )
+
+    assert created.metadata.runtime == "vz_linux"
+    assert created.metadata.session_mode is False
+    assert created.metadata.created_at != ""
+
+
 def test_parse_helper_vm_list_normalizes_status_entries() -> None:
     result = parse_helper_vm_list(
         {
@@ -290,6 +397,16 @@ def test_socket_helper_supports_ping_validate_create_exec_status_and_terminate(m
                 "helper_version": "0.1.0",
                 "vm_id": "vm-transport-1",
                 "state": "created",
+                "metadata": {
+                    "owner": "tldw",
+                    "runtime": "vz_linux",
+                    "run_id": "run-1",
+                    "session_id": "",
+                    "session_mode": False,
+                    "template_path": "/tmp/template.img",
+                    "workspace_path": "/tmp/workspace",
+                    "created_at": "2026-04-30T18:00:00Z",
+                },
                 "details": {"runtime": "vz_linux", "transport": "vsock"},
             },
             "exec_guest": {
@@ -328,6 +445,8 @@ def test_socket_helper_supports_ping_validate_create_exec_status_and_terminate(m
     assert ping.protocol_version == "1"
     assert host["available"] is True
     assert vm.vm_id == "vm-transport-1"
+    assert vm.metadata.owner == "tldw"
+    assert vm.metadata.run_id == "run-1"
     assert exec_reply.stdout == b"ok\n"
     assert status.vm_id == "vm-transport-1"
     assert terminated is True

@@ -124,12 +124,27 @@ final class UnixSocketServer {
                 )
             )
         case "create_vm":
+            let templatePath = request.request["template"]?.stringValue
+                ?? request.request["template_path"]?.stringValue
+                ?? ""
+            let workspacePath = request.request["workspace_path"]?.stringValue ?? ""
+            let metadata = VMOwnershipMetadata(
+                owner: request.request["owner"]?.stringValue ?? "unknown",
+                runtime: request.request["runtime"]?.stringValue ?? "vz_linux",
+                runID: request.request["run_id"]?.stringValue ?? "",
+                sessionID: request.request["session_id"]?.stringValue ?? "",
+                sessionMode: request.request["session_mode"]?.boolValue ?? false,
+                templatePath: templatePath,
+                workspacePath: workspacePath,
+                createdAt: ""
+            )
             return try encoder.encode(
                 try service.createVM(
                     vmID: request.request["vm_name"]?.stringValue ?? request.request["run_id"]?.stringValue ?? "",
-                    templatePath: request.request["template"]?.stringValue ?? "",
-                    workspacePath: request.request["workspace_path"]?.stringValue ?? "",
-                    readinessTimeoutSeconds: TimeInterval(request.request["timeout_sec"]?.intValue ?? 30)
+                    templatePath: templatePath,
+                    workspacePath: workspacePath,
+                    readinessTimeoutSeconds: TimeInterval(request.request["timeout_sec"]?.intValue ?? 30),
+                    metadata: metadata
                 )
             )
         case "get_vm_status":
@@ -144,6 +159,7 @@ final class UnixSocketServer {
                     vmID: vmID,
                     state: "missing",
                     healthy: false,
+                    metadata: .unknown,
                     details: ["error_code": "vm_not_found"]
                 )
             )

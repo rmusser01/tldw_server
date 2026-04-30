@@ -48,10 +48,56 @@ struct TemplateValidationResponse: Encodable {
     }
 }
 
+struct VMOwnershipMetadata: Codable, Equatable {
+    let owner: String
+    let runtime: String
+    let runID: String
+    let sessionID: String
+    let sessionMode: Bool
+    let templatePath: String
+    let workspacePath: String
+    let createdAt: String
+
+    static let unknown = VMOwnershipMetadata(
+        owner: "unknown",
+        runtime: "",
+        runID: "",
+        sessionID: "",
+        sessionMode: false,
+        templatePath: "",
+        workspacePath: "",
+        createdAt: ""
+    )
+
+    private enum CodingKeys: String, CodingKey {
+        case owner
+        case runtime
+        case runID = "run_id"
+        case sessionID = "session_id"
+        case sessionMode = "session_mode"
+        case templatePath = "template_path"
+        case workspacePath = "workspace_path"
+        case createdAt = "created_at"
+    }
+}
+
 struct VMRecord {
     let vmID: String
     let state: String
     let healthy: Bool
+    let metadata: VMOwnershipMetadata
+
+    init(
+        vmID: String,
+        state: String,
+        healthy: Bool,
+        metadata: VMOwnershipMetadata = .unknown
+    ) {
+        self.vmID = vmID
+        self.state = state
+        self.healthy = healthy
+        self.metadata = metadata
+    }
 }
 
 struct HelperVMResponse: Encodable {
@@ -59,6 +105,7 @@ struct HelperVMResponse: Encodable {
     let helperVersion: String
     let vmID: String
     let state: String
+    let metadata: VMOwnershipMetadata
     let details: [String: String]
 
     private enum CodingKeys: String, CodingKey {
@@ -66,6 +113,7 @@ struct HelperVMResponse: Encodable {
         case helperVersion = "helper_version"
         case vmID = "vm_id"
         case state
+        case metadata
         case details
     }
 }
@@ -76,6 +124,7 @@ struct HelperVMStatusResponse: Encodable {
     let vmID: String
     let state: String
     let healthy: Bool
+    let metadata: VMOwnershipMetadata
     let details: [String: String]
 
     private enum CodingKeys: String, CodingKey {
@@ -84,6 +133,7 @@ struct HelperVMStatusResponse: Encodable {
         case vmID = "vm_id"
         case state
         case healthy
+        case metadata
         case details
     }
 }

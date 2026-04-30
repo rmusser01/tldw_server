@@ -61,6 +61,41 @@ import Testing
     #expect(guestBridge.lastExec?.vmID == "vm-route")
 }
 
+@Test func unixSocketServerForwardsCreateVMOwnershipMetadata() throws {
+    let registry = VMRegistry()
+    let manager = VZLinuxVMManager(
+        registry: registry,
+        bootDriver: RecordingBootDriver(),
+        guestBridge: ReadyGuestBridge()
+    )
+    let service = HelperService(
+        hostFacts: HostFacts(isMacOS: true, isAppleSilicon: true),
+        registry: registry,
+        vmManager: manager
+    )
+    let server = UnixSocketServer(
+        socketPath: "/tmp/macos-vz-helper.sock",
+        service: service
+    )
+
+    let createRequest = """
+    {"operation":"create_vm","protocol_version":"1","request":{"vm_name":"vm-owned","owner":"tldw","runtime":"vz_linux","run_id":"run-owned","session_id":"session-owned","session_mode":true,"template":"/tmp/template.img","workspace_path":"/workspace"}}
+    """.data(using: .utf8)!
+    let createResponseData = try server.handleRequestData(createRequest)
+    let createJSON = try JSONSerialization.jsonObject(with: createResponseData) as? [String: Any]
+    let metadata = createJSON?["metadata"] as? [String: Any]
+
+    #expect(createJSON?["vm_id"] as? String == "vm-owned")
+    #expect(metadata?["owner"] as? String == "tldw")
+    #expect(metadata?["runtime"] as? String == "vz_linux")
+    #expect(metadata?["run_id"] as? String == "run-owned")
+    #expect(metadata?["session_id"] as? String == "session-owned")
+    #expect(metadata?["session_mode"] as? Bool == true)
+    #expect(metadata?["template_path"] as? String == "/tmp/template.img")
+    #expect(metadata?["workspace_path"] as? String == "/workspace")
+    #expect((metadata?["created_at"] as? String)?.isEmpty == false)
+}
+
 @Test func unixSocketServerServesPingOverRealSocket() throws {
     let socketDirectory = try makePrivateTemporaryDirectory()
     defer { try? FileManager.default.removeItem(at: socketDirectory) }

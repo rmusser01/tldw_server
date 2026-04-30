@@ -4,10 +4,16 @@ final class VMRegistry {
     private var records: [String: VMRecord] = [:]
     private let lock = NSLock()
 
-    func upsert(vmID: String, state: String, healthy: Bool) {
+    func upsert(vmID: String, state: String, healthy: Bool, metadata: VMOwnershipMetadata? = nil) {
         lock.lock()
         defer { lock.unlock() }
-        records[vmID] = VMRecord(vmID: vmID, state: state, healthy: healthy)
+        let existingMetadata = records[vmID]?.metadata ?? .unknown
+        records[vmID] = VMRecord(
+            vmID: vmID,
+            state: state,
+            healthy: healthy,
+            metadata: metadata ?? existingMetadata
+        )
     }
 
     func status(vmID: String) -> VMRecord? {

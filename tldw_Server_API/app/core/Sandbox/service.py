@@ -58,6 +58,7 @@ from .snapshots import SnapshotManager
 from .store import get_store_mode
 from .streams import get_hub
 from .vz_reconciliation import collect_vz_reconciliation
+from .vz_reconciliation import ORPHAN_STATUSES, REASON_OWNED_ORPHAN, REASON_UNKNOWN_OWNERSHIP, STATUS_OWNED_ORPHAN
 
 _SANDBOX_SERVICE_NONCRITICAL_EXCEPTIONS = (
     asyncio.CancelledError,
@@ -1032,7 +1033,9 @@ class SandboxService:
         stale_items = [item for item in report_items if str(item.get("status") or "").strip() == "stale_session"]
         unhealthy_items = [item for item in report_items if str(item.get("status") or "").strip() == "unhealthy_vm"]
         skipped_items = [item for item in report_items if str(item.get("status") or "").strip() == "skipped_active_session"]
-        orphaned_items = [item for item in report_items if str(item.get("status") or "").strip() == "orphaned_vm"]
+        orphaned_items = [
+            item for item in report_items if str(item.get("status") or "").strip() in ORPHAN_STATUSES
+        ]
         actions: list[dict[str, object]] = []
         summary: dict[str, int] = {
             "stale_session_controls": len(stale_items),
@@ -1062,8 +1065,25 @@ class SandboxService:
                 actions.append(action)
                 continue
 
-            if status == "orphaned_vm":
+            if status in ORPHAN_STATUSES:
                 if not terminate_orphaned_vms or not vm_id:
+                    continue
+
+                termination_eligible = (
+                    (status == STATUS_OWNED_ORPHAN and bool(item.get("termination_eligible")))
+                    or (status == "orphaned_vm" and bool(item.get("termination_eligible")) and reason == REASON_OWNED_ORPHAN)
+                )
+                if not termination_eligible:
+                    action = {
+                        "type": "skip_orphaned_vm",
+                        "session_id": None,
+                        "vm_id": vm_id,
+                        "status": "skipped",
+                        "reason": reason or REASON_UNKNOWN_OWNERSHIP,
+                        "termination_eligible": False,
+                    }
+                    logger.info("Skipping VZ reconciliation orphan repair action: {}", action)
+                    actions.append(action)
                     continue
 
                 action_status = "planned"
@@ -1102,6 +1122,7 @@ class SandboxService:
                     "vm_id": vm_id,
                     "status": action_status,
                     "reason": reason or None,
+                    "termination_eligible": True,
                 }
                 logger.info("VZ reconciliation repair action: {}", action)
                 actions.append(action)

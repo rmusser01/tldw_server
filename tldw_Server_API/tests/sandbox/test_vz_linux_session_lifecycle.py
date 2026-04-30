@@ -54,7 +54,12 @@ def test_vz_linux_session_reuses_existing_vm_for_second_run(monkeypatch, tmp_pat
             }
 
         def create_vm(self, request: dict[str, object]) -> HelperVMReply:
+            assert request["owner"] == "tldw"
+            assert request["runtime"] == "vz_linux"
+            assert request["run_id"] == "run-1"
+            assert request["session_id"] == "sess-vz-1"
             assert request["session_mode"] is True
+            assert request["template"] == "ubuntu-24.04"
             calls.append("create_vm")
             return HelperVMReply(vm_id="vm-session-1", state="created", details={"session_mode": True})
 

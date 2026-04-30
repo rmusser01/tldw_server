@@ -12,6 +12,7 @@ The helper is intentionally narrow:
 - owns `Virtualization.framework` lifecycle
 - owns host readiness and runnable-template truth
 - owns VM create, exec, status, list, and terminate operations
+- stores per-VM ownership metadata supplied by the Python sandbox control plane
 
 ## Non-Goals
 
@@ -22,10 +23,13 @@ The first helper slice is not a generic macOS sandbox backend:
 - no second persistence layer for sandbox sessions
 - no APFS clone execution path yet
 - no automatic launchd installation or helper auto-upgrade yet
-- no automatic orphan VM termination during admin repair; Python can request it only through explicit dry-run-first reconciliation repair
+- no automatic orphan VM termination during admin repair; Python can request it only through explicit dry-run-first reconciliation repair, and only for helper VMs whose metadata proves `owner=tldw` and `runtime=vz_linux`
 
 Python remains authoritative for sandbox admission, session identity, artifacts, and ACP
 integration. The helper only owns runtime VM facts and control-plane operations.
+Helper VM metadata is local control-plane metadata, not cryptographic attestation.
+Legacy or manually created helper VMs without metadata are reported as unknown and skipped
+by automated repair.
 
 ## Managed Helper Lifecycle
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import socket
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -14,9 +15,11 @@ from .models import (
     HelperVMListReply,
     HelperVMReply,
     HelperVMStatusReply,
+    _bool_field,
     parse_helper_host_validation,
     parse_helper_ping,
     parse_helper_vm_list,
+    parse_helper_vm_reply,
     parse_helper_vm_status,
 )
 
@@ -87,18 +90,30 @@ class MacOSVirtualizationHelperClient:
     def create_vm(self, request: dict[str, Any]) -> HelperVMReply:
         if is_truthy(os.getenv("TEST_MODE")):
             vm_name = str(request.get("vm_name") or "").strip() or "vm-test"
-            runtime = str(request.get("runtime") or "").strip()
-            return HelperVMReply(
-                vm_id=vm_name,
-                state="created",
-                details={"runtime": runtime or None, "transport": "vsock"},
+            runtime = str(request.get("runtime") or "").strip() or "vz_linux"
+            template_path = str(request.get("template") or request.get("template_path") or "").strip()
+            raw_session_mode = request.get("session_mode")
+            session_mode = _bool_field({"session_mode": raw_session_mode}, "session_mode")
+            created_at = str(request.get("created_at") or "").strip() or datetime.now(timezone.utc).isoformat()
+            return parse_helper_vm_reply(
+                {
+                    "vm_id": vm_name,
+                    "state": "created",
+                    "metadata": {
+                        "owner": request.get("owner") or "unknown",
+                        "runtime": runtime,
+                        "run_id": request.get("run_id") or "",
+                        "session_id": request.get("session_id") or "",
+                        "session_mode": session_mode,
+                        "template_path": template_path,
+                        "workspace_path": request.get("workspace_path") or "",
+                        "created_at": created_at,
+                    },
+                    "details": {"runtime": runtime or None, "transport": "vsock"},
+                }
             )
         payload = self._request("create_vm", request, timeout_sec=self._operation_timeout_sec(request))
-        return HelperVMReply(
-            vm_id=str(payload.get("vm_id") or "").strip(),
-            state=str(payload.get("state") or "").strip(),
-            details=dict(payload.get("details") or {}) if isinstance(payload.get("details"), dict) else {},
-        )
+        return parse_helper_vm_reply(payload)
 
     def validate_vz_linux_host(self, request: dict[str, Any]) -> dict[str, Any]:
         if is_truthy(os.getenv("TEST_MODE")):

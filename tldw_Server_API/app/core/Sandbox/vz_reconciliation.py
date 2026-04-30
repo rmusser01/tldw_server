@@ -16,6 +16,18 @@ REASON_HELPER_UNAVAILABLE = "macos_virtualization_helper_unavailable"
 REASON_PROTOCOL_MISMATCH = "macos_virtualization_helper_protocol_mismatch"
 REASON_HELPER_FAILURE = "macos_virtualization_helper_failure"
 REASON_RECONCILIATION_UNAVAILABLE = "vz_reconciliation_unavailable"
+STATUS_OWNED_ORPHAN = "owned_orphaned_vm"
+STATUS_UNKNOWN_ORPHAN = "unknown_orphaned_vm"
+STATUS_FOREIGN_ORPHAN = "foreign_orphaned_vm"
+REASON_OWNED_ORPHAN = "owned_orphan"
+REASON_UNKNOWN_OWNERSHIP = "unknown_ownership"
+REASON_FOREIGN_OWNER = "foreign_owner"
+ORPHAN_STATUSES = {
+    STATUS_OWNED_ORPHAN,
+    STATUS_UNKNOWN_ORPHAN,
+    STATUS_FOREIGN_ORPHAN,
+    "orphaned_vm",
+}
 
 
 def _empty_report() -> dict[str, object]:
@@ -28,6 +40,9 @@ def _empty_report() -> dict[str, object]:
         "unhealthy_session_ids": [],
         "skipped_active_session_ids": [],
         "orphaned_vm_ids": [],
+        "owned_orphaned_vm_ids": [],
+        "unknown_orphaned_vm_ids": [],
+        "foreign_orphaned_vm_ids": [],
         "items": [],
         "reasons": [],
     }
@@ -46,6 +61,7 @@ def _append_item(
     state: str | None = None,
     healthy: bool | None = None,
     reason: str | None = None,
+    termination_eligible: bool | None = None,
 ) -> None:
     item: dict[str, object] = {"status": status}
     if session_id:
@@ -58,6 +74,8 @@ def _append_item(
         item["healthy"] = bool(healthy)
     if reason:
         item["reason"] = reason
+    if termination_eligible is not None:
+        item["termination_eligible"] = bool(termination_eligible)
     items.append(item)
 
 
@@ -70,6 +88,25 @@ def _sort_items(items: list[dict[str, object]]) -> list[dict[str, object]]:
             str(item.get("vm_id") or ""),
         ),
     )
+
+
+def _classify_orphan_vm(vm: object) -> tuple[str, bool, str]:
+    """Return orphan classification, repair eligibility, and reason for a live helper VM."""
+    metadata = getattr(vm, "metadata", None)
+    owner = _clean_id(getattr(metadata, "owner", ""))
+    runtime = _clean_id(getattr(metadata, "runtime", ""))
+    if not owner or owner == "unknown" or not runtime:
+        return STATUS_UNKNOWN_ORPHAN, False, REASON_UNKNOWN_OWNERSHIP
+    if owner != "tldw" or runtime != "vz_linux":
+        return STATUS_FOREIGN_ORPHAN, False, REASON_FOREIGN_OWNER
+
+    run_id = _clean_id(getattr(metadata, "run_id", ""))
+    created_at = _clean_id(getattr(metadata, "created_at", ""))
+    session_mode = bool(getattr(metadata, "session_mode", False))
+    session_id = _clean_id(getattr(metadata, "session_id", ""))
+    if not run_id or not created_at or (session_mode and not session_id):
+        return STATUS_UNKNOWN_ORPHAN, False, REASON_UNKNOWN_OWNERSHIP
+    return STATUS_OWNED_ORPHAN, True, REASON_OWNED_ORPHAN
 
 
 def collect_vz_reconciliation(
@@ -138,6 +175,9 @@ def collect_vz_reconciliation(
     unhealthy_session_ids: list[str] = []
     skipped_active_session_ids: list[str] = []
     orphaned_vm_ids: list[str] = []
+    owned_orphaned_vm_ids: list[str] = []
+    unknown_orphaned_vm_ids: list[str] = []
+    foreign_orphaned_vm_ids: list[str] = []
     items: list[dict[str, object]] = []
 
     for session_id, vm_id in persisted_vm_by_session.items():
@@ -205,14 +245,22 @@ def collect_vz_reconciliation(
     for vm_id, vm in live_vm_by_id.items():
         if vm_id in persisted_vm_ids:
             continue
+        status, termination_eligible, reason = _classify_orphan_vm(vm)
         orphaned_vm_ids.append(vm_id)
+        if status == STATUS_OWNED_ORPHAN:
+            owned_orphaned_vm_ids.append(vm_id)
+        elif status == STATUS_FOREIGN_ORPHAN:
+            foreign_orphaned_vm_ids.append(vm_id)
+        else:
+            unknown_orphaned_vm_ids.append(vm_id)
         _append_item(
             items,
-            status="orphaned_vm",
+            status=status,
             vm_id=vm_id,
             state=_clean_id(getattr(vm, "state", "")),
             healthy=bool(getattr(vm, "healthy", False)),
-            reason="session_missing",
+            reason=reason,
+            termination_eligible=termination_eligible,
         )
 
     report["computed"] = True
@@ -222,5 +270,8 @@ def collect_vz_reconciliation(
     report["unhealthy_session_ids"] = sorted(unhealthy_session_ids)
     report["skipped_active_session_ids"] = sorted(skipped_active_session_ids)
     report["orphaned_vm_ids"] = sorted(orphaned_vm_ids)
+    report["owned_orphaned_vm_ids"] = sorted(owned_orphaned_vm_ids)
+    report["unknown_orphaned_vm_ids"] = sorted(unknown_orphaned_vm_ids)
+    report["foreign_orphaned_vm_ids"] = sorted(foreign_orphaned_vm_ids)
     report["items"] = _sort_items(items)
     return report

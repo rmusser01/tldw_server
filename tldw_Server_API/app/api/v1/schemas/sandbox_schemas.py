@@ -320,6 +320,7 @@ class SandboxAdminMacOSReconciliationItem(BaseModel):
     state: str | None = None
     healthy: bool | None = None
     reason: str | None = None
+    termination_eligible: bool | None = None
 
 
 class SandboxAdminMacOSReconciliationDiagnostics(BaseModel):
@@ -333,6 +334,9 @@ class SandboxAdminMacOSReconciliationDiagnostics(BaseModel):
     unhealthy_session_ids: list[str] = Field(default_factory=list)
     skipped_active_session_ids: list[str] = Field(default_factory=list)
     orphaned_vm_ids: list[str] = Field(default_factory=list)
+    owned_orphaned_vm_ids: list[str] = Field(default_factory=list)
+    unknown_orphaned_vm_ids: list[str] = Field(default_factory=list)
+    foreign_orphaned_vm_ids: list[str] = Field(default_factory=list)
     items: list[SandboxAdminMacOSReconciliationItem] = Field(default_factory=list)
     reasons: list[str] = Field(default_factory=list)
 
@@ -360,6 +364,7 @@ class SandboxAdminMacOSReconciliationRepairAction(BaseModel):
     vm_id: str | None = None
     status: str
     reason: str | None = None
+    termination_eligible: bool | None = None
 
 
 class SandboxAdminMacOSReconciliationRepairSummary(BaseModel):
