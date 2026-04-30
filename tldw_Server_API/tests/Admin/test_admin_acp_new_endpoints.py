@@ -77,7 +77,55 @@ async def _add_usage(store, session_id: str, prompt_tokens: int, completion_toke
 
 
 # ===========================================================================
-# 1. GET /admin/acp/agents/metrics
+# 1. GET /admin/acp/sessions
+# ===========================================================================
+
+
+class TestACPAdminSessionsList:
+    """Route-level tests for the ACP sessions admin list endpoint."""
+
+    def test_sessions_list_includes_canonical_pagination(self, monkeypatch, tmp_path):
+        """Listing ACP sessions preserves total and adds nested pagination."""
+        store = _make_store(tmp_path)
+
+        async def _seed():
+            await _register_session(store, "s1", user_id=1, agent_type="coder")
+            await _register_session(store, "s2", user_id=1, agent_type="coder")
+            await _register_session(store, "s3", user_id=1, agent_type="coder")
+            await _register_session(store, "s4", user_id=1, agent_type="coder")
+
+        _run(_seed())
+
+        monkeypatch.setattr(
+            "tldw_Server_API.app.api.v1.endpoints.admin.admin_acp_agents.get_acp_session_store",
+            mock.AsyncMock(return_value=store),
+        )
+
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+        from tldw_Server_API.app.api.v1.endpoints.admin import admin_acp_agents
+
+        app = FastAPI()
+        app.include_router(admin_acp_agents.router, prefix="/api/v1/admin")
+
+        response = TestClient(app).get("/api/v1/admin/acp/sessions?limit=2&offset=1")
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["total"] == 4
+        assert len(body["sessions"]) == 2
+        assert body["pagination"] == {
+            "mode": "offset",
+            "limit": 2,
+            "offset": 1,
+            "total": 4,
+            "has_more": True,
+            "next_offset": 3,
+        }
+
+
+# ===========================================================================
+# 2. GET /admin/acp/agents/metrics
 # ===========================================================================
 
 
@@ -218,7 +266,7 @@ class TestACPAgentMetrics:
 
 
 # ===========================================================================
-# 2. PATCH /admin/acp/sessions/{session_id}/budget
+# 3. PATCH /admin/acp/sessions/{session_id}/budget
 # ===========================================================================
 
 
@@ -331,7 +379,7 @@ class TestACPSessionBudget:
 
 
 # ===========================================================================
-# 3. Budget enforcement — check_and_enforce_budget()
+# 4. Budget enforcement — check_and_enforce_budget()
 # ===========================================================================
 
 

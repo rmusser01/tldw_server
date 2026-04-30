@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, get_auth_principal
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.schemas.agent_client_protocol import (
     ACPAgentConfigCreate,
     ACPAgentConfigListResponse,
@@ -75,7 +76,16 @@ async def admin_list_acp_sessions(
         ))
         for rec in records
     ]
-    return ACPSessionListResponse(sessions=sessions, total=total)
+    return ACPSessionListResponse(
+        sessions=sessions,
+        total=total,
+        pagination=build_offset_pagination_meta(
+            total=total,
+            limit=limit,
+            offset=offset,
+            count=len(sessions),
+        ),
+    )
 
 
 @router.get("/acp/sessions/{session_id}/usage", response_model=ACPSessionUsageResponse)
