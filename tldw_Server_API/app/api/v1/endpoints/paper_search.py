@@ -2709,7 +2709,7 @@ async def paper_search_scopus_by_doi(params: DOIRequestForm = Depends()):
 
 @router.get(
     "/acm",
-    response_model=GenericSearchResponse,
+    response_model=GenericPageSearchResponse,
     summary="Search ACM Digital Library via aggregators (scaffold)",
     tags=["paper-search"],
 )
@@ -2736,7 +2736,7 @@ async def paper_search_acm(search_params: SimpleVenueSearchForm = Depends()):
         total_pages = math.ceil(total / search_params.results_per_page) if search_params.results_per_page > 0 else 0
         if total == 0:
             total_pages = 0
-        return GenericSearchResponse(
+        return GenericPageSearchResponse(
             query_echo={
                 "q": search_params.q,
                 "venue": search_params.venue or "ACM",
@@ -2748,6 +2748,12 @@ async def paper_search_acm(search_params: SimpleVenueSearchForm = Depends()):
             page=search_params.page,
             results_per_page=search_params.results_per_page,
             total_pages=total_pages,
+            pagination=build_page_pagination_meta(
+                page=search_params.page,
+                per_page=search_params.results_per_page,
+                total=total,
+                total_pages=total_pages,
+            ),
         )
     except HTTPException:
         raise
@@ -2780,7 +2786,7 @@ async def paper_search_acm_by_doi(params: DOIRequestForm = Depends()):
 
 @router.get(
     "/wiley",
-    response_model=GenericSearchResponse,
+    response_model=GenericPageSearchResponse,
     summary="Search Wiley via aggregators (scaffold)",
     tags=["paper-search"],
 )
@@ -2806,7 +2812,7 @@ async def paper_search_wiley(search_params: SimpleVenueSearchForm = Depends()):
         total_pages = math.ceil(total / search_params.results_per_page) if search_params.results_per_page > 0 else 0
         if total == 0:
             total_pages = 0
-        return GenericSearchResponse(
+        return GenericPageSearchResponse(
             query_echo={
                 "q": search_params.q,
                 "venue": search_params.venue or "Wiley",
@@ -2818,6 +2824,12 @@ async def paper_search_wiley(search_params: SimpleVenueSearchForm = Depends()):
             page=search_params.page,
             results_per_page=search_params.results_per_page,
             total_pages=total_pages,
+            pagination=build_page_pagination_meta(
+                page=search_params.page,
+                per_page=search_params.results_per_page,
+                total=total,
+                total_pages=total_pages,
+            ),
         )
     except HTTPException:
         raise

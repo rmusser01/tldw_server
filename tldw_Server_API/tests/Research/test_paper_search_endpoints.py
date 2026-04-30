@@ -374,6 +374,86 @@ async def test_springer_search_success(monkeypatch, paper_search_app):
 
 
 @pytest.mark.asyncio
+async def test_acm_search_success(monkeypatch, paper_search_app):
+
+    def _fake_openalex(q, offset, results_per_page, venue, from_year, to_year):
+
+        items = [
+            {
+                "id": "acm-789",
+                "title": "ACM Proceedings Paper",
+                "authors": "Nguyen, C.",
+                "pub_date": "2020-09-20",
+                "doi": "10.1145/1234567.8901234",
+                "url": "https://dl.acm.org/doi/10.1145/1234567.8901234",
+                "provider": "acm",
+            }
+        ]
+        return items, 1, None
+
+    from tldw_Server_API.app.core.Third_Party import OpenAlex as _OpenAlex
+    monkeypatch.setattr(_OpenAlex, "search_openalex", _fake_openalex)
+
+    async with AsyncClient(transport=ASGITransport(app=paper_search_app), base_url="http://test") as client:
+        r = await client.get(
+            "/api/v1/paper-search/acm",
+            params={"q": "distributed systems", "page": 1, "results_per_page": 10},
+        )
+        assert r.status_code == 200
+        data = r.json()
+        assert data["total_results"] == 1
+        assert len(data["items"]) == 1
+        assert data["pagination"] == {
+            "mode": "page",
+            "page": 1,
+            "per_page": 10,
+            "total": 1,
+            "total_pages": 1,
+            "has_more": False,
+        }
+
+
+@pytest.mark.asyncio
+async def test_wiley_search_success(monkeypatch, paper_search_app):
+
+    def _fake_openalex(q, offset, results_per_page, venue, from_year, to_year):
+
+        items = [
+            {
+                "id": "wiley-012",
+                "title": "Wiley Review Article",
+                "authors": "Patel, D.",
+                "pub_date": "2019-11-11",
+                "doi": "10.1002/wiley.012",
+                "url": "https://onlinelibrary.wiley.com/doi/10.1002/wiley.012",
+                "provider": "wiley",
+            }
+        ]
+        return items, 1, None
+
+    from tldw_Server_API.app.core.Third_Party import OpenAlex as _OpenAlex
+    monkeypatch.setattr(_OpenAlex, "search_openalex", _fake_openalex)
+
+    async with AsyncClient(transport=ASGITransport(app=paper_search_app), base_url="http://test") as client:
+        r = await client.get(
+            "/api/v1/paper-search/wiley",
+            params={"q": "cardiology", "page": 1, "results_per_page": 10},
+        )
+        assert r.status_code == 200
+        data = r.json()
+        assert data["total_results"] == 1
+        assert len(data["items"]) == 1
+        assert data["pagination"] == {
+            "mode": "page",
+            "page": 1,
+            "per_page": 10,
+            "total": 1,
+            "total_pages": 1,
+            "has_more": False,
+        }
+
+
+@pytest.mark.asyncio
 async def test_biorxiv_by_doi_success(monkeypatch, paper_search_app):
 
     def _fake_by_doi(doi, server):
