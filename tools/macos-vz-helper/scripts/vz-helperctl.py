@@ -364,7 +364,7 @@ def lookup_process(pid: int) -> ProcessInfo | None:
             capture_output=True,
             text=True,
         )
-    except FileNotFoundError:
+    except (FileNotFoundError, PermissionError, OSError):
         return ProcessInfo(pid=pid, command="", error_reason="helper_process_lookup_unavailable")
     if completed.returncode != 0:
         return ProcessInfo(pid=pid, command="", error_reason="helper_process_lookup_failed")
@@ -611,6 +611,8 @@ def _acquire_lifecycle_lock(
         return fd
 
     lock_pid = _read_positive_pid(lock_path)
+    if lock_pid is None:
+        return None
     if lock_pid is not None and lock_process_exists(lock_pid):
         return None
 
@@ -745,7 +747,19 @@ def start_helper(
         started = process_starter([str(helper_path)], env, stdout_path=stdout_path, stderr_path=stderr_path)
         pid_write = _write_pid_file_exclusive(pid_file, started.pid)
         if not pid_write.ok:
-            process_killer(started.pid)
+            cleanup_result = cleanup_started_helper(
+                pid=started.pid,
+                pid_file=pid_file,
+                socket_path=socket_path,
+                socket_identity=socket_identity(socket_path),
+                process_killer=process_killer,
+                process_lookup=process_lookup,
+                socket_remover=socket_remover,
+                exit_timeout_sec=exit_timeout_sec,
+                exit_poll_interval_sec=exit_poll_interval_sec,
+            )
+            if not cleanup_result.ok:
+                return cleanup_result
             return pid_write
 
         if socket_waiter is wait_for_socket:
@@ -878,10 +892,7 @@ def collect_check_results(
     process_lookup: Callable[[int], ProcessInfo | None] = lookup_process,
     path_validator: Callable[[Path], CheckResult] = validate_socket_path,
 ) -> list[tuple[str, CheckResult]]:
-    if dry_run and entitlements_path is None:
-        entitlement_result = CheckResult(ok=True, reason="helper_entitlements_not_checked")
-    else:
-        entitlement_result = entitlement_checker(helper_path, entitlements_path)
+    entitlement_result = entitlement_checker(helper_path, entitlements_path)
 
     socket_result = path_validator(socket_path)
     pid_result = validate_pid_file(pid_file, helper_path, process_lookup=process_lookup)
@@ -979,6 +990,8 @@ def stop_helper(
         if pid_state.pid is None:
             return CheckResult(ok=True, reason="helper_not_running")
         if pid_result.reason == "helper_pid_stale":
+            if socket_path is not None:
+                socket_remover(socket_path, socket_identity_reader(socket_path))
             _remove_pid_file_if_pid(pid_file, pid_state.pid)
             return CheckResult(ok=True, reason="helper_pid_stale")
         pid = pid_state.pid

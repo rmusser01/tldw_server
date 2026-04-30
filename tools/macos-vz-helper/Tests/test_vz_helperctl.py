@@ -513,7 +513,7 @@ def test_plist_cli_rejects_symlink_socket_path(tmp_path, capsys):
     CASE.assertTrue(socket_path.is_symlink())
 
 
-def test_check_cli_accepts_operator_socket_flag(tmp_path, capsys):
+def test_check_cli_accepts_operator_socket_flag(monkeypatch, tmp_path, capsys):
     helperctl = load_helperctl()
     helper = tmp_path / "macos-vz-helper"
     socket_path = tmp_path / "runtime" / "helper.sock"
@@ -521,6 +521,11 @@ def test_check_cli_accepts_operator_socket_flag(tmp_path, capsys):
     log_dir = tmp_path / "logs"
     helper.write_text("#!/bin/sh\n", encoding="utf-8")
     helper.chmod(0o700)
+    monkeypatch.setattr(
+        helperctl,
+        "read_codesign_entitlements",
+        lambda helper_path: helperctl.CheckResult(True, message="<plist><dict><key>com.apple.security.virtualization</key><true/></dict></plist>"),
+    )
 
     code = helperctl.main(
         [
@@ -588,6 +593,40 @@ def test_build_reports_missing_swift(monkeypatch, capsys):
     captured = capsys.readouterr()
     CASE.assertEqual(code, 1)
     CASE.assertIn("helper_swift_unavailable", captured.err)
+
+
+def test_check_dry_run_still_validates_entitlements(monkeypatch, tmp_path, capsys):
+    helperctl = load_helperctl()
+    helper = tmp_path / "macos-vz-helper"
+    socket_path = tmp_path / "runtime" / "helper.sock"
+    pid_file = tmp_path / "runtime" / "helper.pid"
+    log_dir = tmp_path / "logs"
+    helper.write_text("#!/bin/sh\n", encoding="utf-8")
+    helper.chmod(0o700)
+    monkeypatch.setattr(
+        helperctl,
+        "read_codesign_entitlements",
+        lambda helper_path: helperctl.CheckResult(False, "helper_not_signed"),
+    )
+
+    code = helperctl.main(
+        [
+            "check",
+            "--dry-run",
+            "--helper",
+            str(helper),
+            "--socket",
+            str(socket_path),
+            "--pid-file",
+            str(pid_file),
+            "--log-dir",
+            str(log_dir),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    CASE.assertEqual(code, 1)
+    CASE.assertIn("entitlements: not ok helper_not_signed", captured.out)
 
 
 def test_sign_requires_entitlements(tmp_path, capsys):
@@ -662,6 +701,22 @@ def test_validate_pid_file_reports_missing_process_lookup_tool(monkeypatch, tmp_
         raise FileNotFoundError("ps")
 
     monkeypatch.setattr(helperctl.subprocess, "run", missing_ps)
+
+    result = helperctl.validate_pid_file(pid_file, helper)
+
+    CASE.assertEqual(result, helperctl.CheckResult(ok=False, reason="helper_process_lookup_unavailable"))
+
+
+def test_validate_pid_file_reports_blocked_process_lookup_tool(monkeypatch, tmp_path):
+    helperctl = load_helperctl()
+    helper = tmp_path / "macos-vz-helper"
+    pid_file = tmp_path / "helper.pid"
+    pid_file.write_text(f"{os.getpid()}\n", encoding="utf-8")
+
+    def blocked_ps(*args, **kwargs):
+        raise PermissionError("ps")
+
+    monkeypatch.setattr(helperctl.subprocess, "run", blocked_ps)
 
     result = helperctl.validate_pid_file(pid_file, helper)
 
@@ -770,6 +825,42 @@ def test_start_helper_preserves_pid_when_failed_start_process_survives(tmp_path)
     CASE.assertEqual(result, helperctl.CheckResult(ok=False, reason="helper_stop_timeout"))
     CASE.assertEqual(killed, [1234])
     CASE.assertEqual(pid_file.read_text(encoding="utf-8"), "1234\n")
+
+
+def test_start_helper_waits_when_pid_write_loses_race(tmp_path):
+    helperctl = load_helperctl()
+    helper = tmp_path / "macos-vz-helper"
+    socket_path = tmp_path / "runtime" / "helper.sock"
+    pid_file = tmp_path / "runtime" / "helper.pid"
+    log_dir = tmp_path / "logs"
+    helper.write_text("#!/bin/sh\n", encoding="utf-8")
+    helper.chmod(0o700)
+    killed = []
+    lookups = []
+
+    def process_lookup(pid):
+        lookups.append(pid)
+        return helperctl.ProcessInfo(pid=pid, command=str(helper))
+
+    def process_starter(argv, env, **kwargs):
+        pid_file.write_text("9999\n", encoding="utf-8")
+        return helperctl.StartedProcess(pid=1234)
+
+    result = helperctl.start_helper(
+        helper,
+        socket_path,
+        pid_file,
+        log_dir,
+        process_starter=process_starter,
+        process_killer=lambda pid: killed.append(pid),
+        process_lookup=process_lookup,
+        exit_timeout_sec=0.01,
+        exit_poll_interval_sec=0.001,
+    )
+
+    CASE.assertEqual(result, helperctl.CheckResult(ok=False, reason="helper_stop_timeout"))
+    CASE.assertEqual(killed, [1234])
+    CASE.assertEqual(pid_file.read_text(encoding="utf-8"), "9999\n")
 
 
 def test_start_helper_cleans_up_started_process_on_socket_wait_failure(tmp_path):
@@ -904,6 +995,32 @@ def test_start_helper_recovers_stale_lifecycle_lock(tmp_path):
     CASE.assertEqual(result, helperctl.CheckResult(ok=True))
     CASE.assertEqual(starts, [[str(helper)]])
     CASE.assertFalse((pid_file.parent / "helper.pid.lock").exists())
+
+
+def test_start_helper_preserves_empty_lifecycle_lock_as_active(tmp_path):
+    helperctl = load_helperctl()
+    helper = tmp_path / "macos-vz-helper"
+    socket_path = tmp_path / "runtime" / "helper.sock"
+    pid_file = tmp_path / "runtime" / "helper.pid"
+    log_dir = tmp_path / "logs"
+    helper.write_text("#!/bin/sh\n", encoding="utf-8")
+    helper.chmod(0o700)
+    pid_file.parent.mkdir(mode=0o700)
+    lock = pid_file.parent / "helper.pid.lock"
+    lock.write_text("", encoding="utf-8")
+    starts = []
+
+    result = helperctl.start_helper(
+        helper,
+        socket_path,
+        pid_file,
+        log_dir,
+        process_starter=lambda argv, env, **kwargs: starts.append(argv) or helperctl.StartedProcess(pid=1234),
+    )
+
+    CASE.assertEqual(result, helperctl.CheckResult(ok=False, reason="helper_already_running"))
+    CASE.assertTrue(lock.exists())
+    CASE.assertEqual(starts, [])
 
 
 def test_start_helper_passes_managed_log_paths_to_process_starter(tmp_path):
@@ -1214,6 +1331,31 @@ def test_stop_helper_tolerates_missing_pid_directory(tmp_path):
     )
 
     CASE.assertEqual(result, helperctl.CheckResult(ok=True, reason="helper_not_running"))
+
+
+def test_stop_helper_removes_stale_pid_and_owned_socket(tmp_path):
+    helperctl = load_helperctl()
+    helper = tmp_path / "macos-vz-helper"
+    pid_file = tmp_path / "runtime" / "helper.pid"
+    socket_path = tmp_path / "runtime" / "helper.sock"
+    identity = helperctl.SocketIdentity(device=1, inode=2)
+    helper.write_text("#!/bin/sh\n", encoding="utf-8")
+    pid_file.parent.mkdir(mode=0o700)
+    pid_file.write_text("1234\n", encoding="utf-8")
+    removed = []
+
+    result = helperctl.stop_helper(
+        helper,
+        pid_file,
+        socket_path=socket_path,
+        process_lookup=lambda pid: None,
+        socket_identity_reader=lambda path: identity,
+        socket_remover=lambda path, owned_identity: removed.append((path, owned_identity)),
+    )
+
+    CASE.assertEqual(result, helperctl.CheckResult(ok=True, reason="helper_pid_stale"))
+    CASE.assertFalse(pid_file.exists())
+    CASE.assertEqual(removed, [(socket_path, identity)])
 
 
 def test_stop_helper_rejects_malformed_pid_parent(tmp_path):
