@@ -597,6 +597,7 @@ class WatchlistOutput(BaseModel):
 class WatchlistOutputsListResponse(BaseModel):
     items: list[WatchlistOutput]
     total: int
+    pagination: OffsetPaginationMeta
 
 
 class WatchlistTemplateSummary(BaseModel):

@@ -943,6 +943,9 @@ def test_items_and_outputs_flow(client_with_user, monkeypatch):
     assert r.status_code == 200, r.text
     outputs = r.json()
     assert outputs["total"] >= 2
+    assert outputs["pagination"]["total"] >= 2
+    assert outputs["pagination"]["limit"] == 50
+    assert outputs["pagination"]["offset"] == 0
     assert any(o["id"] == output_id for o in outputs["items"])
 
     # Output metadata
@@ -1063,6 +1066,10 @@ def test_watchlists_outputs_variants_and_ingest(client_with_user, monkeypatch):
 
     monkeypatch.setattr(
         "tldw_Server_API.app.core.TTS.tts_service_v2.get_tts_service_v2",
+        _fake_get_tts_service_v2,
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.services.outputs_service.get_tts_service_v2",
         _fake_get_tts_service_v2,
     )
 
@@ -1208,6 +1215,10 @@ def test_watchlists_outputs_pagination_excludes_mixed_origin_rows(client_with_us
     assert r.status_code == 200, r.text
     page1 = r.json()
     assert page1["total"] == 2
+    assert page1["pagination"]["total"] == 2
+    assert page1["pagination"]["limit"] == 1
+    assert page1["pagination"]["offset"] == 0
+    assert page1["pagination"]["has_more"] is True
     assert len(page1["items"]) == 1
     assert page1["items"][0]["id"] == wl_new.id
 
@@ -1215,6 +1226,10 @@ def test_watchlists_outputs_pagination_excludes_mixed_origin_rows(client_with_us
     assert r.status_code == 200, r.text
     page2 = r.json()
     assert page2["total"] == 2
+    assert page2["pagination"]["total"] == 2
+    assert page2["pagination"]["limit"] == 1
+    assert page2["pagination"]["offset"] == 1
+    assert page2["pagination"]["has_more"] is False
     assert len(page2["items"]) == 1
     assert page2["items"][0]["id"] == wl_old.id
 

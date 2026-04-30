@@ -5464,7 +5464,16 @@ async def list_outputs(
         if metadata.get("origin") != "watchlists":
             continue
         items.append(_row_to_output(row, user_id=user_id))
-    return WatchlistOutputsListResponse(items=items, total=total)
+    return WatchlistOutputsListResponse(
+        items=items,
+        total=total,
+        pagination=build_offset_pagination_meta(
+            total=total,
+            offset=offset,
+            limit=limit,
+            count=len(items),
+        ),
+    )
 
 
 @router.get("/outputs/{output_id}", response_model=WatchlistOutput, summary="Get output metadata")
