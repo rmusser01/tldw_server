@@ -66,6 +66,46 @@ async def test_create_and_list_chat_grammars(chacha_db: CharactersRAGDB):
 
 
 @pytest.mark.asyncio
+async def test_list_chat_grammars_returns_canonical_pagination(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(ChatGrammarService, "__init__", lambda self, db: None)
+    monkeypatch.setattr(
+        ChatGrammarService,
+        "list_grammars",
+        lambda self, include_archived=False, limit=100, offset=0: [
+            {
+                "id": "grammar-1",
+                "name": "Root",
+                "description": "desc",
+                "grammar_text": 'root ::= "ok"',
+                "validation_status": "valid",
+                "validation_error": None,
+                "last_validated_at": None,
+                "is_archived": False,
+                "created_at": "2026-01-01T00:00:00+00:00",
+                "updated_at": "2026-01-01T00:00:00+00:00",
+                "version": 1,
+            }
+        ],
+    )
+    monkeypatch.setattr(ChatGrammarService, "count_grammars", lambda self, include_archived=False: 1)
+
+    listing = await chat_grammar_endpoints.list_chat_grammars(
+        include_archived=False,
+        limit=100,
+        offset=0,
+        db=object(),
+    )
+
+    assert listing.total == 1
+    assert listing.items[0].id == "grammar-1"
+    assert listing.pagination.total == 1
+    assert listing.pagination.limit == 100
+    assert listing.pagination.offset == 0
+    assert listing.pagination.has_more is False
+    assert listing.pagination.next_offset is None
+
+
+@pytest.mark.asyncio
 async def test_get_archived_grammar_requires_include_archived(chacha_db: CharactersRAGDB):
     service = ChatGrammarService(chacha_db)
     grammar_id = service.create_grammar(

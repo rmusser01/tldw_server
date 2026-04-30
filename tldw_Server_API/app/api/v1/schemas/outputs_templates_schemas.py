@@ -5,6 +5,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
+from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
+
 TemplateType = Literal[
     "newsletter_markdown",
     "briefing_markdown",
@@ -71,6 +73,7 @@ class OutputTemplate(BaseModel):
 class OutputTemplateList(BaseModel):
     items: list[OutputTemplate]
     total: int
+    pagination: OffsetPaginationMeta
 
 
 class TemplatePreviewRequest(BaseModel):

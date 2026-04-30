@@ -96,6 +96,14 @@ def test_generate_and_get_data_table(tmp_path, data_tables_app_factory):
         detail_payload = detail.json()
         assert detail_payload["table"]["uuid"] == table_uuid
         assert detail_payload["sources"]
+        assert detail_payload["pagination"] == {
+            "mode": "offset",
+            "limit": 200,
+            "offset": 0,
+            "total": 0,
+            "has_more": False,
+            "next_offset": None,
+        }
 
 
 def test_mark_data_table_generate_failed_sanitizes_update_failure_log(monkeypatch):
@@ -430,8 +438,30 @@ def test_list_update_delete_data_table(tmp_path, data_tables_app_factory):
         assert resp.status_code == 200, resp.text
         payload = resp.json()
         assert payload["count"] >= 1
+        assert payload["pagination"] == {
+            "mode": "offset",
+            "limit": 50,
+            "offset": 0,
+            "total": payload["total"],
+            "has_more": False,
+            "next_offset": None,
+        }
 
         table_uuid = table.get("uuid")
+        detail = client.get(f"/api/v1/data-tables/{table_uuid}?rows_limit=1&rows_offset=0")
+        assert detail.status_code == 200, detail.text
+        detail_payload = detail.json()
+        assert detail_payload["rows_limit"] == 1
+        assert detail_payload["rows_offset"] == 0
+        assert detail_payload["pagination"] == {
+            "mode": "offset",
+            "limit": 1,
+            "offset": 0,
+            "total": 1,
+            "has_more": False,
+            "next_offset": None,
+        }
+
         patch = client.patch(
             f"/api/v1/data-tables/{table_uuid}",
             json={"name": "Renamed Table"},

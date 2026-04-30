@@ -73,6 +73,111 @@ class TestListFilesEndpoint:
         call_kwargs = mock_files_repo.list_files.call_args[1]
         assert call_kwargs["file_category"] == "tts_audio"
 
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_list_files_returns_canonical_pagination(
+        self,
+        mock_storage_service,
+        mock_user,
+        mock_files_repo,
+        monkeypatch,
+    ):
+        """List files returns additive canonical pagination metadata."""
+        mock_files_repo.list_files = AsyncMock(
+            return_value=(
+                [
+                    {
+                        "id": 1,
+                        "uuid": "uuid-1",
+                        "user_id": mock_user.id,
+                        "filename": "file_1.wav",
+                        "storage_path": "tts_audio/file_1.wav",
+                        "file_category": "tts_audio",
+                        "source_feature": "tts",
+                        "file_size_bytes": 1024,
+                        "is_deleted": False,
+                        "is_transient": False,
+                        "tags": [],
+                        "created_at": datetime.now(timezone.utc),
+                        "updated_at": datetime.now(timezone.utc),
+                    }
+                ],
+                7,
+            )
+        )
+        mock_storage_service.get_generated_files_repo = AsyncMock(return_value=mock_files_repo)
+        monkeypatch.setattr(
+            storage_endpoints,
+            "_get_service",
+            AsyncMock(return_value=mock_storage_service),
+        )
+
+        response = await storage_endpoints.list_files(user=mock_user, offset=2, limit=3)
+
+        assert response.total == 7
+        assert response.offset == 2
+        assert response.limit == 3
+        assert response.pagination.total == 7
+        assert response.pagination.offset == 2
+        assert response.pagination.limit == 3
+        assert response.pagination.has_more is True
+        assert response.pagination.next_offset == 5
+
+
+class TestTrashEndpoint:
+    """Tests for GET /storage/trash endpoint."""
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_list_trashed_files_returns_canonical_pagination(
+        self,
+        mock_storage_service,
+        mock_user,
+        mock_files_repo,
+        monkeypatch,
+    ):
+        """Trashed files listing returns additive canonical pagination metadata."""
+        mock_files_repo.list_trashed_files = AsyncMock(
+            return_value=(
+                [
+                    {
+                        "id": 9,
+                        "uuid": "uuid-9",
+                        "user_id": mock_user.id,
+                        "filename": "deleted.wav",
+                        "storage_path": "tts_audio/deleted.wav",
+                        "file_category": "tts_audio",
+                        "source_feature": "tts",
+                        "file_size_bytes": 2048,
+                        "is_deleted": True,
+                        "is_transient": False,
+                        "tags": [],
+                        "created_at": datetime.now(timezone.utc),
+                        "updated_at": datetime.now(timezone.utc),
+                        "deleted_at": datetime.now(timezone.utc),
+                    }
+                ],
+                4,
+            )
+        )
+        mock_storage_service.get_generated_files_repo = AsyncMock(return_value=mock_files_repo)
+        monkeypatch.setattr(
+            storage_endpoints,
+            "_get_service",
+            AsyncMock(return_value=mock_storage_service),
+        )
+
+        response = await storage_endpoints.list_trashed_files(user=mock_user, offset=1, limit=2)
+
+        assert response.total == 4
+        assert response.offset == 1
+        assert response.limit == 2
+        assert response.pagination.total == 4
+        assert response.pagination.offset == 1
+        assert response.pagination.limit == 2
+        assert response.pagination.has_more is True
+        assert response.pagination.next_offset == 3
+
 
 class TestDownloadFileEndpoint:
     """Tests for GET /storage/files/{file_id}/download endpoint."""

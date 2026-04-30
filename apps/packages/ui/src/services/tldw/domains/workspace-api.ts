@@ -14,6 +14,33 @@ export interface TldwApiClientCore {
   buildQuery(params?: Record<string, any>): string
 }
 
+type OffsetPaginationMeta = {
+  mode: "offset"
+  limit: number
+  offset: number
+  total?: number | null
+  has_more: boolean
+  next_offset?: number | null
+}
+
+type SkillSummary = {
+  name: string
+  description?: string | null
+  argument_hint?: string | null
+  user_invocable: boolean
+  disable_model_invocation: boolean
+  context: "inline" | "fork"
+}
+
+type SkillsListPayload = {
+  skills: SkillSummary[]
+  count: number
+  total: number
+  limit: number
+  offset: number
+  pagination?: OffsetPaginationMeta
+}
+
 export const workspaceApiMethods = {
   // ── Skills API ──
 
@@ -23,13 +50,13 @@ export const workspaceApiMethods = {
       limit?: number
       offset?: number
     }
-  ): Promise<any> {
+  ): Promise<SkillsListPayload> {
     const query = buildQuery(params)
     const base = await this.resolveApiPath("skills.list", [
       "/api/v1/skills",
       "/api/v1/skills/"
     ])
-    return await bgRequest<any>({
+    return await bgRequest<SkillsListPayload>({
       path: appendPathQuery(base, query),
       method: "GET"
     })

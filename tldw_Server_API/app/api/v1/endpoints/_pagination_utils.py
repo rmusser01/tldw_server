@@ -10,6 +10,11 @@ used across endpoints (e.g., runs, events, future artifacts listings).
 
 import urllib.parse as _u
 
+from tldw_Server_API.app.api.v1.schemas.pagination import (
+    CursorPaginationMeta,
+    OffsetPaginationMeta,
+)
+
 
 def build_link_header(
     base_path: str,
@@ -91,4 +96,82 @@ def build_link_header(
     return ", ".join(links) if links else None
 
 
-__all__ = ["build_link_header"]
+def build_offset_pagination_meta(
+    *,
+    limit: int,
+    offset: int,
+    total: int | None = None,
+    count: int | None = None,
+    has_more: bool | None = None,
+) -> OffsetPaginationMeta:
+    """Build canonical offset pagination metadata from route-local values."""
+    normalized_count = max(count or 0, 0)
+
+    if has_more is None:
+        if total is not None:
+            has_more = int(offset) + normalized_count < int(total)
+        else:
+            has_more = normalized_count >= int(limit)
+
+    next_offset = int(offset) + int(limit) if has_more else None
+
+    return OffsetPaginationMeta(
+        limit=int(limit),
+        offset=int(offset),
+        total=int(total) if total is not None else None,
+        has_more=bool(has_more),
+        next_offset=next_offset,
+    )
+
+
+def build_cursor_pagination_meta(
+    *,
+    limit: int,
+    cursor: str | None = None,
+    next_cursor: str | None = None,
+    has_more: bool | None = None,
+) -> CursorPaginationMeta:
+    """Build canonical cursor pagination metadata from route-local values."""
+    normalized_has_more = bool(next_cursor) if has_more is None else bool(has_more)
+    return CursorPaginationMeta(
+        limit=int(limit),
+        cursor=cursor,
+        next_cursor=next_cursor,
+        has_more=normalized_has_more,
+    )
+
+
+def build_pagination_link_header(
+    base_path: str,
+    common_params: list[tuple[str, str]] | None = None,
+    *,
+    pagination: OffsetPaginationMeta | CursorPaginationMeta,
+    cursor_param: str = "cursor",
+    include_first_last: bool = True,
+) -> str | None:
+    """Build an RFC5988 Link header from canonical pagination metadata."""
+    if isinstance(pagination, OffsetPaginationMeta):
+        return build_link_header(
+            base_path=base_path,
+            common_params=common_params,
+            limit=pagination.limit,
+            offset=pagination.offset,
+            has_more=pagination.has_more,
+            include_first_last=include_first_last,
+        )
+
+    return build_link_header(
+        base_path=base_path,
+        common_params=common_params,
+        next_cursor=pagination.next_cursor,
+        limit=pagination.limit,
+        cursor_param=cursor_param,
+    )
+
+
+__all__ = [
+    "build_cursor_pagination_meta",
+    "build_link_header",
+    "build_offset_pagination_meta",
+    "build_pagination_link_header",
+]

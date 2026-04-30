@@ -9,6 +9,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
+
 # File categories
 FileCategory = Literal["tts_audio", "stt_audio", "image", "voice_clone", "mindmap", "spreadsheet"]
 
@@ -88,6 +90,7 @@ class GeneratedFilesListResponse(BaseModel):
     total: int
     offset: int
     limit: int
+    pagination: OffsetPaginationMeta
 
 
 # =========================================================================
@@ -251,6 +254,7 @@ class TrashListResponse(BaseModel):
     total: int
     offset: int
     limit: int
+    pagination: OffsetPaginationMeta
 
 
 class RestoreResponse(BaseModel):

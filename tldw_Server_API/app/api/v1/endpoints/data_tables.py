@@ -16,7 +16,7 @@ from cachetools import LRUCache
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from loguru import logger
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, get_auth_principal, get_request_user, rbac_rate_limit, RequirePermission, User
-
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.API_Deps.Collections_DB_Deps import get_collections_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.api.v1.schemas.data_tables_schemas import (
@@ -421,6 +421,12 @@ def _build_table_detail_response(
         sources=sources,
         rows_limit=rows_limit,
         rows_offset=rows_offset,
+        pagination=build_offset_pagination_meta(
+            limit=rows_limit,
+            offset=rows_offset,
+            total=int(table_row.get("row_count") or 0),
+            count=len(rows) if include_rows else 0,
+        ),
     )
 
 
@@ -665,6 +671,12 @@ async def list_data_tables(
         total=total,
         limit=limit,
         offset=offset,
+        pagination=build_offset_pagination_meta(
+            limit=limit,
+            offset=offset,
+            total=total,
+            count=len(tables),
+        ),
     )
 
 

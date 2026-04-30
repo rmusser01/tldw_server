@@ -8,6 +8,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
 
+from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
+
 
 class SlideLayout(str, Enum):
     """Supported slide layout identifiers."""
@@ -137,6 +139,7 @@ class PresentationVersionListResponse(BaseModel):
     total: int
     limit: int
     offset: int
+    pagination: OffsetPaginationMeta
 
 
 class SlidesTemplateResponse(BaseModel):
@@ -206,6 +209,7 @@ class VisualStyleListResponse(BaseModel):
     total_count: int
     limit: int
     offset: int
+    pagination: OffsetPaginationMeta
 
 
 class PresentationSummary(BaseModel):
@@ -228,6 +232,7 @@ class PresentationListResponse(BaseModel):
     total: int
     limit: int
     offset: int
+    pagination: OffsetPaginationMeta
 
 
 class PresentationSearchResponse(BaseModel):
@@ -237,6 +242,7 @@ class PresentationSearchResponse(BaseModel):
     total: int
     limit: int
     offset: int
+    pagination: OffsetPaginationMeta
 
 
 class SlideGenerationBase(VisualStyleSelectionMixin):

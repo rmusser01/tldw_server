@@ -303,12 +303,28 @@ class TestListSkills:
         data = r.json()
         assert data["count"] == 2
         assert data["total"] == 3
+        assert data["pagination"] == {
+            "mode": "offset",
+            "limit": 2,
+            "offset": 0,
+            "total": 3,
+            "has_more": True,
+            "next_offset": 2,
+        }
 
         # Page 2
         r = client.get(f"{SKILLS_PREFIX}/?limit=2&offset=2")
         assert r.status_code == 200
         data = r.json()
         assert data["count"] == 1
+        assert data["pagination"] == {
+            "mode": "offset",
+            "limit": 2,
+            "offset": 2,
+            "total": 3,
+            "has_more": False,
+            "next_offset": None,
+        }
 
 
 class TestCreateAndGetSkill:

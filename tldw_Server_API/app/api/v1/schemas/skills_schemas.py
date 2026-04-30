@@ -12,6 +12,8 @@ from typing import Literal
 # 3rd-party Libraries
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
+
 #
 # Local Imports
 #
@@ -192,6 +194,7 @@ class SkillsListResponse(BaseModel):
     total: int = Field(..., description="Total number of skills")
     limit: int = Field(..., description="Pagination limit")
     offset: int = Field(..., description="Pagination offset")
+    pagination: OffsetPaginationMeta = Field(..., description="Canonical pagination metadata")
 
     model_config = ConfigDict(from_attributes=True)
 

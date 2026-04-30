@@ -9,6 +9,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
+
 ChatGrammarValidationStatus = Literal["unchecked", "valid", "invalid"]
 
 
@@ -76,3 +78,4 @@ class ChatGrammarListResponse(BaseModel):
 
     items: list[ChatGrammarResponse] = Field(default_factory=list, description="Saved grammar records")
     total: int = Field(..., description="Total number of matching saved grammars")
+    pagination: OffsetPaginationMeta

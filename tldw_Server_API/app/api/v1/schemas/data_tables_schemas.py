@@ -6,6 +6,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 from tldw_Server_API.app.api.v1.schemas.file_artifacts_schemas import FileExportInfo
+from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
 
 try:
     # Pydantic v2
@@ -174,6 +175,7 @@ class DataTablesListResponse(BaseModel):
     limit: int
     offset: int
     total: int | None = None
+    pagination: OffsetPaginationMeta
 
 
 class DataTableDetailResponse(BaseModel):
@@ -185,6 +187,7 @@ class DataTableDetailResponse(BaseModel):
     sources: list[DataTableSource]
     rows_limit: int
     rows_offset: int
+    pagination: OffsetPaginationMeta
 
 
 class DataTableContentUpdateRequest(BaseModel):
