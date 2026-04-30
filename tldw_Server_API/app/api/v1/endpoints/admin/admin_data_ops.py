@@ -7,6 +7,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import (
+    build_offset_pagination_meta,
+)
 from tldw_Server_API.app.api.v1.schemas.admin_schemas import (
     BackupCreateRequest,
     BackupCreateResponse,
@@ -252,7 +255,18 @@ async def list_backups(
             )
             for item in items
         ]
-        return BackupListResponse(items=payload, total=total, limit=limit, offset=offset)
+        return BackupListResponse(
+            items=payload,
+            total=total,
+            limit=limit,
+            offset=offset,
+            pagination=build_offset_pagination_meta(
+                total=total,
+                offset=offset,
+                limit=limit,
+                count=len(payload),
+            ),
+        )
     except HTTPException:
         raise
     except _DATA_OPS_NONCRITICAL_EXCEPTIONS as exc:
