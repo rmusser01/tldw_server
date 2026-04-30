@@ -85,7 +85,9 @@ Current limitations:
   `<root>/templates/<runtime>/<template>/manifest.json`, records artifact
   size/SHA-256 metadata plus optional bundle provenance, persists run clone
   planning manifests under `<root>/runs/<run_id>/manifest.json`, and exposes
-  dry-run run-directory GC planning.
+  dry-run run-directory GC planning with candidate reasons that distinguish
+  planning-only manifests, fully materialized inactive runs, and legacy run
+  directories without a persisted manifest.
 - When `TLDW_SANDBOX_IMAGE_STORE_ROOT` is configured, `vz_linux` can also
   resolve `spec.base_image` as a registered image-store `template_id` instead
   of a raw path, provided the template record has a stored `source_path`.

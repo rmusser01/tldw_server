@@ -143,7 +143,15 @@ gc_plan = store.plan_garbage_collection(active_run_ids=set())
 ```
 
 `plan_garbage_collection()` is dry-run only. It returns candidate records for
-inactive run directories and does not delete files.
+inactive run directories and does not delete files. Candidate reasons now
+differentiate:
+
+- `planning_only_run_manifest`: a persisted run manifest exists but no clone
+  artifacts were materialized under that run directory yet
+- `inactive_run`: a persisted run manifest exists and the run directory also
+  contains clone/runtime files
+- `legacy_run_directory`: files exist under `runs/<run_id>/` without a
+  persisted run manifest
 
 ## Networking
 

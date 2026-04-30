@@ -74,6 +74,7 @@ class GarbageCollectionCandidate:
     path: str
     size_bytes: int
     reason: str
+    template_id: str | None = None
 
 
 @dataclass(slots=True)
@@ -245,12 +246,23 @@ class SandboxImageStore:
         for run_path in sorted(path for path in runs_root.iterdir() if path.is_dir()):
             if run_path.name in active_ids:
                 continue
+            manifest = self._run_clone_manifests.get(run_path.name)
+            reason = "inactive_run"
+            if manifest is None:
+                reason = "legacy_run_directory"
+            else:
+                non_manifest_children = [
+                    child.name for child in run_path.iterdir() if child.name != "manifest.json"
+                ]
+                if not non_manifest_children:
+                    reason = "planning_only_run_manifest"
             candidates.append(
                 GarbageCollectionCandidate(
                     run_id=run_path.name,
                     path=str(run_path),
                     size_bytes=self._tree_size(run_path),
-                    reason="inactive_run",
+                    reason=reason,
+                    template_id=(manifest.template_id if manifest is not None else None),
                 )
             )
         return GarbageCollectionPlan(run_candidates=candidates)

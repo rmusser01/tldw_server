@@ -208,3 +208,41 @@ def test_sandbox_image_store_rejects_invalid_run_id_for_clone_manifest(tmp_path:
 
     with pytest.raises(ImageStoreValidationError, match="run_id_invalid"):
         store.prepare_run_clone(template_id=template_id, run_id="../escape")
+
+
+def test_sandbox_image_store_gc_plan_classifies_run_manifest_only_directories(
+    tmp_path: Path,
+) -> None:
+    disk = tmp_path / "rootfs.img"
+    disk.write_bytes(b"rootfs")
+    store = SandboxImageStore(root_path=tmp_path / "store")
+    template_id = store.register_template(
+        runtime="vz_linux",
+        template_name="debian-bookworm-arm64",
+        disk_paths=[str(disk)],
+    )
+
+    store.prepare_run_clone(template_id=template_id, run_id="run-manifest-only")
+    gc_plan = store.plan_garbage_collection(active_run_ids=set())
+
+    candidate = next(
+        item for item in gc_plan.run_candidates if item.run_id == "run-manifest-only"
+    )
+    assert candidate.reason == "planning_only_run_manifest"
+    assert candidate.template_id == template_id
+
+
+def test_sandbox_image_store_gc_plan_classifies_legacy_run_directories_without_manifest(
+    tmp_path: Path,
+) -> None:
+    run_dir = tmp_path / "store" / "runs" / "legacy-run"
+    run_dir.mkdir(parents=True)
+    (run_dir / "rootfs.img").write_bytes(b"clone")
+
+    gc_plan = SandboxImageStore(root_path=tmp_path / "store").plan_garbage_collection(
+        active_run_ids=set()
+    )
+
+    candidate = next(item for item in gc_plan.run_candidates if item.run_id == "legacy-run")
+    assert candidate.reason == "legacy_run_directory"
+    assert candidate.template_id is None
