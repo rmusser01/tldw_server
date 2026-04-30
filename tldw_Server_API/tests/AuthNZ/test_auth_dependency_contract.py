@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+from collections.abc import Mapping
 from types import SimpleNamespace
 from typing import Any
 
@@ -24,6 +25,16 @@ from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
 
 
 pytestmark = pytest.mark.unit
+
+
+def _public_names(module: object) -> set[str]:
+    return {name for name in dir(module) if not name.startswith("_")}
+
+
+def _cached_user_id(cached_user: object) -> Any:
+    if isinstance(cached_user, Mapping):
+        return cached_user.get("id")
+    return getattr(cached_user, "id", None)
 
 
 def _principal(
@@ -153,7 +164,7 @@ def _build_real_principal_app() -> FastAPI:
             "permissions": principal.permissions,
             "state_principal_id": getattr(state_principal, "principal_id", None),
             "principal_id": principal.principal_id,
-            "cached_user_id": getattr(cached_user, "id", None),
+            "cached_user_id": _cached_user_id(cached_user),
             "state_user_id": getattr(request.state, "user_id", None),
             "state_api_key_id": getattr(request.state, "api_key_id", None),
         }
@@ -519,7 +530,9 @@ def test_tools_router_uses_standard_permission_factory_alias() -> None:
     from tldw_Server_API.app.api.v1.endpoints import tools
 
     assert tools.RequirePermission is auth_deps.RequirePermission
-    assert not hasattr(tools, "auth_deps")
+    assert callable(tools.RequirePermission("tools.execute:*"))
+    assert "auth_deps" not in _public_names(tools)
+    assert not hasattr(tools, "require_permissions")
 
 
 @pytest.mark.parametrize(
@@ -620,14 +633,18 @@ def test_chat_workflows_router_uses_standard_permission_factory_alias() -> None:
     from tldw_Server_API.app.api.v1.endpoints import chat_workflows
 
     assert chat_workflows.RequirePermission is auth_deps.RequirePermission
-    assert not hasattr(chat_workflows, "auth_deps")
+    assert callable(chat_workflows.RequirePermission("chat.workflows.read"))
+    assert "auth_deps" not in _public_names(chat_workflows)
+    assert not hasattr(chat_workflows, "require_permissions")
 
 
 def test_sandbox_router_uses_standard_role_factory_alias() -> None:
     from tldw_Server_API.app.api.v1.endpoints import sandbox
 
     assert sandbox.RequireRole is auth_deps.RequireRole
-    assert not hasattr(sandbox, "auth_deps")
+    assert callable(sandbox.RequireRole("admin"))
+    assert "auth_deps" not in _public_names(sandbox)
+    assert not hasattr(sandbox, "require_roles")
 
 
 def test_slides_router_uses_standard_permission_factory_alias() -> None:
@@ -643,7 +660,13 @@ def test_workflows_router_uses_standard_auth_factory_aliases() -> None:
     assert workflows.RequireRole is auth_deps.RequireRole
     assert workflows.RequirePermission is auth_deps.RequirePermission
     assert workflows.TokenScopeGuard is auth_deps.TokenScopeGuard
-    assert not hasattr(workflows, "auth_deps")
+    assert callable(workflows.RequireRole("admin"))
+    assert callable(workflows.RequirePermission("workflows.runs.read"))
+    assert callable(workflows.TokenScopeGuard("workflows.runs.read"))
+    assert "auth_deps" not in _public_names(workflows)
+    assert not hasattr(workflows, "require_roles")
+    assert not hasattr(workflows, "require_permissions")
+    assert not hasattr(workflows, "require_token_scope")
 
 
 def test_api_key_scope_factory_alias_preserves_jwt_bypass_and_scope_checks() -> None:
