@@ -159,6 +159,28 @@ def test_ensure_private_dir_refuses_missing_child_under_symlink_parent(tmp_path)
     CASE.assertFalse((target / "child").exists())
 
 
+def test_ensure_private_dir_refuses_missing_child_under_broken_symlink_parent(tmp_path):
+    helperctl = load_helperctl()
+    link = tmp_path / "runtime"
+    link.symlink_to(tmp_path / "missing-target", target_is_directory=True)
+
+    result = helperctl.ensure_private_dir(link / "child")
+
+    CASE.assertEqual(result, helperctl.CheckResult(ok=False, reason="helper_directory_unsafe"))
+    CASE.assertTrue(link.is_symlink())
+
+
+def test_ensure_private_dir_dry_run_refuses_missing_child_under_broken_symlink_parent(tmp_path):
+    helperctl = load_helperctl()
+    link = tmp_path / "runtime"
+    link.symlink_to(tmp_path / "missing-target", target_is_directory=True)
+
+    result = helperctl.ensure_private_dir(link / "child", dry_run=True)
+
+    CASE.assertEqual(result, helperctl.CheckResult(ok=False, reason="helper_directory_unsafe"))
+    CASE.assertTrue(link.is_symlink())
+
+
 def test_ensure_private_dir_refuses_regular_file(tmp_path):
     helperctl = load_helperctl()
     runtime_dir = tmp_path / "runtime"

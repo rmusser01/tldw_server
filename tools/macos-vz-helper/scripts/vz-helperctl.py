@@ -79,7 +79,11 @@ def ensure_private_dir(path: Path, dry_run: bool = False) -> CheckResult:
 
     missing_dirs: list[Path] = []
     current = path
-    while not current.exists():
+    while True:
+        if current.is_symlink():
+            return CheckResult(ok=False, reason="helper_directory_unsafe")
+        if current.exists():
+            break
         missing_dirs.append(current)
         parent = current.parent
         if parent == current:
