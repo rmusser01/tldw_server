@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
+from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
 
 
 class WritingVersionResponse(BaseModel):
@@ -52,6 +53,9 @@ class WritingSessionListItem(BaseModel):
 class WritingSessionListResponse(BaseModel):
     sessions: list[WritingSessionListItem]
     total: int
+    limit: int
+    offset: int
+    pagination: OffsetPaginationMeta
 
 
 class WritingTemplateCreate(BaseModel):
@@ -87,6 +91,9 @@ class WritingTemplateResponse(BaseModel):
 class WritingTemplateListResponse(BaseModel):
     templates: list[WritingTemplateResponse]
     total: int
+    limit: int
+    offset: int
+    pagination: OffsetPaginationMeta
 
 
 class WritingThemeCreate(BaseModel):
@@ -128,6 +135,9 @@ class WritingThemeResponse(BaseModel):
 class WritingThemeListResponse(BaseModel):
     themes: list[WritingThemeResponse]
     total: int
+    limit: int
+    offset: int
+    pagination: OffsetPaginationMeta
 
 
 class WritingDefaultTemplate(BaseModel):
