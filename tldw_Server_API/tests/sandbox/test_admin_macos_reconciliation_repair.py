@@ -12,6 +12,11 @@ from tldw_Server_API.app.api.v1.endpoints import sandbox as sandbox_mod
 from tldw_Server_API.app.core.AuthNZ.permissions import ROLE_ADMIN
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
 from tldw_Server_API.app.core.Sandbox import service as service_mod
+from tldw_Server_API.app.core.Sandbox.macos_virtualization.helper_client import (
+    MacOSVirtualizationHelperFailure,
+    MacOSVirtualizationHelperProtocolError,
+    MacOSVirtualizationHelperUnavailable,
+)
 from tldw_Server_API.app.core.Sandbox.service import SandboxService
 
 
@@ -174,9 +179,14 @@ def test_admin_reconciliation_repair_runs_service_in_thread(monkeypatch) -> None
     assert to_thread_calls[0]["kwargs"]["dry_run"] is True
 
 
-def test_admin_reconciliation_repair_rejects_orphan_termination(monkeypatch) -> None:
-    def _repair(**kwargs) -> dict[str, object]:
-        raise service_mod.SandboxReconciliationRepairError("orphan_termination_not_supported", 400)
+def test_admin_reconciliation_repair_orphan_termination_passes_through(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen_kwargs: dict[str, object] = {}
+
+    def _repair(**kwargs: object) -> dict[str, object]:
+        seen_kwargs.update(kwargs)
+        return _repair_payload(dry_run=bool(kwargs["dry_run"]), action_status="planned")
 
     monkeypatch.setattr(sandbox_mod, "_service", SimpleNamespace(repair_macos_reconciliation=_repair), raising=True)
 
@@ -188,8 +198,8 @@ def test_admin_reconciliation_repair_rejects_orphan_termination(monkeypatch) -> 
             json={"terminate_orphaned_vms": True},
         )
 
-    assert resp.status_code == 400
-    assert resp.json()["detail"] == "orphan_termination_not_supported"
+    assert resp.status_code == 200
+    assert seen_kwargs["terminate_orphaned_vms"] is True
 
 
 def test_admin_reconciliation_repair_maps_service_unavailable_error(monkeypatch) -> None:
@@ -485,6 +495,243 @@ def test_repair_active_session_item_is_skipped(monkeypatch) -> None:
     assert result["summary"]["skipped_active_sessions"] == 1
     assert result["actions"][0]["status"] == "skipped"
     assert result["actions"][0]["reason"] == "active_session"
+
+
+def test_repair_orphan_vm_dry_run_plans_termination_without_helper_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    terminated_vm_ids: list[str] = []
+    orch = SimpleNamespace(delete_vz_session_control=lambda session_id: True)
+    service = _service_with_orchestrator(orch)
+    monkeypatch.setattr(service, "_active_session_run_count", lambda session_id: 0)
+    monkeypatch.setattr(
+        service_mod,
+        "collect_vz_reconciliation",
+        lambda *args, **kwargs: _reconciliation_report(
+            items=[
+                {
+                    "status": "orphaned_vm",
+                    "vm_id": "vm-orphan",
+                    "reason": "session_missing",
+                }
+            ]
+        ),
+        raising=True,
+    )
+    monkeypatch.setattr(
+        service_mod,
+        "MacOSVirtualizationHelperClient",
+        lambda: SimpleNamespace(terminate_vm=terminated_vm_ids.append),
+        raising=True,
+    )
+
+    result = service.repair_macos_reconciliation(terminate_orphaned_vms=True)
+
+    assert terminated_vm_ids == []
+    assert result["summary"]["orphaned_vms"] == 1
+    assert result["summary"]["terminated_orphaned_vms"] == 0
+    assert result["actions"] == [
+        {
+            "type": "terminate_orphaned_vm",
+            "session_id": None,
+            "vm_id": "vm-orphan",
+            "status": "planned",
+            "reason": "session_missing",
+        }
+    ]
+
+
+def test_repair_orphan_vm_mutating_run_calls_helper(monkeypatch: pytest.MonkeyPatch) -> None:
+    terminated_vm_ids: list[str] = []
+    orch = SimpleNamespace(delete_vz_session_control=lambda session_id: True)
+    service = _service_with_orchestrator(orch)
+    monkeypatch.setattr(service, "_active_session_run_count", lambda session_id: 0)
+    monkeypatch.setattr(
+        service_mod,
+        "collect_vz_reconciliation",
+        lambda *args, **kwargs: _reconciliation_report(
+            items=[
+                {
+                    "status": "orphaned_vm",
+                    "vm_id": "vm-orphan",
+                    "reason": "session_missing",
+                }
+            ]
+        ),
+        raising=True,
+    )
+
+    def _terminate_vm(vm_id: str) -> bool:
+        terminated_vm_ids.append(vm_id)
+        return True
+
+    monkeypatch.setattr(
+        service_mod,
+        "MacOSVirtualizationHelperClient",
+        lambda: SimpleNamespace(terminate_vm=_terminate_vm),
+        raising=True,
+    )
+
+    result = service.repair_macos_reconciliation(
+        terminate_orphaned_vms=True,
+        dry_run=False,
+    )
+
+    assert terminated_vm_ids == ["vm-orphan"]
+    assert result["summary"]["orphaned_vms"] == 1
+    assert result["summary"]["terminated_orphaned_vms"] == 1
+    assert result["actions"] == [
+        {
+            "type": "terminate_orphaned_vm",
+            "session_id": None,
+            "vm_id": "vm-orphan",
+            "status": "terminated",
+            "reason": "session_missing",
+        }
+    ]
+
+
+def test_repair_orphan_vm_termination_false_reports_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    terminated_vm_ids: list[str] = []
+    orch = SimpleNamespace(delete_vz_session_control=lambda session_id: True)
+    service = _service_with_orchestrator(orch)
+    monkeypatch.setattr(service, "_active_session_run_count", lambda session_id: 0)
+    monkeypatch.setattr(
+        service_mod,
+        "collect_vz_reconciliation",
+        lambda *args, **kwargs: _reconciliation_report(
+            items=[
+                {
+                    "status": "orphaned_vm",
+                    "vm_id": "vm-orphan",
+                    "reason": "session_missing",
+                }
+            ]
+        ),
+        raising=True,
+    )
+
+    def _terminate_vm(vm_id: str) -> bool:
+        terminated_vm_ids.append(vm_id)
+        return False
+
+    monkeypatch.setattr(
+        service_mod,
+        "MacOSVirtualizationHelperClient",
+        lambda: SimpleNamespace(terminate_vm=_terminate_vm),
+        raising=True,
+    )
+
+    result = service.repair_macos_reconciliation(
+        terminate_orphaned_vms=True,
+        dry_run=False,
+    )
+
+    assert terminated_vm_ids == ["vm-orphan"]
+    assert result["summary"]["orphaned_vms"] == 1
+    assert result["summary"]["terminated_orphaned_vms"] == 0
+    assert result["actions"][0]["status"] == "missing"
+
+
+@pytest.mark.parametrize(
+    ("helper_exc", "expected_reason"),
+    [
+        (
+            MacOSVirtualizationHelperUnavailable("macos_virtualization_helper_unavailable"),
+            "macos_virtualization_helper_unavailable",
+        ),
+        (
+            MacOSVirtualizationHelperProtocolError("macos_virtualization_helper_protocol_error"),
+            "macos_virtualization_helper_protocol_mismatch",
+        ),
+        (
+            MacOSVirtualizationHelperFailure("vm_shutdown_denied", "helper refused termination"),
+            "vm_shutdown_denied",
+        ),
+    ],
+)
+def test_repair_orphan_vm_termination_helper_errors_preserve_reason(
+    monkeypatch: pytest.MonkeyPatch,
+    helper_exc: Exception,
+    expected_reason: str,
+) -> None:
+    orch = SimpleNamespace(delete_vz_session_control=lambda session_id: True)
+    service = _service_with_orchestrator(orch)
+    monkeypatch.setattr(service, "_active_session_run_count", lambda session_id: 0)
+    monkeypatch.setattr(
+        service_mod,
+        "collect_vz_reconciliation",
+        lambda *args, **kwargs: _reconciliation_report(
+            items=[
+                {
+                    "status": "orphaned_vm",
+                    "vm_id": "vm-orphan",
+                    "reason": "session_missing",
+                }
+            ]
+        ),
+        raising=True,
+    )
+
+    def _terminate_vm(vm_id: str) -> bool:
+        raise helper_exc
+
+    monkeypatch.setattr(
+        service_mod,
+        "MacOSVirtualizationHelperClient",
+        lambda: SimpleNamespace(terminate_vm=_terminate_vm),
+        raising=True,
+    )
+
+    with pytest.raises(service_mod.SandboxReconciliationRepairError) as exc_info:
+        service.repair_macos_reconciliation(
+            terminate_orphaned_vms=True,
+            dry_run=False,
+        )
+
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.reason == expected_reason
+
+
+def test_repair_orphan_vm_termination_unexpected_exception_maps_to_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    orch = SimpleNamespace(delete_vz_session_control=lambda session_id: True)
+    service = _service_with_orchestrator(orch)
+    monkeypatch.setattr(service, "_active_session_run_count", lambda session_id: 0)
+    monkeypatch.setattr(
+        service_mod,
+        "collect_vz_reconciliation",
+        lambda *args, **kwargs: _reconciliation_report(
+            items=[
+                {
+                    "status": "orphaned_vm",
+                    "vm_id": "vm-orphan",
+                    "reason": "session_missing",
+                }
+            ]
+        ),
+        raising=True,
+    )
+
+    def _terminate_vm(vm_id: str) -> bool:
+        raise RuntimeError("helper disconnected")
+
+    monkeypatch.setattr(
+        service_mod,
+        "MacOSVirtualizationHelperClient",
+        lambda: SimpleNamespace(terminate_vm=_terminate_vm),
+        raising=True,
+    )
+
+    with pytest.raises(service_mod.SandboxReconciliationRepairError) as exc_info:
+        service.repair_macos_reconciliation(
+            terminate_orphaned_vms=True,
+            dry_run=False,
+        )
+
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.reason == "vz_orphan_vm_termination_failed"
 
 
 @pytest.mark.parametrize(

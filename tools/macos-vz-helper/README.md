@@ -22,7 +22,7 @@ The first helper slice is not a generic macOS sandbox backend:
 - no second persistence layer for sandbox sessions
 - no APFS clone execution path yet
 - no automatic launchd installation or helper auto-upgrade yet
-- no automatic orphan VM termination during admin repair yet
+- no automatic orphan VM termination during admin repair; Python can request it only through explicit dry-run-first reconciliation repair
 
 Python remains authoritative for sandbox admission, session identity, artifacts, and ACP
 integration. The helper only owns runtime VM facts and control-plane operations.

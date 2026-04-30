@@ -40,6 +40,8 @@ from .models import (
 from .macos_virtualization.helper_client import (
     MacOSVirtualizationHelperClient,
     MacOSVirtualizationHelperFailure,
+    MacOSVirtualizationHelperProtocolError,
+    MacOSVirtualizationHelperUnavailable,
 )
 from .macos_diagnostics import collect_macos_diagnostics, probe_helper
 from .orchestrator import SandboxOrchestrator, SessionActiveRunsConflict
@@ -1011,9 +1013,6 @@ class SandboxService:
         terminate_orphaned_vms: bool = False,
         dry_run: bool = True,
     ) -> dict[str, object]:
-        if terminate_orphaned_vms:
-            raise SandboxReconciliationRepairError("orphan_termination_not_supported", 400)
-
         helper_status = probe_helper()
         report = collect_vz_reconciliation(
             self._orch,
@@ -1043,6 +1042,7 @@ class SandboxService:
             "orphaned_vms": len(orphaned_items),
             "terminated_orphaned_vms": 0,
         }
+        helper_client: MacOSVirtualizationHelperClient | None = None
 
         for item in report_items:
             status = str(item.get("status") or "").strip()
@@ -1059,6 +1059,51 @@ class SandboxService:
                     "reason": reason or "active_session",
                 }
                 logger.info("Skipping VZ reconciliation repair action: {}", action)
+                actions.append(action)
+                continue
+
+            if status == "orphaned_vm":
+                if not terminate_orphaned_vms or not vm_id:
+                    continue
+
+                action_status = "planned"
+                if not dry_run:
+                    try:
+                        if helper_client is None:
+                            helper_client = MacOSVirtualizationHelperClient()
+                        terminated = bool(helper_client.terminate_vm(vm_id))
+                    except MacOSVirtualizationHelperUnavailable as exc:
+                        reason_code = str(exc) or "macos_virtualization_helper_unavailable"
+                        logger.info("VZ reconciliation repair orphan termination blocked: {}", reason_code)
+                        raise SandboxReconciliationRepairError(reason_code, 503) from exc
+                    except MacOSVirtualizationHelperProtocolError as exc:
+                        reason_code = "macos_virtualization_helper_protocol_mismatch"
+                        logger.info("VZ reconciliation repair orphan termination blocked: {}", reason_code)
+                        raise SandboxReconciliationRepairError(reason_code, 503) from exc
+                    except MacOSVirtualizationHelperFailure as exc:
+                        logger.info(
+                            "VZ reconciliation repair orphan termination helper failure for vm_id={}: {}",
+                            vm_id,
+                            exc.error_code,
+                        )
+                        raise SandboxReconciliationRepairError(exc.error_code, 503) from exc
+                    except Exception as exc:
+                        logger.exception("VZ reconciliation repair orphan termination failed for vm_id={}", vm_id)
+                        raise SandboxReconciliationRepairError("vz_orphan_vm_termination_failed", 503) from exc
+                    if terminated:
+                        summary["terminated_orphaned_vms"] += 1
+                        action_status = "terminated"
+                    else:
+                        action_status = "missing"
+
+                action = {
+                    "type": "terminate_orphaned_vm",
+                    "session_id": None,
+                    "vm_id": vm_id,
+                    "status": action_status,
+                    "reason": reason or None,
+                }
+                logger.info("VZ reconciliation repair action: {}", action)
                 actions.append(action)
                 continue
 

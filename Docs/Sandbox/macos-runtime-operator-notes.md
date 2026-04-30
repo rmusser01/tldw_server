@@ -186,9 +186,10 @@ healthy, stale, unhealthy, active, and orphan facts without changing either side
 `POST /api/v1/sandbox/admin/macos-reconciliation/repair` is the explicit
 admin-only repair endpoint. Repair defaults to dry-run, skips active sessions,
 and can delete stale or unhealthy inactive persisted session-control rows when
-requested. It does not terminate orphan helper VMs yet; orphan termination
-remains deferred and manual. Helper unavailable or protocol mismatch conditions
-fail closed and block mutating repair.
+requested. It can terminate orphan helper VMs only when
+`terminate_orphaned_vms=true` is explicitly requested; operators should inspect
+the dry-run plan first. Helper unavailable or protocol mismatch conditions fail
+closed and block mutating repair.
 
 ## Current Limits
 
@@ -203,7 +204,7 @@ fail closed and block mutating repair.
 - No allowlist networking for the new macOS runtimes
 - No `vz_macos` warm-session VM reuse yet
 - Managed helper lifecycle is available through `tools/macos-vz-helper/scripts/vz-helperctl.py`, but it remains operator-driven and does not install or load launchd services automatically
-- No automatic orphan VM termination during diagnostics or repair yet
+- No automatic orphan VM termination during diagnostics or repair; orphan termination is explicit repair-only behavior
 
 Current diagnostics are mixed-mode:
 

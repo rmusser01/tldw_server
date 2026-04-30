@@ -66,9 +66,9 @@ Current limitations:
 - `vz_linux` supports session VM reuse through persisted VZ session-control metadata; `vz_macos` does not.
 - `vz_linux` admin diagnostics include reconciliation data comparing persisted VZ session-control rows against live helper VM state.
 - `vz_linux` repair is explicit and admin-only through `POST /api/v1/sandbox/admin/macos-reconciliation/repair`; diagnostics do not mutate state.
-- `vz_linux` repair defaults to dry-run, skips active sessions, can delete stale or unhealthy inactive persisted session-control rows when requested, and does not terminate orphan helper VMs yet.
+- `vz_linux` repair defaults to dry-run, skips active sessions, can delete stale or unhealthy inactive persisted session-control rows when requested, and can terminate orphan helper VMs only when `terminate_orphaned_vms=true` is explicitly requested.
 - Helper unavailable or protocol mismatch conditions fail closed and block mutating repair.
-- Orphan VM termination remains future work and is not automatic repair behavior.
+- Orphan VM termination is not automatic repair behavior; operators should inspect the dry-run plan before running mutating repair.
 - `tools/macos-vz-helper/scripts/vz-helperctl.py` is the preferred operator helper lifecycle command for `check`, `build`, `sign`, `start`, `status`, `stop`, `plist`, and `smoke`; it can generate launchd plist scaffolding but does not install or load services automatically.
 - helper-backed template validation now distinguishes canonical bundles from
   raw-disk compatibility mode through `boot_mode` and `validation_strength`.
@@ -108,7 +108,8 @@ included in the public discovery payload, plus reconciliation data for persisted
 `POST /api/v1/sandbox/admin/macos-reconciliation/repair` is the separate
 admin-only repair surface. Repair defaults to dry-run, skips active sessions,
 can delete stale or unhealthy inactive persisted session-control rows when
-requested, and currently leaves orphan helper VMs running for manual handling.
+requested, and can terminate orphan helper VMs only when
+`terminate_orphaned_vms=true` is explicitly requested.
 
 Selected configuration knobs:
 
