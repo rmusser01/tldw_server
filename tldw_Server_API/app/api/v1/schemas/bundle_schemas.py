@@ -6,6 +6,8 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
+
 
 class BundleCreateRequest(BaseModel):
     """Request to create a backup bundle."""
@@ -63,6 +65,7 @@ class BundleListResponse(BaseModel):
     total: int
     limit: int
     offset: int
+    pagination: OffsetPaginationMeta
 
     model_config = ConfigDict(from_attributes=True)
 

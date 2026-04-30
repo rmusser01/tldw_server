@@ -451,6 +451,9 @@ async def test_list_bundles_empty(tmp_path):
         data = resp.json()
         assert data["items"] == []
         assert data["total"] == 0
+        assert data["pagination"]["total"] == 0
+        assert data["pagination"]["limit"] == 100
+        assert data["pagination"]["offset"] == 0
 
 
 @pytest.mark.asyncio
@@ -498,6 +501,9 @@ async def test_list_bundles_pagination(tmp_path):
         data = resp.json()
         assert len(data["items"]) == 1
         assert data["total"] >= 2
+        assert data["pagination"]["total"] >= 2
+        assert data["pagination"]["limit"] == 1
+        assert data["pagination"]["offset"] == 0
 
 
 # ---------------------------------------------------------------------------
