@@ -66,7 +66,8 @@ Current limitations:
 - `vz_linux` supports session VM reuse through persisted VZ session-control metadata; `vz_macos` does not.
 - `vz_linux` admin diagnostics include reconciliation data comparing persisted VZ session-control rows against live helper VM state.
 - `vz_linux` repair is explicit and admin-only through `POST /api/v1/sandbox/admin/macos-reconciliation/repair`; diagnostics do not mutate state.
-- `vz_linux` repair defaults to dry-run, skips active sessions, can delete stale or unhealthy inactive persisted session-control rows when requested, and can terminate orphan helper VMs only when `terminate_orphaned_vms=true` is explicitly requested.
+- `vz_linux` repair defaults to dry-run, skips active sessions, can delete stale or unhealthy inactive persisted session-control rows when requested, and can terminate orphan helper VMs only when `terminate_orphaned_vms=true` is explicitly requested and helper metadata proves `owner=tldw` plus `runtime=vz_linux`.
+- `vz_linux` orphan VM diagnostics split live unreferenced helper VMs into `owned_orphaned_vm`, `unknown_orphaned_vm`, and `foreign_orphaned_vm`; unknown, foreign, and legacy generic orphan records are reported but skipped by automated repair.
 - Helper unavailable or protocol mismatch conditions fail closed and block mutating repair.
 - Orphan VM termination is not automatic repair behavior; operators should inspect the dry-run plan before running mutating repair.
 - `tools/macos-vz-helper/scripts/vz-helperctl.py` is the preferred operator helper lifecycle command for `check`, `build`, `sign`, `start`, `status`, `stop`, `plist`, and `smoke`; it can generate launchd plist scaffolding but does not install or load services automatically.
@@ -109,7 +110,8 @@ included in the public discovery payload, plus reconciliation data for persisted
 admin-only repair surface. Repair defaults to dry-run, skips active sessions,
 can delete stale or unhealthy inactive persisted session-control rows when
 requested, and can terminate orphan helper VMs only when
-`terminate_orphaned_vms=true` is explicitly requested.
+`terminate_orphaned_vms=true` is explicitly requested and the reconciliation item
+is ownership-eligible.
 
 Selected configuration knobs:
 

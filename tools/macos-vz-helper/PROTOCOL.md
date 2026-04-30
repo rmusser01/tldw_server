@@ -75,8 +75,64 @@ Every failure response should include:
   "vm_id": "vm-123",
   "state": "running",
   "healthy": true,
+  "metadata": {
+    "owner": "tldw",
+    "runtime": "vz_linux",
+    "run_id": "run-123",
+    "session_id": "session-456",
+    "session_mode": true,
+    "template_path": "/var/lib/tldw/vz-linux/debian-arm64",
+    "workspace_path": "/tmp/tldw-vz-linux-workspace",
+    "created_at": "2026-04-30T18:00:00Z"
+  },
   "details": {
     "runtime": "vz_linux"
+  }
+}
+```
+
+### `create_vm`
+
+Request:
+
+```json
+{
+  "operation": "create_vm",
+  "protocol_version": "1",
+  "request": {
+    "owner": "tldw",
+    "runtime": "vz_linux",
+    "vm_name": "run-123",
+    "run_id": "run-123",
+    "session_id": "session-456",
+    "session_mode": true,
+    "template": "/var/lib/tldw/vz-linux/debian-arm64",
+    "workspace_path": "/tmp/tldw-vz-linux-workspace",
+    "timeout_sec": 300
+  }
+}
+```
+
+Response:
+
+```json
+{
+  "protocol_version": "1",
+  "helper_version": "0.1.0",
+  "vm_id": "run-123",
+  "state": "running",
+  "metadata": {
+    "owner": "tldw",
+    "runtime": "vz_linux",
+    "run_id": "run-123",
+    "session_id": "session-456",
+    "session_mode": true,
+    "template_path": "/var/lib/tldw/vz-linux/debian-arm64",
+    "workspace_path": "/tmp/tldw-vz-linux-workspace",
+    "created_at": "2026-04-30T18:00:00Z"
+  },
+  "details": {
+    "transport": "vsock"
   }
 }
 ```
@@ -109,6 +165,16 @@ Every failure response should include:
       "vm_id": "vm-123",
       "state": "running",
       "healthy": true,
+      "metadata": {
+        "owner": "tldw",
+        "runtime": "vz_linux",
+        "run_id": "run-123",
+        "session_id": "session-456",
+        "session_mode": true,
+        "template_path": "/var/lib/tldw/vz-linux/debian-arm64",
+        "workspace_path": "/tmp/tldw-vz-linux-workspace",
+        "created_at": "2026-04-30T18:00:00Z"
+      },
       "details": {
         "runtime": "vz_linux"
       }
@@ -121,6 +187,11 @@ Every failure response should include:
 
 - Python must reject incompatible `protocol_version` values.
 - Helper runtime truth wins over env-only scaffolding.
+- VM ownership metadata is additive in protocol version `1`. Missing or malformed
+  metadata must parse as unknown ownership on the Python side.
+- The helper assigns `created_at` when VM creation metadata omits it. Python uses
+  `owner=tldw`, `runtime=vz_linux`, non-empty `run_id`, and session metadata to
+  decide whether orphan repair may terminate a live VM.
 - Template validation must report `boot_mode` and `validation_strength` when the
   helper can resolve the template successfully.
 - Python remains the source of truth for sandbox sessions; the helper only reports

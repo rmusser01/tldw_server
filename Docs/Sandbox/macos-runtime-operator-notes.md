@@ -187,9 +187,24 @@ healthy, stale, unhealthy, active, and orphan facts without changing either side
 admin-only repair endpoint. Repair defaults to dry-run, skips active sessions,
 and can delete stale or unhealthy inactive persisted session-control rows when
 requested. It can terminate orphan helper VMs only when
-`terminate_orphaned_vms=true` is explicitly requested; operators should inspect
-the dry-run plan first. Helper unavailable or protocol mismatch conditions fail
-closed and block mutating repair.
+`terminate_orphaned_vms=true` is explicitly requested and helper metadata proves
+the VM is owned by this `tldw` `vz_linux` sandbox control plane. Operators should
+inspect the dry-run plan first. Helper unavailable or protocol mismatch
+conditions fail closed and block mutating repair.
+
+Orphan VM classifications are:
+
+- `owned_orphaned_vm`: metadata has `owner=tldw`, `runtime=vz_linux`, non-empty
+  `run_id`, non-empty helper-created `created_at`, and a `session_id` when
+  `session_mode=true`; repair may terminate these when explicitly requested.
+- `unknown_orphaned_vm`: metadata is missing, legacy, or incomplete; repair
+  reports and skips these.
+- `foreign_orphaned_vm`: metadata exists but owner or runtime does not match this
+  sandbox control plane; repair reports and skips these.
+
+This metadata is local helper ownership metadata, not cryptographic proof. Unknown,
+foreign, or legacy helper VMs may require manual operator cleanup outside the
+automated repair endpoint.
 
 ## Current Limits
 
@@ -204,7 +219,7 @@ closed and block mutating repair.
 - No allowlist networking for the new macOS runtimes
 - No `vz_macos` warm-session VM reuse yet
 - Managed helper lifecycle is available through `tools/macos-vz-helper/scripts/vz-helperctl.py`, but it remains operator-driven and does not install or load launchd services automatically
-- No automatic orphan VM termination during diagnostics or repair; orphan termination is explicit repair-only behavior
+- No automatic orphan VM termination during diagnostics or repair; orphan termination is explicit repair-only behavior and is limited to owned `vz_linux` helper VMs
 
 Current diagnostics are mixed-mode:
 
