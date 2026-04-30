@@ -979,6 +979,41 @@ def test_browse_provider_sources_backfills_blank_zotero_provider_user_id(connect
 
 
 @pytest.mark.integration
+def test_browse_provider_sources_sanitizes_connector_error(connectors_client, monkeypatch):
+    client, headers = connectors_client
+
+    import tldw_Server_API.app.api.v1.endpoints.connectors as ep
+
+    class _FailingConn:
+        async def list_collections(self, account, *, cursor=None, page_size=100):
+            raise RuntimeError("connector backend exploded")
+
+    async def _fake_get_account_tokens(db, user_id, account_id):
+        assert account_id == 15
+        return {"access_token": "api-key", "provider_user_id": "123456"}
+
+    async def _fake_get_account_email(db, user_id, account_id):
+        return None
+
+    async def _fake_get_account_for_user(db, user_id, account_id):
+        return {"id": account_id, "user_id": user_id, "provider": "zotero"}
+
+    monkeypatch.setattr(ep, "get_connector_by_name", lambda provider: _FailingConn())
+    monkeypatch.setattr(ep, "get_account_tokens", _fake_get_account_tokens)
+    monkeypatch.setattr(ep, "get_account_email", _fake_get_account_email)
+    monkeypatch.setattr(ep, "get_account_for_user", _fake_get_account_for_user)
+
+    response = client.get(
+        "/api/v1/connectors/providers/zotero/sources/browse",
+        params={"account_id": 15, "page_size": 25},
+        headers=headers,
+    )
+
+    assert response.status_code == 502
+    assert response.json()["detail"] == "Browse failed"
+
+
+@pytest.mark.integration
 def test_browse_provider_sources_rejects_account_provider_mismatch(connectors_client, monkeypatch):
     client, headers = connectors_client
 

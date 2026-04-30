@@ -22,20 +22,20 @@ def _make_reference_wav(duration_seconds: float, *, sample_rate: int = 24000) ->
     return buffer.getvalue()
 
 
-def test_omnivoice_clone_allows_missing_reference_text_for_auto_transcription():
+def test_omnivoice_clone_requires_reference_text():
     validator = TTSInputValidator()
     request = TTSRequest(
         text="hello",
         voice="clone",
         format=AudioFormat.WAV,
-        voice_reference=_make_reference_wav(3.5),
+        voice_reference=b"RIFF" + b"\x00" * 64,
         extra_params={},
     )
 
     is_valid, error = validator.validate_request(request, provider="omnivoice")
 
-    assert is_valid is True
-    assert error is None
+    assert is_valid is False
+    assert "reference_text" in str(error)
 
 
 def test_omnivoice_clone_accepts_reference_text():

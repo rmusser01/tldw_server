@@ -4,9 +4,10 @@ import asyncio
 import inspect
 import secrets
 import uuid
+from collections.abc import Awaitable
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any, Awaitable, Callable
+from typing import Any, Callable
 
 from fastapi import HTTPException, Request, status
 from fastapi.responses import JSONResponse
@@ -14,12 +15,12 @@ from loguru import logger
 from pydantic import ValidationError
 
 from tldw_Server_API.app.api.v1.schemas.telegram_schemas import (
+    TELEGRAM_WEBHOOK_SECRET_MIN_LENGTH,
     TelegramBotConfigResponse,
     TelegramBotConfigUpdate,
     TelegramLinkedActorListResponse,
     TelegramLinkedActorRevokeResponse,
     TelegramWebhookUpdate,
-    TELEGRAM_WEBHOOK_SECRET_MIN_LENGTH,
 )
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
@@ -518,10 +519,7 @@ def _normalize_bot_config_payload(payload: dict[str, Any] | None) -> dict[str, A
     }
     if isinstance(payload, dict):
         merged.update(payload)
-    merged["bot_username"] = (
-        _normalize_telegram_bot_username(merged.get("bot_username"))
-        or _DEFAULT_BOT_USERNAME
-    )
+    merged["bot_username"] = _normalize_telegram_bot_username(merged.get("bot_username")) or _DEFAULT_BOT_USERNAME
     merged["enabled"] = bool(merged.get("enabled"))
     return merged
 
@@ -556,8 +554,8 @@ def _decrypt_telegram_payload(encrypted_blob: str | None) -> dict[str, Any] | No
         return None
     try:
         payload = decrypt_byok_payload(loads_envelope(encrypted_blob))
-    except Exception as exc:
-        logger.warning("Failed to decrypt Telegram bot config payload: {}", exc)
+    except Exception:
+        logger.warning("Failed to decrypt Telegram bot config payload")
         return None
     return payload if isinstance(payload, dict) else None
 
@@ -645,8 +643,8 @@ async def _handle_telegram_approval_callback_query(
     now = datetime.now(timezone.utc)
     try:
         approvals_repo = await get_telegram_approvals_repo()
-    except Exception as exc:
-        logger.error("Failed to resolve Telegram approvals repo: {}", exc)
+    except Exception:
+        logger.error("Failed to resolve Telegram approvals repo")
         return _telegram_webhook_error(
             status.HTTP_503_SERVICE_UNAVAILABLE,
             "approval_service_unavailable",
@@ -696,8 +694,8 @@ async def _handle_telegram_approval_callback_query(
 
         try:
             approval_service = await get_approval_service()
-        except Exception as exc:
-            logger.error("Failed to resolve Telegram approval service: {}", exc)
+        except Exception:
+            logger.error("Failed to resolve Telegram approval service")
             return _telegram_webhook_error(
                 status.HTTP_503_SERVICE_UNAVAILABLE,
                 "approval_service_unavailable",
@@ -730,8 +728,8 @@ async def _handle_telegram_approval_callback_query(
                 "scope_key": consumed_pending.get("scope_key"),
             },
         )
-    except Exception as exc:
-        logger.error("Failed to persist Telegram approval decision: {}", exc)
+    except Exception:
+        logger.error("Failed to persist Telegram approval decision")
         return _telegram_webhook_error(
             status.HTTP_503_SERVICE_UNAVAILABLE,
             "approval_service_unavailable",
@@ -770,9 +768,7 @@ def _telegram_webhook_error(
 
 
 def _coerce_valid_webhook_secret_header(request: Request) -> str | None:
-    webhook_secret = _coerce_nonempty_string(
-        request.headers.get("X-Telegram-Bot-Api-Secret-Token")
-    )
+    webhook_secret = _coerce_nonempty_string(request.headers.get("X-Telegram-Bot-Api-Secret-Token"))
     if not webhook_secret:
         return None
     if len(webhook_secret) < TELEGRAM_WEBHOOK_SECRET_MIN_LENGTH:
@@ -788,7 +784,7 @@ async def _resolve_webhook_scope_from_secret(
     try:
         rows = await repo.list_secrets(provider=_PROVIDER)
     except Exception as exc:
-        logger.error("Failed to list Telegram bot configs for webhook resolution: {}", exc)
+        logger.error("Failed to list Telegram bot configs for webhook resolution")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Telegram bot configuration is unavailable",
@@ -803,12 +799,7 @@ async def _resolve_webhook_scope_from_secret(
         try:
             secret_row = await repo.fetch_secret(scope_type, scope_id, _PROVIDER)
         except Exception as exc:
-            logger.error(
-                "Failed to load Telegram bot config for webhook resolution at {}:{}: {}",
-                scope_type,
-                scope_id,
-                exc,
-            )
+            logger.error("Failed to load Telegram bot config for webhook resolution")
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="Telegram bot configuration is unavailable",
@@ -826,8 +817,7 @@ async def _resolve_webhook_scope_from_secret(
         matches.append(
             TelegramWebhookContext(
                 scope=TelegramScope(scope_type=scope_type, scope_id=scope_id),
-                bot_username=_normalize_telegram_bot_username(payload.get("bot_username"))
-                or _DEFAULT_BOT_USERNAME,
+                bot_username=_normalize_telegram_bot_username(payload.get("bot_username")) or _DEFAULT_BOT_USERNAME,
             )
         )
         if len(matches) > 1:
@@ -1004,8 +994,8 @@ async def telegram_webhook_impl(
                 scope_type=scope.scope_type,
                 scope_id=scope.scope_id,
             )
-        except Exception as exc:
-            logger.error("Failed to mint Telegram execution identity: {}", exc)
+        except Exception:
+            logger.error("Failed to mint Telegram execution identity")
             return _telegram_webhook_error(
                 status.HTTP_503_SERVICE_UNAVAILABLE,
                 "execution_identity_unavailable",

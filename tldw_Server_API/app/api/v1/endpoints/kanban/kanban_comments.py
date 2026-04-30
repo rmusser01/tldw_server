@@ -14,6 +14,7 @@ from tldw_Server_API.app.api.v1.API_Deps.kanban_deps import (
     handle_kanban_db_error,
     kanban_rate_limit,
 )
+from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.api.v1.schemas.kanban_schemas import (
     CommentCreate,
     CommentResponse,
@@ -22,9 +23,11 @@ from tldw_Server_API.app.api.v1.schemas.kanban_schemas import (
     PaginationInfo,
 )
 from tldw_Server_API.app.core.DB_Management.Kanban_DB import (
-    InputError as KanbanInputError,
+    ConflictError,
+    InputError,
     KanbanDB,
     KanbanDBError,
+    NotFoundError,
 )
 
 router = APIRouter(tags=["Kanban Comments"])
@@ -66,7 +69,9 @@ async def create_comment(
             content=comment_in.content
         )
         return CommentResponse(**comment)
-    except (KanbanDBError, KanbanInputError) as e:
+    except (InputError, ConflictError, NotFoundError, KanbanDBError) as e:
+        raise map_db_error_to_http(e, default_detail="Failed to create comment") from e
+    except Exception as e:
         raise _handle_error(e) from e
 
 
@@ -104,7 +109,9 @@ async def list_comments(
                 has_more=has_more
             )
         )
-    except (KanbanDBError, KanbanInputError) as e:
+    except (InputError, ConflictError, NotFoundError, KanbanDBError) as e:
+        raise map_db_error_to_http(e, default_detail="Failed to fetch comments") from e
+    except Exception as e:
         raise _handle_error(e) from e
 
 
@@ -131,7 +138,9 @@ async def get_comment(
         return CommentResponse(**comment)
     except HTTPException:
         raise
-    except (KanbanDBError, KanbanInputError) as e:
+    except (InputError, ConflictError, NotFoundError, KanbanDBError) as e:
+        raise map_db_error_to_http(e, default_detail="Failed to fetch comment") from e
+    except Exception as e:
         raise _handle_error(e) from e
 
 
@@ -160,7 +169,9 @@ async def update_comment(
             content=comment_in.content
         )
         return CommentResponse(**comment)
-    except (KanbanDBError, KanbanInputError) as e:
+    except (InputError, ConflictError, NotFoundError, KanbanDBError) as e:
+        raise map_db_error_to_http(e, default_detail="Failed to update comment") from e
+    except Exception as e:
         raise _handle_error(e) from e
 
 
@@ -193,5 +204,7 @@ async def delete_comment(
         return Response(status_code=status.HTTP_204_NO_CONTENT)
     except HTTPException:
         raise
-    except (KanbanDBError, KanbanInputError) as e:
+    except (InputError, ConflictError, NotFoundError, KanbanDBError) as e:
+        raise map_db_error_to_http(e, default_detail="Failed to delete comment") from e
+    except Exception as e:
         raise _handle_error(e) from e

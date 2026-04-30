@@ -314,7 +314,7 @@ def _raise_for_tts_error(exc: Exception) -> None:
     if isinstance(exc, TTSValidationError):
         raise HTTPException(status_code=400, detail=str(exc))
     if isinstance(exc, TTSProviderNotConfiguredError):
-        raise HTTPException(status_code=503, detail=f"TTS service unavailable: {str(exc)}")
+        raise HTTPException(status_code=503, detail="TTS service unavailable")
     if isinstance(exc, TTSAuthenticationError):
         raise HTTPException(status_code=502, detail="TTS provider authentication failed")
     if isinstance(exc, TTSRateLimitError):
@@ -322,7 +322,7 @@ def _raise_for_tts_error(exc: Exception) -> None:
     if isinstance(exc, TTSQuotaExceededError):
         raise HTTPException(status_code=402, detail="TTS quota exceeded")
     if isinstance(exc, TTSError):
-        raise HTTPException(status_code=500, detail=f"TTS error: {str(exc)}")
+        raise HTTPException(status_code=500, detail="TTS generation failed")
     raise HTTPException(status_code=500, detail="TTS generation failed")
 
 
@@ -518,7 +518,7 @@ async def save_reading_item(
         record_reading_item_saved(user_id=current_user.id, item=item)
         return item
     except _READING_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error(f"reading_save_failed: {exc}")
+        logger.error("reading_save_failed")
         raise HTTPException(status_code=400, detail="reading_save_failed") from exc
 
 
@@ -606,7 +606,7 @@ async def create_reading_saved_search(
             sort=payload.sort,
         )
     except _READING_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error(f"reading_saved_search_create_failed: {exc}")
+        logger.error("reading_saved_search_create_failed")
         raise HTTPException(status_code=400, detail="reading_saved_search_create_failed") from exc
     return _to_saved_search_response(row)
 
@@ -626,7 +626,7 @@ async def list_reading_saved_searches(
     try:
         rows, total = collections_db.list_saved_searches(limit=limit, offset=offset)
     except _READING_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error(f"reading_saved_search_list_failed: {exc}")
+        logger.error("reading_saved_search_list_failed")
         raise HTTPException(status_code=400, detail="reading_saved_search_list_failed") from exc
     return ReadingSavedSearchListResponse(
         items=[_to_saved_search_response(row) for row in rows],
@@ -660,7 +660,7 @@ async def update_reading_saved_search(
     except KeyError:
         raise HTTPException(status_code=404, detail="reading_saved_search_not_found") from None
     except _READING_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error(f"reading_saved_search_update_failed: {exc}")
+        logger.error("reading_saved_search_update_failed")
         raise HTTPException(status_code=400, detail="reading_saved_search_update_failed") from exc
     return _to_saved_search_response(row)
 
@@ -679,7 +679,7 @@ async def delete_reading_saved_search(
     try:
         ok = collections_db.delete_saved_search(search_id)
     except _READING_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error(f"reading_saved_search_delete_failed: {exc}")
+        logger.error("reading_saved_search_delete_failed")
         raise HTTPException(status_code=400, detail="reading_saved_search_delete_failed") from exc
     if not ok:
         raise HTTPException(status_code=404, detail="reading_saved_search_not_found")
@@ -707,7 +707,7 @@ async def link_note_to_reading_item(
     except KeyError:
         raise HTTPException(status_code=404, detail="reading_item_not_found") from None
     except _READING_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error(f"reading_note_link_create_failed: {exc}")
+        logger.error("reading_note_link_create_failed")
         raise HTTPException(status_code=400, detail="reading_note_link_create_failed") from exc
     record_reading_note_linked(
         user_id=current_user.id,
@@ -735,7 +735,7 @@ async def list_reading_item_note_links(
     except KeyError:
         raise HTTPException(status_code=404, detail="reading_item_not_found") from None
     except _READING_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error(f"reading_note_link_list_failed: {exc}")
+        logger.error("reading_note_link_list_failed")
         raise HTTPException(status_code=400, detail="reading_note_link_list_failed") from exc
     return ReadingNoteLinksListResponse(
         item_id=item_id,
@@ -770,7 +770,7 @@ async def unlink_note_from_reading_item(
     except KeyError:
         raise HTTPException(status_code=404, detail="reading_item_not_found") from None
     except _READING_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error(f"reading_note_link_delete_failed: {exc}")
+        logger.error("reading_note_link_delete_failed")
         raise HTTPException(status_code=400, detail="reading_note_link_delete_failed") from exc
     if not ok:
         raise HTTPException(status_code=404, detail="reading_note_link_not_found")
@@ -814,7 +814,7 @@ async def import_reading_items(
     try:
         raw = await file.read()
     except _READING_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error(f"reading_import_read_failed: {exc}")
+        logger.error("reading_import_read_failed")
         raise HTTPException(status_code=400, detail="reading_import_failed") from exc
     if not raw:
         raise HTTPException(status_code=400, detail="reading_import_empty")
@@ -844,12 +844,12 @@ async def import_reading_items(
             max_retries=3,
         )
     except _READING_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error(f"reading_import_job_create_failed: {exc}")
+        logger.error("reading_import_job_create_failed")
         if staged_path is not None:
             try:
                 staged_path.unlink(missing_ok=True)
-            except OSError as cleanup_exc:
-                logger.debug(f"Failed to cleanup staged file: {cleanup_exc}")
+            except OSError:
+                logger.debug("reading_import_staged_file_cleanup_failed")
         raise HTTPException(status_code=500, detail="reading_import_failed") from exc
 
     return ReadingImportJobResponse(
@@ -929,7 +929,7 @@ async def get_reading_item(
     except KeyError:
         raise HTTPException(status_code=404, detail="reading_item_not_found") from None
     except _READING_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error(f"reading_get_failed: {exc}")
+        logger.error("reading_get_failed")
         raise HTTPException(status_code=400, detail="reading_get_failed") from exc
     return _to_reading_detail(row)
 
@@ -963,7 +963,7 @@ async def summarize_reading_item(
     except KeyError:
         raise HTTPException(status_code=404, detail="reading_item_not_found") from None
     except _READING_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error(f"reading_summary_get_failed: {exc}")
+        logger.error("reading_summary_get_failed")
         raise HTTPException(status_code=400, detail="reading_item_fetch_failed") from exc
 
     metadata = _parse_metadata(row)
@@ -996,13 +996,13 @@ async def summarize_reading_item(
             ),
         )
     except _READING_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error(f"reading_summarize_failed: {exc}")
+        logger.error("reading_summarize_failed")
         raise HTTPException(status_code=503, detail="reading_summarize_failed") from exc
 
     if not isinstance(summary, str):
         summary = str(summary)
     if not summary or summary.strip().lower().startswith("error:"):
-        logger.error(f"reading_summarize_error: {summary}")
+        logger.error("reading_summarize_error")
         raise HTTPException(status_code=503, detail="reading_summarize_failed")
 
     citation = _build_reading_citation(row)
@@ -1048,7 +1048,7 @@ async def tts_reading_item(
     except KeyError:
         raise HTTPException(status_code=404, detail="reading_item_not_found") from None
     except _READING_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error(f"reading_tts_get_failed: {exc}")
+        logger.error("reading_tts_get_failed")
         raise HTTPException(status_code=400, detail="reading_item_fetch_failed") from exc
 
     metadata = _parse_metadata(row)
@@ -1162,7 +1162,7 @@ async def update_reading_item(
     except KeyError:
         raise HTTPException(status_code=404, detail="reading_item_not_found") from None
     except _READING_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error(f"reading_update_failed: {exc}")
+        logger.error("reading_update_failed")
         raise HTTPException(status_code=400, detail="reading_update_failed") from exc
 
 
@@ -1190,7 +1190,7 @@ async def delete_reading_item(
     except KeyError:
         raise HTTPException(status_code=404, detail="reading_item_not_found") from None
     except _READING_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error(f"reading_delete_failed: {exc}")
+        logger.error("reading_delete_failed")
         raise HTTPException(status_code=400, detail="reading_delete_failed") from exc
 
 
@@ -1274,7 +1274,7 @@ async def create_reading_archive(
     try:
         out_dir.mkdir(parents=True, exist_ok=True)
     except _READING_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error(f"reading_archive: failed to create outputs dir: {exc}")
+        logger.error("reading_archive_outputs_dir_failed")
         raise HTTPException(status_code=500, detail="storage_unavailable") from exc
 
     ts = datetime.now(tz=timezone.utc).strftime("%Y%m%d_%H%M%S")
@@ -1286,7 +1286,7 @@ async def create_reading_archive(
     try:
         path.write_text(content, encoding="utf-8")
     except _READING_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error(f"reading_archive: failed to write archive file: {exc}")
+        logger.error("reading_archive_write_failed")
         raise HTTPException(status_code=500, detail="reading_archive_write_failed") from exc
 
     retention_until = _resolve_archive_retention(payload)
@@ -1309,11 +1309,11 @@ async def create_reading_archive(
             retention_until=retention_until,
         )
     except _READING_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error(f"reading_archive: failed to insert output record: {exc}")
+        logger.error("reading_archive_db_failed")
         try:
             path.unlink(missing_ok=True)
-        except OSError as cleanup_exc:
-            logger.warning(f"reading_archive: failed to cleanup file after DB error: {cleanup_exc}")
+        except OSError:
+            logger.warning("reading_archive_cleanup_failed")
         raise HTTPException(status_code=500, detail="reading_archive_db_failed") from exc
 
     return ReadingArchiveResponse(
@@ -1396,8 +1396,8 @@ async def export_reading_items(
         if include_highlights:
             try:
                 highlights = service.collections.list_highlights_by_item(item_id=row.id)
-            except _READING_NONCRITICAL_EXCEPTIONS as exc:
-                logger.debug(f"Failed to fetch highlights for item {row.id}: {exc}")
+            except _READING_NONCRITICAL_EXCEPTIONS:
+                logger.debug("reading_export_highlights_fetch_failed")
                 highlights = []
             payload["highlights"] = [_serialize_highlight_row(h) for h in highlights]
         return payload

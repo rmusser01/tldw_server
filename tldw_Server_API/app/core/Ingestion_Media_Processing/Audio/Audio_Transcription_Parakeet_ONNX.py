@@ -579,7 +579,8 @@ def transcribe_with_parakeet_onnx(
     try:
         session, tokenizer = load_parakeet_onnx_model(model_path, device)
     except Exception as e:
-        return f"[Error: {str(e)}]"
+        logger.exception(f"Failed to load ONNX model: {e}")
+        return "[Error: Failed to load ONNX model]"
     if session is None or tokenizer is None:
         return "[Error: Failed to load ONNX model]"
 
@@ -597,7 +598,7 @@ def transcribe_with_parakeet_onnx(
                 )
         except (ImportError, OSError, RuntimeError, TypeError, ValueError) as e:
             logger.exception(f"Failed to load audio file: {e}")
-            return f"[Error: Failed to load audio: {e}]"
+            return "[Error: Failed to load audio]"
 
     # Ensure numpy array
     if not isinstance(audio_data, np.ndarray):
@@ -670,7 +671,7 @@ def transcribe_with_parakeet_onnx(
 
     except Exception as e:
         logger.exception(f"Transcription error: {e}")
-        return f"[Error: Transcription failed: {e}]"
+        return "[Error: Parakeet ONNX transcription failed]"
 
 
 def transcribe_chunked_onnx(

@@ -17,6 +17,22 @@ def _make_request() -> Request:
     return Request(scope)
 
 
+def _capture_setup_deps_records() -> tuple[list[dict], int]:
+    records: list[dict] = []
+    sink_id = setup_deps.logger.add(
+        lambda message: records.append(
+            {
+                "message": str(message.record.get("message") or ""),
+                "extra": dict(message.record.get("extra") or {}),
+                "exception": message.record.get("exception"),
+            }
+        ),
+        level="DEBUG",
+        format="{message}",
+    )
+    return records, sink_id
+
+
 @pytest.mark.asyncio
 async def test_require_admin_for_remote_rejects_non_admin(monkeypatch):
     async def fake_get_auth_principal(_request):
@@ -136,3 +152,40 @@ async def test_require_shared_audio_installer_access_allows_admin_claims(monkeyp
     )
 
     await setup_deps.require_shared_audio_installer_access(_make_request())
+
+
+def test_config_allows_remote_sanitizes_config_read_fallback_log(monkeypatch):
+    sensitive_marker = "RAW_SETUP_CONFIG_READ_MARKER"
+    sensitive_path = "/private/tmp/setup/token-config.txt"
+    sensitive_token = "setup-token-abc123"
+    sensitive_detail = f"{sensitive_marker} failed for {sensitive_path} using {sensitive_token}"
+    records, sink_id = _capture_setup_deps_records()
+
+    def _raise_config_path_failure():
+        raise RuntimeError(sensitive_detail)
+
+    setup_deps.reset_remote_access_cache()
+    monkeypatch.setattr(setup_deps.setup_manager, "get_config_file_path", _raise_config_path_failure)
+
+    try:
+        assert setup_deps._config_allows_remote() is False
+    finally:
+        setup_deps.logger.remove(sink_id)
+        setup_deps.reset_remote_access_cache()
+
+    assert records == [
+        {
+            "message": "Unable to read setup remote access configuration; using localhost-only default",
+            "extra": {"error_type": "RuntimeError"},
+            "exception": None,
+        }
+    ]
+
+    rendered_record = "\n".join(
+        f"{record['message']} {record['extra']} {record['exception']}" for record in records
+    )
+    assert "exc_info" not in rendered_record
+    assert sensitive_marker not in rendered_record
+    assert sensitive_path not in rendered_record
+    assert sensitive_token not in rendered_record
+    assert sensitive_detail not in rendered_record

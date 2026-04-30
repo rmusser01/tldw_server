@@ -80,8 +80,8 @@ def _extract_request_base(request: Request | None) -> str:
         return ""
     try:
         return str(request.base_url).rstrip("/")
-    except (AttributeError, TypeError, ValueError) as e:
-        logger.debug(f"Failed to resolve base_url from request: {e}")
+    except (AttributeError, TypeError, ValueError):
+        logger.debug("Failed to resolve base_url from request")
         return ""
 
 
@@ -272,8 +272,8 @@ def _load_active_job(sync_state: dict[str, Any] | None) -> dict[str, Any] | None
         from tldw_Server_API.app.core.Jobs.manager import JobManager
 
         return JobManager().get_job(int(active_job_id))
-    except Exception as exc:
-        logger.warning("Failed to load active connectors job {}: {}", active_job_id, exc)
+    except Exception:
+        logger.warning("Failed to load active connectors job")
         return None
 
 
@@ -376,7 +376,7 @@ async def _queue_source_job(
         try:
             today_count = count_jobs_fn(user_id)
         except Exception as exc:
-            logger.exception(f"Quota check failed for user_id={user_id}: {exc}")
+            logger.error("Connectors quota check failed")
             raise HTTPException(
                 status_code=HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Daily import quota check failed",
@@ -559,7 +559,7 @@ async def oauth_callback(
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception(f"Policy enforcement error on callback for provider '{provider}': {e}")
+        logger.error("Connector callback policy enforcement failed")
         raise HTTPException(
             status_code=403,
             detail="Account linking denied: policy enforcement failed",
@@ -616,8 +616,8 @@ async def oauth_callback(
                     close = getattr(resp, "close", None)
                     if callable(close):
                         close()
-        except Exception as e:
-            logger.debug(f"Failed to fetch userinfo for drive account (non-fatal): {e}")
+        except Exception:
+            logger.debug("Failed to fetch drive userinfo")
     elif provider == 'notion':
         notion_workspace_id = tokens.get('workspace_id')
     # Enforce additional org policy constraints at callback across modes using
@@ -631,7 +631,7 @@ async def oauth_callback(
             account_email=acct_email,
         )
     except Exception as e:
-        logger.exception(f"Callback constraint evaluation failed for provider '{provider}': {e}")
+        logger.error("Connector callback constraint evaluation failed")
         raise HTTPException(
             status_code=500,
             detail="Account linking denied: policy evaluation failed",
@@ -712,8 +712,8 @@ async def browse_provider_sources(
         else:
             items, next_cursor = [], None
     except Exception as e:
-        logger.error(f"Browse error for {provider}: {e}")
-        raise HTTPException(status_code=502, detail=f"Browse failed: {e}") from e
+        logger.error("Connector browse failed")
+        raise HTTPException(status_code=502, detail="Browse failed") from e
     return {"items": items, "next_cursor": next_cursor}
 
 
@@ -747,7 +747,7 @@ async def add_source(
     try:
         ok, why = evaluate_policy_constraints(org_policy, provider=provider, remote_path=path)
     except Exception as e:
-        logger.exception(f"Policy evaluation failed for provider '{provider}': {e}")
+        logger.error("Connector source policy evaluation failed")
         raise HTTPException(
             status_code=HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Source denied: policy evaluation failed",
@@ -809,7 +809,7 @@ async def add_source(
                     **sync_updates,
                 )
         except Exception as exc:
-            logger.warning(f"{provider} webhook provisioning failed for source {row.get('id')}: {exc}")
+            logger.warning("Connector webhook provisioning failed")
             await upsert_source_sync_state(
                 db,
                 source_id=int(row.get("id")),
@@ -1137,7 +1137,7 @@ async def get_job_status(job_id: int) -> dict[str, Any]:
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Failed to get connector job status") from e
 
 
 # Admin: Org-level policy

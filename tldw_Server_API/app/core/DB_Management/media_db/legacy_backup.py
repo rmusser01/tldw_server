@@ -20,7 +20,7 @@ def create_automated_backup(db_path: Any, backup_dir: Any) -> str:
         return _create_backup(db_path, backup_dir, "media")
     except MEDIA_NONCRITICAL_EXCEPTIONS as exc:
         logger.exception("create_automated_backup failed")
-        return f"Failed to create backup: {exc}"
+        return "Failed to create backup."
 
 
 def create_incremental_backup(db_path: Any, backup_dir: Any) -> str:
@@ -33,7 +33,7 @@ def create_incremental_backup(db_path: Any, backup_dir: Any) -> str:
         return _create_incremental_backup(db_path, backup_dir, "media")
     except MEDIA_NONCRITICAL_EXCEPTIONS as exc:
         logger.exception("create_incremental_backup failed")
-        return f"Failed to create incremental backup: {exc}"
+        return "Failed to create incremental backup."
 
 
 def rotate_backups(backup_dir: Any, max_backups: int = 10) -> str:
@@ -64,7 +64,7 @@ def rotate_backups(backup_dir: Any, max_backups: int = 10) -> str:
         return f"Removed {removed} old backups."
     except MEDIA_NONCRITICAL_EXCEPTIONS as exc:
         logger.exception("rotate_backups failed")
-        return f"Failed to rotate backups: {exc}"
+        return "Failed to rotate backups."
 
 
 __all__ = [

@@ -212,10 +212,10 @@ class JobsNotificationsService:
             except _JOBS_NOTIFICATIONS_NONCRITICAL_EXCEPTIONS as exc:
                 failed += 1
                 logger.warning(
-                    "jobs_notifications_bridge: failed processing event_id={} type={} error={}",
+                    "jobs_notifications_bridge: failed processing event_id={} type={} exception_type={}",
                     event_id,
                     row.get("event_type"),
-                    exc,
+                    type(exc).__name__,
                 )
                 try:
                     get_metrics_registry().increment(
@@ -263,7 +263,7 @@ class JobsNotificationsService:
                     sleep_s = min(0.05, self.poll_interval_seconds)
                 await asyncio.sleep(sleep_s)
             except _JOBS_NOTIFICATIONS_NONCRITICAL_EXCEPTIONS as exc:
-                logger.warning("jobs_notifications_bridge loop error: {}", exc)
+                logger.warning("jobs_notifications_bridge loop error exception_type={}", type(exc).__name__)
                 await asyncio.sleep(self.poll_interval_seconds)
 
 

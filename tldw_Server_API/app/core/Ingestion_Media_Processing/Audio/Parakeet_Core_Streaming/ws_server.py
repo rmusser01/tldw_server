@@ -369,7 +369,7 @@ async def websocket_parakeet_core(
     except _PARAKEET_WS_NONCRITICAL_EXCEPTIONS as e:
         logger.error(f"Parakeet core WS error: {e}")
         with contextlib.suppress(_PARAKEET_WS_NONCRITICAL_EXCEPTIONS):
-            await websocket.send_json({"type": "error", "message": str(e)})
+            await websocket.send_json({"type": "error", "message": "Parakeet core websocket failed"})
     finally:
         try:
             with contextlib.suppress(_PARAKEET_WS_NONCRITICAL_EXCEPTIONS):

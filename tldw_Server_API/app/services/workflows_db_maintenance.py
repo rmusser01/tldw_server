@@ -103,7 +103,7 @@ async def run_workflows_db_maintenance(stop_event: asyncio.Event) -> None:
                         _vacuum_postgres_workflow_tables(db)
                         logger.info("Workflows DB maintenance: VACUUM ANALYZE completed for workflow Postgres tables")
                     except _WORKFLOWS_DB_MAINTENANCE_NONCRITICAL_EXCEPTIONS as e:
-                        logger.warning(f"Workflows DB maintenance: Postgres VACUUM failed: {e}")
+                        logger.bind(error_type=type(e).__name__).warning("Workflows DB maintenance: Postgres VACUUM failed")
             else:
                 # SQLite: run a checkpoint and optional compact vacuum
                 try:
@@ -114,24 +114,24 @@ async def run_workflows_db_maintenance(stop_event: asyncio.Event) -> None:
                         db._conn.execute(f"PRAGMA wal_checkpoint({checkpoint_mode});")  # type: ignore[attr-defined]
                     except _WORKFLOWS_DB_MAINTENANCE_NONCRITICAL_EXCEPTIONS as e:
                         # Some environments may not be in WAL mode; ignore
-                        logger.debug(f"Workflows DB maintenance: WAL checkpoint skipped: {e}")
+                        logger.bind(error_type=type(e).__name__).debug("Workflows DB maintenance: WAL checkpoint skipped")
 
                     # PRAGMA optimize is a lightweight hint to SQLite
                     try:
                         db._conn.execute("PRAGMA optimize;")  # type: ignore[attr-defined]
                     except _WORKFLOWS_DB_MAINTENANCE_NONCRITICAL_EXCEPTIONS as e:
-                        logger.debug(f"Workflows DB maintenance: PRAGMA optimize skipped: {e}")
+                        logger.bind(error_type=type(e).__name__).debug("Workflows DB maintenance: PRAGMA optimize skipped")
 
                     if _env_bool("WORKFLOWS_SQLITE_VACUUM", False):
                         try:
                             db._conn.execute("VACUUM;")  # type: ignore[attr-defined]
                             logger.info("Workflows DB maintenance: SQLite VACUUM completed")
                         except _WORKFLOWS_DB_MAINTENANCE_NONCRITICAL_EXCEPTIONS as ve:
-                            logger.warning(f"Workflows DB maintenance: SQLite VACUUM failed: {ve}")
+                            logger.bind(error_type=type(ve).__name__).warning("Workflows DB maintenance: SQLite VACUUM failed")
                 except _WORKFLOWS_DB_MAINTENANCE_NONCRITICAL_EXCEPTIONS as e:
-                    logger.warning(f"Workflows DB maintenance (SQLite) failed: {e}")
+                    logger.bind(error_type=type(e).__name__).warning("Workflows DB maintenance (SQLite) failed")
         except _WORKFLOWS_DB_MAINTENANCE_NONCRITICAL_EXCEPTIONS as e:
-            logger.warning(f"Workflows DB maintenance loop error: {e}")
+            logger.bind(error_type=type(e).__name__).warning("Workflows DB maintenance loop error")
 
         with contextlib.suppress(asyncio.TimeoutError):
             await asyncio.wait_for(stop_event.wait(), timeout=interval)

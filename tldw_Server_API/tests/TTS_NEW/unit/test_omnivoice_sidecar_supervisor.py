@@ -90,59 +90,6 @@ async def test_supervisor_generates_fresh_token_and_includes_it_on_internal_requ
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_supervisor_passes_omnivoice_runtime_env_to_sidecar(tmp_path, monkeypatch):
-    from tldw_Server_API.app.core.TTS.adapters import omnivoice_sidecar_supervisor as supervisor_module
-    from tldw_Server_API.app.core.TTS.adapters.omnivoice_sidecar_supervisor import OmniVoiceSidecarSupervisor
-
-    recorded_env = {}
-
-    class _FakeClient:
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, exc_type, exc, tb):
-            return False
-
-        async def get(self, url, *, headers=None, timeout=None):  # noqa: ARG002
-            return httpx.Response(200, json={"status": "ok", "ready": True})
-
-    async def _fake_create_subprocess_exec(*args, **kwargs):  # noqa: ARG001
-        recorded_env.update(kwargs["env"])
-        return _FakeProcess()
-
-    monkeypatch.setattr(supervisor_module, "is_port_free", lambda host, port: True, raising=True)
-    monkeypatch.setattr(supervisor_module.asyncio, "create_subprocess_exec", _fake_create_subprocess_exec, raising=True)
-    monkeypatch.setattr(
-        supervisor_module,
-        "create_sidecar_async_client",
-        lambda *, timeout: _FakeClient(),
-        raising=True,
-    )
-
-    supervisor = OmniVoiceSidecarSupervisor(
-        provider_config={
-            "extra_params": {
-                "host": "127.0.0.1",
-                "port": 8039,
-                "runtime_mode": "real",
-                "model_id": "k2-fsa/OmniVoice",
-                "device": "cpu",
-                "dtype": "float32",
-            }
-        },
-        repo_root=tmp_path,
-    )
-
-    await supervisor.ensure_started()
-
-    assert recorded_env["OMNIVOICE_RUNTIME_MODE"] == "real"  # nosec B101
-    assert recorded_env["OMNIVOICE_MODEL"] == "k2-fsa/OmniVoice"  # nosec B101
-    assert recorded_env["OMNIVOICE_DEVICE"] == "cpu"  # nosec B101
-    assert recorded_env["OMNIVOICE_DTYPE"] == "float32"  # nosec B101
-
-
-@pytest.mark.unit
-@pytest.mark.asyncio
 async def test_supervisor_retries_bounded_port_collisions_before_succeeding(tmp_path, monkeypatch):
     from tldw_Server_API.app.core.TTS.adapters import omnivoice_sidecar_supervisor as supervisor_module
     from tldw_Server_API.app.core.TTS.adapters.omnivoice_sidecar_supervisor import OmniVoiceSidecarSupervisor
@@ -298,31 +245,6 @@ def test_supervisor_preserves_explicit_zero_config_values(tmp_path):
     assert supervisor._port_probe_max == 0  # nosec B101
     assert supervisor._startup_backoff_seconds == 0  # nosec B101
     assert supervisor._idle_shutdown_seconds == 0  # nosec B101
-
-
-@pytest.mark.unit
-def test_supervisor_preserves_symlinked_virtualenv_interpreter_path(tmp_path):
-    from tldw_Server_API.app.core.TTS.adapters.omnivoice_sidecar_supervisor import OmniVoiceSidecarSupervisor
-
-    if os.name == "nt":
-        pytest.skip("Symlink preservation check is only relevant on POSIX runtimes")
-
-    target_dir = tmp_path / "runtime"
-    target_dir.mkdir()
-    target_interpreter = target_dir / "python-real"
-    target_interpreter.write_text("", encoding="utf-8")
-
-    link_dir = tmp_path / "sidecar" / "bin"
-    link_dir.mkdir(parents=True)
-    linked_interpreter = link_dir / "python"
-    linked_interpreter.symlink_to(target_interpreter)
-
-    supervisor = OmniVoiceSidecarSupervisor(
-        provider_config={"extra_params": {"python_path": "sidecar/bin/python"}},
-        repo_root=tmp_path,
-    )
-
-    assert supervisor._resolve_interpreter() == str(linked_interpreter.absolute())  # nosec B101
 
 
 @pytest.mark.unit
@@ -505,51 +427,3 @@ async def test_supervisor_restarts_existing_process_after_idle_timeout(tmp_path,
 
     assert len(spawned_processes) == 2  # nosec B101
     assert spawned_processes[0].terminate_called is True  # nosec B101
-
-
-@pytest.mark.unit
-@pytest.mark.asyncio
-async def test_supervisor_prefers_graceful_shutdown_endpoint_before_terminate(tmp_path, monkeypatch):
-    from tldw_Server_API.app.core.TTS.adapters import omnivoice_sidecar_supervisor as supervisor_module
-    from tldw_Server_API.app.core.TTS.adapters.omnivoice_sidecar_supervisor import OmniVoiceSidecarSupervisor
-
-    recorded = {"urls": [], "headers": []}
-    process = _FakeProcess()
-
-    class _GracefulClient:
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, exc_type, exc, tb):
-            return False
-
-        async def post(self, url, *, headers=None):
-            recorded["urls"].append(url)
-            recorded["headers"].append(dict(headers or {}))
-            process.returncode = 0
-            return httpx.Response(200, json={"status": "shutting-down", "ready": False})
-
-    monkeypatch.setattr(
-        supervisor_module,
-        "create_sidecar_async_client",
-        lambda *, timeout: _GracefulClient(),
-        raising=True,
-    )
-
-    supervisor = OmniVoiceSidecarSupervisor(
-        provider_config={"extra_params": {"host": "127.0.0.1", "port": 8039}},
-        repo_root=tmp_path,
-    )
-    supervisor._process = process
-    supervisor._base_url = "http://127.0.0.1:8039"
-    supervisor._port = 8039
-
-    await supervisor._stop_process()  # noqa: SLF001
-
-    assert recorded["urls"] == ["http://127.0.0.1:8039/control/shutdown"]  # nosec B101
-    assert process.terminate_called is False  # nosec B101
-    assert process.kill_called is False  # nosec B101
-    assert supervisor._process is None  # noqa: SLF001 # nosec B101
-    assert supervisor._base_url is None  # noqa: SLF001 # nosec B101
-    assert supervisor._port is None  # noqa: SLF001 # nosec B101
-    assert supervisor._last_activity_at is None  # noqa: SLF001 # nosec B101

@@ -4,6 +4,7 @@ from fastapi import status
 
 from tldw_Server_API.app.api.v1.API_Deps.chat_documents_deps import get_document_generator_service
 from tldw_Server_API.app.api.v1.endpoints import chat as chat_router
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDBError, InputError
 from tldw_Server_API.tests._plugins.chat_fixtures import get_auth_headers
 
 pytestmark = pytest.mark.usefixtures("setup_dependencies")
@@ -163,6 +164,291 @@ def test_document_generate_bubbles_service_error(authenticated_client):
     assert response.json() == {"detail": "No messages found for conversation chat-42"}
     response.close()
     assert FailingStubService.record_calls == 0
+
+
+def test_document_generate_maps_input_error_from_service(authenticated_client):
+
+
+    class InputErrorStubService:
+        def __init__(self, db):
+
+            self._db = db
+
+        def generate_document(self, *args, **kwargs):
+
+            raise InputError("No messages found for conversation chat-42")
+
+        def get_generated_documents(self, *args, **kwargs):
+
+            return []
+
+        def record_streamed_document(self, *args, **kwargs):
+
+            return None
+
+    authenticated_client.app.dependency_overrides[get_document_generator_service] = lambda: InputErrorStubService
+
+    response = authenticated_client.post(
+        "/api/v1/chat/documents/generate",
+        json=_make_payload(),
+    )
+
+    assert response.status_code == 400, response.text
+    assert response.json() == {"detail": "No messages found for conversation chat-42"}
+    response.close()
+
+
+def test_document_list_maps_database_error_from_service(authenticated_client):
+    class DatabaseErrorStubService:
+        def __init__(self, db):
+            self._db = db
+
+        def get_generated_documents(self, *args, **kwargs):
+            raise CharactersRAGDBError("sqlite list exploded")
+
+    authenticated_client.app.dependency_overrides[get_document_generator_service] = lambda: DatabaseErrorStubService
+
+    response = authenticated_client.get("/api/v1/chat/documents")
+
+    assert response.status_code == 500, response.text
+    assert response.json() == {"detail": "Failed to list generated documents"}
+    response.close()
+
+
+def test_document_get_maps_database_error_from_service(authenticated_client):
+    class DatabaseErrorStubService:
+        def __init__(self, db):
+            self._db = db
+
+        def get_generated_document_by_id(self, *args, **kwargs):
+            raise CharactersRAGDBError("sqlite get exploded")
+
+    authenticated_client.app.dependency_overrides[get_document_generator_service] = lambda: DatabaseErrorStubService
+
+    response = authenticated_client.get("/api/v1/chat/documents/123")
+
+    assert response.status_code == 500, response.text
+    assert response.json() == {"detail": "Failed to get generated document"}
+    response.close()
+
+
+def test_document_job_status_maps_database_error_from_service(authenticated_client):
+    class DatabaseErrorStubService:
+        def __init__(self, db):
+            self._db = db
+
+        def get_job_status(self, *args, **kwargs):
+            raise CharactersRAGDBError("sqlite job exploded")
+
+    authenticated_client.app.dependency_overrides[get_document_generator_service] = lambda: DatabaseErrorStubService
+
+    response = authenticated_client.get("/api/v1/chat/documents/jobs/job-1")
+
+    assert response.status_code == 500, response.text
+    assert response.json() == {"detail": "Failed to get generation job status"}
+    response.close()
+
+
+def test_document_cancel_maps_database_error_from_service(authenticated_client, auth_token):
+    class DatabaseErrorStubService:
+        def __init__(self, db):
+            self._db = db
+
+        def get_job_status(self, *args, **kwargs):
+            raise CharactersRAGDBError("sqlite cancel exploded")
+
+    authenticated_client.app.dependency_overrides[get_document_generator_service] = lambda: DatabaseErrorStubService
+
+    response = authenticated_client.delete(
+        "/api/v1/chat/documents/jobs/job-1",
+        headers=get_auth_headers(auth_token, getattr(authenticated_client, "csrf_token", "")),
+    )
+
+    assert response.status_code == 500, response.text
+    assert response.json() == {"detail": "Failed to cancel generation job"}
+    response.close()
+
+
+def test_document_delete_maps_database_error_from_service(authenticated_client, auth_token):
+    class DatabaseErrorStubService:
+        def __init__(self, db):
+            self._db = db
+
+        def delete_generated_document(self, *args, **kwargs):
+            raise CharactersRAGDBError("sqlite delete exploded")
+
+    authenticated_client.app.dependency_overrides[get_document_generator_service] = lambda: DatabaseErrorStubService
+
+    response = authenticated_client.delete(
+        "/api/v1/chat/documents/123",
+        headers=get_auth_headers(auth_token, getattr(authenticated_client, "csrf_token", "")),
+    )
+
+    assert response.status_code == 500, response.text
+    assert response.json() == {"detail": "Failed to delete generated document"}
+    response.close()
+
+
+def test_document_save_prompt_maps_database_error_from_service(authenticated_client):
+    class DatabaseErrorStubService:
+        def __init__(self, db):
+            self._db = db
+
+        def save_user_prompt_config(self, *args, **kwargs):
+            raise CharactersRAGDBError("sqlite prompt exploded")
+
+    authenticated_client.app.dependency_overrides[get_document_generator_service] = lambda: DatabaseErrorStubService
+
+    response = authenticated_client.post(
+        "/api/v1/chat/documents/prompts",
+        json={
+            "document_type": "summary",
+            "system_prompt": "Summarize.",
+            "user_prompt": "Content: {content}",
+            "temperature": 0.7,
+            "max_tokens": 1000,
+        },
+    )
+
+    assert response.status_code == 500, response.text
+    assert response.json() == {"detail": "Failed to save prompt configuration"}
+    response.close()
+
+
+def test_document_bulk_maps_database_error_from_service(authenticated_client):
+    class DatabaseErrorStubService:
+        def __init__(self, db):
+            self._db = db
+
+        def create_generation_job(self, *args, **kwargs):
+            raise CharactersRAGDBError("sqlite bulk exploded")
+
+    authenticated_client.app.dependency_overrides[get_document_generator_service] = lambda: DatabaseErrorStubService
+
+    response = authenticated_client.post(
+        "/api/v1/chat/documents/bulk",
+        json={
+            "conversation_ids": ["chat-42"],
+            "document_types": ["summary"],
+            "provider": "openai",
+            "model": "gpt-4o-mini",
+            "api_key": "sk-test",
+            "async_generation": True,
+        },
+    )
+
+    assert response.status_code == 500, response.text
+    assert response.json() == {"detail": "Failed to create bulk generation jobs"}
+    response.close()
+
+
+@pytest.mark.parametrize(
+    ("case_name", "service_method", "request_factory", "expected_detail"),
+    [
+        (
+            "job_status",
+            "get_job_status",
+            lambda client, token: client.get("/api/v1/chat/documents/jobs/job-1"),
+            "Failed to get generation job status",
+        ),
+        (
+            "cancel_job",
+            "get_job_status",
+            lambda client, token: client.delete(
+                "/api/v1/chat/documents/jobs/job-1",
+                headers=get_auth_headers(token, getattr(client, "csrf_token", "")),
+            ),
+            "Failed to cancel generation job",
+        ),
+        (
+            "list_documents",
+            "get_generated_documents",
+            lambda client, token: client.get("/api/v1/chat/documents"),
+            "Failed to list generated documents",
+        ),
+        (
+            "get_document",
+            "get_generated_document_by_id",
+            lambda client, token: client.get("/api/v1/chat/documents/123"),
+            "Failed to get generated document",
+        ),
+        (
+            "delete_document",
+            "delete_generated_document",
+            lambda client, token: client.delete(
+                "/api/v1/chat/documents/123",
+                headers=get_auth_headers(token, getattr(client, "csrf_token", "")),
+            ),
+            "Failed to delete generated document",
+        ),
+        (
+            "save_prompt",
+            "save_user_prompt_config",
+            lambda client, token: client.post(
+                "/api/v1/chat/documents/prompts",
+                json={
+                    "document_type": "summary",
+                    "system_prompt": "Summarize.",
+                    "user_prompt": "Content: {content}",
+                    "temperature": 0.7,
+                    "max_tokens": 1000,
+                },
+            ),
+            "Failed to save prompt configuration",
+        ),
+        (
+            "get_prompt",
+            "get_user_prompt_config",
+            lambda client, token: client.get("/api/v1/chat/documents/prompts/summary"),
+            "Failed to get prompt configuration",
+        ),
+        (
+            "bulk_generate",
+            "create_generation_job",
+            lambda client, token: client.post(
+                "/api/v1/chat/documents/bulk",
+                json={
+                    "conversation_ids": ["chat-42"],
+                    "document_types": ["summary"],
+                    "provider": "openai",
+                    "model": "gpt-4o-mini",
+                    "api_key": "sk-test",
+                    "async_generation": True,
+                },
+            ),
+            "Failed to create bulk generation jobs",
+        ),
+    ],
+    ids=lambda value: value if isinstance(value, str) else None,
+)
+def test_document_handlers_sanitize_unexpected_service_errors(
+    authenticated_client,
+    auth_token,
+    case_name,
+    service_method,
+    request_factory,
+    expected_detail,
+):
+    def _raise_unexpected_error(self, *args, **kwargs):
+        _ = (self, args, kwargs)
+        raise RuntimeError(f"{case_name} backend unavailable")
+
+    RuntimeErrorStubService = type(
+        "RuntimeErrorStubService",
+        (),
+        {
+            "__init__": lambda self, db: setattr(self, "_db", db),
+            service_method: _raise_unexpected_error,
+        },
+    )
+
+    authenticated_client.app.dependency_overrides[get_document_generator_service] = lambda: RuntimeErrorStubService
+
+    response = request_factory(authenticated_client, auth_token)
+
+    assert response.status_code == 500, response.text
+    assert response.json() == {"detail": expected_detail}
+    response.close()
 
 
 def test_document_generate_uses_configured_api_key(monkeypatch, authenticated_client):

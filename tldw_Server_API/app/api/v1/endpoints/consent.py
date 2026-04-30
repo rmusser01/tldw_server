@@ -91,7 +91,7 @@ async def get_consent_preferences(
             consents=[ConsentRecordResponse.model_validate(record) for record in records],
         )
     except _CONSENT_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error("Failed to get consent preferences for user {}: {}", user_id, exc)
+        logger.error("Failed to get consent preferences")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to retrieve consent preferences.",
@@ -120,7 +120,7 @@ async def grant_consent(
         )
         return ConsentRecordResponse.model_validate(result)
     except _CONSENT_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error("Failed to grant consent for user {} purpose {}: {}", user_id, purpose, exc)
+        logger.error("Failed to grant consent")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to record consent.",
@@ -146,7 +146,7 @@ async def withdraw_consent(
     except HTTPException:
         raise
     except _CONSENT_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error("Failed to withdraw consent for user {} purpose {}: {}", user_id, purpose, exc)
+        logger.error("Failed to withdraw consent")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to withdraw consent.",

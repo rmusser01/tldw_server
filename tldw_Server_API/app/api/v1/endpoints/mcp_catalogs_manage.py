@@ -48,17 +48,11 @@ def _is_manager(role: str | None) -> bool:
 
 
 def _is_admin_principal(principal: AuthPrincipal) -> bool:
-    roles = {
-        str(role).strip().lower()
-        for role in (principal.roles or [])
-        if str(role).strip()
-    }
+    roles = {str(role).strip().lower() for role in (principal.roles or []) if str(role).strip()}
     if "admin" in roles:
         return True
     permissions = {
-        str(permission).strip().lower()
-        for permission in (principal.permissions or [])
-        if str(permission).strip()
+        str(permission).strip().lower() for permission in (principal.permissions or []) if str(permission).strip()
     }
     return bool(permissions & _ADMIN_CLAIM_PERMISSIONS)
 
@@ -79,8 +73,8 @@ async def _require_org_manager(principal: AuthPrincipal, org_id: int) -> None:
                     return
             except _CATALOG_MEMBER_PARSE_EXCEPTIONS:
                 pass
-    except _CATALOG_NONCRITICAL_EXCEPTIONS as e:
-        logger.debug(f"Org manager check failed: {e}")
+    except _CATALOG_NONCRITICAL_EXCEPTIONS:
+        logger.debug("Org manager check failed")
     raise HTTPException(status_code=403, detail="Org manager role required")
 
 
@@ -99,8 +93,8 @@ async def _require_team_manager(principal: AuthPrincipal, team_id: int) -> None:
                     return
             except _CATALOG_MEMBER_PARSE_EXCEPTIONS:
                 pass
-    except _CATALOG_NONCRITICAL_EXCEPTIONS as e:
-        logger.debug(f"Team manager check failed: {e}")
+    except _CATALOG_NONCRITICAL_EXCEPTIONS:
+        logger.debug("Team manager check failed")
     raise HTTPException(status_code=403, detail="Team manager role required")
 
 
@@ -166,7 +160,7 @@ async def list_org_tool_catalogs(
         rows = await _list_scoped_catalogs(db, org_id=org_id)
         return [ToolCatalogResponse(**r) for r in rows]
     except _CATALOG_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Failed to list org tool catalogs: {e}")
+        logger.error("Failed to list org tool catalogs")
         raise HTTPException(status_code=500, detail="Failed to list org tool catalogs") from e
 
 
@@ -207,7 +201,7 @@ async def create_org_tool_catalog(
     except HTTPException:
         raise
     except _CATALOG_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Failed to create org tool catalog: {e}")
+        logger.error("Failed to create org tool catalog")
         raise HTTPException(status_code=500, detail="Failed to create tool catalog") from e
 
 
@@ -231,7 +225,7 @@ async def list_team_tool_catalogs(
         rows = await _list_scoped_catalogs(db, team_id=team_id)
         return [ToolCatalogResponse(**r) for r in rows]
     except _CATALOG_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Failed to list team tool catalogs: {e}")
+        logger.error("Failed to list team tool catalogs")
         raise HTTPException(status_code=500, detail="Failed to list team tool catalogs") from e
 
 
@@ -271,7 +265,7 @@ async def create_team_tool_catalog(
     except HTTPException:
         raise
     except _CATALOG_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Failed to create team tool catalog: {e}")
+        logger.error("Failed to create team tool catalog")
         raise HTTPException(status_code=500, detail="Failed to create tool catalog") from e
 
 
@@ -286,7 +280,13 @@ async def create_team_tool_catalog(
         "Scope: Fails with 404 if the catalog is not owned by the specified org."
     ),
 )
-async def add_org_catalog_entry(org_id: int, catalog_id: int, payload: ToolCatalogEntryCreateRequest, principal: AuthPrincipal = Depends(get_auth_principal), db=Depends(get_db_transaction)) -> ToolCatalogEntryResponse:
+async def add_org_catalog_entry(
+    org_id: int,
+    catalog_id: int,
+    payload: ToolCatalogEntryCreateRequest,
+    principal: AuthPrincipal = Depends(get_auth_principal),
+    db=Depends(get_db_transaction),
+) -> ToolCatalogEntryResponse:
     await _require_org_manager(principal, org_id)
     # Confirm catalog scope
     owner = await _get_scoped_catalog(db, catalog_id=catalog_id, org_id=org_id)
@@ -304,7 +304,7 @@ async def add_org_catalog_entry(org_id: int, catalog_id: int, payload: ToolCatal
         )
         return ToolCatalogEntryResponse(**row)
     except _CATALOG_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Failed to add org tool catalog entry: {e}")
+        logger.error("Failed to add org tool catalog entry")
         raise HTTPException(status_code=500, detail="Failed to add tool catalog entry") from e
 
 
@@ -319,7 +319,13 @@ async def add_org_catalog_entry(org_id: int, catalog_id: int, payload: ToolCatal
         "Scope: Fails with 404 if the catalog is not owned by the specified team."
     ),
 )
-async def add_team_catalog_entry(team_id: int, catalog_id: int, payload: ToolCatalogEntryCreateRequest, principal: AuthPrincipal = Depends(get_auth_principal), db=Depends(get_db_transaction)) -> ToolCatalogEntryResponse:
+async def add_team_catalog_entry(
+    team_id: int,
+    catalog_id: int,
+    payload: ToolCatalogEntryCreateRequest,
+    principal: AuthPrincipal = Depends(get_auth_principal),
+    db=Depends(get_db_transaction),
+) -> ToolCatalogEntryResponse:
     await _require_team_manager(principal, team_id)
     owner = await _get_scoped_catalog(db, catalog_id=catalog_id, team_id=team_id)
     if not owner:
@@ -335,7 +341,7 @@ async def add_team_catalog_entry(team_id: int, catalog_id: int, payload: ToolCat
         )
         return ToolCatalogEntryResponse(**row)
     except _CATALOG_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Failed to add team tool catalog entry: {e}")
+        logger.error("Failed to add team tool catalog entry")
         raise HTTPException(status_code=500, detail="Failed to add tool catalog entry") from e
 
 
@@ -348,7 +354,9 @@ async def add_team_catalog_entry(team_id: int, catalog_id: int, payload: ToolCat
         "Scope: Returns 404 if the catalog does not belong to the specified org."
     ),
 )
-async def delete_org_tool_catalog(org_id: int, catalog_id: int, principal: AuthPrincipal = Depends(get_auth_principal), db=Depends(get_db_transaction)) -> dict:
+async def delete_org_tool_catalog(
+    org_id: int, catalog_id: int, principal: AuthPrincipal = Depends(get_auth_principal), db=Depends(get_db_transaction)
+) -> dict:
     """Delete an org-scoped tool catalog (entries cascade).
 
     Requires the requester to be an org manager (owner/admin/lead) or global admin.
@@ -363,7 +371,7 @@ async def delete_org_tool_catalog(org_id: int, catalog_id: int, principal: AuthP
     except HTTPException:
         raise
     except _CATALOG_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Failed to delete org tool catalog {catalog_id}: {e}")
+        logger.error("Failed to delete org tool catalog")
         raise HTTPException(status_code=500, detail="Failed to delete tool catalog") from e
 
 
@@ -376,7 +384,13 @@ async def delete_org_tool_catalog(org_id: int, catalog_id: int, principal: AuthP
         "Scope: Returns 404 if the catalog does not belong to the specified org."
     ),
 )
-async def delete_org_catalog_entry(org_id: int, catalog_id: int, tool_name: str, principal: AuthPrincipal = Depends(get_auth_principal), db=Depends(get_db_transaction)) -> dict:
+async def delete_org_catalog_entry(
+    org_id: int,
+    catalog_id: int,
+    tool_name: str,
+    principal: AuthPrincipal = Depends(get_auth_principal),
+    db=Depends(get_db_transaction),
+) -> dict:
     """Remove a tool entry from an org-scoped catalog.
 
     Requires the requester to be an org manager (owner/admin/lead) or global admin.
@@ -391,11 +405,16 @@ async def delete_org_catalog_entry(org_id: int, catalog_id: int, tool_name: str,
             catalog_id,
             tool_name,
         )
-        return {"message": "Entry deleted", "catalog_id": catalog_id, "tool_name": tool_name, "scope": {"org_id": org_id}}
+        return {
+            "message": "Entry deleted",
+            "catalog_id": catalog_id,
+            "tool_name": tool_name,
+            "scope": {"org_id": org_id},
+        }
     except HTTPException:
         raise
     except _CATALOG_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Failed to delete org tool catalog entry: {e}")
+        logger.error("Failed to delete org tool catalog entry")
         raise HTTPException(status_code=500, detail="Failed to delete tool catalog entry") from e
 
 
@@ -408,7 +427,12 @@ async def delete_org_catalog_entry(org_id: int, catalog_id: int, tool_name: str,
         "Scope: Returns 404 if the catalog does not belong to the specified team."
     ),
 )
-async def delete_team_tool_catalog(team_id: int, catalog_id: int, principal: AuthPrincipal = Depends(get_auth_principal), db=Depends(get_db_transaction)) -> dict:
+async def delete_team_tool_catalog(
+    team_id: int,
+    catalog_id: int,
+    principal: AuthPrincipal = Depends(get_auth_principal),
+    db=Depends(get_db_transaction),
+) -> dict:
     """Delete a team-scoped tool catalog (entries cascade).
 
     Requires the requester to be a team manager (owner/admin/lead) or global admin.
@@ -423,7 +447,7 @@ async def delete_team_tool_catalog(team_id: int, catalog_id: int, principal: Aut
     except HTTPException:
         raise
     except _CATALOG_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Failed to delete team tool catalog {catalog_id}: {e}")
+        logger.error("Failed to delete team tool catalog")
         raise HTTPException(status_code=500, detail="Failed to delete tool catalog") from e
 
 
@@ -436,7 +460,13 @@ async def delete_team_tool_catalog(team_id: int, catalog_id: int, principal: Aut
         "Scope: Returns 404 if the catalog does not belong to the specified team."
     ),
 )
-async def delete_team_catalog_entry(team_id: int, catalog_id: int, tool_name: str, principal: AuthPrincipal = Depends(get_auth_principal), db=Depends(get_db_transaction)) -> dict:
+async def delete_team_catalog_entry(
+    team_id: int,
+    catalog_id: int,
+    tool_name: str,
+    principal: AuthPrincipal = Depends(get_auth_principal),
+    db=Depends(get_db_transaction),
+) -> dict:
     """Remove a tool entry from a team-scoped catalog.
 
     Requires the requester to be a team manager (owner/admin/lead) or global admin.
@@ -451,9 +481,14 @@ async def delete_team_catalog_entry(team_id: int, catalog_id: int, tool_name: st
             catalog_id,
             tool_name,
         )
-        return {"message": "Entry deleted", "catalog_id": catalog_id, "tool_name": tool_name, "scope": {"team_id": team_id}}
+        return {
+            "message": "Entry deleted",
+            "catalog_id": catalog_id,
+            "tool_name": tool_name,
+            "scope": {"team_id": team_id},
+        }
     except HTTPException:
         raise
     except _CATALOG_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Failed to delete team tool catalog entry: {e}")
+        logger.error("Failed to delete team tool catalog entry")
         raise HTTPException(status_code=500, detail="Failed to delete tool catalog entry") from e

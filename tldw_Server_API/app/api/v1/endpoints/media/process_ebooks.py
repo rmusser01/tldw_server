@@ -119,7 +119,7 @@ def _process_single_ebook(
             "input_ref": original_ref,
             "processing_source": str(ebook_path),
             "media_type": "ebook",
-            "error": f"Worker processing failed: {exc}",
+            "error": "Ebook processing failed",
             "content": None,
             "metadata": None,
             "chunks": None,
@@ -164,9 +164,9 @@ async def process_ebooks_endpoint(
             tags=["no_db"],
             metadata={"has_urls": bool(form_data.urls), "has_files": bool(files)},
         )
-    except Exception as usage_log_error:
+    except Exception:
         # Usage logging is best-effort; do not fail the request.
-        logger.debug("Ebook process endpoint usage logging failed", exc_info=usage_log_error)
+        logger.debug("Ebook process endpoint usage logging failed")
 
     # Legacy endpoint treats urls=[""] as "no URLs".
     legacy_urls_empty_sentinel_used = bool(form_data.urls and form_data.urls == [""])
@@ -290,7 +290,7 @@ async def process_ebooks_endpoint(
                         )
                     )
                 else:
-                    error_detail = f"Download/preparation failed: {result}"
+                    error_detail = "Download/preparation failed"
                     batch["results"].append(
                         {
                             "status": "Error",
@@ -398,9 +398,7 @@ async def process_ebooks_endpoint(
                         exc,
                         exc_info=True,
                     )
-                    error_detail = (
-                        f"Task execution failed: {type(exc).__name__}: {exc}"
-                    )
+                    error_detail = "Ebook processing failed"
                     res = {
                         "status": "Error",
                         "input_ref": original_ref,
@@ -519,8 +517,8 @@ async def process_ebooks_endpoint(
                     chunks = _improved_chunking_process(text, chunk_options_dict)
 
                 res["chunks"] = chunks
-    except Exception as rechunk_err:
-        logger.debug("Ebook post-processing re-chunking skipped/failed: {}", rechunk_err)
+    except Exception:
+        logger.debug("Ebook post-processing re-chunking skipped/failed")
 
     response = JSONResponse(status_code=final_status_code, content=batch)
     if legacy_signal is not None:

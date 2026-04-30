@@ -159,6 +159,89 @@ def test_persona_profile_projection_fails_open_when_buddy_lookup_breaks(
     fastapi_app.dependency_overrides.clear()
 
 
+def test_create_persona_profile_sanitizes_buddy_rollback_failure(
+    persona_db: CharactersRAGDB,
+    monkeypatch,
+):
+    def _raise_buddy_failure(*args, **kwargs):
+        _ = (args, kwargs)
+        raise ValueError("buddy validation exploded")
+
+    def _raise_rollback_failure(*args, **kwargs):
+        _ = (args, kwargs)
+        raise persona_ep.PersonaBuddyRollbackError("rollback create exploded")
+
+    monkeypatch.setattr(
+        persona_ep,
+        "_ensure_persona_buddy_after_profile_mutation",
+        _raise_buddy_failure,
+    )
+    monkeypatch.setattr(
+        persona_ep,
+        "_rollback_created_persona_profile_after_buddy_failure",
+        _raise_rollback_failure,
+    )
+
+    with _client_for_user(1, persona_db) as client:
+        created = client.post(
+            "/api/v1/persona/profiles",
+            json={
+                "name": "Rollback Create Persona",
+                "mode": "persistent_scoped",
+                "system_prompt": "Trigger rollback failure.",
+            },
+        )
+
+    assert created.status_code == 500, created.text
+    assert created.json()["detail"] == "Failed to roll back persona profile creation"
+    fastapi_app.dependency_overrides.clear()
+
+
+def test_update_persona_profile_sanitizes_buddy_rollback_failure(
+    persona_db: CharactersRAGDB,
+    monkeypatch,
+):
+    with _client_for_user(1, persona_db) as client:
+        created = client.post(
+            "/api/v1/persona/profiles",
+            json={
+                "name": "Rollback Update Persona",
+                "mode": "persistent_scoped",
+                "system_prompt": "Create before update rollback failure.",
+            },
+        )
+        assert created.status_code == 201, created.text
+        persona_id = created.json()["id"]
+
+        def _raise_buddy_failure(*args, **kwargs):
+            _ = (args, kwargs)
+            raise ValueError("buddy validation exploded")
+
+        def _raise_rollback_failure(*args, **kwargs):
+            _ = (args, kwargs)
+            raise persona_ep.PersonaBuddyRollbackError("rollback update exploded")
+
+        monkeypatch.setattr(
+            persona_ep,
+            "_ensure_persona_buddy_after_profile_mutation",
+            _raise_buddy_failure,
+        )
+        monkeypatch.setattr(
+            persona_ep,
+            "_rollback_updated_persona_profile_after_buddy_failure",
+            _raise_rollback_failure,
+        )
+
+        updated = client.patch(
+            f"/api/v1/persona/profiles/{persona_id}",
+            json={"mode": "session_scoped"},
+        )
+
+    assert updated.status_code == 500, updated.text
+    assert updated.json()["detail"] == "Failed to roll back persona profile update"
+    fastapi_app.dependency_overrides.clear()
+
+
 def test_list_persona_profiles_uses_bulk_buddy_lookup_for_profile_collections(
     persona_db: CharactersRAGDB,
     monkeypatch,

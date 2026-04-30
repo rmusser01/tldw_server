@@ -164,7 +164,7 @@ async def run_benchmark(
             batch_results = await asyncio.gather(*tasks, return_exceptions=True)
             for item, result in zip(batch, batch_results):
                 if isinstance(result, Exception):
-                    logger.error("Benchmark evaluation failed for item_id={}: {}", item.get("id"), result)
+                    logger.error("Benchmark evaluation failed")
                     results.append({"item": item, "score": 0.0, "error": str(result)})
                 else:
                     results.append(
@@ -221,7 +221,7 @@ async def run_benchmark(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to run benchmark: {e}")
+        logger.error("Failed to run benchmark")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to run benchmark: {sanitize_error_message(e, 'benchmark run')}",

@@ -2264,11 +2264,19 @@ class TTSServiceV2:
                     raise TTSGenerationError(error_message, provider=provider_key)
                 success = True
         except _TTS_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"Fallback generation failed: {e}")
-            error_message = str(e)
+            logger.error(
+                "Fallback generation failed for provider {}: {}",
+                provider_key,
+                type(e).__name__,
+            )
+            error_message = "All providers failed"
             if self._stream_errors_as_audio:
                 yield f"ERROR: All providers failed - {str(e)}".encode()
-            raise TTSGenerationError(f"All providers failed - {str(e)}") from e
+            raise TTSGenerationError(
+                error_message,
+                provider=provider_key,
+                details={"error_type": type(e).__name__},
+            ) from e
         finally:
             await self._close_response_audio_stream(response)
             self._cleanup_transient_pocket_tts_cpp_voice_path(request_for_provider)
@@ -2574,8 +2582,7 @@ class TTSServiceV2:
                 return await factory.registry.get_adapter(provider_enum)
 
         # Get adapter by model name
-        provider_resolver = getattr(factory, "get_provider_for_model", None)
-        model_provider = provider_resolver(model) if callable(provider_resolver) else None
+        model_provider = factory.get_provider_for_model(model)
         if model_provider == TTSProvider.OMNIVOICE:
             return await factory.registry.create_adapter_with_overrides(
                 model_provider,

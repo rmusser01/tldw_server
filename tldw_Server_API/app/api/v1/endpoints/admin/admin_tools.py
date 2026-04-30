@@ -52,7 +52,7 @@ async def list_tool_catalogs(
         )
         return [ToolCatalogResponse(**r) for r in rows]
     except Exception as exc:
-        logger.error("Failed to list tool catalogs: {}", exc)
+        logger.error("Failed to list tool catalogs")
         raise HTTPException(status_code=500, detail="Failed to list tool catalogs") from exc
 
 
@@ -98,7 +98,7 @@ async def create_tool_catalog(
     except HTTPException:
         raise
     except Exception as exc:
-        logger.error("Failed to create tool catalog: {}", exc)
+        logger.error("Failed to create tool catalog")
         raise HTTPException(status_code=500, detail="Failed to create tool catalog") from exc
 
 
@@ -126,7 +126,7 @@ async def delete_tool_catalog(
     except HTTPException:
         raise
     except Exception as exc:
-        logger.error("Failed to delete tool catalog {}: {}", catalog_id, exc)
+        logger.error("Failed to delete tool catalog")
         raise HTTPException(status_code=500, detail="Failed to delete tool catalog") from exc
 
 
@@ -134,10 +134,7 @@ async def delete_tool_catalog(
     "/mcp/tool_catalogs/{catalog_id}/entries",
     response_model=list[ToolCatalogEntryResponse],
     summary="List catalog entries (admin)",
-    description=(
-        "List tools included in the specified catalog.\n\n"
-        "RBAC: Admin-only."
-    ),
+    description=("List tools included in the specified catalog.\n\n" "RBAC: Admin-only."),
     dependencies=[Depends(require_roles("admin"))],
 )
 async def list_tool_catalog_entries(
@@ -161,7 +158,7 @@ async def list_tool_catalog_entries(
     except HTTPException:
         raise
     except Exception as exc:
-        logger.error("Failed to list tool catalog entries for {}: {}", catalog_id, exc)
+        logger.error("Failed to list tool catalog entries")
         raise HTTPException(status_code=500, detail="Failed to list tool catalog entries") from exc
 
 
@@ -170,10 +167,7 @@ async def list_tool_catalog_entries(
     response_model=ToolCatalogEntryResponse,
     status_code=201,
     summary="Add tool to catalog (admin)",
-    description=(
-        "Add a tool entry to the catalog. Idempotent per (catalog_id, tool_name).\n\n"
-        "RBAC: Admin-only."
-    ),
+    description=("Add a tool entry to the catalog. Idempotent per (catalog_id, tool_name).\n\n" "RBAC: Admin-only."),
     dependencies=[Depends(require_roles("admin"))],
 )
 async def add_tool_catalog_entry(
@@ -193,7 +187,7 @@ async def add_tool_catalog_entry(
     except HTTPException:
         raise
     except Exception as exc:
-        logger.error("Failed to add tool catalog entry to {}: {}", catalog_id, exc)
+        logger.error("Failed to add tool catalog entry")
         raise HTTPException(status_code=500, detail="Failed to add tool catalog entry") from exc
 
 
@@ -201,8 +195,7 @@ async def add_tool_catalog_entry(
     "/mcp/tool_catalogs/{catalog_id}/entries/{tool_name}",
     summary="Remove tool from catalog (admin)",
     description=(
-        "Remove a tool entry from the catalog. Returns 200 whether or not the entry existed.\n\n"
-        "RBAC: Admin-only."
+        "Remove a tool entry from the catalog. Returns 200 whether or not the entry existed.\n\n" "RBAC: Admin-only."
     ),
     dependencies=[Depends(require_roles("admin"))],
 )
@@ -221,12 +214,7 @@ async def delete_tool_catalog_entry(
     except HTTPException:
         raise
     except Exception as exc:
-        logger.error(
-            "Failed to delete tool catalog entry {} from {}: {}",
-            tool_name,
-            catalog_id,
-            exc,
-        )
+        logger.error("Failed to delete tool catalog entry")
         raise HTTPException(status_code=500, detail="Failed to delete tool catalog entry") from exc
 
 
@@ -303,6 +291,6 @@ async def get_mcp_tool_usage(
             modules=module_usage,
             tools=tool_usage,
         )
-    except ImportError as exc:
-        logger.warning("MCP metrics module unavailable: {}", exc)
+    except ImportError:
+        logger.warning("MCP metrics module unavailable")
         return MCPToolUsageResponse(period_seconds=period_seconds, modules={}, tools={})

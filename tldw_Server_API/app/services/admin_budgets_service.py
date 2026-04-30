@@ -378,7 +378,7 @@ async def list_budgets(
             limit=limit,
         )
     except Exception as exc:
-        logger.error(f"Failed to list org budgets: {exc}")
+        logger.error("Failed to list org budgets")
         raise HTTPException(status_code=500, detail="Failed to list org budgets") from exc
 
 
@@ -410,7 +410,7 @@ async def upsert_budget(
             raise HTTPException(status_code=500, detail="subscription_not_found") from exc
         raise HTTPException(status_code=400, detail="invalid_budget_update") from exc
     except Exception as exc:
-        logger.error(f"Failed to upsert org budget: {exc}")
+        logger.error("Failed to upsert org budget")
         raise HTTPException(status_code=500, detail="Failed to upsert org budget") from exc
 
     actor_role = None
@@ -433,7 +433,7 @@ async def upsert_budget(
             actor_role=actor_role,
         )
     except Exception as exc:
-        logger.error(f"Budget audit failed: {exc}")
+        logger.error("Budget audit failed")
         raise HTTPException(status_code=500, detail="audit_failed") from exc
 
     return OrgBudgetItem(**item)

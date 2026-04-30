@@ -210,7 +210,7 @@ class PIIDetector:
                 checksum += digit
             return (checksum + digits[-1]) % 10 == 0
         except Exception as e:
-            logger.debug(f"Luhn checksum validation failed: value={card_number}, error={e}")
+            logger.debug(f"Luhn checksum validation failed: {type(e).__name__}")
             return False
 
     def _get_confidence(self, pii_type: PIIType, text: str) -> float:
@@ -668,7 +668,7 @@ class SecurityAuditor:
             self._delete_old_records()
 
         except Exception as e:
-            logger.error(f"Error checking rotation: {e}")
+            logger.error(f"Error checking rotation: {type(e).__name__}")
 
     def _rotate_by_size(self):
         """Rotate audit log when size limit exceeded."""
@@ -724,7 +724,7 @@ class SecurityAuditor:
                 logger.debug("gzip not available, archive not compressed")
 
         except Exception as e:
-            logger.error(f"Error rotating audit log: {e}")
+            logger.error(f"Error rotating audit log: {type(e).__name__}")
 
     def _delete_old_records(self):
         """Delete records older than max_age_days."""
@@ -743,7 +743,7 @@ class SecurityAuditor:
                     logger.info(f"Deleted {deleted_count} old audit records")
 
         except Exception as e:
-            logger.error(f"Error deleting old records: {e}")
+            logger.error(f"Error deleting old records: {type(e).__name__}")
 
 
 class SecurityFilters:

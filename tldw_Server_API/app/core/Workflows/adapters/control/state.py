@@ -156,14 +156,14 @@ async def run_cache_result_adapter(config: dict[str, Any], context: dict[str, An
                     metadatas=[{"data": data_str, "cached_at": time.time()}],
                 )
                 return {"cached": False, "stored": True, "data": data, "key": cache_key}
-            except _STATE_ADAPTER_EXCEPTIONS as e:
-                return {"cached": False, "data": data, "error": f"cache_store_error: {e}"}
+            except _STATE_ADAPTER_EXCEPTIONS:
+                return {"cached": False, "data": data, "error": "cache_store_error"}
 
         return {"cached": False, "data": data}
 
-    except _STATE_ADAPTER_EXCEPTIONS as e:
-        logger.exception(f"Cache result error: {e}")
-        return {"cached": False, "data": data, "error": str(e)}
+    except _STATE_ADAPTER_EXCEPTIONS:
+        logger.exception("Cache result error")
+        return {"cached": False, "data": data, "error": "cache_result_error"}
 
 
 @registry.register(
@@ -224,8 +224,8 @@ async def run_retry_adapter(config: dict[str, Any], context: dict[str, Any]) -> 
 
             return {"result": result, "attempts": attempt + 1, "success": True}
 
-        except _STATE_ADAPTER_EXCEPTIONS as e:
-            last_error = str(e)
+        except _STATE_ADAPTER_EXCEPTIONS:
+            last_error = "retry_step_error"
             if attempt < max_retries:
                 delay = min(backoff_base ** attempt, backoff_max)
                 await asyncio.sleep(delay)
@@ -288,6 +288,6 @@ async def run_checkpoint_adapter(config: dict[str, Any], context: dict[str, Any]
 
         return {"checkpoint_id": checkpoint_id, "saved": True, "run_id": run_id}
 
-    except _STATE_ADAPTER_EXCEPTIONS as e:
-        logger.exception(f"Checkpoint error: {e}")
-        return {"error": str(e), "checkpoint_id": checkpoint_id, "saved": False}
+    except _STATE_ADAPTER_EXCEPTIONS:
+        logger.exception("Checkpoint error")
+        return {"error": "checkpoint_error", "checkpoint_id": checkpoint_id, "saved": False}

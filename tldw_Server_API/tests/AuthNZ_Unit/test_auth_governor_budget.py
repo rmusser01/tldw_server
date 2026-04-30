@@ -10,6 +10,18 @@ from tldw_Server_API.app.core.AuthNZ.llm_budget_guard import enforce_llm_budget
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal, AuthContext
 
 
+class _LoggerStub:
+    def __init__(self) -> None:
+        self.errors: list[str] = []
+        self.debugs: list[str] = []
+
+    def error(self, message: str, *args, **kwargs) -> None:
+        self.errors.append(message)
+
+    def debug(self, message: str, *args, **kwargs) -> None:
+        self.debugs.append(message)
+
+
 def _make_request(headers: dict[str, str] | None = None, *, path: str = "/api/v1/chat/completions") -> Request:
     scope: Scope = {
         "type": "http",
@@ -42,7 +54,7 @@ async def test_auth_governor_decorates_over_budget_result_with_principal(monkeyp
         user_id=1,
         api_key_id=123,
         subject=None,
-        token_type="api_key",
+        token_type="api_key",  # nosec B106
         jti=None,
         roles=[],
         permissions=[],
@@ -83,7 +95,7 @@ async def test_auth_governor_under_budget_includes_principal(monkeypatch):
         user_id=2,
         api_key_id=456,
         subject=None,
-        token_type="api_key",
+        token_type="api_key",  # nosec B106
         jti=None,
         roles=[],
         permissions=[],
@@ -121,7 +133,7 @@ async def test_auth_governor_budget_check_failure_fails_open(monkeypatch):
         user_id=3,
         api_key_id=789,
         subject=None,
-        token_type="api_key",
+        token_type="api_key",  # nosec B106
         jti=None,
         roles=[],
         permissions=[],
@@ -158,7 +170,7 @@ async def test_auth_governor_budget_check_failure_fails_closed(monkeypatch):
         user_id=4,
         api_key_id=321,
         subject=None,
-        token_type="api_key",
+        token_type="api_key",  # nosec B106
         jti=None,
         roles=[],
         permissions=[],
@@ -197,7 +209,7 @@ async def test_auth_governor_budget_check_failure_defaults_to_fail_closed(monkey
         user_id=5,
         api_key_id=654,
         subject=None,
-        token_type="api_key",
+        token_type="api_key",  # nosec B106
         jti=None,
         roles=[],
         permissions=[],
@@ -275,7 +287,7 @@ async def test_enforce_llm_budget_uses_auth_governor_and_raises_402(monkeypatch)
         user_id=7,
         api_key_id=123,
         subject=None,
-        token_type="api_key",
+        token_type="api_key",  # nosec B106
         jti=None,
         roles=[],
         permissions=[],
@@ -530,3 +542,80 @@ async def test_enforce_llm_budget_allows_under_budget_embeddings(monkeypatch):
 
     assert getattr(req.state, "api_key_id", None) == 777
     assert getattr(req.state, "user_id", None) == 11
+
+
+@pytest.mark.asyncio
+async def test_auth_governor_budget_failure_log_is_sanitized(monkeypatch):
+    from tldw_Server_API.app.core.AuthNZ import auth_governor as auth_governor_module
+
+    async def _fake_is_key_over_budget(_key_id: int):
+        raise RuntimeError("budget backend failed at /private/budget.db")
+
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(auth_governor_module, "is_key_over_budget", _fake_is_key_over_budget)
+    monkeypatch.setattr(auth_governor_module, "logger", logger_stub)
+    monkeypatch.setenv("AUTH_BUDGET_FAIL_OPEN", "1")
+
+    principal = AuthPrincipal(
+        kind="api_key",
+        user_id=12,
+        api_key_id=888,
+        subject=None,
+        token_type="api_key",  # nosec B106
+        jti=None,
+        roles=[],
+        permissions=[],
+        is_admin=False,
+        org_ids=[],
+        team_ids=[],
+    )
+
+    result = await AuthGovernor().check_llm_budget_for_api_key(principal, 888)
+
+    assert result["over"] is False
+    assert logger_stub.errors == ["AuthGovernor budget check failed"]
+    assert "budget backend failed" not in str(logger_stub.errors)
+    assert "/private/budget.db" not in str(logger_stub.errors)
+    assert "888" not in str(logger_stub.errors)
+
+
+@pytest.mark.asyncio
+async def test_auth_governor_limiter_failure_logs_are_sanitized(monkeypatch):
+    from tldw_Server_API.app.core.AuthNZ import auth_governor as auth_governor_module
+
+    class _FailingLimiter:
+        enabled = True
+
+        async def check_lockout(self, identifier, attempt_type="login"):
+            raise RuntimeError("lockout backend failed at /private/lockout.db")
+
+        async def record_failed_attempt(self, *, identifier, attempt_type):
+            raise RuntimeError("record backend failed at /private/record.db")
+
+        async def check_rate_limit(self, identifier, endpoint, **kwargs):
+            raise RuntimeError("rate backend failed at /private/rate.db")
+
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(auth_governor_module, "logger", logger_stub)
+
+    gov = AuthGovernor()
+    locked, expires = await gov.check_lockout("user@example.test", rate_limiter=_FailingLimiter())
+    failure = await gov.record_auth_failure("user@example.test", rate_limiter=_FailingLimiter())
+    allowed, meta = await gov.check_rate_limit(
+        "user@example.test",
+        "auth/login",
+        rate_limiter=_FailingLimiter(),
+    )
+
+    assert (locked, expires) == (False, None)
+    assert failure == {"is_locked": False, "remaining_attempts": 5}
+    assert (allowed, meta) == (True, {})
+    assert logger_stub.debugs == [
+        "AuthGovernor lockout check failed",
+        "AuthGovernor record failure failed",
+        "AuthGovernor rate limit failed",
+    ]
+    joined = "\n".join(logger_stub.debugs)
+    assert "user@example.test" not in joined
+    assert "backend failed" not in joined
+    assert "/private/" not in joined

@@ -37,6 +37,10 @@ from tldw_Server_API.app.core.testing import is_truthy
 _SEVERITY_ORDER = {"info": 0, "warning": 1, "critical": 2}
 
 
+def _safe_exception_label(exc: BaseException) -> str:
+    return exc.__class__.__name__
+
+
 def _find_project_root(start: Path) -> Path | None:
     """Best-effort search for the repository root starting from a file/dir path."""
     start_dir = start if start.is_dir() else start.parent
@@ -161,7 +165,7 @@ class NotificationService:
                 Path(resolved).parent.mkdir(parents=True, exist_ok=True)
                 self.file_path = resolved
             except (OSError, RuntimeError, TypeError, ValueError) as e:
-                logger.warning(f"Failed to update MONITORING_NOTIFY_FILE: {e}")
+                logger.warning("Failed to update MONITORING_NOTIFY_FILE ({})", _safe_exception_label(e))
         if webhook_url is not None:
             self.webhook_url = webhook_url
         if email_to is not None:
@@ -222,20 +226,20 @@ class NotificationService:
                 f.write(json.dumps(payload, ensure_ascii=False) + "\n")
         except (OSError, RuntimeError, TypeError, ValueError) as e:
             file_written = False
-            logger.warning(f"Notification file sink failed: {e}")
+            logger.warning("Notification file sink failed ({})", _safe_exception_label(e))
         # Best-effort asynchronous sends (non-blocking)
         try:
             if self.webhook_url:
                 threading.Thread(target=self._send_webhook_safe, args=(payload,), daemon=True).start()
         except (OSError, RuntimeError) as e:
-            logger.debug(f"Webhook thread start failed: {e}")
+            logger.debug("Webhook thread start failed ({})", _safe_exception_label(e))
         try:
             # Email optional and only if SMTP configured and recipients provided
             recipients = self._parse_email_recipients(self.email_to)
             if recipients and self.smtp_host and self.email_from:
                 threading.Thread(target=self._send_email_safe, args=(alert,), daemon=True).start()
         except (OSError, RuntimeError) as e:
-            logger.debug(f"Email thread start failed: {e}")
+            logger.debug("Email thread start failed ({})", _safe_exception_label(e))
         return "logged" if file_written else "failed"
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=8), reraise=False)
@@ -250,9 +254,9 @@ class NotificationService:
         try:
             self._send_webhook(payload)
         except RetryError as e:
-            logger.info(f"Webhook notify failed: {e}")
+            logger.info("Webhook notify failed ({})", _safe_exception_label(e))
         except (OSError, RuntimeError, TypeError, ValueError) as e:
-            logger.info(f"Webhook notify failed: {e}")
+            logger.info("Webhook notify failed ({})", _safe_exception_label(e))
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=8), reraise=False)
     def _send_email(self, alert: TopicAlert) -> None:
@@ -299,12 +303,12 @@ class NotificationService:
                 f.write(json.dumps(payload, ensure_ascii=False) + "\n")
         except (OSError, RuntimeError, TypeError, ValueError) as e:
             file_written = False
-            logger.warning(f"Notification file sink failed: {e}")
+            logger.warning("Notification file sink failed ({})", _safe_exception_label(e))
         try:
             if self.webhook_url:
                 threading.Thread(target=self._send_webhook_safe, args=(payload,), daemon=True).start()
         except (OSError, RuntimeError) as e:
-            logger.debug(f"Webhook thread start failed: {e}")
+            logger.debug("Webhook thread start failed ({})", _safe_exception_label(e))
         return "logged" if file_written else "failed"
 
     def notify_or_batch(self, payload: dict[str, Any]) -> str:
@@ -341,9 +345,9 @@ class NotificationService:
         try:
             self._send_email(alert)
         except RetryError as e:
-            logger.info(f"Email notify failed: {e}")
+            logger.info("Email notify failed ({})", _safe_exception_label(e))
         except (OSError, RuntimeError, TypeError, ValueError, smtplib.SMTPException) as e:
-            logger.info(f"Email notify failed: {e}")
+            logger.info("Email notify failed ({})", _safe_exception_label(e))
 
 
 _notify_singleton: NotificationService | None = None

@@ -12,6 +12,7 @@ from cachetools import LRUCache
 from fastapi import Depends, Header, HTTPException, Request, status
 from loguru import logger
 
+from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.api.v1.schemas.prompt_studio_base import SecurityConfig
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.config import settings
@@ -134,7 +135,11 @@ def _get_or_create_prompt_studio_db(user_id: str, client_id: str) -> PromptStudi
             logger.info("Created new PromptStudioDatabase instance for user {}", user_id)
             return db_instance
         except _PROMPT_STUDIO_DB_EXCEPTIONS as e:
-            logger.error(f"Failed to create PromptStudioDatabase for user {user_id}: {e}")
+            logger.error(
+                "Failed to create PromptStudioDatabase for user {}; error_type={}",
+                user_id,
+                type(e).__name__,
+            )
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to initialize database"
@@ -224,7 +229,10 @@ async def get_prompt_studio_user(
                 )
                 await apply_prompt_studio_quota_policy(user_context["user_id"])
             except _PROMPT_STUDIO_CONTEXT_EXCEPTIONS as exc:
-                logger.debug("Prompt Studio quota policy lookup failed: {}", exc)
+                logger.debug(
+                    "Prompt Studio quota policy lookup failed; error_type={}",
+                    type(exc).__name__,
+                )
             return user_context
     except _PROMPT_STUDIO_CONTEXT_EXCEPTIONS:
         # Ignore and fall through to standard handling
@@ -355,7 +363,10 @@ async def get_prompt_studio_user(
         )
         await apply_prompt_studio_quota_policy(user_context["user_id"])
     except _PROMPT_STUDIO_CONTEXT_EXCEPTIONS as exc:
-        logger.debug("Prompt Studio quota policy lookup failed: {}", exc)
+        logger.debug(
+            "Prompt Studio quota policy lookup failed; error_type={}",
+            type(exc).__name__,
+        )
 
     return user_context
 
@@ -434,11 +445,11 @@ async def require_project_access(
         return True
 
     except DatabaseError as e:
-        logger.error(f"Database error checking project access: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Database error"
-        ) from e
+        logger.error(
+            "Database error checking project access; error_type={}",
+            type(e).__name__,
+        )
+        raise map_db_error_to_http(e, default_detail="Database error") from e
 
 async def require_project_write_access(
     project_id: int,
@@ -509,7 +520,10 @@ async def check_rate_limit(
         if user_context.get("rg_policy_id"):
             return True
     except _PROMPT_STUDIO_CONTEXT_EXCEPTIONS as exc:
-        logger.debug("Prompt Studio rate-limit bypass: failed to read rg_policy_id from user_context: {}", exc)
+        logger.debug(
+            "Prompt Studio rate-limit bypass: failed to read rg_policy_id from user_context; error_type={}",
+            type(exc).__name__,
+        )
 
     user_id = str(user_context.get("user_id", "anonymous"))
 
@@ -545,9 +559,9 @@ async def check_rate_limit(
                 globals()["_PROMPT_STUDIO_RATE_LIMIT_SHIM_LOGGED"] = True
                 logger.warning(
                     "Prompt Studio shared rate limiter unavailable; local fallback limiter is retired. "
-                    "Denying request (fail-closed). operation={} error={}",
+                    "Denying request (fail-closed). operation={} error_type={}",
                     operation,
-                    e,
+                    type(e).__name__,
                 )
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -580,7 +594,10 @@ def shutdown_prompt_studio_deps():
                 if hasattr(db_instance, 'close'):
                     db_instance.close()
             except _PROMPT_STUDIO_DB_EXCEPTIONS as e:
-                logger.error(f"Error closing database instance: {e}")
+                logger.error(
+                    "Error closing database instance; error_type={}",
+                    type(e).__name__,
+                )
 
         _db_instances_cache.clear()
         logger.info("Prompt Studio dependencies cleaned up")

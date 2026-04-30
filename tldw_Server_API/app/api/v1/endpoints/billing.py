@@ -142,8 +142,8 @@ async def list_subscriptions(
                     name = org.get("name")
                     if org_id is not None and name:
                         org_names[int(org_id)] = str(name)
-            except Exception as exc:
-                logger.warning(f"Failed to resolve org names for subscriptions: {exc}")
+            except Exception:
+                logger.warning("Failed to resolve org names for subscriptions")
 
         now = datetime.now(timezone.utc)
         result = []
@@ -201,6 +201,6 @@ async def list_subscriptions(
             result.append(item)
 
         return result
-    except Exception as exc:
-        logger.error(f"list_subscriptions failed: {exc}")
+    except Exception:
+        logger.error("list_subscriptions failed")
         raise

@@ -2,7 +2,6 @@
 # Description: Tests for admin backup bundle endpoints and service layer.
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
 import hashlib
 import io
 import json
@@ -10,8 +9,11 @@ import os
 import sqlite3
 import uuid
 import zipfile
+from datetime import datetime, timedelta, timezone
+from typing import Any
 
 import pytest
+from fastapi import HTTPException, UploadFile
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.main import app
@@ -19,6 +21,15 @@ from tldw_Server_API.app.main import app
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+class _LoggerStub:
+    def __init__(self) -> None:
+        self.error_records: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = []
+
+    def error(self, message: str, *args: Any, **kwargs: Any) -> None:
+        self.error_records.append((message, args, kwargs))
+
 
 def _setup_env(tmp_path):
     os.environ["AUTH_MODE"] = "single_user"
@@ -40,6 +51,7 @@ async def _reset_state():
 
     # Reset module-level rate limit state so tests are isolated
     from tldw_Server_API.app.services import admin_bundle_service
+
     admin_bundle_service._rate_limit_windows.clear()
 
 
@@ -56,17 +68,28 @@ async def _seed_authnz_data() -> int:
             VALUES (?,?,?,?,1)
             ON CONFLICT (username) DO NOTHING
             """,
-            str(uuid.uuid4()), username, email, "x",
+            str(uuid.uuid4()),
+            username,
+            email,
+            "x",
         )
     else:
         await pool.execute(
             "INSERT OR IGNORE INTO users (uuid, username, email, password_hash, is_active) VALUES (?,?,?,?,1)",
-            str(uuid.uuid4()), username, email, "x",
+            str(uuid.uuid4()),
+            username,
+            email,
+            "x",
         )
     user_id = await pool.fetchval("SELECT id FROM users WHERE username = ?", username)
     await pool.execute(
         "INSERT INTO audit_logs (user_id, action, resource_type, resource_id, ip_address, details) VALUES (?,?,?,?,?,?)",
-        int(user_id), "bundle.test", "backup", 1, "127.0.0.1", '{"ok": true}',
+        int(user_id),
+        "bundle.test",
+        "backup",
+        1,
+        "127.0.0.1",
+        '{"ok": true}',
     )
     return int(user_id)
 
@@ -101,6 +124,7 @@ def _make_bundle_zip(datasets=None, manifest_overrides=None, tamper_checksum=Fal
             conn.commit()
             # Serialize to bytes via backup API
             import tempfile
+
             with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tf:
                 tf_path = tf.name
             try:
@@ -187,8 +211,160 @@ def _set_bundle_created_at(bundle_path: str, created_at: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Generic fallback log sanitization tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_create_bundle_sanitizes_noncritical_failure_log(monkeypatch):
+    from tldw_Server_API.app.api.v1.endpoints.admin import admin_bundle_ops
+
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(admin_bundle_ops, "logger", logger_stub)
+
+    async def _raise_create_bundle_async(**_kwargs):
+        raise RuntimeError("bundle backend exploded at /private/bundles.db")
+
+    monkeypatch.setattr(admin_bundle_ops.svc, "create_bundle_async", _raise_create_bundle_async)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await admin_bundle_ops.create_bundle(
+            admin_bundle_ops.BundleCreateRequest(datasets=["authnz"]),
+            request=object(),
+            principal=object(),
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "Failed to create bundle"
+    assert logger_stub.error_records == [("Failed to create bundle", (), {})]
+
+
+@pytest.mark.asyncio
+async def test_list_bundles_sanitizes_noncritical_failure_log(monkeypatch):
+    from tldw_Server_API.app.api.v1.endpoints.admin import admin_bundle_ops
+
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(admin_bundle_ops, "logger", logger_stub)
+
+    def _raise_list_bundles(**_kwargs):
+        raise RuntimeError("bundle list backend exploded at /private/bundles.db")
+
+    monkeypatch.setattr(admin_bundle_ops.svc, "list_bundles", _raise_list_bundles)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await admin_bundle_ops.list_bundles(
+            user_id=None,
+            limit=100,
+            offset=0,
+            principal=object(),
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "Failed to list bundles"
+    assert logger_stub.error_records == [("Failed to list bundles", (), {})]
+
+
+@pytest.mark.asyncio
+async def test_import_bundle_sanitizes_noncritical_failure_log(monkeypatch):
+    from tldw_Server_API.app.api.v1.endpoints.admin import admin_bundle_ops
+
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(admin_bundle_ops, "logger", logger_stub)
+
+    async def _raise_import_bundle_async(**_kwargs):
+        raise RuntimeError("bundle import backend exploded at /private/bundles.db")
+
+    monkeypatch.setattr(admin_bundle_ops.svc, "import_bundle_async", _raise_import_bundle_async)
+
+    upload = UploadFile(file=io.BytesIO(b"not-a-real-bundle"), filename="test.zip")
+
+    with pytest.raises(HTTPException) as exc_info:
+        await admin_bundle_ops.import_bundle(
+            request=object(),
+            file=upload,
+            user_id=None,
+            dry_run=False,
+            allow_downgrade=False,
+            principal=object(),
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "Failed to import bundle"
+    assert logger_stub.error_records == [("Failed to import bundle", (), {})]
+
+
+@pytest.mark.asyncio
+async def test_get_bundle_metadata_sanitizes_noncritical_failure_log(monkeypatch):
+    from tldw_Server_API.app.api.v1.endpoints.admin import admin_bundle_ops
+
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(admin_bundle_ops, "logger", logger_stub)
+
+    def _raise_get_bundle_metadata(_bundle_id: str):
+        raise RuntimeError("bundle metadata backend exploded at /private/bundles.db")
+
+    monkeypatch.setattr(admin_bundle_ops.svc, "get_bundle_metadata", _raise_get_bundle_metadata)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await admin_bundle_ops.get_bundle_metadata("bundle.zip", principal=object())
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "Failed to get bundle metadata"
+    assert logger_stub.error_records == [("Failed to get bundle metadata", (), {})]
+
+
+@pytest.mark.asyncio
+async def test_download_bundle_sanitizes_noncritical_failure_log(monkeypatch):
+    from tldw_Server_API.app.api.v1.endpoints.admin import admin_bundle_ops
+
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(admin_bundle_ops, "logger", logger_stub)
+
+    def _raise_get_bundle_path(_bundle_id: str):
+        raise RuntimeError("bundle path backend exploded at /private/bundles.db")
+
+    monkeypatch.setattr(admin_bundle_ops.svc, "get_bundle_path", _raise_get_bundle_path)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await admin_bundle_ops.download_bundle(
+            "bundle.zip",
+            request=object(),
+            principal=object(),
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "Failed to download bundle"
+    assert logger_stub.error_records == [("Failed to download bundle", (), {})]
+
+
+@pytest.mark.asyncio
+async def test_delete_bundle_sanitizes_noncritical_failure_log(monkeypatch):
+    from tldw_Server_API.app.api.v1.endpoints.admin import admin_bundle_ops
+
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(admin_bundle_ops, "logger", logger_stub)
+
+    def _raise_delete_bundle(_bundle_id: str):
+        raise RuntimeError("bundle delete backend exploded at /private/bundles.db")
+
+    monkeypatch.setattr(admin_bundle_ops.svc, "delete_bundle", _raise_delete_bundle)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await admin_bundle_ops.delete_bundle_endpoint(
+            "bundle.zip",
+            request=object(),
+            principal=object(),
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "Failed to delete bundle"
+    assert logger_stub.error_records == [("Failed to delete bundle", (), {})]
+
+
+# ---------------------------------------------------------------------------
 # Export tests
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_create_bundle_authnz_only(tmp_path):
@@ -312,6 +488,7 @@ async def test_list_bundles_pagination(tmp_path):
         r1 = client.post("/api/v1/admin/backups/bundles", json={"datasets": ["authnz"]})
         assert r1.status_code == 200, r1.text
         import time
+
         time.sleep(1.1)  # ensure different timestamps
         r2 = client.post("/api/v1/admin/backups/bundles", json={"datasets": ["authnz"]})
         assert r2.status_code == 200, r2.text
@@ -326,6 +503,7 @@ async def test_list_bundles_pagination(tmp_path):
 # ---------------------------------------------------------------------------
 # Metadata & download tests
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_get_bundle_metadata(tmp_path):
@@ -399,6 +577,7 @@ async def test_download_bundle_404(tmp_path):
 # Delete tests
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_delete_bundle(tmp_path):
     """Delete bundle and verify 404 on re-access."""
@@ -440,6 +619,7 @@ async def test_delete_bundle_nonexistent(tmp_path):
 # ---------------------------------------------------------------------------
 # Import tests
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_import_dry_run(tmp_path):
@@ -517,9 +697,7 @@ async def test_import_response_propagates_rollback_failures(tmp_path, monkeypatc
         assert resp.status_code == 200, resp.text
         data = resp.json()
         assert data["status"] == "imported"
-        assert data["rollback_failures"] == [
-            "authnz: rollback failed in prior phase"
-        ]
+        assert data["rollback_failures"] == ["authnz: rollback failed in prior phase"]
 
 
 @pytest.mark.asyncio
@@ -650,10 +828,10 @@ async def test_import_restore_failure_returns_structured_detail(tmp_path, monkey
 
     async def _fake_import_bundle_async(**_kwargs):
         exc = BundleImportError(
-            "restore_failed:media: restore boom; rollback_failures: authnz: rollback boom",
+            "restore_failed:media: restore operation failed; " "rollback_failures: authnz: rollback operation failed",
             error_code="restore_failed",
         )
-        exc.rollback_failures = ["authnz: rollback boom"]  # type: ignore[attr-defined]
+        exc.rollback_failures = ["authnz: rollback operation failed"]  # type: ignore[attr-defined]
         raise exc
 
     monkeypatch.setattr(
@@ -672,8 +850,8 @@ async def test_import_restore_failure_returns_structured_detail(tmp_path, monkey
         assert resp.status_code == 400, resp.text
         detail = resp.json()["detail"]
         assert detail["error_code"] == "restore_failed"
-        assert "restore_failed:media: restore boom" in detail["message"]
-        assert detail["rollback_failures"] == ["authnz: rollback boom"]
+        assert "restore_failed:media: restore operation failed" in detail["message"]
+        assert detail["rollback_failures"] == ["authnz: rollback operation failed"]
 
 
 @pytest.mark.asyncio
@@ -692,12 +870,14 @@ async def test_import_error_detail_shape_contract_restore_failed_vs_checksum(
         await _seed_authnz_data()
 
         with monkeypatch.context() as mp:
+
             async def _fake_import_bundle_async(**_kwargs):
                 exc = BundleImportError(
-                    "restore_failed:media: restore boom; rollback_failures: authnz: rollback boom",
+                    "restore_failed:media: restore operation failed; "
+                    "rollback_failures: authnz: rollback operation failed",
                     error_code="restore_failed",
                 )
-                exc.rollback_failures = ["authnz: rollback boom"]  # type: ignore[attr-defined]
+                exc.rollback_failures = ["authnz: rollback operation failed"]  # type: ignore[attr-defined]
                 raise exc
 
             mp.setattr(
@@ -734,8 +914,7 @@ def test_import_restore_failure_exposes_error_code_and_rollback_failures(
 ):
     """Service should raise restore_failed with rollback_failures metadata."""
     from tldw_Server_API.app.core.exceptions import BundleImportError
-    from tldw_Server_API.app.services import admin_bundle_service
-    from tldw_Server_API.app.services import admin_data_ops_service
+    from tldw_Server_API.app.services import admin_bundle_service, admin_data_ops_service
     from tldw_Server_API.app.services.admin_bundle_service import import_bundle
 
     admin_bundle_service._rate_limit_windows.clear()
@@ -806,13 +985,17 @@ def test_import_restore_failure_exposes_error_code_and_rollback_failures(
 
     exc = exc_info.value
     assert getattr(exc, "error_code", None) == "restore_failed"
-    assert getattr(exc, "rollback_failures", []) == ["authnz: rollback boom"]
-    assert "rollback_failures: authnz: rollback boom" in str(exc)
+    assert getattr(exc, "rollback_failures", []) == ["authnz: rollback operation failed"]
+    assert "restore_failed:media: restore operation failed" in str(exc)
+    assert "rollback_failures: authnz: rollback operation failed" in str(exc)
+    assert "restore boom" not in str(exc)
+    assert "rollback boom" not in str(exc)
 
 
 # ---------------------------------------------------------------------------
 # Concurrency / rate limit tests
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_concurrency_lock_busy(tmp_path, monkeypatch):
@@ -965,6 +1148,7 @@ async def test_rate_limit_exceeded(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 # Unit tests for service helpers
 # ---------------------------------------------------------------------------
+
 
 def test_compute_sha256(tmp_path):
     """_compute_sha256 returns correct hex digest."""
@@ -1254,6 +1438,7 @@ async def test_create_bundle_retention_hours_prunes_old_bundles_in_scope(tmp_pat
 # GAP-6: Test creating bundle with ALL datasets (default behavior)
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_create_bundle_all_datasets_default(tmp_path):
     """Omitting 'datasets' should default to all 6 datasets."""
@@ -1279,6 +1464,7 @@ async def test_create_bundle_all_datasets_default(tmp_path):
 # ---------------------------------------------------------------------------
 # GAP-2: Test size verification during import
 # ---------------------------------------------------------------------------
+
 
 def test_import_size_mismatch(tmp_path):
     """Import should reject files whose size doesn't match manifest."""
@@ -1318,6 +1504,7 @@ def test_import_size_mismatch(tmp_path):
 # Zip Slip protection test
 # ---------------------------------------------------------------------------
 
+
 def test_import_rejects_path_traversal(tmp_path):
     """Import should reject ZIP entries with path traversal."""
     from tldw_Server_API.app.core.exceptions import BundleImportError
@@ -1352,6 +1539,7 @@ def test_import_rejects_path_traversal(tmp_path):
 # ---------------------------------------------------------------------------
 # GAP-9: Multi-user mode user_id_required test
 # ---------------------------------------------------------------------------
+
 
 def test_export_user_id_required_multi_user(tmp_path, monkeypatch):
     """Export of per-user datasets without user_id should fail when auto-resolve fails."""

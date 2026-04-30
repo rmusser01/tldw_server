@@ -3,8 +3,8 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Path, status
 from loguru import logger
 
-from tldw_Server_API.app.api.v1.API_Deps.Collections_DB_Deps import get_collections_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import rbac_rate_limit, require_permissions
+from tldw_Server_API.app.api.v1.API_Deps.Collections_DB_Deps import get_collections_db_for_user
 from tldw_Server_API.app.api.v1.schemas.reminders_schemas import (
     ReminderTaskCreateRequest,
     ReminderTaskDeleteResponse,
@@ -37,24 +37,15 @@ _REMINDERS_ENDPOINT_NONCRITICAL_EXCEPTIONS = (
 async def _reconcile_task_best_effort(*, task_id: str, user_id: int) -> None:
     try:
         await get_reminders_scheduler().reconcile_task(task_id=task_id, user_id=user_id)
-    except _REMINDERS_ENDPOINT_NONCRITICAL_EXCEPTIONS as exc:
-        logger.warning(
-            "reminders endpoint reconcile_task failed task_id={} user_id={} error={}",
-            task_id,
-            user_id,
-            exc,
-        )
+    except _REMINDERS_ENDPOINT_NONCRITICAL_EXCEPTIONS:
+        logger.warning("reminders endpoint reconcile_task failed")
 
 
 async def _unschedule_task_best_effort(*, task_id: str) -> None:
     try:
         await get_reminders_scheduler().unschedule_task(task_id=task_id)
-    except _REMINDERS_ENDPOINT_NONCRITICAL_EXCEPTIONS as exc:
-        logger.warning(
-            "reminders endpoint unschedule_task failed task_id={} error={}",
-            task_id,
-            exc,
-        )
+    except _REMINDERS_ENDPOINT_NONCRITICAL_EXCEPTIONS:
+        logger.warning("reminders endpoint unschedule_task failed")
 
 
 def _row_to_response(row: ReminderTaskRow) -> ReminderTaskResponse:

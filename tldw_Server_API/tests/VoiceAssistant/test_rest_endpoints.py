@@ -2,12 +2,14 @@
 # Integration tests for Voice Assistant REST endpoints
 #
 #######################################################################################################################
+import builtins
 import importlib
 import json
 import uuid
 from typing import Any, Dict, List, Optional
 
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
@@ -175,6 +177,63 @@ class MockVoiceWorkflowHandler:
                 "steps": [{"id": "step1"}],
             },
         }
+
+
+@pytest.mark.asyncio
+async def test_voice_command_dry_run_sanitizes_module_import_errors(monkeypatch, mock_user):
+    """Dry-run availability errors should not expose import/backend details."""
+    from tldw_Server_API.app.api.v1.endpoints import voice_assistant as voice_mod
+
+    original_import = builtins.__import__
+
+    def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "tldw_Server_API.app.core.VoiceAssistant.intent_parser":
+            raise ImportError("voice backend exploded")
+        return original_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await voice_mod.voice_command_dry_run(
+            payload=voice_mod.VoiceCommandDryRunRequest(phrase="hello assistant"),
+            request=object(),
+            current_user=mock_user,
+            db=object(),
+        )
+
+    assert exc_info.value.status_code == 501
+    assert exc_info.value.detail == "Voice assistant module not available"
+
+
+@pytest.mark.asyncio
+async def test_voice_command_dry_run_sanitizes_unexpected_failures(monkeypatch, mock_user):
+    """Dry-run backend failures should return a stable operational detail."""
+    from tldw_Server_API.app.api.v1.endpoints import voice_assistant as voice_mod
+
+    logged_errors = []
+
+    class LoggerStub:
+        def error(self, message, *args, **kwargs):
+            logged_errors.append((message, args, kwargs))
+
+    monkeypatch.setattr(voice_mod, "logger", LoggerStub())
+    monkeypatch.setattr(
+        voice_mod,
+        "get_voice_command_registry",
+        lambda: (_ for _ in ()).throw(RuntimeError("dry-run backend exploded")),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await voice_mod.voice_command_dry_run(
+            payload=voice_mod.VoiceCommandDryRunRequest(phrase="hello assistant"),
+            request=object(),
+            current_user=mock_user,
+            db=object(),
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "Dry-run failed"
+    assert logged_errors == [("Voice command dry-run failed", (), {})]
 
 
 # Test classes

@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import asyncio
+import contextlib
 from datetime import datetime, timedelta, timezone
 
 import pytest
+from loguru import logger
 
 from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
 from tldw_Server_API.app.core.config import settings
+from tldw_Server_API.app.services import notifications_prune_service
 from tldw_Server_API.app.services.notifications_prune_service import NotificationsPruneService
 
 
@@ -106,3 +110,148 @@ async def test_prune_uses_read_acceleration_window(notifications_base):
 
     assert summary["archived"] == 1
     assert summary["deleted"] == 0
+
+
+def test_enumerate_user_ids_sanitizes_base_dir_resolution_failure(monkeypatch):
+    secret_path = "/tmp/private/user-db-token-abc123"
+    records: list[dict[str, object]] = []
+    sink_id = logger.add(
+        lambda message: records.append(message.record),
+        level="DEBUG",
+        format="{message}",
+    )
+
+    def fail_base_dir():
+        raise RuntimeError(f"cannot inspect {secret_path}")
+
+    monkeypatch.setattr(
+        notifications_prune_service.DatabasePaths,
+        "get_user_db_base_dir",
+        fail_base_dir,
+    )
+    try:
+        assert notifications_prune_service._enumerate_user_ids() == []
+    finally:
+        logger.remove(sink_id)
+
+    matching = [
+        record
+        for record in records
+        if "notifications_prune: failed to resolve user db base dir" in record["message"]
+    ]
+    assert matching
+    assert all(secret_path not in record["message"] for record in matching)
+    assert matching[-1]["extra"]["error_type"] == "RuntimeError"
+
+
+def test_enumerate_user_ids_sanitizes_single_user_fallback_failure(monkeypatch, tmp_path):
+    secret_path = "/tmp/private/single-user-token-xyz"
+    records: list[dict[str, object]] = []
+    sink_id = logger.add(
+        lambda message: records.append(message.record),
+        level="DEBUG",
+        format="{message}",
+    )
+
+    monkeypatch.setattr(
+        notifications_prune_service.DatabasePaths,
+        "get_user_db_base_dir",
+        lambda: tmp_path,
+    )
+
+    def fail_single_user_id():
+        raise RuntimeError(f"cannot derive {secret_path}")
+
+    monkeypatch.setattr(
+        notifications_prune_service.DatabasePaths,
+        "get_single_user_id",
+        fail_single_user_id,
+    )
+    try:
+        assert notifications_prune_service._enumerate_user_ids() == []
+    finally:
+        logger.remove(sink_id)
+
+    matching = [
+        record
+        for record in records
+        if "notifications_prune: failed to derive single user id" in record["message"]
+    ]
+    assert matching
+    assert all(secret_path not in record["message"] for record in matching)
+    assert matching[-1]["extra"]["error_type"] == "RuntimeError"
+
+
+def test_int_env_sanitizes_invalid_raw_value(monkeypatch):
+    secret_value = "not-an-int /tmp/private-notification-token sk-live-notify"
+    records: list[dict[str, object]] = []
+    sink_id = logger.add(
+        lambda message: records.append(message.record),
+        level="DEBUG",
+        format="{message}",
+    )
+    monkeypatch.setenv("NOTIFICATIONS_PRUNE_INTERVAL_SEC", secret_value)
+
+    try:
+        assert notifications_prune_service._int_env("NOTIFICATIONS_PRUNE_INTERVAL_SEC", 3600) == 3600
+    finally:
+        logger.remove(sink_id)
+
+    matching = [
+        record
+        for record in records
+        if "notifications_prune: invalid NOTIFICATIONS_PRUNE_INTERVAL_SEC" in record["message"]
+    ]
+    assert matching
+    rendered = "\n".join(record["message"] for record in matching)
+    assert secret_value not in rendered
+    assert "/tmp/private-notification-token" not in rendered
+    assert "sk-live-notify" not in rendered
+    assert "defaulting to 3600" in rendered
+    assert matching[-1]["extra"]["error_type"] == "ValueError"
+
+
+@pytest.mark.asyncio
+async def test_notifications_prune_runner_failure_log_is_sanitized(monkeypatch):
+    secret_path = "/tmp/private/notifications-run-secret"
+    records: list[dict[str, object]] = []
+    sink_id = logger.add(
+        lambda message: records.append(message.record),
+        level="DEBUG",
+        format="{message}",
+    )
+
+    monkeypatch.setenv("NOTIFICATIONS_PRUNE_ENABLED", "true")
+    monkeypatch.setenv("NOTIFICATIONS_PRUNE_INTERVAL_SEC", "1")
+
+    async def _fail_run_once(self, *, user_ids=None):
+        raise RuntimeError(f"cannot prune {secret_path}")
+
+    sleep_calls = {"count": 0}
+
+    async def _fake_sleep(_seconds: float) -> None:
+        sleep_calls["count"] += 1
+        if sleep_calls["count"] >= 2:
+            raise asyncio.CancelledError
+
+    monkeypatch.setattr(NotificationsPruneService, "run_once", _fail_run_once)
+    monkeypatch.setattr(notifications_prune_service.asyncio, "sleep", _fake_sleep)
+
+    try:
+        task = await notifications_prune_service.start_notifications_prune_scheduler()
+        assert task is not None
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+    finally:
+        logger.remove(sink_id)
+
+    matching = [
+        record
+        for record in records
+        if "Notifications prune run failed" in record["message"]
+    ]
+    assert matching
+    rendered = "\n".join(record["message"] for record in matching)
+    assert "cannot prune" not in rendered
+    assert secret_path not in rendered
+    assert matching[-1]["extra"]["error_type"] == "RuntimeError"

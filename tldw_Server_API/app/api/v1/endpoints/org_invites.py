@@ -4,6 +4,7 @@ org_invites.py
 Public invite endpoints for preview and redemption.
 These are separate from the org management endpoints in orgs.py.
 """
+
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -110,7 +111,12 @@ async def redeem_invite(
 
     if not result.success:
         # Determine appropriate status code based on the failure reason
-        if "expired" in (result.message or "").lower() or "exhausted" in (result.message or "").lower() or "limit" in (result.message or "").lower() or "revoked" in (result.message or "").lower():
+        if (
+            "expired" in (result.message or "").lower()
+            or "exhausted" in (result.message or "").lower()
+            or "limit" in (result.message or "").lower()
+            or "revoked" in (result.message or "").lower()
+        ):
             status_code = status.HTTP_410_GONE
         elif "not found" in (result.message or "").lower():
             status_code = status.HTTP_404_NOT_FOUND
@@ -140,15 +146,8 @@ async def redeem_invite(
             if principal.user_id is None:
                 return
             svc = await get_or_create_audit_service_for_user_id(int(principal.user_id))
-            correlation_id = (
-                request.headers.get("X-Correlation-ID")
-                or getattr(request.state, "correlation_id", None)
-            )
-            request_id = (
-                request.headers.get("X-Request-ID")
-                or getattr(request.state, "request_id", None)
-                or ""
-            )
+            correlation_id = request.headers.get("X-Correlation-ID") or getattr(request.state, "correlation_id", None)
+            request_id = request.headers.get("X-Request-ID") or getattr(request.state, "request_id", None) or ""
             audit_ctx = AuditContext(
                 user_id=str(principal.user_id),
                 correlation_id=correlation_id,
@@ -173,8 +172,8 @@ async def redeem_invite(
                     "code_prefix": body.code[:8],
                 },
             )
-        except Exception as exc:
-            logger.debug("Org invite audit failed: {}", exc)
+        except Exception:
+            logger.debug("Org invite audit failed")
 
     await _safe_audit_log_invite_redeem()
 

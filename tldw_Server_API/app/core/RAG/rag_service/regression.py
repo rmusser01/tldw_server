@@ -240,7 +240,7 @@ class RegressionDetector:
             data = json.loads(path.read_text())
             return MetricBaseline(**data)
         except (json.JSONDecodeError, TypeError, ValueError) as e:
-            logger.warning(f"Failed to load baseline '{baseline_id}': {e}")
+            logger.warning("Failed to load baseline: {}", type(e).__name__)
             return None
 
     def check_regression(

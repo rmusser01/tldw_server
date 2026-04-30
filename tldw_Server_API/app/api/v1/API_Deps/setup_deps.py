@@ -330,8 +330,10 @@ def _config_allows_remote() -> bool:
         parser = ConfigParser()
         parser.read(config_path, encoding="utf-8")
         allow_remote = parser.getboolean("Setup", "allow_remote_setup_access", fallback=False)
-    except Exception:  # noqa: BLE001 - best-effort config read should not block setup access checks
-        logger.debug("Unable to read allow_remote_setup_access from config.txt", exc_info=True)
+    except Exception as exc:  # noqa: BLE001 - best-effort config read should not block setup access checks
+        logger.bind(error_type=type(exc).__name__).debug(
+            "Unable to read setup remote access configuration; using localhost-only default"
+        )
 
     _set_remote_access_cache(allow_remote)
     return allow_remote

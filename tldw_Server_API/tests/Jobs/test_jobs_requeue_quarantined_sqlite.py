@@ -104,3 +104,26 @@ def test_requeue_quarantined_updates_counters_sqlite(monkeypatch, tmp_path):
             assert int(row2[3] or 0) == 0
     finally:
         conn2.close()
+
+
+@pytest.mark.unit
+def test_requeue_quarantined_sanitizes_generic_failure(monkeypatch, tmp_path):
+    _init_env(monkeypatch, tmp_path)
+    from tldw_Server_API.app.core.AuthNZ.settings import get_settings, reset_settings
+    reset_settings()
+    from tldw_Server_API.app.main import app
+
+    def boom(self):
+        raise RuntimeError("jobs requeue backend exploded")
+
+    monkeypatch.setattr(JobManager, "_connect", boom)
+
+    headers = {"X-API-KEY": get_settings().SINGLE_USER_API_KEY}
+    with TestClient(app, headers=headers) as client:
+        r = client.post(
+            "/api/v1/jobs/batch/requeue_quarantined",
+            headers={**headers, "X-Confirm": "true"},
+            json={"domain": "chatbooks", "queue": "default", "job_type": "export", "dry_run": False},
+        )
+        assert r.status_code == 500
+        assert r.json()["detail"] == "Batch requeue quarantined failed"

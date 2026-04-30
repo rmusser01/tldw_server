@@ -4,6 +4,8 @@
 #
 
 import os
+from collections.abc import Iterator
+from contextlib import contextmanager
 
 import pytest
 from fastapi.testclient import TestClient
@@ -23,6 +25,7 @@ from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+from tldw_Server_API.app.core.Skills.exceptions import SkillsError
 from tldw_Server_API.app.core.Skills.skills_service import SkillsService
 
 pytestmark = pytest.mark.integration
@@ -72,6 +75,18 @@ context: inline
 
 Process $ARGUMENTS with care.
 """
+
+
+@contextmanager
+def _capture_skills_endpoint_errors() -> Iterator[list[str]]:
+    from tldw_Server_API.app.api.v1.endpoints import skills as skills_endpoint
+
+    messages: list[str] = []
+    sink_id = skills_endpoint.logger.add(lambda message: messages.append(str(message)), level="ERROR")
+    try:
+        yield messages
+    finally:
+        skills_endpoint.logger.remove(sink_id)
 
 
 class TestListSkills:
@@ -142,6 +157,25 @@ class TestCreateAndGetSkill:
         )
         assert r.status_code == 409
 
+    def test_create_skill_sanitizes_skills_error(self, client, monkeypatch):
+        async def _boom(self, *, name, content, supporting_files=None):  # noqa: ANN001, ANN202
+            raise SkillsError("skills backend exploded at /private/create")
+
+        monkeypatch.setattr(SkillsService, "create_skill", _boom)
+
+        with _capture_skills_endpoint_errors() as messages:
+            r = client.post(
+                f"{SKILLS_PREFIX}/",
+                json={"name": "new-skill", "content": SAMPLE_SKILL},
+            )
+
+        joined = "\n".join(messages)
+        assert r.status_code == 500
+        assert r.json()["detail"] == "Failed to create skill"
+        assert "Error creating skill" in joined
+        assert "skills backend exploded" not in joined
+        assert "/private/" not in joined
+
 
 class TestUpdateSkill:
     def test_update_skill_content(self, client):
@@ -198,6 +232,25 @@ class TestUpdateSkill:
         assert "remove.md" not in data["supporting_files"]
         assert data["supporting_files"]["keep.md"] == "to keep"
 
+    def test_update_skill_sanitizes_skills_error(self, client, monkeypatch):
+        async def _boom(self, *, name, content=None, supporting_files=None, expected_version=None):  # noqa: ANN001, ANN202
+            raise SkillsError("skills backend exploded at /private/update")
+
+        monkeypatch.setattr(SkillsService, "update_skill", _boom)
+
+        with _capture_skills_endpoint_errors() as messages:
+            r = client.put(
+                f"{SKILLS_PREFIX}/upd-skill",
+                json={"content": "updated"},
+            )
+
+        joined = "\n".join(messages)
+        assert r.status_code == 500
+        assert r.json()["detail"] == "Failed to update skill"
+        assert "Error updating skill" in joined
+        assert "skills backend exploded" not in joined
+        assert "/private/" not in joined
+
 
 class TestDeleteSkill:
     def test_delete_skill_204(self, client):
@@ -214,6 +267,22 @@ class TestDeleteSkill:
     def test_delete_skill_not_found_404(self, client):
         r = client.delete(f"{SKILLS_PREFIX}/nonexistent")
         assert r.status_code == 404
+
+    def test_delete_skill_sanitizes_skills_error(self, client, monkeypatch):
+        async def _boom(self, name, *, expected_version=None):  # noqa: ANN001, ANN202
+            raise SkillsError("skills backend exploded at /private/delete")
+
+        monkeypatch.setattr(SkillsService, "delete_skill", _boom)
+
+        with _capture_skills_endpoint_errors() as messages:
+            r = client.delete(f"{SKILLS_PREFIX}/del-skill")
+
+        joined = "\n".join(messages)
+        assert r.status_code == 500
+        assert r.json()["detail"] == "Failed to delete skill"
+        assert "Error deleting skill" in joined
+        assert "skills backend exploded" not in joined
+        assert "/private/" not in joined
 
 
 class TestImportExport:
@@ -267,6 +336,29 @@ class TestImportExport:
         assert r.status_code == 201
         assert r.json()["description"] == "Overwritten"
 
+    def test_import_skill_sanitizes_skills_error(self, client, monkeypatch):
+        async def _boom(self, *, content, name=None, supporting_files=None, overwrite=False):  # noqa: ANN001, ANN202
+            raise SkillsError("skills backend exploded at /private/import")
+
+        monkeypatch.setattr(SkillsService, "import_skill", _boom)
+
+        with _capture_skills_endpoint_errors() as messages:
+            r = client.post(
+                f"{SKILLS_PREFIX}/import",
+                json={
+                    "name": "imported",
+                    "content": "---\ndescription: Imported\n---\nImported content",
+                    "overwrite": False,
+                },
+            )
+
+        joined = "\n".join(messages)
+        assert r.status_code == 500
+        assert r.json()["detail"] == "Failed to import skill"
+        assert "Error importing skill" in joined
+        assert "skills backend exploded" not in joined
+        assert "/private/" not in joined
+
     def test_import_skill_json_supporting_files_count_limit_422(self, client):
         files = {f"file{i:02d}.md": "content" for i in range(25)}
         r = client.post(
@@ -302,6 +394,25 @@ class TestImportExport:
                 files={"file": ("my-file-skill.md", f, "text/markdown")},
             )
         assert r.status_code == 201, r.text
+
+    def test_import_skill_file_sanitizes_skills_error(self, client, monkeypatch):
+        async def _boom(self, *, content, name=None, supporting_files=None, overwrite=False):  # noqa: ANN001, ANN202
+            raise SkillsError("skills backend exploded at /private/import-file")
+
+        monkeypatch.setattr(SkillsService, "import_skill", _boom)
+
+        with _capture_skills_endpoint_errors() as messages:
+            r = client.post(
+                f"{SKILLS_PREFIX}/import/file",
+                files={"file": ("skill.md", SAMPLE_SKILL, "text/markdown")},
+            )
+
+        joined = "\n".join(messages)
+        assert r.status_code == 500
+        assert r.json()["detail"] == "Failed to import skill from file"
+        assert "Error importing skill from file" in joined
+        assert "skills backend exploded" not in joined
+        assert "/private/" not in joined
 
     def test_import_skill_file_invalid_frontmatter_name_400(self, client, tmp_path):
         skill_file = tmp_path / "SKILL.md"
@@ -397,6 +508,22 @@ class TestImportExport:
         r = client.get(f"{SKILLS_PREFIX}/no-such-skill/export")
         assert r.status_code == 404
 
+    def test_export_skill_sanitizes_skills_error(self, client, monkeypatch):
+        async def _boom(self, name):  # noqa: ANN001, ANN202
+            raise SkillsError("skills backend exploded at /private/export")
+
+        monkeypatch.setattr(SkillsService, "export_skill", _boom)
+
+        with _capture_skills_endpoint_errors() as messages:
+            r = client.get(f"{SKILLS_PREFIX}/export-skill/export")
+
+        joined = "\n".join(messages)
+        assert r.status_code == 500
+        assert r.json()["detail"] == "Failed to export skill"
+        assert "Error exporting skill" in joined
+        assert "skills backend exploded" not in joined
+        assert "/private/" not in joined
+
 
 class TestExecuteSkill:
     def test_execute_skill_inline(self, client):
@@ -413,6 +540,25 @@ class TestExecuteSkill:
         assert result["skill_name"] == "exec-skill"
         assert "my test args" in result["rendered_prompt"]
         assert result["execution_mode"] == "inline"
+
+    def test_execute_skill_sanitizes_skills_error(self, client, monkeypatch):
+        async def _boom(self, name):  # noqa: ANN001, ANN202
+            raise SkillsError("skills backend exploded at /private/execute")
+
+        monkeypatch.setattr(SkillsService, "get_skill", _boom)
+
+        with _capture_skills_endpoint_errors() as messages:
+            r = client.post(
+                f"{SKILLS_PREFIX}/exec-skill/execute",
+                json={"args": "my test args"},
+            )
+
+        joined = "\n".join(messages)
+        assert r.status_code == 500
+        assert r.json()["detail"] == "Failed to execute skill"
+        assert "Error executing skill" in joined
+        assert "skills backend exploded" not in joined
+        assert "/private/" not in joined
 
 
 class TestContextPayload:
@@ -446,6 +592,59 @@ class TestContextPayload:
         assert data["available_skills"] == []
         assert data["context_text"] == ""
         assert calls["async"] == 1
+
+
+class TestReadErrorSanitization:
+    def test_list_skills_sanitizes_skills_error(self, client, monkeypatch):
+        async def _raise_skills_error(self, *args, **kwargs):
+            _ = (self, args, kwargs)
+            raise SkillsError("skills backend exploded at /private/skills.db")
+
+        monkeypatch.setattr(SkillsService, "list_skills", _raise_skills_error)
+
+        with _capture_skills_endpoint_errors() as messages:
+            r = client.get(f"{SKILLS_PREFIX}/")
+
+        joined = "\n".join(messages)
+        assert r.status_code == 500
+        assert r.json()["detail"] == "Failed to list skills"
+        assert "Error listing skills" in joined
+        assert "skills backend exploded" not in joined
+        assert "/private/" not in joined
+
+    def test_get_skills_context_sanitizes_skills_error(self, client, monkeypatch):
+        async def _raise_skills_error(self):
+            _ = self
+            raise SkillsError("skills backend exploded at /private/context-cache")
+
+        monkeypatch.setattr(SkillsService, "get_context_payload_async", _raise_skills_error)
+
+        with _capture_skills_endpoint_errors() as messages:
+            r = client.get(f"{SKILLS_PREFIX}/context")
+
+        joined = "\n".join(messages)
+        assert r.status_code == 500
+        assert r.json()["detail"] == "Failed to get skills context"
+        assert "Error getting skills context" in joined
+        assert "skills backend exploded" not in joined
+        assert "/private/" not in joined
+
+    def test_get_skill_sanitizes_skills_error(self, client, monkeypatch):
+        async def _raise_skills_error(self, name):
+            _ = (self, name)
+            raise SkillsError("skills backend exploded at /private/skill.md")
+
+        monkeypatch.setattr(SkillsService, "get_skill", _raise_skills_error)
+
+        with _capture_skills_endpoint_errors() as messages:
+            r = client.get(f"{SKILLS_PREFIX}/broken-skill")
+
+        joined = "\n".join(messages)
+        assert r.status_code == 500
+        assert r.json()["detail"] == "Failed to get skill"
+        assert "Error getting skill" in joined
+        assert "skills backend exploded" not in joined
+        assert "/private/" not in joined
 
 
 class TestSupportingFilesLimit:

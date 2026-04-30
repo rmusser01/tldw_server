@@ -890,7 +890,7 @@ async def create_snapshot(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
     except OSError as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Failed to create snapshot") from e
 
 
 @router.post(
@@ -927,7 +927,7 @@ async def restore_snapshot(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
     except OSError as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Failed to restore snapshot") from e
 
 
 @router.post(
@@ -968,7 +968,7 @@ async def clone_session(
         raise HTTPException(status_code=404, detail=str(e)) from e
     except _SANDBOX_NONCRITICAL_EXCEPTIONS as e:
         logger.exception(f"Clone session failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Failed to clone session") from e
 
 
 @router.get(
@@ -1842,7 +1842,7 @@ async def cancel_run(
         raise HTTPException(status_code=500, detail={
             "error": {
                 "code": "cancel_failed",
-                "message": str(e),
+                "message": "Failed to cancel sandbox run",
                 "details": {"run_id": run_id}
             }
         }) from e

@@ -137,10 +137,10 @@ async def list_skills(
             offset=offset,
         )
     except SkillsError as e:
-        logger.error(f"Error listing skills: {e}")
+        logger.error("Error listing skills")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e),
+            detail="Failed to list skills",
         ) from e
 
 
@@ -162,10 +162,10 @@ async def get_skills_context(
             context_text=payload["context_text"],
         )
     except SkillsError as e:
-        logger.error(f"Error getting skills context: {e}")
+        logger.error("Error getting skills context")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e),
+            detail="Failed to get skills context",
         ) from e
 
 
@@ -188,10 +188,10 @@ async def get_skill(
             detail=f"Skill '{skill_name}' not found",
         ) from None
     except SkillsError as e:
-        logger.error(f"Error getting skill '{skill_name}': {e}")
+        logger.error("Error getting skill")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e),
+            detail="Failed to get skill",
         ) from e
 
 
@@ -223,10 +223,10 @@ async def create_skill(
             detail=str(e),
         ) from e
     except SkillsError as e:
-        logger.error(f"Error creating skill: {e}")
+        logger.error("Error creating skill")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e),
+            detail="Failed to create skill",
         ) from e
 
 
@@ -266,10 +266,10 @@ async def update_skill(
             detail=str(e),
         ) from e
     except SkillsError as e:
-        logger.error(f"Error updating skill '{skill_name}': {e}")
+        logger.error("Error updating skill")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e),
+            detail="Failed to update skill",
         ) from e
 
 
@@ -297,10 +297,10 @@ async def delete_skill(
             detail=str(e),
         ) from e
     except SkillsError as e:
-        logger.error(f"Error deleting skill '{skill_name}': {e}")
+        logger.error("Error deleting skill")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e),
+            detail="Failed to delete skill",
         ) from e
 
 
@@ -333,10 +333,10 @@ async def import_skill(
             detail=str(e),
         ) from e
     except SkillsError as e:
-        logger.error(f"Error importing skill: {e}")
+        logger.error("Error importing skill")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e),
+            detail="Failed to import skill",
         ) from e
 
 
@@ -389,10 +389,10 @@ async def import_skill_from_file(
             detail=str(e),
         ) from e
     except SkillsError as e:
-        logger.error(f"Error importing skill from file: {e}")
+        logger.error("Error importing skill from file")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e),
+            detail="Failed to import skill from file",
         ) from e
 
 
@@ -421,10 +421,10 @@ async def export_skill(
             detail=f"Skill '{skill_name}' not found",
         ) from None
     except SkillsError as e:
-        logger.error(f"Error exporting skill '{skill_name}': {e}")
+        logger.error("Error exporting skill")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e),
+            detail="Failed to export skill",
         ) from e
 
 
@@ -484,10 +484,10 @@ async def execute_skill(
             detail=f"Skill '{skill_name}' not found",
         ) from None
     except SkillsError as e:
-        logger.error(f"Error executing skill '{skill_name}': {e}")
+        logger.error("Error executing skill")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e),
+            detail="Failed to execute skill",
         ) from e
 
 

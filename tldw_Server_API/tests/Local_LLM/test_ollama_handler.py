@@ -1,4 +1,6 @@
 import asyncio
+from types import SimpleNamespace
+
 import pytest
 
 from tldw_Server_API.app.core.Local_LLM.Ollama_Handler import OllamaHandler
@@ -112,3 +114,45 @@ async def test_ollama_serve_model_not_ready(monkeypatch):
 
     with pytest.raises(ServerError):
         await handler.serve_model("m", port=11435)
+
+
+@pytest.mark.asyncio
+async def test_ollama_stop_server_pid_failure_is_sanitized(monkeypatch):
+    cfg = OllamaConfig()
+    handler = OllamaHandler(cfg, global_app_config={})
+
+    monkeypatch.setattr(handler, "is_ollama_installed", lambda: asyncio.sleep(0, result=True))
+
+    def fail_terminate(_pid):
+        raise RuntimeError("termination failed at /private/ollama.pid")
+
+    monkeypatch.setattr(handler, "_terminate_process", fail_terminate)
+
+    result = await handler.stop_server(pid=123)
+
+    assert result == "Error stopping Ollama server PID 123"
+    assert "termination failed" not in result
+    assert "/private/ollama.pid" not in result
+
+
+@pytest.mark.asyncio
+async def test_ollama_stop_server_port_failure_is_sanitized(monkeypatch):
+    cfg = OllamaConfig()
+    handler = OllamaHandler(cfg, global_app_config={})
+
+    import tldw_Server_API.app.core.Local_LLM.Ollama_Handler as ol_mod
+
+    def fail_net_connections():
+        raise RuntimeError("port lookup failed at /private/ollama.sock")
+
+    fake_psutil = SimpleNamespace(CONN_LISTEN="LISTEN", net_connections=fail_net_connections)
+
+    monkeypatch.setattr(handler, "is_ollama_installed", lambda: asyncio.sleep(0, result=True))
+    monkeypatch.setattr(ol_mod, "PSUTIL_AVAILABLE", True)
+    monkeypatch.setattr(ol_mod, "psutil", fake_psutil)
+
+    result = await handler.stop_server(port=11434)
+
+    assert result == "Error stopping Ollama server on port 11434"
+    assert "port lookup failed" not in result
+    assert "/private/ollama.sock" not in result

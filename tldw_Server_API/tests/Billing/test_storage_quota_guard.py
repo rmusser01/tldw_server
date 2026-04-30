@@ -8,9 +8,27 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi import HTTPException
 
+from tldw_Server_API.app.api.v1.API_Deps import storage_quota_guard as quota_guard_mod
 from tldw_Server_API.app.api.v1.API_Deps.storage_quota_guard import (
     guard_storage_quota,
 )
+
+
+class _RecordingLogger:
+    def __init__(self):
+        self.warning_calls = []
+
+    def warning(self, *args, **kwargs):
+        self.warning_calls.append((args, kwargs))
+
+
+def _assert_warning_logs_are_sanitized(logger: _RecordingLogger):
+    assert logger.warning_calls
+    for args, kwargs in logger.warning_calls:
+        assert not kwargs.get("exc_info")
+        rendered = " ".join(str(arg) for arg in args)
+        assert "/tmp/source" not in rendered
+        assert "token=secret" not in rendered
 
 
 def _fake_user(
@@ -210,6 +228,36 @@ async def test_guard_fails_open_on_error(_pool, _check, _mode):
         current_user=_fake_user(user_id=1, org_ids=[10]),
     )
     assert result is None
+
+
+@pytest.mark.asyncio
+@patch(
+    "tldw_Server_API.app.api.v1.API_Deps.storage_quota_guard.is_single_user_profile_mode",
+    return_value=False,
+)
+@patch(
+    "tldw_Server_API.app.api.v1.API_Deps.storage_quota_guard.check_storage_quota",
+    new_callable=AsyncMock,
+    side_effect=ConnectionError("db unavailable /tmp/source token=secret"),
+)
+@patch(
+    "tldw_Server_API.app.api.v1.API_Deps.storage_quota_guard.get_db_pool",
+    new_callable=AsyncMock,
+    return_value=MagicMock(),
+)
+async def test_guard_fail_open_log_is_sanitized(_pool, _check, _mode, monkeypatch):
+    """Quota backend failures are swallowed without logging raw backend details."""
+    recording_logger = _RecordingLogger()
+    monkeypatch.setattr(quota_guard_mod, "logger", recording_logger)
+
+    result = await guard_storage_quota(
+        request=_fake_request(org_id=10),
+        response=_fake_response(),
+        current_user=_fake_user(user_id=1, org_ids=[10]),
+    )
+
+    assert result is None
+    _assert_warning_logs_are_sanitized(recording_logger)
 
 
 # ---------------------------------------------------------------------------

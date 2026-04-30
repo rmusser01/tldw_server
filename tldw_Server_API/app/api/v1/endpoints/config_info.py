@@ -47,7 +47,7 @@ def load_safe_config() -> dict:
     config_path = get_config_path()
 
     if not config_path.exists():
-        logger.warning(f"Config file not found at {config_path}")
+        logger.warning("Config file not found")
         return {
             "configured": False,
             "message": "Configuration file not found"
@@ -138,8 +138,8 @@ def load_safe_config() -> dict:
         # expose both for backward-compat and forward-looking UI
         safe_config["supported_features"] = caps
         safe_config["capabilities"] = caps
-    except (KeyError, TypeError, AttributeError) as e:
-        logger.debug(f"Failed to derive safe capability flags: {e}")
+    except Exception:
+        logger.debug("Failed to derive safe capability flags")
 
     return safe_config
 
@@ -208,7 +208,7 @@ async def get_flashcards_import_limits():
     def _int_env(name: str, default: int) -> int:
         try:
             return max(1, int(os.getenv(name, str(default))))
-        except (ValueError, TypeError):
+        except Exception:
             return default
 
     return {
@@ -339,12 +339,12 @@ async def get_jobs_config_info():
     def _to_int(name: str, default: int) -> int:
         try:
             return int(os.getenv(name, str(default)))
-        except (ValueError, TypeError):
+        except Exception:
             return default
     def _to_float(name: str, default: float) -> float:
         try:
             return float(os.getenv(name, str(default)))
-        except (ValueError, TypeError):
+        except Exception:
             return default
     return {
         "backend": backend,
@@ -389,8 +389,8 @@ async def get_quickstart_redirect():
                     url = cfg.get('UI', 'quickstart_url').strip()
                 elif cfg.has_section('Docs') and cfg.has_option('Docs', 'quickstart_url'):
                     url = cfg.get('Docs', 'quickstart_url').strip()
-            except (configparser.Error, OSError, ValueError) as e:
-                logger.warning(f"Quickstart redirect: could not read config, using default. Error: {e}")
+            except Exception:
+                logger.warning("Quickstart redirect: could not read config, using default")
 
         # 4) Default
         if not url:
@@ -405,8 +405,8 @@ async def get_quickstart_redirect():
 
         logger.info(f"Redirecting /api/v1/config/quickstart to: {target}")
         return RedirectResponse(url=target, status_code=307)
-    except Exception as e:  # noqa: BLE001 — outermost endpoint handler
-        logger.error(f"Quickstart redirect failed: {e}")
+    except Exception:
+        logger.error("Quickstart redirect failed")
         # Fallback to a minimal built-in HTML page with a link to /docs
         fallback_html = """
         <!DOCTYPE html>
@@ -558,8 +558,8 @@ def _resolve_provider_key(provider: str) -> Optional[str]:
         val = (keys.get(provider) or "").strip()
         if val:
             return val
-    except (KeyError, OSError, ValueError) as e:
-        logger.debug("Failed to load API keys for provider %s: %s", provider, e)
+    except Exception:
+        logger.debug("Failed to load API keys for provider")
 
     return None
 
@@ -603,7 +603,7 @@ async def list_configured_providers() -> ProvidersStatusResponse:
         from tldw_Server_API.app.core.LLM_Calls.provider_metadata import (
             PROVIDER_REQUIRES_KEY,
         )
-    except (ImportError, AttributeError):
+    except Exception:
         PROVIDER_REQUIRES_KEY = {}
 
     # Ordered list of cloud providers first, then local
@@ -702,8 +702,8 @@ async def validate_provider_key(body: ProviderValidateRequest, request: Request)
             valid=False,
             error=f"Validation timed out after {_VALIDATION_TIMEOUT_SECONDS}s",
         )
-    except Exception as exc:  # noqa: BLE001 — outermost validation handler, many failure modes
-        logger.warning(f"Provider validation failed for {provider}: {exc}")
+    except Exception as exc:
+        logger.warning("Provider validation failed")
         return ProviderValidateResponse(
             provider=provider,
             valid=False,
@@ -757,8 +757,8 @@ async def _validate_provider_http(
             err_type = err_body.get("error", {}).get("type", "")
             if err_type in ("invalid_request_error", "overloaded_error"):
                 return True, None
-        except (AttributeError, KeyError, TypeError, ValueError) as exc:
-            logger.debug(f"Anthropic provider validation response was not JSON: {exc}")
+        except Exception:
+            return True, None
         return True, None
     if resp.status_code in (401, 403):
         return False, f"Authentication failed (HTTP {resp.status_code})"

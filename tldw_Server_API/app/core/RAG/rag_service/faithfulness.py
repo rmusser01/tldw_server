@@ -186,12 +186,12 @@ class FaithfulnessEvaluator:
         # Extract claims from response
         try:
             claims = await self._extract_claims(response)
-        except Exception as e:
-            logger.warning(f"Faithfulness: claim extraction failed: {e}")
+        except Exception:
+            logger.warning("Faithfulness: claim extraction failed")
             return FaithfulnessResult(
                 score=0.0,
                 claims=[],
-                reasoning=f"Claim extraction failed: {e}",
+                reasoning="Claim extraction failed.",
             )
 
         if not claims:
@@ -210,13 +210,13 @@ class FaithfulnessEvaluator:
             try:
                 verification = await self._verify_claim(claim, context)
                 verifications.append(verification)
-            except Exception as e:
-                logger.warning(f"Faithfulness: claim verification failed for '{claim[:50]}...': {e}")
+            except Exception:
+                logger.warning(f"Faithfulness: claim verification failed for '{claim[:50]}...'")
                 verifications.append(
                     ClaimVerification(
                         claim=claim,
                         supported=False,
-                        reasoning=f"Verification failed: {e}",
+                        reasoning="Verification failed.",
                     )
                 )
 

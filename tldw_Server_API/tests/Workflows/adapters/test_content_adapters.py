@@ -518,6 +518,25 @@ class TestImageGenAdapter:
         assert result.get("prompt") == "cat portrait"
         assert result.get("prompt_refinement_mode") == "off"
 
+    @pytest.mark.asyncio
+    async def test_image_gen_adapter_sanitizes_backend_errors(self, monkeypatch, base_context):
+        """Test image generation backend failures hide raw exception details."""
+        monkeypatch.delenv("TEST_MODE", raising=False)
+        monkeypatch.delenv("TLDW_TEST_MODE", raising=False)
+
+        from tldw_Server_API.app.core.Workflows.adapters.content import run_image_gen_adapter
+
+        with patch(
+            "tldw_Server_API.app.core.Workflows.adapters.content.image.is_test_mode",
+            return_value=False,
+        ), patch(
+            "tldw_Server_API.app.core.Image_Generation.adapter_registry.get_registry",
+            side_effect=RuntimeError("image backend exploded at /private/image-cache"),
+        ):
+            result = await run_image_gen_adapter({"prompt": "A clean test image"}, base_context)
+
+        assert result == {"error": "image_gen_error"}
+
 
 # =============================================================================
 # Test: run_image_describe_adapter
@@ -588,6 +607,39 @@ class TestImageDescribeAdapter:
 
         result = await run_image_describe_adapter(config, context)
         assert result.get("__status__") == "cancelled"
+
+    @pytest.mark.asyncio
+    async def test_image_describe_adapter_sanitizes_file_read_errors(self, base_context):
+        """Test image description file-read failures hide raw path details."""
+        from tldw_Server_API.app.core.Workflows.adapters.content import run_image_describe_adapter
+
+        with patch(
+            "tldw_Server_API.app.core.Workflows.adapters.content.image.resolve_workflow_file_path",
+            side_effect=RuntimeError("cannot read /private/image-cache/secret.png"),
+        ):
+            result = await run_image_describe_adapter(
+                {"image_path": "secret.png", "prompt": "Describe this image"},
+                base_context,
+            )
+
+        assert result == {"description": "", "error": "image_read_error"}
+
+    @pytest.mark.asyncio
+    async def test_image_describe_adapter_sanitizes_backend_errors(self, base_context):
+        """Test image description backend failures hide raw exception details."""
+        from tldw_Server_API.app.core.Workflows.adapters.content import run_image_describe_adapter
+
+        with patch(
+            "tldw_Server_API.app.core.Workflows.adapters.content.image.perform_chat_api_call_async",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("vision backend exploded at /private/image-cache"),
+        ):
+            result = await run_image_describe_adapter(
+                {"image_url": "https://example.com/image.jpg", "prompt": "Describe this image"},
+                base_context,
+            )
+
+        assert result == {"description": "", "error": "image_describe_error"}
 
 
 # =============================================================================
@@ -1428,20 +1480,135 @@ class TestContentAdaptersErrorHandling:
             assert result.get("count") == 0
 
     @pytest.mark.asyncio
-    async def test_quiz_generate_exception_handling(self, monkeypatch, base_context, sample_long_text):
-        """Test quiz generation handles exceptions gracefully."""
+    async def test_flashcard_generate_sanitizes_backend_errors(self, base_context, sample_long_text):
+        """Test flashcard generation hides backend exception details."""
+        from tldw_Server_API.app.core.Workflows.adapters.content import run_flashcard_generate_adapter
+
+        with patch(
+            "tldw_Server_API.app.core.Workflows.adapters.content.generation.perform_chat_api_call_async",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("flashcard backend exploded at /private/content-cache"),
+        ):
+            result = await run_flashcard_generate_adapter({"text": sample_long_text}, base_context)
+
+        assert result == {"error": "flashcard_generate_error", "flashcards": [], "count": 0}
+
+    @pytest.mark.asyncio
+    async def test_quiz_generate_sanitizes_backend_errors(self, base_context, sample_long_text):
+        """Test quiz generation hides backend exception details."""
         from tldw_Server_API.app.core.Workflows.adapters.content import run_quiz_generate_adapter
 
         with patch(
             "tldw_Server_API.app.core.Workflows.adapters.content.generation.perform_chat_api_call_async",
             new_callable=AsyncMock,
-            side_effect=Exception("API error"),
+            side_effect=RuntimeError("quiz backend exploded at /private/content-cache"),
         ):
-            config = {"text": sample_long_text}
-            result = await run_quiz_generate_adapter(config, base_context)
+            result = await run_quiz_generate_adapter({"text": sample_long_text}, base_context)
 
-            assert "error" in result
-            assert "quiz_generate_error" in result["error"]
+        assert result == {"error": "quiz_generate_error", "questions": [], "count": 0}
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("adapter_name", "config", "expected"),
+        [
+            ("run_outline_generate_adapter", {"text": "Sample content"}, {"error": "outline_generate_error", "outline": {}, "outline_text": ""}),
+            ("run_glossary_extract_adapter", {"text": "Sample content"}, {"error": "glossary_extract_error", "glossary": [], "count": 0}),
+            ("run_mindmap_generate_adapter", {"text": "Sample content"}, {"error": "mindmap_generate_error", "mindmap": {}, "mermaid": ""}),
+            ("run_slides_generate_adapter", {"content": "Sample content"}, {"slides": [], "error": "slides_generate_error"}),
+            ("run_report_generate_adapter", {"content": "Sample content"}, {"report": "", "error": "report_generate_error"}),
+            ("run_newsletter_generate_adapter", {"content": "Sample content"}, {"newsletter": "", "error": "newsletter_generate_error"}),
+            (
+                "run_diagram_generate_adapter",
+                {"content": "Sample content", "provider": "mock", "model": "mock-model"},
+                {"diagram": "", "error": "diagram_generate_error"},
+            ),
+        ],
+    )
+    async def test_content_generation_adapters_sanitize_backend_errors(
+        self, base_context, adapter_name, config, expected
+    ):
+        """Test content generation adapters hide backend exception details."""
+        from tldw_Server_API.app.core.Workflows.adapters import content as content_adapters
+
+        with patch(
+            "tldw_Server_API.app.core.Workflows.adapters.content.generation.perform_chat_api_call_async",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("content backend exploded at /private/content-cache"),
+        ):
+            result = await getattr(content_adapters, adapter_name)(config, base_context)
+
+        assert result == expected
+
+    @pytest.mark.asyncio
+    async def test_notes_studio_generate_sanitizes_fallback_warnings(self, base_context):
+        """Test Notes Studio fallback hides backend exception details."""
+        from tldw_Server_API.app.core.Workflows.adapters.content import run_notes_studio_generate_adapter
+
+        with patch(
+            "tldw_Server_API.app.core.Workflows.adapters.content.generation.perform_chat_api_call_async",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("notes backend exploded at /private/content-cache"),
+        ):
+            result = await run_notes_studio_generate_adapter(
+                {
+                    "excerpt_text": "Sample study notes.",
+                    "source_note_id": "note-1",
+                    "provider": "mock",
+                    "model": "mock-model",
+                },
+                base_context,
+            )
+
+        assert result["source"] == "deterministic_fallback"
+        assert result["warning"] == "notes_studio_generate_warning"
+        assert isinstance(result["payload"], dict)
+
+    @pytest.mark.asyncio
+    async def test_summarize_adapter_sanitizes_backend_errors(self, monkeypatch, base_context, sample_long_text):
+        """Test summarize adapter hides backend exception details."""
+        monkeypatch.delenv("TEST_MODE", raising=False)
+        from tldw_Server_API.app.core.Workflows.adapters.content import run_summarize_adapter
+
+        with patch(
+            "tldw_Server_API.app.core.Workflows.adapters.content.summarize.asyncio.to_thread",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("summarizer backend exploded at /private/content-cache"),
+        ):
+            result = await run_summarize_adapter({"text": sample_long_text}, base_context)
+
+        assert result == {"error": "summarize_error"}
+
+    @pytest.mark.asyncio
+    async def test_citations_adapter_sanitizes_backend_errors(self, monkeypatch, base_context, sample_documents):
+        """Test citations adapter hides backend exception details."""
+        monkeypatch.delenv("TEST_MODE", raising=False)
+        from tldw_Server_API.app.core.Workflows.adapters.content import run_citations_adapter
+
+        with patch(
+            "tldw_Server_API.app.core.RAG.rag_service.citations.CitationGenerator.generate_citations",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("citations backend exploded at /private/content-cache"),
+        ):
+            result = await run_citations_adapter({"documents": sample_documents}, base_context)
+
+        assert result == {"error": "citations_error"}
+
+    @pytest.mark.asyncio
+    async def test_rerank_adapter_sanitizes_backend_errors(self, monkeypatch, base_context, sample_documents):
+        """Test rerank adapter hides backend exception details."""
+        monkeypatch.delenv("TEST_MODE", raising=False)
+        from tldw_Server_API.app.core.Workflows.adapters.content import run_rerank_adapter
+
+        with patch(
+            "tldw_Server_API.app.core.RAG.rag_service.advanced_reranking.create_reranker",
+            side_effect=RuntimeError("rerank backend exploded at /private/content-cache"),
+        ):
+            result = await run_rerank_adapter(
+                {"query": "AI research", "documents": sample_documents},
+                base_context,
+            )
+
+        assert result == {"error": "rerank_error"}
 
     @pytest.mark.asyncio
     async def test_slides_generate_json_parse_error(self, monkeypatch, base_context, sample_long_text):
@@ -1894,6 +2061,39 @@ class TestAudioBriefingComposeAdapter:
         assert "Title:" in first_persona_call["messages"][0]["content"]
 
     @pytest.mark.asyncio
+    async def test_compose_persona_pre_summarization_sanitizes_warnings(
+        self, sample_items, mock_llm_response_multi_voice, base_context
+    ):
+        """Test persona pre-summarization warnings hide backend exception details."""
+        from tldw_Server_API.app.core.Workflows.adapters.content.audio_briefing import (
+            run_audio_briefing_compose_adapter,
+        )
+
+        config = {
+            "items": sample_items[:1],
+            "persona_summarize": True,
+            "provider": "openai",
+            "model": "gpt-4o-mini",
+        }
+
+        with patch(
+            "tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async",
+            new_callable=AsyncMock,
+            side_effect=[
+                RuntimeError("persona backend exploded at /private/audio-cache"),
+                mock_llm_response_multi_voice,
+            ],
+        ), patch(
+            "tldw_Server_API.app.core.Workflows.adapters.content.audio_briefing.logger.warning"
+        ) as mock_warning:
+            result = await run_audio_briefing_compose_adapter(config, base_context)
+
+        assert result.get("error") is None
+        mock_warning.assert_called_once_with(
+            "Persona pre-summarization failed", exc_info=True
+        )
+
+    @pytest.mark.asyncio
     async def test_compose_strips_reasoning_blocks(self, sample_items, base_context):
         """Test reasoning blocks are stripped from final spoken script."""
         from tldw_Server_API.app.core.Workflows.adapters.content.audio_briefing import (
@@ -1930,7 +2130,7 @@ class TestAudioBriefingComposeAdapter:
 
     @pytest.mark.asyncio
     async def test_compose_llm_error_handled(self, sample_items, base_context):
-        """Test LLM errors are caught and returned gracefully."""
+        """Test LLM errors are caught without returning raw backend details."""
         from tldw_Server_API.app.core.Workflows.adapters.content.audio_briefing import (
             run_audio_briefing_compose_adapter,
         )
@@ -1940,12 +2140,16 @@ class TestAudioBriefingComposeAdapter:
         with patch(
             "tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async",
             new_callable=AsyncMock,
-            side_effect=RuntimeError("LLM provider down"),
+            side_effect=RuntimeError("LLM provider down at /private/content-cache"),
         ):
             result = await run_audio_briefing_compose_adapter(config, base_context)
 
-        assert "error" in result
-        assert result["text"] == ""
+        assert result == {
+            "text": "",
+            "script": "",
+            "sections": [],
+            "error": "audio_briefing_compose_error",
+        }
 
     @pytest.mark.asyncio
     async def test_section_parsing_with_pause(self, base_context):

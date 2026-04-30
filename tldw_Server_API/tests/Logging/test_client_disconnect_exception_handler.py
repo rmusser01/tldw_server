@@ -63,12 +63,11 @@ async def test_client_disconnect_exception_handler_returns_499():
 
     assert response.status_code == 499
     assert json.loads(response.body.decode("utf-8")) == {
-        "detail": "Client disconnected",
         "error": {
             "code": "client_disconnected",
             "message": "Client disconnected",
             "request_id": "req-499",
-        },
+        }
     }
 
 
@@ -80,12 +79,11 @@ async def test_global_unhandled_exception_handler_treats_client_disconnect_as_49
 
     assert response.status_code == 499
     assert json.loads(response.body.decode("utf-8")) == {
-        "detail": "Client disconnected",
         "error": {
             "code": "client_disconnected",
             "message": "Client disconnected",
             "request_id": "req-499-post",
-        },
+        }
     }
 
 
@@ -105,12 +103,11 @@ async def test_global_handler_uses_request_state_request_id_before_header(monkey
 
     assert response.status_code == 500
     assert json.loads(response.body.decode("utf-8")) == {
-        "detail": "Internal server error",
         "error": {
             "code": "internal_server_error",
             "message": "Internal server error",
             "request_id": "state-id",
-        },
+        }
     }
     assert stub_logger.calls
     level, _, kwargs = stub_logger.calls[-1]

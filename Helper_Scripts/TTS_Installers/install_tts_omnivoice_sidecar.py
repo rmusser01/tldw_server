@@ -15,7 +15,6 @@ import re
 import shutil
 import subprocess  # nosec B404 - installer intentionally launches vetted local git/pip argv without a shell
 import sys
-import time
 import venv
 from dataclasses import dataclass
 from pathlib import Path
@@ -32,7 +31,6 @@ DEFAULT_SOURCE_CHECKOUT = Path("external") / "OmniVoice"
 DEFAULT_LOCAL_CHECKOUT = Path("..") / "OmniVoice"
 PROVIDER_NAME = "omnivoice"
 _GIT_SCP_URL_RE = re.compile(r"^[A-Za-z0-9_.-]+@[A-Za-z0-9_.-]+:[A-Za-z0-9_./-]+(?:\.git)?$")
-DEFAULT_MODEL_ID = "k2-fsa/OmniVoice"
 
 
 @dataclass(frozen=True)
@@ -121,48 +119,14 @@ def create_runtime_layout(layout: OmniVoiceRuntimeLayout) -> OmniVoiceRuntimeLay
     return layout
 
 
-def is_virtualenv_interpreter_usable(interpreter_path: Path, *, timeout_seconds: float = 10.0) -> bool:
-    """Return whether the managed virtualenv interpreter can launch successfully."""
-
-    if not interpreter_path.exists():
-        return False
-    try:
-        subprocess.run(  # nosec B603
-            [str(interpreter_path), "-V"],
-            check=True,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            timeout=timeout_seconds,
-        )
-    except (OSError, subprocess.SubprocessError) as exc:
-        logger.warning("OmniVoice sidecar interpreter is unusable at {}: {}", interpreter_path, exc)
-        return False
-    return True
-
-
-def archive_existing_virtualenv(venv_dir: Path, *, reason: str) -> Path:
-    """Move an existing managed virtualenv aside so a clean one can be created."""
-
-    timestamp = time.strftime("%Y%m%d-%H%M%S")
-    archived_dir = venv_dir.with_name(f"{venv_dir.name}.{reason}-{timestamp}")
-    counter = 1
-    while archived_dir.exists():
-        archived_dir = venv_dir.with_name(f"{venv_dir.name}.{reason}-{timestamp}-{counter}")
-        counter += 1
-    shutil.move(str(venv_dir), str(archived_dir))
-    logger.warning("Archived OmniVoice sidecar virtualenv {} -> {}", venv_dir, archived_dir)
-    return archived_dir
-
-
 def validate_runtime_layout(layout: OmniVoiceRuntimeLayout) -> list[str]:
     """Return a list of missing required runtime artifacts."""
-    missing: list[str] = []
-    for path in (layout.runtime_base, layout.venv_dir, layout.runtime_dir, layout.logs_dir, layout.interpreter_path):
-        if not path.exists():
-            missing.append(str(path))
-    if layout.interpreter_path.exists() and not is_virtualenv_interpreter_usable(layout.interpreter_path):
-        missing.append(f"{layout.interpreter_path} (unusable)")
-    return missing
+
+    return [
+        str(path)
+        for path in (layout.runtime_base, layout.venv_dir, layout.runtime_dir, layout.logs_dir, layout.interpreter_path)
+        if not path.exists()
+    ]
 
 
 def _path_for_config(path: Path, repo_root: Optional[Path]) -> str:
@@ -336,8 +300,6 @@ def patch_tts_config(
         f"{key_indent}max_concurrent_generations: 1",
         f"{key_indent}extra_params:",
         f'{nested_indent}repo_path: "{_path_for_config(source_checkout, repo_root)}"',
-        f'{nested_indent}runtime_mode: "real"',
-        f'{nested_indent}model_id: "{DEFAULT_MODEL_ID}"',
         f'{nested_indent}python_path: "{_path_for_config(layout.interpreter_path, repo_root)}"',
         f'{nested_indent}runtime_path: "{_path_for_config(layout.runtime_dir, repo_root)}"',
         f'{nested_indent}logs_path: "{_path_for_config(layout.logs_dir, repo_root)}"',
@@ -394,22 +356,13 @@ def clone_repository(repo_url: str, source_dir: Path) -> None:
     _run_checked_command([git_executable, "clone", validated_repo_url, str(source_dir)])
 
 
-def create_virtualenv(venv_dir: Path, *, recreate: bool = False) -> None:
+def create_virtualenv(venv_dir: Path) -> None:
     """Create a dedicated virtual environment for the sidecar."""
 
-    interpreter_path = resolve_sidecar_python_path(venv_dir)
     if venv_dir.exists():
-        if recreate:
-            archive_existing_virtualenv(venv_dir, reason="recreate")
-        elif is_virtualenv_interpreter_usable(interpreter_path):
-            logger.info("Using existing OmniVoice sidecar virtualenv at {}", venv_dir)
-            return
-        else:
-            archive_existing_virtualenv(venv_dir, reason="broken")
-    # POSIX runtimes created from uv-managed Python interpreters are more
-    # reliable when the environment keeps the interpreter as a symlink rather
-    # than copying a binary that expects a sibling libpython payload.
-    builder = venv.EnvBuilder(with_pip=True, symlinks=(os.name != "nt"))
+        logger.info("Using existing OmniVoice sidecar virtualenv at {}", venv_dir)
+        return
+    builder = venv.EnvBuilder(with_pip=True)
     builder.create(venv_dir)
 
 
@@ -487,13 +440,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if not args.skip_clone:
         clone_repository(args.repo_url, source_checkout)
 
-    create_virtualenv(layout.venv_dir, recreate=args.recreate_venv)
+    create_virtualenv(layout.venv_dir)
     if not args.skip_install:
         install_sidecar_runtime(
             interpreter_path=layout.interpreter_path,
             repo_root=repo_root,
             source_checkout=source_checkout,
-            install_inference_deps=args.install_inference_deps,
         )
 
     missing = validate_runtime_layout(layout)

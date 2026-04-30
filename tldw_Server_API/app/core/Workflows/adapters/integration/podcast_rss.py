@@ -353,8 +353,8 @@ async def run_podcast_rss_publish_adapter(config: dict[str, Any], context: dict[
         tmp_file = Path(tmp_name)
         tree.write(tmp_file, encoding="utf-8", xml_declaration=True)
         os.replace(tmp_file, feed_path)
-    except _PODCAST_RSS_NONCRITICAL_EXCEPTIONS as exc:
-        logger.exception(f"podcast_rss_publish write failed: {exc}")
+    except _PODCAST_RSS_NONCRITICAL_EXCEPTIONS:
+        logger.error("podcast_rss_publish write failed")
         return {"error": "feed_write_failed", "published": False}
     finally:
         if tmp_file is not None and tmp_file.exists():

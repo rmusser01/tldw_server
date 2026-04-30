@@ -202,6 +202,10 @@ def record_webhook_delivery_event(
             raise
 
 
+def _delivery_exception_message(exc: BaseException) -> str:
+    return "Webhook delivery timed out" if isinstance(exc, TimeoutError) else "Webhook delivery failed"
+
+
 async def _attempt_delivery(url: str, payload: dict[str, Any], timeout: float) -> tuple[bool, str | None]:
     try:
         policy = RetryPolicy()
@@ -224,7 +228,7 @@ async def _attempt_delivery(url: str, payload: dict[str, Any], timeout: float) -
                 if callable(close):
                     close()
     except _WORKFLOWS_DLQ_NONCRITICAL_EXCEPTIONS as e:  # network or other error
-        return False, str(e)
+        return False, _delivery_exception_message(e)
 
 
 async def run_workflows_webhook_dlq_worker(stop_event: asyncio.Event) -> None:
@@ -345,7 +349,7 @@ async def run_workflows_webhook_dlq_worker(stop_event: asyncio.Event) -> None:
             try:
                 ok, err = await _attempt_delivery(url, body, timeout=timeout_sec)
             except _WORKFLOWS_DLQ_NONCRITICAL_EXCEPTIONS as e:
-                ok, err = False, str(e)
+                ok, err = False, _delivery_exception_message(e)
             if ok:
                 record_webhook_delivery_event(
                     db,

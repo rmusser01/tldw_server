@@ -13,10 +13,12 @@ import httpx
 
 #
 # Local Imports
+from tldw_Server_API.app.core.TTS import tts_resource_manager as rm_mod
 from tldw_Server_API.app.core.TTS.tts_resource_manager import (
     TTSResourceManager,
     HTTPConnectionPool,
     MemoryMonitor,
+    ResourceType,
     StreamingSession,
     StreamingSessionManager,
     get_resource_manager,
@@ -87,6 +89,56 @@ class TestMemoryMonitor:
             )
             assert monitor.is_memory_critical() is False
             assert monitor.is_memory_warning() is False
+
+    @pytest.mark.asyncio
+    async def test_force_cleanup_failure_log_sanitizes_exception_text(self):
+        """Force-cleanup callback logs should not include raw exceptions."""
+        raw_marker = "MEMORY_CLEANUP_SECRET_MARKER"
+        monitor = MemoryMonitor()
+
+        def _failing_cleanup():
+            raise RuntimeError(raw_marker)
+
+        monitor._cleanup_callbacks.append(_failing_cleanup)
+
+        messages = []
+        sink_id = rm_mod.logger.add(messages.append, format="{message}")
+        try:
+            await monitor.force_cleanup()
+        finally:
+            rm_mod.logger.remove(sink_id)
+
+        log_output = "\n".join(messages)
+        assert "Error in cleanup callback" in log_output
+        assert raw_marker not in log_output
+
+    @pytest.mark.asyncio
+    async def test_monitor_loop_failure_log_sanitizes_exception_text(self, monkeypatch):
+        """Memory monitor loop logs should not include raw exceptions."""
+        raw_marker = "MEMORY_MONITOR_SECRET_MARKER"
+        monitor = MemoryMonitor(check_interval=0)
+        monitor._monitoring = True
+
+        def _failing_memory_check():
+            raise RuntimeError(raw_marker)
+
+        async def _stop_after_log(_delay):
+            raise asyncio.CancelledError
+
+        monkeypatch.setattr(monitor, "is_memory_critical", _failing_memory_check)
+        monkeypatch.setattr(rm_mod.asyncio, "sleep", _stop_after_log)
+
+        messages = []
+        sink_id = rm_mod.logger.add(messages.append, format="{message}")
+        try:
+            with pytest.raises(asyncio.CancelledError):
+                await monitor._monitor_loop()
+        finally:
+            rm_mod.logger.remove(sink_id)
+
+        log_output = "\n".join(messages)
+        assert "Error in memory monitoring" in log_output
+        assert raw_marker not in log_output
 
     def test_memory_check_caching(self):
         """Test that memory checks are cached"""
@@ -222,6 +274,31 @@ class TestStreamingSession:
 
         assert session.bytes_sent == 1536
         assert session.chunks_sent == 2
+
+    @pytest.mark.asyncio
+    async def test_close_failure_log_sanitizes_exception_text(self):
+        """Session close logs should not include raw cleanup exceptions."""
+        raw_marker = "STREAMING_SESSION_SECRET_MARKER"
+
+        def _failing_cleanup():
+            raise RuntimeError(raw_marker)
+
+        messages = []
+        sink_id = rm_mod.logger.add(messages.append, format="{message}")
+        try:
+            session = StreamingSession(
+                session_id="session123",
+                provider="openai",
+                cleanup_callback=_failing_cleanup,
+            )
+
+            await session.close()
+        finally:
+            rm_mod.logger.remove(sink_id)
+
+        log_output = "\n".join(messages)
+        assert "Error closing streaming session session123" in log_output
+        assert raw_marker not in log_output
 
 
 class TestStreamingSessionManager:
@@ -389,6 +466,65 @@ class TestTTSResourceManager:
         assert "a" not in manager._registered_models
         assert "b" in manager._registered_models
 
+    def test_model_cache_eviction_failure_log_sanitizes_exception_text(self):
+        """Model eviction cleanup logs should not include raw cleanup exceptions."""
+        raw_marker = "MODEL_EVICTION_SECRET_MARKER"
+        manager = TTSResourceManager({"model_cache_max_entries": 1})
+
+        def _failing_cleanup():
+            raise RuntimeError(raw_marker)
+
+        messages = []
+        sink_id = rm_mod.logger.add(messages.append, format="{message}")
+        try:
+            manager.register_model(
+                provider="a",
+                model_instance=Mock(),
+                cleanup_callback=_failing_cleanup,
+            )
+            manager.register_model(
+                provider="b",
+                model_instance=Mock(),
+                cleanup_callback=Mock(),
+            )
+        finally:
+            rm_mod.logger.remove(sink_id)
+
+        log_output = "\n".join(messages)
+        assert "Error cleaning model for a" in log_output
+        assert raw_marker not in log_output
+
+    @pytest.mark.asyncio
+    async def test_async_model_cache_eviction_failure_log_sanitizes_exception_text(self):
+        """Async model eviction cleanup logs should not include raw exceptions."""
+        raw_marker = "ASYNC_MODEL_EVICTION_SECRET_MARKER"
+        manager = TTSResourceManager({"model_cache_max_entries": 1})
+
+        async def _failing_cleanup():
+            raise RuntimeError(raw_marker)
+
+        messages = []
+        sink_id = rm_mod.logger.add(messages.append, format="{message}")
+        try:
+            manager.register_model(
+                provider="a",
+                model_instance=Mock(),
+                cleanup_callback=_failing_cleanup,
+            )
+            eviction_task = manager.register_model(
+                provider="b",
+                model_instance=Mock(),
+                cleanup_callback=Mock(),
+            )
+            assert eviction_task is not None
+            await eviction_task
+        finally:
+            rm_mod.logger.remove(sink_id)
+
+        log_output = "\n".join(messages)
+        assert "Error cleaning model for a" in log_output
+        assert raw_marker not in log_output
+
     def test_cleanup_device_cache_does_not_import_torch_when_unloaded(self, monkeypatch):
         """Device-cache cleanup should not import torch just to check for caches."""
         manager = TTSResourceManager({})
@@ -423,6 +559,81 @@ class TestTTSResourceManager:
         assert "higgs" not in resource_manager._registered_models
 
     @pytest.mark.asyncio
+    async def test_unregister_model_failure_log_sanitizes_exception_text(self, resource_manager):
+        """Unregister cleanup logs should not include raw cleanup exceptions."""
+        raw_marker = "UNREGISTER_MODEL_SECRET_MARKER"
+
+        def _failing_cleanup():
+            raise RuntimeError(raw_marker)
+
+        resource_manager.register_model(
+            provider="higgs",
+            model_instance=Mock(),
+            cleanup_callback=_failing_cleanup,
+        )
+
+        messages = []
+        sink_id = rm_mod.logger.add(messages.append, format="{message}")
+        try:
+            await resource_manager.unregister_model("higgs")
+        finally:
+            rm_mod.logger.remove(sink_id)
+
+        log_output = "\n".join(messages)
+        assert "Error in model cleanup for higgs" in log_output
+        assert raw_marker not in log_output
+
+    @pytest.mark.asyncio
+    async def test_shutdown_cleanup_handler_failure_log_sanitizes_exception_text(self):
+        """Shutdown cleanup handler logs should not include raw exceptions."""
+        raw_marker = "SHUTDOWN_HANDLER_SECRET_MARKER"
+        manager = TTSResourceManager()
+
+        def _failing_cleanup():
+            raise RuntimeError(raw_marker)
+
+        manager.register_cleanup_handler(ResourceType.TEMP_FILE, _failing_cleanup)
+
+        messages = []
+        sink_id = rm_mod.logger.add(messages.append, format="{message}")
+        try:
+            await manager.shutdown()
+        finally:
+            rm_mod.logger.remove(sink_id)
+
+        log_output = "\n".join(messages)
+        assert "Error in ResourceType.TEMP_FILE cleanup handler" in log_output
+        assert raw_marker not in log_output
+
+    @pytest.mark.asyncio
+    async def test_expired_session_cleanup_failure_log_sanitizes_exception_text(self, monkeypatch):
+        """Expired-session cleanup loop logs should not include raw exceptions."""
+        raw_marker = "SESSION_CLEANUP_SECRET_MARKER"
+        manager = TTSResourceManager()
+
+        class _FailingSession:
+            def is_expired(self, _timeout):
+                raise RuntimeError(raw_marker)
+
+        async def _stop_after_log(_delay):
+            raise asyncio.CancelledError
+
+        manager._streaming_sessions["session123"] = _FailingSession()
+        monkeypatch.setattr(rm_mod.asyncio, "sleep", _stop_after_log)
+
+        messages = []
+        sink_id = rm_mod.logger.add(messages.append, format="{message}")
+        try:
+            with pytest.raises(asyncio.CancelledError):
+                await manager._cleanup_expired_sessions()
+        finally:
+            rm_mod.logger.remove(sink_id)
+
+        log_output = "\n".join(messages)
+        assert "Error in session cleanup" in log_output
+        assert raw_marker not in log_output
+
+    @pytest.mark.asyncio
     async def test_create_streaming_session(self, resource_manager):
         """Test creating a streaming session"""
         session_id = await resource_manager.create_streaming_session("elevenlabs")
@@ -454,6 +665,52 @@ class TestTTSResourceManager:
         client.aclose.assert_called()
         assert len(resource_manager._registered_models) == 0
         assert session_id not in resource_manager.session_manager._sessions
+
+    @pytest.mark.asyncio
+    async def test_cleanup_all_model_failure_log_sanitizes_exception_text(self, monkeypatch):
+        """cleanup_all model logs should not include raw exceptions."""
+        raw_marker = "CLEANUP_ALL_MODEL_SECRET_MARKER"
+        manager = TTSResourceManager()
+        manager._registered_models["model-provider"] = {"model": Mock(), "cleanup": Mock()}
+
+        async def _failing_unregister(_provider):
+            raise RuntimeError(raw_marker)
+
+        monkeypatch.setattr(manager, "unregister_model", _failing_unregister)
+
+        messages = []
+        sink_id = rm_mod.logger.add(messages.append, format="{message}")
+        try:
+            await manager.cleanup_all()
+        finally:
+            rm_mod.logger.remove(sink_id)
+
+        log_output = "\n".join(messages)
+        assert "Error cleaning model model-provider" in log_output
+        assert raw_marker not in log_output
+
+    @pytest.mark.asyncio
+    async def test_cleanup_all_session_failure_log_sanitizes_exception_text(self, monkeypatch):
+        """cleanup_all session logs should not include raw exceptions."""
+        raw_marker = "CLEANUP_ALL_SESSION_SECRET_MARKER"
+        manager = TTSResourceManager()
+        manager.session_manager._sessions["session123"] = Mock()
+
+        async def _failing_close_session(_session_id):
+            raise RuntimeError(raw_marker)
+
+        monkeypatch.setattr(manager.session_manager, "close_session", _failing_close_session)
+
+        messages = []
+        sink_id = rm_mod.logger.add(messages.append, format="{message}")
+        try:
+            await manager.cleanup_all()
+        finally:
+            rm_mod.logger.remove(sink_id)
+
+        log_output = "\n".join(messages)
+        assert "Error closing session session123" in log_output
+        assert raw_marker not in log_output
 
     def test_get_resource_statistics(self, resource_manager):
         """Test getting resource statistics"""

@@ -55,24 +55,15 @@ _NOTIFICATIONS_STREAM_NONCRITICAL_EXCEPTIONS = (
 async def _reconcile_snooze_task_best_effort(*, task_id: str, user_id: int) -> None:
     try:
         await get_reminders_scheduler().reconcile_task(task_id=task_id, user_id=user_id)
-    except _NOTIFICATIONS_STREAM_NONCRITICAL_EXCEPTIONS as exc:
-        logger.warning(
-            "notifications snooze reconcile_task failed task_id={} user_id={} error={}",
-            task_id,
-            user_id,
-            exc,
-        )
+    except _NOTIFICATIONS_STREAM_NONCRITICAL_EXCEPTIONS:
+        logger.warning("notifications snooze reconcile_task failed")
 
 
 async def _unschedule_snooze_task_best_effort(*, task_id: str) -> None:
     try:
         await get_reminders_scheduler().unschedule_task(task_id=task_id)
-    except _NOTIFICATIONS_STREAM_NONCRITICAL_EXCEPTIONS as exc:
-        logger.warning(
-            "notifications snooze unschedule_task failed task_id={} error={}",
-            task_id,
-            exc,
-        )
+    except _NOTIFICATIONS_STREAM_NONCRITICAL_EXCEPTIONS:
+        logger.warning("notifications snooze unschedule_task failed")
 
 
 def _notification_to_response(
@@ -377,7 +368,7 @@ async def stream_notifications(
             await asyncio.wait_for(stream.send_event(event, payload, event_id=event_id), timeout=send_timeout_s)
             return True
         except asyncio.TimeoutError:
-            logger.warning("notifications stream send timeout for event={}", event)
+            logger.warning("notifications stream send timeout")
             with contextlib.suppress(_NOTIFICATIONS_STREAM_NONCRITICAL_EXCEPTIONS):
                 await stream.done(force=True)
             return False
@@ -447,8 +438,8 @@ async def stream_notifications(
                         await asyncio.sleep(poll_interval_s)
             except (asyncio.CancelledError, GeneratorExit):
                 break
-            except _NOTIFICATIONS_STREAM_NONCRITICAL_EXCEPTIONS as exc:
-                logger.warning("notifications stream loop error: {}", exc)
+            except _NOTIFICATIONS_STREAM_NONCRITICAL_EXCEPTIONS:
+                logger.warning("notifications stream loop error")
                 await asyncio.sleep(poll_interval_s)
 
     async def _gen() -> AsyncGenerator[str, None]:

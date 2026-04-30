@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import tldw_Server_API.app.core.RAG.rag_service.quality_graders as quality_graders
 from tldw_Server_API.app.core.RAG.rag_service.quality_graders import (
     FastGroundednessResult,
     FastGroundednessGrader,
@@ -23,6 +24,26 @@ from tldw_Server_API.app.core.RAG.rag_service.quality_graders import (
     grade_utility,
 )
 from tldw_Server_API.app.core.RAG.rag_service.types import Document, DataSource
+
+
+SECRET_TOKEN = "sk-test-secret-value"
+SENSITIVE_PATH = "/Users/alice/private/quality_grader_payload.json"
+
+
+def _capture_quality_grader_logs(level: str = "DEBUG"):
+    messages: list[str] = []
+    sink_id = quality_graders.logger.add(
+        lambda message: messages.append(str(message)),
+        format="{message}",
+        level=level,
+    )
+    return messages, sink_id
+
+
+def _assert_sensitive_details_not_logged(messages: list[str]) -> None:
+    log_output = "\n".join(messages)
+    assert SECRET_TOKEN not in log_output
+    assert SENSITIVE_PATH not in log_output
 
 
 class TestFastGroundednessResult:
@@ -266,6 +287,49 @@ class TestFastGroundednessGrader:
         assert result.method == "error_fallback"
 
     @pytest.mark.asyncio
+    async def test_llm_failure_fallback_does_not_log_sensitive_exception_details(self, sample_documents):
+        """Test LLM failure fallback without leaking exception details."""
+        def failing_analyze(*args, **kwargs):
+            raise RuntimeError(f"provider failed with {SECRET_TOKEN} at {SENSITIVE_PATH}")
+
+        messages, sink_id = _capture_quality_grader_logs()
+        try:
+            grader = FastGroundednessGrader(analyze_fn=failing_analyze)
+            result = await grader.grade(
+                query="What is machine learning?",
+                answer="Machine learning uses algorithms to learn patterns from data.",
+                documents=sample_documents,
+            )
+        finally:
+            quality_graders.logger.remove(sink_id)
+
+        assert result.method == "heuristic"
+        assert result.is_grounded is True
+        assert result.metadata == {}
+        _assert_sensitive_details_not_logged(messages)
+
+    def test_parse_failure_fallback_does_not_log_sensitive_exception_details(self):
+        """Test parse fallback logging does not include raw parser exception details."""
+        def failing_parser(*args, **kwargs):
+            raise ValueError(f"parse failed for {SECRET_TOKEN} at {SENSITIVE_PATH}")
+
+        messages, sink_id = _capture_quality_grader_logs()
+        try:
+            grader = FastGroundednessGrader(analyze_fn=MagicMock())
+            with patch.object(quality_graders, "parse_structured_output", side_effect=failing_parser):
+                result = grader._parse_groundedness_response("not json", latency_ms=7)
+        finally:
+            quality_graders.logger.remove(sink_id)
+
+        assert result.is_grounded is True
+        assert result.confidence == 0.5
+        assert result.rationale == "Could not parse LLM response"
+        assert result.latency_ms == 7
+        assert result.method == "error_fallback"
+        assert result.metadata == {"parse_error": True}
+        _assert_sensitive_details_not_logged(messages)
+
+    @pytest.mark.asyncio
     async def test_empty_documents(self):
         """Test groundedness check with no documents."""
         # Use failing analyze to force heuristic path
@@ -450,6 +514,50 @@ class TestUtilityGrader:
 
         assert result.utility_score == 3  # Default
         assert result.method == "error_fallback"
+
+    @pytest.mark.asyncio
+    async def test_llm_failure_fallback_does_not_log_sensitive_exception_details(self):
+        """Test LLM failure fallback without leaking exception details."""
+        def failing_analyze(*args, **kwargs):
+            raise RuntimeError(f"provider failed with {SECRET_TOKEN} at {SENSITIVE_PATH}")
+
+        messages, sink_id = _capture_quality_grader_logs()
+        try:
+            grader = UtilityGrader(analyze_fn=failing_analyze)
+            result = await grader.grade(
+                query="What is machine learning?",
+                answer=(
+                    "Machine learning is a field of artificial intelligence "
+                    "that uses algorithms to learn from data."
+                ),
+            )
+        finally:
+            quality_graders.logger.remove(sink_id)
+
+        assert result.method == "heuristic"
+        assert result.utility_score >= 3
+        assert result.metadata == {}
+        _assert_sensitive_details_not_logged(messages)
+
+    def test_parse_failure_fallback_does_not_log_sensitive_exception_details(self):
+        """Test parse fallback logging does not include raw parser exception details."""
+        def failing_parser(*args, **kwargs):
+            raise ValueError(f"parse failed for {SECRET_TOKEN} at {SENSITIVE_PATH}")
+
+        messages, sink_id = _capture_quality_grader_logs()
+        try:
+            grader = UtilityGrader(analyze_fn=MagicMock())
+            with patch.object(quality_graders, "parse_structured_output", side_effect=failing_parser):
+                result = grader._parse_utility_response("not json", latency_ms=11)
+        finally:
+            quality_graders.logger.remove(sink_id)
+
+        assert result.utility_score == 3
+        assert result.explanation == "Could not parse LLM response"
+        assert result.latency_ms == 11
+        assert result.method == "error_fallback"
+        assert result.metadata == {"parse_error": True}
+        _assert_sensitive_details_not_logged(messages)
 
 
 class TestConvenienceFunctions:

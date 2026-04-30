@@ -105,9 +105,9 @@ async def process_videos_endpoint(
             tags=["no_db"],
             metadata={"has_urls": bool(form_data.urls), "has_files": bool(files)},
         )
-    except Exception as usage_log_error:
+    except Exception:
         # Usage logging is best-effort; do not fail the request.
-        logger.debug("Video process endpoint usage logging failed", exc_info=usage_log_error)
+        logger.debug("Video process endpoint usage logging failed")
 
     legacy_urls_empty_sentinel_used = bool(form_data.urls and form_data.urls == [""])
     if legacy_urls_empty_sentinel_used:
@@ -307,8 +307,8 @@ async def process_videos_endpoint(
             )
         else:
             logger.debug("No success item found in final results before return.")
-    except Exception as debug_err:  # pragma: no cover - defensive logging
-        logger.error(f"Error during debug logging: {debug_err}")
+    except Exception:  # pragma: no cover - defensive logging
+        logger.error("Video process endpoint debug logging failed")
 
     # Optional template/hierarchical re-chunking of video transcripts (best-effort).
     try:
@@ -378,8 +378,8 @@ async def process_videos_endpoint(
                     chunks = _improved_chunking_process(text, chunk_options_dict)
 
                 res["chunks"] = chunks
-    except Exception as rechunk_error:
-        logger.debug("Video process endpoint rechunking failed; returning original result", exc_info=rechunk_error)
+    except Exception:
+        logger.debug("Video process endpoint rechunking failed; returning original result")
 
     response = JSONResponse(status_code=final_status_code, content=batch_result)
     if legacy_signal is not None:

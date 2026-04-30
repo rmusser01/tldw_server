@@ -7,9 +7,11 @@ import numpy as np
 import pytest
 from unittest.mock import MagicMock
 
+from tldw_Server_API.app.core.TTS.adapters import index_tts_adapter as index_tts_mod
 from tldw_Server_API.app.core.TTS.adapters.base import AudioFormat, ProviderStatus, TTSRequest
 from tldw_Server_API.app.core.TTS.adapters.index_tts_adapter import IndexTTS2Adapter
 from tldw_Server_API.app.core.TTS.tts_exceptions import (
+    TTSGenerationError,
     TTSUnsupportedFormatError,
     TTSValidationError,
 )
@@ -26,6 +28,25 @@ def _make_wav_bytes(duration_seconds: float = 0.2, sample_rate: int = 16000) -> 
         wf.setframerate(sample_rate)
         wf.writeframes(b"\x00\x00" * total_frames)
     return buffer.getvalue()
+
+
+def _capture_index_tts_logs(level: str = "DEBUG") -> tuple[list[str], int]:
+    messages: list[str] = []
+
+    def capture(message):
+        exception = message.record.get("exception")
+        exception_text = ""
+        if exception:
+            exception_text = f"\n{exception.type.__name__}: {exception.value}"
+        messages.append(
+            f"{message.record['message']}\n{message.record.get('extra', {})}{exception_text}"
+        )
+
+    sink_id = index_tts_mod.logger.add(
+        capture,
+        level=level,
+    )
+    return messages, sink_id
 
 
 @pytest.fixture
@@ -140,6 +161,75 @@ async def test_generate_unsupported_format(adapter):
 
 
 @pytest.mark.asyncio
+async def test_initialize_registration_failure_log_sanitizes_exception_extra(tmp_path, monkeypatch):
+    raw_marker = "RAW_INDEX_TTS_REGISTER_SECRET_MARKER token=secret"
+    cfg_path = tmp_path / "config.yaml"
+    cfg_path.write_text("model: dummy")
+    model_dir = tmp_path / "checkpoints"
+    model_dir.mkdir()
+
+    class FailingResourceManager:
+        def register_model(self, **kwargs):
+            raise RuntimeError(raw_marker)
+
+    async def fake_get_resource_manager():
+        return FailingResourceManager()
+
+    monkeypatch.setattr(IndexTTS2Adapter, "_create_engine", lambda self: object())
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.TTS.tts_resource_manager.get_resource_manager",
+        fake_get_resource_manager,
+    )
+    test_adapter = IndexTTS2Adapter(
+        {
+            "index_tts_cfg_path": str(cfg_path),
+            "index_tts_model_dir": str(model_dir),
+        }
+    )
+    messages, sink_id = _capture_index_tts_logs()
+
+    try:
+        assert await test_adapter.initialize() is True
+    finally:
+        index_tts_mod.logger.remove(sink_id)
+
+    rendered_logs = "\n".join(messages)
+    assert "IndexTTS provider registration failed" in rendered_logs
+    assert "RAW_INDEX_TTS_REGISTER_SECRET_MARKER" not in rendered_logs
+    assert "token=secret" not in rendered_logs
+
+
+@pytest.mark.asyncio
+async def test_generate_failure_log_sanitizes_exception_text(adapter):
+    raw_marker = "RAW_INDEX_TTS_GENERATION_SECRET_MARKER token=secret"
+
+    def fail_infer(*args, **kwargs):
+        raise RuntimeError(raw_marker)
+
+    adapter._engine.infer = fail_infer
+    request = TTSRequest(
+        text="Hello",
+        voice="demo",
+        format=AudioFormat.WAV,
+        stream=False,
+        voice_reference=_make_wav_bytes(),
+    )
+    messages, sink_id = _capture_index_tts_logs(level="ERROR")
+
+    try:
+        with pytest.raises(TTSGenerationError) as exc_info:
+            await adapter.generate(request)
+    finally:
+        index_tts_mod.logger.remove(sink_id)
+
+    assert raw_marker in exc_info.value.details["error"]
+    rendered_logs = "\n".join(messages)
+    assert "IndexTTS2 generation failed" in rendered_logs
+    assert "RAW_INDEX_TTS_GENERATION_SECRET_MARKER" not in rendered_logs
+    assert "token=secret" not in rendered_logs
+
+
+@pytest.mark.asyncio
 async def test_generate_streaming_wav(adapter, monkeypatch):
     voice_bytes = _make_wav_bytes()
 
@@ -200,6 +290,143 @@ async def test_generate_streaming_wav(adapter, monkeypatch):
         collected.extend(chunk)
 
     assert collected  # Should receive streamed bytes
+
+
+@pytest.mark.asyncio
+async def test_generate_streaming_failure_log_sanitizes_exception_text(adapter):
+    raw_marker = "RAW_INDEX_TTS_STREAMING_SECRET_MARKER token=secret"
+
+    def fake_infer(*args, **kwargs):
+        def iterator():
+            yield np.ones(16, dtype=np.int16)
+            raise RuntimeError(raw_marker)
+
+        return iterator()
+
+    adapter._engine.infer = fake_infer
+    request = TTSRequest(
+        text="Stream request",
+        voice="demo",
+        format=AudioFormat.WAV,
+        speed=1.0,
+        voice_reference=_make_wav_bytes(),
+        stream=True,
+    )
+    messages, sink_id = _capture_index_tts_logs(level="ERROR")
+
+    try:
+        response = await adapter.generate(request)
+        assert response.audio_stream is not None
+        with pytest.raises(TTSGenerationError) as exc_info:
+            async for _ in response.audio_stream:
+                pass
+    finally:
+        index_tts_mod.logger.remove(sink_id)
+
+    assert raw_marker in exc_info.value.details["error"]
+    rendered_logs = "\n".join(messages)
+    assert "IndexTTS2 streaming failed" in rendered_logs
+    assert "RAW_INDEX_TTS_STREAMING_SECRET_MARKER" not in rendered_logs
+    assert "token=secret" not in rendered_logs
+
+
+def test_streaming_chunk_conversion_error_log_sanitizes_exception_text(adapter):
+    raw_marker = "RAW_INDEX_TTS_CHUNK_CONVERSION_SECRET_MARKER token=secret"
+
+    class BadChunk:
+        def __array__(self, dtype=None):
+            raise RuntimeError(raw_marker)
+
+    writer = MagicMock()
+    result = None
+    messages, sink_id = _capture_index_tts_logs(level="WARNING")
+
+    try:
+        result = adapter._convert_stream_chunk(
+            BadChunk(),
+            index_tts_mod.AudioNormalizer(),
+            writer,
+            target_sample_rate=adapter.STREAM_SAMPLE_RATE,
+        )
+    finally:
+        index_tts_mod.logger.remove(sink_id)
+
+    assert result == b""
+    writer.write_chunk.assert_not_called()
+    rendered_logs = "\n".join(messages)
+    assert "IndexTTS2 streaming chunk conversion error" in rendered_logs
+    assert "RAW_INDEX_TTS_CHUNK_CONVERSION_SECRET_MARKER" not in rendered_logs
+    assert "token=secret" not in rendered_logs
+
+
+def test_streaming_numpy_resample_fallback_log_sanitizes_exception_text(adapter, monkeypatch):
+    raw_marker = "RAW_INDEX_TTS_RESAMPLE_FALLBACK_SECRET_MARKER token=secret"
+
+    real_import = __import__
+
+    def fail_torchaudio_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "torchaudio":
+            raise RuntimeError(raw_marker)
+        return real_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr("builtins.__import__", fail_torchaudio_import)
+    writer = MagicMock()
+    writer.write_chunk.return_value = b"chunk"
+    messages, sink_id = _capture_index_tts_logs(level="WARNING")
+
+    try:
+        result = adapter._convert_stream_chunk(
+            np.ones(16, dtype=np.int16),
+            index_tts_mod.AudioNormalizer(),
+            writer,
+            target_sample_rate=16000,
+        )
+    finally:
+        index_tts_mod.logger.remove(sink_id)
+
+    assert result == b"chunk"
+    rendered_logs = "\n".join(messages)
+    assert "IndexTTS2 streaming using numpy resample fallback" in rendered_logs
+    assert "RAW_INDEX_TTS_RESAMPLE_FALLBACK_SECRET_MARKER" not in rendered_logs
+    assert "token=secret" not in rendered_logs
+
+
+def test_streaming_interpolation_failure_log_sanitizes_exception_text(adapter, monkeypatch):
+    raw_resample_marker = "RAW_INDEX_TTS_RESAMPLE_FALLBACK_SECRET_MARKER token=secret"
+    raw_interp_marker = "RAW_INDEX_TTS_INTERPOLATION_SECRET_MARKER token=secret"
+
+    real_import = __import__
+
+    def fail_torchaudio_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "torchaudio":
+            raise RuntimeError(raw_resample_marker)
+        return real_import(name, globals, locals, fromlist, level)
+
+    def fail_interp(*args, **kwargs):
+        raise RuntimeError(raw_interp_marker)
+
+    monkeypatch.setattr("builtins.__import__", fail_torchaudio_import)
+    monkeypatch.setattr(index_tts_mod.np, "interp", fail_interp)
+    writer = MagicMock()
+    writer.write_chunk.return_value = b"chunk"
+    messages, sink_id = _capture_index_tts_logs(level="WARNING")
+
+    try:
+        result = adapter._convert_stream_chunk(
+            np.ones(16, dtype=np.int16),
+            index_tts_mod.AudioNormalizer(),
+            writer,
+            target_sample_rate=16000,
+        )
+    finally:
+        index_tts_mod.logger.remove(sink_id)
+
+    assert result == b"chunk"
+    rendered_logs = "\n".join(messages)
+    assert "IndexTTS2 streaming interpolation failed" in rendered_logs
+    assert "RAW_INDEX_TTS_RESAMPLE_FALLBACK_SECRET_MARKER" not in rendered_logs
+    assert "RAW_INDEX_TTS_INTERPOLATION_SECRET_MARKER" not in rendered_logs
+    assert "token=secret" not in rendered_logs
 
 
 def test_registry_includes_index_tts_provider():

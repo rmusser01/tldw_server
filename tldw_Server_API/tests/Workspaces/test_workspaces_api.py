@@ -1,4 +1,5 @@
 """Tests for workspace CRUD endpoints and scoped chat session isolation."""
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -7,11 +8,15 @@ from fastapi.testclient import TestClient
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.endpoints.workspaces_rate_limit_policy import (
     WORKSPACES_DELETE_RATE_LIMIT,
+    WORKSPACES_READ_RATE_LIMIT,
+    WORKSPACES_WRITE_RATE_LIMIT,
 )
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
+    CharactersRAGDBError,
     CharactersRAGDB,
     ConflictError,
+    InputError,
 )
 
 
@@ -161,6 +166,164 @@ def test_workspace_api_accepts_and_returns_study_materials_policy(workspace_fast
         workspace_fastapi_app.dependency_overrides.pop(WORKSPACES_WRITE_RATE_LIMIT, None)
 
 
+@pytest.mark.integration
+def test_workspace_root_endpoints_happy_path(workspace_fastapi_app, db):
+    from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
+
+    async def _allow_rate_limit() -> None:
+        return None
+
+    async def _user() -> User:
+        return User(
+            id=1,
+            username="testuser",
+            email="test@example.com",
+            is_active=True,
+            roles=["admin"],
+            is_admin=True,
+        )
+
+    def _db() -> CharactersRAGDB:
+        return db
+
+    workspace_fastapi_app.dependency_overrides[get_request_user] = _user
+    workspace_fastapi_app.dependency_overrides[get_chacha_db_for_user] = _db
+    workspace_fastapi_app.dependency_overrides[WORKSPACES_READ_RATE_LIMIT] = _allow_rate_limit
+    workspace_fastapi_app.dependency_overrides[WORKSPACES_WRITE_RATE_LIMIT] = _allow_rate_limit
+    try:
+        with TestClient(workspace_fastapi_app, raise_server_exceptions=False) as client:
+            upsert_response = client.put(
+                "/api/v1/workspaces/ws-root-api",
+                json={"name": "Root Workspace", "study_materials_policy": "workspace"},
+            )
+            assert upsert_response.status_code == 200, upsert_response.text
+            upserted = upsert_response.json()
+            assert upserted["id"] == "ws-root-api"
+            assert upserted["name"] == "Root Workspace"
+
+            get_response = client.get("/api/v1/workspaces/ws-root-api")
+            assert get_response.status_code == 200, get_response.text
+            fetched = get_response.json()
+            assert fetched["id"] == "ws-root-api"
+            assert fetched["study_materials_policy"] == "workspace"
+
+            list_response = client.get("/api/v1/workspaces/")
+            assert list_response.status_code == 200, list_response.text
+            payload = list_response.json()
+            assert payload["total"] == 1
+            assert payload["items"][0]["id"] == "ws-root-api"
+    finally:
+        workspace_fastapi_app.dependency_overrides.pop(get_request_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(get_chacha_db_for_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(WORKSPACES_READ_RATE_LIMIT, None)
+        workspace_fastapi_app.dependency_overrides.pop(WORKSPACES_WRITE_RATE_LIMIT, None)
+
+
+@pytest.mark.integration
+def test_list_workspaces_maps_database_error_to_contextual_500(workspace_fastapi_app):
+    class _DatabaseErrorDB:
+        def list_workspaces(self):
+            raise CharactersRAGDBError("sqlite backend unavailable")
+
+    async def _allow_rate_limit() -> None:
+        return None
+
+    workspace_fastapi_app.dependency_overrides[get_request_user] = lambda: SimpleNamespace(id=1)
+    workspace_fastapi_app.dependency_overrides[get_chacha_db_for_user] = lambda: _DatabaseErrorDB()
+    workspace_fastapi_app.dependency_overrides[WORKSPACES_READ_RATE_LIMIT] = _allow_rate_limit
+    try:
+        with TestClient(workspace_fastapi_app, raise_server_exceptions=False) as client:
+            response = client.get("/api/v1/workspaces/")
+    finally:
+        workspace_fastapi_app.dependency_overrides.pop(get_request_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(get_chacha_db_for_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(WORKSPACES_READ_RATE_LIMIT, None)
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to fetch workspaces"
+
+
+@pytest.mark.integration
+def test_get_workspace_maps_database_error_to_contextual_500(workspace_fastapi_app):
+    class _DatabaseErrorDB:
+        def get_workspace(self, workspace_id: str):
+            _ = workspace_id
+            raise CharactersRAGDBError("sqlite backend unavailable")
+
+    async def _allow_rate_limit() -> None:
+        return None
+
+    workspace_fastapi_app.dependency_overrides[get_request_user] = lambda: SimpleNamespace(id=1)
+    workspace_fastapi_app.dependency_overrides[get_chacha_db_for_user] = lambda: _DatabaseErrorDB()
+    workspace_fastapi_app.dependency_overrides[WORKSPACES_READ_RATE_LIMIT] = _allow_rate_limit
+    try:
+        with TestClient(workspace_fastapi_app, raise_server_exceptions=False) as client:
+            response = client.get("/api/v1/workspaces/ws-1")
+    finally:
+        workspace_fastapi_app.dependency_overrides.pop(get_request_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(get_chacha_db_for_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(WORKSPACES_READ_RATE_LIMIT, None)
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to fetch workspace"
+
+
+@pytest.mark.integration
+def test_upsert_workspace_maps_input_error_to_400(workspace_fastapi_app):
+    class _InputErrorDB:
+        def upsert_workspace(self, workspace_id: str, name: str, *, study_materials_policy: str):
+            _ = (workspace_id, name, study_materials_policy)
+            raise InputError("invalid workspace create")
+
+    async def _allow_rate_limit() -> None:
+        return None
+
+    workspace_fastapi_app.dependency_overrides[get_request_user] = lambda: SimpleNamespace(id=1)
+    workspace_fastapi_app.dependency_overrides[get_chacha_db_for_user] = lambda: _InputErrorDB()
+    workspace_fastapi_app.dependency_overrides[WORKSPACES_WRITE_RATE_LIMIT] = _allow_rate_limit
+    try:
+        with TestClient(workspace_fastapi_app, raise_server_exceptions=False) as client:
+            response = client.put(
+                "/api/v1/workspaces/ws-1",
+                json={"name": "Workspace", "study_materials_policy": "workspace"},
+            )
+    finally:
+        workspace_fastapi_app.dependency_overrides.pop(get_request_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(get_chacha_db_for_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(WORKSPACES_WRITE_RATE_LIMIT, None)
+
+    assert response.status_code == 400, response.text
+    assert response.json()["detail"] == "invalid workspace create"
+
+
+@pytest.mark.integration
+def test_upsert_workspace_maps_database_error_to_contextual_500(workspace_fastapi_app):
+    class _DatabaseErrorDB:
+        def upsert_workspace(self, workspace_id: str, name: str, *, study_materials_policy: str):
+            _ = (workspace_id, name, study_materials_policy)
+            raise CharactersRAGDBError("sqlite backend unavailable")
+
+    async def _allow_rate_limit() -> None:
+        return None
+
+    workspace_fastapi_app.dependency_overrides[get_request_user] = lambda: SimpleNamespace(id=1)
+    workspace_fastapi_app.dependency_overrides[get_chacha_db_for_user] = lambda: _DatabaseErrorDB()
+    workspace_fastapi_app.dependency_overrides[WORKSPACES_WRITE_RATE_LIMIT] = _allow_rate_limit
+    try:
+        with TestClient(workspace_fastapi_app, raise_server_exceptions=False) as client:
+            response = client.put(
+                "/api/v1/workspaces/ws-1",
+                json={"name": "Workspace", "study_materials_policy": "workspace"},
+            )
+    finally:
+        workspace_fastapi_app.dependency_overrides.pop(get_request_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(get_chacha_db_for_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(WORKSPACES_WRITE_RATE_LIMIT, None)
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to create or update workspace"
+
+
 class TestScopedChatSessions:
     def test_workspace_chat_not_visible_in_global_list(self, db):
         db.upsert_workspace("ws-1", "WS")
@@ -204,3 +367,756 @@ def test_delete_workspace_maps_conflict_to_409(workspace_fastapi_app):
         workspace_fastapi_app.dependency_overrides.pop(WORKSPACES_DELETE_RATE_LIMIT, None)
 
     assert response.status_code == 409, response.text
+
+
+@pytest.mark.integration
+def test_patch_workspace_maps_input_error_to_400(workspace_fastapi_app):
+    class _InputErrorDB:
+        def update_workspace(self, workspace_id: str, updates: dict, expected_version: int):
+            _ = (workspace_id, updates, expected_version)
+            raise InputError("invalid workspace patch")
+
+    async def _allow_rate_limit() -> None:
+        return None
+
+    workspace_fastapi_app.dependency_overrides[get_request_user] = lambda: SimpleNamespace(id=1)
+    workspace_fastapi_app.dependency_overrides[get_chacha_db_for_user] = lambda: _InputErrorDB()
+    workspace_fastapi_app.dependency_overrides[WORKSPACES_WRITE_RATE_LIMIT] = _allow_rate_limit
+    try:
+        with TestClient(workspace_fastapi_app, raise_server_exceptions=False) as client:
+            response = client.patch(
+                "/api/v1/workspaces/ws-1",
+                json={"name": "Renamed", "version": 1},
+            )
+    finally:
+        workspace_fastapi_app.dependency_overrides.pop(get_request_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(get_chacha_db_for_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(WORKSPACES_WRITE_RATE_LIMIT, None)
+
+    assert response.status_code == 400, response.text
+    assert response.json()["detail"] == "invalid workspace patch"
+
+
+@pytest.mark.integration
+def test_delete_workspace_maps_database_error_to_contextual_500(workspace_fastapi_app):
+    class _DatabaseErrorDB:
+        def get_workspace(self, workspace_id: str):
+            return {"id": workspace_id, "version": 1}
+
+        def delete_workspace(self, workspace_id: str, expected_version: int) -> None:
+            _ = (workspace_id, expected_version)
+            raise CharactersRAGDBError("sqlite backend unavailable")
+
+    async def _allow_rate_limit() -> None:
+        return None
+
+    workspace_fastapi_app.dependency_overrides[get_request_user] = lambda: SimpleNamespace(id=1)
+    workspace_fastapi_app.dependency_overrides[get_chacha_db_for_user] = lambda: _DatabaseErrorDB()
+    workspace_fastapi_app.dependency_overrides[WORKSPACES_DELETE_RATE_LIMIT] = _allow_rate_limit
+    try:
+        with TestClient(workspace_fastapi_app, raise_server_exceptions=False) as client:
+            response = client.delete("/api/v1/workspaces/ws-1")
+    finally:
+        workspace_fastapi_app.dependency_overrides.pop(get_request_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(get_chacha_db_for_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(WORKSPACES_DELETE_RATE_LIMIT, None)
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to delete workspace"
+
+
+@pytest.mark.integration
+def test_update_workspace_source_maps_input_error_to_400(workspace_fastapi_app):
+    class _InputErrorDB:
+        def get_workspace(self, workspace_id: str):
+            return {"id": workspace_id, "version": 1}
+
+        def update_workspace_source(
+            self,
+            workspace_id: str,
+            source_id: str,
+            updates: dict,
+            *,
+            expected_version: int,
+        ):
+            _ = (workspace_id, source_id, updates, expected_version)
+            raise InputError("invalid workspace source patch")
+
+    async def _allow_rate_limit() -> None:
+        return None
+
+    workspace_fastapi_app.dependency_overrides[get_request_user] = lambda: SimpleNamespace(id=1)
+    workspace_fastapi_app.dependency_overrides[get_chacha_db_for_user] = lambda: _InputErrorDB()
+    workspace_fastapi_app.dependency_overrides[WORKSPACES_WRITE_RATE_LIMIT] = _allow_rate_limit
+    try:
+        with TestClient(workspace_fastapi_app, raise_server_exceptions=False) as client:
+            response = client.put(
+                "/api/v1/workspaces/ws-1/sources/src-1",
+                json={"title": "Renamed", "version": 1},
+            )
+    finally:
+        workspace_fastapi_app.dependency_overrides.pop(get_request_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(get_chacha_db_for_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(WORKSPACES_WRITE_RATE_LIMIT, None)
+
+    assert response.status_code == 400, response.text
+    assert response.json()["detail"] == "invalid workspace source patch"
+
+
+@pytest.mark.integration
+def test_workspace_artifact_endpoints_happy_path(workspace_fastapi_app, db):
+    from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
+
+    async def _allow_rate_limit() -> None:
+        return None
+
+    async def _user() -> User:
+        return User(
+            id=1,
+            username="testuser",
+            email="test@example.com",
+            is_active=True,
+            roles=["admin"],
+            is_admin=True,
+        )
+
+    def _db() -> CharactersRAGDB:
+        return db
+
+    workspace_fastapi_app.dependency_overrides[get_request_user] = _user
+    workspace_fastapi_app.dependency_overrides[get_chacha_db_for_user] = _db
+    workspace_fastapi_app.dependency_overrides[WORKSPACES_READ_RATE_LIMIT] = _allow_rate_limit
+    workspace_fastapi_app.dependency_overrides[WORKSPACES_WRITE_RATE_LIMIT] = _allow_rate_limit
+    workspace_fastapi_app.dependency_overrides[WORKSPACES_DELETE_RATE_LIMIT] = _allow_rate_limit
+    try:
+        db.upsert_workspace("ws-art-api", "Workspace Artifacts")
+
+        with TestClient(workspace_fastapi_app, raise_server_exceptions=False) as client:
+            add_response = client.post(
+                "/api/v1/workspaces/ws-art-api/artifacts",
+                json={
+                    "id": "art-1",
+                    "artifact_type": "summary",
+                    "title": "Draft Summary",
+                    "content": "Initial summary",
+                },
+            )
+            assert add_response.status_code == 201, add_response.text
+            added = add_response.json()
+            assert added["id"] == "art-1"
+            assert added["status"] == "pending"
+            assert added["version"] == 1
+
+            list_response = client.get("/api/v1/workspaces/ws-art-api/artifacts")
+            assert list_response.status_code == 200, list_response.text
+            listed = list_response.json()
+            assert len(listed) == 1
+            assert listed[0]["id"] == "art-1"
+            assert listed[0]["title"] == "Draft Summary"
+
+            update_response = client.put(
+                "/api/v1/workspaces/ws-art-api/artifacts/art-1",
+                json={
+                    "title": "Final Summary",
+                    "status": "completed",
+                    "content": "Completed summary",
+                    "version": added["version"],
+                },
+            )
+            assert update_response.status_code == 200, update_response.text
+            updated = update_response.json()
+            assert updated["title"] == "Final Summary"
+            assert updated["status"] == "completed"
+            assert updated["content"] == "Completed summary"
+            assert updated["version"] == 2
+
+            delete_response = client.delete("/api/v1/workspaces/ws-art-api/artifacts/art-1")
+            assert delete_response.status_code == 204, delete_response.text
+
+            final_list_response = client.get("/api/v1/workspaces/ws-art-api/artifacts")
+            assert final_list_response.status_code == 200, final_list_response.text
+            assert final_list_response.json() == []
+    finally:
+        workspace_fastapi_app.dependency_overrides.pop(get_request_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(get_chacha_db_for_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(WORKSPACES_READ_RATE_LIMIT, None)
+        workspace_fastapi_app.dependency_overrides.pop(WORKSPACES_WRITE_RATE_LIMIT, None)
+        workspace_fastapi_app.dependency_overrides.pop(WORKSPACES_DELETE_RATE_LIMIT, None)
+
+
+@pytest.mark.integration
+def test_list_workspace_artifacts_maps_database_error_to_contextual_500(workspace_fastapi_app):
+    class _DatabaseErrorDB:
+        def get_workspace(self, workspace_id: str):
+            return {"id": workspace_id, "version": 1}
+
+        def list_workspace_artifacts(self, workspace_id: str):
+            _ = workspace_id
+            raise CharactersRAGDBError("sqlite backend unavailable")
+
+    async def _allow_rate_limit() -> None:
+        return None
+
+    workspace_fastapi_app.dependency_overrides[get_request_user] = lambda: SimpleNamespace(id=1)
+    workspace_fastapi_app.dependency_overrides[get_chacha_db_for_user] = lambda: _DatabaseErrorDB()
+    workspace_fastapi_app.dependency_overrides[WORKSPACES_READ_RATE_LIMIT] = _allow_rate_limit
+    try:
+        with TestClient(workspace_fastapi_app, raise_server_exceptions=False) as client:
+            response = client.get("/api/v1/workspaces/ws-1/artifacts")
+    finally:
+        workspace_fastapi_app.dependency_overrides.pop(get_request_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(get_chacha_db_for_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(WORKSPACES_READ_RATE_LIMIT, None)
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to fetch workspace artifacts"
+
+
+@pytest.mark.integration
+def test_add_workspace_artifact_maps_input_error_to_400(workspace_fastapi_app):
+    class _InputErrorDB:
+        def get_workspace(self, workspace_id: str):
+            return {"id": workspace_id, "version": 1}
+
+        def add_workspace_artifact(self, workspace_id: str, data: dict):
+            _ = (workspace_id, data)
+            raise InputError("invalid workspace artifact create")
+
+    async def _allow_rate_limit() -> None:
+        return None
+
+    workspace_fastapi_app.dependency_overrides[get_request_user] = lambda: SimpleNamespace(id=1)
+    workspace_fastapi_app.dependency_overrides[get_chacha_db_for_user] = lambda: _InputErrorDB()
+    workspace_fastapi_app.dependency_overrides[WORKSPACES_WRITE_RATE_LIMIT] = _allow_rate_limit
+    try:
+        with TestClient(workspace_fastapi_app, raise_server_exceptions=False) as client:
+            response = client.post(
+                "/api/v1/workspaces/ws-1/artifacts",
+                json={
+                    "id": "art-1",
+                    "artifact_type": "summary",
+                    "title": "Draft Summary",
+                },
+            )
+    finally:
+        workspace_fastapi_app.dependency_overrides.pop(get_request_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(get_chacha_db_for_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(WORKSPACES_WRITE_RATE_LIMIT, None)
+
+    assert response.status_code == 400, response.text
+    assert response.json()["detail"] == "invalid workspace artifact create"
+
+
+@pytest.mark.integration
+def test_delete_workspace_artifact_maps_database_error_to_contextual_500(workspace_fastapi_app):
+    class _DatabaseErrorDB:
+        def get_workspace(self, workspace_id: str):
+            return {"id": workspace_id, "version": 1}
+
+        def delete_workspace_artifact(self, workspace_id: str, artifact_id: str) -> None:
+            _ = (workspace_id, artifact_id)
+            raise CharactersRAGDBError("sqlite backend unavailable")
+
+    async def _allow_rate_limit() -> None:
+        return None
+
+    workspace_fastapi_app.dependency_overrides[get_request_user] = lambda: SimpleNamespace(id=1)
+    workspace_fastapi_app.dependency_overrides[get_chacha_db_for_user] = lambda: _DatabaseErrorDB()
+    workspace_fastapi_app.dependency_overrides[WORKSPACES_DELETE_RATE_LIMIT] = _allow_rate_limit
+    try:
+        with TestClient(workspace_fastapi_app, raise_server_exceptions=False) as client:
+            response = client.delete("/api/v1/workspaces/ws-1/artifacts/art-1")
+    finally:
+        workspace_fastapi_app.dependency_overrides.pop(get_request_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(get_chacha_db_for_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(WORKSPACES_DELETE_RATE_LIMIT, None)
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to delete workspace artifact"
+
+
+@pytest.mark.integration
+def test_update_workspace_artifact_maps_database_error_to_contextual_500(workspace_fastapi_app):
+    class _DatabaseErrorDB:
+        def get_workspace(self, workspace_id: str):
+            return {"id": workspace_id, "version": 1}
+
+        def update_workspace_artifact(
+            self,
+            workspace_id: str,
+            artifact_id: str,
+            updates: dict,
+            *,
+            expected_version: int,
+        ):
+            _ = (workspace_id, artifact_id, updates, expected_version)
+            raise CharactersRAGDBError("sqlite backend unavailable")
+
+    async def _allow_rate_limit() -> None:
+        return None
+
+    workspace_fastapi_app.dependency_overrides[get_request_user] = lambda: SimpleNamespace(id=1)
+    workspace_fastapi_app.dependency_overrides[get_chacha_db_for_user] = lambda: _DatabaseErrorDB()
+    workspace_fastapi_app.dependency_overrides[WORKSPACES_WRITE_RATE_LIMIT] = _allow_rate_limit
+    try:
+        with TestClient(workspace_fastapi_app, raise_server_exceptions=False) as client:
+            response = client.put(
+                "/api/v1/workspaces/ws-1/artifacts/art-1",
+                json={"title": "Updated", "version": 1},
+            )
+    finally:
+        workspace_fastapi_app.dependency_overrides.pop(get_request_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(get_chacha_db_for_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(WORKSPACES_WRITE_RATE_LIMIT, None)
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to update workspace artifact"
+
+
+@pytest.mark.integration
+def test_update_workspace_note_maps_input_error_to_400(workspace_fastapi_app):
+    class _InputErrorDB:
+        def get_workspace(self, workspace_id: str):
+            return {"id": workspace_id, "version": 1}
+
+        def update_workspace_note(
+            self,
+            workspace_id: str,
+            note_id: int,
+            updates: dict,
+            *,
+            expected_version: int,
+        ):
+            _ = (workspace_id, note_id, updates, expected_version)
+            raise InputError("invalid workspace note patch")
+
+    async def _allow_rate_limit() -> None:
+        return None
+
+    workspace_fastapi_app.dependency_overrides[get_request_user] = lambda: SimpleNamespace(id=1)
+    workspace_fastapi_app.dependency_overrides[get_chacha_db_for_user] = lambda: _InputErrorDB()
+    workspace_fastapi_app.dependency_overrides[WORKSPACES_WRITE_RATE_LIMIT] = _allow_rate_limit
+    try:
+        with TestClient(workspace_fastapi_app, raise_server_exceptions=False) as client:
+            response = client.put(
+                "/api/v1/workspaces/ws-1/notes/42",
+                json={"title": "Updated", "version": 1},
+            )
+    finally:
+        workspace_fastapi_app.dependency_overrides.pop(get_request_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(get_chacha_db_for_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(WORKSPACES_WRITE_RATE_LIMIT, None)
+
+    assert response.status_code == 400, response.text
+    assert response.json()["detail"] == "invalid workspace note patch"
+
+
+@pytest.mark.integration
+def test_workspace_note_endpoints_happy_path(workspace_fastapi_app, db):
+    from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
+
+    async def _allow_rate_limit() -> None:
+        return None
+
+    async def _user() -> User:
+        return User(
+            id=1,
+            username="testuser",
+            email="test@example.com",
+            is_active=True,
+            roles=["admin"],
+            is_admin=True,
+        )
+
+    def _db() -> CharactersRAGDB:
+        return db
+
+    workspace_fastapi_app.dependency_overrides[get_request_user] = _user
+    workspace_fastapi_app.dependency_overrides[get_chacha_db_for_user] = _db
+    workspace_fastapi_app.dependency_overrides[WORKSPACES_READ_RATE_LIMIT] = _allow_rate_limit
+    workspace_fastapi_app.dependency_overrides[WORKSPACES_WRITE_RATE_LIMIT] = _allow_rate_limit
+    workspace_fastapi_app.dependency_overrides[WORKSPACES_DELETE_RATE_LIMIT] = _allow_rate_limit
+    try:
+        db.upsert_workspace("ws-note-api", "Workspace Notes")
+
+        with TestClient(workspace_fastapi_app, raise_server_exceptions=False) as client:
+            add_response = client.post(
+                "/api/v1/workspaces/ws-note-api/notes",
+                json={
+                    "title": "Draft Note",
+                    "content": "Initial note body",
+                    "keywords": ["alpha", "beta"],
+                },
+            )
+            assert add_response.status_code == 201, add_response.text
+            added = add_response.json()
+            assert added["title"] == "Draft Note"
+            assert added["content"] == "Initial note body"
+            assert json.loads(added["keywords_json"]) == ["alpha", "beta"]
+            assert added["version"] == 1
+
+            list_response = client.get("/api/v1/workspaces/ws-note-api/notes")
+            assert list_response.status_code == 200, list_response.text
+            listed = list_response.json()
+            assert len(listed) == 1
+            assert listed[0]["id"] == added["id"]
+
+            update_response = client.put(
+                f"/api/v1/workspaces/ws-note-api/notes/{added['id']}",
+                json={
+                    "title": "Final Note",
+                    "content": "Updated note body",
+                    "keywords_json": json.dumps(["gamma"]),
+                    "version": added["version"],
+                },
+            )
+            assert update_response.status_code == 200, update_response.text
+            updated = update_response.json()
+            assert updated["title"] == "Final Note"
+            assert updated["content"] == "Updated note body"
+            assert json.loads(updated["keywords_json"]) == ["gamma"]
+            assert updated["version"] == 2
+
+            delete_response = client.delete(f"/api/v1/workspaces/ws-note-api/notes/{added['id']}")
+            assert delete_response.status_code == 204, delete_response.text
+
+            final_list_response = client.get("/api/v1/workspaces/ws-note-api/notes")
+            assert final_list_response.status_code == 200, final_list_response.text
+            assert final_list_response.json() == []
+    finally:
+        workspace_fastapi_app.dependency_overrides.pop(get_request_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(get_chacha_db_for_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(WORKSPACES_READ_RATE_LIMIT, None)
+        workspace_fastapi_app.dependency_overrides.pop(WORKSPACES_WRITE_RATE_LIMIT, None)
+        workspace_fastapi_app.dependency_overrides.pop(WORKSPACES_DELETE_RATE_LIMIT, None)
+
+
+@pytest.mark.integration
+def test_list_workspace_notes_maps_database_error_to_contextual_500(workspace_fastapi_app):
+    class _DatabaseErrorDB:
+        def get_workspace(self, workspace_id: str):
+            return {"id": workspace_id, "version": 1}
+
+        def list_workspace_notes(self, workspace_id: str):
+            _ = workspace_id
+            raise CharactersRAGDBError("sqlite backend unavailable")
+
+    async def _allow_rate_limit() -> None:
+        return None
+
+    workspace_fastapi_app.dependency_overrides[get_request_user] = lambda: SimpleNamespace(id=1)
+    workspace_fastapi_app.dependency_overrides[get_chacha_db_for_user] = lambda: _DatabaseErrorDB()
+    workspace_fastapi_app.dependency_overrides[WORKSPACES_READ_RATE_LIMIT] = _allow_rate_limit
+    try:
+        with TestClient(workspace_fastapi_app, raise_server_exceptions=False) as client:
+            response = client.get("/api/v1/workspaces/ws-1/notes")
+    finally:
+        workspace_fastapi_app.dependency_overrides.pop(get_request_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(get_chacha_db_for_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(WORKSPACES_READ_RATE_LIMIT, None)
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to fetch workspace notes"
+
+
+@pytest.mark.integration
+def test_add_workspace_note_maps_input_error_to_400(workspace_fastapi_app):
+    class _InputErrorDB:
+        def get_workspace(self, workspace_id: str):
+            return {"id": workspace_id, "version": 1}
+
+        def add_workspace_note(self, workspace_id: str, data: dict):
+            _ = (workspace_id, data)
+            raise InputError("invalid workspace note create")
+
+    async def _allow_rate_limit() -> None:
+        return None
+
+    workspace_fastapi_app.dependency_overrides[get_request_user] = lambda: SimpleNamespace(id=1)
+    workspace_fastapi_app.dependency_overrides[get_chacha_db_for_user] = lambda: _InputErrorDB()
+    workspace_fastapi_app.dependency_overrides[WORKSPACES_WRITE_RATE_LIMIT] = _allow_rate_limit
+    try:
+        with TestClient(workspace_fastapi_app, raise_server_exceptions=False) as client:
+            response = client.post(
+                "/api/v1/workspaces/ws-1/notes",
+                json={
+                    "title": "Draft Note",
+                    "content": "Initial note body",
+                    "keywords": ["alpha"],
+                },
+            )
+    finally:
+        workspace_fastapi_app.dependency_overrides.pop(get_request_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(get_chacha_db_for_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(WORKSPACES_WRITE_RATE_LIMIT, None)
+
+    assert response.status_code == 400, response.text
+    assert response.json()["detail"] == "invalid workspace note create"
+
+
+@pytest.mark.integration
+def test_delete_workspace_note_maps_database_error_to_contextual_500(workspace_fastapi_app):
+    class _DatabaseErrorDB:
+        def get_workspace(self, workspace_id: str):
+            return {"id": workspace_id, "version": 1}
+
+        def delete_workspace_note(self, workspace_id: str, note_id: int) -> None:
+            _ = (workspace_id, note_id)
+            raise CharactersRAGDBError("sqlite backend unavailable")
+
+    async def _allow_rate_limit() -> None:
+        return None
+
+    workspace_fastapi_app.dependency_overrides[get_request_user] = lambda: SimpleNamespace(id=1)
+    workspace_fastapi_app.dependency_overrides[get_chacha_db_for_user] = lambda: _DatabaseErrorDB()
+    workspace_fastapi_app.dependency_overrides[WORKSPACES_DELETE_RATE_LIMIT] = _allow_rate_limit
+    try:
+        with TestClient(workspace_fastapi_app, raise_server_exceptions=False) as client:
+            response = client.delete("/api/v1/workspaces/ws-1/notes/42")
+    finally:
+        workspace_fastapi_app.dependency_overrides.pop(get_request_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(get_chacha_db_for_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(WORKSPACES_DELETE_RATE_LIMIT, None)
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to delete workspace note"
+
+
+@pytest.mark.integration
+def test_workspace_source_endpoints_happy_path(workspace_fastapi_app, db):
+    from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
+
+    async def _allow_rate_limit() -> None:
+        return None
+
+    async def _user() -> User:
+        return User(
+            id=1,
+            username="testuser",
+            email="test@example.com",
+            is_active=True,
+            roles=["admin"],
+            is_admin=True,
+        )
+
+    def _db() -> CharactersRAGDB:
+        return db
+
+    workspace_fastapi_app.dependency_overrides[get_request_user] = _user
+    workspace_fastapi_app.dependency_overrides[get_chacha_db_for_user] = _db
+    workspace_fastapi_app.dependency_overrides[WORKSPACES_READ_RATE_LIMIT] = _allow_rate_limit
+    workspace_fastapi_app.dependency_overrides[WORKSPACES_WRITE_RATE_LIMIT] = _allow_rate_limit
+    workspace_fastapi_app.dependency_overrides[WORKSPACES_DELETE_RATE_LIMIT] = _allow_rate_limit
+    try:
+        db.upsert_workspace("ws-src-api", "Workspace Sources")
+
+        with TestClient(workspace_fastapi_app, raise_server_exceptions=False) as client:
+            add_response = client.post(
+                "/api/v1/workspaces/ws-src-api/sources",
+                json={
+                    "id": "src-1",
+                    "media_id": 1,
+                    "title": "Video Source",
+                    "source_type": "video",
+                },
+            )
+            assert add_response.status_code == 201, add_response.text
+            added = add_response.json()
+            assert added["id"] == "src-1"
+            assert added["selected"] is True
+
+            list_response = client.get("/api/v1/workspaces/ws-src-api/sources")
+            assert list_response.status_code == 200, list_response.text
+            assert [item["id"] for item in list_response.json()] == ["src-1"]
+
+            second_add_response = client.post(
+                "/api/v1/workspaces/ws-src-api/sources",
+                json={
+                    "id": "src-2",
+                    "media_id": 2,
+                    "title": "Article Source",
+                    "source_type": "article",
+                },
+            )
+            assert second_add_response.status_code == 201, second_add_response.text
+
+            selection_response = client.put(
+                "/api/v1/workspaces/ws-src-api/sources/selection",
+                json={"selected_ids": ["src-2"]},
+            )
+            assert selection_response.status_code == 200, selection_response.text
+
+            reorder_response = client.put(
+                "/api/v1/workspaces/ws-src-api/sources/reorder",
+                json={"ordered_ids": ["src-2", "src-1"]},
+            )
+            assert reorder_response.status_code == 200, reorder_response.text
+
+            reordered_list_response = client.get("/api/v1/workspaces/ws-src-api/sources")
+            assert reordered_list_response.status_code == 200, reordered_list_response.text
+            reordered_sources = reordered_list_response.json()
+            assert [item["id"] for item in reordered_sources] == ["src-2", "src-1"]
+            assert reordered_sources[0]["selected"] is True
+            assert reordered_sources[1]["selected"] is False
+
+            delete_response = client.delete("/api/v1/workspaces/ws-src-api/sources/src-1")
+            assert delete_response.status_code == 204, delete_response.text
+
+            final_list_response = client.get("/api/v1/workspaces/ws-src-api/sources")
+            assert final_list_response.status_code == 200, final_list_response.text
+            assert [item["id"] for item in final_list_response.json()] == ["src-2"]
+    finally:
+        workspace_fastapi_app.dependency_overrides.pop(get_request_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(get_chacha_db_for_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(WORKSPACES_READ_RATE_LIMIT, None)
+        workspace_fastapi_app.dependency_overrides.pop(WORKSPACES_WRITE_RATE_LIMIT, None)
+        workspace_fastapi_app.dependency_overrides.pop(WORKSPACES_DELETE_RATE_LIMIT, None)
+
+
+@pytest.mark.integration
+def test_list_workspace_sources_maps_database_error_to_contextual_500(workspace_fastapi_app):
+    class _DatabaseErrorDB:
+        def get_workspace(self, workspace_id: str):
+            return {"id": workspace_id, "version": 1}
+
+        def list_workspace_sources(self, workspace_id: str):
+            _ = workspace_id
+            raise CharactersRAGDBError("sqlite backend unavailable")
+
+    async def _allow_rate_limit() -> None:
+        return None
+
+    workspace_fastapi_app.dependency_overrides[get_request_user] = lambda: SimpleNamespace(id=1)
+    workspace_fastapi_app.dependency_overrides[get_chacha_db_for_user] = lambda: _DatabaseErrorDB()
+    workspace_fastapi_app.dependency_overrides[WORKSPACES_READ_RATE_LIMIT] = _allow_rate_limit
+    try:
+        with TestClient(workspace_fastapi_app, raise_server_exceptions=False) as client:
+            response = client.get("/api/v1/workspaces/ws-1/sources")
+    finally:
+        workspace_fastapi_app.dependency_overrides.pop(get_request_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(get_chacha_db_for_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(WORKSPACES_READ_RATE_LIMIT, None)
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to fetch workspace sources"
+
+
+@pytest.mark.integration
+def test_add_workspace_source_maps_input_error_to_400(workspace_fastapi_app):
+    class _InputErrorDB:
+        def get_workspace(self, workspace_id: str):
+            return {"id": workspace_id, "version": 1}
+
+        def add_workspace_source(self, workspace_id: str, data: dict):
+            _ = (workspace_id, data)
+            raise InputError("invalid workspace source create")
+
+    async def _allow_rate_limit() -> None:
+        return None
+
+    workspace_fastapi_app.dependency_overrides[get_request_user] = lambda: SimpleNamespace(id=1)
+    workspace_fastapi_app.dependency_overrides[get_chacha_db_for_user] = lambda: _InputErrorDB()
+    workspace_fastapi_app.dependency_overrides[WORKSPACES_WRITE_RATE_LIMIT] = _allow_rate_limit
+    try:
+        with TestClient(workspace_fastapi_app, raise_server_exceptions=False) as client:
+            response = client.post(
+                "/api/v1/workspaces/ws-1/sources",
+                json={"id": "src-1", "media_id": 1, "title": "Video", "source_type": "video"},
+            )
+    finally:
+        workspace_fastapi_app.dependency_overrides.pop(get_request_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(get_chacha_db_for_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(WORKSPACES_WRITE_RATE_LIMIT, None)
+
+    assert response.status_code == 400, response.text
+    assert response.json()["detail"] == "invalid workspace source create"
+
+
+@pytest.mark.integration
+def test_delete_workspace_source_maps_database_error_to_contextual_500(workspace_fastapi_app):
+    class _DatabaseErrorDB:
+        def get_workspace(self, workspace_id: str):
+            return {"id": workspace_id, "version": 1}
+
+        def delete_workspace_source(self, workspace_id: str, source_id: str):
+            _ = (workspace_id, source_id)
+            raise CharactersRAGDBError("sqlite backend unavailable")
+
+    async def _allow_rate_limit() -> None:
+        return None
+
+    workspace_fastapi_app.dependency_overrides[get_request_user] = lambda: SimpleNamespace(id=1)
+    workspace_fastapi_app.dependency_overrides[get_chacha_db_for_user] = lambda: _DatabaseErrorDB()
+    workspace_fastapi_app.dependency_overrides[WORKSPACES_DELETE_RATE_LIMIT] = _allow_rate_limit
+    try:
+        with TestClient(workspace_fastapi_app, raise_server_exceptions=False) as client:
+            response = client.delete("/api/v1/workspaces/ws-1/sources/src-1")
+    finally:
+        workspace_fastapi_app.dependency_overrides.pop(get_request_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(get_chacha_db_for_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(WORKSPACES_DELETE_RATE_LIMIT, None)
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to delete workspace source"
+
+
+@pytest.mark.integration
+def test_update_workspace_source_selection_maps_input_error_to_400(workspace_fastapi_app):
+    class _InputErrorDB:
+        def get_workspace(self, workspace_id: str):
+            return {"id": workspace_id, "version": 1}
+
+        def update_workspace_source_selection(self, workspace_id: str, *, selected_ids: list[str]):
+            _ = (workspace_id, selected_ids)
+            raise InputError("invalid workspace source selection")
+
+    async def _allow_rate_limit() -> None:
+        return None
+
+    workspace_fastapi_app.dependency_overrides[get_request_user] = lambda: SimpleNamespace(id=1)
+    workspace_fastapi_app.dependency_overrides[get_chacha_db_for_user] = lambda: _InputErrorDB()
+    workspace_fastapi_app.dependency_overrides[WORKSPACES_WRITE_RATE_LIMIT] = _allow_rate_limit
+    try:
+        with TestClient(workspace_fastapi_app, raise_server_exceptions=False) as client:
+            response = client.put(
+                "/api/v1/workspaces/ws-1/sources/selection",
+                json={"selected_ids": ["src-1"]},
+            )
+    finally:
+        workspace_fastapi_app.dependency_overrides.pop(get_request_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(get_chacha_db_for_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(WORKSPACES_WRITE_RATE_LIMIT, None)
+
+    assert response.status_code == 400, response.text
+    assert response.json()["detail"] == "invalid workspace source selection"
+
+
+@pytest.mark.integration
+def test_reorder_workspace_sources_maps_database_error_to_contextual_500(workspace_fastapi_app):
+    class _DatabaseErrorDB:
+        def get_workspace(self, workspace_id: str):
+            return {"id": workspace_id, "version": 1}
+
+        def reorder_workspace_sources(self, workspace_id: str, ordered_ids: list[str]):
+            _ = (workspace_id, ordered_ids)
+            raise CharactersRAGDBError("sqlite backend unavailable")
+
+    async def _allow_rate_limit() -> None:
+        return None
+
+    workspace_fastapi_app.dependency_overrides[get_request_user] = lambda: SimpleNamespace(id=1)
+    workspace_fastapi_app.dependency_overrides[get_chacha_db_for_user] = lambda: _DatabaseErrorDB()
+    workspace_fastapi_app.dependency_overrides[WORKSPACES_WRITE_RATE_LIMIT] = _allow_rate_limit
+    try:
+        with TestClient(workspace_fastapi_app, raise_server_exceptions=False) as client:
+            response = client.put(
+                "/api/v1/workspaces/ws-1/sources/reorder",
+                json={"ordered_ids": ["src-2", "src-1"]},
+            )
+    finally:
+        workspace_fastapi_app.dependency_overrides.pop(get_request_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(get_chacha_db_for_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(WORKSPACES_WRITE_RATE_LIMIT, None)
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to reorder workspace sources"

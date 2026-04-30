@@ -5,6 +5,7 @@ import types
 import numpy as np
 import pytest
 import soundfile as sf
+from fastapi import HTTPException
 
 from tldw_Server_API.app.core.Audio import tokenizer_service
 
@@ -79,6 +80,21 @@ def test_load_qwen3_tokenizer_uses_from_pretrained_when_available(monkeypatch):
     tokenizer = tokenizer_service._load_qwen3_tokenizer("Qwen/Qwen3-TTS-Tokenizer-12Hz", allow_download=True)
     assert tokenizer.model == "Qwen/Qwen3-TTS-Tokenizer-12Hz"
     assert tokenizer.local_files_only is False
+
+
+def test_load_qwen3_tokenizer_sanitizes_missing_package_detail(monkeypatch):
+    def _raise_missing_package(name):
+        assert name == "qwen_tts"
+        raise ModuleNotFoundError("qwen_tts unavailable at /private/qwen/token")
+
+    monkeypatch.setattr(tokenizer_service.importlib, "import_module", _raise_missing_package)
+
+    with pytest.raises(HTTPException) as exc_info:
+        tokenizer_service._load_qwen3_tokenizer("Qwen/Qwen3-TTS-Tokenizer-12Hz", allow_download=False)
+
+    assert exc_info.value.status_code == 501
+    assert exc_info.value.detail == "qwen-tts package not available"
+    assert "/private/qwen/token" not in str(exc_info.value.detail)
 
 
 def test_load_qwen3_tokenizer_maps_model_path_error(monkeypatch):

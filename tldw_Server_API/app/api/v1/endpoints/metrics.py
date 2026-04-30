@@ -162,7 +162,7 @@ async def get_json_metrics() -> dict[str, Any]:
             "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         }
     except _METRICS_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Error getting metrics: {e}")
+        logger.error("Error getting metrics")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to retrieve metrics"
@@ -198,8 +198,8 @@ async def health_check_with_metrics() -> dict[str, Any]:
             "active_transactions": active["active_transactions"],
             "message": "Service is operational"
         }
-    except _METRICS_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Metrics Health check failed: {e}")
+    except _METRICS_NONCRITICAL_EXCEPTIONS:
+        logger.error("Metrics Health check failed")
         return {
             "status": "unhealthy",
             "message": "Metrics Health check failed: ERROR - SEE LOGS",
@@ -235,7 +235,7 @@ async def get_chat_metrics_endpoint() -> dict[str, Any]:
             "token_costs": collector.token_costs  # Model pricing info
         }
     except _METRICS_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Error getting chat metrics: {e}")
+        logger.error("Error getting chat metrics")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to retrieve chat metrics"
@@ -276,7 +276,7 @@ async def reset_metrics() -> dict[str, str]:
             "message": "Registry metrics have been reset"
         }
     except _METRICS_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Error resetting metrics: {e}")
+        logger.error("Error resetting metrics")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to reset metrics"

@@ -56,8 +56,8 @@ def record_onboarding_ingest_result(result: str) -> None:
             1,
             labels={"result": str(result or "unknown")},
         )
-    except Exception as exc:  # noqa: BLE001
-        logger.debug("watchlists telemetry metrics ingest emit skipped: {}", exc)
+    except Exception:  # noqa: BLE001
+        logger.debug("watchlists telemetry metrics ingest emit skipped")
 
 
 def record_summary_request(endpoint: str, status: str, duration_seconds: float) -> None:
@@ -75,11 +75,11 @@ def record_summary_request(endpoint: str, status: str, duration_seconds: float) 
             max(0.0, float(duration_seconds)),
             labels={"endpoint": str(endpoint or "unknown")},
         )
-    except Exception as exc:  # noqa: BLE001
-        logger.debug("watchlists telemetry metrics summary emit skipped: {}", exc)
+    except Exception:  # noqa: BLE001
+        logger.debug("watchlists telemetry metrics summary emit skipped")
 
 
 try:
     register_watchlists_telemetry_metrics()
-except Exception as exc:  # noqa: BLE001
-    logger.debug("watchlists telemetry metrics registration skipped: {}", exc)
+except Exception:  # noqa: BLE001
+    logger.debug("watchlists telemetry metrics registration skipped")

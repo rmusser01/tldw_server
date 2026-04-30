@@ -190,3 +190,64 @@ def test_import_mediawiki_dump_reuses_single_managed_media_database(
     assert len(fake_repo.calls) == 2
     assert checkpoint_saves == [123, 124]
     assert media_db.closed is True
+
+
+def test_import_mediawiki_dump_sanitizes_unexpected_import_error(monkeypatch, tmp_path):
+    dump_path = tmp_path / "dump.xml"
+    dump_path.write_text("<mediawiki />")
+
+    monkeypatch.setattr(Media_Wiki, "sanitize_wiki_name", lambda name: name)
+    monkeypatch.setattr(Media_Wiki, "validate_file_path", lambda *args, **kwargs: dump_path)
+    monkeypatch.setattr(Media_Wiki, "get_mediawiki_import_config", lambda: {"chunking": {}})
+    monkeypatch.setattr(
+        Media_Wiki,
+        "count_pages",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            RuntimeError("mediawiki parser failed at /private/wiki/dump.xml")
+        ),
+    )
+
+    results = list(
+        Media_Wiki.import_mediawiki_dump(
+            file_path=str(dump_path),
+            wiki_name="ExampleWiki",
+            store_to_db=False,
+            store_to_vector_db=False,
+            allowed_dir=tmp_path,
+        )
+    )
+
+    assert results == [{"type": "error", "message": "Error during import"}]
+    assert "mediawiki parser failed" not in str(results)
+    assert "/private/wiki/dump.xml" not in str(results)
+
+
+def test_process_single_item_sanitizes_unexpected_processing_error(monkeypatch):
+    monkeypatch.setattr(
+        Media_Wiki,
+        "optimized_chunking",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            RuntimeError("chunker failed at /private/wiki/chunks")
+        ),
+    )
+
+    result = Media_Wiki.process_single_item(
+        content="Wiki body",
+        title="Broken Page",
+        wiki_name="ExampleWiki",
+        chunk_options={},
+        item={
+            "timestamp": datetime(2024, 1, 2, tzinfo=timezone.utc),
+            "namespace": 0,
+            "page_id": 123,
+            "revision_id": 456,
+        },
+        store_to_db=False,
+        store_to_vector_db=False,
+    )
+
+    assert result["status"] == "Error"
+    assert result["error_message"] == "MediaWiki item processing failed"
+    assert result["message"] == "Failed to process MediaWiki item"
+    assert "chunker failed" not in str(result)
+    assert "/private/wiki/chunks" not in str(result)

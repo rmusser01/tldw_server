@@ -401,6 +401,8 @@ def _decorate_collections_public_operations(cls: type["CollectionsDatabase"]) ->
             continue
         if isinstance(attribute, (classmethod, staticmethod, property)):
             continue
+        if isinstance(attribute, type):
+            continue
         if not callable(attribute):
             continue
         setattr(cls, name, _pin_collections_public_operation(attribute))

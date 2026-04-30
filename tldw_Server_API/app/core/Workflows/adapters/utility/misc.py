@@ -586,9 +586,9 @@ async def run_sandbox_exec_adapter(config: dict[str, Any], context: dict[str, An
 
         return result
 
-    except Exception as e:
-        logger.exception(f"Sandbox exec adapter error: {e}")
-        return {"error": f"sandbox_exec_error:{e}"}
+    except Exception:
+        logger.exception("Sandbox exec adapter error")
+        return {"error": "sandbox_exec_error"}
 
 
 @registry.register(
@@ -689,9 +689,9 @@ async def run_screenshot_capture_adapter(config: dict[str, Any], context: dict[s
 
     except ImportError:
         return {"error": "playwright_not_installed"}
-    except Exception as e:
-        logger.exception(f"Screenshot capture error: {e}")
-        return {"error": str(e)}
+    except Exception:
+        logger.exception("Screenshot capture error")
+        return {"error": "screenshot_capture_error"}
 
 
 @registry.register(
@@ -754,8 +754,8 @@ async def run_schedule_workflow_adapter(config: dict[str, Any], context: dict[st
                 next_run_at=run_at.isoformat() if run_at else None,
                 inputs_json=json.dumps(inputs),
             )
-        except Exception as e:
-            logger.debug(f"Schedule storage error: {e}")
+        except Exception:
+            logger.debug("Schedule storage error")
 
         return {
             "scheduled": True,
@@ -765,6 +765,6 @@ async def run_schedule_workflow_adapter(config: dict[str, Any], context: dict[st
             "cron": cron,
         }
 
-    except Exception as e:
-        logger.exception(f"Schedule workflow error: {e}")
-        return {"scheduled": False, "error": str(e)}
+    except Exception:
+        logger.exception("Schedule workflow error")
+        return {"scheduled": False, "error": "schedule_workflow_error"}

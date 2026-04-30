@@ -186,27 +186,6 @@ const cpuKittenRecommendationPayload = {
   catalog: []
 }
 
-const omnivoiceStatusPayload = {
-  provider: "omnivoice",
-  enabled: true,
-  runtime: "sidecar",
-  runtime_mode: "real",
-  model_id: "k2-fsa/OmniVoice",
-  source_checkout: "../OmniVoice",
-  source_checkout_exists: true,
-  runtime_installed: true,
-  missing_runtime_components: [],
-  weights_cached: false,
-  weights_cache_path: "/tmp/hf/models--k2-fsa--OmniVoice",
-  python_path: "models/omnivoice_sidecar/.venv/bin/python",
-  runtime_path: "models/omnivoice_sidecar/runtime",
-  logs_path: "models/omnivoice_sidecar/logs",
-  sidecar: {
-    runtime: "sidecar",
-    sidecar_state: "idle_stopped"
-  }
-}
-
 describe("AudioInstallerPanel", () => {
   beforeEach(() => {
     mocks.bgRequest.mockReset()
@@ -224,9 +203,6 @@ describe("AudioInstallerPanel", () => {
       if (String(init.path).includes("/install-status")) {
         return Promise.resolve(createResponse({ status: "idle", steps: [], errors: [] }))
       }
-      if (String(init.path).includes("/providers/omnivoice/status")) {
-        return Promise.resolve(createResponse(omnivoiceStatusPayload))
-      }
       throw new Error(`Unexpected request: ${init.path}`)
     })
 
@@ -239,7 +215,6 @@ describe("AudioInstallerPanel", () => {
     expect(screen.getByRole("button", { name: "Provision bundle" })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Run verification" })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Safe rerun" })).toBeInTheDocument()
-    expect(screen.getByText("OmniVoice sidecar")).toBeInTheDocument()
   })
 
   it("deduplicates bundle options when recommendations contain multiple profiles for one bundle", async () => {
@@ -269,9 +244,6 @@ describe("AudioInstallerPanel", () => {
       }
       if (String(init.path).includes("/install-status")) {
         return Promise.resolve(createResponse({ status: "idle", steps: [], errors: [] }))
-      }
-      if (String(init.path).includes("/providers/omnivoice/status")) {
-        return Promise.resolve(createResponse(omnivoiceStatusPayload))
       }
       throw new Error(`Unexpected request: ${init.path}`)
     })
@@ -307,9 +279,6 @@ describe("AudioInstallerPanel", () => {
                 }
           )
         )
-      }
-      if (target.includes("/providers/omnivoice/status")) {
-        return Promise.resolve(createResponse(omnivoiceStatusPayload))
       }
       if (target.includes("/audio/provision")) {
         expect(init?.method).toBe("POST")
@@ -379,9 +348,6 @@ describe("AudioInstallerPanel", () => {
       if (target.includes("/install-status")) {
         return Promise.resolve(createResponse({ status: "idle", steps: [], errors: [] }))
       }
-      if (target.includes("/providers/omnivoice/status")) {
-        return Promise.resolve(createResponse(omnivoiceStatusPayload))
-      }
       if (target.includes("/audio/verify")) {
         expect(init?.method).toBe("POST")
         expect(JSON.parse(String(init?.body))).toEqual({
@@ -434,9 +400,6 @@ describe("AudioInstallerPanel", () => {
       if (target.includes("/install-status")) {
         return Promise.resolve(createResponse({ status: "idle", steps: [], errors: [] }))
       }
-      if (target.includes("/providers/omnivoice/status")) {
-        return Promise.resolve(createResponse(omnivoiceStatusPayload))
-      }
       if (target.includes("/audio/provision")) {
         expect(init?.method).toBe("POST")
         expect(JSON.parse(String(init?.body))).toEqual({
@@ -487,9 +450,6 @@ describe("AudioInstallerPanel", () => {
       }
       if (target.includes("/install-status")) {
         return Promise.resolve(createResponse({ status: "idle", steps: [], errors: [] }))
-      }
-      if (target.includes("/providers/omnivoice/status")) {
-        return Promise.resolve(createResponse(omnivoiceStatusPayload))
       }
       if (target.includes("/audio/verify")) {
         verifyAttempts += 1
@@ -553,63 +513,5 @@ describe("AudioInstallerPanel", () => {
     expect(
       await screen.findByText("This server does not expose the admin audio installer yet.")
     ).toBeInTheDocument()
-  })
-
-  it("runs omnivoice setup actions from the same panel", async () => {
-    mocks.bgRequest.mockImplementation((init: { path: string; method?: string; body?: string }) => {
-      const target = String(init.path)
-      if (target.includes("/audio/recommendations")) {
-        return Promise.resolve(createResponse(recommendationPayload))
-      }
-      if (target.includes("/install-status")) {
-        return Promise.resolve(createResponse({ status: "idle", steps: [], errors: [] }))
-      }
-      if (target.includes("/providers/omnivoice/status")) {
-        return Promise.resolve(createResponse(omnivoiceStatusPayload))
-      }
-      if (target.includes("/providers/omnivoice/action")) {
-        expect(init?.method).toBe("POST")
-        expect(JSON.parse(String(init?.body))).toEqual({ action: "warmup" })
-        return Promise.resolve(
-          createResponse({
-            success: true,
-            provider: "omnivoice",
-            action: "warmup",
-            status: "ready",
-            detail: "OmniVoice sidecar warmup completed.",
-            snapshot_path: null,
-            health: {
-              ready: true,
-              model_loaded: true,
-              runtime_mode: "real"
-            },
-            omnivoice: {
-              ...omnivoiceStatusPayload,
-              sidecar: {
-                runtime: "sidecar",
-                sidecar_state: "ready"
-              }
-            }
-          })
-        )
-      }
-      throw new Error(`Unexpected request: ${init.path}`)
-    })
-
-    render(<AudioInstallerPanel />)
-
-    fireEvent.click(await screen.findByRole("button", { name: "Warm up sidecar" }))
-
-    await waitFor(() => {
-      expect(mocks.bgRequest).toHaveBeenCalledWith(
-        expect.objectContaining({
-          path: "/api/v1/setup/admin/audio/providers/omnivoice/action",
-          method: "POST"
-        })
-      )
-    })
-
-    expect(await screen.findByText("OmniVoice sidecar warmup completed.")).toBeInTheDocument()
-    expect((await screen.findAllByText("ready")).length).toBeGreaterThanOrEqual(1)
   })
 })

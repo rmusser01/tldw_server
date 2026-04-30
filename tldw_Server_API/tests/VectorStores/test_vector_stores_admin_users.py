@@ -70,6 +70,25 @@ def test_admin_users_list(client_admin, tmp_path):
     assert '1' in got and '2' in got
 
 
+def test_admin_users_list_sanitizes_scan_failure(client_admin, monkeypatch):
+    from tldw_Server_API.app.api.v1.endpoints import vector_stores_openai as vector_ep
+
+    class ExplodingBaseDir:
+        def iterdir(self):
+            raise OSError("scan backend exploded")
+
+    monkeypatch.setattr(
+        vector_ep.DatabasePaths,
+        "get_user_db_base_dir",
+        staticmethod(lambda: ExplodingBaseDir()),
+    )
+
+    response = client_admin.get('/api/v1/vector_stores/admin/users')
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == "Failed to list vector store users"
+
+
 def test_vector_store_meta_db_uses_shared_sqlite_policy_helper():
     meta_module = importlib.import_module(
         "tldw_Server_API.app.core.Embeddings.vector_store_meta_db"

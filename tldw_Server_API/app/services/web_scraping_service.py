@@ -511,7 +511,10 @@ async def process_web_scraping_task(
         except HTTPException:
             raise
         except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e)) from e
+            raise HTTPException(
+                status_code=500,
+                detail="Legacy web scraping fallback failed",
+            ) from e
 
 
 async def ingest_web_content_orchestrate(

@@ -2,9 +2,12 @@
 from __future__ import annotations
 
 import asyncio
+import builtins
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
+from fastapi import HTTPException
 
 from tldw_Server_API.app.core.Agent_Client_Protocol.event_bus import SessionEventBus
 from tldw_Server_API.app.core.Agent_Client_Protocol.events import (
@@ -223,3 +226,68 @@ async def test_stop_unsubscribes():
     # Task should be cleaned up
     assert consumer._task is None
     assert consumer._bus is None
+
+
+@pytest.mark.asyncio
+async def test_ensure_checkpoint_consumer_sanitizes_sandbox_service_errors(monkeypatch):
+    """Sandbox service setup failures should not expose import/config details."""
+    from tldw_Server_API.app.api.v1.endpoints import agent_client_protocol as acp_mod
+
+    with acp_mod._CHECKPOINT_CONSUMERS_LOCK:
+        acp_mod._CHECKPOINT_CONSUMERS.clear()
+
+    original_import = builtins.__import__
+
+    def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "tldw_Server_API.app.core.Sandbox.service":
+            raise ImportError("sandbox backend exploded")
+        return original_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await acp_mod._ensure_checkpoint_consumer("session-redacted")
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail == "Sandbox service unavailable"
+
+
+@pytest.mark.asyncio
+async def test_acp_session_rollback_sanitizes_restore_errors(monkeypatch):
+    """Sandbox restore failures should not expose backend exception details."""
+    from tldw_Server_API.app.api.v1.endpoints import agent_client_protocol as acp_mod
+
+    class FakeUser:
+        id = 1
+
+    class FailingSandboxService:
+        def restore_snapshot(self, _session_id, _snapshot_id):
+            raise RuntimeError("sandbox restore backend exploded")
+
+    async def fake_runner_client():
+        return object()
+
+    async def fake_require_access(_client, *, session_id, user_id):
+        return None
+
+    original_import = builtins.__import__
+
+    def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "tldw_Server_API.app.core.Sandbox.service":
+            return SimpleNamespace(SandboxService=FailingSandboxService)
+        return original_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(acp_mod, "get_runner_client", fake_runner_client)
+    monkeypatch.setattr(acp_mod, "_require_session_access", fake_require_access)
+    monkeypatch.setattr(acp_mod, "_acp_enforce_control_rate_limit", lambda **_kwargs: None)
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await acp_mod.acp_session_rollback(
+            "session-redacted",
+            acp_mod.ACPRollbackRequest(to_snapshot_id="snapshot-redacted"),
+            user=FakeUser(),
+        )
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail == "Rollback failed"

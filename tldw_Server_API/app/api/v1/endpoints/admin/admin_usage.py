@@ -75,7 +75,7 @@ async def run_usage_aggregate(day: str | None = Query(None, description="YYYY-MM
     except HTTPException:
         raise
     except Exception as exc:
-        logger.error("Failed to run usage aggregate: {}", exc)
+        logger.error("Failed to run usage aggregate")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to run usage aggregate",
@@ -106,8 +106,8 @@ async def export_usage_daily_csv(
     if not filename:
         filename = default_filename
     if filename:
-        safe = filename.replace("\n", " ").replace("\r", " ").replace("\"", "_")
-        resp.headers["Content-Disposition"] = f"attachment; filename=\"{safe}\""
+        safe = filename.replace("\n", " ").replace("\r", " ").replace('"', "_")
+        resp.headers["Content-Disposition"] = f'attachment; filename="{safe}"'
     return resp
 
 
@@ -135,8 +135,8 @@ async def export_usage_top_csv(
     if not filename:
         filename = default_filename
     if filename:
-        safe = filename.replace("\n", " ").replace("\r", " ").replace("\"", "_")
-        resp.headers["Content-Disposition"] = f"attachment; filename=\"{safe}\""
+        safe = filename.replace("\n", " ").replace("\r", " ").replace('"', "_")
+        resp.headers["Content-Disposition"] = f'attachment; filename="{safe}"'
     return resp
 
 
@@ -147,7 +147,7 @@ async def run_llm_usage_aggregate(day: str | None = Query(None, description="YYY
     except HTTPException:
         raise
     except Exception as exc:
-        logger.error("Failed to run LLM usage aggregate: {}", exc)
+        logger.error("Failed to run LLM usage aggregate")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to run LLM usage aggregate",
@@ -189,8 +189,12 @@ async def get_llm_usage(
 async def get_llm_usage_summary(
     start: str | None = Query(None, description="ISO timestamp inclusive"),
     end: str | None = Query(None, description="ISO timestamp inclusive"),
-    group_by: list[str] = Query(default=["user"], description="One or two groupings: user|provider|model|operation|day"),
-    provider: str | None = Query(None, description="Optional provider filter (supports trend queries with group_by=day)"),
+    group_by: list[str] = Query(
+        default=["user"], description="One or two groupings: user|provider|model|operation|day"
+    ),
+    provider: str | None = Query(
+        None, description="Optional provider filter (supports trend queries with group_by=day)"
+    ),
     org_id: int | None = Query(None, description="Restrict to a specific organization"),
     principal: AuthPrincipal = Depends(get_auth_principal),
     db=Depends(get_db_transaction),

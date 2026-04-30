@@ -16,13 +16,13 @@ from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps.kanban_deps import (
     get_kanban_db_for_user,
-    handle_kanban_db_error,
     kanban_rate_limit,
 )
 from tldw_Server_API.app.api.v1.endpoints.kanban._kanban_utils import (
     resolve_limit_offset,
     to_db_timestamp,
 )
+from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.api.v1.schemas.kanban_schemas import (
     ActivitiesListResponse,
     ActivityResponse,
@@ -48,12 +48,6 @@ from tldw_Server_API.app.core.DB_Management.Kanban_DB import (
 )
 
 router = APIRouter(prefix="/boards", tags=["Kanban Boards"])
-
-
-# --- Helper for Exception Handling ---
-def _handle_error(e: Exception) -> HTTPException:
-    """Convert exceptions to appropriate HTTP responses."""
-    return handle_kanban_db_error(e)
 
 def _export_board_data(
     db: KanbanDB,
@@ -107,7 +101,7 @@ async def create_board(
         logger.info(f"Created board {board['id']} for user {db.user_id}")
         return BoardResponse(**board)
     except (InputError, ConflictError, KanbanDBError) as e:
-        raise _handle_error(e) from e
+        raise map_db_error_to_http(e, default_detail="Failed to create board") from e
 @router.get(
     "",
     response_model=BoardListResponse,
@@ -147,7 +141,7 @@ async def list_boards(
             )
         )
     except KanbanDBError as e:
-        raise _handle_error(e) from e
+        raise map_db_error_to_http(e, default_detail="Failed to fetch boards") from e
 @router.get(
     "/{board_id}",
     response_model=BoardWithListsResponse,
@@ -198,7 +192,7 @@ async def get_board(
 
         return BoardWithListsResponse(**board)
     except (NotFoundError, KanbanDBError) as e:
-        raise _handle_error(e) from e
+        raise map_db_error_to_http(e, default_detail="Failed to fetch board") from e
 
 
 @router.patch(
@@ -232,7 +226,7 @@ async def update_board(
         logger.info(f"Updated board {board_id}")
         return BoardResponse(**board)
     except (NotFoundError, InputError, ConflictError, KanbanDBError) as e:
-        raise _handle_error(e) from e
+        raise map_db_error_to_http(e, default_detail="Failed to update board") from e
 # =============================================================================
 # Archive Operations
 # =============================================================================
@@ -254,7 +248,7 @@ async def archive_board(
         logger.info(f"Archived board {board_id}")
         return BoardResponse(**board)
     except (NotFoundError, KanbanDBError) as e:
-        raise _handle_error(e) from e
+        raise map_db_error_to_http(e, default_detail="Failed to archive board") from e
 
 
 @router.post(
@@ -274,7 +268,7 @@ async def unarchive_board(
         logger.info(f"Unarchived board {board_id}")
         return BoardResponse(**board)
     except (NotFoundError, KanbanDBError) as e:
-        raise _handle_error(e) from e
+        raise map_db_error_to_http(e, default_detail="Failed to unarchive board") from e
 
 
 # =============================================================================
@@ -307,7 +301,7 @@ async def delete_board(
         logger.info(f"Deleted board {board_id}")
         return DetailResponse(detail=f"Board {board_id} deleted successfully")
     except KanbanDBError as e:
-        raise _handle_error(e) from e
+        raise map_db_error_to_http(e, default_detail="Failed to delete board") from e
 @router.post(
     "/{board_id}/restore",
     response_model=BoardResponse,
@@ -325,7 +319,7 @@ async def restore_board(
         logger.info(f"Restored board {board_id}")
         return BoardResponse(**board)
     except (NotFoundError, InputError, KanbanDBError) as e:
-        raise _handle_error(e) from e
+        raise map_db_error_to_http(e, default_detail="Failed to restore board") from e
 # =============================================================================
 # Activity Endpoints (Phase 2 placeholder)
 # =============================================================================
@@ -384,7 +378,7 @@ async def get_board_activities(
             )
         )
     except (NotFoundError, KanbanDBError) as e:
-        raise _handle_error(e) from e
+        raise map_db_error_to_http(e, default_detail="Failed to fetch board activities") from e
 # =============================================================================
 # Export/Import Endpoints (Phase 3)
 # =============================================================================
@@ -411,7 +405,7 @@ async def export_board_get(
             include_deleted=include_deleted,
         )
     except (NotFoundError, KanbanDBError) as e:
-        raise _handle_error(e) from e
+        raise map_db_error_to_http(e, default_detail="Failed to export board") from e
 
 @router.post(
     "/{board_id}/export",
@@ -442,7 +436,7 @@ async def export_board(
             include_deleted=export_request.include_deleted,
         )
     except (NotFoundError, KanbanDBError) as e:
-        raise _handle_error(e) from e
+        raise map_db_error_to_http(e, default_detail="Failed to export board") from e
 @router.post(
     "/import",
     response_model=BoardImportResponse,
@@ -477,4 +471,4 @@ async def import_board(
             import_stats=ImportStatsResponse(**result["import_stats"])
         )
     except (InputError, KanbanDBError) as e:
-        raise _handle_error(e) from e
+        raise map_db_error_to_http(e, default_detail="Failed to import board") from e

@@ -141,6 +141,9 @@ class BufferedRealtimeSession(RealtimeTTSSession):
                         await self._audio_queue.put(chunk)
         except Exception as exc:
             self._error = exc
-            logger.error(f"Buffered realtime TTS session failed: {exc}")
+            logger.error(
+                "Buffered realtime TTS session failed ({})",
+                type(exc).__name__,
+            )
         finally:
             await self._audio_queue.put(None)

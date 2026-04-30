@@ -263,6 +263,49 @@ class TestProjectEndpoints:
         assert data["data"]["description"] == "Updated description"
         assert data["data"]["status"] == "active"
 
+    def test_archive_and_unarchive_project(self, client, test_db):
+
+        """Test archiving and unarchiving a project."""
+        create_response = client.post(
+            "/api/v1/prompt-studio/projects/",
+            json={"name": "Archive Test", "description": "Original"},
+        )
+
+        assert create_response.status_code == 201
+        project_id = create_response.json()["data"]["id"]
+
+        archive_response = client.post(
+            f"/api/v1/prompt-studio/projects/archive/{project_id}"
+        )
+
+        assert archive_response.status_code == 200
+        archive_data = archive_response.json()
+        assert archive_data["success"] == True
+        assert archive_data["data"]["status"] == "archived"
+
+        get_archived_response = client.get(
+            f"/api/v1/prompt-studio/projects/get/{project_id}"
+        )
+
+        assert get_archived_response.status_code == 200
+        assert get_archived_response.json()["data"]["status"] == "archived"
+
+        unarchive_response = client.post(
+            f"/api/v1/prompt-studio/projects/unarchive/{project_id}"
+        )
+
+        assert unarchive_response.status_code == 200
+        unarchive_data = unarchive_response.json()
+        assert unarchive_data["success"] == True
+        assert unarchive_data["data"]["status"] == "active"
+
+        get_unarchived_response = client.get(
+            f"/api/v1/prompt-studio/projects/get/{project_id}"
+        )
+
+        assert get_unarchived_response.status_code == 200
+        assert get_unarchived_response.json()["data"]["status"] == "active"
+
     def test_delete_project(self, client, test_db):
 
         """Test deleting a project."""

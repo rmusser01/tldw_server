@@ -538,7 +538,7 @@ async def parse_audiobook_source(
                 custom_pattern=request.custom_chapter_pattern,
             )
         except Exception as exc:
-            logger.warning("Chapter detection failed: {}", exc)
+            logger.warning("Chapter detection failed")
             raise HTTPException(status_code=400, detail="chapter_detection_failed") from exc
 
     if tag_result.chapter_markers or tag_result.voice_markers or tag_result.speed_markers or tag_result.ts_markers:
@@ -585,8 +585,8 @@ async def create_audiobook_job(
                 try:
                     if isinstance(payload.get("items"), list):
                         payload["items"][idx].pop("subtitles", None)
-                except _AUDIOBOOKS_COERCE_EXCEPTIONS as exc:
-                    logger.debug("Failed to remove subtitle override at index {}: {}", idx, exc)
+                except _AUDIOBOOKS_COERCE_EXCEPTIONS:
+                    logger.debug("Failed to remove subtitle override")
 
     job_manager = _get_job_manager()
     batch_group = request.queue.batch_group if request.queue is not None else None
@@ -1008,8 +1008,8 @@ async def export_subtitles(
                 return response
             try:
                 collections_db.delete_output_artifact(cached_row.id, hard=True)
-            except _AUDIOBOOKS_DB_OPERATION_EXCEPTIONS as exc:
-                logger.warning("audiobook subtitles: failed to prune missing cache output: {}", exc)
+            except _AUDIOBOOKS_DB_OPERATION_EXCEPTIONS:
+                logger.warning("audiobook subtitles: failed to prune missing cache output")
 
     try:
         content = generate_subtitles(
@@ -1070,8 +1070,8 @@ async def export_subtitles(
     )
     try:
         collections_db.update_audiobook_output_usage(size_bytes)
-    except _AUDIOBOOKS_DB_OPERATION_EXCEPTIONS as exc:
-        logger.warning("audiobook_quota: failed to increment subtitle usage: {}", exc)
+    except _AUDIOBOOKS_DB_OPERATION_EXCEPTIONS:
+        logger.warning("audiobook_quota: failed to increment subtitle usage")
 
     project_id = metadata.get("project_id")
     if project_id:
@@ -1086,8 +1086,8 @@ async def export_subtitles(
             )
         except KeyError:
             pass
-        except _AUDIOBOOKS_DB_OPERATION_EXCEPTIONS as exc:
-            logger.warning("audiobook subtitles: failed to link artifact: {}", exc)
+        except _AUDIOBOOKS_DB_OPERATION_EXCEPTIONS:
+            logger.warning("audiobook subtitles: failed to link artifact")
 
     response = PlainTextResponse(content)
     response.headers["X-Subtitle-Output-Id"] = str(row.id)

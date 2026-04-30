@@ -44,7 +44,7 @@ PowerShell / no-`make` equivalent:
 docker compose --env-file tldw_Server_API/Config_Files/.env -f Dockerfiles/docker-compose.single-user.yml -f Dockerfiles/docker-compose.webui.yml up -d --wait
 ```
 
-The API starts at http://127.0.0.1:8000 and the WebUI starts at http://127.0.0.1:8080. The default path uses same-origin browser API requests through the WebUI proxy. Treat LAN/custom-host browser access as advanced configuration unless you intentionally need another device or origin to reach the API.
+The API starts at http://127.0.0.1:8000 and the WebUI starts at http://127.0.0.1:8080. The default browser path uses same-origin browser API requests through the WebUI proxy. Treat LAN/custom-host browser access as advanced configuration; if you intentionally need that path, set `NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE=advanced` together with `NEXT_PUBLIC_API_URL`.
 
 Default persistence uses Docker named volumes:
 
@@ -115,4 +115,4 @@ After this profile is running, continue with one of:
 
 - Add provider API keys to `tldw_Server_API/Config_Files/.env`, then restart the stack.
 - Use `Dockerfiles/docker-compose.host-storage.yml` for host-visible data under `docker-data/`.
-- Use the advanced WebUI environment variables only when browsers must reach a LAN host, reverse proxy, or custom domain. Set `NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE=advanced` together with `NEXT_PUBLIC_API_URL` for that advanced/custom-host path.
+- Use the advanced WebUI environment variables only when browsers must reach a LAN host, reverse proxy, or custom domain.

@@ -2,6 +2,8 @@ import os
 import pytest
 from fastapi.testclient import TestClient
 
+from tldw_Server_API.app.core.Jobs.manager import JobManager
+
 
 def _set_env(monkeypatch, tmp_path):
 
@@ -57,3 +59,19 @@ def test_rbac_for_list_and_stale_requires_domain_and_allowlist(monkeypatch, tmp_
         r6 = client.get("/api/v1/jobs/stale", params={"domain": "chatbooks"})
         assert r5.status_code == 200
         assert r6.status_code == 200
+
+
+def test_jobs_stale_sanitizes_generic_failure(monkeypatch, tmp_path):
+    _set_env(monkeypatch, tmp_path)
+    monkeypatch.setenv("JOBS_DOMAIN_ALLOWLIST_1", "chatbooks")
+
+    def boom(self):
+        raise RuntimeError("jobs stale backend exploded")
+
+    monkeypatch.setattr(JobManager, "_connect", boom)
+
+    app, headers = _client(monkeypatch)
+    with TestClient(app, headers=headers) as client:
+        r = client.get("/api/v1/jobs/stale", params={"domain": "chatbooks"})
+        assert r.status_code == 500
+        assert r.json()["detail"] == "Stale groups failed"

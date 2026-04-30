@@ -151,7 +151,7 @@ async def query_text2sql(
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"code": "sql_execution_failed", "message": str(exc)},
+            detail={"code": "sql_execution_failed", "message": "SQL execution failed"},
         ) from exc
 
     sql_text = str(result.get("sql", ""))

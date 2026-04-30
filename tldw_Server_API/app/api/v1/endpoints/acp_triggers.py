@@ -130,7 +130,7 @@ def _get_trigger_manager():
         from fastapi import HTTPException
         raise HTTPException(
             status_code=503,
-            detail=f"Webhook trigger encryption not configured: {exc}",
+            detail="Webhook trigger encryption not configured",
         )
     return ACPTriggerManager(db=db, secret_manager=secret_mgr)
 

@@ -48,8 +48,8 @@ def _get_tz(timezone_str: str | None) -> ZoneInfo:
         return ZoneInfo("UTC")
     try:
         return ZoneInfo(timezone_str)
-    except (KeyError, ValueError, TypeError) as e:
-        logger.debug(f"Invalid schedule_timezone '{timezone_str}', falling back to UTC: {e}")
+    except (KeyError, ValueError, TypeError):
+        logger.debug("Invalid schedule_timezone, falling back to UTC")
         return ZoneInfo("UTC")
 
 
@@ -103,8 +103,8 @@ def is_schedule_active(
                         return False
             # If only one bound is set or parse failed, fail-open (active)
 
-    except Exception as e:
-        logger.debug(f"Schedule evaluation error, failing open: {e}")
+    except Exception:
+        logger.debug("Schedule evaluation error, failing open")
         return True
 
     return True

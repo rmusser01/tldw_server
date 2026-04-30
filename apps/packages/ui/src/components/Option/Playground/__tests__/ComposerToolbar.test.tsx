@@ -136,6 +136,25 @@ describe("ComposerToolbar web search", () => {
     expect(screen.queryByRole("button", { name: "Send" })).toBeNull()
   })
 
+  it("keeps mobile image attachment discoverable when options are collapsed", () => {
+    render(
+      <ComposerToolbar
+        {...createProps({
+          isMobile: true,
+          optionsExpanded: false,
+          sendControlPlacement: "external",
+          attachmentButton: <button type="button">Attach image</button>
+        })}
+      />
+    )
+
+    expect(
+      screen.getByRole("button", { name: "Attach image" })
+    ).toBeVisible()
+    expect(screen.queryByText("Model selector")).toBeNull()
+    expect(screen.queryByRole("button", { name: "Send" })).toBeNull()
+  })
+
   it("uses casual focus-first layout by default", () => {
     render(<ComposerToolbar {...createProps()} />)
 

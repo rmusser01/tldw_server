@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import json
 import os
-import random
 import re
+import secrets
 import time
 from pathlib import Path
 from typing import Any
@@ -19,6 +19,10 @@ from loguru import logger
 
 BASE_DIR = Path("Databases/observability")
 SINK = BASE_DIR / "rag_payload_exemplars.jsonl"
+
+
+def _sampling_random() -> float:
+    return secrets.SystemRandom().random()
 
 
 def _enforce_base_dir(candidate: Path) -> Path:
@@ -88,7 +92,7 @@ def maybe_record_exemplar(
     except Exception:
         rate = 0.05
     try:
-        if random.random() > max(0.0, min(1.0, rate)):
+        if _sampling_random() > max(0.0, min(1.0, rate)):
             return
         sink = _safe_sink(user_id=user_id, namespace=namespace)
         sample = {
@@ -109,5 +113,5 @@ def maybe_record_exemplar(
         }
         with sink.open("a", encoding="utf-8") as f:
             f.write(json.dumps(sample) + "\n")
-    except Exception as e:
-        logger.debug(f"Failed to write exemplar: {e}")
+    except Exception:
+        logger.debug("Failed to write exemplar")

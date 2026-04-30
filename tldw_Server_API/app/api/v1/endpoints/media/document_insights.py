@@ -66,8 +66,9 @@ def _build_insights_cache_key(
         f"{categories_str}:{model_str}:maxlen:{max_content_length}"
     )
 
+
 # System prompt for generating insights
-INSIGHTS_SYSTEM_PROMPT = '''You are a research analyst. Analyze the following document and extract structured insights.
+INSIGHTS_SYSTEM_PROMPT = """You are a research analyst. Analyze the following document and extract structured insights.
 For each category, provide a concise title and detailed content.
 
 Categories to analyze:
@@ -90,7 +91,7 @@ Important:
 - If the document is not a research paper, adapt the categories as appropriate
 - For non-academic documents, focus on: summary, key_findings, and any applicable categories
 - Return ONLY valid JSON, no other text
-'''
+"""
 
 
 def _get_adapter(provider: str):
@@ -235,7 +236,7 @@ async def generate_document_insights(
     try:
         media = db.get_media_by_id(media_id, include_deleted=False, include_trash=False)
     except Exception as e:
-        logger.error("Database error fetching media_id={}: {}", media_id, e)
+        logger.error("Database error fetching media item")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Database error while fetching media item",
@@ -285,10 +286,10 @@ async def generate_document_insights(
     provider = (DEFAULT_LLM_PROVIDER or "openai").strip().lower()
     api_key, _debug = resolve_provider_api_key(provider, prefer_module_keys_in_tests=True)
     if provider_requires_api_key(provider) and not api_key:
-        logger.error("No API key available for provider '{}'", provider)
+        logger.error("No API key available for configured provider")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"LLM provider '{provider}' is not configured. Please set up API credentials.",
+            detail="LLM provider configuration error",
         )
 
     # 5. Call LLM
@@ -304,17 +305,20 @@ async def generate_document_insights(
         model_to_use = _resolve_model(provider, request.model, app_config)
         if model_to_use is None:
             raise ChatConfigurationError(provider=provider, message="Model is required for provider.")
-        return adapter.chat(
-            {
-                "messages": messages_payload,
-                "api_key": api_key,
-                "model": model_to_use,
-                "temperature": 0.3,
-                "max_tokens": 2000,
-                "response_format": response_format,
-                "app_config": app_config,
-            }
-        ), model_to_use
+        return (
+            adapter.chat(
+                {
+                    "messages": messages_payload,
+                    "api_key": api_key,
+                    "model": model_to_use,
+                    "temperature": 0.3,
+                    "max_tokens": 2000,
+                    "response_format": response_format,
+                    "app_config": app_config,
+                }
+            ),
+            model_to_use,
+        )
 
     try:
         start = time.time()
@@ -327,13 +331,13 @@ async def generate_document_insights(
             media_id,
         )
     except ChatConfigurationError as e:
-        logger.error("LLM configuration error for insights: {}", e)
+        logger.error("LLM configuration error for insights")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=str(e),
+            detail="LLM provider configuration error",
         ) from e
     except Exception as e:
-        logger.error("LLM call failed for document insights: {}", e, exc_info=True)
+        logger.error("LLM call failed for document insights")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to generate insights. LLM service error.",
@@ -350,11 +354,7 @@ async def generate_document_insights(
         raw_insights = payload.get("insights") if isinstance(payload, dict) else payload
 
         if not isinstance(raw_insights, list):
-            logger.warning(
-                "LLM response did not include an insights list (media_id={}): {}",
-                media_id,
-                type(raw_insights),
-            )
+            logger.warning("LLM response did not include an insights list")
             raw_insights = []
 
         insights = _normalize_insights(raw_insights)
@@ -382,12 +382,7 @@ async def generate_document_insights(
         return response
 
     except Exception as e:
-        logger.error(
-            "Failed to parse LLM response for document insights (media_id={}): {}",
-            media_id,
-            e,
-            exc_info=True,
-        )
+        logger.error("Failed to parse LLM response for document insights")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to parse insights from LLM response.",

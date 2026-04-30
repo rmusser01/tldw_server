@@ -34,11 +34,7 @@ async def require_debug_roles(
     if getattr(principal, "subject", None) == "single_user":
         return principal
 
-    roles = {
-        str(role).strip().lower()
-        for role in (principal.roles or [])
-        if str(role).strip()
-    }
+    roles = {str(role).strip().lower() for role in (principal.roles or []) if str(role).strip()}
     if roles & _DEBUG_ALLOWED_ROLES:
         return principal
     raise HTTPException(
@@ -79,9 +75,9 @@ async def _resolve_api_key_id(request: Request, x_api_key: str | None) -> dict[s
                 user_id = getattr(principal, "user_id", None)
                 if key_id is not None:
                     return {"api_key_id": int(key_id), "user_id": user_id}
-    except (AttributeError, TypeError, ValueError) as exc:
+    except (AttributeError, TypeError, ValueError):
         # Fall back to legacy request.state attributes and header-based resolution.
-        logger.debug(f"_resolve_api_key_id: principal-first resolution failed, falling back: {exc}")
+        logger.debug("_resolve_api_key_id: principal-first resolution failed, falling back")
 
     key_id = getattr(request.state, "api_key_id", None)
     user_id = getattr(request.state, "user_id", None)

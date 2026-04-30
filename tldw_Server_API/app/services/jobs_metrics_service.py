@@ -192,7 +192,7 @@ class JobsMetricsService:
                 n = self.reconcile_once()
                 logger.debug(f"Jobs metrics reconcile tick: updated {n} group(s)")
             except _JOBS_METRICS_BEST_EFFORT_EXCEPTIONS as e:
-                logger.warning(f"Jobs metrics reconcile error: {e}")
+                logger.bind(error_type=type(e).__name__).warning("Jobs metrics reconcile error")
             time.sleep(self.interval)
 
 
@@ -207,7 +207,7 @@ async def run_jobs_metrics_reconcile(stop_event) -> None:
         try:
             svc.reconcile_once()
         except _JOBS_METRICS_BEST_EFFORT_EXCEPTIONS as e:
-            logger.debug(f"Jobs reconcile loop error: {e}")
+            logger.bind(error_type=type(e).__name__).debug("Jobs reconcile loop error")
         await _wait_for_stop_or_timeout(stop_event, interval)
 
 
@@ -321,5 +321,5 @@ async def run_jobs_metrics_gauges(stop_event) -> None:
                 with contextlib.suppress(_JOBS_METRICS_BEST_EFFORT_EXCEPTIONS):
                     conn.close()
         except _JOBS_METRICS_BEST_EFFORT_EXCEPTIONS as e:
-            logger.debug(f"Jobs SLO gauges loop error: {e}")
+            logger.bind(error_type=type(e).__name__).debug("Jobs SLO gauges loop error")
         await _wait_for_stop_or_timeout(stop_event, interval)

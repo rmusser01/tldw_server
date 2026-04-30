@@ -181,13 +181,13 @@ async def admin_rescan(
     try:
         await svc._rescan_once()  # type: ignore[attr-defined]
     except Exception as e:
-        logger.warning(f"Admin rescan failed: {e}")
+        logger.warning("Admin rescan failed")
         raise HTTPException(status_code=500, detail="Rescan failed") from e
     jobs = 0
     try:
         jobs = len(svc._aps.get_jobs()) if getattr(svc, "_aps", None) else 0  # type: ignore[attr-defined]
-    except Exception as jobs_count_error:
-        logger.debug("Failed to collect APScheduler job count after admin rescan", exc_info=jobs_count_error)
+    except Exception:
+        logger.debug("Failed to collect APScheduler job count after admin rescan")
     return {"ok": True, "jobs": jobs}
 
 
@@ -274,12 +274,12 @@ async def get_schedule(
             if nxt is not None:
                 try:
                     svc._get_db(int(s.user_id)).set_history(s.id, next_run_at=nxt.isoformat())  # type: ignore[attr-defined]
-                except Exception as persist_next_run_error:
-                    logger.debug("Failed to persist computed next_run_at for schedule {}", s.id, exc_info=persist_next_run_error)
+                except Exception:
+                    logger.debug("Failed to persist computed next_run_at")
                 # Refresh s to reflect persisted value
                 s = svc.get(schedule_id) or s
-        except Exception as cron_parse_error:
-            logger.debug("Failed to compute next_run_at from crontab for schedule {}", s.id, exc_info=cron_parse_error)
+        except Exception:
+            logger.debug("Failed to compute next_run_at from crontab")
     try:
         inputs = json.loads(s.inputs_json or "{}")
     except Exception:

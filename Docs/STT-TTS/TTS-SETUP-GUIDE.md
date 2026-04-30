@@ -57,11 +57,6 @@ Flags:
 
 OmniVoice runs in a dedicated sidecar runtime rather than the main server interpreter.
 
-Focused OmniVoice docs:
-
-- `Docs/STT-TTS/OMNIVOICE_TTS_SETUP.md`
-- `Docs/STT-TTS/OMNIVOICE_TTS_USER_GUIDE.md`
-
 Preferred install path:
 
 ```bash
@@ -84,9 +79,7 @@ Runtime notes:
 
 - The sidecar supervisor reads the configured OmniVoice interpreter path from provider config, so the dedicated `.venv` created by the installer is the runtime that gets launched.
 - Public requests that target OmniVoice and omit `voice` normalize to `auto`.
-- The WebUI admin audio installer now exposes OmniVoice `Pre-download weights` and `Warm up sidecar` actions alongside the existing bundle controls.
 - Explicit voices still win over the provider default.
-- See `Docs/STT-TTS/OMNIVOICE_TTS_SETUP.md` for a full setup runbook and smoke test.
 
 ### Model Auto-Download Controls
 

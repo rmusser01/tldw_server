@@ -206,7 +206,9 @@ class AuthnzRateLimitsRepo:
                         await conn.commit()
                     except Exception as commit_error:
                         # aiosqlite transaction manager may commit outside; ignore
-                        logger.debug("Rate limits repo explicit commit failed; transaction manager likely committed", exc_info=commit_error)
+                        logger.bind(error_type=type(commit_error).__name__).debug(
+                            "Rate limits repo explicit commit failed; transaction manager likely committed"
+                        )
         except Exception as exc:
             logger.error(f"AuthnzRateLimitsRepo.ensure_schema failed: {exc}")
             raise

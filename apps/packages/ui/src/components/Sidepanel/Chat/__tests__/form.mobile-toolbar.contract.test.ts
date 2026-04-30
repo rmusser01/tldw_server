@@ -17,6 +17,22 @@ if (!chatFormPath) {
 
 const chatFormSource = readFileSync(chatFormPath, "utf8")
 
+const controlRowPathCandidates = [
+  "src/components/Sidepanel/Chat/ControlRow.tsx",
+  "../packages/ui/src/components/Sidepanel/Chat/ControlRow.tsx",
+  "apps/packages/ui/src/components/Sidepanel/Chat/ControlRow.tsx"
+]
+
+const controlRowPath = controlRowPathCandidates.find((candidate) =>
+  existsSync(candidate)
+)
+
+if (!controlRowPath) {
+  throw new Error("Unable to locate Sidepanel control row source for compact toolbar contract test")
+}
+
+const controlRowSource = readFileSync(controlRowPath, "utf8")
+
 describe("sidepanel chat compact toolbar contract", () => {
   it("keeps compact icon controls at a minimum 44px touch target", () => {
     expect(chatFormSource).toMatch(/h-11 w-11 min-h-\[44px\] min-w-\[44px\]/)
@@ -29,9 +45,9 @@ describe("sidepanel chat compact toolbar contract", () => {
     expect(chatFormSource).toContain("playground:composer.stopShort")
   })
 
-  it("keeps image attach as a first-class pro toolbar control", () => {
-    expect(chatFormSource).toContain('data-testid="chat-attach-image"')
-    expect(chatFormSource).toContain('aria-label="Attach image"')
-    expect(chatFormSource).toContain("min-h-[44px] min-w-[44px]")
+  it("keeps pro composer image attachment visible and accessible", () => {
+    expect(controlRowSource).toContain('data-testid="chat-attach-image"')
+    expect(controlRowSource).toContain('sidepanel:controlRow.attachImage", "Attach image"')
+    expect(controlRowSource).toContain("min-h-[44px]")
   })
 })

@@ -332,7 +332,7 @@ async def process_emails_endpoint(
                             "input_ref": pf.get("original_filename"),
                             "processing_source": str(pf.get("path")),
                             "media_type": "email",
-                            "error": f"Processing failed: {exc}",
+                            "error": "Email processing failed",
                             "metadata": {},
                             "content": None,
                             "chunks": None,
@@ -369,8 +369,8 @@ async def process_emails_endpoint(
             chunk_options_dict = prepare_chunking_options_dict(form_data)
             try:
                 TemplateClassifier = getattr(media_mod, "TemplateClassifier", None)
-            except Exception as e:
-                logger.debug(f"TemplateClassifier not available: {e}")
+            except Exception:
+                logger.debug("TemplateClassifier not available")
                 TemplateClassifier = None
 
             if chunk_options_dict is not None:
@@ -378,8 +378,8 @@ async def process_emails_endpoint(
                 try:
                     if saved_files_info:
                         first_filename = saved_files_info[0].get("original_filename")
-                except Exception as e:
-                    logger.debug(f"Could not determine first filename: {e}")
+                except Exception:
+                    logger.debug("Could not determine first filename")
                     first_filename = None
 
                 chunk_options_dict = apply_chunking_template_if_any(
@@ -432,8 +432,8 @@ async def process_emails_endpoint(
                     chunks = _improved_chunking_process(text, chunk_options_dict)
 
                 res["chunks"] = chunks
-    except Exception as rechunk_err:
-        logger.debug("Optional email re-chunking failed: {}", rechunk_err)
+    except Exception:
+        logger.debug("Optional email re-chunking failed")
 
     return JSONResponse(status_code=final_status, content=batch)
 

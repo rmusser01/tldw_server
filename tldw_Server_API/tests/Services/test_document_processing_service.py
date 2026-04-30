@@ -110,3 +110,94 @@ async def test_process_documents_store_in_db_uses_media_repository_api(
             "chunks": fake_chunks,
         }
     ]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_process_documents_file_failure_progress_does_not_leak_raw_exception(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    document_path = tmp_path / "document.txt"
+    document_path.write_text("Alpha document body", encoding="utf-8")
+    leak = "database exploded /tmp/doc-secret-token"
+
+    monkeypatch.setattr(dps, "_ensure_placeholder_enabled", lambda: None)
+    monkeypatch.setattr(
+        dps,
+        "_store_document_in_db",
+        lambda **_kwargs: (_ for _ in ()).throw(RuntimeError(leak)),
+    )
+
+    result = await dps.process_documents(
+        doc_urls=None,
+        doc_files=[str(document_path)],
+        api_name=None,
+        api_key=None,
+        custom_prompt_input=None,
+        system_prompt_input=None,
+        use_cookies=False,
+        cookies=None,
+        keep_original=True,
+        custom_keywords=[],
+        chunk_method="sentences",
+        max_chunk_size=256,
+        chunk_overlap=0,
+        use_adaptive_chunking=False,
+        use_multi_level_chunking=False,
+        chunk_language="en",
+        store_in_db=True,
+    )
+
+    assert result["status"] == "partial"
+    assert result["results"][0]["error"] == leak
+    rendered_progress = "\n".join(result["progress"])
+    assert "Failed to process file 1" in rendered_progress
+    assert "database exploded" not in rendered_progress
+    assert "/tmp/doc-secret-token" not in rendered_progress
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_process_documents_summarization_progress_does_not_leak_raw_exception(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    document_path = tmp_path / "document.txt"
+    document_path.write_text("Alpha document body", encoding="utf-8")
+    leak = "summarizer exploded /tmp/summarizer-secret-token"
+
+    monkeypatch.setattr(dps, "_ensure_placeholder_enabled", lambda: None)
+    monkeypatch.setattr(dps, "load_prompt", lambda *_args, **_kwargs: "")
+    monkeypatch.setattr(
+        dps,
+        "improved_chunking_process",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError(leak)),
+    )
+
+    result = await dps.process_documents(
+        doc_urls=None,
+        doc_files=[str(document_path)],
+        api_name="mock-provider",
+        api_key=None,
+        custom_prompt_input=None,
+        system_prompt_input=None,
+        use_cookies=False,
+        cookies=None,
+        keep_original=True,
+        custom_keywords=[],
+        chunk_method="sentences",
+        max_chunk_size=256,
+        chunk_overlap=0,
+        use_adaptive_chunking=False,
+        use_multi_level_chunking=False,
+        chunk_language="en",
+        store_in_db=False,
+    )
+
+    assert result["status"] == "success"
+    assert result["results"][0]["summary"] == "Summary generation failed"
+    rendered_progress = "\n".join(result["progress"])
+    assert "Summarization failed" in rendered_progress
+    assert "summarizer exploded" not in rendered_progress
+    assert "/tmp/summarizer-secret-token" not in rendered_progress

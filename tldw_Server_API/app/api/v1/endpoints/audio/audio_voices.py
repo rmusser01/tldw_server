@@ -97,19 +97,19 @@ async def upload_voice(
             status_code=status.HTTP_501_NOT_IMPLEMENTED, detail="Custom voice upload is not available in this build"
         ) from None
     except VoiceQuotaExceededError as e:
-        logger.warning(f"Voice quota exceeded: {e}", exc_info=True)
+        logger.warning("Voice quota exceeded")
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail=_http_error_detail("Voice quota exceeded", request_id, exc=e),
         ) from e
     except VoiceProcessingError as e:
-        logger.warning(f"Voice processing failed: {e}", exc_info=True)
+        logger.warning("Voice processing failed")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=_http_error_detail("Voice processing failed", request_id, exc=e),
         ) from e
     except Exception as e:
-        logger.error(f"Voice upload error: {e}")
+        logger.error("Voice upload error")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to upload voice sample") from e
 
 
@@ -151,13 +151,13 @@ async def encode_voice_reference(
         )
         return VoiceEncodeResponse(**result.model_dump())
     except VoiceProcessingError as e:
-        logger.warning(f"Voice encoding failed: {e}", exc_info=True)
+        logger.warning("Voice encoding failed")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e),
         ) from e
     except Exception as e:
-        logger.error(f"Voice encode error: {e}")
+        logger.error("Voice encode error")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to encode voice reference") from e
 
 
@@ -191,7 +191,7 @@ async def list_voices(request: Request, current_user: User = Depends(get_request
     except ImportError:
         return {"voices": [], "count": 0}
     except Exception as e:
-        logger.error(f"Error listing voices: {e}")
+        logger.error("Error listing voices")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to list voices") from e
 
 
@@ -232,7 +232,7 @@ async def get_voice_details(
     except ImportError:
         raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail="Custom voice management not available") from None
     except Exception as e:
-        logger.error(f"Error getting voice details: {e}")
+        logger.error("Error getting voice details")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to get voice details") from e
 
 
@@ -275,7 +275,7 @@ async def delete_voice(
     except ImportError:
         raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail="Custom voice management not available") from None
     except Exception as e:
-        logger.error(f"Error deleting voice: {e}")
+        logger.error("Error deleting voice")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to delete voice") from e
 
 
@@ -344,7 +344,7 @@ async def preview_voice(
     except ImportError:
         raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail="Custom voice preview not available") from None
     except Exception as e:
-        logger.error(f"Voice preview error: {e}")
+        logger.error("Voice preview error")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to generate voice preview"
         ) from e

@@ -176,19 +176,19 @@ class SelfMonitoringService:
                     if rule.pattern_type == "regex":
                         is_safe, reason = validate_regex_safety(pat_str)
                         if not is_safe:
-                            logger.warning(f"Unsafe self-monitoring regex '{pat_str}': {reason}")
+                            logger.warning("Unsafe self-monitoring regex skipped")
                             continue
                         include_pats.append(re.compile(pat_str, re.IGNORECASE))
                     else:
                         include_pats.append(re.compile(re.escape(pat_str), re.IGNORECASE))
-                except re.error as e:
-                    logger.warning(f"Invalid self-monitoring pattern '{pat_str}': {e}")
+                except re.error:
+                    logger.warning("Invalid self-monitoring pattern skipped")
             for exc_str in (rule.except_patterns or []):
                 try:
                     if rule.pattern_type == "regex":
                         is_safe, reason = validate_regex_safety(exc_str)
                         if not is_safe:
-                            logger.warning(f"Unsafe self-monitoring except regex '{exc_str}': {reason}")
+                            logger.warning("Unsafe self-monitoring except regex skipped")
                             continue
                         exclude_pats.append(re.compile(exc_str, re.IGNORECASE))
                     else:
@@ -314,8 +314,8 @@ class SelfMonitoringService:
                     display_mode=rule.display_mode,
                     escalation_info=escalation_info if escalation_info.get("escalated") else None,
                 )
-            except _SELFMON_NONCRITICAL_EXCEPTIONS as e:
-                logger.warning(f"Failed to record self-monitoring alert: {e}")
+            except _SELFMON_NONCRITICAL_EXCEPTIONS:
+                logger.warning("Failed to record self-monitoring alert")
 
             # Crisis resources
             if rule.crisis_resources_enabled:
@@ -367,8 +367,8 @@ class SelfMonitoringService:
                     rule_id=rule.id,
                     session_id=session_id,
                 )
-        except _SELFMON_NONCRITICAL_EXCEPTIONS as e:
-            logger.debug(f"Dedup check failed: {e}")
+        except _SELFMON_NONCRITICAL_EXCEPTIONS:
+            logger.debug("Dedup check failed")
         return False
 
     def _check_escalation(
@@ -476,8 +476,8 @@ class SelfMonitoringService:
                 info["window_trigger_count"] = window_count
                 info["escalated_action"] = escalated_action
 
-        except _SELFMON_NONCRITICAL_EXCEPTIONS as e:
-            logger.debug(f"Escalation check failed: {e}")
+        except _SELFMON_NONCRITICAL_EXCEPTIONS:
+            logger.debug("Escalation check failed")
 
         return info
 
@@ -576,8 +576,8 @@ class SelfMonitoringService:
                         f"It will be disabled at {deactivation_at.isoformat()}."
                     ),
                 }
-            except _SELFMON_NONCRITICAL_EXCEPTIONS as e:
-                return {"ok": False, "error": str(e)}
+            except _SELFMON_NONCRITICAL_EXCEPTIONS:
+                return {"ok": False, "error": "deactivation_request_failed"}
 
         # "confirmation" — generate token, user must confirm
         if bypass == "confirmation":

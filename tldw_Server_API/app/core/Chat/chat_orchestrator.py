@@ -155,7 +155,9 @@ def _shutdown_sync_executor() -> None:
             # Python < 3.9 doesn't support cancel_futures
             _SYNC_EXECUTOR.shutdown(wait=True)
         except Exception as shutdown_error:  # noqa: BLE001 - shutdown must not raise during exit
-            logger.debug("Chat orchestrator sync executor shutdown raised non-fatal error", exc_info=shutdown_error)
+            logger.bind(error_type=type(shutdown_error).__name__).debug(
+                "Chat orchestrator sync executor shutdown raised non-fatal error"
+            )
 
 
 # Register cleanup on interpreter shutdown
@@ -300,7 +302,7 @@ def approximate_token_count(history):
         total_tokens = len(total_text.split())
         return total_tokens
     except _CHAT_ORCHESTRATOR_NONCRITICAL_EXCEPTIONS as e:
-        logging.error(f"Error calculating token count: {str(e)}")
+        logging.bind(error_type=type(e).__name__).error("Error calculating token count")
         return 0
 
 #

@@ -1165,7 +1165,7 @@ class VibeVoiceAdapter(TTSAdapter):
             )
 
             if error:
-                logger.error(f"Voice reference processing failed: {error}")
+                logger.error("Voice reference processing failed")
                 return None
 
             # Save to temporary file
@@ -1203,11 +1203,11 @@ class VibeVoiceAdapter(TTSAdapter):
             except _VIBEVOICE_NONCRITICAL_EXCEPTIONS as e:
                 logger.warning(f"Could not validate voice reference duration: {e}")
 
-            logger.info(f"Voice reference prepared for VibeVoice: {tmp_path}")
+            logger.info("Voice reference prepared for VibeVoice")
             return tmp_path
 
         except _VIBEVOICE_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"Failed to prepare voice reference: {e}")
+            logger.error("Failed to prepare voice reference ({})", type(e).__name__)
             return None
 
     def map_voice(self, voice_id: str) -> str:
@@ -1452,7 +1452,7 @@ class VibeVoiceAdapter(TTSAdapter):
 
             logger.debug(f"{self.provider_name}: Resources cleaned up")
         except _VIBEVOICE_NONCRITICAL_EXCEPTIONS as e:
-            logger.warning(f"{self.provider_name}: Error during cleanup: {e}")
+            logger.warning(f"{self.provider_name}: Error during cleanup ({{}})", type(e).__name__)
 
     async def cleanup_after_generation(self):
         """Clean up after each generation to free memory."""
@@ -1473,7 +1473,7 @@ class VibeVoiceAdapter(TTSAdapter):
                 logger.debug(f"Post-generation cleanup: {self._memory_stats['current_vram_gb']:.2f}GB in use")
 
         except _VIBEVOICE_NONCRITICAL_EXCEPTIONS as e:
-            logger.debug(f"Post-generation cleanup error: {e}")
+            logger.debug("Post-generation cleanup error ({})", type(e).__name__)
 
     def cancel_generation(self):
         """Cancel the current generation task."""

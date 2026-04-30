@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import threading
 from collections.abc import Iterator
 from pathlib import Path
@@ -346,10 +347,10 @@ def _persist_flashcard_deck(
     )
     try:
         note_db.add_flashcards_bulk(flashcard_payloads)
-    except Exception as exc:
+    except Exception:
         with contextlib.suppress(Exception):
             soft_delete_deck(note_db, deck_id=int(deck_id))
-        logger.warning("Flashcard follow-up generation cleanup deleted deck {} after insert failure: {}", deck_id, exc)
+        logger.warning("Flashcard follow-up generation cleanup deleted deck after insert failure")
         raise
     return str(deck_id)
 

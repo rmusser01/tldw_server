@@ -533,7 +533,9 @@ class UnifiedShareAuditWriter:
             params.append(resource_id)
         params.extend([limit, offset])
 
-        query = f"""
+        where_clause = " AND ".join(conditions)
+        query = (
+            """
             SELECT
                 event_id,
                 timestamp,
@@ -546,10 +548,14 @@ class UnifiedShareAuditWriter:
                 resource_id,
                 metadata
             FROM audit_events
-            WHERE {' AND '.join(conditions)}
+            WHERE """
+            # Conditions are fixed SQL fragments; values stay parameterized.
+            + where_clause  # nosec B608
+            + """
             ORDER BY timestamp DESC, rowid DESC
             LIMIT ? OFFSET ?
         """
+        )
 
         db = await self._open_db()
         try:
@@ -572,22 +578,14 @@ class UnifiedShareAuditWriter:
             or metadata.get("legacy_share_audit_id")
         )
         if compatibility_id is None:
-            logger.warning(
-                "Skipping sharing audit row without compatibility_id: event_id={}, event_type={}",
-                row.get("event_id", "?"),
-                row.get("event_type", "?"),
-            )
+            logger.warning("Skipping sharing audit row without compatibility_id")
             return None
 
         owner_user_id = _coerce_int(row.get("tenant_user_id"))
         if owner_user_id is None:
             owner_user_id = _coerce_int(metadata.get("owner_user_id"))
         if owner_user_id is None:
-            logger.warning(
-                "Skipping sharing audit row without owner_user_id: event_id={}, event_type={}",
-                row.get("event_id", "?"),
-                row.get("event_type", "?"),
-            )
+            logger.warning("Skipping sharing audit row without owner_user_id")
             return None
 
         actor_user_id = _coerce_int(metadata.get("actor_user_id"))

@@ -62,9 +62,9 @@ async def load_mlx_model(
     except ChatBadRequestError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except ChatProviderError as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Failed to load MLX model") from e
     except Exception as e:
-        logger.error(f"Unexpected MLX load failure: {e}")
+        logger.error("Unexpected MLX load failure")
         raise HTTPException(status_code=500, detail="MLX load failed unexpectedly") from e
 
 
@@ -82,7 +82,7 @@ async def unload_mlx_model(
         _ = payload
         return _normalize_mlx_response(registry.unload())
     except Exception as e:
-        logger.error(f"Unexpected MLX unload failure: {e}")
+        logger.error("Unexpected MLX unload failure")
         raise HTTPException(status_code=500, detail="MLX unload failed unexpectedly") from e
 
 
@@ -98,5 +98,5 @@ async def get_mlx_status(
     try:
         return _normalize_mlx_response(registry.status())
     except Exception as e:
-        logger.error(f"Unexpected MLX status failure: {e}")
+        logger.error("Unexpected MLX status failure")
         raise HTTPException(status_code=500, detail="Failed to get MLX status") from e

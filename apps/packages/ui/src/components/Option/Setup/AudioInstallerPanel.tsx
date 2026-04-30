@@ -32,21 +32,6 @@ const renderInstallerError = (entry: unknown) => {
   if (entry == null) return "Unknown installer error"
   return String(entry)
 }
-
-const renderOmniVoiceStateColor = (state?: string) => {
-  switch (state) {
-    case "ready":
-      return "green"
-    case "starting":
-      return "blue"
-    case "degraded":
-      return "orange"
-    case "disabled":
-      return "default"
-    default:
-      return "default"
-  }
-}
 export const AudioInstallerPanel: React.FC = () => {
   const { t } = useTranslation(["settings", "common", "option"])
   const {
@@ -56,10 +41,6 @@ export const AudioInstallerPanel: React.FC = () => {
     installStatus,
     loading,
     machineProfile,
-    omnivoiceActionError,
-    omnivoiceActionResult,
-    omnivoiceBusyAction,
-    omnivoiceStatus,
     profileOptions,
     provisioning,
     selectedBundle,
@@ -69,7 +50,6 @@ export const AudioInstallerPanel: React.FC = () => {
     selectedTtsChoice,
     setSelectedResourceProfile,
     handleBundleChange,
-    handleOmniVoiceAction,
     handleResourceProfileChange,
     handleTtsChoiceChange,
     handleProvision,
@@ -240,112 +220,6 @@ export const AudioInstallerPanel: React.FC = () => {
             {t("settings:audioInstaller.safeRerun", "Safe rerun")}
           </Button>
         </Space>
-
-        {omnivoiceStatus && (
-          <Card
-            size="small"
-            title={t("settings:audioInstaller.omnivoiceTitle", "OmniVoice sidecar")}
-          >
-            <Space orientation="vertical" size="small" className="w-full">
-              <Paragraph type="secondary" className="mb-0">
-                {t(
-                  "settings:audioInstaller.omnivoiceHint",
-                  "Pre-download OmniVoice weights and warm the managed sidecar without sending a full synthesis request."
-                )}
-              </Paragraph>
-
-              <Space wrap>
-                <Tag color={omnivoiceStatus.enabled ? "green" : "default"}>
-                  {omnivoiceStatus.enabled
-                    ? t("settings:audioInstaller.omnivoiceEnabled", "Enabled")
-                    : t("settings:audioInstaller.omnivoiceDisabled", "Disabled")}
-                </Tag>
-                <Tag color={omnivoiceStatus.runtime_installed ? "green" : "orange"}>
-                  {omnivoiceStatus.runtime_installed
-                    ? t("settings:audioInstaller.omnivoiceRuntimeInstalled", "Runtime installed")
-                    : t("settings:audioInstaller.omnivoiceRuntimeIncomplete", "Runtime incomplete")}
-                </Tag>
-                <Tag color={omnivoiceStatus.weights_cached ? "green" : "gold"}>
-                  {omnivoiceStatus.weights_cached
-                    ? t("settings:audioInstaller.omnivoiceWeightsCached", "Weights cached")
-                    : t("settings:audioInstaller.omnivoiceWeightsMissing", "Weights not cached")}
-                </Tag>
-                <Tag color={renderOmniVoiceStateColor(omnivoiceStatus.sidecar?.sidecar_state)}>
-                  {omnivoiceStatus.sidecar?.sidecar_state || "idle_stopped"}
-                </Tag>
-              </Space>
-
-              <Descriptions size="small" column={1}>
-                <Descriptions.Item
-                  label={t("settings:audioInstaller.omnivoiceModel", "Model")}
-                >
-                  {omnivoiceStatus.model_id || "–"}
-                </Descriptions.Item>
-                <Descriptions.Item
-                  label={t("settings:audioInstaller.omnivoiceCheckout", "Checkout")}
-                >
-                  {omnivoiceStatus.source_checkout || "–"}
-                </Descriptions.Item>
-              </Descriptions>
-
-              {(omnivoiceStatus.missing_runtime_components || []).length > 0 && (
-                <Alert
-                  type="info"
-                  showIcon
-                  title={t(
-                    "settings:audioInstaller.omnivoiceRuntimeMissingTitle",
-                    "Runtime components missing"
-                  )}
-                  description={(omnivoiceStatus.missing_runtime_components || []).join(", ")}
-                />
-              )}
-
-              <Space wrap>
-                <Button
-                  onClick={() => void handleOmniVoiceAction("predownload")}
-                  loading={omnivoiceBusyAction === "predownload"}
-                  disabled={omnivoiceBusyAction !== null}
-                >
-                  {t("settings:audioInstaller.omnivoicePredownload", "Pre-download weights")}
-                </Button>
-                <Button
-                  onClick={() => void handleOmniVoiceAction("warmup")}
-                  loading={omnivoiceBusyAction === "warmup"}
-                  disabled={omnivoiceBusyAction !== null || !omnivoiceStatus.runtime_installed}
-                >
-                  {t("settings:audioInstaller.omnivoiceWarmup", "Warm up sidecar")}
-                </Button>
-              </Space>
-
-              {omnivoiceActionError && (
-                <Alert
-                  type="error"
-                  showIcon
-                  title={t(
-                    "settings:audioInstaller.omnivoiceActionErrorTitle",
-                    "OmniVoice action failed"
-                  )}
-                  description={omnivoiceActionError}
-                />
-              )}
-
-              {omnivoiceActionResult && (
-                <Alert
-                  type={omnivoiceActionResult.success ? "success" : "warning"}
-                  showIcon
-                  title={omnivoiceActionResult.status || "unknown"}
-                  description={
-                    omnivoiceActionResult.detail ||
-                    t(
-                      "settings:audioInstaller.omnivoiceActionFallback",
-                      "OmniVoice action finished."
-                    )
-                  }
-                />
-              )}
-            </Space>
-          </Card>
-        )}
 
         {installStatus && (
           <Card

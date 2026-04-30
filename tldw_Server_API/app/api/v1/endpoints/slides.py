@@ -57,6 +57,7 @@ from tldw_Server_API.app.api.v1.schemas.slides_schemas import (
     VisualStylePatchRequest,
     VisualStyleResponse,
 )
+from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.AuthNZ.permissions import MEDIA_CREATE, MEDIA_DELETE, MEDIA_READ, MEDIA_UPDATE
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
@@ -192,6 +193,14 @@ def _parse_etag(raw: str | None) -> int:
 
 def _format_etag(version: int) -> str:
     return f'W/"v{version}"'
+
+
+def _map_precondition_conflict(exc: ConflictError) -> HTTPException:
+    return map_db_error_to_http(
+        exc,
+        conflict_status_code=status.HTTP_412_PRECONDITION_FAILED,
+        conflict_detail="precondition_failed",
+    )
 
 
 def _slides_jobs_manager() -> JobManager:
@@ -476,7 +485,7 @@ def _resolve_template(template_id: str | None) -> SlidesTemplate | None:
     except SlidesTemplateNotFoundError as exc:
         raise HTTPException(status_code=404, detail="template_not_found") from exc
     except SlidesTemplateInvalidError as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        raise HTTPException(status_code=500, detail="Failed to resolve slide template") from exc
 
 
 def _compact_visual_style_appearance_defaults(appearance_defaults: dict[str, Any]) -> dict[str, Any]:
@@ -938,8 +947,8 @@ def _resolve_media_source_text(
             version_number=None,
             include_content=True,
         )
-    except Exception as exc:
-        logger.debug("Failed to resolve latest document content for media {}: {}", media_id, exc)
+    except Exception:
+        logger.debug("Failed to resolve latest document content for slides source media")
         latest_document = None
 
     if isinstance(latest_document, dict):
@@ -1043,8 +1052,8 @@ def _generate_presentation(
                 "slides_generation_errors_total",
                 labels={"source_type": source_type, "error": error_type},
             )
-        except _SLIDES_NONCRITICAL_EXCEPTIONS as exc:
-            logger.debug("Failed to record generation error metric: {}", exc)
+        except _SLIDES_NONCRITICAL_EXCEPTIONS:
+            logger.debug("Failed to record slides generation error metric")
 
     try:
         generated = generator.generate_from_text(
@@ -1081,7 +1090,7 @@ def _generate_presentation(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except SlidesGenerationError as exc:
         _record_generation_error("generation_error")
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        raise HTTPException(status_code=500, detail="Failed to generate presentation") from exc
 
     try:
         slides = _normalize_slides([_slide_from_obj(s) for s in generated["slides"]])
@@ -1118,8 +1127,8 @@ def _generate_presentation(
                 time.perf_counter() - started_at,
                 labels={"source_type": source_type},
             )
-        except _SLIDES_NONCRITICAL_EXCEPTIONS as exc:
-            logger.debug("Failed to record generation latency metric: {}", exc)
+        except _SLIDES_NONCRITICAL_EXCEPTIONS:
+            logger.debug("Failed to record slides generation latency metric")
     response.headers["ETag"] = _format_etag(row.version)
     response.headers["Last-Modified"] = row.last_modified
     return _build_presentation_response(row)
@@ -1320,9 +1329,9 @@ async def update_presentation(
     except KeyError:
         raise HTTPException(status_code=404, detail="presentation_not_found") from None
     except InputError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except ConflictError:
-        raise HTTPException(status_code=412, detail="precondition_failed") from None
+        raise map_db_error_to_http(exc, default_detail="Failed to update presentation") from exc
+    except ConflictError as exc:
+        raise _map_precondition_conflict(exc) from exc
     response.headers["ETag"] = _format_etag(row.version)
     response.headers["Last-Modified"] = row.last_modified
     return _build_presentation_response(row)
@@ -1426,9 +1435,9 @@ async def patch_presentation(
     except KeyError:
         raise HTTPException(status_code=404, detail="presentation_not_found") from None
     except InputError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except ConflictError:
-        raise HTTPException(status_code=412, detail="precondition_failed") from None
+        raise map_db_error_to_http(exc, default_detail="Failed to patch presentation") from exc
+    except ConflictError as exc:
+        raise _map_precondition_conflict(exc) from exc
     response.headers["ETag"] = _format_etag(row.version)
     response.headers["Last-Modified"] = row.last_modified
     return _build_presentation_response(row)
@@ -1479,9 +1488,9 @@ async def reorder_presentation(
     except KeyError:
         raise HTTPException(status_code=404, detail="presentation_not_found") from None
     except InputError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except ConflictError:
-        raise HTTPException(status_code=412, detail="precondition_failed") from None
+        raise map_db_error_to_http(exc, default_detail="Failed to reorder presentation") from exc
+    except ConflictError as exc:
+        raise _map_precondition_conflict(exc) from exc
 
     response.headers["ETag"] = _format_etag(row.version)
     response.headers["Last-Modified"] = row.last_modified
@@ -1506,9 +1515,9 @@ async def delete_presentation(
     except KeyError:
         raise HTTPException(status_code=404, detail="presentation_not_found") from None
     except InputError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except ConflictError:
-        raise HTTPException(status_code=412, detail="precondition_failed") from None
+        raise map_db_error_to_http(exc, default_detail="Failed to delete presentation") from exc
+    except ConflictError as exc:
+        raise _map_precondition_conflict(exc) from exc
     response.headers["ETag"] = _format_etag(row.version)
     response.headers["Last-Modified"] = row.last_modified
     return _build_presentation_response(row)
@@ -1532,9 +1541,9 @@ async def restore_presentation(
     except KeyError:
         raise HTTPException(status_code=404, detail="presentation_not_found") from None
     except InputError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except ConflictError:
-        raise HTTPException(status_code=412, detail="precondition_failed") from None
+        raise map_db_error_to_http(exc, default_detail="Failed to restore presentation") from exc
+    except ConflictError as exc:
+        raise _map_precondition_conflict(exc) from exc
     response.headers["ETag"] = _format_etag(row.version)
     response.headers["Last-Modified"] = row.last_modified
     return _build_presentation_response(row)
@@ -1550,7 +1559,7 @@ async def list_templates() -> SlidesTemplateListResponse:
     try:
         templates = list_slide_templates()
     except SlidesTemplateInvalidError as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        raise HTTPException(status_code=500, detail="Failed to list slide templates") from exc
     return SlidesTemplateListResponse(templates=[_template_to_response(t) for t in templates])
 
 
@@ -1566,7 +1575,7 @@ async def get_template(template_id: str) -> SlidesTemplateResponse:
     except SlidesTemplateNotFoundError as exc:
         raise HTTPException(status_code=404, detail="template_not_found") from exc
     except SlidesTemplateInvalidError as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        raise HTTPException(status_code=500, detail="Failed to get slide template") from exc
     return _template_to_response(template)
 
 
@@ -1728,8 +1737,11 @@ async def patch_visual_style(
         )
     except KeyError:
         raise HTTPException(status_code=404, detail="visual_style_not_found") from None
-    except ConflictError:
-        raise HTTPException(status_code=409, detail="visual_style_version_conflict") from None
+    except ConflictError as exc:
+        raise map_db_error_to_http(
+            exc,
+            conflict_detail="visual_style_version_conflict",
+        ) from exc
     return _visual_style_response_from_row(row)
 
 
@@ -1747,8 +1759,11 @@ async def delete_visual_style(
         raise HTTPException(status_code=403, detail="builtin_visual_style_read_only")
     try:
         deleted = db.delete_visual_style(style_id)
-    except ConflictError:
-        raise HTTPException(status_code=409, detail="visual_style_in_use") from None
+    except ConflictError as exc:
+        raise map_db_error_to_http(
+            exc,
+            conflict_detail="visual_style_in_use",
+        ) from exc
     if not deleted:
         raise HTTPException(status_code=404, detail="visual_style_not_found")
     return Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -1866,9 +1881,9 @@ async def restore_presentation_version(
     except KeyError:
         raise HTTPException(status_code=404, detail="presentation_not_found") from None
     except InputError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except ConflictError:
-        raise HTTPException(status_code=412, detail="precondition_failed") from None
+        raise map_db_error_to_http(exc, default_detail="Failed to restore presentation version") from exc
+    except ConflictError as exc:
+        raise _map_precondition_conflict(exc) from exc
     response.headers["ETag"] = _format_etag(row.version)
     response.headers["Last-Modified"] = row.last_modified
     return _build_presentation_response(row)
@@ -2279,7 +2294,10 @@ async def export_presentation(
                         "slides_export_errors_total",
                         labels={"format": format.value, "error": "export_error"},
                     )
-            raise HTTPException(status_code=500, detail=str(exc)) from exc
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to export presentation as markdown",
+            ) from exc
         filename = f"presentation_{presentation_id}.md"
         media_type = "text/markdown"
     elif format == ExportFormat.PDF:
@@ -2322,7 +2340,10 @@ async def export_presentation(
                         "slides_export_errors_total",
                         labels={"format": format.value, "error": "export_error"},
                     )
-            raise HTTPException(status_code=500, detail=str(exc)) from exc
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to export presentation as pdf",
+            ) from exc
         filename = f"presentation_{presentation_id}.pdf"
         media_type = "application/pdf"
     elif format == ExportFormat.REVEAL:
@@ -2360,7 +2381,10 @@ async def export_presentation(
                         "slides_export_errors_total",
                         labels={"format": format.value, "error": "export_error"},
                     )
-            raise HTTPException(status_code=500, detail=str(exc)) from exc
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to export presentation as revealjs",
+            ) from exc
         filename = f"presentation_{presentation_id}.zip"
         media_type = "application/zip"
     else:
@@ -2394,6 +2418,6 @@ async def slides_health(db: SlidesDatabase = Depends(get_slides_db_for_user)) ->
     try:
         _ = db.list_presentations(limit=1, offset=0, include_deleted=True, sort_column="created_at", sort_direction="DESC")
     except _SLIDES_NONCRITICAL_EXCEPTIONS as exc:
-        logger.warning("slides health check failed: {}", exc)
+        logger.warning("slides health check failed")
         raise HTTPException(status_code=500, detail="slides_db_unavailable") from exc
     return SlidesHealthResponse(service="slides", status="ok")

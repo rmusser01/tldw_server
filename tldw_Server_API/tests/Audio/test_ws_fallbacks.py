@@ -216,6 +216,296 @@ async def test_model_unavailable_without_fallback_emits_error(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_model_unavailable_without_fallback_sanitizes_internal_error(monkeypatch):
+    """Model initialization failures should not expose backend exception details."""
+    import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Streaming_Unified as unified
+
+    class _FailingTranscriber:
+        def __init__(self, _config):
+            pass
+
+        def initialize(self):
+            raise RuntimeError("streaming model exploded at /private/audio/model.bin")
+
+        def cleanup(self):
+            pass
+
+    monkeypatch.setattr(unified, "UnifiedStreamingTranscriber", _FailingTranscriber)
+    monkeypatch.setattr(unified, "load_comprehensive_config", lambda: _make_cfg(False))
+
+    cfg = json.dumps({"type": "config", "model": "parakeet-onnx", "sample_rate": 16000})
+    stop = json.dumps({"type": "stop"})
+    ws = _DummyWebSocket([cfg, stop])
+
+    await unified.handle_unified_websocket(ws, unified.UnifiedStreamingConfig())
+
+    errors = [m for m in ws.sent if m.get("type") == "error"]
+    warnings = [m for m in ws.sent if m.get("type") == "warning"]
+    model_warnings = [w for w in warnings if w.get("error_type") == "model_unavailable"]
+    assert errors
+    assert model_warnings
+    assert any(e.get("error_type") == "model_unavailable" for e in errors)
+    assert "streaming model exploded" not in str(ws.sent)
+    assert "/private/audio/model.bin" not in str(ws.sent)
+    assert model_warnings[0]["details"]["error"] == "Streaming model initialization failed"
+    assert errors[-1]["data"]["error"] == "Streaming model initialization failed"
+
+
+@pytest.mark.asyncio
+async def test_model_fallback_failure_sanitizes_internal_errors(monkeypatch):
+    """Fallback model failures should not expose either backend exception."""
+    import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Streaming_Unified as unified
+
+    class _FailingTranscriber:
+        def __init__(self, config):
+            self._model = config.model
+
+        def initialize(self):
+            if self._model == "whisper":
+                raise RuntimeError("fallback whisper exploded at /private/audio/whisper.bin")
+            raise RuntimeError("primary model exploded at /private/audio/parakeet.onnx")
+
+        def cleanup(self):
+            pass
+
+    monkeypatch.setattr(unified, "UnifiedStreamingTranscriber", _FailingTranscriber)
+    monkeypatch.setattr(unified, "load_comprehensive_config", lambda: _make_cfg(True))
+
+    cfg = json.dumps({"type": "config", "model": "parakeet-onnx", "sample_rate": 16000})
+    stop = json.dumps({"type": "stop"})
+    ws = _DummyWebSocket([cfg, stop])
+
+    await unified.handle_unified_websocket(ws, unified.UnifiedStreamingConfig())
+
+    errors = [m for m in ws.sent if m.get("type") == "error"]
+    warnings = [m for m in ws.sent if m.get("type") == "warning"]
+    model_warnings = [w for w in warnings if w.get("error_type") == "model_unavailable"]
+    assert errors
+    assert model_warnings
+    assert any(e.get("error_type") == "provider_error" for e in errors)
+    assert "primary model exploded" not in str(ws.sent)
+    assert "fallback whisper exploded" not in str(ws.sent)
+    assert "/private/audio/parakeet.onnx" not in str(ws.sent)
+    assert "/private/audio/whisper.bin" not in str(ws.sent)
+    assert model_warnings[0]["details"]["error"] == "Streaming model initialization failed"
+    assert errors[-1]["data"]["original_error"] == "Streaming model initialization failed"
+    assert errors[-1]["data"]["fallback_error"] == "Streaming fallback initialization failed"
+
+
+@pytest.mark.asyncio
+async def test_stt_error_sentinel_sanitizes_raw_error_payload(monkeypatch):
+    """STT error sentinels should not expose backend text in error frame data."""
+    import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Streaming_Unified as unified
+
+    class _SentinelTranscriber:
+        def __init__(self, _config):
+            pass
+
+        def initialize(self):
+            pass
+
+        async def process_audio_chunk(self, _audio_bytes):
+            return {
+                "text": "provider crashed while reading /private/audio/stt-model.bin",
+                "is_final": False,
+            }
+
+        def get_full_transcript(self):
+            return ""
+
+        def reset(self):
+            pass
+
+        def cleanup(self):
+            pass
+
+    monkeypatch.setattr(unified, "UnifiedStreamingTranscriber", _SentinelTranscriber)
+    monkeypatch.setattr(unified, "_is_transcription_error_message", lambda _text: True)
+
+    cfg = json.dumps({"type": "config", "model": "whisper", "sample_rate": 16000})
+    audio = json.dumps({"type": "audio", "data": "AA=="})
+    ws = _DummyWebSocket([cfg, audio])
+
+    await unified.handle_unified_websocket(ws, unified.UnifiedStreamingConfig())
+
+    errors = [m for m in ws.sent if m.get("type") == "error"]
+    assert errors
+    assert errors[-1]["error_type"] == "provider_error"
+    assert "provider crashed" not in str(ws.sent)
+    assert "/private/audio/stt-model.bin" not in str(ws.sent)
+    assert errors[-1]["data"]["raw_error"] == "Transcription provider returned an error"
+
+
+@pytest.mark.asyncio
+async def test_audio_processing_error_sanitizes_internal_error(monkeypatch):
+    """Audio-frame processing failures should not expose backend exception text."""
+    import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Streaming_Unified as unified
+
+    class _FailingChunkTranscriber:
+        def __init__(self, _config):
+            pass
+
+        def initialize(self):
+            pass
+
+        async def process_audio_chunk(self, _audio_bytes):
+            raise RuntimeError("chunk processor exploded at /private/audio/chunk.wav")
+
+        def get_full_transcript(self):
+            return ""
+
+        def reset(self):
+            pass
+
+        def cleanup(self):
+            pass
+
+    monkeypatch.setattr(unified, "UnifiedStreamingTranscriber", _FailingChunkTranscriber)
+
+    cfg = json.dumps({"type": "config", "model": "whisper", "sample_rate": 16000})
+    audio = json.dumps({"type": "audio", "data": "AA=="})
+    stop = json.dumps({"type": "stop"})
+    ws = _DummyWebSocket([cfg, audio, stop])
+
+    await unified.handle_unified_websocket(ws, unified.UnifiedStreamingConfig())
+
+    errors = [m for m in ws.sent if m.get("type") == "error"]
+    assert errors
+    assert errors[0]["error_type"] == "internal_error"
+    assert "chunk processor exploded" not in str(ws.sent)
+    assert "/private/audio/chunk.wav" not in str(ws.sent)
+    assert errors[0]["message"] == "Streaming audio processing failed"
+
+
+@pytest.mark.asyncio
+async def test_outer_websocket_handler_error_sanitizes_internal_error(monkeypatch):
+    """Outer websocket failures should not expose backend exception text."""
+    import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Streaming_Unified as unified
+
+    class _FailingControlSession:
+        def __init__(self, _config):
+            pass
+
+        def apply_config(self, _config_payload):
+            raise RuntimeError("control session exploded at /private/audio/control.db")
+
+    monkeypatch.setattr(unified, "WSControlSession", _FailingControlSession)
+
+    cfg = json.dumps({"type": "config", "model": "whisper", "sample_rate": 16000})
+    ws = _DummyWebSocket([cfg])
+
+    await unified.handle_unified_websocket(ws, unified.UnifiedStreamingConfig())
+
+    errors = [m for m in ws.sent if m.get("type") == "error"]
+    assert errors
+    assert errors[-1]["error_type"] == "internal_error"
+    assert "control session exploded" not in str(ws.sent)
+    assert "/private/audio/control.db" not in str(ws.sent)
+    assert errors[-1]["message"] == "Streaming server error"
+
+
+@pytest.mark.asyncio
+async def test_diarization_initialization_warning_sanitizes_details(monkeypatch):
+    """Diarization init failures should not expose backend exception details."""
+    import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Streaming_Unified as unified
+
+    class _ReadyTranscriber:
+        def __init__(self, _config):
+            pass
+
+        def initialize(self):
+            pass
+
+        def get_full_transcript(self):
+            return ""
+
+        def reset(self):
+            pass
+
+        def cleanup(self):
+            pass
+
+    class _FailingDiarizer:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        async def ensure_ready(self):
+            raise RuntimeError("diarizer exploded at /private/audio/diarizer.bin")
+
+    monkeypatch.setattr(unified, "UnifiedStreamingTranscriber", _ReadyTranscriber)
+    monkeypatch.setattr(unified, "StreamingDiarizer", _FailingDiarizer)
+
+    cfg = json.dumps({
+        "type": "config",
+        "model": "whisper",
+        "sample_rate": 16000,
+        "diarization": {"enabled": True},
+    })
+    stop = json.dumps({"type": "stop"})
+    ws = _DummyWebSocket([cfg, stop])
+
+    await unified.handle_unified_websocket(ws, unified.UnifiedStreamingConfig())
+
+    warnings = [
+        m for m in ws.sent
+        if m.get("type") == "warning" and m.get("state") == "diarization_unavailable"
+    ]
+    assert warnings
+    assert "diarizer exploded" not in str(ws.sent)
+    assert "/private/audio/diarizer.bin" not in str(ws.sent)
+    assert warnings[-1]["details"] == "Diarization initialization failed"
+
+
+@pytest.mark.asyncio
+async def test_live_insights_initialization_warning_sanitizes_details(monkeypatch):
+    """Live-insights init failures should not expose backend exception details."""
+    import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Streaming_Unified as unified
+
+    class _ReadyTranscriber:
+        def __init__(self, _config):
+            pass
+
+        def initialize(self):
+            pass
+
+        def get_full_transcript(self):
+            return ""
+
+        def reset(self):
+            pass
+
+        def cleanup(self):
+            pass
+
+    class _FailingLiveInsights:
+        def __init__(self, *_args, **_kwargs):
+            raise RuntimeError("insights exploded at /private/audio/insights.db")
+
+    monkeypatch.setattr(unified, "UnifiedStreamingTranscriber", _ReadyTranscriber)
+    monkeypatch.setattr(unified, "LiveMeetingInsights", _FailingLiveInsights)
+
+    cfg = json.dumps({
+        "type": "config",
+        "model": "whisper",
+        "sample_rate": 16000,
+        "insights_enabled": True,
+    })
+    stop = json.dumps({"type": "stop"})
+    ws = _DummyWebSocket([cfg, stop])
+
+    await unified.handle_unified_websocket(ws, unified.UnifiedStreamingConfig())
+
+    warnings = [
+        m for m in ws.sent
+        if m.get("type") == "warning" and m.get("state") == "insights_unavailable"
+    ]
+    assert warnings
+    assert "insights exploded" not in str(ws.sent)
+    assert "/private/audio/insights.db" not in str(ws.sent)
+    assert warnings[-1]["details"] == "Live insights initialization failed"
+
+
+@pytest.mark.asyncio
 async def test_model_unavailable_defaults_to_no_fallback_when_stt_section_missing(monkeypatch):
     """Missing STT-Settings should default to fail-fast (no Whisper fallback)."""
     import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Parakeet_Core_Streaming.transcriber as core_tx

@@ -101,11 +101,11 @@ async def create_evaluation(
                             if response is not None:
                                 response.headers["X-Idempotent-Replay"] = "true"
                                 response.headers["Idempotency-Key"] = idempotency_key
-                        except _EVALS_CRUD_NONCRITICAL_EXCEPTIONS as e:
-                            logger.debug(f"evaluations_crud: failed to set idempotency headers for {existing_id}: {e}")
+                        except _EVALS_CRUD_NONCRITICAL_EXCEPTIONS:
+                            logger.debug("evaluations_crud: failed to set evaluation idempotency replay headers")
                         return EvaluationResponse(**existing)
-            except _EVALS_CRUD_NONCRITICAL_EXCEPTIONS as e:
-                logger.debug(f"evaluations_crud: idempotency lookup failed for key {idempotency_key}: {e}")
+            except _EVALS_CRUD_NONCRITICAL_EXCEPTIONS:
+                logger.debug("evaluations_crud: evaluation idempotency lookup failed")
         evaluation = await svc.create_evaluation(
             name=eval_request.name,
             description=eval_request.description,
@@ -119,13 +119,11 @@ async def create_evaluation(
         try:
             if idempotency_key and evaluation.get("id"):
                 svc.db.record_idempotency("evaluation", idempotency_key, evaluation["id"], identity.created_by)
-        except _EVALS_CRUD_NONCRITICAL_EXCEPTIONS as e:
-            logger.debug(
-                f"evaluations_crud: failed to record idempotency for evaluation {evaluation.get('id')}: {e}"
-            )
+        except _EVALS_CRUD_NONCRITICAL_EXCEPTIONS:
+            logger.debug("evaluations_crud: failed to record evaluation idempotency")
         return EvaluationResponse(**evaluation)
     except _EVALS_CRUD_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Failed to create evaluation: {e}")
+        logger.error("Failed to create evaluation")
         raise create_error_response(
             message=f"Failed to create evaluation: {sanitize_error_message(e, 'evaluation creation')}",
             error_type="server_error",
@@ -164,7 +162,7 @@ async def list_evaluations(
             last_id=last_id,
         )
     except _EVALS_CRUD_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Failed to list evaluations: {e}")
+        logger.error("Failed to list evaluations")
         raise create_error_response(
             message=f"Failed to list evaluations: {sanitize_error_message(e, 'listing evaluations')}",
             error_type="server_error",
@@ -194,7 +192,7 @@ async def get_evaluation(
     except HTTPException:
         raise
     except _EVALS_CRUD_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Failed to get evaluation: {e}")
+        logger.error("Failed to get evaluation")
         raise create_error_response(
             message=f"Failed to get evaluation: {sanitize_error_message(e, 'retrieving evaluation')}",
             error_type="server_error",
@@ -232,7 +230,7 @@ async def update_evaluation(
     except HTTPException:
         raise
     except _EVALS_CRUD_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Failed to update evaluation: {e}")
+        logger.error("Failed to update evaluation")
         raise create_error_response(
             message=f"Failed to update evaluation: {sanitize_error_message(e, 'updating evaluation')}",
             error_type="server_error",
@@ -267,7 +265,7 @@ async def delete_evaluation(
     except HTTPException:
         raise
     except _EVALS_CRUD_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Failed to delete evaluation: {e}")
+        logger.error("Failed to delete evaluation")
         raise create_error_response(
             message=f"Failed to delete evaluation: {sanitize_error_message(e, 'deleting evaluation')}",
             error_type="server_error",
@@ -312,13 +310,11 @@ async def create_run(
                             if response is not None:
                                 response.headers["X-Idempotent-Replay"] = "true"
                                 response.headers["Idempotency-Key"] = idempotency_key
-                        except _EVALS_CRUD_NONCRITICAL_EXCEPTIONS as e:
-                            logger.debug(
-                                f"evaluations_crud: failed to set idempotency headers for {existing_id}: {e}"
-                            )
+                        except _EVALS_CRUD_NONCRITICAL_EXCEPTIONS:
+                            logger.debug("evaluations_crud: failed to set run idempotency replay headers")
                         return RunResponse(**existing)
-            except _EVALS_CRUD_NONCRITICAL_EXCEPTIONS as e:
-                logger.debug(f"evaluations_crud: idempotency lookup failed for key {idempotency_key}: {e}")
+            except _EVALS_CRUD_NONCRITICAL_EXCEPTIONS:
+                logger.debug("evaluations_crud: run idempotency lookup failed")
         target_model = request.target_model
         # Allow free-form config; convert Pydantic models if provided in future
         config = model_dump_compat(request.config) if hasattr(request.config, 'model_dump') else (request.config or {})
@@ -336,8 +332,8 @@ async def create_run(
         try:
             if idempotency_key and run.get("id"):
                 svc.db.record_idempotency("run", idempotency_key, run["id"], identity.created_by)
-        except _EVALS_CRUD_NONCRITICAL_EXCEPTIONS as e:
-            logger.debug(f"evaluations_crud: failed to record idempotency for run {run.get('id')}: {e}")
+        except _EVALS_CRUD_NONCRITICAL_EXCEPTIONS:
+            logger.debug("evaluations_crud: failed to record run idempotency")
         return RunResponse(**run)
     except HTTPException:
         raise
@@ -349,7 +345,7 @@ async def create_run(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
         ) from e
     except _EVALS_CRUD_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Failed to create run: {e}")
+        logger.error("Failed to create run")
         raise create_error_response(
             message=f"Failed to create run: {sanitize_error_message(e, 'creating run')}",
             error_type="server_error",
@@ -366,14 +362,14 @@ async def list_runs(
     eval_id: str,
     limit: int = Query(20, ge=1, le=100),
     after: Optional[str] = Query(None),
-    status: Optional[str] = Query(None),
+    run_status: Optional[str] = Query(None, alias="status"),
     current_user: User = Depends(get_eval_request_user),
 ):
     try:
         identity, svc = _get_crud_identity_and_service(current_user)
         runs, has_more = await svc.list_runs(
             eval_id=eval_id,
-            status=status,
+            status=run_status,
             limit=limit,
             after=after,
             created_by=identity.created_by,
@@ -382,7 +378,7 @@ async def list_runs(
         last_id = runs[-1]["id"] if runs else None
         return RunListResponse(object="list", data=[RunResponse(**run) for run in runs], has_more=has_more, first_id=first_id, last_id=last_id)
     except _EVALS_CRUD_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Failed to list runs: {e}")
+        logger.error("Failed to list runs")
         raise create_error_response(
             message=f"Failed to list runs: {sanitize_error_message(e, 'listing runs')}",
             error_type="server_error",
@@ -412,7 +408,7 @@ async def get_run(
     except HTTPException:
         raise
     except _EVALS_CRUD_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Failed to get run: {e}")
+        logger.error("Failed to get run")
         raise create_error_response(
             message=f"Failed to get run: {sanitize_error_message(e, 'retrieving run')}",
             error_type="server_error",
@@ -445,7 +441,7 @@ async def cancel_run(
     except HTTPException:
         raise
     except _EVALS_CRUD_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Failed to cancel run: {e}")
+        logger.error("Failed to cancel run")
         raise create_error_response(
             message=f"Failed to cancel run: {sanitize_error_message(e, 'cancelling run')}",
             error_type="server_error",

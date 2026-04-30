@@ -100,3 +100,68 @@ async def test_meetings_webhook_dlq_worker_retries_then_delivers(monkeypatch, tm
     finally:
         db.close_connection()
 
+
+@pytest.mark.asyncio
+async def test_meetings_attempt_dispatch_sanitizes_network_errors(monkeypatch):
+    from tldw_Server_API.app.services import meetings_webhook_dlq_service as worker_mod
+
+    monkeypatch.setattr(
+        worker_mod,
+        "evaluate_url_policy",
+        lambda *_args, **_kwargs: SimpleNamespace(allowed=True, reason=None),
+        raising=True,
+    )
+
+    async def _raise_network_error(*_args, **_kwargs):
+        raise RuntimeError("meeting webhook token at /private/meeting-webhook.key")
+
+    monkeypatch.setattr(worker_mod, "afetch", _raise_network_error, raising=True)
+
+    ok, error, response = await worker_mod._attempt_dispatch(
+        dispatch_row={
+            "payload_json": {
+                "destination": {"url": "https://hooks.example.test/meeting"},
+                "request_body": {"ok": True},
+            }
+        },
+        timeout_sec=1.0,
+    )
+
+    assert ok is False
+    assert response is None
+    assert error == "Meeting webhook delivery failed"
+    assert "meeting webhook token" not in error
+    assert "/private/meeting-webhook.key" not in error
+
+
+@pytest.mark.asyncio
+async def test_meetings_attempt_dispatch_preserves_timeout_classification(monkeypatch):
+    from tldw_Server_API.app.services import meetings_webhook_dlq_service as worker_mod
+
+    monkeypatch.setattr(
+        worker_mod,
+        "evaluate_url_policy",
+        lambda *_args, **_kwargs: SimpleNamespace(allowed=True, reason=None),
+        raising=True,
+    )
+
+    async def _raise_timeout(*_args, **_kwargs):
+        raise TimeoutError("timed out at /private/meeting-webhook-timeout.key")
+
+    monkeypatch.setattr(worker_mod, "afetch", _raise_timeout, raising=True)
+
+    ok, error, response = await worker_mod._attempt_dispatch(
+        dispatch_row={
+            "payload_json": {
+                "destination": {"url": "https://hooks.example.test/meeting"},
+                "request_body": {"ok": True},
+            }
+        },
+        timeout_sec=1.0,
+    )
+
+    assert ok is False
+    assert response is None
+    assert error == "Meeting webhook delivery timed out"
+    assert "timed out at" not in error
+    assert "/private/meeting-webhook-timeout.key" not in error

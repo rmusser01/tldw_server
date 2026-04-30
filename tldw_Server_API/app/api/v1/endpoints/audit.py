@@ -129,8 +129,8 @@ def _map_event_types(values: list[str] | None | str | None) -> list[AuditEventTy
         try:
             mapped.append(AuditEventType[v])
             continue
-        except Exception as enum_key_error:
-            logger.debug(f"Failed enum-key mapping for audit event type '{v}'", exc_info=enum_key_error)
+        except Exception:
+            logger.debug("Audit event type enum-key mapping failed")
         try:
             mapped.append(AuditEventType(v))
         except Exception:
@@ -159,8 +159,8 @@ def _map_categories(values: list[str] | None | str | None) -> list[AuditEventCat
         try:
             mapped.append(AuditEventCategory[v])
             continue
-        except Exception as enum_key_error:
-            logger.debug(f"Failed enum-key mapping for audit category '{v}'", exc_info=enum_key_error)
+        except Exception:
+            logger.debug("Audit category enum-key mapping failed")
         try:
             mapped.append(AuditEventCategory(v))
         except Exception:

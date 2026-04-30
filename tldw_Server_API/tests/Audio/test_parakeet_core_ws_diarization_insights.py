@@ -366,3 +366,29 @@ async def test_core_ws_model_reconfigure_closes_previous_transcriber(monkeypatch
 
     # Old transcriber should be closed during model swap, and active one on teardown.
     assert len(closes) >= 2
+
+
+@pytest.mark.asyncio
+async def test_core_ws_outer_error_sanitizes_internal_message(monkeypatch):
+    import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Parakeet_Core_Streaming.ws_server as wsmod
+
+    class _FakeTranscriber:
+        def __init__(self, config, decode_fn=None):
+            self.decode_fn = decode_fn
+
+        async def flush(self):
+            return None
+
+        def close(self):
+            return None
+
+    monkeypatch.setattr(wsmod, "ParakeetCoreTranscriber", _FakeTranscriber, raising=True)
+
+    ws = DummyWebSocket([])
+    await wsmod.websocket_parakeet_core(ws, decode_fn=lambda _a, _b: "ok")
+
+    errors = [out for out in ws.outputs if out.get("type") == "error"]
+    assert errors
+    assert errors[-1]["message"] == "Parakeet core websocket failed"
+    assert "No more messages" not in str(errors)
+    assert ws.closed is True

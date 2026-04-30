@@ -686,7 +686,7 @@ async def set_user_quota(
     except UserNotFoundError:
         raise HTTPException(status_code=404, detail="User not found") from None
     except StorageError as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Failed to set user storage quota") from e
 
 
 @router.put("/admin/quotas/team/{team_id}", response_model=SetQuotaResponse)

@@ -197,6 +197,11 @@ def _truncate_text(value: str | None, max_len: int = 600) -> str:
     return text[: max_len - 1].rstrip() + "..."
 
 
+def _set_processing_error(output_dict: dict[str, Any], message: str) -> None:
+    output_dict["processing_error"] = message
+    logging.error(message)
+
+
 def _coerce_bool(value: Any, default: bool = False) -> bool:
     if value is None:
         return default
@@ -1661,7 +1666,11 @@ def perform_websearch(search_engine, search_query, content_country, search_lang,
         return web_search_results_dict
 
     except _WEBSEARCH_NONCRITICAL_EXCEPTIONS as e:
-        return {"processing_error": f"Error performing web search: {str(e)}"}
+        error_text = str(e)
+        if error_text.startswith("Blocked by outbound policy:"):
+            return {"processing_error": f"Error performing web search: {error_text}"}
+        logging.error("Error performing web search")
+        return {"processing_error": "Error performing web search"}
 
 
 def test_perform_websearch_google():
@@ -1674,8 +1683,8 @@ def test_perform_websearch_google():
         print(f"Test 2: {test_2}")
         test_3 = perform_websearch("google", "What is the capital of France?", "US", "en", "en", 10)
         print(f"Test 3: {test_3}")
-    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS as e:
-        print(f"Error performing google searches: {str(e)}")
+    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS:
+        print("Error performing google searches")
     pass
 
 
@@ -1689,8 +1698,8 @@ def test_perform_websearch_brave():
     try:
         test_7 = perform_websearch("brave", "What is the capital of France?", "US", "en", "en", 10)
         print(f"Test 7: {test_7}")
-    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS as e:
-        print(f"Error performing brave searches: {str(e)}")
+    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS:
+        print("Error performing brave searches")
 
 
 def test_perform_websearch_ddg():
@@ -1700,8 +1709,8 @@ def test_perform_websearch_ddg():
         print(f"Test 6: {test_6}")
         test_7 = perform_websearch("duckduckgo", "What is the capital of France?", "US", "en", "en", 10, date_range="y")
         print(f"Test 7: {test_7}")
-    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS as e:
-        print(f"Error performing duckduckgo searches: {str(e)}")
+    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS:
+        print("Error performing duckduckgo searches")
 
 
 # FIXME
@@ -1710,8 +1719,8 @@ def test_perform_websearch_kagi():
     try:
         test_8 = perform_websearch("kagi", "What is the capital of France?", "US", "en", "en", 10)
         print(f"Test 8: {test_8}")
-    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS as e:
-        print(f"Error performing kagi searches: {str(e)}")
+    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS:
+        print("Error performing kagi searches")
 
 # FIXME
 def test_perform_websearch_serper():
@@ -1719,8 +1728,8 @@ def test_perform_websearch_serper():
     try:
         test_9 = perform_websearch("serper", "What is the capital of France?", "US", "en", "en", 10)
         print(f"Test 9: {test_9}")
-    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS as e:
-        print(f"Error performing serper searches: {str(e)}")
+    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS:
+        print("Error performing serper searches")
 
 # FIXME
 def test_perform_websearch_tavily():
@@ -1728,8 +1737,8 @@ def test_perform_websearch_tavily():
     try:
         test_10 = perform_websearch("tavily", "What is the capital of France?", "US", "en", "en", 10)
         print(f"Test 10: {test_10}")
-    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS as e:
-        print(f"Error performing tavily searches: {str(e)}")
+    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS:
+        print("Error performing tavily searches")
 
 
 # FIXME
@@ -1738,8 +1747,8 @@ def test_perform_websearch_searx():
     try:
         test_11 = perform_websearch("searx", "What is the capital of France?", "US", "en", "en", 10)
         print(f"Test 11: {test_11}")
-    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS as e:
-        print(f"Error performing searx searches: {str(e)}")
+    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS:
+        print("Error performing searx searches")
 
 
 # FIXME
@@ -1748,8 +1757,8 @@ def test_perform_websearch_yandex():
     try:
         test_12 = perform_websearch("yandex", "What is the capital of France?", "US", "en", "en", 10)
         print(f"Test 12: {test_12}")
-    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS as e:
-        print(f"Error performing yandex searches: {str(e)}")
+    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS:
+        print("Error performing yandex searches")
     pass
 
 #
@@ -1864,8 +1873,11 @@ def process_web_search_results(search_results: dict, search_engine: str) -> dict
             raise ValueError(f"Error: Invalid Search Engine Name {search_engine}")
 
     except _WEBSEARCH_NONCRITICAL_EXCEPTIONS as e:
-        web_search_results_dict["processing_error"] = f"Error processing search results: {str(e)}"
-        logging.error(f"Error in process_web_search_results: {str(e)}")
+        error_text = str(e)
+        if error_text.startswith("Error: Invalid Search Engine Name "):
+            _set_processing_error(web_search_results_dict, error_text)
+        else:
+            _set_processing_error(web_search_results_dict, "Error processing search results")
 
     return web_search_results_dict
 
@@ -2079,9 +2091,8 @@ def parse_brave_results(raw_results: dict, output_dict: dict) -> None:
         if "mixed" in raw_results:
             output_dict["family_friendly"] = raw_results.get("family_friendly", True)
 
-    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS as e:
-        logging.error(f"Error processing Brave results: {str(e)}")
-        output_dict["processing_error"] = f"Error processing Brave results: {str(e)}"
+    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS:
+        _set_processing_error(output_dict, "Error processing Brave results")
 
 def test_parse_brave_results():
     pass
@@ -2261,9 +2272,8 @@ def parse_duckduckgo_results(raw_results: dict, output_dict: dict) -> None:
         # Update total results count
         output_dict["total_results_found"] = len(output_dict["results"])
 
-    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS as e:
-        logging.error(f"Error processing DuckDuckGo results: {str(e)}")
-        output_dict["processing_error"] = f"Error processing DuckDuckGo results: {str(e)}"
+    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS:
+        _set_processing_error(output_dict, "Error processing DuckDuckGo results")
 
 
 def extract_domain(url: str) -> str:
@@ -2580,9 +2590,8 @@ def parse_google_results(raw_results: dict, output_dict: dict) -> None:
                                    .get("startIndex", 1)
         }
 
-    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS as e:
-        logging.error(f"Error processing Google results: {str(e)}")
-        output_dict["processing_error"] = f"Error processing Google results: {str(e)}"
+    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS:
+        _set_processing_error(output_dict, "Error processing Google results")
 
 
 def test_parse_google_results():
@@ -2680,8 +2689,8 @@ def parse_kagi_results(raw_results: dict, output_dict: dict) -> None:
                 if item.get("t") == 0
             ])
 
-    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS as e:
-        output_dict["processing_error"] = f"Error processing Kagi results: {str(e)}"
+    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS:
+        _set_processing_error(output_dict, "Error processing Kagi results")
 
 
 def test_parse_kagi_results():
@@ -2741,8 +2750,9 @@ def search_web_searx(
             params['format'] = 'json'
         search_url = f"{parsed_url.scheme}://{parsed_url.netloc}{parsed_url.path}?{urlencode(params)}"
         logging.info(f"Search URL: {search_url}")
-    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS as e:
-        return {"error": f"Invalid URL configuration: {str(e)}"}
+    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS:
+        logging.error("Invalid URL configuration for Searx search")
+        return {"error": "Invalid URL configuration."}
 
     # Perform the search request
     try:
@@ -2795,7 +2805,7 @@ def search_web_searx(
 
     except (NetworkError, RetryExhaustedError) as e:
         logging.error(f"Error searching for content: {str(e)}")
-        return {"error": f"There was an error searching for content. {str(e)}"}
+        return {"error": "There was an error searching for content."}
 
 def test_search_searx():
     # Use a different Searx instance to avoid rate limiting
@@ -2831,8 +2841,8 @@ def parse_searx_results(searx_search_results, web_search_results_dict):
             web_search_results_dict["results"].append(processed)
 
         web_search_results_dict["total_results_found"] = len(web_search_results_dict["results"])
-    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS as e:
-        web_search_results_dict["processing_error"] = f"Error processing Searx results: {e}"
+    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS:
+        _set_processing_error(web_search_results_dict, "Error processing Searx results")
 
 def test_parse_searx_results():
     pass
@@ -3016,8 +3026,8 @@ def parse_serper_results(serper_search_results, web_search_results_dict):
             _append_item(knowledge_graph)
 
         web_search_results_dict["total_results_found"] = len(web_search_results_dict["results"])
-    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS as e:
-        web_search_results_dict["processing_error"] = f"Error processing Serper results: {e}"
+    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS:
+        _set_processing_error(web_search_results_dict, "Error processing Serper results")
 
 
 
@@ -3057,7 +3067,7 @@ def search_web_tavily(search_query, result_count=10, site_whitelist=None, site_b
         data = fetch_json(method="POST", url=tavily_api_url, headers=headers, json=payload, timeout=15.0)
         return data
     except _WEBSEARCH_NONCRITICAL_EXCEPTIONS as e:
-        return {"error": f"There was an error searching for content. {str(e)}"}
+        return {"error": "There was an error searching for content."}
 
 
 def test_search_tavily():
@@ -3094,8 +3104,8 @@ def parse_tavily_results(tavily_search_results, web_search_results_dict):
             web_search_results_dict["results"].append(processed)
 
         web_search_results_dict["total_results_found"] = len(web_search_results_dict["results"])
-    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS as e:
-        web_search_results_dict["processing_error"] = f"Error processing Tavily results: {e}"
+    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS:
+        _set_processing_error(web_search_results_dict, "Error processing Tavily results")
 
 
 def test_parse_tavily_results():
@@ -3172,8 +3182,8 @@ def parse_exa_results(exa_search_results, web_search_results_dict):
             web_search_results_dict["results"].append(processed)
 
         web_search_results_dict["total_results_found"] = len(web_search_results_dict["results"])
-    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS as e:
-        web_search_results_dict["processing_error"] = f"Error processing Exa results: {e}"
+    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS:
+        _set_processing_error(web_search_results_dict, "Error processing Exa results")
 
 
 def test_parse_exa_results():
@@ -3256,8 +3266,8 @@ def parse_firecrawl_results(firecrawl_search_results, web_search_results_dict):
             web_search_results_dict["results"].append(processed)
 
         web_search_results_dict["total_results_found"] = len(web_search_results_dict["results"])
-    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS as e:
-        web_search_results_dict["processing_error"] = f"Error processing Firecrawl results: {e}"
+    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS:
+        _set_processing_error(web_search_results_dict, "Error processing Firecrawl results")
 
 
 def test_parse_firecrawl_results():
@@ -3788,8 +3798,8 @@ def parse_4chan_results(fourchan_search_results, web_search_results_dict):
             web_search_results_dict["warnings"] = warnings
 
         web_search_results_dict["total_results_found"] = len(web_search_results_dict["results"])
-    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS as e:
-        web_search_results_dict["processing_error"] = f"Error processing 4chan results: {e}"
+    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS:
+        _set_processing_error(web_search_results_dict, "Error processing 4chan results")
 
 
 

@@ -101,8 +101,8 @@ async def get_media_item(
                 bool(headers.get("X-API-KEY")),
                 bool(headers.get("authorization")),
             )
-    except Exception as auth_header_log_error:
-        logger.debug("Failed to emit media item auth header diagnostics", exc_info=auth_header_log_error)
+    except Exception:
+        logger.debug("Failed to emit media item auth header diagnostics")
 
     try:
         details = get_full_media_details_rich(
@@ -144,10 +144,8 @@ async def get_media_item(
         ) from exc
     except Exception as exc:
         logger.error(
-            "Unexpected error fetching details for media {}: {}",
+            "Unexpected error fetching details for media {}",
             media_id,
-            exc,
-            exc_info=True,
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -218,10 +216,8 @@ async def delete_media_item(
         ) from exc
     except Exception as exc:
         logger.error(
-            "Unexpected error trashing media {}: {}",
+            "Unexpected error trashing media {}",
             media_id,
-            exc,
-            exc_info=True,
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -313,10 +309,8 @@ async def restore_media_item(
         ) from exc
     except Exception as exc:
         logger.error(
-            "Unexpected error restoring media {}: {}",
+            "Unexpected error restoring media {}",
             media_id,
-            exc,
-            exc_info=True,
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -390,10 +384,8 @@ async def permanently_delete_media_item(
         ) from exc
     except Exception as exc:
         logger.error(
-            "Unexpected error permanently deleting media {}: {}",
+            "Unexpected error permanently deleting media {}",
             media_id,
-            exc,
-            exc_info=True,
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -504,14 +496,8 @@ async def update_media_item(
 
             content_updated = "content" in update_fields and update_fields["content"] is not None
             new_content = update_fields.get("content") if content_updated else None
-            new_content_hash = (
-                hashlib.sha256(new_content.encode()).hexdigest()
-                if content_updated
-                else current_hash
-            )
-            content_actually_changed = content_updated and (
-                new_content_hash != current_hash
-            )
+            new_content_hash = hashlib.sha256(new_content.encode()).hexdigest() if content_updated else current_hash
+            content_actually_changed = content_updated and (new_content_hash != current_hash)
 
             set_parts = []
             params: list[Any] = []
@@ -548,8 +534,7 @@ async def update_media_item(
                 params.append("pending")
             elif content_updated and not content_actually_changed:
                 logger.info(
-                    "Content provided for media {} but hash is identical. "
-                    "Content field not updated.",
+                    "Content provided for media {} but hash is identical. " "Content field not updated.",
                     media_id,
                 )
 
@@ -612,8 +597,7 @@ async def update_media_item(
                 db._update_fts_media(conn, media_id, fts_title, fts_content)
             if content_updated:
                 logger.info(
-                    "Content was present in update payload for media {}. "
-                    "Creating new document version.",
+                    "Content was present in update payload for media {}. " "Creating new document version.",
                     media_id,
                 )
                 new_doc_version_info = db.create_document_version(
@@ -638,9 +622,7 @@ async def update_media_item(
                 updated_media_info["created_doc_ver_uuid"] = new_doc_version_info.get(
                     "uuid",
                 )
-                updated_media_info["created_doc_ver_num"] = (
-                    new_doc_version_info.get("version_number")
-                )
+                updated_media_info["created_doc_ver_num"] = new_doc_version_info.get("version_number")
 
             db._log_sync_event(
                 conn,
@@ -678,10 +660,8 @@ async def update_media_item(
         ) from exc
     except Exception as exc:  # noqa: BLE001
         logger.error(
-            "Unexpected error updating media {}: {}",
+            "Unexpected error updating media {}",
             media_id,
-            exc,
-            exc_info=True,
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -734,10 +714,8 @@ async def update_media_keywords(
         ) from exc
     except Exception as exc:  # noqa: BLE001
         logger.error(
-            "Unexpected error updating keywords for media {}: {}",
+            "Unexpected error updating keywords for media {}",
             media_id,
-            exc,
-            exc_info=True,
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

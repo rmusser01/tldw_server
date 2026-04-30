@@ -80,6 +80,15 @@ Respond with a JSON object containing:
 JSON Response:"""
 
 
+def _fallback_error_label(error: Optional[str]) -> Optional[str]:
+    """Map fallback errors to fixed labels safe for result metadata."""
+    if error is None:
+        return None
+    if error in {"timeout", "batch_timeout"}:
+        return error
+    return "grading_error"
+
+
 def _resolve_grading_config() -> tuple[str, Optional[str], float]:
     """
     Resolve LLM provider, model, and temperature from config with fallbacks.
@@ -239,8 +248,8 @@ class DocumentGrader:
             return self._fallback_to_score(doc_id, doc_score, start_time, error="timeout")
 
         except Exception as e:
-            logger.warning(f"Document grading failed for doc {doc_id}: {e}")
-            return self._fallback_to_score(doc_id, doc_score, start_time, error=str(e))
+            logger.warning(f"Document grading failed for doc {doc_id}; using fallback")
+            return self._fallback_to_score(doc_id, doc_score, start_time, error="grading_error")
 
     def _parse_grading_response(
         self,
@@ -283,8 +292,10 @@ class DocumentGrader:
                 method="llm",
             )
 
-        except (StructuredOutputParseError, ValueError, KeyError) as e:
-            logger.warning(f"Failed to parse grading response for doc {doc_id}: {e}")
+        except (StructuredOutputParseError, ValueError, KeyError):
+            logger.warning(
+                f"Failed to parse grading response for doc {doc_id}; using heuristic fallback"
+            )
             # Fall back to heuristic parsing
             return self._heuristic_parse(doc_id, raw_response, latency_ms, fallback_score)
 
@@ -334,6 +345,8 @@ class DocumentGrader:
     ) -> GradingResult:
         """Fall back to using the document's existing score for grading."""
         latency_ms = int((time.time() - start_time) * 1000)
+        error_label = _fallback_error_label(error)
+        metadata = {"error": error_label} if error_label else {}
 
         if not self.config.fallback_to_score:
             # If fallback is disabled, mark as irrelevant
@@ -341,10 +354,10 @@ class DocumentGrader:
                 document_id=doc_id,
                 is_relevant=False,
                 relevance_score=0.0,
-                reasoning=f"Grading failed and fallback disabled: {error}" if error else "Grading unavailable",
+                reasoning="Grading failed and fallback disabled" if error else "Grading unavailable",
                 latency_ms=latency_ms,
                 method="error_fallback",
-                metadata={"error": error} if error else {},
+                metadata=metadata,
             )
 
         # Use existing score
@@ -353,10 +366,10 @@ class DocumentGrader:
             document_id=doc_id,
             is_relevant=is_relevant,
             relevance_score=doc_score,
-            reasoning=f"Using retrieval score as fallback{f' (error: {error})' if error else ''}",
+            reasoning="Using retrieval score as fallback",
             latency_ms=latency_ms,
             method="score_fallback",
-            metadata={"error": error} if error else {},
+            metadata=metadata,
         )
 
     async def grade_documents(

@@ -94,9 +94,9 @@ async def process_audios_endpoint(
             tags=["no_db"],
             metadata={"has_urls": bool(form_data.urls), "has_files": bool(files)},
         )
-    except Exception as usage_log_error:
+    except Exception:
         # Usage logging is best-effort; do not fail the request.
-        logger.debug("Audio process endpoint usage logging failed", exc_info=usage_log_error)
+        logger.debug("Audio process endpoint usage logging failed")
 
     # Normalize the "urls=['']" sentinel used by some clients.
     legacy_urls_empty_sentinel_used = bool(form_data.urls and form_data.urls == [""])
@@ -289,9 +289,9 @@ async def process_audios_endpoint(
                         "download/egress error: {}",
                         errors_joined,
                     )
-            except Exception as endpoint_log_error:
+            except Exception:
                 # Logging must never affect endpoint behavior.
-                logger.debug("Audio process endpoint warning log formatting failed", exc_info=endpoint_log_error)
+                logger.debug("Audio process endpoint warning log formatting failed")
 
     # Optional template/hierarchical re-chunking of transcripts (best-effort).
     try:
@@ -362,10 +362,9 @@ async def process_audios_endpoint(
                     chunks = _improved_chunking_process(text, chunk_options_dict)
 
                 res["chunks"] = chunks
-    except Exception as exc:
+    except Exception:
         logger.warning(
-            "Best-effort audio chunking post-processing failed; leaving results unchunked: {}",
-            exc,
+            "Best-effort audio chunking post-processing failed; leaving results unchunked"
         )
 
     response = JSONResponse(status_code=final_status_code, content=batch_result)

@@ -67,10 +67,12 @@ def _resolve_llm_manager(request: Request) -> LLMInferenceManager:
         raise HTTPException(status_code=503, detail="LLM manager not initialized.")
     return mgr  # type: ignore[return-value]
 
+
 def _llamacpp_unavailable(detail: Optional[str] = None) -> HTTPException:
     base = "Managed llama.cpp backend is not configured."
     guidance = "Enable [LlamaCpp] enabled=true in Config_Files/config.txt and restart the server."
-    message = f"{base} ({detail}) {guidance}" if detail else f"{base} {guidance}"
+    safe_detail = "backend unavailable" if detail else None
+    message = f"{base} ({safe_detail}) {guidance}" if safe_detail else f"{base} {guidance}"
     return HTTPException(status_code=503, detail=message)
 
 
@@ -87,6 +89,11 @@ def _resolve_llamacpp_target(llm_manager: LLMInferenceManager, required: tuple[s
     raise _llamacpp_unavailable()
 
 
+def _log_sanitized_manager_error(llm_manager: LLMInferenceManager, message: str) -> None:
+    """Log a sanitized manager fallback without attaching exception details."""
+    llm_manager.logger.error(message)
+
+
 # --- Llama.cpp Specific Endpoints ---
 @router.post(
     "/llamacpp/start_server",
@@ -94,11 +101,13 @@ def _resolve_llamacpp_target(llm_manager: LLMInferenceManager, required: tuple[s
     dependencies=[Depends(check_rate_limit), Depends(require_roles("admin"))],
 )
 async def start_llamacpp_server_endpoint(
-        model_filename: str = Body(..., embed=True,
-                                   description="Filename of the GGUF model to load (e.g., 'mistral-7b-v0.1.Q4_K_M.gguf')"),
-        server_args: Optional[dict[str, Any]] = Body({}, embed=True,
-                                                     description="Optional Llama.cpp server arguments (e.g., port, n_gpu_layers)"),
-        llm_manager: LLMInferenceManager = Depends(_resolve_llm_manager),
+    model_filename: str = Body(
+        ..., embed=True, description="Filename of the GGUF model to load (e.g., 'mistral-7b-v0.1.Q4_K_M.gguf')"
+    ),
+    server_args: Optional[dict[str, Any]] = Body(
+        {}, embed=True, description="Optional Llama.cpp server arguments (e.g., port, n_gpu_layers)"
+    ),
+    llm_manager: LLMInferenceManager = Depends(_resolve_llm_manager),
 ):
     """
     Starts the Llama.cpp server with the specified model.
@@ -122,7 +131,7 @@ async def start_llamacpp_server_endpoint(
     except (ModelNotFoundError, ServerError) as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
-        llm_manager.logger.error(f"Unexpected error starting Llama.cpp server: {e}", exc_info=True)
+        _log_sanitized_manager_error(llm_manager, "Unexpected error starting Llama.cpp server")
         raise HTTPException(status_code=500, detail="An unexpected error occurred.") from e
 
 
@@ -146,7 +155,7 @@ async def stop_llamacpp_server_endpoint(llm_manager: LLMInferenceManager = Depen
     except ServerError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
-        llm_manager.logger.error(f"Unexpected error stopping Llama.cpp server: {e}", exc_info=True)
+        _log_sanitized_manager_error(llm_manager, "Unexpected error stopping Llama.cpp server")
         raise HTTPException(status_code=500, detail="An unexpected error occurred.") from e
 
 
@@ -170,7 +179,7 @@ async def get_llamacpp_status_endpoint(llm_manager: LLMInferenceManager = Depend
     except InferenceError as e:
         raise _llamacpp_unavailable(str(e)) from e
     except Exception as e:
-        llm_manager.logger.error(f"Unexpected error getting Llama.cpp server status: {e}", exc_info=True)
+        _log_sanitized_manager_error(llm_manager, "Unexpected error getting Llama.cpp server status")
         raise HTTPException(status_code=500, detail="An unexpected error occurred.") from e
 
 
@@ -193,7 +202,7 @@ async def get_llamacpp_metrics_endpoint(llm_manager: LLMInferenceManager = Depen
     except InferenceError as e:
         raise _llamacpp_unavailable(str(e)) from e
     except Exception as e:
-        llm_manager.logger.error(f"Unexpected error getting Llama.cpp metrics: {e}", exc_info=True)
+        _log_sanitized_manager_error(llm_manager, "Unexpected error getting Llama.cpp metrics")
         raise HTTPException(status_code=500, detail="An unexpected error occurred.") from e
 
 
@@ -209,7 +218,7 @@ async def get_llamafile_metrics_endpoint(llm_manager: LLMInferenceManager = Depe
     except HTTPException:
         raise
     except Exception as e:
-        llm_manager.logger.error(f"Unexpected error getting Llamafile metrics: {e}", exc_info=True)
+        _log_sanitized_manager_error(llm_manager, "Unexpected error getting Llamafile metrics")
         raise HTTPException(status_code=500, detail="An unexpected error occurred.") from e
 
 
@@ -233,7 +242,7 @@ async def list_llamacpp_models_endpoint(llm_manager: LLMInferenceManager = Depen
     except InferenceError as e:
         raise _llamacpp_unavailable(str(e)) from e
     except Exception as e:
-        llm_manager.logger.error(f"Unexpected error listing Llama.cpp models: {e}", exc_info=True)
+        _log_sanitized_manager_error(llm_manager, "Unexpected error listing Llama.cpp models")
         raise HTTPException(status_code=500, detail="An unexpected error occurred.") from e
 
 
@@ -283,10 +292,12 @@ async def run_llamacpp_inference_endpoint(
     except ServerError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
-        llm_manager.logger.error(f"Unexpected error during Llama.cpp inference: {e}", exc_info=True)
+        _log_sanitized_manager_error(llm_manager, "Unexpected error during Llama.cpp inference")
         raise HTTPException(status_code=500, detail="An unexpected error occurred.") from e
 
+
 # --- Llama.cpp Reranker (GGUF embeddings) ---
+
 
 class LlamaCppRerankItem(BaseModel):
     id: Optional[str] = Field(default=None, description="Optional identifier for the passage")
@@ -296,7 +307,9 @@ class LlamaCppRerankItem(BaseModel):
 class LlamaCppRerankRequest(BaseModel):
     query: str = Field(..., min_length=1, description="Query to rank against passages")
     passages: list[LlamaCppRerankItem] = Field(..., min_length=1, description="Candidate passages to rerank")
-    top_k: Optional[int] = Field(default=None, ge=1, le=100, description="Top-K results to return (defaults to len(passages))")
+    top_k: Optional[int] = Field(
+        default=None, ge=1, le=100, description="Top-K results to return (defaults to len(passages))"
+    )
     # Optional overrides for llama.cpp and model selection
     model: Optional[str] = Field(default=None, description="GGUF model path (overrides config)")
     binary: Optional[str] = Field(default=None, description="llama-embedding binary name or path")
@@ -307,25 +320,27 @@ class LlamaCppRerankRequest(BaseModel):
     normalize: Optional[int] = Field(default=None, description="Embedding normalize flag (-1, 0, 1)")
     max_doc_chars: Optional[int] = Field(default=None, ge=0, description="Max chars per passage (truncation)")
     # OpenAPI example
-    model_config = ConfigDict(json_schema_extra={
-        "examples": [
-            {
-                "query": "What do llamas eat?",
-                "passages": [
-                    {"id": "a", "text": "Llamas eat bananas"},
-                    {"id": "b", "text": "Llamas in pyjamas"},
-                    {"id": "c", "text": "A bowl of fruit salad"}
-                ],
-                "top_k": 2,
-                "model": "/models/Qwen3-Embedding-0.6B_f16.gguf",
-                "ngl": 99,
-                "separator": "<#sep#>",
-                "output_format": "json+",
-                "pooling": "last",
-                "normalize": -1
-            }
-        ]
-    })
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {
+                    "query": "What do llamas eat?",
+                    "passages": [
+                        {"id": "a", "text": "Llamas eat bananas"},
+                        {"id": "b", "text": "Llamas in pyjamas"},
+                        {"id": "c", "text": "A bowl of fruit salad"},
+                    ],
+                    "top_k": 2,
+                    "model": "/models/Qwen3-Embedding-0.6B_f16.gguf",
+                    "ngl": 99,
+                    "separator": "<#sep#>",
+                    "output_format": "json+",
+                    "pooling": "last",
+                    "normalize": -1,
+                }
+            ]
+        }
+    )
 
 
 class LlamaCppRerankResult(BaseModel):
@@ -339,8 +354,18 @@ class LlamaCppRerankResponse(BaseModel):
     results: list[LlamaCppRerankResult]
 
 
-@router.post("/llamacpp/reranking", summary="Rerank passages with llama.cpp embeddings (GGUF)", response_model=LlamaCppRerankResponse, dependencies=[Depends(check_rate_limit)])
-@router.post("/llamacpp/rerank", summary="Rerank passages with llama.cpp embeddings (GGUF)", response_model=LlamaCppRerankResponse, dependencies=[Depends(check_rate_limit)])
+@router.post(
+    "/llamacpp/reranking",
+    summary="Rerank passages with llama.cpp embeddings (GGUF)",
+    response_model=LlamaCppRerankResponse,
+    dependencies=[Depends(check_rate_limit)],
+)
+@router.post(
+    "/llamacpp/rerank",
+    summary="Rerank passages with llama.cpp embeddings (GGUF)",
+    response_model=LlamaCppRerankResponse,
+    dependencies=[Depends(check_rate_limit)],
+)
 async def llamacpp_reranker_endpoint(payload: LlamaCppRerankRequest, current_user: User = Depends(get_request_user)):
     """
     Rerank passages using the llama.cpp embeddings binary (llama-embedding) with a GGUF embedding model
@@ -355,18 +380,20 @@ async def llamacpp_reranker_endpoint(payload: LlamaCppRerankRequest, current_use
         )
         from tldw_Server_API.app.core.RAG.rag_service.types import DataSource, Document
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Reranking modules unavailable: {e}") from e
+        raise HTTPException(status_code=500, detail="Failed to initialize reranking") from e
 
     # Build documents from passages
     documents: list[Document] = []
     for i, item in enumerate(payload.passages):
-        documents.append(Document(
-            id=item.id or str(i),
-            content=item.text,
-            metadata={"source": "llamacpp_reranker"},
-            source=DataSource.MEDIA_DB,
-            score=0.0,
-        ))
+        documents.append(
+            Document(
+                id=item.id or str(i),
+                content=item.text,
+                metadata={"source": "llamacpp_reranker"},
+                source=DataSource.MEDIA_DB,
+                score=0.0,
+            )
+        )
 
     # Config and overrides
     cfg = RerankingConfig(
@@ -404,21 +431,23 @@ async def llamacpp_reranker_endpoint(payload: LlamaCppRerankRequest, current_use
         if isinstance(scored, list) and cfg.top_k:
             scored = scored[: cfg.top_k]
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Reranking failed: {e}") from e
+        raise HTTPException(status_code=500, detail="Failed to rerank passages") from e
 
     # Convert results
     # Map back to original order indices
-    id_to_index = { (p.id or str(i)): i for i, p in enumerate(payload.passages) }
+    id_to_index = {(p.id or str(i)): i for i, p in enumerate(payload.passages)}
     results: list[LlamaCppRerankResult] = []
     for sd in scored:
-        pid = getattr(sd.document, 'id', None)
+        pid = getattr(sd.document, "id", None)
         idx = id_to_index.get(pid, 0)
-        results.append(LlamaCppRerankResult(
-            id=pid,
-            index=idx,
-            score=float(getattr(sd, 'rerank_score', 0.0)),
-            text=getattr(sd.document, 'content', None)
-        ))
+        results.append(
+            LlamaCppRerankResult(
+                id=pid,
+                index=idx,
+                score=float(getattr(sd, "rerank_score", 0.0)),
+                text=getattr(sd.document, "content", None),
+            )
+        )
 
     return LlamaCppRerankResponse(results=results)
 
@@ -428,32 +457,38 @@ public_router = APIRouter()
 
 
 class PublicRerankRequest(BaseModel):
-    model: Optional[str] = Field(default=None, description="Reranker model id/path (GGUF for llama.cpp or HF id for transformers)")
+    model: Optional[str] = Field(
+        default=None, description="Reranker model id/path (GGUF for llama.cpp or HF id for transformers)"
+    )
     query: str = Field(..., min_length=1)
     documents: list[str] = Field(..., min_length=1, description="Documents (plain text) to rank")
     top_n: Optional[int] = Field(default=None, ge=1, le=100)
     backend: Optional[str] = Field(default="auto", description="Reranker backend: auto|llamacpp|transformers")
-    model_config = ConfigDict(json_schema_extra={
-        "examples": [
-            {
-                "model": "/models/Qwen3-Embedding-0.6B_f16.gguf",
-                "query": "What is panda?",
-                "top_n": 3,
-                "documents": [
-                    "hi",
-                    "it is a bear",
-                    "The giant panda (Ailuropoda melanoleuca), sometimes called a panda bear ..."
-                ]
-            }
-        ]
-    })
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {
+                    "model": "/models/Qwen3-Embedding-0.6B_f16.gguf",
+                    "query": "What is panda?",
+                    "top_n": 3,
+                    "documents": [
+                        "hi",
+                        "it is a bear",
+                        "The giant panda (Ailuropoda melanoleuca), sometimes called a panda bear ...",
+                    ],
+                }
+            ]
+        }
+    )
 
 
 class PublicRerankResponse(BaseModel):
     results: list[LlamaCppRerankResult]
 
 
-async def _run_public_rerank(query: str, docs: list[str], model_override: Optional[str], top_k: Optional[int], backend: str) -> list[LlamaCppRerankResult]:
+async def _run_public_rerank(
+    query: str, docs: list[str], model_override: Optional[str], top_k: Optional[int], backend: str
+) -> list[LlamaCppRerankResult]:
     from tldw_Server_API.app.core.RAG.rag_service.advanced_reranking import (
         RerankingConfig,
         RerankingStrategy,
@@ -478,7 +513,11 @@ async def _run_public_rerank(query: str, docs: list[str], model_override: Option
         strategy = RerankingStrategy.CROSS_ENCODER
     else:
         # Auto fallback: prefer transformers if it looks like HF id, else llama if gguf
-        strategy = RerankingStrategy.LLAMA_CPP if is_gguf else (RerankingStrategy.CROSS_ENCODER if looks_hf_id else RerankingStrategy.FLASHRANK)
+        strategy = (
+            RerankingStrategy.LLAMA_CPP
+            if is_gguf
+            else (RerankingStrategy.CROSS_ENCODER if looks_hf_id else RerankingStrategy.FLASHRANK)
+        )
 
     cfg = RerankingConfig(
         strategy=strategy,
@@ -498,18 +537,30 @@ async def _run_public_rerank(query: str, docs: list[str], model_override: Option
         scored = scored[: cfg.top_k]
     out: list[LlamaCppRerankResult] = []
     for sd in scored:
-        idx = int(getattr(sd.document, 'id', '0')) if str(getattr(sd.document, 'id', '0')).isdigit() else 0
-        out.append(LlamaCppRerankResult(
-            id=getattr(sd.document, 'id', None),
-            index=idx,
-            score=float(getattr(sd, 'rerank_score', 0.0)),
-            text=getattr(sd.document, 'content', None),
-        ))
+        idx = int(getattr(sd.document, "id", "0")) if str(getattr(sd.document, "id", "0")).isdigit() else 0
+        out.append(
+            LlamaCppRerankResult(
+                id=getattr(sd.document, "id", None),
+                index=idx,
+                score=float(getattr(sd, "rerank_score", 0.0)),
+                text=getattr(sd.document, "content", None),
+            )
+        )
     return out
 
 
-@public_router.post("/v1/reranking", summary="Rerank documents according to a query", response_model=PublicRerankResponse, dependencies=[Depends(check_rate_limit)])
-@public_router.post("/v1/rerank", summary="Rerank documents according to a query", response_model=PublicRerankResponse, dependencies=[Depends(check_rate_limit)])
+@public_router.post(
+    "/v1/reranking",
+    summary="Rerank documents according to a query",
+    response_model=PublicRerankResponse,
+    dependencies=[Depends(check_rate_limit)],
+)
+@public_router.post(
+    "/v1/rerank",
+    summary="Rerank documents according to a query",
+    response_model=PublicRerankResponse,
+    dependencies=[Depends(check_rate_limit)],
+)
 async def public_reranking_endpoint(payload: PublicRerankRequest, current_user: User = Depends(get_request_user)):
     try:
         results = await _run_public_rerank(
@@ -523,7 +574,8 @@ async def public_reranking_endpoint(payload: PublicRerankRequest, current_user: 
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Public reranking failed: {e}") from e
+        raise HTTPException(status_code=500, detail="Failed to rerank documents") from e
+
 
 #
 # End of llamacpp.py

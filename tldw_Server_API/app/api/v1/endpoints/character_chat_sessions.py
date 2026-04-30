@@ -77,6 +77,7 @@ from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import (
     DEFAULT_LLM_PROVIDER,
 )
 from tldw_Server_API.app.api.v1.utils.deprecation import build_deprecation_headers
+from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
     apply_llm_provider_overrides_to_listing,
     get_override_model_priority,
@@ -3536,14 +3537,14 @@ async def create_chat_session(
 
 # Template tokens available in custom presets
 _PRESET_TEMPLATE_TOKENS = [
-    PresetTokenInfo(token="{{char}}", description="Character name"),
-    PresetTokenInfo(token="{{user}}", description="User/player name"),
-    PresetTokenInfo(token="{{description}}", description="Character description field"),
-    PresetTokenInfo(token="{{personality}}", description="Character personality field"),
-    PresetTokenInfo(token="{{scenario}}", description="Character scenario field"),
-    PresetTokenInfo(token="{{system_prompt}}", description="Character system prompt field"),
-    PresetTokenInfo(token="{{message_example}}", description="Character example messages"),
-    PresetTokenInfo(token="{{post_history}}", description="Post-history instructions"),
+    PresetTokenInfo(token="{{char}}", description="Character name"),  # nosec B106
+    PresetTokenInfo(token="{{user}}", description="User/player name"),  # nosec B106
+    PresetTokenInfo(token="{{description}}", description="Character description field"),  # nosec B106
+    PresetTokenInfo(token="{{personality}}", description="Character personality field"),  # nosec B106
+    PresetTokenInfo(token="{{scenario}}", description="Character scenario field"),  # nosec B106
+    PresetTokenInfo(token="{{system_prompt}}", description="Character system prompt field"),  # nosec B106
+    PresetTokenInfo(token="{{message_example}}", description="Character example messages"),  # nosec B106
+    PresetTokenInfo(token="{{post_history}}", description="Post-history instructions"),  # nosec B106
 ]
 
 # Built-in preset metadata (non-deletable)
@@ -4982,9 +4983,11 @@ async def character_chat_completion(
                     ) from e
             except ChatAPIError as e:
                 logger.error("Chat provider call failed [{}]: {}", e.__class__.__name__, e)
+                provider_status_code = int(getattr(e, "status_code", status.HTTP_502_BAD_GATEWAY))
+                public_detail = "Chat provider error" if provider_status_code >= 500 else str(e)
                 raise HTTPException(
-                    status_code=int(getattr(e, "status_code", status.HTTP_502_BAD_GATEWAY)),
-                    detail=str(e),
+                    status_code=provider_status_code,
+                    detail=public_detail,
                 ) from e
             except _CHAR_CHAT_SESSIONS_NONCRITICAL_EXCEPTIONS as e:
                 logger.error(f"Chat provider call failed: {e}")
@@ -5427,18 +5430,17 @@ async def character_chat_completion(
     except HTTPException:
         raise
     except InputError as e:
-        msg = str(e)
-        status_code = status.HTTP_400_BAD_REQUEST
-        if "exceeds maximum" in msg.lower():
-            status_code = status.HTTP_413_CONTENT_TOO_LARGE
         logger.warning(f"Input error in character chat completion for {chat_id}: {e}")
-        raise HTTPException(status_code=status_code, detail=msg) from e
+        raise map_db_error_to_http(
+            e,
+            payload_too_large_substrings=("exceeds maximum",),
+        ) from e
     except ConflictError as e:
         logger.warning(f"Conflict in character chat completion for {chat_id}: {e}")
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e)) from e
+        raise map_db_error_to_http(e) from e
     except CharactersRAGDBError as e:
         logger.error(f"DB error in character chat completion for {chat_id}: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)) from e
+        raise map_db_error_to_http(e, default_detail="Failed to complete character chat") from e
     except _CHAR_CHAT_SESSIONS_NONCRITICAL_EXCEPTIONS as e:
         logger.error(f"Error in character chat completion for {chat_id}: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="An unexpected error occurred during character chat completion") from e
@@ -5669,10 +5671,10 @@ async def update_chat_session(
     except ConflictError as e:
         # Optimistic locking or state conflicts
         logger.warning(f"Conflict updating chat session {chat_id}: {e}")
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e)) from e
+        raise map_db_error_to_http(e) from e
     except CharactersRAGDBError as e:
         logger.error(f"DB error updating chat session {chat_id}: {e}", exc_info=True)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)) from e
+        raise map_db_error_to_http(e, default_detail="Failed to update chat session") from e
     except HTTPException:
         raise
     except _CHAR_CHAT_SESSIONS_NONCRITICAL_EXCEPTIONS as e:
@@ -5935,10 +5937,10 @@ async def delete_chat_session(
 
     except ConflictError as e:
         logger.warning(f"Conflict deleting chat session {chat_id}: {e}")
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e)) from e
+        raise map_db_error_to_http(e) from e
     except CharactersRAGDBError as e:
         logger.error(f"DB error deleting chat session {chat_id}: {e}", exc_info=True)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)) from e
+        raise map_db_error_to_http(e, default_detail="Failed to delete chat session") from e
     except HTTPException:
         raise
     except _CHAR_CHAT_SESSIONS_NONCRITICAL_EXCEPTIONS as e:
@@ -5989,10 +5991,10 @@ async def restore_chat_session(
 
     except ConflictError as e:
         logger.warning(f"Conflict restoring chat session {chat_id}: {e}")
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e)) from e
+        raise map_db_error_to_http(e) from e
     except CharactersRAGDBError as e:
         logger.error(f"DB error restoring chat session {chat_id}: {e}", exc_info=True)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)) from e
+        raise map_db_error_to_http(e, default_detail="Failed to restore chat session") from e
     except HTTPException:
         raise
     except _CHAR_CHAT_SESSIONS_NONCRITICAL_EXCEPTIONS as e:
@@ -6506,18 +6508,17 @@ async def persist_streamed_assistant_message(
     except HTTPException:
         raise
     except InputError as e:
-        msg = str(e)
-        status_code = status.HTTP_400_BAD_REQUEST
-        if "exceeds maximum" in msg.lower():
-            status_code = status.HTTP_413_CONTENT_TOO_LARGE
         logger.warning(f"Input error persisting streamed assistant message for {chat_id}: {e}")
-        raise HTTPException(status_code=status_code, detail=msg) from e
+        raise map_db_error_to_http(
+            e,
+            payload_too_large_substrings=("exceeds maximum",),
+        ) from e
     except ConflictError as e:
         logger.warning(f"Conflict persisting streamed assistant message for {chat_id}: {e}")
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e)) from e
+        raise map_db_error_to_http(e) from e
     except CharactersRAGDBError as e:
         logger.error(f"DB error persisting streamed assistant message for {chat_id}: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)) from e
+        raise map_db_error_to_http(e, default_detail="Failed to persist assistant message") from e
     except _CHAR_CHAT_SESSIONS_NONCRITICAL_EXCEPTIONS as e:
         logger.error(f"Error persisting streamed assistant message for {chat_id}: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to persist assistant message") from e

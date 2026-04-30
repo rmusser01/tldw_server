@@ -93,6 +93,13 @@ def _torch_mps_available(*, allow_import: bool = False) -> bool:
     except Exception:
         return False
 
+
+def _safe_exception_label(exc: BaseException | None) -> str:
+    if exc is None:
+        return "unknown"
+    return type(exc).__name__
+
+
 class DiaAdapter(TTSAdapter):
     """Adapter for Dia TTS model (dialogue generation specialist)"""
 
@@ -178,7 +185,8 @@ class DiaAdapter(TTSAdapter):
         """Initialize the Dia TTS model"""
         if _get_torch(allow_import=True) is None:
             logger.warning(
-                f"{self.provider_name}: torch unavailable; disabling provider. error={_TORCH_IMPORT_ERROR}"
+                f"{self.provider_name}: torch unavailable; disabling provider. "
+                f"exception_type={_safe_exception_label(_TORCH_IMPORT_ERROR)}"
             )
             self._status = ProviderStatus.NOT_CONFIGURED
             return False
@@ -220,7 +228,10 @@ class DiaAdapter(TTSAdapter):
                 ) from e
             raise
         except Exception as e:
-            logger.error(f"{self.provider_name}: Initialization failed: {e}")
+            logger.error(
+                f"{self.provider_name}: Initialization failed; "
+                f"exception_type={_safe_exception_label(e)}"
+            )
             self._status = ProviderStatus.ERROR
             raise TTSProviderInitializationError(
                 f"Failed to initialize {self.provider_name}",
@@ -317,7 +328,10 @@ class DiaAdapter(TTSAdapter):
         try:
             validate_tts_request(request, provider=self.provider_key)
         except Exception as e:
-            logger.error(f"{self.provider_name} request validation failed: {e}")
+            logger.error(
+                f"{self.provider_name} request validation failed; "
+                f"exception_type={_safe_exception_label(e)}"
+            )
             raise
 
         # Process text for dialogue
@@ -352,7 +366,10 @@ class DiaAdapter(TTSAdapter):
                 )
 
         except Exception as e:
-            logger.error(f"{self.provider_name} generation error: {e}")
+            logger.error(
+                f"{self.provider_name} generation error; "
+                f"exception_type={_safe_exception_label(e)}"
+            )
             raise
 
     async def _stream_audio_dia(
@@ -442,7 +459,10 @@ class DiaAdapter(TTSAdapter):
             logger.info(f"{self.provider_name}: Successfully generated dialogue audio")
 
         except Exception as e:
-            logger.error(f"{self.provider_name} streaming error: {e}")
+            logger.error(
+                f"{self.provider_name} streaming error; "
+                f"exception_type={_safe_exception_label(e)}"
+            )
             raise
         finally:
             writer.close()

@@ -164,9 +164,9 @@ async def run_csv_to_json_adapter(config: dict[str, Any], context: dict[str, Any
             records = [{"col_" + str(i): v for i, v in enumerate(row)} for row in rows]
 
         return {"records": records, "count": len(records), "columns": headers if has_header else None}
-    except Exception as e:
-        logger.exception(f"CSV to JSON error: {e}")
-        return {"error": str(e), "records": [], "count": 0}
+    except Exception:
+        logger.exception("CSV to JSON error")
+        return {"error": "csv_to_json_error", "records": [], "count": 0}
 
 
 @registry.register(
@@ -215,6 +215,6 @@ async def run_json_to_csv_adapter(config: dict[str, Any], context: dict[str, Any
 
         csv_data = output.getvalue()
         return {"csv": csv_data, "count": len(records)}
-    except Exception as e:
-        logger.exception(f"JSON to CSV error: {e}")
-        return {"error": str(e), "csv": "", "count": 0}
+    except Exception:
+        logger.exception("JSON to CSV error")
+        return {"error": "json_to_csv_error", "csv": "", "count": 0}

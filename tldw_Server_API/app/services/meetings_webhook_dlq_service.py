@@ -51,6 +51,10 @@ def _next_attempt_iso(delay_seconds: int) -> str:
     return (datetime.now(timezone.utc) + timedelta(seconds=max(1, int(delay_seconds)))).replace(microsecond=0).isoformat()
 
 
+def _dispatch_exception_message(exc: BaseException) -> str:
+    return "Meeting webhook delivery timed out" if isinstance(exc, TimeoutError) else "Meeting webhook delivery failed"
+
+
 def discover_meetings_db_targets() -> list[tuple[Path, str]]:
     """Discover candidate per-user media DB paths for meeting dispatch processing."""
     targets: list[tuple[Path, str]] = []
@@ -123,7 +127,7 @@ async def _attempt_dispatch(
         finally:
             await _close_response(response)
     except _MEETINGS_DLQ_NONCRITICAL_EXCEPTIONS as exc:
-        return False, str(exc), None
+        return False, _dispatch_exception_message(exc), None
 
 
 async def run_meetings_webhook_dlq_worker(stop_event: asyncio.Event | None = None) -> None:

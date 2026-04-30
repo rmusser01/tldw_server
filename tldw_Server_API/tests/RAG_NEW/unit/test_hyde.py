@@ -1,8 +1,85 @@
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
+import pytest
+
+import tldw_Server_API.app.core.LLM_Calls as llm_calls
+from tldw_Server_API.app.core.RAG.rag_service import hyde
 from tldw_Server_API.app.core.RAG.rag_service.types import Document, DataSource
 from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import unified_rag_pipeline
+
+
+class _FakeLogger:
+    def __init__(self):
+        self.debugs = []
+        self.warnings = []
+
+    def debug(self, message):
+        self.debugs.append(message)
+
+    def warning(self, message):
+        self.warnings.append(message)
+
+
+@pytest.mark.unit
+def test_generate_with_llm_sanitizes_generation_failure(monkeypatch):
+    secret = "sk-secret-hyde-generation"
+
+    def fake_analyze(**kwargs):
+        raise RuntimeError(secret)
+
+    fake_sgl = SimpleNamespace(analyze=fake_analyze)
+    fake_logger = _FakeLogger()
+    monkeypatch.setattr(hyde, "logger", fake_logger)
+    monkeypatch.setattr(llm_calls, "Summarization_General_Lib", fake_sgl)
+    monkeypatch.setitem(
+        __import__("sys").modules,
+        "tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib",
+        fake_sgl,
+    )
+
+    assert hyde._generate_with_llm("prompt", "openai", "gpt-4o-mini") == ""
+    assert fake_logger.warnings == ["HyDE LLM generation failed"]
+    assert secret not in "\n".join(fake_logger.warnings + fake_logger.debugs)
+
+
+@pytest.mark.unit
+def test_generate_with_llm_sanitizes_utility_unavailable(monkeypatch):
+    secret = "sk-secret-hyde-utility"
+    real_import = __import__("builtins").__import__
+
+    def fake_import(name, *args, **kwargs):
+        if name == "tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib":
+            raise ImportError(secret)
+        return real_import(name, *args, **kwargs)
+
+    fake_logger = _FakeLogger()
+    monkeypatch.setattr(hyde, "logger", fake_logger)
+    monkeypatch.setattr("builtins.__import__", fake_import)
+
+    assert hyde._generate_with_llm("prompt", "openai", "gpt-4o-mini") is None
+    assert fake_logger.debugs == ["HyDE LLM utility unavailable"]
+    assert secret not in "\n".join(fake_logger.warnings + fake_logger.debugs)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_embed_text_sanitizes_embedding_failure(monkeypatch):
+    secret = "sk-secret-hyde-embedding"
+    real_import = __import__("builtins").__import__
+
+    def fake_import(name, *args, **kwargs):
+        if name == "tldw_Server_API.app.core.Embeddings.Embeddings_Server.Embeddings_Create":
+            raise RuntimeError(secret)
+        return real_import(name, *args, **kwargs)
+
+    fake_logger = _FakeLogger()
+    monkeypatch.setattr(hyde, "logger", fake_logger)
+    monkeypatch.setattr("builtins.__import__", fake_import)
+
+    assert await hyde.embed_text("text") is None
+    assert fake_logger.warnings == ["HyDE embedding failed"]
+    assert secret not in "\n".join(fake_logger.warnings + fake_logger.debugs)
 
 
 @pytest.mark.unit

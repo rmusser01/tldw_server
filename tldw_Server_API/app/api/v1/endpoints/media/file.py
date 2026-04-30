@@ -180,11 +180,7 @@ async def get_media_file(
 
     storage_path = file_record.get("storage_path")
     if not storage_path:
-        logger.error(
-            "File record exists but storage_path is empty for media_id={}, file_type={}",
-            media_id,
-            file_type,
-        )
+        logger.error("File record has empty storage path")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="File record is corrupted",
@@ -206,11 +202,7 @@ async def get_media_file(
                 detail="File not found on storage (may have been deleted)",
             )
     except StorageError as e:
-        logger.error(
-            "Storage error checking file existence for {}: {}",
-            storage_path,
-            e,
-        )
+        logger.error("Storage error checking file existence")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error accessing file storage",

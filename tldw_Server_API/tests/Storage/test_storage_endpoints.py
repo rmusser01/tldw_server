@@ -15,6 +15,10 @@ from fastapi.testclient import TestClient
 from unittest.mock import AsyncMock
 from datetime import datetime, timezone
 
+from tldw_Server_API.app.api.v1.endpoints import storage as storage_endpoints
+from tldw_Server_API.app.api.v1.schemas.storage_schemas import SetQuotaRequest
+from tldw_Server_API.app.core.AuthNZ.exceptions import StorageError
+
 
 class TestListFilesEndpoint:
     """Tests for GET /storage/files endpoint."""
@@ -397,6 +401,31 @@ class TestAdminQuotaEndpoints:
         result = await mock_storage_service.set_user_quota(1, 2000)
 
         assert result["storage_quota_mb"] == 2000
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_set_user_quota_sanitizes_storage_error(self, monkeypatch):
+        """Test admin user quota failures do not leak backend details."""
+
+        class _BrokenStorageService:
+            async def set_user_quota(self, user_id, quota_mb):
+                _ = (user_id, quota_mb)
+                raise StorageError("storage backend exploded")
+
+        async def _get_broken_service():
+            return _BrokenStorageService()
+
+        monkeypatch.setattr(storage_endpoints, "_get_service", _get_broken_service)
+
+        with pytest.raises(HTTPException) as exc_info:
+            await storage_endpoints.set_user_quota(
+                user_id=1,
+                request=SetQuotaRequest(quota_mb=1000),
+                _principal=object(),
+            )
+
+        assert exc_info.value.status_code == 500
+        assert exc_info.value.detail == "Failed to set user storage quota"
 
 
 class TestUsageWithSoftLimitWarnings:

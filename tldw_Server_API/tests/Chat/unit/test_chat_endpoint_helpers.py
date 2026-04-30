@@ -97,6 +97,23 @@ def test_build_test_mode_chat_response_uses_explicit_system_message():
     assert content.startswith("mindmap")
 
 
+def test_chat_error_audit_metadata_sanitizes_exception_message():
+    exc = RuntimeError("provider failed at /private/chat/request.json")
+
+    metadata = chat_endpoint._build_chat_error_audit_metadata(
+        exc,
+        provider="openai",
+        model="gpt-4o-mini",
+    )
+
+    assert metadata == {
+        "error_type": "RuntimeError",
+        "error_message": "Chat completion failed",
+        "provider": "openai",
+        "model": "gpt-4o-mini",
+    }
+
+
 @pytest.mark.asyncio
 async def test_schedule_audit_background_task_observes_exception(monkeypatch):
     captured: list[tuple[str, tuple]] = []

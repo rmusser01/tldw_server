@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import Any
-
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
@@ -18,11 +16,6 @@ class OmniVoiceSynthesizeRequest(BaseModel):
     voice: str | None = None
     reference_audio_path: str | None = None
     reference_text: str | None = None
-    language: str | None = None
-    instruct: str | None = None
-    duration: float | None = Field(default=None, gt=0)
-    speed: float | None = Field(default=None, gt=0)
-    generation_params: dict[str, Any] = Field(default_factory=dict)
     sample_rate: int = Field(default=24000, ge=8000, le=192000)
 
     @model_validator(mode="after")
@@ -30,6 +23,8 @@ class OmniVoiceSynthesizeRequest(BaseModel):
         if self.mode == "clone":
             if not self.reference_audio_path:
                 raise ValueError("reference_audio_path is required for clone mode")
+            if not self.reference_text:
+                raise ValueError("reference_text is required for clone mode")
         return self
 
 
@@ -55,10 +50,6 @@ class OmniVoiceHealthResponse(BaseModel):
     ready: bool = True
     provider: str = "omnivoice"
     runtime: str = "sidecar"
-    runtime_mode: str = "stub"
-    model_loaded: bool = False
-    model_ready: bool = True
-    last_error: str | None = None
 
 
 def build_sidecar_auth_headers(sidecar_token: str) -> dict[str, str]:

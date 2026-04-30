@@ -64,6 +64,7 @@ from tldw_Server_API.app.api.v1.schemas.writing_schemas import (
     WritingWordcloudResult,
     WritingWordcloudWord,
 )
+from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.core.AuthNZ.rate_limiter import RateLimiter
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
@@ -114,6 +115,7 @@ _WRITING_NONCRITICAL_EXCEPTIONS = (
     json.JSONDecodeError,
 )
 
+TOKENIZER_UNAVAILABLE_DETAIL = "Tokenizer unavailable for provider/model"
 _TRUE_VALUES = {"1", "true", "yes", "on"}
 
 
@@ -123,11 +125,7 @@ async def _enforce_rate_limit(rate_limiter: RateLimiter, user_id: int, scope: st
         allowed, meta = await rate_limiter.check_user_rate_limit(int(user_id), scope)
     except _WRITING_NONCRITICAL_EXCEPTIONS as exc:
         retry_after = 60
-        logger.exception(
-            "Rate limiter check failed for user_id={} scope={}",
-            user_id,
-            scope,
-        )
+        logger.error("Rate limiter check failed")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Rate limiter unavailable",
@@ -147,22 +145,26 @@ def _handle_db_errors(exc: Exception, entity_label: str) -> NoReturn:
         raise exc
     if isinstance(exc, InputError):
         logger.warning("Input error for {}: {}", entity_label, exc)
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        raise map_db_error_to_http(exc) from exc
     if isinstance(exc, ConflictError):
         message = str(exc)
         lowered = message.lower()
         if "not found" in lowered or "soft-deleted" in lowered or "soft deleted" in lowered:
             logger.debug("Entity not found for {}: {}", entity_label, exc)
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"{entity_label} not found") from exc
+            raise map_db_error_to_http(
+                exc,
+                conflict_status_code=status.HTTP_404_NOT_FOUND,
+                conflict_detail=f"{entity_label} not found",
+            ) from exc
         logger.warning("Conflict error for {}: {}", entity_label, exc)
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=message) from exc
+        raise map_db_error_to_http(exc) from exc
     if isinstance(exc, CharactersRAGDBError):
-        logger.error("Database error for {}: {}", entity_label, exc)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Database error while processing {entity_label}",
+        logger.error("Database error while processing writing entity")
+        raise map_db_error_to_http(
+            exc,
+            default_detail=f"Database error while processing {entity_label}",
         ) from exc
-    logger.exception("Unexpected error for {}: {}", entity_label, exc)
+    logger.error("Unexpected error while processing writing entity")
     raise HTTPException(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         detail=f"Unexpected error while processing {entity_label}",
@@ -551,12 +553,12 @@ def _tokenizer_support(provider: str, model: str) -> WritingTokenizerSupport:
             count_accuracy=count_accuracy,
             strict_mode_effective=strict_mode_effective,
         )
-    except TokenizerUnavailable as exc:
+    except TokenizerUnavailable:
         return WritingTokenizerSupport(
             available=False,
             count_accuracy="unavailable",
             strict_mode_effective=_strict_token_counting_enabled(),
-            error=str(exc),
+            error=TOKENIZER_UNAVAILABLE_DETAIL,
         )
 
 
@@ -565,6 +567,7 @@ WORDCLOUD_STATUS_QUEUED = "queued"
 WORDCLOUD_STATUS_RUNNING = "running"
 WORDCLOUD_STATUS_READY = "ready"
 WORDCLOUD_STATUS_FAILED = "failed"
+WORDCLOUD_GENERATION_FAILED_DETAIL = "Wordcloud generation failed"
 WORDCLOUD_TOKEN_RE = re.compile(r"[\w'-]+", flags=re.UNICODE)
 DEFAULT_WORDCLOUD_STOPWORDS = {
     "a",
@@ -800,15 +803,15 @@ def _run_wordcloud_job(
             error=None,
         )
     except _WRITING_NONCRITICAL_EXCEPTIONS as exc:
-        logger.exception("Wordcloud job failed for {}: {}", wordcloud_id, exc)
+        logger.error("Wordcloud job failed")
         try:
             db.set_writing_wordcloud_result(
                 wordcloud_id,
                 status=WORDCLOUD_STATUS_FAILED,
-                error=str(exc),
+                error=WORDCLOUD_GENERATION_FAILED_DETAIL,
             )
         except _WRITING_NONCRITICAL_EXCEPTIONS:
-            logger.exception("Failed to persist wordcloud failure for {}", wordcloud_id)
+            logger.error("Failed to persist wordcloud failure")
 
 
 def _build_wordcloud_response_from_row(row: dict[str, Any], *, cached: bool) -> WritingWordcloudResponse:
@@ -947,8 +950,8 @@ async def get_writing_capabilities(
                     strict_mode_effective,
                 ) = _resolve_tokenizer_details(provider_name, model_name)
                 tokenizer_available = True
-            except TokenizerUnavailable as exc:
-                tokenization_error = str(exc)
+            except TokenizerUnavailable:
+                tokenization_error = TOKENIZER_UNAVAILABLE_DETAIL
             extra_body_compat = _safe_model_extra_body_compat(provider_name, model_name, runtime_ctx)
         elif provider_name:
             extra_body_compat = _safe_provider_extra_body_compat(provider_name, runtime_ctx)

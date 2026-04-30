@@ -1673,19 +1673,21 @@ async def batch_evaluate(
                                 }
                                 failed_count += 1
                         except _EVALS_NONCRITICAL_EXCEPTIONS as e:
+                            logger.error(f"Batch evaluation item failed: {e}", exc_info=True)
                             results_by_index[item_index] = {
                                 "evaluation_id": None,
                                 "status": "failed",
-                                "error": str(e),
+                                "error": "Evaluation item failed",
                             }
                             failed_count += 1
                             if not request.continue_on_error:
                                 fail_fast_cancelled = True
                         except Exception as e:
+                            logger.error(f"Batch evaluation item failed: {e}", exc_info=True)
                             results_by_index[item_index] = {
                                 "evaluation_id": None,
                                 "status": "failed",
-                                "error": str(e),
+                                "error": "Evaluation item failed",
                             }
                             failed_count += 1
                             if not request.continue_on_error:
@@ -1831,10 +1833,11 @@ async def batch_evaluate(
                     })
 
                 except _EVALS_NONCRITICAL_EXCEPTIONS as e:
+                    logger.error(f"Batch evaluation item failed: {e}", exc_info=True)
                     results.append({
                         "evaluation_id": None,
                         "status": "failed",
-                        "error": str(e)
+                        "error": "Evaluation item failed"
                     })
                     failed_count += 1
 

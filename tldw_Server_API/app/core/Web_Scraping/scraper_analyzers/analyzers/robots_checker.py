@@ -62,4 +62,4 @@ def check_robots_txt(url: str) -> dict[str, Any]:
 
         return {"status": "error", "message": str(resp.status_code)}
     except Exception as exc:
-        return {"status": "error", "message": str(exc)}
+        return {"status": "error", "message": "Robots.txt check failed."}

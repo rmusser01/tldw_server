@@ -158,10 +158,10 @@ async def run_batch(
                     cancel_event.set()
                     logger.warning(
                         f"Batch item {index} failed (fail_fast=True), "
-                        f"cancelling remaining: {e}"
+                        "cancelling remaining"
                     )
                 else:
-                    logger.warning(f"Batch item {index} failed: {e}")
+                    logger.warning(f"Batch item {index} failed")
 
     # Create and run tasks
     tasks = [
@@ -253,7 +253,7 @@ async def run_batch_indexed(
                 if fail_fast:
                     cancel_event.set()
                 else:
-                    logger.warning(f"Batch item {index} failed: {e}")
+                    logger.warning(f"Batch item {index} failed")
 
     tasks = [
         asyncio.create_task(process_item(i, item))

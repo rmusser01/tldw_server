@@ -12,8 +12,6 @@ const RECOMMENDATIONS_PATH = toAllowedPath("/api/v1/setup/admin/audio/recommenda
 const INSTALL_STATUS_PATH = toAllowedPath("/api/v1/setup/admin/install-status")
 const PROVISION_PATH = toAllowedPath("/api/v1/setup/admin/audio/provision")
 const VERIFY_PATH = toAllowedPath("/api/v1/setup/admin/audio/verify")
-const OMNIVOICE_STATUS_PATH = toAllowedPath("/api/v1/setup/admin/audio/providers/omnivoice/status")
-const OMNIVOICE_ACTION_PATH = toAllowedPath("/api/v1/setup/admin/audio/providers/omnivoice/action")
 
 const POLL_INTERVAL_MS = 3000
 const PROVISION_TIMEOUT_MS = 30 * 60 * 1000
@@ -85,40 +83,6 @@ type VerificationResult = {
   tts_choice?: string | null
   targets_checked?: string[]
   remediation_items?: Array<{ code?: string; action?: string; message?: string } | string>
-}
-
-type OmniVoiceStatus = {
-  provider?: string
-  enabled?: boolean
-  runtime?: string
-  runtime_mode?: string
-  model_id?: string
-  source_checkout?: string | null
-  source_checkout_exists?: boolean
-  runtime_installed?: boolean
-  missing_runtime_components?: string[]
-  weights_cached?: boolean
-  weights_cache_path?: string | null
-  python_path?: string | null
-  runtime_path?: string | null
-  logs_path?: string | null
-  sidecar?: {
-    runtime?: string
-    sidecar_state?: string
-  } | null
-}
-
-type OmniVoiceAction = "predownload" | "warmup"
-
-type OmniVoiceActionResult = {
-  success?: boolean
-  provider?: string
-  action?: OmniVoiceAction
-  status?: string
-  detail?: string | null
-  snapshot_path?: string | null
-  health?: Record<string, unknown> | null
-  omnivoice?: OmniVoiceStatus | null
 }
 
 type RecommendationsResponse = {
@@ -261,10 +225,6 @@ export const useAudioInstaller = () => {
   const [verification, setVerification] = React.useState<VerificationResult | null>(null)
   const [provisioning, setProvisioning] = React.useState(false)
   const [verifying, setVerifying] = React.useState(false)
-  const [omnivoiceStatus, setOmnivoiceStatus] = React.useState<OmniVoiceStatus | null>(null)
-  const [omnivoiceActionResult, setOmnivoiceActionResult] = React.useState<OmniVoiceActionResult | null>(null)
-  const [omnivoiceActionError, setOmnivoiceActionError] = React.useState<string | null>(null)
-  const [omnivoiceBusyAction, setOmnivoiceBusyAction] = React.useState<OmniVoiceAction | null>(null)
 
   React.useEffect(() => {
     selectionRef.current = {
@@ -278,17 +238,6 @@ export const useAudioInstaller = () => {
     const snapshot = await requestJson<InstallStatusSnapshot>(INSTALL_STATUS_PATH)
     setInstallStatus(snapshot)
     return snapshot
-  }, [])
-
-  const refreshOmniVoiceStatus = React.useCallback(async () => {
-    try {
-      const snapshot = await requestJson<OmniVoiceStatus>(OMNIVOICE_STATUS_PATH)
-      setOmnivoiceStatus(snapshot)
-      return snapshot
-    } catch (err) {
-      logNonFatalRefreshError("omnivoice status", err)
-      return null
-    }
   }, [])
 
   const load = React.useCallback(async () => {
@@ -326,7 +275,6 @@ export const useAudioInstaller = () => {
       setError(null)
 
       await refreshInstallStatus()
-      await refreshOmniVoiceStatus()
     } catch (err) {
       const guardState = deriveAdminGuardFromError(err)
       setAdminGuard(guardState)
@@ -339,7 +287,7 @@ export const useAudioInstaller = () => {
     } finally {
       setLoading(false)
     }
-  }, [refreshInstallStatus, refreshOmniVoiceStatus])
+  }, [refreshInstallStatus])
 
   React.useEffect(() => {
     void load()
@@ -519,30 +467,6 @@ export const useAudioInstaller = () => {
     }
   }, [selectedBundleId, selectedResourceProfile, selectedTtsChoice])
 
-  const handleOmniVoiceAction = React.useCallback(async (action: OmniVoiceAction) => {
-    setOmnivoiceBusyAction(action)
-    setOmnivoiceActionError(null)
-    try {
-      const result = await requestJson<OmniVoiceActionResult>(OMNIVOICE_ACTION_PATH, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        timeoutMs: action === "warmup" ? PROVISION_TIMEOUT_MS : 10 * 60 * 1000,
-        body: JSON.stringify({ action })
-      })
-      setOmnivoiceActionResult(result)
-      setOmnivoiceStatus(result.omnivoice || null)
-      setAdminGuard(null)
-      setError(null)
-    } catch (err) {
-      setAdminGuard(deriveAdminGuardFromError(err))
-      setOmnivoiceActionError(
-        sanitizeAdminErrorMessage(err, "Unable to run the requested OmniVoice setup action.")
-      )
-    } finally {
-      setOmnivoiceBusyAction(null)
-    }
-  }, [])
-
   return {
     adminGuard,
     bundleOptions,
@@ -551,10 +475,6 @@ export const useAudioInstaller = () => {
     installStatus,
     loading,
     machineProfile,
-    omnivoiceActionError,
-    omnivoiceActionResult,
-    omnivoiceBusyAction,
-    omnivoiceStatus,
     profileOptions,
     provisioning,
     recommendations,
@@ -565,13 +485,11 @@ export const useAudioInstaller = () => {
     selectedTtsChoice,
     setSelectedResourceProfile,
     handleBundleChange,
-    handleOmniVoiceAction,
     handleResourceProfileChange,
     handleTtsChoiceChange,
     handleProvision,
     handleVerify,
     refresh: load,
-    refreshOmniVoiceStatus,
     ttsChoiceOptions,
     verification,
     verifying

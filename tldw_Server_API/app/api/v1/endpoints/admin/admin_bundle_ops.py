@@ -57,6 +57,7 @@ _BUNDLE_NONCRITICAL_EXCEPTIONS = (
     HTTPException,
 )
 
+
 async def _emit_admin_audit_event(
     request: Request,
     principal: AuthPrincipal,
@@ -224,7 +225,7 @@ async def create_bundle(
     except HTTPException:
         raise
     except _BUNDLE_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error("Failed to create bundle: {}", exc)
+        logger.error("Failed to create bundle")
         raise HTTPException(status_code=500, detail="Failed to create bundle") from exc
 
 
@@ -254,7 +255,7 @@ async def list_bundles(
     except HTTPException:
         raise
     except _BUNDLE_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error("Failed to list bundles: {}", exc)
+        logger.error("Failed to list bundles")
         raise HTTPException(status_code=500, detail="Failed to list bundles") from exc
 
 
@@ -276,9 +277,7 @@ async def import_bundle(
             await _enforce_admin_user_scope(principal, user_id, require_hierarchy=False)
 
         # Save upload to temp file using chunked streaming
-        with tempfile.NamedTemporaryFile(
-            delete=False, suffix=".zip", prefix="tldw_bundle_import_"
-        ) as tmp:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".zip", prefix="tldw_bundle_import_") as tmp:
             while True:
                 chunk = await file.read(65536)
                 if not chunk:
@@ -322,16 +321,14 @@ async def import_bundle(
             warnings=result.get("warnings", []),
             safety_snapshots=result.get("safety_snapshots", {}),
             rollback_failures=result.get("rollback_failures", []),
-            validations=[
-                BundleImportValidation(**v) for v in result.get("validations", [])
-            ],
+            validations=[BundleImportValidation(**v) for v in result.get("validations", [])],
         )
     except BundleError as exc:
         raise _handle_bundle_error(exc) from exc
     except HTTPException:
         raise
     except _BUNDLE_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error("Failed to import bundle: {}", exc)
+        logger.error("Failed to import bundle")
         raise HTTPException(status_code=500, detail="Failed to import bundle") from exc
     finally:
         if tmp_path and os.path.isfile(tmp_path):
@@ -357,7 +354,7 @@ async def get_bundle_metadata(
     except HTTPException:
         raise
     except _BUNDLE_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error("Failed to get bundle metadata: {}", exc)
+        logger.error("Failed to get bundle metadata")
         raise HTTPException(status_code=500, detail="Failed to get bundle metadata") from exc
 
 
@@ -394,7 +391,7 @@ async def download_bundle(
     except HTTPException:
         raise
     except _BUNDLE_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error("Failed to download bundle: {}", exc)
+        logger.error("Failed to download bundle")
         raise HTTPException(status_code=500, detail="Failed to download bundle") from exc
 
 
@@ -427,5 +424,5 @@ async def delete_bundle_endpoint(
     except HTTPException:
         raise
     except _BUNDLE_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error("Failed to delete bundle: {}", exc)
+        logger.error("Failed to delete bundle")
         raise HTTPException(status_code=500, detail="Failed to delete bundle") from exc

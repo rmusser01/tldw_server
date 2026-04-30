@@ -1,5 +1,6 @@
 import os
 import json
+import builtins
 from pathlib import Path
 
 from tenacity import Future, RetryError
@@ -13,6 +14,15 @@ def _retry_error(message: str) -> RetryError:
     attempt = Future(3)
     attempt.set_exception(RuntimeError(message))
     return RetryError(attempt)
+
+
+def _capture_notification_logs(level: str = "DEBUG") -> tuple[list[str], int]:
+    messages: list[str] = []
+    sink_id = notification_service.logger.add(
+        lambda message: messages.append(str(message.record.get("message") or "")),
+        level=level,
+    )
+    return messages, sink_id
 
 
 def test_notification_threshold_and_file_sink(tmp_path, monkeypatch):
@@ -144,6 +154,67 @@ def test_notification_update_settings_normalizes_relative_file(tmp_path, monkeyp
     assert expected.parent.exists()
 
 
+def test_notification_update_settings_file_failure_log_is_sanitized(tmp_path, monkeypatch):
+    svc = NotificationService()
+    original_file = svc.file_path
+    secret_path = tmp_path / "secret-user-dir" / "monitoring.jsonl"
+    messages, sink_id = _capture_notification_logs("WARNING")
+    original_mkdir = notification_service.Path.mkdir
+
+    def _raise_mkdir(self, parents=False, exist_ok=False):  # noqa: ANN001
+        _ = (parents, exist_ok)
+        raise OSError(f"cannot create {secret_path}")
+
+    monkeypatch.setattr(notification_service.Path, "mkdir", _raise_mkdir)
+
+    try:
+        updated = svc.update_settings(file=str(secret_path))
+    finally:
+        monkeypatch.setattr(notification_service.Path, "mkdir", original_mkdir)
+        notification_service.logger.remove(sink_id)
+
+    assert updated["file"] == original_file
+    assert any("Failed to update MONITORING_NOTIFY_FILE" in message for message in messages)
+    assert "secret-user-dir" not in "\n".join(messages)
+    assert str(secret_path) not in "\n".join(messages)
+
+
+def test_notify_file_sink_failure_log_is_sanitized(tmp_path, monkeypatch):
+    svc = NotificationService()
+    svc.enabled = True
+    svc.min_severity = "info"
+    svc.file_path = str(tmp_path / "secret-notification-sink.jsonl")
+    messages, sink_id = _capture_notification_logs("WARNING")
+
+    def _raise_open(*args, **kwargs):  # noqa: ANN002, ANN003
+        _ = (args, kwargs)
+        raise OSError(f"permission denied for {svc.file_path}")
+
+    monkeypatch.setattr(builtins, "open", _raise_open)
+
+    alert = TopicAlert(
+        user_id="u",
+        scope_type="user",
+        scope_id="u",
+        source="chat.input",
+        watchlist_id="w",
+        rule_category="adult",
+        rule_severity="critical",
+        pattern="nsfw",
+        text_snippet="...nsfw...",
+    )
+
+    try:
+        result = svc.notify(alert)
+    finally:
+        notification_service.logger.remove(sink_id)
+
+    assert result == "failed"
+    assert any("Notification file sink failed" in message for message in messages)
+    assert "secret-notification-sink" not in "\n".join(messages)
+    assert svc.file_path not in "\n".join(messages)
+
+
 def test_notification_send_webhook_invokes_fetch(monkeypatch):
 
 
@@ -186,13 +257,44 @@ def test_notification_send_webhook_invokes_fetch(monkeypatch):
 
 def test_send_webhook_safe_swallows_retry_exhaustion(monkeypatch):
     svc = NotificationService()
+    secret_detail = "webhook retry failed at /tmp/private-webhook-retry"
+    messages, sink_id = _capture_notification_logs("INFO")
     monkeypatch.setattr(
         svc,
         "_send_webhook",
-        lambda payload: (_ for _ in ()).throw(_retry_error("webhook boom")),
+        lambda payload: (_ for _ in ()).throw(_retry_error(secret_detail)),
     )
 
-    svc._send_webhook_safe({"event": "test"})
+    try:
+        svc._send_webhook_safe({"event": "test"})
+    finally:
+        notification_service.logger.remove(sink_id)
+
+    joined = "\n".join(messages)
+    assert "Webhook notify failed" in joined
+    assert secret_detail not in joined
+    assert "private-webhook-retry" not in joined
+
+
+def test_send_webhook_safe_sanitizes_runtime_failure_log(monkeypatch):
+    svc = NotificationService()
+    secret_detail = "webhook runtime failed at /tmp/private-webhook-runtime"
+    messages, sink_id = _capture_notification_logs("INFO")
+    monkeypatch.setattr(
+        svc,
+        "_send_webhook",
+        lambda payload: (_ for _ in ()).throw(RuntimeError(secret_detail)),
+    )
+
+    try:
+        svc._send_webhook_safe({"event": "test"})
+    finally:
+        notification_service.logger.remove(sink_id)
+
+    joined = "\n".join(messages)
+    assert "Webhook notify failed" in joined
+    assert secret_detail not in joined
+    assert "private-webhook-runtime" not in joined
 
 
 def test_send_email_safe_swallows_retry_exhaustion(monkeypatch):
@@ -208,13 +310,55 @@ def test_send_email_safe_swallows_retry_exhaustion(monkeypatch):
         pattern="cpu high",
         text_snippet="CPU at 95%",
     )
+    secret_detail = "email retry failed at /tmp/private-email-retry"
+    messages, sink_id = _capture_notification_logs("INFO")
     monkeypatch.setattr(
         svc,
         "_send_email",
-        lambda payload: (_ for _ in ()).throw(_retry_error("email boom")),
+        lambda payload: (_ for _ in ()).throw(_retry_error(secret_detail)),
     )
 
-    svc._send_email_safe(alert)
+    try:
+        svc._send_email_safe(alert)
+    finally:
+        notification_service.logger.remove(sink_id)
+
+    joined = "\n".join(messages)
+    assert "Email notify failed" in joined
+    assert secret_detail not in joined
+    assert "private-email-retry" not in joined
+
+
+def test_send_email_safe_sanitizes_runtime_failure_log(monkeypatch):
+    svc = NotificationService()
+    alert = TopicAlert(
+        user_id="u1",
+        scope_type="user",
+        scope_id="u1",
+        source="chat.input",
+        watchlist_id="watch-1",
+        rule_category="system",
+        rule_severity="critical",
+        pattern="cpu high",
+        text_snippet="CPU at 95%",
+    )
+    secret_detail = "email runtime failed at /tmp/private-email-runtime"
+    messages, sink_id = _capture_notification_logs("INFO")
+    monkeypatch.setattr(
+        svc,
+        "_send_email",
+        lambda payload: (_ for _ in ()).throw(RuntimeError(secret_detail)),
+    )
+
+    try:
+        svc._send_email_safe(alert)
+    finally:
+        notification_service.logger.remove(sink_id)
+
+    joined = "\n".join(messages)
+    assert "Email notify failed" in joined
+    assert secret_detail not in joined
+    assert "private-email-runtime" not in joined
 
 
 def test_notify_generic_only_schedules_webhook_path(monkeypatch, tmp_path):
@@ -244,6 +388,140 @@ def test_notify_generic_only_schedules_webhook_path(monkeypatch, tmp_path):
     assert result == "logged"
     assert svc._send_webhook_safe in targets
     assert svc._send_email_safe not in targets
+
+
+def test_notify_generic_webhook_thread_failure_log_is_sanitized(monkeypatch, tmp_path):
+    svc = NotificationService()
+    svc.enabled = True
+    svc.min_severity = "info"
+    svc.file_path = str(tmp_path / "notifications.jsonl")
+    svc.webhook_url = "https://example.com/hook"
+    secret_thread_detail = "thread-token=/tmp/private-webhook-dispatch"
+    messages, sink_id = _capture_notification_logs("DEBUG")
+
+    class _FailingThread:
+        def __init__(self, *, target=None, args=(), daemon=None):  # noqa: ANN001, ANN002
+            _ = (target, args, daemon)
+            raise RuntimeError(secret_thread_detail)
+
+    monkeypatch.setattr(notification_service.threading, "Thread", _FailingThread)
+
+    try:
+        result = svc.notify_generic({"type": "guardian_alert", "severity": "warning", "user_id": "u1"})
+    finally:
+        notification_service.logger.remove(sink_id)
+
+    assert result == "logged"
+    assert any("Webhook thread start failed" in message for message in messages)
+    assert secret_thread_detail not in "\n".join(messages)
+    assert "private-webhook-dispatch" not in "\n".join(messages)
+
+
+def test_notify_webhook_thread_failure_log_is_sanitized(monkeypatch, tmp_path):
+    svc = NotificationService()
+    svc.enabled = True
+    svc.min_severity = "info"
+    svc.file_path = str(tmp_path / "notifications.jsonl")
+    svc.webhook_url = "https://example.com/hook"
+    secret_thread_detail = "thread-token=/tmp/private-topic-webhook-dispatch"
+    messages, sink_id = _capture_notification_logs("DEBUG")
+
+    class _FailingThread:
+        def __init__(self, *, target=None, args=(), daemon=None):  # noqa: ANN001, ANN002
+            _ = (target, args, daemon)
+            raise RuntimeError(secret_thread_detail)
+
+    monkeypatch.setattr(notification_service.threading, "Thread", _FailingThread)
+
+    alert = TopicAlert(
+        user_id="u",
+        scope_type="user",
+        scope_id="u",
+        source="chat.input",
+        watchlist_id="w",
+        rule_category="adult",
+        rule_severity="critical",
+        pattern="nsfw",
+        text_snippet="...nsfw...",
+    )
+
+    try:
+        result = svc.notify(alert)
+    finally:
+        notification_service.logger.remove(sink_id)
+
+    assert result == "logged"
+    assert any("Webhook thread start failed" in message for message in messages)
+    joined = "\n".join(messages)
+    assert secret_thread_detail not in joined
+    assert "private-topic-webhook-dispatch" not in joined
+
+
+def test_notify_email_thread_failure_log_is_sanitized(monkeypatch, tmp_path):
+    svc = NotificationService()
+    svc.enabled = True
+    svc.min_severity = "info"
+    svc.file_path = str(tmp_path / "notifications.jsonl")
+    svc.smtp_host = "smtp.example.com"
+    svc.email_from = "alerts@example.com"
+    svc.email_to = "recipient@example.com"
+    secret_thread_detail = "thread-token=/tmp/private-topic-email-dispatch"
+    messages, sink_id = _capture_notification_logs("DEBUG")
+
+    class _FailingThread:
+        def __init__(self, *, target=None, args=(), daemon=None):  # noqa: ANN001, ANN002
+            _ = (target, args, daemon)
+            raise RuntimeError(secret_thread_detail)
+
+    monkeypatch.setattr(notification_service.threading, "Thread", _FailingThread)
+
+    alert = TopicAlert(
+        user_id="u",
+        scope_type="user",
+        scope_id="u",
+        source="chat.input",
+        watchlist_id="w",
+        rule_category="adult",
+        rule_severity="critical",
+        pattern="nsfw",
+        text_snippet="...nsfw...",
+    )
+
+    try:
+        result = svc.notify(alert)
+    finally:
+        notification_service.logger.remove(sink_id)
+
+    assert result == "logged"
+    assert any("Email thread start failed" in message for message in messages)
+    joined = "\n".join(messages)
+    assert secret_thread_detail not in joined
+    assert "private-topic-email-dispatch" not in joined
+
+
+def test_notify_generic_file_sink_failure_log_is_sanitized(monkeypatch, tmp_path):
+    svc = NotificationService()
+    svc.enabled = True
+    svc.min_severity = "info"
+    svc.file_path = str(tmp_path / "secret-generic-notification-sink.jsonl")
+    messages, sink_id = _capture_notification_logs("WARNING")
+
+    def _raise_open(*args, **kwargs):  # noqa: ANN002, ANN003
+        _ = (args, kwargs)
+        raise OSError(f"permission denied for {svc.file_path}")
+
+    monkeypatch.setattr(builtins, "open", _raise_open)
+
+    try:
+        result = svc.notify_generic({"type": "guardian_alert", "severity": "warning", "user_id": "u1"})
+    finally:
+        notification_service.logger.remove(sink_id)
+
+    assert result == "failed"
+    assert any("Notification file sink failed" in message for message in messages)
+    joined = "\n".join(messages)
+    assert "secret-generic-notification-sink" not in joined
+    assert svc.file_path not in joined
 
 
 def test_flush_digest_returns_count_without_dispatch(monkeypatch):

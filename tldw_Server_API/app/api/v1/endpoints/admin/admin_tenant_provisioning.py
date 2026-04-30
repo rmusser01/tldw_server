@@ -4,9 +4,8 @@ Tenant provisioning endpoint.
 Provides a single API call that chains user creation, org creation,
 and role assignment into one atomic provisioning operation.
 """
-from __future__ import annotations
 
-from typing import Any
+from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from loguru import logger
@@ -21,6 +20,7 @@ router = APIRouter(prefix="/provisioning", tags=["admin-provisioning"])
 # ---------------------------------------------------------------------------
 # Request / Response schemas
 # ---------------------------------------------------------------------------
+
 
 class TenantProvisionRequest(BaseModel):
     """Request body for provisioning a new tenant."""
@@ -46,6 +46,7 @@ class TenantProvisionResponse(BaseModel):
 # ---------------------------------------------------------------------------
 # Endpoint
 # ---------------------------------------------------------------------------
+
 
 @router.post("/tenants", response_model=TenantProvisionResponse)
 async def provision_tenant(
@@ -131,8 +132,8 @@ async def provision_tenant(
     except HTTPException:
         raise
     except Exception as exc:
-        logger.error("Tenant provisioning failed: {}", exc)
+        logger.error("Tenant provisioning failed")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Tenant provisioning failed: {exc}",
+            detail="Tenant provisioning failed",
         ) from exc

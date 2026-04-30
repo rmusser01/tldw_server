@@ -12,38 +12,14 @@ import wave
 from types import ModuleType
 
 import pytest
-from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from tldw_Server_API.app.api.v1.endpoints import audio as audio_endpoints
 
-from tldw_Server_API.app.api.v1.endpoints.audio.audio import router as audio_router
+from tldw_Server_API.app.main import app
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
-from tldw_Server_API.app.core.AuthNZ.settings import get_settings, reset_settings
+from tldw_Server_API.app.core.AuthNZ.settings import get_settings
 
 pytestmark = [pytest.mark.integration]
-
-
-app: FastAPI | None = None
-
-
-@pytest.fixture(autouse=True)
-def _transcription_test_app(monkeypatch):
-    """Build a narrow audio-router app after pytest fixtures are active."""
-
-    global app
-    monkeypatch.setenv("TEST_MODE", "true")
-    monkeypatch.setenv("AUTH_MODE", "single_user")
-    monkeypatch.setenv("SINGLE_USER_API_KEY", "test-api-key-1234567890")
-    monkeypatch.setenv("SINGLE_USER_FIXED_ID", "1")
-    reset_settings()
-
-    app = FastAPI()
-    app.include_router(audio_router, prefix="/api/v1/audio")
-    try:
-        yield app
-    finally:
-        app.dependency_overrides.clear()
-        app = None
-        reset_settings()
 
 
 def _api_key_headers() -> dict[str, str]:

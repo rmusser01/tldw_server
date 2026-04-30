@@ -17,6 +17,7 @@ from cachetools import LRUCache
 from fastapi import Depends, HTTPException, status
 from loguru import logger
 
+from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.config import settings
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
@@ -71,6 +72,10 @@ _KANBAN_HEALTH: dict[str, Any] = {
 _KANBAN_RECENT_INIT_FAILURES = deque(maxlen=_KANBAN_HEALTH_MAX_RECENT_FAILURES)
 
 
+def _safe_kanban_health_error(error: Optional[Exception]) -> str:
+    return type(error).__name__ if error else "unknown error"
+
+
 def _get_kanban_executor() -> ThreadPoolExecutor:
     """
     Return a live executor for Kanban DB work.
@@ -100,7 +105,7 @@ def _record_init(duration_ms: float, success: bool, error: Optional[Exception] =
             _KANBAN_HEALTH["last_success_ts"] = now_ts
         else:
             _KANBAN_HEALTH["init_failures"] += 1
-            _KANBAN_HEALTH["last_error"] = str(error) if error else "unknown error"
+            _KANBAN_HEALTH["last_error"] = _safe_kanban_health_error(error)
             _KANBAN_HEALTH["last_failure_ts"] = now_ts
             _KANBAN_RECENT_INIT_FAILURES.append(now_ts)
 
@@ -142,6 +147,16 @@ def _create_kanban_db(user_id: int) -> KanbanDB:
     return db_instance
 
 
+def _map_kanban_init_db_error(exc: Exception) -> HTTPException:
+    return map_db_error_to_http(
+        exc,
+        default_detail="Kanban DB unavailable",
+        input_status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        conflict_status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        conflict_detail="Kanban DB unavailable",
+    )
+
+
 def _health_check_instance(db_instance: KanbanDB) -> bool:
     """Quick health check for a cached instance."""
     try:
@@ -158,10 +173,10 @@ def _health_check_instance(db_instance: KanbanDB) -> bool:
     except sqlite3.OperationalError as e:
         if "database is locked" in str(e).lower():
             return True
-        logger.warning(f"Kanban health probe failed: {e}")
+        logger.warning("Kanban health probe failed")
         return False
-    except Exception as e:
-        logger.warning(f"Kanban health probe failed: {e}")
+    except Exception:
+        logger.warning("Kanban health probe failed")
         return False
 
 
@@ -229,10 +244,14 @@ async def _get_or_init_db_instance(user_id: int) -> KanbanDB:
     except Exception as e:
         duration_ms = (time.perf_counter() - start) * 1000
         _record_init(duration_ms, False, e)
-        logger.error(f"Kanban DB initialization failed for user {user_id}: {e}")
+        logger.error(f"Kanban DB initialization failed for user {user_id}")
+        if isinstance(e, (InputError, ConflictError)) or (
+            isinstance(e, KanbanDBError) and not isinstance(e, NotFoundError)
+        ):
+            raise _map_kanban_init_db_error(e) from e
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Could not initialize Kanban database for user: {e}",
+            detail="Could not initialize Kanban database for user",
         ) from e
 
     # Cache the instance
@@ -287,8 +306,8 @@ def close_all_kanban_db_instances() -> None:
         if callable(close_method):
             try:
                 close_method()
-            except Exception as e:
-                logger.debug(f"Error closing KanbanDB instance {cache_key}: {e}")
+            except Exception:
+                logger.debug(f"Error closing KanbanDB instance {cache_key}")
 
     logger.info("All KanbanDB instances closed and cache cleared.")
 
@@ -310,8 +329,8 @@ def shutdown_kanban_executor(wait: bool = False) -> None:
     try:
         executor.shutdown(wait=wait, cancel_futures=True)
         logger.info("Kanban executor shut down successfully.")
-    except Exception as e:
-        logger.debug(f"Kanban executor shutdown error: {e}")
+    except Exception:
+        logger.debug("Kanban executor shutdown error")
 
 
 # --- Exception Handlers (for use in endpoints) ---
@@ -326,32 +345,14 @@ def handle_kanban_db_error(e: Exception) -> HTTPException:
     Returns:
         HTTPException with appropriate status code.
     """
-    if isinstance(e, NotFoundError):
-        return HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=str(e)
-        )
-    elif isinstance(e, InputError):
-        return HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
-    elif isinstance(e, ConflictError):
-        return HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=str(e)
-        )
-    elif isinstance(e, KanbanDBError):
-        return HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
-        )
-    else:
-        logger.error(f"Unexpected error in Kanban operation: {e}", exc_info=True)
-        return HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="An unexpected error occurred"
-        )
+    if isinstance(e, (NotFoundError, InputError, ConflictError, KanbanDBError)):
+        return map_db_error_to_http(e, default_detail="Kanban operation failed")
+
+    logger.error("Unexpected error in Kanban operation")
+    return HTTPException(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail="An unexpected error occurred"
+    )
 
 
 # =============================================================================
