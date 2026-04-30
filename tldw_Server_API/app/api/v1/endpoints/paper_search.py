@@ -2306,6 +2306,7 @@ from tldw_Server_API.app.api.v1.schemas.paper_search_schemas import (  # noqa: E
     ChemRxivSearchRequestForm,
     DOIRequestForm,
     GenericPaper,
+    GenericPageSearchResponse,
     GenericSearchResponse,
     IacrConferenceResponse,
     IEEESearchRequestForm,
@@ -4296,7 +4297,7 @@ async def zenodo_ingest(
 
 @router.get(
     "/figshare",
-    response_model=GenericSearchResponse,
+    response_model=GenericPageSearchResponse,
     summary="Search Figshare records",
     tags=["paper-search"],
 )
@@ -4316,13 +4317,19 @@ async def figshare_search(
         if items is None:
             raise HTTPException(status_code=500, detail="Figshare search failed to return data.")  # noqa: TRY301
         total_pages = math.ceil(total / results_per_page) if results_per_page > 0 else 0
-        return GenericSearchResponse(
+        return GenericPageSearchResponse(
             query_echo={"q": q, "search_for": search_for, "order": order, "order_direction": order_direction},
             items=[GenericPaper(**it) for it in items],
             total_results=total,
             page=page,
             results_per_page=results_per_page,
             total_pages=total_pages,
+            pagination=build_page_pagination_meta(
+                page=page,
+                per_page=results_per_page,
+                total=total,
+                total_pages=total_pages,
+            ),
         )
     except HTTPException:
         raise
@@ -4720,7 +4727,7 @@ async def figshare_ingest_by_doi(
 
 @router.get(
     "/hal",
-    response_model=GenericSearchResponse,
+    response_model=GenericPageSearchResponse,
     summary="Search HAL (Solr-like)",
     tags=["paper-search"],
 )
@@ -4743,13 +4750,19 @@ async def hal_search(
         if items is None:
             raise HTTPException(status_code=500, detail="HAL search failed to return data.")  # noqa: TRY301
         total_pages = math.ceil(total / results_per_page) if results_per_page > 0 else 0
-        return GenericSearchResponse(
+        return GenericPageSearchResponse(
             query_echo={"q": q, "fl": fl, "fq": fqs, "sort": sort, "scope": scope},
             items=[GenericPaper(**it) for it in items],
             total_results=total,
             page=page,
             results_per_page=results_per_page,
             total_pages=total_pages,
+            pagination=build_page_pagination_meta(
+                page=page,
+                per_page=results_per_page,
+                total=total,
+                total_pages=total_pages,
+            ),
         )
     except HTTPException:
         raise

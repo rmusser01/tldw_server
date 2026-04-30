@@ -214,6 +214,86 @@ async def test_paper_search_pubmed_error_mapping(monkeypatch, paper_search_app):
 
 
 @pytest.mark.asyncio
+async def test_figshare_search_success(monkeypatch, paper_search_app):
+
+    def _fake_figshare(q, page, results_per_page, order, order_direction, search_for):
+
+        items = [
+            {
+                "id": "42",
+                "title": "Figshare Dataset",
+                "authors": "Doe, J.",
+                "pub_date": "2024-01-01",
+                "doi": "10.6084/m9.figshare.42",
+                "url": "https://figshare.com/articles/dataset/42",
+                "provider": "figshare",
+            }
+        ]
+        return items, 1, None
+
+    from tldw_Server_API.app.core.Third_Party import Figshare as _Figshare
+    monkeypatch.setattr(_Figshare, "search_articles", _fake_figshare)
+
+    async with AsyncClient(transport=ASGITransport(app=paper_search_app), base_url="http://test") as client:
+        r = await client.get(
+            "/api/v1/paper-search/figshare",
+            params={"q": "dataset", "page": 1, "results_per_page": 10},
+        )
+        assert r.status_code == 200
+        data = r.json()
+        assert data["total_results"] == 1
+        assert len(data["items"]) == 1
+        assert data["pagination"] == {
+            "mode": "page",
+            "page": 1,
+            "per_page": 10,
+            "total": 1,
+            "total_pages": 1,
+            "has_more": False,
+        }
+
+
+@pytest.mark.asyncio
+async def test_hal_search_success(monkeypatch, paper_search_app):
+
+    def _fake_hal(q, start, rows, fl, fqs, sort, scope):
+
+        items = [
+            {
+                "id": "hal-01234567",
+                "title": "HAL Research Record",
+                "authors": "Roe, R.",
+                "pub_date": "2023-05-01",
+                "doi": "10.1000/hal-record",
+                "url": "https://hal.science/hal-01234567",
+                "provider": "hal",
+            }
+        ]
+        return items, 1, None
+
+    from tldw_Server_API.app.core.Third_Party import HAL as _HAL
+    monkeypatch.setattr(_HAL, "search", _fake_hal)
+
+    async with AsyncClient(transport=ASGITransport(app=paper_search_app), base_url="http://test") as client:
+        r = await client.get(
+            "/api/v1/paper-search/hal",
+            params={"q": "title_t:japon", "page": 1, "results_per_page": 10},
+        )
+        assert r.status_code == 200
+        data = r.json()
+        assert data["total_results"] == 1
+        assert len(data["items"]) == 1
+        assert data["pagination"] == {
+            "mode": "page",
+            "page": 1,
+            "per_page": 10,
+            "total": 1,
+            "total_pages": 1,
+            "has_more": False,
+        }
+
+
+@pytest.mark.asyncio
 async def test_biorxiv_by_doi_success(monkeypatch, paper_search_app):
 
     def _fake_by_doi(doi, server):

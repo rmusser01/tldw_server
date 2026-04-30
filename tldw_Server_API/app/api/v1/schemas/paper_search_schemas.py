@@ -256,6 +256,16 @@ class GenericSearchResponse(BaseModel):
     total_pages: int
 
 
+class GenericPageSearchResponse(BaseModel):
+    query_echo: dict[str, Any]
+    items: list[GenericPaper]
+    total_results: int
+    page: int
+    results_per_page: int
+    total_pages: int
+    pagination: PagePaginationMeta
+
+
 class IEEESearchRequestForm:
     def __init__(
         self,
