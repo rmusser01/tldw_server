@@ -284,7 +284,7 @@ async def test_run_shutdown_post_worker_services_delegates_and_returns_handles(
 
 
 @pytest.mark.asyncio
-async def test_run_shutdown_post_worker_services_logs_and_returns_original_handles_on_guard_failure(
+async def test_run_shutdown_post_worker_services_guard_failure_suppresses_stopped_background_handles(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from tldw_Server_API.app.services import shutdown_post_worker_services as shutdown_services
@@ -340,6 +340,12 @@ async def test_run_shutdown_post_worker_services_logs_and_returns_original_handl
         workflows_maint_task="maint-input",
         workflows_maint_stop_event="maint-stop-input",
         guard_exceptions=(RuntimeError,),
+        stopped_background_worker_names={
+            "jobs_metrics_task",
+            "jobs_metrics_reconcile_task",
+            "jobs_crypto_rotate_task",
+            "jobs_integrity_task",
+        },
     )
 
     assert log_messages == ["Post-worker services skipped: post-worker boom"]
@@ -353,12 +359,12 @@ async def test_run_shutdown_post_worker_services_logs_and_returns_original_handl
     assert handles.websub_renewal_task == "websub-input"
     assert handles.usage_task == "usage-input"
     assert handles.llm_usage_task == "llm-input"
-    assert handles.jobs_metrics_task == "metrics-input"
+    assert handles.jobs_metrics_task is None
     assert handles.loop_lag_task == "loop-lag-input"
-    assert handles.jobs_metrics_reconcile_task == "reconcile-input"
-    assert handles.jobs_metrics_reconcile_stop == "reconcile-stop-input"
-    assert handles.jobs_crypto_rotate_task == "crypto-input"
-    assert handles.jobs_integrity_task == "integrity-input"
+    assert handles.jobs_metrics_reconcile_task is None
+    assert handles.jobs_metrics_reconcile_stop is None
+    assert handles.jobs_crypto_rotate_task is None
+    assert handles.jobs_integrity_task is None
     assert handles.jobs_webhooks_task == "webhooks-input"
     assert handles.meetings_webhook_dlq_task == "meetings-input"
     assert handles.workflows_dlq_task == "dlq-input"

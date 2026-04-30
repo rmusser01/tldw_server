@@ -86,7 +86,6 @@ async def test_run_lifespan_startup_sequence_runs_helpers_in_order_and_updates_r
         run_pg_rls_auto_ensure=lambda *_args, **_kwargs: None,
         register_owned_job_poller=lambda *_args, **_kwargs: None,
         replace_owned_job_poller_inventory=lambda *_args, **_kwargs: None,
-        publish_shutdown_job_poller_inventory=lambda *_args, **_kwargs: None,
         startup_api_key_log_value="api-key-log-value",
         startup_guard_exceptions=(RuntimeError,),
         import_exceptions=(ImportError,),
@@ -101,6 +100,7 @@ async def test_run_lifespan_startup_sequence_runs_helpers_in_order_and_updates_r
     assert calls[1][1]["defer_heavy"] is True
     assert calls[2][1]["app"] is app
     assert calls[2][1]["test_mode"] is True
+    assert "publish_shutdown_job_poller_inventory" not in calls[2][1]
     assert calls[2][1]["startup_api_key_log_value"] == "api-key-log-value"
     assert handles.db_pool == "db-pool"
     assert handles.session_manager == "session-manager"

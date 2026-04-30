@@ -58,10 +58,19 @@ async def start_service_groups(
     run_pg_rls_auto_ensure: Callable[[], Any],
     owned_job_pollers: list[Any],
     register_owned_job_poller: Callable[..., None],
+    worker_inventory: Any | None = None,
 ) -> StartupServiceGroupHandles:
     """Start the runtime/optional/auxiliary/infra service tail in the legacy order."""
-    runtime_monitor_handles = await _start_runtime_monitors()
-    optional_worker_handles = await _start_optional_workers()
+    if worker_inventory is None:
+        runtime_monitor_handles = await _start_runtime_monitors()
+        optional_worker_handles = await _start_optional_workers()
+    else:
+        runtime_monitor_handles = await _start_runtime_monitors(
+            worker_inventory=worker_inventory,
+        )
+        optional_worker_handles = await _start_optional_workers(
+            worker_inventory=worker_inventory,
+        )
     claims_task = await _start_claims_rebuild_worker(app_settings)
     auxiliary_startup_handles = await _start_auxiliary_services(app_settings)
     infra_startup_handles = await _start_infra_services(
@@ -114,16 +123,16 @@ async def start_service_groups(
     )
 
 
-async def _start_runtime_monitors():
+async def _start_runtime_monitors(**kwargs: Any) -> Any:
     from tldw_Server_API.app.services.startup_runtime_monitors import start_runtime_monitors
 
-    return await start_runtime_monitors()
+    return await start_runtime_monitors(**kwargs)
 
 
-async def _start_optional_workers():
+async def _start_optional_workers(**kwargs: Any) -> Any:
     from tldw_Server_API.app.services.startup_optional_workers import start_optional_workers
 
-    return await start_optional_workers()
+    return await start_optional_workers(**kwargs)
 
 
 async def _start_claims_rebuild_worker(app_settings: Any):

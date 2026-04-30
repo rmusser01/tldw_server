@@ -9,6 +9,10 @@ from typing import Any
 
 from fastapi import FastAPI
 
+from tldw_Server_API.app.services.lifecycle_workers import (
+    ShutdownPhase,
+    stop_registered_workers,
+)
 from tldw_Server_API.app.services.lifespan_worker_runtime_state import (
     LifespanWorkerRuntimeState,
 )
@@ -77,6 +81,20 @@ async def run_lifespan_shutdown_sequence(
         import_exceptions=import_exceptions,
     )
     should_run_late_stop = job_poller_handoff_handles.should_run_late_stop
+
+    with timed_shutdown_segment(app, "background_worker_shutdown"):
+        await stop_registered_workers(
+            app,
+            _handles_for_shutdown_phase(
+                worker_runtime,
+                ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN,
+            ),
+            stopped_names_attr="_tldw_shutdown_stopped_background_worker_names",
+            log_label="background worker",
+        )
+        stopped_background_worker_names = set(
+            getattr(app.state, "_tldw_shutdown_stopped_background_worker_names", [])
+        )
 
     from tldw_Server_API.app.services.shutdown_coordinated_legacy_components import (
         run_shutdown_coordinated_legacy_components,
@@ -208,6 +226,7 @@ async def run_lifespan_shutdown_sequence(
         workflows_gc_stop_event=worker_runtime.workflows_gc_stop_event,
         workflows_maint_task=worker_runtime.workflows_maint_task,
         workflows_maint_stop_event=worker_runtime.workflows_maint_stop_event,
+        stopped_background_worker_names=stopped_background_worker_names,
         guard_exceptions=startup_guard_exceptions,
     )
     worker_runtime.apply_post_worker_shutdown_handles(
@@ -238,3 +257,20 @@ async def run_lifespan_shutdown_sequence(
         app,
         int((monotonic() - shutdown_started) * 1000),
     )
+
+
+def _handles_for_shutdown_phase(
+    worker_runtime: LifespanWorkerRuntimeState,
+    shutdown_phase: ShutdownPhase,
+) -> list[Any]:
+    worker_inventory = getattr(worker_runtime, "worker_inventory", None)
+    handles_for_phase = getattr(worker_inventory, "handles_for_phase", None)
+    if callable(handles_for_phase):
+        return list(handles_for_phase(shutdown_phase))
+
+    target_phase_values = {shutdown_phase, shutdown_phase.value}
+    return [
+        handle
+        for handle in getattr(worker_runtime, "owned_job_pollers", [])
+        if getattr(handle, "shutdown_phase", None) in target_phase_values
+    ]

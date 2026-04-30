@@ -77,8 +77,21 @@ async def shutdown_post_worker_services(
     workflows_maint_task: Any | None,
     workflows_maint_stop_event: Any | None,
     guard_exceptions: tuple[type[BaseException], ...],
+    stopped_background_worker_names: set[str] | None = None,
 ) -> PostWorkerShutdownHandles:
     """Run the post-worker shutdown tail in the legacy order."""
+    stopped_background_worker_names = stopped_background_worker_names or set()
+
+    def _task_if_not_stopped(name: str, task: Any | None) -> Any | None:
+        if name in stopped_background_worker_names:
+            return None
+        return task
+
+    def _stop_event_if_not_stopped(name: str, stop_event: Any | None) -> Any | None:
+        if name in stopped_background_worker_names:
+            return None
+        return stop_event
+
     claims_shutdown_handles = await _shutdown_claims_maintenance_tasks(
         claims_task=claims_task,
         jobs_prune_task=jobs_prune_task,
@@ -107,25 +120,43 @@ async def shutdown_post_worker_services(
         connectors_sync_sched_task=connectors_sync_sched_task,
     )
     runtime_monitor_shutdown_handles = await _shutdown_runtime_monitors(
-        jobs_metrics_task=jobs_metrics_task,
-        jobs_metrics_stop_event=jobs_metrics_stop_event,
+        jobs_metrics_task=_task_if_not_stopped("jobs_metrics_task", jobs_metrics_task),
+        jobs_metrics_stop_event=_stop_event_if_not_stopped(
+            "jobs_metrics_task",
+            jobs_metrics_stop_event,
+        ),
         loop_lag_task=loop_lag_task,
         loop_lag_stop_event=loop_lag_stop_event,
         guard_exceptions=guard_exceptions,
     )
     jobs_metrics_reconcile_shutdown_handles = await _shutdown_jobs_metrics_reconcile(
-        jobs_metrics_reconcile_task=jobs_metrics_reconcile_task,
-        jobs_metrics_reconcile_stop=jobs_metrics_reconcile_stop,
+        jobs_metrics_reconcile_task=_task_if_not_stopped(
+            "jobs_metrics_reconcile_task",
+            jobs_metrics_reconcile_task,
+        ),
+        jobs_metrics_reconcile_stop=_stop_event_if_not_stopped(
+            "jobs_metrics_reconcile_task",
+            jobs_metrics_reconcile_stop,
+        ),
         guard_exceptions=guard_exceptions,
     )
     await _shutdown_personalization_consolidation(
         guard_exceptions=guard_exceptions,
     )
     optional_worker_shutdown_handles = await _shutdown_optional_workers(
-        jobs_crypto_rotate_task=jobs_crypto_rotate_task,
-        jobs_crypto_rotate_stop_event=jobs_crypto_rotate_stop_event,
-        jobs_integrity_task=jobs_integrity_task,
-        jobs_integrity_stop_event=jobs_integrity_stop_event,
+        jobs_crypto_rotate_task=_task_if_not_stopped(
+            "jobs_crypto_rotate_task",
+            jobs_crypto_rotate_task,
+        ),
+        jobs_crypto_rotate_stop_event=_stop_event_if_not_stopped(
+            "jobs_crypto_rotate_task",
+            jobs_crypto_rotate_stop_event,
+        ),
+        jobs_integrity_task=_task_if_not_stopped("jobs_integrity_task", jobs_integrity_task),
+        jobs_integrity_stop_event=_stop_event_if_not_stopped(
+            "jobs_integrity_task",
+            jobs_integrity_stop_event,
+        ),
         jobs_webhooks_task=jobs_webhooks_task,
         jobs_webhooks_stop_event=jobs_webhooks_stop_event,
         meetings_webhook_dlq_task=meetings_webhook_dlq_task,
@@ -203,8 +234,16 @@ async def run_shutdown_post_worker_services(
     workflows_maint_task: Any | None,
     workflows_maint_stop_event: Any | None,
     guard_exceptions: tuple[type[BaseException], ...],
+    stopped_background_worker_names: set[str] | None = None,
 ) -> PostWorkerShutdownHandles:
     """Run post-worker shutdown with main-lifespan fallback behavior."""
+    stopped_background_worker_names = stopped_background_worker_names or set()
+
+    def _fallback_if_not_stopped(name: str, value: Any | None) -> Any | None:
+        if name in stopped_background_worker_names:
+            return None
+        return value
+
     try:
         return await shutdown_post_worker_services(
             claims_task=claims_task,
@@ -244,6 +283,7 @@ async def run_shutdown_post_worker_services(
             workflows_gc_stop_event=workflows_gc_stop_event,
             workflows_maint_task=workflows_maint_task,
             workflows_maint_stop_event=workflows_maint_stop_event,
+            stopped_background_worker_names=stopped_background_worker_names,
             guard_exceptions=guard_exceptions,
         )
     except guard_exceptions as exc:
@@ -259,12 +299,24 @@ async def run_shutdown_post_worker_services(
             websub_renewal_task=websub_renewal_task,
             usage_task=usage_task,
             llm_usage_task=llm_usage_task,
-            jobs_metrics_task=jobs_metrics_task,
+            jobs_metrics_task=_fallback_if_not_stopped("jobs_metrics_task", jobs_metrics_task),
             loop_lag_task=loop_lag_task,
-            jobs_metrics_reconcile_task=jobs_metrics_reconcile_task,
-            jobs_metrics_reconcile_stop=jobs_metrics_reconcile_stop,
-            jobs_crypto_rotate_task=jobs_crypto_rotate_task,
-            jobs_integrity_task=jobs_integrity_task,
+            jobs_metrics_reconcile_task=_fallback_if_not_stopped(
+                "jobs_metrics_reconcile_task",
+                jobs_metrics_reconcile_task,
+            ),
+            jobs_metrics_reconcile_stop=_fallback_if_not_stopped(
+                "jobs_metrics_reconcile_task",
+                jobs_metrics_reconcile_stop,
+            ),
+            jobs_crypto_rotate_task=_fallback_if_not_stopped(
+                "jobs_crypto_rotate_task",
+                jobs_crypto_rotate_task,
+            ),
+            jobs_integrity_task=_fallback_if_not_stopped(
+                "jobs_integrity_task",
+                jobs_integrity_task,
+            ),
             jobs_webhooks_task=jobs_webhooks_task,
             meetings_webhook_dlq_task=meetings_webhook_dlq_task,
             workflows_dlq_task=workflows_dlq_task,

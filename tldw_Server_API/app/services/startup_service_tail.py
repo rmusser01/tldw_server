@@ -73,6 +73,7 @@ async def initialize_startup_service_tail(
     shared_is_truthy: Callable[..., bool],
     startup_guard_exceptions: tuple[type[BaseException], ...],
     import_exceptions: tuple[type[BaseException], ...],
+    worker_inventory: Any | None = None,
 ) -> StartupServiceTailHandles:
     """Run the startup service tail in the legacy order."""
     startup_service_group_handles = await _start_service_groups(
@@ -80,6 +81,7 @@ async def initialize_startup_service_tail(
         app_settings=app_settings,
         run_pg_rls_auto_ensure=run_pg_rls_auto_ensure,
         owned_job_pollers=owned_job_pollers,
+        worker_inventory=worker_inventory,
         register_owned_job_poller=register_owned_job_poller,
     )
     recurring_scheduler_handles = await _finalize_startup_tail(
