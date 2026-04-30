@@ -3616,7 +3616,18 @@ async def list_runs_for_job(
     rows, total = target_db.list_runs_for_job(job_id, limit=limit, offset=offset)
     items = [Run(id=r.id, job_id=r.job_id, status=r.status, started_at=r.started_at, finished_at=r.finished_at, stats=(json.loads(r.stats_json or "{}") if r.stats_json else None), error_msg=r.error_msg) for r in rows]
     has_more = (offset + len(items)) < int(total or 0)
-    return RunsListResponse(items=items, total=total, has_more=has_more)
+    return RunsListResponse(
+        items=items,
+        total=total,
+        has_more=has_more,
+        pagination=build_offset_pagination_meta(
+            total=total,
+            offset=offset,
+            limit=limit,
+            count=len(items),
+            has_more=has_more,
+        ),
+    )
 
 
 @router.get("/runs", response_model=RunsListResponse, summary="List runs across all jobs")
@@ -3654,7 +3665,18 @@ async def list_runs_global(
         for r in rows
     ]
     has_more = (offset + len(items)) < int(total or 0)
-    return RunsListResponse(items=items, total=total, has_more=has_more)
+    return RunsListResponse(
+        items=items,
+        total=total,
+        has_more=has_more,
+        pagination=build_offset_pagination_meta(
+            total=total,
+            offset=offset,
+            limit=limit,
+            count=len(items),
+            has_more=has_more,
+        ),
+    )
 
 
 @router.get("/runs/export.csv", response_class=PlainTextResponse, summary="Export runs as CSV (global or by job)")
@@ -4525,7 +4547,17 @@ async def list_scraped_items(
         limit=limit,
         offset=offset,
     )
-    return ScrapedItemsListResponse(items=[_row_to_scraped_item(r) for r in rows], total=total)
+    items = [_row_to_scraped_item(r) for r in rows]
+    return ScrapedItemsListResponse(
+        items=items,
+        total=total,
+        pagination=build_offset_pagination_meta(
+            total=total,
+            offset=offset,
+            limit=limit,
+            count=len(items),
+        ),
+    )
 
 
 @router.get("/items/{item_id}", response_model=ScrapedItem, summary="Get a scraped item")

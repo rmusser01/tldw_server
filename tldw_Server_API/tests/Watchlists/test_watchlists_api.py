@@ -246,7 +246,11 @@ def test_sources_check_now_endpoint_triggers_runs_and_items(client_with_user, mo
 
     runs_resp = c.get("/api/v1/watchlists/runs", params={"page": 1, "size": 20})
     assert runs_resp.status_code == 200, runs_resp.text
-    run_ids = [int(run["id"]) for run in runs_resp.json().get("items", [])]
+    runs_payload = runs_resp.json()
+    assert runs_payload["pagination"]["total"] >= 1
+    assert runs_payload["pagination"]["limit"] == 20
+    assert runs_payload["pagination"]["offset"] == 0
+    run_ids = [int(run["id"]) for run in runs_payload.get("items", [])]
     assert run_id in run_ids
 
     items_resp = c.get("/api/v1/watchlists/items", params={"source_id": source_id, "page": 1, "size": 20})
@@ -822,6 +826,9 @@ def test_items_and_outputs_flow(client_with_user, monkeypatch):
     assert r.status_code == 200, r.text
     data = r.json()
     assert data["total"] >= 1
+    assert data["pagination"]["total"] >= 1
+    assert data["pagination"]["limit"] == 50
+    assert data["pagination"]["offset"] == 0
     first_item = data["items"][0]
     item_id = first_item["id"]
     assert first_item["status"] in {"ingested", "error", "duplicate"}

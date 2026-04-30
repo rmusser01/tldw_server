@@ -296,6 +296,7 @@ class RunsListResponse(BaseModel):
     items: list[Run]
     total: int
     has_more: bool | None = None
+    pagination: OffsetPaginationMeta
 
 
 class WatchlistOnboardingTelemetryIngestRequest(BaseModel):
@@ -436,6 +437,7 @@ class ScrapedItem(BaseModel):
 class ScrapedItemsListResponse(BaseModel):
     items: list[ScrapedItem]
     total: int
+    pagination: OffsetPaginationMeta
 
 
 class ScrapedItemSmartCountsResponse(BaseModel):
