@@ -9,6 +9,7 @@ from loguru import logger
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_rate_limiter_dep, get_request_user, RateLimiter, rbac_rate_limit, User
 
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.schemas.writing_manuscript_schemas import (
     ChapterSummary,
     ManuscriptAnalysisListResponse,
@@ -212,7 +213,18 @@ async def list_projects(
             status_filter=status_filter, limit=limit, offset=offset
         )
         items = [ManuscriptProjectResponse(**p) for p in projects]
-        return ManuscriptProjectListResponse(projects=items, total=total)
+        return ManuscriptProjectListResponse(
+            projects=items,
+            total=total,
+            limit=limit,
+            offset=offset,
+            pagination=build_offset_pagination_meta(
+                limit=limit,
+                offset=offset,
+                total=total,
+                count=len(items),
+            ),
+        )
     except _MANUSCRIPT_NONCRITICAL_EXCEPTIONS as exc:
         _handle_db_errors(exc, "manuscript projects")
 

@@ -8,6 +8,8 @@ import json
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator, model_validator
 
+from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
+
 
 # ---------------------------------------------------------------------------
 # Project
@@ -68,6 +70,9 @@ class ManuscriptProjectResponse(BaseModel):
 class ManuscriptProjectListResponse(BaseModel):
     projects: list[ManuscriptProjectResponse]
     total: int
+    limit: int
+    offset: int
+    pagination: OffsetPaginationMeta
 
 
 # ---------------------------------------------------------------------------
