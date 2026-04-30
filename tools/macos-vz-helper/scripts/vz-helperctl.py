@@ -75,24 +75,43 @@ def ensure_private_dir(path: Path, dry_run: bool = False) -> CheckResult:
         return CheckResult(ok=False, reason="helper_directory_unsafe")
 
     if path.exists():
-        if not path.is_dir():
-            return CheckResult(ok=False, reason="helper_directory_unsafe")
-        path_stat = path.stat()
-        if path_stat.st_uid != os.getuid():
-            return CheckResult(ok=False, reason="helper_directory_owner_mismatch")
-        if path_stat.st_mode & 0o077:
-            return CheckResult(ok=False, reason="helper_directory_not_private")
-        return CheckResult(ok=True)
+        return _validate_private_dir(path)
 
     if dry_run:
         return CheckResult(ok=True)
 
-    path.mkdir(mode=0o700, parents=True, exist_ok=True)
-    try:
-        path.chmod(0o700)
-    except OSError:
-        pass
+    missing_dirs: list[Path] = []
+    current = path
+    while not current.exists():
+        missing_dirs.append(current)
+        parent = current.parent
+        if parent == current:
+            break
+        current = parent
 
+    for directory in reversed(missing_dirs):
+        if directory.exists():
+            result = _validate_private_dir(directory)
+            if not result.ok:
+                return result
+            continue
+        directory.mkdir(mode=0o700)
+        try:
+            directory.chmod(0o700)
+        except OSError:
+            pass
+        result = _validate_private_dir(directory)
+        if not result.ok:
+            return result
+
+    return _validate_private_dir(path)
+
+
+def _validate_private_dir(path: Path) -> CheckResult:
+    if path.is_symlink():
+        return CheckResult(ok=False, reason="helper_directory_unsafe")
+    if not path.is_dir():
+        return CheckResult(ok=False, reason="helper_directory_unsafe")
     path_stat = path.stat()
     if path_stat.st_uid != os.getuid():
         return CheckResult(ok=False, reason="helper_directory_owner_mismatch")

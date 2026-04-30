@@ -98,6 +98,14 @@ def test_validate_socket_path_refuses_empty_path():
     CASE.assertEqual(result, helperctl.CheckResult(ok=False, reason="helper_socket_unconfigured"))
 
 
+def test_validate_socket_path_accepts_missing_path(tmp_path):
+    helperctl = load_helperctl()
+
+    result = helperctl.validate_socket_path(tmp_path / "runtime" / "helper.sock")
+
+    CASE.assertEqual(result, helperctl.CheckResult(ok=True))
+
+
 def test_validate_socket_path_accepts_existing_unix_socket():
     helperctl = load_helperctl()
 
@@ -116,12 +124,13 @@ def test_validate_socket_path_accepts_existing_unix_socket():
 
 def test_ensure_private_dir_creates_owner_only_directory(tmp_path):
     helperctl = load_helperctl()
-    runtime_dir = tmp_path / "runtime"
+    runtime_dir = tmp_path / "state" / "runtime"
 
     result = helperctl.ensure_private_dir(runtime_dir)
 
     CASE.assertEqual(result, helperctl.CheckResult(ok=True))
     CASE.assertTrue(runtime_dir.is_dir())
+    CASE.assertEqual(runtime_dir.parent.stat().st_mode & 0o777, 0o700)
     CASE.assertEqual(runtime_dir.stat().st_mode & 0o777, 0o700)
 
 
@@ -254,6 +263,7 @@ def test_plist_cli_creates_private_socket_parent_when_not_dry_run(tmp_path, caps
     CASE.assertEqual(code, 0)
     CASE.assertIn(str(socket_path), captured.out)
     CASE.assertEqual(socket_path.parent.stat().st_mode & 0o777, 0o700)
+    CASE.assertEqual(log_dir.stat().st_mode & 0o777, 0o700)
 
 
 def test_plist_cli_rejects_unsafe_socket_parent_when_not_dry_run(tmp_path, capsys):
