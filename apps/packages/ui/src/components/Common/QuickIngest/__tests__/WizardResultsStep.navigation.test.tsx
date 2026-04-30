@@ -1,7 +1,13 @@
 // @vitest-environment jsdom
-import { describe, expect, it, vi } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 import { render, screen, fireEvent } from "@testing-library/react"
 import React from "react"
+import type { WizardResultItem } from "../types"
+
+const wizardHarness = vi.hoisted(() => ({
+  results: [] as WizardResultItem[],
+  reset: vi.fn(),
+}))
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -15,24 +21,35 @@ vi.mock("react-i18next", () => ({
 vi.mock("../IngestWizardContext", () => ({
   useIngestWizard: () => ({
     state: {
-      results: [
-        {
-          id: "test-1",
-          status: "ok" as const,
-          type: "pdf",
-          title: "My Test PDF",
-          mediaId: 42,
-        },
-      ],
+      results: wizardHarness.results,
       processingState: { elapsed: 10 },
     },
-    reset: vi.fn(),
+    reset: wizardHarness.reset,
   }),
 }))
 
 import { WizardResultsStep } from "../WizardResultsStep"
 
 describe("WizardResultsStep navigation buttons", () => {
+  const setSinglePdfResult = (overrides: Partial<WizardResultItem> = {}) => {
+    wizardHarness.results = [
+      {
+        id: "test-1",
+        status: "ok" as const,
+        type: "pdf",
+        title: "My Test PDF",
+        mediaId: 42,
+        persisted: true,
+        ...overrides,
+      },
+    ]
+  }
+
+  beforeEach(() => {
+    wizardHarness.reset.mockReset()
+    setSinglePdfResult()
+  })
+
   it("renders Search in Knowledge button when onSearchKnowledge is provided", () => {
     const onSearchKnowledge = vi.fn()
     render(
@@ -62,6 +79,18 @@ describe("WizardResultsStep navigation buttons", () => {
     expect(onOpenWorkspace).toHaveBeenCalledWith(
       expect.objectContaining({ type: "pdf", mediaId: 42 })
     )
+  })
+
+  it("does not render Open in Workspace when the original file was not persisted", () => {
+    setSinglePdfResult({ persisted: false })
+    render(
+      <WizardResultsStep
+        onClose={vi.fn()}
+        onOpenWorkspace={vi.fn()}
+      />
+    )
+
+    expect(screen.queryByText("Open in Workspace")).toBeNull()
   })
 
   it("does not render navigation buttons when callbacks are not provided", () => {
