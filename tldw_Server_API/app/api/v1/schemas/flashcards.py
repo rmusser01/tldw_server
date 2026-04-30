@@ -168,6 +168,10 @@ class Deck(BaseModel):
         return data
 
 
+class DeckDeleteResponse(BaseModel):
+    deleted: bool
+
+
 class FlashcardTemplatePlaceholderDefinition(BaseModel):
     """Describes a named placeholder that can populate one or more template scaffold fields."""
 

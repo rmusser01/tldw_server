@@ -1,5 +1,18 @@
 # Personas
 
+
+
+https://github.com/VectorSpaceLab/general-agentic-memory
+https://arxiv.org/abs/2601.10080
+https://github.com/Neph0s/awesome-llm-role-playing-with-persona
+https://github.com/rmusser01/Clawatar
+https://www.deviantart.com/ryoma3d/art/ani-x-1220087954
+https://oshikoi.io/community/mate/8969a098-ad97-4f49-9b59-cfcb5d53a65b
+
+https://zby.github.io/commonplace/agent-memory-systems/
+https://github.com/elevenyellow/handcrafted-persona-engine/blob/624a76c8b364edbf22b779f2ed19df0c5ccad53e/src/PersonaEngine/PersonaEngine.Lib/Resources/Prompts/personality.txt
+https://github.com/vspeech/Qwen3-TTS-Train
+
 ## Problem statement
 
 The platform currently supports character cards and session context, but it lacks a first-class persona model that can persist user intent, policy constraints, and scoped behavior across conversations and workflows. This creates inconsistent behavior between sessions and increases repeated setup effort for users who want stable persona-driven assistant behavior.

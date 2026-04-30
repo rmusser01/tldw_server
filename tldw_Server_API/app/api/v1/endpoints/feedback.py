@@ -348,6 +348,43 @@ async def list_feedback(
 
 
 # ---------------------------------------------------------------------------
+# GET  /feedback/{feedback_id}  – get a single feedback entry
+# ---------------------------------------------------------------------------
+
+@router.get(
+    "/{feedback_id}",
+    response_model=FeedbackRecord,
+    summary="Get a feedback entry",
+    dependencies=[Depends(check_rate_limit)],
+    responses={
+        403: {"model": ErrorDetail, "description": "Forbidden – not the conversation owner"},
+        404: {"model": ErrorDetail, "description": "Feedback record not found"},
+    },
+)
+async def get_feedback(
+    feedback_id: str,
+    current_user: User = Depends(get_request_user),
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+) -> FeedbackRecord:
+    store = UnifiedFeedbackSystem(chacha_db=db)
+    if not store.user_feedback:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Feedback record not found")
+
+    record = await store.user_feedback.get_feedback_by_id(feedback_id)
+    if not record:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Feedback record not found")
+
+    conv_id = record.get("conversation_id")
+    if conv_id:
+        conversation = db.get_conversation_by_id(conv_id)
+        if not conversation or conversation.get("deleted"):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Feedback record not found")
+        _ensure_conversation_owner(conversation, current_user)
+
+    return FeedbackRecord(**record)
+
+
+# ---------------------------------------------------------------------------
 # DELETE  /feedback/{feedback_id}  – retract a feedback entry
 # ---------------------------------------------------------------------------
 

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any, NoReturn
+from typing import Any, Literal, NoReturn
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, status
 from loguru import logger
@@ -45,12 +45,17 @@ from tldw_Server_API.app.api.v1.schemas.writing_manuscript_schemas import (
     ManuscriptRelationshipResponse,
     ManuscriptResearchRequest,
     ManuscriptResearchResponse,
+    ManuscriptRestoredEntityResponse,
     ManuscriptSceneCreate,
     ManuscriptSceneResponse,
     ManuscriptSceneUpdate,
     ManuscriptSearchResponse,
     ManuscriptSearchResult,
     ManuscriptStructureResponse,
+    ManuscriptTrashListResponse,
+    ManuscriptVersionCreateRequest,
+    ManuscriptVersionListResponse,
+    ManuscriptVersionResponse,
     ManuscriptWorldInfoCreate,
     ManuscriptWorldInfoResponse,
     ManuscriptWorldInfoUpdate,
@@ -79,6 +84,8 @@ from tldw_Server_API.app.core.DB_Management.ManuscriptDB import ManuscriptDBHelp
 from tldw_Server_API.app.core.LLM_Calls.provider_metadata import PROVIDER_CAPABILITIES
 
 router = APIRouter()
+ManuscriptVersionEntityType = Literal["manuscript", "part", "chapter", "scene"]
+ManuscriptTrashEntityType = Literal["project", "manuscript", "part", "chapter", "scene"]
 
 # ---------------------------------------------------------------------------
 # Exception tuple and helpers (mirrors writing.py)
@@ -2424,3 +2431,142 @@ async def list_analyses(
         return ManuscriptAnalysisListResponse(analyses=items, total=len(items))
     except _MANUSCRIPT_NONCRITICAL_EXCEPTIONS as exc:
         _handle_db_errors(exc, "analyses")
+
+
+# ===================================================================
+# Manual versions and trash
+# ===================================================================
+
+
+@router.post(
+    "/{entity_type}/{entity_id}/versions",
+    response_model=ManuscriptVersionResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create a manual manuscript snapshot",
+    tags=["manuscripts"],
+)
+async def create_version(
+    entity_type: ManuscriptVersionEntityType,
+    entity_id: str,
+    payload: ManuscriptVersionCreateRequest,
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    _: None = Depends(rbac_rate_limit("writing.manuscripts.update")),
+) -> ManuscriptVersionResponse:
+    try:
+        version = _get_helper(db).create_version(entity_type, entity_id, label=payload.label)
+        return ManuscriptVersionResponse(**version)
+    except _MANUSCRIPT_NONCRITICAL_EXCEPTIONS as exc:
+        _handle_db_errors(exc, "manuscript version")
+
+
+@router.get(
+    "/{entity_type}/{entity_id}/versions",
+    response_model=ManuscriptVersionListResponse,
+    summary="List manual manuscript snapshots",
+    tags=["manuscripts"],
+)
+async def list_versions(
+    entity_type: ManuscriptVersionEntityType,
+    entity_id: str,
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    _: None = Depends(rbac_rate_limit("writing.manuscripts.list")),
+) -> ManuscriptVersionListResponse:
+    try:
+        versions = _get_helper(db).list_versions(entity_type, entity_id)
+        return ManuscriptVersionListResponse(
+            versions=[ManuscriptVersionResponse(**version) for version in versions],
+            total=len(versions),
+        )
+    except _MANUSCRIPT_NONCRITICAL_EXCEPTIONS as exc:
+        _handle_db_errors(exc, "manuscript versions")
+
+
+@router.get(
+    "/{entity_type}/{entity_id}/versions/{version_number}",
+    response_model=ManuscriptVersionResponse,
+    summary="Get a manual manuscript snapshot",
+    tags=["manuscripts"],
+)
+async def get_version(
+    entity_type: ManuscriptVersionEntityType,
+    entity_id: str,
+    version_number: int,
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    _: None = Depends(rbac_rate_limit("writing.manuscripts.get")),
+) -> ManuscriptVersionResponse:
+    try:
+        version = _get_helper(db).get_version(entity_type, entity_id, version_number)
+        return ManuscriptVersionResponse(**version)
+    except _MANUSCRIPT_NONCRITICAL_EXCEPTIONS as exc:
+        _handle_db_errors(exc, "manuscript version")
+
+
+@router.post(
+    "/{entity_type}/{entity_id}/versions/{version_number}/restore",
+    response_model=ManuscriptRestoredEntityResponse,
+    summary="Restore a manual manuscript snapshot",
+    tags=["manuscripts"],
+)
+async def restore_version(
+    entity_type: ManuscriptVersionEntityType,
+    entity_id: str,
+    version_number: int,
+    expected_version: int | None = Header(None, description="Expected current entity version"),
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    _: None = Depends(rbac_rate_limit("writing.manuscripts.update")),
+) -> ManuscriptRestoredEntityResponse:
+    try:
+        restored = _get_helper(db).restore_version(
+            entity_type,
+            entity_id,
+            version_number,
+            expected_version=expected_version,
+        )
+        return ManuscriptRestoredEntityResponse.model_validate(restored)
+    except _MANUSCRIPT_NONCRITICAL_EXCEPTIONS as exc:
+        _handle_db_errors(exc, "manuscript version restore")
+
+
+@router.get(
+    "/trash",
+    response_model=ManuscriptTrashListResponse,
+    summary="List soft-deleted manuscript records",
+    tags=["manuscripts"],
+)
+async def list_trash(
+    entity_type: ManuscriptTrashEntityType | None = Query(
+        None,
+        description="Optional project/manuscript/part/chapter/scene filter",
+    ),
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    _: None = Depends(rbac_rate_limit("writing.manuscripts.list")),
+) -> ManuscriptTrashListResponse:
+    try:
+        items = _get_helper(db).list_trash(entity_type=entity_type)
+        return ManuscriptTrashListResponse(items=items, total=len(items))
+    except _MANUSCRIPT_NONCRITICAL_EXCEPTIONS as exc:
+        _handle_db_errors(exc, "manuscript trash")
+
+
+@router.post(
+    "/trash/{entity_type}/{entity_id}/restore",
+    response_model=ManuscriptRestoredEntityResponse,
+    summary="Restore a soft-deleted manuscript record",
+    tags=["manuscripts"],
+)
+async def restore_trash(
+    entity_type: ManuscriptTrashEntityType,
+    entity_id: str,
+    expected_version: int | None = Header(None, description="Expected deleted entity version"),
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    _: None = Depends(rbac_rate_limit("writing.manuscripts.update")),
+) -> ManuscriptRestoredEntityResponse:
+    try:
+        restored = _get_helper(db).restore_trash(
+            entity_type,
+            entity_id,
+            expected_version=expected_version,
+        )
+        return ManuscriptRestoredEntityResponse.model_validate(restored)
+    except _MANUSCRIPT_NONCRITICAL_EXCEPTIONS as exc:
+        _handle_db_errors(exc, "manuscript trash restore")

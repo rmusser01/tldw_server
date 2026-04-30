@@ -17,8 +17,16 @@ os.environ.setdefault("READING_DIGEST_JOBS_WORKER_ENABLED", "0")
 os.environ.setdefault("READING_DIGEST_SCHEDULER_ENABLED", "0")
 os.environ.setdefault("TEST_MODE", "1")
 
+from tldw_Server_API.app.api.v1.endpoints import flashcards as flashcards_endpoint
 from tldw_Server_API.app.api.v1.endpoints.config_info import router as config_info_router
 from tldw_Server_API.app.api.v1.endpoints.flashcards import router as flashcards_router
+from tldw_Server_API.app.api.v1.schemas.flashcards import DeckDeleteResponse
+from tldw_Server_API.app.api.v1.schemas.study_packs import (
+    StudyPackJobAcceptedResponse,
+    StudyPackJobListResponse,
+    StudyPackJobStatusResponse,
+)
+from tldw_Server_API.app.api.v1.API_Deps.jobs_deps import get_job_manager
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     CharactersRAGDBError,
@@ -29,6 +37,11 @@ from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_u
 from tldw_Server_API.app.core.Flashcards.asset_refs import extract_flashcard_asset_uuids
 from tldw_Server_API.app.core.Flashcards.apkg_exporter import export_apkg_from_rows
 from tldw_Server_API.app.core.Flashcards.scheduler_sm2 import SchedulerSettingsError
+from tldw_Server_API.app.core.StudyPacks.jobs import (
+    STUDY_PACKS_DOMAIN,
+    STUDY_PACKS_JOB_TYPE,
+    study_pack_jobs_queue,
+)
 from tldw_Server_API.tests.test_config import TestConfig
 
 # Explicit auth headers for single-user mode (required by get_request_user)
@@ -52,6 +65,13 @@ def _build_flashcards_test_app() -> FastAPI:
 
 
 fastapi_app = _build_flashcards_test_app()
+
+
+def test_flashcards_reviewed_endpoints_have_explicit_return_annotations() -> None:
+    assert flashcards_endpoint.delete_deck.__annotations__["return"] is DeckDeleteResponse
+    assert flashcards_endpoint.create_study_pack_job.__annotations__["return"] is StudyPackJobAcceptedResponse
+    assert flashcards_endpoint.list_study_pack_jobs.__annotations__["return"] is StudyPackJobListResponse
+    assert flashcards_endpoint.get_study_pack_job_status.__annotations__["return"] is StudyPackJobStatusResponse
 
 
 @pytest.fixture(scope="function")
@@ -626,6 +646,71 @@ def test_delete_template_returns_409_for_conflict_error(
     assert response.json()["detail"] == "template delete mismatch"
 
 
+def test_delete_deck_soft_deletes_with_expected_version(client_with_flashcards_db: TestClient):
+    create_response = client_with_flashcards_db.post(
+        "/api/v1/flashcards/decks",
+        json={"name": "Delete Me"},
+        headers=AUTH_HEADERS,
+    )
+    assert create_response.status_code == 200
+    created = create_response.json()
+
+    delete_response = client_with_flashcards_db.delete(
+        f"/api/v1/flashcards/decks/{created['id']}",
+        params={"expected_version": created["version"]},
+        headers=AUTH_HEADERS,
+    )
+
+    assert delete_response.status_code == 200
+    assert delete_response.json() == {"deleted": True}
+
+    decks_response = client_with_flashcards_db.get("/api/v1/flashcards/decks", headers=AUTH_HEADERS)
+    assert decks_response.status_code == 200
+    assert all(deck["id"] != created["id"] for deck in decks_response.json())
+
+
+def test_delete_deck_rejects_stale_version_after_concurrent_update(
+    client_with_flashcards_db: TestClient,
+    flashcards_db: CharactersRAGDB,
+    monkeypatch,
+):
+    create_response = client_with_flashcards_db.post(
+        "/api/v1/flashcards/decks",
+        json={"name": "Race Delete"},
+        headers=AUTH_HEADERS,
+    )
+    assert create_response.status_code == 200
+    created = create_response.json()
+    stale_deck = dict(flashcards_db.get_deck(created["id"]))
+
+    updated = flashcards_db.update_deck(
+        created["id"],
+        description="Concurrent update",
+        expected_version=created["version"],
+    )
+    assert updated is True
+
+    original_get_deck = flashcards_db.get_deck
+
+    def _stale_get_deck(deck_id: int):
+        if int(deck_id) == int(created["id"]):
+            return stale_deck
+        return original_get_deck(deck_id)
+
+    monkeypatch.setattr(flashcards_db, "get_deck", _stale_get_deck)
+
+    delete_response = client_with_flashcards_db.delete(
+        f"/api/v1/flashcards/decks/{created['id']}",
+        params={"expected_version": created["version"]},
+        headers=AUTH_HEADERS,
+    )
+
+    assert delete_response.status_code == 409
+    current = original_get_deck(created["id"])
+    assert current is not None
+    assert not current["deleted"]
+
+
 def test_deck_endpoints_reject_unknown_workspace_ids(
     client_with_flashcards_db: TestClient,
 ):
@@ -652,6 +737,74 @@ def test_deck_endpoints_reject_unknown_workspace_ids(
     )
     assert update_response.status_code == 404
     assert "missing-ws" in update_response.json()["detail"]
+
+
+def test_list_study_pack_jobs_returns_current_user_jobs(client_with_flashcards_db: TestClient):
+    class StubJobManager:
+        def __init__(self):
+            self.calls = []
+            self.count_calls = []
+
+        def list_jobs(self, **kwargs):
+            self.calls.append(kwargs)
+            return [
+                {
+                    "id": 42,
+                    "status": "queued",
+                    "domain": STUDY_PACKS_DOMAIN,
+                    "queue": study_pack_jobs_queue(),
+                    "job_type": STUDY_PACKS_JOB_TYPE,
+                    "owner_user_id": "1",
+                }
+            ]
+
+        def count_jobs(self, **kwargs):
+            self.count_calls.append(kwargs)
+            return 3
+
+    stub = StubJobManager()
+    client_with_flashcards_db.app.dependency_overrides[get_job_manager] = lambda: stub
+
+    response = client_with_flashcards_db.get(
+        "/api/v1/flashcards/study-packs/jobs",
+        params={"status": "queued", "limit": 25},
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "jobs": [
+            {
+                "id": 42,
+                "status": "queued",
+                "domain": STUDY_PACKS_DOMAIN,
+                "queue": study_pack_jobs_queue(),
+                "job_type": STUDY_PACKS_JOB_TYPE,
+            }
+        ],
+        "total": 3,
+    }
+    assert stub.calls == [
+        {
+            "domain": STUDY_PACKS_DOMAIN,
+            "queue": study_pack_jobs_queue(),
+            "status": "queued",
+            "owner_user_id": "1",
+            "job_type": STUDY_PACKS_JOB_TYPE,
+            "limit": 25,
+            "sort_by": "created_at",
+            "sort_order": "desc",
+        }
+    ]
+    assert stub.count_calls == [
+        {
+            "domain": STUDY_PACKS_DOMAIN,
+            "queue": study_pack_jobs_queue(),
+            "status": "queued",
+            "owner_user_id": "1",
+            "job_type": STUDY_PACKS_JOB_TYPE,
+        }
+    ]
 
 
 def test_flashcard_visibility_endpoints_respect_default_general_only_and_explicit_scope(

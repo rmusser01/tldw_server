@@ -23,6 +23,7 @@ from tldw_Server_API.app.core.AuthNZ.orgs_teams import list_org_members, list_te
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.exceptions import ToolCatalogConflictError
 from tldw_Server_API.app.services import admin_tool_catalog_service
+from tldw_Server_API.app.services.mcp_hub_service import emit_mcp_hub_audit
 
 router = APIRouter(prefix="", tags=["mcp-catalogs-scope"])
 _CATALOG_NONCRITICAL_EXCEPTIONS = (
@@ -195,6 +196,13 @@ async def create_org_tool_catalog(
             team_id=None,
             is_active=is_active,
         )
+        await emit_mcp_hub_audit(
+            action="tool_catalog.created",
+            actor_id=principal.user_id,
+            resource_type="mcp_tool_catalog",
+            resource_id=str(row.get("id")),
+            metadata={"owner_scope_type": "org", "owner_scope_id": org_id, "name": row.get("name")},
+        )
         return ToolCatalogResponse(**row)
     except ToolCatalogConflictError as exc:
         raise HTTPException(status_code=409, detail="Catalog already exists") from exc
@@ -259,6 +267,13 @@ async def create_team_tool_catalog(
             team_id=team_id,
             is_active=is_active,
         )
+        await emit_mcp_hub_audit(
+            action="tool_catalog.created",
+            actor_id=principal.user_id,
+            resource_type="mcp_tool_catalog",
+            resource_id=str(row.get("id")),
+            metadata={"owner_scope_type": "team", "owner_scope_id": team_id, "name": row.get("name")},
+        )
         return ToolCatalogResponse(**row)
     except ToolCatalogConflictError as exc:
         raise HTTPException(status_code=409, detail="Catalog already exists") from exc
@@ -302,6 +317,19 @@ async def add_org_catalog_entry(
             tool,
             module_id,
         )
+        await emit_mcp_hub_audit(
+            action="tool_catalog_entry.created",
+            actor_id=principal.user_id,
+            resource_type="mcp_tool_catalog_entry",
+            resource_id=f"{catalog_id}:{tool}",
+            metadata={
+                "owner_scope_type": "org",
+                "owner_scope_id": org_id,
+                "catalog_id": catalog_id,
+                "tool_name": tool,
+                "module_id": module_id,
+            },
+        )
         return ToolCatalogEntryResponse(**row)
     except _CATALOG_NONCRITICAL_EXCEPTIONS as e:
         logger.error("Failed to add org tool catalog entry")
@@ -339,6 +367,19 @@ async def add_team_catalog_entry(
             tool,
             module_id,
         )
+        await emit_mcp_hub_audit(
+            action="tool_catalog_entry.created",
+            actor_id=principal.user_id,
+            resource_type="mcp_tool_catalog_entry",
+            resource_id=f"{catalog_id}:{tool}",
+            metadata={
+                "owner_scope_type": "team",
+                "owner_scope_id": team_id,
+                "catalog_id": catalog_id,
+                "tool_name": tool,
+                "module_id": module_id,
+            },
+        )
         return ToolCatalogEntryResponse(**row)
     except _CATALOG_NONCRITICAL_EXCEPTIONS as e:
         logger.error("Failed to add team tool catalog entry")
@@ -367,6 +408,13 @@ async def delete_org_tool_catalog(
         if not owner:
             raise HTTPException(status_code=404, detail="Catalog not found in org")
         await admin_tool_catalog_service.delete_tool_catalog(db, catalog_id)
+        await emit_mcp_hub_audit(
+            action="tool_catalog.deleted",
+            actor_id=principal.user_id,
+            resource_type="mcp_tool_catalog",
+            resource_id=str(catalog_id),
+            metadata={"owner_scope_type": "org", "owner_scope_id": org_id, "name": owner.get("name")},
+        )
         return {"message": "Catalog deleted", "id": catalog_id, "scope": {"org_id": org_id}}
     except HTTPException:
         raise
@@ -404,6 +452,18 @@ async def delete_org_catalog_entry(
             db,
             catalog_id,
             tool_name,
+        )
+        await emit_mcp_hub_audit(
+            action="tool_catalog_entry.deleted",
+            actor_id=principal.user_id,
+            resource_type="mcp_tool_catalog_entry",
+            resource_id=f"{catalog_id}:{tool_name}",
+            metadata={
+                "owner_scope_type": "org",
+                "owner_scope_id": org_id,
+                "catalog_id": catalog_id,
+                "tool_name": tool_name,
+            },
         )
         return {
             "message": "Entry deleted",
@@ -443,6 +503,13 @@ async def delete_team_tool_catalog(
         if not owner:
             raise HTTPException(status_code=404, detail="Catalog not found in team")
         await admin_tool_catalog_service.delete_tool_catalog(db, catalog_id)
+        await emit_mcp_hub_audit(
+            action="tool_catalog.deleted",
+            actor_id=principal.user_id,
+            resource_type="mcp_tool_catalog",
+            resource_id=str(catalog_id),
+            metadata={"owner_scope_type": "team", "owner_scope_id": team_id, "name": owner.get("name")},
+        )
         return {"message": "Catalog deleted", "id": catalog_id, "scope": {"team_id": team_id}}
     except HTTPException:
         raise
@@ -480,6 +547,18 @@ async def delete_team_catalog_entry(
             db,
             catalog_id,
             tool_name,
+        )
+        await emit_mcp_hub_audit(
+            action="tool_catalog_entry.deleted",
+            actor_id=principal.user_id,
+            resource_type="mcp_tool_catalog_entry",
+            resource_id=f"{catalog_id}:{tool_name}",
+            metadata={
+                "owner_scope_type": "team",
+                "owner_scope_id": team_id,
+                "catalog_id": catalog_id,
+                "tool_name": tool_name,
+            },
         )
         return {
             "message": "Entry deleted",

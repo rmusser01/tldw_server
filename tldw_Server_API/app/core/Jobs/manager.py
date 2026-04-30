@@ -2166,8 +2166,11 @@ class JobManager:
         self,
         *,
         domain: str | None = None,
+        queue: str | None = None,
         status: str | None = None,
         owner_user_id: str | None = None,
+        job_type: str | None = None,
+        batch_group: str | None = None,
     ) -> int:
         """
         Return the number of jobs matching the provided filters.
@@ -2180,12 +2183,21 @@ class JobManager:
                 if domain:
                     query += " AND domain = %s"
                     params.append(domain)
+                if queue:
+                    query += " AND queue = %s"
+                    params.append(queue)
                 if status:
                     query += " AND status = %s"
                     params.append(status)
                 if owner_user_id:
                     query += " AND owner_user_id = %s"
                     params.append(owner_user_id)
+                if job_type:
+                    query += " AND job_type = %s"
+                    params.append(job_type)
+                if batch_group:
+                    query += " AND batch_group = %s"
+                    params.append(batch_group)
                 with self._pg_cursor(conn) as cur:
                     cur.execute(query, params)
                     row = cur.fetchone()
@@ -2201,13 +2213,32 @@ class JobManager:
                 if domain:
                     query += " AND domain = ?"
                     params.append(domain)
+                if queue:
+                    query += " AND queue = ?"
+                    params.append(queue)
                 if status:
                     query += " AND status = ?"
                     params.append(status)
                 if owner_user_id:
                     query += " AND owner_user_id = ?"
                     params.append(owner_user_id)
-                row = conn.execute(query, params).fetchone()
+                if job_type:
+                    query += " AND job_type = ?"
+                    params.append(job_type)
+                if batch_group:
+                    query += " AND batch_group = ?"
+                    params.append(batch_group)
+                try:
+                    row = conn.execute(query, params).fetchone()
+                except sqlite3.OperationalError as exc:
+                    if (
+                        batch_group
+                        and self._sqlite_missing_column_error(exc, "batch_group")
+                        and self._sqlite_ensure_batch_group(conn)
+                    ):
+                        row = conn.execute(query, params).fetchone()
+                    else:
+                        raise
                 if not row:
                     return 0
                 try:

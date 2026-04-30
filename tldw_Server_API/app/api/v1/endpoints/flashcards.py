@@ -20,6 +20,7 @@ from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import DEFAULT_LLM_
 from tldw_Server_API.app.api.v1.schemas.flashcards import (
     Deck,
     DeckCreate,
+    DeckDeleteResponse,
     DeckUpdate,
     Flashcard,
     FlashcardAnalyticsSummaryResponse,
@@ -54,6 +55,7 @@ from tldw_Server_API.app.api.v1.schemas.flashcards import (
 from tldw_Server_API.app.api.v1.schemas.study_packs import (
     StudyPackCreateJobRequest,
     StudyPackJobAcceptedResponse,
+    StudyPackJobListResponse,
     StudyPackJobStatusResponse,
     StudyPackSummaryResponse,
 )
@@ -775,6 +777,27 @@ def update_deck(
         raise map_db_error_to_http(e) from e
     except (InputError, CharactersRAGDBError) as exc:
         raise map_db_error_to_http(exc, default_detail="Failed to update deck") from exc
+
+
+@router.delete("/decks/{deck_id}", response_model=DeckDeleteResponse)
+def delete_deck(
+    deck_id: int,
+    expected_version: int = Query(..., ge=1),
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+) -> DeckDeleteResponse:
+    try:
+        deck = db.get_deck(deck_id)
+        if not deck or deck.get("deleted"):
+            raise HTTPException(status_code=404, detail="Deck not found")
+        db.soft_delete_deck_by_id(deck_id, expected_version=expected_version)
+        return DeckDeleteResponse(deleted=True)
+    except HTTPException:
+        raise
+    except ConflictError as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
+    except CharactersRAGDBError as e:
+        logger.error(f"Failed to delete deck: {e}")
+        raise HTTPException(status_code=500, detail="Failed to delete deck") from e
 
 
 @router.post("/assets", response_model=FlashcardAssetMetadata)
@@ -1878,7 +1901,7 @@ def create_study_pack_job(
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
     current_user: User = Depends(get_request_user),
     jm: JobManager = Depends(get_job_manager),
-):
+) -> StudyPackJobAcceptedResponse:
     try:
         _ensure_workspace_exists(db, payload.workspace_id)
         job = jm.create_job(
@@ -1890,9 +1913,41 @@ def create_study_pack_job(
             priority=5,
             max_retries=2,
         )
-        return {"job": _serialize_study_pack_job(job)}
+        return StudyPackJobAcceptedResponse(job=_serialize_study_pack_job(job))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/study-packs/jobs", response_model=StudyPackJobListResponse)
+def list_study_pack_jobs(
+    status: Optional[str] = Query(None),
+    limit: int = Query(100, ge=1, le=1000),
+    current_user: User = Depends(get_request_user),
+    principal: AuthPrincipal = Depends(get_auth_principal),
+    jm: JobManager = Depends(get_job_manager),
+) -> StudyPackJobListResponse:
+    jobs = jm.list_jobs(
+        domain=STUDY_PACKS_DOMAIN,
+        queue=study_pack_jobs_queue(),
+        status=status,
+        owner_user_id=str(current_user.id),
+        job_type=STUDY_PACKS_JOB_TYPE,
+        limit=limit,
+        sort_by="created_at",
+        sort_order="desc",
+    )
+    visible_jobs: list[dict[str, Any]] = []
+    for job in jobs:
+        _ensure_study_pack_job_access(job, current_user=current_user, principal=principal)
+        visible_jobs.append(_serialize_study_pack_job(job))
+    total = jm.count_jobs(
+        domain=STUDY_PACKS_DOMAIN,
+        queue=study_pack_jobs_queue(),
+        status=status,
+        owner_user_id=str(current_user.id),
+        job_type=STUDY_PACKS_JOB_TYPE,
+    )
+    return StudyPackJobListResponse(jobs=visible_jobs, total=total)
 
 
 @router.get("/study-packs/jobs/{job_id}", response_model=StudyPackJobStatusResponse)
@@ -1902,7 +1957,7 @@ async def get_study_pack_job_status(
     current_user: User = Depends(get_request_user),
     principal: AuthPrincipal = Depends(get_auth_principal),
     jm: JobManager = Depends(get_job_manager),
-):
+) -> StudyPackJobStatusResponse:
     job = jm.get_job(job_id)
     if not job or str(job.get("domain") or "").strip().lower() != STUDY_PACKS_DOMAIN:
         raise HTTPException(status_code=404, detail="Study-pack job not found")
@@ -1919,11 +1974,11 @@ async def get_study_pack_job_status(
         )
         study_pack = _study_pack_from_job_result(study_pack_db, job)
     error = _public_study_pack_job_error(job)
-    return {
-        "job": _serialize_study_pack_job(job),
-        "study_pack": study_pack,
-        "error": error,
-    }
+    return StudyPackJobStatusResponse(
+        job=_serialize_study_pack_job(job),
+        study_pack=study_pack,
+        error=error,
+    )
 
 
 @router.get("/study-packs/{pack_id}", response_model=StudyPackSummaryResponse)
@@ -1943,7 +1998,7 @@ def regenerate_study_pack(
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
     current_user: User = Depends(get_request_user),
     jm: JobManager = Depends(get_job_manager),
-):
+) -> StudyPackJobAcceptedResponse:
     pack = db.get_study_pack(pack_id)
     if not pack:
         raise HTTPException(status_code=404, detail="Study pack not found")
@@ -1973,7 +2028,7 @@ def regenerate_study_pack(
         priority=5,
         max_retries=2,
     )
-    return {"job": _serialize_study_pack_job(job)}
+    return StudyPackJobAcceptedResponse(job=_serialize_study_pack_job(job))
 
 
 @router.get("/{card_uuid}/assistant", response_model=StudyAssistantContextResponse)
