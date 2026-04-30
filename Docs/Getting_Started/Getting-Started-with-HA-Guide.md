@@ -87,6 +87,8 @@ Why this class of hardware:
 
 ## Current References
 
+These references were spot-checked on `2026-04-30`; still verify live reseller stock, pricing, and model-specific install notes before buying hardware.
+
 - Raspberry Pi 4:
   - https://www.raspberrypi.com/products/raspberry-pi-4-model-b/
   - https://www.raspberrypi.com/products/raspberry-pi-4-model-b/specifications/
@@ -95,7 +97,7 @@ Why this class of hardware:
 - Raspberry Pi 4 Case:
   - https://www.raspberrypi.com/products/raspberry-pi-4-case/
 - Raspberry Pi 4 Case Fan:
-  - https://www.raspberrypi.com/products//raspberry-pi-4-case-fan/
+  - https://www.raspberrypi.com/products/raspberry-pi-4-case-fan/
 - ReSpeaker XVF3800:
   - https://www.seeedstudio.com/ReSpeaker-XVF3800-USB-Mic-Array-p-6488.html
   - https://wiki.seeedstudio.com/respeaker_xvf3800_introduction/
@@ -123,10 +125,10 @@ Do these in order. Do not skip ahead to `tldw_server` integration before the roo
 
 ### 1. Build the Room Node
 
-- Flash `Raspberry Pi OS Lite`
+- Install the current supported `64-bit Linux` image for the selected node, such as `Raspberry Pi OS Lite` for a Raspberry Pi
 - Enable `SSH`
 - Give the node a room-specific hostname such as `voice-office-01`
-- Boot the `Pi 4`
+- Boot the room node
 - Update packages
 - Put the node on `5 GHz Wi-Fi` if available
 
@@ -333,7 +335,7 @@ Target:
 - `Mic/speaker placement`
   - do not place the mic array directly beside or behind the speaker
 - `Power issues`
-  - use the official PSU; cheap supplies can cause undervoltage and unstable USB/audio behavior
+  - use a vendor-recommended power supply for the selected node; cheap supplies can cause undervoltage and unstable USB/audio behavior
 - `Network topology`
   - `Music Assistant` wants the server and players on the same Layer 2 network; complicated VLAN/firewall setups are a common breakage point
 - `Voice-initiated music playback`
@@ -366,4 +368,4 @@ After the first room is stable:
 1. Add a second room and confirm the pattern duplicates cleanly.
 2. Standardize your room-node naming, speaker pairing procedure, and recovery steps.
 3. Expand the `Home Assistant` -> `tldw_server` command set gradually.
-4. Only then explore cost-down options like trying a `Pi Zero 2 W` in secondary rooms.
+4. Only then benchmark cost-down nodes, such as a `Pi Zero 2 W`, in secondary rooms.
