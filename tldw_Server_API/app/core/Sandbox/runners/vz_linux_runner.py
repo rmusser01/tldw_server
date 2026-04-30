@@ -14,6 +14,7 @@ from loguru import logger
 
 from ..macos_virtualization.helper_client import (
     MacOSVirtualizationHelperClient,
+    MacOSVirtualizationHelperProtocolError,
     MacOSVirtualizationHelperUnavailable,
 )
 from ..models import RunPhase, RunSpec, RunStatus, RuntimeType
@@ -66,10 +67,15 @@ class VZLinuxRunner(VZBaseRunner):
                         "network_policy": str(network_policy or "deny_all").strip().lower() or "deny_all",
                     }
                 )
-            except MacOSVirtualizationHelperUnavailable as exc:
+            except (MacOSVirtualizationHelperUnavailable, MacOSVirtualizationHelperProtocolError) as exc:
+                default_reason = (
+                    "macos_virtualization_helper_protocol_mismatch"
+                    if isinstance(exc, MacOSVirtualizationHelperProtocolError)
+                    else "macos_virtualization_helper_unavailable"
+                )
                 helper_result = {
                     "available": False,
-                    "reasons": [str(exc) or "macos_virtualization_helper_unavailable"],
+                    "reasons": [str(exc) or default_reason],
                     "execution_mode": "none",
                 }
             helper_reasons = [str(reason) for reason in helper_result.get("reasons", []) if str(reason).strip()]
@@ -275,7 +281,11 @@ class VZLinuxRunner(VZBaseRunner):
                 and str(session_control.get("vm_id") or "").strip()
             ):
                 candidate_vm_id = str(session_control.get("vm_id") or "").strip()
-                status = helper.get_vm_status(candidate_vm_id)
+                try:
+                    status = helper.get_vm_status(candidate_vm_id)
+                except (MacOSVirtualizationHelperUnavailable, MacOSVirtualizationHelperProtocolError):
+                    # Host truth is unavailable or untrusted; explicit admin repair owns row cleanup.
+                    raise
                 if bool(status.healthy):
                     vm_id = candidate_vm_id
                     template_ref = str(session_control.get("template_id") or "").strip() or spec.base_image

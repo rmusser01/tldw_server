@@ -9,7 +9,7 @@ These notes cover the current macOS runtime scaffolding for the sandbox subsyste
 - `seatbelt`
 
 This is not yet a guide for shipping the full macOS runtime roadmap. The current implementation exposes runtime identities, policy admission, discovery metadata, helper/image-store contracts, and one real VM-backed path:
-- `vz_linux` now supports helper-backed ephemeral execution plus session VM reuse.
+- `vz_linux` supports helper-backed boot, guest command execution, ephemeral execution, and session VM reuse on prepared Apple silicon macOS hosts.
 - `vz_macos` remains scaffold-only.
 - `seatbelt` has a real trusted-workflow subprocess path on compatible macOS hosts.
 
@@ -59,7 +59,8 @@ other scaffold-only paths:
 - `TLDW_SANDBOX_VZ_MACOS_TEMPLATE_READY=1`
 
 `vz_linux` uses helper-backed truth outside `TEST_MODE` and exposes a real
-execution path only when the helper and template are both validated.
+boot and guest execution path only when the helper and template are both
+validated.
 `vz_macos` still stays scaffold-only and exposes `real_execution_not_implemented`
 in preflight/discovery unless its fake execution flags are enabled.
 
@@ -74,8 +75,9 @@ The repo now contains:
 - a first-party Swift helper daemon subproject in `tools/macos-vz-helper/`
 - a first guest-protocol bridge in `tools/tldw-agent/` for guest-mode `tldw-agent`
 
-What is still incomplete is the actual `Virtualization.framework` boot path and
-the real vsock transport binding. The protocol and daemon surfaces are now in-repo.
+The `vz_linux` helper-backed boot and guest execution path is real when host,
+helper, guest agent, and canonical bundle or compatibility template validation
+all pass. `vz_macos` remains scaffold-only.
 
 ## Template Preparation Flow
 
@@ -98,7 +100,7 @@ Its current role is narrow:
 Expected operator flow:
 
 1. Prepare a sealed template image per runtime family.
-2. Register the template or canonical bundle in the sandbox image store.
+2. Register the canonical bundle, or a weaker compatibility template, in the sandbox image store.
 3. Create run-scoped clone manifests from that template.
 4. Hand clone metadata to the native helper for VM boot.
 5. Destroy the run-scoped clone state after completion.
@@ -175,6 +177,19 @@ that payload stays summarized and does not expose helper/template internals.
 
 ACP sandbox session creation now performs runtime preflight validation before calling the sandbox service, and converts failures into `ACPResponseError` instead of leaking raw sandbox exceptions.
 
+## Reconciliation And Repair
+
+`/api/v1/sandbox/admin/macos-diagnostics` is read-only. Its reconciliation block
+compares persisted VZ session-control rows with helper live VM state and reports
+healthy, stale, unhealthy, active, and orphan facts without changing either side.
+
+`POST /api/v1/sandbox/admin/macos-reconciliation/repair` is the explicit
+admin-only repair endpoint. Repair defaults to dry-run, skips active sessions,
+and can delete stale or unhealthy inactive persisted session-control rows when
+requested. It does not terminate orphan helper VMs yet; orphan termination
+remains deferred and manual. Helper unavailable or protocol mismatch conditions
+fail closed and block mutating repair.
+
 ## Current Limits
 
 - `vz_linux` real guest command execution is available behind helper/template readiness on Apple silicon macOS hosts
@@ -187,6 +202,8 @@ ACP sandbox session creation now performs runtime preflight validation before ca
 - No APFS clone execution path yet
 - No allowlist networking for the new macOS runtimes
 - No `vz_macos` warm-session VM reuse yet
+- No launchd or managed helper lifecycle yet
+- No automatic orphan VM termination during diagnostics or repair yet
 
 Current diagnostics are mixed-mode:
 

@@ -11,11 +11,13 @@ from tldw_Server_API.app.core.testing import is_truthy
 
 from .macos_virtualization.helper_client import (
     MacOSVirtualizationHelperClient,
+    MacOSVirtualizationHelperProtocolError,
     MacOSVirtualizationHelperUnavailable,
 )
 from .models import RuntimeType
 from .runtime_capabilities import RuntimePreflightResult, collect_runtime_preflights
 from .runners.vz_common import vz_host_facts
+from .vz_reconciliation import collect_vz_reconciliation
 
 _VZ_LINUX_TEMPLATE_MISSING_REASON = "vz_linux_template_missing"
 _VZ_MACOS_TEMPLATE_MISSING_REASON = "macos_template_missing"
@@ -44,6 +46,8 @@ def _remediation_for_reasons(reasons: list[str]) -> str | None:
         return "Run this runtime on an Apple silicon macOS host."
     if "macos_virtualization_helper_unavailable" in reasons:
         return "Install or start the macOS virtualization helper service."
+    if "macos_virtualization_helper_protocol_mismatch" in reasons:
+        return "Update the macOS virtualization helper and Python client to compatible protocol versions."
     if "macos_helper_missing" in reasons:
         return "Configure the macOS virtualization helper and mark it ready."
     if _VZ_LINUX_TEMPLATE_MISSING_REASON in reasons or _VZ_MACOS_TEMPLATE_MISSING_REASON in reasons:
@@ -105,8 +109,16 @@ def probe_helper() -> dict[str, object]:
         helper_version = str(ping.helper_version or "").strip() or None
     except MacOSVirtualizationHelperUnavailable as exc:
         reasons.append(str(exc) or "macos_virtualization_helper_unavailable")
+    except MacOSVirtualizationHelperProtocolError:
+        reasons.append("macos_virtualization_helper_protocol_mismatch")
 
-    if not ready and "macos_virtualization_helper_unavailable" not in reasons:
+    if not ready and not any(
+        reason in reasons
+        for reason in (
+            "macos_virtualization_helper_unavailable",
+            "macos_virtualization_helper_protocol_mismatch",
+        )
+    ):
         reasons.append("macos_helper_missing")
 
     return {
@@ -173,6 +185,8 @@ def _vz_linux_template_status() -> dict[str, object]:
         reasons.extend(helper_reasons)
     except MacOSVirtualizationHelperUnavailable as exc:
         reasons.append(str(exc) or "macos_virtualization_helper_unavailable")
+    except MacOSVirtualizationHelperProtocolError:
+        reasons.append("macos_virtualization_helper_protocol_mismatch")
 
     if not ready and not reasons:
         reasons.append(_VZ_LINUX_TEMPLATE_MISSING_REASON)
@@ -226,52 +240,7 @@ def probe_runtime_statuses(
 def probe_reconciliation(orchestrator: Any | None = None) -> dict[str, object]:
     """Compare persisted VZ session rows with live helper VM state when available."""
 
-    summary: dict[str, object] = {
-        "computed": False,
-        "persisted_sessions": 0,
-        "live_vms": 0,
-        "stale_session_ids": [],
-        "orphaned_vm_ids": [],
-        "reasons": [],
-    }
-    if orchestrator is None:
-        return summary
-
-    lister = getattr(orchestrator, "list_vz_session_controls", None)
-    if not callable(lister):
-        summary["reasons"] = ["vz_session_listing_unavailable"]
-        return summary
-
-    persisted_rows = [dict(row) for row in lister() or [] if isinstance(row, dict)]
-    summary["persisted_sessions"] = len(persisted_rows)
-
-    try:
-        live = MacOSVirtualizationHelperClient().list_vms()
-    except MacOSVirtualizationHelperUnavailable as exc:
-        summary["reasons"] = [str(exc) or "macos_virtualization_helper_unavailable"]
-        return summary
-
-    live_vm_ids = {
-        str(vm.vm_id).strip()
-        for vm in list(live.vms or [])
-        if str(getattr(vm, "vm_id", "")).strip()
-    }
-    persisted_vm_by_session = {
-        str(row.get("id") or "").strip(): str(row.get("vm_id") or "").strip()
-        for row in persisted_rows
-        if str(row.get("id") or "").strip() and str(row.get("vm_id") or "").strip()
-    }
-    persisted_vm_ids = {vm_id for vm_id in persisted_vm_by_session.values() if vm_id}
-
-    summary["computed"] = True
-    summary["live_vms"] = len(live_vm_ids)
-    summary["stale_session_ids"] = sorted(
-        session_id
-        for session_id, vm_id in persisted_vm_by_session.items()
-        if vm_id not in live_vm_ids
-    )
-    summary["orphaned_vm_ids"] = sorted(vm_id for vm_id in live_vm_ids if vm_id not in persisted_vm_ids)
-    return summary
+    return collect_vz_reconciliation(orchestrator)
 
 
 def collect_macos_diagnostics(orchestrator: Any | None = None) -> dict[str, Any]:

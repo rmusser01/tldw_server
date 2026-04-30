@@ -313,14 +313,27 @@ class SandboxAdminMacOSRuntimeDiagnostics(BaseModel):
     remediation: str | None = None
 
 
+class SandboxAdminMacOSReconciliationItem(BaseModel):
+    status: str
+    session_id: str | None = None
+    vm_id: str | None = None
+    state: str | None = None
+    healthy: bool | None = None
+    reason: str | None = None
+
+
 class SandboxAdminMacOSReconciliationDiagnostics(BaseModel):
     """Admin-facing comparison between persisted VZ session state and live helper VMs."""
 
     computed: bool
     persisted_sessions: int
     live_vms: int
+    healthy_session_ids: list[str] = Field(default_factory=list)
     stale_session_ids: list[str] = Field(default_factory=list)
+    unhealthy_session_ids: list[str] = Field(default_factory=list)
+    skipped_active_session_ids: list[str] = Field(default_factory=list)
     orphaned_vm_ids: list[str] = Field(default_factory=list)
+    items: list[SandboxAdminMacOSReconciliationItem] = Field(default_factory=list)
     reasons: list[str] = Field(default_factory=list)
 
 
@@ -332,6 +345,38 @@ class SandboxAdminMacOSDiagnosticsResponse(BaseModel):
     templates: dict[str, SandboxAdminMacOSTemplateDiagnostics] = Field(default_factory=dict)
     runtimes: dict[str, SandboxAdminMacOSRuntimeDiagnostics] = Field(default_factory=dict)
     reconciliation: SandboxAdminMacOSReconciliationDiagnostics | None = None
+
+
+class SandboxAdminMacOSReconciliationRepairRequest(BaseModel):
+    delete_stale_session_controls: bool = True
+    delete_unhealthy_session_controls: bool = True
+    terminate_orphaned_vms: bool = False
+    dry_run: bool = True
+
+
+class SandboxAdminMacOSReconciliationRepairAction(BaseModel):
+    type: str
+    session_id: str | None = None
+    vm_id: str | None = None
+    status: str
+    reason: str | None = None
+
+
+class SandboxAdminMacOSReconciliationRepairSummary(BaseModel):
+    stale_session_controls: int = 0
+    unhealthy_session_controls: int = 0
+    deleted_session_controls: int = 0
+    skipped_active_sessions: int = 0
+    orphaned_vms: int = 0
+    terminated_orphaned_vms: int = 0
+
+
+class SandboxAdminMacOSReconciliationRepairResponse(BaseModel):
+    dry_run: bool
+    helper: dict[str, object] = Field(default_factory=dict)
+    summary: SandboxAdminMacOSReconciliationRepairSummary
+    actions: list[SandboxAdminMacOSReconciliationRepairAction] = Field(default_factory=list)
+    reasons: list[str] = Field(default_factory=list)
 
 
 # Snapshot/Clone Schemas

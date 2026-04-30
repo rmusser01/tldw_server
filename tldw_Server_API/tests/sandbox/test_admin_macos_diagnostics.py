@@ -102,8 +102,12 @@ def _diagnostics_payload() -> dict:
             "computed": False,
             "persisted_sessions": 0,
             "live_vms": 0,
+            "healthy_session_ids": [],
             "stale_session_ids": [],
+            "unhealthy_session_ids": [],
+            "skipped_active_session_ids": [],
             "orphaned_vm_ids": [],
+            "items": [],
             "reasons": ["macos_virtualization_helper_unavailable"],
         }
     }
@@ -125,6 +129,10 @@ def test_admin_macos_diagnostics_returns_structured_payload(monkeypatch) -> None
     assert body["runtimes"]["vz_linux"]["execution_mode"] == "none"
     assert body["helper"]["protocol_version"] is None
     assert body["reconciliation"]["computed"] is False
+    assert body["reconciliation"]["healthy_session_ids"] == []
+    assert body["reconciliation"]["unhealthy_session_ids"] == []
+    assert body["reconciliation"]["skipped_active_session_ids"] == []
+    assert body["reconciliation"]["items"] == []
 
 
 def test_admin_macos_diagnostics_allows_real_vz_linux_execution_mode(monkeypatch) -> None:
@@ -144,6 +152,16 @@ def test_admin_macos_diagnostics_allows_real_vz_linux_execution_mode(monkeypatch
     payload["reconciliation"]["computed"] = True
     payload["reconciliation"]["persisted_sessions"] = 1
     payload["reconciliation"]["live_vms"] = 1
+    payload["reconciliation"]["healthy_session_ids"] = ["sess-live"]
+    payload["reconciliation"]["items"] = [
+        {
+            "status": "healthy",
+            "session_id": "sess-live",
+            "vm_id": "vm-live",
+            "state": "running",
+            "healthy": True,
+        }
+    ]
     payload["reconciliation"]["reasons"] = []
 
     fake_service = SimpleNamespace(macos_diagnostics=lambda: payload)
@@ -161,3 +179,5 @@ def test_admin_macos_diagnostics_allows_real_vz_linux_execution_mode(monkeypatch
     assert body["helper"]["protocol_version"] == "1"
     assert body["helper"]["helper_version"] == "0.1.0"
     assert body["reconciliation"]["computed"] is True
+    assert body["reconciliation"]["healthy_session_ids"] == ["sess-live"]
+    assert body["reconciliation"]["items"][0]["status"] == "healthy"
