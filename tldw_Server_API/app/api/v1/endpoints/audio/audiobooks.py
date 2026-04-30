@@ -901,11 +901,14 @@ async def create_voice_profile(
     dependencies=[Depends(check_rate_limit)],
 )
 async def list_voice_profiles(
+    limit: int = Query(100, ge=1, le=200, description="Maximum number of voice profiles to return"),
+    offset: int = Query(0, ge=0, description="Number of voice profiles to skip"),
     _current_user: User = Depends(get_request_user),
     collections_db: CollectionsDatabase = Depends(get_collections_db_for_user),
 ) -> VoiceProfileListResponse:
     try:
-        rows = collections_db.list_voice_profiles()
+        rows = collections_db.list_voice_profiles(limit=limit, offset=offset)
+        total = collections_db.count_voice_profiles()
     except Exception as exc:
         logger.exception("Failed to list audiobook voice profiles")
         raise HTTPException(status_code=500, detail="voice_profile_list_failed") from exc
@@ -926,7 +929,18 @@ async def list_voice_profiles(
                 chapter_overrides=overrides,
             )
         )
-    return VoiceProfileListResponse(profiles=profiles)
+    return VoiceProfileListResponse(
+        profiles=profiles,
+        total=total,
+        limit=limit,
+        offset=offset,
+        pagination=build_offset_pagination_meta(
+            total=total,
+            limit=limit,
+            offset=offset,
+            count=len(profiles),
+        ),
+    )
 
 
 @router.delete(

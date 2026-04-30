@@ -3982,6 +3982,13 @@ class CollectionsDatabase:
         rows = self.backend.execute(q, (self.user_id, limit, offset)).rows
         return [VoiceProfileRow(**row) for row in rows]
 
+    def count_voice_profiles(self) -> int:
+        row = self.backend.execute(
+            "SELECT COUNT(*) AS total FROM audiobook_voice_profiles WHERE user_id = ?",
+            (self.user_id,),
+        ).first
+        return int(row["total"] if row and row["total"] is not None else 0)
+
     def delete_voice_profile(self, profile_id: str) -> None:
         q = "DELETE FROM audiobook_voice_profiles WHERE profile_id = ? AND user_id = ?"
         res = self.backend.execute(q, (profile_id, self.user_id))

@@ -614,6 +614,10 @@ class VoiceProfileListResponse(BaseModel):
     """List response for voice profiles."""
 
     profiles: list[VoiceProfileResponse] = Field(..., description="Voice profiles")
+    total: int = Field(..., description="Total voice profiles matching the query")
+    limit: int = Field(..., description="Applied page size")
+    offset: int = Field(..., description="Applied offset")
+    pagination: OffsetPaginationMeta = Field(..., description="Canonical pagination metadata")
 
 
 class VoiceProfileDeleteResponse(BaseModel):

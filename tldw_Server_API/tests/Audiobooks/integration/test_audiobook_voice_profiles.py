@@ -41,10 +41,22 @@ def test_voice_profile_crud(client_voice_profiles):
 
     list_resp = client_voice_profiles.get("/api/v1/audiobooks/voices/profiles")
     assert list_resp.status_code == 200
-    listed = list_resp.json()["profiles"]
+    payload = list_resp.json()
+    listed = payload["profiles"]
     assert len(listed) == 1
     assert listed[0]["profile_id"] == created["profile_id"]
     assert listed[0]["chapter_overrides"] == create_payload["chapter_overrides"]
+    assert payload["total"] == 1
+    assert payload["limit"] == 100
+    assert payload["offset"] == 0
+    assert payload["pagination"] == {
+        "mode": "offset",
+        "total": 1,
+        "limit": 100,
+        "offset": 0,
+        "has_more": False,
+        "next_offset": None,
+    }
 
     delete_resp = client_voice_profiles.delete(f"/api/v1/audiobooks/voices/profiles/{created['profile_id']}")
     assert delete_resp.status_code == 200
@@ -54,4 +66,17 @@ def test_voice_profile_crud(client_voice_profiles):
 
     list_resp = client_voice_profiles.get("/api/v1/audiobooks/voices/profiles")
     assert list_resp.status_code == 200
-    assert list_resp.json()["profiles"] == []
+    assert list_resp.json() == {
+        "profiles": [],
+        "total": 0,
+        "limit": 100,
+        "offset": 0,
+        "pagination": {
+            "mode": "offset",
+            "total": 0,
+            "limit": 100,
+            "offset": 0,
+            "has_more": False,
+            "next_offset": None,
+        },
+    }
