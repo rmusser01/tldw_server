@@ -6,6 +6,7 @@
 import os
 from collections.abc import Iterator
 from contextlib import contextmanager
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -39,7 +40,7 @@ TEST_USER_ID = 999
 
 
 @pytest.fixture()
-def client(tmp_path, monkeypatch):
+def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
     """Provide a TestClient with mocked auth and isolated user database."""
     from tldw_Server_API.app.main import app as fastapi_app
 
@@ -50,10 +51,10 @@ def client(tmp_path, monkeypatch):
     db_path = user_base / "ChaChaNotes.db"
     chacha_db = CharactersRAGDB(db_path=db_path, client_id="test_client")
 
-    async def override_user():
+    async def override_user() -> User:
         return User(id=TEST_USER_ID, username="skills-test-user", email=None, is_active=True)
 
-    def override_chacha_db():
+    def override_chacha_db() -> CharactersRAGDB:
         return chacha_db
 
     # Monkeypatch DatabasePaths so SkillsService gets our temp dir
@@ -71,7 +72,7 @@ def client(tmp_path, monkeypatch):
 
 
 @pytest.fixture()
-def principal_client(tmp_path, monkeypatch):
+def principal_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
     """Provide a TestClient that authenticates skills routes through AuthPrincipal only."""
     from tldw_Server_API.app.main import app as fastapi_app
 
@@ -108,7 +109,7 @@ def principal_client(tmp_path, monkeypatch):
         request.state.team_ids = list(principal.team_ids)
         return principal
 
-    def override_chacha_db():
+    def override_chacha_db() -> CharactersRAGDB:
         return chacha_db
 
     monkeypatch.setattr(DatabasePaths, "get_user_base_directory", staticmethod(lambda uid: user_base))
@@ -125,7 +126,7 @@ def principal_client(tmp_path, monkeypatch):
 
 
 @pytest.fixture()
-def auth_path_client(tmp_path, monkeypatch):
+def auth_path_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
     """Provide a TestClient that leaves get_auth_principal on the real auth path."""
     from tldw_Server_API.app.main import app as fastapi_app
 
@@ -136,7 +137,7 @@ def auth_path_client(tmp_path, monkeypatch):
     db_path = user_base / "ChaChaNotes.db"
     chacha_db = CharactersRAGDB(db_path=db_path, client_id="auth_path_test_client")
 
-    def override_chacha_db():
+    def override_chacha_db() -> CharactersRAGDB:
         return chacha_db
 
     monkeypatch.setattr(DatabasePaths, "get_user_base_directory", staticmethod(lambda uid: user_base))
