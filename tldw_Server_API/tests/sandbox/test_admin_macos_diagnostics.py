@@ -107,6 +107,9 @@ def _diagnostics_payload() -> dict:
             "unhealthy_session_ids": [],
             "skipped_active_session_ids": [],
             "orphaned_vm_ids": [],
+            "owned_orphaned_vm_ids": [],
+            "unknown_orphaned_vm_ids": [],
+            "foreign_orphaned_vm_ids": [],
             "items": [],
             "reasons": ["macos_virtualization_helper_unavailable"],
         }
