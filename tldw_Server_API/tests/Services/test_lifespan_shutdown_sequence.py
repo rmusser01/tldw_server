@@ -216,6 +216,7 @@ async def test_run_lifespan_shutdown_sequence_runs_wrappers_in_order_and_updates
         "segment",
         "transition",
         "pollers",
+        "segment",
         "coordinated",
         "pre",
         "primary",
@@ -226,17 +227,18 @@ async def test_run_lifespan_shutdown_sequence_runs_wrappers_in_order_and_updates
     assert calls[0][1]["segment_name"] == "transition_handoff"
     assert calls[1][1]["usage_task"] == "usage-start"
     assert calls[2][1]["owned_job_pollers"] == ["poller-a"]
-    assert calls[3][1]["legacy_shutdown_plan"] == ["transition-plan"]
-    assert calls[4][1]["coordinated_legacy_component_names"] == {"usage_aggregator"}
-    assert calls[5][1]["should_run_late_stop"] is True
+    assert calls[3][1]["segment_name"] == "background_worker_shutdown"
+    assert calls[4][1]["legacy_shutdown_plan"] == ["transition-plan"]
+    assert calls[5][1]["coordinated_legacy_component_names"] == {"usage_aggregator"}
     assert calls[6][1]["should_run_late_stop"] is True
-    assert calls[7][1]["claims_task"] == "claims-start"
-    assert calls[8][1]["authnz_scheduler_started"] is True
-    assert calls[8][1]["db_pool"] == "db-pool"
-    assert calls[8][1]["session_manager"] == "session-manager"
-    assert calls[8][1]["heavy_startup_handles"] == "heavy-handles"
-    assert calls[8][1]["in_pytest_for_db_pool_shutdown"] is True
-    assert calls[8][1]["in_pytest_for_tts_shutdown"] is True
+    assert calls[7][1]["should_run_late_stop"] is True
+    assert calls[8][1]["claims_task"] == "claims-start"
+    assert calls[9][1]["authnz_scheduler_started"] is True
+    assert calls[9][1]["db_pool"] == "db-pool"
+    assert calls[9][1]["session_manager"] == "session-manager"
+    assert calls[9][1]["heavy_startup_handles"] == "heavy-handles"
+    assert calls[9][1]["in_pytest_for_db_pool_shutdown"] is True
+    assert calls[9][1]["in_pytest_for_tts_shutdown"] is True
     assert worker_runtime.cleanup_task == "cleanup-after"
     assert worker_runtime.chatbooks_cleanup_task == "chatbooks-after"
     assert worker_runtime.storage_cleanup_service == "storage-after"

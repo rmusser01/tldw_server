@@ -123,13 +123,13 @@ async def start_service_groups(
     )
 
 
-async def _start_runtime_monitors(**kwargs):
+async def _start_runtime_monitors(**kwargs: Any) -> Any:
     from tldw_Server_API.app.services.startup_runtime_monitors import start_runtime_monitors
 
     return await start_runtime_monitors(**kwargs)
 
 
-async def _start_optional_workers(**kwargs):
+async def _start_optional_workers(**kwargs: Any) -> Any:
     from tldw_Server_API.app.services.startup_optional_workers import start_optional_workers
 
     return await start_optional_workers(**kwargs)

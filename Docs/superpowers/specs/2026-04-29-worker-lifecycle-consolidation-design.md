@@ -9,7 +9,7 @@
 
 Reduce lifecycle coupling in `tldw_Server_API/app/main.py` by consolidating remaining stop-event-owned background workers under the current managed-poller and shutdown-coordinator seams.
 
-This design intentionally adapts issue #1114 to the current codebase. The historical issue text references a `WorkerRegistry`, but the current branch no longer contains `tldw_Server_API/app/services/worker_registry.py`, and the recovery plan records that the old WorkerRegistry slice was rejected as stale. The current architecture already has `_ManagedJobPoller`, app-state worker inventory, early job-poller quiescing, and a shutdown coordinator. The next slice should extend those seams rather than resurrect an obsolete abstraction.
+This design intentionally adapts issue #1114 to the current codebase. The historical issue text references a standalone `WorkerRegistry`; the current implementation provides a `WorkerRegistry` facade on top of the app-state worker inventory model instead of restoring the removed standalone registry internals. The current architecture already has `_ManagedJobPoller`, phased worker inventory, early job-poller quiescing, and a shutdown coordinator. The next slice should extend those seams through the current registry facade.
 
 ## Context
 
@@ -50,7 +50,7 @@ Initial migration candidates include workers with current direct task ownership 
 
 Out of scope:
 
-- bringing back the stale `WorkerRegistry` design
+- bringing back the stale standalone `WorkerRegistry` internals
 - redesigning cron-style schedulers in the first slice
 - ResourceGovernor extraction
 - route registration refactors
@@ -77,9 +77,9 @@ Cons:
 - the first slice still leaves scheduler-style services in `main.py`
 - the final module shape may need another pass after several migrations
 
-### Alternative: Reintroduce WorkerRegistry
+### Alternative: Reintroduce The Old Standalone WorkerRegistry
 
-Create a new `WorkerRegistry` with `register()` and `register_custom()` and move all worker startup into it.
+Restore the old standalone `WorkerRegistry` implementation and move all worker startup into it.
 
 Pros:
 
@@ -136,14 +136,15 @@ Fields:
 
 Existing app-state job-poller inventory consumers must continue to see `name`, `task_name`, `has_stop_event`, and `timeout_sec` for `job_poller_quiesce` workers.
 
-### WorkerInventory
+### WorkerRegistry And WorkerInventory
 
-Small owner for started worker handles.
+Small owner for started worker handles. `WorkerRegistry` is the public current-code facade for issue #1114 migrations, while `WorkerInventory` remains the compatibility name for existing inventory-oriented code in this slice.
 
 Responsibilities:
 
 - hold `ManagedWorker` records
 - register workers after successful startup
+- expose `register_custom(...)` for custom stop-event workers
 - publish full worker inventory to `app.state._tldw_shutdown_worker_inventory`
 - publish a filtered compatibility inventory to `app.state._tldw_shutdown_job_poller_inventory` for `job_poller_quiesce` workers only
 - expose handles to the shutdown path
@@ -179,7 +180,7 @@ This should preserve the current behavior of `_stop_registered_job_pollers(...)`
 
 ## Startup Flow
 
-1. `main.py` creates a `WorkerInventory(app)` near the existing `owned_job_pollers` initialization point.
+1. `main.py` creates a `WorkerRegistry(app)` near the existing `owned_job_pollers` initialization point.
 2. `main.py` evaluates the same environment flags and route defaults it evaluates today.
 3. For compatible enabled workers, `main.py` calls `start_stop_event_worker(...)` with an explicit `shutdown_phase`.
 4. The helper creates an `asyncio.Event`, starts the task, registers the handle, and republishes app-state inventory.
@@ -273,7 +274,7 @@ Scheduler-style services should get a separate design or implementation slice if
 
 Automated tests:
 
-- unit tests for `WorkerInventory` registration and inventory publication
+- unit tests for `WorkerRegistry`/`WorkerInventory` registration and inventory publication
 - unit tests proving `job_poller_quiesce` workers appear in the filtered compatibility inventory and `background_worker_shutdown` workers do not
 - unit tests for concurrent stop behavior, timeout fallback, cancellation, and quiesced-name recording
 - integration tests extending `test_main_shutdown_job_pollers.py` so migrated workers appear in the full worker inventory when their flags are enabled
@@ -290,7 +291,7 @@ Verification commands for implementation planning should include:
 
 ## Acceptance Criteria
 
-- A current-code lifecycle helper exists and does not depend on the stale WorkerRegistry design.
+- A current-code `WorkerRegistry` facade exists and does not depend on the stale standalone WorkerRegistry internals.
 - App-state job-poller inventory remains backward compatible, with a separate full worker inventory for non-job workers.
 - The first Jobs-domain background-worker batch (`jobs_metrics`, `jobs_metrics_reconcile`, `jobs_crypto_rotate`, and `jobs_integrity`) is migrated into the shared inventory and shutdown path.
 - Migrated workers no longer require duplicated unguarded late-stop code in `main.py`.

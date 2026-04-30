@@ -1,9 +1,17 @@
+"""Lifecycle worker registration, inventory publication, and shutdown helpers.
+
+The helpers in this module centralize the repeated FastAPI lifespan pattern of
+creating a stop event, starting a named task, publishing diagnostic inventory,
+and later stopping registered workers with bounded cancellation.
+"""
+
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Awaitable, Callable, Sequence
+from typing import Any
 
 from loguru import logger
 
@@ -11,12 +19,16 @@ from tldw_Server_API.app.services.lifecycle_exceptions import LIFECYCLE_GUARD_EX
 
 
 class ShutdownPhase(str, Enum):
+    """Shutdown phase that owns a registered worker."""
+
     JOB_POLLER_QUIESCE = "job_poller_quiesce"
     BACKGROUND_WORKER_SHUTDOWN = "background_worker_shutdown"
 
 
 @dataclass
 class ManagedWorker:
+    """Runtime handle for one lifecycle-managed worker task."""
+
     name: str
     task: asyncio.Task[Any]
     stop_event: asyncio.Event | None = None
@@ -39,9 +51,13 @@ class WorkerInventory:
 
     @property
     def handles(self) -> list[ManagedWorker]:
+        """Return the mutable handle list shared with legacy startup paths."""
+
         return self._handles
 
     def register(self, worker: ManagedWorker | None = None, **worker_kwargs: Any) -> ManagedWorker:
+        """Register an already-started worker and republish app-state inventory."""
+
         if worker is None:
             worker = ManagedWorker(**worker_kwargs)
         self._handles.append(worker)
@@ -53,6 +69,8 @@ class WorkerInventory:
         shutdown_phase: ShutdownPhase | str,
         handles: Sequence[ManagedWorker],
     ) -> None:
+        """Replace all workers owned by one shutdown phase."""
+
         target_phase = _normalize_shutdown_phase(shutdown_phase)
         self._handles[:] = [
             handle
@@ -63,6 +81,8 @@ class WorkerInventory:
         self.publish()
 
     def handles_for_phase(self, shutdown_phase: ShutdownPhase | str) -> list[ManagedWorker]:
+        """Return workers currently owned by a shutdown phase."""
+
         target_phase = _normalize_shutdown_phase(shutdown_phase)
         return [
             handle
@@ -71,10 +91,46 @@ class WorkerInventory:
         ]
 
     def publish(self) -> None:
+        """Publish full and compatibility inventories to app state."""
+
         publish_worker_inventory(self._app, self._handles)
 
 
+class WorkerRegistry(WorkerInventory):
+    """Current-code registry facade for Phase 2.1 worker migrations.
+
+    The original issue references a standalone ``worker_registry.py`` module.
+    Current startup/shutdown ownership uses the worker inventory model instead,
+    so this facade exposes the WorkerRegistry naming and ``register_custom``
+    hook without reintroducing the removed stale implementation.
+    """
+
+    async def register_custom(
+        self,
+        *,
+        name: str,
+        task_name: str,
+        coroutine_factory: Callable[[asyncio.Event], Awaitable[Any]],
+        timeout_sec: float = 5.0,
+        category: str | None = None,
+        shutdown_phase: ShutdownPhase = ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN,
+    ) -> tuple[asyncio.Task[Any], asyncio.Event]:
+        """Start and register a custom stop-event worker."""
+
+        return await start_stop_event_worker(
+            self,
+            name=name,
+            task_name=task_name,
+            coroutine_factory=coroutine_factory,
+            timeout_sec=timeout_sec,
+            category=category,
+            shutdown_phase=shutdown_phase,
+        )
+
+
 def publish_worker_inventory(app: Any, handles: Sequence[ManagedWorker]) -> None:
+    """Publish full worker metadata and the job-poller compatibility view."""
+
     full_inventory = [
         {
             "name": handle.name,
@@ -99,13 +155,13 @@ def publish_worker_inventory(app: Any, handles: Sequence[ManagedWorker]) -> None
 
     try:
         app.state._tldw_shutdown_worker_inventory = full_inventory
-    except LIFECYCLE_GUARD_EXCEPTIONS:
-        pass
+    except LIFECYCLE_GUARD_EXCEPTIONS as exc:
+        _log_state_publication_failure("_tldw_shutdown_worker_inventory", exc)
 
     try:
         app.state._tldw_shutdown_job_poller_inventory = job_poller_inventory
-    except LIFECYCLE_GUARD_EXCEPTIONS:
-        pass
+    except LIFECYCLE_GUARD_EXCEPTIONS as exc:
+        _log_state_publication_failure("_tldw_shutdown_job_poller_inventory", exc)
 
 
 async def stop_registered_workers(
@@ -115,6 +171,8 @@ async def stop_registered_workers(
     stopped_names_attr: str,
     log_label: str,
 ) -> None:
+    """Stop registered workers concurrently and publish stopped worker names."""
+
     async def _await_worker_shutdown(handle: ManagedWorker) -> bool:
         try:
             await asyncio.wait_for(asyncio.shield(handle.task), timeout=handle.timeout_sec)
@@ -138,14 +196,14 @@ async def stop_registered_workers(
                     log_label,
                     handle.name,
                 )
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - worker failures must not block shutdown.
                 logger.warning(
                     "App Shutdown: {} {} raised after cancellation: {}",
                     log_label,
                     handle.name,
                     exc,
                 )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - worker failures must not block shutdown.
             logger.warning(
                 "App Shutdown: {} {} exited during shutdown: {}",
                 log_label,
@@ -160,7 +218,7 @@ async def stop_registered_workers(
         else:
             try:
                 handle.task.cancel()
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - cancel hooks can raise arbitrary errors.
                 logger.warning(
                     "App Shutdown: {} {} cancel request failed: {}",
                     log_label,
@@ -182,8 +240,8 @@ async def stop_registered_workers(
                 if stopped
             ],
         )
-    except LIFECYCLE_GUARD_EXCEPTIONS:
-        pass
+    except LIFECYCLE_GUARD_EXCEPTIONS as exc:
+        _log_state_publication_failure(stopped_names_attr, exc)
 
 
 async def start_stop_event_worker(
@@ -196,6 +254,8 @@ async def start_stop_event_worker(
     category: str | None = None,
     shutdown_phase: ShutdownPhase = ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN,
 ) -> tuple[asyncio.Task[Any], asyncio.Event]:
+    """Create a stop event, start a task, register it, and return both handles."""
+
     stop_event = asyncio.Event()
     task = asyncio.create_task(coroutine_factory(stop_event), name=task_name)
     inventory.register(
@@ -222,3 +282,7 @@ def _normalize_shutdown_phase(shutdown_phase: ShutdownPhase | str) -> ShutdownPh
     if isinstance(shutdown_phase, ShutdownPhase):
         return shutdown_phase
     return ShutdownPhase(str(shutdown_phase))
+
+
+def _log_state_publication_failure(attr_name: str, exc: BaseException) -> None:
+    logger.debug("Lifecycle worker metadata publication skipped for {}: {}", attr_name, exc)

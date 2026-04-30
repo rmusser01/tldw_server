@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 from types import SimpleNamespace
 
 import pytest
@@ -43,7 +44,6 @@ async def test_initialize_startup_worker_bootstrap_runs_helpers_in_order_and_ret
         run_pg_rls_auto_ensure="run-pg-ensure",
         register_owned_job_poller="register-poller",
         replace_owned_job_poller_inventory="replace-inventory",
-        publish_shutdown_job_poller_inventory="publish-inventory",
         logger="logger",
         startup_api_key_log_value="api-key",
         shared_is_truthy="truthy",
@@ -82,3 +82,12 @@ async def test_initialize_startup_worker_bootstrap_runs_helpers_in_order_and_ret
     assert handles.worker_inventory is calls[2][1]["worker_inventory"]
     assert handles.startup_worker_group_handles.cleanup_task == "cleanup-task"
     assert handles.startup_service_tail_handles.jobs_metrics_task == "jobs-metrics-task"
+
+
+def test_startup_worker_bootstrap_no_longer_exposes_dead_poller_hook() -> None:
+    from tldw_Server_API.app.services import startup_worker_bootstrap as startup_bootstrap
+
+    signature = inspect.signature(startup_bootstrap.initialize_startup_worker_bootstrap)
+
+    assert "publish_shutdown_job_poller_inventory" not in signature.parameters
+    assert not hasattr(startup_bootstrap, "_prepare_startup_owned_job_pollers")

@@ -82,18 +82,19 @@ async def run_lifespan_shutdown_sequence(
     )
     should_run_late_stop = job_poller_handoff_handles.should_run_late_stop
 
-    await stop_registered_workers(
-        app,
-        _handles_for_shutdown_phase(
-            worker_runtime,
-            ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN,
-        ),
-        stopped_names_attr="_tldw_shutdown_stopped_background_worker_names",
-        log_label="background worker",
-    )
-    stopped_background_worker_names = set(
-        getattr(app.state, "_tldw_shutdown_stopped_background_worker_names", [])
-    )
+    with timed_shutdown_segment(app, "background_worker_shutdown"):
+        await stop_registered_workers(
+            app,
+            _handles_for_shutdown_phase(
+                worker_runtime,
+                ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN,
+            ),
+            stopped_names_attr="_tldw_shutdown_stopped_background_worker_names",
+            log_label="background worker",
+        )
+        stopped_background_worker_names = set(
+            getattr(app.state, "_tldw_shutdown_stopped_background_worker_names", [])
+        )
 
     from tldw_Server_API.app.services.shutdown_coordinated_legacy_components import (
         run_shutdown_coordinated_legacy_components,

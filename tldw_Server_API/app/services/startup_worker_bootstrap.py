@@ -7,7 +7,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from tldw_Server_API.app.services.lifecycle_workers import WorkerInventory
+from tldw_Server_API.app.services.lifecycle_workers import WorkerRegistry
 
 
 @dataclass
@@ -18,7 +18,7 @@ class StartupWorkerBootstrapHandles:
     owned_job_pollers: list[Any]
     startup_worker_group_handles: Any
     startup_service_tail_handles: Any
-    worker_inventory: WorkerInventory | None = None
+    worker_inventory: WorkerRegistry | None = None
 
 
 async def initialize_startup_worker_bootstrap(
@@ -29,7 +29,6 @@ async def initialize_startup_worker_bootstrap(
     run_pg_rls_auto_ensure: Callable[..., Any],
     register_owned_job_poller: Callable[..., None],
     replace_owned_job_poller_inventory: Callable[..., None],
-    publish_shutdown_job_poller_inventory: Callable[..., None],
     logger: Any,
     startup_api_key_log_value: Any,
     shared_is_truthy: Callable[..., bool],
@@ -37,7 +36,7 @@ async def initialize_startup_worker_bootstrap(
     import_exceptions: tuple[type[BaseException], ...],
 ) -> StartupWorkerBootstrapHandles:
     """Run the owned-poller, worker-group, and service-tail bootstrap in legacy order."""
-    worker_inventory = WorkerInventory(app)
+    worker_inventory = WorkerRegistry(app)
     owned_job_pollers = worker_inventory.handles
     app_settings = _load_app_settings()
     startup_worker_group_handles = await _start_worker_groups(
@@ -72,15 +71,6 @@ async def initialize_startup_worker_bootstrap(
         startup_service_tail_handles=startup_service_tail_handles,
         worker_inventory=worker_inventory,
     )
-
-
-def _prepare_startup_owned_job_pollers(**kwargs) -> list[Any]:
-    from tldw_Server_API.app.services.startup_owned_job_pollers import (
-        prepare_startup_owned_job_pollers,
-    )
-
-    return prepare_startup_owned_job_pollers(**kwargs)
-
 
 def _load_app_settings():
     from tldw_Server_API.app.core.config import settings as app_settings

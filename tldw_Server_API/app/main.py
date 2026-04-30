@@ -1255,7 +1255,6 @@ async def lifespan(app: FastAPI):
         run_pg_rls_auto_ensure=_run_pg_rls_auto_ensure,
         register_owned_job_poller=_register_owned_job_poller,
         replace_owned_job_poller_inventory=_replace_owned_job_poller_inventory,
-        publish_shutdown_job_poller_inventory=_publish_shutdown_job_poller_inventory,
         startup_api_key_log_value=_startup_api_key_log_value,
         startup_guard_exceptions=_STARTUP_GUARD_EXCEPTIONS,
         import_exceptions=_IMPORT_EXCEPTIONS,

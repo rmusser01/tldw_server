@@ -790,9 +790,7 @@ def test_lifespan_startup_delegates_worker_bootstrap(
     assert recorded_calls[0]["replace_owned_job_poller_inventory"] is (
         main_module._replace_owned_job_poller_inventory
     )
-    assert recorded_calls[0]["publish_shutdown_job_poller_inventory"] is (
-        main_module._publish_shutdown_job_poller_inventory
-    )
+    assert "publish_shutdown_job_poller_inventory" not in recorded_calls[0]
     assert recorded_calls[0]["logger"] is main_module.logger
     assert recorded_calls[0]["startup_api_key_log_value"] is main_module._startup_api_key_log_value
     assert recorded_calls[0]["shared_is_truthy"] is main_module._shared_is_truthy

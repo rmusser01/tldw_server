@@ -237,6 +237,13 @@ async def run_shutdown_post_worker_services(
     stopped_background_worker_names: set[str] | None = None,
 ) -> PostWorkerShutdownHandles:
     """Run post-worker shutdown with main-lifespan fallback behavior."""
+    stopped_background_worker_names = stopped_background_worker_names or set()
+
+    def _fallback_if_not_stopped(name: str, value: Any | None) -> Any | None:
+        if name in stopped_background_worker_names:
+            return None
+        return value
+
     try:
         return await shutdown_post_worker_services(
             claims_task=claims_task,
@@ -292,12 +299,24 @@ async def run_shutdown_post_worker_services(
             websub_renewal_task=websub_renewal_task,
             usage_task=usage_task,
             llm_usage_task=llm_usage_task,
-            jobs_metrics_task=jobs_metrics_task,
+            jobs_metrics_task=_fallback_if_not_stopped("jobs_metrics_task", jobs_metrics_task),
             loop_lag_task=loop_lag_task,
-            jobs_metrics_reconcile_task=jobs_metrics_reconcile_task,
-            jobs_metrics_reconcile_stop=jobs_metrics_reconcile_stop,
-            jobs_crypto_rotate_task=jobs_crypto_rotate_task,
-            jobs_integrity_task=jobs_integrity_task,
+            jobs_metrics_reconcile_task=_fallback_if_not_stopped(
+                "jobs_metrics_reconcile_task",
+                jobs_metrics_reconcile_task,
+            ),
+            jobs_metrics_reconcile_stop=_fallback_if_not_stopped(
+                "jobs_metrics_reconcile_task",
+                jobs_metrics_reconcile_stop,
+            ),
+            jobs_crypto_rotate_task=_fallback_if_not_stopped(
+                "jobs_crypto_rotate_task",
+                jobs_crypto_rotate_task,
+            ),
+            jobs_integrity_task=_fallback_if_not_stopped(
+                "jobs_integrity_task",
+                jobs_integrity_task,
+            ),
             jobs_webhooks_task=jobs_webhooks_task,
             meetings_webhook_dlq_task=meetings_webhook_dlq_task,
             workflows_dlq_task=workflows_dlq_task,

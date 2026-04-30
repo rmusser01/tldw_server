@@ -10,6 +10,99 @@ async def _wait_for_stop(stop_event: asyncio.Event) -> None:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_worker_registry_register_custom_starts_and_registers_worker() -> None:
+    from tldw_Server_API.app.services.lifecycle_workers import (
+        ShutdownPhase,
+        WorkerRegistry,
+    )
+
+    app = FastAPI()
+    registry = WorkerRegistry(app)
+    observed_stop_event: asyncio.Event | None = None
+
+    async def _worker(stop_event: asyncio.Event) -> None:
+        nonlocal observed_stop_event
+        observed_stop_event = stop_event
+        await stop_event.wait()
+
+    task, stop_event = await registry.register_custom(
+        name="custom_worker",
+        task_name="custom-worker-task",
+        coroutine_factory=_worker,
+        timeout_sec=1.5,
+        category="jobs",
+        shutdown_phase=ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN,
+    )
+
+    try:
+        await asyncio.sleep(0)
+
+        assert observed_stop_event is stop_event
+        assert task.get_name() == "custom-worker-task"
+        assert registry.handles[0].name == "custom_worker"
+        assert registry.handles[0].shutdown_phase is ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN
+        assert app.state._tldw_shutdown_worker_inventory == [
+            {
+                "name": "custom_worker",
+                "task_name": "custom-worker-task",
+                "has_stop_event": True,
+                "timeout_sec": 1.5,
+                "category": "jobs",
+                "shutdown_phase": "background_worker_shutdown",
+            }
+        ]
+    finally:
+        stop_event.set()
+        await asyncio.wait_for(task, timeout=1)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_publish_worker_inventory_logs_guarded_state_publication_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.services import lifecycle_workers
+    from tldw_Server_API.app.services.lifecycle_workers import (
+        ManagedWorker,
+        publish_worker_inventory,
+    )
+
+    class _FailingState:
+        def __setattr__(self, name: str, value: object) -> None:
+            raise RuntimeError(f"{name} unavailable")
+
+    app = type("App", (), {"state": _FailingState()})()
+    stop_event = asyncio.Event()
+    task = asyncio.create_task(_wait_for_stop(stop_event), name="state-guard-task")
+    debug_calls: list[tuple[object, ...]] = []
+
+    monkeypatch.setattr(
+        lifecycle_workers.logger,
+        "debug",
+        lambda *args, **kwargs: debug_calls.append(args),
+    )
+
+    try:
+        publish_worker_inventory(
+            app,
+            [
+                ManagedWorker(
+                    name="guarded_worker",
+                    task=task,
+                    stop_event=stop_event,
+                )
+            ],
+        )
+    finally:
+        stop_event.set()
+        await asyncio.wait_for(task, timeout=1)
+
+    assert any("_tldw_shutdown_worker_inventory" in str(args) for args in debug_calls)
+    assert any("_tldw_shutdown_job_poller_inventory" in str(args) for args in debug_calls)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_worker_inventory_publishes_full_and_filtered_views() -> None:
     from tldw_Server_API.app.services.lifecycle_workers import (
         ManagedWorker,
@@ -269,6 +362,48 @@ async def test_stop_registered_workers_sets_events_and_waits_concurrently() -> N
     assert stop_b.is_set() is True
     assert elapsed < 0.2
     assert app.state._tldw_stopped_worker_names == ["worker_a", "worker_b"]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_stop_registered_workers_logs_stopped_names_publication_guard(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.services import lifecycle_workers
+    from tldw_Server_API.app.services.lifecycle_workers import (
+        ManagedWorker,
+        stop_registered_workers,
+    )
+
+    class _FailingState:
+        def __setattr__(self, name: str, value: object) -> None:
+            raise RuntimeError(f"{name} unavailable")
+
+    app = type("App", (), {"state": _FailingState()})()
+    stop_event = asyncio.Event()
+    task = asyncio.create_task(_wait_for_stop(stop_event), name="publish-guard-task")
+    debug_calls: list[tuple[object, ...]] = []
+
+    monkeypatch.setattr(
+        lifecycle_workers.logger,
+        "debug",
+        lambda *args, **kwargs: debug_calls.append(args),
+    )
+
+    await stop_registered_workers(
+        app,
+        [
+            ManagedWorker(
+                name="guarded_worker",
+                task=task,
+                stop_event=stop_event,
+            )
+        ],
+        stopped_names_attr="_tldw_guarded_stopped_names",
+        log_label="test worker",
+    )
+
+    assert any("_tldw_guarded_stopped_names" in str(args) for args in debug_calls)
 
 
 @pytest.mark.unit
