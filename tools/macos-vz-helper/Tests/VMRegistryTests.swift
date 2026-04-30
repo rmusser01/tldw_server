@@ -12,6 +12,46 @@ import Testing
     #expect(status?.healthy == false)
 }
 
+@Test func vmRegistryStoresOwnershipMetadata() throws {
+    let registry = VMRegistry()
+    let metadata = VMOwnershipMetadata(
+        owner: "tldw",
+        runtime: "vz_linux",
+        runID: "run-1",
+        sessionID: "session-1",
+        sessionMode: true,
+        templatePath: "/tmp/bundle",
+        workspacePath: "/tmp/workspace",
+        createdAt: "2026-04-30T18:00:00Z"
+    )
+
+    registry.upsert(vmID: "vm-1", state: "booting", healthy: false, metadata: metadata)
+
+    #expect(registry.status(vmID: "vm-1")?.metadata.owner == "tldw")
+    #expect(registry.status(vmID: "vm-1")?.metadata.runID == "run-1")
+}
+
+@Test func vmRegistryPreservesMetadataAcrossStateUpdates() throws {
+    let registry = VMRegistry()
+    let metadata = VMOwnershipMetadata(
+        owner: "tldw",
+        runtime: "vz_linux",
+        runID: "run-1",
+        sessionID: "",
+        sessionMode: false,
+        templatePath: "/tmp/bundle",
+        workspacePath: "/tmp/workspace",
+        createdAt: "2026-04-30T18:00:00Z"
+    )
+
+    registry.upsert(vmID: "vm-1", state: "booting", healthy: false, metadata: metadata)
+    registry.upsert(vmID: "vm-1", state: "running", healthy: true)
+
+    let record = registry.status(vmID: "vm-1")
+    #expect(record?.state == "running")
+    #expect(record?.metadata.runID == "run-1")
+}
+
 @Test func listVMsReturnsKnownVMs() throws {
     let registry = VMRegistry()
     registry.upsert(vmID: "vm-1", state: "running", healthy: true)
