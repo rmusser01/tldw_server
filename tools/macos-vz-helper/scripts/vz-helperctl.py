@@ -54,6 +54,12 @@ class StartedProcess:
     pid: int
 
 
+@dataclass(frozen=True)
+class PidFileState:
+    result: CheckResult
+    pid: int | None = None
+
+
 def default_paths() -> HelperPaths:
     home = Path.home()
     state_dir = home / "Library" / "Application Support" / "tldw" / "sandbox" / "macos-vz-helper"
@@ -293,22 +299,33 @@ def validate_pid_file(
     *,
     process_lookup: Callable[[int], ProcessInfo | None] = lookup_process,
 ) -> CheckResult:
+    return read_pid_file_state(pid_file, expected_helper, process_lookup=process_lookup).result
+
+
+def read_pid_file_state(
+    pid_file: Path,
+    expected_helper: Path,
+    *,
+    process_lookup: Callable[[int], ProcessInfo | None] = lookup_process,
+) -> PidFileState:
     if not pid_file.exists():
-        return CheckResult(ok=True)
+        return PidFileState(CheckResult(ok=True))
     try:
         raw_pid = pid_file.read_text(encoding="utf-8").strip()
         pid = int(raw_pid)
         if pid <= 0:
             raise ValueError(raw_pid)
     except (OSError, ValueError):
-        return CheckResult(ok=False, reason="helper_pid_file_invalid")
+        return PidFileState(CheckResult(ok=False, reason="helper_pid_file_invalid"))
 
     process = process_lookup(pid)
     if process is None:
-        return CheckResult(ok=True, reason="helper_pid_stale")
+        return PidFileState(CheckResult(ok=True, reason="helper_pid_stale"), pid=pid)
     if not _command_matches_helper(process.command, expected_helper):
-        return CheckResult(ok=False, reason="helper_pid_process_mismatch")
-    return CheckResult(ok=True, reason="helper_pid_running")
+        return PidFileState(CheckResult(ok=False, reason="helper_pid_process_mismatch"), pid=pid)
+    return PidFileState(CheckResult(ok=True, reason="helper_pid_running"), pid=pid)
+
+
 
 
 def _start_process(
@@ -455,15 +472,16 @@ def stop_helper(
     process_killer: Callable[[int], None] = _kill_process,
     process_lookup: Callable[[int], ProcessInfo | None] = lookup_process,
 ) -> CheckResult:
-    pid_result = validate_pid_file(pid_file, helper_path, process_lookup=process_lookup)
+    pid_state = read_pid_file_state(pid_file, helper_path, process_lookup=process_lookup)
+    pid_result = pid_state.result
     if not pid_result.ok:
         return pid_result
-    if not pid_file.exists():
+    if pid_state.pid is None:
         return CheckResult(ok=True, reason="helper_not_running")
     if pid_result.reason == "helper_pid_stale":
         _remove_pid_file(pid_file)
         return CheckResult(ok=True, reason="helper_pid_stale")
-    pid = int(pid_file.read_text(encoding="utf-8").strip())
+    pid = pid_state.pid
     process_killer(pid)
     _remove_pid_file(pid_file)
     return CheckResult(ok=True)

@@ -713,3 +713,28 @@ def test_status_cli_accepts_entitlements_flag(tmp_path, capsys):
     captured = capsys.readouterr()
     CASE.assertEqual(code, 1)
     CASE.assertIn("helper_entitlements_missing", captured.out)
+
+
+def test_stop_helper_terminates_only_validated_pid(tmp_path):
+    helperctl = load_helperctl()
+    helper = tmp_path / "macos-vz-helper"
+    pid_file = tmp_path / "runtime" / "helper.pid"
+    helper.write_text("#!/bin/sh\n", encoding="utf-8")
+    pid_file.parent.mkdir(mode=0o700)
+    pid_file.write_text("1234\n", encoding="utf-8")
+    killed = []
+
+    def process_lookup(pid):
+        pid_file.write_text("9999\n", encoding="utf-8")
+        return helperctl.ProcessInfo(pid=pid, command=str(helper))
+
+    result = helperctl.stop_helper(
+        helper,
+        pid_file,
+        process_lookup=process_lookup,
+        process_killer=lambda pid: killed.append(pid),
+    )
+
+    CASE.assertEqual(result, helperctl.CheckResult(ok=True))
+    CASE.assertEqual(killed, [1234])
+    CASE.assertFalse(pid_file.exists())
