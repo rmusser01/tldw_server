@@ -13,8 +13,8 @@ from typing import Any, NoReturn
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query, Response, status
 from fastapi.responses import JSONResponse
 from loguru import logger
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_rate_limiter_dep, get_request_user, RateLimiter, rbac_rate_limit, User
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_rate_limiter_dep, rbac_rate_limit
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.endpoints.llm_providers import get_configured_providers_async
 from tldw_Server_API.app.api.v1.schemas.writing_schemas import (
@@ -65,8 +65,6 @@ from tldw_Server_API.app.api.v1.schemas.writing_schemas import (
     WritingWordcloudWord,
 )
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
-from tldw_Server_API.app.core.AuthNZ.rate_limiter import RateLimiter
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     CharactersRAGDBError,

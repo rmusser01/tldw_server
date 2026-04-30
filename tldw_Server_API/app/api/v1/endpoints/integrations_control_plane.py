@@ -5,8 +5,8 @@ from typing import Any
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal, get_request_user, RequireRole, User
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import RequireRole, get_auth_principal
 from tldw_Server_API.app.api.v1.endpoints.discord_oauth_admin import discord_oauth_start_impl
 from tldw_Server_API.app.api.v1.endpoints.discord_support import (
     _decrypt_discord_payload,
@@ -66,7 +66,6 @@ from tldw_Server_API.app.api.v1.schemas.telegram_schemas import (
     TelegramLinkedActorListResponse,
     TelegramLinkedActorRevokeResponse,
 )
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.repos import get_workspace_provider_installations_repo

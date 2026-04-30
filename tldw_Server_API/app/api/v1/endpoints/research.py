@@ -31,7 +31,7 @@ from tldw_Server_API.app.api.v1.schemas.websearch_schemas import (
     WebSearchRawResponse,
     WebSearchRequest,
 )
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user  # For User dependency
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, User
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
 from tldw_Server_API.app.core.DB_Management.media_db.api import get_media_repository
 from tldw_Server_API.app.core.DB_Management.media_db.api import managed_media_database

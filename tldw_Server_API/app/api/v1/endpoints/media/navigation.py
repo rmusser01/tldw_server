@@ -11,8 +11,8 @@ from typing import Any, Protocol
 
 from fastapi import APIRouter, Depends, HTTPException, Path, status
 from loguru import logger
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, rbac_rate_limit, User
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import rbac_rate_limit
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.api.v1.endpoints.media.document_outline import (
     MAX_OUTLINE_FILE_SIZE,
@@ -32,7 +32,6 @@ from tldw_Server_API.app.api.v1.schemas.media_navigation_schemas import (
     MediaNavigationTarget,
 )
 from tldw_Server_API.app.api.v1.utils.cache import cache_response, get_cached_response
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.DB_Management.media_db.api import (
     get_document_version,
     get_latest_transcription,

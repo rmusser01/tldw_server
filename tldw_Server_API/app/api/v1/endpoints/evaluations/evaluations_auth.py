@@ -14,8 +14,8 @@ from typing import Any, Optional
 from fastapi import Depends, Header, HTTPException, Request, Response, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from loguru import logger
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_rate_limiter_dep, get_request_user, User, verify_jwt_and_fetch_user
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_rate_limiter_dep
 from tldw_Server_API.app.api.v1.API_Deps.v1_endpoint_deps import oauth2_scheme
 from tldw_Server_API.app.core.AuthNZ.exceptions import InvalidTokenError, TokenExpiredError
 from tldw_Server_API.app.core.AuthNZ.ip_allowlist import (
@@ -25,11 +25,6 @@ from tldw_Server_API.app.core.AuthNZ.ip_allowlist import (
 from tldw_Server_API.app.core.AuthNZ.jwt_service import get_jwt_service
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import (
-    User,
-    get_request_user,
-    verify_jwt_and_fetch_user,
-)
 from tldw_Server_API.app.core.exceptions import InactiveUserError
 from tldw_Server_API.app.core.Evaluations.identity import (
     EvaluationIdentity,

@@ -53,6 +53,8 @@ from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import (
     authenticate_api_key_user,
     get_single_user_instance,
     get_request_user,
+    resolve_user_id_for_request as resolve_user_id_for_request,
+    User as User,
     verify_jwt_and_fetch_user,
 )
 from tldw_Server_API.app.core.DB_Management.scope_context import set_scope

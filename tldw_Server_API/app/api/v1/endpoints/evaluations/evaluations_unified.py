@@ -14,8 +14,8 @@ from typing import Annotated, Any, Optional, Union
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, Request, Response, UploadFile, status
 from fastapi.routing import APIRoute
 from loguru import logger
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal, rbac_rate_limit, RequireRole, User
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import RequireRole, rbac_rate_limit
 
 # Import unified schemas
 from tldw_Server_API.app.api.v1.schemas.evaluation_schemas_unified import (
@@ -42,7 +42,6 @@ from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
     record_byok_missing_credentials,
     resolve_byok_credentials,
 )
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
 from tldw_Server_API.app.core.AuthNZ.permissions import EVALS_READ
 from tldw_Server_API.app.core.Chat.chat_service import resolve_provider_api_key
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
@@ -96,7 +95,6 @@ _wm_lock = None
 
 import contextlib
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 
 from .evaluations_auth import (

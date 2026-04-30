@@ -9,8 +9,8 @@ from typing import Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from loguru import logger
 from pydantic import BaseModel, Field
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User
 
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
 from tldw_Server_API.app.core.AuthNZ.permissions import EVALS_MANAGE, EVALS_READ
 from tldw_Server_API.app.core.Evaluations.benchmark_loaders import load_benchmark_dataset
 from tldw_Server_API.app.core.Evaluations.benchmark_registry import get_registry

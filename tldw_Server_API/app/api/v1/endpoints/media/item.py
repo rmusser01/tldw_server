@@ -5,8 +5,8 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, Request, Response, status
 from loguru import logger
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, rbac_rate_limit, RequirePermission, User
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import RequirePermission, rbac_rate_limit
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.api.v1.schemas.media_request_models import (
     MediaKeywordsUpdateRequest,
@@ -23,7 +23,6 @@ from tldw_Server_API.app.api.v1.utils.rag_cache import (
     invalidate_rag_caches,
 )
 from tldw_Server_API.app.core.AuthNZ.permissions import MEDIA_DELETE, MEDIA_UPDATE
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.DB_Management.media_db.api import (
     fetch_keywords_for_media,
     get_full_media_details_rich,

@@ -15,8 +15,8 @@ try:
     import bleach  # type: ignore
 except ImportError:  # pragma: no cover - optional dependency fallback
     bleach = None
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, rbac_rate_limit, User
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import rbac_rate_limit
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.Collections_DB_Deps import get_collections_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.jobs_deps import get_job_manager
@@ -55,7 +55,6 @@ from tldw_Server_API.app.api.v1.schemas.reading_schemas import (
     ReadingTTSRequest,
     ReadingUpdateRequest,
 )
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.Collections.reading_import_jobs import (
     MAX_READING_IMPORT_BYTES,
     READING_IMPORT_DOMAIN,

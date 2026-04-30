@@ -6,8 +6,8 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Path, Request
 from fastapi.responses import StreamingResponse
 from loguru import logger
 from starlette import status
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, get_request_user, TokenScopeGuard, User
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, TokenScopeGuard
 from tldw_Server_API.app.api.v1.endpoints.audio.audio_tts import get_tts_service
 from tldw_Server_API.app.api.v1.schemas.audio_schemas import (
     OpenAISpeechRequest,
@@ -15,7 +15,6 @@ from tldw_Server_API.app.api.v1.schemas.audio_schemas import (
     VoiceEncodeResponse,
 )
 from tldw_Server_API.app.core.Audio.error_payloads import _http_error_detail
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.Logging.log_context import ensure_request_id
 from tldw_Server_API.app.core.TTS.tts_service_v2 import TTSServiceV2
 

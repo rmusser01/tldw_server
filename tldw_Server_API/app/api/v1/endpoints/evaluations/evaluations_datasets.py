@@ -21,7 +21,7 @@ from tldw_Server_API.app.api.v1.schemas.evaluation_schemas_unified import (
     DatasetListResponse,
     DatasetResponse,
 )
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User
 from tldw_Server_API.app.core.AuthNZ.permissions import EVALS_MANAGE, EVALS_READ
 from tldw_Server_API.app.core.Evaluations.unified_evaluation_service import (
     _UNIFIED_EVAL_NONCRITICAL_EXCEPTIONS,

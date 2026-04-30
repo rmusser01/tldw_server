@@ -7,8 +7,8 @@ import numpy as np
 import soundfile as sf
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse, Response
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, get_request_user, TokenScopeGuard, User
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, TokenScopeGuard
 from tldw_Server_API.app.api.v1.schemas.audio_schemas import (
     AudioTokenizerDecodeRequest,
     AudioTokenizerEncodeRequest,
@@ -28,7 +28,6 @@ from tldw_Server_API.app.core.Audio.tokenizer_service import (
     _serialize_audio_output,
     _serialize_tokens,
 )
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.Logging.log_context import ensure_request_id
 
 router = APIRouter(

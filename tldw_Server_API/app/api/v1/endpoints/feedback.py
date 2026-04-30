@@ -6,8 +6,8 @@ from dataclasses import dataclass
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from loguru import logger
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, get_request_user, User
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.api.v1.schemas.feedback_schemas import (
@@ -19,7 +19,6 @@ from tldw_Server_API.app.api.v1.schemas.feedback_schemas import (
     FeedbackRecord,
     FeedbackUpdateRequest,
 )
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, CharactersRAGDBError
 from tldw_Server_API.app.core.RAG.rag_service.analytics_system import UnifiedFeedbackSystem, UserFeedbackStore
 

@@ -14,17 +14,12 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi import status as http_status
 from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, rbac_rate_limit, resolve_user_id_for_request, User
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import rbac_rate_limit
 
 # Local imports
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.api.v1.utils.rag_cache import invalidate_rag_caches
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import (
-    User,
-    get_request_user,
-    resolve_user_id_for_request,
-)
 from tldw_Server_API.app.core.Chunking.base import ChunkerConfig
 from tldw_Server_API.app.core.Chunking.chunker import Chunker
 from tldw_Server_API.app.core.config import settings

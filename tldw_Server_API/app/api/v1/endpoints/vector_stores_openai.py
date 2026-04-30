@@ -17,21 +17,11 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal, get_request_user, rbac_rate_limit, RequirePermission, RequireRole, resolve_user_id_for_request, User
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
-    RequirePermission,
-    RequireRole,
-    get_auth_principal,
-    rbac_rate_limit,
-)
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.core.AuthNZ.permissions import SYSTEM_CONFIGURE
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import (
-    User,
-    get_request_user,
-    resolve_user_id_for_request,
-)
 from tldw_Server_API.app.core.Chunking.base import ChunkerConfig, ChunkingMethod
 from tldw_Server_API.app.core.Chunking.chunker import Chunker
 from tldw_Server_API.app.core.config import settings

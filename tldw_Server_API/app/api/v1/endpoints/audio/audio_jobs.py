@@ -22,15 +22,10 @@ except ImportError:  # pragma: no cover - fallback for older environments
 import contextlib
 
 from loguru import logger
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal, get_request_user, RequirePermission, RequireRole, User
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
-    RequirePermission,
-    RequireRole,
-    get_auth_principal,
-)
 from tldw_Server_API.app.core.AuthNZ.permissions import SYSTEM_MAINTENANCE
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.DB_Management.backends.base import (
     DatabaseError as BackendDatabaseError,
 )

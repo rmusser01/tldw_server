@@ -30,8 +30,8 @@ from fastapi import (
 from fastapi.responses import FileResponse, StreamingResponse
 from loguru import logger
 from pydantic import BaseModel, Field, ValidationError
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, RequirePermission, RequireRole, resolve_user_id_for_request, TokenScopeGuard, User
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import RequirePermission, RequireRole, TokenScopeGuard
 from tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps import get_audit_service_for_user
 from tldw_Server_API.app.api.v1.schemas.workflows import (
     AdhocRunRequest,
@@ -62,11 +62,6 @@ from tldw_Server_API.app.core.AuthNZ.permissions import (
     WORKFLOWS_RUNS_READ,
 )
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import (
-    User,
-    get_request_user,
-    resolve_user_id_for_request,
-)
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.DB_Management.DB_Manager import (
     create_workflows_database,

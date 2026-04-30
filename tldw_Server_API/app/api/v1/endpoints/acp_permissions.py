@@ -10,11 +10,8 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, User
 
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import (
-    User,
-    get_request_user,
-)
 from tldw_Server_API.app.core.DB_Management.ACP_Sessions_DB import ACPSessionsDB
 
 router = APIRouter(prefix="/acp/permissions", tags=["acp-permissions"])

@@ -20,12 +20,8 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, R
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from loguru import logger
 from pydantic import BaseModel, Field
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal, get_db_transaction, RequirePermission, verify_jwt_and_fetch_user
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
-    RequirePermission,
-    get_auth_principal,
-    get_db_transaction,
-)
 from tldw_Server_API.app.api.v1.schemas.admin_schemas import ToolCatalogResponse
 from tldw_Server_API.app.core.AuthNZ.api_key_manager import get_api_key_manager
 from tldw_Server_API.app.core.AuthNZ.ip_allowlist import (
@@ -42,7 +38,6 @@ from tldw_Server_API.app.core.AuthNZ.settings import (
     get_settings,
     is_single_user_profile_mode,
 )
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import verify_jwt_and_fetch_user
 from tldw_Server_API.app.core.feature_flags import is_mcp_hub_policy_enforcement_enabled
 from tldw_Server_API.app.core.MCP_unified import MCPRequest, MCPResponse, get_config, get_mcp_server
 from tldw_Server_API.app.core.MCP_unified.auth import UserRole

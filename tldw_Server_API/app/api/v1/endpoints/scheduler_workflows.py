@@ -6,15 +6,10 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 from loguru import logger
 from pydantic import BaseModel, Field
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal, get_request_user, RequirePermission, TokenScopeGuard, User
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
-    RequirePermission,
-    get_auth_principal,
-    TokenScopeGuard,
-)
 from tldw_Server_API.app.core.AuthNZ.permissions import WORKFLOWS_ADMIN
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.Scheduler import get_global_scheduler
 from tldw_Server_API.app.services.workflows_scheduler import (
     build_schedule_payload,

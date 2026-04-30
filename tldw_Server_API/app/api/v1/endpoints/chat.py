@@ -51,11 +51,7 @@ from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
 # ---------------------------------------------------------------------------
 # Imports
 # ---------------------------------------------------------------------------
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import (
-    User,
-    get_request_user,
-    resolve_user_id_for_request,
-)
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal, get_request_user, rbac_rate_limit, RequirePermission, resolve_user_id_for_request, TokenScopeGuard, User
 from tldw_Server_API.app.core.Utils.image_validation import (
     get_max_base64_bytes,
     validate_image_url,
@@ -211,12 +207,6 @@ _ORIGINAL_PERFORM_CHAT_API_CALL = perform_chat_api_call
 from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel, Field, ValidationError
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
-    RequirePermission,
-    get_auth_principal,
-    rbac_rate_limit,
-    TokenScopeGuard,
-)
 from tldw_Server_API.app.api.v1.API_Deps.llm_routing_deps import (
     get_request_routing_decision_store,
 )

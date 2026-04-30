@@ -18,8 +18,8 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, R
 from fastapi.encoders import jsonable_encoder
 from loguru import logger
 from pydantic import ValidationError
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, rbac_rate_limit, RequirePermission, User
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import RequirePermission, rbac_rate_limit
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user, get_chacha_db_for_user_id
 from tldw_Server_API.app.api.v1.API_Deps.Collections_DB_Deps import get_collections_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
@@ -58,7 +58,6 @@ from tldw_Server_API.app.api.v1.schemas.slides_schemas import (
     VisualStyleResponse,
 )
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.AuthNZ.permissions import MEDIA_CREATE, MEDIA_DELETE, MEDIA_READ, MEDIA_UPDATE
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase

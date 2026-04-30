@@ -17,14 +17,8 @@ from uuid import uuid4
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, status
 from fastapi.responses import StreamingResponse
 from loguru import logger
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, get_auth_principal, get_request_user, rbac_rate_limit, RequirePermission, TokenScopeGuard, User
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
-    RequirePermission,
-    check_rate_limit,
-    get_auth_principal,
-    rbac_rate_limit,
-    TokenScopeGuard,
-)
 from tldw_Server_API.app.api.v1.API_Deps.billing_deps import require_within_limit
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 
@@ -41,7 +35,6 @@ from tldw_Server_API.app.api.v1.schemas.rag_schemas_unified import (
 )
 from tldw_Server_API.app.core.AuthNZ.permissions import MEDIA_READ
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.RAG.rag_service.agentic_chunker import (

@@ -8,8 +8,8 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from loguru import logger
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, User
 
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.Metrics import get_metrics_registry
 from tldw_Server_API.app.core.Security.url_validation import assert_url_safe
 from tldw_Server_API.app.services.enhanced_web_scraping_service import get_web_scraping_service

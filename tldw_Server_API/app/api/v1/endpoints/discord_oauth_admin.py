@@ -5,8 +5,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Awaitable, Callable
 
 from fastapi import HTTPException, status
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User
 
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
 from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import key_hint_for_api_key
 
 

@@ -13,9 +13,8 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from loguru import logger
 from pydantic import BaseModel, Field, field_validator
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, TokenScopeGuard, User
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import TokenScopeGuard
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.Agent_Orchestration.models import TaskStatus
 from tldw_Server_API.app.core.Agent_Orchestration.orchestration_service import (
     CycleDependencyError,

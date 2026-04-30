@@ -6,8 +6,8 @@ import asyncio
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from loguru import logger
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_rate_limiter_dep, get_request_user, RateLimiter, User
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_rate_limiter_dep
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.schemas.web_clipper_schemas import (
     WebClipperEnrichmentPayload,
@@ -17,8 +17,6 @@ from tldw_Server_API.app.api.v1.schemas.web_clipper_schemas import (
     WebClipperStatusResponse,
 )
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
-from tldw_Server_API.app.core.AuthNZ.rate_limiter import RateLimiter
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     CharactersRAGDBError,

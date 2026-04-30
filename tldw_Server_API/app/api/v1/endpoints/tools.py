@@ -4,15 +4,14 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from loguru import logger
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, RequirePermission, User
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import RequirePermission
 from tldw_Server_API.app.api.v1.schemas.tools import (
     ExecuteToolRequest,
     ExecuteToolResult,
     ToolInfo,
     ToolListResponse,
 )
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.Tools.tool_executor import ToolExecutionError, ToolExecutor
 
 router = APIRouter()

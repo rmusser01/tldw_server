@@ -7,8 +7,8 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from loguru import logger
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import TokenScopeGuard, User
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import TokenScopeGuard
 from tldw_Server_API.app.api.v1.endpoints.evaluations.evaluations_auth import (
     create_error_response,
     get_eval_request_user,
@@ -20,7 +20,6 @@ from tldw_Server_API.app.api.v1.schemas.evaluation_schemas_unified import (
     PipelinePresetListResponse,
     PipelinePresetResponse,
 )
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
 from tldw_Server_API.app.core.Evaluations.unified_evaluation_service import (
     get_unified_evaluation_service_for_user,
 )

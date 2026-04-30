@@ -86,7 +86,7 @@ from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
     record_byok_missing_credentials,
     resolve_byok_credentials,
 )
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, User
 
 # Character chat helpers
 from tldw_Server_API.app.core.Character_Chat.Character_Chat_Lib_facade import (

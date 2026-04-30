@@ -19,7 +19,7 @@ from tldw_Server_API.app.api.v1.schemas.synthetic_eval_schemas import (
     SyntheticEvalReviewActionRecord,
     SyntheticEvalReviewRequest,
 )
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User
 from tldw_Server_API.app.core.AuthNZ.permissions import EVALS_MANAGE, EVALS_READ
 from tldw_Server_API.app.core.Evaluations.synthetic_eval_service import (
     get_synthetic_eval_service_for_user,
