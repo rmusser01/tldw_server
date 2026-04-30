@@ -535,3 +535,66 @@ def test_check_cli_accepts_operator_socket_flag(tmp_path, capsys):
     captured = capsys.readouterr()
     CASE.assertEqual(code, 0)
     CASE.assertIn("socket_path: ok", captured.out)
+
+
+def test_build_dry_run_prints_swiftpm_command(capsys):
+    helperctl = load_helperctl()
+
+    code = helperctl.main(["build", "--dry-run"])
+
+    captured = capsys.readouterr()
+    CASE.assertEqual(code, 0)
+    CASE.assertIn("swift build --package-path", captured.out)
+
+
+def test_sign_requires_entitlements(tmp_path, capsys):
+    helperctl = load_helperctl()
+    helper = tmp_path / "macos-vz-helper"
+    helper.write_text("#!/bin/sh\n", encoding="utf-8")
+    helper.chmod(0o700)
+
+    code = helperctl.main(["sign", "--helper", str(helper), "--dry-run"])
+
+    captured = capsys.readouterr()
+    CASE.assertNotEqual(code, 0)
+    CASE.assertIn("helper_entitlements_missing", captured.err)
+
+
+def test_validate_pid_file_rejects_live_process_mismatch(tmp_path):
+    helperctl = load_helperctl()
+    pid_file = tmp_path / "helper.pid"
+    helper = tmp_path / "macos-vz-helper"
+    pid_file.write_text("12345\n", encoding="utf-8")
+
+    result = helperctl.validate_pid_file(
+        pid_file,
+        helper,
+        process_lookup=lambda pid: helperctl.ProcessInfo(pid=pid, command="/bin/other"),
+    )
+
+    CASE.assertEqual(result, helperctl.CheckResult(ok=False, reason="helper_pid_process_mismatch"))
+
+
+def test_start_helper_cleans_up_started_process_on_ping_failure(tmp_path):
+    helperctl = load_helperctl()
+    helper = tmp_path / "macos-vz-helper"
+    socket_path = tmp_path / "runtime" / "helper.sock"
+    pid_file = tmp_path / "runtime" / "helper.pid"
+    log_dir = tmp_path / "logs"
+    helper.write_text("#!/bin/sh\n", encoding="utf-8")
+    helper.chmod(0o700)
+    killed = []
+
+    result = helperctl.start_helper(
+        helper,
+        socket_path,
+        pid_file,
+        log_dir,
+        process_starter=lambda argv, env: helperctl.StartedProcess(pid=1234),
+        ping_checker=lambda path: helperctl.CheckResult(False, "helper_ping_failed"),
+        process_killer=lambda pid: killed.append(pid),
+    )
+
+    CASE.assertEqual(result, helperctl.CheckResult(ok=False, reason="helper_ping_failed"))
+    CASE.assertEqual(killed, [1234])
+    CASE.assertFalse(pid_file.exists())
