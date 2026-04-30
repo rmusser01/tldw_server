@@ -136,6 +136,12 @@ def test_vz_linux_start_run_executes_real_ephemeral_vm_command(monkeypatch, tmp_
     assert status.exit_code == 0
     assert [name for name, _payload in calls] == ["validate_template", "create_vm", "exec_guest", "terminate_vm"]
     assert calls[0][1]["template"] == "ubuntu-24.04"
+    assert calls[1][1]["owner"] == "tldw"
+    assert calls[1][1]["runtime"] == "vz_linux"
+    assert calls[1][1]["vm_name"] == run_id
+    assert calls[1][1]["run_id"] == run_id
+    assert calls[1][1]["session_id"] == ""
+    assert calls[1][1]["session_mode"] is False
     assert calls[1][1]["workspace_path"] == str(tmp_path)
     assert calls[1][1]["workspace_mount"] == "virtiofs"
     assert calls[1][1]["template"] == "ubuntu-24.04"
@@ -382,6 +388,12 @@ def test_vz_linux_session_run_recreates_unhealthy_vm(monkeypatch, tmp_path) -> N
 
         def create_vm(self, request: dict[str, object]) -> HelperVMReply:
             calls.append("create_vm")
+            assert request["owner"] == "tldw"
+            assert request["runtime"] == "vz_linux"
+            assert request["run_id"] == "vz-run-recreate"
+            assert request["session_id"] == "sess-2"
+            assert request["session_mode"] is True
+            assert request["template"] == "ubuntu-24.04"
             return HelperVMReply(vm_id="vm-new", state="created")
 
         def exec_guest(self, *, vm_id: str, request: dict[str, object]) -> HelperExecReply:

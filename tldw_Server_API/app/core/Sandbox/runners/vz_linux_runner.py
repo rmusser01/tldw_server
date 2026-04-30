@@ -309,9 +309,11 @@ class VZLinuxRunner(VZBaseRunner):
                 template_source = str(template_validation.get("source") or "").strip() or spec.base_image
                 vm = helper.create_vm(
                     {
+                        "owner": "tldw",
                         "runtime": self.runtime_type.value,
                         "vm_name": run_id,
                         "run_id": run_id,
+                        "session_id": str(spec.session_id or "").strip(),
                         "session_mode": session_mode,
                         "workspace_path": workspace,
                         "workspace_mount": "virtiofs",
