@@ -464,6 +464,28 @@ class SandboxAdminMacOSImageStoreCleanupPlanResponse(BaseModel):
     reasons: list[str] = Field(default_factory=list)
 
 
+class SandboxAdminMacOSImageStoreCleanupRequest(BaseModel):
+    dry_run: bool = True
+
+
+class SandboxAdminMacOSImageStoreCleanupSummary(BaseModel):
+    total_candidates: int = 0
+    planned_actions: int = 0
+    deleted_actions: int = 0
+    blocked_live_matches: int = 0
+    planning_only_run_manifests: int = 0
+    inactive_runs: int = 0
+    legacy_run_directories: int = 0
+
+
+class SandboxAdminMacOSImageStoreCleanupResponse(BaseModel):
+    dry_run: bool
+    image_store: SandboxAdminMacOSImageStoreDiagnostics
+    summary: SandboxAdminMacOSImageStoreCleanupSummary
+    actions: list[SandboxAdminMacOSImageStoreCleanupAction] = Field(default_factory=list)
+    reasons: list[str] = Field(default_factory=list)
+
+
 # Snapshot/Clone Schemas
 class SnapshotCreateResponse(BaseModel):
     """Response when creating a session snapshot."""

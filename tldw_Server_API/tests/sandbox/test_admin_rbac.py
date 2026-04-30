@@ -51,4 +51,6 @@ def test_admin_endpoints_require_admin_role(monkeypatch) -> None:
         ):
             r = client.get(path)
             assert r.status_code in (401, 403), f"Expected RBAC to reject non-admin on {path}"
+        r = client.post("/api/v1/sandbox/admin/macos-image-store/cleanup", json={})
+        assert r.status_code in (401, 403), "Expected RBAC to reject non-admin on cleanup mutation surface"
         client.app.dependency_overrides.clear()

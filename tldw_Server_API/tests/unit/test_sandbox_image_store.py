@@ -246,3 +246,47 @@ def test_sandbox_image_store_gc_plan_classifies_legacy_run_directories_without_m
     candidate = next(item for item in gc_plan.run_candidates if item.run_id == "legacy-run")
     assert candidate.reason == "legacy_run_directory"
     assert candidate.template_id is None
+
+
+def test_sandbox_image_store_cleanup_run_candidate_removes_manifest_only_directory(
+    tmp_path: Path,
+) -> None:
+    disk = tmp_path / "rootfs.img"
+    disk.write_bytes(b"rootfs")
+    store = SandboxImageStore(root_path=tmp_path / "store")
+    template_id = store.register_template(
+        runtime="vz_linux",
+        template_name="debian-bookworm-arm64",
+        disk_paths=[str(disk)],
+    )
+    store.prepare_run_clone(template_id=template_id, run_id="run-manifest-only")
+
+    deleted = store.cleanup_run_candidate(
+        run_id="run-manifest-only",
+        reason="planning_only_run_manifest",
+    )
+
+    assert deleted is True
+    assert not (tmp_path / "store" / "runs" / "run-manifest-only").exists()
+    assert store.get_run_clone_manifest("run-manifest-only") is None
+
+
+def test_sandbox_image_store_cleanup_run_candidate_rejects_manifest_only_reason_when_payload_exists(
+    tmp_path: Path,
+) -> None:
+    disk = tmp_path / "rootfs.img"
+    disk.write_bytes(b"rootfs")
+    store = SandboxImageStore(root_path=tmp_path / "store")
+    template_id = store.register_template(
+        runtime="vz_linux",
+        template_name="debian-bookworm-arm64",
+        disk_paths=[str(disk)],
+    )
+    store.prepare_run_clone(template_id=template_id, run_id="run-not-empty")
+    (tmp_path / "store" / "runs" / "run-not-empty" / "rootfs.img").write_bytes(b"clone")
+
+    with pytest.raises(ImageStoreValidationError, match="gc_reason_mismatch_planning_only_run_manifest"):
+        store.cleanup_run_candidate(
+            run_id="run-not-empty",
+            reason="planning_only_run_manifest",
+        )

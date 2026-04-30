@@ -44,6 +44,7 @@ from .macos_virtualization.helper_client import (
     MacOSVirtualizationHelperUnavailable,
 )
 from .macos_diagnostics import collect_macos_diagnostics, probe_helper
+from .image_store import SandboxImageStore
 from .orchestrator import SandboxOrchestrator, SessionActiveRunsConflict
 from .policy import SandboxPolicy, SandboxPolicyConfig, compute_policy_hash
 from .runtime_capabilities import RuntimePreflightResult, collect_runtime_preflights
@@ -1082,6 +1083,55 @@ class SandboxService:
             "summary": summary,
             "actions": actions,
             "reasons": reasons,
+        }
+
+    def cleanup_macos_image_store(self, *, dry_run: bool = True) -> dict[str, object]:
+        plan = self.plan_macos_image_store_cleanup()
+        summary = dict(plan.get("summary") or {})
+        summary["deleted_actions"] = 0
+        actions = [dict(action) for action in list(plan.get("actions") or []) if isinstance(action, dict)]
+        image_store = plan.get("image_store")
+        if not isinstance(image_store, dict):
+            image_store = {}
+
+        if dry_run:
+            return {
+                "dry_run": True,
+                "image_store": dict(image_store),
+                "summary": summary,
+                "actions": actions,
+                "reasons": list(plan.get("reasons") or []),
+            }
+
+        root_path = str(image_store.get("root_path") or "").strip()
+        if not root_path:
+            return {
+                "dry_run": False,
+                "image_store": dict(image_store),
+                "summary": summary,
+                "actions": actions,
+                "reasons": list(plan.get("reasons") or []),
+            }
+
+        store = SandboxImageStore(root_path=root_path)
+        deleted_actions = 0
+        for action in actions:
+            run_id = str(action.get("run_id") or "").strip()
+            gc_reason = str(action.get("gc_reason") or "").strip()
+            if not run_id or not gc_reason:
+                continue
+            deleted = store.cleanup_run_candidate(run_id=run_id, reason=gc_reason)
+            action["status"] = "deleted" if deleted else "already_absent"
+            if deleted:
+                deleted_actions += 1
+
+        summary["deleted_actions"] = deleted_actions
+        return {
+            "dry_run": False,
+            "image_store": dict(image_store),
+            "summary": summary,
+            "actions": actions,
+            "reasons": list(plan.get("reasons") or []),
         }
 
     def repair_macos_reconciliation(

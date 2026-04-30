@@ -153,6 +153,24 @@ differentiate:
 - `legacy_run_directory`: files exist under `runs/<run_id>/` without a
   persisted run manifest
 
+The admin image-store surfaces now split planning from mutation:
+
+- `GET /api/v1/sandbox/admin/macos-image-store/cleanup-plan`: read-only
+  candidate planning derived from diagnostics correlation
+- `POST /api/v1/sandbox/admin/macos-image-store/cleanup`: explicit admin action
+  surface that defaults to `dry_run=true` and reuses the same candidate plan
+
+Mutating cleanup only applies to already planned candidates that do not match a
+live VM. It currently supports:
+
+- deleting a planning-only manifest directory when it only contains
+  `manifest.json`
+- deleting a fully inactive run directory
+- deleting a legacy run directory that has no persisted manifest
+
+If a candidate still matches a live helper VM, cleanup fails closed for that
+item and reports `live_vm_matches_blocked_cleanup` instead of deleting files.
+
 ## Networking
 
 - `deny_all` is the intended strict baseline for the new macOS runtimes.
@@ -184,6 +202,8 @@ It is admin-only and returns:
 - reconciliation data comparing persisted VZ session rows with live helper VM state
 - image-store correlation showing persisted run manifests, dry-run GC candidate
   classification, and any matching reconciliation/helper VM records
+- an additive image-store cleanup plan endpoint and a default-dry-run cleanup
+  mutation endpoint for explicit operator action
 - additive `startup_warning_summary` showing whether current-process startup
   warnings were recorded, whether any were blocking, and which stable warning
   codes were emitted during boot

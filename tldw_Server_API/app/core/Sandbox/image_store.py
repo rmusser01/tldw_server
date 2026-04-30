@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shutil
 import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -266,6 +267,51 @@ class SandboxImageStore:
                 )
             )
         return GarbageCollectionPlan(run_candidates=candidates)
+
+    def cleanup_run_candidate(self, *, run_id: str, reason: str) -> bool:
+        """Delete one previously planned run candidate after validating its GC reason."""
+
+        normalized_run_id = self._normalize_manifest_segment(run_id, "run_id")
+        run_path = self.root_path / "runs" / normalized_run_id
+        manifest_path = self._run_manifest_path(normalized_run_id)
+
+        if reason == "planning_only_run_manifest":
+            if not manifest_path.exists():
+                self._run_clone_manifests.pop(normalized_run_id, None)
+                return False
+            if run_path.exists():
+                non_manifest_children = [
+                    child.name for child in run_path.iterdir() if child.name != "manifest.json"
+                ]
+                if non_manifest_children:
+                    raise ImageStoreValidationError(
+                        f"gc_reason_mismatch_planning_only_run_manifest: {normalized_run_id}"
+                    )
+            manifest_path.unlink(missing_ok=True)
+            if run_path.exists():
+                run_path.rmdir()
+            self._run_clone_manifests.pop(normalized_run_id, None)
+            return True
+
+        if reason == "inactive_run":
+            if not run_path.exists():
+                self._run_clone_manifests.pop(normalized_run_id, None)
+                return False
+            shutil.rmtree(run_path, ignore_errors=False)
+            self._run_clone_manifests.pop(normalized_run_id, None)
+            return True
+
+        if reason == "legacy_run_directory":
+            if manifest_path.exists():
+                raise ImageStoreValidationError(
+                    f"gc_reason_mismatch_legacy_run_directory: {normalized_run_id}"
+                )
+            if not run_path.exists():
+                return False
+            shutil.rmtree(run_path, ignore_errors=False)
+            return True
+
+        raise ImageStoreValidationError(f"gc_reason_unsupported: {reason}")
 
     def _load_templates(self) -> None:
         templates_root = self.root_path / "templates"
