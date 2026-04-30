@@ -15,6 +15,7 @@ class StartupCoreInitializationHandles:
     db_pool: Any | None = None
     session_manager: Any | None = None
     heavy_startup_handles: Any | None = None
+    startup_sandbox_orchestrator: Any | None = None
 
 
 async def initialize_startup_core_components(
@@ -61,11 +62,13 @@ async def initialize_startup_core_components(
         route_enabled=route_enabled,
         defer_heavy=defer_heavy,
     )
+    startup_sandbox_orchestrator = _build_startup_sandbox_orchestrator()
 
     return StartupCoreInitializationHandles(
         db_pool=auth_runtime_handles.db_pool,
         session_manager=auth_runtime_handles.session_manager,
         heavy_startup_handles=heavy_startup_handles,
+        startup_sandbox_orchestrator=startup_sandbox_orchestrator,
     )
 
 
@@ -111,3 +114,9 @@ async def _start_heavy_initializations(app_arg, **kwargs):
     )
 
     return await start_heavy_initializations(app_arg, **kwargs)
+
+
+def _build_startup_sandbox_orchestrator():
+    from tldw_Server_API.app.core.Sandbox.service import SandboxService
+
+    return SandboxService(enable_background_tasks=False)._orch

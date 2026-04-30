@@ -210,6 +210,44 @@ class UserQuotaUpdateRequest(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class AdminStartupWarningItem(BaseModel):
+    """One current-process startup warning record."""
+
+    component: str
+    severity: str
+    startup_action: str
+    code: str
+    summary: str
+    remediation: str
+    details: dict[str, Any] = Field(default_factory=dict)
+    detected_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class AdminStartupWarningSummary(BaseModel):
+    """Grouped summary for current-process startup warnings."""
+
+    total: int
+    by_component: dict[str, int] = Field(default_factory=dict)
+    by_severity: dict[str, int] = Field(default_factory=dict)
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class AdminStartupWarningsResponse(BaseModel):
+    """Response for the current-process startup warnings admin endpoint."""
+
+    startup_id: str
+    scope: Literal["current_process"] = "current_process"
+    warnings_present: bool
+    blocking_present: bool
+    summary: AdminStartupWarningSummary
+    items: list[AdminStartupWarningItem] = Field(default_factory=list)
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 #######################################################################################################################
 #
 # Registration Code Schemas

@@ -341,6 +341,14 @@ class SandboxAdminMacOSReconciliationDiagnostics(BaseModel):
     reasons: list[str] = Field(default_factory=list)
 
 
+class SandboxAdminStartupWarningSummary(BaseModel):
+    """Compact startup warning summary projected into sandbox diagnostics."""
+
+    present: bool
+    blocking: bool
+    codes: list[str] = Field(default_factory=list)
+
+
 class SandboxAdminMacOSDiagnosticsResponse(BaseModel):
     """Structured admin response for macOS sandbox diagnostics."""
 
@@ -349,6 +357,7 @@ class SandboxAdminMacOSDiagnosticsResponse(BaseModel):
     templates: dict[str, SandboxAdminMacOSTemplateDiagnostics] = Field(default_factory=dict)
     runtimes: dict[str, SandboxAdminMacOSRuntimeDiagnostics] = Field(default_factory=dict)
     reconciliation: SandboxAdminMacOSReconciliationDiagnostics | None = None
+    startup_warning_summary: SandboxAdminStartupWarningSummary | None = None
 
 
 class SandboxAdminMacOSReconciliationRepairRequest(BaseModel):

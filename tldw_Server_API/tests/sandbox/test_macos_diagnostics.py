@@ -337,6 +337,32 @@ def test_admin_schema_accepts_macos_diagnostics_payload() -> None:
     assert model.reconciliation.items
 
 
+def test_admin_schema_accepts_startup_warning_summary() -> None:
+    from tldw_Server_API.app.api.v1.schemas.sandbox_schemas import (
+        SandboxAdminMacOSDiagnosticsResponse,
+    )
+
+    payload = _sample_diagnostics_payload()
+    payload["startup_warning_summary"] = {
+        "present": True,
+        "blocking": False,
+        "codes": [
+            "vz_stale_session_controls_detected",
+            "vz_orphaned_vms_detected",
+        ],
+    }
+
+    model = SandboxAdminMacOSDiagnosticsResponse.model_validate(payload)
+
+    assert model.startup_warning_summary is not None
+    assert model.startup_warning_summary.present is True
+    assert model.startup_warning_summary.blocking is False
+    assert model.startup_warning_summary.codes == [
+        "vz_stale_session_controls_detected",
+        "vz_orphaned_vms_detected",
+    ]
+
+
 def test_collect_macos_diagnostics_classifies_helper_protocol_mismatch(monkeypatch) -> None:
     class _FakeHelper:
         def ping(self):

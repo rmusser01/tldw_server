@@ -2228,12 +2228,22 @@ async def stream_run_logs(websocket: WebSocket, run_id: str) -> None:
     summary="Admin: macOS sandbox diagnostics",
 )
 async def admin_macos_diagnostics(
+    request: Request,
     _principal: AuthPrincipal = Depends(RequireRole("admin")),
     _current_user: User = Depends(get_request_user),
 ) -> SandboxAdminMacOSDiagnosticsResponse:
     """Return detailed macOS sandbox diagnostics for admin troubleshooting."""
+    payload = dict(_service.macos_diagnostics())
+    registry = getattr(request.app.state, "startup_warning_registry", None)
+    if registry is not None:
+        records = registry.list_warnings()
+        payload["startup_warning_summary"] = {
+            "present": bool(records),
+            "blocking": registry.should_block_startup(),
+            "codes": [record.code for record in records],
+        }
 
-    return SandboxAdminMacOSDiagnosticsResponse.model_validate(_service.macos_diagnostics())
+    return SandboxAdminMacOSDiagnosticsResponse.model_validate(payload)
 
 
 @router.post(
