@@ -32,9 +32,13 @@
   - Compiled rules hold `regex`, `category`, `severity`; dangerous regex patterns are rejected; snippets are bounded to avoid large payloads.
   - Alerts persistence via `TopicMonitoringDB` (SQLite, WAL, indexes on timestamps/users/watchlists); shape defined in module docstring: tldw_Server_API/app/core/DB_Management/TopicMonitoring_DB.py:1
   - NotificationService: JSONL file sink for topic alerts with optional best-effort webhook/email attempts: tldw_Server_API/app/core/Monitoring/notification_service.py:1
-  - NotificationService also serves **guardian alert dispatch** — `dispatch_guardian_notification()` in `supervised_policy.py` calls `notify_or_batch()` to route guardian alerts through the same JSONL/webhook/email pipeline.
+  - NotificationService also serves **guardian alert dispatch** — `dispatch_guardian_notification()` in `supervised_policy.py` calls `notify_or_batch()` to route guardian alerts through the same JSONL/webhook pipeline.
   - Generic notifications only use the JSONL sink plus optional webhook dispatch; they do not send email in the current implementation.
-  - `notify_or_batch()` buffers payloads in `hourly`/`daily` digest modes, and `flush_digest()` currently clears buffered items and returns the count only.
+  - `notify()` topic-alert notifications remain immediate. Digest mode applies to generic/guardian payloads passed through `notify_or_batch()`.
+  - `notify_or_batch()` buffers generic/guardian payloads by recipient in `hourly`/`daily` digest modes.
+  - `flush_digest()` emits one compiled `monitoring_digest` payload per recipient through the generic notification path.
+  - `flush_digest()` returns the number of buffered items successfully processed. Failed digest deliveries are requeued for a later flush instead of being dropped.
+  - Digest timing is caller-driven: `hourly` and `daily` describe the intended batching cadence, but no internal timer flushes the buffer automatically.
 
 - Configuration (env or config file `monitoring.*`)
   - Topic monitor:
@@ -47,6 +51,7 @@
     - `MONITORING_NOTIFY_MIN_SEVERITY`: `info|warning|critical` (default `critical`).
     - `MONITORING_NOTIFY_FILE`: JSONL sink path (default `Databases/monitoring_notifications.log`).
     - `MONITORING_NOTIFY_WEBHOOK_URL`: optional webhook URL.
+    - `MONITORING_NOTIFY_DIGEST_MODE`: `immediate|hourly|daily` (default `immediate`).
     - Optional email (Phase 1 best‑effort): `MONITORING_NOTIFY_SMTP_HOST`, `MONITORING_NOTIFY_SMTP_PORT`, `MONITORING_NOTIFY_SMTP_STARTTLS`, `MONITORING_NOTIFY_SMTP_USER`, `MONITORING_NOTIFY_SMTP_PASSWORD`, `MONITORING_NOTIFY_EMAIL_TO`, `MONITORING_NOTIFY_EMAIL_FROM`.
 
 - Concurrency & Performance

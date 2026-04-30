@@ -389,7 +389,6 @@ def test_notify_generic_only_schedules_webhook_path(monkeypatch, tmp_path):
     assert svc._send_webhook_safe in targets
     assert svc._send_email_safe not in targets
 
-
 def test_notify_generic_webhook_thread_failure_log_is_sanitized(monkeypatch, tmp_path):
     svc = NotificationService()
     svc.enabled = True
@@ -524,18 +523,165 @@ def test_notify_generic_file_sink_failure_log_is_sanitized(monkeypatch, tmp_path
     assert svc.file_path not in joined
 
 
-def test_flush_digest_returns_count_without_dispatch(monkeypatch):
+def test_flush_digest_dispatches_compiled_payload(monkeypatch):
+    svc = NotificationService()
+    svc.enabled = True
+    svc.min_severity = "info"
+    svc.digest_mode = "hourly"
+    delivered: list[dict[str, object]] = []
+
+    def _record_digest(payload: dict[str, object]) -> str:
+        delivered.append(payload)
+        return "logged"
+
+    monkeypatch.setattr(svc, "notify_generic", _record_digest)
+
+    assert svc.notify_or_batch(
+        {"type": "guardian_alert", "severity": "info", "user_id": "u1"}
+    ) == "batched"
+    assert svc.notify_or_batch(
+        {"type": "guardian_alert", "severity": "critical", "user_id": "u1"}
+    ) == "batched"
+    assert svc.flush_digest("u1") == 2
+    assert svc.get_pending_digest_count("u1") == 0
+
+    assert len(delivered) == 1
+    digest = delivered[0]
+    assert digest["type"] == "monitoring_digest"
+    assert digest["recipient"] == "u1"
+    assert digest["digest_mode"] == "hourly"
+    assert digest["item_count"] == 2
+    assert digest["severity"] == "critical"
+    assert [item["severity"] for item in digest["items"]] == ["info", "critical"]
+
+
+def test_flush_digest_uses_rule_severity_for_topic_alert_payloads(monkeypatch):
+    svc = NotificationService()
+    svc.enabled = True
+    svc.min_severity = "info"
+    svc.digest_mode = "hourly"
+    delivered: list[dict[str, object]] = []
+
+    monkeypatch.setattr(
+        svc,
+        "notify_generic",
+        lambda payload: delivered.append(payload) or "logged",
+    )
+
+    assert svc.notify_or_batch(
+        {"type": "topic_alert", "rule_severity": "critical", "user_id": "u1"}
+    ) == "batched"
+    assert svc.notify_or_batch(
+        {"type": "guardian_alert", "severity": "warning", "user_id": "u1"}
+    ) == "batched"
+
+    assert svc.flush_digest("u1") == 2
+    assert delivered[0]["severity"] == "critical"
+
+
+def test_digest_recipient_keys_preserve_falsy_user_ids(monkeypatch):
+    svc = NotificationService()
+    svc.enabled = True
+    svc.min_severity = "info"
+    svc.digest_mode = "hourly"
+
+    monkeypatch.setattr(svc, "notify_generic", lambda payload: "logged")
+
+    assert svc.notify_or_batch(
+        {"type": "guardian_alert", "severity": "info", "user_id": 0}
+    ) == "batched"
+    assert svc.get_pending_digest_count(0) == 1
+    assert svc.get_pending_digest_count("0") == 1
+    assert svc.get_pending_digest_count("_default") == 0
+    assert svc.flush_digest(0) == 1
+    assert svc.get_pending_digest_count(0) == 0
+
+
+def test_flush_digest_requeues_when_delivery_fails(monkeypatch):
+    svc = NotificationService()
+    svc.enabled = True
+    svc.min_severity = "info"
+    svc.digest_mode = "daily"
+    svc.notify_or_batch({"type": "guardian_alert", "severity": "warning", "user_id": "u1"})
+    svc.notify_or_batch({"type": "guardian_alert", "severity": "critical", "user_id": "u1"})
+    attempts: list[dict[str, object]] = []
+
+    def _fail_digest(payload: dict[str, object]) -> str:
+        attempts.append(payload)
+        return "failed"
+
+    monkeypatch.setattr(svc, "notify_generic", _fail_digest)
+
+    assert svc.flush_digest("u1") == 0
+    assert svc.get_pending_digest_count("u1") == 2
+    assert len(attempts) == 1
+
+
+def test_flush_digest_requeues_when_delivery_raises(monkeypatch):
     svc = NotificationService()
     svc.enabled = True
     svc.min_severity = "info"
     svc.digest_mode = "hourly"
     svc.notify_or_batch({"type": "guardian_alert", "severity": "info", "user_id": "u1"})
-    svc.notify_or_batch({"type": "guardian_alert", "severity": "info", "user_id": "u1"})
+
+    def _raise_digest(payload: dict[str, object]) -> str:
+        raise RuntimeError("digest sink unavailable")
+
+    monkeypatch.setattr(svc, "notify_generic", _raise_digest)
+
+    assert svc.flush_digest("u1") == 0
+    assert svc.get_pending_digest_count("u1") == 1
+
+
+def test_flush_digest_requeues_when_delivery_raises_unexpected_exception(monkeypatch):
+    class UnexpectedDigestError(Exception):
+        pass
+
+    svc = NotificationService()
+    svc.enabled = True
+    svc.min_severity = "info"
+    svc.digest_mode = "hourly"
+    svc.notify_or_batch({"type": "guardian_alert", "severity": "warning", "user_id": "u1"})
+
+    def _raise_digest(payload: dict[str, object]) -> str:
+        raise UnexpectedDigestError("digest sink unavailable")
+
+    monkeypatch.setattr(svc, "notify_generic", _raise_digest)
+
+    assert svc.flush_digest("u1") == 0
+    assert svc.get_pending_digest_count("u1") == 1
+
+
+def test_flush_digest_does_not_requeue_threshold_skipped_delivery(monkeypatch):
+    svc = NotificationService()
+    svc.enabled = True
+    svc.min_severity = "info"
+    svc.digest_mode = "hourly"
+    svc.notify_or_batch({"type": "guardian_alert", "severity": "warning", "user_id": "u1"})
+
+    svc.min_severity = "critical"
+    monkeypatch.setattr(svc, "notify_generic", lambda payload: "skipped")
+
+    assert svc.flush_digest("u1") == 1
+    assert svc.get_pending_digest_count("u1") == 0
+
+
+def test_flush_digest_without_recipient_dispatches_one_digest_per_recipient(monkeypatch):
+    svc = NotificationService()
+    svc.enabled = True
+    svc.min_severity = "info"
+    svc.digest_mode = "hourly"
+    delivered: list[dict[str, object]] = []
     monkeypatch.setattr(
         svc,
         "notify_generic",
-        lambda payload: (_ for _ in ()).throw(AssertionError("flush_digest must not dispatch")),
+        lambda payload: delivered.append(payload) or "logged",
     )
 
-    assert svc.flush_digest("u1") == 2
-    assert svc.get_pending_digest_count("u1") == 0
+    svc.notify_or_batch({"type": "guardian_alert", "severity": "info", "user_id": "u1"})
+    svc.notify_or_batch({"type": "guardian_alert", "severity": "warning", "user_id": "u2"})
+
+    assert svc.flush_digest() == 2
+    assert svc.get_pending_digest_count() == 0
+    assert {payload["recipient"] for payload in delivered} == {"u1", "u2"}
+    assert all(payload["item_count"] == 1 for payload in delivered)
