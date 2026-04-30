@@ -79,6 +79,20 @@ def test_project_crud_list(prompt_studio_dual_backend_client):
     data = lst.json()
     assert data.get("success") is True
     assert isinstance(data.get("data"), list)
+    assert data.get("metadata") == {
+        "page": 1,
+        "per_page": 10,
+        "total": 1,
+        "total_pages": 1,
+    }
+    assert data.get("pagination") == {
+        "mode": "page",
+        "page": 1,
+        "per_page": 10,
+        "total": 1,
+        "total_pages": 1,
+        "has_more": False,
+    }
     # Get project details
     getp = client.get(f"/api/v1/prompt-studio/projects/get/{pid}")
     assert getp.status_code == 200

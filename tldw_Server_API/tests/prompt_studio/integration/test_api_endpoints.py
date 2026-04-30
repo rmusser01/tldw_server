@@ -210,6 +210,20 @@ class TestProjectEndpoints:
         assert "data" in data
         assert "metadata" in data
         assert isinstance(data["data"], list)
+        assert data["metadata"] == {
+            "page": 1,
+            "per_page": 20,
+            "total": 1,
+            "total_pages": 1,
+        }
+        assert data["pagination"] == {
+            "mode": "page",
+            "page": 1,
+            "per_page": 20,
+            "total": 1,
+            "total_pages": 1,
+            "has_more": False,
+        }
 
     def test_get_project(self, client, test_db):
 

@@ -13,6 +13,7 @@ import urllib.parse as _u
 from tldw_Server_API.app.api.v1.schemas.pagination import (
     CursorPaginationMeta,
     OffsetPaginationMeta,
+    PagePaginationMeta,
 )
 
 
@@ -141,6 +142,30 @@ def build_cursor_pagination_meta(
     )
 
 
+def build_page_pagination_meta(
+    *,
+    page: int,
+    per_page: int,
+    total: int | None = None,
+    total_pages: int | None = None,
+    has_more: bool | None = None,
+) -> PagePaginationMeta:
+    """Build canonical page-based pagination metadata from route-local values."""
+    normalized_total_pages = int(total_pages) if total_pages is not None else None
+    normalized_has_more = (
+        bool(normalized_total_pages and int(page) < normalized_total_pages)
+        if has_more is None
+        else bool(has_more)
+    )
+    return PagePaginationMeta(
+        page=int(page),
+        per_page=int(per_page),
+        total=int(total) if total is not None else None,
+        total_pages=normalized_total_pages,
+        has_more=normalized_has_more,
+    )
+
+
 def build_pagination_link_header(
     base_path: str,
     common_params: list[tuple[str, str]] | None = None,
@@ -172,6 +197,7 @@ def build_pagination_link_header(
 __all__ = [
     "build_cursor_pagination_meta",
     "build_link_header",
+    "build_page_pagination_meta",
     "build_offset_pagination_meta",
     "build_pagination_link_header",
 ]
