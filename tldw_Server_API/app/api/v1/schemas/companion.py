@@ -7,6 +7,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
+
 
 class CompanionActivityItem(BaseModel):
     """One persisted companion activity event."""
@@ -29,6 +31,7 @@ class CompanionActivityListResponse(BaseModel):
     total: int
     limit: int
     offset: int
+    pagination: OffsetPaginationMeta
 
 
 class CompanionActivityDetail(CompanionActivityItem):
