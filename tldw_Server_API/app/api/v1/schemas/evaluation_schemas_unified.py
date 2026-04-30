@@ -14,6 +14,7 @@ from typing import Any, Literal, Optional, Union
 from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator, model_validator
 
+from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
 from tldw_Server_API.app.core.Evaluations.run_state import normalize_run_status
 
 try:
@@ -809,6 +810,7 @@ class EvaluationHistoryResponse(BaseModel):
     total_count: int
     items: list[dict[str, Any]]
     aggregations: Optional[dict[str, Any]] = None
+    pagination: OffsetPaginationMeta
 
 
 # ============= Webhook Schemas =============

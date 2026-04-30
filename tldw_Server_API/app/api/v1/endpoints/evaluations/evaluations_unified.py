@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query
 from fastapi.routing import APIRoute
 from loguru import logger
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal, rbac_rate_limit, RequireRole, User
-
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 
 # Import unified schemas
 from tldw_Server_API.app.api.v1.schemas.evaluation_schemas_unified import (
@@ -2151,7 +2151,13 @@ async def get_evaluation_history(
                         "end": request.end_date.isoformat() if request.end_date else None
                     }
                 }
-            }
+            },
+            pagination=build_offset_pagination_meta(
+                total=total_count,
+                limit=request.limit or 100,
+                offset=request.offset or 0,
+                count=len(evaluations),
+            ),
         )
 
     except _EVALS_NONCRITICAL_EXCEPTIONS as e:
