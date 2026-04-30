@@ -40,6 +40,8 @@ from .models import (
 from .macos_virtualization.helper_client import (
     MacOSVirtualizationHelperClient,
     MacOSVirtualizationHelperFailure,
+    MacOSVirtualizationHelperProtocolError,
+    MacOSVirtualizationHelperUnavailable,
 )
 from .macos_diagnostics import collect_macos_diagnostics, probe_helper
 from .orchestrator import SandboxOrchestrator, SessionActiveRunsConflict
@@ -1070,6 +1072,21 @@ class SandboxService:
                         if helper_client is None:
                             helper_client = MacOSVirtualizationHelperClient()
                         terminated = bool(helper_client.terminate_vm(vm_id))
+                    except MacOSVirtualizationHelperUnavailable as exc:
+                        reason_code = str(exc) or "macos_virtualization_helper_unavailable"
+                        logger.info("VZ reconciliation repair orphan termination blocked: {}", reason_code)
+                        raise SandboxReconciliationRepairError(reason_code, 503) from exc
+                    except MacOSVirtualizationHelperProtocolError as exc:
+                        reason_code = "macos_virtualization_helper_protocol_mismatch"
+                        logger.info("VZ reconciliation repair orphan termination blocked: {}", reason_code)
+                        raise SandboxReconciliationRepairError(reason_code, 503) from exc
+                    except MacOSVirtualizationHelperFailure as exc:
+                        logger.info(
+                            "VZ reconciliation repair orphan termination helper failure for vm_id={}: {}",
+                            vm_id,
+                            exc.error_code,
+                        )
+                        raise SandboxReconciliationRepairError(exc.error_code, 503) from exc
                     except Exception as exc:
                         logger.exception("VZ reconciliation repair orphan termination failed for vm_id={}", vm_id)
                         raise SandboxReconciliationRepairError("vz_orphan_vm_termination_failed", 503) from exc
