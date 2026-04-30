@@ -2130,6 +2130,28 @@ class EvaluationsDatabase:
 
             return datasets, has_more
 
+    def count_datasets(
+        self,
+        *,
+        after: Optional[str] = None,
+        created_by: Optional[str] = None,
+    ) -> int:
+        """Count datasets matching the same list filters."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+
+            query = "SELECT COUNT(*) FROM datasets WHERE 1=1"
+            params: list[Any] = []
+
+            if after:
+                query += " AND created_at < (SELECT created_at FROM datasets WHERE id = ?)"
+                params.append(after)
+
+            query, params = self._append_user_filter(query, params, "created_by", created_by)
+            cursor.execute(query, params)
+            row = cursor.fetchone()
+            return int(row[0] or 0) if row else 0
+
     def delete_dataset(self, dataset_id: str, *, created_by: Optional[str] = None) -> bool:
         """Delete dataset"""
         with self.get_connection() as conn:

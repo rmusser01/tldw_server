@@ -141,17 +141,15 @@ class SyntheticEvalRepository:
         payload.pop("review_summary_json", None)
         return payload
 
-    def list_draft_samples(
+    def _filtered_draft_samples(
         self,
         *,
         recipe_kind: str | None = None,
         review_state: str | SyntheticEvalReviewState | None = None,
         source_kind: str | None = None,
         generation_batch_id: str | None = None,
-        limit: int = 50,
-        offset: int = 0,
     ) -> list[dict[str, Any]]:
-        """List persisted synthetic draft samples with simple filters."""
+        """Return all matching synthetic draft samples before pagination."""
 
         query = "SELECT * FROM synthetic_eval_draft_samples WHERE 1=1"
         params: list[Any] = []
@@ -191,10 +189,50 @@ class SyntheticEvalRepository:
                 if str((sample.get("sample_metadata") or {}).get("generation_batch_id") or "") == generation_batch_id
             ]
 
+        return results
+
+    def list_draft_samples(
+        self,
+        *,
+        recipe_kind: str | None = None,
+        review_state: str | SyntheticEvalReviewState | None = None,
+        source_kind: str | None = None,
+        generation_batch_id: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        """List persisted synthetic draft samples with simple filters."""
+
+        results = self._filtered_draft_samples(
+            recipe_kind=recipe_kind,
+            review_state=review_state,
+            source_kind=source_kind,
+            generation_batch_id=generation_batch_id,
+        )
+
         start = max(0, int(offset))
         end = start + max(1, int(limit))
         results = results[start:end]
         return results
+
+    def count_draft_samples(
+        self,
+        *,
+        recipe_kind: str | None = None,
+        review_state: str | SyntheticEvalReviewState | None = None,
+        source_kind: str | None = None,
+        generation_batch_id: str | None = None,
+    ) -> int:
+        """Count matching synthetic draft samples before pagination."""
+
+        return len(
+            self._filtered_draft_samples(
+                recipe_kind=recipe_kind,
+                review_state=review_state,
+                source_kind=source_kind,
+                generation_batch_id=generation_batch_id,
+            )
+        )
 
     def get_draft_samples(self, sample_ids: list[str]) -> list[dict[str, Any]]:
         """Fetch multiple draft samples in caller-provided order."""

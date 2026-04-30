@@ -92,6 +92,10 @@ def test_dataset_routes_require_read_vs_manage_permissions(monkeypatch):
             _ = (limit, offset, created_by)
             return [stored_datasets["ds_1"]], False
 
+        def count_datasets(self, *, created_by, after=None):
+            _ = (created_by, after)
+            return len(stored_datasets)
+
         def get_dataset(
             self,
             dataset_id,

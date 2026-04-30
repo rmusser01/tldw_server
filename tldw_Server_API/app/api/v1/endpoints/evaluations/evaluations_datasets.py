@@ -8,6 +8,7 @@ from typing import Any, Optional
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, status
 from loguru import logger
 
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.endpoints.evaluations.evaluations_auth import (
     create_error_response,
     get_evaluation_identity,
@@ -132,10 +133,24 @@ async def list_datasets(
         identity = get_evaluation_identity(current_user)
         svc = get_unified_evaluation_service_for_user(identity.user_scope)
         items, has_more = svc.db.list_datasets(limit=limit, offset=offset, created_by=identity.created_by)
+        total = svc.db.count_datasets(created_by=identity.created_by)
         resp = [DatasetResponse(**_normalize_dataset_payload(r)) for r in items]
         first_id = resp[0].id if resp else None
         last_id = resp[-1].id if resp else None
-        return DatasetListResponse(data=resp, has_more=has_more, first_id=first_id, last_id=last_id)
+        return DatasetListResponse(
+            data=resp,
+            has_more=has_more,
+            first_id=first_id,
+            last_id=last_id,
+            total=total,
+            pagination=build_offset_pagination_meta(
+                total=total,
+                limit=limit,
+                offset=offset,
+                count=len(resp),
+                has_more=has_more,
+            ),
+        )
     except _UNIFIED_EVAL_NONCRITICAL_EXCEPTIONS as e:
         logger.error("Failed to list datasets")
         raise create_error_response(

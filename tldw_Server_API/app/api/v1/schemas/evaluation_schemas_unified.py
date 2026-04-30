@@ -427,6 +427,7 @@ class RunListResponse(ListResponse):
 class DatasetListResponse(ListResponse):
     """Dataset list response"""
     data: list[DatasetResponse]
+    pagination: OffsetPaginationMeta
 
 
 # ============= tldw-Specific Evaluation Schemas =============

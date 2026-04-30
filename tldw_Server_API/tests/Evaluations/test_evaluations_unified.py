@@ -661,6 +661,15 @@ class TestDatasetManagement:
         data = response.json()
         assert data["object"] == "list"
         assert len(data["data"]) <= 2
+        assert data["total"] == 3
+        assert data["pagination"] == {
+            "mode": "offset",
+            "limit": 2,
+            "offset": 0,
+            "total": 3,
+            "has_more": True,
+            "next_offset": 2,
+        }
 
     def test_delete_dataset(self, client, auth_headers, sample_dataset_request):
 
