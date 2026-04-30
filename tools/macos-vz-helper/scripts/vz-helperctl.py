@@ -189,15 +189,14 @@ def _plist_command(args: argparse.Namespace) -> int:
         print(f"socket_path: not ok {socket_result.reason}", file=sys.stderr)
         return 1
 
-    if not args.dry_run:
-        socket_directory_result = ensure_private_dir(socket_path.parent)
-        if not socket_directory_result.ok:
-            print(f"socket_directory: not ok {socket_directory_result.reason}", file=sys.stderr)
-            return 1
-        directory_result = ensure_private_dir(log_dir)
-        if not directory_result.ok:
-            print(f"log_directory: not ok {directory_result.reason}", file=sys.stderr)
-            return 1
+    socket_directory_result = ensure_private_dir(socket_path.parent, dry_run=args.dry_run)
+    if not socket_directory_result.ok:
+        print(f"socket_directory: not ok {socket_directory_result.reason}", file=sys.stderr)
+        return 1
+    directory_result = ensure_private_dir(log_dir, dry_run=args.dry_run)
+    if not directory_result.ok:
+        print(f"log_directory: not ok {directory_result.reason}", file=sys.stderr)
+        return 1
 
     print(render_launchd_plist(helper_path, socket_path, log_dir), end="")
     return 0

@@ -291,6 +291,58 @@ def test_plist_cli_rejects_unsafe_socket_parent_when_not_dry_run(tmp_path, capsy
     CASE.assertEqual(runtime_dir.stat().st_mode & 0o777, 0o755)
 
 
+def test_plist_dry_run_rejects_unsafe_socket_parent(tmp_path, capsys):
+    helperctl = load_helperctl()
+    helper_path = tmp_path / "macos-vz-helper"
+    runtime_dir = tmp_path / "runtime"
+    runtime_dir.mkdir(mode=0o755)
+    runtime_dir.chmod(0o755)
+
+    code = helperctl.main(
+        [
+            "plist",
+            "--dry-run",
+            "--helper",
+            str(helper_path),
+            "--socket",
+            str(runtime_dir / "helper.sock"),
+            "--log-dir",
+            str(tmp_path / "logs"),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    CASE.assertEqual(code, 1)
+    CASE.assertIn("socket_directory: not ok helper_directory_not_private", captured.err)
+
+
+def test_plist_dry_run_rejects_unsafe_log_dir(tmp_path, capsys):
+    helperctl = load_helperctl()
+    helper_path = tmp_path / "macos-vz-helper"
+    runtime_dir = tmp_path / "runtime"
+    runtime_dir.mkdir(mode=0o700)
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir(mode=0o755)
+    log_dir.chmod(0o755)
+
+    code = helperctl.main(
+        [
+            "plist",
+            "--dry-run",
+            "--helper",
+            str(helper_path),
+            "--socket",
+            str(runtime_dir / "helper.sock"),
+            "--log-dir",
+            str(log_dir),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    CASE.assertEqual(code, 1)
+    CASE.assertIn("log_directory: not ok helper_directory_not_private", captured.err)
+
+
 def test_plist_cli_rejects_regular_file_socket_path(tmp_path, capsys):
     helperctl = load_helperctl()
     helper_path = tmp_path / "macos-vz-helper"
