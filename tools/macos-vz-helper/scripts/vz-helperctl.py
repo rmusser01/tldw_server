@@ -57,6 +57,7 @@ class ProcessInfo:
 @dataclass(frozen=True)
 class StartedProcess:
     pid: int
+    process: object | None = None
 
 
 @dataclass(frozen=True)
@@ -429,7 +430,7 @@ def _start_process(
     # Helper argv is executed directly without a shell.
     with stdout_path.open("ab") as stdout_file, stderr_path.open("ab") as stderr_file:
         process = subprocess.Popen(argv, env=env, stdout=stdout_file, stderr=stderr_file)  # nosec B603
-    return StartedProcess(pid=int(process.pid))
+    return StartedProcess(pid=int(process.pid), process=process)
 
 
 def _kill_process(pid: int) -> None:
@@ -656,9 +657,23 @@ def wait_for_process_exit(
         time.sleep(interval_sec)
 
 
+def wait_for_process_handle_exit(process: object, *, timeout_sec: float) -> CheckResult:
+    wait = getattr(process, "wait", None)
+    if not callable(wait):
+        return CheckResult(ok=False, reason="helper_process_handle_invalid")
+    try:
+        wait(timeout=timeout_sec)
+    except subprocess.TimeoutExpired:
+        return CheckResult(ok=False, reason="helper_stop_timeout")
+    except ChildProcessError:
+        return CheckResult(ok=True)
+    return CheckResult(ok=True)
+
+
 def cleanup_started_helper(
     *,
     pid: int,
+    started_process: StartedProcess | None = None,
     pid_file: Path,
     socket_path: Path,
     socket_identity: SocketIdentity | None,
@@ -667,14 +682,29 @@ def cleanup_started_helper(
     socket_remover: Callable[[Path, SocketIdentity | None], None],
     exit_timeout_sec: float,
     exit_poll_interval_sec: float,
+    expected_helper: Path | None = None,
 ) -> CheckResult:
+    if expected_helper is not None:
+        identity_result = validate_process_identity(pid, expected_helper, process_lookup=process_lookup)
+        if not identity_result.ok:
+            return identity_result
+        if identity_result.reason == "helper_pid_stale":
+            _remove_pid_file_if_pid(pid_file, pid)
+            socket_remover(socket_path, socket_identity)
+            return CheckResult(ok=True, reason="helper_pid_stale")
     process_killer(pid)
-    exit_result = wait_for_process_exit(
-        pid,
-        process_lookup=process_lookup,
-        timeout_sec=exit_timeout_sec,
-        interval_sec=exit_poll_interval_sec,
-    )
+    process_handle = None
+    if started_process is not None and started_process.pid == pid:
+        process_handle = started_process.process
+    if process_handle is not None:
+        exit_result = wait_for_process_handle_exit(process_handle, timeout_sec=exit_timeout_sec)
+    else:
+        exit_result = wait_for_process_exit(
+            pid,
+            process_lookup=process_lookup,
+            timeout_sec=exit_timeout_sec,
+            interval_sec=exit_poll_interval_sec,
+        )
     if not exit_result.ok:
         return exit_result
     _remove_pid_file_if_pid(pid_file, pid)
@@ -749,6 +779,7 @@ def start_helper(
         if not pid_write.ok:
             cleanup_result = cleanup_started_helper(
                 pid=started.pid,
+                started_process=started,
                 pid_file=pid_file,
                 socket_path=socket_path,
                 socket_identity=socket_identity(socket_path),
@@ -757,6 +788,7 @@ def start_helper(
                 socket_remover=socket_remover,
                 exit_timeout_sec=exit_timeout_sec,
                 exit_poll_interval_sec=exit_poll_interval_sec,
+                expected_helper=helper_path,
             )
             if not cleanup_result.ok:
                 return cleanup_result
@@ -770,6 +802,7 @@ def start_helper(
         if not socket_ready.result.ok:
             cleanup_result = cleanup_started_helper(
                 pid=started.pid,
+                started_process=started,
                 pid_file=pid_file,
                 socket_path=socket_path,
                 socket_identity=socket_ready.identity,
@@ -778,6 +811,7 @@ def start_helper(
                 socket_remover=socket_remover,
                 exit_timeout_sec=exit_timeout_sec,
                 exit_poll_interval_sec=exit_poll_interval_sec,
+                expected_helper=helper_path,
             )
             if not cleanup_result.ok:
                 return cleanup_result
@@ -792,6 +826,7 @@ def start_helper(
         if not ping_result.ok:
             cleanup_result = cleanup_started_helper(
                 pid=started.pid,
+                started_process=started,
                 pid_file=pid_file,
                 socket_path=socket_path,
                 socket_identity=socket_ready.identity,
@@ -800,6 +835,7 @@ def start_helper(
                 socket_remover=socket_remover,
                 exit_timeout_sec=exit_timeout_sec,
                 exit_poll_interval_sec=exit_poll_interval_sec,
+                expected_helper=helper_path,
             )
             if not cleanup_result.ok:
                 return cleanup_result
@@ -968,6 +1004,7 @@ def stop_helper(
     process_lookup: Callable[[int], ProcessInfo | None] = lookup_process,
     lock_process_exists: Callable[[int], bool] = process_exists,
     socket_identity_reader: Callable[[Path], SocketIdentity | None] = socket_identity,
+    socket_active_checker: Callable[[Path], bool] = socket_accepts_connection,
     socket_remover: Callable[[Path, SocketIdentity | None], None] = remove_socket_if_identity,
     exit_timeout_sec: float = 5.0,
     exit_poll_interval_sec: float = 0.05,
@@ -991,6 +1028,8 @@ def stop_helper(
             return CheckResult(ok=True, reason="helper_not_running")
         if pid_result.reason == "helper_pid_stale":
             if socket_path is not None:
+                if socket_active_checker(socket_path):
+                    return CheckResult(ok=False, reason="helper_socket_active")
                 socket_remover(socket_path, socket_identity_reader(socket_path))
             _remove_pid_file_if_pid(pid_file, pid_state.pid)
             return CheckResult(ok=True, reason="helper_pid_stale")
