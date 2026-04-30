@@ -247,10 +247,13 @@ The lower-level fallback remains available when operators need to bypass the
 managed defaults:
 
 ```bash
+runtime_dir="$(mktemp -d "${TMPDIR:-/tmp}/tldw-vz-helper-e2e.XXXXXX")"
+chmod 700 "$runtime_dir"
+
 tools/vz-linux-image/scripts/run-host-e2e-smoke.sh \
   --bundle /path/to/canonical/bundle \
-  --socket /tmp/tldw-vz-helper-e2e.sock \
-  --serial-log-dir /tmp/tldw-vz-serial-e2e \
+  --socket "$runtime_dir/helper.sock" \
+  --serial-log-dir "$runtime_dir/serial" \
   --entitlements /path/to/helper.entitlements
 ```
 

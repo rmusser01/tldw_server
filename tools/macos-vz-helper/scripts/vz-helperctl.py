@@ -25,13 +25,21 @@ from typing import Callable, Iterable
 REPO_ROOT = Path(__file__).resolve().parents[3]
 HELPER_PACKAGE_DIR = REPO_ROOT / "tools" / "macos-vz-helper"
 DEFAULT_HELPER = HELPER_PACKAGE_DIR / ".build" / "debug" / "macos-vz-helper"
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 try:
     from tldw_Server_API.app.core.Sandbox.macos_virtualization.helper_client import (
         EXPECTED_HELPER_PROTOCOL_VERSION,
     )
-except Exception:
+except ModuleNotFoundError as exc:
+    missing_name = str(exc.name or "")
+    if missing_name != "tldw_Server_API" and not missing_name.startswith("tldw_Server_API."):
+        raise
     EXPECTED_HELPER_PROTOCOL_VERSION = "1"
+
+
+INVALID_LIFECYCLE_LOCK_GRACE_SEC = 1.0
 
 
 @dataclass(frozen=True)
@@ -660,18 +668,40 @@ def _read_positive_pid(path: Path) -> int | None:
 
 
 def _open_lifecycle_lock(lock_path: Path) -> int | None:
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0)
     try:
-        fd = os.open(lock_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        fd = os.open(lock_path, flags, 0o600)
     except FileExistsError:
         return None
-    os.write(fd, f"{os.getpid()}\n".encode("utf-8"))
+    try:
+        payload = f"{os.getpid()}\n".encode("utf-8")
+        written = os.write(fd, payload)
+        if written != len(payload):
+            raise OSError("partial lifecycle lock write")
+    except OSError:
+        with contextlib.suppress(OSError):
+            os.close(fd)
+        with contextlib.suppress(FileNotFoundError):
+            lock_path.unlink()
+        raise
     return fd
+
+
+def _lifecycle_lock_is_recent(lock_path: Path, grace_sec: float) -> bool:
+    try:
+        lock_stat = lock_path.stat()
+    except FileNotFoundError:
+        return False
+    except OSError:
+        return True
+    return time.time() - lock_stat.st_mtime < grace_sec
 
 
 def _acquire_lifecycle_lock(
     pid_file: Path,
     *,
     lock_process_exists: Callable[[int], bool] = process_exists,
+    invalid_lock_grace_sec: float = INVALID_LIFECYCLE_LOCK_GRACE_SEC,
 ) -> int | None:
     lock_path = _pid_lock_path(pid_file)
     fd = _open_lifecycle_lock(lock_path)
@@ -680,7 +710,11 @@ def _acquire_lifecycle_lock(
 
     lock_pid = _read_positive_pid(lock_path)
     if lock_pid is None:
-        return None
+        if _lifecycle_lock_is_recent(lock_path, invalid_lock_grace_sec):
+            return None
+        with contextlib.suppress(FileNotFoundError):
+            lock_path.unlink()
+        return _open_lifecycle_lock(lock_path)
     if lock_pid is not None and lock_process_exists(lock_pid):
         return None
 
@@ -1205,30 +1239,33 @@ def _plist_command(args: argparse.Namespace) -> int:
     socket_path = Path(args.socket_path) if args.socket_path else paths.socket_path
     log_dir = Path(args.log_dir) if args.log_dir else paths.log_dir
     helper_path = Path(args.helper_path) if args.helper_path else DEFAULT_HELPER
+    dry_run = bool(getattr(args, "dry_run", False))
+    create_dirs = bool(getattr(args, "create_dirs", False)) and not dry_run
+    directory_dry_run = not create_dirs
 
     socket_result = validate_socket_path(socket_path)
     if not socket_result.ok:
         print(f"socket_path: not ok {socket_result.reason}", file=sys.stderr)
         return 1
 
-    socket_directory_result = ensure_private_dir(socket_path.parent, dry_run=args.dry_run)
+    socket_directory_result = ensure_private_dir(socket_path.parent, dry_run=directory_dry_run)
     if not socket_directory_result.ok:
         print(f"socket_directory: not ok {socket_directory_result.reason}", file=sys.stderr)
         return 1
-    directory_result = ensure_private_dir(log_dir, dry_run=args.dry_run)
+    directory_result = ensure_private_dir(log_dir, dry_run=directory_dry_run)
     if not directory_result.ok:
         print(f"log_directory: not ok {directory_result.reason}", file=sys.stderr)
         return 1
 
     rendered = render_launchd_plist(helper_path, socket_path, log_dir)
-    if args.plist_output:
+    if args.plist_output and not dry_run:
         plist_output = Path(args.plist_output)
-        if args.dry_run and not plist_output.parent.exists():
-            print("plist_directory: not ok helper_directory_unconfigured", file=sys.stderr)
-            return 1
-        output_directory_result = ensure_private_dir(plist_output.parent, dry_run=args.dry_run)
+        output_directory_result = ensure_private_dir(plist_output.parent, dry_run=directory_dry_run)
         if not output_directory_result.ok:
             print(f"plist_directory: not ok {output_directory_result.reason}", file=sys.stderr)
+            return 1
+        if not create_dirs and not plist_output.parent.exists():
+            print("plist_directory: not ok helper_directory_missing", file=sys.stderr)
             return 1
         plist_output.write_text(rendered, encoding="utf-8")
         return 0
@@ -1393,8 +1430,8 @@ def build_parser() -> argparse.ArgumentParser:
     plist_parser.add_argument("--socket", "--socket-path", dest="socket_path")
     plist_parser.add_argument("--log-dir")
     plist_parser.add_argument("--plist-output")
-    plist_parser.add_argument("--dry-run", action="store_true", default=True)
-    plist_parser.add_argument("--create-dirs", action="store_false", dest="dry_run")
+    plist_parser.add_argument("--dry-run", action="store_true")
+    plist_parser.add_argument("--create-dirs", action="store_true")
     plist_parser.set_defaults(func=_plist_command)
 
     return parser

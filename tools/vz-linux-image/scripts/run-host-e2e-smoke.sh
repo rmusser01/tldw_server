@@ -6,8 +6,9 @@ IMAGE_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 REPO_ROOT="$(cd "${IMAGE_DIR}/../.." && pwd)"
 
 BUNDLE_PATH=""
-SOCKET_PATH="/tmp/tldw-vz-helper-e2e-$$.sock"
-SERIAL_LOG_DIR="/tmp/tldw-vz-serial-e2e-$$"
+DEFAULT_RUNTIME_DIR="${TMPDIR:-/tmp}/tldw-vz-helper-e2e-$$"
+SOCKET_PATH="${DEFAULT_RUNTIME_DIR}/helper.sock"
+SERIAL_LOG_DIR="${DEFAULT_RUNTIME_DIR}/serial"
 HELPER_PATH="${REPO_ROOT}/tools/macos-vz-helper/.build/debug/macos-vz-helper"
 ENTITLEMENTS_PATH=""
 PYTHON_BIN=""
@@ -198,6 +199,43 @@ prepare_socket_path() {
   fi
 }
 
+stat_owner() {
+  stat -f '%u' "$1" 2>/dev/null || stat -c '%u' "$1"
+}
+
+stat_mode() {
+  stat -f '%Lp' "$1" 2>/dev/null || stat -c '%a' "$1"
+}
+
+directory_is_owner_private() {
+  local directory="$1"
+  local owner
+  local mode
+  [[ -d "${directory}" ]] || return 1
+  owner="$(stat_owner "${directory}")" || return 1
+  mode="$(stat_mode "${directory}")" || return 1
+  [[ "${owner}" == "$(id -u)" ]] || return 1
+  [[ $((8#${mode} & 077)) -eq 0 ]]
+}
+
+prepare_private_socket_parent() {
+  local socket_dir
+  socket_dir="$(dirname "${SOCKET_PATH}")"
+  if [[ -L "${socket_dir}" ]]; then
+    die "helper socket directory is a symlink: ${socket_dir}"
+  fi
+  if [[ -e "${socket_dir}" && ! -d "${socket_dir}" ]]; then
+    die "helper socket directory is not a directory: ${socket_dir}"
+  fi
+  if [[ ! -e "${socket_dir}" ]]; then
+    mkdir -p "${socket_dir}"
+    chmod 700 "${socket_dir}"
+  fi
+  if ! directory_is_owner_private "${socket_dir}"; then
+    die "helper socket directory must be owner-only: ${socket_dir}"
+  fi
+}
+
 run_helper_daemon_smoke() {
   run_cmd env \
     TLDW_SANDBOX_MACOS_HELPER_DAEMON_SMOKE=1 \
@@ -218,6 +256,7 @@ start_helper_for_real_e2e() {
     return 0
   fi
 
+  prepare_private_socket_parent
   prepare_socket_path
   mkdir -p "${SERIAL_LOG_DIR}"
   env \

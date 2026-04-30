@@ -256,7 +256,6 @@ final class UnixSocketServer {
                 withIntermediateDirectories: false,
                 attributes: [.posixPermissions: 0o700]
             )
-            chmod(directory.path, 0o700)
             try validateSocketDirectory(directory.path)
         }
     }

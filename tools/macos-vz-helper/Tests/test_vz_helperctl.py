@@ -5,6 +5,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 from unittest import TestCase
 
@@ -52,6 +53,7 @@ def test_protocol_version_loads_from_helper_client():
     helperctl = load_helperctl()
 
     CASE.assertEqual(helperctl.EXPECTED_HELPER_PROTOCOL_VERSION, helper_client.EXPECTED_HELPER_PROTOCOL_VERSION)
+    CASE.assertIn(str(helperctl.REPO_ROOT), helperctl.sys.path)
 
 
 def test_protocol_version_falls_back_when_helper_client_import_fails(monkeypatch):
@@ -59,7 +61,7 @@ def test_protocol_version_falls_back_when_helper_client_import_fails(monkeypatch
 
     def blocked_import(name, globals=None, locals=None, fromlist=(), level=0):
         if name == "tldw_Server_API.app.core.Sandbox.macos_virtualization.helper_client":
-            raise ImportError("blocked for fallback test")
+            raise ModuleNotFoundError("blocked for fallback test", name="tldw_Server_API")
         return original_import(name, globals, locals, fromlist, level)
 
     monkeypatch.setattr("builtins.__import__", blocked_import)
@@ -67,6 +69,20 @@ def test_protocol_version_falls_back_when_helper_client_import_fails(monkeypatch
     helperctl = load_helperctl("vz_helperctl_fallback")
 
     CASE.assertEqual(helperctl.EXPECTED_HELPER_PROTOCOL_VERSION, "1")
+
+
+def test_protocol_version_surfaces_unexpected_import_errors(monkeypatch):
+    original_import = __import__
+
+    def broken_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "tldw_Server_API.app.core.Sandbox.macos_virtualization.helper_client":
+            raise ImportError("helper client import bug")
+        return original_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr("builtins.__import__", broken_import)
+
+    with pytest.raises(ImportError, match="helper client import bug"):
+        load_helperctl("vz_helperctl_import_bug")
 
 
 def test_validate_socket_path_refuses_symlink(tmp_path):
@@ -407,6 +423,72 @@ def test_plist_cli_writes_explicit_output_when_requested(tmp_path, capsys):
     CASE.assertEqual(code, 0)
     CASE.assertEqual(captured.out, "")
     CASE.assertIn(str(socket_path), plist_output.read_text(encoding="utf-8"))
+
+
+def test_plist_cli_dry_run_with_output_prints_without_writing(tmp_path, capsys):
+    helperctl = load_helperctl()
+    helper_path = tmp_path / "macos-vz-helper"
+    private_root = tmp_path / "private"
+    private_root.mkdir(mode=0o700)
+    private_root.chmod(0o700)
+    socket_path = private_root / "runtime" / "helper.sock"
+    log_dir = private_root / "logs"
+    plist_output = private_root / "LaunchAgents" / "org.tldw.macos-vz-helper.plist"
+
+    code = helperctl.main(
+        [
+            "plist",
+            "--dry-run",
+            "--helper",
+            str(helper_path),
+            "--socket",
+            str(socket_path),
+            "--log-dir",
+            str(log_dir),
+            "--plist-output",
+            str(plist_output),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    CASE.assertEqual(code, 0)
+    CASE.assertIn(str(socket_path), captured.out)
+    CASE.assertFalse(plist_output.exists())
+    CASE.assertFalse(plist_output.parent.exists())
+    CASE.assertFalse(socket_path.parent.exists())
+    CASE.assertFalse(log_dir.exists())
+
+
+def test_plist_cli_rejects_missing_output_parent_without_create_dirs(tmp_path, capsys):
+    helperctl = load_helperctl()
+    helper_path = tmp_path / "macos-vz-helper"
+    private_root = tmp_path / "private"
+    private_root.mkdir(mode=0o700)
+    private_root.chmod(0o700)
+    socket_path = private_root / "runtime" / "helper.sock"
+    log_dir = private_root / "logs"
+    plist_output = private_root / "LaunchAgents" / "org.tldw.macos-vz-helper.plist"
+
+    code = helperctl.main(
+        [
+            "plist",
+            "--helper",
+            str(helper_path),
+            "--socket",
+            str(socket_path),
+            "--log-dir",
+            str(log_dir),
+            "--plist-output",
+            str(plist_output),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    CASE.assertEqual(code, 1)
+    CASE.assertIn("plist_directory: not ok helper_directory_missing", captured.err)
+    CASE.assertFalse(plist_output.exists())
+    CASE.assertFalse(socket_path.parent.exists())
+    CASE.assertFalse(log_dir.exists())
 
 
 def test_plist_cli_writes_explicit_output_without_creating_runtime_dirs(tmp_path, capsys):
@@ -1290,6 +1372,52 @@ def test_start_helper_preserves_empty_lifecycle_lock_as_active(tmp_path):
     CASE.assertEqual(result, helperctl.CheckResult(ok=False, reason="helper_already_running"))
     CASE.assertTrue(lock.exists())
     CASE.assertEqual(starts, [])
+
+
+def test_start_helper_recovers_old_invalid_lifecycle_lock(tmp_path):
+    helperctl = load_helperctl()
+    helper = tmp_path / "macos-vz-helper"
+    socket_path = tmp_path / "runtime" / "helper.sock"
+    pid_file = tmp_path / "runtime" / "helper.pid"
+    log_dir = tmp_path / "logs"
+    helper.write_text("#!/bin/sh\n", encoding="utf-8")
+    helper.chmod(0o700)
+    pid_file.parent.mkdir(mode=0o700)
+    lock = pid_file.parent / "helper.pid.lock"
+    lock.write_text("not-a-pid\n", encoding="utf-8")
+    old_time = time.time() - 10
+    os.utime(lock, (old_time, old_time))
+    starts = []
+
+    result = helperctl.start_helper(
+        helper,
+        socket_path,
+        pid_file,
+        log_dir,
+        process_starter=lambda argv, env, **kwargs: starts.append(argv) or helperctl.StartedProcess(pid=1234),
+        socket_waiter=lambda path: helperctl.CheckResult(True),
+        ping_checker=lambda path: helperctl.CheckResult(True),
+        process_killer=lambda pid: None,
+    )
+
+    CASE.assertEqual(result, helperctl.CheckResult(ok=True))
+    CASE.assertEqual(starts, [[str(helper)]])
+    CASE.assertFalse(lock.exists())
+
+
+def test_open_lifecycle_lock_removes_lock_on_write_failure(monkeypatch, tmp_path):
+    helperctl = load_helperctl()
+    lock = tmp_path / "helper.pid.lock"
+
+    def fail_write(fd, data):
+        raise OSError("write failed")
+
+    monkeypatch.setattr(helperctl.os, "write", fail_write)
+
+    with pytest.raises(OSError, match="write failed"):
+        helperctl._open_lifecycle_lock(lock)
+
+    CASE.assertFalse(lock.exists())
 
 
 def test_start_helper_passes_managed_log_paths_to_process_starter(tmp_path):
