@@ -181,6 +181,18 @@ def test_ensure_private_dir_refuses_missing_child_under_file_parent(tmp_path):
     CASE.assertEqual(runtime_file.read_text(encoding="utf-8"), "not a directory")
 
 
+def test_ensure_private_dir_dry_run_refuses_missing_child_under_unsafe_parent(tmp_path):
+    helperctl = load_helperctl()
+    runtime_dir = tmp_path / "runtime"
+    runtime_dir.mkdir(mode=0o755)
+    runtime_dir.chmod(0o755)
+
+    result = helperctl.ensure_private_dir(runtime_dir / "child", dry_run=True)
+
+    CASE.assertEqual(result, helperctl.CheckResult(ok=False, reason="helper_directory_not_private"))
+    CASE.assertFalse((runtime_dir / "child").exists())
+
+
 def test_ensure_private_dir_refuses_group_or_other_accessible_existing_dir_without_chmod(tmp_path):
     helperctl = load_helperctl()
     runtime_dir = tmp_path / "runtime"
@@ -365,6 +377,34 @@ def test_plist_dry_run_rejects_unsafe_log_dir(tmp_path, capsys):
     captured = capsys.readouterr()
     CASE.assertEqual(code, 1)
     CASE.assertIn("log_directory: not ok helper_directory_not_private", captured.err)
+
+
+def test_plist_dry_run_rejects_missing_log_dir_under_unsafe_parent(tmp_path, capsys):
+    helperctl = load_helperctl()
+    helper_path = tmp_path / "macos-vz-helper"
+    runtime_dir = tmp_path / "runtime"
+    runtime_dir.mkdir(mode=0o700)
+    log_parent = tmp_path / "logs-parent"
+    log_parent.mkdir(mode=0o755)
+    log_parent.chmod(0o755)
+
+    code = helperctl.main(
+        [
+            "plist",
+            "--dry-run",
+            "--helper",
+            str(helper_path),
+            "--socket",
+            str(runtime_dir / "helper.sock"),
+            "--log-dir",
+            str(log_parent / "logs"),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    CASE.assertEqual(code, 1)
+    CASE.assertIn("log_directory: not ok helper_directory_not_private", captured.err)
+    CASE.assertFalse((log_parent / "logs").exists())
 
 
 def test_plist_cli_rejects_regular_file_socket_path(tmp_path, capsys):

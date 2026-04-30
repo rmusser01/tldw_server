@@ -77,9 +77,6 @@ def ensure_private_dir(path: Path, dry_run: bool = False) -> CheckResult:
     if path.exists():
         return _validate_private_dir(path)
 
-    if dry_run:
-        return CheckResult(ok=True)
-
     missing_dirs: list[Path] = []
     current = path
     while not current.exists():
@@ -93,6 +90,9 @@ def ensure_private_dir(path: Path, dry_run: bool = False) -> CheckResult:
         parent_result = _validate_private_dir(current)
         if not parent_result.ok:
             return parent_result
+
+    if dry_run:
+        return CheckResult(ok=True)
 
     for directory in reversed(missing_dirs):
         if directory.exists():
