@@ -241,6 +241,18 @@ def test_list_and_search_pagination_and_404s(client_with_notes_db: TestClient):
     d1, d2 = page1.json(), page2.json()
     assert isinstance(d1, dict) and isinstance(d2, dict)
     assert isinstance(d1.get("notes"), list) and isinstance(d2.get("notes"), list)
+    assert d1["pagination"]["mode"] == "offset"
+    assert d1["pagination"]["limit"] == 2
+    assert d1["pagination"]["offset"] == 0
+    assert d1["pagination"]["total"] == d1["total"]
+    assert d1["pagination"]["has_more"] is True
+    assert d1["pagination"]["next_offset"] == 2
+    assert d2["pagination"]["mode"] == "offset"
+    assert d2["pagination"]["limit"] == 2
+    assert d2["pagination"]["offset"] == 2
+    assert d2["pagination"]["total"] == d2["total"]
+    assert d2["pagination"]["has_more"] is True
+    assert d2["pagination"]["next_offset"] == 4
     # Verify disjointness of pages by IDs
     ids1 = {n.get("id") for n in d1.get("notes", [])}
     ids2 = {n.get("id") for n in d2.get("notes", [])}

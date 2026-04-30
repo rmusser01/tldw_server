@@ -1302,6 +1302,12 @@ async def list_notes(
             "limit": limit,
             "offset": offset,
             "total": total,
+            "pagination": build_offset_pagination_meta(
+                limit=limit,
+                offset=offset,
+                total=total,
+                count=len(notes_data),
+            ),
         }
     except _NOTES_NONCRITICAL_EXCEPTIONS as e:
         handle_db_errors(e, "notes list")
@@ -1357,6 +1363,12 @@ async def list_deleted_notes(
             "limit": limit,
             "offset": offset,
             "total": total,
+            "pagination": build_offset_pagination_meta(
+                limit=limit,
+                offset=offset,
+                total=total,
+                count=len(notes_data),
+            ),
         }
     except _NOTES_NONCRITICAL_EXCEPTIONS as e:
         handle_db_errors(e, "deleted notes list")

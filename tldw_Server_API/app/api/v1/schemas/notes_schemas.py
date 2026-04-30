@@ -9,6 +9,8 @@ from typing import Any, Literal
 # 3rd-party Libraries
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
+
 from .notes_studio import NoteStudioDocumentSummaryResponse
 
 #
@@ -434,6 +436,7 @@ class NotesListResponse(BaseModel):
     limit: int
     offset: int
     total: int | None = None
+    pagination: OffsetPaginationMeta
 
 
 class NotesExportResponse(BaseModel):
