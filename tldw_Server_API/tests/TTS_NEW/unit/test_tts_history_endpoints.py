@@ -80,6 +80,13 @@ def test_history_list_favorite_delete(test_client, auth_headers):
         payload = resp.json()
         assert len(payload["items"]) == 1
         assert payload["items"][0]["id"] == entry_two
+        assert payload["pagination"] == {
+            "mode": "cursor",
+            "limit": 50,
+            "cursor": None,
+            "next_cursor": None,
+            "has_more": False,
+        }
 
         resp = test_client.patch(
             f"/api/v1/audio/history/{entry_one}",
@@ -203,7 +210,15 @@ def test_history_next_cursor_failure_log_is_sanitized(test_client, auth_headers,
     try:
         resp = test_client.get("/api/v1/audio/history?limit=1", headers=auth_headers)
         assert resp.status_code == status.HTTP_200_OK
-        assert resp.json()["next_cursor"] is None
+        payload = resp.json()
+        assert payload["next_cursor"] is None
+        assert payload["pagination"] == {
+            "mode": "cursor",
+            "limit": 1,
+            "cursor": None,
+            "next_cursor": None,
+            "has_more": False,
+        }
         fake_logger.debug.assert_called_once_with(
             "TTS history: failed to build next cursor"
         )
