@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from tldw_Server_API.app.core.Sandbox.macos_virtualization.helper_client import (
     MacOSVirtualizationHelperFailure,
     MacOSVirtualizationHelperProtocolError,
@@ -74,6 +76,9 @@ def _metadata(
     run_id: str = "run-owned",
     session_id: str = "",
     session_mode: bool = False,
+    template_id: str = "",
+    run_manifest_path: str = "",
+    planning_source: str = "",
     created_at: str = "2026-04-30T18:00:00Z",
 ) -> HelperVMMetadata:
     return HelperVMMetadata(
@@ -82,7 +87,10 @@ def _metadata(
         run_id=run_id,
         session_id=session_id,
         session_mode=session_mode,
+        template_id=template_id,
         template_path="/tmp/template",
+        run_manifest_path=run_manifest_path,
+        planning_source=planning_source,
         workspace_path="/tmp/workspace",
         created_at=created_at,
     )
@@ -142,6 +150,46 @@ def test_reconciliation_reports_healthy_stale_unhealthy_and_orphaned_vms():
     assert helper.deleted_vm_ids == []
 
 
+def test_reconciliation_reports_template_context_for_persisted_sessions() -> None:
+    helper = _FakeHelper(
+        [
+            _vm(
+                "vm-live",
+                metadata=_metadata(
+                    run_id="run-live",
+                    template_id="vz_linux:bundle-a",
+                ),
+            ),
+            _vm(
+                "vm-unhealthy",
+                healthy=False,
+                metadata=_metadata(
+                    run_id="run-unhealthy",
+                    template_id="vz_linux:bundle-b",
+                ),
+            ),
+        ]
+    )
+
+    report = collect_vz_reconciliation(
+        orchestrator=_FakeOrchestrator(
+            [
+                {"id": "sess-live", "vm_id": "vm-live", "template_id": "vz_linux:bundle-a"},
+                {"id": "sess-unhealthy", "vm_id": "vm-unhealthy", "template_id": "vz_linux:bundle-c"},
+            ]
+        ),
+        helper_client=helper,
+    )
+
+    items_by_session = {str(item["session_id"]): item for item in report["items"] if "session_id" in item}
+    assert items_by_session["sess-live"]["persisted_template_id"] == "vz_linux:bundle-a"
+    assert items_by_session["sess-live"]["helper_template_id"] == "vz_linux:bundle-a"
+    assert items_by_session["sess-live"]["template_id_matches_persisted"] is True
+    assert items_by_session["sess-unhealthy"]["persisted_template_id"] == "vz_linux:bundle-c"
+    assert items_by_session["sess-unhealthy"]["helper_template_id"] == "vz_linux:bundle-b"
+    assert items_by_session["sess-unhealthy"]["template_id_matches_persisted"] is False
+
+
 def test_reconciliation_classifies_orphaned_vms_by_ownership_metadata():
     helper = _FakeHelper(
         [
@@ -195,6 +243,73 @@ def test_reconciliation_classifies_orphaned_vms_by_ownership_metadata():
     assert items_by_vm["vm-foreign-owner"]["reason"] == "foreign_owner"
     assert items_by_vm["vm-foreign-owner"]["termination_eligible"] is False
     assert items_by_vm["vm-foreign-runtime"]["status"] == "foreign_orphaned_vm"
+
+
+def test_reconciliation_downgrades_image_store_orphan_without_run_manifest(tmp_path: Path) -> None:
+    missing_manifest = tmp_path / "runs" / "run-owned" / "manifest.json"
+    helper = _FakeHelper(
+        [
+            _vm(
+                "vm-owned-image-store",
+                metadata=_metadata(
+                    run_id="run-owned",
+                    template_id="vz_linux:bundle-owned",
+                    run_manifest_path=str(missing_manifest),
+                    planning_source="image_store",
+                ),
+            )
+        ]
+    )
+
+    report = collect_vz_reconciliation(
+        orchestrator=_FakeOrchestrator([]),
+        helper_client=helper,
+    )
+
+    assert report["owned_orphaned_vm_ids"] == []
+    assert report["unknown_orphaned_vm_ids"] == ["vm-owned-image-store"]
+    item = next(item for item in report["items"] if item.get("vm_id") == "vm-owned-image-store")
+    assert item["status"] == "unknown_orphaned_vm"
+    assert item["reason"] == "image_store_manifest_missing"
+    assert item["termination_eligible"] is False
+    assert item["planning_source"] == "image_store"
+    assert item["template_id"] == "vz_linux:bundle-owned"
+    assert item["run_manifest_path"] == str(missing_manifest)
+    assert item["run_manifest_present"] is False
+
+
+def test_reconciliation_reports_image_store_context_for_owned_orphan(tmp_path: Path) -> None:
+    manifest_path = tmp_path / "runs" / "run-owned" / "manifest.json"
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest_path.write_text("{}", encoding="utf-8")
+    helper = _FakeHelper(
+        [
+            _vm(
+                "vm-owned-image-store",
+                metadata=_metadata(
+                    run_id="run-owned",
+                    template_id="vz_linux:bundle-owned",
+                    run_manifest_path=str(manifest_path),
+                    planning_source="image_store",
+                ),
+            )
+        ]
+    )
+
+    report = collect_vz_reconciliation(
+        orchestrator=_FakeOrchestrator([]),
+        helper_client=helper,
+    )
+
+    assert report["owned_orphaned_vm_ids"] == ["vm-owned-image-store"]
+    item = next(item for item in report["items"] if item.get("vm_id") == "vm-owned-image-store")
+    assert item["status"] == "owned_orphaned_vm"
+    assert item["termination_eligible"] is True
+    assert item["planning_source"] == "image_store"
+    assert item["template_id"] == "vz_linux:bundle-owned"
+    assert item["run_id"] == "run-owned"
+    assert item["run_manifest_path"] == str(manifest_path)
+    assert item["run_manifest_present"] is True
 
 
 def test_reconciliation_classifies_helper_unavailable():

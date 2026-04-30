@@ -321,6 +321,15 @@ class SandboxAdminMacOSReconciliationItem(BaseModel):
     healthy: bool | None = None
     reason: str | None = None
     termination_eligible: bool | None = None
+    run_id: str | None = None
+    helper_session_id: str | None = None
+    template_id: str | None = None
+    persisted_template_id: str | None = None
+    helper_template_id: str | None = None
+    template_id_matches_persisted: bool | None = None
+    planning_source: str | None = None
+    run_manifest_path: str | None = None
+    run_manifest_present: bool | None = None
 
 
 class SandboxAdminMacOSReconciliationDiagnostics(BaseModel):

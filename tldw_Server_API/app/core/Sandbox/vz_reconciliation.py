@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 from loguru import logger
@@ -22,6 +23,7 @@ STATUS_FOREIGN_ORPHAN = "foreign_orphaned_vm"
 REASON_OWNED_ORPHAN = "owned_orphan"
 REASON_UNKNOWN_OWNERSHIP = "unknown_ownership"
 REASON_FOREIGN_OWNER = "foreign_owner"
+REASON_IMAGE_STORE_MANIFEST_MISSING = "image_store_manifest_missing"
 ORPHAN_STATUSES = {
     STATUS_OWNED_ORPHAN,
     STATUS_UNKNOWN_ORPHAN,
@@ -62,6 +64,7 @@ def _append_item(
     healthy: bool | None = None,
     reason: str | None = None,
     termination_eligible: bool | None = None,
+    item_fields: dict[str, object] | None = None,
 ) -> None:
     item: dict[str, object] = {"status": status}
     if session_id:
@@ -76,6 +79,10 @@ def _append_item(
         item["reason"] = reason
     if termination_eligible is not None:
         item["termination_eligible"] = bool(termination_eligible)
+    if item_fields:
+        for key, value in item_fields.items():
+            if value is not None:
+                item[key] = value
     items.append(item)
 
 
@@ -88,6 +95,22 @@ def _sort_items(items: list[dict[str, object]]) -> list[dict[str, object]]:
             str(item.get("vm_id") or ""),
         ),
     )
+
+
+def _metadata_context(vm: object) -> dict[str, object]:
+    metadata = getattr(vm, "metadata", None)
+    run_manifest_path = _clean_id(getattr(metadata, "run_manifest_path", ""))
+    planning_source = _clean_id(getattr(metadata, "planning_source", ""))
+    return {
+        "template_id": _clean_id(getattr(metadata, "template_id", "")) or None,
+        "run_id": _clean_id(getattr(metadata, "run_id", "")) or None,
+        "helper_session_id": _clean_id(getattr(metadata, "session_id", "")) or None,
+        "planning_source": planning_source or None,
+        "run_manifest_path": run_manifest_path or None,
+        "run_manifest_present": (
+            Path(run_manifest_path).is_file() if planning_source == "image_store" and run_manifest_path else None
+        ),
+    }
 
 
 def _classify_orphan_vm(vm: object) -> tuple[str, bool, str]:
@@ -106,6 +129,14 @@ def _classify_orphan_vm(vm: object) -> tuple[str, bool, str]:
     session_id = _clean_id(getattr(metadata, "session_id", ""))
     if not run_id or not created_at or (session_mode and not session_id):
         return STATUS_UNKNOWN_ORPHAN, False, REASON_UNKNOWN_OWNERSHIP
+    planning_source = _clean_id(getattr(metadata, "planning_source", ""))
+    if planning_source == "image_store":
+        run_manifest_path = _clean_id(getattr(metadata, "run_manifest_path", ""))
+        template_id = _clean_id(getattr(metadata, "template_id", ""))
+        if not template_id or not run_manifest_path:
+            return STATUS_UNKNOWN_ORPHAN, False, REASON_UNKNOWN_OWNERSHIP
+        if not Path(run_manifest_path).is_file():
+            return STATUS_UNKNOWN_ORPHAN, False, REASON_IMAGE_STORE_MANIFEST_MISSING
     return STATUS_OWNED_ORPHAN, True, REASON_OWNED_ORPHAN
 
 
@@ -163,10 +194,15 @@ def collect_vz_reconciliation(
         for vm in list(getattr(live, "vms", None) or [])
         if (vm_id := _clean_id(getattr(vm, "vm_id", "")))
     }
+    persisted_row_by_session = {
+        session_id: row
+        for row in persisted_rows
+        if (session_id := _clean_id(row.get("id")))
+    }
     persisted_vm_by_session = {
         session_id: vm_id
-        for row in persisted_rows
-        if (session_id := _clean_id(row.get("id"))) and (vm_id := _clean_id(row.get("vm_id")))
+        for session_id, row in persisted_row_by_session.items()
+        if (vm_id := _clean_id(row.get("vm_id")))
     }
     persisted_vm_ids = set(persisted_vm_by_session.values())
 
@@ -182,6 +218,8 @@ def collect_vz_reconciliation(
 
     for session_id, vm_id in persisted_vm_by_session.items():
         is_active_session = active_session_checker is not None and active_session_checker(session_id)
+        persisted_row = persisted_row_by_session.get(session_id, {})
+        persisted_template_id = _clean_id(persisted_row.get("template_id")) or None
         vm = live_vm_by_id.get(vm_id)
         if vm is None:
             if is_active_session:
@@ -192,6 +230,7 @@ def collect_vz_reconciliation(
                     session_id=session_id,
                     vm_id=vm_id,
                     reason="active_session",
+                    item_fields={"persisted_template_id": persisted_template_id},
                 )
                 continue
             stale_session_ids.append(session_id)
@@ -201,11 +240,23 @@ def collect_vz_reconciliation(
                 session_id=session_id,
                 vm_id=vm_id,
                 reason="vm_missing",
+                item_fields={"persisted_template_id": persisted_template_id},
             )
             continue
 
         state = _clean_id(getattr(vm, "state", ""))
         healthy = bool(getattr(vm, "healthy", False))
+        metadata_fields = _metadata_context(vm)
+        helper_template_id = str(metadata_fields.get("template_id") or "").strip() or None
+        template_id_matches = None
+        if persisted_template_id is not None and helper_template_id is not None:
+            template_id_matches = persisted_template_id == helper_template_id
+        item_fields = {
+            **metadata_fields,
+            "persisted_template_id": persisted_template_id,
+            "helper_template_id": helper_template_id,
+            "template_id_matches_persisted": template_id_matches,
+        }
         if healthy:
             healthy_session_ids.append(session_id)
             _append_item(
@@ -215,6 +266,7 @@ def collect_vz_reconciliation(
                 vm_id=vm_id,
                 state=state,
                 healthy=healthy,
+                item_fields=item_fields,
             )
             continue
 
@@ -228,6 +280,7 @@ def collect_vz_reconciliation(
                 state=state,
                 healthy=healthy,
                 reason="active_session",
+                item_fields=item_fields,
             )
             continue
 
@@ -240,6 +293,7 @@ def collect_vz_reconciliation(
             state=state,
             healthy=healthy,
             reason="vm_unhealthy",
+            item_fields=item_fields,
         )
 
     for vm_id, vm in live_vm_by_id.items():
@@ -261,6 +315,7 @@ def collect_vz_reconciliation(
             healthy=bool(getattr(vm, "healthy", False)),
             reason=reason,
             termination_eligible=termination_eligible,
+            item_fields=_metadata_context(vm),
         )
 
     report["computed"] = True
