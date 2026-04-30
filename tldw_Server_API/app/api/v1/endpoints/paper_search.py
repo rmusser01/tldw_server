@@ -2459,7 +2459,7 @@ async def repec_citations(handle: str = Query(..., min_length=8)):
 
 @router.get(
     "/ieee",
-    response_model=GenericSearchResponse,
+    response_model=GenericPageSearchResponse,
     summary="Search IEEE Xplore (scaffold)",
     tags=["paper-search"],
 )
@@ -2485,7 +2485,7 @@ async def paper_search_ieee(search_params: IEEESearchRequestForm = Depends()):
         total_pages = math.ceil(total / search_params.results_per_page) if search_params.results_per_page > 0 else 0
         if total == 0:
             total_pages = 0
-        return GenericSearchResponse(
+        return GenericPageSearchResponse(
             query_echo={
                 "q": search_params.q,
                 "from_year": search_params.from_year,
@@ -2498,6 +2498,12 @@ async def paper_search_ieee(search_params: IEEESearchRequestForm = Depends()):
             page=search_params.page,
             results_per_page=search_params.results_per_page,
             total_pages=total_pages,
+            pagination=build_page_pagination_meta(
+                page=search_params.page,
+                per_page=search_params.results_per_page,
+                total=total,
+                total_pages=total_pages,
+            ),
         )
     except HTTPException:
         raise
@@ -2552,7 +2558,7 @@ async def paper_search_ieee_by_id(article_number: str = Query(...)):
 
 @router.get(
     "/springer",
-    response_model=GenericSearchResponse,
+    response_model=GenericPageSearchResponse,
     summary="Search Springer Nature (scaffold)",
     tags=["paper-search"],
 )
@@ -2577,7 +2583,7 @@ async def paper_search_springer(search_params: SimpleVenueSearchForm = Depends()
         total_pages = math.ceil(total / search_params.results_per_page) if search_params.results_per_page > 0 else 0
         if total == 0:
             total_pages = 0
-        return GenericSearchResponse(
+        return GenericPageSearchResponse(
             query_echo={
                 "q": search_params.q,
                 "journal": search_params.venue,
@@ -2589,6 +2595,12 @@ async def paper_search_springer(search_params: SimpleVenueSearchForm = Depends()
             page=search_params.page,
             results_per_page=search_params.results_per_page,
             total_pages=total_pages,
+            pagination=build_page_pagination_meta(
+                page=search_params.page,
+                per_page=search_params.results_per_page,
+                total=total,
+                total_pages=total_pages,
+            ),
         )
     except HTTPException:
         raise

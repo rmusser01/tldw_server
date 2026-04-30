@@ -294,6 +294,86 @@ async def test_hal_search_success(monkeypatch, paper_search_app):
 
 
 @pytest.mark.asyncio
+async def test_ieee_search_success(monkeypatch, paper_search_app):
+
+    def _fake_ieee(q, offset, results_per_page, from_year, to_year, publication_title, authors):
+
+        items = [
+            {
+                "id": "ieee-123",
+                "title": "IEEE Conference Paper",
+                "authors": "Smith, A.",
+                "pub_date": "2022-06-01",
+                "doi": "10.1109/TEST.2022.123",
+                "url": "https://ieeexplore.ieee.org/document/123",
+                "provider": "ieee",
+            }
+        ]
+        return items, 1, None
+
+    from tldw_Server_API.app.core.Third_Party import IEEE_Xplore as _IEEE
+    monkeypatch.setattr(_IEEE, "search_ieee", _fake_ieee)
+
+    async with AsyncClient(transport=ASGITransport(app=paper_search_app), base_url="http://test") as client:
+        r = await client.get(
+            "/api/v1/paper-search/ieee",
+            params={"q": "transformer", "page": 1, "results_per_page": 10},
+        )
+        assert r.status_code == 200
+        data = r.json()
+        assert data["total_results"] == 1
+        assert len(data["items"]) == 1
+        assert data["pagination"] == {
+            "mode": "page",
+            "page": 1,
+            "per_page": 10,
+            "total": 1,
+            "total_pages": 1,
+            "has_more": False,
+        }
+
+
+@pytest.mark.asyncio
+async def test_springer_search_success(monkeypatch, paper_search_app):
+
+    def _fake_springer(q, offset, results_per_page, venue, from_year, to_year):
+
+        items = [
+            {
+                "id": "springer-456",
+                "title": "Springer Journal Article",
+                "authors": "Taylor, B.",
+                "pub_date": "2021-03-15",
+                "doi": "10.1007/s00134-021-456",
+                "url": "https://link.springer.com/article/10.1007/s00134-021-456",
+                "provider": "springer",
+            }
+        ]
+        return items, 1, None
+
+    from tldw_Server_API.app.core.Third_Party import Springer_Nature as _Springer
+    monkeypatch.setattr(_Springer, "search_springer", _fake_springer)
+
+    async with AsyncClient(transport=ASGITransport(app=paper_search_app), base_url="http://test") as client:
+        r = await client.get(
+            "/api/v1/paper-search/springer",
+            params={"q": "critical care", "page": 1, "results_per_page": 10},
+        )
+        assert r.status_code == 200
+        data = r.json()
+        assert data["total_results"] == 1
+        assert len(data["items"]) == 1
+        assert data["pagination"] == {
+            "mode": "page",
+            "page": 1,
+            "per_page": 10,
+            "total": 1,
+            "total_pages": 1,
+            "has_more": False,
+        }
+
+
+@pytest.mark.asyncio
 async def test_biorxiv_by_doi_success(monkeypatch, paper_search_app):
 
     def _fake_by_doi(doi, server):
