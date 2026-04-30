@@ -11,6 +11,7 @@ import stat
 # Operator CLI intentionally invokes SwiftPM, codesign, ps, and helper binaries.
 import subprocess  # nosec B404
 import sys
+import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Callable, Iterable
@@ -310,9 +311,16 @@ def validate_pid_file(
     return CheckResult(ok=True, reason="helper_pid_running")
 
 
-def _start_process(argv: list[str], env: dict[str, str]) -> StartedProcess:
+def _start_process(
+    argv: list[str],
+    env: dict[str, str],
+    *,
+    stdout_path: Path,
+    stderr_path: Path,
+) -> StartedProcess:
     # Helper argv is executed directly without a shell.
-    process = subprocess.Popen(argv, env=env)  # nosec B603
+    with stdout_path.open("ab") as stdout_file, stderr_path.open("ab") as stderr_file:
+        process = subprocess.Popen(argv, env=env, stdout=stdout_file, stderr=stderr_file)  # nosec B603
     return StartedProcess(pid=int(process.pid))
 
 
@@ -337,6 +345,18 @@ def _ping_helper(socket_path: Path) -> CheckResult:
     return CheckResult(ok=True)
 
 
+def wait_for_socket(socket_path: Path, *, timeout_sec: float = 10.0, interval_sec: float = 0.05) -> CheckResult:
+    deadline = time.monotonic() + timeout_sec
+    while time.monotonic() < deadline:
+        socket_result = validate_socket_path(socket_path)
+        if not socket_result.ok:
+            return socket_result
+        if socket_path.exists():
+            return CheckResult(ok=True)
+        time.sleep(interval_sec)
+    return CheckResult(ok=False, reason="helper_socket_not_ready")
+
+
 def _remove_pid_file(pid_file: Path) -> None:
     try:
         pid_file.unlink()
@@ -351,7 +371,8 @@ def start_helper(
     log_dir: Path,
     *,
     dry_run: bool = False,
-    process_starter: Callable[[list[str], dict[str, str]], StartedProcess] = _start_process,
+    process_starter: Callable[..., StartedProcess] = _start_process,
+    socket_waiter: Callable[[Path], CheckResult] = wait_for_socket,
     ping_checker: Callable[[Path], CheckResult] = _ping_helper,
     process_killer: Callable[[int], None] = _kill_process,
     process_lookup: Callable[[int], ProcessInfo | None] = lookup_process,
@@ -384,8 +405,15 @@ def start_helper(
     if dry_run:
         return CheckResult(ok=run_command([str(helper_path)], dry_run=True, env=env) == 0)
 
-    started = process_starter([str(helper_path)], env)
+    stdout_path = log_dir / "helper.stdout.log"
+    stderr_path = log_dir / "helper.stderr.log"
+    started = process_starter([str(helper_path)], env, stdout_path=stdout_path, stderr_path=stderr_path)
     pid_file.write_text(f"{started.pid}\n", encoding="utf-8")
+    socket_ready = socket_waiter(socket_path)
+    if not socket_ready.ok:
+        process_killer(started.pid)
+        _remove_pid_file(pid_file)
+        return socket_ready
     ping_result = ping_checker(socket_path)
     if not ping_result.ok:
         process_killer(started.pid)

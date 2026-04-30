@@ -590,7 +590,8 @@ def test_start_helper_cleans_up_started_process_on_ping_failure(tmp_path):
         socket_path,
         pid_file,
         log_dir,
-        process_starter=lambda argv, env: helperctl.StartedProcess(pid=1234),
+        process_starter=lambda argv, env, **kwargs: helperctl.StartedProcess(pid=1234),
+        socket_waiter=lambda path: helperctl.CheckResult(True),
         ping_checker=lambda path: helperctl.CheckResult(False, "helper_ping_failed"),
         process_killer=lambda pid: killed.append(pid),
     )
@@ -598,3 +599,64 @@ def test_start_helper_cleans_up_started_process_on_ping_failure(tmp_path):
     CASE.assertEqual(result, helperctl.CheckResult(ok=False, reason="helper_ping_failed"))
     CASE.assertEqual(killed, [1234])
     CASE.assertFalse(pid_file.exists())
+
+
+def test_start_helper_cleans_up_started_process_on_socket_wait_failure(tmp_path):
+    helperctl = load_helperctl()
+    helper = tmp_path / "macos-vz-helper"
+    socket_path = tmp_path / "runtime" / "helper.sock"
+    pid_file = tmp_path / "runtime" / "helper.pid"
+    log_dir = tmp_path / "logs"
+    helper.write_text("#!/bin/sh\n", encoding="utf-8")
+    helper.chmod(0o700)
+    killed = []
+    ping_calls = []
+
+    result = helperctl.start_helper(
+        helper,
+        socket_path,
+        pid_file,
+        log_dir,
+        process_starter=lambda argv, env, **kwargs: helperctl.StartedProcess(pid=1234),
+        socket_waiter=lambda path: helperctl.CheckResult(False, "helper_socket_not_ready"),
+        ping_checker=lambda path: ping_calls.append(path) or helperctl.CheckResult(True),
+        process_killer=lambda pid: killed.append(pid),
+    )
+
+    CASE.assertEqual(result, helperctl.CheckResult(ok=False, reason="helper_socket_not_ready"))
+    CASE.assertEqual(killed, [1234])
+    CASE.assertEqual(ping_calls, [])
+    CASE.assertFalse(pid_file.exists())
+
+
+def test_start_helper_passes_managed_log_paths_to_process_starter(tmp_path):
+    helperctl = load_helperctl()
+    helper = tmp_path / "macos-vz-helper"
+    socket_path = tmp_path / "runtime" / "helper.sock"
+    pid_file = tmp_path / "runtime" / "helper.pid"
+    log_dir = tmp_path / "logs"
+    helper.write_text("#!/bin/sh\n", encoding="utf-8")
+    helper.chmod(0o700)
+    received = {}
+
+    def process_starter(argv, env, **kwargs):
+        received["argv"] = argv
+        received["env"] = env
+        received["kwargs"] = kwargs
+        return helperctl.StartedProcess(pid=1234)
+
+    result = helperctl.start_helper(
+        helper,
+        socket_path,
+        pid_file,
+        log_dir,
+        process_starter=process_starter,
+        socket_waiter=lambda path: helperctl.CheckResult(True),
+        ping_checker=lambda path: helperctl.CheckResult(True),
+    )
+
+    CASE.assertEqual(result, helperctl.CheckResult(ok=True))
+    CASE.assertEqual(received["argv"], [str(helper)])
+    CASE.assertEqual(received["env"]["TLDW_SANDBOX_VZ_LINUX_SERIAL_LOG_DIR"], str(log_dir / "serial"))
+    CASE.assertEqual(received["kwargs"]["stdout_path"], log_dir / "helper.stdout.log")
+    CASE.assertEqual(received["kwargs"]["stderr_path"], log_dir / "helper.stderr.log")
