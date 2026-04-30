@@ -181,10 +181,14 @@ The canonical bundle can also drive the repeatable host-side E2E smoke:
 
 ```bash
 ./scripts/run-host-e2e-smoke.sh --dry-run --bundle "${BUNDLE_DIR}"
+runtime_dir="$(mktemp -d "${TMPDIR:-/tmp}/tldw-vz-helper-e2e.XXXXXX")"
+trap 'rm -rf "${runtime_dir}"' EXIT
+chmod 700 "${runtime_dir}"
+
 ./scripts/run-host-e2e-smoke.sh \
   --bundle "${BUNDLE_DIR}" \
-  --socket /tmp/tldw-vz-helper-e2e.sock \
-  --serial-log-dir /tmp/tldw-vz-serial-e2e
+  --socket "${runtime_dir}/helper.sock" \
+  --serial-log-dir "${runtime_dir}/serial"
 ```
 
 On a prepared Apple silicon macOS host, that script builds the Swift helper
@@ -192,6 +196,10 @@ when needed, optionally signs it with `--entitlements`, runs the helper-daemon
 bundle smoke, starts a helper daemon for the Python sandbox runtime, runs real
 `vz_linux` ephemeral execution, verifies same-session VM reuse, and stops the
 helper on exit.
+
+The helper refuses sockets whose parent directory is not owner-only. Do not put
+the helper socket directly under `/tmp`; use the script defaults or create a
+private `0700` runtime directory as shown above.
 
 The lower-level helper smoke remains available for focused debugging:
 
