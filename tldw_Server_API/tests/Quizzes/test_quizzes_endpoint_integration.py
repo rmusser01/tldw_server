@@ -678,6 +678,10 @@ def test_quiz_list_ignores_workspace_tag_query_param(client_with_quizzes_db: Tes
     assert baseline.status_code == 200
     assert filtered.status_code == 200
     assert filtered.json()["count"] == baseline.json()["count"]
+    assert filtered.json()["pagination"]["total"] == filtered.json()["count"]
+    assert filtered.json()["pagination"]["limit"] == 50
+    assert filtered.json()["pagination"]["offset"] == 0
+    assert filtered.json()["pagination"]["has_more"] is False
 
 
 def test_list_quizzes_maps_input_error_to_400(
@@ -746,6 +750,46 @@ def test_list_questions_maps_input_error_to_400(
     assert response.json()["detail"] == "invalid question list query"
 
 
+def test_question_list_returns_canonical_pagination(client_with_quizzes_db: TestClient):
+    create_quiz_response = client_with_quizzes_db.post(
+        "/api/v1/quizzes",
+        json={"name": "Question Pagination Quiz"},
+        headers=AUTH_HEADERS,
+    )
+    assert create_quiz_response.status_code == 200
+    quiz_id = create_quiz_response.json()["id"]
+
+    for index in range(2):
+        create_question_response = client_with_quizzes_db.post(
+            f"/api/v1/quizzes/{quiz_id}/questions",
+            json={
+                "question_type": "multiple_choice",
+                "question_text": f"Question {index}",
+                "options": ["A", "B"],
+                "correct_answer": 1,
+                "points": 1,
+                "order_index": index,
+            },
+            headers=AUTH_HEADERS,
+        )
+        assert create_question_response.status_code == 200
+
+    response = client_with_quizzes_db.get(
+        f"/api/v1/quizzes/{quiz_id}/questions",
+        params={"limit": 1, "offset": 1},
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["count"] == 2
+    assert len(payload["items"]) == 1
+    assert payload["pagination"]["total"] == 2
+    assert payload["pagination"]["limit"] == 1
+    assert payload["pagination"]["offset"] == 1
+    assert payload["pagination"]["has_more"] is False
+
+
 def test_attempts_list_route_is_not_shadowed_by_quiz_id(client_with_quizzes_db: TestClient):
     create_quiz_response = client_with_quizzes_db.post(
         "/api/v1/quizzes",
@@ -793,6 +837,9 @@ def test_attempts_list_route_is_not_shadowed_by_quiz_id(client_with_quizzes_db: 
     assert attempts_payload["count"] >= 1
     assert any(item["id"] == attempt_id for item in attempts_payload["items"])
     assert all(item["quiz_id"] == quiz_id for item in attempts_payload["items"])
+    assert attempts_payload["pagination"]["total"] >= 1
+    assert attempts_payload["pagination"]["limit"] == 20
+    assert attempts_payload["pagination"]["offset"] == 0
 
 
 def test_start_attempt_returns_404_for_missing_quiz(client_with_quizzes_db: TestClient):

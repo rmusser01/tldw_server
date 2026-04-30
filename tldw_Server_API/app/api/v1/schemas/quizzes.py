@@ -3,6 +3,8 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
+
 from .flashcards import (
     DeckReviewPromptSide,
     DeckSchedulerSettingsEnvelope,
@@ -95,6 +97,7 @@ class QuizResponse(BaseModel):
 class QuizListResponse(BaseModel):
     items: list[QuizResponse]
     count: int
+    pagination: OffsetPaginationMeta
 
 
 class QuestionCreate(BaseModel):
@@ -155,6 +158,7 @@ class QuestionAdminResponse(QuestionPublicResponse):
 class QuestionListResponse(BaseModel):
     items: list[QuestionPublicResponse | QuestionAdminResponse]
     count: int
+    pagination: OffsetPaginationMeta
 
 
 class QuizAnswerInput(BaseModel):
@@ -196,6 +200,7 @@ class AttemptResponse(BaseModel):
 class AttemptListResponse(BaseModel):
     items: list[AttemptResponse]
     count: int
+    pagination: OffsetPaginationMeta
 
 
 class QuizRemediationConversionSummary(BaseModel):
