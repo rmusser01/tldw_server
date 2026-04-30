@@ -534,6 +534,86 @@ async def test_chemrxiv_items_search_success(monkeypatch, paper_search_app):
 
 
 @pytest.mark.asyncio
+async def test_earthrxiv_search_success(monkeypatch, paper_search_app):
+
+    def _fake_earthrxiv(term, page, results_per_page, from_date):
+
+        items = [
+            {
+                "id": "earthrxiv-901",
+                "title": "EarthArXiv Preprint",
+                "authors": "Garcia, H.",
+                "pub_date": "2023-08-18",
+                "doi": "10.31223/earthrxiv.901",
+                "url": "https://eartharxiv.org/repository/view/901/",
+                "provider": "earthrxiv",
+            }
+        ]
+        return items, 1, None
+
+    from tldw_Server_API.app.core.Third_Party import EarthRxiv as _EarthRxiv
+    monkeypatch.setattr(_EarthRxiv, "search_items", _fake_earthrxiv)
+
+    async with AsyncClient(transport=ASGITransport(app=paper_search_app), base_url="http://test") as client:
+        r = await client.get(
+            "/api/v1/paper-search/earthrxiv",
+            params={"term": "climate", "page": 1, "results_per_page": 10},
+        )
+        assert r.status_code == 200
+        data = r.json()
+        assert data["total_results"] == 1
+        assert len(data["items"]) == 1
+        assert data["pagination"] == {
+            "mode": "page",
+            "page": 1,
+            "per_page": 10,
+            "total": 1,
+            "total_pages": 1,
+            "has_more": False,
+        }
+
+
+@pytest.mark.asyncio
+async def test_osf_search_success(monkeypatch, paper_search_app):
+
+    def _fake_osf(term, page, results_per_page, provider, from_date):
+
+        items = [
+            {
+                "id": "osf-234",
+                "title": "OSF Preprint",
+                "authors": "Ivanov, I.",
+                "pub_date": "2022-04-22",
+                "doi": "10.31219/osf.io/234ab",
+                "url": "https://osf.io/preprints/osf/234ab",
+                "provider": "osf",
+            }
+        ]
+        return items, 1, None
+
+    from tldw_Server_API.app.core.Third_Party import OSF as _OSF
+    monkeypatch.setattr(_OSF, "search_preprints", _fake_osf)
+
+    async with AsyncClient(transport=ASGITransport(app=paper_search_app), base_url="http://test") as client:
+        r = await client.get(
+            "/api/v1/paper-search/osf",
+            params={"term": "reproducibility", "page": 1, "results_per_page": 10},
+        )
+        assert r.status_code == 200
+        data = r.json()
+        assert data["total_results"] == 1
+        assert len(data["items"]) == 1
+        assert data["pagination"] == {
+            "mode": "page",
+            "page": 1,
+            "per_page": 10,
+            "total": 1,
+            "total_pages": 1,
+            "has_more": False,
+        }
+
+
+@pytest.mark.asyncio
 async def test_biorxiv_by_doi_success(monkeypatch, paper_search_app):
 
     def _fake_by_doi(doi, server):

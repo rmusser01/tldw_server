@@ -3683,7 +3683,7 @@ async def iacr_conf_raw(
 
 @router.get(
     "/earthrxiv",
-    response_model=GenericSearchResponse,
+    response_model=GenericPageSearchResponse,
     summary="Search EarthArXiv (OSF) preprints",
     tags=["paper-search"],
 )
@@ -3701,13 +3701,19 @@ async def earthrxiv_search(
         if items is None:
             raise HTTPException(status_code=500, detail="EarthArXiv search failed to return data.")  # noqa: TRY301
         total_pages = math.ceil(total / results_per_page) if results_per_page > 0 else 0
-        return GenericSearchResponse(
+        return GenericPageSearchResponse(
             query_echo={"term": term, "from_date": from_date},
             items=[GenericPaper(**it) for it in items],
             total_results=total,
             page=page,
             results_per_page=results_per_page,
             total_pages=total_pages,
+            pagination=build_page_pagination_meta(
+                page=page,
+                per_page=results_per_page,
+                total=total,
+                total_pages=total_pages,
+            ),
         )
     except HTTPException:
         raise
@@ -3764,7 +3770,7 @@ async def earthrxiv_by_doi(doi: str = Query(..., min_length=3)):
 
 @router.get(
     "/osf",
-    response_model=GenericSearchResponse,
+    response_model=GenericPageSearchResponse,
     summary="Search OSF preprints (all providers or a specific provider)",
     tags=["paper-search"],
 )
@@ -3785,7 +3791,7 @@ async def osf_search(search: OSFSearchRequestForm = Depends()):
         if items is None:
             raise HTTPException(status_code=500, detail="OSF search failed to return data.")  # noqa: TRY301
         total_pages = math.ceil(total / search.results_per_page) if search.results_per_page > 0 else 0
-        return GenericSearchResponse(
+        return GenericPageSearchResponse(
             query_echo={
                 "term": search.term,
                 "provider": search.provider,
@@ -3796,6 +3802,12 @@ async def osf_search(search: OSFSearchRequestForm = Depends()):
             page=search.page,
             results_per_page=search.results_per_page,
             total_pages=total_pages,
+            pagination=build_page_pagination_meta(
+                page=search.page,
+                per_page=search.results_per_page,
+                total=total,
+                total_pages=total_pages,
+            ),
         )
     except HTTPException:
         raise
