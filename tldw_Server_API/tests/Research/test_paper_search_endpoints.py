@@ -448,6 +448,14 @@ async def test_biorxiv_pubs_search_success(monkeypatch):
         assert r.status_code == 200
         data = r.json()
         assert data["total_results"] == 1
+        assert data["pagination"] == {
+            "mode": "page",
+            "page": 1,
+            "per_page": 10,
+            "total": 1,
+            "total_pages": 1,
+            "has_more": False,
+        }
         # Now request compact (no abstracts)
         r2 = await client.get(
             "/api/v1/paper-search/biorxiv-pubs",
@@ -455,6 +463,14 @@ async def test_biorxiv_pubs_search_success(monkeypatch):
         )
         assert r2.status_code == 200
         d2 = r2.json()
+        assert d2["pagination"] == {
+            "mode": "page",
+            "page": 1,
+            "per_page": 10,
+            "total": 1,
+            "total_pages": 1,
+            "has_more": False,
+        }
         assert d2["items"][0].get("preprint_abstract") is None
 
 

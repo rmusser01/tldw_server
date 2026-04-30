@@ -1770,6 +1770,12 @@ async def paper_search_biorxiv_pubs(
         page=search_params.page,
         results_per_page=search_params.results_per_page,
         total_pages=total_pages,
+        pagination=build_page_pagination_meta(
+            page=search_params.page,
+            per_page=search_params.results_per_page,
+            total=total_results,
+            total_pages=total_pages,
+        ),
     )
 
 
