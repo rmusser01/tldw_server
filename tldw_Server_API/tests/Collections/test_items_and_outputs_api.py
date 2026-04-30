@@ -829,6 +829,10 @@ async def test_outputs_list_deleted_invalid_path_fallback_log_is_sanitized(monke
     )
 
     assert result.items[0].storage_path == "../private/deleted.md"
+    assert result.pagination.total == 1
+    assert result.pagination.limit == 50
+    assert result.pagination.offset == 0
+    assert result.pagination.has_more is False
     assert logger.warnings == ["outputs.list_deleted: invalid storage path skipped"]
     logged = "\n".join(logger.warnings)
     assert "888" not in logged
@@ -1159,6 +1163,9 @@ def test_outputs_preview_with_inline_data_and_generate(client_with_user, tmp_pat
     assert r.status_code == 200
     lst = r.json()
     assert lst["total"] >= 1
+    assert lst["pagination"]["total"] >= 1
+    assert lst["pagination"]["limit"] == 10
+    assert lst["pagination"]["offset"] == 0
     assert any(it["id"] == oid for it in lst.get("items", []))
 
 
