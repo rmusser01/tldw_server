@@ -13,6 +13,7 @@ from pydantic import ValidationError
 
 # Database and authentication dependencies
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 
 # Schemas
@@ -659,7 +660,13 @@ async def get_chat_messages(
                 messages=built_messages,
                 total=total_count,
                 limit=limit,
-                offset=offset
+                offset=offset,
+                pagination=build_offset_pagination_meta(
+                    total=total_count,
+                    limit=limit,
+                    offset=offset,
+                    count=len(built_messages),
+                ),
             )
 
             # Add character context as additional field
@@ -722,7 +729,13 @@ async def get_chat_messages(
             messages=built_messages,
             total=total_count,
             limit=limit,
-            offset=offset
+            offset=offset,
+            pagination=build_offset_pagination_meta(
+                total=total_count,
+                limit=limit,
+                offset=offset,
+                count=len(built_messages),
+            ),
         )
 
     except HTTPException:
@@ -1065,7 +1078,13 @@ async def search_messages(
             messages=[_convert_db_message_to_response(msg) for msg in results],
             total=len(results),
             limit=limit,
-            offset=0
+            offset=0,
+            pagination=build_offset_pagination_meta(
+                total=len(results),
+                limit=limit,
+                offset=0,
+                count=len(results),
+            ),
         )
 
     except HTTPException:

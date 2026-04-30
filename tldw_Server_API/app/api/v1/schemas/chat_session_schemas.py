@@ -309,6 +309,7 @@ class MessageListResponse(BaseModel):
     total: int = Field(..., description="Total number of messages")
     limit: int = Field(..., description="Number of items per page")
     offset: int = Field(..., description="Offset for pagination")
+    pagination: OffsetPaginationMeta
 
 
 # ========================================================================

@@ -101,6 +101,14 @@ async def test_character_chat_flow_sessions_messages_worldbooks():
             # When not using format_for_completions, response is a dict with messages list
             assert "messages" in msgs
             assert any(m.get("id") == message_id for m in msgs["messages"])  # our message present
+            assert msgs["pagination"] == {
+                "mode": "offset",
+                "limit": 50,
+                "offset": 0,
+                "total": 1,
+                "has_more": False,
+                "next_offset": None,
+            }
 
             # 6) Delete the message (optimistic lock)
             r = await client.delete(
@@ -266,9 +274,18 @@ async def test_message_placeholders_and_length_guard(monkeypatch):
             # Standard message listing should replace placeholders
             r = await client.get(f"/api/v1/chats/{chat_id}/messages", headers=headers)
             assert r.status_code == 200
-            msgs = r.json().get("messages", [])
+            body = r.json()
+            msgs = body.get("messages", [])
             assistant_msg = next(m for m in msgs if m.get("sender") == "assistant")
             assert assistant_msg["content"] == f"Hi User, I'm {char_name}."
+            assert body["pagination"] == {
+                "mode": "offset",
+                "limit": 50,
+                "offset": 0,
+                "total": 1,
+                "has_more": False,
+                "next_offset": None,
+            }
 
             # Completions-formatted messages should replace placeholders in system context
             r = await client.get(
