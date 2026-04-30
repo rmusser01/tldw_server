@@ -17,6 +17,12 @@ const gettingStarted: TutorialDefinition = {
     "A quick tour of the main features to help you get the most out of tldw",
   icon: Rocket,
   priority: 0,
+  sequence: {
+    nextTutorialId: "getting-started-knowledge",
+    nextRoute: "/knowledge",
+    nextLabelKey: "tutorials:gettingStarted.sequence.knowledgeLabel",
+    nextLabelFallback: "Continue in Knowledge"
+  },
   steps: [
     {
       target: '[data-testid="companion-home-shell"]',

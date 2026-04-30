@@ -10,6 +10,7 @@ const markPromptSeenMock = vi.fn()
 const startTutorialMock = vi.fn()
 
 const tutorialStoreState = {
+  completedTutorials: [] as string[],
   hasSeenPromptForPage: vi.fn(() => false),
   markPromptSeen: markPromptSeenMock,
   startTutorial: startTutorialMock,
@@ -17,9 +18,18 @@ const tutorialStoreState = {
   activeTutorialId: null as string | null
 }
 
-const hasTutorialsForRouteMock = vi.fn<(route: string) => boolean>(() => true)
+type TutorialRouteOptions = {
+  completedTutorialIds?: readonly string[]
+}
+
+const hasTutorialsForRouteMock = vi.fn<
+  (route: string, options?: TutorialRouteOptions) => boolean
+>(() => true)
 const getPrimaryTutorialForRouteMock = vi.fn<
-  (route: string) => {
+  (
+    route: string,
+    options?: TutorialRouteOptions
+  ) => {
     id: string
     labelKey: string
     labelFallback: string
@@ -84,9 +94,10 @@ vi.mock("@/store/tutorials", () => ({
 }))
 
 vi.mock("@/tutorials", () => ({
-  hasTutorialsForRoute: (route: string) => hasTutorialsForRouteMock(route),
-  getPrimaryTutorialForRoute: (route: string) =>
-    getPrimaryTutorialForRouteMock(route)
+  hasTutorialsForRoute: (route: string, options?: TutorialRouteOptions) =>
+    hasTutorialsForRouteMock(route, options),
+  getPrimaryTutorialForRoute: (route: string, options?: TutorialRouteOptions) =>
+    getPrimaryTutorialForRouteMock(route, options)
 }))
 
 describe("TutorialPrompt behavior", () => {
@@ -94,6 +105,7 @@ describe("TutorialPrompt behavior", () => {
     vi.useFakeTimers()
     vi.clearAllMocks()
     tutorialStoreState.hasSeenPromptForPage.mockReturnValue(false)
+    tutorialStoreState.completedTutorials = []
     tutorialStoreState.isHelpModalOpen = false
     tutorialStoreState.activeTutorialId = null
     capturedNavigate = null
@@ -126,6 +138,42 @@ describe("TutorialPrompt behavior", () => {
 
     expect(infoMock).toHaveBeenCalledTimes(1)
     expect(infoMock.mock.calls[0][0]?.key).toBe("tutorial-prompt-global")
+  })
+
+  it("passes completed tutorial IDs into tutorial route lookups", () => {
+    tutorialStoreState.completedTutorials = ["getting-started"]
+
+    render(
+      <MemoryRouter initialEntries={["/knowledge"]}>
+        <Routes>
+          <Route
+            path="*"
+            element={
+              <>
+                <NavigatorBridge />
+                <TutorialPrompt />
+              </>
+            }
+          />
+        </Routes>
+      </MemoryRouter>
+    )
+
+    act(() => {
+      vi.advanceTimersByTime(2000)
+    })
+
+    const expectedOptions = {
+      completedTutorialIds: ["getting-started"]
+    }
+    expect(hasTutorialsForRouteMock).toHaveBeenCalledWith(
+      "/knowledge",
+      expectedOptions
+    )
+    expect(getPrimaryTutorialForRouteMock).toHaveBeenCalledWith(
+      "/knowledge",
+      expectedOptions
+    )
   })
 
   it("avoids rapid duplicate prompts across route changes", () => {

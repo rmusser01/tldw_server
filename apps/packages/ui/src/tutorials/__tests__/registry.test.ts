@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it } from "vitest"
 import {
   TUTORIAL_REGISTRY,
+  areTutorialPrerequisitesMet,
   getPrimaryTutorialForRoute,
+  getNextTutorialInSequence,
   getTutorialsForRoute,
   isTutorialRuntimeSuppressed,
   normalizeTutorialRoute,
@@ -100,6 +102,82 @@ describe("tutorial registry route matching", () => {
     expect(primaryTutorial?.id).toBe("playground-basics")
   })
 
+  it("filters prerequisite-gated tutorials until their prerequisites are completed", () => {
+    const lockedTutorial: TutorialDefinition = {
+      id: "test-locked-knowledge-tour",
+      routePattern: "/knowledge",
+      labelKey: "tutorials:test.lockedKnowledge.label",
+      labelFallback: "Locked Knowledge Tour",
+      descriptionKey: "tutorials:test.lockedKnowledge.description",
+      descriptionFallback: "A locked route tutorial",
+      prerequisites: ["getting-started"],
+      priority: 0,
+      steps: [
+        {
+          target: "body",
+          titleKey: "tutorials:test.lockedKnowledge.stepTitle",
+          titleFallback: "Step",
+          contentKey: "tutorials:test.lockedKnowledge.stepContent",
+          contentFallback: "Locked route tutorial test"
+        }
+      ]
+    }
+
+    TUTORIAL_REGISTRY.push(lockedTutorial)
+    injectedTutorials.push(lockedTutorial)
+
+    expect(areTutorialPrerequisitesMet(lockedTutorial, [])).toBe(false)
+    expect(
+      getTutorialsForRoute("/knowledge", { completedTutorialIds: [] }).some(
+        (tutorial) => tutorial.id === lockedTutorial.id
+      )
+    ).toBe(false)
+    expect(
+      getTutorialsForRoute("/knowledge", {
+        completedTutorialIds: [],
+        includeLocked: true
+      }).some((tutorial) => tutorial.id === lockedTutorial.id)
+    ).toBe(true)
+    expect(
+      getTutorialsForRoute("/knowledge", {
+        completedTutorialIds: ["getting-started"]
+      }).some((tutorial) => tutorial.id === lockedTutorial.id)
+    ).toBe(true)
+  })
+
+  it("prefers the sequence-specific tutorial once prerequisites are completed", () => {
+    expect(
+      getTutorialsForRoute("/knowledge", { completedTutorialIds: [] }).some(
+        (tutorial) => tutorial.id === "getting-started-knowledge"
+      )
+    ).toBe(false)
+
+    const primaryTutorial = getPrimaryTutorialForRoute("/knowledge", {
+      completedTutorialIds: ["getting-started"]
+    })
+
+    expect(primaryTutorial?.id).toBe("getting-started-knowledge")
+  })
+
+  it("resolves the next eligible tutorial in the getting started sequence", () => {
+    expect(getNextTutorialInSequence("getting-started")?.id).toBe(
+      "getting-started-knowledge"
+    )
+    expect(
+      getNextTutorialInSequence("getting-started-knowledge", ["getting-started"])
+        ?.id
+    ).toBe("document-workspace-basics")
+  })
+
+  it("starts the document workspace tutorial on an always-rendered route shell", () => {
+    const primaryTutorial = getPrimaryTutorialForRoute("/document-workspace")
+
+    expect(primaryTutorial?.id).toBe("document-workspace-basics")
+    expect(primaryTutorial?.steps[0]?.target).toBe(
+      '[data-testid="document-workspace-root"]'
+    )
+  })
+
   it("includes basics tutorials for all P0/P1 page routes", () => {
     const expectedBasicsByRoute: Record<string, string> = {
       "/chat": "playground-basics",
@@ -111,7 +189,8 @@ describe("tutorial registry route matching", () => {
       "/evaluations": "evaluations-basics",
       "/notes": "notes-basics",
       "/flashcards": "flashcards-basics",
-      "/world-books": "world-books-basics"
+      "/world-books": "world-books-basics",
+      "/document-workspace": "document-workspace-basics"
     }
 
     for (const [route, expectedId] of Object.entries(expectedBasicsByRoute)) {
@@ -133,6 +212,9 @@ describe("tutorial registry route matching", () => {
     expect(normalizeTutorialRoute("/options/notes")).toBe("/notes")
     expect(normalizeTutorialRoute("/options/flashcards")).toBe("/flashcards")
     expect(normalizeTutorialRoute("/options/world-books")).toBe("/world-books")
+    expect(normalizeTutorialRoute("/options/document-workspace")).toBe(
+      "/document-workspace"
+    )
     expect(normalizeTutorialRoute("/knowledge/thread/abc123")).toBe("/knowledge")
     expect(normalizeTutorialRoute("/knowledge/shared/share-token")).toBe("/knowledge")
   })
