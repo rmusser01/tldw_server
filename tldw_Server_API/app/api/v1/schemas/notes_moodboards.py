@@ -6,6 +6,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
+
 
 def _normalize_nonempty_text(value: str) -> str:
     text = str(value or "").strip()
@@ -188,3 +190,4 @@ class MoodboardNotesListResponse(BaseModel):
     limit: int = Field(..., ge=1)
     offset: int = Field(..., ge=0)
     total: int | None = Field(default=None, ge=0)
+    pagination: OffsetPaginationMeta

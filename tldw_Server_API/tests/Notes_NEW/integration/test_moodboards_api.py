@@ -108,6 +108,14 @@ def test_moodboard_crud_and_membership_flow(moodboard_client: TestClient):
     paged_body = paged.json()
     assert paged_body["count"] == 1
     assert paged_body["total"] == 2
+    assert paged_body["pagination"] == {
+        "mode": "offset",
+        "limit": 1,
+        "offset": 0,
+        "total": 2,
+        "has_more": True,
+        "next_offset": 1,
+    }
 
     unpin_both = client.delete(f"/api/v1/notes/moodboards/{moodboard_id}/notes/{note_both['id']}")
     assert unpin_both.status_code == 200
