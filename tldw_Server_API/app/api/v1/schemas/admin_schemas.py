@@ -1812,6 +1812,7 @@ class LLMUsageLogResponse(BaseModel):
     total: int
     page: int
     limit: int
+    pagination: OffsetPaginationMeta
 
     model_config = ConfigDict(from_attributes=True)
 
