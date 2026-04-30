@@ -702,11 +702,74 @@ def test_start_helper_cleans_up_started_process_on_ping_failure(tmp_path):
         socket_waiter=lambda path: helperctl.CheckResult(True),
         ping_checker=lambda path: helperctl.CheckResult(False, "helper_ping_failed"),
         process_killer=lambda pid: killed.append(pid),
+        ping_timeout_sec=0.01,
+        ping_interval_sec=0.001,
     )
 
     CASE.assertEqual(result, helperctl.CheckResult(ok=False, reason="helper_ping_failed"))
     CASE.assertEqual(killed, [1234])
     CASE.assertFalse(pid_file.exists())
+
+
+def test_start_helper_retries_transient_ping_until_ready(tmp_path):
+    helperctl = load_helperctl()
+    helper = tmp_path / "macos-vz-helper"
+    socket_path = tmp_path / "runtime" / "helper.sock"
+    pid_file = tmp_path / "runtime" / "helper.pid"
+    log_dir = tmp_path / "logs"
+    helper.write_text("#!/bin/sh\n", encoding="utf-8")
+    helper.chmod(0o700)
+    pings = []
+
+    def ping_checker(path):
+        pings.append(path)
+        if len(pings) == 1:
+            return helperctl.CheckResult(False, "helper_ping_failed")
+        return helperctl.CheckResult(True)
+
+    result = helperctl.start_helper(
+        helper,
+        socket_path,
+        pid_file,
+        log_dir,
+        process_starter=lambda argv, env, **kwargs: helperctl.StartedProcess(pid=1234),
+        socket_waiter=lambda path: helperctl.CheckResult(True),
+        ping_checker=ping_checker,
+        process_lookup=lambda pid: None,
+        ping_timeout_sec=0.05,
+        ping_interval_sec=0.001,
+    )
+
+    CASE.assertEqual(result, helperctl.CheckResult(ok=True))
+    CASE.assertEqual(pings, [socket_path, socket_path])
+
+
+def test_start_helper_preserves_pid_when_failed_start_process_survives(tmp_path):
+    helperctl = load_helperctl()
+    helper = tmp_path / "macos-vz-helper"
+    socket_path = tmp_path / "runtime" / "helper.sock"
+    pid_file = tmp_path / "runtime" / "helper.pid"
+    log_dir = tmp_path / "logs"
+    helper.write_text("#!/bin/sh\n", encoding="utf-8")
+    helper.chmod(0o700)
+    killed = []
+
+    result = helperctl.start_helper(
+        helper,
+        socket_path,
+        pid_file,
+        log_dir,
+        process_starter=lambda argv, env, **kwargs: helperctl.StartedProcess(pid=1234),
+        socket_waiter=lambda path: helperctl.CheckResult(False, "helper_socket_not_ready"),
+        process_killer=lambda pid: killed.append(pid),
+        process_lookup=lambda pid: helperctl.ProcessInfo(pid=pid, command=str(helper)),
+        exit_timeout_sec=0.01,
+        exit_poll_interval_sec=0.001,
+    )
+
+    CASE.assertEqual(result, helperctl.CheckResult(ok=False, reason="helper_stop_timeout"))
+    CASE.assertEqual(killed, [1234])
+    CASE.assertEqual(pid_file.read_text(encoding="utf-8"), "1234\n")
 
 
 def test_start_helper_cleans_up_started_process_on_socket_wait_failure(tmp_path):
@@ -761,6 +824,8 @@ def test_start_helper_removes_owned_socket_on_ping_failure(tmp_path):
         ping_checker=lambda path: helperctl.CheckResult(False, "helper_ping_failed"),
         process_killer=lambda pid: None,
         socket_remover=lambda path, owned_identity: removed.append((path, owned_identity)),
+        ping_timeout_sec=0.01,
+        ping_interval_sec=0.001,
     )
 
     CASE.assertEqual(result, helperctl.CheckResult(ok=False, reason="helper_ping_failed"))
@@ -1004,6 +1069,65 @@ def test_status_results_report_component_state(tmp_path):
     CASE.assertEqual(results["log_directory"].message, str(log_dir))
 
 
+def test_status_pings_socket_even_when_helper_binary_is_missing(tmp_path):
+    helperctl = load_helperctl()
+    helper = tmp_path / "missing-helper"
+    socket_path = tmp_path / "runtime" / "helper.sock"
+    pid_file = tmp_path / "runtime" / "helper.pid"
+    log_dir = tmp_path / "logs"
+    socket_path.parent.mkdir(mode=0o700)
+    socket_path.write_text("socket placeholder", encoding="utf-8")
+    log_dir.mkdir(mode=0o700)
+    ping_calls = []
+
+    results = dict(
+        helperctl.collect_status_results(
+            helper,
+            socket_path,
+            pid_file,
+            log_dir,
+            path_validator=lambda path: helperctl.CheckResult(True),
+            ping_checker=lambda path: ping_calls.append(path) or helperctl.CheckResult(True),
+        )
+    )
+
+    CASE.assertEqual(results["helper_binary"].reason, "helper_binary_missing")
+    CASE.assertEqual(results["ping"], helperctl.CheckResult(ok=True))
+    CASE.assertEqual(ping_calls, [socket_path])
+
+
+def test_check_results_validate_reachable_helper_protocol(tmp_path):
+    helperctl = load_helperctl()
+    helper = tmp_path / "macos-vz-helper"
+    socket_path = tmp_path / "runtime" / "helper.sock"
+    pid_file = tmp_path / "runtime" / "helper.pid"
+    log_dir = tmp_path / "logs"
+    helper.write_text("#!/bin/sh\n", encoding="utf-8")
+    helper.chmod(0o700)
+    pid_file.parent.mkdir(mode=0o700)
+    pid_file.write_text("1234\n", encoding="utf-8")
+
+    results = dict(
+        helperctl.collect_check_results(
+            helper,
+            socket_path,
+            pid_file,
+            log_dir,
+            dry_run=False,
+            entitlement_checker=lambda helper_path, entitlements_path: helperctl.CheckResult(True),
+            ping_checker=lambda path: helperctl.PingState(
+                result=helperctl.CheckResult(False, "helper_protocol_mismatch"),
+                protocol_version="0",
+                helper_version="test-helper",
+            ),
+            process_lookup=lambda pid: helperctl.ProcessInfo(pid=pid, command=str(helper)),
+        )
+    )
+
+    CASE.assertEqual(results["ping"], helperctl.CheckResult(ok=False, reason="helper_protocol_mismatch"))
+    CASE.assertEqual(results["protocol_version"].message, "0")
+
+
 def test_ping_helper_reports_protocol_mismatch(monkeypatch, tmp_path):
     from tldw_Server_API.app.core.Sandbox.macos_virtualization.helper_client import (
         MacOSVirtualizationHelperProtocolError,
@@ -1037,7 +1161,7 @@ def test_stop_helper_terminates_only_validated_pid(tmp_path):
         nonlocal lookups
         lookups += 1
         pid_file.write_text("9999\n", encoding="utf-8")
-        if lookups > 1:
+        if lookups > 2:
             return None
         return helperctl.ProcessInfo(pid=pid, command=str(helper))
 
@@ -1053,6 +1177,34 @@ def test_stop_helper_terminates_only_validated_pid(tmp_path):
     CASE.assertEqual(pid_file.read_text(encoding="utf-8"), "9999\n")
 
 
+def test_stop_helper_revalidates_process_before_signal(tmp_path):
+    helperctl = load_helperctl()
+    helper = tmp_path / "macos-vz-helper"
+    pid_file = tmp_path / "runtime" / "helper.pid"
+    helper.write_text("#!/bin/sh\n", encoding="utf-8")
+    pid_file.parent.mkdir(mode=0o700)
+    pid_file.write_text("1234\n", encoding="utf-8")
+    killed = []
+    lookups = []
+
+    def process_lookup(pid):
+        lookups.append(pid)
+        if len(lookups) == 1:
+            return helperctl.ProcessInfo(pid=pid, command=str(helper))
+        return helperctl.ProcessInfo(pid=pid, command="/bin/other")
+
+    result = helperctl.stop_helper(
+        helper,
+        pid_file,
+        process_lookup=process_lookup,
+        process_killer=lambda pid: killed.append(pid),
+    )
+
+    CASE.assertEqual(result, helperctl.CheckResult(ok=False, reason="helper_pid_process_mismatch"))
+    CASE.assertEqual(killed, [])
+    CASE.assertEqual(pid_file.read_text(encoding="utf-8"), "1234\n")
+
+
 def test_stop_helper_tolerates_missing_pid_directory(tmp_path):
     helperctl = load_helperctl()
 
@@ -1062,6 +1214,19 @@ def test_stop_helper_tolerates_missing_pid_directory(tmp_path):
     )
 
     CASE.assertEqual(result, helperctl.CheckResult(ok=True, reason="helper_not_running"))
+
+
+def test_stop_helper_rejects_malformed_pid_parent(tmp_path):
+    helperctl = load_helperctl()
+    pid_parent = tmp_path / "runtime"
+    pid_parent.write_text("not a directory", encoding="utf-8")
+
+    result = helperctl.stop_helper(
+        tmp_path / "macos-vz-helper",
+        pid_parent / "helper.pid",
+    )
+
+    CASE.assertEqual(result, helperctl.CheckResult(ok=False, reason="helper_directory_unsafe"))
 
 
 def test_stop_helper_preserves_pid_file_when_process_survives_sigterm(tmp_path):
@@ -1085,3 +1250,34 @@ def test_stop_helper_preserves_pid_file_when_process_survives_sigterm(tmp_path):
     CASE.assertEqual(result, helperctl.CheckResult(ok=False, reason="helper_stop_timeout"))
     CASE.assertEqual(killed, [1234])
     CASE.assertEqual(pid_file.read_text(encoding="utf-8"), "1234\n")
+
+
+def test_stop_helper_removes_owned_socket_after_process_exit(tmp_path):
+    helperctl = load_helperctl()
+    helper = tmp_path / "macos-vz-helper"
+    pid_file = tmp_path / "runtime" / "helper.pid"
+    socket_path = tmp_path / "runtime" / "helper.sock"
+    identity = helperctl.SocketIdentity(device=1, inode=2)
+    helper.write_text("#!/bin/sh\n", encoding="utf-8")
+    pid_file.parent.mkdir(mode=0o700)
+    pid_file.write_text("1234\n", encoding="utf-8")
+    removed = []
+    lookups = []
+
+    def process_lookup(pid):
+        lookups.append(pid)
+        if len(lookups) <= 2:
+            return helperctl.ProcessInfo(pid=pid, command=str(helper))
+        return None
+
+    result = helperctl.stop_helper(
+        helper,
+        pid_file,
+        socket_path=socket_path,
+        process_lookup=process_lookup,
+        socket_identity_reader=lambda path: identity,
+        socket_remover=lambda path, owned_identity: removed.append((path, owned_identity)),
+    )
+
+    CASE.assertEqual(result, helperctl.CheckResult(ok=True))
+    CASE.assertEqual(removed, [(socket_path, identity)])

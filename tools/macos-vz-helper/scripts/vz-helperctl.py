@@ -479,6 +479,26 @@ def _ping_helper(socket_path: Path) -> CheckResult:
     return ping_helper_state(socket_path).result
 
 
+def wait_for_ping(
+    socket_path: Path,
+    *,
+    ping_checker: Callable[[Path], CheckResult | PingState] = ping_helper_state,
+    timeout_sec: float = 10.0,
+    interval_sec: float = 0.05,
+) -> PingState:
+    deadline = time.monotonic() + timeout_sec
+    last_state = PingState(CheckResult(ok=False, reason="helper_ping_failed"))
+    while True:
+        last_state = _coerce_ping_state(ping_checker(socket_path))
+        if last_state.result.ok:
+            return last_state
+        if last_state.result.reason == "helper_protocol_mismatch":
+            return last_state
+        if time.monotonic() >= deadline:
+            return last_state
+        time.sleep(interval_sec)
+
+
 def wait_for_socket(
     socket_path: Path,
     *,
@@ -529,6 +549,22 @@ def _remove_pid_file_if_pid(pid_file: Path, expected_pid: int) -> bool:
         return False
     _remove_pid_file(pid_file)
     return True
+
+
+def validate_process_identity(
+    pid: int,
+    expected_helper: Path,
+    *,
+    process_lookup: Callable[[int], ProcessInfo | None] = lookup_process,
+) -> CheckResult:
+    process = process_lookup(pid)
+    if process is None:
+        return CheckResult(ok=True, reason="helper_pid_stale")
+    if process.error_reason:
+        return CheckResult(ok=False, reason=process.error_reason)
+    if not _command_matches_helper(process.command, expected_helper):
+        return CheckResult(ok=False, reason="helper_pid_process_mismatch")
+    return CheckResult(ok=True, reason="helper_pid_running")
 
 
 def process_exists(pid: int) -> bool:
@@ -618,6 +654,32 @@ def wait_for_process_exit(
         time.sleep(interval_sec)
 
 
+def cleanup_started_helper(
+    *,
+    pid: int,
+    pid_file: Path,
+    socket_path: Path,
+    socket_identity: SocketIdentity | None,
+    process_killer: Callable[[int], None],
+    process_lookup: Callable[[int], ProcessInfo | None],
+    socket_remover: Callable[[Path, SocketIdentity | None], None],
+    exit_timeout_sec: float,
+    exit_poll_interval_sec: float,
+) -> CheckResult:
+    process_killer(pid)
+    exit_result = wait_for_process_exit(
+        pid,
+        process_lookup=process_lookup,
+        timeout_sec=exit_timeout_sec,
+        interval_sec=exit_poll_interval_sec,
+    )
+    if not exit_result.ok:
+        return exit_result
+    _remove_pid_file_if_pid(pid_file, pid)
+    socket_remover(socket_path, socket_identity)
+    return CheckResult(ok=True)
+
+
 def start_helper(
     helper_path: Path,
     socket_path: Path,
@@ -632,6 +694,10 @@ def start_helper(
     process_lookup: Callable[[int], ProcessInfo | None] = lookup_process,
     socket_remover: Callable[[Path, SocketIdentity | None], None] = remove_socket_if_identity,
     lock_process_exists: Callable[[int], bool] = process_exists,
+    ping_timeout_sec: float = 10.0,
+    ping_interval_sec: float = 0.05,
+    exit_timeout_sec: float = 5.0,
+    exit_poll_interval_sec: float = 0.05,
 ) -> CheckResult:
     helper_result = validate_helper_binary(helper_path)
     if not helper_result.ok:
@@ -688,15 +754,41 @@ def start_helper(
             raw_socket_ready = socket_waiter(socket_path)
         socket_ready = _coerce_socket_wait_result(raw_socket_ready)
         if not socket_ready.result.ok:
-            process_killer(started.pid)
-            _remove_pid_file_if_pid(pid_file, started.pid)
-            socket_remover(socket_path, socket_ready.identity)
+            cleanup_result = cleanup_started_helper(
+                pid=started.pid,
+                pid_file=pid_file,
+                socket_path=socket_path,
+                socket_identity=socket_ready.identity,
+                process_killer=process_killer,
+                process_lookup=process_lookup,
+                socket_remover=socket_remover,
+                exit_timeout_sec=exit_timeout_sec,
+                exit_poll_interval_sec=exit_poll_interval_sec,
+            )
+            if not cleanup_result.ok:
+                return cleanup_result
             return socket_ready.result
-        ping_result = _coerce_ping_state(ping_checker(socket_path)).result
+        ping_state = wait_for_ping(
+            socket_path,
+            ping_checker=ping_checker,
+            timeout_sec=ping_timeout_sec,
+            interval_sec=ping_interval_sec,
+        )
+        ping_result = ping_state.result
         if not ping_result.ok:
-            process_killer(started.pid)
-            _remove_pid_file_if_pid(pid_file, started.pid)
-            socket_remover(socket_path, socket_ready.identity)
+            cleanup_result = cleanup_started_helper(
+                pid=started.pid,
+                pid_file=pid_file,
+                socket_path=socket_path,
+                socket_identity=socket_ready.identity,
+                process_killer=process_killer,
+                process_lookup=process_lookup,
+                socket_remover=socket_remover,
+                exit_timeout_sec=exit_timeout_sec,
+                exit_poll_interval_sec=exit_poll_interval_sec,
+            )
+            if not cleanup_result.ok:
+                return cleanup_result
             return ping_result
         return CheckResult(ok=True)
     except FileNotFoundError as exc:
@@ -729,12 +821,13 @@ def collect_status_results(
     entitlement_checker: Callable[[Path, Path | None], CheckResult] = compare_entitlements,
     ping_checker: Callable[[Path], CheckResult | PingState] = ping_helper_state,
     process_lookup: Callable[[int], ProcessInfo | None] = lookup_process,
+    path_validator: Callable[[Path], CheckResult] = validate_socket_path,
 ) -> list[tuple[str, CheckResult]]:
     results: list[tuple[str, CheckResult]] = []
     helper_result = validate_helper_binary(helper_path)
     results.append(("helper_binary", helper_result))
 
-    socket_result = validate_socket_path(socket_path)
+    socket_result = path_validator(socket_path)
     results.append(("socket_path", socket_result))
     socket_exists = socket_path.exists()
     if socket_result.ok:
@@ -757,14 +850,61 @@ def collect_status_results(
     entitlement_result = entitlement_checker(helper_path, entitlements_path)
     results.append(("entitlements", entitlement_result))
 
-    should_ping = (
-        helper_result.ok
-        and socket_result.ok
-        and (socket_exists or pid_state.result.reason == "helper_pid_running")
-    )
+    should_ping = socket_result.ok and (socket_exists or pid_state.result.reason == "helper_pid_running")
     if should_ping:
         ping_state = _coerce_ping_state(ping_checker(socket_path))
         results.append(("ping", ping_state.result))
+        if ping_state.protocol_version:
+            results.append(("protocol_version", CheckResult(ok=True, message=ping_state.protocol_version)))
+        if ping_state.helper_version:
+            results.append(("helper_version", CheckResult(ok=True, message=ping_state.helper_version)))
+    else:
+        results.append(("ping", CheckResult(ok=True, reason="helper_not_running")))
+
+    return results
+
+
+def collect_check_results(
+    helper_path: Path,
+    socket_path: Path,
+    pid_file: Path,
+    log_dir: Path,
+    *,
+    entitlements_path: Path | None = None,
+    dry_run: bool = False,
+    expected_protocol_version: str = EXPECTED_HELPER_PROTOCOL_VERSION,
+    entitlement_checker: Callable[[Path, Path | None], CheckResult] = compare_entitlements,
+    ping_checker: Callable[[Path], CheckResult | PingState] = ping_helper_state,
+    process_lookup: Callable[[int], ProcessInfo | None] = lookup_process,
+    path_validator: Callable[[Path], CheckResult] = validate_socket_path,
+) -> list[tuple[str, CheckResult]]:
+    if dry_run and entitlements_path is None:
+        entitlement_result = CheckResult(ok=True, reason="helper_entitlements_not_checked")
+    else:
+        entitlement_result = entitlement_checker(helper_path, entitlements_path)
+
+    socket_result = path_validator(socket_path)
+    pid_result = validate_pid_file(pid_file, helper_path, process_lookup=process_lookup)
+    results = [
+        ("helper_binary", validate_helper_binary(helper_path)),
+        ("socket_path", socket_result),
+        ("socket_directory", ensure_private_dir(socket_path.parent, dry_run=dry_run)),
+        ("pid_directory", ensure_private_dir(pid_file.parent, dry_run=dry_run)),
+        ("log_directory", ensure_private_dir(log_dir, dry_run=dry_run)),
+        ("pid_file", pid_result),
+        ("entitlements", entitlement_result),
+    ]
+
+    if socket_result.ok and (socket_path.exists() or pid_result.reason == "helper_pid_running"):
+        ping_state = _coerce_ping_state(ping_checker(socket_path))
+        ping_result = ping_state.result
+        if (
+            ping_result.ok
+            and ping_state.protocol_version
+            and str(ping_state.protocol_version) != str(expected_protocol_version)
+        ):
+            ping_result = CheckResult(ok=False, reason="helper_protocol_mismatch")
+        results.append(("ping", ping_result))
         if ping_state.protocol_version:
             results.append(("protocol_version", CheckResult(ok=True, message=ping_state.protocol_version)))
         if ping_state.helper_version:
@@ -812,14 +952,21 @@ def stop_helper(
     helper_path: Path,
     pid_file: Path,
     *,
+    socket_path: Path | None = None,
     process_killer: Callable[[int], None] = _kill_process,
     process_lookup: Callable[[int], ProcessInfo | None] = lookup_process,
     lock_process_exists: Callable[[int], bool] = process_exists,
+    socket_identity_reader: Callable[[Path], SocketIdentity | None] = socket_identity,
+    socket_remover: Callable[[Path, SocketIdentity | None], None] = remove_socket_if_identity,
     exit_timeout_sec: float = 5.0,
     exit_poll_interval_sec: float = 0.05,
 ) -> CheckResult:
     if not pid_file.exists() and not pid_file.parent.exists():
         return CheckResult(ok=True, reason="helper_not_running")
+    if pid_file.parent.exists():
+        directory_result = _validate_private_dir(pid_file.parent)
+        if not directory_result.ok:
+            return directory_result
 
     lock_fd = _acquire_lifecycle_lock(pid_file, lock_process_exists=lock_process_exists)
     if lock_fd is None:
@@ -835,6 +982,13 @@ def stop_helper(
             _remove_pid_file_if_pid(pid_file, pid_state.pid)
             return CheckResult(ok=True, reason="helper_pid_stale")
         pid = pid_state.pid
+        final_identity = validate_process_identity(pid, helper_path, process_lookup=process_lookup)
+        if not final_identity.ok:
+            return final_identity
+        if final_identity.reason == "helper_pid_stale":
+            _remove_pid_file_if_pid(pid_file, pid)
+            return CheckResult(ok=True, reason="helper_pid_stale")
+        owned_socket_identity = socket_identity_reader(socket_path) if socket_path is not None else None
         process_killer(pid)
         exit_result = wait_for_process_exit(
             pid,
@@ -845,6 +999,8 @@ def stop_helper(
         if not exit_result.ok:
             return exit_result
         _remove_pid_file_if_pid(pid_file, pid)
+        if socket_path is not None:
+            socket_remover(socket_path, owned_socket_identity)
         return CheckResult(ok=True)
     finally:
         _release_lifecycle_lock(pid_file, lock_fd)
@@ -875,20 +1031,15 @@ def _check_command(args: argparse.Namespace) -> int:
     log_dir = Path(args.log_dir) if args.log_dir else paths.log_dir
     helper_path = Path(args.helper_path) if getattr(args, "helper_path", None) else DEFAULT_HELPER
     entitlements_path = Path(args.entitlements) if getattr(args, "entitlements", None) else None
-    if args.dry_run and entitlements_path is None:
-        entitlement_result = CheckResult(ok=True, reason="helper_entitlements_not_checked")
-    else:
-        entitlement_result = compare_entitlements(helper_path, entitlements_path)
-
-    results = [
-        ("helper_binary", validate_helper_binary(helper_path)),
-        ("socket_path", validate_socket_path(socket_path)),
-        ("socket_directory", ensure_private_dir(socket_path.parent, dry_run=args.dry_run)),
-        ("pid_directory", ensure_private_dir(pid_file.parent, dry_run=args.dry_run)),
-        ("log_directory", ensure_private_dir(log_dir, dry_run=args.dry_run)),
-        ("pid_file", validate_pid_file(pid_file, helper_path)),
-        ("entitlements", entitlement_result),
-    ]
+    results = collect_check_results(
+        helper_path,
+        socket_path,
+        pid_file,
+        log_dir,
+        entitlements_path=entitlements_path,
+        dry_run=args.dry_run,
+        expected_protocol_version=args.expected_protocol_version,
+    )
     _print_results(results, as_json=args.json)
     return 0 if all(result.ok for _, result in results) else 1
 
@@ -977,6 +1128,7 @@ def _stop_command(args: argparse.Namespace) -> int:
     result = stop_helper(
         Path(args.helper_path) if args.helper_path else DEFAULT_HELPER,
         Path(args.pid_file) if args.pid_file else paths.pid_file,
+        socket_path=Path(args.socket_path) if args.socket_path else paths.socket_path,
     )
     if not result.ok:
         print(f"stop: not ok {result.reason}", file=sys.stderr)
@@ -998,6 +1150,7 @@ def build_parser() -> argparse.ArgumentParser:
     check_parser.add_argument("--pid-file")
     check_parser.add_argument("--log-dir")
     check_parser.add_argument("--entitlements")
+    check_parser.add_argument("--expected-protocol-version", default=EXPECTED_HELPER_PROTOCOL_VERSION)
     check_parser.add_argument("--dry-run", action="store_true")
     check_parser.add_argument("--json", action="store_true")
     check_parser.set_defaults(func=_check_command)
@@ -1035,6 +1188,7 @@ def build_parser() -> argparse.ArgumentParser:
     stop = subparsers.add_parser("stop", help="stop the helper")
     stop.add_argument("--helper", "--helper-path", dest="helper_path")
     stop.add_argument("--pid-file")
+    stop.add_argument("--socket", "--socket-path", dest="socket_path")
     stop.set_defaults(func=_stop_command)
 
     plist_parser = subparsers.add_parser("plist", help="print launchd plist XML")
