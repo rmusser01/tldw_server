@@ -309,10 +309,19 @@ The underlying opt-in pytest module is still available directly:
 Required env for that module:
 
 - `TLDW_SANDBOX_VZ_LINUX_E2E=1`
-- `TLDW_SANDBOX_VZ_LINUX_E2E_BASE_IMAGE=<guest-template-id-or-base-image>`
+- `TLDW_SANDBOX_VZ_LINUX_E2E_BASE_IMAGE=<base-image-path-or-registered-template-id>`
 - `TLDW_SANDBOX_MACOS_HELPER_SOCKET=/path/to/helper.sock`
 - real helper reachability required through helper `ping`
 - helper-backed template validation required through `validate_template`
+
+If `TLDW_SANDBOX_VZ_LINUX_E2E_BASE_IMAGE` is a registered template id instead of
+an absolute bundle/path, also set:
+
+- `TLDW_SANDBOX_IMAGE_STORE_ROOT=/var/lib/tldw/sandbox-images`
+
+When that root is configured, the `vz_linux` runner resolves registered
+template ids through the image store, uses the stored `source_path` for helper
+validation/boot, and persists a run-scoped clone manifest before VM creation.
 
 The helper function in that test module also forces:
 

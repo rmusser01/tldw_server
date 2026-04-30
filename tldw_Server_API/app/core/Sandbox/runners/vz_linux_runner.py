@@ -12,6 +12,7 @@ from typing import Any
 
 from loguru import logger
 
+from ..image_store import SandboxImageStore
 from ..macos_virtualization.helper_client import (
     MacOSVirtualizationHelperClient,
     MacOSVirtualizationHelperProtocolError,
@@ -210,6 +211,31 @@ class VZLinuxRunner(VZBaseRunner):
         if callable(deleter):
             deleter(sid)
 
+    def _image_store(self) -> SandboxImageStore | None:
+        root_text = str(os.getenv("TLDW_SANDBOX_IMAGE_STORE_ROOT") or "").strip()
+        if not root_text:
+            return None
+        return SandboxImageStore(root_path=root_text)
+
+    def _resolve_template_request(
+        self,
+        *,
+        base_image: str | None,
+        run_id: str,
+    ) -> tuple[str, SandboxImageStore | None]:
+        template_text = str(base_image or "").strip()
+        store = self._image_store()
+        if store is None or not template_text:
+            return template_text, None
+
+        record = store.get_template(template_text)
+        if record is None:
+            return template_text, store
+        if not record.source_path:
+            raise RuntimeError("image_store_template_source_missing")
+        store.prepare_run_clone(template_id=record.template_id, run_id=run_id)
+        return record.source_path, store
+
     @classmethod
     def cancel_run(cls, run_id: str) -> bool:
         vm_id, run_dir = cls._clear_active_run(run_id)
@@ -272,6 +298,10 @@ class VZLinuxRunner(VZBaseRunner):
             self._write_inline_files(workspace, spec.files_inline)
 
             helper = self.helper_client_cls()
+            template_request, _image_store = self._resolve_template_request(
+                base_image=spec.base_image,
+                run_id=run_id,
+            )
             session_control = self._load_session_control(spec.session_id)
             if (
                 session_mode
@@ -296,7 +326,7 @@ class VZLinuxRunner(VZBaseRunner):
                 template_validation = helper.validate_template(
                     {
                         "runtime": self.runtime_type.value,
-                        "template": spec.base_image,
+                        "template": template_request,
                     }
                 )
                 if not bool(template_validation.get("ready")):
