@@ -1,9 +1,10 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, expectTypeOf, it } from "vitest"
 
 import {
   isApiResponseEnvelope,
   unwrapApiResponseData,
-  unwrapApiResponseEnvelope
+  unwrapApiResponseEnvelope,
+  type ApiResponseEnvelope
 } from "@/services/response-envelope"
 
 describe("response envelope helpers", () => {
@@ -48,6 +49,19 @@ describe("response envelope helpers", () => {
 
     expect(isApiResponseEnvelope(payload)).toBe(false)
     expect(unwrapApiResponseEnvelope(payload)).toBe(payload)
+  })
+
+  it("types union inputs without leaking the envelope shape", () => {
+    type Payload = { id: number }
+    const payload: ApiResponseEnvelope<Payload> | Payload | null | undefined =
+      Math.random() > 0.5 ? { success: true, data: { id: 3 } } : { id: 4 }
+    const legacyPayload = { success: true, file_id: "generated-file" }
+
+    const unwrapped = unwrapApiResponseEnvelope(payload)
+    const unwrappedLegacy = unwrapApiResponseEnvelope(legacyPayload)
+
+    expectTypeOf(unwrapped).toEqualTypeOf<Payload | null | undefined>()
+    expectTypeOf(unwrappedLegacy).toEqualTypeOf<typeof legacyPayload>()
   })
 
   it("unwraps transitional data wrappers without requiring endpoint payload changes", () => {

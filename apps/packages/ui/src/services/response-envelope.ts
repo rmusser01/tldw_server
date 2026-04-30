@@ -60,6 +60,9 @@ export const isApiResponseEnvelope = (
  * Unwraps canonical response envelopes while preserving non-envelope payloads.
  */
 export function unwrapApiResponseEnvelope<T>(value: ApiResponseEnvelope<T>): T | null
+export function unwrapApiResponseEnvelope<T>(
+  value: ApiResponseEnvelope<T> | T | null | undefined
+): T | null | undefined
 export function unwrapApiResponseEnvelope<T>(value: T): T
 export function unwrapApiResponseEnvelope(value: null): null
 export function unwrapApiResponseEnvelope(value: undefined): undefined
