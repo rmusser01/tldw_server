@@ -635,6 +635,39 @@ def test_compare_entitlements_without_expected_path_checks_signed_binary(monkeyp
     CASE.assertEqual(result, helperctl.CheckResult(ok=False, reason="helper_entitlements_missing"))
 
 
+def test_read_codesign_entitlements_ignores_diagnostic_stderr(monkeypatch, tmp_path):
+    helperctl = load_helperctl()
+    helper = tmp_path / "macos-vz-helper"
+    helper.write_text("#!/bin/sh\n", encoding="utf-8")
+
+    class Completed:
+        returncode = 0
+        stdout = ""
+        stderr = f"{helper}: no entitlements\n"
+
+    monkeypatch.setattr(helperctl.subprocess, "run", lambda *args, **kwargs: Completed())
+
+    result = helperctl.read_codesign_entitlements(helper)
+
+    CASE.assertEqual(result, helperctl.CheckResult(ok=False, reason="helper_entitlements_missing"))
+
+
+def test_validate_pid_file_reports_missing_process_lookup_tool(monkeypatch, tmp_path):
+    helperctl = load_helperctl()
+    helper = tmp_path / "macos-vz-helper"
+    pid_file = tmp_path / "helper.pid"
+    pid_file.write_text(f"{os.getpid()}\n", encoding="utf-8")
+
+    def missing_ps(*args, **kwargs):
+        raise FileNotFoundError("ps")
+
+    monkeypatch.setattr(helperctl.subprocess, "run", missing_ps)
+
+    result = helperctl.validate_pid_file(pid_file, helper)
+
+    CASE.assertEqual(result, helperctl.CheckResult(ok=False, reason="helper_process_lookup_unavailable"))
+
+
 def test_validate_pid_file_rejects_live_process_mismatch(tmp_path):
     helperctl = load_helperctl()
     pid_file = tmp_path / "helper.pid"
@@ -762,7 +795,7 @@ def test_start_helper_refuses_existing_lifecycle_lock(tmp_path):
     helper.write_text("#!/bin/sh\n", encoding="utf-8")
     helper.chmod(0o700)
     pid_file.parent.mkdir(mode=0o700)
-    (pid_file.parent / "helper.pid.lock").write_text("locked\n", encoding="utf-8")
+    (pid_file.parent / "helper.pid.lock").write_text(f"{os.getpid()}\n", encoding="utf-8")
     starts = []
 
     result = helperctl.start_helper(
@@ -777,6 +810,35 @@ def test_start_helper_refuses_existing_lifecycle_lock(tmp_path):
 
     CASE.assertEqual(result, helperctl.CheckResult(ok=False, reason="helper_already_running"))
     CASE.assertEqual(starts, [])
+
+
+def test_start_helper_recovers_stale_lifecycle_lock(tmp_path):
+    helperctl = load_helperctl()
+    helper = tmp_path / "macos-vz-helper"
+    socket_path = tmp_path / "runtime" / "helper.sock"
+    pid_file = tmp_path / "runtime" / "helper.pid"
+    log_dir = tmp_path / "logs"
+    helper.write_text("#!/bin/sh\n", encoding="utf-8")
+    helper.chmod(0o700)
+    pid_file.parent.mkdir(mode=0o700)
+    (pid_file.parent / "helper.pid.lock").write_text("999999999\n", encoding="utf-8")
+    starts = []
+
+    result = helperctl.start_helper(
+        helper,
+        socket_path,
+        pid_file,
+        log_dir,
+        process_starter=lambda argv, env, **kwargs: starts.append(argv) or helperctl.StartedProcess(pid=1234),
+        socket_waiter=lambda path: helperctl.CheckResult(True),
+        ping_checker=lambda path: helperctl.CheckResult(True),
+        process_killer=lambda pid: None,
+        lock_process_exists=lambda pid: False,
+    )
+
+    CASE.assertEqual(result, helperctl.CheckResult(ok=True))
+    CASE.assertEqual(starts, [[str(helper)]])
+    CASE.assertFalse((pid_file.parent / "helper.pid.lock").exists())
 
 
 def test_start_helper_passes_managed_log_paths_to_process_starter(tmp_path):
@@ -812,7 +874,7 @@ def test_start_helper_passes_managed_log_paths_to_process_starter(tmp_path):
     CASE.assertEqual(received["kwargs"]["stderr_path"], log_dir / "helper.stderr.log")
 
 
-def test_status_helper_checks_entitlements_before_ping(tmp_path):
+def test_status_helper_reports_entitlements_and_ping_independently(tmp_path):
     helperctl = load_helperctl()
     helper = tmp_path / "macos-vz-helper"
     socket_path = tmp_path / "runtime" / "helper.sock"
@@ -827,6 +889,40 @@ def test_status_helper_checks_entitlements_before_ping(tmp_path):
     log_dir.mkdir(mode=0o700)
     ping_calls = []
 
+    results = dict(
+        helperctl.collect_status_results(
+            helper,
+            socket_path,
+            pid_file,
+            log_dir,
+            entitlements_path=entitlements,
+            entitlement_checker=lambda helper_path, entitlements_path: helperctl.CheckResult(
+                False, "helper_entitlements_mismatch"
+            ),
+            ping_checker=lambda path: ping_calls.append(path) or helperctl.CheckResult(True),
+            process_lookup=lambda pid: helperctl.ProcessInfo(pid=pid, command=str(helper)),
+        )
+    )
+
+    CASE.assertEqual(results["entitlements"], helperctl.CheckResult(ok=False, reason="helper_entitlements_mismatch"))
+    CASE.assertEqual(results["ping"], helperctl.CheckResult(ok=True))
+    CASE.assertEqual(ping_calls, [socket_path])
+
+
+def test_status_helper_returns_entitlement_failure_when_collapsed(tmp_path):
+    helperctl = load_helperctl()
+    helper = tmp_path / "macos-vz-helper"
+    socket_path = tmp_path / "runtime" / "helper.sock"
+    pid_file = tmp_path / "runtime" / "helper.pid"
+    entitlements = tmp_path / "helper.entitlements"
+    log_dir = tmp_path / "logs"
+    helper.write_text("#!/bin/sh\n", encoding="utf-8")
+    helper.chmod(0o700)
+    entitlements.write_text("<plist/>", encoding="utf-8")
+    pid_file.parent.mkdir(mode=0o700)
+    pid_file.write_text("1234\n", encoding="utf-8")
+    log_dir.mkdir(mode=0o700)
+
     result = helperctl.status_helper(
         helper,
         socket_path,
@@ -836,12 +932,11 @@ def test_status_helper_checks_entitlements_before_ping(tmp_path):
         entitlement_checker=lambda helper_path, entitlements_path: helperctl.CheckResult(
             False, "helper_entitlements_mismatch"
         ),
-        ping_checker=lambda path: ping_calls.append(path) or helperctl.CheckResult(True),
+        ping_checker=lambda path: helperctl.CheckResult(True),
         process_lookup=lambda pid: helperctl.ProcessInfo(pid=pid, command=str(helper)),
     )
 
     CASE.assertEqual(result, helperctl.CheckResult(ok=False, reason="helper_entitlements_mismatch"))
-    CASE.assertEqual(ping_calls, [])
 
 
 def test_status_cli_accepts_entitlements_flag(tmp_path, capsys):
@@ -936,9 +1031,14 @@ def test_stop_helper_terminates_only_validated_pid(tmp_path):
     pid_file.parent.mkdir(mode=0o700)
     pid_file.write_text("1234\n", encoding="utf-8")
     killed = []
+    lookups = 0
 
     def process_lookup(pid):
+        nonlocal lookups
+        lookups += 1
         pid_file.write_text("9999\n", encoding="utf-8")
+        if lookups > 1:
+            return None
         return helperctl.ProcessInfo(pid=pid, command=str(helper))
 
     result = helperctl.stop_helper(
@@ -951,3 +1051,37 @@ def test_stop_helper_terminates_only_validated_pid(tmp_path):
     CASE.assertEqual(result, helperctl.CheckResult(ok=True))
     CASE.assertEqual(killed, [1234])
     CASE.assertEqual(pid_file.read_text(encoding="utf-8"), "9999\n")
+
+
+def test_stop_helper_tolerates_missing_pid_directory(tmp_path):
+    helperctl = load_helperctl()
+
+    result = helperctl.stop_helper(
+        tmp_path / "macos-vz-helper",
+        tmp_path / "missing-runtime" / "helper.pid",
+    )
+
+    CASE.assertEqual(result, helperctl.CheckResult(ok=True, reason="helper_not_running"))
+
+
+def test_stop_helper_preserves_pid_file_when_process_survives_sigterm(tmp_path):
+    helperctl = load_helperctl()
+    helper = tmp_path / "macos-vz-helper"
+    pid_file = tmp_path / "runtime" / "helper.pid"
+    helper.write_text("#!/bin/sh\n", encoding="utf-8")
+    pid_file.parent.mkdir(mode=0o700)
+    pid_file.write_text("1234\n", encoding="utf-8")
+    killed = []
+
+    result = helperctl.stop_helper(
+        helper,
+        pid_file,
+        process_lookup=lambda pid: helperctl.ProcessInfo(pid=pid, command=str(helper)),
+        process_killer=lambda pid: killed.append(pid),
+        exit_timeout_sec=0.01,
+        exit_poll_interval_sec=0.001,
+    )
+
+    CASE.assertEqual(result, helperctl.CheckResult(ok=False, reason="helper_stop_timeout"))
+    CASE.assertEqual(killed, [1234])
+    CASE.assertEqual(pid_file.read_text(encoding="utf-8"), "1234\n")

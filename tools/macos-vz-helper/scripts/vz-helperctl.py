@@ -51,6 +51,7 @@ class HelperPaths:
 class ProcessInfo:
     pid: int
     command: str
+    error_reason: str = ""
 
 
 @dataclass(frozen=True)
@@ -315,8 +316,16 @@ def read_codesign_entitlements(helper_path: Path) -> CheckResult:
         if "not signed" in message or "code object is not signed" in message:
             return CheckResult(ok=False, reason="helper_not_signed", message=message)
         return CheckResult(ok=False, reason="helper_codesign_unreadable", message=message)
-    payload = (completed.stdout or completed.stderr).strip()
+    payload = (completed.stdout or "").strip()
     if not payload:
+        return CheckResult(ok=False, reason="helper_entitlements_missing")
+    try:
+        entitlement_payload = plistlib.loads(payload.encode("utf-8"))
+    except (plistlib.InvalidFileException, ValueError) as exc:
+        return CheckResult(ok=False, reason="helper_entitlements_unreadable", message=str(exc))
+    if not isinstance(entitlement_payload, dict):
+        return CheckResult(ok=False, reason="helper_entitlements_unreadable")
+    if not entitlement_payload:
         return CheckResult(ok=False, reason="helper_entitlements_missing")
     return CheckResult(ok=True, message=payload)
 
@@ -348,14 +357,17 @@ def lookup_process(pid: int) -> ProcessInfo | None:
         pass
 
     # Process inspection uses fixed ps argv without shell expansion.
-    completed = subprocess.run(  # nosec
-        ["ps", "-p", str(pid), "-o", "command="],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
+    try:
+        completed = subprocess.run(  # nosec
+            ["ps", "-p", str(pid), "-o", "command="],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except FileNotFoundError:
+        return ProcessInfo(pid=pid, command="", error_reason="helper_process_lookup_unavailable")
     if completed.returncode != 0:
-        return ProcessInfo(pid=pid, command="")
+        return ProcessInfo(pid=pid, command="", error_reason="helper_process_lookup_failed")
     return ProcessInfo(pid=pid, command=completed.stdout.strip())
 
 
@@ -398,6 +410,8 @@ def read_pid_file_state(
     process = process_lookup(pid)
     if process is None:
         return PidFileState(CheckResult(ok=True, reason="helper_pid_stale"), pid=pid)
+    if process.error_reason:
+        return PidFileState(CheckResult(ok=False, reason=process.error_reason), pid=pid)
     if not _command_matches_helper(process.command, expected_helper):
         return PidFileState(CheckResult(ok=False, reason="helper_pid_process_mismatch"), pid=pid)
     return PidFileState(CheckResult(ok=True, reason="helper_pid_running"), pid=pid)
@@ -517,18 +531,56 @@ def _remove_pid_file_if_pid(pid_file: Path, expected_pid: int) -> bool:
     return True
 
 
+def process_exists(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
 def _pid_lock_path(pid_file: Path) -> Path:
     return pid_file.with_name(f"{pid_file.name}.lock")
 
 
-def _acquire_lifecycle_lock(pid_file: Path) -> int | None:
-    lock_path = _pid_lock_path(pid_file)
+def _read_positive_pid(path: Path) -> int | None:
+    try:
+        pid = int(path.read_text(encoding="utf-8").strip())
+    except (FileNotFoundError, OSError, ValueError):
+        return None
+    if pid <= 0:
+        return None
+    return pid
+
+
+def _open_lifecycle_lock(lock_path: Path) -> int | None:
     try:
         fd = os.open(lock_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     except FileExistsError:
         return None
     os.write(fd, f"{os.getpid()}\n".encode("utf-8"))
     return fd
+
+
+def _acquire_lifecycle_lock(
+    pid_file: Path,
+    *,
+    lock_process_exists: Callable[[int], bool] = process_exists,
+) -> int | None:
+    lock_path = _pid_lock_path(pid_file)
+    fd = _open_lifecycle_lock(lock_path)
+    if fd is not None:
+        return fd
+
+    lock_pid = _read_positive_pid(lock_path)
+    if lock_pid is not None and lock_process_exists(lock_pid):
+        return None
+
+    with contextlib.suppress(FileNotFoundError):
+        lock_path.unlink()
+    return _open_lifecycle_lock(lock_path)
 
 
 def _release_lifecycle_lock(pid_file: Path, fd: int | None) -> None:
@@ -550,6 +602,22 @@ def _write_pid_file_exclusive(pid_file: Path, pid: int) -> CheckResult:
     return CheckResult(ok=True)
 
 
+def wait_for_process_exit(
+    pid: int,
+    *,
+    process_lookup: Callable[[int], ProcessInfo | None] = lookup_process,
+    timeout_sec: float = 5.0,
+    interval_sec: float = 0.05,
+) -> CheckResult:
+    deadline = time.monotonic() + timeout_sec
+    while True:
+        if process_lookup(pid) is None:
+            return CheckResult(ok=True)
+        if time.monotonic() >= deadline:
+            return CheckResult(ok=False, reason="helper_stop_timeout")
+        time.sleep(interval_sec)
+
+
 def start_helper(
     helper_path: Path,
     socket_path: Path,
@@ -563,6 +631,7 @@ def start_helper(
     process_killer: Callable[[int], None] = _kill_process,
     process_lookup: Callable[[int], ProcessInfo | None] = lookup_process,
     socket_remover: Callable[[Path, SocketIdentity | None], None] = remove_socket_if_identity,
+    lock_process_exists: Callable[[int], bool] = process_exists,
 ) -> CheckResult:
     helper_result = validate_helper_binary(helper_path)
     if not helper_result.ok:
@@ -587,7 +656,7 @@ def start_helper(
     if dry_run:
         return CheckResult(ok=run_command([str(helper_path)], dry_run=True, env=env) == 0)
 
-    lock_fd = _acquire_lifecycle_lock(pid_file)
+    lock_fd = _acquire_lifecycle_lock(pid_file, lock_process_exists=lock_process_exists)
     if lock_fd is None:
         return CheckResult(ok=False, reason="helper_already_running")
 
@@ -690,7 +759,6 @@ def collect_status_results(
 
     should_ping = (
         helper_result.ok
-        and entitlement_result.ok
         and socket_result.ok
         and (socket_exists or pid_state.result.reason == "helper_pid_running")
     )
@@ -746,8 +814,14 @@ def stop_helper(
     *,
     process_killer: Callable[[int], None] = _kill_process,
     process_lookup: Callable[[int], ProcessInfo | None] = lookup_process,
+    lock_process_exists: Callable[[int], bool] = process_exists,
+    exit_timeout_sec: float = 5.0,
+    exit_poll_interval_sec: float = 0.05,
 ) -> CheckResult:
-    lock_fd = _acquire_lifecycle_lock(pid_file)
+    if not pid_file.exists() and not pid_file.parent.exists():
+        return CheckResult(ok=True, reason="helper_not_running")
+
+    lock_fd = _acquire_lifecycle_lock(pid_file, lock_process_exists=lock_process_exists)
     if lock_fd is None:
         return CheckResult(ok=False, reason="helper_already_running")
     try:
@@ -762,6 +836,14 @@ def stop_helper(
             return CheckResult(ok=True, reason="helper_pid_stale")
         pid = pid_state.pid
         process_killer(pid)
+        exit_result = wait_for_process_exit(
+            pid,
+            process_lookup=process_lookup,
+            timeout_sec=exit_timeout_sec,
+            interval_sec=exit_poll_interval_sec,
+        )
+        if not exit_result.ok:
+            return exit_result
         _remove_pid_file_if_pid(pid_file, pid)
         return CheckResult(ok=True)
     finally:
