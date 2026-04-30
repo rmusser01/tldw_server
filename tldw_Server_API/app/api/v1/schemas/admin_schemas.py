@@ -2573,6 +2573,9 @@ class AdminWebhookListResponse(BaseModel):
 
     items: list[AdminWebhookResponse]
     total: int
+    limit: int
+    offset: int
+    pagination: OffsetPaginationMeta
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -2607,6 +2610,9 @@ class AdminWebhookDeliveryLogListResponse(BaseModel):
 
     items: list[AdminWebhookDeliveryLogEntry]
     total: int
+    limit: int
+    offset: int
+    pagination: OffsetPaginationMeta
 
     model_config = ConfigDict(from_attributes=True)
 
