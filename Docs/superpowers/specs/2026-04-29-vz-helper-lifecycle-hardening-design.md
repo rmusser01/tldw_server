@@ -95,7 +95,7 @@ Recommended subcommands:
 
 The command should default to dry-run behavior for launchd plist generation and should never call `launchctl bootstrap`, `launchctl bootout`, or write into `~/Library/LaunchAgents` unless an operator explicitly requests that in a future PR.
 
-## Path Contract
+## Path And Socket Contract
 
 Use deterministic user-owned defaults:
 
@@ -123,8 +123,27 @@ Path safety rules:
 - refuse existing non-socket files at the socket path
 - allow removing a stale socket only when it is actually a Unix socket
 - refuse pid files whose process is alive but not the expected helper binary
-- create log directories with owner-only write expectations where possible
+- create runtime and log directories with owner-only write expectations where possible
 - do not chmod arbitrary existing parent directories
+
+The helper command and the Swift helper must both enforce socket safety. The
+wrapper check is not sufficient because operators may launch the helper directly
+or through a generated plist. The helper startup path should use `lstat` before
+unlinking the configured socket path:
+
+- refuse symlink socket paths
+- refuse existing non-socket files
+- remove an existing path only when it is a Unix socket
+- surface a clear startup error instead of silently unlinking unsafe paths
+
+Directory ownership and permissions are part of the lifecycle contract. The
+default runtime directory should be owner-only, preferably `0700`, so the socket
+does not become a local multi-user control surface. The implementation may rely
+on an owner-only parent directory instead of a `0600` socket mode if macOS socket
+permission behavior is not portable, but it must document which guarantee it is
+using and test the path-safety decision logic. Log directories should also avoid
+world-writable parents, but log readability is less security-critical than the
+helper socket.
 
 ## Command Behavior
 
@@ -138,11 +157,18 @@ Validate:
 - `swift` is available when a build is needed
 - `codesign` status is readable on macOS
 - entitlements path exists when provided
+- signed binary entitlements match the provided entitlements plist when both are available
 - socket path is safe
 - pid file is absent, stale, or belongs to the expected helper process
 - helper protocol version matches the Python client expectation when the helper is reachable
 
 Output should be human-readable by default and optionally JSON with `--json`.
+
+The expected helper protocol version should come from one explicit source of
+truth. Prefer importing or reading the Python helper client's expected protocol
+constant; otherwise add a clearly named shared constant used by both checks and
+tests. The lifecycle command should also allow `--expected-protocol-version` for
+diagnostic overrides, but the default must remain the repo-owned expected value.
 
 ### `build`
 
@@ -164,6 +190,18 @@ codesign --force --sign - --entitlements <entitlements> <helper>
 
 The command should not invent entitlements. It should validate that the helper exists and the entitlements file exists before invoking `codesign`.
 
+Entitlement validation should be concrete. On macOS, `check` should read the
+signed helper entitlements with `codesign -d --entitlements :- <helper>` when
+possible and compare them against the operator-provided plist. At minimum, a
+helper signed without the entitlements required by the provided plist must not
+report as fully valid. The PR does not need to define a production certificate
+identity, but it must distinguish:
+
+- unsigned helper
+- signed helper with unreadable entitlements
+- signed helper with matching provided entitlements
+- signed helper with mismatched or missing provided entitlements
+
 ### `start`
 
 Start the helper with:
@@ -174,6 +212,13 @@ Start the helper with:
 Redirect stdout and stderr into the log directory and write a pid file only after the process starts. Then wait for the socket and verify `ping`.
 
 If a pid file already points to a live expected helper, `start` should fail with `helper_already_running` unless a future explicit `--restart` option is added.
+
+Failed startup must clean up after itself. If socket creation, helper `ping`, or
+protocol validation fails after the command starts a helper process, `start`
+should terminate that just-started process, remove the pid file, remove only a
+safe stale socket it owns, and preserve stdout/stderr logs for debugging. It
+should not kill an already-running helper that existed before this `start`
+attempt.
 
 ### `status`
 
