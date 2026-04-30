@@ -127,6 +127,10 @@ The preferred ownership seam is `app.state.startup_warning_registry`, with a
 small service helper around it, rather than a module-global singleton. That
 keeps startup lifecycle control explicit and makes tests less fragile.
 
+The registry should be created by the lifespan startup flow and attached to
+`app.state`. Admin endpoints may read it from `request.app.state`. Lower-level
+diagnostics helpers must not reach into `app.state` directly.
+
 ### Producer Boundary
 
 The first producer is sandbox-specific, but it only translates existing truth.
@@ -147,6 +151,11 @@ Instead, startup should use a focused producer that pulls only:
 - helper compatibility status
 - reconciliation status/counts
 
+The producer must not import or depend on the sandbox endpoint module singleton
+(`tldw_Server_API.app.api.v1.endpoints.sandbox._service`). Startup code should
+depend on an explicit sandbox/orchestrator seam owned by app startup, not an
+endpoint-owned global.
+
 ### Startup Ordering
 
 The sandbox startup warning producer must run only after the sandbox service and
@@ -154,6 +163,13 @@ its orchestrator dependencies are available.
 
 It should run once during the lifespan startup sequence, after core sandbox
 state is ready but before startup is considered complete.
+
+Concretely, the startup producer should receive either:
+
+- an orchestrator reference passed from startup-owned initialization, or
+- a small startup-safe sandbox service reference attached to `app.state`
+
+It must not obtain startup dependencies by importing endpoint modules.
 
 Policy:
 
@@ -274,6 +290,10 @@ Response shape:
 
 This endpoint is only meaningful for a successful boot.
 
+Implementation note: this endpoint must be wired into the existing admin router
+assembly under `tldw_Server_API/app/api/v1/endpoints/admin/__init__.py` and the
+admin router group, not only created as a standalone module.
+
 ### Sandbox Diagnostics Additive Summary
 
 Extend the existing sandbox diagnostics payload with a compact startup summary:
@@ -291,6 +311,18 @@ Extend the existing sandbox diagnostics payload with a compact startup summary:
 
 This keeps sandbox operators in their existing workflow while the generic admin
 endpoint establishes the reusable app-level pattern.
+
+Because `collect_macos_diagnostics(orchestrator)` is intentionally app-agnostic,
+the startup warning summary must be injected one layer above it. The preferred
+seam is:
+
+- keep `macos_diagnostics.py` pure and independent of `app.state`
+- have `SandboxService.macos_diagnostics()` or the sandbox admin endpoint obtain
+  the shared startup warning summary from a provider attached to app startup
+  state and merge that additive summary into the response payload
+
+The design must not assume that low-level diagnostics helpers can read
+`app.state` directly.
 
 ## Timeout And Startup Cost Rules
 

@@ -30,21 +30,30 @@
   - First producer translating sandbox helper/reconciliation truth into shared warning records.
 - Modify: `tldw_Server_API/app/services/lifespan_startup_sequence.py`
   - Initialize registry and run producers at the correct startup point.
+- Modify: `tldw_Server_API/app/services/startup_core_initialization.py` or the
+  startup-owned seam that can safely expose sandbox/orchestrator dependencies
+  to later startup producers.
 - Modify: `tldw_Server_API/app/api/v1/schemas/admin_schemas.py`
   - Add generic admin startup-warning response models.
 - Create or modify: `tldw_Server_API/app/api/v1/endpoints/admin/startup_warnings.py`
   - Admin-only current-process startup-warning endpoint.
+- Modify: `tldw_Server_API/app/api/v1/endpoints/admin/__init__.py`
+  - Include the new startup-warning admin router in the assembled admin surface.
+- Modify: `tldw_Server_API/app/api/v1/router_groups/admin.py`
+  - Ensure the admin router group exposes the new startup-warning route.
 - Modify: `tldw_Server_API/app/core/Sandbox/macos_diagnostics.py`
-  - Add startup warning summary projection.
+  - Accept additive startup warning summary injection without depending on app state.
+- Modify: `tldw_Server_API/app/core/Sandbox/service.py`
+  - Project the startup warning summary into sandbox diagnostics through a startup-safe seam.
 - Modify: `tldw_Server_API/app/api/v1/schemas/sandbox_schemas.py`
   - Add additive sandbox startup-warning summary schema.
 - Modify tests:
-  - `tldw_Server_API/tests/services/test_startup_warning_registry.py`
-  - `tldw_Server_API/tests/services/test_startup_warning_sandbox.py`
+  - `tldw_Server_API/tests/Services/test_startup_warning_registry.py`
+  - `tldw_Server_API/tests/Services/test_startup_warning_sandbox.py`
   - `tldw_Server_API/tests/sandbox/test_macos_diagnostics.py`
   - `tldw_Server_API/tests/sandbox/test_admin_macos_diagnostics.py`
   - `tldw_Server_API/tests/api/test_admin_startup_warnings.py`
-  - one startup/lifespan integration test file in the existing startup/services test area
+  - extend one startup/lifespan integration test file in `tldw_Server_API/tests/Services/`
 - Modify docs:
   - `Docs/Sandbox/macos-runtime-operator-notes.md`
   - `tldw_Server_API/app/core/Sandbox/README.md`
@@ -54,7 +63,7 @@
 **Files:**
 - Create: `tldw_Server_API/app/services/startup_warning_models.py`
 - Create: `tldw_Server_API/app/services/startup_warning_registry.py`
-- Test: `tldw_Server_API/tests/services/test_startup_warning_registry.py`
+- Test: `tldw_Server_API/tests/Services/test_startup_warning_registry.py`
 
 - [ ] **Step 1: Write the failing registry tests**
 
@@ -85,7 +94,7 @@ def test_startup_warning_registry_clear_resets_state():
 Run:
 
 ```bash
-source .venv/bin/activate && python -m pytest tldw_Server_API/tests/services/test_startup_warning_registry.py -v
+source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Services/test_startup_warning_registry.py -v
 ```
 
 Expected: import or symbol failures.
@@ -126,7 +135,7 @@ Run the Task 1 command again and expect PASS.
 git add \
   tldw_Server_API/app/services/startup_warning_models.py \
   tldw_Server_API/app/services/startup_warning_registry.py \
-  tldw_Server_API/tests/services/test_startup_warning_registry.py
+  tldw_Server_API/tests/Services/test_startup_warning_registry.py
 git commit -m "feat(startup): add startup warning registry"
 ```
 
@@ -134,7 +143,7 @@ git commit -m "feat(startup): add startup warning registry"
 
 **Files:**
 - Create: `tldw_Server_API/app/services/startup_warning_sandbox.py`
-- Test: `tldw_Server_API/tests/services/test_startup_warning_sandbox.py`
+- Test: `tldw_Server_API/tests/Services/test_startup_warning_sandbox.py`
 
 - [ ] **Step 1: Write the failing sandbox producer tests**
 
@@ -167,7 +176,7 @@ def test_sandbox_startup_producer_does_not_mutate_runtime_state():
 Run:
 
 ```bash
-source .venv/bin/activate && python -m pytest tldw_Server_API/tests/services/test_startup_warning_sandbox.py -v
+source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Services/test_startup_warning_sandbox.py -v
 ```
 
 Expected: import or missing symbol failures.
@@ -179,6 +188,8 @@ Implementation requirements:
 - use bounded helper/reconciliation checks only
 - do not call `collect_macos_diagnostics()`
 - summarize counts rather than storing raw reconciliation items
+- accept startup-owned dependencies explicitly; do not import or depend on
+  `tldw_Server_API.app.api.v1.endpoints.sandbox._service`
 - emit `warn` records for:
   - stale session controls
   - unhealthy session controls
@@ -197,7 +208,7 @@ Run the Task 2 command again and expect PASS.
 ```bash
 git add \
   tldw_Server_API/app/services/startup_warning_sandbox.py \
-  tldw_Server_API/tests/services/test_startup_warning_sandbox.py
+  tldw_Server_API/tests/Services/test_startup_warning_sandbox.py
 git commit -m "feat(startup): add sandbox startup warning producer"
 ```
 
@@ -205,8 +216,8 @@ git commit -m "feat(startup): add sandbox startup warning producer"
 
 **Files:**
 - Modify: `tldw_Server_API/app/services/lifespan_startup_sequence.py`
-- Possibly modify the startup handle/state module that owns app startup state
-- Test: existing startup/lifespan test area
+- Modify: the startup-owned handle/state module that owns app startup state
+- Test: existing startup/lifespan test area under `tldw_Server_API/tests/Services/`
 
 - [ ] **Step 1: Write the failing startup integration tests**
 
@@ -236,10 +247,12 @@ Requirements:
 
 - initialize a registry per startup/boot
 - attach it to `app.state`
-- run the sandbox producer after sandbox dependencies are available
+- run the sandbox producer after startup-owned sandbox/orchestrator dependencies
+  are available
 - if `registry.should_block_startup()` is true, raise using the strongest
   blocking record
 - keep startup non-mutating
+- do not resolve sandbox startup dependencies by importing endpoint modules
 
 - [ ] **Step 4: Run the startup integration tests to verify pass**
 
@@ -257,6 +270,8 @@ git commit -m "feat(startup): wire startup warnings into lifespan"
 **Files:**
 - Modify: `tldw_Server_API/app/api/v1/schemas/admin_schemas.py`
 - Create or modify: `tldw_Server_API/app/api/v1/endpoints/admin/startup_warnings.py`
+- Modify: `tldw_Server_API/app/api/v1/endpoints/admin/__init__.py`
+- Modify: `tldw_Server_API/app/api/v1/router_groups/admin.py`
 - Test: `tldw_Server_API/tests/api/test_admin_startup_warnings.py`
 
 - [ ] **Step 1: Write the failing admin endpoint tests**
@@ -308,6 +323,8 @@ Re-run the Task 4 command and expect PASS.
 git add \
   tldw_Server_API/app/api/v1/schemas/admin_schemas.py \
   tldw_Server_API/app/api/v1/endpoints/admin/startup_warnings.py \
+  tldw_Server_API/app/api/v1/endpoints/admin/__init__.py \
+  tldw_Server_API/app/api/v1/router_groups/admin.py \
   tldw_Server_API/tests/api/test_admin_startup_warnings.py
 git commit -m "feat(admin): expose startup warnings endpoint"
 ```
@@ -316,6 +333,7 @@ git commit -m "feat(admin): expose startup warnings endpoint"
 
 **Files:**
 - Modify: `tldw_Server_API/app/core/Sandbox/macos_diagnostics.py`
+- Modify: `tldw_Server_API/app/core/Sandbox/service.py`
 - Modify: `tldw_Server_API/app/api/v1/schemas/sandbox_schemas.py`
 - Modify: `tldw_Server_API/tests/sandbox/test_macos_diagnostics.py`
 - Modify: `tldw_Server_API/tests/sandbox/test_admin_macos_diagnostics.py`
@@ -338,8 +356,9 @@ Run the two focused sandbox diagnostics test files and expect failure.
 
 Requirements:
 
+- keep `macos_diagnostics.py` app-agnostic
 - project warning records from the shared registry into a compact sandbox-local
-  summary
+  summary one layer above `collect_macos_diagnostics()`
 - include only sandbox-related codes
 - do not duplicate the full generic endpoint payload
 
@@ -352,6 +371,7 @@ Re-run the Task 5 command and expect PASS.
 ```bash
 git add \
   tldw_Server_API/app/core/Sandbox/macos_diagnostics.py \
+  tldw_Server_API/app/core/Sandbox/service.py \
   tldw_Server_API/app/api/v1/schemas/sandbox_schemas.py \
   tldw_Server_API/tests/sandbox/test_macos_diagnostics.py \
   tldw_Server_API/tests/sandbox/test_admin_macos_diagnostics.py
@@ -405,8 +425,8 @@ Run:
 
 ```bash
 source .venv/bin/activate && python -m pytest \
-  tldw_Server_API/tests/services/test_startup_warning_registry.py \
-  tldw_Server_API/tests/services/test_startup_warning_sandbox.py \
+  tldw_Server_API/tests/Services/test_startup_warning_registry.py \
+  tldw_Server_API/tests/Services/test_startup_warning_sandbox.py \
   tldw_Server_API/tests/api/test_admin_startup_warnings.py \
   tldw_Server_API/tests/sandbox/test_macos_diagnostics.py \
   tldw_Server_API/tests/sandbox/test_admin_macos_diagnostics.py \
