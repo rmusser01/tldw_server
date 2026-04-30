@@ -2446,7 +2446,7 @@ async def list_analyses(
     tags=["manuscripts"],
 )
 async def create_version(
-    entity_type: str,
+    entity_type: ManuscriptVersionEntityType,
     entity_id: str,
     payload: ManuscriptVersionCreateRequest,
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
@@ -2466,7 +2466,7 @@ async def create_version(
     tags=["manuscripts"],
 )
 async def list_versions(
-    entity_type: str,
+    entity_type: ManuscriptVersionEntityType,
     entity_id: str,
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
     _: None = Depends(rbac_rate_limit("writing.manuscripts.list")),
@@ -2488,7 +2488,7 @@ async def list_versions(
     tags=["manuscripts"],
 )
 async def get_version(
-    entity_type: str,
+    entity_type: ManuscriptVersionEntityType,
     entity_id: str,
     version_number: int,
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),

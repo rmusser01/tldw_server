@@ -1311,6 +1311,33 @@ class ManuscriptDBHelper:
                     entity=table,
                     entity_id=entity_id,
                 )
+            try:
+                if normalized_type in {"manuscript", "part"}:
+                    self._fetch_entity_row(conn, "project", row["project_id"], deleted=False)
+                elif normalized_type == "chapter":
+                    self._fetch_entity_row(conn, "project", row["project_id"], deleted=False)
+                    if row.get("part_id"):
+                        parent = self._fetch_entity_row(conn, "part", row["part_id"], deleted=False)
+                        if parent["project_id"] != row["project_id"]:
+                            raise ConflictError(
+                                f"{label.title()} {entity_id!r} restore failed (parent project mismatch).",
+                                entity=table,
+                                entity_id=entity_id,
+                            )
+                elif normalized_type == "scene":
+                    parent = self._fetch_entity_row(conn, "chapter", row["chapter_id"], deleted=False)
+                    if parent["project_id"] != row["project_id"]:
+                        raise ConflictError(
+                            f"{label.title()} {entity_id!r} restore failed (parent project mismatch).",
+                            entity=table,
+                            entity_id=entity_id,
+                        )
+            except InputError as exc:
+                raise ConflictError(
+                    f"{label.title()} {entity_id!r} restore failed (parent missing or deleted).",
+                    entity=table,
+                    entity_id=entity_id,
+                ) from exc
             next_version = int(row["version"]) + 1
             cur = conn.execute(
                 f"UPDATE {table} "  # nosec B608

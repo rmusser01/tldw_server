@@ -262,6 +262,18 @@ def _is_mutation_allowed(principal: AuthPrincipal) -> bool:
     return bool(permissions & required)
 
 
+def _is_admin_principal(principal: AuthPrincipal) -> bool:
+    """Return True only for explicit admin principals."""
+    if bool(getattr(principal, "is_admin", False)):
+        return True
+    roles = {
+        str(role).strip().lower()
+        for role in (principal.roles or [])
+        if str(role).strip()
+    }
+    return "admin" in roles
+
+
 def _require_mutation_permission(principal: AuthPrincipal) -> None:
     """Require mutation permission for MCP Hub write operations."""
     if _is_mutation_allowed(principal):
@@ -2695,13 +2707,14 @@ async def stream_mcp_hub_events(
         queue = None
         sent_event_ids: set[str] = set()
         try:
+            queue = await bus.subscribe()
             if replay:
                 durable_replayed = await replay_mcp_hub_audit_events(
                     principal_user_id=principal.user_id,
                     after_event_id=after_event_id,
                     event_types=event_types,
                     limit=None,
-                    allow_cross_tenant=_is_mutation_allowed(principal),
+                    allow_cross_tenant=_is_admin_principal(principal),
                 )
                 for event in durable_replayed:
                     if not _event_matches_visible_scope(event, visible_scopes):
@@ -2731,7 +2744,6 @@ async def stream_mcp_hub_events(
                     if limit is not None and sent >= limit:
                         return
 
-            queue = await bus.subscribe()
             while True:
                 if await request.is_disconnected():
                     break

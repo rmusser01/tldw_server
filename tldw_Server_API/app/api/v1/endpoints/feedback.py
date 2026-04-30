@@ -377,8 +377,9 @@ async def get_feedback(
     conv_id = record.get("conversation_id")
     if conv_id:
         conversation = db.get_conversation_by_id(conv_id)
-        if conversation:
-            _ensure_conversation_owner(conversation, current_user)
+        if not conversation or conversation.get("deleted"):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Feedback record not found")
+        _ensure_conversation_owner(conversation, current_user)
 
     return FeedbackRecord(**record)
 

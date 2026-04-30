@@ -19970,24 +19970,37 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         except BackendDatabaseError as exc:
             raise CharactersRAGDBError(f"Failed to release suggestion generation link reservation: {exc}") from exc  # noqa: TRY003
 
-    def soft_delete_deck_by_id(self, deck_id: int) -> None:
-        """Best-effort soft-delete of a deck by id."""
+    def soft_delete_deck_by_id(self, deck_id: int, expected_version: int | None = None) -> None:
+        """Best-effort soft-delete of a deck by id, optionally with optimistic locking."""
         now = self._get_current_utc_timestamp_iso()
         try:
             with self.transaction() as conn:
-                conn.execute(
-                    """
+                params: list[Any] = [
+                    True,
+                    now,
+                    self.client_id,
+                    int(deck_id),
+                ]
+                version_clause = ""
+                if expected_version is not None:
+                    version_clause = " AND version = ?"
+                    params.append(int(expected_version))
+                rowcount = conn.execute(
+                    f"""
                     UPDATE decks
                        SET deleted = ?, last_modified = ?, version = version + 1, client_id = ?
-                     WHERE id = ? AND deleted = 0
-                    """,
-                    (
-                        True,
-                        now,
-                        self.client_id,
-                        int(deck_id),
-                    ),
-                )
+                     WHERE id = ? AND deleted = 0{version_clause}
+                    """,  # nosec B608
+                    tuple(params),
+                ).rowcount
+                if rowcount == 0 and expected_version is not None:
+                    existing = conn.execute(
+                        "SELECT id FROM decks WHERE id = ? AND deleted = 0",
+                        (int(deck_id),),
+                    ).fetchone()
+                    if existing is None:
+                        raise ConflictError("Deck not found", entity="decks", identifier=deck_id)  # noqa: TRY003
+                    raise ConflictError("Version mismatch deleting deck", entity="decks", identifier=deck_id)  # noqa: TRY003
         except sqlite3.Error as exc:
             raise CharactersRAGDBError(f"Failed to soft-delete deck: {exc}") from exc  # noqa: TRY003
         except BackendDatabaseError as exc:

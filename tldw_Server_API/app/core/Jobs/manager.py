@@ -2228,7 +2228,17 @@ class JobManager:
                 if batch_group:
                     query += " AND batch_group = ?"
                     params.append(batch_group)
-                row = conn.execute(query, params).fetchone()
+                try:
+                    row = conn.execute(query, params).fetchone()
+                except sqlite3.OperationalError as exc:
+                    if (
+                        batch_group
+                        and self._sqlite_missing_column_error(exc, "batch_group")
+                        and self._sqlite_ensure_batch_group(conn)
+                    ):
+                        row = conn.execute(query, params).fetchone()
+                    else:
+                        raise
                 if not row:
                     return 0
                 try:

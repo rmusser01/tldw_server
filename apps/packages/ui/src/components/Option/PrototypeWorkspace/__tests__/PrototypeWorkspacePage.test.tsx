@@ -1,10 +1,14 @@
 import React from "react"
 import { render, screen } from "@testing-library/react"
-import { describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it } from "vitest"
 
 import { PrototypeWorkspacePage } from "../PrototypeWorkspacePage"
 
 describe("PrototypeWorkspacePage", () => {
+  afterEach(() => {
+    window.history.replaceState({}, "", "/")
+  })
+
   it("defaults to owner mode when no prototype session token is present", () => {
     window.history.pushState({}, "", "/prototype-workspaces")
 

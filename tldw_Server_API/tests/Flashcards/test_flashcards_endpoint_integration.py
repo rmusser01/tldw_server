@@ -655,6 +655,48 @@ def test_delete_deck_soft_deletes_with_expected_version(client_with_flashcards_d
     assert all(deck["id"] != created["id"] for deck in decks_response.json())
 
 
+def test_delete_deck_rejects_stale_version_after_concurrent_update(
+    client_with_flashcards_db: TestClient,
+    flashcards_db: CharactersRAGDB,
+    monkeypatch,
+):
+    create_response = client_with_flashcards_db.post(
+        "/api/v1/flashcards/decks",
+        json={"name": "Race Delete"},
+        headers=AUTH_HEADERS,
+    )
+    assert create_response.status_code == 200
+    created = create_response.json()
+    stale_deck = dict(flashcards_db.get_deck(created["id"]))
+
+    updated = flashcards_db.update_deck(
+        created["id"],
+        description="Concurrent update",
+        expected_version=created["version"],
+    )
+    assert updated is True
+
+    original_get_deck = flashcards_db.get_deck
+
+    def _stale_get_deck(deck_id: int):
+        if int(deck_id) == int(created["id"]):
+            return stale_deck
+        return original_get_deck(deck_id)
+
+    monkeypatch.setattr(flashcards_db, "get_deck", _stale_get_deck)
+
+    delete_response = client_with_flashcards_db.delete(
+        f"/api/v1/flashcards/decks/{created['id']}",
+        params={"expected_version": created["version"]},
+        headers=AUTH_HEADERS,
+    )
+
+    assert delete_response.status_code == 409
+    current = original_get_deck(created["id"])
+    assert current is not None
+    assert not current["deleted"]
+
+
 def test_deck_endpoints_reject_unknown_workspace_ids(
     client_with_flashcards_db: TestClient,
 ):

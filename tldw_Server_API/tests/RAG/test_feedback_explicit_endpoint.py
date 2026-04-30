@@ -277,6 +277,29 @@ def test_get_feedback_returns_single_entry(feedback_setup):
 
 
 @pytest.mark.integration
+def test_get_feedback_fails_closed_when_conversation_is_missing(feedback_setup, monkeypatch):
+    client, _db, _conversation_id, _message_id = feedback_setup
+
+    class _OrphanedFeedbackStore:
+        async def get_feedback_by_id(self, _feedback_id: str):
+            return {
+                "id": "fb_orphaned",
+                "conversation_id": "missing-conversation",
+                "helpful": True,
+            }
+
+    class _OrphanedFeedbackSystem:
+        def __init__(self, chacha_db):
+            self.user_feedback = _OrphanedFeedbackStore()
+
+    monkeypatch.setattr(feedback_endpoint, "UnifiedFeedbackSystem", _OrphanedFeedbackSystem)
+
+    resp = client.get("/api/v1/feedback/fb_orphaned")
+
+    assert resp.status_code == status.HTTP_404_NOT_FOUND
+
+
+@pytest.mark.integration
 def test_list_feedback_not_found_for_missing_conversation(feedback_setup):
     client, _db, _conversation_id, _message_id = feedback_setup
 

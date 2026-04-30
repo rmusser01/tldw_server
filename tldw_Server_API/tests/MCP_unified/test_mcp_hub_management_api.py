@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Any
 
@@ -13,6 +14,11 @@ from tldw_Server_API.app.api.v1.endpoints import mcp_hub_management
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.exceptions import BadRequestError, ResourceNotFoundError
 from tldw_Server_API.app.services import mcp_hub_service
+
+
+class _NeverDisconnectedRequest:
+    async def is_disconnected(self) -> bool:
+        return False
 
 
 def _make_principal(
@@ -553,6 +559,93 @@ async def test_mcp_hub_events_stream_replays_governance_audit_events(tmp_path, m
     assert "event: mcp_hub.external_server.created" in resp.text
     assert '"resource_type": "mcp_external_server"' in resp.text
     assert '"resource_id": "docs"' in resp.text
+
+
+@pytest.mark.asyncio
+async def test_mcp_hub_event_stream_permission_replay_is_tenant_scoped(monkeypatch) -> None:
+    captured: dict[str, Any] = {}
+
+    async def _fake_replay(**kwargs: Any) -> list[dict[str, Any]]:
+        captured.update(kwargs)
+        return [
+            {
+                "event_id": "evt_scoped",
+                "event_type": "mcp_hub.external_server.created",
+                "action": "external_server.created",
+                "actor_id": 1,
+                "resource_type": "mcp_external_server",
+                "resource_id": "docs",
+                "metadata": {"owner_scope_type": "global", "owner_scope_id": None},
+            }
+        ]
+
+    async def _fake_bus() -> mcp_hub_service.McpHubEventBus:
+        return mcp_hub_service.McpHubEventBus(max_events=4)
+
+    monkeypatch.setattr(mcp_hub_management, "replay_mcp_hub_audit_events", _fake_replay)
+    monkeypatch.setattr(mcp_hub_management, "get_mcp_hub_event_bus", _fake_bus)
+
+    response = await mcp_hub_management.stream_mcp_hub_events(
+        request=_NeverDisconnectedRequest(),  # type: ignore[arg-type]
+        after_event_id=None,
+        event_type=None,
+        owner_scope_type=None,
+        owner_scope_id=None,
+        replay=True,
+        limit=1,
+        principal=_make_principal(permissions=["system.configure"]),
+    )
+    chunk = await asyncio.wait_for(anext(response.body_iterator), timeout=0.5)
+    text = chunk.decode() if isinstance(chunk, bytes) else str(chunk)
+
+    assert "evt_scoped" in text
+    assert captured["principal_user_id"] == 1
+    assert captured["allow_cross_tenant"] is False
+
+
+@pytest.mark.asyncio
+async def test_mcp_hub_event_stream_subscribes_before_replay(monkeypatch) -> None:
+    live_event = {
+        "event_id": "evt_live_race",
+        "event_type": "mcp_hub.external_server.updated",
+        "action": "external_server.updated",
+        "actor_id": 1,
+        "resource_type": "mcp_external_server",
+        "resource_id": "docs-race",
+        "metadata": {"owner_scope_type": "global", "owner_scope_id": None},
+    }
+
+    class _RaceBus(mcp_hub_service.McpHubEventBus):
+        async def replay(self, **_kwargs: Any) -> list[dict[str, Any]]:
+            await self.publish(live_event)
+            return []
+
+    race_bus = _RaceBus(max_events=4)
+
+    async def _fake_bus() -> _RaceBus:
+        return race_bus
+
+    async def _fake_replay(**_kwargs: Any) -> list[dict[str, Any]]:
+        return []
+
+    monkeypatch.setattr(mcp_hub_management, "get_mcp_hub_event_bus", _fake_bus)
+    monkeypatch.setattr(mcp_hub_management, "replay_mcp_hub_audit_events", _fake_replay)
+
+    response = await mcp_hub_management.stream_mcp_hub_events(
+        request=_NeverDisconnectedRequest(),  # type: ignore[arg-type]
+        after_event_id=None,
+        event_type=["mcp_hub.external_server.updated"],
+        owner_scope_type=None,
+        owner_scope_id=None,
+        replay=True,
+        limit=1,
+        principal=_make_principal(roles=["admin"], permissions=[]),
+    )
+    chunk = await asyncio.wait_for(anext(response.body_iterator), timeout=0.5)
+    text = chunk.decode() if isinstance(chunk, bytes) else str(chunk)
+
+    assert "evt_live_race" in text
+    assert "docs-race" in text
 
 
 def test_mcp_hub_audit_row_normalizes_prefixed_actions() -> None:

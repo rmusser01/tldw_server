@@ -789,9 +789,7 @@ def delete_deck(
         deck = db.get_deck(deck_id)
         if not deck or deck.get("deleted"):
             raise HTTPException(status_code=404, detail="Deck not found")
-        if int(deck.get("version") or 0) != int(expected_version):
-            raise ConflictError("Version mismatch deleting deck", entity="decks", identifier=deck_id)
-        db.soft_delete_deck_by_id(deck_id)
+        db.soft_delete_deck_by_id(deck_id, expected_version=expected_version)
         return DeckDeleteResponse(deleted=True)
     except HTTPException:
         raise

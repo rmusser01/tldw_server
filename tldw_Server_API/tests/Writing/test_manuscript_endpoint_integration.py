@@ -330,6 +330,15 @@ def test_manuscript_version_history_and_trash_restore(client: TestClient):
 
 
 def test_manuscript_restore_endpoints_reject_invalid_entity_type(client: TestClient):
+    create_version_resp = client.post(f"{PREFIX}/invalid/entity-1/versions", json={})
+    assert create_version_resp.status_code == 422
+
+    list_versions_resp = client.get(f"{PREFIX}/invalid/entity-1/versions")
+    assert list_versions_resp.status_code == 422
+
+    get_version_resp = client.get(f"{PREFIX}/invalid/entity-1/versions/1")
+    assert get_version_resp.status_code == 422
+
     restore_version_resp = client.post(f"{PREFIX}/invalid/entity-1/versions/1/restore")
     assert restore_version_resp.status_code == 422
 
@@ -338,6 +347,45 @@ def test_manuscript_restore_endpoints_reject_invalid_entity_type(client: TestCli
 
     restore_trash_resp = client.post(f"{PREFIX}/trash/invalid/entity-1/restore")
     assert restore_trash_resp.status_code == 422
+
+
+def test_manuscript_restore_trash_rejects_deleted_parent_chapter(client: TestClient):
+    project_resp = client.post(f"{PREFIX}/projects", json={"title": "Parent Guard Novel"})
+    assert project_resp.status_code == 201, project_resp.text
+    project_id = project_resp.json()["id"]
+
+    chapter_resp = client.post(f"{PREFIX}/projects/{project_id}/chapters", json={"title": "Deleted Parent"})
+    assert chapter_resp.status_code == 201, chapter_resp.text
+    chapter = chapter_resp.json()
+
+    scene_resp = client.post(
+        f"{PREFIX}/chapters/{chapter['id']}/scenes",
+        json={"title": "Orphan Candidate", "content_plain": "Scene text"},
+    )
+    assert scene_resp.status_code == 201, scene_resp.text
+    scene_id = scene_resp.json()["id"]
+
+    current_chapter_resp = client.get(f"{PREFIX}/chapters/{chapter['id']}")
+    assert current_chapter_resp.status_code == 200, current_chapter_resp.text
+    current_chapter = current_chapter_resp.json()
+
+    delete_chapter_resp = client.delete(
+        f"{PREFIX}/chapters/{chapter['id']}",
+        headers={"expected-version": str(current_chapter["version"])},
+    )
+    assert delete_chapter_resp.status_code == 204, delete_chapter_resp.text
+
+    trash_resp = client.get(f"{PREFIX}/trash", params={"entity_type": "scene"})
+    assert trash_resp.status_code == 200, trash_resp.text
+    scene_trash = next(item for item in trash_resp.json()["items"] if item["id"] == scene_id)
+
+    restore_trash_resp = client.post(
+        f"{PREFIX}/trash/scene/{scene_id}/restore",
+        headers={"expected-version": str(scene_trash["version"])},
+    )
+
+    assert restore_trash_resp.status_code == 409
+    assert client.get(f"{PREFIX}/scenes/{scene_id}").status_code == 404
 
 
 def test_project_settings_round_trip(client: TestClient):
