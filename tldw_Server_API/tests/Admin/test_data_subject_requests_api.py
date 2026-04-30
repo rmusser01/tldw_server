@@ -325,6 +325,10 @@ async def test_list_returns_newest_first_with_limit_offset(monkeypatch, tmp_path
     assert listed.status_code == 200, listed.text
     payload = listed.json()
     assert payload["total"] == 3
+    assert payload["pagination"]["total"] == 3
+    assert payload["pagination"]["limit"] == 2
+    assert payload["pagination"]["offset"] == 1
+    assert payload["pagination"]["has_more"] is False
     assert [item["client_request_id"] for item in payload["items"]] == [
         "dsr-client-2",
         "dsr-client-1",
