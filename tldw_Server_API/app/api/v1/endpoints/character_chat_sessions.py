@@ -76,6 +76,7 @@ from tldw_Server_API.app.api.v1.schemas.chat_session_schemas import (
 from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import (
     DEFAULT_LLM_PROVIDER,
 )
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.utils.deprecation import build_deprecation_headers
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
@@ -5596,7 +5597,13 @@ async def list_chat_sessions(
             chats=chats,
             total=total_count,
             limit=limit,
-            offset=offset
+            offset=offset,
+            pagination=build_offset_pagination_meta(
+                total=total_count,
+                limit=limit,
+                offset=offset,
+                count=len(chats),
+            ),
         )
 
     except HTTPException:

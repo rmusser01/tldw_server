@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import Any, Literal, Optional, Union
 
 from pydantic import BaseModel, Field, field_validator, model_validator
+from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
 from tldw_Server_API.app.core.LLM_Calls.routing.models import RoutingOverride
 
 ALLOWED_CONVERSATION_STATES = ("in-progress", "resolved", "backlog", "non-viable")
@@ -184,6 +185,7 @@ class ChatSessionListResponse(BaseModel):
     total: int = Field(..., description="Total number of chats")
     limit: int = Field(..., description="Number of items per page")
     offset: int = Field(..., description="Offset for pagination")
+    pagination: OffsetPaginationMeta
 
 
 class ChatLinkedResearchRunResponse(BaseModel):
