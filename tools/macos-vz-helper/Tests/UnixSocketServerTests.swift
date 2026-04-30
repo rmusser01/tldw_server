@@ -146,6 +146,40 @@ import Testing
     #expect(FileManager.default.fileExists(atPath: socketPath))
 }
 
+@Test func unixSocketServerRefusesActiveSocketPath() throws {
+    let socketPath = "/tmp/macos-vz-helper-\(UUID().uuidString.prefix(8)).sock"
+    let fd = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
+    guard fd >= 0 else { return }
+    defer {
+        close(fd)
+        unlink(socketPath)
+    }
+
+    try bindSocketForTest(fd: fd, path: socketPath)
+    guard Darwin.listen(fd, SOMAXCONN) == 0 else {
+        throw TestFailure.socketListenFailed
+    }
+
+    do {
+        let server = UnixSocketServer(socketPath: socketPath, service: HelperService())
+        #expect(throws: UnixSocketServerError.self) {
+            try server.start()
+        }
+    }
+
+    let clientFD = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
+    guard clientFD >= 0 else { return }
+    defer { close(clientFD) }
+
+    let address = try unixSocketAddress(path: socketPath)
+    let connectResult = withUnsafePointer(to: address.value) { pointer in
+        pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPointer in
+            connect(clientFD, sockaddrPointer, address.length)
+        }
+    }
+    #expect(connectResult == 0)
+}
+
 private func waitForSocket(at path: String, timeoutSeconds: TimeInterval = 2.0) throws {
     let deadline = Date().addingTimeInterval(timeoutSeconds)
     while Date() < deadline {
@@ -227,6 +261,7 @@ private enum TestFailure: Error {
     case socketBindFailed
     case clientSocketUnavailable
     case socketConnectFailed
+    case socketListenFailed
     case socketNotReady
     case socketPathTooLong
     case socketReadFailed

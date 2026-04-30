@@ -14,6 +14,7 @@ enum UnixSocketServerError: Error {
     case writeFailed(Int32)
     case unsafeSocketPath(String)
     case existingSocketPathIsNotSocket(String)
+    case existingSocketPathIsActive(String)
 }
 
 final class UnixSocketServer {
@@ -21,6 +22,7 @@ final class UnixSocketServer {
     private let service: HelperService
     private var serverSocketFD: Int32 = -1
     private var isRunning = false
+    private var ownsSocketPath = false
 
     init(socketPath: String, service: HelperService) {
         self.socketPath = socketPath.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -51,7 +53,7 @@ final class UnixSocketServer {
             isRunning = true
         } catch {
             close(socketFD)
-            unlink(socketPath)
+            unlinkOwnedSocketPath()
             throw error
         }
     }
@@ -85,7 +87,7 @@ final class UnixSocketServer {
             close(serverSocketFD)
             serverSocketFD = -1
         }
-        unlink(socketPath)
+        unlinkOwnedSocketPath()
     }
 
     func handleRequestData(_ data: Data) throws -> Data {
@@ -170,31 +172,16 @@ final class UnixSocketServer {
     }
 
     private func bindAndListen(socketFD: Int32) throws {
-        var address = sockaddr_un()
-        address.sun_family = sa_family_t(AF_UNIX)
-
-        let pathBytes = Array(socketPath.utf8CString)
-        let maxLength = MemoryLayout.size(ofValue: address.sun_path)
-        guard pathBytes.count <= maxLength else {
-            throw UnixSocketServerError.socketPathTooLong
-        }
-
-        withUnsafeMutablePointer(to: &address.sun_path.0) { pointer in
-            pointer.initialize(repeating: 0, count: maxLength)
-            for (index, byte) in pathBytes.enumerated() {
-                pointer.advanced(by: index).pointee = byte
-            }
-        }
-
-        let addressLength = socklen_t(MemoryLayout<sa_family_t>.size + pathBytes.count)
-        let bindResult = withUnsafePointer(to: &address) { pointer in
+        let address = try socketAddress()
+        let bindResult = withUnsafePointer(to: address.value) { pointer in
             pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPointer in
-                Darwin.bind(socketFD, sockaddrPointer, addressLength)
+                Darwin.bind(socketFD, sockaddrPointer, address.length)
             }
         }
         guard bindResult == 0 else {
             throw UnixSocketServerError.bindFailed(errno)
         }
+        ownsSocketPath = true
         guard Darwin.listen(socketFD, SOMAXCONN) == 0 else {
             throw UnixSocketServerError.listenFailed(errno)
         }
@@ -222,7 +209,90 @@ final class UnixSocketServer {
         if type != S_IFSOCK {
             throw UnixSocketServerError.existingSocketPathIsNotSocket(socketPath)
         }
+        if try existingSocketPathHasListener() {
+            throw UnixSocketServerError.existingSocketPathIsActive(socketPath)
+        }
         unlink(socketPath)
+    }
+
+    private func existingSocketPathHasListener() throws -> Bool {
+        let socketFD = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
+        guard socketFD >= 0 else {
+            throw UnixSocketServerError.socketCreateFailed(errno)
+        }
+        defer {
+            close(socketFD)
+        }
+
+        setShortSocketTimeout(socketFD)
+        let address = try socketAddress()
+        let connectResult = withUnsafePointer(to: address.value) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPointer in
+                connect(socketFD, sockaddrPointer, address.length)
+            }
+        }
+        if connectResult == 0 {
+            drainHelperPingProbe(socketFD)
+            return true
+        }
+
+        switch errno {
+        case ECONNREFUSED, ENOENT:
+            return false
+        default:
+            throw UnixSocketServerError.unsafeSocketPath(socketPath)
+        }
+    }
+
+    private func socketAddress() throws -> (value: sockaddr_un, length: socklen_t) {
+        var address = sockaddr_un()
+        address.sun_family = sa_family_t(AF_UNIX)
+
+        let pathBytes = Array(socketPath.utf8CString)
+        let maxLength = MemoryLayout.size(ofValue: address.sun_path)
+        guard pathBytes.count <= maxLength else {
+            throw UnixSocketServerError.socketPathTooLong
+        }
+
+        withUnsafeMutablePointer(to: &address.sun_path.0) { pointer in
+            pointer.initialize(repeating: 0, count: maxLength)
+            for (index, byte) in pathBytes.enumerated() {
+                pointer.advanced(by: index).pointee = byte
+            }
+        }
+
+        return (address, socklen_t(MemoryLayout<sa_family_t>.size + pathBytes.count))
+    }
+
+    private func setShortSocketTimeout(_ socketFD: Int32) {
+        var timeout = timeval(tv_sec: 0, tv_usec: 200_000)
+        withUnsafePointer(to: &timeout) { pointer in
+            pointer.withMemoryRebound(to: UInt8.self, capacity: MemoryLayout<timeval>.size) { rawPointer in
+                _ = setsockopt(socketFD, SOL_SOCKET, SO_RCVTIMEO, rawPointer, socklen_t(MemoryLayout<timeval>.size))
+                _ = setsockopt(socketFD, SOL_SOCKET, SO_SNDTIMEO, rawPointer, socklen_t(MemoryLayout<timeval>.size))
+            }
+        }
+    }
+
+    private func drainHelperPingProbe(_ socketFD: Int32) {
+        let payload = Data("{\"operation\":\"ping\",\"protocol_version\":\"1\",\"request\":{}}\n".utf8)
+        payload.withUnsafeBytes { rawBuffer in
+            guard let baseAddress = rawBuffer.baseAddress else {
+                return
+            }
+            _ = Darwin.write(socketFD, baseAddress, rawBuffer.count)
+        }
+
+        var buffer = [UInt8](repeating: 0, count: 512)
+        _ = recv(socketFD, &buffer, buffer.count, 0)
+    }
+
+    private func unlinkOwnedSocketPath() {
+        guard ownsSocketPath else {
+            return
+        }
+        unlink(socketPath)
+        ownsSocketPath = false
     }
 
     private func handleConnection(clientFD: Int32) throws {
