@@ -16,6 +16,7 @@ from typing import Any, Optional, Union
 from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
 from tldw_Server_API.app.core.Character_Chat.constants import MAX_CHAT_DICTIONARY_TEXT_LENGTH
 
 # Maximum length for regex patterns to prevent complexity attacks
@@ -509,6 +510,7 @@ class DictionaryActivityListResponse(BaseModel):
     total: int = Field(..., ge=0, description="Total number of matching events")
     limit: int = Field(..., ge=1, description="Applied page size")
     offset: int = Field(..., ge=0, description="Applied offset")
+    pagination: OffsetPaginationMeta
 
 
 class DictionaryVersionSummary(BaseModel):
@@ -551,6 +553,7 @@ class DictionaryVersionListResponse(BaseModel):
     total: int = Field(..., ge=0, description="Total number of snapshots for this dictionary")
     limit: int = Field(..., ge=1, description="Applied page size")
     offset: int = Field(..., ge=0, description="Applied offset")
+    pagination: OffsetPaginationMeta
 
 
 class DictionaryVersionRevertResponse(BaseModel):
