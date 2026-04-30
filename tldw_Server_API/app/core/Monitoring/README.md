@@ -79,5 +79,6 @@
   - Webhook/email sends are best‑effort and may be disabled in restricted environments; rely on JSONL for auditability.
   - Public alert mutation endpoints return the authoritative merged alert state in `{status, id, item}`.
   - `read` marks the runtime alert as read without setting `acknowledged_at`; `acknowledge` records `acknowledged_at`; `dismiss` records `dismissed_at`.
+  - Admin overlay mutation endpoints require runtime-backed `alert:<id>` identities; overlay-only identities are rejected before state or history events are written.
   - Large texts are truncated for scanning; test your rules with realistic snippets.
   - Regex complexity can impact performance; prefer literals or well‑scoped regexes.

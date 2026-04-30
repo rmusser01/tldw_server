@@ -118,6 +118,11 @@ Monitoring emits alerts without changing moderation behavior or endpoint results
 - `acknowledge` marks the runtime alert as read and records `acknowledged_at`.
 - `dismiss` marks the runtime alert as read and records `dismissed_at`.
 
+## Admin Overlay Identity Contract
+- Admin overlay mutation endpoints (`assign`, `snooze`, and `escalate`) only accept runtime-backed `alert:<id>` identities.
+- The referenced runtime alert row must exist in the monitoring alerts database before overlay state or history events are written.
+- Overlay-only identities such as `fingerprint:*` are not a public mutation contract; operators should create or locate the runtime alert first, then mutate its `alert:<id>` identity.
+
 ## Phase 2 (planned)
 - Delivery channels: email, webhook, Slack.
 - WebSocket push to WebUI for admins.

@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import pytest
+from fastapi import HTTPException
 
 from tldw_Server_API.app.api.v1.endpoints.admin import admin_monitoring as admin_monitoring_mod
 
@@ -37,74 +38,50 @@ class _StubMonitoringDb:
         return self.row
 
 
-def test_warn_if_runtime_alert_identity_missing_logs_warning(monkeypatch) -> None:
+def test_require_runtime_alert_identity_rejects_missing_runtime_row() -> None:
     db = _StubMonitoringDb(row=None)
-    warnings: list[str] = []
-    monkeypatch.setattr(
-        admin_monitoring_mod.logger,
-        "warning",
-        lambda message, *args, **kwargs: warnings.append(str(message)),
-    )
 
-    admin_monitoring_mod._warn_if_overlay_identity_has_no_runtime_row("alert:77", db)
+    with pytest.raises(HTTPException) as exc_info:
+        admin_monitoring_mod._require_runtime_alert_identity("alert:77", db)
 
     assert db.lookups == [77]
-    assert any("missing runtime alert" in msg for msg in warnings)
+    assert exc_info.value.status_code == 404
+    assert exc_info.value.detail == "unknown_alert"
 
 
-def test_warn_if_overlay_only_identity_logs_info_without_lookup(monkeypatch) -> None:
+def test_require_runtime_alert_identity_rejects_overlay_only_identity() -> None:
     db = _StubMonitoringDb(row=None)
-    infos: list[str] = []
-    monkeypatch.setattr(
-        admin_monitoring_mod.logger,
-        "info",
-        lambda message, *args, **kwargs: infos.append(str(message)),
-    )
 
-    admin_monitoring_mod._warn_if_overlay_identity_has_no_runtime_row("fingerprint:abc", db)
+    with pytest.raises(HTTPException) as exc_info:
+        admin_monitoring_mod._require_runtime_alert_identity("fingerprint:abc", db)
 
     assert db.lookups == []
-    assert any("overlay-only identity" in msg for msg in infos)
+    assert exc_info.value.status_code == 422
+    assert exc_info.value.detail == "unsupported_alert_identity"
 
 
-def test_warn_if_malformed_runtime_alert_identity_logs_warning(monkeypatch) -> None:
+def test_require_runtime_alert_identity_rejects_malformed_runtime_identity() -> None:
     db = _StubMonitoringDb(row=None)
-    warnings: list[str] = []
-    monkeypatch.setattr(
-        admin_monitoring_mod.logger,
-        "warning",
-        lambda message, *args, **kwargs: warnings.append(str(message)),
-    )
 
-    admin_monitoring_mod._warn_if_overlay_identity_has_no_runtime_row("alert:not-an-int", db)
+    with pytest.raises(HTTPException) as exc_info:
+        admin_monitoring_mod._require_runtime_alert_identity("alert:not-an-int", db)
 
     assert db.lookups == []
-    assert any("malformed runtime alert identity" in msg for msg in warnings)
+    assert exc_info.value.status_code == 422
+    assert exc_info.value.detail == "malformed_alert_identity"
 
 
 @pytest.mark.asyncio
-async def test_emit_overlay_identity_diagnostic_sanitizes_skip_log(monkeypatch) -> None:
-    debug_records: list[tuple[str, tuple[object, ...], dict[str, object]]] = []
+async def test_require_runtime_alert_identity_for_mutation_returns_canonical_identity() -> None:
+    db = _StubMonitoringDb(row={"id": 7})
 
-    def _raise_path_resolution() -> str:
-        raise RuntimeError("monitoring backend exploded at /private/monitoring.db")
-
-    monkeypatch.setattr(
-        admin_monitoring_mod,
-        "_resolve_monitoring_alerts_db_path",
-        _raise_path_resolution,
-    )
-    monkeypatch.setattr(
-        admin_monitoring_mod.logger,
-        "debug",
-        lambda message, *args, **kwargs: debug_records.append((str(message), args, kwargs)),
+    canonical_identity = await admin_monitoring_mod._require_runtime_alert_identity_for_mutation(
+        "alert:007",
+        db,
     )
 
-    await admin_monitoring_mod._emit_overlay_identity_diagnostic(
-        "alert:private-alert-id",
-    )
-
-    assert debug_records == [("monitoring overlay diagnostic skipped", (), {})]
+    assert canonical_identity == "alert:7"
+    assert db.lookups == [7]
 
 
 @pytest.mark.asyncio
@@ -243,7 +220,7 @@ async def test_assign_alert_sanitizes_backend_error_log(monkeypatch) -> None:
 
     class _Repo:
         async def upsert_alert_state(self, **kwargs):
-            assert kwargs["alert_identity"] == "alert:private-assign"
+            assert kwargs["alert_identity"] == "alert:7"
             assert kwargs["assigned_to_user_id"] == 123
             raise RuntimeError("monitoring assign failed at /private/admin-monitoring.db")
 
@@ -253,27 +230,24 @@ async def test_assign_alert_sanitizes_backend_error_log(monkeypatch) -> None:
     async def _fake_get_monitoring_repo():
         return _Repo()
 
-    async def _noop_overlay_diagnostic(alert_identity: str) -> None:
-        assert alert_identity == "alert:private-assign"
-
     logger_stub = _LoggerStub()
     monkeypatch.setattr(admin_monitoring_mod, "_get_users_repo", _fake_get_users_repo)
     monkeypatch.setattr(admin_monitoring_mod, "_get_monitoring_repo", _fake_get_monitoring_repo)
-    monkeypatch.setattr(admin_monitoring_mod, "_emit_overlay_identity_diagnostic", _noop_overlay_diagnostic)
     monkeypatch.setattr(admin_monitoring_mod, "logger", logger_stub)
 
     with pytest.raises(admin_monitoring_mod.HTTPException) as exc_info:
         await admin_monitoring_mod.assign_alert(
-            alert_identity="alert:private-assign",
+            alert_identity="alert:007",
             payload=AdminAlertAssignRequest(assigned_to_user_id=123),
             request=SimpleNamespace(),
             principal=SimpleNamespace(user_id=7),
+            runtime_alerts_db=_StubMonitoringDb(row={"id": 7}),
         )
 
     assert exc_info.value.status_code == 500
     assert exc_info.value.detail == "Failed to assign alert"
     assert logger_stub.errors == ["Failed to assign monitoring alert"]
-    assert "alert:private-assign" not in str(logger_stub.errors)
+    assert "alert:007" not in str(logger_stub.errors)
     assert "123" not in str(logger_stub.errors)
     assert "monitoring assign failed" not in str(logger_stub.errors)
     assert "/private/admin-monitoring.db" not in str(logger_stub.errors)
@@ -287,33 +261,30 @@ async def test_snooze_alert_sanitizes_backend_error_log(monkeypatch) -> None:
 
     class _Repo:
         async def upsert_alert_state(self, **kwargs):
-            assert kwargs["alert_identity"] == "alert:private-snooze"
+            assert kwargs["alert_identity"] == "alert:8"
             assert kwargs["snoozed_until"] == snoozed_until.isoformat()
             raise RuntimeError("monitoring snooze failed at /private/admin-monitoring.db")
 
     async def _fake_get_monitoring_repo():
         return _Repo()
 
-    async def _noop_overlay_diagnostic(alert_identity: str) -> None:
-        assert alert_identity == "alert:private-snooze"
-
     logger_stub = _LoggerStub()
     monkeypatch.setattr(admin_monitoring_mod, "_get_monitoring_repo", _fake_get_monitoring_repo)
-    monkeypatch.setattr(admin_monitoring_mod, "_emit_overlay_identity_diagnostic", _noop_overlay_diagnostic)
     monkeypatch.setattr(admin_monitoring_mod, "logger", logger_stub)
 
     with pytest.raises(admin_monitoring_mod.HTTPException) as exc_info:
         await admin_monitoring_mod.snooze_alert(
-            alert_identity="alert:private-snooze",
+            alert_identity="alert:008",
             payload=AdminAlertSnoozeRequest(snoozed_until=snoozed_until),
             request=SimpleNamespace(),
             principal=SimpleNamespace(user_id=7),
+            runtime_alerts_db=_StubMonitoringDb(row={"id": 8}),
         )
 
     assert exc_info.value.status_code == 500
     assert exc_info.value.detail == "Failed to snooze alert"
     assert logger_stub.errors == ["Failed to snooze monitoring alert"]
-    assert "alert:private-snooze" not in str(logger_stub.errors)
+    assert "alert:008" not in str(logger_stub.errors)
     assert snoozed_until.isoformat() not in str(logger_stub.errors)
     assert "monitoring snooze failed" not in str(logger_stub.errors)
     assert "/private/admin-monitoring.db" not in str(logger_stub.errors)
@@ -325,33 +296,39 @@ async def test_escalate_alert_sanitizes_backend_error_log(monkeypatch) -> None:
 
     class _Repo:
         async def upsert_alert_state(self, **kwargs):
-            assert kwargs["alert_identity"] == "alert:private-escalate"
+            assert kwargs["alert_identity"] == "alert:9"
             assert kwargs["escalated_severity"] == "critical"
             raise RuntimeError("monitoring escalate failed at /private/admin-monitoring.db")
 
     async def _fake_get_monitoring_repo():
         return _Repo()
 
-    async def _noop_overlay_diagnostic(alert_identity: str) -> None:
-        assert alert_identity == "alert:private-escalate"
-
     logger_stub = _LoggerStub()
     monkeypatch.setattr(admin_monitoring_mod, "_get_monitoring_repo", _fake_get_monitoring_repo)
-    monkeypatch.setattr(admin_monitoring_mod, "_emit_overlay_identity_diagnostic", _noop_overlay_diagnostic)
     monkeypatch.setattr(admin_monitoring_mod, "logger", logger_stub)
 
     with pytest.raises(admin_monitoring_mod.HTTPException) as exc_info:
         await admin_monitoring_mod.escalate_alert(
-            alert_identity="alert:private-escalate",
+            alert_identity="alert:009",
             payload=AdminAlertEscalateRequest(severity="critical"),
             request=SimpleNamespace(),
             principal=SimpleNamespace(user_id=7),
+            runtime_alerts_db=_StubMonitoringDb(row={"id": 9}),
         )
 
     assert exc_info.value.status_code == 500
     assert exc_info.value.detail == "Failed to escalate alert"
     assert logger_stub.errors == ["Failed to escalate monitoring alert"]
-    assert "alert:private-escalate" not in str(logger_stub.errors)
+    assert "alert:009" not in str(logger_stub.errors)
     assert "critical" not in str(logger_stub.errors)
     assert "monitoring escalate failed" not in str(logger_stub.errors)
     assert "/private/admin-monitoring.db" not in str(logger_stub.errors)
+
+
+def test_require_runtime_alert_identity_accepts_existing_runtime_row() -> None:
+    db = _StubMonitoringDb(row={"id": 77})
+
+    alert_id = admin_monitoring_mod._require_runtime_alert_identity("alert:77", db)
+
+    assert alert_id == 77
+    assert db.lookups == [77]
