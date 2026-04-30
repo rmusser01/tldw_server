@@ -510,25 +510,42 @@ def _build_app(
 
 
 @pytest.mark.asyncio
-async def test_mcp_hub_events_stream_replays_governance_audit_events() -> None:
-    event_id = await mcp_hub_service.publish_mcp_hub_event(
-        event_type="mcp_hub.external_server.created",
-        action="external_server.created",
-        actor_id=1,
-        resource_type="mcp_external_server",
-        resource_id="docs",
-        metadata={"owner_scope_type": "team", "owner_scope_id": 7},
-    )
-    app = _build_app(
-        principal=_make_principal(roles=["admin"], permissions=[]),
-        fail_with_401=False,
+async def test_mcp_hub_events_stream_replays_governance_audit_events(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("AUDIT_STORAGE_MODE", "shared")
+    monkeypatch.setenv("AUDIT_SHARED_DB_PATH", str(tmp_path / "audit_shared.db"))
+    monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path / "user_dbs"))
+    monkeypatch.setattr(
+        mcp_hub_service,
+        "_mcp_hub_event_bus",
+        mcp_hub_service.McpHubEventBus(max_events=32),
+        raising=False,
     )
 
-    with TestClient(app) as client:
-        resp = client.get(
-            "/api/v1/mcp/hub/events/stream",
-            params={"replay": "true", "limit": "1", "event_type": "mcp_hub.external_server.created"},
+    from tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps import shutdown_all_audit_services
+
+    await shutdown_all_audit_services()
+    try:
+        event_id = await mcp_hub_service.publish_mcp_hub_event(
+            event_type="mcp_hub.external_server.created",
+            action="external_server.created",
+            actor_id=1,
+            resource_type="mcp_external_server",
+            resource_id="docs",
+            metadata={"owner_scope_type": "team", "owner_scope_id": 7},
         )
+        app = _build_app(
+            principal=_make_principal(roles=["admin"], permissions=[]),
+            fail_with_401=False,
+        )
+
+        with TestClient(app) as client:
+            resp = client.get(
+                "/api/v1/mcp/hub/events/stream",
+                params={"replay": "true", "limit": "1", "event_type": "mcp_hub.external_server.created"},
+            )
+    finally:
+        await shutdown_all_audit_services()
+        monkeypatch.setattr(mcp_hub_service, "_mcp_hub_event_bus", None, raising=False)
 
     assert resp.status_code == 200
     assert "text/event-stream" in resp.headers.get("content-type", "")

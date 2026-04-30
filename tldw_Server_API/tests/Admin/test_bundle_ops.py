@@ -1231,16 +1231,20 @@ def test_resolve_authnz_sqlite_windows_absolute_database_url(monkeypatch):
 
     from tldw_Server_API.app.services import admin_data_ops_service
 
-    monkeypatch.setattr(
-        admin_data_ops_service,
-        "get_settings",
-        lambda: SimpleNamespace(DATABASE_URL="sqlite:///C:/temp/users_test_bundle_ops.db"),
-    )
+    for url in (
+        "sqlite:///C:/temp/users_test_bundle_ops.db",
+        "sqlite:////C:/temp/users_test_bundle_ops.db",
+    ):
+        monkeypatch.setattr(
+            admin_data_ops_service,
+            "get_settings",
+            lambda url=url: SimpleNamespace(DATABASE_URL=url),
+        )
 
-    db_path, resolved_user_id = admin_data_ops_service._resolve_dataset_db_path("authnz", None)
+        db_path, resolved_user_id = admin_data_ops_service._resolve_dataset_db_path("authnz", None)
 
-    assert db_path == "C:/temp/users_test_bundle_ops.db"
-    assert resolved_user_id is None
+        assert db_path == "C:/temp/users_test_bundle_ops.db"
+        assert resolved_user_id is None
 
 
 def test_check_disk_space(tmp_path):
