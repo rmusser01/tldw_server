@@ -5,6 +5,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
+
 
 class UserProviderKeyUpsertRequest(BaseModel):
     provider: str = Field(..., description="Provider name (e.g., 'openai').")
@@ -202,3 +204,4 @@ class ByokValidationRunListResponse(BaseModel):
     total: int
     limit: int
     offset: int
+    pagination: OffsetPaginationMeta

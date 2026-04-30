@@ -12,6 +12,9 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     check_rate_limit,
     get_auth_principal,
 )
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import (
+    build_offset_pagination_meta,
+)
 from tldw_Server_API.app.api.v1.schemas.user_keys import (
     AdminUserKeysResponse,
     ByokValidationRunCreateRequest,
@@ -239,6 +242,12 @@ async def admin_list_byok_validation_runs(
         total=total,
         limit=limit,
         offset=offset,
+        pagination=build_offset_pagination_meta(
+            total=total,
+            limit=limit,
+            offset=offset,
+            count=len(items),
+        ),
     )
 
 

@@ -141,6 +141,10 @@ async def test_admin_byok_validation_create_list_and_detail_roundtrip(monkeypatc
             assert list_resp.status_code == 200, list_resp.text
             listed = list_resp.json()
             assert listed["total"] == 1
+            assert listed["pagination"]["total"] == 1
+            assert listed["pagination"]["limit"] == 25
+            assert listed["pagination"]["offset"] == 0
+            assert listed["pagination"]["has_more"] is False
             assert listed["items"][0]["id"] == "run-1"
 
             detail_resp = client.get("/api/v1/admin/byok/validation-runs/run-1")
