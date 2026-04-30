@@ -9,6 +9,7 @@ from typing import Any, Literal, Optional, Union
 #
 # Third-party imports
 from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_validator
+from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
 
 #
 ######################################################################################################################
@@ -190,6 +191,7 @@ class CharacterListQueryResponse(BaseModel):
     page: int = Field(default=1, ge=1)
     page_size: int = Field(default=25, ge=1)
     has_more: bool = False
+    pagination: OffsetPaginationMeta
 
 
 class CharacterTagOperationRequest(BaseModel):

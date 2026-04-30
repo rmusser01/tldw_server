@@ -20,6 +20,7 @@ from loguru import logger
 from starlette import status
 
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 
 # Constants for file upload validation
 MAX_CHARACTER_FILE_SIZE = 10 * 1024 * 1024  # 10MB max file size
@@ -995,7 +996,13 @@ async def query_characters(
             total=total,
             page=page,
             page_size=page_size,
-            has_more=(offset + len(items)) < total
+            has_more=(offset + len(items)) < total,
+            pagination=build_offset_pagination_meta(
+                total=total,
+                offset=offset,
+                limit=page_size,
+                count=len(items),
+            ),
         )
     except CharactersRAGDBError as e:
         logger.error(f"DB error querying characters: {e}", exc_info=True)
