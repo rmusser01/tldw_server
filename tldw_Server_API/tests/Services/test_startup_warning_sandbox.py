@@ -62,6 +62,20 @@ class _ProtocolMismatchHelper:
         raise MacOSVirtualizationHelperProtocolError("helper protocol mismatch")
 
 
+class _FailureHelper:
+    def list_vms(self) -> HelperVMListReply:
+        from tldw_Server_API.app.core.Sandbox.macos_virtualization.helper_client import (
+            MacOSVirtualizationHelperFailure,
+        )
+
+        raise MacOSVirtualizationHelperFailure("helper_internal_error", "list failed")
+
+
+class _RaisingOrchestrator:
+    def list_vz_session_controls(self) -> list[dict[str, object]]:
+        raise RuntimeError("store unavailable")
+
+
 def _metadata(
     *,
     owner: str = "tldw",
@@ -208,3 +222,47 @@ def test_sandbox_startup_producer_does_not_mutate_runtime_state() -> None:
     assert orchestrator.mutating_calls == []
     assert helper.terminated_vm_ids == []
     assert helper.deleted_vm_ids == []
+
+
+def test_sandbox_startup_producer_reports_helper_failure() -> None:
+    from tldw_Server_API.app.services.startup_warning_registry import (
+        StartupWarningRegistry,
+    )
+    from tldw_Server_API.app.services.startup_warning_sandbox import (
+        produce_sandbox_startup_warnings,
+    )
+
+    registry = StartupWarningRegistry(startup_id="boot-1")
+
+    produce_sandbox_startup_warnings(
+        orchestrator=_FakeOrchestrator([{"id": "sess-live", "vm_id": "vm-live"}]),
+        helper_client=_FailureHelper(),
+        registry=registry,
+    )
+
+    warnings = registry.list_warnings()
+    assert [item.code for item in warnings] == ["vz_helper_failure_at_startup"]
+    assert warnings[0].startup_action == "warn"
+
+
+def test_sandbox_startup_producer_reports_reconciliation_unavailable() -> None:
+    from tldw_Server_API.app.services.startup_warning_registry import (
+        StartupWarningRegistry,
+    )
+    from tldw_Server_API.app.services.startup_warning_sandbox import (
+        produce_sandbox_startup_warnings,
+    )
+
+    registry = StartupWarningRegistry(startup_id="boot-1")
+
+    produce_sandbox_startup_warnings(
+        orchestrator=_RaisingOrchestrator(),
+        helper_client=_FakeHelper([]),
+        registry=registry,
+    )
+
+    warnings = registry.list_warnings()
+    assert [item.code for item in warnings] == [
+        "vz_reconciliation_unavailable_at_startup"
+    ]
+    assert warnings[0].startup_action == "warn"

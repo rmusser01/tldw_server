@@ -76,7 +76,7 @@ Current limitations:
   while helper unavailable and reconciliation drift remain warnings only.
 - Orphan VM termination is not automatic repair behavior; operators should inspect the dry-run plan before running mutating repair.
 - The generic admin startup warning endpoint is `GET /api/v1/admin/startup-warnings`.
-  It exposes current-process, current-boot warning records only; there is no
+  It exposes current-process warning records only; there is no
   cross-process aggregation or persistence in this slice.
 - `tools/macos-vz-helper/scripts/vz-helperctl.py` is the preferred operator helper lifecycle command for `check`, `build`, `sign`, `start`, `status`, `stop`, `plist`, and `smoke`; it can generate launchd plist scaffolding but does not install or load services automatically.
 - helper-backed template validation now distinguishes canonical bundles from

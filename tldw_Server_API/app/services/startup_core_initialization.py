@@ -5,6 +5,8 @@ Startup core initialization helper extracted from the application lifespan.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import os
+import platform
 from typing import Any, Callable
 
 
@@ -62,7 +64,12 @@ async def initialize_startup_core_components(
         route_enabled=route_enabled,
         defer_heavy=defer_heavy,
     )
-    startup_sandbox_orchestrator = _build_startup_sandbox_orchestrator()
+    startup_sandbox_orchestrator = None
+    if _sandbox_startup_warning_configured():
+        startup_sandbox_orchestrator = _build_startup_sandbox_orchestrator(
+            logger=logger,
+            startup_guard_exceptions=startup_guard_exceptions,
+        )
 
     return StartupCoreInitializationHandles(
         db_pool=auth_runtime_handles.db_pool,
@@ -116,7 +123,31 @@ async def _start_heavy_initializations(app_arg, **kwargs):
     return await start_heavy_initializations(app_arg, **kwargs)
 
 
-def _build_startup_sandbox_orchestrator():
-    from tldw_Server_API.app.core.Sandbox.service import SandboxService
+def _sandbox_startup_warning_configured() -> bool:
+    """Return True when the macOS VZ helper path is configured enough to make startup warnings actionable."""
+    helper_socket = str(os.getenv("TLDW_SANDBOX_MACOS_HELPER_SOCKET") or "").strip()
+    return bool(helper_socket) and platform.system() == "Darwin"
 
-    return SandboxService(enable_background_tasks=False)._orch
+
+def _build_startup_sandbox_orchestrator(
+    *,
+    logger: Any,
+    startup_guard_exceptions: tuple[type[BaseException], ...],
+) -> Any | None:
+    """Best-effort startup-owned sandbox orchestrator factory for startup warning producers."""
+    try:
+        from tldw_Server_API.app.core.Sandbox.service import SandboxService
+
+        return SandboxService(enable_background_tasks=False)._orch
+    except startup_guard_exceptions as exc:
+        logger.warning(
+            "Startup sandbox orchestrator unavailable; continuing without startup sandbox warnings: {}",
+            exc,
+        )
+        return None
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "Startup sandbox orchestrator unavailable; continuing without startup sandbox warnings: {}",
+            exc,
+        )
+        return None

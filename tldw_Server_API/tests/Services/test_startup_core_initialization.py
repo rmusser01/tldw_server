@@ -88,3 +88,47 @@ async def test_initialize_startup_core_components_runs_helpers_in_order_and_retu
     assert handles.db_pool == "db-pool"
     assert handles.session_manager == "session-manager"
     assert handles.heavy_startup_handles == "heavy-startup-handles"
+
+
+def test_build_startup_sandbox_orchestrator_skips_when_unconfigured(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.services import startup_core_initialization as startup_core
+
+    monkeypatch.delenv("TLDW_SANDBOX_MACOS_HELPER_SOCKET", raising=False)
+    monkeypatch.setattr(startup_core.platform, "system", lambda: "Darwin")
+
+    assert startup_core._sandbox_startup_warning_configured() is False
+
+
+def test_build_startup_sandbox_orchestrator_downgrades_failures_to_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.services import startup_core_initialization as startup_core
+
+    warnings: list[str] = []
+
+    def _raising_service_factory(*args, **kwargs):
+        raise RuntimeError("sandbox init failed")
+
+    monkeypatch.setattr(
+        startup_core,
+        "_sandbox_startup_warning_configured",
+        lambda: True,
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Sandbox.service.SandboxService",
+        _raising_service_factory,
+    )
+
+    logger = SimpleNamespace(warning=lambda message, exc: warnings.append(message.format(exc)))
+
+    result = startup_core._build_startup_sandbox_orchestrator(
+        logger=logger,
+        startup_guard_exceptions=(RuntimeError,),
+    )
+
+    assert result is None
+    assert warnings == [
+        "Startup sandbox orchestrator unavailable; continuing without startup sandbox warnings: sandbox init failed"
+    ]

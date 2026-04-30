@@ -140,6 +140,17 @@ def test_admin_macos_diagnostics_returns_structured_payload(monkeypatch) -> None
             details={"stale_session_controls": 1},
         )
     )
+    registry.add_warning(
+        StartupWarningRecord(
+            component="jobs.integrity",
+            severity="error",
+            startup_action="block_startup",
+            code="jobs_integrity_blocker",
+            summary="jobs blocker",
+            remediation="inspect jobs",
+            details={},
+        )
+    )
     app.state.startup_warning_registry = registry
 
     with TestClient(app) as client:

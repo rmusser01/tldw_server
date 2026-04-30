@@ -19,23 +19,39 @@ class StartupWarningRegistry:
     def add_warning(self, record: StartupWarningRecord) -> None:
         self._warnings.append(record)
 
-    def list_warnings(self) -> list[StartupWarningRecord]:
+    def list_warnings(
+        self,
+        *,
+        component_prefix: str | None = None,
+    ) -> list[StartupWarningRecord]:
+        """Return deterministically ordered warning records, optionally filtered by component prefix."""
+        warnings = self._warnings
+        if component_prefix:
+            warnings = [
+                item for item in warnings if item.component.startswith(component_prefix)
+            ]
         return sorted(
-            self._warnings,
+            warnings,
             key=lambda item: (
                 item.component,
                 item.code,
                 item.startup_action,
-                item.detected_at.isoformat(),
+                item.detected_at,
             ),
         )
 
-    def summary(self) -> dict[str, object]:
-        warnings = self.list_warnings()
+    def summary(
+        self,
+        *,
+        component_prefix: str | None = None,
+    ) -> dict[str, object]:
+        """Return grouped warning counts for the current process, optionally filtered by component prefix."""
+        warnings = self.list_warnings(component_prefix=component_prefix)
         blocking_total = sum(
             1 for item in warnings if item.startup_action == "block_startup"
         )
         component_counts = Counter(item.component for item in warnings)
+        severity_counts = Counter(item.severity for item in warnings)
         action_counts = Counter(item.startup_action for item in warnings)
         return {
             "startup_id": self.startup_id,
@@ -45,6 +61,10 @@ class StartupWarningRegistry:
             "by_component": {
                 component: component_counts[component]
                 for component in sorted(component_counts)
+            },
+            "by_severity": {
+                severity: severity_counts[severity]
+                for severity in sorted(severity_counts)
             },
             "by_action": {
                 action: action_counts[action] for action in sorted(action_counts)

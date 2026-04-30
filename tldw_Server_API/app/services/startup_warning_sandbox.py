@@ -61,6 +61,34 @@ def produce_sandbox_startup_warnings(
                 details={"reason": vz_reconciliation.REASON_HELPER_UNAVAILABLE},
             )
         )
+    elif vz_reconciliation.REASON_HELPER_FAILURE in reasons:
+        records.append(
+            _record(
+                code="vz_helper_failure_at_startup",
+                severity="warning",
+                startup_action="warn",
+                summary="Startup could not complete the macOS virtualization helper probe.",
+                remediation=(
+                    "Inspect helper logs and rerun sandbox diagnostics before relying on "
+                    "vz_linux execution."
+                ),
+                details={"reason": vz_reconciliation.REASON_HELPER_FAILURE},
+            )
+        )
+    elif vz_reconciliation.REASON_RECONCILIATION_UNAVAILABLE in reasons:
+        records.append(
+            _record(
+                code="vz_reconciliation_unavailable_at_startup",
+                severity="warning",
+                startup_action="warn",
+                summary="Startup could not collect vz_linux reconciliation state.",
+                remediation=(
+                    "Review sandbox diagnostics and startup logs to determine why "
+                    "reconciliation state could not be collected."
+                ),
+                details={"reason": vz_reconciliation.REASON_RECONCILIATION_UNAVAILABLE},
+            )
+        )
     else:
         records.extend(_count_records(report))
 

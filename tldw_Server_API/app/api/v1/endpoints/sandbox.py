@@ -2236,11 +2236,12 @@ async def admin_macos_diagnostics(
     payload = dict(_service.macos_diagnostics())
     registry = getattr(request.app.state, "startup_warning_registry", None)
     if registry is not None:
-        records = registry.list_warnings()
+        records = registry.list_warnings(component_prefix="sandbox.")
+        summary = registry.summary(component_prefix="sandbox.")
         payload["startup_warning_summary"] = {
             "present": bool(records),
-            "blocking": registry.should_block_startup(),
-            "codes": [record.code for record in records],
+            "blocking": bool(summary["has_blocking"]),
+            "codes": sorted({record.code for record in records}),
         }
 
     return SandboxAdminMacOSDiagnosticsResponse.model_validate(payload)
