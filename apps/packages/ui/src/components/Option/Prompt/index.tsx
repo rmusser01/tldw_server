@@ -146,6 +146,7 @@ const PROMPTS_CUSTOM_SORT_STORAGE_KEY = "tldw-prompts-custom-sort-v1"
 const PROMPTS_TABLE_DENSITY_STORAGE_KEY = "tldw-prompts-table-density-v1"
 const PROMPTS_VIEW_MODE_STORAGE_KEY = "tldw-prompts-view-mode-v1"
 const PROMPTS_GALLERY_DENSITY_STORAGE_KEY = "tldw-prompts-gallery-density-v1"
+export const PROMPTS_COPILOT_HELP_STORAGE_KEY = "tldw-prompts-copilot-help-dismissed-v1"
 const PROMPTS_MOBILE_BREAKPOINT_PX = 768
 
 const readPromptSortState = (): PromptSortState => {
@@ -262,6 +263,14 @@ export const PromptBody = () => {
   const [savedView, setSavedView] = useState<PromptSavedView>("all")
   const [historyDrawerOpen, setHistoryDrawerOpen] = useState(false)
   const [historyPromptId, setHistoryPromptId] = useState<number | null>(null)
+  const [copilotHelpDismissed, setCopilotHelpDismissed] = useState(() => {
+    if (typeof window === "undefined") return false
+    try {
+      return window.localStorage.getItem(PROMPTS_COPILOT_HELP_STORAGE_KEY) === "true"
+    } catch {
+      return false
+    }
+  })
   const { presets: filterPresets, savePreset: saveFilterPreset, deletePreset: deleteFilterPreset } = useFilterPresets()
   const { shouldShow: shouldShowHint, dismiss: dismissHint, markShown: markHintShown } = useContextualHints()
 
@@ -1934,8 +1943,48 @@ export const PromptBody = () => {
         />
       )
     }
+
+    const dismissCopilotHelp = () => {
+      setCopilotHelpDismissed(true)
+      try {
+        window.localStorage.setItem(PROMPTS_COPILOT_HELP_STORAGE_KEY, "true")
+      } catch {
+        // Ignore storage failures in restricted browser modes.
+      }
+    }
+
     return (
-      <div>
+      <div className="space-y-4">
+        {!copilotHelpDismissed && (
+          <div
+            className="flex items-start gap-3 rounded-md border border-primary/20 bg-primary/5 p-3 text-sm text-text"
+            data-testid="prompts-copilot-help"
+          >
+            <div className="min-w-0 flex-1">
+              <p className="font-semibold">
+                {t("managePrompts.copilotHelp.title", {
+                  defaultValue: "Copilot prompts"
+                })}
+              </p>
+              <p className="mt-1 text-text-muted">
+                {t("managePrompts.copilotHelp.description", {
+                  defaultValue:
+                    "Copilot prompts are server-provided prompt templates for common tasks. Use them directly, edit the server template, or copy one to Custom when you want a local version."
+                })}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={dismissCopilotHelp}
+              aria-label={t("common:dismiss", { defaultValue: "Dismiss" })}
+              data-testid="prompts-copilot-help-dismiss"
+              className="shrink-0 rounded p-1 text-text-muted hover:bg-surface2 hover:text-text focus:outline-none focus:ring-2 focus:ring-focus"
+            >
+              <X className="size-4" aria-hidden="true" />
+            </button>
+          </div>
+        )}
+
         {copilotStatus === "pending" && <Skeleton paragraph={{ rows: 8 }} />}
 
         {copilotStatus === "success" && Array.isArray(copilotData) && copilotData.length === 0 && (
@@ -1966,7 +2015,7 @@ export const PromptBody = () => {
 
         {copilotStatus === "success" && Array.isArray(copilotData) && copilotData.length > 0 && (
           <>
-            <div className="mb-3 flex flex-wrap items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <Input
                 value={copilotSearchText}
                 onChange={(event) => setCopilotSearchText(event.target.value)}
