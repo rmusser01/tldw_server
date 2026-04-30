@@ -237,6 +237,44 @@ import Testing
     #expect(!FileManager.default.fileExists(atPath: socket.path))
 }
 
+@Test func unixSocketServerRefusesMissingSocketParentUnderGroupAccessibleParent() throws {
+    let root = try makePrivateTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let sharedParent = root.appendingPathComponent("shared")
+    try FileManager.default.createDirectory(at: sharedParent, withIntermediateDirectories: true)
+    chmod(sharedParent.path, 0o755)
+
+    let runtimeDirectory = sharedParent.appendingPathComponent("runtime")
+    let socket = runtimeDirectory.appendingPathComponent("helper.sock")
+    let server = UnixSocketServer(socketPath: socket.path, service: HelperService())
+    defer { server.stop() }
+
+    #expect(throws: UnixSocketServerError.self) {
+        try server.start()
+    }
+    #expect(!FileManager.default.fileExists(atPath: runtimeDirectory.path))
+}
+
+@Test func unixSocketServerRefusesMissingSocketParentThroughSymlinkAncestor() throws {
+    let root = try makePrivateTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let target = root.appendingPathComponent("target")
+    let link = root.appendingPathComponent("link")
+    try FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
+    chmod(target.path, 0o700)
+    try FileManager.default.createSymbolicLink(atPath: link.path, withDestinationPath: target.path)
+
+    let runtimeDirectory = link.appendingPathComponent("runtime")
+    let socket = runtimeDirectory.appendingPathComponent("helper.sock")
+    let server = UnixSocketServer(socketPath: socket.path, service: HelperService())
+    defer { server.stop() }
+
+    #expect(throws: UnixSocketServerError.self) {
+        try server.start()
+    }
+    #expect(!FileManager.default.fileExists(atPath: target.appendingPathComponent("runtime").path))
+}
+
 private func makePrivateTemporaryDirectory() throws -> URL {
     let directory = URL(fileURLWithPath: "/tmp")
         .appendingPathComponent("macos-vz-helper-\(UUID().uuidString)")

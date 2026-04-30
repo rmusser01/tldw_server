@@ -409,6 +409,38 @@ def test_plist_cli_writes_explicit_output_when_requested(tmp_path, capsys):
     CASE.assertIn(str(socket_path), plist_output.read_text(encoding="utf-8"))
 
 
+def test_plist_cli_writes_explicit_output_without_creating_runtime_dirs(tmp_path, capsys):
+    helperctl = load_helperctl()
+    helper_path = tmp_path / "macos-vz-helper"
+    socket_path = tmp_path / "runtime" / "helper.sock"
+    log_dir = tmp_path / "logs"
+    plist_output_parent = tmp_path / "LaunchAgents"
+    plist_output_parent.mkdir(mode=0o700)
+    plist_output_parent.chmod(0o700)
+    plist_output = plist_output_parent / "org.tldw.macos-vz-helper.plist"
+
+    code = helperctl.main(
+        [
+            "plist",
+            "--helper",
+            str(helper_path),
+            "--socket",
+            str(socket_path),
+            "--log-dir",
+            str(log_dir),
+            "--plist-output",
+            str(plist_output),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    CASE.assertEqual(code, 0)
+    CASE.assertEqual(captured.out, "")
+    CASE.assertIn(str(socket_path), plist_output.read_text(encoding="utf-8"))
+    CASE.assertFalse(socket_path.parent.exists())
+    CASE.assertFalse(log_dir.exists())
+
+
 def test_plist_cli_rejects_unsafe_socket_parent_when_not_dry_run(tmp_path, capsys):
     helperctl = load_helperctl()
     helper_path = tmp_path / "macos-vz-helper"

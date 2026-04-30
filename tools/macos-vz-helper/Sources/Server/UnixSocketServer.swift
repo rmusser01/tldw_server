@@ -230,22 +230,35 @@ final class UnixSocketServer {
             throw UnixSocketServerError.unsafeSocketDirectory(directoryPath)
         }
 
-        var directoryStat = stat()
-        let statResult = lstat(directoryPath, &directoryStat)
-        if statResult != 0 {
-            if errno == ENOENT {
-                try FileManager.default.createDirectory(
-                    at: socketDirectory,
-                    withIntermediateDirectories: true,
-                    attributes: [.posixPermissions: 0o700]
-                )
-                chmod(directoryPath, 0o700)
-                try validateSocketDirectory(directoryPath)
-                return
+        var missingDirectories: [URL] = []
+        var current = socketDirectory
+        while true {
+            var directoryStat = stat()
+            let statResult = lstat(current.path, &directoryStat)
+            if statResult == 0 {
+                try validateSocketDirectory(current.path, statBuffer: directoryStat)
+                break
             }
-            throw UnixSocketServerError.unsafeSocketDirectory(directoryPath)
+            guard errno == ENOENT else {
+                throw UnixSocketServerError.unsafeSocketDirectory(current.path)
+            }
+            missingDirectories.append(current)
+            let parent = current.deletingLastPathComponent()
+            guard parent.path != current.path else {
+                throw UnixSocketServerError.unsafeSocketDirectory(current.path)
+            }
+            current = parent
         }
-        try validateSocketDirectory(directoryPath, statBuffer: directoryStat)
+
+        for directory in missingDirectories.reversed() {
+            try FileManager.default.createDirectory(
+                at: directory,
+                withIntermediateDirectories: false,
+                attributes: [.posixPermissions: 0o700]
+            )
+            chmod(directory.path, 0o700)
+            try validateSocketDirectory(directory.path)
+        }
     }
 
     private func validateSocketDirectory(_ directoryPath: String, statBuffer: stat? = nil) throws {

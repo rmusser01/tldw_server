@@ -1222,11 +1222,11 @@ def _plist_command(args: argparse.Namespace) -> int:
 
     rendered = render_launchd_plist(helper_path, socket_path, log_dir)
     if args.plist_output:
-        if args.dry_run:
-            print(rendered, end="")
-            return 0
         plist_output = Path(args.plist_output)
-        output_directory_result = ensure_private_dir(plist_output.parent, dry_run=False)
+        if args.dry_run and not plist_output.parent.exists():
+            print("plist_directory: not ok helper_directory_unconfigured", file=sys.stderr)
+            return 1
+        output_directory_result = ensure_private_dir(plist_output.parent, dry_run=args.dry_run)
         if not output_directory_result.ok:
             print(f"plist_directory: not ok {output_directory_result.reason}", file=sys.stderr)
             return 1
