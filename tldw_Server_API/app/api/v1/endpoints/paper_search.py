@@ -4064,7 +4064,7 @@ async def osf_raw_by_id(osf_id: str = Query(..., min_length=3)):
 
 @router.get(
     "/zenodo",
-    response_model=GenericSearchResponse,
+    response_model=GenericPageSearchResponse,
     summary="Search Zenodo published records",
     tags=["paper-search"],
 )
@@ -4084,13 +4084,19 @@ async def zenodo_search(
         if items is None:
             raise HTTPException(status_code=500, detail="Zenodo search failed to return data.")  # noqa: TRY301
         total_pages = math.ceil(total / results_per_page) if results_per_page > 0 else 0
-        return GenericSearchResponse(
+        return GenericPageSearchResponse(
             query_echo={"q": q, "type": type, "subtype": subtype, "communities": communities},
             items=[GenericPaper(**it) for it in items],
             total_results=total,
             page=page,
             results_per_page=results_per_page,
             total_pages=total_pages,
+            pagination=build_page_pagination_meta(
+                page=page,
+                per_page=results_per_page,
+                total=total,
+                total_pages=total_pages,
+            ),
         )
     except HTTPException:
         raise
@@ -5183,7 +5189,7 @@ async def vixra_ingest(
 
 @router.get(
     "/vixra/search",
-    response_model=GenericSearchResponse,
+    response_model=GenericPageSearchResponse,
     summary="Best-effort viXra search (HTML scrape)",
     tags=["paper-search"],
 )
@@ -5199,13 +5205,19 @@ async def vixra_search(
             _handle_provider_error(err)
         items = items or []
         total_pages = 1 if items else 0
-        return GenericSearchResponse(
+        return GenericPageSearchResponse(
             query_echo={"term": term},
             items=[GenericPaper(**it) for it in items],
             total_results=total,
             page=page,
             results_per_page=results_per_page,
             total_pages=total_pages,
+            pagination=build_page_pagination_meta(
+                page=page,
+                per_page=results_per_page,
+                total=total,
+                total_pages=total_pages,
+            ),
         )
     except HTTPException:
         raise

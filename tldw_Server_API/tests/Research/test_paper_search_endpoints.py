@@ -614,6 +614,85 @@ async def test_osf_search_success(monkeypatch, paper_search_app):
 
 
 @pytest.mark.asyncio
+async def test_zenodo_search_success(monkeypatch, paper_search_app):
+
+    def _fake_zenodo(q, page, results_per_page, type, subtype, communities):
+
+        items = [
+            {
+                "id": "zenodo-567",
+                "title": "Zenodo Record",
+                "authors": "Brown, J.",
+                "pub_date": "2021-12-12",
+                "doi": "10.5281/zenodo.567",
+                "url": "https://zenodo.org/records/567",
+                "provider": "zenodo",
+            }
+        ]
+        return items, 1, None
+
+    from tldw_Server_API.app.core.Third_Party import Zenodo as _Zenodo
+    monkeypatch.setattr(_Zenodo, "search_records", _fake_zenodo)
+
+    async with AsyncClient(transport=ASGITransport(app=paper_search_app), base_url="http://test") as client:
+        r = await client.get(
+            "/api/v1/paper-search/zenodo",
+            params={"q": "llm", "page": 1, "results_per_page": 10},
+        )
+        assert r.status_code == 200
+        data = r.json()
+        assert data["total_results"] == 1
+        assert len(data["items"]) == 1
+        assert data["pagination"] == {
+            "mode": "page",
+            "page": 1,
+            "per_page": 10,
+            "total": 1,
+            "total_pages": 1,
+            "has_more": False,
+        }
+
+
+@pytest.mark.asyncio
+async def test_vixra_search_success(monkeypatch, paper_search_app):
+
+    def _fake_vixra(term, page, results_per_page):
+
+        items = [
+            {
+                "id": "vixra-890",
+                "title": "viXra Submission",
+                "authors": "Singh, K.",
+                "pub_date": "2020-10-10",
+                "url": "https://vixra.org/abs/2010.0890",
+                "provider": "vixra",
+            }
+        ]
+        return items, 1, None
+
+    from tldw_Server_API.app.core.Third_Party import Vixra as _Vixra
+    monkeypatch.setattr(_Vixra, "search", _fake_vixra)
+
+    async with AsyncClient(transport=ASGITransport(app=paper_search_app), base_url="http://test") as client:
+        r = await client.get(
+            "/api/v1/paper-search/vixra/search",
+            params={"term": "quantum", "page": 1, "results_per_page": 10},
+        )
+        assert r.status_code == 200
+        data = r.json()
+        assert data["total_results"] == 1
+        assert len(data["items"]) == 1
+        assert data["pagination"] == {
+            "mode": "page",
+            "page": 1,
+            "per_page": 10,
+            "total": 1,
+            "total_pages": 1,
+            "has_more": False,
+        }
+
+
+@pytest.mark.asyncio
 async def test_biorxiv_by_doi_success(monkeypatch, paper_search_app):
 
     def _fake_by_doi(doi, server):
