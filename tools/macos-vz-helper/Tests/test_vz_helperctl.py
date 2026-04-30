@@ -515,14 +515,19 @@ def test_plist_cli_rejects_symlink_socket_path(tmp_path, capsys):
 
 def test_check_cli_accepts_operator_socket_flag(tmp_path, capsys):
     helperctl = load_helperctl()
+    helper = tmp_path / "macos-vz-helper"
     socket_path = tmp_path / "runtime" / "helper.sock"
     pid_file = tmp_path / "runtime" / "helper.pid"
     log_dir = tmp_path / "logs"
+    helper.write_text("#!/bin/sh\n", encoding="utf-8")
+    helper.chmod(0o700)
 
     code = helperctl.main(
         [
             "check",
             "--dry-run",
+            "--helper",
+            str(helper),
             "--socket",
             str(socket_path),
             "--pid-file",
@@ -535,6 +540,33 @@ def test_check_cli_accepts_operator_socket_flag(tmp_path, capsys):
     captured = capsys.readouterr()
     CASE.assertEqual(code, 0)
     CASE.assertIn("socket_path: ok", captured.out)
+    CASE.assertIn("helper_binary: ok", captured.out)
+
+
+def test_check_cli_rejects_missing_helper_binary(tmp_path, capsys):
+    helperctl = load_helperctl()
+    socket_path = tmp_path / "runtime" / "helper.sock"
+    pid_file = tmp_path / "runtime" / "helper.pid"
+    log_dir = tmp_path / "logs"
+
+    code = helperctl.main(
+        [
+            "check",
+            "--dry-run",
+            "--helper",
+            str(tmp_path / "missing-helper"),
+            "--socket",
+            str(socket_path),
+            "--pid-file",
+            str(pid_file),
+            "--log-dir",
+            str(log_dir),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    CASE.assertEqual(code, 1)
+    CASE.assertIn("helper_binary: not ok helper_binary_missing", captured.out)
 
 
 def test_build_dry_run_prints_swiftpm_command(capsys):
@@ -545,6 +577,17 @@ def test_build_dry_run_prints_swiftpm_command(capsys):
     captured = capsys.readouterr()
     CASE.assertEqual(code, 0)
     CASE.assertIn("swift build --package-path", captured.out)
+
+
+def test_build_reports_missing_swift(monkeypatch, capsys):
+    helperctl = load_helperctl()
+    monkeypatch.setattr(helperctl.shutil, "which", lambda executable: None)
+
+    code = helperctl.main(["build"])
+
+    captured = capsys.readouterr()
+    CASE.assertEqual(code, 1)
+    CASE.assertIn("helper_swift_unavailable", captured.err)
 
 
 def test_sign_requires_entitlements(tmp_path, capsys):
@@ -558,6 +601,38 @@ def test_sign_requires_entitlements(tmp_path, capsys):
     captured = capsys.readouterr()
     CASE.assertNotEqual(code, 0)
     CASE.assertIn("helper_entitlements_missing", captured.err)
+
+
+def test_sign_reports_missing_codesign(monkeypatch, tmp_path, capsys):
+    helperctl = load_helperctl()
+    helper = tmp_path / "macos-vz-helper"
+    entitlements = tmp_path / "helper.entitlements"
+    helper.write_text("#!/bin/sh\n", encoding="utf-8")
+    helper.chmod(0o700)
+    entitlements.write_text("<plist/>", encoding="utf-8")
+    monkeypatch.setattr(helperctl.shutil, "which", lambda executable: None)
+
+    code = helperctl.main(["sign", "--helper", str(helper), "--entitlements", str(entitlements)])
+
+    captured = capsys.readouterr()
+    CASE.assertEqual(code, 1)
+    CASE.assertIn("helper_codesign_unavailable", captured.err)
+
+
+def test_compare_entitlements_without_expected_path_checks_signed_binary(monkeypatch, tmp_path):
+    helperctl = load_helperctl()
+    helper = tmp_path / "macos-vz-helper"
+    helper.write_text("#!/bin/sh\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        helperctl,
+        "read_codesign_entitlements",
+        lambda helper_path: helperctl.CheckResult(False, "helper_entitlements_missing"),
+    )
+
+    result = helperctl.compare_entitlements(helper, None)
+
+    CASE.assertEqual(result, helperctl.CheckResult(ok=False, reason="helper_entitlements_missing"))
 
 
 def test_validate_pid_file_rejects_live_process_mismatch(tmp_path):
@@ -629,6 +704,81 @@ def test_start_helper_cleans_up_started_process_on_socket_wait_failure(tmp_path)
     CASE.assertFalse(pid_file.exists())
 
 
+def test_start_helper_removes_owned_socket_on_ping_failure(tmp_path):
+    helperctl = load_helperctl()
+    helper = tmp_path / "macos-vz-helper"
+    socket_path = tmp_path / "runtime" / "helper.sock"
+    pid_file = tmp_path / "runtime" / "helper.pid"
+    log_dir = tmp_path / "logs"
+    helper.write_text("#!/bin/sh\n", encoding="utf-8")
+    helper.chmod(0o700)
+    identity = helperctl.SocketIdentity(device=1, inode=2)
+    removed = []
+
+    result = helperctl.start_helper(
+        helper,
+        socket_path,
+        pid_file,
+        log_dir,
+        process_starter=lambda argv, env, **kwargs: helperctl.StartedProcess(pid=1234),
+        socket_waiter=lambda path: helperctl.SocketWaitResult(
+            result=helperctl.CheckResult(True),
+            identity=identity,
+        ),
+        ping_checker=lambda path: helperctl.CheckResult(False, "helper_ping_failed"),
+        process_killer=lambda pid: None,
+        socket_remover=lambda path, owned_identity: removed.append((path, owned_identity)),
+    )
+
+    CASE.assertEqual(result, helperctl.CheckResult(ok=False, reason="helper_ping_failed"))
+    CASE.assertFalse(pid_file.exists())
+    CASE.assertEqual(removed, [(socket_path, identity)])
+
+
+def test_wait_for_socket_ignores_preexisting_socket_identity(tmp_path):
+    helperctl = load_helperctl()
+    socket_path = tmp_path / "helper.sock"
+    socket_path.write_text("placeholder", encoding="utf-8")
+    previous_identity = helperctl.SocketIdentity(device=1, inode=2)
+
+    result = helperctl.wait_for_socket(
+        socket_path,
+        previous_identity=previous_identity,
+        timeout_sec=0.01,
+        interval_sec=0.001,
+        path_validator=lambda path: helperctl.CheckResult(True),
+        identity_reader=lambda path: previous_identity,
+    )
+
+    CASE.assertEqual(result.result, helperctl.CheckResult(ok=False, reason="helper_socket_not_ready"))
+
+
+def test_start_helper_refuses_existing_lifecycle_lock(tmp_path):
+    helperctl = load_helperctl()
+    helper = tmp_path / "macos-vz-helper"
+    socket_path = tmp_path / "runtime" / "helper.sock"
+    pid_file = tmp_path / "runtime" / "helper.pid"
+    log_dir = tmp_path / "logs"
+    helper.write_text("#!/bin/sh\n", encoding="utf-8")
+    helper.chmod(0o700)
+    pid_file.parent.mkdir(mode=0o700)
+    (pid_file.parent / "helper.pid.lock").write_text("locked\n", encoding="utf-8")
+    starts = []
+
+    result = helperctl.start_helper(
+        helper,
+        socket_path,
+        pid_file,
+        log_dir,
+        process_starter=lambda argv, env, **kwargs: starts.append(argv) or helperctl.StartedProcess(pid=1234),
+        socket_waiter=lambda path: helperctl.CheckResult(True),
+        ping_checker=lambda path: helperctl.CheckResult(True),
+    )
+
+    CASE.assertEqual(result, helperctl.CheckResult(ok=False, reason="helper_already_running"))
+    CASE.assertEqual(starts, [])
+
+
 def test_start_helper_passes_managed_log_paths_to_process_starter(tmp_path):
     helperctl = load_helperctl()
     helper = tmp_path / "macos-vz-helper"
@@ -668,16 +818,20 @@ def test_status_helper_checks_entitlements_before_ping(tmp_path):
     socket_path = tmp_path / "runtime" / "helper.sock"
     pid_file = tmp_path / "runtime" / "helper.pid"
     entitlements = tmp_path / "helper.entitlements"
+    log_dir = tmp_path / "logs"
     helper.write_text("#!/bin/sh\n", encoding="utf-8")
+    helper.chmod(0o700)
     entitlements.write_text("<plist/>", encoding="utf-8")
     pid_file.parent.mkdir(mode=0o700)
     pid_file.write_text("1234\n", encoding="utf-8")
+    log_dir.mkdir(mode=0o700)
     ping_calls = []
 
     result = helperctl.status_helper(
         helper,
         socket_path,
         pid_file,
+        log_dir=log_dir,
         entitlements_path=entitlements,
         entitlement_checker=lambda helper_path, entitlements_path: helperctl.CheckResult(
             False, "helper_entitlements_mismatch"
@@ -695,6 +849,7 @@ def test_status_cli_accepts_entitlements_flag(tmp_path, capsys):
     helper = tmp_path / "macos-vz-helper"
     entitlements = tmp_path / "missing.entitlements"
     helper.write_text("#!/bin/sh\n", encoding="utf-8")
+    helper.chmod(0o700)
 
     code = helperctl.main(
         [
@@ -713,6 +868,64 @@ def test_status_cli_accepts_entitlements_flag(tmp_path, capsys):
     captured = capsys.readouterr()
     CASE.assertEqual(code, 1)
     CASE.assertIn("helper_entitlements_missing", captured.out)
+
+
+def test_status_results_report_component_state(tmp_path):
+    helperctl = load_helperctl()
+    helper = tmp_path / "macos-vz-helper"
+    socket_path = tmp_path / "runtime" / "helper.sock"
+    pid_file = tmp_path / "runtime" / "helper.pid"
+    log_dir = tmp_path / "logs"
+    helper.write_text("#!/bin/sh\n", encoding="utf-8")
+    helper.chmod(0o700)
+    pid_file.parent.mkdir(mode=0o700)
+    pid_file.write_text("1234\n", encoding="utf-8")
+    log_dir.mkdir(mode=0o700)
+
+    results = dict(
+        helperctl.collect_status_results(
+            helper,
+            socket_path,
+            pid_file,
+            log_dir,
+            entitlement_checker=lambda helper_path, entitlements_path: helperctl.CheckResult(True),
+            ping_checker=lambda path: helperctl.PingState(
+                result=helperctl.CheckResult(True),
+                protocol_version="1",
+                helper_version="test-helper",
+            ),
+            process_lookup=lambda pid: helperctl.ProcessInfo(pid=pid, command=str(helper)),
+        )
+    )
+
+    CASE.assertIn("helper_binary", results)
+    CASE.assertIn("pid_file", results)
+    CASE.assertIn("process", results)
+    CASE.assertIn("socket_path", results)
+    CASE.assertIn("socket", results)
+    CASE.assertIn("ping", results)
+    CASE.assertEqual(results["protocol_version"].message, "1")
+    CASE.assertEqual(results["helper_version"].message, "test-helper")
+    CASE.assertEqual(results["log_directory"].message, str(log_dir))
+
+
+def test_ping_helper_reports_protocol_mismatch(monkeypatch, tmp_path):
+    from tldw_Server_API.app.core.Sandbox.macos_virtualization.helper_client import (
+        MacOSVirtualizationHelperProtocolError,
+    )
+
+    helperctl = load_helperctl()
+
+    class FakeClient:
+        def ping(self):
+            raise MacOSVirtualizationHelperProtocolError("macos_virtualization_helper_protocol_mismatch")
+
+    result = helperctl.ping_helper_state(
+        tmp_path / "helper.sock",
+        client_factory=lambda socket_path: FakeClient(),
+    )
+
+    CASE.assertEqual(result.result, helperctl.CheckResult(ok=False, reason="helper_protocol_mismatch", message="macos_virtualization_helper_protocol_mismatch"))
 
 
 def test_stop_helper_terminates_only_validated_pid(tmp_path):
@@ -737,4 +950,4 @@ def test_stop_helper_terminates_only_validated_pid(tmp_path):
 
     CASE.assertEqual(result, helperctl.CheckResult(ok=True))
     CASE.assertEqual(killed, [1234])
-    CASE.assertFalse(pid_file.exists())
+    CASE.assertEqual(pid_file.read_text(encoding="utf-8"), "9999\n")
