@@ -25,7 +25,7 @@ The sandbox doctrine keeps Python as the trusted control plane and the helper as
 
 The helper flow is:
 
-- Python calls `MacOSVirtualizationHelperClient.create_vm()` with `vm_name`, `runtime`, `run_id`, and template/workspace paths.
+- Python calls `MacOSVirtualizationHelperClient.create_vm()` with `vm_name`, `runtime`, `run_id`, `session_mode`, `workspace_path`, and the template source under the existing `template` key.
 - `HelperService.createVM()` passes only `vmID`, `templatePath`, `workspacePath`, and readiness timeout to `VZLinuxVMManager`.
 - `VMRegistry.upsert()` stores `VMRecord(vmID, state, healthy)`.
 - `get_vm_status` and `list_vms` return `vm_id`, `state`, `healthy`, and generic transport details.
@@ -58,13 +58,34 @@ That last step is too broad for long-term safety because orphan classification l
 
 Use additive helper metadata fields and conservative repair gating.
 
-The helper should store a `VMOwnershipMetadata` value with each `VMRecord`. Python should provide the metadata during `create_vm`; if a caller omits it, the helper should mark the ownership as `unknown` rather than inventing ownership. Reconciliation should classify live VMs as:
+The helper should store a `VMOwnershipMetadata` value with each `VMRecord`. Python should provide the metadata during `create_vm`; if a caller omits it, the helper should mark the ownership as `unknown` rather than inventing ownership. `VMRegistry.upsert()` must preserve existing metadata across state transitions unless explicit replacement metadata is supplied, because `VZLinuxVMManager.createVM()` currently writes `booting` and then `running` records.
 
-- `owned_orphaned_vm`: helper VM has `owner="tldw"`, `runtime="vz_linux"`, and enough run/session metadata to prove it was created by this sandbox path
+Reconciliation should classify live VMs as:
+
+- `owned_orphaned_vm`: helper VM satisfies the exact ownership eligibility contract below
 - `unknown_orphaned_vm`: helper VM lacks ownership metadata or has partial legacy metadata
 - `foreign_orphaned_vm`: helper VM has ownership metadata that does not match the expected sandbox owner/runtime
 
 Only `owned_orphaned_vm` is eligible for `terminate_orphaned_vms=true`. The existing `orphaned_vm` summary field can remain as a total for compatibility, but action items should carry the more precise status/reason.
+
+### Ownership Eligibility Contract
+
+A live helper VM is termination-eligible only when all of these conditions are true:
+
+- `metadata.owner == "tldw"`
+- `metadata.runtime == "vz_linux"`
+- `metadata.run_id` is non-empty
+- `metadata.created_at` is non-empty and parseable enough to display as helper-created metadata
+- when `metadata.session_mode == true`, `metadata.session_id` is non-empty
+
+Everything else must be non-eligible:
+
+- missing metadata -> `unknown_orphaned_vm`
+- missing `run_id` or `created_at` -> `unknown_orphaned_vm`
+- session-mode VM with no `session_id` -> `unknown_orphaned_vm`
+- owner/runtime mismatch -> `foreign_orphaned_vm`
+
+The first implementation should not require `vm_id == run_id` because the helper protocol already allows callers to choose `vm_name`, but docs should note that the current `vz_linux` runner uses `run_id` as `vm_name`.
 
 ## Metadata Contract
 
@@ -79,7 +100,7 @@ Only `owned_orphaned_vm` is eligible for `terminate_orphaned_vms=true`. The exis
   "run_id": "run-123",
   "session_id": "session-456",
   "session_mode": true,
-  "template_path": "/path/to/bundle",
+  "template": "/path/to/bundle",
   "workspace_path": "/path/to/workspace"
 }
 ```
@@ -91,8 +112,10 @@ Rules:
 - `run_id` should be the sandbox run id.
 - `session_id` may be empty for ephemeral runs.
 - `session_mode` should be true only when a sandbox session VM is intended for reuse.
+- the helper should continue accepting the existing `template` key and may also accept `template_path` as an alias; response metadata should normalize this value as `template_path`.
 - `template_path` and `workspace_path` should be preserved as strings but should not be used as authority for filesystem access decisions.
 - `created_at` should be assigned by the helper at creation time in UTC ISO-8601 format.
+- Python's `vz_linux` runner must add `owner="tldw"` and `session_id` to the existing `create_vm` request. It should keep sending `template` for compatibility with the current helper request parser.
 
 ### Helper Response Metadata
 
@@ -146,6 +169,8 @@ The report should include:
 - `foreign_orphaned_vm_ids`
 
 Each item should carry a `termination_eligible` boolean and a reason string, such as `owned_orphan`, `unknown_ownership`, or `foreign_owner`.
+
+Compatibility note: any existing code that counts `status == "orphaned_vm"` must be updated to count all three precise orphan statuses. The aggregate `orphaned_vm_ids` list should remain the complete set of owned, unknown, and foreign orphan VM ids.
 
 ## Repair Behavior
 
@@ -208,7 +233,9 @@ Repair should not turn metadata ambiguity into a hard failure. It should skip am
 ### Swift Helper Tests
 
 - `VMRegistry` stores and returns metadata.
+- `VMRegistry.upsert()` preserves metadata when state/health is updated without replacement metadata.
 - `HelperService.createVM()` records metadata from request fields.
+- `UnixSocketServer` forwards `owner`, `runtime`, `run_id`, `session_id`, `session_mode`, `template`, and `workspace_path` into `HelperService.createVM()`.
 - `get_vm_status` includes metadata for created VMs.
 - `list_vms` includes metadata for every record.
 - missing metadata defaults to unknown ownership.
@@ -224,7 +251,9 @@ Repair should not turn metadata ambiguity into a hard failure. It should skip am
 - owned orphan is classified as `owned_orphaned_vm` and termination eligible.
 - unknown orphan is classified as `unknown_orphaned_vm` and not termination eligible.
 - foreign orphan is classified as `foreign_orphaned_vm` and not termination eligible.
+- partial tldw metadata missing `run_id`, `created_at`, or session `session_id` is not termination eligible.
 - existing healthy/stale/unhealthy persisted-session behavior is unchanged.
+- orphan summary counts include owned, unknown, and foreign orphan statuses.
 
 ### Repair Tests
 
