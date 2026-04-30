@@ -1006,6 +1006,84 @@ class SandboxService:
     def macos_diagnostics(self) -> dict[str, object]:
         return collect_macos_diagnostics(self._orch)
 
+    def plan_macos_image_store_cleanup(self) -> dict[str, object]:
+        payload = self.macos_diagnostics()
+        image_store = payload.get("image_store")
+        if not isinstance(image_store, dict):
+            image_store = {}
+
+        items = [item for item in list(image_store.get("items") or []) if isinstance(item, dict)]
+        actions: list[dict[str, object]] = []
+        reasons: list[str] = []
+        summary: dict[str, int] = {
+            "total_candidates": 0,
+            "planned_actions": 0,
+            "blocked_live_matches": 0,
+            "planning_only_run_manifests": 0,
+            "inactive_runs": 0,
+            "legacy_run_directories": 0,
+        }
+        action_types = {
+            "planning_only_run_manifest": "remove_run_manifest",
+            "inactive_run": "remove_run_directory",
+            "legacy_run_directory": "remove_legacy_run_directory",
+        }
+        summary_keys = {
+            "planning_only_run_manifest": "planning_only_run_manifests",
+            "inactive_run": "inactive_runs",
+            "legacy_run_directory": "legacy_run_directories",
+        }
+
+        for item in items:
+            gc_reason = str(item.get("gc_reason") or "").strip()
+            if not gc_reason:
+                continue
+            action_type = action_types.get(gc_reason)
+            if action_type is None:
+                continue
+
+            summary["total_candidates"] += 1
+            summary[summary_keys[gc_reason]] += 1
+
+            if item.get("matched_vm_id"):
+                summary["blocked_live_matches"] += 1
+                if "live_vm_matches_blocked_cleanup" not in reasons:
+                    reasons.append("live_vm_matches_blocked_cleanup")
+                continue
+
+            actions.append(
+                {
+                    "type": action_type,
+                    "run_id": str(item.get("run_id") or ""),
+                    "template_id": item.get("template_id"),
+                    "run_manifest_path": item.get("run_manifest_path"),
+                    "run_manifest_present": item.get("run_manifest_present"),
+                    "gc_reason": gc_reason,
+                    "gc_path": item.get("gc_path"),
+                    "matched_vm_id": item.get("matched_vm_id"),
+                    "matched_reconciliation_status": item.get("matched_reconciliation_status"),
+                    "matched_reconciliation_reason": item.get("matched_reconciliation_reason"),
+                    "status": "planned",
+                }
+            )
+
+        summary["planned_actions"] = len(actions)
+        return {
+            "dry_run": True,
+            "image_store": {
+                "configured": bool(image_store.get("configured")),
+                "root_path": image_store.get("root_path"),
+                "registered_templates": int(image_store.get("registered_templates") or 0),
+                "run_manifests": int(image_store.get("run_manifests") or 0),
+                "gc_candidates": int(image_store.get("gc_candidates") or 0),
+                "items": items,
+                "reasons": list(image_store.get("reasons") or []),
+            },
+            "summary": summary,
+            "actions": actions,
+            "reasons": reasons,
+        }
+
     def repair_macos_reconciliation(
         self,
         *,

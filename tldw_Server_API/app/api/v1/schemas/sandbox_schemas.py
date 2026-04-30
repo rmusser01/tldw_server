@@ -433,6 +433,37 @@ class SandboxAdminMacOSReconciliationRepairResponse(BaseModel):
     reasons: list[str] = Field(default_factory=list)
 
 
+class SandboxAdminMacOSImageStoreCleanupAction(BaseModel):
+    type: str
+    run_id: str
+    status: str
+    template_id: str | None = None
+    run_manifest_path: str | None = None
+    run_manifest_present: bool | None = None
+    gc_reason: str | None = None
+    gc_path: str | None = None
+    matched_vm_id: str | None = None
+    matched_reconciliation_status: str | None = None
+    matched_reconciliation_reason: str | None = None
+
+
+class SandboxAdminMacOSImageStoreCleanupSummary(BaseModel):
+    total_candidates: int = 0
+    planned_actions: int = 0
+    blocked_live_matches: int = 0
+    planning_only_run_manifests: int = 0
+    inactive_runs: int = 0
+    legacy_run_directories: int = 0
+
+
+class SandboxAdminMacOSImageStoreCleanupPlanResponse(BaseModel):
+    dry_run: bool
+    image_store: SandboxAdminMacOSImageStoreDiagnostics
+    summary: SandboxAdminMacOSImageStoreCleanupSummary
+    actions: list[SandboxAdminMacOSImageStoreCleanupAction] = Field(default_factory=list)
+    reasons: list[str] = Field(default_factory=list)
+
+
 # Snapshot/Clone Schemas
 class SnapshotCreateResponse(BaseModel):
     """Response when creating a session snapshot."""

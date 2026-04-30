@@ -45,6 +45,7 @@ def test_admin_endpoints_require_admin_role(monkeypatch) -> None:
         for path in (
             "/api/v1/sandbox/admin/runs",
             "/api/v1/sandbox/admin/macos-diagnostics",
+            "/api/v1/sandbox/admin/macos-image-store/cleanup-plan",
             "/api/v1/sandbox/admin/idempotency",
             "/api/v1/sandbox/admin/usage",
         ):

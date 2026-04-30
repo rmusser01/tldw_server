@@ -33,6 +33,7 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, Requ
 from tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps import get_audit_service_for_user
 from tldw_Server_API.app.api.v1.schemas.sandbox_schemas import (
     SandboxAdminMacOSDiagnosticsResponse,
+    SandboxAdminMacOSImageStoreCleanupPlanResponse,
     SandboxAdminMacOSReconciliationRepairRequest,
     SandboxAdminMacOSReconciliationRepairResponse,
     ArtifactListResponse,
@@ -2262,6 +2263,19 @@ async def admin_repair_macos_reconciliation(
     except SandboxReconciliationRepairError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.reason) from exc
     return SandboxAdminMacOSReconciliationRepairResponse.model_validate(payload)
+
+
+@router.get(
+    "/admin/macos-image-store/cleanup-plan",
+    response_model=SandboxAdminMacOSImageStoreCleanupPlanResponse,
+    summary="Admin: plan macOS image store cleanup actions",
+)
+async def admin_macos_image_store_cleanup_plan(
+    _principal: AuthPrincipal = Depends(RequireRole("admin")),
+    _current_user: User = Depends(get_request_user),
+) -> SandboxAdminMacOSImageStoreCleanupPlanResponse:
+    payload = await asyncio.to_thread(_service.plan_macos_image_store_cleanup)
+    return SandboxAdminMacOSImageStoreCleanupPlanResponse.model_validate(payload)
 
 
 @router.get(
