@@ -7,7 +7,7 @@ Goal: Provide a configurable, privacy-respecting content monitoring feature that
 - Scopes: global (all users), per-user; basic support for per-team and per-org when caller provides membership.
 - Integration points: chat input and output; ingestion; notes (create/update/bulk); RAG search (unified/simple/advanced). Hooks emit alerts but NEVER block content.
 - Alert storage and retrieval API with mark-as-read.
-- Admin endpoints to manage watchlists and list alerts.
+- Operational endpoints to manage watchlists and list alerts, gated by monitoring permissions.
 
 ## Non-Goals (Phase 1)
 - Email/SMS/Slack/webhook delivery (planned in Phase 2).
@@ -65,14 +65,19 @@ Goal: Provide a configurable, privacy-respecting content monitoring feature that
 - Config (optional): `tldw_Server_API/Config_Files/monitoring_watchlists.json`
 
 ## API Endpoints (Phase 1)
-- `GET  /api/v1/monitoring/watchlists`        list watchlists (admin)
-- `POST /api/v1/monitoring/watchlists`        create/update watchlist (admin)
-- `DELETE /api/v1/monitoring/watchlists/{id}` delete watchlist (admin)
-- `GET  /api/v1/monitoring/alerts`            list alerts (admin; filters: user_id, since, unread)
-- `POST /api/v1/monitoring/alerts/{id}/read`  mark alert as read (admin)
-- `POST /api/v1/monitoring/alerts/{id}/acknowledge` acknowledge alert (admin)
-- `DELETE /api/v1/monitoring/alerts/{id}` dismiss alert (admin)
-- `POST /api/v1/monitoring/reload`            reload config file (admin)
+- `GET  /api/v1/monitoring/watchlists`        list watchlists (requires `system.logs`)
+- `POST /api/v1/monitoring/watchlists`        create/update watchlist (requires `system.logs`)
+- `DELETE /api/v1/monitoring/watchlists/{id}` delete watchlist (requires `system.logs`)
+- `GET  /api/v1/monitoring/alerts`            list alerts (requires `system.logs`; filters: user_id, since, unread)
+- `POST /api/v1/monitoring/alerts/{id}/read`  mark alert as read (requires `system.logs`)
+- `POST /api/v1/monitoring/alerts/{id}/acknowledge` acknowledge alert (requires `system.logs`)
+- `DELETE /api/v1/monitoring/alerts/{id}` dismiss alert (requires `system.logs`)
+- `POST /api/v1/monitoring/reload`            reload config file (requires `system.logs`)
+
+## Permission Model
+- `/api/v1/monitoring/*` routes require `system.logs`. These are operational monitoring routes under the non-`/admin` prefix, not anonymous or end-user public routes. Admin-role principals also pass through the shared AuthNZ admin bypass.
+- `/api/v1/admin/monitoring/*` routes inherit the admin role gate from the `/api/v1/admin` router. They are the control-plane surface for shared alert rules, overlay mutations, and alert history.
+- There is no unauthenticated public monitoring surface. Public monitoring means non-`/admin` prefix, not anonymous access.
 
 ## Reload Semantics (Phase 1)
 - Default mode is `upsert` only. No deletes or disables unless explicitly requested.
@@ -98,7 +103,7 @@ Monitoring emits alerts without changing moderation behavior or endpoint results
 - If a chunk is deduped, skip alert creation; otherwise store the similarity metrics in `metadata`.
 
 ## Security & Privacy
-- Admin-only APIs. Extend to org/team leads later.
+- Monitoring APIs are AuthNZ claim-gated. Extend to org/team leads later.
 - Opt-in via config or explicit creation of watchlists.
 - Store minimal snippets (e.g., first 200 chars around the match).
 - Local-first by default; webhook/email delivery is attempted only when operators configure those channels.
