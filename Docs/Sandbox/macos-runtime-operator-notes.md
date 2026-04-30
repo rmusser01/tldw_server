@@ -202,7 +202,7 @@ fail closed and block mutating repair.
 - No APFS clone execution path yet
 - No allowlist networking for the new macOS runtimes
 - No `vz_macos` warm-session VM reuse yet
-- No launchd or managed helper lifecycle yet
+- Managed helper lifecycle is available through `tools/macos-vz-helper/scripts/vz-helperctl.py`, but it remains operator-driven and does not install or load launchd services automatically
 - No automatic orphan VM termination during diagnostics or repair yet
 
 Current diagnostics are mixed-mode:
@@ -218,13 +218,12 @@ Current diagnostics are mixed-mode:
 ## Real Host E2E Smoke
 
 The preferred operator entrypoint for proving real `vz_linux` execution on a
-prepared Apple silicon macOS host is:
+prepared Apple silicon macOS host is the managed helper wrapper:
 
 ```bash
-tools/vz-linux-image/scripts/run-host-e2e-smoke.sh \
+tools/macos-vz-helper/scripts/vz-helperctl.py check
+tools/macos-vz-helper/scripts/vz-helperctl.py smoke \
   --bundle /path/to/canonical/bundle \
-  --socket /tmp/tldw-vz-helper-e2e.sock \
-  --serial-log-dir /tmp/tldw-vz-serial-e2e \
   --entitlements /path/to/helper.entitlements
 ```
 
@@ -232,16 +231,31 @@ Use `--dry-run` first to print the exact SwiftPM, codesign, helper, and pytest
 commands without starting VMs:
 
 ```bash
-tools/vz-linux-image/scripts/run-host-e2e-smoke.sh \
+tools/macos-vz-helper/scripts/vz-helperctl.py smoke \
   --dry-run \
   --bundle /path/to/canonical/bundle
 ```
 
-The script validates the bundle, builds the Swift helper when the binary is
-missing, optionally ad hoc signs it with the supplied entitlements, runs the
-helper-daemon smoke, starts one helper daemon for real `vz_linux` E2E, verifies
-ephemeral execution, verifies same-session VM reuse, and stops the helper on
-exit.
+The wrapper delegates to `tools/vz-linux-image/scripts/run-host-e2e-smoke.sh`
+with the managed helper defaults. That lower-level script validates the bundle,
+builds the Swift helper when the binary is missing, optionally ad hoc signs it
+with the supplied entitlements, runs the helper-daemon smoke, starts one helper
+daemon for real `vz_linux` E2E, verifies ephemeral execution, verifies
+same-session VM reuse, and stops the helper on exit.
+
+The lower-level fallback remains available when operators need to bypass the
+managed defaults:
+
+```bash
+runtime_dir="$(mktemp -d "${TMPDIR:-/tmp}/tldw-vz-helper-e2e.XXXXXX")"
+chmod 700 "$runtime_dir"
+
+tools/vz-linux-image/scripts/run-host-e2e-smoke.sh \
+  --bundle /path/to/canonical/bundle \
+  --socket "$runtime_dir/helper.sock" \
+  --serial-log-dir "$runtime_dir/serial" \
+  --entitlements /path/to/helper.entitlements
+```
 
 The underlying opt-in pytest module is still available directly:
 

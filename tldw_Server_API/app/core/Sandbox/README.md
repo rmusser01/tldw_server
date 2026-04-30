@@ -68,7 +68,8 @@ Current limitations:
 - `vz_linux` repair is explicit and admin-only through `POST /api/v1/sandbox/admin/macos-reconciliation/repair`; diagnostics do not mutate state.
 - `vz_linux` repair defaults to dry-run, skips active sessions, can delete stale or unhealthy inactive persisted session-control rows when requested, and does not terminate orphan helper VMs yet.
 - Helper unavailable or protocol mismatch conditions fail closed and block mutating repair.
-- Orphan VM termination and launchd/managed helper lifecycle are future work, not automatic repair behavior.
+- Orphan VM termination remains future work and is not automatic repair behavior.
+- `tools/macos-vz-helper/scripts/vz-helperctl.py` is the preferred operator helper lifecycle command for `check`, `build`, `sign`, `start`, `status`, `stop`, `plist`, and `smoke`; it can generate launchd plist scaffolding but does not install or load services automatically.
 - helper-backed template validation now distinguishes canonical bundles from
   raw-disk compatibility mode through `boot_mode` and `validation_strength`.
 - `SandboxImageStore` persists template manifests under
@@ -77,8 +78,14 @@ Current limitations:
   run-directory GC planning.
 - `seatbelt` is intentionally conservative and should not be treated as equivalent to a VM boundary.
 - Real host `vz_linux` smoke coverage should normally be run through
-  `tools/vz-linux-image/scripts/run-host-e2e-smoke.sh`; the underlying pytest
-  module remains opt-in through `tldw_Server_API/tests/sandbox/test_vz_linux_real_host_e2e.py` and requires `TLDW_SANDBOX_VZ_LINUX_E2E=1`, `TLDW_SANDBOX_VZ_LINUX_E2E_BASE_IMAGE=<value>`, `TLDW_SANDBOX_MACOS_HELPER_SOCKET=<socket>`, `SANDBOX_ENABLE_EXECUTION=1`, and `SANDBOX_BACKGROUND_EXECUTION=0`.
+  `tools/macos-vz-helper/scripts/vz-helperctl.py smoke`; the lower-level
+  fallback remains `tools/vz-linux-image/scripts/run-host-e2e-smoke.sh`. The
+  underlying pytest module remains opt-in through
+  `tldw_Server_API/tests/sandbox/test_vz_linux_real_host_e2e.py` and requires
+  `TLDW_SANDBOX_VZ_LINUX_E2E=1`,
+  `TLDW_SANDBOX_VZ_LINUX_E2E_BASE_IMAGE=<value>`,
+  `TLDW_SANDBOX_MACOS_HELPER_SOCKET=<socket>`, `SANDBOX_ENABLE_EXECUTION=1`,
+  and `SANDBOX_BACKGROUND_EXECUTION=0`.
 - Real helper-daemon smoke coverage is opt-in through `tldw_Server_API/tests/sandbox/test_macos_virtualization_helper_daemon_host_gated.py` and requires `TLDW_SANDBOX_MACOS_HELPER_DAEMON_SMOKE=1`.
 
 ## Operations And Development

@@ -12,13 +12,28 @@ enum UnixSocketServerError: Error {
     case acceptFailed(Int32)
     case readFailed(Int32)
     case writeFailed(Int32)
+    case unsafeSocketPath(String)
+    case unsafeSocketDirectory(String)
+    case existingSocketPathIsNotSocket(String)
+    case existingSocketPathIsActive(String)
 }
 
 final class UnixSocketServer {
+    private struct SocketPathIdentity {
+        let device: dev_t
+        let inode: ino_t
+
+        init(_ statBuffer: stat) {
+            self.device = statBuffer.st_dev
+            self.inode = statBuffer.st_ino
+        }
+    }
+
     private let socketPath: String
     private let service: HelperService
     private var serverSocketFD: Int32 = -1
     private var isRunning = false
+    private var ownedSocketPathIdentity: SocketPathIdentity?
 
     init(socketPath: String, service: HelperService) {
         self.socketPath = socketPath.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -36,11 +51,7 @@ final class UnixSocketServer {
         if isRunning {
             return
         }
-        try FileManager.default.createDirectory(
-            at: URL(fileURLWithPath: socketPath).deletingLastPathComponent(),
-            withIntermediateDirectories: true
-        )
-        unlink(socketPath)
+        try prepareSocketPath()
 
         let socketFD = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
         guard socketFD >= 0 else {
@@ -53,7 +64,7 @@ final class UnixSocketServer {
             isRunning = true
         } catch {
             close(socketFD)
-            unlink(socketPath)
+            unlinkOwnedSocketPath()
             throw error
         }
     }
@@ -87,7 +98,7 @@ final class UnixSocketServer {
             close(serverSocketFD)
             serverSocketFD = -1
         }
-        unlink(socketPath)
+        unlinkOwnedSocketPath()
     }
 
     func handleRequestData(_ data: Data) throws -> Data {
@@ -172,6 +183,211 @@ final class UnixSocketServer {
     }
 
     private func bindAndListen(socketFD: Int32) throws {
+        let address = try socketAddress()
+        let bindResult = withUnsafePointer(to: address.value) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPointer in
+                Darwin.bind(socketFD, sockaddrPointer, address.length)
+            }
+        }
+        guard bindResult == 0 else {
+            throw UnixSocketServerError.bindFailed(errno)
+        }
+        var boundStat = stat()
+        guard fstat(socketFD, &boundStat) == 0 else {
+            throw UnixSocketServerError.bindFailed(errno)
+        }
+        ownedSocketPathIdentity = SocketPathIdentity(boundStat)
+        guard Darwin.listen(socketFD, SOMAXCONN) == 0 else {
+            throw UnixSocketServerError.listenFailed(errno)
+        }
+    }
+
+    private func prepareSocketPath() throws {
+        let socketDirectory = URL(fileURLWithPath: socketPath).deletingLastPathComponent()
+        try prepareSocketDirectory(socketDirectory)
+
+        var existing = stat()
+        let statResult = lstat(socketPath, &existing)
+        if statResult != 0 {
+            if errno == ENOENT {
+                return
+            }
+            throw UnixSocketServerError.unsafeSocketPath(socketPath)
+        }
+
+        let type = existing.st_mode & S_IFMT
+        if type == S_IFLNK {
+            throw UnixSocketServerError.unsafeSocketPath(socketPath)
+        }
+        if type != S_IFSOCK {
+            throw UnixSocketServerError.existingSocketPathIsNotSocket(socketPath)
+        }
+        if try existingSocketPathHasListener() {
+            throw UnixSocketServerError.existingSocketPathIsActive(socketPath)
+        }
+        try unlinkStaleSocketPath(expected: SocketPathIdentity(existing))
+    }
+
+    private func prepareSocketDirectory(_ socketDirectory: URL) throws {
+        let directoryPath = socketDirectory.path
+        guard !directoryPath.isEmpty else {
+            throw UnixSocketServerError.unsafeSocketDirectory(directoryPath)
+        }
+
+        var missingDirectories: [URL] = []
+        var current = socketDirectory
+        while true {
+            var directoryStat = stat()
+            let statResult = lstat(current.path, &directoryStat)
+            if statResult == 0 {
+                try validateSocketDirectory(current.path, statBuffer: directoryStat)
+                break
+            }
+            guard errno == ENOENT else {
+                throw UnixSocketServerError.unsafeSocketDirectory(current.path)
+            }
+            missingDirectories.append(current)
+            let parent = current.deletingLastPathComponent()
+            guard parent.path != current.path else {
+                throw UnixSocketServerError.unsafeSocketDirectory(current.path)
+            }
+            current = parent
+        }
+
+        for directory in missingDirectories.reversed() {
+            try FileManager.default.createDirectory(
+                at: directory,
+                withIntermediateDirectories: false,
+                attributes: [.posixPermissions: 0o700]
+            )
+            try validateSocketDirectory(directory.path)
+        }
+    }
+
+    private func validateSocketDirectory(_ directoryPath: String, statBuffer: stat? = nil) throws {
+        var directoryStat = statBuffer ?? stat()
+        if statBuffer == nil {
+            let statResult = lstat(directoryPath, &directoryStat)
+            guard statResult == 0 else {
+                throw UnixSocketServerError.unsafeSocketDirectory(directoryPath)
+            }
+        }
+
+        let type = directoryStat.st_mode & S_IFMT
+        guard type == S_IFDIR else {
+            throw UnixSocketServerError.unsafeSocketDirectory(directoryPath)
+        }
+        guard directoryStat.st_uid == geteuid() else {
+            throw UnixSocketServerError.unsafeSocketDirectory(directoryPath)
+        }
+        guard directoryStat.st_mode & 0o077 == 0 else {
+            throw UnixSocketServerError.unsafeSocketDirectory(directoryPath)
+        }
+    }
+
+    private func existingSocketPathHasListener() throws -> Bool {
+        let socketFD = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
+        guard socketFD >= 0 else {
+            throw UnixSocketServerError.socketCreateFailed(errno)
+        }
+        defer {
+            close(socketFD)
+        }
+
+        let originalFlags = fcntl(socketFD, F_GETFL, 0)
+        guard originalFlags >= 0,
+              fcntl(socketFD, F_SETFL, originalFlags | O_NONBLOCK) == 0 else {
+            throw UnixSocketServerError.unsafeSocketPath(socketPath)
+        }
+
+        let address = try socketAddress()
+        let connectResult = withUnsafePointer(to: address.value) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPointer in
+                connect(socketFD, sockaddrPointer, address.length)
+            }
+        }
+        if connectResult == 0 {
+            return true
+        }
+
+        let connectError = errno
+        if connectError == EINPROGRESS || connectError == EALREADY || connectError == EAGAIN || connectError == EWOULDBLOCK {
+            return try waitForSocketProbe(socketFD)
+        }
+        if connectError == ECONNREFUSED || connectError == ENOENT {
+            return false
+        }
+        if connectError == EISCONN {
+            return true
+        }
+        throw UnixSocketServerError.unsafeSocketPath(socketPath)
+    }
+
+    private func waitForSocketProbe(_ socketFD: Int32) throws -> Bool {
+        var descriptor = pollfd(fd: socketFD, events: Int16(POLLOUT), revents: 0)
+        while true {
+            let pollResult = Darwin.poll(&descriptor, 1, 200)
+            if pollResult == 0 {
+                return true
+            }
+            if pollResult < 0 {
+                if errno == EINTR {
+                    continue
+                }
+                throw UnixSocketServerError.unsafeSocketPath(socketPath)
+            }
+
+            var socketError: Int32 = 0
+            var socketErrorLength = socklen_t(MemoryLayout<Int32>.size)
+            let optionResult = withUnsafeMutablePointer(to: &socketError) { pointer in
+                pointer.withMemoryRebound(to: UInt8.self, capacity: MemoryLayout<Int32>.size) { rawPointer in
+                    getsockopt(socketFD, SOL_SOCKET, SO_ERROR, rawPointer, &socketErrorLength)
+                }
+            }
+            guard optionResult == 0 else {
+                throw UnixSocketServerError.unsafeSocketPath(socketPath)
+            }
+
+            if socketError == 0 || socketError == EISCONN {
+                return true
+            }
+            if socketError == ECONNREFUSED || socketError == ENOENT {
+                return false
+            }
+            if socketError == EAGAIN || socketError == EWOULDBLOCK || socketError == ETIMEDOUT {
+                return true
+            }
+            throw UnixSocketServerError.unsafeSocketPath(socketPath)
+        }
+    }
+
+    private func unlinkStaleSocketPath(expected: SocketPathIdentity) throws {
+        let current = try currentSocketPathIdentity()
+        guard current.device == expected.device,
+              current.inode == expected.inode else {
+            throw UnixSocketServerError.unsafeSocketPath(socketPath)
+        }
+
+        if unlink(socketPath) != 0 {
+            throw UnixSocketServerError.unsafeSocketPath(socketPath)
+        }
+    }
+
+    private func currentSocketPathIdentity() throws -> SocketPathIdentity {
+        var current = stat()
+        let result = lstat(socketPath, &current)
+        if result != 0 {
+            throw UnixSocketServerError.unsafeSocketPath(socketPath)
+        }
+
+        let currentType = current.st_mode & S_IFMT
+        guard currentType == S_IFSOCK else {
+            throw UnixSocketServerError.unsafeSocketPath(socketPath)
+        }
+        return SocketPathIdentity(current)
+    }
+
+    private func socketAddress() throws -> (value: sockaddr_un, length: socklen_t) {
         var address = sockaddr_un()
         address.sun_family = sa_family_t(AF_UNIX)
 
@@ -188,18 +404,22 @@ final class UnixSocketServer {
             }
         }
 
-        let addressLength = socklen_t(MemoryLayout<sa_family_t>.size + pathBytes.count)
-        let bindResult = withUnsafePointer(to: &address) { pointer in
-            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPointer in
-                Darwin.bind(socketFD, sockaddrPointer, addressLength)
-            }
+        return (address, socklen_t(MemoryLayout<sa_family_t>.size + pathBytes.count))
+    }
+
+    private func unlinkOwnedSocketPath() {
+        guard let expected = ownedSocketPathIdentity else {
+            return
         }
-        guard bindResult == 0 else {
-            throw UnixSocketServerError.bindFailed(errno)
+        defer {
+            ownedSocketPathIdentity = nil
         }
-        guard Darwin.listen(socketFD, SOMAXCONN) == 0 else {
-            throw UnixSocketServerError.listenFailed(errno)
+        guard let current = try? currentSocketPathIdentity(),
+              current.device == expected.device,
+              current.inode == expected.inode else {
+            return
         }
+        unlink(socketPath)
     }
 
     private func handleConnection(clientFD: Int32) throws {

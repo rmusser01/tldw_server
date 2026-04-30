@@ -81,6 +81,31 @@ def test_host_e2e_smoke_script_dry_run_prints_helper_and_pytest_commands(tmp_pat
     assert not serial_log_dir.exists()
 
 
+def test_host_e2e_smoke_script_default_socket_uses_private_runtime_dir(tmp_path: Path) -> None:
+    bundle = tmp_path / "bundle"
+    bundle.mkdir()
+    (bundle / "kernel").write_bytes(b"kernel")
+    (bundle / "rootfs.img").write_bytes(b"rootfs")
+    helper = tmp_path / "macos-vz-helper"
+
+    result = _run_smoke_script(
+        "--dry-run",
+        "--bundle",
+        str(bundle),
+        "--helper",
+        str(helper),
+        "--python",
+        sys.executable,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "TLDW_SANDBOX_MACOS_HELPER_SOCKET=" in result.stdout
+    assert "/tldw-vz-helper-e2e-" in result.stdout
+    assert "/helper.sock" in result.stdout
+    assert "TLDW_SANDBOX_VZ_LINUX_SERIAL_LOG_DIR=" in result.stdout
+    assert "/serial" in result.stdout
+
+
 def test_host_e2e_smoke_script_removes_stale_socket_before_helper_start(tmp_path: Path) -> None:
     bundle = tmp_path / "bundle"
     bundle.mkdir()
@@ -133,7 +158,48 @@ def test_host_e2e_smoke_script_removes_stale_socket_before_helper_start(tmp_path
             )
 
         assert result.returncode == 0, result.stderr
-        assert not socket_path.exists()
+    assert not socket_path.exists()
+
+
+def test_host_e2e_smoke_script_refuses_non_private_socket_parent(tmp_path: Path) -> None:
+    bundle = tmp_path / "bundle"
+    bundle.mkdir()
+    (bundle / "kernel").write_bytes(b"kernel")
+    (bundle / "rootfs.img").write_bytes(b"rootfs")
+    serial_log_dir = tmp_path / "serial"
+    fake_python = tmp_path / "fake-python"
+    fake_helper = tmp_path / "fake-helper"
+    fake_python.write_text(
+        "#!/usr/bin/env python3\n"
+        "import sys\n"
+        "sys.exit(0 if sys.argv[1:3] == ['-m', 'pytest'] else 2)\n",
+        encoding="utf-8",
+    )
+    fake_helper.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
+    fake_python.chmod(0o755)
+    fake_helper.chmod(0o755)
+    socket_dir = tmp_path / "public-runtime"
+    socket_dir.mkdir(mode=0o755)
+    socket_dir.chmod(0o755)
+
+    result = _run_smoke_script(
+        "--bundle",
+        str(bundle),
+        "--helper",
+        str(fake_helper),
+        "--socket",
+        str(socket_dir / "helper.sock"),
+        "--serial-log-dir",
+        str(serial_log_dir),
+        "--python",
+        str(fake_python),
+        "--skip-build",
+        "--skip-sign",
+        env_overrides={"TLDW_HOST_E2E_SMOKE_SKIP_SOCKET_WAIT": "1"},
+    )
+
+    assert result.returncode != 0
+    assert "helper socket directory must be owner-only" in result.stderr
 
 
 def test_host_e2e_smoke_script_refuses_regular_file_socket_path(tmp_path: Path) -> None:

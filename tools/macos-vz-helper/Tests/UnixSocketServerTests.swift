@@ -62,7 +62,9 @@ import Testing
 }
 
 @Test func unixSocketServerServesPingOverRealSocket() throws {
-    let socketPath = "/tmp/macos-vz-helper-\(UUID().uuidString.prefix(8)).sock"
+    let socketDirectory = try makePrivateTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: socketDirectory) }
+    let socketPath = socketDirectory.appendingPathComponent("helper.sock").path
     let server = UnixSocketServer(
         socketPath: socketPath,
         service: HelperService()
@@ -74,7 +76,6 @@ import Testing
     }
     defer {
         server.stop()
-        unlink(socketPath)
     }
 
     try waitForSocket(at: socketPath)
@@ -92,6 +93,223 @@ import Testing
     #expect(responseJSON?["status"] as? String == "ok")
 }
 
+@Test func unixSocketServerRefusesExistingRegularFileSocketPath() throws {
+    let dir = try makePrivateTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    let socket = dir.appendingPathComponent("helper.sock")
+    try "do not remove".write(to: socket, atomically: true, encoding: .utf8)
+    let server = UnixSocketServer(socketPath: socket.path, service: HelperService())
+    defer { server.stop() }
+
+    #expect(throws: UnixSocketServerError.self) {
+        try server.start()
+    }
+    #expect(FileManager.default.fileExists(atPath: socket.path))
+}
+
+@Test func unixSocketServerRefusesSymlinkSocketPath() throws {
+    let dir = try makePrivateTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    let target = dir.appendingPathComponent("target")
+    let socket = dir.appendingPathComponent("helper.sock")
+    try "target".write(to: target, atomically: true, encoding: .utf8)
+    try FileManager.default.createSymbolicLink(atPath: socket.path, withDestinationPath: target.path)
+
+    let server = UnixSocketServer(socketPath: socket.path, service: HelperService())
+    defer { server.stop() }
+
+    #expect(throws: UnixSocketServerError.self) {
+        try server.start()
+    }
+    #expect(FileManager.default.fileExists(atPath: socket.path))
+}
+
+@Test func unixSocketServerRemovesExistingSocketPath() throws {
+    let socketDirectory = try makePrivateTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: socketDirectory) }
+    let socketPath = socketDirectory.appendingPathComponent("helper.sock").path
+    let fd = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
+    guard fd >= 0 else { return }
+    defer {
+        close(fd)
+    }
+
+    try bindSocketForTest(fd: fd, path: socketPath)
+    let server = UnixSocketServer(socketPath: socketPath, service: HelperService())
+    try server.start()
+    defer { server.stop() }
+
+    #expect(FileManager.default.fileExists(atPath: socketPath))
+}
+
+@Test func unixSocketServerRefusesActiveSocketPath() throws {
+    let socketDirectory = try makePrivateTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: socketDirectory) }
+    let socketPath = socketDirectory.appendingPathComponent("helper.sock").path
+    let fd = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
+    guard fd >= 0 else { return }
+    defer {
+        close(fd)
+    }
+
+    try bindSocketForTest(fd: fd, path: socketPath)
+    guard Darwin.listen(fd, SOMAXCONN) == 0 else {
+        throw TestFailure.socketListenFailed
+    }
+
+    do {
+        let server = UnixSocketServer(socketPath: socketPath, service: HelperService())
+        #expect(throws: UnixSocketServerError.self) {
+            try server.start()
+        }
+    }
+
+    let acceptedFD = try acceptConnectionForTest(fd: fd)
+    defer { close(acceptedFD) }
+    setSocketReceiveTimeoutForTest(acceptedFD)
+    var buffer = [UInt8](repeating: 0, count: 512)
+    let readCount = recv(acceptedFD, &buffer, buffer.count, 0)
+    #expect(readCount <= 0)
+
+    let clientFD = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
+    guard clientFD >= 0 else { return }
+    defer { close(clientFD) }
+
+    let address = try unixSocketAddress(path: socketPath)
+    let connectResult = withUnsafePointer(to: address.value) { pointer in
+        pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPointer in
+            connect(clientFD, sockaddrPointer, address.length)
+        }
+    }
+    #expect(connectResult == 0)
+}
+
+@Test func unixSocketServerDoesNotRemoveReplacementPathOnStop() throws {
+    let socketDirectory = try makePrivateTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: socketDirectory) }
+    let socketPath = socketDirectory.appendingPathComponent("helper.sock").path
+    let replacementURL = URL(fileURLWithPath: socketPath)
+    let server = UnixSocketServer(socketPath: socketPath, service: HelperService())
+    try server.start()
+    defer {
+        server.stop()
+    }
+
+    unlink(socketPath)
+    try "replacement".write(to: replacementURL, atomically: true, encoding: .utf8)
+
+    server.stop()
+
+    #expect(FileManager.default.fileExists(atPath: socketPath))
+    #expect(try String(contentsOf: replacementURL, encoding: .utf8) == "replacement")
+}
+
+@Test func unixSocketServerCreatesMissingSocketParentAsOwnerOnly() throws {
+    let root = try makePrivateTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let runtimeDirectory = root.appendingPathComponent("runtime")
+    let socketPath = runtimeDirectory.appendingPathComponent("helper.sock").path
+    let server = UnixSocketServer(socketPath: socketPath, service: HelperService())
+
+    try server.start()
+    defer { server.stop() }
+
+    let permissions = try socketParentPermissions(at: runtimeDirectory)
+    #expect(permissions == 0o700)
+}
+
+@Test func unixSocketServerRefusesGroupAccessibleSocketParent() throws {
+    let dir = URL(fileURLWithPath: NSTemporaryDirectory())
+        .appendingPathComponent("macos-vz-helper-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    chmod(dir.path, 0o755)
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    let socket = dir.appendingPathComponent("helper.sock")
+    let server = UnixSocketServer(socketPath: socket.path, service: HelperService())
+    defer { server.stop() }
+
+    #expect(throws: UnixSocketServerError.self) {
+        try server.start()
+    }
+    #expect(!FileManager.default.fileExists(atPath: socket.path))
+}
+
+@Test func unixSocketServerRefusesMissingSocketParentUnderGroupAccessibleParent() throws {
+    let root = try makePrivateTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let sharedParent = root.appendingPathComponent("shared")
+    try FileManager.default.createDirectory(at: sharedParent, withIntermediateDirectories: true)
+    chmod(sharedParent.path, 0o755)
+
+    let runtimeDirectory = sharedParent.appendingPathComponent("runtime")
+    let socket = runtimeDirectory.appendingPathComponent("helper.sock")
+    let server = UnixSocketServer(socketPath: socket.path, service: HelperService())
+    defer { server.stop() }
+
+    #expect(throws: UnixSocketServerError.self) {
+        try server.start()
+    }
+    #expect(!FileManager.default.fileExists(atPath: runtimeDirectory.path))
+}
+
+@Test func unixSocketServerRefusesMissingSocketParentThroughSymlinkAncestor() throws {
+    let root = try makePrivateTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let target = root.appendingPathComponent("target")
+    let link = root.appendingPathComponent("link")
+    try FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
+    chmod(target.path, 0o700)
+    try FileManager.default.createSymbolicLink(atPath: link.path, withDestinationPath: target.path)
+
+    let runtimeDirectory = link.appendingPathComponent("runtime")
+    let socket = runtimeDirectory.appendingPathComponent("helper.sock")
+    let server = UnixSocketServer(socketPath: socket.path, service: HelperService())
+    defer { server.stop() }
+
+    #expect(throws: UnixSocketServerError.self) {
+        try server.start()
+    }
+    #expect(!FileManager.default.fileExists(atPath: target.appendingPathComponent("runtime").path))
+}
+
+private func makePrivateTemporaryDirectory() throws -> URL {
+    let directory = URL(fileURLWithPath: "/tmp")
+        .appendingPathComponent("macos-vz-helper-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(
+        at: directory,
+        withIntermediateDirectories: true,
+        attributes: [.posixPermissions: 0o700]
+    )
+    chmod(directory.path, 0o700)
+    return directory
+}
+
+private func socketParentPermissions(at url: URL) throws -> Int {
+    let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+    let permissions = attributes[.posixPermissions] as? NSNumber
+    return permissions?.intValue ?? -1
+}
+
+private func acceptConnectionForTest(fd: Int32) throws -> Int32 {
+    let acceptedFD = Darwin.accept(fd, nil, nil)
+    guard acceptedFD >= 0 else {
+        throw TestFailure.socketAcceptFailed
+    }
+    return acceptedFD
+}
+
+private func setSocketReceiveTimeoutForTest(_ fd: Int32) {
+    var timeout = timeval(tv_sec: 0, tv_usec: 200_000)
+    withUnsafePointer(to: &timeout) { pointer in
+        pointer.withMemoryRebound(to: UInt8.self, capacity: MemoryLayout<timeval>.size) { rawPointer in
+            _ = setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, rawPointer, socklen_t(MemoryLayout<timeval>.size))
+        }
+    }
+}
+
 private func waitForSocket(at path: String, timeoutSeconds: TimeInterval = 2.0) throws {
     let deadline = Date().addingTimeInterval(timeoutSeconds)
     while Date() < deadline {
@@ -103,6 +321,18 @@ private func waitForSocket(at path: String, timeoutSeconds: TimeInterval = 2.0) 
     throw TestFailure.socketNotReady
 }
 
+private func bindSocketForTest(fd: Int32, path: String) throws {
+    let address = try unixSocketAddress(path: path)
+    let bindResult = withUnsafePointer(to: address.value) { pointer in
+        pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPointer in
+            Darwin.bind(fd, sockaddrPointer, address.length)
+        }
+    }
+    guard bindResult == 0 else {
+        throw TestFailure.socketBindFailed
+    }
+}
+
 private func sendSocketRequest(socketPath: String, payload: String) throws -> Data {
     let clientFD = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
     guard clientFD >= 0 else {
@@ -112,24 +342,10 @@ private func sendSocketRequest(socketPath: String, payload: String) throws -> Da
         close(clientFD)
     }
 
-    var address = sockaddr_un()
-    address.sun_family = sa_family_t(AF_UNIX)
-    let pathBytes = Array(socketPath.utf8CString)
-    let maxLength = MemoryLayout.size(ofValue: address.sun_path)
-    if pathBytes.count > maxLength {
-        throw TestFailure.socketPathTooLong
-    }
-    withUnsafeMutablePointer(to: &address.sun_path.0) { pointer in
-        pointer.initialize(repeating: 0, count: maxLength)
-        for (index, byte) in pathBytes.enumerated() {
-            pointer.advanced(by: index).pointee = byte
-        }
-    }
-
-    let addressLength = socklen_t(MemoryLayout<sa_family_t>.size + pathBytes.count)
-    let connectResult = withUnsafePointer(to: &address) { pointer in
+    let address = try unixSocketAddress(path: socketPath)
+    let connectResult = withUnsafePointer(to: address.value) { pointer in
         pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPointer in
-            connect(clientFD, sockaddrPointer, addressLength)
+            connect(clientFD, sockaddrPointer, address.length)
         }
     }
     guard connectResult == 0 else {
@@ -154,9 +370,29 @@ private func sendSocketRequest(socketPath: String, payload: String) throws -> Da
     return Data(buffer.prefix(readCount)).trimmingTrailingNewlines()
 }
 
+private func unixSocketAddress(path: String) throws -> (value: sockaddr_un, length: socklen_t) {
+    var address = sockaddr_un()
+    address.sun_family = sa_family_t(AF_UNIX)
+    let pathBytes = Array(path.utf8CString)
+    let maxLength = MemoryLayout.size(ofValue: address.sun_path)
+    if pathBytes.count > maxLength {
+        throw TestFailure.socketPathTooLong
+    }
+    withUnsafeMutablePointer(to: &address.sun_path.0) { pointer in
+        pointer.initialize(repeating: 0, count: maxLength)
+        for (index, byte) in pathBytes.enumerated() {
+            pointer.advanced(by: index).pointee = byte
+        }
+    }
+    return (address, socklen_t(MemoryLayout<sa_family_t>.size + pathBytes.count))
+}
+
 private enum TestFailure: Error {
+    case socketAcceptFailed
+    case socketBindFailed
     case clientSocketUnavailable
     case socketConnectFailed
+    case socketListenFailed
     case socketNotReady
     case socketPathTooLong
     case socketReadFailed
