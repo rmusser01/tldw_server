@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import importlib
 import sys
 
+from fastapi import FastAPI
 import pytest
 
 
@@ -29,7 +31,8 @@ async def test_start_optional_workers_combines_handles_in_order(
         calls.append("jobs-crypto")
         return ("jobs-crypto-stop", "jobs-crypto-task")
 
-    async def _record_jobs_webhooks():
+    async def _record_jobs_webhooks(*, worker_inventory: object | None = None) -> tuple[str, str]:
+        assert worker_inventory is None
         calls.append("jobs-webhooks")
         return ("jobs-webhooks-stop", "jobs-webhooks-task")
 
@@ -107,6 +110,66 @@ async def test_start_jobs_webhooks_worker_skips_without_url(
 
     assert stop_event is None
     assert task is None
+
+
+@pytest.mark.asyncio
+async def test_start_jobs_webhooks_worker_registers_background_inventory_when_enabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_workers = _import_startup_optional_workers()
+    from tldw_Server_API.app.services.lifecycle_workers import ShutdownPhase, WorkerRegistry
+
+    app = FastAPI()
+    worker_inventory = WorkerRegistry(app)
+    observed_stop_events: list[asyncio.Event] = []
+
+    async def _fake_webhooks_worker(stop_event: asyncio.Event) -> None:
+        observed_stop_events.append(stop_event)
+        await stop_event.wait()
+
+    monkeypatch.setenv("JOBS_WEBHOOKS_ENABLED", "true")
+    monkeypatch.setenv("JOBS_WEBHOOKS_URL", "https://example.test/jobs-webhooks")
+    monkeypatch.setattr(
+        startup_workers,
+        "_run_jobs_webhooks_worker_service",
+        _fake_webhooks_worker,
+    )
+
+    stop_event = None
+    task = None
+    try:
+        stop_event, task = await startup_workers._start_jobs_webhooks_worker(
+            worker_inventory=worker_inventory,
+        )
+        await asyncio.sleep(0)
+
+        assert stop_event is not None
+        assert task is not None
+        assert task.get_name() == "jobs_webhooks_task"
+        assert observed_stop_events == [stop_event]
+        assert len(worker_inventory.handles) == 1
+        handle = worker_inventory.handles[0]
+        assert handle.name == "jobs_webhooks_task"
+        assert handle.task is task
+        assert handle.stop_event is stop_event
+        assert handle.category == "jobs"
+        assert handle.shutdown_phase is ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN
+        assert app.state._tldw_shutdown_worker_inventory == [
+            {
+                "name": "jobs_webhooks_task",
+                "task_name": "jobs_webhooks_task",
+                "has_stop_event": True,
+                "timeout_sec": 5.0,
+                "category": "jobs",
+                "shutdown_phase": "background_worker_shutdown",
+            }
+        ]
+        assert app.state._tldw_shutdown_job_poller_inventory == []
+    finally:
+        if stop_event is not None:
+            stop_event.set()
+        if task is not None:
+            await asyncio.wait_for(task, timeout=1)
 
 
 @pytest.mark.asyncio
