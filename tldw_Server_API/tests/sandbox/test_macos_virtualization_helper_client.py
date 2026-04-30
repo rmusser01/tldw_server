@@ -78,6 +78,37 @@ def _install_fake_helper_socket(monkeypatch, responses: dict[str, object], socke
     return requests
 
 
+def test_helper_client_exports_expected_protocol_version() -> None:
+    from tldw_Server_API.app.core.Sandbox.macos_virtualization.helper_client import (
+        EXPECTED_HELPER_PROTOCOL_VERSION,
+    )
+
+    assert EXPECTED_HELPER_PROTOCOL_VERSION == "1"
+
+
+def test_helper_client_default_uses_expected_protocol_version(monkeypatch) -> None:
+    from tldw_Server_API.app.core.Sandbox.macos_virtualization.helper_client import (
+        EXPECTED_HELPER_PROTOCOL_VERSION,
+    )
+
+    monkeypatch.delenv("TEST_MODE", raising=False)
+    requests = _install_fake_helper_socket(
+        monkeypatch,
+        {
+            "ping": {
+                "protocol_version": EXPECTED_HELPER_PROTOCOL_VERSION,
+                "helper_version": "0.1.0",
+                "status": "ok",
+                "details": {"transport": "unix"},
+            }
+        },
+    )
+
+    MacOSVirtualizationHelperClient().ping()
+
+    assert requests[0]["protocol_version"] == EXPECTED_HELPER_PROTOCOL_VERSION
+
+
 def test_fake_helper_supports_vz_linux_vm_create_and_exec(monkeypatch) -> None:
     monkeypatch.setenv("TEST_MODE", "1")
 
