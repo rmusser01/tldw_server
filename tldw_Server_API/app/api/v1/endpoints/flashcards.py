@@ -11,6 +11,7 @@ from fastapi.responses import Response, StreamingResponse
 from loguru import logger
 from pydantic import BaseModel
 
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_owner, get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.jobs_deps import get_job_manager
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, get_auth_principal, get_request_user, User
@@ -1104,7 +1105,18 @@ def list_flashcards(
             q=q,
             include_deleted=False,
         )
-        return {"items": items, "count": len(items), "total": int(total)}
+        total_int = int(total)
+        return {
+            "items": items,
+            "count": len(items),
+            "total": total_int,
+            "pagination": build_offset_pagination_meta(
+                total=total_int,
+                limit=limit,
+                offset=offset,
+                count=len(items),
+            ),
+        }
     except CharactersRAGDBError as exc:
         raise map_db_error_to_http(exc, default_detail="Failed to list flashcards") from exc
 

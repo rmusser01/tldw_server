@@ -4,6 +4,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, model_validator
 
+from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
 from tldw_Server_API.app.api.v1.schemas.study_packs import (
     FlashcardCitationResponse,
     FlashcardDeepDiveTarget,
@@ -332,6 +333,7 @@ class FlashcardListResponse(BaseModel):
     items: list[Flashcard]
     count: int
     total: int | None = None
+    pagination: OffsetPaginationMeta
 
 
 class FlashcardReviewRequest(BaseModel):
