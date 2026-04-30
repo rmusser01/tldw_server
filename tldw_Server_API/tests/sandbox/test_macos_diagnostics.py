@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import json
 import tldw_Server_API.app.core.Sandbox.macos_diagnostics as diagnostics_module
 import tldw_Server_API.app.core.Sandbox.vz_reconciliation as reconciliation_module
+from tldw_Server_API.app.core.Sandbox.image_store import SandboxImageStore
 from tldw_Server_API.app.core.Sandbox.models import RuntimeType
 from tldw_Server_API.app.core.Sandbox.macos_virtualization.models import (
+    HelperVMMetadata,
     HelperPingReply,
     HelperVMListReply,
     HelperVMStatusReply,
@@ -86,6 +89,15 @@ def _sample_diagnostics_payload() -> dict:
                     "healthy": True,
                 }
             ],
+            "reasons": [],
+        },
+        "image_store": {
+            "configured": False,
+            "root_path": None,
+            "registered_templates": 0,
+            "run_manifests": 0,
+            "gc_candidates": 0,
+            "items": [],
             "reasons": [],
         },
     }
@@ -510,3 +522,130 @@ def test_collect_macos_diagnostics_reports_reconciliation_mismatches(monkeypatch
     assert data["reconciliation"]["stale_session_ids"] == ["sess-stale"]
     assert data["reconciliation"]["items"]
     assert data["reconciliation"]["orphaned_vm_ids"] == []
+
+
+def test_collect_macos_diagnostics_reports_image_store_correlation(monkeypatch, tmp_path) -> None:
+    _patch_macos_host(monkeypatch)
+    monkeypatch.delenv("TEST_MODE", raising=False)
+
+    store_root = tmp_path / "image-store"
+    bundle = tmp_path / "bundle"
+    bundle.mkdir()
+    (bundle / "kernel").write_bytes(b"kernel")
+    (bundle / "rootfs.img").write_bytes(b"rootfs")
+    (bundle / "manifest.json").write_text(
+        json.dumps({"schema_version": 1, "boot_mode": "linux_direct"}),
+        encoding="utf-8",
+    )
+    store = SandboxImageStore(root_path=store_root)
+    template_id = store.register_bundle(
+        runtime="vz_linux",
+        template_name="debian-bookworm-arm64",
+        bundle_path=bundle,
+    )
+    live_manifest = store.prepare_run_clone(template_id=template_id, run_id="run-live")
+    manifest_only = store.prepare_run_clone(template_id=template_id, run_id="run-manifest-only")
+    inactive_manifest = store.prepare_run_clone(template_id=template_id, run_id="run-inactive")
+    inactive_rootfs = store_root / "runs" / "run-inactive" / "rootfs.img"
+    inactive_rootfs.write_bytes(b"clone")
+    legacy_run = store_root / "runs" / "run-legacy"
+    legacy_run.mkdir(parents=True)
+    (legacy_run / "leftover.img").write_bytes(b"legacy")
+
+    monkeypatch.setenv("TLDW_SANDBOX_IMAGE_STORE_ROOT", str(store_root))
+    monkeypatch.setenv("TLDW_SANDBOX_VZ_LINUX_TEMPLATE_SOURCE", str(bundle))
+
+    class _FakeHelper:
+        def ping(self):
+            return HelperPingReply(
+                protocol_version="1",
+                helper_version="0.1.0",
+                status="ok",
+                details={"transport": "unix"},
+            )
+
+        def validate_template(self, request: dict[str, object]) -> dict[str, object]:
+            return {
+                "template_id": template_id,
+                "source": request["template"],
+                "ready": True,
+                "reasons": [],
+            }
+
+        def list_vms(self):
+            return HelperVMListReply(
+                protocol_version="1",
+                helper_version="0.1.0",
+                vms=[
+                    HelperVMStatusReply(
+                        protocol_version="1",
+                        helper_version="0.1.0",
+                        vm_id="vm-live",
+                        state="running",
+                        healthy=True,
+                        metadata=HelperVMMetadata(
+                            owner="tldw",
+                            runtime="vz_linux",
+                            run_id="run-live",
+                            session_id="sess-live",
+                            session_mode=True,
+                            template_id=template_id,
+                            template_path=str(bundle),
+                            run_manifest_path=str(store_root / "runs" / live_manifest.run_id / "manifest.json"),
+                            planning_source="image_store",
+                            workspace_path="/tmp/workspace",
+                            created_at="2026-04-30T18:00:00Z",
+                        ),
+                    )
+                ],
+            )
+
+    class _FakeOrchestrator:
+        def list_vz_session_controls(self):
+            return [{"id": "sess-live", "vm_id": "vm-live", "template_id": template_id}]
+
+    monkeypatch.setattr(diagnostics_module, "MacOSVirtualizationHelperClient", _FakeHelper)
+    monkeypatch.setattr(reconciliation_module, "MacOSVirtualizationHelperClient", _FakeHelper)
+    monkeypatch.setattr(
+        diagnostics_module,
+        "collect_runtime_preflights",
+        lambda network_policy="deny_all": {
+            RuntimeType.vz_linux: RuntimePreflightResult(
+                runtime=RuntimeType.vz_linux,
+                available=True,
+                reasons=[],
+                execution_mode="real",
+            ),
+            RuntimeType.vz_macos: RuntimePreflightResult(
+                runtime=RuntimeType.vz_macos,
+                available=False,
+                reasons=["macos_virtualization_helper_unavailable"],
+                execution_mode="none",
+            ),
+            RuntimeType.seatbelt: RuntimePreflightResult(
+                runtime=RuntimeType.seatbelt,
+                available=False,
+                reasons=["seatbelt_unavailable"],
+                execution_mode="none",
+                supported_trust_levels=["trusted"],
+            ),
+        },
+    )
+
+    data = diagnostics_module.collect_macos_diagnostics(_FakeOrchestrator())
+
+    image_store = data["image_store"]
+    assert image_store["configured"] is True
+    assert image_store["root_path"] == str(store_root)
+    assert image_store["registered_templates"] == 1
+    assert image_store["run_manifests"] == 3
+    assert image_store["gc_candidates"] == 3
+    items_by_run = {item["run_id"]: item for item in image_store["items"]}
+    assert items_by_run["run-live"]["matched_vm_id"] == "vm-live"
+    assert items_by_run["run-live"]["matched_reconciliation_status"] == "healthy"
+    assert items_by_run["run-live"]["gc_reason"] is None
+    assert items_by_run["run-manifest-only"]["gc_reason"] == "planning_only_run_manifest"
+    assert items_by_run["run-manifest-only"]["run_manifest_present"] is True
+    assert items_by_run["run-inactive"]["gc_reason"] == "inactive_run"
+    assert items_by_run["run-legacy"]["gc_reason"] == "legacy_run_directory"
+    assert items_by_run["run-legacy"]["run_manifest_present"] is False

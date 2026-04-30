@@ -65,6 +65,7 @@ Current limitations:
 - `seatbelt` real execution still depends on deprecated `sandbox-exec` and may be blocked by an enclosing sandbox even on macOS hosts.
 - `vz_linux` supports session VM reuse through persisted VZ session-control metadata; `vz_macos` does not.
 - `vz_linux` admin diagnostics include reconciliation data comparing persisted VZ session-control rows against live helper VM state.
+- `vz_linux` admin diagnostics also include a read-only image-store block that correlates persisted run manifests and dry-run GC classifications with reconciliation/helper state.
 - `vz_linux` admin diagnostics now also project an additive
   `startup_warning_summary` field from the app-owned startup warning registry;
   low-level diagnostics collection remains app-agnostic.
@@ -122,8 +123,9 @@ Current limitations:
 `/api/v1/sandbox/admin/macos-diagnostics` is an admin-only diagnostics surface for
 operator troubleshooting and exposes helper/template readiness details that are not
 included in the public discovery payload, plus reconciliation data for persisted
-`vz_linux` session-control rows versus live helper VM state. It is read-only and
-now includes a compact `startup_warning_summary` field projected from the
+`vz_linux` session-control rows versus live helper VM state, and image-store
+correlation for persisted run manifests and dry-run GC candidates. It is
+read-only and now includes a compact `startup_warning_summary` field projected from the
 current-process startup warning registry.
 `/api/v1/admin/startup-warnings` is the generic admin-only companion surface for
 the same startup records and returns full current-process warning items plus

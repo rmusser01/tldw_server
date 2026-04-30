@@ -182,6 +182,8 @@ It is admin-only and returns:
 - template readiness for `vz_linux` and `vz_macos`, with optional template source metadata
 - per-runtime execution mode and remediation hints
 - reconciliation data comparing persisted VZ session rows with live helper VM state
+- image-store correlation showing persisted run manifests, dry-run GC candidate
+  classification, and any matching reconciliation/helper VM records
 - additive `startup_warning_summary` showing whether current-process startup
   warnings were recorded, whether any were blocking, and which stable warning
   codes were emitted during boot

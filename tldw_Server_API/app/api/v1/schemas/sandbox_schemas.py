@@ -350,6 +350,28 @@ class SandboxAdminMacOSReconciliationDiagnostics(BaseModel):
     reasons: list[str] = Field(default_factory=list)
 
 
+class SandboxAdminMacOSImageStoreItem(BaseModel):
+    run_id: str
+    template_id: str | None = None
+    run_manifest_path: str | None = None
+    run_manifest_present: bool | None = None
+    gc_reason: str | None = None
+    gc_path: str | None = None
+    matched_vm_id: str | None = None
+    matched_reconciliation_status: str | None = None
+    matched_reconciliation_reason: str | None = None
+
+
+class SandboxAdminMacOSImageStoreDiagnostics(BaseModel):
+    configured: bool
+    root_path: str | None = None
+    registered_templates: int = 0
+    run_manifests: int = 0
+    gc_candidates: int = 0
+    items: list[SandboxAdminMacOSImageStoreItem] = Field(default_factory=list)
+    reasons: list[str] = Field(default_factory=list)
+
+
 class SandboxAdminStartupWarningSummary(BaseModel):
     """Compact startup warning summary projected into sandbox diagnostics."""
 
@@ -366,6 +388,7 @@ class SandboxAdminMacOSDiagnosticsResponse(BaseModel):
     templates: dict[str, SandboxAdminMacOSTemplateDiagnostics] = Field(default_factory=dict)
     runtimes: dict[str, SandboxAdminMacOSRuntimeDiagnostics] = Field(default_factory=dict)
     reconciliation: SandboxAdminMacOSReconciliationDiagnostics | None = None
+    image_store: SandboxAdminMacOSImageStoreDiagnostics | None = None
     startup_warning_summary: SandboxAdminStartupWarningSummary | None = None
 
 
