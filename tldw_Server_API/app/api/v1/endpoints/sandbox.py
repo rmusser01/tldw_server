@@ -2244,7 +2244,7 @@ async def admin_macos_diagnostics(
 )
 async def admin_repair_macos_reconciliation(
     request: SandboxAdminMacOSReconciliationRepairRequest = Body(default_factory=SandboxAdminMacOSReconciliationRepairRequest),
-    _principal: AuthPrincipal = Depends(auth_deps.require_roles("admin")),
+    _principal: AuthPrincipal = Depends(RequireRole("admin")),
     _current_user: User = Depends(get_request_user),
 ) -> SandboxAdminMacOSReconciliationRepairResponse:
     try:
