@@ -2360,10 +2360,17 @@ def list_flashcard_templates(
 
     try:
         items = db.list_flashcard_templates(limit=limit, offset=offset)
+        total = db.count_flashcard_templates()
         return FlashcardTemplateListResponse(
             items=items,
             count=len(items),
-            total=db.count_flashcard_templates(),
+            total=total,
+            pagination=build_offset_pagination_meta(
+                total=total,
+                limit=limit,
+                offset=offset,
+                count=len(items),
+            ),
         )
     except CharactersRAGDBError as exc:
         raise map_db_error_to_http(

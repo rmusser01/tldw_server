@@ -251,6 +251,7 @@ class FlashcardTemplateListResponse(BaseModel):
     items: list[FlashcardTemplate]
     count: int
     total: int | None = None
+    pagination: OffsetPaginationMeta
 
 
 class FlashcardReviewIntervalPreviews(BaseModel):
