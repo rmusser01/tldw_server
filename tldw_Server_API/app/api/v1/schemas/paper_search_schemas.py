@@ -331,6 +331,7 @@ class BioRxivFunderSearchResponse(BaseModel):
     page: int
     results_per_page: int
     total_pages: int
+    pagination: PagePaginationMeta
 
 
 class BioRxivFunderSearchRequestForm:

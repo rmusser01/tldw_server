@@ -506,3 +506,46 @@ async def test_biorxiv_pubs_by_doi_success(monkeypatch):
         assert r2.status_code == 200
         d2 = r2.json()
         assert d2.get("preprint_abstract") is None
+
+
+@pytest.mark.asyncio
+async def test_biorxiv_funder_search_success(monkeypatch):
+    from tldw_Server_API.app.main import app
+
+    def _fake_funder(server, ror_id, from_date, to_date, offset, limit, recent_days, recent_count, category):
+
+        items = [{
+            "doi": "10.1101/2024.01.01.123456",
+            "title": "Funded Preprint",
+            "authors": "Doe, J.; Roe, R.",
+            "category": "bioinformatics",
+            "date": "2024-01-01",
+            "abstract": "Test abstract",
+            "server": server,
+            "version": 1,
+            "url": "https://www.biorxiv.org/content/10.1101/2024.01.01.123456v1",
+            "pdf_url": "https://www.biorxiv.org/content/10.1101/2024.01.01.123456v1.full.pdf",
+            "funder": {"name": "Test Funder", "id": ror_id},
+        }]
+        return items, 1, None
+
+    from tldw_Server_API.app.core.Third_Party import BioRxiv as _Bio
+    monkeypatch.setattr(_Bio, "search_biorxiv_funder", _fake_funder)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        r = await client.get(
+            "/api/v1/paper-search/biorxiv/funder",
+            params={"server": "biorxiv", "ror_id": "03yrm5c26", "page": 1, "results_per_page": 10},
+        )
+        assert r.status_code == 200
+        data = r.json()
+        assert data["total_results"] == 1
+        assert len(data["items"]) == 1
+        assert data["pagination"] == {
+            "mode": "page",
+            "page": 1,
+            "per_page": 10,
+            "total": 1,
+            "total_pages": 1,
+            "has_more": False,
+        }
