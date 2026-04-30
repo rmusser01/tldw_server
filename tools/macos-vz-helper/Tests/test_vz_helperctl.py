@@ -29,6 +29,15 @@ def test_default_paths_uses_home(monkeypatch, tmp_path):
     CASE.assertEqual(paths.log_dir, tmp_path / "Library" / "Logs" / "tldw" / "macos-vz-helper")
 
 
+def test_default_helper_uses_debug_build_path():
+    helperctl = load_helperctl()
+
+    CASE.assertEqual(
+        helperctl.DEFAULT_HELPER,
+        helperctl.HELPER_PACKAGE_DIR / ".build" / "debug" / "macos-vz-helper",
+    )
+
+
 def test_validate_socket_path_refuses_symlink(tmp_path):
     helperctl = load_helperctl()
     target = tmp_path / "target.sock"
@@ -63,6 +72,31 @@ def test_render_launchd_plist_includes_required_fields(tmp_path):
     CASE.assertEqual(plist["Label"], "org.tldw.macos-vz-helper")
     CASE.assertEqual(plist["ProgramArguments"], [str(helper_path)])
     CASE.assertEqual(plist["EnvironmentVariables"]["TLDW_SANDBOX_MACOS_HELPER_SOCKET"], str(socket_path))
-    CASE.assertEqual(plist["EnvironmentVariables"]["TLDW_SANDBOX_VZ_LINUX_SERIAL_LOG_DIR"], str(log_dir))
+    CASE.assertEqual(plist["EnvironmentVariables"]["TLDW_SANDBOX_VZ_LINUX_SERIAL_LOG_DIR"], str(log_dir / "serial"))
     CASE.assertIs(plist["KeepAlive"], False)
     CASE.assertIs(plist["RunAtLoad"], False)
+
+
+def test_plist_cli_accepts_operator_flag_names(tmp_path, capsys):
+    helperctl = load_helperctl()
+    helper_path = tmp_path / "macos-vz-helper"
+    socket_path = tmp_path / "helper.sock"
+    log_dir = tmp_path / "logs"
+
+    code = helperctl.main(
+        [
+            "plist",
+            "--dry-run",
+            "--helper",
+            str(helper_path),
+            "--socket",
+            str(socket_path),
+            "--log-dir",
+            str(log_dir),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    CASE.assertEqual(code, 0)
+    CASE.assertIn(str(helper_path), captured.out)
+    CASE.assertIn(str(socket_path), captured.out)

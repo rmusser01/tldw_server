@@ -13,7 +13,7 @@ from typing import Iterable
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 HELPER_PACKAGE_DIR = REPO_ROOT / "tools" / "macos-vz-helper"
-DEFAULT_HELPER = HELPER_PACKAGE_DIR / ".build" / "release" / "macos-vz-helper"
+DEFAULT_HELPER = HELPER_PACKAGE_DIR / ".build" / "debug" / "macos-vz-helper"
 
 try:
     from tldw_Server_API.app.core.Sandbox.macos_virtualization.helper_client import (
@@ -107,7 +107,7 @@ def render_launchd_plist(
         "ProgramArguments": [str(helper_path)],
         "EnvironmentVariables": {
             "TLDW_SANDBOX_MACOS_HELPER_SOCKET": str(socket_path),
-            "TLDW_SANDBOX_VZ_LINUX_SERIAL_LOG_DIR": str(log_dir),
+            "TLDW_SANDBOX_VZ_LINUX_SERIAL_LOG_DIR": str(log_dir / "serial"),
             "TLDW_SANDBOX_MACOS_HELPER_PROTOCOL_VERSION": str(EXPECTED_HELPER_PROTOCOL_VERSION),
         },
         "StandardOutPath": str(stdout_path),
@@ -171,11 +171,12 @@ def _plist_command(args: argparse.Namespace) -> int:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Check macOS VZ helper paths and render a launchd plist.",
+        allow_abbrev=False,
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     check_parser = subparsers.add_parser("check", help="validate helper filesystem paths")
-    check_parser.add_argument("--socket-path")
+    check_parser.add_argument("--socket", "--socket-path", dest="socket_path")
     check_parser.add_argument("--pid-file")
     check_parser.add_argument("--log-dir")
     check_parser.add_argument("--dry-run", action="store_true")
@@ -183,8 +184,8 @@ def build_parser() -> argparse.ArgumentParser:
     check_parser.set_defaults(func=_check_command)
 
     plist_parser = subparsers.add_parser("plist", help="print launchd plist XML")
-    plist_parser.add_argument("--helper-path")
-    plist_parser.add_argument("--socket-path")
+    plist_parser.add_argument("--helper", "--helper-path", dest="helper_path")
+    plist_parser.add_argument("--socket", "--socket-path", dest="socket_path")
     plist_parser.add_argument("--log-dir")
     plist_parser.add_argument("--dry-run", action="store_true")
     plist_parser.set_defaults(func=_plist_command)
