@@ -454,6 +454,86 @@ async def test_wiley_search_success(monkeypatch, paper_search_app):
 
 
 @pytest.mark.asyncio
+async def test_scopus_search_success(monkeypatch, paper_search_app):
+
+    def _fake_scopus(q, offset, results_per_page, from_year, to_year, open_access_only):
+
+        items = [
+            {
+                "id": "scopus-345",
+                "title": "Scopus Indexed Article",
+                "authors": "Kim, E.",
+                "pub_date": "2018-07-07",
+                "doi": "10.1016/j.test.2018.07.007",
+                "url": "https://www.scopus.com/record/display.uri?eid=2-s2.0-345",
+                "provider": "scopus",
+            }
+        ]
+        return items, 1, None
+
+    from tldw_Server_API.app.core.Third_Party import Elsevier_Scopus as _Scopus
+    monkeypatch.setattr(_Scopus, "search_scopus", _fake_scopus)
+
+    async with AsyncClient(transport=ASGITransport(app=paper_search_app), base_url="http://test") as client:
+        r = await client.get(
+            "/api/v1/paper-search/scopus",
+            params={"q": "graph learning", "page": 1, "results_per_page": 10},
+        )
+        assert r.status_code == 200
+        data = r.json()
+        assert data["total_results"] == 1
+        assert len(data["items"]) == 1
+        assert data["pagination"] == {
+            "mode": "page",
+            "page": 1,
+            "per_page": 10,
+            "total": 1,
+            "total_pages": 1,
+            "has_more": False,
+        }
+
+
+@pytest.mark.asyncio
+async def test_chemrxiv_items_search_success(monkeypatch, paper_search_app):
+
+    def _fake_chemrxiv(term, skip, limit, sort, author, searchDateFrom, searchDateTo, searchLicense, categoryIds_list, subjectIds_list):
+
+        items = [
+            {
+                "id": "chemrxiv-678",
+                "title": "ChemRxiv Preprint",
+                "authors": "Lopez, F.",
+                "pub_date": "2024-02-14",
+                "doi": "10.26434/chemrxiv-678",
+                "url": "https://chemrxiv.org/engage/chemrxiv/article-details/678",
+                "provider": "chemrxiv",
+            }
+        ]
+        return items, 1, None
+
+    from tldw_Server_API.app.core.Third_Party import ChemRxiv as _ChemRxiv
+    monkeypatch.setattr(_ChemRxiv, "search_items", _fake_chemrxiv)
+
+    async with AsyncClient(transport=ASGITransport(app=paper_search_app), base_url="http://test") as client:
+        r = await client.get(
+            "/api/v1/paper-search/chemrxiv/items",
+            params={"term": "catalysis", "skip": 0, "limit": 10},
+        )
+        assert r.status_code == 200
+        data = r.json()
+        assert data["total_results"] == 1
+        assert len(data["items"]) == 1
+        assert data["pagination"] == {
+            "mode": "page",
+            "page": 1,
+            "per_page": 10,
+            "total": 1,
+            "total_pages": 1,
+            "has_more": False,
+        }
+
+
+@pytest.mark.asyncio
 async def test_biorxiv_by_doi_success(monkeypatch, paper_search_app):
 
     def _fake_by_doi(doi, server):

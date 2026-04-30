@@ -2633,7 +2633,7 @@ async def paper_search_springer_by_doi(params: DOIRequestForm = Depends()):
 
 @router.get(
     "/scopus",
-    response_model=GenericSearchResponse,
+    response_model=GenericPageSearchResponse,
     summary="Search Elsevier Scopus (scaffold)",
     tags=["paper-search"],
 )
@@ -2665,7 +2665,7 @@ async def paper_search_scopus(
         total_pages = math.ceil(total / results_per_page) if results_per_page > 0 else 0
         if total == 0:
             total_pages = 0
-        return GenericSearchResponse(
+        return GenericPageSearchResponse(
             query_echo={
                 "q": q,
                 "from_year": from_year,
@@ -2677,6 +2677,12 @@ async def paper_search_scopus(
             page=page,
             results_per_page=results_per_page,
             total_pages=total_pages,
+            pagination=build_page_pagination_meta(
+                page=page,
+                per_page=results_per_page,
+                total=total,
+                total_pages=total_pages,
+            ),
         )
     except HTTPException:
         raise
@@ -3463,7 +3469,7 @@ async def ingest_batch(
 
 @router.get(
     "/chemrxiv/items",
-    response_model=GenericSearchResponse,
+    response_model=GenericPageSearchResponse,
     summary="Search ChemRxiv items",
     tags=["paper-search"],
 )
@@ -3490,7 +3496,7 @@ async def chemrxiv_items(search: ChemRxivSearchRequestForm = Depends()):
             raise HTTPException(status_code=500, detail="ChemRxiv search failed to return data.")  # noqa: TRY301
         page = (search.skip // max(1, search.limit)) + 1
         total_pages = math.ceil(total / search.limit) if search.limit > 0 else 0
-        return GenericSearchResponse(
+        return GenericPageSearchResponse(
             query_echo={
                 "term": search.term,
                 "skip": search.skip,
@@ -3503,6 +3509,12 @@ async def chemrxiv_items(search: ChemRxivSearchRequestForm = Depends()):
             page=page,
             results_per_page=search.limit,
             total_pages=total_pages,
+            pagination=build_page_pagination_meta(
+                page=page,
+                per_page=search.limit,
+                total=total,
+                total_pages=total_pages,
+            ),
         )
     except HTTPException:
         raise
