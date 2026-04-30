@@ -694,6 +694,7 @@ class BackupScheduleListResponse(BaseModel):
     total: int
     limit: int
     offset: int
+    pagination: OffsetPaginationMeta
 
     model_config = ConfigDict(from_attributes=True)
 

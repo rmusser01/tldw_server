@@ -390,7 +390,18 @@ async def list_backup_schedules(
         )
         items = service.filter_visible_items(items, principal=principal)
         payload = [_serialize_backup_schedule_item(item) for item in items]
-        return BackupScheduleListResponse(items=payload, total=total, limit=limit, offset=offset)
+        return BackupScheduleListResponse(
+            items=payload,
+            total=total,
+            limit=limit,
+            offset=offset,
+            pagination=build_offset_pagination_meta(
+                total=total,
+                limit=limit,
+                offset=offset,
+                count=len(payload),
+            ),
+        )
     except HTTPException:
         raise
     except _DATA_OPS_NONCRITICAL_EXCEPTIONS as exc:
