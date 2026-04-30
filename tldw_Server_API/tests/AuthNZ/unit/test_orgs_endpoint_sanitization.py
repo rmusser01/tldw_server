@@ -243,6 +243,69 @@ async def test_revoke_invite_audit_failure_log_is_sanitized(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_list_invites_includes_canonical_pagination(monkeypatch):
+    from tldw_Server_API.app.api.v1.API_Deps.org_deps import OrgContext
+    from tldw_Server_API.app.api.v1.endpoints import orgs
+
+    class _InviteService:
+        async def list_org_invites(self, org_id, **kwargs):
+            assert org_id == 9
+            assert kwargs["include_expired"] is False
+            assert kwargs["include_inactive"] is False
+            assert kwargs["limit"] == 1
+            assert kwargs["offset"] == 0
+            return (
+                [
+                    {
+                        "id": 42,
+                        "code": "secret-code-123",
+                        "org_id": 9,
+                        "org_name": "Example",
+                        "team_id": None,
+                        "team_name": None,
+                        "role_to_grant": "member",
+                        "max_uses": 1,
+                        "uses_count": 0,
+                        "is_active": True,
+                        "expires_at": None,
+                        "created_at": None,
+                        "created_by": 7,
+                        "description": None,
+                        "allowed_email_domain": None,
+                    }
+                ],
+                2,
+            )
+
+    async def _fake_get_invite_service():
+        return _InviteService()
+
+    monkeypatch.setattr(orgs, "get_invite_service", _fake_get_invite_service)
+
+    response = await orgs.list_invites(
+        ctx=OrgContext(org_id=9, role="admin"),
+        include_expired=False,
+        include_inactive=False,
+        limit=1,
+        offset=0,
+    )
+
+    assert response.total == 2
+    assert response.limit == 1
+    assert response.offset == 0
+    assert response.pagination.model_dump() == {
+        "mode": "offset",
+        "limit": 1,
+        "offset": 0,
+        "total": 2,
+        "has_more": True,
+        "next_offset": 1,
+    }
+    assert len(response.items) == 1
+    assert response.items[0].id == 42
+
+
+@pytest.mark.asyncio
 async def test_accept_invite_audit_failure_log_is_sanitized(monkeypatch):
     from tldw_Server_API.app.api.v1.endpoints import orgs
     from tldw_Server_API.app.api.v1.schemas.org_team_schemas import OrgInviteAcceptRequest

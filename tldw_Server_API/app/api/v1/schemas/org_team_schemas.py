@@ -281,6 +281,9 @@ class OrgInviteListResponse(BaseModel):
     """List of organization invites."""
     items: list[OrgInviteResponse]
     total: int
+    limit: int
+    offset: int
+    pagination: OffsetPaginationMeta
 
 
 class OrgInvitePreviewResponse(BaseModel):
