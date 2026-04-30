@@ -4,6 +4,7 @@ from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import AnyUrl, BaseModel, Field, field_validator
+from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
 
 SourceType = Literal["rss", "site", "forum"]  # forums are feature-flagged for Phase 3
 
@@ -88,6 +89,7 @@ class Source(BaseModel):
 class SourcesListResponse(BaseModel):
     items: list[Source]
     total: int
+    pagination: OffsetPaginationMeta
 
 
 class ReversibleDeleteResponse(BaseModel):
@@ -186,6 +188,7 @@ class Group(BaseModel):
 class GroupsListResponse(BaseModel):
     items: list[Group]
     total: int
+    pagination: OffsetPaginationMeta
 
 
 class Tag(BaseModel):
@@ -196,6 +199,7 @@ class Tag(BaseModel):
 class TagsListResponse(BaseModel):
     items: list[Tag]
     total: int
+    pagination: OffsetPaginationMeta
 
 
 class JobCreateRequest(BaseModel):
@@ -264,6 +268,7 @@ class Job(BaseModel):
 class JobsListResponse(BaseModel):
     items: list[Job]
     total: int
+    pagination: OffsetPaginationMeta
 
 
 class JobDeleteResponse(ReversibleDeleteResponse):

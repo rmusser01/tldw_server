@@ -92,6 +92,10 @@ def test_sources_crud_and_tags(client_with_user):
     assert r.status_code == 200
     data = r.json()
     assert data["total"] >= 1
+    assert data["pagination"]["total"] >= 1
+    assert data["pagination"]["limit"] == 50
+    assert data["pagination"]["offset"] == 0
+    assert data["pagination"]["has_more"] is False
     assert any(it["id"] == sid for it in data["items"])
 
     # Get source
@@ -117,6 +121,10 @@ def test_sources_crud_and_tags(client_with_user):
     r = c.get("/api/v1/watchlists/tags")
     assert r.status_code == 200
     tags = r.json().get("items", [])
+    pagination = r.json()["pagination"]
+    assert pagination["total"] >= 2
+    assert pagination["limit"] == 50
+    assert pagination["offset"] == 0
     names = {t["name"] for t in tags}
     assert {"news", "tech", "updates"}.issubset(names)
 
@@ -504,7 +512,11 @@ def test_bulk_sources_and_groups_and_jobs(client_with_user):
     gid = g["id"]
     r = c.get("/api/v1/watchlists/groups")
     assert r.status_code == 200
-    assert any(x["id"] == gid for x in r.json().get("items", []))
+    groups_payload = r.json()
+    assert groups_payload["pagination"]["total"] >= 1
+    assert groups_payload["pagination"]["limit"] == 50
+    assert groups_payload["pagination"]["offset"] == 0
+    assert any(x["id"] == gid for x in groups_payload.get("items", []))
     r = c.patch(f"/api/v1/watchlists/groups/{gid}", json={"description": "Updated"})
     assert r.status_code == 200
     assert r.json()["description"] == "Updated"
@@ -523,7 +535,11 @@ def test_bulk_sources_and_groups_and_jobs(client_with_user):
     jid = job["id"]
     r = c.get("/api/v1/watchlists/jobs")
     assert r.status_code == 200
-    assert any(x["id"] == jid for x in r.json().get("items", []))
+    jobs_payload = r.json()
+    assert jobs_payload["pagination"]["total"] >= 1
+    assert jobs_payload["pagination"]["limit"] == 50
+    assert jobs_payload["pagination"]["offset"] == 0
+    assert any(x["id"] == jid for x in jobs_payload.get("items", []))
     r = c.get(f"/api/v1/watchlists/jobs/{jid}")
     assert r.status_code == 200
     # Update job

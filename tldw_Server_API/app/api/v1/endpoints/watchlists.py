@@ -47,6 +47,7 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, rbac
 from tldw_Server_API.app.api.v1.API_Deps.Collections_DB_Deps import get_collections_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.Watchlists_DB_Deps import get_watchlists_db_for_user
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.core.AuthNZ.api_key_manager import get_api_key_manager
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool as _get_db_pool
 from tldw_Server_API.app.core.AuthNZ.ip_allowlist import (
@@ -1550,7 +1551,16 @@ async def list_sources(
                 updated_at=r.updated_at,
             )
         )
-    return SourcesListResponse(items=items, total=total)
+    return SourcesListResponse(
+        items=items,
+        total=total,
+        pagination=build_offset_pagination_meta(
+            total=total,
+            offset=offset,
+            limit=limit,
+            count=len(items),
+        ),
+    )
 
 
 # OPML import/export placed before /sources/{source_id} to avoid route conflicts
@@ -2440,7 +2450,17 @@ async def list_tags(
     limit = size
     offset = (page - 1) * limit
     rows, total = db.list_tags(q=q, limit=limit, offset=offset)
-    return TagsListResponse(items=[Tag(id=r.id, name=r.name) for r in rows], total=total)
+    items = [Tag(id=r.id, name=r.name) for r in rows]
+    return TagsListResponse(
+        items=items,
+        total=total,
+        pagination=build_offset_pagination_meta(
+            total=total,
+            offset=offset,
+            limit=limit,
+            count=len(items),
+        ),
+    )
 
 
 # --------------------
@@ -2470,7 +2490,17 @@ async def list_groups(
     limit = size
     offset = (page - 1) * limit
     rows, total = db.list_groups(q=q, limit=limit, offset=offset)
-    return GroupsListResponse(items=[Group(id=r.id, name=r.name, description=r.description, parent_group_id=r.parent_group_id) for r in rows], total=total)
+    items = [Group(id=r.id, name=r.name, description=r.description, parent_group_id=r.parent_group_id) for r in rows]
+    return GroupsListResponse(
+        items=items,
+        total=total,
+        pagination=build_offset_pagination_meta(
+            total=total,
+            offset=offset,
+            limit=limit,
+            count=len(items),
+        ),
+    )
 
 
 @router.patch("/groups/{group_id}", response_model=Group, summary="Update group")
@@ -3078,7 +3108,16 @@ async def list_jobs(
                 next_run_at=r.next_run_at,
             )
         )
-    return JobsListResponse(items=items, total=total)
+    return JobsListResponse(
+        items=items,
+        total=total,
+        pagination=build_offset_pagination_meta(
+            total=total,
+            offset=offset,
+            limit=limit,
+            count=len(items),
+        ),
+    )
 
 
 @router.get("/jobs/{job_id}", response_model=Job, summary="Get job")
