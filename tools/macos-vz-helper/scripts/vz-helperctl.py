@@ -405,7 +405,7 @@ def lookup_process(pid: int) -> ProcessInfo | None:
     # Process inspection uses fixed ps argv without shell expansion.
     try:
         completed = subprocess.run(  # nosec
-            ["ps", "-p", str(pid), "-o", "command="],
+            ["ps", "-ww", "-p", str(pid), "-o", "lstart=", "-o", "command="],
             check=False,
             capture_output=True,
             text=True,
@@ -414,19 +414,12 @@ def lookup_process(pid: int) -> ProcessInfo | None:
         return ProcessInfo(pid=pid, command="", error_reason="helper_process_lookup_unavailable")
     if completed.returncode != 0:
         return ProcessInfo(pid=pid, command="", error_reason="helper_process_lookup_failed")
-    identity = ""
-    try:
-        identity_completed = subprocess.run(  # nosec
-            ["ps", "-p", str(pid), "-o", "lstart="],
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-        if identity_completed.returncode == 0:
-            identity = identity_completed.stdout.strip()
-    except (FileNotFoundError, PermissionError, OSError):
-        identity = ""
-    return ProcessInfo(pid=pid, command=completed.stdout.strip(), identity=identity)
+    fields = completed.stdout.strip().split(maxsplit=5)
+    if len(fields) >= 6:
+        return ProcessInfo(pid=pid, command=fields[5].strip(), identity=" ".join(fields[:5]))
+    if len(fields) >= 5:
+        return ProcessInfo(pid=pid, command="", identity=" ".join(fields[:5]))
+    return ProcessInfo(pid=pid, command=completed.stdout.strip(), identity="")
 
 
 def _command_matches_helper(command: str, expected_helper: Path) -> bool:
@@ -1011,11 +1004,33 @@ def collect_status_results(
 
     socket_result = path_validator(socket_path)
     results.append(("socket_path", socket_result))
+    socket_directory_result = ensure_private_dir(socket_path.parent, dry_run=True)
+    results.append(
+        (
+            "socket_directory",
+            CheckResult(
+                socket_directory_result.ok,
+                socket_directory_result.reason,
+                str(socket_path.parent),
+            ),
+        )
+    )
     socket_exists = socket_path.exists()
     if socket_result.ok:
         socket_reason = "helper_socket_present" if socket_exists else "helper_socket_absent"
         results.append(("socket", CheckResult(ok=True, reason=socket_reason, message=str(socket_path))))
 
+    pid_directory_result = ensure_private_dir(pid_file.parent, dry_run=True)
+    results.append(
+        (
+            "pid_directory",
+            CheckResult(
+                pid_directory_result.ok,
+                pid_directory_result.reason,
+                str(pid_file.parent),
+            ),
+        )
+    )
     pid_state = read_pid_file_state(pid_file, helper_path, process_lookup=process_lookup)
     results.append(("pid_file", pid_state.result))
     if pid_state.pid is None:
@@ -1025,6 +1040,13 @@ def collect_status_results(
 
     log_result = ensure_private_dir(log_dir, dry_run=True)
     results.append(("log_directory", CheckResult(log_result.ok, log_result.reason, str(log_dir) or log_result.message)))
+    serial_result = ensure_private_dir(log_dir / "serial", dry_run=True)
+    results.append(
+        (
+            "serial_log_directory",
+            CheckResult(serial_result.ok, serial_result.reason, str(log_dir / "serial")),
+        )
+    )
 
     if plist_path is not None:
         results.append(("launchd_plist", validate_plist_match(plist_path, helper_path, socket_path, log_dir)))
@@ -1070,6 +1092,7 @@ def collect_check_results(
         ("socket_directory", ensure_private_dir(socket_path.parent, dry_run=dry_run)),
         ("pid_directory", ensure_private_dir(pid_file.parent, dry_run=dry_run)),
         ("log_directory", ensure_private_dir(log_dir, dry_run=dry_run)),
+        ("serial_log_directory", ensure_private_dir(log_dir / "serial", dry_run=dry_run)),
         ("pid_file", pid_result),
         ("entitlements", entitlement_result),
     ]
@@ -1255,6 +1278,10 @@ def _plist_command(args: argparse.Namespace) -> int:
     directory_result = ensure_private_dir(log_dir, dry_run=directory_dry_run)
     if not directory_result.ok:
         print(f"log_directory: not ok {directory_result.reason}", file=sys.stderr)
+        return 1
+    serial_directory_result = ensure_private_dir(log_dir / "serial", dry_run=directory_dry_run)
+    if not serial_directory_result.ok:
+        print(f"serial_log_directory: not ok {serial_directory_result.reason}", file=sys.stderr)
         return 1
 
     rendered = render_launchd_plist(helper_path, socket_path, log_dir)

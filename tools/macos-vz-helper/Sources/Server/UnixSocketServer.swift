@@ -192,7 +192,11 @@ final class UnixSocketServer {
         guard bindResult == 0 else {
             throw UnixSocketServerError.bindFailed(errno)
         }
-        ownedSocketPathIdentity = try currentSocketPathIdentity()
+        var boundStat = stat()
+        guard fstat(socketFD, &boundStat) == 0 else {
+            throw UnixSocketServerError.bindFailed(errno)
+        }
+        ownedSocketPathIdentity = SocketPathIdentity(boundStat)
         guard Darwin.listen(socketFD, SOMAXCONN) == 0 else {
             throw UnixSocketServerError.listenFailed(errno)
         }

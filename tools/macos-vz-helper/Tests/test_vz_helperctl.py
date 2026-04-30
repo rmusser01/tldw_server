@@ -7,6 +7,7 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+from subprocess import CompletedProcess
 from unittest import TestCase
 
 import pytest
@@ -83,6 +84,42 @@ def test_protocol_version_surfaces_unexpected_import_errors(monkeypatch):
 
     with pytest.raises(ImportError, match="helper client import bug"):
         load_helperctl("vz_helperctl_import_bug")
+
+
+def test_lookup_process_uses_single_wide_ps_call(monkeypatch):
+    helperctl = load_helperctl()
+    calls = []
+
+    def fake_kill(pid, sig):
+        CASE.assertEqual(pid, 1234)
+        CASE.assertEqual(sig, 0)
+
+    def fake_run(argv, **kwargs):
+        calls.append(argv)
+        return CompletedProcess(
+            argv,
+            0,
+            stdout="Thu Apr 30 08:01:02 2026 /very/long/macos-vz-helper --serve\n",
+            stderr="",
+        )
+
+    monkeypatch.setattr(helperctl.os, "kill", fake_kill)
+    monkeypatch.setattr(helperctl.subprocess, "run", fake_run)
+
+    result = helperctl.lookup_process(1234)
+
+    CASE.assertEqual(
+        calls,
+        [["ps", "-ww", "-p", "1234", "-o", "lstart=", "-o", "command="]],
+    )
+    CASE.assertEqual(
+        result,
+        helperctl.ProcessInfo(
+            pid=1234,
+            command="/very/long/macos-vz-helper --serve",
+            identity="Thu Apr 30 08:01:02 2026",
+        ),
+    )
 
 
 def test_validate_socket_path_refuses_symlink(tmp_path):
@@ -370,6 +407,7 @@ def test_plist_cli_creates_private_socket_parent_when_not_dry_run(tmp_path, caps
     CASE.assertIn(str(socket_path), captured.out)
     CASE.assertEqual(socket_path.parent.stat().st_mode & 0o777, 0o700)
     CASE.assertEqual(log_dir.stat().st_mode & 0o777, 0o700)
+    CASE.assertEqual((log_dir / "serial").stat().st_mode & 0o777, 0o700)
 
 
 def test_plist_cli_defaults_to_dry_run_without_creating_directories(tmp_path, capsys):
@@ -1576,11 +1614,75 @@ def test_status_results_report_component_state(tmp_path):
     CASE.assertIn("pid_file", results)
     CASE.assertIn("process", results)
     CASE.assertIn("socket_path", results)
+    CASE.assertIn("socket_directory", results)
+    CASE.assertIn("pid_directory", results)
+    CASE.assertIn("serial_log_directory", results)
     CASE.assertIn("socket", results)
     CASE.assertIn("ping", results)
     CASE.assertEqual(results["protocol_version"].message, "1")
     CASE.assertEqual(results["helper_version"].message, "test-helper")
     CASE.assertEqual(results["log_directory"].message, str(log_dir))
+    CASE.assertEqual(results["serial_log_directory"].message, str(log_dir / "serial"))
+
+
+def test_status_results_reject_unsafe_socket_pid_and_serial_dirs(tmp_path):
+    helperctl = load_helperctl()
+    helper = tmp_path / "macos-vz-helper"
+    socket_dir = tmp_path / "socket-runtime"
+    pid_dir = tmp_path / "pid-runtime"
+    log_dir = tmp_path / "logs"
+    serial_dir = log_dir / "serial"
+    helper.write_text("#!/bin/sh\n", encoding="utf-8")
+    helper.chmod(0o700)
+    socket_dir.mkdir(mode=0o755)
+    socket_dir.chmod(0o755)
+    pid_dir.mkdir(mode=0o755)
+    pid_dir.chmod(0o755)
+    log_dir.mkdir(mode=0o700)
+    serial_dir.mkdir(mode=0o755)
+    serial_dir.chmod(0o755)
+
+    results = dict(
+        helperctl.collect_status_results(
+            helper,
+            socket_dir / "helper.sock",
+            pid_dir / "helper.pid",
+            log_dir,
+            entitlement_checker=lambda helper_path, entitlements_path: helperctl.CheckResult(True),
+        )
+    )
+
+    CASE.assertEqual(results["socket_directory"].reason, "helper_directory_not_private")
+    CASE.assertEqual(results["pid_directory"].reason, "helper_directory_not_private")
+    CASE.assertEqual(results["serial_log_directory"].reason, "helper_directory_not_private")
+
+
+def test_check_results_validate_serial_log_directory(tmp_path):
+    helperctl = load_helperctl()
+    helper = tmp_path / "macos-vz-helper"
+    socket_path = tmp_path / "runtime" / "helper.sock"
+    pid_file = tmp_path / "runtime" / "helper.pid"
+    log_dir = tmp_path / "logs"
+    serial_dir = log_dir / "serial"
+    helper.write_text("#!/bin/sh\n", encoding="utf-8")
+    helper.chmod(0o700)
+    socket_path.parent.mkdir(mode=0o700)
+    log_dir.mkdir(mode=0o700)
+    serial_dir.mkdir(mode=0o755)
+    serial_dir.chmod(0o755)
+
+    results = dict(
+        helperctl.collect_check_results(
+            helper,
+            socket_path,
+            pid_file,
+            log_dir,
+            dry_run=True,
+            entitlement_checker=lambda helper_path, entitlements_path: helperctl.CheckResult(True),
+        )
+    )
+
+    CASE.assertEqual(results["serial_log_directory"].reason, "helper_directory_not_private")
 
 
 def test_status_pings_socket_even_when_helper_binary_is_missing(tmp_path):
