@@ -406,6 +406,14 @@ class SandboxAdminMacOSReconciliationRepairAction(BaseModel):
     status: str
     reason: str | None = None
     termination_eligible: bool | None = None
+    run_id: str | None = None
+    template_id: str | None = None
+    planning_source: str | None = None
+    run_manifest_path: str | None = None
+    run_manifest_present: bool | None = None
+    persisted_template_id: str | None = None
+    helper_template_id: str | None = None
+    template_id_matches_persisted: bool | None = None
 
 
 class SandboxAdminMacOSReconciliationRepairSummary(BaseModel):

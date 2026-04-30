@@ -1047,6 +1047,19 @@ class SandboxService:
         }
         helper_client: MacOSVirtualizationHelperClient | None = None
 
+        def _action_context(source: dict[str, object]) -> dict[str, object]:
+            keys = (
+                "run_id",
+                "template_id",
+                "planning_source",
+                "run_manifest_path",
+                "run_manifest_present",
+                "persisted_template_id",
+                "helper_template_id",
+                "template_id_matches_persisted",
+            )
+            return {key: source.get(key) for key in keys if key in source and source.get(key) is not None}
+
         for item in report_items:
             status = str(item.get("status") or "").strip()
             session_id = str(item.get("session_id") or "").strip()
@@ -1060,6 +1073,7 @@ class SandboxService:
                     "vm_id": vm_id or None,
                     "status": "skipped",
                     "reason": reason or "active_session",
+                    **_action_context(item),
                 }
                 logger.info("Skipping VZ reconciliation repair action: {}", action)
                 actions.append(action)
@@ -1081,6 +1095,7 @@ class SandboxService:
                         "status": "skipped",
                         "reason": reason or REASON_UNKNOWN_OWNERSHIP,
                         "termination_eligible": False,
+                        **_action_context(item),
                     }
                     logger.info("Skipping VZ reconciliation orphan repair action: {}", action)
                     actions.append(action)
@@ -1123,6 +1138,7 @@ class SandboxService:
                     "status": action_status,
                     "reason": reason or None,
                     "termination_eligible": True,
+                    **_action_context(item),
                 }
                 logger.info("VZ reconciliation repair action: {}", action)
                 actions.append(action)
@@ -1143,6 +1159,7 @@ class SandboxService:
                     "vm_id": vm_id or None,
                     "status": "skipped",
                     "reason": "active_session",
+                    **_action_context(item),
                 }
                 logger.info("Skipping VZ reconciliation repair action: {}", action)
                 actions.append(action)
@@ -1167,6 +1184,7 @@ class SandboxService:
                 "vm_id": vm_id or None,
                 "status": action_status,
                 "reason": reason or None,
+                **_action_context(item),
             }
             logger.info("VZ reconciliation repair action: {}", action)
             actions.append(action)
