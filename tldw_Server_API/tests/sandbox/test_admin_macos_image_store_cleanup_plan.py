@@ -258,4 +258,3 @@ def test_service_does_not_plan_cleanup_for_live_matched_runs(monkeypatch) -> Non
     assert result["summary"]["blocked_live_matches"] == 1
     assert all(action["run_id"] != "run-blocked" for action in result["actions"])
     assert result["reasons"] == ["live_vm_matches_blocked_cleanup"]
-
