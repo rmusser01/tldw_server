@@ -29,6 +29,8 @@ export type PromptTableColumnOptions = {
   onToggleFavorite?: (row: PromptRowVM, nextFavorite: boolean) => void
   onEdit?: (row: PromptRowVM) => void
   onOpenConflictResolution?: (row: PromptRowVM) => void
+  canRetrySync?: (row: PromptRowVM) => boolean
+  onRetrySync?: (row: PromptRowVM) => void
   renderActions?: (row: PromptRowVM) => React.ReactNode
   renderTitleMeta?: (row: PromptRowVM) => React.ReactNode
   favoriteButtonTestId?: (row: PromptRowVM) => string
@@ -118,6 +120,8 @@ export const buildPromptTableColumns = (
     onToggleFavorite,
     onEdit,
     onOpenConflictResolution,
+    canRetrySync,
+    onRetrySync,
     renderActions,
     renderTitleMeta,
     favoriteButtonTestId,
@@ -275,6 +279,13 @@ export const buildPromptTableColumns = (
                     onClick={
                       record.syncStatus === "conflict"
                         ? () => onOpenConflictResolution?.(record)
+                        : undefined
+                    }
+                    onRetry={
+                      isOnline &&
+                      onRetrySync &&
+                      (canRetrySync?.(record) ?? false)
+                        ? () => onRetrySync(record)
                         : undefined
                     }
                   />
