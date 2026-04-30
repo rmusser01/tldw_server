@@ -18,11 +18,21 @@ enum UnixSocketServerError: Error {
 }
 
 final class UnixSocketServer {
+    private struct SocketPathIdentity {
+        let device: dev_t
+        let inode: ino_t
+
+        init(_ statBuffer: stat) {
+            self.device = statBuffer.st_dev
+            self.inode = statBuffer.st_ino
+        }
+    }
+
     private let socketPath: String
     private let service: HelperService
     private var serverSocketFD: Int32 = -1
     private var isRunning = false
-    private var ownsSocketPath = false
+    private var ownedSocketPathIdentity: SocketPathIdentity?
 
     init(socketPath: String, service: HelperService) {
         self.socketPath = socketPath.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -181,7 +191,7 @@ final class UnixSocketServer {
         guard bindResult == 0 else {
             throw UnixSocketServerError.bindFailed(errno)
         }
-        ownsSocketPath = true
+        ownedSocketPathIdentity = try currentSocketPathIdentity()
         guard Darwin.listen(socketFD, SOMAXCONN) == 0 else {
             throw UnixSocketServerError.listenFailed(errno)
         }
@@ -212,7 +222,7 @@ final class UnixSocketServer {
         if try existingSocketPathHasListener() {
             throw UnixSocketServerError.existingSocketPathIsActive(socketPath)
         }
-        try unlinkStaleSocketPath(expected: existing)
+        try unlinkStaleSocketPath(expected: SocketPathIdentity(existing))
     }
 
     private func existingSocketPathHasListener() throws -> Bool {
@@ -222,6 +232,12 @@ final class UnixSocketServer {
         }
         defer {
             close(socketFD)
+        }
+
+        let originalFlags = fcntl(socketFD, F_GETFL, 0)
+        guard originalFlags >= 0,
+              fcntl(socketFD, F_SETFL, originalFlags | O_NONBLOCK) == 0 else {
+            throw UnixSocketServerError.unsafeSocketPath(socketPath)
         }
 
         let address = try socketAddress()
@@ -234,34 +250,81 @@ final class UnixSocketServer {
             return true
         }
 
-        switch errno {
-        case ECONNREFUSED, ENOENT:
+        let connectError = errno
+        if connectError == EINPROGRESS || connectError == EALREADY || connectError == EAGAIN || connectError == EWOULDBLOCK {
+            return try waitForSocketProbe(socketFD)
+        }
+        if connectError == ECONNREFUSED || connectError == ENOENT {
             return false
-        default:
+        }
+        if connectError == EISCONN {
+            return true
+        }
+        throw UnixSocketServerError.unsafeSocketPath(socketPath)
+    }
+
+    private func waitForSocketProbe(_ socketFD: Int32) throws -> Bool {
+        var descriptor = pollfd(fd: socketFD, events: Int16(POLLOUT), revents: 0)
+        while true {
+            let pollResult = Darwin.poll(&descriptor, 1, 200)
+            if pollResult == 0 {
+                return true
+            }
+            if pollResult < 0 {
+                if errno == EINTR {
+                    continue
+                }
+                throw UnixSocketServerError.unsafeSocketPath(socketPath)
+            }
+
+            var socketError: Int32 = 0
+            var socketErrorLength = socklen_t(MemoryLayout<Int32>.size)
+            let optionResult = withUnsafeMutablePointer(to: &socketError) { pointer in
+                pointer.withMemoryRebound(to: UInt8.self, capacity: MemoryLayout<Int32>.size) { rawPointer in
+                    getsockopt(socketFD, SOL_SOCKET, SO_ERROR, rawPointer, &socketErrorLength)
+                }
+            }
+            guard optionResult == 0 else {
+                throw UnixSocketServerError.unsafeSocketPath(socketPath)
+            }
+
+            if socketError == 0 || socketError == EISCONN {
+                return true
+            }
+            if socketError == ECONNREFUSED || socketError == ENOENT {
+                return false
+            }
+            if socketError == EAGAIN || socketError == EWOULDBLOCK || socketError == ETIMEDOUT {
+                return true
+            }
             throw UnixSocketServerError.unsafeSocketPath(socketPath)
         }
     }
 
-    private func unlinkStaleSocketPath(expected: stat) throws {
-        var current = stat()
-        let result = lstat(socketPath, &current)
-        if result != 0 {
-            if errno == ENOENT {
-                return
-            }
-            throw UnixSocketServerError.unsafeSocketPath(socketPath)
-        }
-
-        let currentType = current.st_mode & S_IFMT
-        guard currentType == S_IFSOCK,
-              current.st_dev == expected.st_dev,
-              current.st_ino == expected.st_ino else {
+    private func unlinkStaleSocketPath(expected: SocketPathIdentity) throws {
+        let current = try currentSocketPathIdentity()
+        guard current.device == expected.device,
+              current.inode == expected.inode else {
             throw UnixSocketServerError.unsafeSocketPath(socketPath)
         }
 
         if unlink(socketPath) != 0 {
             throw UnixSocketServerError.unsafeSocketPath(socketPath)
         }
+    }
+
+    private func currentSocketPathIdentity() throws -> SocketPathIdentity {
+        var current = stat()
+        let result = lstat(socketPath, &current)
+        if result != 0 {
+            throw UnixSocketServerError.unsafeSocketPath(socketPath)
+        }
+
+        let currentType = current.st_mode & S_IFMT
+        guard currentType == S_IFSOCK else {
+            throw UnixSocketServerError.unsafeSocketPath(socketPath)
+        }
+        return SocketPathIdentity(current)
     }
 
     private func socketAddress() throws -> (value: sockaddr_un, length: socklen_t) {
@@ -285,11 +348,18 @@ final class UnixSocketServer {
     }
 
     private func unlinkOwnedSocketPath() {
-        guard ownsSocketPath else {
+        guard let expected = ownedSocketPathIdentity else {
+            return
+        }
+        defer {
+            ownedSocketPathIdentity = nil
+        }
+        guard let current = try? currentSocketPathIdentity(),
+              current.device == expected.device,
+              current.inode == expected.inode else {
             return
         }
         unlink(socketPath)
-        ownsSocketPath = false
     }
 
     private func handleConnection(clientFD: Int32) throws {

@@ -187,6 +187,25 @@ import Testing
     #expect(connectResult == 0)
 }
 
+@Test func unixSocketServerDoesNotRemoveReplacementPathOnStop() throws {
+    let socketPath = "/tmp/macos-vz-helper-\(UUID().uuidString.prefix(8)).sock"
+    let replacementURL = URL(fileURLWithPath: socketPath)
+    let server = UnixSocketServer(socketPath: socketPath, service: HelperService())
+    try server.start()
+    defer {
+        server.stop()
+        unlink(socketPath)
+    }
+
+    unlink(socketPath)
+    try "replacement".write(to: replacementURL, atomically: true, encoding: .utf8)
+
+    server.stop()
+
+    #expect(FileManager.default.fileExists(atPath: socketPath))
+    #expect(try String(contentsOf: replacementURL, encoding: .utf8) == "replacement")
+}
+
 private func acceptConnectionForTest(fd: Int32) throws -> Int32 {
     let acceptedFD = Darwin.accept(fd, nil, nil)
     guard acceptedFD >= 0 else {
