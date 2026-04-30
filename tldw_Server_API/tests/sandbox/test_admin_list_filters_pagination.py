@@ -66,6 +66,11 @@ def test_admin_list_filters_and_pagination(monkeypatch):
         assert j["limit"] == 1
         assert j["offset"] == 0
         assert j["has_more"] is True
+        assert j["pagination"]["total"] == 2
+        assert j["pagination"]["limit"] == 1
+        assert j["pagination"]["offset"] == 0
+        assert j["pagination"]["has_more"] is True
+        assert j["pagination"]["next_offset"] == 1
         assert len(j["items"]) == 1
 
         # Next page
@@ -74,6 +79,11 @@ def test_admin_list_filters_and_pagination(monkeypatch):
         j2 = r2.json()
         assert j2["total"] == 2
         assert j2["has_more"] is False
+        assert j2["pagination"]["total"] == 2
+        assert j2["pagination"]["limit"] == 1
+        assert j2["pagination"]["offset"] == 1
+        assert j2["pagination"]["has_more"] is False
+        assert j2["pagination"]["next_offset"] is None
         assert len(j2["items"]) == 1
 
         # Date filter: only include recent (exclude r1 by from cutoff)

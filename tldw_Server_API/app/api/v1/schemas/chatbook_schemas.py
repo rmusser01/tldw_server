@@ -14,6 +14,8 @@ from typing import Any, Literal, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
+
 # Import shared enums from the canonical models module to avoid divergence.
 # ConflictResolution is intentionally redefined here to constrain API input
 # to only the currently-supported strategies (skip, rename).
@@ -282,12 +284,14 @@ class ListExportJobsResponse(BaseModel):
     """Response for listing export jobs."""
     jobs: list[ExportJobResponse]
     total: int
+    pagination: OffsetPaginationMeta
 
 
 class ListImportJobsResponse(BaseModel):
     """Response for listing import jobs."""
     jobs: list[ImportJobResponse]
     total: int
+    pagination: OffsetPaginationMeta
 
 
 class CleanupExpiredExportsResponse(BaseModel):

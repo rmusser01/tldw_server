@@ -9,6 +9,8 @@ try:
 except ImportError:  # pragma: no cover - pydantic v1 fallback
     from pydantic import root_validator as model_validator  # type: ignore
 
+from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
+
 RuntimeType = Literal["docker", "firecracker", "lima", "vz_linux", "vz_macos", "seatbelt"]
 TrustLevelType = Literal["trusted", "standard", "untrusted"]
 
@@ -228,6 +230,7 @@ class SandboxAdminRunListResponse(BaseModel):
     limit: int
     offset: int
     has_more: bool
+    pagination: OffsetPaginationMeta
     items: list[SandboxAdminRunSummary]
 
 
@@ -250,6 +253,7 @@ class SandboxAdminIdempotencyListResponse(BaseModel):
     limit: int
     offset: int
     has_more: bool
+    pagination: OffsetPaginationMeta
     items: list[SandboxAdminIdempotencyItem]
 
 
@@ -266,6 +270,7 @@ class SandboxAdminUsageResponse(BaseModel):
     limit: int
     offset: int
     has_more: bool
+    pagination: OffsetPaginationMeta
     items: list[SandboxAdminUsageItem]
 
 
