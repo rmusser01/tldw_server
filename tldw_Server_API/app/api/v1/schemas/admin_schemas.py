@@ -200,6 +200,7 @@ class UserListResponse(BaseModel):
     page: int
     limit: int
     pages: int
+    pagination: OffsetPaginationMeta
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -1763,6 +1764,7 @@ class OrgBudgetListResponse(BaseModel):
     total: int
     page: int
     limit: int
+    pagination: OffsetPaginationMeta
 
     model_config = ConfigDict(from_attributes=True)
 
