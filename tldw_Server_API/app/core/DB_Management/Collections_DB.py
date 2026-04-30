@@ -3804,6 +3804,13 @@ class CollectionsDatabase:
         rows = self.backend.execute(q, (self.user_id, limit, offset)).rows
         return [AudiobookProjectRow(**row) for row in rows]
 
+    def count_audiobook_projects(self) -> int:
+        row = self.backend.execute(
+            "SELECT COUNT(*) AS total FROM audiobook_projects WHERE user_id = ?",
+            (self.user_id,),
+        ).first
+        return int(row["total"] if row and row["total"] is not None else 0)
+
     def update_audiobook_project_status(
         self,
         project_id: int,

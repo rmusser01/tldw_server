@@ -2002,6 +2002,21 @@ class PromptsDatabase:
                 raise
             raise DatabaseError(f"Failed to list prompt collections: {e}") from e  # noqa: TRY003
 
+    def count_prompt_collections(self) -> int:
+        try:
+            row = self.execute_query(
+                """
+                SELECT COUNT(*) AS total
+                FROM PromptCollections
+                """
+            ).fetchone()
+            return int(row["total"] if row and row["total"] is not None else 0)
+        except (DatabaseError, sqlite3.Error) as e:
+            logger.error(f"Error counting prompt collections: {e}", exc_info=True)
+            if isinstance(e, DatabaseError):
+                raise
+            raise DatabaseError(f"Failed to count prompt collections: {e}") from e  # noqa: TRY003
+
     def update_prompt_collection(
         self,
         collection_id: int,

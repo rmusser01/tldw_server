@@ -7,6 +7,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
+
 
 #
 # Third-party Imports
@@ -302,3 +304,7 @@ class PromptCollectionResponse(BaseModel):
 
 class PromptCollectionListResponse(BaseModel):
     collections: list[PromptCollectionResponse] = Field(default_factory=list)
+    total: int = 0
+    limit: int = 200
+    offset: int = 0
+    pagination: OffsetPaginationMeta

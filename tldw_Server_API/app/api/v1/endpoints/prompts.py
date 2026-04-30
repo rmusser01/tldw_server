@@ -15,6 +15,7 @@ from loguru import logger
 from pydantic import ValidationError
 
 from tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps import get_prompts_db_for_user
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.api.v1.schemas import prompt_schemas as schemas
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings as get_auth_settings
@@ -1138,8 +1139,18 @@ async def list_collections(
 ):
     try:
         items = db.list_prompt_collections(limit=limit, offset=offset)
+        total = db.count_prompt_collections()
         return schemas.PromptCollectionListResponse(
-            collections=[schemas.PromptCollectionResponse(**item) for item in items]
+            collections=[schemas.PromptCollectionResponse(**item) for item in items],
+            total=total,
+            limit=limit,
+            offset=offset,
+            pagination=build_offset_pagination_meta(
+                total=total,
+                limit=limit,
+                offset=offset,
+                count=len(items),
+            ),
         )
     except (InputError, DatabaseError) as e:
         logger.error("Database error listing prompt collections: {}", e, exc_info=True)

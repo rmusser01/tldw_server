@@ -8,6 +8,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
+
 SourceInputType = Literal["epub", "pdf", "txt", "md", "srt", "vtt", "ass"]
 AudioFormat = Literal["wav", "mp3", "flac", "opus", "m4b"]
 SubtitleFormat = Literal["srt", "vtt", "ass"]
@@ -401,6 +403,10 @@ class AudiobookProjectListResponse(BaseModel):
     """List response for audiobook projects."""
 
     projects: list[AudiobookProjectInfo] = Field(..., description="Project list")
+    total: int = Field(..., description="Total number of projects")
+    limit: int = Field(..., description="Applied page limit")
+    offset: int = Field(..., description="Applied page offset")
+    pagination: OffsetPaginationMeta = Field(..., description="Canonical pagination metadata")
 
     model_config = {
         "json_schema_extra": {
@@ -416,7 +422,18 @@ class AudiobookProjectListResponse(BaseModel):
                         "created_at": "2025-01-21T10:00:00+00:00",
                         "updated_at": "2025-01-21T10:05:00+00:00",
                     }
-                ]
+                ],
+                "total": 1,
+                "limit": 100,
+                "offset": 0,
+                "pagination": {
+                    "mode": "offset",
+                    "total": 1,
+                    "limit": 100,
+                    "offset": 0,
+                    "has_more": False,
+                    "next_offset": None,
+                },
             }
         }
     }
