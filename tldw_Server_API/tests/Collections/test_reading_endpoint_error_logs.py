@@ -94,6 +94,98 @@ async def test_delete_saved_search_sanitizes_backend_log(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_list_reading_import_jobs_includes_canonical_pagination():
+    class _JobManager:
+        def list_jobs(self, **_kwargs):
+            return [
+                {
+                    "id": 1,
+                    "uuid": "job-1",
+                    "status": "queued",
+                    "payload_json": "{}",
+                    "result_json": None,
+                    "error_message": None,
+                    "progress": 0,
+                    "created_at": "2026-01-01T00:00:00",
+                    "updated_at": "2026-01-01T00:00:00",
+                    "started_at": None,
+                    "completed_at": None,
+                },
+                {
+                    "id": 2,
+                    "uuid": "job-2",
+                    "status": "processing",
+                    "payload_json": "{}",
+                    "result_json": None,
+                    "error_message": None,
+                    "progress": 25,
+                    "created_at": "2026-01-01T00:00:00",
+                    "updated_at": "2026-01-01T00:00:00",
+                    "started_at": None,
+                    "completed_at": None,
+                },
+            ]
+
+        def count_jobs(self, **_kwargs):
+            return 5
+
+    response = await reading.list_reading_import_jobs(
+        status=None,
+        limit=2,
+        offset=1,
+        current_user=SimpleNamespace(id=42),
+        jm=_JobManager(),
+    )
+
+    assert response.total == 5
+    assert response.limit == 2
+    assert response.offset == 1
+    assert [job.job_id for job in response.jobs] == [2]
+    assert response.pagination.mode == "offset"
+    assert response.pagination.total == 5
+    assert response.pagination.limit == 2
+    assert response.pagination.offset == 1
+    assert response.pagination.has_more is True
+    assert response.pagination.next_offset == 3
+
+
+@pytest.mark.asyncio
+async def test_list_reading_digest_outputs_includes_canonical_pagination():
+    row = SimpleNamespace(
+        id=11,
+        title="Digest A",
+        format="md",
+        created_at="2026-01-01T00:00:00",
+        metadata_json='{"schedule_id":"sched-1","schedule_name":"Morning","item_count":3}',
+    )
+
+    class _CollectionsDB:
+        def list_output_artifacts(self, **kwargs):
+            if kwargs["offset"] == 0:
+                return [row], 1
+            return [], 1
+
+    response = await reading.list_reading_digest_outputs(
+        schedule_id="sched-1",
+        limit=1,
+        offset=0,
+        _current_user=SimpleNamespace(id=42),
+        collections_db=_CollectionsDB(),
+    )
+
+    assert response.total == 1
+    assert response.limit == 1
+    assert response.offset == 0
+    assert [item.output_id for item in response.items] == [11]
+    assert response.pagination.mode == "offset"
+    assert response.pagination.total == 1
+    assert response.pagination.limit == 1
+    assert response.pagination.offset == 0
+    assert response.pagination.has_more is False
+    assert response.pagination.next_offset is None
+
+
+@pytest.mark.asyncio
 async def test_create_note_link_sanitizes_backend_log(monkeypatch):
     logger_stub = MagicMock()
 

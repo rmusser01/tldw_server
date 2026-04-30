@@ -288,6 +288,7 @@ class ReadingImportJobsListResponse(BaseModel):
     total: int
     limit: int | None = None
     offset: int | None = None
+    pagination: OffsetPaginationMeta
 
 
 class ReadingDigestSuggestionsConfig(BaseModel):
@@ -429,6 +430,7 @@ class ReadingDigestOutputsListResponse(BaseModel):
     total: int
     limit: int | None = None
     offset: int | None = None
+    pagination: OffsetPaginationMeta
 
 
 class ReadingArchiveCreateRequest(BaseModel):

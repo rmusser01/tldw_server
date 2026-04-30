@@ -903,6 +903,12 @@ async def list_reading_import_jobs(
         total=total,
         limit=limit,
         offset=offset,
+        pagination=build_offset_pagination_meta(
+            total=total,
+            limit=limit,
+            offset=offset,
+            count=len(jobs),
+        ),
     )
 
 
@@ -1632,4 +1638,15 @@ async def list_reading_digest_outputs(
 
     total_matches = len(matched)
     page = matched[offset : offset + limit]
-    return ReadingDigestOutputsListResponse(items=page, total=total_matches, limit=limit, offset=offset)
+    return ReadingDigestOutputsListResponse(
+        items=page,
+        total=total_matches,
+        limit=limit,
+        offset=offset,
+        pagination=build_offset_pagination_meta(
+            total=total_matches,
+            limit=limit,
+            offset=offset,
+            count=len(page),
+        ),
+    )
