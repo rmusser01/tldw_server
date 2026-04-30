@@ -5,6 +5,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, HttpUrl, validator
 
 from tldw_Server_API.app.api.v1.schemas._compat import Field
+from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
 
 _READING_SAVED_SEARCH_ALLOWED_QUERY_KEYS = {
     "q",
@@ -223,6 +224,7 @@ class ReadingSavedSearchListResponse(BaseModel):
     total: int
     limit: int
     offset: int
+    pagination: OffsetPaginationMeta
 
 
 class ReadingNoteLinkCreateRequest(BaseModel):

@@ -197,6 +197,14 @@ def test_saved_search_endpoints_crud(reading_app):
         body = r.json()
         assert body["total"] == 1
         assert body["items"][0]["id"] == search_id
+        assert body["pagination"] == {
+            "mode": "offset",
+            "total": 1,
+            "limit": 10,
+            "offset": 0,
+            "has_more": False,
+            "next_offset": None,
+        }
 
         r = client.patch(
             f"/api/v1/reading/saved-searches/{search_id}",
@@ -212,7 +220,20 @@ def test_saved_search_endpoints_crud(reading_app):
 
         r = client.get("/api/v1/reading/saved-searches", params={"limit": 10, "offset": 0})
         assert r.status_code == 200, r.text
-        assert r.json()["total"] == 0
+        assert r.json() == {
+            "items": [],
+            "total": 0,
+            "limit": 10,
+            "offset": 0,
+            "pagination": {
+                "mode": "offset",
+                "total": 0,
+                "limit": 10,
+                "offset": 0,
+                "has_more": False,
+                "next_offset": None,
+            },
+        }
 
 
 def test_saved_search_rejects_unsupported_query_key(reading_app):

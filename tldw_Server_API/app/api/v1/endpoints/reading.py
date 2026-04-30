@@ -20,6 +20,7 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, rbac
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.Collections_DB_Deps import get_collections_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.jobs_deps import get_job_manager
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.endpoints.items import bulk_update_items as bulk_update_items_handler
 from tldw_Server_API.app.api.v1.schemas.audio_schemas import OpenAISpeechRequest
 from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import DEFAULT_LLM_PROVIDER
@@ -632,6 +633,12 @@ async def list_reading_saved_searches(
         total=int(total),
         limit=limit,
         offset=offset,
+        pagination=build_offset_pagination_meta(
+            total=int(total),
+            limit=limit,
+            offset=offset,
+            count=len(rows),
+        ),
     )
 
 
