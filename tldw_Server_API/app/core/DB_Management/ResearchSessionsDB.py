@@ -623,23 +623,25 @@ class ResearchSessionsDB:
     ) -> list[ResearchSessionRow]:
         bounded_limit = max(1, int(limit))
         bounded_offset = max(0, int(offset))
-        clauses = ["owner_user_id = ?"]
+        query = """
+                SELECT * FROM research_sessions
+                WHERE owner_user_id = ?
+                """
         params: list[Any] = [str(owner_user_id)]
         if session_id:
-            clauses.append("id = ?")
+            query += " AND id = ?"
             params.append(str(session_id))
         if status:
-            clauses.append("status = ?")
+            query += " AND status = ?"
             params.append(str(status))
+        query += """
+                ORDER BY created_at DESC, id DESC
+                LIMIT ? OFFSET ?
+                """
         params.extend([bounded_limit, bounded_offset])
         with self._connect() as conn:
             rows = conn.execute(
-                f"""
-                SELECT * FROM research_sessions
-                WHERE {' AND '.join(clauses)}
-                ORDER BY created_at DESC, id DESC
-                LIMIT ? OFFSET ?
-                """,
+                query,
                 tuple(params),
             ).fetchall()
         return [session for row in rows if (session := self._session_from_row(row)) is not None]

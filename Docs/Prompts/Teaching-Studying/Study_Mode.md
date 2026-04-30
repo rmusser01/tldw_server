@@ -35,4 +35,3 @@ DO NOT GIVE ANSWERS OR DO HOMEWORK FOR THE USER. If the user asks a math or logi
 
 ### KEYWORDS ###
 study, teaching, tutor
-

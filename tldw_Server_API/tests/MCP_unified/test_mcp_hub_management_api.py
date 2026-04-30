@@ -19,6 +19,7 @@ def _make_principal(
     *,
     roles: list[str] | None = None,
     permissions: list[str] | None = None,
+    team_ids: list[int] | None = None,
 ) -> AuthPrincipal:
     return AuthPrincipal(
         kind="user",
@@ -31,7 +32,7 @@ def _make_principal(
         permissions=permissions or [],
         is_admin=False,
         org_ids=[],
-        team_ids=[],
+        team_ids=team_ids or [],
     )
 
 
@@ -445,6 +446,20 @@ class _FakeService:
         return True
 
 
+class _ScopeAuditRepo:
+    async def create_permission_profile(self, **_kwargs: Any) -> dict[str, Any]:
+        return {
+            "id": 44,
+            "name": "Team Profile",
+            "owner_scope_type": "team",
+            "owner_scope_id": 7,
+            "mode": "custom",
+            "path_scope_object_id": None,
+            "policy_document": {},
+            "is_active": True,
+        }
+
+
 class _FakeBrokerService:
     async def get_slot_status(
         self,
@@ -521,6 +536,53 @@ async def test_mcp_hub_events_stream_replays_governance_audit_events() -> None:
     assert "event: mcp_hub.external_server.created" in resp.text
     assert '"resource_type": "mcp_external_server"' in resp.text
     assert '"resource_id": "docs"' in resp.text
+
+
+def test_mcp_hub_audit_row_normalizes_prefixed_actions() -> None:
+    event = mcp_hub_service._audit_row_to_mcp_hub_event(
+        {
+            "event_id": "evt_1",
+            "timestamp": "2026-04-30T00:00:00Z",
+            "metadata": json.dumps(
+                {
+                    "action": "mcp_hub.permission_profile.create",
+                    "actor_id": 1,
+                    "resource_type": "mcp_permission_profile",
+                    "resource_id": "44",
+                }
+            ),
+        }
+    )
+
+    assert event is not None
+    assert event["event_type"] == "mcp_hub.permission_profile.create"
+
+
+@pytest.mark.asyncio
+async def test_mcp_hub_scoped_audit_metadata_includes_scope_id(monkeypatch) -> None:
+    captured: list[dict[str, Any] | None] = []
+
+    async def _capture_emit(**kwargs: Any) -> None:
+        captured.append(kwargs.get("metadata"))
+
+    monkeypatch.setattr(mcp_hub_service, "emit_mcp_hub_audit", _capture_emit)
+    service = mcp_hub_service.McpHubService(repo=_ScopeAuditRepo())  # type: ignore[arg-type]
+
+    await service.create_permission_profile(
+        name="Team Profile",
+        owner_scope_type="team",
+        owner_scope_id=7,
+        mode="custom",
+        path_scope_object_id=None,
+        policy_document={},
+        actor_id=1,
+    )
+
+    assert captured == [{"name": "Team Profile", "owner_scope_type": "team", "owner_scope_id": 7}]
+    assert mcp_hub_management._event_matches_visible_scope(
+        {"metadata": captured[0]},
+        [("team", 7)],
+    )
 
 
 @pytest.mark.asyncio
