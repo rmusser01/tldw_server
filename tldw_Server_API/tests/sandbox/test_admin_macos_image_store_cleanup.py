@@ -194,6 +194,30 @@ def test_admin_macos_image_store_cleanup_dry_run_false_passes_through(monkeypatc
     assert resp.json()["actions"][0]["status"] == "deleted"
 
 
+def test_admin_macos_image_store_cleanup_filter_fields_pass_through(monkeypatch) -> None:
+    seen_kwargs: dict[str, object] = {}
+
+    def _cleanup(**kwargs) -> dict[str, object]:
+        seen_kwargs.update(kwargs)
+        return _cleanup_payload(dry_run=bool(kwargs["dry_run"]), action_status="planned")
+
+    monkeypatch.setattr(sandbox_mod, "_service", SimpleNamespace(cleanup_macos_image_store=_cleanup), raising=True)
+    app = _build_app_with_overrides(_make_principal(is_admin=True))
+
+    with TestClient(app) as client:
+        resp = client.post(
+            "/api/v1/sandbox/admin/macos-image-store/cleanup",
+            json={
+                "action_types": ["remove_run_manifest"],
+                "run_ids": ["run-manifest-only"],
+            },
+        )
+
+    assert resp.status_code == 200
+    assert seen_kwargs["action_types"] == ["remove_run_manifest"]
+    assert seen_kwargs["run_ids"] == ["run-manifest-only"]
+
+
 def test_admin_macos_image_store_cleanup_requires_admin(monkeypatch) -> None:
     fake_service = SimpleNamespace(cleanup_macos_image_store=lambda **kwargs: _cleanup_payload(dry_run=True, action_status="planned"))
     monkeypatch.setattr(sandbox_mod, "_service", fake_service, raising=True)
@@ -244,3 +268,39 @@ def test_service_cleanup_macos_image_store_mutates_planned_candidates_only(monke
     assert not (root / "runs" / "run-inactive").exists()
     assert (root / "runs" / "run-blocked").exists()
     assert result["reasons"] == ["live_vm_matches_blocked_cleanup"]
+
+
+def test_service_cleanup_macos_image_store_filters_by_action_type(monkeypatch, tmp_path: Path) -> None:
+    service = SandboxService(enable_background_tasks=False)
+    root = tmp_path / "store"
+    _seed_store(root)
+    monkeypatch.setattr(service, "macos_diagnostics", lambda: _diagnostics_payload(root))
+
+    result = service.cleanup_macos_image_store(
+        dry_run=False,
+        action_types=["remove_run_manifest"],
+    )
+
+    assert result["summary"]["total_candidates"] == 3
+    assert result["summary"]["planned_actions"] == 1
+    assert result["summary"]["deleted_actions"] == 1
+    assert [action["run_id"] for action in result["actions"]] == ["run-manifest-only"]
+    assert not (root / "runs" / "run-manifest-only").exists()
+    assert (root / "runs" / "run-inactive").exists()
+
+
+def test_service_cleanup_macos_image_store_filters_by_run_id(monkeypatch, tmp_path: Path) -> None:
+    service = SandboxService(enable_background_tasks=False)
+    root = tmp_path / "store"
+    _seed_store(root)
+    monkeypatch.setattr(service, "macos_diagnostics", lambda: _diagnostics_payload(root))
+
+    result = service.cleanup_macos_image_store(
+        dry_run=True,
+        run_ids=["run-inactive"],
+    )
+
+    assert result["dry_run"] is True
+    assert result["summary"]["planned_actions"] == 1
+    assert result["summary"]["deleted_actions"] == 0
+    assert [action["run_id"] for action in result["actions"]] == ["run-inactive"]

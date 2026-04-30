@@ -447,7 +447,7 @@ class SandboxAdminMacOSImageStoreCleanupAction(BaseModel):
     matched_reconciliation_reason: str | None = None
 
 
-class SandboxAdminMacOSImageStoreCleanupSummary(BaseModel):
+class SandboxAdminMacOSImageStoreCleanupPlanSummary(BaseModel):
     total_candidates: int = 0
     planned_actions: int = 0
     blocked_live_matches: int = 0
@@ -459,13 +459,15 @@ class SandboxAdminMacOSImageStoreCleanupSummary(BaseModel):
 class SandboxAdminMacOSImageStoreCleanupPlanResponse(BaseModel):
     dry_run: bool
     image_store: SandboxAdminMacOSImageStoreDiagnostics
-    summary: SandboxAdminMacOSImageStoreCleanupSummary
+    summary: SandboxAdminMacOSImageStoreCleanupPlanSummary
     actions: list[SandboxAdminMacOSImageStoreCleanupAction] = Field(default_factory=list)
     reasons: list[str] = Field(default_factory=list)
 
 
 class SandboxAdminMacOSImageStoreCleanupRequest(BaseModel):
     dry_run: bool = True
+    action_types: list[str] | None = None
+    run_ids: list[str] | None = None
 
 
 class SandboxAdminMacOSImageStoreCleanupSummary(BaseModel):

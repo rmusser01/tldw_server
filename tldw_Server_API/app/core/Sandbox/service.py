@@ -1085,7 +1085,13 @@ class SandboxService:
             "reasons": reasons,
         }
 
-    def cleanup_macos_image_store(self, *, dry_run: bool = True) -> dict[str, object]:
+    def cleanup_macos_image_store(
+        self,
+        *,
+        dry_run: bool = True,
+        action_types: list[str] | None = None,
+        run_ids: list[str] | None = None,
+    ) -> dict[str, object]:
         plan = self.plan_macos_image_store_cleanup()
         summary = dict(plan.get("summary") or {})
         summary["deleted_actions"] = 0
@@ -1093,6 +1099,26 @@ class SandboxService:
         image_store = plan.get("image_store")
         if not isinstance(image_store, dict):
             image_store = {}
+
+        allowed_action_types = {
+            str(action_type).strip()
+            for action_type in list(action_types or [])
+            if str(action_type).strip()
+        }
+        allowed_run_ids = {
+            str(run_id).strip()
+            for run_id in list(run_ids or [])
+            if str(run_id).strip()
+        }
+        if allowed_action_types:
+            actions = [
+                action for action in actions if str(action.get("type") or "").strip() in allowed_action_types
+            ]
+        if allowed_run_ids:
+            actions = [
+                action for action in actions if str(action.get("run_id") or "").strip() in allowed_run_ids
+            ]
+        summary["planned_actions"] = len(actions)
 
         if dry_run:
             return {
