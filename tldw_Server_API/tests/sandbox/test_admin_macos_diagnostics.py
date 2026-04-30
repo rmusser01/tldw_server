@@ -117,17 +117,55 @@ def _diagnostics_payload() -> dict:
 
 
 def test_admin_macos_diagnostics_returns_structured_payload(monkeypatch) -> None:
+    from tldw_Server_API.app.services.startup_warning_registry import (
+        StartupWarningRegistry,
+    )
+    from tldw_Server_API.app.services.startup_warning_models import (
+        StartupWarningRecord,
+    )
+
     fake_service = SimpleNamespace(macos_diagnostics=lambda: _diagnostics_payload())
     monkeypatch.setattr(sandbox_mod, "_service", fake_service, raising=True)
 
     app = _build_app_with_overrides(_make_principal(is_admin=True))
+    registry = StartupWarningRegistry(startup_id="boot-1")
+    registry.add_warning(
+        StartupWarningRecord(
+            component="sandbox.vz_linux",
+            severity="warning",
+            startup_action="warn",
+            code="vz_stale_session_controls_detected",
+            summary="stale sessions detected",
+            remediation="review diagnostics",
+            details={"stale_session_controls": 1},
+        )
+    )
+    registry.add_warning(
+        StartupWarningRecord(
+            component="jobs.integrity",
+            severity="error",
+            startup_action="block_startup",
+            code="jobs_integrity_blocker",
+            summary="jobs blocker",
+            remediation="inspect jobs",
+            details={},
+        )
+    )
+    app.state.startup_warning_registry = registry
 
     with TestClient(app) as client:
         resp = client.get("/api/v1/sandbox/admin/macos-diagnostics")
 
     assert resp.status_code == 200
     body = resp.json()
-    assert set(body.keys()) == {"host", "helper", "templates", "runtimes", "reconciliation"}
+    assert set(body.keys()) == {
+        "host",
+        "helper",
+        "templates",
+        "runtimes",
+        "reconciliation",
+        "startup_warning_summary",
+    }
     assert body["host"]["supported"] is True
     assert body["runtimes"]["vz_linux"]["execution_mode"] == "none"
     assert body["helper"]["protocol_version"] is None
@@ -136,6 +174,11 @@ def test_admin_macos_diagnostics_returns_structured_payload(monkeypatch) -> None
     assert body["reconciliation"]["unhealthy_session_ids"] == []
     assert body["reconciliation"]["skipped_active_session_ids"] == []
     assert body["reconciliation"]["items"] == []
+    assert body["startup_warning_summary"] == {
+        "present": True,
+        "blocking": False,
+        "codes": ["vz_stale_session_controls_detected"],
+    }
 
 
 def test_admin_macos_diagnostics_allows_real_vz_linux_execution_mode(monkeypatch) -> None:

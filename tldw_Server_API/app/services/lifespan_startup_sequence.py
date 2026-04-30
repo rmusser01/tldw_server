@@ -6,10 +6,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any
+from uuid import uuid4
 
 from tldw_Server_API.app.services.lifespan_worker_runtime_state import (
     LifespanWorkerRuntimeState,
 )
+from tldw_Server_API.app.services.startup_warning_registry import StartupWarningRegistry
 
 
 @dataclass
@@ -41,6 +43,9 @@ async def run_lifespan_startup_sequence(
     import_exceptions: tuple[type[BaseException], ...],
 ) -> LifespanStartupSequenceHandles:
     """Run the pre-core, core-init, and worker-bootstrap startup sequence."""
+    startup_warning_registry = StartupWarningRegistry(startup_id=uuid4().hex)
+    app.state.startup_warning_registry = startup_warning_registry
+
     from tldw_Server_API.app.services.startup_pre_core import prepare_startup_pre_core
 
     defer_heavy = await prepare_startup_pre_core(
@@ -69,6 +74,16 @@ async def run_lifespan_startup_sequence(
         startup_guard_exceptions=startup_guard_exceptions,
         import_exceptions=import_exceptions,
     )
+    app.state.startup_sandbox_orchestrator = getattr(
+        startup_core_handles,
+        "startup_sandbox_orchestrator",
+        None,
+    )
+    _run_startup_warning_producers(
+        app=app,
+        startup_core_handles=startup_core_handles,
+    )
+    _raise_if_startup_blocked(startup_warning_registry)
 
     from tldw_Server_API.app.services.startup_worker_bootstrap import (
         initialize_startup_worker_bootstrap,
@@ -95,4 +110,34 @@ async def run_lifespan_startup_sequence(
         db_pool=startup_core_handles.db_pool,
         session_manager=startup_core_handles.session_manager,
         heavy_startup_handles=startup_core_handles.heavy_startup_handles,
+    )
+
+
+def _run_startup_warning_producers(*, app: Any, startup_core_handles: Any) -> None:
+    from tldw_Server_API.app.services.startup_warning_sandbox import (
+        produce_sandbox_startup_warnings,
+    )
+
+    registry = app.state.startup_warning_registry
+    produce_sandbox_startup_warnings(
+        orchestrator=getattr(startup_core_handles, "startup_sandbox_orchestrator", None),
+        registry=registry,
+    )
+
+
+def _raise_if_startup_blocked(registry: StartupWarningRegistry) -> None:
+    if not registry.should_block_startup():
+        return
+    blocking_warning = next(
+        (
+            item
+            for item in registry.list_warnings()
+            if item.startup_action == "block_startup"
+        ),
+        None,
+    )
+    if blocking_warning is None:
+        raise RuntimeError("startup blocked by unknown warning")
+    raise RuntimeError(
+        f"startup blocked by {blocking_warning.code}: {blocking_warning.summary}"
     )

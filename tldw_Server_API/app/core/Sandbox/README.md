@@ -65,11 +65,19 @@ Current limitations:
 - `seatbelt` real execution still depends on deprecated `sandbox-exec` and may be blocked by an enclosing sandbox even on macOS hosts.
 - `vz_linux` supports session VM reuse through persisted VZ session-control metadata; `vz_macos` does not.
 - `vz_linux` admin diagnostics include reconciliation data comparing persisted VZ session-control rows against live helper VM state.
+- `vz_linux` admin diagnostics now also project an additive
+  `startup_warning_summary` field from the app-owned startup warning registry;
+  low-level diagnostics collection remains app-agnostic.
 - `vz_linux` repair is explicit and admin-only through `POST /api/v1/sandbox/admin/macos-reconciliation/repair`; diagnostics do not mutate state.
 - `vz_linux` repair defaults to dry-run, skips active sessions, can delete stale or unhealthy inactive persisted session-control rows when requested, and can terminate orphan helper VMs only when `terminate_orphaned_vms=true` is explicitly requested, helper metadata proves `owner=tldw` and `runtime=vz_linux`, and the ownership record remains eligibility-complete. Eligibility-complete means `run_id` and `created_at` are present, and `session_id` is also present when `session_mode=true`.
 - `vz_linux` orphan VM diagnostics split live unreferenced helper VMs into `owned_orphaned_vm`, `unknown_orphaned_vm`, and `foreign_orphaned_vm`. Only ownership-eligible `owned_orphaned_vm` records can be terminated automatically; unknown, foreign, and legacy generic orphan records are reported but skipped by automated repair.
 - Helper unavailable or protocol mismatch conditions fail closed and block mutating repair.
+- Startup warning policy is narrower: helper protocol mismatch blocks startup,
+  while helper unavailable and reconciliation drift remain warnings only.
 - Orphan VM termination is not automatic repair behavior; operators should inspect the dry-run plan before running mutating repair.
+- The generic admin startup warning endpoint is `GET /api/v1/admin/startup-warnings`.
+  It exposes current-process warning records only; there is no
+  cross-process aggregation or persistence in this slice.
 - `tools/macos-vz-helper/scripts/vz-helperctl.py` is the preferred operator helper lifecycle command for `check`, `build`, `sign`, `start`, `status`, `stop`, `plist`, and `smoke`; it can generate launchd plist scaffolding but does not install or load services automatically.
 - helper-backed template validation now distinguishes canonical bundles from
   raw-disk compatibility mode through `boot_mode` and `validation_strength`.
@@ -97,6 +105,7 @@ Current limitations:
 - Recommended validation endpoints:
   - `/api/v1/sandbox/health`
   - `/api/v1/sandbox/runtimes`
+  - `/api/v1/admin/startup-warnings`
   - `/api/v1/sandbox/admin/macos-diagnostics`
   - `POST /api/v1/sandbox/admin/macos-reconciliation/repair`
   - `/api/v1/sandbox/runs`
@@ -105,7 +114,12 @@ Current limitations:
 `/api/v1/sandbox/admin/macos-diagnostics` is an admin-only diagnostics surface for
 operator troubleshooting and exposes helper/template readiness details that are not
 included in the public discovery payload, plus reconciliation data for persisted
-`vz_linux` session-control rows versus live helper VM state. It is read-only.
+`vz_linux` session-control rows versus live helper VM state. It is read-only and
+now includes a compact `startup_warning_summary` field projected from the
+current-process startup warning registry.
+`/api/v1/admin/startup-warnings` is the generic admin-only companion surface for
+the same startup records and returns full current-process warning items plus
+grouped counts.
 `POST /api/v1/sandbox/admin/macos-reconciliation/repair` is the separate
 admin-only repair surface. Repair defaults to dry-run, skips active sessions,
 can delete stale or unhealthy inactive persisted session-control rows when

@@ -170,6 +170,15 @@ It is admin-only and returns:
 - template readiness for `vz_linux` and `vz_macos`, with optional template source metadata
 - per-runtime execution mode and remediation hints
 - reconciliation data comparing persisted VZ session rows with live helper VM state
+- additive `startup_warning_summary` showing whether current-process startup
+  warnings were recorded, whether any were blocking, and which stable warning
+  codes were emitted during boot
+
+`GET /api/v1/admin/startup-warnings` is the generic app-level companion surface
+for the same startup records. It is also admin-only and returns the full
+current-process startup warning list plus grouped summary counts. In this PR the
+scope is intentionally limited to the current API process and current boot; it
+is not cluster-wide or persisted across restarts.
 
 Use the admin endpoint when you are validating host setup or trying to explain why a
 runtime is unavailable. Use `/api/v1/sandbox/runtimes` for client-facing discovery;
@@ -191,6 +200,22 @@ requested. It can terminate orphan helper VMs only when
 the VM is owned by this `tldw` `vz_linux` sandbox control plane. Operators should
 inspect the dry-run plan first. Helper unavailable or protocol mismatch
 conditions fail closed and block mutating repair.
+
+Startup now also records bounded reconciliation/helper warnings during process
+boot through the shared startup warning framework. That startup path is
+read-only and never performs repair or VM termination. The current sandbox
+startup warning policy is:
+
+- `vz_helper_protocol_mismatch`: blocks startup
+- `vz_helper_unavailable_at_startup`: warning only
+- stale, unhealthy, skipped-active, and orphaned reconciliation findings:
+  warning only
+
+When startup succeeds with warnings, the warnings are visible both through
+`GET /api/v1/admin/startup-warnings` and through the additive
+`startup_warning_summary` field on `/api/v1/sandbox/admin/macos-diagnostics`.
+When startup is blocked by helper protocol mismatch, logs are the guaranteed
+surface because the API process never finishes booting.
 
 Orphan VM classifications are:
 
