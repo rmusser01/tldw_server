@@ -18,6 +18,7 @@ from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 
 #
 # Local Imports
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_page_pagination_meta
 from tldw_Server_API.app.api.v1.schemas.research_schemas import (
     ArxivPaper,
     ArxivSearchRequestForm,
@@ -183,6 +184,12 @@ async def arxiv_search_endpoint(
         page=search_params.page,
         results_per_page=search_params.results_per_page,
         total_pages=total_pages_calculated,
+        pagination=build_page_pagination_meta(
+            page=search_params.page,
+            per_page=search_params.results_per_page,
+            total=total_results_from_api,
+            total_pages=total_pages_calculated,
+        ),
     )
 
 # FIXME - This needs to be updated/Integrated
@@ -326,6 +333,12 @@ async def semantic_scholar_search_endpoint(
         next_offset=next_offset_api,
         page=search_params.page,  # The page number we calculated offset from
         total_pages=total_pages_calculated,
+        pagination=build_page_pagination_meta(
+            page=search_params.page,
+            per_page=search_params.results_per_page,
+            total=total_results_api,
+            total_pages=total_pages_calculated,
+        ),
     )
 
 #
