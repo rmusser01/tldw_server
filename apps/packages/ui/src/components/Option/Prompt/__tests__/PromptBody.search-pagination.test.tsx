@@ -12,6 +12,11 @@ const state = vi.hoisted(() => ({
   prompts: [] as any[]
 }))
 
+const FILTER_PRESETS_STORAGE_KEY = "tldw-prompt-filter-presets-v1"
+const FILTER_PRESET_HINT_DISMISSED_KEY =
+  "tldw-prompt-hint-dismissed-filter-presets"
+const FILTER_PRESET_HINT_SHOWN_KEY = "tldw-prompt-hint-shown-filter-presets"
+
 const promptStudioStore = vi.hoisted(() => ({
   setActiveSubTab: vi.fn(),
   setSelectedProjectId: vi.fn(),
@@ -436,6 +441,7 @@ describe("PromptBody server search and pagination", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     window.sessionStorage.clear()
+    window.localStorage.clear()
     mocks.navigate.mockReset()
     mocks.setSelectedQuickPrompt.mockReset()
     mocks.setSelectedSystemPrompt.mockReset()
@@ -703,6 +709,235 @@ describe("PromptBody server search and pagination", () => {
     })
     expect(getVisibleRowNames()).toEqual(["Beta Prompt"])
     expect(mocks.searchPromptsServer).not.toHaveBeenCalled()
+  })
+
+  it("saves the current custom filters from the toolbar", async () => {
+    renderPromptBody()
+
+    await screen.findByTestId("prompts-table")
+    fireEvent.click(screen.getByTestId("prompts-filter-preset-save-toolbar"))
+    fireEvent.change(screen.getByTestId("prompts-filter-preset-toolbar-name"), {
+      target: { value: "Working set" }
+    })
+    fireEvent.click(screen.getByTestId("prompts-filter-preset-toolbar-confirm"))
+
+    const saved = JSON.parse(
+      window.localStorage.getItem(FILTER_PRESETS_STORAGE_KEY) || "[]"
+    )
+    expect(saved).toHaveLength(1)
+    expect(saved[0]).toMatchObject({
+      name: "Working set",
+      typeFilter: "all",
+      syncFilter: "all",
+      usageFilter: "all",
+      tagFilter: [],
+      tagMatchMode: "any",
+      savedView: "all"
+    })
+    expect(screen.getByTestId("prompts-filter-preset-chips")).toHaveTextContent(
+      "Working set"
+    )
+  })
+
+  it("rejects duplicate toolbar filter preset names", async () => {
+    const warningSpy = vi.spyOn(notification, "warning")
+    window.localStorage.setItem(
+      FILTER_PRESETS_STORAGE_KEY,
+      JSON.stringify([
+        {
+          id: "working-set",
+          name: "Working set",
+          typeFilter: "all",
+          syncFilter: "all",
+          usageFilter: "all",
+          tagFilter: [],
+          tagMatchMode: "any",
+          savedView: "all"
+        }
+      ])
+    )
+
+    renderPromptBody()
+
+    await screen.findByTestId("prompts-filter-preset-chip-working-set")
+    fireEvent.click(screen.getByTestId("prompts-filter-preset-save-toolbar"))
+
+    const nameInput = screen.getByTestId("prompts-filter-preset-toolbar-name")
+    await waitFor(() => {
+      expect(nameInput).toHaveFocus()
+    })
+    expect(nameInput).toHaveAttribute("maxlength", "50")
+
+    fireEvent.change(nameInput, { target: { value: " working SET " } })
+    fireEvent.click(screen.getByTestId("prompts-filter-preset-toolbar-confirm"))
+
+    await waitFor(() => {
+      expect(warningSpy).toHaveBeenCalled()
+    })
+    const latestWarning = warningSpy.mock.calls.at(-1)?.[0] as
+      | { message?: string }
+      | undefined
+    expect(latestWarning?.message).toBe("A preset with this name already exists.")
+
+    const saved = JSON.parse(
+      window.localStorage.getItem(FILTER_PRESETS_STORAGE_KEY) || "[]"
+    )
+    expect(saved).toHaveLength(1)
+    expect(saved[0]).toMatchObject({ id: "working-set", name: "Working set" })
+  })
+
+  it("loads saved filter presets from quick chips above the prompt table", async () => {
+    state.prompts = [
+      {
+        id: "system-unused",
+        name: "System Unused",
+        title: "System Unused",
+        content: "system",
+        is_system: true,
+        createdAt: 100,
+        usageCount: 0,
+        keywords: []
+      },
+      {
+        id: "system-used",
+        name: "System Used",
+        title: "System Used",
+        content: "system used",
+        is_system: true,
+        createdAt: 90,
+        usageCount: 3,
+        keywords: []
+      },
+      {
+        id: "quick-unused",
+        name: "Quick Unused",
+        title: "Quick Unused",
+        content: "quick",
+        is_system: false,
+        createdAt: 80,
+        usageCount: 0,
+        keywords: []
+      }
+    ]
+    mocks.getAllPrompts.mockResolvedValue(state.prompts)
+    window.localStorage.setItem(
+      FILTER_PRESETS_STORAGE_KEY,
+      JSON.stringify([
+        {
+          id: "unused-system",
+          name: "Unused systems",
+          typeFilter: "system",
+          syncFilter: "all",
+          usageFilter: "unused",
+          tagFilter: [],
+          tagMatchMode: "any",
+          savedView: "all"
+        }
+      ])
+    )
+
+    renderPromptBody()
+
+    await waitFor(() => {
+      expect(screen.getByTestId("table-row-count")).toHaveTextContent("3")
+    })
+    fireEvent.click(screen.getByTestId("prompts-filter-preset-chip-unused-system"))
+
+    await waitFor(() => {
+      expect(screen.getByTestId("table-row-count")).toHaveTextContent("1")
+    })
+    expect(getVisibleRowNames()).toEqual(["System Unused"])
+  })
+
+  it("resets pagination when a preset narrows the local result set", async () => {
+    state.isOnline = false
+    state.prompts = [
+      ...Array.from({ length: 20 }, (_, index) => ({
+        id: `used-${index + 1}`,
+        name: `Used Prompt ${index + 1}`,
+        title: `Used Prompt ${index + 1}`,
+        content: `used content ${index + 1}`,
+        is_system: false,
+        createdAt: 1_000 - index,
+        usageCount: index + 1,
+        keywords: []
+      })),
+      {
+        id: "unused-only",
+        name: "Unused Only",
+        title: "Unused Only",
+        content: "unused content",
+        is_system: false,
+        createdAt: 1,
+        usageCount: 0,
+        keywords: []
+      }
+    ]
+    mocks.getAllPrompts.mockResolvedValue(state.prompts)
+    window.localStorage.setItem(
+      FILTER_PRESETS_STORAGE_KEY,
+      JSON.stringify([
+        {
+          id: "used-only",
+          name: "Used only",
+          typeFilter: "all",
+          syncFilter: "all",
+          usageFilter: "used",
+          tagFilter: [],
+          tagMatchMode: "any",
+          savedView: "all"
+        }
+      ])
+    )
+
+    renderPromptBody()
+
+    await waitFor(() => {
+      expect(screen.getByTestId("table-row-count")).toHaveTextContent("20")
+    })
+    fireEvent.click(screen.getByTestId("table-next-page"))
+    await waitFor(() => {
+      expect(screen.getByTestId("table-row-count")).toHaveTextContent("1")
+    })
+    expect(getVisibleRowNames()).toEqual(["Unused Only"])
+
+    fireEvent.click(screen.getByTestId("prompts-filter-preset-chip-used-only"))
+
+    await waitFor(() => {
+      expect(screen.getByTestId("table-row-count")).toHaveTextContent("20")
+    })
+    expect(getVisibleRowNames()[0]).toBe("Used Prompt 1")
+  })
+
+  it("shows the filter preset hint after repeated filter changes", async () => {
+    const { unmount } = renderPromptBody()
+
+    await screen.findByTestId("prompts-table")
+    fireEvent.click(screen.getByTestId("facet-type-system"))
+    fireEvent.click(screen.getByTestId("facet-sync-local"))
+    fireEvent.click(screen.getByTestId("smart-collection-favorites"))
+
+    expect(await screen.findByTestId("hint-filter-presets")).toHaveTextContent(
+      "Save this filter combination as a preset to reuse it later."
+    )
+    await waitFor(() => {
+      expect(window.localStorage.getItem(FILTER_PRESET_HINT_SHOWN_KEY)).toBe("1")
+      expect(window.localStorage.getItem(FILTER_PRESET_HINT_DISMISSED_KEY)).toBe(
+        "true"
+      )
+    })
+
+    unmount()
+    renderPromptBody()
+
+    await screen.findByTestId("prompts-table")
+    fireEvent.click(screen.getByTestId("facet-type-system"))
+    fireEvent.click(screen.getByTestId("facet-sync-local"))
+    fireEvent.click(screen.getByTestId("smart-collection-favorites"))
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("hint-filter-presets")).not.toBeInTheDocument()
+    })
   })
 
   it("applies title sort override and persists sort state in session storage", async () => {

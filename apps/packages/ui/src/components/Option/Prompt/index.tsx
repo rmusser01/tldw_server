@@ -14,7 +14,7 @@ import {
   Pagination,
   type InputRef
 } from "antd"
-import { Computer, Zap, Star, StarOff, UploadCloud, Download, Trash2, Pen, Undo2, AlertTriangle, Layers, Cloud, Clipboard, Copy, Keyboard, FolderPlus, Play, LayoutGrid, List } from "lucide-react"
+import { Computer, Zap, Star, StarOff, UploadCloud, Download, Trash2, Pen, Undo2, AlertTriangle, Layers, Cloud, Clipboard, Copy, Keyboard, FolderPlus, Play, LayoutGrid, List, Bookmark, BookmarkPlus, X } from "lucide-react"
 import { PromptActionsMenu } from "./PromptActionsMenu"
 import { SyncStatusBadge } from "./SyncStatusBadge"
 import { PromptBulkActionBar } from "./PromptBulkActionBar"
@@ -233,6 +233,10 @@ export const PromptBody = () => {
   const [tagFilter, setTagFilter] = useState<string[]>([])
   const [tagMatchMode, setTagMatchMode] = useState<TagMatchMode>("any")
   const [syncFilter, setSyncFilter] = useState<string>("all")
+  const [filterPresetSaving, setFilterPresetSaving] = useState(false)
+  const [filterPresetName, setFilterPresetName] = useState("")
+  const [filterChangeCount, setFilterChangeCount] = useState(0)
+  const filterSignatureInitializedRef = useRef(false)
   const [currentPage, setCurrentPage] = useState(1)
   const [resultsPerPage, setResultsPerPage] = useState(20)
   const [tableDensity, setTableDensity] = useState<PromptTableDensity>(() =>
@@ -401,7 +405,38 @@ export const PromptBody = () => {
 
   useEffect(() => {
     setCurrentPage(1)
-  }, [normalizedSearchText, projectFilter, typeFilter, collections.collectionFilter, tagFilter, tagMatchMode])
+  }, [
+    normalizedSearchText,
+    projectFilter,
+    typeFilter,
+    syncFilter,
+    usageFilter,
+    savedView,
+    collections.collectionFilter,
+    tagFilter,
+    tagMatchMode,
+  ])
+
+  const filterSignature = React.useMemo(
+    () =>
+      JSON.stringify({
+        typeFilter,
+        syncFilter,
+        usageFilter,
+        tagFilter,
+        tagMatchMode,
+        savedView
+      }),
+    [typeFilter, syncFilter, usageFilter, tagFilter, tagMatchMode, savedView]
+  )
+
+  useEffect(() => {
+    if (!filterSignatureInitializedRef.current) {
+      filterSignatureInitializedRef.current = true
+      return
+    }
+    setFilterChangeCount((count) => Math.min(3, count + 1))
+  }, [filterSignature])
 
   useEffect(() => {
     if (typeof window === "undefined") return
@@ -849,24 +884,55 @@ export const PromptBody = () => {
   }
 
   const handleLoadFilterPreset = React.useCallback((preset: FilterPreset) => {
+    setCurrentPage(1)
     setTypeFilter(preset.typeFilter as any)
     setSyncFilter(preset.syncFilter as any)
+    setUsageFilter(preset.usageFilter || "all")
     setTagFilter(preset.tagFilter)
     setTagMatchMode(preset.tagMatchMode)
     setSavedView(preset.savedView)
   }, [])
 
+  const buildCurrentFilterPreset = React.useCallback(
+    () => ({
+      typeFilter,
+      syncFilter,
+      usageFilter,
+      tagFilter: [...tagFilter],
+      tagMatchMode,
+      savedView,
+    }),
+    [typeFilter, syncFilter, usageFilter, tagFilter, tagMatchMode, savedView]
+  )
+
   const handleSaveFilterPreset = React.useCallback(
     (name: string) => {
-      saveFilterPreset(name, {
-        typeFilter,
-        syncFilter,
-        tagFilter,
-        tagMatchMode,
-        savedView,
-      })
+      saveFilterPreset(name, buildCurrentFilterPreset())
     },
-    [typeFilter, syncFilter, tagFilter, tagMatchMode, savedView, saveFilterPreset]
+    [buildCurrentFilterPreset, saveFilterPreset]
+  )
+
+  const handleToolbarFilterPresetSave = React.useCallback(
+    () => {
+      const trimmed = filterPresetName.trim()
+      if (!trimmed) return
+      if (
+        filterPresets.some((preset) => preset.name.toLowerCase() === trimmed.toLowerCase())
+      ) {
+        notification.warning({
+          message: t("managePrompts.filterPresets.duplicateName", {
+            defaultValue: "A preset with this name already exists."
+          })
+        })
+        return
+      }
+      handleSaveFilterPreset(trimmed)
+      setFilterPresetName("")
+      setFilterPresetSaving(false)
+      markHintShown("filter-presets")
+      dismissHint("filter-presets")
+    },
+    [dismissHint, filterPresetName, filterPresets, handleSaveFilterPreset, markHintShown, t]
   )
 
   const handleCustomPromptTableQueryChange = React.useCallback(
@@ -1551,9 +1617,99 @@ export const PromptBody = () => {
                   />
                 </div>
               )}
+              {selectedSegment === "custom" && (
+                <div
+                  className="w-full sm:w-auto"
+                  data-testid="prompts-filter-preset-toolbar"
+                >
+                  {filterPresetSaving ? (
+                    <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
+                      <Input
+                        autoFocus
+                        value={filterPresetName}
+                        onChange={(event) => setFilterPresetName(event.target.value)}
+                        onPressEnter={handleToolbarFilterPresetSave}
+                        placeholder={t("managePrompts.filterPresets.namePlaceholder", {
+                          defaultValue: "Preset name"
+                        })}
+                        aria-label={t("managePrompts.filterPresets.nameLabel", {
+                          defaultValue: "Filter preset name"
+                        })}
+                        data-testid="prompts-filter-preset-toolbar-name"
+                        style={{ width: isCompactViewport ? "100%" : 160 }}
+                        maxLength={50}
+                      />
+                      <button
+                        type="button"
+                        onClick={handleToolbarFilterPresetSave}
+                        disabled={!filterPresetName.trim()}
+                        data-testid="prompts-filter-preset-toolbar-confirm"
+                        className="inline-flex min-h-8 items-center gap-1.5 rounded-md border border-primary/40 px-2 py-1.5 text-sm font-medium text-primary hover:bg-primary/10 disabled:opacity-50"
+                      >
+                        <BookmarkPlus className="size-4" aria-hidden="true" />
+                        {t("common:save", { defaultValue: "Save" })}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setFilterPresetSaving(false)
+                          setFilterPresetName("")
+                        }}
+                        aria-label={t("common:cancel", { defaultValue: "Cancel" })}
+                        data-testid="prompts-filter-preset-toolbar-cancel"
+                        className="inline-flex min-h-8 min-w-8 items-center justify-center rounded-md border border-border text-text-muted hover:bg-surface2 hover:text-text"
+                      >
+                        <X className="size-4" aria-hidden="true" />
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setFilterPresetSaving(true)}
+                      data-testid="prompts-filter-preset-save-toolbar"
+                      className="inline-flex min-h-8 w-full items-center justify-center gap-1.5 rounded-md border border-border px-2 py-1.5 text-sm font-medium text-text hover:bg-surface2 sm:w-auto"
+                    >
+                      <BookmarkPlus className="size-4" aria-hidden="true" />
+                      {t("managePrompts.filterPresets.saveFilters", {
+                        defaultValue: "Save filters"
+                      })}
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
           </PromptListToolbar>
         </div>
+
+        {filterPresets.length > 0 && (
+          <div
+            className="mb-3 flex flex-wrap items-center gap-2"
+            data-testid="prompts-filter-preset-chips"
+          >
+            <span className="text-xs font-semibold uppercase tracking-wider text-text-muted">
+              {t("managePrompts.filterPresets.quickLabel", {
+                defaultValue: "Filter presets"
+              })}
+            </span>
+            {filterPresets.slice(0, 5).map((preset) => (
+              <button
+                key={preset.id}
+                type="button"
+                onClick={() => handleLoadFilterPreset(preset)}
+                className="inline-flex min-h-8 items-center gap-1.5 rounded-full border border-border bg-bg px-2.5 py-1 text-sm text-text-muted hover:border-primary/40 hover:bg-primary/10 hover:text-primary"
+                data-testid={`prompts-filter-preset-chip-${preset.id}`}
+              >
+                <Bookmark className="size-3.5" aria-hidden="true" />
+                {preset.name}
+              </button>
+            ))}
+            {filterPresets.length > 5 && (
+              <span className="text-xs text-text-muted">
+                +{filterPresets.length - 5}
+              </span>
+            )}
+          </div>
+        )}
 
         {customPromptsLoading && <Skeleton paragraph={{ rows: 8 }} />}
 
@@ -1616,6 +1772,21 @@ export const PromptBody = () => {
             <ContextualHint
               id="keyboard-shortcuts"
               message="Press Enter to preview, E to edit, or ? for all keyboard shortcuts."
+              visible={true}
+              onDismiss={dismissHint}
+              onShown={markHintShown}
+            />
+          </Suspense>
+        )}
+
+        {filterChangeCount >= 3 && shouldShowHint("filter-presets") && (
+          <Suspense fallback={null}>
+            <ContextualHint
+              id="filter-presets"
+              message={t("managePrompts.filterPresets.hint", {
+                defaultValue:
+                  "Save this filter combination as a preset to reuse it later."
+              })}
               visible={true}
               onDismiss={dismissHint}
               onShown={markHintShown}
