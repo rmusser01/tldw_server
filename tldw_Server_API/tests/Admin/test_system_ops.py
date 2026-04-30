@@ -166,7 +166,11 @@ async def test_admin_system_ops_endpoints(monkeypatch, tmp_path):
 
         list_resp = client.get("/api/v1/admin/incidents")
         assert list_resp.status_code == 200, list_resp.text
-        assert list_resp.json()["total"] >= 1
+        payload = list_resp.json()
+        assert payload["total"] >= 1
+        assert payload["pagination"]["total"] >= 1
+        assert payload["pagination"]["limit"] == 50
+        assert payload["pagination"]["offset"] == 0
 
         delete_resp = client.delete(f"/api/v1/admin/incidents/{incident_id}")
         assert delete_resp.status_code == 200, delete_resp.text
