@@ -1011,9 +1011,6 @@ class SandboxService:
         terminate_orphaned_vms: bool = False,
         dry_run: bool = True,
     ) -> dict[str, object]:
-        if terminate_orphaned_vms:
-            raise SandboxReconciliationRepairError("orphan_termination_not_supported", 400)
-
         helper_status = probe_helper()
         report = collect_vz_reconciliation(
             self._orch,
@@ -1043,6 +1040,7 @@ class SandboxService:
             "orphaned_vms": len(orphaned_items),
             "terminated_orphaned_vms": 0,
         }
+        helper_client: MacOSVirtualizationHelperClient | None = None
 
         for item in report_items:
             status = str(item.get("status") or "").strip()
@@ -1059,6 +1057,36 @@ class SandboxService:
                     "reason": reason or "active_session",
                 }
                 logger.info("Skipping VZ reconciliation repair action: {}", action)
+                actions.append(action)
+                continue
+
+            if status == "orphaned_vm":
+                if not terminate_orphaned_vms or not vm_id:
+                    continue
+
+                action_status = "planned"
+                if not dry_run:
+                    try:
+                        if helper_client is None:
+                            helper_client = MacOSVirtualizationHelperClient()
+                        terminated = bool(helper_client.terminate_vm(vm_id))
+                    except Exception as exc:
+                        logger.exception("VZ reconciliation repair orphan termination failed for vm_id={}", vm_id)
+                        raise SandboxReconciliationRepairError("vz_orphan_vm_termination_failed", 503) from exc
+                    if terminated:
+                        summary["terminated_orphaned_vms"] += 1
+                        action_status = "terminated"
+                    else:
+                        action_status = "missing"
+
+                action = {
+                    "type": "terminate_orphaned_vm",
+                    "session_id": None,
+                    "vm_id": vm_id,
+                    "status": action_status,
+                    "reason": reason or None,
+                }
+                logger.info("VZ reconciliation repair action: {}", action)
                 actions.append(action)
                 continue
 
