@@ -1,19 +1,25 @@
 import importlib.util
 import os
 import plistlib
+import socket
+import sys
+import tempfile
 from pathlib import Path
 from unittest import TestCase
+
+import pytest
 
 
 SCRIPT_PATH = Path(__file__).resolve().parents[1] / "scripts" / "vz-helperctl.py"
 CASE = TestCase()
 
 
-def load_helperctl():
-    spec = importlib.util.spec_from_file_location("vz_helperctl", SCRIPT_PATH)
+def load_helperctl(module_name="vz_helperctl"):
+    spec = importlib.util.spec_from_file_location(module_name, SCRIPT_PATH)
     module = importlib.util.module_from_spec(spec)
     if spec.loader is None:
         raise RuntimeError(f"Unable to load {SCRIPT_PATH}")
+    sys.modules[module_name] = module
     spec.loader.exec_module(module)
     return module
 
@@ -39,6 +45,29 @@ def test_default_helper_uses_debug_build_path():
     )
 
 
+def test_protocol_version_loads_from_helper_client():
+    from tldw_Server_API.app.core.Sandbox.macos_virtualization import helper_client
+
+    helperctl = load_helperctl()
+
+    CASE.assertEqual(helperctl.EXPECTED_HELPER_PROTOCOL_VERSION, helper_client.EXPECTED_HELPER_PROTOCOL_VERSION)
+
+
+def test_protocol_version_falls_back_when_helper_client_import_fails(monkeypatch):
+    original_import = __import__
+
+    def blocked_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "tldw_Server_API.app.core.Sandbox.macos_virtualization.helper_client":
+            raise ImportError("blocked for fallback test")
+        return original_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr("builtins.__import__", blocked_import)
+
+    helperctl = load_helperctl("vz_helperctl_fallback")
+
+    CASE.assertEqual(helperctl.EXPECTED_HELPER_PROTOCOL_VERSION, "1")
+
+
 def test_validate_socket_path_refuses_symlink(tmp_path):
     helperctl = load_helperctl()
     target = tmp_path / "target.sock"
@@ -59,6 +88,30 @@ def test_validate_socket_path_refuses_regular_file_without_altering_contents(tmp
 
     CASE.assertEqual(result, helperctl.CheckResult(ok=False, reason="helper_socket_unsafe"))
     CASE.assertEqual(socket_path.read_text(encoding="utf-8"), "do not alter")
+
+
+def test_validate_socket_path_refuses_empty_path():
+    helperctl = load_helperctl()
+
+    result = helperctl.validate_socket_path(Path(""))
+
+    CASE.assertEqual(result, helperctl.CheckResult(ok=False, reason="helper_socket_unconfigured"))
+
+
+def test_validate_socket_path_accepts_existing_unix_socket():
+    helperctl = load_helperctl()
+
+    with tempfile.TemporaryDirectory(prefix="vz-helperctl-", dir="/tmp") as socket_dir:
+        socket_path = Path(socket_dir) / "helper.sock"
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as server:
+            try:
+                server.bind(str(socket_path))
+            except PermissionError:
+                pytest.skip("AF_UNIX socket binding is not permitted in this sandbox")
+
+            result = helperctl.validate_socket_path(socket_path)
+
+    CASE.assertEqual(result, helperctl.CheckResult(ok=True))
 
 
 def test_ensure_private_dir_creates_owner_only_directory(tmp_path):
@@ -132,6 +185,12 @@ def test_render_launchd_plist_includes_required_fields(tmp_path):
     CASE.assertEqual(plist["ProgramArguments"], [str(helper_path)])
     CASE.assertEqual(plist["EnvironmentVariables"]["TLDW_SANDBOX_MACOS_HELPER_SOCKET"], str(socket_path))
     CASE.assertEqual(plist["EnvironmentVariables"]["TLDW_SANDBOX_VZ_LINUX_SERIAL_LOG_DIR"], str(log_dir / "serial"))
+    CASE.assertEqual(
+        plist["EnvironmentVariables"]["TLDW_SANDBOX_MACOS_HELPER_PROTOCOL_VERSION"],
+        helperctl.EXPECTED_HELPER_PROTOCOL_VERSION,
+    )
+    CASE.assertEqual(plist["StandardOutPath"], str(log_dir / "helper.stdout.log"))
+    CASE.assertEqual(plist["StandardErrorPath"], str(log_dir / "helper.stderr.log"))
     CASE.assertIs(plist["KeepAlive"], False)
     CASE.assertIs(plist["RunAtLoad"], False)
 
@@ -159,3 +218,27 @@ def test_plist_cli_accepts_operator_flag_names(tmp_path, capsys):
     CASE.assertEqual(code, 0)
     CASE.assertIn(str(helper_path), captured.out)
     CASE.assertIn(str(socket_path), captured.out)
+
+
+def test_check_cli_accepts_operator_socket_flag(tmp_path, capsys):
+    helperctl = load_helperctl()
+    socket_path = tmp_path / "runtime" / "helper.sock"
+    pid_file = tmp_path / "runtime" / "helper.pid"
+    log_dir = tmp_path / "logs"
+
+    code = helperctl.main(
+        [
+            "check",
+            "--dry-run",
+            "--socket",
+            str(socket_path),
+            "--pid-file",
+            str(pid_file),
+            "--log-dir",
+            str(log_dir),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    CASE.assertEqual(code, 0)
+    CASE.assertIn("socket_path: ok", captured.out)
