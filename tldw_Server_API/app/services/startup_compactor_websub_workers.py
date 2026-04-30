@@ -34,12 +34,14 @@ class CompactorWebsubStartupHandles:
 async def start_compactor_websub_workers(
     *,
     should_start_worker: Callable[..., bool],
+    worker_inventory: Any | None = None,
 ) -> CompactorWebsubStartupHandles:
     """Start the embeddings compactor and WebSub renewal worker."""
 
     embeddings_compactor_stop_event, embeddings_compactor_task = await _start_embeddings_vector_compactor()
     websub_renewal_task = await _start_websub_renewal_worker(
         should_start_worker=should_start_worker,
+        worker_inventory=worker_inventory,
     )
     return CompactorWebsubStartupHandles(
         embeddings_compactor_stop_event=embeddings_compactor_stop_event,
@@ -52,8 +54,9 @@ def _make_event() -> Any:
     return asyncio.Event()
 
 
-def _create_task(awaitable: Any) -> Any:
-    return asyncio.create_task(awaitable)
+def _create_task(awaitable: Any, *, name: str | None = None) -> Any:
+    """Create a task with an optional asyncio task name for diagnostics."""
+    return asyncio.create_task(awaitable, name=name)
 
 
 async def _start_embeddings_vector_compactor() -> tuple[Any | None, Any | None]:
@@ -75,6 +78,7 @@ async def _start_embeddings_vector_compactor() -> tuple[Any | None, Any | None]:
 async def _start_websub_renewal_worker(
     *,
     should_start_worker: Callable[..., bool],
+    worker_inventory: Any | None = None,
 ) -> Any | None:
     try:
         callback_base_url = os.getenv("WEBSUB_CALLBACK_BASE_URL", "").strip()
@@ -86,7 +90,32 @@ async def _start_websub_renewal_worker(
             logger.info("WebSub renewal worker disabled (no WEBSUB_CALLBACK_BASE_URL or flag off)")
             return None
 
-        task = _create_task(_run_websub_renewal_loop())
+        task = _create_task(_run_websub_renewal_loop(), name="websub_renewal_task")
+        if worker_inventory is not None:
+            from tldw_Server_API.app.services.lifecycle_workers import (
+                ManagedWorker,
+                ShutdownPhase,
+            )
+
+            try:
+                worker_inventory.register(
+                    ManagedWorker(
+                        name="websub_renewal_task",
+                        task=task,
+                        stop_event=None,
+                        category="collections-websub",
+                        shutdown_phase=ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN,
+                    )
+                )
+            except Exception:
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+                except Exception as exc:
+                    logger.debug(f"WebSub renewal task raised during startup rollback: {exc}")
+                raise
         logger.info("WebSub lease renewal worker started")
         return task
     except _STARTUP_GUARD_EXCEPTIONS as exc:

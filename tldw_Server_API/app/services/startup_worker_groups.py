@@ -81,6 +81,7 @@ async def start_worker_groups(
     startup_guard_exceptions: tuple[type[BaseException], ...],
     owned_job_pollers: list[Any],
     register_owned_job_poller: Callable[..., None],
+    worker_inventory: Any | None = None,
 ) -> StartupWorkerGroupHandles:
     """Start the startup worker/poller groups in the legacy order."""
     cleanup_worker_handles = await _start_cleanup_workers(
@@ -127,6 +128,7 @@ async def start_worker_groups(
     )
     compactor_websub_startup_handles = await _start_compactor_websub_workers(
         should_start_worker=_should_start_worker,
+        worker_inventory=worker_inventory,
     )
     content_jobs_poller_handles = await _start_content_jobs_pollers(
         app=app,

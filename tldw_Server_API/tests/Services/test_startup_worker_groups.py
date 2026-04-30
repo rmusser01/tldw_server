@@ -77,8 +77,9 @@ async def test_start_worker_groups_runs_helpers_in_order_and_returns_handles(
             privilege_snapshot_task="privilege-task",
         )
 
-    async def _record_compactor_websub_workers(*, should_start_worker):
+    async def _record_compactor_websub_workers(*, should_start_worker, worker_inventory):
         assert should_start_worker("AUDIO_JOBS_WORKER_ENABLED", "audio-jobs") is True
+        assert worker_inventory == "worker-inventory"
         calls.append("compactor")
         return SimpleNamespace(
             embeddings_compactor_stop_event="embeddings-stop",
@@ -189,6 +190,7 @@ async def test_start_worker_groups_runs_helpers_in_order_and_returns_handles(
         startup_guard_exceptions=(RuntimeError,),
         owned_job_pollers=owned_job_pollers,
         register_owned_job_poller=register_owned_job_poller,
+        worker_inventory="worker-inventory",
     )
 
     assert calls == [
