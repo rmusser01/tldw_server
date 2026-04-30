@@ -552,6 +552,7 @@ describe("PromptBody server search and pagination", () => {
   afterEach(() => {
     setViewportWidth(1280)
     vi.clearAllMocks()
+    vi.restoreAllMocks()
   })
 
   it("exposes the screen-reader status live region", async () => {
@@ -1183,6 +1184,65 @@ describe("PromptBody server search and pagination", () => {
     expect(screen.getByTestId("mock-prompt-drawer")).toHaveTextContent(
       "Imported Shared Prompt"
     )
+  })
+
+  it("does not open a shared prompt deep-link drawer after switching segments during import", async () => {
+    const infoSpy = vi.spyOn(notification, "info")
+    let resolvePull!: () => void
+    const importedPrompt = {
+      id: "imported-1",
+      name: "Imported Shared Prompt",
+      title: "Imported Shared Prompt",
+      content: "imported content",
+      is_system: false,
+      createdAt: 200,
+      serverId: 101,
+      keywords: []
+    }
+
+    state.prompts = []
+    mocks.getAllPrompts.mockImplementation(async () => state.prompts)
+    mocks.pullFromStudio.mockImplementation(async () => {
+      await new Promise<void>((resolve) => {
+        resolvePull = () => {
+          state.prompts = [importedPrompt]
+          resolve()
+        }
+      })
+      return {
+        success: true,
+        localId: importedPrompt.id,
+        syncStatus: "synced"
+      }
+    })
+
+    renderPromptBody(["/prompts?prompt=101&source=studio"])
+
+    await waitFor(() => {
+      expect(mocks.pullFromStudio).toHaveBeenCalledWith(101)
+    })
+
+    fireEvent.click(screen.getByTestId("sidebar-ws-copilot"))
+    await waitFor(() => {
+      expect(screen.getByTestId("prompt-location-search")).toHaveTextContent(
+        "?tab=copilot"
+      )
+    })
+
+    resolvePull()
+
+    await waitFor(() => {
+      expect(infoSpy).toHaveBeenCalled()
+    })
+    const latestInfo = infoSpy.mock.calls.at(-1)?.[0] as
+      | { message?: string; description?: string }
+      | undefined
+    expect(latestInfo?.message).toBe("Shared prompt imported")
+    expect(latestInfo?.description).toBe(
+      "The prompt was imported but you navigated away. Switch back to the Custom tab to view it."
+    )
+    expect(screen.queryByTestId("mock-prompt-drawer")).not.toBeInTheDocument()
+    infoSpy.mockRestore()
   })
 
   it("handles later shared prompt deep-links after the first link is cleared", async () => {
