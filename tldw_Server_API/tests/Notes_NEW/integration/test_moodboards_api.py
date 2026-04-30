@@ -85,8 +85,21 @@ def test_moodboard_crud_and_membership_flow(moodboard_client: TestClient):
 
     list_resp = client.get("/api/v1/notes/moodboards")
     assert list_resp.status_code == 200
-    boards = list_resp.json()["moodboards"]
+    list_payload = list_resp.json()
+    boards = list_payload["moodboards"]
     assert any(int(item["id"]) == int(moodboard_id) for item in boards)
+    assert list_payload["count"] == 1
+    assert list_payload["total"] == 1
+    assert list_payload["limit"] == 100
+    assert list_payload["offset"] == 0
+    assert list_payload["pagination"] == {
+        "mode": "offset",
+        "limit": 100,
+        "offset": 0,
+        "total": 1,
+        "has_more": False,
+        "next_offset": None,
+    }
 
     pin_manual = client.post(f"/api/v1/notes/moodboards/{moodboard_id}/notes/{note_manual['id']}")
     pin_both = client.post(f"/api/v1/notes/moodboards/{moodboard_id}/notes/{note_both['id']}")

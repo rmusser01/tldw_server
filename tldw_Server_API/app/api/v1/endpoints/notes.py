@@ -2536,6 +2536,7 @@ async def list_moodboards_endpoint(
                 headers={"Retry-After": str(meta.get("retry_after", 60))},
             )
         rows = await _run_db_call(db.list_moodboards, limit=limit, offset=offset, include_deleted=include_deleted)
+        total = await _run_db_call(db.count_moodboards, include_deleted=include_deleted)
         payload = [_normalize_moodboard_payload(row) for row in rows]
         return MoodboardListResponse(
             items=payload,
@@ -2543,6 +2544,13 @@ async def list_moodboards_endpoint(
             count=len(payload),
             limit=limit,
             offset=offset,
+            total=total,
+            pagination=build_offset_pagination_meta(
+                total=total,
+                limit=limit,
+                offset=offset,
+                count=len(payload),
+            ),
         )
     except _NOTES_NONCRITICAL_EXCEPTIONS as e:
         handle_db_errors(e, "moodboard")

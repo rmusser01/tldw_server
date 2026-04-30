@@ -165,6 +165,7 @@ class MoodboardListResponse(BaseModel):
     limit: int = Field(..., ge=1)
     offset: int = Field(..., ge=0)
     total: int | None = Field(default=None, ge=0)
+    pagination: OffsetPaginationMeta
 
 
 class MoodboardPinResponse(BaseModel):
