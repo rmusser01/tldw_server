@@ -158,6 +158,7 @@ class ReadingItemsListResponse(BaseModel):
     size: int
     offset: int | None = None
     limit: int | None = None
+    pagination: OffsetPaginationMeta
 
 
 class ReadingSavedSearchCreateRequest(BaseModel):

@@ -584,6 +584,12 @@ async def list_reading_items(
         size=size,
         offset=resolved_offset,
         limit=resolved_limit,
+        pagination=build_offset_pagination_meta(
+            total=total,
+            limit=resolved_limit,
+            offset=resolved_offset,
+            count=len(rows),
+        ),
     )
 
 
