@@ -17,6 +17,7 @@ from .models import (
     parse_helper_host_validation,
     parse_helper_ping,
     parse_helper_vm_list,
+    parse_helper_vm_reply,
     parse_helper_vm_status,
 )
 
@@ -88,17 +89,26 @@ class MacOSVirtualizationHelperClient:
         if is_truthy(os.getenv("TEST_MODE")):
             vm_name = str(request.get("vm_name") or "").strip() or "vm-test"
             runtime = str(request.get("runtime") or "").strip()
-            return HelperVMReply(
-                vm_id=vm_name,
-                state="created",
-                details={"runtime": runtime or None, "transport": "vsock"},
+            template_path = str(request.get("template") or request.get("template_path") or "").strip()
+            return parse_helper_vm_reply(
+                {
+                    "vm_id": vm_name,
+                    "state": "created",
+                    "metadata": {
+                        "owner": request.get("owner") or "unknown",
+                        "runtime": runtime,
+                        "run_id": request.get("run_id") or "",
+                        "session_id": request.get("session_id") or "",
+                        "session_mode": bool(request.get("session_mode")),
+                        "template_path": template_path,
+                        "workspace_path": request.get("workspace_path") or "",
+                        "created_at": request.get("created_at") or "",
+                    },
+                    "details": {"runtime": runtime or None, "transport": "vsock"},
+                }
             )
         payload = self._request("create_vm", request, timeout_sec=self._operation_timeout_sec(request))
-        return HelperVMReply(
-            vm_id=str(payload.get("vm_id") or "").strip(),
-            state=str(payload.get("state") or "").strip(),
-            details=dict(payload.get("details") or {}) if isinstance(payload.get("details"), dict) else {},
-        )
+        return parse_helper_vm_reply(payload)
 
     def validate_vz_linux_host(self, request: dict[str, Any]) -> dict[str, Any]:
         if is_truthy(os.getenv("TEST_MODE")):

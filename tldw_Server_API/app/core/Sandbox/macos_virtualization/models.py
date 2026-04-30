@@ -15,6 +15,10 @@ def _bool_field(payload: dict[str, Any], key: str, default: bool = False) -> boo
     value = payload.get(key)
     if value is None:
         return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
     return bool(value)
 
 
@@ -33,9 +37,42 @@ def _list_field(payload: dict[str, Any], key: str) -> list[str]:
 
 
 @dataclass(slots=True)
+class HelperVMMetadata:
+    owner: str = "unknown"
+    runtime: str = ""
+    run_id: str = ""
+    session_id: str = ""
+    session_mode: bool = False
+    template_path: str = ""
+    workspace_path: str = ""
+    created_at: str = ""
+
+    @property
+    def has_tldw_owner(self) -> bool:
+        return self.owner == "tldw" and self.runtime == "vz_linux"
+
+
+def _metadata_field(payload: dict[str, Any]) -> HelperVMMetadata:
+    raw = payload.get("metadata")
+    if not isinstance(raw, dict):
+        return HelperVMMetadata()
+    return HelperVMMetadata(
+        owner=_str_field(raw, "owner", "unknown").strip() or "unknown",
+        runtime=_str_field(raw, "runtime").strip(),
+        run_id=_str_field(raw, "run_id").strip(),
+        session_id=_str_field(raw, "session_id").strip(),
+        session_mode=_bool_field(raw, "session_mode"),
+        template_path=_str_field(raw, "template_path").strip(),
+        workspace_path=_str_field(raw, "workspace_path").strip(),
+        created_at=_str_field(raw, "created_at").strip(),
+    )
+
+
+@dataclass(slots=True)
 class HelperVMReply:
     vm_id: str
     state: str
+    metadata: HelperVMMetadata = field(default_factory=HelperVMMetadata)
     details: dict[str, Any] = field(default_factory=dict)
 
 
@@ -73,6 +110,7 @@ class HelperVMStatusReply:
     vm_id: str
     state: str
     healthy: bool
+    metadata: HelperVMMetadata = field(default_factory=HelperVMMetadata)
     details: dict[str, Any] = field(default_factory=dict)
 
 
@@ -107,6 +145,15 @@ def parse_helper_host_validation(payload: dict[str, Any]) -> HelperHostValidatio
     )
 
 
+def parse_helper_vm_reply(payload: dict[str, Any]) -> HelperVMReply:
+    return HelperVMReply(
+        vm_id=_str_field(payload, "vm_id").strip(),
+        state=_str_field(payload, "state").strip(),
+        metadata=_metadata_field(payload),
+        details=_dict_field(payload),
+    )
+
+
 def parse_helper_vm_status(payload: dict[str, Any]) -> HelperVMStatusReply:
     return HelperVMStatusReply(
         protocol_version=_str_field(payload, "protocol_version"),
@@ -114,6 +161,7 @@ def parse_helper_vm_status(payload: dict[str, Any]) -> HelperVMStatusReply:
         vm_id=_str_field(payload, "vm_id"),
         state=_str_field(payload, "state"),
         healthy=_bool_field(payload, "healthy"),
+        metadata=_metadata_field(payload),
         details=_dict_field(payload),
     )
 
