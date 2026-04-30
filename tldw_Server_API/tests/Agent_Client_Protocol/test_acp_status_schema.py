@@ -187,6 +187,11 @@ def test_acp_list_sessions_status_schema_includes_tenancy(client_user_only, stub
     assert resp.status_code == 200
     payload = resp.json()
     assert payload["total"] == 1
+    assert payload["pagination"]["total"] == 1
+    assert payload["pagination"]["limit"] == 100
+    assert payload["pagination"]["offset"] == 0
+    assert payload["pagination"]["has_more"] is False
+    assert payload["pagination"]["next_offset"] is None
     session = payload["sessions"][0]
     assert session["status"] == "active"
     assert session["has_websocket"] is True

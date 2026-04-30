@@ -4,6 +4,7 @@ from enum import Enum
 from typing import Any, Literal, Union
 
 from pydantic import BaseModel, Field
+from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
 
 # -----------------------------------------------------------------------------
 # Agent Types
@@ -444,6 +445,7 @@ class ACPSessionListResponse(BaseModel):
     """Response for listing ACP sessions."""
     sessions: list[ACPSessionInfo] = Field(default_factory=list)
     total: int = Field(default=0, description="Total number of sessions matching filters")
+    pagination: OffsetPaginationMeta
 
 
 class ACPSessionDetailResponse(ACPSessionInfo):
