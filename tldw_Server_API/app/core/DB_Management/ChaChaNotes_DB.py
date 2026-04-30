@@ -23578,6 +23578,9 @@ for _message_store_method in (
 for _note_store_method in (
     "add_note",
     "get_note_by_id",
+    "get_note_studio_document",
+    "create_note_studio_document",
+    "upsert_note_studio_document",
     "list_notes",
     "list_deleted_notes",
     "get_notes_batch",

@@ -742,9 +742,7 @@ async def test_biorxiv_by_doi_not_found(monkeypatch, paper_search_app):
 
 
 @pytest.mark.asyncio
-async def test_arxiv_by_id_success(monkeypatch):
-    from tldw_Server_API.app.main import app
-
+async def test_arxiv_by_id_success(monkeypatch, paper_search_app):
     def _fake_arxiv_by_id(paper_id):
 
         return {
@@ -759,7 +757,7 @@ async def test_arxiv_by_id_success(monkeypatch):
     from tldw_Server_API.app.core.Third_Party import Arxiv as _Arxiv
     monkeypatch.setattr(_Arxiv, "get_arxiv_by_id", _fake_arxiv_by_id)
 
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+    async with AsyncClient(transport=ASGITransport(app=paper_search_app), base_url="http://test") as client:
         r = await client.get(
             "/api/v1/paper-search/arxiv/by-id",
             params={"id": "1706.03762"},
@@ -770,9 +768,7 @@ async def test_arxiv_by_id_success(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_arxiv_by_id_not_found(monkeypatch):
-    from tldw_Server_API.app.main import app
-
+async def test_arxiv_by_id_not_found(monkeypatch, paper_search_app):
     def _fake_arxiv_by_id_notfound(paper_id):
 
         return None, None
@@ -780,7 +776,7 @@ async def test_arxiv_by_id_not_found(monkeypatch):
     from tldw_Server_API.app.core.Third_Party import Arxiv as _Arxiv
     monkeypatch.setattr(_Arxiv, "get_arxiv_by_id", _fake_arxiv_by_id_notfound)
 
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+    async with AsyncClient(transport=ASGITransport(app=paper_search_app), base_url="http://test") as client:
         r = await client.get(
             "/api/v1/paper-search/arxiv/by-id",
             params={"id": "0000.00000"},
@@ -789,9 +785,7 @@ async def test_arxiv_by_id_not_found(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_semantic_scholar_by_id_success(monkeypatch):
-    from tldw_Server_API.app.main import app
-
+async def test_semantic_scholar_by_id_success(monkeypatch, paper_search_app):
     def _fake_s2_details(paper_id, fields_to_return='paperId,title,abstract,year,citationCount,authors,venue,openAccessPdf,url,publicationTypes,publicationDate,externalIds'):
 
         return {
@@ -812,7 +806,7 @@ async def test_semantic_scholar_by_id_success(monkeypatch):
     from tldw_Server_API.app.core.Third_Party import Semantic_Scholar as _S2
     monkeypatch.setattr(_S2, "get_paper_details_semantic_scholar", _fake_s2_details)
 
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+    async with AsyncClient(transport=ASGITransport(app=paper_search_app), base_url="http://test") as client:
         r = await client.get(
             "/api/v1/paper-search/semantic-scholar/by-id",
             params={"paper_id": "abcdef"},
@@ -823,9 +817,7 @@ async def test_semantic_scholar_by_id_success(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_semantic_scholar_by_id_not_found(monkeypatch):
-    from tldw_Server_API.app.main import app
-
+async def test_semantic_scholar_by_id_not_found(monkeypatch, paper_search_app):
     def _fake_s2_notfound(paper_id, fields_to_return='paperId,title,abstract,year,citationCount,authors,venue,openAccessPdf,url,publicationTypes,publicationDate,externalIds'):
 
         return None, "Semantic Scholar API HTTP Error: 404 - Not Found"
@@ -833,7 +825,7 @@ async def test_semantic_scholar_by_id_not_found(monkeypatch):
     from tldw_Server_API.app.core.Third_Party import Semantic_Scholar as _S2
     monkeypatch.setattr(_S2, "get_paper_details_semantic_scholar", _fake_s2_notfound)
 
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+    async with AsyncClient(transport=ASGITransport(app=paper_search_app), base_url="http://test") as client:
         r = await client.get(
             "/api/v1/paper-search/semantic-scholar/by-id",
             params={"paper_id": "notfound"},
@@ -842,9 +834,7 @@ async def test_semantic_scholar_by_id_not_found(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_pubmed_by_id_success(monkeypatch):
-    from tldw_Server_API.app.main import app
-
+async def test_pubmed_by_id_success(monkeypatch, paper_search_app):
     def _fake_pubmed_by_id(pmid):
 
         return {
@@ -864,7 +854,7 @@ async def test_pubmed_by_id_success(monkeypatch):
     from tldw_Server_API.app.core.Third_Party import PubMed as _Pub
     monkeypatch.setattr(_Pub, "get_pubmed_by_id", _fake_pubmed_by_id)
 
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+    async with AsyncClient(transport=ASGITransport(app=paper_search_app), base_url="http://test") as client:
         r = await client.get(
             "/api/v1/paper-search/pubmed/by-id",
             params={"pmid": "12345678"},
@@ -876,9 +866,7 @@ async def test_pubmed_by_id_success(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_pubmed_by_id_not_found(monkeypatch):
-    from tldw_Server_API.app.main import app
-
+async def test_pubmed_by_id_not_found(monkeypatch, paper_search_app):
     def _fake_pubmed_by_id_notfound(pmid):
 
         return None, None
@@ -886,7 +874,7 @@ async def test_pubmed_by_id_not_found(monkeypatch):
     from tldw_Server_API.app.core.Third_Party import PubMed as _Pub
     monkeypatch.setattr(_Pub, "get_pubmed_by_id", _fake_pubmed_by_id_notfound)
 
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+    async with AsyncClient(transport=ASGITransport(app=paper_search_app), base_url="http://test") as client:
         r = await client.get(
             "/api/v1/paper-search/pubmed/by-id",
             params={"pmid": "99999999"},
@@ -895,9 +883,7 @@ async def test_pubmed_by_id_not_found(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_biorxiv_pubs_search_success(monkeypatch):
-    from tldw_Server_API.app.main import app
-
+async def test_biorxiv_pubs_search_success(monkeypatch, paper_search_app):
     def _fake_pubs(server, f, t, offset, limit, recent_days, recent_count, q):
 
         items = [{
@@ -919,7 +905,7 @@ async def test_biorxiv_pubs_search_success(monkeypatch):
     from tldw_Server_API.app.core.Third_Party import BioRxiv as _Bio
     monkeypatch.setattr(_Bio, "search_biorxiv_pubs", _fake_pubs)
 
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+    async with AsyncClient(transport=ASGITransport(app=paper_search_app), base_url="http://test") as client:
         r = await client.get(
             "/api/v1/paper-search/biorxiv-pubs",
             params={"server": "biorxiv", "recent_days": 7, "page": 1, "results_per_page": 10},
@@ -954,9 +940,7 @@ async def test_biorxiv_pubs_search_success(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_biorxiv_pubs_by_doi_success(monkeypatch):
-    from tldw_Server_API.app.main import app
-
+async def test_biorxiv_pubs_by_doi_success(monkeypatch, paper_search_app):
     def _fake_pub_by_doi(doi, server):
 
         return {
@@ -969,7 +953,7 @@ async def test_biorxiv_pubs_by_doi_success(monkeypatch):
     from tldw_Server_API.app.core.Third_Party import BioRxiv as _Bio
     monkeypatch.setattr(_Bio, "get_biorxiv_published_by_doi", _fake_pub_by_doi)
 
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+    async with AsyncClient(transport=ASGITransport(app=paper_search_app), base_url="http://test") as client:
         r = await client.get(
             "/api/v1/paper-search/biorxiv-pubs/by-doi",
             params={"doi": "10.1101/2021.11.09.467936", "server": "biorxiv"},
@@ -988,9 +972,7 @@ async def test_biorxiv_pubs_by_doi_success(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_biorxiv_funder_search_success(monkeypatch):
-    from tldw_Server_API.app.main import app
-
+async def test_biorxiv_funder_search_success(monkeypatch, paper_search_app):
     def _fake_funder(server, ror_id, from_date, to_date, offset, limit, recent_days, recent_count, category):
 
         items = [{
@@ -1011,7 +993,7 @@ async def test_biorxiv_funder_search_success(monkeypatch):
     from tldw_Server_API.app.core.Third_Party import BioRxiv as _Bio
     monkeypatch.setattr(_Bio, "search_biorxiv_funder", _fake_funder)
 
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+    async with AsyncClient(transport=ASGITransport(app=paper_search_app), base_url="http://test") as client:
         r = await client.get(
             "/api/v1/paper-search/biorxiv/funder",
             params={"server": "biorxiv", "ror_id": "03yrm5c26", "page": 1, "results_per_page": 10},
@@ -1031,9 +1013,7 @@ async def test_biorxiv_funder_search_success(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_biorxiv_publisher_search_success(monkeypatch):
-    from tldw_Server_API.app.main import app
-
+async def test_biorxiv_publisher_search_success(monkeypatch, paper_search_app):
     def _fake_publisher(publisher_prefix, from_date, to_date, offset, limit, recent_days, recent_count):
 
         items = [{
@@ -1053,7 +1033,7 @@ async def test_biorxiv_publisher_search_success(monkeypatch):
     from tldw_Server_API.app.core.Third_Party import BioRxiv as _Bio
     monkeypatch.setattr(_Bio, "search_biorxiv_publisher", _fake_publisher)
 
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+    async with AsyncClient(transport=ASGITransport(app=paper_search_app), base_url="http://test") as client:
         r = await client.get(
             "/api/v1/paper-search/biorxiv/publisher",
             params={"publisher_prefix": "10.7554", "page": 1, "results_per_page": 10},
@@ -1073,9 +1053,7 @@ async def test_biorxiv_publisher_search_success(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_biorxiv_pub_search_success(monkeypatch):
-    from tldw_Server_API.app.main import app
-
+async def test_biorxiv_pub_search_success(monkeypatch, paper_search_app):
     def _fake_pub(from_date, to_date, offset, limit, recent_days, recent_count):
 
         items = [{
@@ -1095,7 +1073,7 @@ async def test_biorxiv_pub_search_success(monkeypatch):
     from tldw_Server_API.app.core.Third_Party import BioRxiv as _Bio
     monkeypatch.setattr(_Bio, "search_biorxiv_pub", _fake_pub)
 
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+    async with AsyncClient(transport=ASGITransport(app=paper_search_app), base_url="http://test") as client:
         r = await client.get(
             "/api/v1/paper-search/biorxiv/pub",
             params={"recent_days": 7, "page": 1, "results_per_page": 10},

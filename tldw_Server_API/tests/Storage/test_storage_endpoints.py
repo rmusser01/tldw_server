@@ -10,7 +10,7 @@ Tests cover:
 - Soft/hard limit warnings in usage responses
 """
 import pytest
-from fastapi import HTTPException
+from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from unittest.mock import AsyncMock
 from datetime import datetime, timezone
@@ -18,6 +18,14 @@ from datetime import datetime, timezone
 from tldw_Server_API.app.api.v1.endpoints import storage as storage_endpoints
 from tldw_Server_API.app.api.v1.schemas.storage_schemas import SetQuotaRequest
 from tldw_Server_API.app.core.AuthNZ.exceptions import StorageError
+
+
+def _storage_download_test_app(mock_user) -> FastAPI:
+    """Create an isolated app for route-level storage download assertions."""
+    app = FastAPI()
+    app.include_router(storage_endpoints.router, prefix="/api/v1")
+    app.dependency_overrides[storage_endpoints.get_request_user] = lambda: mock_user
+    return app
 
 
 class TestListFilesEndpoint:
@@ -236,8 +244,6 @@ class TestDownloadFileEndpointIntegration:
         monkeypatch,
     ):
         """Successful download returns file bytes."""
-        from tldw_Server_API.app.main import app
-        from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user
         from tldw_Server_API.app.api.v1.endpoints import storage as storage_endpoint
 
         rel_path = "tts_audio/test.mp3"
@@ -267,14 +273,11 @@ class TestDownloadFileEndpointIntegration:
             lambda user_id: temp_user_outputs_dir,
         )
 
-        app.dependency_overrides[get_request_user] = lambda: mock_user
-        try:
-            with TestClient(app) as client:
-                resp = client.get("/api/v1/storage/files/1/download")
-                assert resp.status_code == 200
-                assert resp.content == b"test-bytes"
-        finally:
-            app.dependency_overrides.clear()
+        app = _storage_download_test_app(mock_user)
+        with TestClient(app) as client:
+            resp = client.get("/api/v1/storage/files/1/download")
+            assert resp.status_code == 200
+            assert resp.content == b"test-bytes"
 
     @pytest.mark.unit
     def test_download_file_blocks_path_traversal(
@@ -286,8 +289,6 @@ class TestDownloadFileEndpointIntegration:
         monkeypatch,
     ):
         """Path traversal storage paths are rejected."""
-        from tldw_Server_API.app.main import app
-        from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user
         from tldw_Server_API.app.api.v1.endpoints import storage as storage_endpoint
 
         file_record = {
@@ -312,13 +313,10 @@ class TestDownloadFileEndpointIntegration:
             lambda user_id: temp_user_outputs_dir,
         )
 
-        app.dependency_overrides[get_request_user] = lambda: mock_user
-        try:
-            with TestClient(app) as client:
-                resp = client.get("/api/v1/storage/files/2/download")
-                assert resp.status_code == 403
-        finally:
-            app.dependency_overrides.clear()
+        app = _storage_download_test_app(mock_user)
+        with TestClient(app) as client:
+            resp = client.get("/api/v1/storage/files/2/download")
+            assert resp.status_code == 403
 
     @pytest.mark.unit
     def test_download_file_uses_voices_dir_for_voice_clones(
@@ -330,8 +328,6 @@ class TestDownloadFileEndpointIntegration:
         monkeypatch,
     ):
         """Voice clone downloads resolve against the voices directory."""
-        from tldw_Server_API.app.main import app
-        from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user
         from tldw_Server_API.app.api.v1.endpoints import storage as storage_endpoint
 
         voices_dir = temp_storage_dir / "1" / "voices"
@@ -362,14 +358,11 @@ class TestDownloadFileEndpointIntegration:
             lambda user_id: voices_dir,
         )
 
-        app.dependency_overrides[get_request_user] = lambda: mock_user
-        try:
-            with TestClient(app) as client:
-                resp = client.get("/api/v1/storage/files/3/download")
-                assert resp.status_code == 200
-                assert resp.content == b"voice-bytes"
-        finally:
-            app.dependency_overrides.clear()
+        app = _storage_download_test_app(mock_user)
+        with TestClient(app) as client:
+            resp = client.get("/api/v1/storage/files/3/download")
+            assert resp.status_code == 200
+            assert resp.content == b"voice-bytes"
 
     @pytest.mark.unit
     def test_path_traversal_blocked_encoded(self, temp_user_outputs_dir):

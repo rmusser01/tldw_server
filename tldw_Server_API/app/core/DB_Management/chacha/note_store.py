@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 from typing import TYPE_CHECKING, Any
 
@@ -10,6 +11,8 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     ConflictError,
     FTSQueryTranslator,
     InputError,
+    _SUPPORTED_NOTE_STUDIO_HANDWRITING_MODES,
+    _SUPPORTED_NOTE_STUDIO_TEMPLATE_TYPES,
     _CHACHA_NONCRITICAL_EXCEPTIONS,
     logger,
 )
@@ -119,8 +122,204 @@ class NoteStore:
         if note and include_studio_summary:
             studio_document = self._db.get_note_studio_document(note_id)
             if studio_document:
-                note["studio"] = self._db._build_note_studio_summary(studio_document)
+                note["studio"] = self._build_note_studio_summary(studio_document)
         return note
+
+    @staticmethod
+    def _serialize_note_studio_json_field(value: dict[str, Any] | None, field_name: str, *, required: bool) -> str | None:
+        if value is None:
+            if required:
+                raise InputError(f"{field_name} cannot be None.")  # noqa: TRY003
+            return None
+        if not isinstance(value, dict):
+            raise InputError(f"{field_name} must be a JSON object.")  # noqa: TRY003
+        try:
+            return json.dumps(value)
+        except TypeError as exc:
+            raise InputError(f"{field_name} must be JSON serializable.") from exc  # noqa: TRY003
+
+    @staticmethod
+    def _build_note_studio_summary(document: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "note_id": document["note_id"],
+            "template_type": document["template_type"],
+            "handwriting_mode": document["handwriting_mode"],
+            "source_note_id": document.get("source_note_id"),
+            "excerpt_hash": document.get("excerpt_hash"),
+            "companion_content_hash": document.get("companion_content_hash"),
+            "render_version": document.get("render_version", 1),
+        }
+
+    def _fetch_note_studio_document_row(
+        self,
+        note_id: str,
+        *,
+        conn: sqlite3.Connection | BackendConnectionWrapper | None = None,
+    ) -> dict[str, Any] | None:
+        query = "SELECT * FROM note_studio_documents WHERE note_id = ?"
+        if conn is None:
+            cursor = self._db.execute_query(query, (note_id,))
+        else:
+            cursor = conn.execute(query, (note_id,))
+        row = cursor.fetchone()
+        return self._db._deserialize_row_fields(row, ["payload_json", "diagram_manifest_json"]) if row else None
+
+    def get_note_studio_document(self, note_id: str) -> dict[str, Any] | None:
+        return self._fetch_note_studio_document_row(note_id)
+
+    def _write_note_studio_document(
+        self,
+        *,
+        note_id: str,
+        payload_json: dict[str, Any],
+        template_type: str,
+        handwriting_mode: str,
+        source_note_id: str | None,
+        excerpt_snapshot: str | None,
+        excerpt_hash: str | None,
+        diagram_manifest_json: dict[str, Any] | None,
+        companion_content_hash: str | None,
+        render_version: int,
+        conn: sqlite3.Connection | BackendConnectionWrapper | None,
+        upsert: bool,
+    ) -> dict[str, Any]:
+        normalized_note_id = str(note_id).strip()
+        if not normalized_note_id:
+            raise InputError("note_id cannot be empty.")  # noqa: TRY003
+        if template_type not in _SUPPORTED_NOTE_STUDIO_TEMPLATE_TYPES:
+            raise InputError(
+                f"template_type must be one of {sorted(_SUPPORTED_NOTE_STUDIO_TEMPLATE_TYPES)}."
+            )  # noqa: TRY003
+        if handwriting_mode not in _SUPPORTED_NOTE_STUDIO_HANDWRITING_MODES:
+            raise InputError(
+                f"handwriting_mode must be one of {sorted(_SUPPORTED_NOTE_STUDIO_HANDWRITING_MODES)}."
+            )  # noqa: TRY003
+        if not isinstance(render_version, int) or render_version < 1:
+            raise InputError("render_version must be an integer >= 1.")  # noqa: TRY003
+
+        payload_json_str = self._serialize_note_studio_json_field(payload_json, "payload_json", required=True)
+        diagram_manifest_json_str = self._serialize_note_studio_json_field(
+            diagram_manifest_json,
+            "diagram_manifest_json",
+            required=False,
+        )
+        now = self._db._get_current_utc_timestamp_iso()
+
+        if upsert:
+            query = (
+                "INSERT INTO note_studio_documents ("
+                "note_id, payload_json, template_type, handwriting_mode, source_note_id, "
+                "excerpt_snapshot, excerpt_hash, diagram_manifest_json, companion_content_hash, "
+                "render_version, created_at, last_modified"
+                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(note_id) DO UPDATE SET "
+                "payload_json = excluded.payload_json, "
+                "template_type = excluded.template_type, "
+                "handwriting_mode = excluded.handwriting_mode, "
+                "source_note_id = excluded.source_note_id, "
+                "excerpt_snapshot = excluded.excerpt_snapshot, "
+                "excerpt_hash = excluded.excerpt_hash, "
+                "diagram_manifest_json = excluded.diagram_manifest_json, "
+                "companion_content_hash = excluded.companion_content_hash, "
+                "render_version = excluded.render_version, "
+                "last_modified = excluded.last_modified"
+            )
+        else:
+            query = (
+                "INSERT INTO note_studio_documents ("
+                "note_id, payload_json, template_type, handwriting_mode, source_note_id, "
+                "excerpt_snapshot, excerpt_hash, diagram_manifest_json, companion_content_hash, "
+                "render_version, created_at, last_modified"
+                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            )
+
+        params = (
+            normalized_note_id,
+            payload_json_str,
+            template_type,
+            handwriting_mode,
+            source_note_id,
+            excerpt_snapshot,
+            excerpt_hash,
+            diagram_manifest_json_str,
+            companion_content_hash,
+            render_version,
+            now,
+            now,
+        )
+
+        def _execute(inner_conn: sqlite3.Connection | BackendConnectionWrapper) -> dict[str, Any]:
+            prepared_query, prepared_params = self._db._prepare_backend_statement(query, params)
+            inner_conn.execute(prepared_query, prepared_params or ())
+            document = self._fetch_note_studio_document_row(normalized_note_id, conn=inner_conn)
+            if not document:
+                raise CharactersRAGDBError(f"Failed to read note studio document for note ID '{normalized_note_id}'.")
+            return document
+
+        if conn is None:
+            with self._db.transaction() as transaction_conn:
+                return _execute(transaction_conn)
+        return _execute(conn)
+
+    def create_note_studio_document(
+        self,
+        *,
+        note_id: str,
+        payload_json: dict[str, Any],
+        template_type: str,
+        handwriting_mode: str,
+        source_note_id: str | None = None,
+        excerpt_snapshot: str | None = None,
+        excerpt_hash: str | None = None,
+        diagram_manifest_json: dict[str, Any] | None = None,
+        companion_content_hash: str | None = None,
+        render_version: int,
+        conn: sqlite3.Connection | BackendConnectionWrapper | None = None,
+    ) -> dict[str, Any]:
+        return self._write_note_studio_document(
+            note_id=note_id,
+            payload_json=payload_json,
+            template_type=template_type,
+            handwriting_mode=handwriting_mode,
+            source_note_id=source_note_id,
+            excerpt_snapshot=excerpt_snapshot,
+            excerpt_hash=excerpt_hash,
+            diagram_manifest_json=diagram_manifest_json,
+            companion_content_hash=companion_content_hash,
+            render_version=render_version,
+            conn=conn,
+            upsert=False,
+        )
+
+    def upsert_note_studio_document(
+        self,
+        *,
+        note_id: str,
+        payload_json: dict[str, Any],
+        template_type: str,
+        handwriting_mode: str,
+        source_note_id: str | None = None,
+        excerpt_snapshot: str | None = None,
+        excerpt_hash: str | None = None,
+        diagram_manifest_json: dict[str, Any] | None = None,
+        companion_content_hash: str | None = None,
+        render_version: int,
+        conn: sqlite3.Connection | BackendConnectionWrapper | None = None,
+    ) -> dict[str, Any]:
+        return self._write_note_studio_document(
+            note_id=note_id,
+            payload_json=payload_json,
+            template_type=template_type,
+            handwriting_mode=handwriting_mode,
+            source_note_id=source_note_id,
+            excerpt_snapshot=excerpt_snapshot,
+            excerpt_hash=excerpt_hash,
+            diagram_manifest_json=diagram_manifest_json,
+            companion_content_hash=companion_content_hash,
+            render_version=render_version,
+            conn=conn,
+            upsert=True,
+        )
 
     def list_notes(
         self,
