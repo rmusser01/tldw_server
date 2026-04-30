@@ -2701,6 +2701,12 @@ async def stream_mcp_hub_events(
         owner_scope_type=owner_scope_type,
         owner_scope_id=owner_scope_id,
     )
+    allow_cross_tenant_replay = _is_admin_principal(principal)
+    replay_user_id = (
+        None
+        if allow_cross_tenant_replay or principal.user_id is None
+        else str(principal.user_id)
+    )
 
     async def event_generator():
         sent = 0
@@ -2711,10 +2717,11 @@ async def stream_mcp_hub_events(
             if replay:
                 durable_replayed = await replay_mcp_hub_audit_events(
                     principal_user_id=principal.user_id,
+                    user_id=replay_user_id,
                     after_event_id=after_event_id,
                     event_types=event_types,
                     limit=None,
-                    allow_cross_tenant=_is_admin_principal(principal),
+                    allow_cross_tenant=allow_cross_tenant_replay,
                 )
                 for event in durable_replayed:
                     if not _event_matches_visible_scope(event, visible_scopes):

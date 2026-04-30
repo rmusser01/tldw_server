@@ -600,6 +600,7 @@ async def test_mcp_hub_event_stream_permission_replay_is_tenant_scoped(monkeypat
 
     assert "evt_scoped" in text
     assert captured["principal_user_id"] == 1
+    assert captured["user_id"] == "1"
     assert captured["allow_cross_tenant"] is False
 
 

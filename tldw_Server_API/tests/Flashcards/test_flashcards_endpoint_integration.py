@@ -17,8 +17,15 @@ os.environ.setdefault("READING_DIGEST_JOBS_WORKER_ENABLED", "0")
 os.environ.setdefault("READING_DIGEST_SCHEDULER_ENABLED", "0")
 os.environ.setdefault("TEST_MODE", "1")
 
+from tldw_Server_API.app.api.v1.endpoints import flashcards as flashcards_endpoint
 from tldw_Server_API.app.api.v1.endpoints.config_info import router as config_info_router
 from tldw_Server_API.app.api.v1.endpoints.flashcards import router as flashcards_router
+from tldw_Server_API.app.api.v1.schemas.flashcards import DeckDeleteResponse
+from tldw_Server_API.app.api.v1.schemas.study_packs import (
+    StudyPackJobAcceptedResponse,
+    StudyPackJobListResponse,
+    StudyPackJobStatusResponse,
+)
 from tldw_Server_API.app.api.v1.API_Deps.jobs_deps import get_job_manager
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
@@ -58,6 +65,13 @@ def _build_flashcards_test_app() -> FastAPI:
 
 
 fastapi_app = _build_flashcards_test_app()
+
+
+def test_flashcards_reviewed_endpoints_have_explicit_return_annotations() -> None:
+    assert flashcards_endpoint.delete_deck.__annotations__["return"] is DeckDeleteResponse
+    assert flashcards_endpoint.create_study_pack_job.__annotations__["return"] is StudyPackJobAcceptedResponse
+    assert flashcards_endpoint.list_study_pack_jobs.__annotations__["return"] is StudyPackJobListResponse
+    assert flashcards_endpoint.get_study_pack_job_status.__annotations__["return"] is StudyPackJobStatusResponse
 
 
 @pytest.fixture(scope="function")

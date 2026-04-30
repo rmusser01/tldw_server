@@ -1901,7 +1901,7 @@ def create_study_pack_job(
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
     current_user: User = Depends(get_request_user),
     jm: JobManager = Depends(get_job_manager),
-):
+) -> StudyPackJobAcceptedResponse:
     try:
         _ensure_workspace_exists(db, payload.workspace_id)
         job = jm.create_job(
@@ -1913,7 +1913,7 @@ def create_study_pack_job(
             priority=5,
             max_retries=2,
         )
-        return {"job": _serialize_study_pack_job(job)}
+        return StudyPackJobAcceptedResponse(job=_serialize_study_pack_job(job))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -1957,7 +1957,7 @@ async def get_study_pack_job_status(
     current_user: User = Depends(get_request_user),
     principal: AuthPrincipal = Depends(get_auth_principal),
     jm: JobManager = Depends(get_job_manager),
-):
+) -> StudyPackJobStatusResponse:
     job = jm.get_job(job_id)
     if not job or str(job.get("domain") or "").strip().lower() != STUDY_PACKS_DOMAIN:
         raise HTTPException(status_code=404, detail="Study-pack job not found")
@@ -1974,11 +1974,11 @@ async def get_study_pack_job_status(
         )
         study_pack = _study_pack_from_job_result(study_pack_db, job)
     error = _public_study_pack_job_error(job)
-    return {
-        "job": _serialize_study_pack_job(job),
-        "study_pack": study_pack,
-        "error": error,
-    }
+    return StudyPackJobStatusResponse(
+        job=_serialize_study_pack_job(job),
+        study_pack=study_pack,
+        error=error,
+    )
 
 
 @router.get("/study-packs/{pack_id}", response_model=StudyPackSummaryResponse)
@@ -1998,7 +1998,7 @@ def regenerate_study_pack(
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
     current_user: User = Depends(get_request_user),
     jm: JobManager = Depends(get_job_manager),
-):
+) -> StudyPackJobAcceptedResponse:
     pack = db.get_study_pack(pack_id)
     if not pack:
         raise HTTPException(status_code=404, detail="Study pack not found")
@@ -2028,7 +2028,7 @@ def regenerate_study_pack(
         priority=5,
         max_retries=2,
     )
-    return {"job": _serialize_study_pack_job(job)}
+    return StudyPackJobAcceptedResponse(job=_serialize_study_pack_job(job))
 
 
 @router.get("/{card_uuid}/assistant", response_model=StudyAssistantContextResponse)

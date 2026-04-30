@@ -242,6 +242,7 @@ def _mcp_hub_scope_metadata(row: dict[str, Any] | None, **extra: Any) -> dict[st
 async def replay_mcp_hub_audit_events(
     *,
     principal_user_id: int | None,
+    user_id: str | None = None,
     after_event_id: str | None = None,
     event_types: set[str] | None = None,
     limit: int | None = None,
@@ -255,13 +256,16 @@ async def replay_mcp_hub_audit_events(
     """
     query_limit = max(limit or 1000, 1000)
     query_limit = min(query_limit, 5000)
+    tenant_user_id = user_id
+    if tenant_user_id is None and principal_user_id is not None:
+        tenant_user_id = str(principal_user_id)
     svc = await get_or_create_audit_service_for_user_id_optional(principal_user_id)
     rows = await svc.query_events(
         event_types=[AuditEventType.CONFIG_CHANGED],
         categories=[AuditEventCategory.SYSTEM],
         endpoint="/api/v1/mcp/hub",
         limit=query_limit,
-        user_id=None if allow_cross_tenant else (str(principal_user_id) if principal_user_id is not None else None),
+        user_id=None if allow_cross_tenant else tenant_user_id,
         allow_cross_tenant=allow_cross_tenant,
     )
     events = [
