@@ -15,6 +15,7 @@ from loguru import logger
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, rbac_rate_limit, User
 
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.schemas.document_references import (
     DocumentReferencesResponse,
     ReferenceEntry,
@@ -1430,6 +1431,17 @@ async def get_document_references(
     cached = get_cached_response(cache_key)
     if cached is not None:
         _etag, payload = cached
+        if "pagination" not in payload:
+            payload = dict(payload)
+            cached_refs = payload.get("references") or []
+            cached_count = int(payload.get("returned_count") or len(cached_refs))
+            cached_limit = int(payload.get("limit") or cached_count or 1)
+            payload["pagination"] = build_offset_pagination_meta(
+                total=int(payload.get("total_available") or 0),
+                limit=max(1, cached_limit),
+                offset=int(payload.get("offset") or 0),
+                count=cached_count,
+            )
         logger.debug("Returning cached references for media_id={}", media_id)
         return DocumentReferencesResponse(**payload)
 
@@ -1599,6 +1611,12 @@ async def get_document_references(
             total_available=total_available,
             has_more=False,
             next_offset=None,
+            pagination=build_offset_pagination_meta(
+                total=total_available,
+                limit=limit,
+                offset=offset,
+                count=0,
+            ),
         )
         cache_response(cache_key, response.model_dump(), media_id=media_id)
         return response
@@ -1694,6 +1712,12 @@ async def get_document_references(
         total_available=total_available,
         has_more=has_more,
         next_offset=page_end if has_more else None,
+        pagination=build_offset_pagination_meta(
+            total=total_available,
+            limit=limit,
+            offset=offset,
+            count=returned_count,
+        ),
     )
     cache_response(cache_key, response.model_dump(), media_id=media_id)
     return response

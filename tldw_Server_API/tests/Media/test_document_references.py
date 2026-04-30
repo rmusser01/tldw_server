@@ -161,6 +161,14 @@ async def test_references_endpoint_applies_pagination_window(mock_user, mock_db)
     assert data["total_available"] == 6
     assert data["has_more"] is True
     assert data["next_offset"] == 4
+    assert data["pagination"] == {
+        "mode": "offset",
+        "limit": 2,
+        "offset": 2,
+        "total": 6,
+        "has_more": True,
+        "next_offset": 4,
+    }
     assert "Example 3" in data["references"][0]["raw_text"]
     assert "Example 4" in data["references"][1]["raw_text"]
 
@@ -194,6 +202,14 @@ async def test_references_endpoint_applies_search_before_pagination(mock_user, m
     assert data["total_available"] == 1
     assert data["has_more"] is False
     assert data["next_offset"] is None
+    assert data["pagination"] == {
+        "mode": "offset",
+        "limit": 2,
+        "offset": 0,
+        "total": 1,
+        "has_more": False,
+        "next_offset": None,
+    }
     assert "Example 6" in data["references"][0]["raw_text"]
 
     app.dependency_overrides.clear()
