@@ -549,3 +549,87 @@ async def test_biorxiv_funder_search_success(monkeypatch):
             "total_pages": 1,
             "has_more": False,
         }
+
+
+@pytest.mark.asyncio
+async def test_biorxiv_publisher_search_success(monkeypatch):
+    from tldw_Server_API.app.main import app
+
+    def _fake_publisher(publisher_prefix, from_date, to_date, offset, limit, recent_days, recent_count):
+
+        items = [{
+            "biorxiv_doi": "10.1101/2024.02.02.234567",
+            "published_doi": "10.7554/eLife.99999",
+            "published_journal": "eLife",
+            "preprint_platform": "biorxiv",
+            "preprint_title": "Publisher Mapped Preprint",
+            "preprint_authors": "Doe, J.; Roe, R.",
+            "preprint_category": "cell biology",
+            "preprint_date": "2024-02-02",
+            "published_date": "2024-03-01",
+            "preprint_abstract": "Test",
+        }]
+        return items, 1, None
+
+    from tldw_Server_API.app.core.Third_Party import BioRxiv as _Bio
+    monkeypatch.setattr(_Bio, "search_biorxiv_publisher", _fake_publisher)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        r = await client.get(
+            "/api/v1/paper-search/biorxiv/publisher",
+            params={"publisher_prefix": "10.7554", "page": 1, "results_per_page": 10},
+        )
+        assert r.status_code == 200
+        data = r.json()
+        assert data["total_results"] == 1
+        assert len(data["items"]) == 1
+        assert data["pagination"] == {
+            "mode": "page",
+            "page": 1,
+            "per_page": 10,
+            "total": 1,
+            "total_pages": 1,
+            "has_more": False,
+        }
+
+
+@pytest.mark.asyncio
+async def test_biorxiv_pub_search_success(monkeypatch):
+    from tldw_Server_API.app.main import app
+
+    def _fake_pub(from_date, to_date, offset, limit, recent_days, recent_count):
+
+        items = [{
+            "biorxiv_doi": "10.1101/2024.04.04.456789",
+            "published_doi": "10.7554/eLife.88888",
+            "published_journal": "eLife",
+            "preprint_platform": "biorxiv",
+            "preprint_title": "Published Article Detail",
+            "preprint_authors": "Doe, J.; Roe, R.",
+            "preprint_category": "genetics",
+            "preprint_date": "2024-04-04",
+            "published_date": "2024-05-01",
+            "preprint_abstract": "Test",
+        }]
+        return items, 1, None
+
+    from tldw_Server_API.app.core.Third_Party import BioRxiv as _Bio
+    monkeypatch.setattr(_Bio, "search_biorxiv_pub", _fake_pub)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        r = await client.get(
+            "/api/v1/paper-search/biorxiv/pub",
+            params={"recent_days": 7, "page": 1, "results_per_page": 10},
+        )
+        assert r.status_code == 200
+        data = r.json()
+        assert data["total_results"] == 1
+        assert len(data["items"]) == 1
+        assert data["pagination"] == {
+            "mode": "page",
+            "page": 1,
+            "per_page": 10,
+            "total": 1,
+            "total_pages": 1,
+            "has_more": False,
+        }
