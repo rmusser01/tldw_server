@@ -83,8 +83,9 @@ Current limitations:
   raw-disk compatibility mode through `boot_mode` and `validation_strength`.
 - `SandboxImageStore` persists template manifests under
   `<root>/templates/<runtime>/<template>/manifest.json`, records artifact
-  size/SHA-256 metadata plus optional bundle provenance, and exposes dry-run
-  run-directory GC planning.
+  size/SHA-256 metadata plus optional bundle provenance, persists run clone
+  planning manifests under `<root>/runs/<run_id>/manifest.json`, and exposes
+  dry-run run-directory GC planning.
 - `seatbelt` is intentionally conservative and should not be treated as equivalent to a VM boundary.
 - Real host `vz_linux` smoke coverage should normally be run through
   `tools/macos-vz-helper/scripts/vz-helperctl.py smoke`; the lower-level

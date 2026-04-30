@@ -115,12 +115,16 @@ The image store is now filesystem-backed at:
         manifest.json
   runs/
     <run-id>/
+      manifest.json
 ```
 
 Template manifests include artifact paths, artifact size, SHA-256 hashes,
 labels, registration time, source path, and optional build provenance from a
-bundle `build-info.json`. The store remains an inventory and planning layer,
-not the bootability source of truth; helper `validate_template` still owns that.
+bundle `build-info.json`. Run clone manifests now persist deterministic
+per-run clone planning under `runs/<run_id>/manifest.json`, so later helper
+integration and dry-run GC can reason over store-owned run metadata. The store
+remains an inventory and planning layer, not the bootability source of truth;
+helper `validate_template` still owns that.
 
 Minimal Python registration example:
 

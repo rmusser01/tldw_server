@@ -67,7 +67,15 @@ def test_sandbox_image_store_registers_bundle_reloads_and_plans_gc(tmp_path: Pat
     assert record.provenance == {"suite": "bookworm", "architecture": "arm64"}
     assert [template.template_id for template in reloaded.list_templates(runtime="vz_linux")] == [template_id]
     assert any(item.target_path.endswith("run-123/rootfs.img") for item in clone_manifest.clone_items)
-    assert gc_plan.run_candidates[0].run_id == "run-drop"
+    assert (tmp_path / "store" / "runs" / "run-123" / "manifest.json").exists()
+    persisted_manifest = reloaded.get_run_clone_manifest("run-123")
+    assert persisted_manifest is not None
+    assert persisted_manifest.template_id == template_id
+    assert persisted_manifest.run_id == "run-123"
+    assert [candidate.run_id for candidate in gc_plan.run_candidates] == [
+        "run-123",
+        "run-drop",
+    ]
 
 
 def test_sandbox_image_store_rejects_manifest_path_mismatch(tmp_path: Path) -> None:
@@ -166,3 +174,37 @@ def test_sandbox_image_store_gc_plan_ignores_files_deleted_during_size_scan(
 
     assert plan.run_candidates[0].run_id == "run-drop"
     assert plan.run_candidates[0].size_bytes == 0
+
+
+def test_sandbox_image_store_lists_persisted_run_clone_manifests(tmp_path: Path) -> None:
+    disk = tmp_path / "rootfs.img"
+    disk.write_bytes(b"rootfs")
+    store = SandboxImageStore(root_path=tmp_path / "store")
+    template_id = store.register_template(
+        runtime="vz_linux",
+        template_name="debian-bookworm-arm64",
+        disk_paths=[str(disk)],
+    )
+
+    store.prepare_run_clone(template_id=template_id, run_id="run-b")
+    store.prepare_run_clone(template_id=template_id, run_id="run-a")
+
+    reloaded = SandboxImageStore(root_path=tmp_path / "store")
+    assert [manifest.run_id for manifest in reloaded.list_run_clone_manifests()] == [
+        "run-a",
+        "run-b",
+    ]
+
+
+def test_sandbox_image_store_rejects_invalid_run_id_for_clone_manifest(tmp_path: Path) -> None:
+    disk = tmp_path / "rootfs.img"
+    disk.write_bytes(b"rootfs")
+    store = SandboxImageStore(root_path=tmp_path / "store")
+    template_id = store.register_template(
+        runtime="vz_linux",
+        template_name="debian-bookworm-arm64",
+        disk_paths=[str(disk)],
+    )
+
+    with pytest.raises(ImageStoreValidationError, match="run_id_invalid"):
+        store.prepare_run_clone(template_id=template_id, run_id="../escape")
