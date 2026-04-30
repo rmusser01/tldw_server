@@ -453,7 +453,7 @@ git commit -m "feat(sandbox): add macos helper lifecycle checks"
 - Modify: `tools/macos-vz-helper/scripts/vz-helperctl.py`
 - Modify: `tools/macos-vz-helper/tests/test_vz_helperctl.py`
 
-- [ ] **Step 1: Write failing tests for dry-run build and sign**
+- [x] **Step 1: Write failing tests for dry-run build and sign**
 
 Add tests:
 
@@ -481,7 +481,7 @@ def test_sign_requires_entitlements(tmp_path: Path, capsys) -> None:
     assert "helper_entitlements_missing" in captured.err
 ```
 
-- [ ] **Step 2: Write failing tests for pid mismatch and failed-start cleanup**
+- [x] **Step 2: Write failing tests for pid mismatch and failed-start cleanup**
 
 Use fake process hooks rather than spawning real helpers:
 
@@ -524,7 +524,7 @@ def test_start_cleans_up_just_started_process_on_ping_failure(tmp_path: Path) ->
 
 Adjust exact helper function names if the implementation uses a different small seam, but keep injected process hooks so tests do not launch real helpers.
 
-- [ ] **Step 3: Implement lifecycle process helpers**
+- [x] **Step 3: Implement lifecycle process helpers**
 
 Add:
 
@@ -548,7 +548,7 @@ Implementation requirements:
 - `stop` validates pid ownership before sending terminate.
 - `status` never starts or stops anything.
 
-- [ ] **Step 4: Run lifecycle CLI tests**
+- [x] **Step 4: Run lifecycle CLI tests**
 
 Run:
 
@@ -558,7 +558,7 @@ source .venv/bin/activate && python -m pytest tools/macos-vz-helper/tests/test_v
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit Task 4**
+- [x] **Step 5: Commit Task 4**
 
 ```bash
 git add \
@@ -576,7 +576,7 @@ git commit -m "feat(sandbox): manage macos helper process lifecycle"
 - Modify: `Docs/Sandbox/macos-runtime-operator-notes.md`
 - Modify: `tldw_Server_API/app/core/Sandbox/README.md`
 
-- [ ] **Step 1: Write failing smoke delegation test**
+- [x] **Step 1: Write failing smoke delegation test**
 
 Add:
 
@@ -609,7 +609,7 @@ def test_smoke_dry_run_delegates_to_host_smoke_script(tmp_path: Path, capsys) ->
     assert f"--helper {helper}" in captured.out
 ```
 
-- [ ] **Step 2: Implement `smoke` delegation**
+- [x] **Step 2: Implement `smoke` delegation**
 
 Implement `smoke` as command construction around:
 
@@ -629,7 +629,7 @@ Pass:
 
 Do not duplicate helper daemon smoke or real host E2E pytest logic.
 
-- [ ] **Step 3: Update helper README**
+- [x] **Step 3: Update helper README**
 
 Add a "Managed helper lifecycle" section to `tools/macos-vz-helper/README.md`:
 
@@ -651,7 +651,7 @@ The command uses stable user-owned defaults under `~/Library/Application Support
 It does not install launchd services or auto-upgrade helpers.
 ````
 
-- [ ] **Step 4: Update operator docs**
+- [x] **Step 4: Update operator docs**
 
 In `Docs/Sandbox/macos-runtime-operator-notes.md`, update "Real Host E2E Smoke" to show:
 
@@ -664,14 +664,14 @@ tools/macos-vz-helper/scripts/vz-helperctl.py smoke \
 
 Keep the existing direct `run-host-e2e-smoke.sh` command as the lower-level fallback.
 
-- [ ] **Step 5: Update sandbox README**
+- [x] **Step 5: Update sandbox README**
 
 In `tldw_Server_API/app/core/Sandbox/README.md`, add one bullet under macOS scaffolding/current limitations explaining:
 
 - `vz-helperctl.py` is the preferred operator helper lifecycle command.
 - It generates launchd plist scaffolding but does not install/load services.
 
-- [ ] **Step 6: Run smoke/documentation tests**
+- [x] **Step 6: Run smoke/documentation tests**
 
 Run:
 
@@ -684,7 +684,7 @@ source .venv/bin/activate && python -m pytest \
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit Task 5**
+- [x] **Step 7: Commit Task 5**
 
 ```bash
 git add \

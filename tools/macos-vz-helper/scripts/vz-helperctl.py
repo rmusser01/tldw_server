@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Lifecycle checks and launchd plist rendering for the macOS VZ helper."""
 
+from __future__ import annotations
+
 import argparse
 import contextlib
 import json
@@ -52,6 +54,7 @@ class ProcessInfo:
     pid: int
     command: str
     error_reason: str = ""
+    identity: str = ""
 
 
 @dataclass(frozen=True)
@@ -64,6 +67,7 @@ class StartedProcess:
 class PidFileState:
     result: CheckResult
     pid: int | None = None
+    process: ProcessInfo | None = None
 
 
 @dataclass(frozen=True)
@@ -243,6 +247,10 @@ def render_launchd_plist(
     return plistlib.dumps(payload, sort_keys=True).decode("utf-8")
 
 
+def host_smoke_script_path() -> Path:
+    return REPO_ROOT / "tools" / "vz-linux-image" / "scripts" / "run-host-e2e-smoke.sh"
+
+
 def run_command(argv: list[str], *, dry_run: bool = False, env: dict[str, str] | None = None) -> int:
     if dry_run:
         print(" ".join(shlex.quote(str(arg)) for arg in argv))
@@ -298,6 +306,35 @@ def sign_helper(
     )
     if code != 0:
         return CheckResult(ok=False, reason="helper_codesign_failed")
+    return CheckResult(ok=True)
+
+
+def smoke_helper(
+    *,
+    bundle_path: Path,
+    socket_path: Path | None = None,
+    serial_log_dir: Path | None = None,
+    helper_path: Path | None = None,
+    entitlements_path: Path | None = None,
+    python_path: Path | None = None,
+    dry_run: bool = False,
+) -> CheckResult:
+    argv = [str(host_smoke_script_path()), "--bundle", str(bundle_path)]
+    if socket_path is not None:
+        argv.extend(["--socket", str(socket_path)])
+    if serial_log_dir is not None:
+        argv.extend(["--serial-log-dir", str(serial_log_dir)])
+    if helper_path is not None:
+        argv.extend(["--helper", str(helper_path)])
+    if entitlements_path is not None:
+        argv.extend(["--entitlements", str(entitlements_path)])
+    if python_path is not None:
+        argv.extend(["--python", str(python_path)])
+    if dry_run:
+        argv.append("--dry-run")
+    code = run_command(argv, dry_run=dry_run)
+    if code != 0:
+        return CheckResult(ok=False, reason="helper_smoke_failed")
     return CheckResult(ok=True)
 
 
@@ -369,7 +406,19 @@ def lookup_process(pid: int) -> ProcessInfo | None:
         return ProcessInfo(pid=pid, command="", error_reason="helper_process_lookup_unavailable")
     if completed.returncode != 0:
         return ProcessInfo(pid=pid, command="", error_reason="helper_process_lookup_failed")
-    return ProcessInfo(pid=pid, command=completed.stdout.strip())
+    identity = ""
+    try:
+        identity_completed = subprocess.run(  # nosec
+            ["ps", "-p", str(pid), "-o", "lstart="],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if identity_completed.returncode == 0:
+            identity = identity_completed.stdout.strip()
+    except (FileNotFoundError, PermissionError, OSError):
+        identity = ""
+    return ProcessInfo(pid=pid, command=completed.stdout.strip(), identity=identity)
 
 
 def _command_matches_helper(command: str, expected_helper: Path) -> bool:
@@ -415,7 +464,7 @@ def read_pid_file_state(
         return PidFileState(CheckResult(ok=False, reason=process.error_reason), pid=pid)
     if not _command_matches_helper(process.command, expected_helper):
         return PidFileState(CheckResult(ok=False, reason="helper_pid_process_mismatch"), pid=pid)
-    return PidFileState(CheckResult(ok=True, reason="helper_pid_running"), pid=pid)
+    return PidFileState(CheckResult(ok=True, reason="helper_pid_running"), pid=pid, process=process)
 
 
 
@@ -552,6 +601,16 @@ def _remove_pid_file_if_pid(pid_file: Path, expected_pid: int) -> bool:
     return True
 
 
+def _remove_socket_if_identity_present(
+    socket_path: Path,
+    socket_identity: SocketIdentity | None,
+    socket_remover: Callable[[Path, SocketIdentity | None], None],
+) -> None:
+    if socket_identity is None:
+        return
+    socket_remover(socket_path, socket_identity)
+
+
 def validate_process_identity(
     pid: int,
     expected_helper: Path,
@@ -566,6 +625,14 @@ def validate_process_identity(
     if not _command_matches_helper(process.command, expected_helper):
         return CheckResult(ok=False, reason="helper_pid_process_mismatch")
     return CheckResult(ok=True, reason="helper_pid_running")
+
+
+def process_instances_match(expected: ProcessInfo, actual: ProcessInfo) -> bool:
+    if expected.pid != actual.pid:
+        return False
+    if expected.identity and actual.identity:
+        return expected.identity == actual.identity
+    return expected.command == actual.command
 
 
 def process_exists(pid: int) -> bool:
@@ -645,12 +712,16 @@ def wait_for_process_exit(
     pid: int,
     *,
     process_lookup: Callable[[int], ProcessInfo | None] = lookup_process,
+    expected_process: ProcessInfo | None = None,
     timeout_sec: float = 5.0,
     interval_sec: float = 0.05,
 ) -> CheckResult:
     deadline = time.monotonic() + timeout_sec
     while True:
-        if process_lookup(pid) is None:
+        process = process_lookup(pid)
+        if process is None:
+            return CheckResult(ok=True)
+        if expected_process is not None and not process_instances_match(expected_process, process):
             return CheckResult(ok=True)
         if time.monotonic() >= deadline:
             return CheckResult(ok=False, reason="helper_stop_timeout")
@@ -670,6 +741,25 @@ def wait_for_process_handle_exit(process: object, *, timeout_sec: float) -> Chec
     return CheckResult(ok=True)
 
 
+def terminate_process_handle(
+    process: object,
+    *,
+    pid: int,
+    process_killer: Callable[[int], None],
+) -> CheckResult:
+    terminate = getattr(process, "terminate", None)
+    if callable(terminate):
+        try:
+            terminate()
+        except ProcessLookupError:
+            return CheckResult(ok=True)
+        except OSError as exc:
+            return CheckResult(ok=False, reason="helper_stop_failed", message=str(exc))
+        return CheckResult(ok=True)
+    process_killer(pid)
+    return CheckResult(ok=True)
+
+
 def cleanup_started_helper(
     *,
     pid: int,
@@ -684,31 +774,39 @@ def cleanup_started_helper(
     exit_poll_interval_sec: float,
     expected_helper: Path | None = None,
 ) -> CheckResult:
+    process_handle = None
+    if started_process is not None and started_process.pid == pid:
+        process_handle = started_process.process
+    if process_handle is not None:
+        terminate_result = terminate_process_handle(process_handle, pid=pid, process_killer=process_killer)
+        if not terminate_result.ok:
+            return terminate_result
+        exit_result = wait_for_process_handle_exit(process_handle, timeout_sec=exit_timeout_sec)
+        if not exit_result.ok:
+            return exit_result
+        _remove_pid_file_if_pid(pid_file, pid)
+        _remove_socket_if_identity_present(socket_path, socket_identity, socket_remover)
+        return CheckResult(ok=True)
+
     if expected_helper is not None:
         identity_result = validate_process_identity(pid, expected_helper, process_lookup=process_lookup)
         if not identity_result.ok:
             return identity_result
         if identity_result.reason == "helper_pid_stale":
             _remove_pid_file_if_pid(pid_file, pid)
-            socket_remover(socket_path, socket_identity)
+            _remove_socket_if_identity_present(socket_path, socket_identity, socket_remover)
             return CheckResult(ok=True, reason="helper_pid_stale")
     process_killer(pid)
-    process_handle = None
-    if started_process is not None and started_process.pid == pid:
-        process_handle = started_process.process
-    if process_handle is not None:
-        exit_result = wait_for_process_handle_exit(process_handle, timeout_sec=exit_timeout_sec)
-    else:
-        exit_result = wait_for_process_exit(
-            pid,
-            process_lookup=process_lookup,
-            timeout_sec=exit_timeout_sec,
-            interval_sec=exit_poll_interval_sec,
-        )
+    exit_result = wait_for_process_exit(
+        pid,
+        process_lookup=process_lookup,
+        timeout_sec=exit_timeout_sec,
+        interval_sec=exit_poll_interval_sec,
+    )
     if not exit_result.ok:
         return exit_result
     _remove_pid_file_if_pid(pid_file, pid)
-    socket_remover(socket_path, socket_identity)
+    _remove_socket_if_identity_present(socket_path, socket_identity, socket_remover)
     return CheckResult(ok=True)
 
 
@@ -782,7 +880,7 @@ def start_helper(
                 started_process=started,
                 pid_file=pid_file,
                 socket_path=socket_path,
-                socket_identity=socket_identity(socket_path),
+                socket_identity=None,
                 process_killer=process_killer,
                 process_lookup=process_lookup,
                 socket_remover=socket_remover,
@@ -1028,23 +1126,29 @@ def stop_helper(
             return CheckResult(ok=True, reason="helper_not_running")
         if pid_result.reason == "helper_pid_stale":
             if socket_path is not None:
+                stale_socket_identity = socket_identity_reader(socket_path)
                 if socket_active_checker(socket_path):
                     return CheckResult(ok=False, reason="helper_socket_active")
-                socket_remover(socket_path, socket_identity_reader(socket_path))
+                _remove_socket_if_identity_present(socket_path, stale_socket_identity, socket_remover)
             _remove_pid_file_if_pid(pid_file, pid_state.pid)
             return CheckResult(ok=True, reason="helper_pid_stale")
         pid = pid_state.pid
-        final_identity = validate_process_identity(pid, helper_path, process_lookup=process_lookup)
-        if not final_identity.ok:
-            return final_identity
-        if final_identity.reason == "helper_pid_stale":
+        final_process = process_lookup(pid)
+        if final_process is None:
             _remove_pid_file_if_pid(pid_file, pid)
             return CheckResult(ok=True, reason="helper_pid_stale")
+        if final_process.error_reason:
+            return CheckResult(ok=False, reason=final_process.error_reason)
+        if not _command_matches_helper(final_process.command, helper_path):
+            return CheckResult(ok=False, reason="helper_pid_process_mismatch")
+        if pid_state.process is not None and not process_instances_match(pid_state.process, final_process):
+            return CheckResult(ok=False, reason="helper_pid_process_mismatch")
         owned_socket_identity = socket_identity_reader(socket_path) if socket_path is not None else None
         process_killer(pid)
         exit_result = wait_for_process_exit(
             pid,
             process_lookup=process_lookup,
+            expected_process=final_process,
             timeout_sec=exit_timeout_sec,
             interval_sec=exit_poll_interval_sec,
         )
@@ -1116,7 +1220,20 @@ def _plist_command(args: argparse.Namespace) -> int:
         print(f"log_directory: not ok {directory_result.reason}", file=sys.stderr)
         return 1
 
-    print(render_launchd_plist(helper_path, socket_path, log_dir), end="")
+    rendered = render_launchd_plist(helper_path, socket_path, log_dir)
+    if args.plist_output:
+        if args.dry_run:
+            print(rendered, end="")
+            return 0
+        plist_output = Path(args.plist_output)
+        output_directory_result = ensure_private_dir(plist_output.parent, dry_run=False)
+        if not output_directory_result.ok:
+            print(f"plist_directory: not ok {output_directory_result.reason}", file=sys.stderr)
+            return 1
+        plist_output.write_text(rendered, encoding="utf-8")
+        return 0
+
+    print(rendered, end="")
     return 0
 
 
@@ -1189,6 +1306,24 @@ def _stop_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def _smoke_command(args: argparse.Namespace) -> int:
+    paths = default_paths()
+    result = smoke_helper(
+        bundle_path=Path(args.bundle),
+        socket_path=Path(args.socket_path) if args.socket_path else paths.socket_path,
+        serial_log_dir=Path(args.serial_log_dir) if args.serial_log_dir else paths.log_dir / "serial",
+        helper_path=Path(args.helper_path) if args.helper_path else DEFAULT_HELPER,
+        entitlements_path=Path(args.entitlements) if args.entitlements else None,
+        python_path=Path(args.python) if args.python else None,
+        dry_run=args.dry_run,
+    )
+    if not result.ok:
+        print(f"smoke: not ok {result.reason}", file=sys.stderr)
+        return 1
+    print("smoke: ok")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Check macOS VZ helper paths and render a launchd plist.",
@@ -1243,11 +1378,23 @@ def build_parser() -> argparse.ArgumentParser:
     stop.add_argument("--socket", "--socket-path", dest="socket_path")
     stop.set_defaults(func=_stop_command)
 
+    smoke = subparsers.add_parser("smoke", help="delegate to the host VZ Linux E2E smoke script")
+    smoke.add_argument("--bundle", required=True)
+    smoke.add_argument("--socket", "--socket-path", dest="socket_path")
+    smoke.add_argument("--serial-log-dir")
+    smoke.add_argument("--helper", "--helper-path", dest="helper_path")
+    smoke.add_argument("--entitlements")
+    smoke.add_argument("--python")
+    smoke.add_argument("--dry-run", action="store_true")
+    smoke.set_defaults(func=_smoke_command)
+
     plist_parser = subparsers.add_parser("plist", help="print launchd plist XML")
     plist_parser.add_argument("--helper", "--helper-path", dest="helper_path")
     plist_parser.add_argument("--socket", "--socket-path", dest="socket_path")
     plist_parser.add_argument("--log-dir")
-    plist_parser.add_argument("--dry-run", action="store_true")
+    plist_parser.add_argument("--plist-output")
+    plist_parser.add_argument("--dry-run", action="store_true", default=True)
+    plist_parser.add_argument("--create-dirs", action="store_false", dest="dry_run")
     plist_parser.set_defaults(func=_plist_command)
 
     return parser

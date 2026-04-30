@@ -2,6 +2,7 @@ import importlib.util
 import os
 import plistlib
 import socket
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -338,6 +339,7 @@ def test_plist_cli_creates_private_socket_parent_when_not_dry_run(tmp_path, caps
     code = helperctl.main(
         [
             "plist",
+            "--create-dirs",
             "--helper",
             str(helper_path),
             "--socket",
@@ -354,6 +356,59 @@ def test_plist_cli_creates_private_socket_parent_when_not_dry_run(tmp_path, caps
     CASE.assertEqual(log_dir.stat().st_mode & 0o777, 0o700)
 
 
+def test_plist_cli_defaults_to_dry_run_without_creating_directories(tmp_path, capsys):
+    helperctl = load_helperctl()
+    helper_path = tmp_path / "macos-vz-helper"
+    socket_path = tmp_path / "runtime" / "helper.sock"
+    log_dir = tmp_path / "logs"
+
+    code = helperctl.main(
+        [
+            "plist",
+            "--helper",
+            str(helper_path),
+            "--socket",
+            str(socket_path),
+            "--log-dir",
+            str(log_dir),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    CASE.assertEqual(code, 0)
+    CASE.assertIn(str(socket_path), captured.out)
+    CASE.assertFalse(socket_path.parent.exists())
+    CASE.assertFalse(log_dir.exists())
+
+
+def test_plist_cli_writes_explicit_output_when_requested(tmp_path, capsys):
+    helperctl = load_helperctl()
+    helper_path = tmp_path / "macos-vz-helper"
+    socket_path = tmp_path / "runtime" / "helper.sock"
+    log_dir = tmp_path / "logs"
+    plist_output = tmp_path / "LaunchAgents" / "org.tldw.macos-vz-helper.plist"
+
+    code = helperctl.main(
+        [
+            "plist",
+            "--create-dirs",
+            "--helper",
+            str(helper_path),
+            "--socket",
+            str(socket_path),
+            "--log-dir",
+            str(log_dir),
+            "--plist-output",
+            str(plist_output),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    CASE.assertEqual(code, 0)
+    CASE.assertEqual(captured.out, "")
+    CASE.assertIn(str(socket_path), plist_output.read_text(encoding="utf-8"))
+
+
 def test_plist_cli_rejects_unsafe_socket_parent_when_not_dry_run(tmp_path, capsys):
     helperctl = load_helperctl()
     helper_path = tmp_path / "macos-vz-helper"
@@ -364,6 +419,7 @@ def test_plist_cli_rejects_unsafe_socket_parent_when_not_dry_run(tmp_path, capsy
     code = helperctl.main(
         [
             "plist",
+            "--create-dirs",
             "--helper",
             str(helper_path),
             "--socket",
@@ -695,14 +751,17 @@ def test_validate_pid_file_reports_missing_process_lookup_tool(monkeypatch, tmp_
     helperctl = load_helperctl()
     helper = tmp_path / "macos-vz-helper"
     pid_file = tmp_path / "helper.pid"
-    pid_file.write_text(f"{os.getpid()}\n", encoding="utf-8")
+    pid_file.write_text("12345\n", encoding="utf-8")
 
-    def missing_ps(*args, **kwargs):
-        raise FileNotFoundError("ps")
-
-    monkeypatch.setattr(helperctl.subprocess, "run", missing_ps)
-
-    result = helperctl.validate_pid_file(pid_file, helper)
+    result = helperctl.validate_pid_file(
+        pid_file,
+        helper,
+        process_lookup=lambda pid: helperctl.ProcessInfo(
+            pid=pid,
+            command="",
+            error_reason="helper_process_lookup_unavailable",
+        ),
+    )
 
     CASE.assertEqual(result, helperctl.CheckResult(ok=False, reason="helper_process_lookup_unavailable"))
 
@@ -711,14 +770,17 @@ def test_validate_pid_file_reports_blocked_process_lookup_tool(monkeypatch, tmp_
     helperctl = load_helperctl()
     helper = tmp_path / "macos-vz-helper"
     pid_file = tmp_path / "helper.pid"
-    pid_file.write_text(f"{os.getpid()}\n", encoding="utf-8")
+    pid_file.write_text("12345\n", encoding="utf-8")
 
-    def blocked_ps(*args, **kwargs):
-        raise PermissionError("ps")
-
-    monkeypatch.setattr(helperctl.subprocess, "run", blocked_ps)
-
-    result = helperctl.validate_pid_file(pid_file, helper)
+    result = helperctl.validate_pid_file(
+        pid_file,
+        helper,
+        process_lookup=lambda pid: helperctl.ProcessInfo(
+            pid=pid,
+            command="",
+            error_reason="helper_process_lookup_unavailable",
+        ),
+    )
 
     CASE.assertEqual(result, helperctl.CheckResult(ok=False, reason="helper_process_lookup_unavailable"))
 
@@ -874,6 +936,54 @@ def test_start_helper_reaps_started_process_on_failed_start(tmp_path):
     CASE.assertFalse(pid_file.exists())
 
 
+def test_start_helper_reaps_started_process_when_lookup_is_unavailable(tmp_path):
+    helperctl = load_helperctl()
+    helper = tmp_path / "macos-vz-helper"
+    socket_path = tmp_path / "runtime" / "helper.sock"
+    pid_file = tmp_path / "runtime" / "helper.pid"
+    log_dir = tmp_path / "logs"
+    helper.write_text("#!/bin/sh\n", encoding="utf-8")
+    helper.chmod(0o700)
+    killed = []
+
+    class FakeProcess:
+        def __init__(self):
+            self.terminate_calls = 0
+            self.wait_calls = []
+
+        def terminate(self):
+            self.terminate_calls += 1
+
+        def wait(self, *, timeout=None):
+            self.wait_calls.append(timeout)
+            return 0
+
+    process = FakeProcess()
+
+    result = helperctl.start_helper(
+        helper,
+        socket_path,
+        pid_file,
+        log_dir,
+        process_starter=lambda argv, env, **kwargs: helperctl.StartedProcess(pid=1234, process=process),
+        socket_waiter=lambda path: helperctl.CheckResult(False, "helper_socket_not_ready"),
+        process_killer=lambda pid: killed.append(pid),
+        process_lookup=lambda pid: helperctl.ProcessInfo(
+            pid=pid,
+            command="",
+            error_reason="helper_process_lookup_unavailable",
+        ),
+        exit_timeout_sec=0.01,
+        exit_poll_interval_sec=0.001,
+    )
+
+    CASE.assertEqual(result, helperctl.CheckResult(ok=False, reason="helper_socket_not_ready"))
+    CASE.assertEqual(process.terminate_calls, 1)
+    CASE.assertEqual(process.wait_calls, [0.01])
+    CASE.assertEqual(killed, [])
+    CASE.assertFalse(pid_file.exists())
+
+
 def test_start_helper_waits_when_pid_write_loses_race(tmp_path):
     helperctl = load_helperctl()
     helper = tmp_path / "macos-vz-helper"
@@ -908,6 +1018,48 @@ def test_start_helper_waits_when_pid_write_loses_race(tmp_path):
     CASE.assertEqual(result, helperctl.CheckResult(ok=False, reason="helper_stop_timeout"))
     CASE.assertEqual(killed, [1234])
     CASE.assertEqual(pid_file.read_text(encoding="utf-8"), "9999\n")
+
+
+def test_start_helper_does_not_remove_socket_when_pid_write_loses_race(monkeypatch, tmp_path):
+    helperctl = load_helperctl()
+    helper = tmp_path / "macos-vz-helper"
+    socket_path = tmp_path / "runtime" / "helper.sock"
+    pid_file = tmp_path / "runtime" / "helper.pid"
+    log_dir = tmp_path / "logs"
+    helper.write_text("#!/bin/sh\n", encoding="utf-8")
+    helper.chmod(0o700)
+    removed = []
+    winner_identity = helperctl.SocketIdentity(device=1, inode=2)
+    lookups = []
+
+    def process_lookup(pid):
+        lookups.append(pid)
+        if len(lookups) == 1:
+            return helperctl.ProcessInfo(pid=pid, command=str(helper))
+        return None
+
+    def process_starter(argv, env, **kwargs):
+        pid_file.write_text("9999\n", encoding="utf-8")
+        return helperctl.StartedProcess(pid=1234)
+
+    monkeypatch.setattr(helperctl, "socket_identity", lambda path: winner_identity)
+
+    result = helperctl.start_helper(
+        helper,
+        socket_path,
+        pid_file,
+        log_dir,
+        process_starter=process_starter,
+        process_lookup=process_lookup,
+        process_killer=lambda pid: None,
+        socket_remover=lambda path, owned_identity: removed.append((path, owned_identity)),
+        exit_timeout_sec=0.01,
+        exit_poll_interval_sec=0.001,
+    )
+
+    CASE.assertEqual(result, helperctl.CheckResult(ok=False, reason="helper_already_running"))
+    CASE.assertEqual(pid_file.read_text(encoding="utf-8"), "9999\n")
+    CASE.assertEqual(removed, [])
 
 
 def test_start_helper_does_not_signal_reused_pid_on_cleanup(tmp_path):
@@ -1035,7 +1187,7 @@ def test_start_helper_refuses_existing_lifecycle_lock(tmp_path):
     helper.write_text("#!/bin/sh\n", encoding="utf-8")
     helper.chmod(0o700)
     pid_file.parent.mkdir(mode=0o700)
-    (pid_file.parent / "helper.pid.lock").write_text(f"{os.getpid()}\n", encoding="utf-8")
+    (pid_file.parent / "helper.pid.lock").write_text("12345\n", encoding="utf-8")
     starts = []
 
     result = helperctl.start_helper(
@@ -1046,6 +1198,7 @@ def test_start_helper_refuses_existing_lifecycle_lock(tmp_path):
         process_starter=lambda argv, env, **kwargs: starts.append(argv) or helperctl.StartedProcess(pid=1234),
         socket_waiter=lambda path: helperctl.CheckResult(True),
         ping_checker=lambda path: helperctl.CheckResult(True),
+        lock_process_exists=lambda pid: True,
     )
 
     CASE.assertEqual(result, helperctl.CheckResult(ok=False, reason="helper_already_running"))
@@ -1406,6 +1559,61 @@ def test_stop_helper_revalidates_process_before_signal(tmp_path):
     CASE.assertEqual(pid_file.read_text(encoding="utf-8"), "1234\n")
 
 
+def test_stop_helper_revalidates_process_identity_before_signal(tmp_path):
+    helperctl = load_helperctl()
+    helper = tmp_path / "macos-vz-helper"
+    pid_file = tmp_path / "runtime" / "helper.pid"
+    helper.write_text("#!/bin/sh\n", encoding="utf-8")
+    pid_file.parent.mkdir(mode=0o700)
+    pid_file.write_text("1234\n", encoding="utf-8")
+    killed = []
+    lookups = []
+
+    def process_lookup(pid):
+        lookups.append(pid)
+        identity = "first-start" if len(lookups) == 1 else "second-start"
+        return helperctl.ProcessInfo(pid=pid, command=str(helper), identity=identity)
+
+    result = helperctl.stop_helper(
+        helper,
+        pid_file,
+        process_lookup=process_lookup,
+        process_killer=lambda pid: killed.append(pid),
+    )
+
+    CASE.assertEqual(result, helperctl.CheckResult(ok=False, reason="helper_pid_process_mismatch"))
+    CASE.assertEqual(killed, [])
+    CASE.assertEqual(pid_file.read_text(encoding="utf-8"), "1234\n")
+
+
+def test_stop_helper_treats_post_signal_identity_change_as_exit(tmp_path):
+    helperctl = load_helperctl()
+    helper = tmp_path / "macos-vz-helper"
+    pid_file = tmp_path / "runtime" / "helper.pid"
+    helper.write_text("#!/bin/sh\n", encoding="utf-8")
+    pid_file.parent.mkdir(mode=0o700)
+    pid_file.write_text("1234\n", encoding="utf-8")
+    killed = []
+    lookups = []
+
+    def process_lookup(pid):
+        lookups.append(pid)
+        if len(lookups) <= 2:
+            return helperctl.ProcessInfo(pid=pid, command=str(helper), identity="first-start")
+        return helperctl.ProcessInfo(pid=pid, command=str(helper), identity="second-start")
+
+    result = helperctl.stop_helper(
+        helper,
+        pid_file,
+        process_lookup=process_lookup,
+        process_killer=lambda pid: killed.append(pid),
+    )
+
+    CASE.assertEqual(result, helperctl.CheckResult(ok=True))
+    CASE.assertEqual(killed, [1234])
+    CASE.assertFalse(pid_file.exists())
+
+
 def test_stop_helper_tolerates_missing_pid_directory(tmp_path):
     helperctl = load_helperctl()
 
@@ -1460,6 +1668,38 @@ def test_stop_helper_preserves_active_socket_when_pid_is_stale(tmp_path):
         process_lookup=lambda pid: None,
         socket_identity_reader=lambda path: identity,
         socket_active_checker=lambda path: True,
+        socket_remover=lambda path, owned_identity: removed.append((path, owned_identity)),
+    )
+
+    CASE.assertEqual(result, helperctl.CheckResult(ok=False, reason="helper_socket_active"))
+    CASE.assertEqual(pid_file.read_text(encoding="utf-8"), "1234\n")
+    CASE.assertEqual(removed, [])
+
+
+def test_stop_helper_checks_active_socket_after_capturing_stale_socket_identity(tmp_path):
+    helperctl = load_helperctl()
+    helper = tmp_path / "macos-vz-helper"
+    pid_file = tmp_path / "runtime" / "helper.pid"
+    socket_path = tmp_path / "runtime" / "helper.sock"
+    identity = helperctl.SocketIdentity(device=1, inode=2)
+    helper.write_text("#!/bin/sh\n", encoding="utf-8")
+    pid_file.parent.mkdir(mode=0o700)
+    pid_file.write_text("1234\n", encoding="utf-8")
+    removed = []
+    identity_captured = False
+
+    def socket_identity_reader(path):
+        nonlocal identity_captured
+        identity_captured = True
+        return identity
+
+    result = helperctl.stop_helper(
+        helper,
+        pid_file,
+        socket_path=socket_path,
+        process_lookup=lambda pid: None,
+        socket_identity_reader=socket_identity_reader,
+        socket_active_checker=lambda path: identity_captured,
         socket_remover=lambda path, owned_identity: removed.append((path, owned_identity)),
     )
 
@@ -1533,3 +1773,63 @@ def test_stop_helper_removes_owned_socket_after_process_exit(tmp_path):
 
     CASE.assertEqual(result, helperctl.CheckResult(ok=True))
     CASE.assertEqual(removed, [(socket_path, identity)])
+
+
+def test_smoke_dry_run_delegates_to_host_smoke_script(tmp_path, capsys):
+    helperctl = load_helperctl()
+    bundle = tmp_path / "bundle"
+    helper = tmp_path / "macos-vz-helper"
+    entitlements = tmp_path / "helper.entitlements"
+    socket_path = tmp_path / "runtime" / "helper.sock"
+    serial_log_dir = tmp_path / "logs" / "serial"
+    bundle.mkdir()
+    entitlements.write_text("<plist/>", encoding="utf-8")
+
+    code = helperctl.main(
+        [
+            "smoke",
+            "--dry-run",
+            "--bundle",
+            str(bundle),
+            "--helper",
+            str(helper),
+            "--entitlements",
+            str(entitlements),
+            "--socket",
+            str(socket_path),
+            "--serial-log-dir",
+            str(serial_log_dir),
+            "--python",
+            sys.executable,
+        ]
+    )
+
+    captured = capsys.readouterr()
+    CASE.assertEqual(code, 0)
+    CASE.assertIn("run-host-e2e-smoke.sh", captured.out)
+    CASE.assertIn(f"--bundle {bundle}", captured.out)
+    CASE.assertIn(f"--helper {helper}", captured.out)
+    CASE.assertIn(f"--entitlements {entitlements}", captured.out)
+    CASE.assertIn(f"--socket {socket_path}", captured.out)
+    CASE.assertIn(f"--serial-log-dir {serial_log_dir}", captured.out)
+
+
+def test_helperctl_executable_smoke_dry_run_works(tmp_path):
+    bundle = tmp_path / "bundle"
+    bundle.mkdir()
+
+    result = subprocess.run(
+        [
+            str(SCRIPT_PATH),
+            "smoke",
+            "--dry-run",
+            "--bundle",
+            str(bundle),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    CASE.assertEqual(result.returncode, 0)
+    CASE.assertIn("run-host-e2e-smoke.sh", result.stdout)

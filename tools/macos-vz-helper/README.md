@@ -21,8 +21,37 @@ The first helper slice is not a generic macOS sandbox backend:
 - no `seatbelt` support here
 - no second persistence layer for sandbox sessions
 - no APFS clone execution path yet
-- no launchd or managed helper lifecycle yet
+- no automatic launchd installation or helper auto-upgrade yet
 - no automatic orphan VM termination during admin repair yet
 
 Python remains authoritative for sandbox admission, session identity, artifacts, and ACP
 integration. The helper only owns runtime VM facts and control-plane operations.
+
+## Managed Helper Lifecycle
+
+Use `tools/macos-vz-helper/scripts/vz-helperctl.py` for local operator workflows:
+
+```bash
+tools/macos-vz-helper/scripts/vz-helperctl.py check
+tools/macos-vz-helper/scripts/vz-helperctl.py build
+tools/macos-vz-helper/scripts/vz-helperctl.py start
+tools/macos-vz-helper/scripts/vz-helperctl.py status
+tools/macos-vz-helper/scripts/vz-helperctl.py stop
+tools/macos-vz-helper/scripts/vz-helperctl.py plist
+```
+
+The command uses stable user-owned defaults under
+`~/Library/Application Support/tldw/sandbox/macos-vz-helper/` and
+`~/Library/Logs/tldw/macos-vz-helper/`.
+
+`plist` prints LaunchAgent scaffolding by default and does not create runtime
+directories unless `--create-dirs` is provided. It does not call `launchctl`,
+install services, or auto-upgrade helpers.
+
+For real host E2E smoke, prefer the managed wrapper:
+
+```bash
+tools/macos-vz-helper/scripts/vz-helperctl.py smoke \
+  --bundle /path/to/canonical/bundle \
+  --entitlements /path/to/helper.entitlements
+```

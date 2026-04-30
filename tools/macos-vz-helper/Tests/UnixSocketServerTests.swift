@@ -62,7 +62,9 @@ import Testing
 }
 
 @Test func unixSocketServerServesPingOverRealSocket() throws {
-    let socketPath = "/tmp/macos-vz-helper-\(UUID().uuidString.prefix(8)).sock"
+    let socketDirectory = try makePrivateTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: socketDirectory) }
+    let socketPath = socketDirectory.appendingPathComponent("helper.sock").path
     let server = UnixSocketServer(
         socketPath: socketPath,
         service: HelperService()
@@ -74,7 +76,6 @@ import Testing
     }
     defer {
         server.stop()
-        unlink(socketPath)
     }
 
     try waitForSocket(at: socketPath)
@@ -93,9 +94,7 @@ import Testing
 }
 
 @Test func unixSocketServerRefusesExistingRegularFileSocketPath() throws {
-    let dir = URL(fileURLWithPath: NSTemporaryDirectory())
-        .appendingPathComponent("macos-vz-helper-\(UUID().uuidString)")
-    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    let dir = try makePrivateTemporaryDirectory()
     defer { try? FileManager.default.removeItem(at: dir) }
 
     let socket = dir.appendingPathComponent("helper.sock")
@@ -110,9 +109,7 @@ import Testing
 }
 
 @Test func unixSocketServerRefusesSymlinkSocketPath() throws {
-    let dir = URL(fileURLWithPath: NSTemporaryDirectory())
-        .appendingPathComponent("macos-vz-helper-\(UUID().uuidString)")
-    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    let dir = try makePrivateTemporaryDirectory()
     defer { try? FileManager.default.removeItem(at: dir) }
 
     let target = dir.appendingPathComponent("target")
@@ -130,12 +127,13 @@ import Testing
 }
 
 @Test func unixSocketServerRemovesExistingSocketPath() throws {
-    let socketPath = "/tmp/macos-vz-helper-\(UUID().uuidString.prefix(8)).sock"
+    let socketDirectory = try makePrivateTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: socketDirectory) }
+    let socketPath = socketDirectory.appendingPathComponent("helper.sock").path
     let fd = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
     guard fd >= 0 else { return }
     defer {
         close(fd)
-        unlink(socketPath)
     }
 
     try bindSocketForTest(fd: fd, path: socketPath)
@@ -147,12 +145,13 @@ import Testing
 }
 
 @Test func unixSocketServerRefusesActiveSocketPath() throws {
-    let socketPath = "/tmp/macos-vz-helper-\(UUID().uuidString.prefix(8)).sock"
+    let socketDirectory = try makePrivateTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: socketDirectory) }
+    let socketPath = socketDirectory.appendingPathComponent("helper.sock").path
     let fd = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
     guard fd >= 0 else { return }
     defer {
         close(fd)
-        unlink(socketPath)
     }
 
     try bindSocketForTest(fd: fd, path: socketPath)
@@ -188,13 +187,14 @@ import Testing
 }
 
 @Test func unixSocketServerDoesNotRemoveReplacementPathOnStop() throws {
-    let socketPath = "/tmp/macos-vz-helper-\(UUID().uuidString.prefix(8)).sock"
+    let socketDirectory = try makePrivateTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: socketDirectory) }
+    let socketPath = socketDirectory.appendingPathComponent("helper.sock").path
     let replacementURL = URL(fileURLWithPath: socketPath)
     let server = UnixSocketServer(socketPath: socketPath, service: HelperService())
     try server.start()
     defer {
         server.stop()
-        unlink(socketPath)
     }
 
     unlink(socketPath)
@@ -204,6 +204,55 @@ import Testing
 
     #expect(FileManager.default.fileExists(atPath: socketPath))
     #expect(try String(contentsOf: replacementURL, encoding: .utf8) == "replacement")
+}
+
+@Test func unixSocketServerCreatesMissingSocketParentAsOwnerOnly() throws {
+    let root = try makePrivateTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let runtimeDirectory = root.appendingPathComponent("runtime")
+    let socketPath = runtimeDirectory.appendingPathComponent("helper.sock").path
+    let server = UnixSocketServer(socketPath: socketPath, service: HelperService())
+
+    try server.start()
+    defer { server.stop() }
+
+    let permissions = try socketParentPermissions(at: runtimeDirectory)
+    #expect(permissions == 0o700)
+}
+
+@Test func unixSocketServerRefusesGroupAccessibleSocketParent() throws {
+    let dir = URL(fileURLWithPath: NSTemporaryDirectory())
+        .appendingPathComponent("macos-vz-helper-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    chmod(dir.path, 0o755)
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    let socket = dir.appendingPathComponent("helper.sock")
+    let server = UnixSocketServer(socketPath: socket.path, service: HelperService())
+    defer { server.stop() }
+
+    #expect(throws: UnixSocketServerError.self) {
+        try server.start()
+    }
+    #expect(!FileManager.default.fileExists(atPath: socket.path))
+}
+
+private func makePrivateTemporaryDirectory() throws -> URL {
+    let directory = URL(fileURLWithPath: "/tmp")
+        .appendingPathComponent("macos-vz-helper-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(
+        at: directory,
+        withIntermediateDirectories: true,
+        attributes: [.posixPermissions: 0o700]
+    )
+    chmod(directory.path, 0o700)
+    return directory
+}
+
+private func socketParentPermissions(at url: URL) throws -> Int {
+    let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+    let permissions = attributes[.posixPermissions] as? NSNumber
+    return permissions?.intValue ?? -1
 }
 
 private func acceptConnectionForTest(fd: Int32) throws -> Int32 {

@@ -13,6 +13,7 @@ enum UnixSocketServerError: Error {
     case readFailed(Int32)
     case writeFailed(Int32)
     case unsafeSocketPath(String)
+    case unsafeSocketDirectory(String)
     case existingSocketPathIsNotSocket(String)
     case existingSocketPathIsActive(String)
 }
@@ -198,10 +199,8 @@ final class UnixSocketServer {
     }
 
     private func prepareSocketPath() throws {
-        try FileManager.default.createDirectory(
-            at: URL(fileURLWithPath: socketPath).deletingLastPathComponent(),
-            withIntermediateDirectories: true
-        )
+        let socketDirectory = URL(fileURLWithPath: socketPath).deletingLastPathComponent()
+        try prepareSocketDirectory(socketDirectory)
 
         var existing = stat()
         let statResult = lstat(socketPath, &existing)
@@ -223,6 +222,51 @@ final class UnixSocketServer {
             throw UnixSocketServerError.existingSocketPathIsActive(socketPath)
         }
         try unlinkStaleSocketPath(expected: SocketPathIdentity(existing))
+    }
+
+    private func prepareSocketDirectory(_ socketDirectory: URL) throws {
+        let directoryPath = socketDirectory.path
+        guard !directoryPath.isEmpty else {
+            throw UnixSocketServerError.unsafeSocketDirectory(directoryPath)
+        }
+
+        var directoryStat = stat()
+        let statResult = lstat(directoryPath, &directoryStat)
+        if statResult != 0 {
+            if errno == ENOENT {
+                try FileManager.default.createDirectory(
+                    at: socketDirectory,
+                    withIntermediateDirectories: true,
+                    attributes: [.posixPermissions: 0o700]
+                )
+                chmod(directoryPath, 0o700)
+                try validateSocketDirectory(directoryPath)
+                return
+            }
+            throw UnixSocketServerError.unsafeSocketDirectory(directoryPath)
+        }
+        try validateSocketDirectory(directoryPath, statBuffer: directoryStat)
+    }
+
+    private func validateSocketDirectory(_ directoryPath: String, statBuffer: stat? = nil) throws {
+        var directoryStat = statBuffer ?? stat()
+        if statBuffer == nil {
+            let statResult = lstat(directoryPath, &directoryStat)
+            guard statResult == 0 else {
+                throw UnixSocketServerError.unsafeSocketDirectory(directoryPath)
+            }
+        }
+
+        let type = directoryStat.st_mode & S_IFMT
+        guard type == S_IFDIR else {
+            throw UnixSocketServerError.unsafeSocketDirectory(directoryPath)
+        }
+        guard directoryStat.st_uid == geteuid() else {
+            throw UnixSocketServerError.unsafeSocketDirectory(directoryPath)
+        }
+        guard directoryStat.st_mode & 0o077 == 0 else {
+            throw UnixSocketServerError.unsafeSocketDirectory(directoryPath)
+        }
     }
 
     private func existingSocketPathHasListener() throws -> Bool {
