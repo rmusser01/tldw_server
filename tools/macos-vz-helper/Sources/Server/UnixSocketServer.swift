@@ -212,7 +212,7 @@ final class UnixSocketServer {
         if try existingSocketPathHasListener() {
             throw UnixSocketServerError.existingSocketPathIsActive(socketPath)
         }
-        unlink(socketPath)
+        try unlinkStaleSocketPath(expected: existing)
     }
 
     private func existingSocketPathHasListener() throws -> Bool {
@@ -224,7 +224,6 @@ final class UnixSocketServer {
             close(socketFD)
         }
 
-        setShortSocketTimeout(socketFD)
         let address = try socketAddress()
         let connectResult = withUnsafePointer(to: address.value) { pointer in
             pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPointer in
@@ -232,7 +231,6 @@ final class UnixSocketServer {
             }
         }
         if connectResult == 0 {
-            drainHelperPingProbe(socketFD)
             return true
         }
 
@@ -240,6 +238,28 @@ final class UnixSocketServer {
         case ECONNREFUSED, ENOENT:
             return false
         default:
+            throw UnixSocketServerError.unsafeSocketPath(socketPath)
+        }
+    }
+
+    private func unlinkStaleSocketPath(expected: stat) throws {
+        var current = stat()
+        let result = lstat(socketPath, &current)
+        if result != 0 {
+            if errno == ENOENT {
+                return
+            }
+            throw UnixSocketServerError.unsafeSocketPath(socketPath)
+        }
+
+        let currentType = current.st_mode & S_IFMT
+        guard currentType == S_IFSOCK,
+              current.st_dev == expected.st_dev,
+              current.st_ino == expected.st_ino else {
+            throw UnixSocketServerError.unsafeSocketPath(socketPath)
+        }
+
+        if unlink(socketPath) != 0 {
             throw UnixSocketServerError.unsafeSocketPath(socketPath)
         }
     }
@@ -262,29 +282,6 @@ final class UnixSocketServer {
         }
 
         return (address, socklen_t(MemoryLayout<sa_family_t>.size + pathBytes.count))
-    }
-
-    private func setShortSocketTimeout(_ socketFD: Int32) {
-        var timeout = timeval(tv_sec: 0, tv_usec: 200_000)
-        withUnsafePointer(to: &timeout) { pointer in
-            pointer.withMemoryRebound(to: UInt8.self, capacity: MemoryLayout<timeval>.size) { rawPointer in
-                _ = setsockopt(socketFD, SOL_SOCKET, SO_RCVTIMEO, rawPointer, socklen_t(MemoryLayout<timeval>.size))
-                _ = setsockopt(socketFD, SOL_SOCKET, SO_SNDTIMEO, rawPointer, socklen_t(MemoryLayout<timeval>.size))
-            }
-        }
-    }
-
-    private func drainHelperPingProbe(_ socketFD: Int32) {
-        let payload = Data("{\"operation\":\"ping\",\"protocol_version\":\"1\",\"request\":{}}\n".utf8)
-        payload.withUnsafeBytes { rawBuffer in
-            guard let baseAddress = rawBuffer.baseAddress else {
-                return
-            }
-            _ = Darwin.write(socketFD, baseAddress, rawBuffer.count)
-        }
-
-        var buffer = [UInt8](repeating: 0, count: 512)
-        _ = recv(socketFD, &buffer, buffer.count, 0)
     }
 
     private func unlinkOwnedSocketPath() {

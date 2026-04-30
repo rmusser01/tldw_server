@@ -167,6 +167,13 @@ import Testing
         }
     }
 
+    let acceptedFD = try acceptConnectionForTest(fd: fd)
+    defer { close(acceptedFD) }
+    setSocketReceiveTimeoutForTest(acceptedFD)
+    var buffer = [UInt8](repeating: 0, count: 512)
+    let readCount = recv(acceptedFD, &buffer, buffer.count, 0)
+    #expect(readCount <= 0)
+
     let clientFD = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
     guard clientFD >= 0 else { return }
     defer { close(clientFD) }
@@ -178,6 +185,23 @@ import Testing
         }
     }
     #expect(connectResult == 0)
+}
+
+private func acceptConnectionForTest(fd: Int32) throws -> Int32 {
+    let acceptedFD = Darwin.accept(fd, nil, nil)
+    guard acceptedFD >= 0 else {
+        throw TestFailure.socketAcceptFailed
+    }
+    return acceptedFD
+}
+
+private func setSocketReceiveTimeoutForTest(_ fd: Int32) {
+    var timeout = timeval(tv_sec: 0, tv_usec: 200_000)
+    withUnsafePointer(to: &timeout) { pointer in
+        pointer.withMemoryRebound(to: UInt8.self, capacity: MemoryLayout<timeval>.size) { rawPointer in
+            _ = setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, rawPointer, socklen_t(MemoryLayout<timeval>.size))
+        }
+    }
 }
 
 private func waitForSocket(at path: String, timeoutSeconds: TimeInterval = 2.0) throws {
@@ -258,6 +282,7 @@ private func unixSocketAddress(path: String) throws -> (value: sockaddr_un, leng
 }
 
 private enum TestFailure: Error {
+    case socketAcceptFailed
     case socketBindFailed
     case clientSocketUnavailable
     case socketConnectFailed
