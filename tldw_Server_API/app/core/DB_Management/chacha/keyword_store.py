@@ -553,6 +553,21 @@ class KeywordStore:
         """
         return self._db._list_generic_items("keyword_collections", "name COLLATE NOCASE", limit, offset)
 
+    def count_keyword_collections(self) -> int:
+        """Return count of active (non-deleted) keyword collections."""
+        collections_table = self._db._map_table_for_backend("keyword_collections")
+        query = (
+            f"SELECT COUNT(*) AS cnt FROM {collections_table} "  # nosec B608
+            f"WHERE deleted = {self._deleted_literal(False)}"
+        )
+        try:
+            cursor = self._db.execute_query(query)
+            row = cursor.fetchone()
+            return int(row["cnt"]) if row else 0
+        except CharactersRAGDBError as exc:
+            logger.error(f"Error counting keyword collections: {exc}")
+            raise
+
     def update_keyword_collection(self, collection_id: int, update_data: dict[str, Any], expected_version: int) -> bool:
         """
         Updates a keyword collection with optimistic locking.

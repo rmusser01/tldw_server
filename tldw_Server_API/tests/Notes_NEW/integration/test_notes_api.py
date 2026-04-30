@@ -356,6 +356,49 @@ def test_keywords_list_pagination_and_search_limit(client_with_notes_db: TestCli
     assert len(results) <= 7
 
 
+def test_keyword_collections_list_includes_canonical_pagination(client_with_notes_db: TestClient):
+    client = client_with_notes_db
+
+    first = client.post("/api/v1/notes/collections", json={"name": "Collection A"})
+    second = client.post("/api/v1/notes/collections", json={"name": "Collection B"})
+    assert first.status_code == 201, first.text
+    assert second.status_code == 201, second.text
+
+    page1 = client.get("/api/v1/notes/collections", params={"limit": 1, "offset": 0})
+    page2 = client.get("/api/v1/notes/collections", params={"limit": 1, "offset": 1})
+    assert page1.status_code == 200, page1.text
+    assert page2.status_code == 200, page2.text
+
+    payload1 = page1.json()
+    payload2 = page2.json()
+    assert len(payload1["collections"]) == 1
+    assert len(payload2["collections"]) == 1
+    assert payload1["total"] == 2
+    assert payload1["count"] == 1
+    assert payload1["limit"] == 1
+    assert payload1["offset"] == 0
+    assert payload1["pagination"] == {
+        "mode": "offset",
+        "total": 2,
+        "limit": 1,
+        "offset": 0,
+        "has_more": True,
+        "next_offset": 1,
+    }
+    assert payload2["total"] == 2
+    assert payload2["count"] == 1
+    assert payload2["limit"] == 1
+    assert payload2["offset"] == 1
+    assert payload2["pagination"] == {
+        "mode": "offset",
+        "total": 2,
+        "limit": 1,
+        "offset": 1,
+        "has_more": False,
+        "next_offset": None,
+    }
+
+
 def test_keywords_list_without_trailing_slash_does_not_hit_note_lookup(client_with_notes_db: TestClient):
     client = client_with_notes_db
 

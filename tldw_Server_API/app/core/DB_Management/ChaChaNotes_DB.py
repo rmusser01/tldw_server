@@ -23604,6 +23604,7 @@ for _keyword_store_method in (
     "get_keyword_collection_by_id",
     "get_keyword_collection_by_name",
     "list_keyword_collections",
+    "count_keyword_collections",
     "update_keyword_collection",
     "soft_delete_keyword_collection",
     "search_keyword_collections",

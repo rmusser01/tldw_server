@@ -1897,6 +1897,7 @@ async def list_keyword_collections_endpoint(
             )
 
         collections_data = db.list_keyword_collections(limit=limit, offset=offset)
+        total = db.count_keyword_collections()
         if include_keywords:
             collections_data = [
                 _attach_collection_keywords_inline(db, dict(row))
@@ -1908,7 +1909,13 @@ async def list_keyword_collections_endpoint(
             "count": len(collections_data),
             "limit": limit,
             "offset": offset,
-            "total": None,
+            "total": total,
+            "pagination": build_offset_pagination_meta(
+                total=total,
+                limit=limit,
+                offset=offset,
+                count=len(collections_data),
+            ),
         }
     except _NOTES_NONCRITICAL_EXCEPTIONS as e:
         handle_db_errors(e, "collection")
