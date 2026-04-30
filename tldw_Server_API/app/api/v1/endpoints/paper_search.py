@@ -28,6 +28,7 @@ import contextlib
 
 from tldw_Server_API.app.api.v1.API_Deps.backpressure import guard_backpressure_and_quota
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_page_pagination_meta
 from tldw_Server_API.app.api.v1.schemas.paper_search_schemas import (
     BioRxivFunderPaper,
     BioRxivFunderSearchRequestForm,
@@ -298,6 +299,12 @@ async def paper_search_arxiv(
         page=search_params.page,
         results_per_page=search_params.results_per_page,
         total_pages=total_pages,
+        pagination=build_page_pagination_meta(
+            page=search_params.page,
+            per_page=search_params.results_per_page,
+            total=total_results_from_api,
+            total_pages=total_pages,
+        ),
     )
 
 
@@ -355,7 +362,13 @@ async def paper_search_biorxiv(
         total_results=total_results,
         page=search_params.page,
         results_per_page=search_params.results_per_page,
-    total_pages=total_pages,
+        total_pages=total_pages,
+        pagination=build_page_pagination_meta(
+            page=search_params.page,
+            per_page=search_params.results_per_page,
+            total=total_results,
+            total_pages=total_pages,
+        ),
     )
 
 
@@ -1684,6 +1697,12 @@ async def paper_search_semantic_scholar(
         next_offset=next_offset_api,
         page=search_params.page,
         total_pages=total_pages,
+        pagination=build_page_pagination_meta(
+            page=search_params.page,
+            per_page=search_params.results_per_page,
+            total=total_results_api,
+            total_pages=total_pages,
+        ),
     )
 
 
@@ -1814,6 +1833,12 @@ async def paper_search_pubmed(
         page=search_params.page,
         results_per_page=search_params.results_per_page,
         total_pages=total_pages,
+        pagination=build_page_pagination_meta(
+            page=search_params.page,
+            per_page=search_params.results_per_page,
+            total=total_results,
+            total_pages=total_pages,
+        ),
     )
 
 

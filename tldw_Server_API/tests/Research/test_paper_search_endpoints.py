@@ -37,6 +37,14 @@ async def test_paper_search_arxiv_success(monkeypatch, paper_search_app):
         data = r.json()
         assert data["total_results"] == 2
         assert len(data["items"]) == 2
+        assert data["pagination"] == {
+            "mode": "page",
+            "page": 1,
+            "per_page": 2,
+            "total": 2,
+            "total_pages": 1,
+            "has_more": False,
+        }
 
 
 @pytest.mark.asyncio
@@ -72,6 +80,57 @@ async def test_paper_search_biorxiv_success(monkeypatch, paper_search_app):
         data = r.json()
         assert data["total_results"] == 1
         assert len(data["items"]) == 1
+        assert data["pagination"] == {
+            "mode": "page",
+            "page": 1,
+            "per_page": 1,
+            "total": 1,
+            "total_pages": 1,
+            "has_more": False,
+        }
+
+
+@pytest.mark.asyncio
+async def test_paper_search_semantic_scholar_success(monkeypatch, paper_search_app):
+
+    def _fake_s2(query, offset, limit, fos, pub_types, year_range, venue, min_citations, open_access_only, fields_to_return=None):
+
+        return (
+            {
+                "total": 1,
+                "offset": 0,
+                "next": None,
+                "data": [
+                    {
+                        "paperId": "paper-1",
+                        "title": "Graph Neural Networks",
+                        "authors": [{"authorId": "1", "name": "A. Researcher"}],
+                    }
+                ],
+            },
+            None,
+        )
+
+    from tldw_Server_API.app.core.Third_Party import Semantic_Scholar as _S2
+    monkeypatch.setattr(_S2, "search_papers_semantic_scholar", _fake_s2)
+
+    async with AsyncClient(transport=ASGITransport(app=paper_search_app), base_url="http://test") as client:
+        r = await client.get(
+            "/api/v1/paper-search/semantic-scholar",
+            params={"query": "graph neural networks", "page": 1, "results_per_page": 2},
+        )
+        assert r.status_code == 200
+        data = r.json()
+        assert data["total_results"] == 1
+        assert len(data["items"]) == 1
+        assert data["pagination"] == {
+            "mode": "page",
+            "page": 1,
+            "per_page": 2,
+            "total": 1,
+            "total_pages": 1,
+            "has_more": False,
+        }
 
 
 @pytest.mark.asyncio
@@ -126,6 +185,14 @@ async def test_paper_search_pubmed_success(monkeypatch, paper_search_app):
         data = r.json()
         assert data["total_results"] == 1
         assert len(data["items"]) == 1
+        assert data["pagination"] == {
+            "mode": "page",
+            "page": 1,
+            "per_page": 1,
+            "total": 1,
+            "total_pages": 1,
+            "has_more": False,
+        }
 
 
 @pytest.mark.asyncio
