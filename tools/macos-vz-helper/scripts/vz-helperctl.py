@@ -80,7 +80,7 @@ def ensure_private_dir(path: Path, dry_run: bool = False) -> CheckResult:
         path_stat = path.stat()
         if path_stat.st_uid != os.getuid():
             return CheckResult(ok=False, reason="helper_directory_owner_mismatch")
-        if path_stat.st_mode & 0o022:
+        if path_stat.st_mode & 0o077:
             return CheckResult(ok=False, reason="helper_directory_not_private")
         return CheckResult(ok=True)
 
@@ -96,7 +96,7 @@ def ensure_private_dir(path: Path, dry_run: bool = False) -> CheckResult:
     path_stat = path.stat()
     if path_stat.st_uid != os.getuid():
         return CheckResult(ok=False, reason="helper_directory_owner_mismatch")
-    if path_stat.st_mode & 0o022:
+    if path_stat.st_mode & 0o077:
         return CheckResult(ok=False, reason="helper_directory_not_private")
     return CheckResult(ok=True)
 
@@ -166,6 +166,10 @@ def _plist_command(args: argparse.Namespace) -> int:
     helper_path = Path(args.helper_path) if args.helper_path else DEFAULT_HELPER
 
     if not args.dry_run:
+        socket_directory_result = ensure_private_dir(socket_path.parent)
+        if not socket_directory_result.ok:
+            print(f"socket_directory: not ok {socket_directory_result.reason}", file=sys.stderr)
+            return 1
         directory_result = ensure_private_dir(log_dir)
         if not directory_result.ok:
             print(f"log_directory: not ok {directory_result.reason}", file=sys.stderr)
