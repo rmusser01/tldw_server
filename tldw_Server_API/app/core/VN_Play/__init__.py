@@ -13,6 +13,7 @@ from tldw_Server_API.app.core.VN_Play.models import (
     SceneState,
     TurnResult,
 )
+from tldw_Server_API.app.core.VN_Play.state import derive_scene_state
 
 __all__ = [
     "GateResult",
@@ -24,4 +25,5 @@ __all__ = [
     "SceneState",
     "TURN_STATUS_PENDING",
     "TurnResult",
+    "derive_scene_state",
 ]
