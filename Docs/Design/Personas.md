@@ -73,6 +73,12 @@ UI integration:
 - Allow scope-rule editing with clear include/exclude affordances.
 - Provide policy visibility (what tools are blocked/allowed and why).
 
+Wake phrase support:
+- Persona Live wake phrase support is manually armed per session.
+- V1 uses the selected persona profile's saved `voice_chat_trigger_phrases` as wake phrases and detects them in the active browser or extension surface before sending a scoped `wake_activation` frame to `/api/v1/persona/stream`.
+- V1 is not true background always-on listening. Wake listening is visible, manually armed, and only active while the Persona Live surface is open and the browser speech recognition API is available.
+- Pre-wake audio is not sent to the tldw server.
+
 Compatibility and migration:
 - Existing character-card flows remain valid; personas can optionally reference `character_card_id`.
 - Legacy sessions without persona links should continue operating with default behavior.
