@@ -93,7 +93,7 @@ async def shutdown_post_worker_services(
         return stop_event
 
     claims_shutdown_handles = await _shutdown_claims_maintenance_tasks(
-        claims_task=claims_task,
+        claims_task=_task_if_not_stopped("claims_rebuild", claims_task),
         jobs_prune_task=jobs_prune_task,
         files_export_gc_task=files_export_gc_task,
         notifications_prune_task=notifications_prune_task,
@@ -292,7 +292,7 @@ async def run_shutdown_post_worker_services(
     except guard_exceptions as exc:
         logger.debug(f"Post-worker services skipped: {exc}")
         return PostWorkerShutdownHandles(
-            claims_task=claims_task,
+            claims_task=_fallback_if_not_stopped("claims_rebuild", claims_task),
             jobs_prune_task=jobs_prune_task,
             files_export_gc_task=files_export_gc_task,
             notifications_prune_task=notifications_prune_task,

@@ -11,6 +11,11 @@ from typing import Any
 
 from loguru import logger
 
+from tldw_Server_API.app.services.lifecycle_workers import (
+    ShutdownPhase,
+    start_stop_event_worker,
+)
+
 _STARTUP_GUARD_EXCEPTIONS = (
     AttributeError,
     OSError,
@@ -20,7 +25,11 @@ _STARTUP_GUARD_EXCEPTIONS = (
 )
 
 
-async def start_claims_rebuild_worker(app_settings: Mapping[str, Any]) -> Any | None:
+async def start_claims_rebuild_worker(
+    app_settings: Mapping[str, Any],
+    *,
+    worker_inventory: Any | None = None,
+) -> Any | None:
     """Start the claims rebuild worker when enabled."""
     try:
         enabled = bool(app_settings.get("CLAIMS_REBUILD_ENABLED", False))
@@ -30,27 +39,63 @@ async def start_claims_rebuild_worker(app_settings: Mapping[str, Any]) -> Any | 
 
         interval_sec = int(app_settings.get("CLAIMS_REBUILD_INTERVAL_SEC", 3600))
         policy = str(app_settings.get("CLAIMS_REBUILD_POLICY", "missing")).lower()
+
+        if worker_inventory is not None:
+            task, _registered_stop_event = await start_stop_event_worker(
+                worker_inventory,
+                name="claims_rebuild",
+                task_name="claims_task",
+                coroutine_factory=lambda registered_stop_event: _run_claims_rebuild_loop(
+                    app_settings,
+                    stop_event=registered_stop_event,
+                    interval_sec=interval_sec,
+                    policy=policy,
+                ),
+                category="claims",
+                shutdown_phase=ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN,
+            )
+            return task
+
         stop_event = asyncio.Event()
-
-        async def _claims_rebuild_loop() -> None:
-            logger.info(f"Starting claims rebuild worker (every {interval_sec}s, policy={policy})")
-            service = _get_claims_rebuild_service()
-            while not stop_event.is_set():
-                try:
-                    run_claims_rebuild_iteration(app_settings, service, policy=policy)
-                except _STARTUP_GUARD_EXCEPTIONS as exc:
-                    logger.warning(f"Claims rebuild loop error: {exc}")
-                try:
-                    await asyncio.wait_for(stop_event.wait(), timeout=interval_sec)
-                except asyncio.TimeoutError:
-                    continue
-
-        task = asyncio.create_task(_claims_rebuild_loop())
+        task = asyncio.create_task(
+            _run_claims_rebuild_loop(
+                app_settings,
+                stop_event=stop_event,
+                interval_sec=interval_sec,
+                policy=policy,
+            )
+        )
         setattr(task, "_tldw_claims_rebuild_stop_event", stop_event)
         return task
     except _STARTUP_GUARD_EXCEPTIONS as exc:
         logger.warning(f"Failed to start claims rebuild worker: {exc}")
         return None
+
+
+async def _run_claims_rebuild_loop(
+    app_settings: Mapping[str, Any],
+    *,
+    stop_event: asyncio.Event,
+    interval_sec: int,
+    policy: str,
+) -> None:
+    """Run claims rebuild iterations until the lifecycle stop event is set.
+
+    The loop performs one bounded rebuild scan per interval and exits when the
+    caller-owned stop event is signaled by either the managed lifecycle worker
+    registry or the legacy direct-task shutdown path.
+    """
+    logger.info(f"Starting claims rebuild worker (every {interval_sec}s, policy={policy})")
+    service = _get_claims_rebuild_service()
+    while not stop_event.is_set():
+        try:
+            run_claims_rebuild_iteration(app_settings, service, policy=policy)
+        except _STARTUP_GUARD_EXCEPTIONS as exc:
+            logger.warning(f"Claims rebuild loop error: {exc}")
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=interval_sec)
+        except asyncio.TimeoutError:
+            continue
 
 
 def run_claims_rebuild_iteration(

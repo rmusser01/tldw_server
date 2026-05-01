@@ -475,7 +475,8 @@ def test_lifespan_shutdown_cancels_claims_and_maintenance_tasks(
             observed[flag_key] = True
             raise
 
-    async def _fake_start_claims_rebuild_worker(_app_settings):
+    async def _fake_start_claims_rebuild_worker(_app_settings, **kwargs):
+        assert kwargs["worker_inventory"] is not None
         return asyncio.create_task(_wait_forever("claims_cancelled"), name="claims_task")
 
     async def _fake_start_maintenance_schedulers():
