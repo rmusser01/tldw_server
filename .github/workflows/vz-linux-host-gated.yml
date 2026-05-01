@@ -29,7 +29,7 @@ concurrency:
 jobs:
   vz-linux-host-gated-smoke:
     name: VZ Linux real execution smoke
-    if: ${{ github.event_name == 'workflow_dispatch' || vars.TLDW_SANDBOX_VZ_LINUX_HOST_GATED_NIGHTLY == '1' }}
+    if: ${{ (github.event_name == 'workflow_dispatch' || vars.TLDW_SANDBOX_VZ_LINUX_HOST_GATED_NIGHTLY == '1') && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev') }}
     runs-on: [self-hosted, macOS, ARM64, vz-linux]
     timeout-minutes: 120
     env:
@@ -98,7 +98,7 @@ jobs:
 
       - name: Upload helper logs
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: vz-linux-host-gated-helper-logs
           path: ${{ runner.temp }}/tldw-vz-helper-ci/**

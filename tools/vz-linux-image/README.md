@@ -220,7 +220,9 @@ The same script is the entrypoint for the host-gated GitHub Actions workflow at
 `.github/workflows/vz-linux-host-gated.yml`. That workflow is intentionally
 limited to prepared self-hosted Apple silicon runners labeled
 `self-hosted`, `macOS`, `ARM64`, and `vz-linux`; normal hosted CI does not run
-real VZ execution. Set repository variable
+real VZ execution. The job is branch-gated to `main` and `dev` so manual
+dispatch cannot run arbitrary feature-branch code on the self-hosted host. Set
+repository variable
 `TLDW_SANDBOX_VZ_LINUX_HOST_GATED_NIGHTLY=1` to enable the scheduled run, and
 set `TLDW_SANDBOX_VZ_LINUX_BUNDLE_PATH` or pass the manual `bundle_path` input
 to point at the canonical bundle on the runner.

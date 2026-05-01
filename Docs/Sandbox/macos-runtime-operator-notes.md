@@ -390,6 +390,11 @@ Required host/repository configuration:
 - optional repository variable `TLDW_SANDBOX_VZ_HELPER_ENTITLEMENTS_PATH`
 - optional repository variable `TLDW_SANDBOX_VZ_HELPER_SKIP_SIGN=true`
 
+The self-hosted job is branch-gated to `main` and `dev` so a manual dispatch
+does not accidentally execute arbitrary feature-branch code on the prepared
+host. External actions in this workflow are pinned to immutable SHAs because
+they execute on the self-hosted runner.
+
 The workflow calls the same operator smoke script documented above:
 
 ```bash
