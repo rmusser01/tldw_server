@@ -4,6 +4,7 @@ import {
   getSetting,
   setSetting,
   coerceBoolean,
+  coerceBooleanOrNull,
   coerceNumber,
   coerceOptionalString,
   coerceString
@@ -89,6 +90,16 @@ const ELEVEN_LABS_MODEL_SETTING = defineSetting(
   "elevenLabsModel",
   undefined as string | undefined,
   coerceOptionalString
+)
+const ELEVEN_LABS_KEY_VALID_SETTING = defineSetting(
+  "elevenLabsKeyValid",
+  null as boolean | null,
+  coerceBooleanOrNull
+)
+const ELEVEN_LABS_KEY_TESTED_AT_SETTING = defineSetting(
+  "elevenLabsKeyTestedAt",
+  "",
+  (value) => coerceOptionalString(value) || ""
 )
 const OPENAI_TTS_BASE_URL_SETTING = defineSetting(
   "openAITTSBaseUrl",
@@ -273,6 +284,24 @@ export const setElevenLabsModel = async (elevenLabsModel: string) => {
   await setSetting(ELEVEN_LABS_MODEL_SETTING, elevenLabsModel)
 }
 
+export const getElevenLabsKeyValid = async () =>
+  getSetting(ELEVEN_LABS_KEY_VALID_SETTING)
+
+export const setElevenLabsKeyValid = async (
+  elevenLabsKeyValid: boolean | null
+) => {
+  await setSetting(ELEVEN_LABS_KEY_VALID_SETTING, elevenLabsKeyValid)
+}
+
+export const getElevenLabsKeyTestedAt = async () =>
+  getSetting(ELEVEN_LABS_KEY_TESTED_AT_SETTING)
+
+export const setElevenLabsKeyTestedAt = async (
+  elevenLabsKeyTestedAt: string
+) => {
+  await setSetting(ELEVEN_LABS_KEY_TESTED_AT_SETTING, elevenLabsKeyTestedAt)
+}
+
 export const getOpenAITTSBaseUrl = async () =>
   getSetting(OPENAI_TTS_BASE_URL_SETTING)
 
@@ -436,6 +465,8 @@ export const getTTSSettings = async () => {
     elevenLabsApiKey,
     elevenLabsVoiceId,
     elevenLabsModel,
+    elevenLabsKeyValid,
+    elevenLabsKeyTestedAt,
     responseSplitting,
     removeReasoningTagTTS,
     // OPENAI
@@ -470,6 +501,8 @@ export const getTTSSettings = async () => {
     getElevenLabsApiKey(),
     getElevenLabsVoiceId(),
     getElevenLabsModel(),
+    getElevenLabsKeyValid(),
+    getElevenLabsKeyTestedAt(),
     getResponseSplitting(),
     getRemoveReasoningTagTTS(),
     // OPENAI
@@ -506,6 +539,8 @@ export const getTTSSettings = async () => {
     elevenLabsApiKey,
     elevenLabsVoiceId,
     elevenLabsModel,
+    elevenLabsKeyValid,
+    elevenLabsKeyTestedAt,
     responseSplitting,
     removeReasoningTagTTS,
     // OPENAI
@@ -540,6 +575,8 @@ export const setTTSSettings = async ({
   elevenLabsApiKey,
   elevenLabsVoiceId,
   elevenLabsModel,
+  elevenLabsKeyValid,
+  elevenLabsKeyTestedAt,
   responseSplitting,
   removeReasoningTagTTS,
   openAITTSBaseUrl,
@@ -570,6 +607,8 @@ export const setTTSSettings = async ({
   elevenLabsApiKey: string
   elevenLabsVoiceId: string
   elevenLabsModel: string
+  elevenLabsKeyValid?: boolean | null
+  elevenLabsKeyTestedAt?: string
   responseSplitting: string
   removeReasoningTagTTS: boolean
   openAITTSBaseUrl: string
@@ -593,7 +632,7 @@ export const setTTSSettings = async ({
   tldwTtsNormalizePhones: boolean
   tldwTtsNormalizePlurals: boolean
 }) => {
-  await Promise.all([
+  const updates = [
     setTTSEnabled(ttsEnabled),
     setTTSProvider(ttsProvider),
     setVoice(voice),
@@ -623,5 +662,12 @@ export const setTTSSettings = async ({
     setTldwTTSNormalizeEmails(tldwTtsNormalizeEmails),
     setTldwTTSNormalizePhones(tldwTtsNormalizePhones),
     setTldwTTSNormalizePlurals(tldwTtsNormalizePlurals)
-  ])
+  ]
+  if (elevenLabsKeyValid !== undefined) {
+    updates.push(setElevenLabsKeyValid(elevenLabsKeyValid))
+  }
+  if (elevenLabsKeyTestedAt !== undefined) {
+    updates.push(setElevenLabsKeyTestedAt(elevenLabsKeyTestedAt))
+  }
+  await Promise.all(updates)
 }
