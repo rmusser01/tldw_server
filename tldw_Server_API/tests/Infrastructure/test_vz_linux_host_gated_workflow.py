@@ -43,7 +43,7 @@ def test_vz_linux_host_gated_workflow_targets_prepared_apple_silicon_runner() ->
 
     assert job["runs-on"] == ["self-hosted", "macOS", "ARM64", "vz-linux"]  # nosec B101
     assert job["timeout-minutes"] <= 120  # nosec B101
-    assert "TLDW_VZ_HOST_E2E_BUNDLE_PATH" in job["env"]  # nosec B101
+    assert "TLDW_SANDBOX_VZ_LINUX_BUNDLE_PATH" in job["env"]  # nosec B101
 
 
 def test_vz_linux_host_gated_workflow_rejects_untrusted_refs() -> None:
@@ -66,7 +66,7 @@ def test_vz_linux_host_gated_workflow_uses_operator_smoke_script() -> None:
     assert "--bundle" in run_blocks  # nosec B101
     assert "--python" in run_blocks  # nosec B101
     assert 'chmod 700 "${runtime_dir}/serial"' in run_blocks  # nosec B101
-    assert "TLDW_VZ_HOST_E2E_BUNDLE_PATH" in run_blocks  # nosec B101
+    assert "TLDW_SANDBOX_VZ_LINUX_BUNDLE_PATH" in run_blocks  # nosec B101
 
 
 def test_vz_linux_host_gated_workflow_pins_external_actions() -> None:

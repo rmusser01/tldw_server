@@ -399,7 +399,7 @@ The workflow calls the same operator smoke script documented above:
 
 ```bash
 bash tools/vz-linux-image/scripts/run-host-e2e-smoke.sh \
-  --bundle "$TLDW_VZ_HOST_E2E_BUNDLE_PATH" \
+  --bundle "$TLDW_SANDBOX_VZ_LINUX_BUNDLE_PATH" \
   --socket "$RUNNER_TEMP/tldw-vz-helper-ci/helper.sock" \
   --serial-log-dir "$RUNNER_TEMP/tldw-vz-helper-ci/serial"
 ```
