@@ -2,7 +2,16 @@ import React from "react"
 import { useAudioSourceCatalog } from "@/hooks/useAudioSourceCatalog"
 import { useAudioSourcePreferences } from "@/hooks/useAudioSourcePreferences"
 import { useMicStream } from "@/hooks/useMicStream"
-import type { ResolvedPersonaVoiceDefaults } from "@/hooks/useResolvedPersonaVoiceDefaults"
+import {
+  BrowserTranscriptWakeDetector,
+  type WakeDetectedEvent,
+  type WakeDetector,
+  type WakeDetectorState
+} from "@/hooks/personaWakeDetector"
+import type {
+  PersonaWakeBehavior,
+  ResolvedPersonaVoiceDefaults
+} from "@/hooks/useResolvedPersonaVoiceDefaults"
 import { useStreamingAudioPlayer } from "@/hooks/useStreamingAudioPlayer"
 import { arrayBufferToBase64 } from "@/utils/compress"
 
@@ -15,6 +24,11 @@ export type PersonaLiveVoiceState =
 
 export type PersonaLiveVoiceRecoveryMode = "none" | "listening_stuck" | "thinking_stuck"
 export type PersonaLiveVadPreset = "conservative" | "balanced" | "fast" | "custom"
+type PersonaWakeStopReason =
+  | "disarmed"
+  | "route_leave"
+  | "stop_live_voice"
+  | "persona_switch"
 
 type UsePersonaLiveVoiceControllerArgs = {
   ws: WebSocket | null
@@ -23,6 +37,8 @@ type UsePersonaLiveVoiceControllerArgs = {
   personaId: string
   resolvedDefaults: ResolvedPersonaVoiceDefaults
   canUseServerStt: boolean
+  wakeTriggerPhrases?: string[]
+  wakeDetectorFactory?: () => WakeDetector
 }
 
 type PersonaLiveVoicePayload = Record<string, unknown> | null | undefined
@@ -90,7 +106,9 @@ export const usePersonaLiveVoiceController = ({
   sessionId,
   personaId,
   resolvedDefaults,
-  canUseServerStt
+  canUseServerStt,
+  wakeTriggerPhrases = [],
+  wakeDetectorFactory
 }: UsePersonaLiveVoiceControllerArgs) => {
   const [state, setState] = React.useState<PersonaLiveVoiceState>("idle")
   const [heardText, setHeardText] = React.useState("")
@@ -130,6 +148,12 @@ export const usePersonaLiveVoiceController = ({
     isSettled: hasAudioCatalogSettled
   } = useAudioSourceCatalog()
   const [pendingStartRequest, setPendingStartRequest] = React.useState(false)
+  const [wakeArmed, setWakeArmed] = React.useState(false)
+  const [wakeDetectorState, setWakeDetectorState] =
+    React.useState<WakeDetectorState>("idle")
+  const [wakeWarning, setWakeWarning] = React.useState<string | null>(null)
+  const [sessionWakeBehavior, setSessionWakeBehavior] =
+    React.useState<PersonaWakeBehavior>(resolvedDefaults.wakeBehavior)
 
   const heardTranscriptRef = React.useRef("")
   const manualModeRequiredRef = React.useRef(false)
@@ -140,6 +164,14 @@ export const usePersonaLiveVoiceController = ({
   const browserUtteranceActiveRef = React.useRef(false)
   const listeningRecoveryTimeoutRef = React.useRef<number | null>(null)
   const thinkingRecoveryTimeoutRef = React.useRef<number | null>(null)
+  const wakeDetectorRef = React.useRef<WakeDetector | null>(null)
+  const wakeArmedRef = React.useRef(false)
+  const wakeActiveRef = React.useRef(false)
+  const stopWakeListeningRef = React.useRef<
+    (reason?: PersonaWakeStopReason) => Promise<void>
+  >(async () => undefined)
+  const restartWakeListeningRef = React.useRef<(() => void) | null>(null)
+  const personaSessionKeyRef = React.useRef(`${personaId}:${sessionId}`)
 
   const activeProvider = React.useMemo(
     () => normalizeTtsProvider(resolvedDefaults.ttsProvider),
@@ -315,6 +347,49 @@ export const usePersonaLiveVoiceController = ({
     [armThinkingRecovery, clearTransientWarning, connected, handleVoiceError, sessionId, ws]
   )
 
+  const sendWakeActivation = React.useCallback(
+    (event: WakeDetectedEvent) => {
+      if (!connected || !sessionId || !ws || ws.readyState !== WebSocket.OPEN) {
+        setWakeWarning("Wake phrase heard, but Persona Live is not connected.")
+        return
+      }
+
+      try {
+        ws.send(
+          JSON.stringify({
+            type: "wake_activation",
+            session_id: sessionId,
+            matched_phrase: event.canonicalPhrase,
+            detector_kind: event.detectorKind,
+            wake_behavior: sessionWakeBehavior,
+            detected_at_ms: event.detectedAtMs
+          })
+        )
+      } catch {
+        setWakeWarning("Wake phrase heard, but activation could not be sent.")
+      }
+    },
+    [connected, sessionId, sessionWakeBehavior, ws]
+  )
+
+  const sendWakeDeactivation = React.useCallback(
+    (reason: PersonaWakeStopReason) => {
+      if (!sessionId || !ws || ws.readyState !== WebSocket.OPEN) return
+      try {
+        ws.send(
+          JSON.stringify({
+            type: "wake_deactivation",
+            session_id: sessionId,
+            reason
+          })
+        )
+      } catch {
+        // Ignore transient websocket send errors during teardown.
+      }
+    },
+    [sessionId, ws]
+  )
+
   const { start: startMicStream, stop: stopMicStream, active: micActive } = useMicStream(
     (chunk) => {
       if (!connected || !sessionId || !ws || ws.readyState !== WebSocket.OPEN) return
@@ -375,7 +450,46 @@ export const usePersonaLiveVoiceController = ({
     ws
   ])
 
+  const suspendWakeDetectorForLiveCapture = React.useCallback(async () => {
+    if (!wakeArmedRef.current || !wakeDetectorRef.current) return
+    try {
+      await wakeDetectorRef.current.stop()
+    } finally {
+      wakeDetectorRef.current = null
+      setWakeDetectorState("idle")
+    }
+  }, [])
+
+  const stopWakeListening = React.useCallback(
+    async (reason: PersonaWakeStopReason = "disarmed") => {
+      wakeArmedRef.current = false
+      wakeActiveRef.current = false
+      const detector = wakeDetectorRef.current
+      wakeDetectorRef.current = null
+      sendWakeDeactivation(reason)
+      try {
+        await detector?.stop()
+      } finally {
+        setWakeDetectorState("idle")
+        setWakeArmed(false)
+      }
+    },
+    [sendWakeDeactivation]
+  )
+
   const finishVoiceTurn = React.useCallback(() => {
+    if (
+      wakeArmedRef.current &&
+      wakeActiveRef.current &&
+      sessionWakeBehavior === "one_shot"
+    ) {
+      wakeActiveRef.current = false
+      pendingResumeRef.current = false
+      setPendingStartRequest(false)
+      setState("idle")
+      restartWakeListeningRef.current?.()
+      return
+    }
     if (sessionAutoResume && canUseServerStt && connected) {
       if (liveVoiceSourceReady) {
         setPendingStartRequest(false)
@@ -391,7 +505,14 @@ export const usePersonaLiveVoiceController = ({
     pendingResumeRef.current = false
     setPendingStartRequest(false)
     setState("idle")
-  }, [canUseServerStt, connected, liveVoiceSourceReady, sessionAutoResume, startMicCapture])
+  }, [
+    canUseServerStt,
+    connected,
+    liveVoiceSourceReady,
+    sessionAutoResume,
+    sessionWakeBehavior,
+    startMicCapture
+  ])
 
   const resetTurn = React.useCallback(() => {
     clearListeningRecoveryTimeout()
@@ -425,6 +546,23 @@ export const usePersonaLiveVoiceController = ({
     }
     armThinkingRecovery()
   }, [armThinkingRecovery, state])
+
+  React.useEffect(() => {
+    wakeArmedRef.current = wakeArmed
+  }, [wakeArmed])
+
+  React.useEffect(() => {
+    stopWakeListeningRef.current = stopWakeListening
+  }, [stopWakeListening])
+
+  React.useEffect(() => {
+    const nextKey = `${personaId}:${sessionId}`
+    if (personaSessionKeyRef.current === nextKey) return
+    personaSessionKeyRef.current = nextKey
+    if (wakeArmedRef.current) {
+      void stopWakeListeningRef.current("persona_switch")
+    }
+  }, [personaId, sessionId])
 
   React.useEffect(() => {
     manualModeRequiredRef.current = manualModeRequired
@@ -497,6 +635,7 @@ export const usePersonaLiveVoiceController = ({
     }
 
     setPendingStartRequest(false)
+    await suspendWakeDetectorForLiveCapture()
     await startMicCapture()
   }, [
     canUseServerStt,
@@ -509,8 +648,83 @@ export const usePersonaLiveVoiceController = ({
     state,
     startMicCapture,
     stopCurrentPlayback,
+    suspendWakeDetectorForLiveCapture,
     ws
   ])
+
+  const startWakeListening = React.useCallback(async () => {
+    const phrases = (wakeTriggerPhrases || [])
+      .map((phrase) => String(phrase || "").trim())
+      .filter(Boolean)
+    if (phrases.length === 0) {
+      setWakeWarning("Add a persona trigger phrase before arming wake listening.")
+      return
+    }
+
+    const detector = wakeDetectorFactory?.() || new BrowserTranscriptWakeDetector()
+    const available = await detector.isAvailable()
+    if (!available) {
+      setWakeDetectorState("unavailable")
+      setWakeWarning("Wake listening is unavailable in this browser context.")
+      return
+    }
+
+    await wakeDetectorRef.current?.stop()
+    wakeDetectorRef.current = detector
+    wakeActiveRef.current = false
+    wakeArmedRef.current = true
+    setWakeArmed(true)
+    setWakeWarning(null)
+
+    try {
+      await detector.start({
+        phrases,
+        locale: resolvedDefaults.sttLanguage,
+        onStateChange: setWakeDetectorState,
+        onError: (error) => setWakeWarning(error.message),
+        onWake: (event) => {
+          if (wakeActiveRef.current) return
+          wakeActiveRef.current = true
+          wakeDetectorRef.current = null
+          void detector.stop()
+          sendWakeActivation(event)
+          if (sessionWakeBehavior !== "push_to_talk_after_wake") {
+            void startListening()
+          }
+        }
+      })
+    } catch (error) {
+      wakeArmedRef.current = false
+      wakeActiveRef.current = false
+      wakeDetectorRef.current = null
+      setWakeArmed(false)
+      setWakeDetectorState("error")
+      setWakeWarning(
+        error instanceof Error ? error.message : "Wake listening could not start."
+      )
+    }
+  }, [
+    resolvedDefaults.sttLanguage,
+    sendWakeActivation,
+    sessionWakeBehavior,
+    startListening,
+    wakeDetectorFactory,
+    wakeTriggerPhrases
+  ])
+
+  const toggleWakeArmed = React.useCallback(async () => {
+    if (wakeArmedRef.current) {
+      await stopWakeListening("disarmed")
+      return
+    }
+    await startWakeListening()
+  }, [startWakeListening, stopWakeListening])
+
+  React.useEffect(() => {
+    restartWakeListeningRef.current = () => {
+      void startWakeListening()
+    }
+  }, [startWakeListening])
 
   const stopListening = React.useCallback(() => {
     if (!micActive && !pendingStartRequest) return
@@ -602,6 +816,7 @@ export const usePersonaLiveVoiceController = ({
   React.useEffect(() => {
     setSessionAutoResume(resolvedDefaults.autoResume)
     setSessionBargeIn(resolvedDefaults.bargeIn)
+    setSessionWakeBehavior(resolvedDefaults.wakeBehavior)
     setAutoCommitEnabled(resolvedDefaults.autoCommitEnabled)
     setVadThreshold(resolvedDefaults.vadThreshold)
     setMinSilenceMs(resolvedDefaults.minSilenceMs)
@@ -612,6 +827,7 @@ export const usePersonaLiveVoiceController = ({
     textOnlyDueToTtsFailureRef.current = false
     setTextOnlyDueToTtsFailure(false)
     setWarning(null)
+    setWakeWarning(null)
     setHeardText("")
     heardTranscriptRef.current = ""
     setLastCommittedText("")
@@ -639,6 +855,7 @@ export const usePersonaLiveVoiceController = ({
     resolvedDefaults.autoCommitEnabled,
     resolvedDefaults.autoResume,
     resolvedDefaults.bargeIn,
+    resolvedDefaults.wakeBehavior,
     resolvedDefaults.minSilenceMs,
     resolvedDefaults.minUtteranceSecs,
     resolvedDefaults.turnStopSecs,
@@ -650,6 +867,7 @@ export const usePersonaLiveVoiceController = ({
 
   React.useEffect(() => {
     if (!connected) {
+      setSessionWakeBehavior(resolvedDefaults.wakeBehavior)
       setAutoCommitEnabled(resolvedDefaults.autoCommitEnabled)
       setVadThreshold(resolvedDefaults.vadThreshold)
       setMinSilenceMs(resolvedDefaults.minSilenceMs)
@@ -661,6 +879,7 @@ export const usePersonaLiveVoiceController = ({
       setListeningRecoveryCount(0)
       setThinkingRecoveryCount(0)
       setActiveToolStatus("")
+      setWakeWarning(null)
       setListeningRecoveryRestartKey(0)
       setThinkingRecoveryArmed(false)
       setThinkingRecoveryRestartKey(0)
@@ -684,6 +903,7 @@ export const usePersonaLiveVoiceController = ({
     resolvedDefaults.minUtteranceSecs,
     resolvedDefaults.turnStopSecs,
     resolvedDefaults.vadThreshold,
+    resolvedDefaults.wakeBehavior,
     stopMicStream,
     stopCurrentPlayback
   ])
@@ -789,6 +1009,14 @@ export const usePersonaLiveVoiceController = ({
     }
   }, [clearAwaitingTtsTimeout, clearListeningRecoveryTimeout, clearThinkingRecoveryTimeout, stopMicStream, stopCurrentPlayback])
 
+  React.useEffect(() => {
+    return () => {
+      if (wakeArmedRef.current) {
+        void stopWakeListeningRef.current("route_leave")
+      }
+    }
+  }, [])
+
   const handlePayload = React.useCallback(
     (payload: PersonaLiveVoicePayload) => {
       const eventType = String(payload?.event || payload?.type || "").trim().toLowerCase()
@@ -878,6 +1106,22 @@ export const usePersonaLiveVoiceController = ({
 
       if (eventType === "notice") {
         const reasonCode = String(payload?.reason_code || "").trim().toUpperCase()
+        if (reasonCode === "WAKE_ACTIVATION_ACCEPTED") {
+          setWakeWarning(null)
+          return
+        }
+        if (reasonCode === "WAKE_ACTIVATION_REJECTED") {
+          wakeActiveRef.current = false
+          setWakeWarning(String(payload?.message || "Wake activation was rejected."))
+          if (wakeArmedRef.current) {
+            void startWakeListening()
+          }
+          return
+        }
+        if (reasonCode === "WAKE_DEACTIVATED") {
+          wakeActiveRef.current = false
+          return
+        }
         if (reasonCode === "VOICE_TURN_PROCESSING") {
           if (state === "thinking") {
             armThinkingRecovery()
@@ -945,6 +1189,10 @@ export const usePersonaLiveVoiceController = ({
           setWarning(
             String(payload?.message || "No trigger phrase was heard, so the transcript was ignored.")
           )
+          if (wakeArmedRef.current) {
+            wakeActiveRef.current = false
+            void startWakeListening()
+          }
           setState(micActive ? "listening" : "idle")
           return
         }
@@ -958,6 +1206,10 @@ export const usePersonaLiveVoiceController = ({
                 "The trigger phrase was removed, but no spoken command remained."
             )
           )
+          if (wakeArmedRef.current) {
+            wakeActiveRef.current = false
+            void startWakeListening()
+          }
           setState(micActive ? "listening" : "idle")
           return
         }
@@ -979,6 +1231,7 @@ export const usePersonaLiveVoiceController = ({
       micActive,
       playBrowserSpeech,
       activeToolStatus,
+      startWakeListening,
       state,
       stopMicStream,
       textOnlyDueToTtsFailure
@@ -1007,6 +1260,11 @@ export const usePersonaLiveVoiceController = ({
     lastCommittedText,
     activeToolStatus,
     warning,
+    wakeArmed,
+    wakeDetectorState,
+    wakeWarning,
+    sessionWakeBehavior,
+    wakeTriggerPhrases,
     manualModeRequired,
     canSendNow: Boolean(String(heardText || heardTranscriptRef.current || "").trim()),
     speechAvailable: canUseServerStt,
@@ -1023,12 +1281,15 @@ export const usePersonaLiveVoiceController = ({
     startListening,
     stopListening,
     toggleListening,
+    toggleWakeArmed,
+    stopWakeListening,
     sendCurrentTranscriptNow,
     keepListening,
     waitOnRecovery,
     resetTurn,
     setSessionAutoResume,
     setSessionBargeIn,
+    setSessionWakeBehavior,
     setAutoCommitEnabled,
     setVadPreset,
     setVadThreshold,
