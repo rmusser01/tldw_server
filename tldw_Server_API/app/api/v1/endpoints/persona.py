@@ -9,6 +9,7 @@ import binascii
 import contextlib
 import hashlib
 import json
+import os
 import re
 import threading
 import time
@@ -204,6 +205,14 @@ _PERSONA_RUNTIME_MODES = {"session_scoped", "persistent_scoped"}
 _PERSONA_WS_REQUIRED_NOTICE_LEVELS = {"info", "warning", "error"}
 _PERSONA_WS_ALLOWED_STEP_TYPES = {"mcp_tool", "skill", "rag_query", "final_answer"}
 _PERSONA_LIVE_PROCESSING_NOTICE_DELAY_S = 2.0
+_PERSONA_WAKE_BEHAVIORS = {"one_shot", "continuous", "push_to_talk_after_wake"}
+_PERSONA_WAKE_DEACTIVATION_REASONS = {
+    "disarmed",
+    "stop_live_voice",
+    "persona_switch",
+    "route_leave",
+    "session_close",
+}
 _PERSONA_CONNECTION_MEMORY_TYPE = "persona_connection"
 _PERSONA_CONNECTION_ALLOWED_AUTH_TYPES = {"none", "bearer", "api_key", "basic", "custom_header"}
 _PERSONA_CONNECTION_TEST_METHODS = {"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"}
@@ -2502,6 +2511,37 @@ def _apply_persona_live_trigger_phrases(
         cleaned = pattern.sub(" ", cleaned)
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
     return True, cleaned
+
+
+def _get_persona_wake_no_command_timeout_s() -> float:
+    try:
+        return max(
+            1.0,
+            min(300.0, float(os.getenv("PERSONA_WAKE_NO_COMMAND_TIMEOUT_S", "30"))),
+        )
+    except (TypeError, ValueError):
+        return 30.0
+
+
+def _normalize_persona_wake_phrase(value: object) -> str:
+    text = re.sub(r"[^\w\s]+", " ", str(value or "").strip().lower())
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _match_persona_wake_phrase(
+    matched_phrase: object,
+    configured_phrases: list[str] | None,
+) -> str | None:
+    normalized_match = _normalize_persona_wake_phrase(matched_phrase)
+    if not normalized_match:
+        return None
+    for phrase in configured_phrases or []:
+        candidate = str(phrase or "").strip()
+        if not candidate:
+            continue
+        if _normalize_persona_wake_phrase(candidate) == normalized_match:
+            return candidate
+    return None
 
 
 async def _generate_tts_audio_chunks(
@@ -5003,6 +5043,7 @@ async def persona_stream(
     auth_watchdog_stop: asyncio.Event | None = None
     auth_revoked_event: asyncio.Event | None = None
     persona_live_stt_state_by_session: dict[str, dict[str, Any]] = {}
+    persona_live_wake_state_by_session: dict[str, dict[str, Any]] = {}
     persona_live_summary_sessions_seen: set[str] = set()
     try:
         user_id, credentials_supplied, auth_ok = await _resolve_authenticated_user_id(ws, token=token, api_key=api_key)
@@ -5491,6 +5532,46 @@ async def persona_stream(
                     turn_detector.reset()
             voice_transcript_buffer_by_session.pop(session_id, None)
 
+        def _clear_persona_live_wake_state(session_id: str) -> None:
+            persona_live_wake_state_by_session.pop(session_id, None)
+
+        def _get_active_persona_live_wake_state(session_id: str) -> dict[str, Any] | None:
+            state = persona_live_wake_state_by_session.get(session_id)
+            if not isinstance(state, dict):
+                return None
+            expires_at = state.get("expires_at_monotonic")
+            if isinstance(expires_at, (int, float)) and time.monotonic() > float(expires_at):
+                _clear_persona_live_wake_state(session_id)
+                return None
+            return state
+
+        def _get_saved_wake_phrases_for_session(session_id: str) -> list[str]:
+            runtime_context = _load_persona_policy_rules_for_session(
+                persona_scope_db,
+                session_id=session_id,
+                user_id=authenticated_user_id,
+            )
+            if not bool(runtime_context.get("session_exists")):
+                return []
+            runtime_persona_id = str(runtime_context.get("persona_id") or "").strip()
+            if not runtime_persona_id or persona_scope_db is None:
+                return []
+            profile = persona_scope_db.get_persona_profile(
+                runtime_persona_id,
+                user_id=authenticated_user_id,
+                include_deleted=False,
+            )
+            if not isinstance(profile, dict):
+                return []
+            voice_defaults = profile.get("voice_defaults")
+            if not isinstance(voice_defaults, dict):
+                return []
+            return [
+                str(phrase or "").strip()
+                for phrase in voice_defaults.get("voice_chat_trigger_phrases") or []
+                if str(phrase or "").strip()
+            ]
+
         def _get_or_create_persona_live_stt_state(
             session_id: str,
         ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
@@ -5741,10 +5822,15 @@ async def persona_stream(
                 if isinstance(voice_runtime, dict)
                 else []
             )
-            trigger_matched, cleaned_transcript = _apply_persona_live_trigger_phrases(
-                transcript,
-                trigger_phrases=trigger_phrases,
-            )
+            wake_state = _get_active_persona_live_wake_state(session_id)
+            if wake_state:
+                trigger_matched = True
+                cleaned_transcript = str(transcript or "").strip()
+            else:
+                trigger_matched, cleaned_transcript = _apply_persona_live_trigger_phrases(
+                    transcript,
+                    trigger_phrases=trigger_phrases,
+                )
             if not trigger_matched:
                 await _emit_notice(
                     session_id=session_id,
@@ -5785,6 +5871,11 @@ async def persona_stream(
                 voice_runtime=voice_runtime if isinstance(voice_runtime, dict) else None,
                 commit_source=commit_source,
             )
+            if wake_state and wake_state.get("wake_behavior") in {
+                "one_shot",
+                "push_to_talk_after_wake",
+            }:
+                _clear_persona_live_wake_state(session_id)
             _reset_persona_live_active_turn(session_id)
             _schedule_persona_live_processing_notice(session_id)
             await _handle_persona_live_turn(
@@ -6947,12 +7038,97 @@ async def persona_stream(
                     session_id=session_id,
                     voice_runtime=voice_runtime,
                 )
+                _clear_persona_live_wake_state(session_id)
                 _cleanup_persona_live_stt_state(session_id)
                 await _emit_notice(
                     session_id=session_id,
                     level="info",
                     message="Voice runtime updated for this live session.",
                     reason_code="VOICE_CONFIG_UPDATED",
+                )
+            elif mtype == "wake_activation":
+                original_session_id = msg.get("session_id")
+                session_id = _normalize_ws_identifier(original_session_id, fallback="")
+                if not session_id:
+                    await _emit_notice(
+                        session_id=default_session_id,
+                        level="error",
+                        message="session_id is required",
+                        reason_code="SESSION_ID_REQUIRED",
+                    )
+                    continue
+                wake_behavior = str(msg.get("wake_behavior") or "one_shot").strip()
+                matched_phrase = str(msg.get("matched_phrase") or "").strip()
+                detector_kind = _bounded_label(
+                    msg.get("detector_kind"),
+                    allowed={"browser_transcript", "native_companion", "test"},
+                    fallback="browser_transcript",
+                )
+                saved_phrases = _get_saved_wake_phrases_for_session(session_id)
+                runtime_preferences = session_manager.get_preferences(
+                    session_id=session_id,
+                    user_id=connection_user_id,
+                )
+                voice_runtime = runtime_preferences.get("voice_runtime")
+                runtime_phrases = (
+                    list(voice_runtime.get("trigger_phrases") or [])
+                    if isinstance(voice_runtime, dict)
+                    else []
+                )
+                saved_match = _match_persona_wake_phrase(matched_phrase, saved_phrases)
+                runtime_match = _match_persona_wake_phrase(matched_phrase, runtime_phrases)
+                if (
+                    wake_behavior not in _PERSONA_WAKE_BEHAVIORS
+                    or not saved_match
+                    or not runtime_match
+                ):
+                    await _emit_notice(
+                        session_id=session_id,
+                        level="warning",
+                        reason_code="WAKE_ACTIVATION_REJECTED",
+                        message="Wake activation was rejected for this persona session.",
+                    )
+                    continue
+
+                expires_at: float | None = None
+                if wake_behavior in {"one_shot", "push_to_talk_after_wake"}:
+                    expires_at = time.monotonic() + _get_persona_wake_no_command_timeout_s()
+                persona_live_wake_state_by_session[session_id] = {
+                    "wake_behavior": wake_behavior,
+                    "matched_phrase": saved_match,
+                    "detector_kind": detector_kind,
+                    "expires_at_monotonic": expires_at,
+                }
+                await _emit_notice(
+                    session_id=session_id,
+                    level="info",
+                    reason_code="WAKE_ACTIVATION_ACCEPTED",
+                    message="Wake activation accepted for this live session.",
+                    wake_behavior=wake_behavior,
+                    detector_kind=detector_kind,
+                )
+            elif mtype == "wake_deactivation":
+                session_id = _normalize_ws_identifier(msg.get("session_id"), fallback="")
+                if not session_id:
+                    await _emit_notice(
+                        session_id=default_session_id,
+                        level="error",
+                        message="session_id is required",
+                        reason_code="SESSION_ID_REQUIRED",
+                    )
+                    continue
+                reason = _bounded_label(
+                    msg.get("reason"),
+                    allowed=_PERSONA_WAKE_DEACTIVATION_REASONS,
+                    fallback="disarmed",
+                )
+                _clear_persona_live_wake_state(session_id)
+                await _emit_notice(
+                    session_id=session_id,
+                    level="info",
+                    reason_code="WAKE_DEACTIVATED",
+                    message="Wake activation cleared for this live session.",
+                    reason=reason,
                 )
             elif mtype == "voice_commit":
                 original_session_id = msg.get("session_id")
@@ -7623,6 +7799,7 @@ async def persona_stream(
             )
         for session_id in list(persona_live_stt_state_by_session.keys()):
             _cleanup_persona_live_stt_state(session_id)
+        persona_live_wake_state_by_session.clear()
         if stream is not None:
             with contextlib.suppress(Exception):
                 await stream.stop()

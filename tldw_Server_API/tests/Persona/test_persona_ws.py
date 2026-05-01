@@ -3,6 +3,7 @@ import base64
 import json
 import queue
 import threading
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -91,6 +92,7 @@ def _seed_persona_session(
     use_persona_state_context_default: bool = True,
     scope_snapshot_json: dict | None = None,
     preferences_json: dict | None = None,
+    voice_defaults: dict | None = None,
 ) -> None:
     from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
@@ -106,6 +108,7 @@ def _seed_persona_session(
                 "name": "Research Assistant",
                 "mode": mode,
                 "system_prompt": "Helper",
+                "voice_defaults": dict(voice_defaults or {}),
                 "is_active": True,
                 "use_persona_state_context_default": bool(use_persona_state_context_default),
             }
@@ -2223,6 +2226,512 @@ def test_persona_voice_commit_uses_transcriber_snapshot_when_client_omits_transc
             assert plan.get("steps")
             assert fake_transcriber.initialize_called is True
             assert fake_transcriber.reset_called is True
+
+
+class _WakeFakePersonaTranscriber:
+    def __init__(self, transcript: str):
+        self.transcript = transcript
+        self.initialize_called = False
+
+    def initialize(self):
+        self.initialize_called = True
+
+    async def process_audio_chunk(self, audio_data: bytes):
+        return {
+            "type": "partial",
+            "text": self.transcript,
+            "is_final": False,
+        }
+
+    def get_full_transcript(self) -> str:
+        return self.transcript
+
+    def reset(self):
+        return None
+
+    def cleanup(self):
+        return None
+
+
+class _WakeFakeTurnDetector:
+    def __init__(self):
+        self.available = True
+        self.unavailable_reason = None
+        self.last_trigger_at = None
+        self._triggered = False
+
+    def observe(self, audio_data: bytes) -> bool:
+        if self._triggered:
+            return False
+        self._triggered = True
+        self.last_trigger_at = 123.456
+        return True
+
+    def reset(self):
+        self._triggered = False
+
+
+def _install_wake_voice_fakes(monkeypatch, transcript: str):
+    fake_transcriber = _WakeFakePersonaTranscriber(transcript)
+    fake_turn_detector = _WakeFakeTurnDetector()
+    monkeypatch.setattr(
+        persona_ep,
+        "_create_persona_live_stt_transcriber",
+        lambda *args, **kwargs: fake_transcriber,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        persona_ep,
+        "_create_persona_live_turn_detector",
+        lambda *args, **kwargs: fake_turn_detector,
+        raising=False,
+    )
+    return fake_transcriber, fake_turn_detector
+
+
+def test_persona_wake_activation_allows_next_voice_turn_without_trigger(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    _install_wake_voice_fakes(monkeypatch, "summarize the current note")
+    _seed_persona_session(
+        tmp_path,
+        monkeypatch,
+        user_id="1",
+        session_id="sess_wake_valid",
+        mode="session_scoped",
+        voice_defaults={
+            "voice_chat_trigger_phrases": ["hey helper"],
+            "wake_behavior": "one_shot",
+        },
+    )
+
+    with TestClient(fastapi_app) as c:
+        with c.websocket_connect("/api/v1/persona/stream") as ws:
+            _ = json.loads(ws.receive_text())
+            ws.send_text(
+                json.dumps(
+                    {
+                        "type": "voice_config",
+                        "session_id": "sess_wake_valid",
+                        "voice": {"trigger_phrases": ["hey helper"]},
+                        "stt": {"enable_vad": True},
+                    }
+                )
+            )
+            _ = _recv_until(
+                ws,
+                lambda d: d.get("event") == "notice"
+                and d.get("reason_code") == "VOICE_CONFIG_UPDATED",
+            )
+            ws.send_text(
+                json.dumps(
+                    {
+                        "type": "wake_activation",
+                        "session_id": "sess_wake_valid",
+                        "matched_phrase": "hey helper",
+                        "detector_kind": "browser_transcript",
+                        "wake_behavior": "one_shot",
+                        "detected_at_ms": 1714500000000,
+                    }
+                )
+            )
+            accepted = _recv_until(
+                ws,
+                lambda d: d.get("event") == "notice"
+                and d.get("reason_code") == "WAKE_ACTIVATION_ACCEPTED",
+            )
+            assert accepted.get("session_id") == "sess_wake_valid"
+
+            audio_payload = base64.b64encode(b"\x00\x00\xff\x7f\x00\x80").decode(
+                "ascii"
+            )
+            ws.send_text(
+                json.dumps(
+                    {
+                        "type": "audio_chunk",
+                        "session_id": "sess_wake_valid",
+                        "audio_format": "pcm16",
+                        "bytes_base64": audio_payload,
+                    }
+                )
+            )
+            plan = _recv_until(ws, lambda d: d.get("event") == "tool_plan")
+            assert plan.get("session_id") == "sess_wake_valid"
+
+
+def _assert_wake_activation_rejected_keeps_trigger_gate(
+    *,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    session_id: str,
+    saved_phrases: list[str],
+    runtime_phrases: list[str],
+    matched_phrase: str,
+    wake_behavior: str = "one_shot",
+) -> None:
+    _install_wake_voice_fakes(monkeypatch, "summarize the current note")
+    _seed_persona_session(
+        tmp_path,
+        monkeypatch,
+        user_id="1",
+        session_id=session_id,
+        mode="session_scoped",
+        voice_defaults={
+            "voice_chat_trigger_phrases": saved_phrases,
+            "wake_behavior": "one_shot",
+        },
+    )
+
+    with TestClient(fastapi_app) as c:
+        with c.websocket_connect("/api/v1/persona/stream") as ws:
+            _ = json.loads(ws.receive_text())
+            audio_payload = base64.b64encode(b"\x00\x00\xff\x7f\x00\x80").decode(
+                "ascii"
+            )
+            ws.send_text(
+                json.dumps(
+                    {
+                        "type": "voice_config",
+                        "session_id": session_id,
+                        "voice": {"trigger_phrases": runtime_phrases},
+                        "stt": {"model": "whisper-1", "language": "en-US"},
+                    }
+                )
+            )
+            _ = _recv_until(
+                ws,
+                lambda d: d.get("event") == "notice"
+                and d.get("reason_code") == "VOICE_CONFIG_UPDATED",
+            )
+            ws.send_text(
+                json.dumps(
+                    {
+                        "type": "wake_activation",
+                        "session_id": session_id,
+                        "matched_phrase": matched_phrase,
+                        "detector_kind": "browser_transcript",
+                        "wake_behavior": wake_behavior,
+                        "detected_at_ms": 1714500000000,
+                    }
+                )
+            )
+            rejected = _recv_until(
+                ws,
+                lambda d: d.get("event") == "notice"
+                and d.get("reason_code") == "WAKE_ACTIVATION_REJECTED",
+            )
+            assert rejected.get("session_id") == session_id
+            ws.send_text(
+                json.dumps(
+                    {
+                        "type": "audio_chunk",
+                        "session_id": session_id,
+                        "audio_format": "pcm16",
+                        "bytes_base64": audio_payload,
+                    }
+                )
+            )
+            ignored = _recv_until(
+                ws,
+                lambda d: d.get("event") == "notice"
+                and d.get("reason_code") == "VOICE_TRIGGER_NOT_HEARD",
+            )
+            assert ignored.get("session_id") == session_id
+
+
+def test_persona_wake_activation_rejects_phrase_not_saved_in_profile(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    _assert_wake_activation_rejected_keeps_trigger_gate(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        session_id="sess_wake_reject_saved",
+        saved_phrases=["hey helper"],
+        runtime_phrases=["runtime only"],
+        matched_phrase="runtime only",
+    )
+
+
+def test_persona_wake_activation_rejects_phrase_missing_from_runtime_config(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    _assert_wake_activation_rejected_keeps_trigger_gate(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        session_id="sess_wake_reject_runtime",
+        saved_phrases=["hey helper"],
+        runtime_phrases=["okay helper"],
+        matched_phrase="hey helper",
+    )
+
+
+def test_persona_wake_activation_rejects_invalid_wake_behavior(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    _assert_wake_activation_rejected_keeps_trigger_gate(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        session_id="sess_wake_reject_behavior",
+        saved_phrases=["hey helper"],
+        runtime_phrases=["hey helper"],
+        matched_phrase="hey helper",
+        wake_behavior="always_on_background",
+    )
+
+
+def test_persona_wake_deactivation_restores_trigger_gating(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    _install_wake_voice_fakes(monkeypatch, "summarize the current note")
+    _seed_persona_session(
+        tmp_path,
+        monkeypatch,
+        user_id="1",
+        session_id="sess_wake_deactivated",
+        mode="session_scoped",
+        voice_defaults={
+            "voice_chat_trigger_phrases": ["hey helper"],
+            "wake_behavior": "continuous",
+        },
+    )
+
+    with TestClient(fastapi_app) as c:
+        with c.websocket_connect("/api/v1/persona/stream") as ws:
+            _ = json.loads(ws.receive_text())
+            audio_payload = base64.b64encode(b"\x00\x00\xff\x7f\x00\x80").decode(
+                "ascii"
+            )
+            ws.send_text(
+                json.dumps(
+                    {
+                        "type": "voice_config",
+                        "session_id": "sess_wake_deactivated",
+                        "voice": {"trigger_phrases": ["hey helper"]},
+                        "stt": {"model": "whisper-1", "language": "en-US"},
+                    }
+                )
+            )
+            _ = _recv_until(
+                ws,
+                lambda d: d.get("event") == "notice"
+                and d.get("reason_code") == "VOICE_CONFIG_UPDATED",
+            )
+            ws.send_text(
+                json.dumps(
+                    {
+                        "type": "wake_activation",
+                        "session_id": "sess_wake_deactivated",
+                        "matched_phrase": "hey helper",
+                        "detector_kind": "browser_transcript",
+                        "wake_behavior": "continuous",
+                        "detected_at_ms": 1714500000000,
+                    }
+                )
+            )
+            _ = _recv_until(
+                ws,
+                lambda d: d.get("event") == "notice"
+                and d.get("reason_code") == "WAKE_ACTIVATION_ACCEPTED",
+            )
+            ws.send_text(
+                json.dumps(
+                    {
+                        "type": "wake_deactivation",
+                        "session_id": "sess_wake_deactivated",
+                        "reason": "disarmed",
+                    }
+                )
+            )
+            _ = _recv_until(
+                ws,
+                lambda d: d.get("event") == "notice"
+                and d.get("reason_code") == "WAKE_DEACTIVATED",
+            )
+            ws.send_text(
+                json.dumps(
+                    {
+                        "type": "audio_chunk",
+                        "session_id": "sess_wake_deactivated",
+                        "audio_format": "pcm16",
+                        "bytes_base64": audio_payload,
+                    }
+                )
+            )
+            ignored = _recv_until(
+                ws,
+                lambda d: d.get("event") == "notice"
+                and d.get("reason_code") == "VOICE_TRIGGER_NOT_HEARD",
+            )
+            assert ignored.get("session_id") == "sess_wake_deactivated"
+
+
+def test_persona_wake_activation_one_shot_expires_after_commit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    _install_wake_voice_fakes(monkeypatch, "summarize the current note")
+    _seed_persona_session(
+        tmp_path,
+        monkeypatch,
+        user_id="1",
+        session_id="sess_wake_one_shot",
+        mode="session_scoped",
+        voice_defaults={
+            "voice_chat_trigger_phrases": ["hey helper"],
+            "wake_behavior": "one_shot",
+        },
+    )
+
+    with TestClient(fastapi_app) as c:
+        with c.websocket_connect("/api/v1/persona/stream") as ws:
+            _ = json.loads(ws.receive_text())
+            audio_payload = base64.b64encode(b"\x00\x00\xff\x7f\x00\x80").decode(
+                "ascii"
+            )
+            ws.send_text(
+                json.dumps(
+                    {
+                        "type": "voice_config",
+                        "session_id": "sess_wake_one_shot",
+                        "voice": {"trigger_phrases": ["hey helper"]},
+                        "stt": {"model": "whisper-1", "language": "en-US"},
+                    }
+                )
+            )
+            _ = _recv_until(
+                ws,
+                lambda d: d.get("event") == "notice"
+                and d.get("reason_code") == "VOICE_CONFIG_UPDATED",
+            )
+            ws.send_text(
+                json.dumps(
+                    {
+                        "type": "wake_activation",
+                        "session_id": "sess_wake_one_shot",
+                        "matched_phrase": "hey helper",
+                        "detector_kind": "browser_transcript",
+                        "wake_behavior": "one_shot",
+                        "detected_at_ms": 1714500000000,
+                    }
+                )
+            )
+            _ = _recv_until(
+                ws,
+                lambda d: d.get("event") == "notice"
+                and d.get("reason_code") == "WAKE_ACTIVATION_ACCEPTED",
+            )
+            ws.send_text(
+                json.dumps(
+                    {
+                        "type": "audio_chunk",
+                        "session_id": "sess_wake_one_shot",
+                        "audio_format": "pcm16",
+                        "bytes_base64": audio_payload,
+                    }
+                )
+            )
+            _ = _recv_until(
+                ws,
+                lambda d: d.get("event") == "notice"
+                and d.get("reason_code") == "VOICE_TURN_COMMITTED",
+            )
+            _ = _recv_until(ws, lambda d: d.get("event") == "tool_plan")
+            ws.send_text(
+                json.dumps(
+                    {
+                        "type": "audio_chunk",
+                        "session_id": "sess_wake_one_shot",
+                        "audio_format": "pcm16",
+                        "bytes_base64": audio_payload,
+                    }
+                )
+            )
+            ignored = _recv_until(
+                ws,
+                lambda d: d.get("event") == "notice"
+                and d.get("reason_code") == "VOICE_TRIGGER_NOT_HEARD",
+            )
+            assert ignored.get("session_id") == "sess_wake_one_shot"
+
+
+def test_persona_wake_activation_expires_after_no_command_timeout(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    _install_wake_voice_fakes(monkeypatch, "summarize the current note")
+    monkeypatch.setattr(persona_ep, "_get_persona_wake_no_command_timeout_s", lambda: 0.01)
+    _seed_persona_session(
+        tmp_path,
+        monkeypatch,
+        user_id="1",
+        session_id="sess_wake_timeout",
+        mode="session_scoped",
+        voice_defaults={
+            "voice_chat_trigger_phrases": ["hey helper"],
+            "wake_behavior": "one_shot",
+        },
+    )
+
+    with TestClient(fastapi_app) as c:
+        with c.websocket_connect("/api/v1/persona/stream") as ws:
+            _ = json.loads(ws.receive_text())
+            audio_payload = base64.b64encode(b"\x00\x00\xff\x7f\x00\x80").decode(
+                "ascii"
+            )
+            ws.send_text(
+                json.dumps(
+                    {
+                        "type": "voice_config",
+                        "session_id": "sess_wake_timeout",
+                        "voice": {"trigger_phrases": ["hey helper"]},
+                        "stt": {"model": "whisper-1", "language": "en-US"},
+                    }
+                )
+            )
+            _ = _recv_until(
+                ws,
+                lambda d: d.get("event") == "notice"
+                and d.get("reason_code") == "VOICE_CONFIG_UPDATED",
+            )
+            ws.send_text(
+                json.dumps(
+                    {
+                        "type": "wake_activation",
+                        "session_id": "sess_wake_timeout",
+                        "matched_phrase": "hey helper",
+                        "detector_kind": "browser_transcript",
+                        "wake_behavior": "one_shot",
+                        "detected_at_ms": 1714500000000,
+                    }
+                )
+            )
+            _ = _recv_until(
+                ws,
+                lambda d: d.get("event") == "notice"
+                and d.get("reason_code") == "WAKE_ACTIVATION_ACCEPTED",
+            )
+            time.sleep(0.02)
+            ws.send_text(
+                json.dumps(
+                    {
+                        "type": "audio_chunk",
+                        "session_id": "sess_wake_timeout",
+                        "audio_format": "pcm16",
+                        "bytes_base64": audio_payload,
+                    }
+                )
+            )
+            ignored = _recv_until(
+                ws,
+                lambda d: d.get("event") == "notice"
+                and d.get("reason_code") == "VOICE_TRIGGER_NOT_HEARD",
+            )
+            assert ignored.get("session_id") == "sess_wake_timeout"
 
 
 def test_persona_audio_chunk_vad_auto_commit_routes_stripped_transcript_to_plan(monkeypatch):
