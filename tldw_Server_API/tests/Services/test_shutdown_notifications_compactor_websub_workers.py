@@ -141,6 +141,30 @@ async def test_shutdown_embeddings_vector_compactor_worker_cancels_on_guard_exce
 
 
 @pytest.mark.asyncio
+async def test_shutdown_embeddings_vector_compactor_worker_treats_cancelled_wait_as_stopped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    shutdown_workers = _import_shutdown_notifications_compactor_websub_workers()
+    task = _FakeTask()
+    stop_event = _FakeStopEvent()
+
+    async def _cancelled_wait(_task, *, timeout):
+        del timeout
+        raise asyncio.CancelledError()
+
+    monkeypatch.setattr(shutdown_workers, "_wait_for_task", _cancelled_wait)
+
+    await shutdown_workers._shutdown_embeddings_vector_compactor_worker(
+        task=task,
+        stop_event=stop_event,
+        guard_exceptions=(RuntimeError,),
+    )
+
+    assert stop_event.is_set is True
+    assert task.cancelled is False
+
+
+@pytest.mark.asyncio
 async def test_shutdown_embeddings_vector_compactor_worker_cancels_on_timeout(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

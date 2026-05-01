@@ -100,8 +100,14 @@ async def shutdown_post_worker_services(
     )
     notifications_shutdown_handles = await _shutdown_notifications_compactor_websub_workers(
         jobs_notifications_bridge_task=jobs_notifications_bridge_task,
-        embeddings_compactor_task=embeddings_compactor_task,
-        embeddings_compactor_stop_event=embeddings_compactor_stop_event,
+        embeddings_compactor_task=_task_if_not_stopped(
+            "embeddings_compactor_task",
+            embeddings_compactor_task,
+        ),
+        embeddings_compactor_stop_event=_stop_event_if_not_stopped(
+            "embeddings_compactor_task",
+            embeddings_compactor_stop_event,
+        ),
         websub_renewal_task=_task_if_not_stopped("websub_renewal_task", websub_renewal_task),
         guard_exceptions=guard_exceptions,
     )
@@ -298,8 +304,14 @@ async def run_shutdown_post_worker_services(
             files_export_gc_task=files_export_gc_task,
             notifications_prune_task=notifications_prune_task,
             jobs_notifications_bridge_task=jobs_notifications_bridge_task,
-            embeddings_compactor_task=embeddings_compactor_task,
-            embeddings_compactor_stop_event=embeddings_compactor_stop_event,
+            embeddings_compactor_task=_fallback_if_not_stopped(
+                "embeddings_compactor_task",
+                embeddings_compactor_task,
+            ),
+            embeddings_compactor_stop_event=_fallback_if_not_stopped(
+                "embeddings_compactor_task",
+                embeddings_compactor_stop_event,
+            ),
             websub_renewal_task=_fallback_if_not_stopped("websub_renewal_task", websub_renewal_task),
             usage_task=_fallback_if_not_stopped("usage_aggregator", usage_task),
             llm_usage_task=_fallback_if_not_stopped("llm_usage_aggregator", llm_usage_task),

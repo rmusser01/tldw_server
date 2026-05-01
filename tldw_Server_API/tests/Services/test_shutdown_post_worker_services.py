@@ -303,7 +303,7 @@ async def test_shutdown_post_worker_services_skips_jobs_webhooks_after_backgroun
 
 
 @pytest.mark.asyncio
-async def test_shutdown_post_worker_services_skips_websub_after_background_phase(
+async def test_shutdown_post_worker_services_skips_compactor_and_websub_after_background_phase(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from tldw_Server_API.app.services import shutdown_post_worker_services as shutdown_services
@@ -414,14 +414,19 @@ async def test_shutdown_post_worker_services_skips_websub_after_background_phase
         workflows_maint_task=None,
         workflows_maint_stop_event=None,
         guard_exceptions=(RuntimeError,),
-        stopped_background_worker_names={"websub_renewal_task"},
+        stopped_background_worker_names={
+            "embeddings_compactor_task",
+            "websub_renewal_task",
+        },
     )
 
     assert notification_kwargs["jobs_notifications_bridge_task"] == "bridge-task"
-    assert notification_kwargs["embeddings_compactor_task"] == "compactor-task"
+    assert notification_kwargs["embeddings_compactor_task"] is None
+    assert notification_kwargs["embeddings_compactor_stop_event"] is None
     assert notification_kwargs["websub_renewal_task"] is None
     assert handles.jobs_notifications_bridge_task == "bridge-task"
-    assert handles.embeddings_compactor_task == "compactor-task"
+    assert handles.embeddings_compactor_task is None
+    assert handles.embeddings_compactor_stop_event is None
     assert handles.websub_renewal_task is None
 
 
@@ -710,6 +715,7 @@ async def test_run_shutdown_post_worker_services_guard_failure_suppresses_stoppe
         guard_exceptions=(RuntimeError,),
         stopped_background_worker_names={
             "claims_rebuild",
+            "embeddings_compactor_task",
             "usage_aggregator",
             "llm_usage_aggregator",
             "jobs_metrics_task",
@@ -726,8 +732,8 @@ async def test_run_shutdown_post_worker_services_guard_failure_suppresses_stoppe
     assert handles.files_export_gc_task == "files-input"
     assert handles.notifications_prune_task == "notifications-input"
     assert handles.jobs_notifications_bridge_task == "bridge-input"
-    assert handles.embeddings_compactor_task == "compactor-input"
-    assert handles.embeddings_compactor_stop_event == "compactor-stop-input"
+    assert handles.embeddings_compactor_task is None
+    assert handles.embeddings_compactor_stop_event is None
     assert handles.websub_renewal_task is None
     assert handles.usage_task is None
     assert handles.llm_usage_task is None

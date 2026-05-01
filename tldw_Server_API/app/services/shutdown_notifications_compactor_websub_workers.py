@@ -81,6 +81,8 @@ async def _shutdown_embeddings_vector_compactor_worker(
             logger.info("Embeddings Vector Compactor stopped via stop_event")
         else:
             await _cancel_and_wait_for_task(task, guard_exceptions=guard_exceptions)
+    except asyncio.CancelledError:
+        logger.info("Embeddings Vector Compactor was already cancelled")
     except fallback_exceptions:
         await _cancel_and_wait_for_task(task, guard_exceptions=guard_exceptions)
 

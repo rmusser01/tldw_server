@@ -26,7 +26,7 @@ async def test_start_compactor_websub_workers_combines_handles_in_order(
     calls: list[str] = []
 
     async def _record_compactor(**kwargs):
-        del kwargs
+        assert kwargs == {"worker_inventory": None}
         calls.append("compactor")
         return ("compactor-stop", "compactor-task")
 
@@ -79,6 +79,72 @@ async def test_start_embeddings_vector_compactor_starts_when_enabled(
     assert task == "compactor-task"
     assert captured_stop_events == ["compactor-stop"]
     assert created_coroutines == ["compactor-coro"]
+
+
+@pytest.mark.asyncio
+async def test_start_embeddings_vector_compactor_registers_background_inventory_when_enabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_workers = _import_startup_compactor_websub_workers()
+    from tldw_Server_API.app.services.lifecycle_workers import (
+        ShutdownPhase,
+        WorkerRegistry,
+    )
+
+    app = FastAPI()
+    worker_inventory = WorkerRegistry(app)
+    observed_stop_events: list[asyncio.Event] = []
+
+    async def _fake_compactor(stop_event: asyncio.Event) -> None:
+        observed_stop_events.append(stop_event)
+        await stop_event.wait()
+
+    monkeypatch.setattr(
+        startup_workers.os,
+        "getenv",
+        lambda key, default=None: "true" if key == "EMBEDDINGS_COMPACTOR_ENABLED" else default,
+    )
+    monkeypatch.setattr(
+        startup_workers,
+        "_run_embeddings_vector_compactor_service",
+        _fake_compactor,
+    )
+
+    stop_event = None
+    task = None
+    try:
+        stop_event, task = await startup_workers._start_embeddings_vector_compactor(
+            worker_inventory=worker_inventory,
+        )
+        await asyncio.sleep(0)
+
+        assert stop_event is not None
+        assert task is not None
+        assert task.get_name() == "embeddings_compactor_task"
+        assert observed_stop_events == [stop_event]
+        assert len(worker_inventory.handles) == 1
+        handle = worker_inventory.handles[0]
+        assert handle.name == "embeddings_compactor_task"
+        assert handle.task is task
+        assert handle.stop_event is stop_event
+        assert handle.category == "embeddings"
+        assert handle.shutdown_phase is ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN
+        assert app.state._tldw_shutdown_worker_inventory == [
+            {
+                "name": "embeddings_compactor_task",
+                "task_name": "embeddings_compactor_task",
+                "has_stop_event": True,
+                "timeout_sec": 5.0,
+                "category": "embeddings",
+                "shutdown_phase": "background_worker_shutdown",
+            }
+        ]
+        assert app.state._tldw_shutdown_job_poller_inventory == []
+    finally:
+        if stop_event is not None:
+            stop_event.set()
+        if task is not None:
+            await asyncio.wait_for(task, timeout=1)
 
 
 @pytest.mark.asyncio
