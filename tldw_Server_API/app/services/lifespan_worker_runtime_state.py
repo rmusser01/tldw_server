@@ -47,6 +47,10 @@ class LifespanWorkerRuntimeState:
     media_ingest_heavy_jobs_task: Any | None = None
     reading_digest_jobs_stop_event: Any | None = None
     reading_digest_jobs_task: Any | None = None
+    vn_asset_jobs_stop_event: Any | None = None
+    vn_asset_jobs_task: Any | None = None
+    vn_asset_generation_jobs_stop_event: Any | None = None
+    vn_asset_generation_jobs_task: Any | None = None
     companion_reflection_jobs_stop_event: Any | None = None
     companion_reflection_jobs_task: Any | None = None
     reminder_jobs_stop_event: Any | None = None

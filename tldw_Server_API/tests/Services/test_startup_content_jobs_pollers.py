@@ -142,6 +142,49 @@ async def test_start_audio_jobs_worker_registers_owned_poller_when_enabled(
 
 
 @pytest.mark.asyncio
+async def test_start_vn_asset_jobs_workers_use_stable_defaults(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_pollers = _import_startup_content_jobs_pollers()
+    stop_events = iter(["vn-stop", "vn-generation-stop"])
+    calls: list[tuple[str, str, dict[str, object]]] = []
+
+    monkeypatch.setattr(startup_pollers, "_make_event", lambda: next(stop_events))
+    monkeypatch.setattr(startup_pollers, "_create_task", lambda coro: f"task:{coro}")
+    monkeypatch.setattr(
+        startup_pollers,
+        "_run_vn_asset_jobs_worker_service",
+        lambda stop_event: f"vn-coro:{stop_event}",
+    )
+    monkeypatch.setattr(
+        startup_pollers,
+        "_run_vn_asset_generation_jobs_worker_service",
+        lambda stop_event: f"vn-generation-coro:{stop_event}",
+    )
+
+    def _should_start_worker(flag_key: str, route_key: str, **kwargs: object) -> bool:
+        calls.append((flag_key, route_key, kwargs))
+        return False
+
+    handles = await startup_pollers._start_vn_asset_jobs_workers(
+        app="app",
+        owned_job_pollers=[],
+        register_owned_job_poller=lambda *args, **kwargs: None,
+        should_start_worker=_should_start_worker,
+    )
+
+    assert handles == (None, None, None, None)
+    assert calls == [
+        ("VN_ASSET_JOBS_WORKER_ENABLED", "vn-assets", {"default_stable": True}),
+        (
+            "VN_ASSET_GENERATION_JOBS_WORKER_ENABLED",
+            "vn-assets-generation",
+            {"default_stable": True},
+        ),
+    ]
+
+
+@pytest.mark.asyncio
 async def test_start_media_ingest_jobs_workers_respects_heavy_default_stable_false(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

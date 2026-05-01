@@ -972,4 +972,16 @@ def iter_content_router_specs() -> Iterable[RouterSpec]:
     except Exception as e:  # noqa: BLE001
         logger.debug(f"Skipping scheduled_tasks_control_plane router: {e}")
 
+    try:
+        from tldw_Server_API.app.api.v1.endpoints.vn_assets import router as vn_assets_router
+
+        specs.append(RouterSpec(
+            router=vn_assets_router,
+            prefix=f"{API_V1_PREFIX}",
+            tags=("vn-assets",),
+            route_key="vn-assets",
+        ))
+    except Exception as e:  # noqa: BLE001
+        logger.debug(f"Skipping VN assets router: {e}")
+
     return specs
