@@ -30,7 +30,7 @@ Options:
   --socket PATH          Host-side helper AF_UNIX socket path
   --serial-log-dir PATH  Directory for helper VM serial logs
   --helper PATH          Helper binary path
-  --entitlements PATH    Entitlements plist for ad hoc codesigning
+  --entitlements PATH    Entitlements plist for ad hoc codesigning unless the helper is already signed
   --python PATH          Python executable for pytest
   --skip-build           Do not build the helper even if the binary is missing
   --skip-sign            Do not codesign the helper
@@ -236,12 +236,36 @@ prepare_private_socket_parent() {
   fi
 }
 
+prepare_private_serial_log_dir() {
+  if [[ "${DRY_RUN}" -eq 1 ]]; then
+    return 0
+  fi
+  if [[ -L "${SERIAL_LOG_DIR}" ]]; then
+    die "serial log directory is a symlink: ${SERIAL_LOG_DIR}"
+  fi
+  if [[ -e "${SERIAL_LOG_DIR}" && ! -d "${SERIAL_LOG_DIR}" ]]; then
+    die "serial log path is not a directory: ${SERIAL_LOG_DIR}"
+  fi
+  if [[ -d "${SERIAL_LOG_DIR}" ]]; then
+    if ! directory_is_owner_private "${SERIAL_LOG_DIR}"; then
+      die "serial log directory must be owner-only: ${SERIAL_LOG_DIR}"
+    fi
+    return 0
+  fi
+  mkdir -p "${SERIAL_LOG_DIR}"
+  chmod 700 "${SERIAL_LOG_DIR}"
+  if ! directory_is_owner_private "${SERIAL_LOG_DIR}"; then
+    die "serial log directory must be owner-only: ${SERIAL_LOG_DIR}"
+  fi
+}
+
 run_helper_daemon_smoke() {
   run_cmd env \
     TLDW_SANDBOX_MACOS_HELPER_DAEMON_SMOKE=1 \
     TLDW_SANDBOX_VZ_LINUX_BUNDLE_SMOKE=1 \
     TLDW_SANDBOX_VZ_LINUX_BUNDLE_PATH="${BUNDLE_PATH}" \
     TLDW_SANDBOX_MACOS_HELPER_BINARY="${HELPER_PATH}" \
+    TLDW_SANDBOX_VZ_LINUX_SERIAL_LOG_DIR="${SERIAL_LOG_DIR}" \
     "${PYTHON_BIN}" -m pytest \
     "${REPO_ROOT}/tldw_Server_API/tests/sandbox/test_macos_virtualization_helper_daemon_host_gated.py" \
     -q -rs
@@ -258,7 +282,6 @@ start_helper_for_real_e2e() {
 
   prepare_private_socket_parent
   prepare_socket_path
-  mkdir -p "${SERIAL_LOG_DIR}"
   env \
     TLDW_SANDBOX_MACOS_HELPER_SOCKET="${SOCKET_PATH}" \
     TLDW_SANDBOX_VZ_LINUX_SERIAL_LOG_DIR="${SERIAL_LOG_DIR}" \
@@ -312,6 +335,7 @@ cd "${REPO_ROOT}"
 build_helper_if_needed
 sign_helper_if_requested
 require_helper_binary
+prepare_private_serial_log_dir
 run_helper_daemon_smoke
 start_helper_for_real_e2e
 wait_for_helper_socket

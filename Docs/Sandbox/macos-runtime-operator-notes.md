@@ -317,9 +317,10 @@ tools/macos-vz-helper/scripts/vz-helperctl.py smoke \
 
 The wrapper delegates to `tools/vz-linux-image/scripts/run-host-e2e-smoke.sh`
 with the managed helper defaults. That lower-level script validates the bundle,
-builds the Swift helper when the binary is missing, optionally ad hoc signs it
-with the supplied entitlements, runs the helper-daemon smoke, starts one helper
-daemon for real `vz_linux` E2E, verifies ephemeral execution, verifies
+builds the Swift helper when the binary is missing, ad hoc signs it with the
+supplied entitlements unless the helper is already signed with
+`com.apple.security.virtualization`, runs the helper-daemon smoke, starts one
+helper daemon for real `vz_linux` E2E, verifies ephemeral execution, verifies
 same-session VM reuse, and stops the helper on exit.
 
 The lower-level fallback remains available when operators need to bypass the

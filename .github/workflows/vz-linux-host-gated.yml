@@ -77,6 +77,7 @@ jobs:
           rm -rf "${runtime_dir}"
           mkdir -p "${runtime_dir}/serial"
           chmod 700 "${runtime_dir}"
+          chmod 700 "${runtime_dir}/serial"
 
           args=(
             --bundle "${TLDW_VZ_HOST_E2E_BUNDLE_PATH}"

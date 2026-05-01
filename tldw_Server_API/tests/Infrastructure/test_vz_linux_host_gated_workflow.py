@@ -47,4 +47,5 @@ def test_vz_linux_host_gated_workflow_uses_operator_smoke_script() -> None:
     assert "tools/vz-linux-image/scripts/run-host-e2e-smoke.sh" in run_blocks  # nosec B101
     assert "--bundle" in run_blocks  # nosec B101
     assert "--python" in run_blocks  # nosec B101
+    assert 'chmod 700 "${runtime_dir}/serial"' in run_blocks  # nosec B101
     assert "TLDW_VZ_HOST_E2E_BUNDLE_PATH" in run_blocks  # nosec B101
