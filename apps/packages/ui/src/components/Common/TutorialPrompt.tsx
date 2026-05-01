@@ -44,9 +44,13 @@ export const TutorialPrompt: React.FC = () => {
   const startTutorial = useTutorialStore((state) => state.startTutorial)
   const isHelpModalOpen = useTutorialStore((state) => state.isHelpModalOpen)
   const activeTutorialId = useTutorialStore((state) => state.activeTutorialId)
+  const completedTutorials = useTutorialStore((state) => state.completedTutorials)
 
   useEffect(() => {
     const pageKey = location.pathname
+    const tutorialLookupOptions = {
+      completedTutorialIds: completedTutorials
+    }
 
     // Clean up previous timeout
     if (timeoutRef.current) {
@@ -75,7 +79,7 @@ export const TutorialPrompt: React.FC = () => {
     }
 
     // Skip if page has no tutorials
-    if (!hasTutorialsForRoute(pageKey)) {
+    if (!hasTutorialsForRoute(pageKey, tutorialLookupOptions)) {
       return
     }
 
@@ -85,7 +89,10 @@ export const TutorialPrompt: React.FC = () => {
     }
 
     // Get the primary tutorial for this page
-    const primaryTutorial = getPrimaryTutorialForRoute(pageKey)
+    const primaryTutorial = getPrimaryTutorialForRoute(
+      pageKey,
+      tutorialLookupOptions
+    )
     if (!primaryTutorial) {
       return
     }
@@ -188,6 +195,7 @@ export const TutorialPrompt: React.FC = () => {
     activeTutorialId,
     api,
     isHelpModalOpen,
+    completedTutorials,
     t,
     hasSeenPromptForPage,
     markPromptSeen,
