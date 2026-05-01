@@ -46,6 +46,18 @@ def test_vz_linux_host_gated_workflow_targets_prepared_apple_silicon_runner() ->
     assert "TLDW_SANDBOX_VZ_LINUX_BUNDLE_PATH" in job["env"]  # nosec B101
 
 
+def test_vz_linux_host_gated_workflow_preserves_explicit_skip_sign_false() -> None:
+    """Manual skip_sign=false should override a true repository variable."""
+    workflow = _load_workflow()
+    job = workflow["jobs"]["vz-linux-host-gated-smoke"]
+    skip_sign_expr = job["env"]["TLDW_SANDBOX_VZ_HELPER_SKIP_SIGN"]
+    truthy_fallback = "inputs.skip_sign || vars.TLDW_SANDBOX_VZ_HELPER_SKIP_SIGN"
+
+    assert "inputs.skip_sign == null" in skip_sign_expr  # nosec B101
+    assert "vars.TLDW_SANDBOX_VZ_HELPER_SKIP_SIGN || 'false'" in skip_sign_expr  # nosec B101
+    assert truthy_fallback not in skip_sign_expr  # nosec B101
+
+
 def test_vz_linux_host_gated_workflow_rejects_untrusted_refs() -> None:
     """Manual self-hosted runs must not execute arbitrary feature-branch code."""
     workflow = _load_workflow()

@@ -37,7 +37,7 @@ jobs:
       TEST_MODE: '0'
       TLDW_SANDBOX_VZ_LINUX_BUNDLE_PATH: ${{ inputs.bundle_path || vars.TLDW_SANDBOX_VZ_LINUX_BUNDLE_PATH }}
       TLDW_SANDBOX_VZ_HELPER_ENTITLEMENTS_PATH: ${{ inputs.entitlements_path || vars.TLDW_SANDBOX_VZ_HELPER_ENTITLEMENTS_PATH }}
-      TLDW_SANDBOX_VZ_HELPER_SKIP_SIGN: ${{ inputs.skip_sign || vars.TLDW_SANDBOX_VZ_HELPER_SKIP_SIGN || 'false' }}
+      TLDW_SANDBOX_VZ_HELPER_SKIP_SIGN: ${{ inputs.skip_sign == null && (vars.TLDW_SANDBOX_VZ_HELPER_SKIP_SIGN || 'false') || inputs.skip_sign }}
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
