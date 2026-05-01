@@ -343,6 +343,34 @@ async def test_run_cleanup_loop_failure_log_is_sanitized(monkeypatch):
 
 @pytest.mark.asyncio
 @pytest.mark.unit
+async def test_run_cleanup_loop_honors_stop_event_during_interval(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cleanup_module = _load_cleanup_service_module()
+    assert cleanup_module is not None
+
+    stop_event = asyncio.Event()
+    runs = {"count": 0}
+
+    async def _run_once() -> dict[str, int]:
+        runs["count"] += 1
+        stop_event.set()
+        return {"scanned": 0, "pruned": 0, "skipped_active": 0, "failed": 0}
+
+    async def _unexpected_sleep(_seconds: float) -> None:
+        raise AssertionError("loop should wait on stop_event instead of sleeping")
+
+    monkeypatch.setenv("INGESTION_SOURCES_CLEANUP_INTERVAL_SEC", "3600")
+    monkeypatch.setattr(cleanup_module, "run_ingestion_sources_cleanup_once", _run_once, raising=False)
+    monkeypatch.setattr(cleanup_module.asyncio, "sleep", _unexpected_sleep)
+
+    await cleanup_module.run_ingestion_sources_cleanup_loop(stop_event)
+
+    assert runs == {"count": 1}
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
 async def test_cleanup_scheduler_startup_accepts_single_letter_y(monkeypatch):
     cleanup_module = _load_cleanup_service_module()
     assert cleanup_module is not None

@@ -25,8 +25,8 @@ async def test_start_service_groups_runs_helpers_in_order_and_returns_handles(
     owned_job_pollers: list[object] = []
     register_owned_job_poller = object()
     run_pg_rls_auto_ensure = object()
-
-    worker_inventory_ref = object()
+    worker_inventory = object()
+    worker_inventory_ref = worker_inventory
 
     async def _record_runtime_monitors(*, worker_inventory):
         assert worker_inventory is worker_inventory_ref
@@ -117,6 +117,7 @@ async def test_start_service_groups_runs_helpers_in_order_and_returns_handles(
     owned_job_pollers_ref = owned_job_pollers
     register_owned_job_poller_ref = register_owned_job_poller
     run_pg_rls_auto_ensure_ref = run_pg_rls_auto_ensure
+    worker_inventory_ref = worker_inventory
 
     monkeypatch.setattr(startup_groups, "_start_runtime_monitors", _record_runtime_monitors)
     monkeypatch.setattr(startup_groups, "_start_optional_workers", _record_optional_workers)
