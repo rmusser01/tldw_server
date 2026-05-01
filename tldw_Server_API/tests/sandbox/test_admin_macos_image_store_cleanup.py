@@ -292,6 +292,48 @@ def test_service_cleanup_macos_image_store_mutates_planned_candidates_only(monke
     assert result["reasons"] == ["live_vm_matches_blocked_cleanup"]
 
 
+def test_service_cleanup_macos_image_store_reports_per_action_errors(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    service = SandboxService(enable_background_tasks=False)
+    root = tmp_path / "store"
+    _seed_store(root)
+    monkeypatch.setattr(service, "macos_diagnostics", lambda: _diagnostics_payload(root))
+    original_cleanup = SandboxImageStore.cleanup_run_candidate
+
+    def _cleanup(self: SandboxImageStore, *, run_id: str, reason: str) -> bool:
+        if run_id == "run-manifest-only":
+            raise OSError("locked")
+        return original_cleanup(self, run_id=run_id, reason=reason)
+
+    monkeypatch.setattr(SandboxImageStore, "cleanup_run_candidate", _cleanup)
+
+    result = service.cleanup_macos_image_store(dry_run=False, confirm_all=True)
+
+    assert result["summary"]["deleted_actions"] == 1
+    assert [action["status"] for action in result["actions"]] == ["error", "deleted"]
+    assert result["actions"][0]["error"] == "locked"
+    assert (root / "runs" / "run-manifest-only").exists()
+    assert not (root / "runs" / "run-inactive").exists()
+
+
+def test_service_cleanup_macos_image_store_maps_store_init_failure(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    service = SandboxService(enable_background_tasks=False)
+    root = tmp_path / "store-file"
+    root.write_text("not a directory", encoding="utf-8")
+    monkeypatch.setattr(service, "macos_diagnostics", lambda: _diagnostics_payload(root))
+
+    with pytest.raises(service_mod.SandboxImageStoreCleanupError) as exc_info:
+        service.cleanup_macos_image_store(dry_run=False, confirm_all=True)
+
+    assert exc_info.value.reason == "image_store_cleanup_unavailable"
+    assert exc_info.value.status_code == 503
+
+
 def test_service_cleanup_macos_image_store_requires_confirmation_for_unfiltered_mutation(
     monkeypatch,
     tmp_path: Path,

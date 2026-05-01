@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field
+
 try:
     from pydantic import model_validator
 except ImportError:  # pragma: no cover - pydantic v1 fallback
@@ -437,6 +438,7 @@ class SandboxAdminMacOSImageStoreCleanupAction(BaseModel):
     type: str
     run_id: str
     status: str
+    error: str | None = None
     template_id: str | None = None
     run_manifest_path: str | None = None
     run_manifest_present: bool | None = None

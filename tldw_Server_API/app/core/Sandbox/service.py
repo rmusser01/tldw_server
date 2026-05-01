@@ -28,6 +28,14 @@ from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.Metrics import increment_counter, observe_histogram
 from tldw_Server_API.app.core.testing import is_truthy
 
+from .image_store import ImageStoreValidationError, SandboxImageStore
+from .macos_diagnostics import collect_macos_diagnostics, probe_helper
+from .macos_virtualization.helper_client import (
+    MacOSVirtualizationHelperClient,
+    MacOSVirtualizationHelperFailure,
+    MacOSVirtualizationHelperProtocolError,
+    MacOSVirtualizationHelperUnavailable,
+)
 from .models import (
     RunPhase,
     RunSpec,
@@ -37,17 +45,8 @@ from .models import (
     SessionSpec,
     TrustLevel,
 )
-from .macos_virtualization.helper_client import (
-    MacOSVirtualizationHelperClient,
-    MacOSVirtualizationHelperFailure,
-    MacOSVirtualizationHelperProtocolError,
-    MacOSVirtualizationHelperUnavailable,
-)
-from .macos_diagnostics import collect_macos_diagnostics, probe_helper
-from .image_store import SandboxImageStore
 from .orchestrator import SandboxOrchestrator, SessionActiveRunsConflict
 from .policy import SandboxPolicy, SandboxPolicyConfig, compute_policy_hash
-from .runtime_capabilities import RuntimePreflightResult, collect_runtime_preflights
 from .runners.docker_runner import DockerRunner, docker_available
 from .runners.firecracker_runner import FirecrackerRunner, firecracker_available, firecracker_real_enabled
 from .runners.lima_runner import LimaRunner, lima_available
@@ -55,11 +54,17 @@ from .runners.seatbelt_runner import SeatbeltRunner
 from .runners.vz_linux_runner import VZLinuxRunner
 from .runners.vz_macos_runner import VZMacOSRunner
 from .runners.worktree_runner import WorktreeRunner, worktree_available
+from .runtime_capabilities import RuntimePreflightResult, collect_runtime_preflights
 from .snapshots import SnapshotManager
 from .store import get_store_mode
 from .streams import get_hub
-from .vz_reconciliation import collect_vz_reconciliation
-from .vz_reconciliation import ORPHAN_STATUSES, REASON_OWNED_ORPHAN, REASON_UNKNOWN_OWNERSHIP, STATUS_OWNED_ORPHAN
+from .vz_reconciliation import (
+    ORPHAN_STATUSES,
+    REASON_OWNED_ORPHAN,
+    REASON_UNKNOWN_OWNERSHIP,
+    STATUS_OWNED_ORPHAN,
+    collect_vz_reconciliation,
+)
 
 _SANDBOX_SERVICE_NONCRITICAL_EXCEPTIONS = (
     asyncio.CancelledError,
@@ -1154,14 +1159,29 @@ class SandboxService:
                 "reasons": list(plan.get("reasons") or []),
             }
 
-        store = SandboxImageStore(root_path=root_path)
+        try:
+            store = SandboxImageStore(root_path=root_path)
+        except (ImageStoreValidationError, OSError, ValueError) as exc:
+            logger.warning("image_store_cleanup_unavailable root={} error={}", root_path, exc)
+            raise SandboxImageStoreCleanupError("image_store_cleanup_unavailable", 503) from exc
         deleted_actions = 0
         for action in actions:
             run_id = str(action.get("run_id") or "").strip()
             gc_reason = str(action.get("gc_reason") or "").strip()
             if not run_id or not gc_reason:
                 continue
-            deleted = store.cleanup_run_candidate(run_id=run_id, reason=gc_reason)
+            try:
+                deleted = store.cleanup_run_candidate(run_id=run_id, reason=gc_reason)
+            except (ImageStoreValidationError, OSError, ValueError) as exc:
+                logger.warning(
+                    "image_store_cleanup_action_failed run_id={} gc_reason={} error={}",
+                    run_id,
+                    gc_reason,
+                    exc,
+                )
+                action["status"] = "error"
+                action["error"] = str(exc)
+                continue
             action["status"] = "deleted" if deleted else "already_absent"
             if deleted:
                 deleted_actions += 1

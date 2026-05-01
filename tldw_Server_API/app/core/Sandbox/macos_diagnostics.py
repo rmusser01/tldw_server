@@ -16,8 +16,8 @@ from .macos_virtualization.helper_client import (
     MacOSVirtualizationHelperUnavailable,
 )
 from .models import RuntimeType
-from .runtime_capabilities import RuntimePreflightResult, collect_runtime_preflights
 from .runners.vz_common import vz_host_facts
+from .runtime_capabilities import RuntimePreflightResult, collect_runtime_preflights
 from .vz_reconciliation import collect_vz_reconciliation
 
 _VZ_LINUX_TEMPLATE_MISSING_REASON = "vz_linux_template_missing"
@@ -326,7 +326,7 @@ def probe_image_store(reconciliation: dict[str, object] | None = None) -> dict[s
                 "run_id": manifest.run_id,
                 "template_id": manifest.template_id,
                 "run_manifest_path": manifest_path,
-                "run_manifest_present": Path(manifest_path).is_file(),
+                "run_manifest_present": True,
                 "gc_reason": (candidate.reason if candidate is not None else None),
                 "gc_path": (candidate.path if candidate is not None else None),
                 "matched_vm_id": (str(match.get("vm_id") or "").strip() or None) if match else None,
@@ -338,14 +338,12 @@ def probe_image_store(reconciliation: dict[str, object] | None = None) -> dict[s
     for run_id in sorted(unmatched_gc_run_ids):
         candidate = gc_by_run_id[run_id]
         match = _match_reconciliation(run_manifest_path=None, run_id=run_id, template_id=candidate.template_id)
-        manifest_path = str(Path(candidate.path) / "manifest.json")
-        manifest_present = Path(manifest_path).is_file()
         items.append(
             {
                 "run_id": run_id,
                 "template_id": candidate.template_id,
-                "run_manifest_path": (manifest_path if manifest_present else None),
-                "run_manifest_present": manifest_present,
+                "run_manifest_path": None,
+                "run_manifest_present": False,
                 "gc_reason": candidate.reason,
                 "gc_path": candidate.path,
                 "matched_vm_id": (str(match.get("vm_id") or "").strip() or None) if match else None,

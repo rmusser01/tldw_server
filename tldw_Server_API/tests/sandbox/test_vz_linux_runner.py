@@ -5,18 +5,18 @@ import json
 import tldw_Server_API.app.core.Sandbox.runners.vz_common as vz_common
 import tldw_Server_API.app.core.Sandbox.runners.vz_linux_runner as vz_linux_module
 from tldw_Server_API.app.core.Sandbox.image_store import SandboxImageStore
+from tldw_Server_API.app.core.Sandbox.macos_virtualization.helper_client import (
+    MacOSVirtualizationHelperProtocolError,
+    MacOSVirtualizationHelperUnavailable,
+)
 from tldw_Server_API.app.core.Sandbox.macos_virtualization.models import (
     HelperExecReply,
     HelperVMReply,
     HelperVMStatusReply,
 )
-from tldw_Server_API.app.core.Sandbox.macos_virtualization.helper_client import (
-    MacOSVirtualizationHelperProtocolError,
-    MacOSVirtualizationHelperUnavailable,
-)
 from tldw_Server_API.app.core.Sandbox.models import RunPhase, RunSpec, RuntimeType
-from tldw_Server_API.app.core.Sandbox.streams import get_hub
 from tldw_Server_API.app.core.Sandbox.runners.vz_linux_runner import VZLinuxRunner
+from tldw_Server_API.app.core.Sandbox.streams import get_hub
 
 
 def test_vz_linux_fake_run_completes(monkeypatch) -> None:
@@ -225,6 +225,169 @@ def test_vz_linux_start_run_uses_image_store_template_id_when_configured(monkeyp
     )
     assert persisted_manifest is not None
     assert persisted_manifest.template_id == template_id
+
+
+def test_vz_linux_image_store_does_not_persist_manifest_for_healthy_session_reuse(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    monkeypatch.delenv("TLDW_SANDBOX_VZ_LINUX_FAKE_EXEC", raising=False)
+    store_root = tmp_path / "image-store"
+    bundle = tmp_path / "bundle"
+    bundle.mkdir()
+    (bundle / "kernel").write_bytes(b"kernel")
+    (bundle / "rootfs.img").write_bytes(b"rootfs")
+    template_id = SandboxImageStore(root_path=store_root).register_bundle(
+        runtime="vz_linux",
+        template_name="debian-bookworm-arm64",
+        bundle_path=bundle,
+    )
+    monkeypatch.setenv("TLDW_SANDBOX_IMAGE_STORE_ROOT", str(store_root))
+
+    class _Store:
+        def get_vz_session_control(self, session_id: str) -> dict[str, object]:
+            assert session_id == "sess-store-reuse"
+            return {
+                "runtime": "vz_linux",
+                "vm_id": "vm-existing",
+                "template_id": template_id,
+                "workspace_mount": str(tmp_path),
+                "agent_ready": True,
+            }
+
+    class _FakeHelper:
+        def get_vm_status(self, vm_id: str) -> HelperVMStatusReply:
+            return HelperVMStatusReply(
+                protocol_version="1",
+                helper_version="0.1.0",
+                vm_id=vm_id,
+                state="running",
+                healthy=True,
+            )
+
+        def validate_template(self, request: dict[str, object]) -> dict[str, object]:
+            raise AssertionError(f"validate_template should not run for healthy vm reuse: {request}")
+
+        def create_vm(self, request: dict[str, object]) -> HelperVMReply:
+            raise AssertionError(f"create_vm should not run for healthy vm reuse: {request}")
+
+        def exec_guest(self, *, vm_id: str, request: dict[str, object]) -> HelperExecReply:
+            return HelperExecReply(exit_code=0, stdout=b"reuse-ok\n")
+
+    monkeypatch.setattr(vz_linux_module.VZLinuxRunner, "helper_client_cls", _FakeHelper)
+
+    status = VZLinuxRunner(session_control_store=_Store()).start_run(
+        run_id="vz-run-reused-store-template",
+        spec=RunSpec(
+            session_id="sess-store-reuse",
+            runtime=RuntimeType.vz_linux,
+            base_image=template_id,
+            command=["/bin/echo", "ok"],
+            network_policy="deny_all",
+        ),
+        session_workspace=str(tmp_path),
+    )
+
+    assert status.phase == RunPhase.completed
+    assert (
+        SandboxImageStore(root_path=store_root).get_run_clone_manifest("vz-run-reused-store-template")
+        is None
+    )
+
+
+def test_vz_linux_image_store_does_not_persist_manifest_when_create_vm_fails(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    monkeypatch.delenv("TLDW_SANDBOX_VZ_LINUX_FAKE_EXEC", raising=False)
+    store_root = tmp_path / "image-store"
+    bundle = tmp_path / "bundle"
+    bundle.mkdir()
+    (bundle / "kernel").write_bytes(b"kernel")
+    (bundle / "rootfs.img").write_bytes(b"rootfs")
+    template_id = SandboxImageStore(root_path=store_root).register_bundle(
+        runtime="vz_linux",
+        template_name="debian-bookworm-arm64",
+        bundle_path=bundle,
+    )
+    monkeypatch.setenv("TLDW_SANDBOX_IMAGE_STORE_ROOT", str(store_root))
+
+    class _FakeHelper:
+        def validate_template(self, request: dict[str, object]) -> dict[str, object]:
+            return {
+                "template_id": template_id,
+                "source": str(bundle),
+                "ready": True,
+                "reasons": [],
+            }
+
+        def create_vm(self, request: dict[str, object]) -> HelperVMReply:
+            raise RuntimeError("create_vm_failed")
+
+    monkeypatch.setattr(vz_linux_module.VZLinuxRunner, "helper_client_cls", _FakeHelper)
+
+    status = VZLinuxRunner().start_run(
+        run_id="vz-run-create-fails",
+        spec=RunSpec(
+            session_id=None,
+            runtime=RuntimeType.vz_linux,
+            base_image=template_id,
+            command=["/bin/echo", "ok"],
+            network_policy="deny_all",
+        ),
+        session_workspace=str(tmp_path / "workspace"),
+    )
+
+    assert status.phase == RunPhase.failed
+    assert "create_vm_failed" in status.message
+    assert SandboxImageStore(root_path=store_root).get_run_clone_manifest("vz-run-create-fails") is None
+
+
+def test_vz_linux_raw_template_path_ignores_unavailable_image_store(monkeypatch, tmp_path) -> None:
+    monkeypatch.delenv("TLDW_SANDBOX_VZ_LINUX_FAKE_EXEC", raising=False)
+    broken_store_root = tmp_path / "not-a-directory"
+    broken_store_root.write_text("not a directory", encoding="utf-8")
+    monkeypatch.setenv("TLDW_SANDBOX_IMAGE_STORE_ROOT", str(broken_store_root))
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    class _FakeHelper:
+        def validate_template(self, request: dict[str, object]) -> dict[str, object]:
+            calls.append(("validate_template", dict(request)))
+            return {
+                "template_id": "vz_linux:raw-template",
+                "source": "/tmp/raw-vz-bundle",
+                "ready": True,
+                "reasons": [],
+            }
+
+        def create_vm(self, request: dict[str, object]) -> HelperVMReply:
+            calls.append(("create_vm", dict(request)))
+            return HelperVMReply(vm_id="vm-raw", state="created", details={})
+
+        def exec_guest(self, *, vm_id: str, request: dict[str, object]) -> HelperExecReply:
+            calls.append(("exec_guest", {"vm_id": vm_id, **request}))
+            return HelperExecReply(exit_code=0, stdout=b"ok\n")
+
+        def terminate_vm(self, vm_id: str) -> bool:
+            calls.append(("terminate_vm", {"vm_id": vm_id}))
+            return True
+
+    monkeypatch.setattr(vz_linux_module.VZLinuxRunner, "helper_client_cls", _FakeHelper)
+
+    status = VZLinuxRunner().start_run(
+        run_id="vz-run-raw-path",
+        spec=RunSpec(
+            session_id=None,
+            runtime=RuntimeType.vz_linux,
+            base_image="/tmp/raw-vz-bundle",
+            command=["/bin/echo", "ok"],
+            network_policy="deny_all",
+        ),
+        session_workspace=str(tmp_path / "workspace"),
+    )
+
+    assert status.phase == RunPhase.completed
+    assert calls[0] == ("validate_template", {"runtime": "vz_linux", "template": "/tmp/raw-vz-bundle"})
 
 
 def test_vz_linux_start_run_fails_when_image_store_template_id_has_no_source_path(

@@ -107,37 +107,36 @@ def _metadata_context(vm: object) -> dict[str, object]:
         "helper_session_id": _clean_id(getattr(metadata, "session_id", "")) or None,
         "planning_source": planning_source or None,
         "run_manifest_path": run_manifest_path or None,
-        "run_manifest_present": (
-            Path(run_manifest_path).is_file() if planning_source == "image_store" and run_manifest_path else None
-        ),
+        "run_manifest_present": None,
     }
 
 
-def _classify_orphan_vm(vm: object) -> tuple[str, bool, str]:
-    """Return orphan classification, repair eligibility, and reason for a live helper VM."""
+def _classify_orphan_vm(vm: object) -> tuple[str, bool, str, bool | None]:
+    """Return orphan classification, repair eligibility, reason, and manifest presence."""
     metadata = getattr(vm, "metadata", None)
     owner = _clean_id(getattr(metadata, "owner", ""))
     runtime = _clean_id(getattr(metadata, "runtime", ""))
     if not owner or owner == "unknown" or not runtime:
-        return STATUS_UNKNOWN_ORPHAN, False, REASON_UNKNOWN_OWNERSHIP
+        return STATUS_UNKNOWN_ORPHAN, False, REASON_UNKNOWN_OWNERSHIP, None
     if owner != "tldw" or runtime != "vz_linux":
-        return STATUS_FOREIGN_ORPHAN, False, REASON_FOREIGN_OWNER
+        return STATUS_FOREIGN_ORPHAN, False, REASON_FOREIGN_OWNER, None
 
     run_id = _clean_id(getattr(metadata, "run_id", ""))
     created_at = _clean_id(getattr(metadata, "created_at", ""))
     session_mode = bool(getattr(metadata, "session_mode", False))
     session_id = _clean_id(getattr(metadata, "session_id", ""))
     if not run_id or not created_at or (session_mode and not session_id):
-        return STATUS_UNKNOWN_ORPHAN, False, REASON_UNKNOWN_OWNERSHIP
+        return STATUS_UNKNOWN_ORPHAN, False, REASON_UNKNOWN_OWNERSHIP, None
     planning_source = _clean_id(getattr(metadata, "planning_source", ""))
     if planning_source == "image_store":
         run_manifest_path = _clean_id(getattr(metadata, "run_manifest_path", ""))
         template_id = _clean_id(getattr(metadata, "template_id", ""))
         if not template_id or not run_manifest_path:
-            return STATUS_UNKNOWN_ORPHAN, False, REASON_UNKNOWN_OWNERSHIP
+            return STATUS_UNKNOWN_ORPHAN, False, REASON_UNKNOWN_OWNERSHIP, None
         if not Path(run_manifest_path).is_file():
-            return STATUS_UNKNOWN_ORPHAN, False, REASON_IMAGE_STORE_MANIFEST_MISSING
-    return STATUS_OWNED_ORPHAN, True, REASON_OWNED_ORPHAN
+            return STATUS_UNKNOWN_ORPHAN, False, REASON_IMAGE_STORE_MANIFEST_MISSING, False
+        return STATUS_OWNED_ORPHAN, True, REASON_OWNED_ORPHAN, True
+    return STATUS_OWNED_ORPHAN, True, REASON_OWNED_ORPHAN, None
 
 
 def collect_vz_reconciliation(
@@ -299,7 +298,7 @@ def collect_vz_reconciliation(
     for vm_id, vm in live_vm_by_id.items():
         if vm_id in persisted_vm_ids:
             continue
-        status, termination_eligible, reason = _classify_orphan_vm(vm)
+        status, termination_eligible, reason, run_manifest_present = _classify_orphan_vm(vm)
         orphaned_vm_ids.append(vm_id)
         if status == STATUS_OWNED_ORPHAN:
             owned_orphaned_vm_ids.append(vm_id)
@@ -315,7 +314,10 @@ def collect_vz_reconciliation(
             healthy=bool(getattr(vm, "healthy", False)),
             reason=reason,
             termination_eligible=termination_eligible,
-            item_fields=_metadata_context(vm),
+            item_fields={
+                **_metadata_context(vm),
+                "run_manifest_present": run_manifest_present,
+            },
         )
 
     report["computed"] = True

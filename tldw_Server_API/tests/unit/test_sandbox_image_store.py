@@ -196,6 +196,112 @@ def test_sandbox_image_store_lists_persisted_run_clone_manifests(tmp_path: Path)
     ]
 
 
+def test_sandbox_image_store_defers_run_manifest_reload_until_needed(tmp_path: Path) -> None:
+    manifest_path = tmp_path / "store" / "runs" / "bad-run" / "manifest.json"
+    manifest_path.parent.mkdir(parents=True)
+    manifest_path.write_text("[]", encoding="utf-8")
+
+    store = SandboxImageStore(root_path=tmp_path / "store")
+
+    with pytest.raises(ImageStoreValidationError, match="run_manifest_expected_object"):
+        store.list_run_clone_manifests()
+
+
+def test_sandbox_image_store_prepare_run_clone_does_not_load_unrelated_manifests(tmp_path: Path) -> None:
+    disk = tmp_path / "rootfs.img"
+    disk.write_bytes(b"rootfs")
+    manifest_path = tmp_path / "store" / "runs" / "bad-run" / "manifest.json"
+    manifest_path.parent.mkdir(parents=True)
+    manifest_path.write_text("[]", encoding="utf-8")
+    store = SandboxImageStore(root_path=tmp_path / "store")
+    template_id = store.register_template(
+        runtime="vz_linux",
+        template_name="debian-bookworm-arm64",
+        disk_paths=[str(disk)],
+    )
+
+    manifest = store.prepare_run_clone(template_id=template_id, run_id="new-run")
+
+    assert manifest.run_id == "new-run"
+    assert (tmp_path / "store" / "runs" / "new-run" / "manifest.json").exists()
+    with pytest.raises(ImageStoreValidationError, match="run_manifest_expected_object"):
+        store.list_run_clone_manifests()
+
+
+def test_sandbox_image_store_rejects_duplicate_run_clone_target_names(tmp_path: Path) -> None:
+    first_root = tmp_path / "first"
+    second_root = tmp_path / "second"
+    first_root.mkdir()
+    second_root.mkdir()
+    first_disk = first_root / "rootfs.img"
+    second_disk = second_root / "rootfs.img"
+    first_disk.write_bytes(b"one")
+    second_disk.write_bytes(b"two")
+    store = SandboxImageStore(root_path=tmp_path / "store")
+    template_id = store.register_template(
+        runtime="vz_linux",
+        template_name="duplicate-targets",
+        disk_paths=[str(first_disk), str(second_disk)],
+    )
+
+    with pytest.raises(ImageStoreValidationError, match=r"run_clone_target_name_collision: .*rootfs\.img"):
+        store.prepare_run_clone(template_id=template_id, run_id="run-duplicate")
+
+
+def test_sandbox_image_store_rejects_tampered_run_manifest_mode(tmp_path: Path) -> None:
+    source = tmp_path / "rootfs.img"
+    source.write_bytes(b"rootfs")
+    manifest_path = tmp_path / "store" / "runs" / "run-tampered" / "manifest.json"
+    manifest_path.parent.mkdir(parents=True)
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "template_id": "vz_linux:bundle",
+                "run_id": "run-tampered",
+                "clone_items": [
+                    {
+                        "source_path": str(source),
+                        "target_path": str(tmp_path / "store" / "runs" / "run-tampered" / "rootfs.img"),
+                        "mode": "copy",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ImageStoreValidationError, match="run_manifest_clone_item_mode_invalid"):
+        SandboxImageStore(root_path=tmp_path / "store").list_run_clone_manifests()
+
+
+def test_sandbox_image_store_rejects_tampered_run_manifest_target_layout(tmp_path: Path) -> None:
+    source = tmp_path / "rootfs.img"
+    source.write_bytes(b"rootfs")
+    manifest_path = tmp_path / "store" / "runs" / "run-tampered" / "manifest.json"
+    manifest_path.parent.mkdir(parents=True)
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "template_id": "vz_linux:bundle",
+                "run_id": "run-tampered",
+                "clone_items": [
+                    {
+                        "source_path": str(source),
+                        "target_path": str(tmp_path / "outside" / "rootfs.img"),
+                        "mode": "clone",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ImageStoreValidationError, match="run_manifest_clone_item_target_invalid"):
+        SandboxImageStore(root_path=tmp_path / "store").list_run_clone_manifests()
+
+
 def test_sandbox_image_store_rejects_invalid_run_id_for_clone_manifest(tmp_path: Path) -> None:
     disk = tmp_path / "rootfs.img"
     disk.write_bytes(b"rootfs")
