@@ -124,6 +124,18 @@ const LazyVoiceExamplesPanel = React.lazy(() =>
   }))
 )
 
+const normalizeWakeTriggerPhrases = (phrases?: string[] | null): string[] => {
+  const seen = new Set<string>()
+  const next: string[] = []
+  for (const phrase of phrases || []) {
+    const trimmed = String(phrase || "").trim()
+    if (!trimmed || seen.has(trimmed)) continue
+    seen.add(trimmed)
+    next.push(trimmed)
+  }
+  return next
+}
+
 const SidepanelPersona = ({
   mode = "persona",
   shell = "sidepanel"
@@ -522,6 +534,13 @@ const SidepanelPersona = ({
   const resolvedLivePersonaVoiceDefaults = useResolvedPersonaVoiceDefaults(
     connected ? liveSessionVoiceDefaultsBaseline : savedPersonaVoiceDefaults
   )
+  const wakeTriggerPhrases = React.useMemo(
+    () =>
+      normalizeWakeTriggerPhrases(
+        savedPersonaVoiceDefaults?.voice_chat_trigger_phrases
+      ),
+    [savedPersonaVoiceDefaults]
+  )
   const livePersonaId = connected ? activeSessionPersonaId || selectedPersonaId : selectedPersonaId
   const liveVoiceController = usePersonaLiveVoiceController({
     ws: wsRef.current,
@@ -529,7 +548,8 @@ const SidepanelPersona = ({
     sessionId: sessionId || "",
     personaId: String(livePersonaId || "").trim(),
     resolvedDefaults: resolvedLivePersonaVoiceDefaults,
-    canUseServerStt: Boolean(capabilities?.hasAudio)
+    canUseServerStt: Boolean(capabilities?.hasAudio),
+    wakeTriggerPhrases
   })
   liveVoiceControllerRef.current = liveVoiceController
 
@@ -663,6 +683,7 @@ const SidepanelPersona = ({
 
   const handleReconnectPersonaSessionFromRecovery = React.useCallback(() => {
     if (connecting) return
+    void liveVoiceController.stopWakeListening("stop_live_voice")
     liveVoiceController.resetTurn()
     triggerRecoveryReconnect()
     disconnect({ force: true })
@@ -896,7 +917,10 @@ const SidepanelPersona = ({
           value={selectedPersonaId}
           disabled={connected}
           aria-label={t("sidepanel:persona.select", "Select persona")}
-          onChange={(value) => handlePersonaSelectionChange(String(value))}
+          onChange={(value) => {
+            void liveVoiceController.stopWakeListening("persona_switch")
+            handlePersonaSelectionChange(String(value))
+          }}
           options={catalog.map((persona) => ({
             label: persona.name || persona.id,
             value: persona.id
@@ -911,7 +935,10 @@ const SidepanelPersona = ({
         value={resumeSessionId || "__new__"}
         aria-label={t("sidepanel:persona.resume", "Resume session")}
         disabled={connected}
-        onChange={(value) => handleResumeSessionSelectionChange(String(value))}
+        onChange={(value) => {
+          void liveVoiceController.stopWakeListening("persona_switch")
+          handleResumeSessionSelectionChange(String(value))
+        }}
         options={[
           { label: t("sidepanel:persona.newSession", "New session"), value: "__new__" },
           ...sessionHistory.map((session) => ({
@@ -978,6 +1005,7 @@ const SidepanelPersona = ({
           type="primary"
           loading={connecting}
           onClick={() => {
+            void liveVoiceController.stopWakeListening("persona_switch")
             void connect()
           }}
         >
@@ -985,6 +1013,7 @@ const SidepanelPersona = ({
         </Button>
       ) : (
         <Button size="small" onClick={() => {
+          void liveVoiceController.stopWakeListening("stop_live_voice")
           disconnect()
         }}>
           {t("sidepanel:persona.disconnect", "Disconnect")}
@@ -1025,6 +1054,11 @@ const SidepanelPersona = ({
       savingCurrentSettingsAsDefaults={savingLiveVoiceDefaults}
       sessionAutoResume={liveVoiceController.sessionAutoResume}
       sessionBargeIn={liveVoiceController.sessionBargeIn}
+      wakeArmed={liveVoiceController.wakeArmed}
+      wakeDetectorState={liveVoiceController.wakeDetectorState}
+      wakeWarning={liveVoiceController.wakeWarning}
+      wakeTriggerPhrases={liveVoiceController.wakeTriggerPhrases}
+      sessionWakeBehavior={liveVoiceController.sessionWakeBehavior}
       autoCommitEnabled={liveVoiceController.autoCommitEnabled}
       vadPreset={liveVoiceController.vadPreset}
       vadThreshold={liveVoiceController.vadThreshold}
@@ -1035,6 +1069,8 @@ const SidepanelPersona = ({
       onSendNow={liveVoiceController.sendCurrentTranscriptNow}
       onSessionAutoResumeChange={liveVoiceController.setSessionAutoResume}
       onSessionBargeInChange={liveVoiceController.setSessionBargeIn}
+      onToggleWakeArmed={liveVoiceController.toggleWakeArmed}
+      onSessionWakeBehaviorChange={liveVoiceController.setSessionWakeBehavior}
       onAutoCommitEnabledChange={liveVoiceController.setAutoCommitEnabled}
       onVadPresetChange={liveVoiceController.setVadPreset}
       onVadThresholdChange={liveVoiceController.setVadThreshold}
