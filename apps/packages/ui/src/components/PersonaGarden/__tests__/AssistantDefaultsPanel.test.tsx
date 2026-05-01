@@ -294,6 +294,10 @@ describe("AssistantDefaultsPanel", () => {
       expect(screen.getByLabelText("STT language")).toHaveValue("en-US")
       expect(screen.getByLabelText("STT model")).toHaveValue("whisper-1")
       expect(screen.getByLabelText("Wake behavior")).toHaveValue("continuous")
+      expect(screen.getByLabelText("Wake behavior").closest("label")).toHaveAttribute(
+        "for",
+        "persona-assistant-defaults-wake-behavior"
+      )
     })
     expect(screen.getByText("Turn detection defaults")).toBeInTheDocument()
     expect(screen.getByTestId("assistant-defaults-vad-auto-commit")).toBeChecked()

@@ -2289,6 +2289,14 @@ def _install_wake_voice_fakes(monkeypatch, transcript: str):
     return fake_transcriber, fake_turn_detector
 
 
+def test_persona_wake_phrase_normalization_treats_underscores_as_separators():
+    assert persona_ep._normalize_persona_wake_phrase("hey_tldw") == "hey tldw"
+    assert (
+        persona_ep._match_persona_wake_phrase("hey tldw", ["hey_tldw"])
+        == "hey_tldw"
+    )
+
+
 def test_persona_wake_activation_allows_next_voice_turn_without_trigger(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -2358,6 +2366,68 @@ def test_persona_wake_activation_allows_next_voice_turn_without_trigger(
             )
             plan = _recv_until(ws, lambda d: d.get("event") == "tool_plan")
             assert plan.get("session_id") == "sess_wake_valid"
+
+
+def test_persona_wake_activation_saved_phrase_lookup_is_offloaded(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    offloaded_calls: list[str] = []
+
+    async def _fake_to_thread(func, *args, **kwargs):
+        offloaded_calls.append(getattr(func, "__name__", str(func)))
+        return func(*args, **kwargs)
+
+    monkeypatch.setattr(persona_ep.asyncio, "to_thread", _fake_to_thread)
+    _install_wake_voice_fakes(monkeypatch, "summarize the current note")
+    _seed_persona_session(
+        tmp_path,
+        monkeypatch,
+        user_id="1",
+        session_id="sess_wake_offload",
+        mode="session_scoped",
+        voice_defaults={
+            "voice_chat_trigger_phrases": ["hey helper"],
+            "wake_behavior": "one_shot",
+        },
+    )
+
+    with TestClient(fastapi_app) as c:
+        with c.websocket_connect("/api/v1/persona/stream") as ws:
+            _ = json.loads(ws.receive_text())
+            ws.send_text(
+                json.dumps(
+                    {
+                        "type": "voice_config",
+                        "session_id": "sess_wake_offload",
+                        "voice": {"trigger_phrases": ["hey helper"]},
+                    }
+                )
+            )
+            _ = _recv_until(
+                ws,
+                lambda d: d.get("event") == "notice"
+                and d.get("reason_code") == "VOICE_CONFIG_UPDATED",
+            )
+            ws.send_text(
+                json.dumps(
+                    {
+                        "type": "wake_activation",
+                        "session_id": "sess_wake_offload",
+                        "matched_phrase": "hey helper",
+                        "wake_behavior": "one_shot",
+                    }
+                )
+            )
+            accepted = _recv_until(
+                ws,
+                lambda d: d.get("event") == "notice"
+                and d.get("reason_code") == "WAKE_ACTIVATION_ACCEPTED",
+            )
+            assert accepted.get("session_id") == "sess_wake_offload"
+
+    assert "_load_persona_policy_rules_for_session" in offloaded_calls
+    assert "get_persona_profile" in offloaded_calls
 
 
 def _assert_wake_activation_rejected_keeps_trigger_gate(

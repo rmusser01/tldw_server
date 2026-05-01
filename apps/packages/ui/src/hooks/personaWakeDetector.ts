@@ -154,6 +154,20 @@ export class BrowserTranscriptWakeDetector implements WakeDetector {
     recognition.onend = () => {
       if (this.active) {
         config.onStateChange?.("idle")
+        try {
+          recognition.start()
+          config.onStateChange?.("listening")
+        } catch (error) {
+          this.active = false
+          config.onStateChange?.("error")
+          config.onError?.({
+            code: "restart_failed",
+            message:
+              error instanceof Error
+                ? error.message
+                : "Wake detector could not restart."
+          })
+        }
       }
     }
     recognition.start()

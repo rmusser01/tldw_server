@@ -2524,7 +2524,7 @@ def _get_persona_wake_no_command_timeout_s() -> float:
 
 
 def _normalize_persona_wake_phrase(value: object) -> str:
-    text = re.sub(r"[^\w\s]+", " ", str(value or "").strip().lower())
+    text = re.sub(r"[^\w\s]+|_", " ", str(value or "").strip().lower())
     return re.sub(r"\s+", " ", text).strip()
 
 
@@ -5545,8 +5545,9 @@ async def persona_stream(
                 return None
             return state
 
-        def _get_saved_wake_phrases_for_session(session_id: str) -> list[str]:
-            runtime_context = _load_persona_policy_rules_for_session(
+        async def _get_saved_wake_phrases_for_session(session_id: str) -> list[str]:
+            runtime_context = await asyncio.to_thread(
+                _load_persona_policy_rules_for_session,
                 persona_scope_db,
                 session_id=session_id,
                 user_id=authenticated_user_id,
@@ -5556,7 +5557,8 @@ async def persona_stream(
             runtime_persona_id = str(runtime_context.get("persona_id") or "").strip()
             if not runtime_persona_id or persona_scope_db is None:
                 return []
-            profile = persona_scope_db.get_persona_profile(
+            profile = await asyncio.to_thread(
+                persona_scope_db.get_persona_profile,
                 runtime_persona_id,
                 user_id=authenticated_user_id,
                 include_deleted=False,
@@ -7064,7 +7066,7 @@ async def persona_stream(
                     allowed={"browser_transcript", "native_companion", "test"},
                     fallback="browser_transcript",
                 )
-                saved_phrases = _get_saved_wake_phrases_for_session(session_id)
+                saved_phrases = await _get_saved_wake_phrases_for_session(session_id)
                 runtime_preferences = session_manager.get_preferences(
                     session_id=session_id,
                     user_id=connection_user_id,

@@ -481,7 +481,8 @@ export const usePersonaLiveVoiceController = ({
     if (
       wakeArmedRef.current &&
       wakeActiveRef.current &&
-      sessionWakeBehavior === "one_shot"
+      (sessionWakeBehavior === "one_shot" ||
+        sessionWakeBehavior === "push_to_talk_after_wake")
     ) {
       wakeActiveRef.current = false
       pendingResumeRef.current = false
@@ -737,6 +738,9 @@ export const usePersonaLiveVoiceController = ({
       stopMicStream()
     }
     setState("idle")
+    if (wakeArmedRef.current && !wakeActiveRef.current && !wakeDetectorRef.current) {
+      restartWakeListeningRef.current?.()
+    }
   }, [
     clearListeningRecoveryTimeout,
     clearThinkingRecovery,

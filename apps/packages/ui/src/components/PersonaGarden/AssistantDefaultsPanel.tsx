@@ -476,7 +476,10 @@ export const AssistantDefaultsPanel: React.FC<AssistantDefaultsPanelProps> = ({
           </select>
         </label>
 
-        <label className="flex flex-col gap-1 text-sm text-text">
+        <label
+          htmlFor="persona-assistant-defaults-wake-behavior"
+          className="flex flex-col gap-1 text-sm text-text"
+        >
           <span>
             {t("sidepanel:personaGarden.profile.assistantDefaults.wakeBehavior", {
               defaultValue: "Wake behavior"

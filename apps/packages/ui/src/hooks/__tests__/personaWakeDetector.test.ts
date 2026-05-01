@@ -112,6 +112,25 @@ describe("personaWakeDetector", () => {
     expect(recognition.current.stop).toHaveBeenCalledTimes(1)
   })
 
+  it("restarts browser recognition when it ends while still active", async () => {
+    const recognition = installMockRecognition()
+    const onStateChange = vi.fn()
+    const detector = new BrowserTranscriptWakeDetector()
+
+    await detector.start({
+      phrases: ["Hey Helper"],
+      onWake: vi.fn(),
+      onStateChange
+    })
+
+    recognition.current.onend?.()
+
+    expect(recognition.current.start).toHaveBeenCalledTimes(2)
+    expect(onStateChange).toHaveBeenLastCalledWith("listening")
+
+    await detector.stop()
+  })
+
   it("does not start recognition when no wake phrases are configured", async () => {
     const recognition = installMockRecognition()
     const onStateChange = vi.fn()

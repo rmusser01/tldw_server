@@ -427,6 +427,96 @@ describe("usePersonaLiveVoiceController", () => {
     expect(result.current.wakeArmed).toBe(true)
   })
 
+  it("restarts wake listening after manually stopped mic capture while armed", async () => {
+    const wakeHarness = createWakeDetectorHarness()
+    const ws = {
+      readyState: WebSocket.OPEN,
+      send: vi.fn()
+    } as unknown as WebSocket
+
+    const { result } = renderHook(() =>
+      usePersonaLiveVoiceController({
+        ws,
+        connected: true,
+        sessionId: "sess-1",
+        personaId: "persona-1",
+        resolvedDefaults,
+        canUseServerStt: true,
+        wakeTriggerPhrases: ["hey helper"],
+        wakeDetectorFactory: () => wakeHarness.detector
+      })
+    )
+
+    await act(async () => {
+      await result.current.toggleWakeArmed()
+    })
+    expect(wakeHarness.detector.start).toHaveBeenCalledTimes(1)
+
+    await act(async () => {
+      await result.current.startListening()
+    })
+    await waitFor(() => {
+      expect(result.current.isListening).toBe(true)
+    })
+
+    act(() => {
+      result.current.stopListening()
+    })
+
+    await waitFor(() => {
+      expect(wakeHarness.detector.start).toHaveBeenCalledTimes(2)
+    })
+    expect(result.current.wakeArmed).toBe(true)
+  })
+
+  it("restarts wake listening after push-to-talk wake turn finishes", async () => {
+    const wakeHarness = createWakeDetectorHarness()
+    const ws = {
+      readyState: WebSocket.OPEN,
+      send: vi.fn()
+    } as unknown as WebSocket
+    const pushToTalkDefaults = {
+      ...resolvedDefaults,
+      autoResume: false,
+      wakeBehavior: "push_to_talk_after_wake" as const
+    }
+
+    const { result } = renderHook(() =>
+      usePersonaLiveVoiceController({
+        ws,
+        connected: true,
+        sessionId: "sess-1",
+        personaId: "persona-1",
+        resolvedDefaults: pushToTalkDefaults,
+        canUseServerStt: true,
+        wakeTriggerPhrases: ["hey helper"],
+        wakeDetectorFactory: () => wakeHarness.detector
+      })
+    )
+
+    await act(async () => {
+      await result.current.toggleWakeArmed()
+    })
+    expect(wakeHarness.detector.start).toHaveBeenCalledTimes(1)
+
+    act(() => {
+      wakeHarness.fireWake()
+    })
+
+    act(() => {
+      result.current.handlePayload({
+        event: "notice",
+        reason_code: "TTS_UNAVAILABLE_TEXT_ONLY",
+        message: "text only"
+      })
+    })
+
+    await waitFor(() => {
+      expect(wakeHarness.detector.start).toHaveBeenCalledTimes(2)
+    })
+    expect(result.current.wakeArmed).toBe(true)
+  })
+
   it("marks the preset as custom after an advanced runtime edit", () => {
     const ws = {
       readyState: WebSocket.OPEN,
