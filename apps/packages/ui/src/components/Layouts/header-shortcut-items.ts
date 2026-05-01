@@ -495,13 +495,43 @@ const HOSTED_VISIBLE_SHORTCUT_PATHS = new Set([
   "/chat",
   "/knowledge",
   "/media",
-  "/collections"
+  "/collections",
+  "/stt",
+  "/tts"
 ])
+
+const HOSTED_AUDIO_SHORTCUT_DESCRIPTIONS: Partial<
+  Record<
+    HeaderShortcutId,
+    Pick<HeaderShortcutItem, "descriptionKey" | "descriptionDefault">
+  >
+> = {
+  "stt-playground": {
+    descriptionKey: "option:header.modeSttHostedDesc",
+    descriptionDefault:
+      "Requires a self-hosted tldw server for speech transcription."
+  },
+  "tts-playground": {
+    descriptionKey: "option:header.modeTtsHostedDesc",
+    descriptionDefault:
+      "Requires a self-hosted tldw server for speech generation."
+  }
+}
 
 const getHostedHeaderShortcutGroups = (): HeaderShortcutGroup[] => {
   const filteredGroups = BASE_HEADER_SHORTCUT_GROUPS.map((group) => ({
     ...group,
-    items: group.items.filter((item) => HOSTED_VISIBLE_SHORTCUT_PATHS.has(item.to))
+    items: group.items
+      .filter((item) => HOSTED_VISIBLE_SHORTCUT_PATHS.has(item.to))
+      .map((item) => {
+        const hostedDescription = HOSTED_AUDIO_SHORTCUT_DESCRIPTIONS[item.id]
+        return hostedDescription
+          ? {
+              ...item,
+              ...hostedDescription
+            }
+          : item
+      })
   })).filter((group) => group.items.length > 0)
 
   filteredGroups.push({
