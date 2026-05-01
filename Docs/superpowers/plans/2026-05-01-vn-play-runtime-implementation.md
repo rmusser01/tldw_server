@@ -1150,7 +1150,7 @@ git commit -m "feat(vn-play): render playable scenes"
 - Create: `Docs/API-related/VN_PLAY_API.md`
 - Modify: `Docs/superpowers/plans/2026-05-01-vn-play-runtime-implementation.md`
 
-- [ ] **Step 1: Add API documentation**
+- [x] **Step 1: Add API documentation**
 
 Document:
 
@@ -1162,7 +1162,7 @@ Document:
 - Character safety metadata behavior.
 - Freeform and Story example requests.
 
-- [ ] **Step 2: Run backend VN Play tests**
+- [x] **Step 2: Run backend VN Play tests**
 
 Run:
 
@@ -1172,7 +1172,7 @@ Run:
 
 Expected: all pass.
 
-- [ ] **Step 3: Run existing VN Asset tests**
+- [x] **Step 3: Run existing VN Asset tests**
 
 Run:
 
@@ -1182,7 +1182,7 @@ Run:
 
 Expected: all pass.
 
-- [ ] **Step 4: Run frontend VN Play tests**
+- [x] **Step 4: Run frontend VN Play tests**
 
 Run:
 
@@ -1193,7 +1193,7 @@ bunx vitest run __tests__/vn-play
 
 Expected: all pass.
 
-- [ ] **Step 5: Run existing VN Asset frontend tests**
+- [x] **Step 5: Run existing VN Asset frontend tests**
 
 Run:
 
@@ -1204,7 +1204,7 @@ bunx vitest run __tests__/vn-assets
 
 Expected: all pass.
 
-- [ ] **Step 6: Run Playwright VN Play smoke**
+- [x] **Step 6: Run Playwright VN Play smoke**
 
 Run:
 
@@ -1215,7 +1215,7 @@ bunx playwright test e2e/smoke/vn-play.spec.ts --reporter=line
 
 Expected: 1 passed.
 
-- [ ] **Step 7: Run Bandit on touched backend scope**
+- [x] **Step 7: Run Bandit on touched backend scope**
 
 Run:
 
@@ -1225,7 +1225,7 @@ Run:
 
 Expected: command exits 0 and `/tmp/bandit_vn_play_runtime.json` has `"results": []`.
 
-- [ ] **Step 8: Run diff check**
+- [x] **Step 8: Run diff check**
 
 Run:
 
@@ -1235,7 +1235,7 @@ git diff --check
 
 Expected: no output.
 
-- [ ] **Step 9: Commit docs and final plan status**
+- [x] **Step 9: Commit docs and final plan status**
 
 ```bash
 git add Docs/API-related/VN_PLAY_API.md Docs/superpowers/plans/2026-05-01-vn-play-runtime-implementation.md
