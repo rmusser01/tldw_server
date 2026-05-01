@@ -23,13 +23,16 @@ from tldw_Server_API.app.core.VN_Play.constants import (
     EVENT_TURN_FAILED,
     EVENT_TURN_STARTED,
     EVENT_USER_TURN,
+    EVENT_MODEL_TURN_PARSE_FAILED,
     TURN_STATUS_ABANDONED,
     TURN_STATUS_COMPLETED,
     TURN_STATUS_MODEL_CALLING,
     TURN_STATUS_MODEL_FAILED,
+    TURN_STATUS_PARSE_FAILED,
     TURN_STATUS_PENDING,
 )
 from tldw_Server_API.app.core.VN_Play.models import SceneState, TurnResult
+from tldw_Server_API.app.core.VN_Play.parser import VNPlayParseError, coerce_turn_result
 from tldw_Server_API.app.core.VN_Play.state import derive_scene_state
 
 
@@ -52,7 +55,7 @@ class VNPlayTurnError(VNPlayError):
 class VNPlayTurnAdapter(Protocol):
     """Adapter boundary for model-backed VN Play turn generation."""
 
-    async def generate_turn(self, context: VNPlayTurnContext) -> TurnResult:
+    async def generate_turn(self, context: VNPlayTurnContext) -> Any:
         """Generate a normalized turn result for the provided context."""
 
 
@@ -316,7 +319,17 @@ class VNPlayService:
         )
 
         try:
-            result = await self.adapter.generate_turn(context)
+            result = coerce_turn_result(await self.adapter.generate_turn(context))
+        except VNPlayParseError as exc:
+            self._mark_turn_failed(
+                session_id=session_id,
+                turn_request_id=int(turn_request["id"]),
+                error_code=TURN_STATUS_PARSE_FAILED,
+                error_message=str(exc),
+                client_scene_version=client_scene_version,
+                event_type=EVENT_MODEL_TURN_PARSE_FAILED,
+            )
+            raise VNPlayTurnError(TURN_STATUS_PARSE_FAILED) from exc
         except Exception as exc:
             self._mark_turn_failed(
                 session_id=session_id,
@@ -612,11 +625,12 @@ class VNPlayService:
         error_code: str,
         error_message: str,
         client_scene_version: int,
+        event_type: str = EVENT_TURN_FAILED,
     ) -> None:
         failed_event = self.repo.append_event(
             session_id=session_id,
             owner_user_id=self.owner_user_id,
-            event_type=EVENT_TURN_FAILED,
+            event_type=event_type,
             event_payload={
                 "turn_request_id": turn_request_id,
                 "code": error_code,

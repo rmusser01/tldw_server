@@ -217,7 +217,7 @@ Run:
 
 Expected: all tests pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/DB_Management/VNPlay_DB.py tldw_Server_API/tests/VN_Play/test_vn_play_db.py
@@ -639,7 +639,7 @@ git commit -m "feat(vn-play): orchestrate turn lifecycle"
 - Modify: `tldw_Server_API/app/core/VN_Play/service.py`
 - Test: `tldw_Server_API/tests/VN_Play/test_vn_play_turns.py`
 
-- [ ] **Step 1: Write failing parser tests**
+- [x] **Step 1: Write failing parser tests**
 
 ```python
 def test_parse_structured_turn_result():
@@ -692,7 +692,7 @@ async def test_chat_adapter_calls_existing_chat_service(monkeypatch):
     assert captured["model"] == "gpt-test"
 ```
 
-- [ ] **Step 2: Run failing parser tests**
+- [x] **Step 2: Run failing parser tests**
 
 Run:
 
@@ -702,7 +702,7 @@ Run:
 
 Expected: import failure for parser/adapter.
 
-- [ ] **Step 3: Implement parser and adapter interfaces**
+- [x] **Step 3: Implement parser and adapter interfaces**
 
 Implement:
 
@@ -721,7 +721,7 @@ Adapter boundaries:
 - Provider/model selection comes from session settings first, then configured defaults.
 - On provider errors, raise a typed VN Play model error so Task 5 failure handling marks the turn `model_failed`.
 
-- [ ] **Step 4: Run parser/turn tests**
+- [x] **Step 4: Run parser/turn tests**
 
 Run:
 
