@@ -110,17 +110,17 @@ def build_offset_pagination_meta(
 
     if has_more is None:
         if total is not None:
-            has_more = int(offset) + normalized_count < int(total)
+            has_more = offset + normalized_count < total
         else:
-            has_more = normalized_count >= int(limit)
+            has_more = normalized_count >= limit
 
-    next_offset = int(offset) + int(limit) if has_more else None
+    next_offset = offset + limit if has_more else None
 
     return OffsetPaginationMeta(
-        limit=int(limit),
-        offset=int(offset),
-        total=int(total) if total is not None else None,
-        has_more=bool(has_more),
+        limit=limit,
+        offset=offset,
+        total=total,
+        has_more=has_more,
         next_offset=next_offset,
     )
 
@@ -135,7 +135,7 @@ def build_cursor_pagination_meta(
     """Build canonical cursor pagination metadata from route-local values."""
     normalized_has_more = bool(next_cursor) if has_more is None else bool(has_more)
     return CursorPaginationMeta(
-        limit=int(limit),
+        limit=limit,
         cursor=cursor,
         next_cursor=next_cursor,
         has_more=normalized_has_more,

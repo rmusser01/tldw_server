@@ -66,7 +66,7 @@ async def test_create_and_list_chat_grammars(chacha_db: CharactersRAGDB):
 
 
 @pytest.mark.asyncio
-async def test_list_chat_grammars_returns_canonical_pagination(monkeypatch: pytest.MonkeyPatch):
+async def test_list_chat_grammars_returns_canonical_pagination(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(ChatGrammarService, "__init__", lambda self, db: None)
     monkeypatch.setattr(
         ChatGrammarService,

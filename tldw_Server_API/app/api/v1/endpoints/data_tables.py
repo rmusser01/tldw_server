@@ -411,6 +411,8 @@ def _build_table_detail_response(
             for row in db.list_data_table_sources(table_id, owner_user_id=owner_user_id)
         ]
         source_count = len(sources)
+    total_rows = int(table_row.get("row_count") or 0)
+    rows_has_more = rows_offset + rows_limit < total_rows
     return DataTableDetailResponse(
         table=_table_summary_from_row(
             table_row,
@@ -425,8 +427,9 @@ def _build_table_detail_response(
         pagination=build_offset_pagination_meta(
             limit=rows_limit,
             offset=rows_offset,
-            total=int(table_row.get("row_count") or 0),
-            count=len(rows) if include_rows else 0,
+            total=total_rows,
+            count=len(rows),
+            has_more=rows_has_more,
         ),
     )
 
