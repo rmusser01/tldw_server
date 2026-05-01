@@ -308,7 +308,7 @@ Run:
 
 Expected: schema tests pass; endpoint tests may still be skipped or absent at this task.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/VN_Play tldw_Server_API/app/api/v1/schemas/vn_play_schemas.py tldw_Server_API/tests/VN_Play/test_vn_play_api.py
@@ -746,7 +746,7 @@ git commit -m "feat(vn-play): parse structured turns"
 - Modify: `tldw_Server_API/app/api/v1/schemas/vn_play_schemas.py`
 - Test: `tldw_Server_API/tests/VN_Play/test_vn_play_api.py`
 
-- [ ] **Step 1: Write failing endpoint tests**
+- [x] **Step 1: Write failing endpoint tests**
 
 ```python
 def test_create_session_endpoint_returns_scene_state(client, ready_pack_id, character_id):
@@ -782,7 +782,7 @@ def test_turn_endpoint_rejects_stale_scene_version(client, session_id):
     assert stale.json()["detail"] == "stale_scene_version"
 ```
 
-- [ ] **Step 2: Run failing endpoint tests**
+- [x] **Step 2: Run failing endpoint tests**
 
 Run:
 
@@ -792,7 +792,7 @@ Run:
 
 Expected: router import failure or 404.
 
-- [ ] **Step 3: Implement router and register in `main.py`**
+- [x] **Step 3: Implement router and register in `main.py`**
 
 Implement endpoints from the spec:
 
@@ -818,7 +818,7 @@ Map service exceptions:
 
 Register route in `main.py` similarly to `vn_assets`, behind route key `vn-play`.
 
-- [ ] **Step 4: Run endpoint tests**
+- [x] **Step 4: Run endpoint tests**
 
 Run:
 

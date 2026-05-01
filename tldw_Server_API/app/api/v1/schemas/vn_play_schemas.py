@@ -146,6 +146,7 @@ class VNPlaySessionResponse(BaseModel):
     scene_version: StrictInt = Field(default=0, ge=0)
     active_turn_request_id: int | None = None
     current_scene: VNPlaySceneStateResponse | None = None
+    scene_state: VNPlaySceneStateResponse | None = None
     created_at: str | None = None
     updated_at: str | None = None
     deleted: bool = False
@@ -201,7 +202,7 @@ class VNPlayCheckpointCreate(BaseModel):
 
     label: StrictStr = Field(..., min_length=1, max_length=300)
     event_id: StrictInt | None = Field(default=None, ge=1)
-    scene_version: StrictInt = Field(..., ge=0)
+    scene_version: StrictInt | None = Field(default=None, ge=0)
 
 
 class VNPlayCheckpointResponse(BaseModel):
@@ -228,6 +229,15 @@ class VNPlayRestoreRequest(BaseModel):
     idempotency_key: StrictStr = Field(..., min_length=1, max_length=200)
 
 
+class VNPlayRetryTurnRequest(BaseModel):
+    """Request body for retrying the last VN Play user turn."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    client_scene_version: StrictInt = Field(..., ge=0)
+    idempotency_key: StrictStr = Field(..., min_length=1, max_length=200)
+
+
 class VNPlayBranchResponse(BaseModel):
     """Serialized VN Play branch node."""
 
@@ -250,6 +260,7 @@ __all__ = [
     "VNPlayCheckpointResponse",
     "VNPlayEventResponse",
     "VNPlayRestoreRequest",
+    "VNPlayRetryTurnRequest",
     "VNPlaySceneStateResponse",
     "VNPlaySessionCreate",
     "VNPlaySessionResponse",

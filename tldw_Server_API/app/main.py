@@ -8074,6 +8074,16 @@ if not _ULTRA_MINIMAL_APP:
     except _IMPORT_EXCEPTIONS as _vn_assets_import_err:
         logger.debug(f"Skipping VN assets router: {_vn_assets_import_err}")
 
+    try:
+        from tldw_Server_API.app.api.v1.endpoints.vn_play import router as vn_play_router
+
+        if _MINIMAL_TEST_APP:
+            include_router_idempotent(app, vn_play_router, prefix=f"{API_V1_PREFIX}", tags=["vn-play"])
+        else:
+            _include_if_enabled("vn-play", vn_play_router, prefix=f"{API_V1_PREFIX}", tags=["vn-play"])
+    except _IMPORT_EXCEPTIONS as _vn_play_import_err:
+        logger.debug(f"Skipping VN play router: {_vn_play_import_err}")
+
 # Register control-plane metrics endpoints (works in both minimal and full modes)
 if _shared_env_flag_enabled("ENABLE_ADMIN_E2E_TEST_MODE"):
     try:
