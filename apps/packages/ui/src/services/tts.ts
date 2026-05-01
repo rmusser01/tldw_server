@@ -121,6 +121,16 @@ const OPENAI_TTS_VOICE_SETTING = defineSetting(
   "alloy",
   (value) => coerceString(value, "alloy")
 )
+const OPENAI_TTS_KEY_VALID_SETTING = defineSetting(
+  "openAITTSKeyValid",
+  null as boolean | null,
+  coerceBooleanOrNull
+)
+const OPENAI_TTS_KEY_TESTED_AT_SETTING = defineSetting(
+  "openAITTSKeyTestedAt",
+  "",
+  (value) => coerceOptionalString(value) || ""
+)
 const RESPONSE_SPLITTING_SETTING = defineSetting(
   "ttsResponseSplitting",
   "punctuation",
@@ -330,6 +340,24 @@ export const setOpenAITTSVoice = async (openAITTSVoice: string) => {
   await setSetting(OPENAI_TTS_VOICE_SETTING, openAITTSVoice)
 }
 
+export const getOpenAITTSKeyValid = async () =>
+  getSetting(OPENAI_TTS_KEY_VALID_SETTING)
+
+export const setOpenAITTSKeyValid = async (
+  openAITTSKeyValid: boolean | null
+) => {
+  await setSetting(OPENAI_TTS_KEY_VALID_SETTING, openAITTSKeyValid)
+}
+
+export const getOpenAITTSKeyTestedAt = async () =>
+  getSetting(OPENAI_TTS_KEY_TESTED_AT_SETTING)
+
+export const setOpenAITTSKeyTestedAt = async (
+  openAITTSKeyTestedAt: string
+) => {
+  await setSetting(OPENAI_TTS_KEY_TESTED_AT_SETTING, openAITTSKeyTestedAt)
+}
+
 export const getResponseSplitting = async () =>
   getSetting(RESPONSE_SPLITTING_SETTING)
 
@@ -474,6 +502,8 @@ export const getTTSSettings = async () => {
     openAITTSApiKey,
     openAITTSModel,
     openAITTSVoice,
+    openAITTSKeyValid,
+    openAITTSKeyTestedAt,
     // UTILS
     ttsAutoPlay,
     playbackSpeed,
@@ -510,6 +540,8 @@ export const getTTSSettings = async () => {
     getOpenAITTSApiKey(),
     getOpenAITTSModel(),
     getOpenAITTSVoice(),
+    getOpenAITTSKeyValid(),
+    getOpenAITTSKeyTestedAt(),
     // UTILS
     isTTSAutoPlayEnabled(),
     getSpeechPlaybackSpeed(),
@@ -548,6 +580,8 @@ export const getTTSSettings = async () => {
     openAITTSApiKey,
     openAITTSModel,
     openAITTSVoice,
+    openAITTSKeyValid,
+    openAITTSKeyTestedAt,
     ttsAutoPlay,
     playbackSpeed,
     tldwTtsModel,
@@ -583,6 +617,8 @@ export const setTTSSettings = async ({
   openAITTSApiKey,
   openAITTSModel,
   openAITTSVoice,
+  openAITTSKeyValid,
+  openAITTSKeyTestedAt,
   ttsAutoPlay,
   playbackSpeed,
   tldwTtsModel,
@@ -615,6 +651,8 @@ export const setTTSSettings = async ({
   openAITTSApiKey: string
   openAITTSModel: string
   openAITTSVoice: string
+  openAITTSKeyValid?: boolean | null
+  openAITTSKeyTestedAt?: string
   ttsAutoPlay: boolean
   playbackSpeed: number
   tldwTtsModel: string
@@ -668,6 +706,12 @@ export const setTTSSettings = async ({
   }
   if (elevenLabsKeyTestedAt !== undefined) {
     updates.push(setElevenLabsKeyTestedAt(elevenLabsKeyTestedAt))
+  }
+  if (openAITTSKeyValid !== undefined) {
+    updates.push(setOpenAITTSKeyValid(openAITTSKeyValid))
+  }
+  if (openAITTSKeyTestedAt !== undefined) {
+    updates.push(setOpenAITTSKeyTestedAt(openAITTSKeyTestedAt))
   }
   await Promise.all(updates)
 }

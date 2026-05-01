@@ -8,6 +8,9 @@ import { TTSModeSettings } from "../TTSModeSettings"
 const {
   getTTSSettingsMock,
   setTTSSettingsMock,
+  setElevenLabsApiKeyMock,
+  setElevenLabsKeyValidMock,
+  setElevenLabsKeyTestedAtMock,
   getVoicesMock,
   getModelsMock,
   messageSuccessMock,
@@ -16,6 +19,9 @@ const {
 } = vi.hoisted(() => ({
   getTTSSettingsMock: vi.fn(),
   setTTSSettingsMock: vi.fn(async () => undefined),
+  setElevenLabsApiKeyMock: vi.fn(async () => undefined),
+  setElevenLabsKeyValidMock: vi.fn(async () => undefined),
+  setElevenLabsKeyTestedAtMock: vi.fn(async () => undefined),
   getVoicesMock: vi.fn(),
   getModelsMock: vi.fn(),
   messageSuccessMock: vi.fn(),
@@ -45,6 +51,9 @@ vi.mock("@/services/tts", () => ({
   SUPPORTED_TLDW_TTS_FORMATS: ["mp3"],
   getTTSSettings: getTTSSettingsMock,
   setTTSSettings: setTTSSettingsMock,
+  setElevenLabsApiKey: setElevenLabsApiKeyMock,
+  setElevenLabsKeyValid: setElevenLabsKeyValidMock,
+  setElevenLabsKeyTestedAt: setElevenLabsKeyTestedAtMock,
 }))
 
 vi.mock("@/services/elevenlabs", () => ({
@@ -108,6 +117,8 @@ const buildTtsSettings = (overrides: Record<string, unknown> = {}) => ({
   openAITTSApiKey: "",
   openAITTSModel: "tts-1",
   openAITTSVoice: "alloy",
+  openAITTSKeyValid: null,
+  openAITTSKeyTestedAt: "",
   ttsAutoPlay: false,
   playbackSpeed: 1,
   tldwTtsModel: "KittenML/kitten-tts-nano-0.8",
@@ -160,6 +171,7 @@ describe("TTSModeSettings ElevenLabs key validation status", () => {
     renderSettings()
 
     expect(await screen.findByText("Valid")).toBeInTheDocument()
+    expect(screen.getByLabelText("valid")).toBeInTheDocument()
     expect(screen.getByText(/Last tested/)).toBeInTheDocument()
   })
 
@@ -180,28 +192,38 @@ describe("TTSModeSettings ElevenLabs key validation status", () => {
     fireEvent.click(screen.getByRole("button", { name: "Test" }))
 
     await waitFor(() => {
-      expect(setTTSSettingsMock).toHaveBeenCalledWith(
-        expect.objectContaining({
-          elevenLabsApiKey: "sk_valid",
-          elevenLabsKeyValid: true,
-          elevenLabsKeyTestedAt: expect.any(String),
-        })
-      )
+      expect(setElevenLabsApiKeyMock).toHaveBeenCalledWith("sk_valid")
+      expect(setElevenLabsKeyValidMock).toHaveBeenCalledWith(true)
+      expect(setElevenLabsKeyTestedAtMock).toHaveBeenCalledWith(expect.any(String))
     })
+    expect(setTTSSettingsMock).not.toHaveBeenCalled()
     expect(await screen.findByText("Valid")).toBeInTheDocument()
   })
 
-  it("auto-revalidates a saved ElevenLabs key on settings load", async () => {
+  it("auto-revalidates a saved ElevenLabs key without saving unrelated settings", async () => {
     renderSettings()
 
     await waitFor(() => {
-      expect(setTTSSettingsMock).toHaveBeenCalledWith(
-        expect.objectContaining({
-          elevenLabsApiKey: "sk_existing",
-          elevenLabsKeyValid: true,
-          elevenLabsKeyTestedAt: expect.any(String),
-        })
-      )
+      expect(setElevenLabsApiKeyMock).toHaveBeenCalledWith("sk_existing")
+      expect(setElevenLabsKeyValidMock).toHaveBeenCalledWith(true)
+      expect(setElevenLabsKeyTestedAtMock).toHaveBeenCalledWith(expect.any(String))
     })
+    expect(setTTSSettingsMock).not.toHaveBeenCalled()
+  })
+
+  it("shows persisted OpenAI validation status and last tested timestamp", async () => {
+    getTTSSettingsMock.mockResolvedValue(
+      buildTtsSettings({
+        ttsProvider: "openai",
+        openAITTSKeyValid: false,
+        openAITTSKeyTestedAt: "2026-04-30T12:00:00.000Z",
+      })
+    )
+
+    renderSettings()
+
+    expect(await screen.findByText("Failed")).toBeInTheDocument()
+    expect(screen.getByLabelText("failed")).toBeInTheDocument()
+    expect(screen.getByText(/Last tested/)).toBeInTheDocument()
   })
 })
