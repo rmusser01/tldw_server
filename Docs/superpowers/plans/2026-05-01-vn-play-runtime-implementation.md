@@ -731,7 +731,7 @@ Run:
 
 Expected: all pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/VN_Play/parser.py tldw_Server_API/app/core/VN_Play/adapters.py tldw_Server_API/app/core/VN_Play/service.py tldw_Server_API/tests/VN_Play/test_vn_play_turns.py
@@ -949,7 +949,7 @@ git commit -m "feat(vn-play): add frontend api client"
 - Create: `apps/tldw-frontend/components/vn-play/NewSessionDialog.tsx`
 - Test: `apps/tldw-frontend/__tests__/vn-play/VNPlayWorkspace.test.tsx`
 
-- [ ] **Step 1: Write failing workspace tests**
+- [x] **Step 1: Write failing workspace tests**
 
 ```tsx
 it('renders freeform and story session actions', async () => {
@@ -972,7 +972,7 @@ it('loads and selects the first session', async () => {
 });
 ```
 
-- [ ] **Step 2: Run failing workspace tests**
+- [x] **Step 2: Run failing workspace tests**
 
 Run:
 
@@ -983,7 +983,7 @@ bunx vitest run __tests__/vn-play/VNPlayWorkspace.test.tsx
 
 Expected: component import failure.
 
-- [ ] **Step 3: Implement workspace shell**
+- [x] **Step 3: Implement workspace shell**
 
 Build:
 
@@ -1002,7 +1002,7 @@ Build:
 
 Keep center/right panels as placeholders until Task 10.
 
-- [ ] **Step 4: Run workspace tests**
+- [x] **Step 4: Run workspace tests**
 
 Run:
 
