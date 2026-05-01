@@ -111,6 +111,13 @@ def _metadata_context(vm: object) -> dict[str, object]:
     }
 
 
+def _safe_path_is_file(path_text: str) -> bool:
+    try:
+        return Path(path_text).is_file()
+    except (OSError, ValueError):
+        return False
+
+
 def _classify_orphan_vm(vm: object) -> tuple[str, bool, str, bool | None]:
     """Return orphan classification, repair eligibility, reason, and manifest presence."""
     metadata = getattr(vm, "metadata", None)
@@ -133,7 +140,7 @@ def _classify_orphan_vm(vm: object) -> tuple[str, bool, str, bool | None]:
         template_id = _clean_id(getattr(metadata, "template_id", ""))
         if not template_id or not run_manifest_path:
             return STATUS_UNKNOWN_ORPHAN, False, REASON_UNKNOWN_OWNERSHIP, None
-        if not Path(run_manifest_path).is_file():
+        if not _safe_path_is_file(run_manifest_path):
             return STATUS_UNKNOWN_ORPHAN, False, REASON_IMAGE_STORE_MANIFEST_MISSING, False
         return STATUS_OWNED_ORPHAN, True, REASON_OWNED_ORPHAN, True
     return STATUS_OWNED_ORPHAN, True, REASON_OWNED_ORPHAN, None

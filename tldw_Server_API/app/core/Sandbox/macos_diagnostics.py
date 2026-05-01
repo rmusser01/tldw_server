@@ -259,8 +259,29 @@ def probe_image_store(reconciliation: dict[str, object] | None = None) -> dict[s
             "reasons": [],
         }
 
+    root_path = Path(root_text).expanduser()
     try:
-        store = SandboxImageStore(root_path=root_text)
+        if not root_path.exists():
+            return {
+                "configured": True,
+                "root_path": root_text,
+                "registered_templates": 0,
+                "run_manifests": 0,
+                "gc_candidates": 0,
+                "items": [],
+                "reasons": ["image_store_root_missing"],
+            }
+        if not root_path.is_dir():
+            return {
+                "configured": True,
+                "root_path": root_text,
+                "registered_templates": 0,
+                "run_manifests": 0,
+                "gc_candidates": 0,
+                "items": [],
+                "reasons": ["image_store_root_not_directory"],
+            }
+        store = SandboxImageStore(root_path=root_path, create_root=False)
     except (ImageStoreValidationError, OSError, ValueError) as exc:
         return {
             "configured": True,

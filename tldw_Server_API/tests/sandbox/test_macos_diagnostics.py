@@ -1,19 +1,20 @@
 from __future__ import annotations
 
 import json
+
 import tldw_Server_API.app.core.Sandbox.macos_diagnostics as diagnostics_module
 import tldw_Server_API.app.core.Sandbox.vz_reconciliation as reconciliation_module
 from tldw_Server_API.app.core.Sandbox.image_store import SandboxImageStore
-from tldw_Server_API.app.core.Sandbox.models import RuntimeType
-from tldw_Server_API.app.core.Sandbox.macos_virtualization.models import (
-    HelperVMMetadata,
-    HelperPingReply,
-    HelperVMListReply,
-    HelperVMStatusReply,
-)
 from tldw_Server_API.app.core.Sandbox.macos_virtualization.helper_client import (
     MacOSVirtualizationHelperProtocolError,
 )
+from tldw_Server_API.app.core.Sandbox.macos_virtualization.models import (
+    HelperPingReply,
+    HelperVMListReply,
+    HelperVMMetadata,
+    HelperVMStatusReply,
+)
+from tldw_Server_API.app.core.Sandbox.models import RuntimeType
 from tldw_Server_API.app.core.Sandbox.runtime_capabilities import RuntimePreflightResult
 
 
@@ -544,8 +545,8 @@ def test_collect_macos_diagnostics_reports_image_store_correlation(monkeypatch, 
         bundle_path=bundle,
     )
     live_manifest = store.prepare_run_clone(template_id=template_id, run_id="run-live")
-    manifest_only = store.prepare_run_clone(template_id=template_id, run_id="run-manifest-only")
-    inactive_manifest = store.prepare_run_clone(template_id=template_id, run_id="run-inactive")
+    store.prepare_run_clone(template_id=template_id, run_id="run-manifest-only")
+    store.prepare_run_clone(template_id=template_id, run_id="run-inactive")
     inactive_rootfs = store_root / "runs" / "run-inactive" / "rootfs.img"
     inactive_rootfs.write_bytes(b"clone")
     legacy_run = store_root / "runs" / "run-legacy"
@@ -649,3 +650,19 @@ def test_collect_macos_diagnostics_reports_image_store_correlation(monkeypatch, 
     assert items_by_run["run-inactive"]["gc_reason"] == "inactive_run"
     assert items_by_run["run-legacy"]["gc_reason"] == "legacy_run_directory"
     assert items_by_run["run-legacy"]["run_manifest_present"] is False
+
+
+def test_probe_image_store_does_not_create_missing_root(monkeypatch, tmp_path) -> None:
+    store_root = tmp_path / "missing-image-store"
+    monkeypatch.setenv("TLDW_SANDBOX_IMAGE_STORE_ROOT", str(store_root))
+
+    data = diagnostics_module.probe_image_store()
+
+    assert data["configured"] is True
+    assert data["root_path"] == str(store_root)
+    assert data["registered_templates"] == 0
+    assert data["run_manifests"] == 0
+    assert data["gc_candidates"] == 0
+    assert data["items"] == []
+    assert "image_store_root_missing" in data["reasons"]
+    assert not store_root.exists()

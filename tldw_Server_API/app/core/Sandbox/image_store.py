@@ -92,12 +92,13 @@ class SandboxImageStore:
     the runtime authority for bootability.
     """
 
-    def __init__(self, root_path: str | Path) -> None:
+    def __init__(self, root_path: str | Path, *, create_root: bool = True) -> None:
         self.root_path = Path(root_path)
         self._templates: dict[str, TemplateRecord] = {}
         self._run_clone_manifests: dict[str, RunCloneManifest] = {}
         self._run_clone_manifests_loaded = False
-        self.root_path.mkdir(parents=True, exist_ok=True)
+        if create_root:
+            self.root_path.mkdir(parents=True, exist_ok=True)
         self._load_templates()
 
     def register_template(

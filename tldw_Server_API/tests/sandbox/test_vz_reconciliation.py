@@ -8,8 +8,8 @@ from tldw_Server_API.app.core.Sandbox.macos_virtualization.helper_client import 
     MacOSVirtualizationHelperUnavailable,
 )
 from tldw_Server_API.app.core.Sandbox.macos_virtualization.models import (
-    HelperVMMetadata,
     HelperVMListReply,
+    HelperVMMetadata,
     HelperVMStatusReply,
 )
 from tldw_Server_API.app.core.Sandbox.vz_reconciliation import collect_vz_reconciliation
@@ -275,6 +275,43 @@ def test_reconciliation_downgrades_image_store_orphan_without_run_manifest(tmp_p
     assert item["planning_source"] == "image_store"
     assert item["template_id"] == "vz_linux:bundle-owned"
     assert item["run_manifest_path"] == str(missing_manifest)
+    assert item["run_manifest_present"] is False
+
+
+def test_reconciliation_treats_invalid_image_store_manifest_path_as_missing(monkeypatch) -> None:
+    original_is_file = Path.is_file
+
+    def _raising_is_file(path: Path) -> bool:
+        if str(path) == "bad-manifest.json":
+            raise ValueError("embedded null byte")
+        return original_is_file(path)
+
+    monkeypatch.setattr(Path, "is_file", _raising_is_file)
+    helper = _FakeHelper(
+        [
+            _vm(
+                "vm-owned-image-store",
+                metadata=_metadata(
+                    run_id="run-owned",
+                    template_id="vz_linux:bundle-owned",
+                    run_manifest_path="bad-manifest.json",
+                    planning_source="image_store",
+                ),
+            )
+        ]
+    )
+
+    report = collect_vz_reconciliation(
+        orchestrator=_FakeOrchestrator([]),
+        helper_client=helper,
+    )
+
+    assert report["owned_orphaned_vm_ids"] == []
+    assert report["unknown_orphaned_vm_ids"] == ["vm-owned-image-store"]
+    item = next(item for item in report["items"] if item.get("vm_id") == "vm-owned-image-store")
+    assert item["status"] == "unknown_orphaned_vm"
+    assert item["reason"] == "image_store_manifest_missing"
+    assert item["termination_eligible"] is False
     assert item["run_manifest_present"] is False
 
 
