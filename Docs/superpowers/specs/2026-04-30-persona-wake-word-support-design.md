@@ -106,6 +106,8 @@ The field is nullable so existing profiles remain valid and so unsaved profiles 
 
 Do not add separate `wake_phrases` in V1. Continue to use `voice_chat_trigger_phrases`.
 
+Wake arming must use the raw saved persona profile phrases, not the broader resolved Persona Live defaults. Existing non-wake Persona Live behavior may continue to use fallback trigger phrases if that is already supported, but wake mode must not arm from global voice-chat fallback phrases.
+
 ## Frontend Components
 
 ### WakeDetector Interface
@@ -136,7 +138,7 @@ interface WakeDetectorConfig {
 }
 ```
 
-`WakeDetectedEvent` should include the matched phrase, the heard transcript if available, a timestamp, and the detector kind. The heard transcript is diagnostic in V1; it should not directly become a persona turn.
+`WakeDetectedEvent` should include the canonical configured phrase that matched, the heard transcript if available, a timestamp, and the detector kind. The heard transcript is diagnostic in V1; it should not directly become a persona turn.
 
 ### BrowserTranscriptWakeDetector
 
@@ -162,6 +164,8 @@ The implementation can use browser speech recognition where available. The UI mu
 
 The controller should not create a second persona session manager. It should continue to use the existing persona websocket session for actual turns.
 
+Wake mode should pass the controller a separate `wakeTriggerPhrases` value derived from `profile.voice_defaults.voice_chat_trigger_phrases`. Do not derive wake arming from `resolvedDefaults.voiceChatTriggerPhrases`, because that value may include global fallback phrases used by ordinary live voice.
+
 ### Persona Live UI
 
 The Live UI should add:
@@ -180,7 +184,7 @@ Profile settings should add the persistent default wake behavior near existing v
 ### Arming
 
 1. User opens Persona Live and selects a persona.
-2. UI resolves voice defaults and trigger phrases.
+2. UI resolves live voice defaults and separately reads saved persona wake trigger phrases.
 3. User toggles `Listen for wake phrase`.
 4. If there are no trigger phrases, arming is blocked.
 5. If the detector is unavailable, UI shows a recoverable unavailable state.
@@ -192,8 +196,8 @@ Profile settings should add the persistent default wake behavior near existing v
 2. Detector matches one configured trigger phrase.
 3. Controller debounces duplicate detections.
 4. Controller ensures the persona websocket session is connected.
-5. Controller sends or refreshes `voice_config`.
-6. Controller sends a `wake_activation` frame with the matched phrase, detector kind, timestamp, and selected wake behavior.
+5. Controller sends or refreshes `voice_config` with the saved persona wake trigger phrases for this wake-armed session.
+6. Controller sends a `wake_activation` frame with the canonical matched phrase, detector kind, timestamp, and selected wake behavior.
 7. Controller applies the current wake behavior.
 
 ### Wake Activation Frame
@@ -215,10 +219,14 @@ The server should store this as session-local runtime state. It is not a persist
 
 The server should accept `wake_activation` only when all of these are true:
 
-- `session_id` normalizes to an existing or creatable session for the authenticated user.
+- `session_id` normalizes to an existing session for the authenticated user.
+- The session has current `voice_runtime.trigger_phrases` from a prior `voice_config`.
+- The server can resolve the session's persona profile for the authenticated user.
 - `wake_behavior` is one of `one_shot`, `continuous`, or `push_to_talk_after_wake`.
 - `matched_phrase` is non-empty.
-- `matched_phrase` matches one of the current session `voice_runtime.trigger_phrases`.
+- `matched_phrase` is the canonical configured phrase after detector normalization, not the raw recognized text.
+- `matched_phrase` matches one of the saved persona profile `voice_defaults.voice_chat_trigger_phrases`.
+- `matched_phrase` is also present in the current session `voice_runtime.trigger_phrases`, so the active runtime state and saved persona wake phrases agree.
 
 If validation fails, the server should emit a non-fatal `WAKE_ACTIVATION_REJECTED` notice and leave trigger phrase gating unchanged.
 
@@ -269,9 +277,10 @@ The frontend should send `wake_deactivation` before disarming, stopping live voi
 The backend should remain additive:
 
 - Validate and persist `voice_defaults.wake_behavior`.
-- Return the resolved/saved field in persona profile responses.
+- Return the saved nullable `voice_defaults.wake_behavior` in persona profile responses; frontend resolution applies the `one_shot` fallback.
 - Accept `wake_activation` websocket frames and store active wake state in session-local runtime preferences.
 - Accept `wake_deactivation` websocket frames and clear active wake state for the session.
+- Validate wake activation phrases against the saved persona profile, not only client-supplied `voice_config`.
 - Keep existing server-side trigger phrase gating on committed transcripts when no wake activation is active.
 - Let active wake state bypass trigger phrase gating only for the scoped post-wake behavior window.
 - Keep persona policy, scope, tool planning, memory, and TTS behavior unchanged.
@@ -333,6 +342,7 @@ Backend:
 - existing profiles without `wake_behavior` still validate.
 - websocket `wake_activation` allows the next post-wake voice turn to omit the trigger phrase.
 - invalid `wake_activation` frames are rejected without disabling trigger phrase gating.
+- `wake_activation` is rejected when `matched_phrase` exists only in client-supplied runtime config and not in saved persona profile trigger phrases.
 - websocket `wake_deactivation` clears continuous wake activation while the socket stays open.
 - websocket trigger phrase gating still rejects transcripts without trigger phrases when no wake activation is active.
 - `one_shot` wake activation expires after one committed voice turn.
