@@ -33,9 +33,15 @@ async def shutdown_pre_worker_cleanup(
     stopped_background_worker_names: set[str] | None = None,
 ) -> PreWorkerCleanupHandles:
     """Run the cleanup/reset shutdown slice that precedes the worker helpers."""
+    stopped_background_worker_names = stopped_background_worker_names or set()
+    cleanup_task_for_shutdown = _unless_background_stopped(
+        "ephemeral_cleanup_task",
+        cleanup_task,
+        stopped_background_worker_names,
+    )
     await _shutdown_pre_worker_cleanup(
         app=app,
-        cleanup_task=cleanup_task,
+        cleanup_task=cleanup_task_for_shutdown,
         chatbooks_cleanup_task=chatbooks_cleanup_task,
         chatbooks_cleanup_stop_event=chatbooks_cleanup_stop_event,
         storage_cleanup_service=storage_cleanup_service,
@@ -44,7 +50,7 @@ async def shutdown_pre_worker_cleanup(
         stopped_background_worker_names=stopped_background_worker_names,
     )
     return PreWorkerCleanupHandles(
-        cleanup_task=cleanup_task,
+        cleanup_task=cleanup_task_for_shutdown,
         chatbooks_cleanup_task=chatbooks_cleanup_task,
         chatbooks_cleanup_stop_event=chatbooks_cleanup_stop_event,
         storage_cleanup_service=storage_cleanup_service,
@@ -63,6 +69,7 @@ async def run_shutdown_pre_worker_cleanup(
     stopped_background_worker_names: set[str] | None = None,
 ) -> PreWorkerCleanupHandles:
     """Run pre-worker cleanup with main-lifespan fallback behavior."""
+    stopped_background_worker_names = stopped_background_worker_names or set()
     try:
         return await shutdown_pre_worker_cleanup(
             app=app,
@@ -77,7 +84,11 @@ async def run_shutdown_pre_worker_cleanup(
     except guard_exceptions as exc:
         logger.debug(f"Pre-worker cleanup skipped: {exc}")
         return PreWorkerCleanupHandles(
-            cleanup_task=cleanup_task,
+            cleanup_task=_unless_background_stopped(
+                "ephemeral_cleanup_task",
+                cleanup_task,
+                stopped_background_worker_names,
+            ),
             chatbooks_cleanup_task=chatbooks_cleanup_task,
             chatbooks_cleanup_stop_event=chatbooks_cleanup_stop_event,
             storage_cleanup_service=storage_cleanup_service,
@@ -123,6 +134,17 @@ async def _shutdown_pre_worker_cleanup(
     await _reset_authnz_rate_limiter_singleton(
         guard_exceptions=guard_exceptions,
     )
+
+
+def _unless_background_stopped(
+    name: str,
+    value: Any | None,
+    stopped_background_worker_names: set[str],
+) -> Any | None:
+    """Suppress legacy handles already stopped by the background-worker registry."""
+    if name in stopped_background_worker_names:
+        return None
+    return value
 
 
 async def _cancel_deferred_startup_task(
