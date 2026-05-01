@@ -459,6 +459,7 @@ def test_persona_profile_voice_defaults_roundtrip(persona_db: CharactersRAGDB):
                     "tts_voice": "af_heart",
                     "confirmation_mode": "always",
                     "voice_chat_trigger_phrases": ["hey helper", "okay helper"],
+                    "wake_behavior": "continuous",
                     "auto_resume": True,
                     "barge_in": False,
                     "auto_commit_enabled": True,
@@ -478,6 +479,7 @@ def test_persona_profile_voice_defaults_roundtrip(persona_db: CharactersRAGDB):
             "hey helper",
             "okay helper",
         ]
+        assert payload["voice_defaults"]["wake_behavior"] == "continuous"
         assert payload["voice_defaults"]["auto_commit_enabled"] is True
         assert payload["voice_defaults"]["vad_threshold"] == 0.35
         assert payload["voice_defaults"]["min_silence_ms"] == 150
@@ -489,6 +491,7 @@ def test_persona_profile_voice_defaults_roundtrip(persona_db: CharactersRAGDB):
         fetched_payload = fetched.json()
         assert fetched_payload["voice_defaults"]["tts_provider"] == "tldw"
         assert fetched_payload["voice_defaults"]["tts_voice"] == "af_heart"
+        assert fetched_payload["voice_defaults"]["wake_behavior"] == "continuous"
         assert fetched_payload["voice_defaults"]["auto_resume"] is True
         assert fetched_payload["voice_defaults"]["barge_in"] is False
         assert fetched_payload["voice_defaults"]["auto_commit_enabled"] is True
@@ -504,6 +507,7 @@ def test_persona_profile_voice_defaults_roundtrip(persona_db: CharactersRAGDB):
                     "stt_language": "fr-FR",
                     "confirmation_mode": "destructive_only",
                     "voice_chat_trigger_phrases": ["bonjour helper"],
+                    "wake_behavior": "push_to_talk_after_wake",
                     "auto_resume": False,
                     "barge_in": True,
                     "auto_commit_enabled": False,
@@ -521,6 +525,10 @@ def test_persona_profile_voice_defaults_roundtrip(persona_db: CharactersRAGDB):
         assert updated_payload["voice_defaults"]["voice_chat_trigger_phrases"] == [
             "bonjour helper"
         ]
+        assert (
+            updated_payload["voice_defaults"]["wake_behavior"]
+            == "push_to_talk_after_wake"
+        )
         assert updated_payload["voice_defaults"]["auto_resume"] is False
         assert updated_payload["voice_defaults"]["barge_in"] is True
         assert updated_payload["voice_defaults"]["auto_commit_enabled"] is False
@@ -528,6 +536,23 @@ def test_persona_profile_voice_defaults_roundtrip(persona_db: CharactersRAGDB):
         assert updated_payload["voice_defaults"]["min_silence_ms"] == 640
         assert updated_payload["voice_defaults"]["turn_stop_secs"] == 0.48
         assert updated_payload["voice_defaults"]["min_utterance_secs"] == 0.82
+
+    fastapi_app.dependency_overrides.clear()
+
+
+def test_persona_profile_voice_defaults_rejects_invalid_wake_behavior(
+    persona_db: CharactersRAGDB,
+):
+    with _client_for_user(1, persona_db) as client:
+        created = client.post(
+            "/api/v1/persona/profiles",
+            json={
+                "name": "Bad Wake Helper",
+                "mode": "persistent_scoped",
+                "voice_defaults": {"wake_behavior": "always_on_background"},
+            },
+        )
+        assert created.status_code == 422, created.text
 
     fastapi_app.dependency_overrides.clear()
 
