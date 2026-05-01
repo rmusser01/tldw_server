@@ -21,6 +21,9 @@ from tldw_Server_API.app.api.v1.schemas.flashcards import (
     Deck,
     DeckCreate,
     DeckDeleteResponse,
+    DeckShare,
+    DeckShareDeleteResponse,
+    DeckShareUpsert,
     DeckUpdate,
     Flashcard,
     FlashcardAnalyticsSummaryResponse,
@@ -677,6 +680,7 @@ def _get_flashcards_apkg_max_media_bytes() -> int:
 def create_deck(payload: DeckCreate, db: CharactersRAGDB = Depends(get_chacha_db_for_user)):
     try:
         _ensure_workspace_exists(db, payload.workspace_id)
+        visibility = payload.visibility if "visibility" in payload.model_fields_set else None
         review_prompt_side = payload.review_prompt_side if "review_prompt_side" in payload.model_fields_set else None
         deck_id = db.add_deck(
             payload.name,
@@ -684,6 +688,7 @@ def create_deck(payload: DeckCreate, db: CharactersRAGDB = Depends(get_chacha_db
             payload.scheduler_settings.model_dump() if payload.scheduler_settings else None,
             scheduler_type=payload.scheduler_type,
             workspace_id=payload.workspace_id,
+            visibility=visibility,
             review_prompt_side=review_prompt_side,
         )
         # Return the exact deck row by id
@@ -696,6 +701,7 @@ def create_deck(payload: DeckCreate, db: CharactersRAGDB = Depends(get_chacha_db
             "name": payload.name,
             "description": payload.description,
             "workspace_id": payload.workspace_id,
+            "visibility": visibility or "private",
             "review_prompt_side": payload.review_prompt_side,
             "created_at": None,
             "last_modified": None,
@@ -750,6 +756,7 @@ def update_deck(
     scheduler_settings = data.pop("scheduler_settings", None)
     scheduler_type = data.pop("scheduler_type", None)
     review_prompt_side = data.pop("review_prompt_side", None)
+    visibility = data.pop("visibility", None)
     workspace_id = data.pop("workspace_id", ...)
     try:
         if workspace_id is not ...:
@@ -759,6 +766,7 @@ def update_deck(
             name=data.get("name"),
             description=data.get("description"),
             review_prompt_side=review_prompt_side,
+            visibility=visibility,
             scheduler_settings=scheduler_settings,
             scheduler_type=scheduler_type,
             workspace_id=workspace_id,
@@ -776,6 +784,82 @@ def update_deck(
         raise map_db_error_to_http(e) from e
     except (InputError, CharactersRAGDBError) as exc:
         raise map_db_error_to_http(exc, default_detail="Failed to update deck") from exc
+
+
+@router.get(
+    "/decks/{deck_id}/shares",
+    response_model=list[DeckShare],
+    dependencies=[Depends(check_rate_limit)],
+)
+def list_deck_shares(
+    deck_id: int,
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+) -> list[DeckShare]:
+    """List all per-user share grants for a deck owned by the current user."""
+    try:
+        deck = db.get_deck(deck_id)
+        if not deck or deck.get("deleted"):
+            raise HTTPException(status_code=404, detail="Deck not found")
+        return [DeckShare.model_validate(item) for item in db.list_deck_shares(deck_id)]
+    except HTTPException:
+        raise
+    except CharactersRAGDBError as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to list deck shares") from exc
+
+
+@router.put(
+    "/decks/{deck_id}/shares/{user_id}",
+    response_model=DeckShare,
+    dependencies=[Depends(check_rate_limit)],
+)
+def upsert_deck_share(
+    deck_id: int,
+    user_id: int,
+    payload: DeckShareUpsert,
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    current_user: User = Depends(get_request_user),
+) -> DeckShare:
+    """Create or update a user's share role for a deck owned by the current user."""
+    try:
+        deck = db.get_deck(deck_id)
+        if not deck or deck.get("deleted"):
+            raise HTTPException(status_code=404, detail="Deck not found")
+        return DeckShare.model_validate(
+            db.upsert_deck_share(
+                deck_id,
+                user_id=user_id,
+                role=payload.role,
+                shared_by=int(current_user.id),
+            )
+        )
+    except HTTPException:
+        raise
+    except ConflictError as exc:
+        raise map_db_error_to_http(exc) from exc
+    except (InputError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to share deck") from exc
+
+
+@router.delete(
+    "/decks/{deck_id}/shares/{user_id}",
+    response_model=DeckShareDeleteResponse,
+    dependencies=[Depends(check_rate_limit)],
+)
+def delete_deck_share(
+    deck_id: int,
+    user_id: int,
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+) -> DeckShareDeleteResponse:
+    """Remove a per-user share grant from a deck owned by the current user."""
+    try:
+        deck = db.get_deck(deck_id)
+        if not deck or deck.get("deleted"):
+            raise HTTPException(status_code=404, detail="Deck not found")
+        return DeckShareDeleteResponse(removed=db.delete_deck_share(deck_id, user_id=user_id))
+    except HTTPException:
+        raise
+    except CharactersRAGDBError as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to remove deck share") from exc
 
 
 @router.delete("/decks/{deck_id}", response_model=DeckDeleteResponse)

@@ -133,11 +133,29 @@ _SUPPORTED_WEB_CLIPPER_OUTCOME_STATES = {"saved", "saved_with_warnings", "partia
 _SUPPORTED_WEB_CLIPPER_ENRICHMENT_TYPES = {"ocr", "vlm"}
 _FLASHCARD_TEMPLATE_FIELD_NAMES = ("front_template", "back_template", "notes_template", "extra_template")
 _FLASHCARD_TEMPLATE_TOKEN_RE = re.compile(r"\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}")
+_DECK_VISIBILITIES = frozenset({"private", "team", "org", "public"})
+_DECK_SHARE_ROLES = frozenset({"owner", "editor", "viewer"})
 
 
 def _coerce_scheduler_type(value: Any) -> str:
     normalized = str(value or "").strip().lower()
     return normalized if normalized in _SUPPORTED_FLASHCARD_SCHEDULERS else "sm2_plus"
+
+
+def _normalize_deck_visibility(value: Any) -> str:
+    normalized = str(value or "private").strip().lower()
+    if normalized not in _DECK_VISIBILITIES:
+        raise InputError(
+            "Invalid deck visibility. Must be one of: private, team, org, public"
+        )
+    return normalized
+
+
+def _normalize_deck_share_role(value: Any) -> str:
+    normalized = str(value or "viewer").strip().lower()
+    if normalized not in _DECK_SHARE_ROLES:
+        raise InputError("Invalid deck share role. Must be one of: owner, editor, viewer")
+    return normalized
 
 
 def _normalize_scheduler_settings_envelope(raw: Mapping[str, Any] | str | None) -> dict[str, Any]:
@@ -8916,6 +8934,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 self._ensure_flashcard_asset_schema_sqlite(conn)
                 self._ensure_flashcard_template_schema_sqlite(conn)
                 self._ensure_flashcard_scheduler_schema_sqlite(conn)
+                self._ensure_flashcard_deck_sharing_schema_sqlite(conn)
                 self._ensure_study_pack_schema_sqlite(conn)
                 self._ensure_study_assistant_schema_sqlite(conn)
                 self._ensure_quiz_remediation_conversion_schema_sqlite(conn)
@@ -9474,6 +9493,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                   INSERT INTO sync_log(entity,entity_id,operation,timestamp,client_id,version,payload)
                   VALUES('decks',CAST(NEW.id AS TEXT),'create',NEW.last_modified,NEW.client_id,NEW.version,
                          json_object('id',NEW.id,'name',NEW.name,'description',NEW.description,
+                                     'visibility',NEW.visibility,
                                      'review_prompt_side',NEW.review_prompt_side,
                                      'scheduler_type',NEW.scheduler_type,
                                      'scheduler_settings_json',NEW.scheduler_settings_json,
@@ -9486,6 +9506,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 WHEN OLD.deleted = NEW.deleted AND (
                      OLD.name IS NOT NEW.name OR
                      OLD.description IS NOT NEW.description OR
+                     OLD.visibility IS NOT NEW.visibility OR
                      OLD.review_prompt_side IS NOT NEW.review_prompt_side OR
                      OLD.scheduler_type IS NOT NEW.scheduler_type OR
                      OLD.scheduler_settings_json IS NOT NEW.scheduler_settings_json OR
@@ -9495,6 +9516,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                   INSERT INTO sync_log(entity,entity_id,operation,timestamp,client_id,version,payload)
                   VALUES('decks',CAST(NEW.id AS TEXT),'update',NEW.last_modified,NEW.client_id,NEW.version,
                          json_object('id',NEW.id,'name',NEW.name,'description',NEW.description,
+                                     'visibility',NEW.visibility,
                                      'review_prompt_side',NEW.review_prompt_side,
                                      'scheduler_type',NEW.scheduler_type,
                                      'scheduler_settings_json',NEW.scheduler_settings_json,
@@ -9519,6 +9541,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                   INSERT INTO sync_log(entity,entity_id,operation,timestamp,client_id,version,payload)
                   VALUES('decks',CAST(NEW.id AS TEXT),'update',NEW.last_modified,NEW.client_id,NEW.version,
                          json_object('id',NEW.id,'name',NEW.name,'description',NEW.description,
+                                     'visibility',NEW.visibility,
                                      'review_prompt_side',NEW.review_prompt_side,
                                      'scheduler_type',NEW.scheduler_type,
                                      'scheduler_settings_json',NEW.scheduler_settings_json,
@@ -9740,6 +9763,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     conn.execute("ALTER TABLE decks ADD COLUMN scheduler_type TEXT NOT NULL DEFAULT 'sm2_plus'")
                 if "review_prompt_side" not in deck_cols:
                     conn.execute("ALTER TABLE decks ADD COLUMN review_prompt_side TEXT NOT NULL DEFAULT 'front'")
+                if "visibility" not in deck_cols:
+                    conn.execute("ALTER TABLE decks ADD COLUMN visibility TEXT NOT NULL DEFAULT 'private'")
                 conn.execute(
                     """
                     UPDATE decks
@@ -9762,6 +9787,14 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                      WHERE review_prompt_side IS NULL OR trim(review_prompt_side) = ''
                     """
                 )
+                conn.execute(
+                    """
+                    UPDATE decks
+                       SET visibility = 'private'
+                     WHERE visibility IS NULL OR trim(visibility) = ''
+                    """
+                )
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_decks_visibility ON decks(visibility)")
         except sqlite3.Error as exc:
             raise SchemaError(f"Failed ensuring decks review-orientation schema: {exc}") from exc  # noqa: TRY003
 
@@ -9939,6 +9972,36 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             sync_log_exists=sync_log_exists,
         )
 
+    def _ensure_flashcard_deck_sharing_schema_sqlite(self, conn: sqlite3.Connection) -> None:
+        """Ensure owner-side flashcard deck sharing metadata exists for SQLite."""
+        try:
+            existing_tables = {
+                str(row[0])
+                for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()
+            }
+            if "decks" not in existing_tables:
+                return
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS deck_shares(
+                  deck_id       INTEGER NOT NULL REFERENCES decks(id) ON DELETE CASCADE,
+                  user_id       INTEGER NOT NULL,
+                  role          TEXT NOT NULL CHECK(role IN ('owner', 'editor', 'viewer')),
+                  shared_by     INTEGER NOT NULL,
+                  shared_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  last_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  client_id     TEXT NOT NULL DEFAULT 'unknown',
+                  version       INTEGER NOT NULL DEFAULT 1,
+                  PRIMARY KEY(deck_id, user_id)
+                )
+                """
+            )
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_deck_shares_user ON deck_shares(user_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_deck_shares_role ON deck_shares(role)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_deck_shares_shared_by ON deck_shares(shared_by)")
+        except sqlite3.Error as exc:
+            raise SchemaError(f"Failed ensuring flashcard deck sharing schema: {exc}") from exc  # noqa: TRY003
+
     def _ensure_flashcard_fts_triggers_sqlite(self, conn: sqlite3.Connection) -> None:
         """Rebuild flashcard FTS around sanitized search shadow columns."""
         try:
@@ -10084,6 +10147,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 connection=conn,
             )
             self.backend.execute(
+                "ALTER TABLE decks ADD COLUMN IF NOT EXISTS visibility TEXT NOT NULL DEFAULT 'private'",
+                connection=conn,
+            )
+            self.backend.execute(
                 "UPDATE decks SET scheduler_settings_json = %s WHERE scheduler_settings_json IS NULL OR btrim(scheduler_settings_json) = ''",
                 (default_settings_json,),
                 connection=conn,
@@ -10094,6 +10161,14 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             )
             self.backend.execute(
                 "UPDATE decks SET review_prompt_side = 'front' WHERE review_prompt_side IS NULL OR btrim(review_prompt_side) = ''",
+                connection=conn,
+            )
+            self.backend.execute(
+                "UPDATE decks SET visibility = 'private' WHERE visibility IS NULL OR btrim(visibility) = ''",
+                connection=conn,
+            )
+            self.backend.execute(
+                "CREATE INDEX IF NOT EXISTS idx_decks_visibility ON decks(visibility)",
                 connection=conn,
             )
             self.backend.execute(
@@ -10195,6 +10270,40 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             )
         except _CHACHA_NONCRITICAL_EXCEPTIONS as exc:
             raise SchemaError(f"Failed ensuring PostgreSQL flashcard scheduler schema: {exc}") from exc  # noqa: TRY003
+
+    def _ensure_flashcard_deck_sharing_schema_postgres(self, conn: Any) -> None:
+        """Ensure owner-side flashcard deck sharing metadata exists for PostgreSQL."""
+        try:
+            self.backend.execute(
+                """
+                CREATE TABLE IF NOT EXISTS deck_shares(
+                  deck_id BIGINT NOT NULL REFERENCES decks(id) ON DELETE CASCADE,
+                  user_id BIGINT NOT NULL,
+                  role TEXT NOT NULL CHECK(role IN ('owner', 'editor', 'viewer')),
+                  shared_by BIGINT NOT NULL,
+                  shared_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  last_modified TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  client_id TEXT NOT NULL DEFAULT 'unknown',
+                  version INTEGER NOT NULL DEFAULT 1,
+                  PRIMARY KEY(deck_id, user_id)
+                )
+                """,
+                connection=conn,
+            )
+            self.backend.execute(
+                "CREATE INDEX IF NOT EXISTS idx_deck_shares_user ON deck_shares(user_id)",
+                connection=conn,
+            )
+            self.backend.execute(
+                "CREATE INDEX IF NOT EXISTS idx_deck_shares_role ON deck_shares(role)",
+                connection=conn,
+            )
+            self.backend.execute(
+                "CREATE INDEX IF NOT EXISTS idx_deck_shares_shared_by ON deck_shares(shared_by)",
+                connection=conn,
+            )
+        except _CHACHA_NONCRITICAL_EXCEPTIONS as exc:
+            raise SchemaError(f"Failed ensuring PostgreSQL flashcard deck sharing schema: {exc}") from exc  # noqa: TRY003
 
     def _ensure_study_assistant_schema_sqlite(self, conn: sqlite3.Connection) -> None:
         """Ensure study assistant thread/message tables exist for SQLite."""
@@ -12612,6 +12721,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             self._ensure_flashcard_asset_schema_postgres(conn)
             self._ensure_flashcard_template_schema_postgres(conn)
             self._ensure_flashcard_scheduler_schema_postgres(conn)
+            self._ensure_flashcard_deck_sharing_schema_postgres(conn)
             self._ensure_study_pack_schema_postgres(conn)
             self._ensure_study_assistant_schema_postgres(conn)
             self._ensure_workspace_study_material_schema_postgres(conn)
@@ -16683,11 +16793,14 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         *,
         scheduler_type: str = "sm2_plus",
         workspace_id: str | None = None,
+        visibility: str | None = None,
         review_prompt_side: str | None = None,
     ) -> int:
         """Create a deck and return its id."""
         now = self._get_current_utc_timestamp_iso()
         scheduler_type = _coerce_scheduler_type(scheduler_type)
+        normalized_visibility = None if visibility is None else _normalize_deck_visibility(visibility)
+        visibility_for_insert = normalized_visibility or "private"
         normalized_prompt_side = (
             None
             if review_prompt_side is None
@@ -16711,6 +16824,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                             "UPDATE decks SET deleted = ?, last_modified = ?, version = ?, client_id = ?, "
                             "description = COALESCE(?, description), "
                             "workspace_id = ?, "
+                            "visibility = COALESCE(?, visibility), "
                             "review_prompt_side = COALESCE(?, review_prompt_side), "
                             "scheduler_type = COALESCE(?, scheduler_type), "
                             "scheduler_settings_json = COALESCE(?, scheduler_settings_json) "
@@ -16723,6 +16837,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                             self.client_id,
                             description,
                             workspace_id,
+                            normalized_visibility,
                             normalized_prompt_side,
                             scheduler_type,
                             scheduler_settings_json,
@@ -16739,13 +16854,14 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     return deck_id
                 insert_sql = (
                     "INSERT INTO decks("
-                    "name, description, workspace_id, review_prompt_side, scheduler_settings_json, scheduler_type, created_at, last_modified, client_id, version, deleted"
-                    ") VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                    "name, description, workspace_id, visibility, review_prompt_side, scheduler_settings_json, scheduler_type, created_at, last_modified, client_id, version, deleted"
+                    ") VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
                 )
                 params = (
                     name,
                     description,
                     workspace_id,
+                    visibility_for_insert,
                     prompt_side_for_insert,
                     scheduler_settings_json,
                     scheduler_type,
@@ -16785,9 +16901,35 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         include_deleted: bool = False,
         workspace_id: str | None = None,
         include_workspace_items: bool = False,
+        shared_with_user_id: int | None = None,
     ) -> list[dict[str, Any]]:
+        if shared_with_user_id is not None:
+            query = (
+                "SELECT d.id, d.name, d.description, d.workspace_id, d.visibility, d.review_prompt_side, "
+                "d.scheduler_settings_json, d.scheduler_type, d.created_at, d.last_modified, "
+                "d.deleted, d.client_id, d.version FROM decks d "
+                "JOIN deck_shares ds ON ds.deck_id = d.id "
+            )
+            conditions = ["ds.user_id = ?"]
+            params_list: list[Any] = [int(shared_with_user_id)]
+            if not include_deleted:
+                conditions.append("d.deleted = 0")
+            if workspace_id is not None:
+                if include_workspace_items:
+                    conditions.append("(d.workspace_id = ? OR d.workspace_id IS NULL)")
+                else:
+                    conditions.append("d.workspace_id = ?")
+                params_list.append(workspace_id)
+            query += "WHERE " + " AND ".join(conditions) + " ORDER BY d.name LIMIT ? OFFSET ?"
+            params_list.extend([limit, offset])
+            try:
+                cursor = self.execute_query(query, tuple(params_list))
+                return [dict(row) for row in cursor.fetchall()]
+            except CharactersRAGDBError:  # noqa: TRY203
+                raise
+
         select_sql = (
-            "SELECT id, name, description, workspace_id, review_prompt_side, scheduler_settings_json, scheduler_type, created_at, last_modified, "
+            "SELECT id, name, description, workspace_id, visibility, review_prompt_side, scheduler_settings_json, scheduler_type, created_at, last_modified, "
             "deleted, client_id, version FROM decks "
         )
         if include_deleted:
@@ -16819,7 +16961,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
     def get_deck(self, deck_id: int) -> dict[str, Any] | None:
         """Fetch a single deck row by id."""
         query = (
-            "SELECT id, name, description, workspace_id, review_prompt_side, scheduler_settings_json, scheduler_type, created_at, last_modified, deleted, client_id, version "
+            "SELECT id, name, description, workspace_id, visibility, review_prompt_side, scheduler_settings_json, scheduler_type, created_at, last_modified, deleted, client_id, version "
             "FROM decks WHERE id = ?"
         )
         try:
@@ -16834,13 +16976,13 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if include_deleted:
             query = (
                 "SELECT id, name, description, workspace_id, review_prompt_side, scheduler_settings_json, scheduler_type, created_at, "
-                "last_modified, deleted, client_id, version FROM decks WHERE name = ? "
+                "last_modified, deleted, client_id, version, visibility FROM decks WHERE name = ? "
                 "ORDER BY id LIMIT 1"
             )
         else:
             query = (
                 "SELECT id, name, description, workspace_id, review_prompt_side, scheduler_settings_json, scheduler_type, created_at, "
-                "last_modified, deleted, client_id, version FROM decks WHERE name = ? AND deleted = 0 "
+                "last_modified, deleted, client_id, version, visibility FROM decks WHERE name = ? AND deleted = 0 "
                 "ORDER BY id LIMIT 1"
             )
         try:
@@ -16850,6 +16992,126 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         except CharactersRAGDBError:  # noqa: TRY203
             raise
 
+    def upsert_deck_share(
+        self,
+        deck_id: int,
+        *,
+        user_id: int,
+        role: str = "viewer",
+        shared_by: int,
+    ) -> dict[str, Any]:
+        """Create or update a per-user share record for a deck owned by this DB."""
+        target_user_id = int(user_id)
+        sharing_user_id = int(shared_by)
+        if target_user_id <= 0:
+            raise InputError("user_id must be a positive integer")  # noqa: TRY003
+        if sharing_user_id <= 0:
+            raise InputError("shared_by must be a positive integer")  # noqa: TRY003
+        if target_user_id == sharing_user_id:
+            raise InputError("Cannot share a deck with its owner")  # noqa: TRY003
+
+        normalized_role = _normalize_deck_share_role(role)
+        now = self._get_current_utc_timestamp_iso()
+        try:
+            with self.transaction() as conn:
+                deck = conn.execute(
+                    "SELECT id FROM decks WHERE id = ? AND deleted = 0",
+                    (int(deck_id),),
+                ).fetchone()
+                if deck is None:
+                    raise ConflictError("Deck not found", entity="decks", identifier=deck_id)  # noqa: TRY003
+
+                insert_sql = """
+                    INSERT INTO deck_shares(
+                        deck_id, user_id, role, shared_by, shared_at, last_modified, client_id, version
+                    ) VALUES(?, ?, ?, ?, ?, ?, ?, 1)
+                    ON CONFLICT(deck_id, user_id) DO UPDATE SET
+                        role = excluded.role,
+                        shared_by = excluded.shared_by,
+                        last_modified = excluded.last_modified,
+                        client_id = excluded.client_id,
+                        version = deck_shares.version + 1
+                """
+                params = (
+                    int(deck_id),
+                    target_user_id,
+                    normalized_role,
+                    sharing_user_id,
+                    now,
+                    now,
+                    self.client_id,
+                )
+                if self.backend_type == BackendType.POSTGRESQL:
+                    row = conn.execute(
+                        insert_sql
+                        + " RETURNING deck_id, user_id, role, shared_by, shared_at, last_modified, client_id, version",
+                        params,
+                    ).fetchone()
+                    return dict(row)
+
+                conn.execute(insert_sql, params)
+                row = conn.execute(
+                    """
+                    SELECT deck_id, user_id, role, shared_by, shared_at, last_modified, client_id, version
+                      FROM deck_shares
+                     WHERE deck_id = ? AND user_id = ?
+                    """,
+                    (int(deck_id), target_user_id),
+                ).fetchone()
+                if row is None:
+                    raise CharactersRAGDBError("Failed to read deck share after upsert")  # noqa: TRY003
+                return dict(row)
+        except sqlite3.Error as exc:
+            raise CharactersRAGDBError(f"Failed to share deck: {exc}") from exc  # noqa: TRY003
+        except BackendDatabaseError as exc:
+            raise CharactersRAGDBError(f"Failed to share deck: {exc}") from exc  # noqa: TRY003
+
+    def list_deck_shares(self, deck_id: int) -> list[dict[str, Any]]:
+        """List all per-user share records for a deck owned by this DB."""
+        try:
+            cursor = self.execute_query(
+                """
+                SELECT deck_id, user_id, role, shared_by, shared_at, last_modified, client_id, version
+                  FROM deck_shares
+                 WHERE deck_id = ?
+                 ORDER BY user_id
+                """,
+                (int(deck_id),),
+            )
+            return [dict(row) for row in cursor.fetchall()]
+        except CharactersRAGDBError:  # noqa: TRY203
+            raise
+
+    def get_deck_share(self, deck_id: int, *, user_id: int) -> dict[str, Any] | None:
+        """Fetch one per-user share record for a deck owned by this DB."""
+        try:
+            cursor = self.execute_query(
+                """
+                SELECT deck_id, user_id, role, shared_by, shared_at, last_modified, client_id, version
+                  FROM deck_shares
+                 WHERE deck_id = ? AND user_id = ?
+                """,
+                (int(deck_id), int(user_id)),
+            )
+            row = cursor.fetchone()
+            return dict(row) if row else None
+        except CharactersRAGDBError:  # noqa: TRY203
+            raise
+
+    def delete_deck_share(self, deck_id: int, *, user_id: int) -> bool:
+        """Remove one per-user share record from a deck owned by this DB."""
+        try:
+            with self.transaction() as conn:
+                rowcount = conn.execute(
+                    "DELETE FROM deck_shares WHERE deck_id = ? AND user_id = ?",
+                    (int(deck_id), int(user_id)),
+                ).rowcount
+                return rowcount > 0
+        except sqlite3.Error as exc:
+            raise CharactersRAGDBError(f"Failed to remove deck share: {exc}") from exc  # noqa: TRY003
+        except BackendDatabaseError as exc:
+            raise CharactersRAGDBError(f"Failed to remove deck share: {exc}") from exc  # noqa: TRY003
+
     def update_deck(
         self,
         deck_id: int,
@@ -16857,6 +17119,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         name: str | None = None,
         description: str | None = None,
         review_prompt_side: str | None = None,
+        visibility: str | None = None,
         scheduler_settings: Mapping[str, Any] | str | None = None,
         scheduler_type: str | None = None,
         workspace_id: Any = ...,
@@ -16874,6 +17137,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if review_prompt_side is not None:
             set_parts.append("review_prompt_side = ?")
             params.append("back" if str(review_prompt_side).strip().lower() == "back" else "front")
+        if visibility is not None:
+            set_parts.append("visibility = ?")
+            params.append(_normalize_deck_visibility(visibility))
         if scheduler_settings is not None:
             set_parts.append("scheduler_settings_json = ?")
             params.append(scheduler_settings_to_json(scheduler_settings))
@@ -20001,6 +20267,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     if existing is None:
                         raise ConflictError("Deck not found", entity="decks", identifier=deck_id)  # noqa: TRY003
                     raise ConflictError("Version mismatch deleting deck", entity="decks", identifier=deck_id)  # noqa: TRY003
+                if rowcount > 0:
+                    conn.execute("DELETE FROM deck_shares WHERE deck_id = ?", (int(deck_id),))
         except sqlite3.Error as exc:
             raise CharactersRAGDBError(f"Failed to soft-delete deck: {exc}") from exc  # noqa: TRY003
         except BackendDatabaseError as exc:

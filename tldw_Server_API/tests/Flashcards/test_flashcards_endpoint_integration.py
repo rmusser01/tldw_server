@@ -20,7 +20,7 @@ os.environ.setdefault("TEST_MODE", "1")
 from tldw_Server_API.app.api.v1.endpoints import flashcards as flashcards_endpoint
 from tldw_Server_API.app.api.v1.endpoints.config_info import router as config_info_router
 from tldw_Server_API.app.api.v1.endpoints.flashcards import router as flashcards_router
-from tldw_Server_API.app.api.v1.schemas.flashcards import DeckDeleteResponse
+from tldw_Server_API.app.api.v1.schemas.flashcards import DeckDeleteResponse, DeckShare, DeckShareDeleteResponse
 from tldw_Server_API.app.api.v1.schemas.study_packs import (
     StudyPackJobAcceptedResponse,
     StudyPackJobListResponse,
@@ -69,6 +69,9 @@ fastapi_app = _build_flashcards_test_app()
 
 def test_flashcards_reviewed_endpoints_have_explicit_return_annotations() -> None:
     assert flashcards_endpoint.delete_deck.__annotations__["return"] is DeckDeleteResponse
+    assert flashcards_endpoint.list_deck_shares.__annotations__["return"] == list[DeckShare]
+    assert flashcards_endpoint.upsert_deck_share.__annotations__["return"] is DeckShare
+    assert flashcards_endpoint.delete_deck_share.__annotations__["return"] is DeckShareDeleteResponse
     assert flashcards_endpoint.create_study_pack_job.__annotations__["return"] is StudyPackJobAcceptedResponse
     assert flashcards_endpoint.list_study_pack_jobs.__annotations__["return"] is StudyPackJobListResponse
     assert flashcards_endpoint.get_study_pack_job_status.__annotations__["return"] is StudyPackJobStatusResponse
@@ -297,6 +300,95 @@ def test_deck_workspace_id_contract_and_scope_filters(
     assert any(item["id"] == deck_id for item in general_list.json())
 
 
+def test_deck_share_endpoints_manage_user_roles(
+    client_with_flashcards_db: TestClient,
+):
+    create_response = client_with_flashcards_db.post(
+        "/api/v1/flashcards/decks",
+        json={"name": "Shareable Deck", "visibility": "team"},
+        headers=AUTH_HEADERS,
+    )
+    assert create_response.status_code == 200
+    deck = create_response.json()
+    assert deck["visibility"] == "team"
+
+    share_response = client_with_flashcards_db.put(
+        f"/api/v1/flashcards/decks/{deck['id']}/shares/22",
+        json={"role": "viewer"},
+        headers=AUTH_HEADERS,
+    )
+    assert share_response.status_code == 200
+    share = share_response.json()
+    assert share["deck_id"] == deck["id"]
+    assert share["user_id"] == 22
+    assert share["role"] == "viewer"
+    assert share["shared_by"] == 1
+
+    promote_response = client_with_flashcards_db.put(
+        f"/api/v1/flashcards/decks/{deck['id']}/shares/22",
+        json={"role": "editor"},
+        headers=AUTH_HEADERS,
+    )
+    assert promote_response.status_code == 200
+    assert promote_response.json()["role"] == "editor"
+
+    owner_response = client_with_flashcards_db.put(
+        f"/api/v1/flashcards/decks/{deck['id']}/shares/22",
+        json={"role": "owner"},
+        headers=AUTH_HEADERS,
+    )
+    assert owner_response.status_code == 200
+    assert owner_response.json()["role"] == "owner"
+
+    list_response = client_with_flashcards_db.get(
+        f"/api/v1/flashcards/decks/{deck['id']}/shares",
+        headers=AUTH_HEADERS,
+    )
+    assert list_response.status_code == 200
+    assert [item["user_id"] for item in list_response.json()] == [22]
+
+    delete_response = client_with_flashcards_db.delete(
+        f"/api/v1/flashcards/decks/{deck['id']}/shares/22",
+        headers=AUTH_HEADERS,
+    )
+    assert delete_response.status_code == 200
+    assert delete_response.json() == {"removed": True}
+    assert client_with_flashcards_db.get(
+        f"/api/v1/flashcards/decks/{deck['id']}/shares",
+        headers=AUTH_HEADERS,
+    ).json() == []
+
+
+def test_deck_share_endpoint_rejects_self_share(client_with_flashcards_db: TestClient):
+    create_response = client_with_flashcards_db.post(
+        "/api/v1/flashcards/decks",
+        json={"name": "Self Share Deck"},
+        headers=AUTH_HEADERS,
+    )
+    assert create_response.status_code == 200
+    deck_id = create_response.json()["id"]
+
+    share_response = client_with_flashcards_db.put(
+        f"/api/v1/flashcards/decks/{deck_id}/shares/1",
+        json={"role": "viewer"},
+        headers=AUTH_HEADERS,
+    )
+
+    assert share_response.status_code == 400
+    assert share_response.json()["detail"] == "Cannot share a deck with its owner"
+
+
+def test_deck_share_endpoint_returns_404_for_missing_deck(client_with_flashcards_db: TestClient):
+    share_response = client_with_flashcards_db.put(
+        "/api/v1/flashcards/decks/999999/shares/22",
+        json={"role": "viewer"},
+        headers=AUTH_HEADERS,
+    )
+
+    assert share_response.status_code == 404
+    assert share_response.json()["detail"] == "Deck not found"
+
+
 def test_list_decks_returns_500_for_db_error(
     client_with_flashcards_db: TestClient,
     flashcards_db: CharactersRAGDB,
@@ -466,6 +558,45 @@ def test_create_deck_undelete_preserves_orientation_unless_explicit_front_overri
     assert explicit_front_response.json()["review_prompt_side"] == "front"
 
 
+def test_create_deck_undelete_preserves_visibility_unless_explicit_override(
+    client_with_flashcards_db: TestClient,
+    flashcards_db: CharactersRAGDB,
+):
+    create_response = client_with_flashcards_db.post(
+        "/api/v1/flashcards/decks",
+        json={
+            "name": "Visibility API Deck",
+            "visibility": "team",
+        },
+        headers=AUTH_HEADERS,
+    )
+
+    assert create_response.status_code == 200
+    deck_id = create_response.json()["id"]
+    flashcards_db.soft_delete_deck_by_id(deck_id)
+
+    omitted_response = client_with_flashcards_db.post(
+        "/api/v1/flashcards/decks",
+        json={"name": "Visibility API Deck"},
+        headers=AUTH_HEADERS,
+    )
+    assert omitted_response.status_code == 200
+    assert omitted_response.json()["visibility"] == "team"
+
+    flashcards_db.soft_delete_deck_by_id(deck_id)
+
+    explicit_public_response = client_with_flashcards_db.post(
+        "/api/v1/flashcards/decks",
+        json={
+            "name": "Visibility API Deck",
+            "visibility": "public",
+        },
+        headers=AUTH_HEADERS,
+    )
+    assert explicit_public_response.status_code == 200
+    assert explicit_public_response.json()["visibility"] == "public"
+
+
 def test_update_deck_rejects_null_review_prompt_side(client_with_flashcards_db: TestClient):
     create_response = client_with_flashcards_db.post(
         "/api/v1/flashcards/decks",
@@ -478,6 +609,26 @@ def test_update_deck_rejects_null_review_prompt_side(client_with_flashcards_db: 
         f"/api/v1/flashcards/decks/{create_response.json()['id']}",
         json={
             "review_prompt_side": None,
+            "expected_version": create_response.json()["version"],
+        },
+        headers=AUTH_HEADERS,
+    )
+
+    assert update_response.status_code == 422
+
+
+def test_update_deck_rejects_null_visibility(client_with_flashcards_db: TestClient):
+    create_response = client_with_flashcards_db.post(
+        "/api/v1/flashcards/decks",
+        json={"name": "Patch Null Visibility Deck"},
+        headers=AUTH_HEADERS,
+    )
+    assert create_response.status_code == 200
+
+    update_response = client_with_flashcards_db.patch(
+        f"/api/v1/flashcards/decks/{create_response.json()['id']}",
+        json={
+            "visibility": None,
             "expected_version": create_response.json()["version"],
         },
         headers=AUTH_HEADERS,
