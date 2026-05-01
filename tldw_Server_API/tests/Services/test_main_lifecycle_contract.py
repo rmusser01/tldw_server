@@ -1384,8 +1384,14 @@ def test_lifespan_shutdown_delegates_pre_worker_cleanup(
     fake_storage_cleanup_service = object()
     recorded_calls: list[dict[str, object]] = []
 
-    async def _fake_start_cleanup_workers(_app_settings, *, test_mode: bool):
-        del _app_settings, test_mode
+    async def _fake_start_cleanup_workers(
+        app_settings,
+        *,
+        test_mode: bool,
+        worker_inventory,
+    ):
+        del app_settings, test_mode
+        assert worker_inventory is not None
         return startup_cleanup_workers.CleanupWorkerHandles(
             cleanup_task=fake_cleanup_task,
             chatbooks_cleanup_task=fake_chatbooks_cleanup_task,
@@ -1423,6 +1429,8 @@ def test_lifespan_shutdown_delegates_pre_worker_cleanup(
     assert recorded_calls[0]["chatbooks_cleanup_stop_event"] is fake_chatbooks_cleanup_stop_event
     assert recorded_calls[0]["storage_cleanup_service"] is fake_storage_cleanup_service
     assert isinstance(recorded_calls[0]["coordinated_legacy_component_names"], set)
+    assert isinstance(recorded_calls[0]["stopped_background_worker_names"], set)
+    assert "chatbooks_cleanup" not in recorded_calls[0]["stopped_background_worker_names"]
     assert recorded_calls[0]["guard_exceptions"] == main_module._STARTUP_GUARD_EXCEPTIONS
 
 
@@ -1450,8 +1458,14 @@ def test_lifespan_shutdown_delegates_transition_handoff(
             llm_usage_task=fake_llm_usage_task,
         )
 
-    async def _fake_start_cleanup_workers(_app_settings, *, test_mode: bool):
-        del _app_settings, test_mode
+    async def _fake_start_cleanup_workers(
+        app_settings,
+        *,
+        test_mode: bool,
+        worker_inventory,
+    ):
+        del app_settings, test_mode
+        assert worker_inventory is not None
         return startup_cleanup_workers.CleanupWorkerHandles(
             chatbooks_cleanup_task=fake_chatbooks_cleanup_task,
             chatbooks_cleanup_stop_event=fake_chatbooks_cleanup_stop_event,

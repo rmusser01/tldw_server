@@ -64,6 +64,7 @@ async def test_initialize_startup_worker_bootstrap_runs_helpers_in_order_and_ret
     assert calls[1][1]["worker_inventory"].handles is calls[1][1]["owned_job_pollers"]
     assert calls[1][1]["register_owned_job_poller"] == "register-poller"
     assert calls[1][1]["startup_guard_exceptions"] == (RuntimeError,)
+    assert calls[1][1]["worker_inventory"].handles is calls[1][1]["owned_job_pollers"]
     assert calls[2][1]["app"] == "app"
     assert calls[2][1]["app_settings"] == "settings"
     assert calls[2][1]["run_pg_rls_auto_ensure"] == "run-pg-ensure"

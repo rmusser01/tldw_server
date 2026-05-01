@@ -25,10 +25,13 @@ async def test_start_worker_groups_runs_helpers_in_order_and_returns_handles(
     app = object()
     owned_job_pollers: list[object] = []
     register_owned_job_poller = object()
+    worker_inventory = object()
+    worker_inventory_ref = worker_inventory
 
-    async def _record_cleanup_workers(*, app_settings, test_mode):
+    async def _record_cleanup_workers(*, app_settings, test_mode, worker_inventory=None):
         assert app_settings == {"SINGLE_USER_FIXED_ID": "7"}
         assert test_mode is True
+        assert worker_inventory is worker_inventory_ref
         calls.append("cleanup")
         return SimpleNamespace(
             cleanup_task="cleanup-task",
@@ -79,7 +82,7 @@ async def test_start_worker_groups_runs_helpers_in_order_and_returns_handles(
 
     async def _record_compactor_websub_workers(*, should_start_worker, worker_inventory):
         assert should_start_worker("AUDIO_JOBS_WORKER_ENABLED", "audio-jobs") is True
-        assert worker_inventory == "worker-inventory"
+        assert worker_inventory is worker_inventory_ref
         calls.append("compactor")
         return SimpleNamespace(
             embeddings_compactor_stop_event="embeddings-stop",
@@ -190,7 +193,7 @@ async def test_start_worker_groups_runs_helpers_in_order_and_returns_handles(
         startup_guard_exceptions=(RuntimeError,),
         owned_job_pollers=owned_job_pollers,
         register_owned_job_poller=register_owned_job_poller,
-        worker_inventory="worker-inventory",
+        worker_inventory=worker_inventory,
     )
 
     assert calls == [

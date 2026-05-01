@@ -79,6 +79,41 @@ async def test_shutdown_coordinated_legacy_components_returns_handles_and_filter
 
 
 @pytest.mark.asyncio
+async def test_shutdown_coordinated_legacy_components_filters_stopped_background_workers() -> None:
+    shutdown_legacy = _import_shutdown_coordinated_legacy_components()
+    calls: list[list[ShutdownComponent]] = []
+    legacy_shutdown_plan = [
+        _component(
+            "chatbooks_cleanup",
+            phase=ShutdownPhase.WORKERS,
+            policy=ShutdownPolicy.PROD_DRAIN,
+        ),
+        _component(
+            "usage_aggregator",
+            phase=ShutdownPhase.RESOURCES,
+            policy=ShutdownPolicy.BEST_EFFORT,
+        ),
+    ]
+
+    async def _fake_run_coordinated_shutdown(_app_obj, non_transition_plan):
+        calls.append(non_transition_plan)
+        return {component.name for component in non_transition_plan}
+
+    handles = await shutdown_legacy.shutdown_coordinated_legacy_components(
+        app="app",
+        legacy_shutdown_plan=legacy_shutdown_plan,
+        run_coordinated_shutdown=_fake_run_coordinated_shutdown,
+        startup_guard_exceptions=(RuntimeError,),
+        import_exceptions=(ImportError,),
+        stopped_background_worker_names={"chatbooks_cleanup"},
+    )
+
+    assert len(calls) == 1
+    assert [component.name for component in calls[0]] == ["usage_aggregator"]
+    assert handles.coordinated_legacy_component_names == {"usage_aggregator"}
+
+
+@pytest.mark.asyncio
 async def test_shutdown_coordinated_legacy_components_propagates_guard_exception() -> None:
     shutdown_legacy = _import_shutdown_coordinated_legacy_components()
 

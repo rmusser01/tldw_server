@@ -22,9 +22,7 @@ async def test_run_lifespan_shutdown_sequence_runs_wrappers_in_order_and_updates
     from tldw_Server_API.app.services import shutdown_pre_worker_cleanup
     from tldw_Server_API.app.services import shutdown_primary_late_stop_workers
     from tldw_Server_API.app.services import shutdown_transition_handoff
-    from tldw_Server_API.app.services.lifespan_shutdown_sequence import (
-        run_lifespan_shutdown_sequence,
-    )
+    from tldw_Server_API.app.services import lifespan_shutdown_sequence
     from tldw_Server_API.app.services.lifespan_worker_runtime_state import (
         LifespanWorkerRuntimeState,
     )
@@ -114,6 +112,7 @@ async def test_run_lifespan_shutdown_sequence_runs_wrappers_in_order_and_updates
 
     async def _fake_pre_worker_cleanup(**kwargs):
         calls.append(("pre", kwargs))
+        assert kwargs["stopped_background_worker_names"] == {"chatbooks_cleanup"}
         return SimpleNamespace(
             cleanup_task="cleanup-after",
             chatbooks_cleanup_task="chatbooks-after",
@@ -150,6 +149,10 @@ async def test_run_lifespan_shutdown_sequence_runs_wrappers_in_order_and_updates
             authnz_scheduler_started=False,
             files_export_gc_task="files-gc-final",
         )
+
+    async def _fake_stop_registered_workers(app, handles, *, stopped_names_attr, log_label):
+        del handles, log_label
+        setattr(app.state, stopped_names_attr, ["chatbooks_cleanup"])
 
     monkeypatch.setattr(
         shutdown_transition_handoff,
@@ -191,8 +194,13 @@ async def test_run_lifespan_shutdown_sequence_runs_wrappers_in_order_and_updates
         "shutdown_final_cleanup_tail",
         _fake_final_cleanup,
     )
+    monkeypatch.setattr(
+        lifespan_shutdown_sequence,
+        "stop_registered_workers",
+        _fake_stop_registered_workers,
+    )
 
-    await run_lifespan_shutdown_sequence(
+    await lifespan_shutdown_sequence.run_lifespan_shutdown_sequence(
         app=app,
         worker_runtime=worker_runtime,
         readiness_state={"ready": True},
@@ -229,6 +237,7 @@ async def test_run_lifespan_shutdown_sequence_runs_wrappers_in_order_and_updates
     assert calls[2][1]["owned_job_pollers"] == ["poller-a"]
     assert calls[3][1]["segment_name"] == "background_worker_shutdown"
     assert calls[4][1]["legacy_shutdown_plan"] == ["transition-plan"]
+    assert calls[4][1]["stopped_background_worker_names"] == {"chatbooks_cleanup"}
     assert calls[5][1]["coordinated_legacy_component_names"] == {"usage_aggregator"}
     assert calls[6][1]["should_run_late_stop"] is True
     assert calls[7][1]["should_run_late_stop"] is True
