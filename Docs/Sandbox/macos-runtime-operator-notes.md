@@ -366,6 +366,42 @@ That keeps the smoke path synchronous and prevents it from silently using the
 fake helper contract. On unprepared hosts, the module should skip with explicit
 helper-or-template reasons instead of reporting a fake pass.
 
+## Host-Gated CI
+
+Real `vz_linux` execution cannot run on the default hosted CI fleet because it
+requires Apple silicon macOS plus a prepared Virtualization.framework helper and
+canonical bundle. The repo therefore keeps normal CI portable and adds a
+separate host-gated workflow:
+
+- `.github/workflows/vz-linux-host-gated.yml`
+- runner labels: `self-hosted`, `macOS`, `ARM64`, `vz-linux`
+- manual trigger: `workflow_dispatch`
+- scheduled trigger: present, but skipped unless
+  `TLDW_SANDBOX_VZ_LINUX_HOST_GATED_NIGHTLY=1`
+
+Required host/repository configuration:
+
+- a self-hosted Apple silicon macOS runner with the labels above
+- SwiftPM and Xcode command line tools available to the runner
+- a canonical `vz_linux` bundle already present on the runner
+- workflow input `bundle_path` or repository variable
+  `TLDW_SANDBOX_VZ_LINUX_BUNDLE_PATH`
+- optional repository variable `TLDW_SANDBOX_VZ_HELPER_ENTITLEMENTS_PATH`
+- optional repository variable `TLDW_SANDBOX_VZ_HELPER_SKIP_SIGN=true`
+
+The workflow calls the same operator smoke script documented above:
+
+```bash
+bash tools/vz-linux-image/scripts/run-host-e2e-smoke.sh \
+  --bundle "$TLDW_VZ_HOST_E2E_BUNDLE_PATH" \
+  --socket "$RUNNER_TEMP/tldw-vz-helper-ci/helper.sock" \
+  --serial-log-dir "$RUNNER_TEMP/tldw-vz-helper-ci/serial"
+```
+
+That keeps CI aligned with local operator behavior instead of creating a second
+helper lifecycle path. The job uploads helper logs from the runner temp
+directory even when the smoke fails.
+
 ## Helper Daemon Smoke
 
 There is also an opt-in cross-language smoke test for the first-party helper daemon:

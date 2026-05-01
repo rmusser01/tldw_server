@@ -215,6 +215,15 @@ Use the direct module command for focused helper or bundle validation. Use
 `run-host-e2e-smoke.sh` for the full operator workflow because it also covers
 real sandbox execution and session VM reuse.
 
+The same script is the entrypoint for the host-gated GitHub Actions workflow at
+`.github/workflows/vz-linux-host-gated.yml`. That workflow is intentionally
+limited to prepared self-hosted Apple silicon runners labeled
+`self-hosted`, `macOS`, `ARM64`, and `vz-linux`; normal hosted CI does not run
+real VZ execution. Set repository variable
+`TLDW_SANDBOX_VZ_LINUX_HOST_GATED_NIGHTLY=1` to enable the scheduled run, and
+set `TLDW_SANDBOX_VZ_LINUX_BUNDLE_PATH` or pass the manual `bundle_path` input
+to point at the canonical bundle on the runner.
+
 ## Image Store Registration
 
 Canonical bundles can be registered in the sandbox image store for durable local

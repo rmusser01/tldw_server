@@ -39,4 +39,5 @@ jobs:
             .github/workflows/frontend-ux-gates.yml \
             .github/workflows/publish-ghcr-main.yml \
             .github/workflows/publish-docker.yml \
-            .github/workflows/sbom.yml
+            .github/workflows/sbom.yml \
+            .github/workflows/vz-linux-host-gated.yml
