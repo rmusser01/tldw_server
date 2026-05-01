@@ -398,7 +398,7 @@ Run:
 
 Expected: all pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/VN_Play/state.py tldw_Server_API/app/core/VN_Play/models.py tldw_Server_API/tests/VN_Play/test_vn_play_state.py
@@ -842,7 +842,7 @@ git commit -m "feat(vn-play): expose runtime api"
 - Create: `apps/tldw-frontend/lib/api/vnPlay.ts`
 - Test: `apps/tldw-frontend/__tests__/vn-play/vnPlayApi.test.ts`
 
-- [ ] **Step 1: Write failing API client tests**
+- [x] **Step 1: Write failing API client tests**
 
 ```ts
 it('creates a VN play session', async () => {
@@ -881,7 +881,7 @@ it('submits a VN play turn with idempotency key and scene version', async () => 
 });
 ```
 
-- [ ] **Step 2: Run failing frontend API tests**
+- [x] **Step 2: Run failing frontend API tests**
 
 Run:
 
@@ -892,7 +892,7 @@ bunx vitest run __tests__/vn-play/vnPlayApi.test.ts
 
 Expected: module import failure.
 
-- [ ] **Step 3: Implement frontend types and API functions**
+- [x] **Step 3: Implement frontend types and API functions**
 
 Implement:
 
@@ -922,7 +922,7 @@ API functions:
 
 Follow `apps/tldw-frontend/lib/api/vnAssets.ts` style for URL building and JSON errors.
 
-- [ ] **Step 4: Run frontend API tests**
+- [x] **Step 4: Run frontend API tests**
 
 Run:
 

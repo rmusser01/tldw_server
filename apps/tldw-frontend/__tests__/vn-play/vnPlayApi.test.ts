@@ -1,0 +1,114 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+const mocks = vi.hoisted(() => ({
+  apiClient: {
+    delete: vi.fn(),
+    get: vi.fn(),
+    patch: vi.fn(),
+    post: vi.fn(),
+  },
+}));
+
+vi.mock('@web/lib/api', () => ({
+  apiClient: mocks.apiClient,
+}));
+
+import {
+  createVNPlayCheckpoint,
+  createVNPlaySession,
+  deleteVNPlaySession,
+  getVNPlaySession,
+  listVNPlayBranches,
+  listVNPlayCheckpoints,
+  listVNPlayEvents,
+  listVNPlaySessions,
+  restoreVNPlaySession,
+  retryLastVNPlayTurn,
+  submitVNPlayTurn,
+  updateVNPlaySession,
+} from '@web/lib/api/vnPlay';
+
+describe('vnPlay api client', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.apiClient.delete.mockResolvedValue(undefined);
+    mocks.apiClient.get.mockResolvedValue({});
+    mocks.apiClient.patch.mockResolvedValue({});
+    mocks.apiClient.post.mockResolvedValue({});
+  });
+
+  it('creates a VN play session', async () => {
+    mocks.apiClient.post.mockResolvedValueOnce({
+      id: 1,
+      mode: 'freeform',
+      title: 'Library',
+      scene_state: { scene_version: 0 },
+    });
+
+    const session = await createVNPlaySession({
+      mode: 'freeform',
+      title: 'Library',
+      primary_character_id: 1,
+      vn_asset_pack_id: 2,
+    });
+
+    expect(session.id).toBe(1);
+    expect(mocks.apiClient.post).toHaveBeenCalledWith('/vn-play/sessions', {
+      mode: 'freeform',
+      title: 'Library',
+      primary_character_id: 1,
+      vn_asset_pack_id: 2,
+    });
+  });
+
+  it('submits a VN play turn with idempotency key and scene version', async () => {
+    mocks.apiClient.post.mockResolvedValueOnce({
+      events: [],
+      scene_state: { scene_version: 1 },
+    });
+
+    await submitVNPlayTurn(1, {
+      input_text: 'Hello',
+      client_scene_version: 0,
+      idempotency_key: 'turn-1',
+    });
+
+    expect(mocks.apiClient.post).toHaveBeenCalledWith('/vn-play/sessions/1/turn', {
+      input_text: 'Hello',
+      client_scene_version: 0,
+      idempotency_key: 'turn-1',
+    });
+  });
+
+  it('calls session, checkpoint, restore, and branch endpoints', async () => {
+    await listVNPlaySessions();
+    await getVNPlaySession(1);
+    await updateVNPlaySession(1, { title: 'Updated' });
+    await deleteVNPlaySession(1);
+    await retryLastVNPlayTurn(1, { client_scene_version: 2, idempotency_key: 'retry-1' });
+    await listVNPlayEvents(1);
+    await createVNPlayCheckpoint(1, { label: 'Before choice' });
+    await listVNPlayCheckpoints(1);
+    await restoreVNPlaySession(1, { checkpoint_id: 5, idempotency_key: 'restore-1' });
+    await listVNPlayBranches(1);
+
+    expect(mocks.apiClient.get).toHaveBeenCalledWith('/vn-play/sessions');
+    expect(mocks.apiClient.get).toHaveBeenCalledWith('/vn-play/sessions/1');
+    expect(mocks.apiClient.patch).toHaveBeenCalledWith('/vn-play/sessions/1', { title: 'Updated' });
+    expect(mocks.apiClient.delete).toHaveBeenCalledWith('/vn-play/sessions/1');
+    expect(mocks.apiClient.post).toHaveBeenCalledWith('/vn-play/sessions/1/retry-last-turn', {
+      client_scene_version: 2,
+      idempotency_key: 'retry-1',
+    });
+    expect(mocks.apiClient.get).toHaveBeenCalledWith('/vn-play/sessions/1/events');
+    expect(mocks.apiClient.post).toHaveBeenCalledWith('/vn-play/sessions/1/checkpoint', {
+      label: 'Before choice',
+    });
+    expect(mocks.apiClient.get).toHaveBeenCalledWith('/vn-play/sessions/1/checkpoints');
+    expect(mocks.apiClient.post).toHaveBeenCalledWith('/vn-play/sessions/1/restore', {
+      checkpoint_id: 5,
+      idempotency_key: 'restore-1',
+    });
+    expect(mocks.apiClient.get).toHaveBeenCalledWith('/vn-play/sessions/1/branches');
+  });
+});
