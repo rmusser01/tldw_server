@@ -6,11 +6,12 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable
 
 from loguru import logger
 
 from tldw_Server_API.app.core.testing import env_flag_enabled as _env_flag_enabled
+from tldw_Server_API.app.services.lifecycle_workers import ShutdownPhase
 
 _STARTUP_GUARD_EXCEPTIONS = (
     AttributeError,
@@ -39,11 +40,14 @@ class ConnectorsStartupHandles:
 
 async def start_infra_services(
     *,
-    run_pg_rls_auto_ensure,
+    run_pg_rls_auto_ensure: Callable[[Any], Any],
+    worker_inventory: Any | None = None,
 ) -> InfraStartupHandles:
     """Start the small infrastructure startup slice and return explicit handles."""
     await _maybe_ensure_pg_rls(run_pg_rls_auto_ensure)
-    tts_history_cleanup_task, tts_history_cleanup_stop_event = await _start_tts_history_cleanup_worker()
+    tts_history_cleanup_task, tts_history_cleanup_stop_event = await _start_tts_history_cleanup_worker(
+        worker_inventory=worker_inventory,
+    )
     return InfraStartupHandles(
         tts_history_cleanup_task=tts_history_cleanup_task,
         tts_history_cleanup_stop_event=tts_history_cleanup_stop_event,
@@ -68,7 +72,7 @@ async def start_connectors_startup(
     )
 
 
-async def _maybe_ensure_pg_rls(run_pg_rls_auto_ensure) -> None:
+async def _maybe_ensure_pg_rls(run_pg_rls_auto_ensure: Callable[[Any], Any]) -> None:
     """Apply optional PostgreSQL RLS policies when enabled by env."""
     try:
         if not _env_flag_enabled("RAG_ENSURE_PG_RLS"):
@@ -88,11 +92,29 @@ async def _maybe_ensure_pg_rls(run_pg_rls_auto_ensure) -> None:
         logger.warning(f"Failed to apply PG RLS policies automatically: {exc}")
 
 
-async def _start_tts_history_cleanup_worker() -> tuple[Any | None, Any | None]:
+async def _start_tts_history_cleanup_worker(
+    *,
+    worker_inventory: Any | None = None,
+) -> tuple[Any | None, Any | None]:
     """Start the TTS history cleanup worker and return task/stop handles."""
     try:
+        if worker_inventory is not None:
+            task, stop_event = await worker_inventory.register_custom(
+                name="tts_history_cleanup_task",
+                task_name="tts_history_cleanup_task",
+                coroutine_factory=_run_tts_history_cleanup_loop,
+                timeout_sec=5.0,
+                category="maintenance",
+                shutdown_phase=ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN,
+            )
+            logger.info("TTS history cleanup worker started")
+            return task, stop_event
+
         stop_event = asyncio.Event()
-        task = asyncio.create_task(_run_tts_history_cleanup_loop(stop_event))
+        task = asyncio.create_task(
+            _run_tts_history_cleanup_loop(stop_event),
+            name="tts_history_cleanup_task",
+        )
         logger.info("TTS history cleanup worker started")
         return task, stop_event
     except _STARTUP_GUARD_EXCEPTIONS as exc:

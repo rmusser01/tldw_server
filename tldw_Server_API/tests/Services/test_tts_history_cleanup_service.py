@@ -5,7 +5,6 @@ from loguru import logger
 
 from tldw_Server_API.app.services import tts_history_cleanup_service as cleanup
 
-
 pytestmark = pytest.mark.unit
 
 _LEAK = "not-an-int /tmp/secret-token"
@@ -200,6 +199,37 @@ async def test_cleanup_loop_disabled_when_retention_and_rows_nonpositive(monkeyp
 
 
 @pytest.mark.asyncio
+async def test_cleanup_loop_honors_stop_event_during_initial_delay(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stop_event = cleanup.asyncio.Event()
+    events: list[object] = []
+
+    monkeypatch.setattr(cleanup, "_resolve_cleanup_settings", lambda: (1, 30, 100))
+
+    async def _fail_sleep(_seconds: float) -> None:
+        raise AssertionError("initial delay should wait on the stop event")
+
+    async def _fake_wait_for(coro, timeout: float):
+        events.append(("wait_for", timeout))
+        stop_event.set()
+        await coro
+        return True
+
+    monkeypatch.setattr(cleanup.asyncio, "sleep", _fail_sleep)
+    monkeypatch.setattr(cleanup.asyncio, "wait_for", _fake_wait_for)
+    monkeypatch.setattr(
+        cleanup.DatabasePaths,
+        "get_media_db_path",
+        lambda _uid: (_ for _ in ()).throw(AssertionError("cleanup should not run")),
+    )
+
+    await cleanup.run_tts_history_cleanup_loop(stop_event=stop_event)
+
+    assert events == [("wait_for", 60)]
+
+
+@pytest.mark.asyncio
 async def test_cleanup_loop_uses_create_media_database_for_sqlite_users(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,
@@ -218,7 +248,16 @@ async def test_cleanup_loop_uses_create_media_database_for_sqlite_users(
     async def _fake_sleep(_seconds: float) -> None:
         return None
 
+    initial_wait_seen = False
+
     async def _fake_wait_for(coro, timeout: float):
+        nonlocal initial_wait_seen
+        if not initial_wait_seen:
+            initial_wait_seen = True
+            events.append(("initial_wait_for", timeout))
+            if hasattr(coro, "close"):
+                coro.close()
+            raise cleanup.asyncio.TimeoutError
         events.append(("wait_for", timeout))
         stop_event.set()
         await coro
@@ -252,6 +291,7 @@ async def test_cleanup_loop_uses_create_media_database_for_sqlite_users(
     await cleanup.run_tts_history_cleanup_loop(stop_event=stop_event)
 
     assert events == [
+        ("initial_wait_for", 60),
         ("create", "tts_history_cleanup", str(user_db_paths["1"])),
         ("close", "probe"),
         ("create", "tts_history_cleanup", str(user_db_paths["11"])),
@@ -291,7 +331,16 @@ async def test_cleanup_loop_uses_create_media_database_for_postgres(
     async def _fake_sleep(_seconds: float) -> None:
         return None
 
+    initial_wait_seen = False
+
     async def _fake_wait_for(coro, timeout: float):
+        nonlocal initial_wait_seen
+        if not initial_wait_seen:
+            initial_wait_seen = True
+            events.append(("initial_wait_for", timeout))
+            if hasattr(coro, "close"):
+                coro.close()
+            raise cleanup.asyncio.TimeoutError
         events.append(("wait_for", timeout))
         stop_event.set()
         await coro
@@ -315,6 +364,7 @@ async def test_cleanup_loop_uses_create_media_database_for_postgres(
     await cleanup.run_tts_history_cleanup_loop(stop_event=stop_event)
 
     assert events == [
+        ("initial_wait_for", 60),
         ("create", "tts_history_cleanup", str(probe_path)),
         ("purge_with_db", probe_db, ["7", "8"], 14, 55),
         ("close", "probe"),
@@ -336,7 +386,15 @@ async def test_cleanup_loop_failure_log_is_sanitized(
     async def _fake_sleep(_seconds: float) -> None:
         return None
 
+    initial_wait_seen = False
+
     async def _fake_wait_for(coro, timeout: float):
+        nonlocal initial_wait_seen
+        if not initial_wait_seen:
+            initial_wait_seen = True
+            if hasattr(coro, "close"):
+                coro.close()
+            raise cleanup.asyncio.TimeoutError
         stop_event.set()
         await coro
         return True

@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import importlib
+import inspect
 import sys
 from types import SimpleNamespace
 
 import pytest
-
 
 pytestmark = pytest.mark.unit
 
@@ -26,7 +26,8 @@ async def test_start_infra_services_runs_pg_rls_then_tts(
         calls.append("pg-rls")
         assert run_pg_rls_auto_ensure is not None
 
-    async def _fake_tts():
+    async def _fake_tts(*, worker_inventory):
+        assert worker_inventory is None
         calls.append("tts")
         return ("tts-task", "tts-stop")
 
@@ -69,7 +70,8 @@ async def test_start_tts_history_cleanup_worker_creates_task(
     async def _fake_runner(stop_event):
         return stop_event
 
-    def _record_create_task(coro):
+    def _record_create_task(coro, *, name=None):
+        assert name == "tts_history_cleanup_task"
         task = SimpleNamespace(coro=coro, cancel=lambda: None)
         created_tasks.append(task)
         coro.close()
@@ -82,6 +84,37 @@ async def test_start_tts_history_cleanup_worker_creates_task(
 
     assert task is created_tasks[0]
     assert stop_event is not None
+
+
+@pytest.mark.asyncio
+async def test_start_tts_history_cleanup_worker_registers_background_inventory() -> None:
+    startup_infra = _import_startup_infra_services()
+    registrations: list[dict[str, object]] = []
+
+    class _FakeInventory:
+        async def register_custom(self, **kwargs):
+            registrations.append(kwargs)
+            coroutine = kwargs["coroutine_factory"](startup_infra.asyncio.Event())
+            assert inspect.isawaitable(coroutine)
+            coroutine.close()
+            return "tts-task", "tts-stop"
+
+    task, stop_event = await startup_infra._start_tts_history_cleanup_worker(
+        worker_inventory=_FakeInventory(),
+    )
+
+    assert task == "tts-task"
+    assert stop_event == "tts-stop"
+    assert registrations == [
+        {
+            "name": "tts_history_cleanup_task",
+            "task_name": "tts_history_cleanup_task",
+            "coroutine_factory": startup_infra._run_tts_history_cleanup_loop,
+            "timeout_sec": 5.0,
+            "category": "maintenance",
+            "shutdown_phase": startup_infra.ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN,
+        }
+    ]
 
 
 @pytest.mark.asyncio

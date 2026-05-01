@@ -159,7 +159,14 @@ async def run_tts_history_cleanup_loop(stop_event: asyncio.Event | None = None) 
         return
 
     interval_sec = max(60, interval_hours * 3600)
-    await asyncio.sleep(min(interval_sec, 60))
+    initial_delay = min(interval_sec, 60)
+    if stop_event is not None:
+        with contextlib.suppress(asyncio.TimeoutError):
+            await asyncio.wait_for(stop_event.wait(), timeout=initial_delay)
+        if stop_event.is_set():
+            return
+    else:
+        await asyncio.sleep(initial_delay)
 
     while True:
         if stop_event is not None and stop_event.is_set():

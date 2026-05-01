@@ -6,7 +6,6 @@ from types import SimpleNamespace
 
 import pytest
 
-
 pytestmark = pytest.mark.unit
 
 
@@ -27,7 +26,8 @@ async def test_start_service_groups_runs_helpers_in_order_and_returns_handles(
     register_owned_job_poller = object()
     run_pg_rls_auto_ensure = object()
 
-    async def _record_runtime_monitors():
+    async def _record_runtime_monitors(*, worker_inventory):
+        assert worker_inventory is worker_inventory_ref
         calls.append("runtime")
         return SimpleNamespace(
             jobs_metrics_stop_event="jobs-metrics-stop",
@@ -36,7 +36,8 @@ async def test_start_service_groups_runs_helpers_in_order_and_returns_handles(
             loop_lag_task="loop-lag-task",
         )
 
-    async def _record_optional_workers():
+    async def _record_optional_workers(*, worker_inventory):
+        assert worker_inventory is worker_inventory_ref
         calls.append("optional")
         return SimpleNamespace(
             jobs_metrics_reconcile_stop="reconcile-stop",
@@ -72,8 +73,9 @@ async def test_start_service_groups_runs_helpers_in_order_and_returns_handles(
             llm_usage_task="llm-usage-task",
         )
 
-    async def _record_infra_services(*, run_pg_rls_auto_ensure):
+    async def _record_infra_services(*, run_pg_rls_auto_ensure, worker_inventory):
         assert run_pg_rls_auto_ensure is run_pg_rls_auto_ensure_ref
+        assert worker_inventory is worker_inventory_ref
         calls.append("infra")
         return SimpleNamespace(
             tts_history_cleanup_task="tts-history-task",
@@ -112,6 +114,7 @@ async def test_start_service_groups_runs_helpers_in_order_and_returns_handles(
     owned_job_pollers_ref = owned_job_pollers
     register_owned_job_poller_ref = register_owned_job_poller
     run_pg_rls_auto_ensure_ref = run_pg_rls_auto_ensure
+    worker_inventory_ref = object()
 
     monkeypatch.setattr(startup_groups, "_start_runtime_monitors", _record_runtime_monitors)
     monkeypatch.setattr(startup_groups, "_start_optional_workers", _record_optional_workers)
@@ -131,6 +134,7 @@ async def test_start_service_groups_runs_helpers_in_order_and_returns_handles(
         run_pg_rls_auto_ensure=run_pg_rls_auto_ensure,
         owned_job_pollers=owned_job_pollers,
         register_owned_job_poller=register_owned_job_poller,
+        worker_inventory=worker_inventory_ref,
     )
 
     assert calls == [
