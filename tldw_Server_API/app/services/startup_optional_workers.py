@@ -60,7 +60,9 @@ async def start_optional_workers(
         jobs_crypto_rotate_stop_event, jobs_crypto_rotate_task = await _start_jobs_crypto_rotate_worker(
             worker_inventory=worker_inventory,
         )
-    jobs_webhooks_stop_event, jobs_webhooks_task = await _start_jobs_webhooks_worker()
+    jobs_webhooks_stop_event, jobs_webhooks_task = await _start_jobs_webhooks_worker(
+        worker_inventory=worker_inventory,
+    )
     meetings_webhook_dlq_stop_event, meetings_webhook_dlq_task = await _start_meetings_webhook_dlq_worker()
     workflows_dlq_stop_event, workflows_dlq_task = await _start_workflows_webhook_dlq_worker()
     workflows_gc_stop_event, workflows_gc_task = await _start_workflows_artifact_gc_worker()
@@ -165,11 +167,36 @@ async def _start_jobs_crypto_rotate_worker(
         return None, None
 
 
-async def _start_jobs_webhooks_worker() -> tuple[Any | None, Any | None]:
+async def _start_jobs_webhooks_worker(
+    *,
+    worker_inventory: Any | None = None,
+) -> tuple[Any | None, Any | None]:
+    """Start Jobs webhook delivery when enabled and configured.
+
+    Requires both JOBS_WEBHOOKS_ENABLED and JOBS_WEBHOOKS_URL. With a worker
+    inventory, the worker is registered for background-worker lifecycle
+    shutdown; without one, it uses the legacy stop-event task path.
+    """
     try:
         if not _env_flag_enabled("JOBS_WEBHOOKS_ENABLED") or not os.getenv("JOBS_WEBHOOKS_URL"):
             logger.info("Jobs webhooks worker disabled by flag or missing URL")
             return None, None
+        if worker_inventory is not None:
+            from tldw_Server_API.app.services.lifecycle_workers import (
+                ShutdownPhase,
+                start_stop_event_worker,
+            )
+
+            task, stop_event = await start_stop_event_worker(
+                worker_inventory,
+                name="jobs_webhooks_task",
+                task_name="jobs_webhooks_task",
+                coroutine_factory=_run_jobs_webhooks_worker_service,
+                category="jobs",
+                shutdown_phase=ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN,
+            )
+            logger.info("Jobs webhooks worker started with explicit stop_event signal")
+            return stop_event, task
         stop_event = _make_event()
         task = _create_task(_run_jobs_webhooks_worker_service(stop_event))
         logger.info("Jobs webhooks worker started with explicit stop_event signal")
