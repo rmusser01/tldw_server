@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess  # nosec B404 - subprocess is required to launch the repo-local helper daemon in this opt-in smoke test.
 import sys
 import tempfile
@@ -53,14 +54,14 @@ def _require_canonical_bundle_smoke() -> Path:
 def test_macos_helper_daemon_smoke_over_real_unix_socket(monkeypatch, tmp_path: Path) -> None:
     binary_path = _require_helper_daemon_smoke()
     monkeypatch.delenv("TEST_MODE", raising=False)
-    socket_fd, socket_name = tempfile.mkstemp(  # nosec B108 - AF_UNIX paths must stay short on macOS, so this smoke test intentionally allocates under /tmp.
-        prefix="macos-vz-helper-smoke-",
-        suffix=".sock",
-        dir="/tmp",  # nosec B108
+    socket_dir = Path(
+        tempfile.mkdtemp(  # nosec B108 - AF_UNIX paths must stay short on macOS, so this smoke test intentionally allocates a private directory under /tmp.
+            prefix="macos-vz-helper-smoke-",
+            dir="/tmp",  # nosec B108
+        )
     )
-    os.close(socket_fd)
-    socket_path = Path(socket_name)
-    socket_path.unlink(missing_ok=True)
+    socket_dir.chmod(0o700)
+    socket_path = socket_dir / "helper.sock"
     template_path = tmp_path / "template.img"
     template_path.write_bytes(b"")
 
@@ -120,21 +121,21 @@ def test_macos_helper_daemon_smoke_over_real_unix_socket(monkeypatch, tmp_path: 
         except subprocess.TimeoutExpired:
             process.kill()
             process.wait(timeout=5)
-        socket_path.unlink(missing_ok=True)
+        shutil.rmtree(socket_dir, ignore_errors=True)
 
 
 def test_macos_helper_daemon_canonical_bundle_boot_smoke(monkeypatch, tmp_path: Path) -> None:
     binary_path = _require_helper_daemon_smoke()
     bundle_path = _require_canonical_bundle_smoke()
     monkeypatch.delenv("TEST_MODE", raising=False)
-    socket_fd, socket_name = tempfile.mkstemp(  # nosec B108 - AF_UNIX paths must stay short on macOS, so this smoke test intentionally allocates under /tmp.
-        prefix="macos-vz-helper-bundle-",
-        suffix=".sock",
-        dir="/tmp",  # nosec B108
+    socket_dir = Path(
+        tempfile.mkdtemp(  # nosec B108 - AF_UNIX paths must stay short on macOS, so this smoke test intentionally allocates a private directory under /tmp.
+            prefix="macos-vz-helper-bundle-",
+            dir="/tmp",  # nosec B108
+        )
     )
-    os.close(socket_fd)
-    socket_path = Path(socket_name)
-    socket_path.unlink(missing_ok=True)
+    socket_dir.chmod(0o700)
+    socket_path = socket_dir / "helper.sock"
 
     env = os.environ.copy()
     env["TLDW_SANDBOX_MACOS_HELPER_SOCKET"] = str(socket_path)
@@ -215,7 +216,7 @@ def test_macos_helper_daemon_canonical_bundle_boot_smoke(monkeypatch, tmp_path: 
         except subprocess.TimeoutExpired:
             process.kill()
             process.wait(timeout=5)
-        socket_path.unlink(missing_ok=True)
+        shutil.rmtree(socket_dir, ignore_errors=True)
         if cleanup_error is not None:
             warnings.warn(
                 f"failed to terminate helper smoke vm {created_vm_id}: {cleanup_error}",

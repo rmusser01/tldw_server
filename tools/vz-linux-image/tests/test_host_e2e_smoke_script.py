@@ -76,6 +76,7 @@ def test_host_e2e_smoke_script_dry_run_prints_helper_and_pytest_commands(tmp_pat
     assert f"TLDW_SANDBOX_MACOS_HELPER_SOCKET={socket_path}" in result.stdout
     assert f"TLDW_SANDBOX_VZ_LINUX_BUNDLE_PATH={bundle}" in result.stdout
     assert f"TLDW_SANDBOX_VZ_LINUX_E2E_BASE_IMAGE={bundle}" in result.stdout
+    assert f"TLDW_SANDBOX_VZ_LINUX_SERIAL_LOG_DIR={serial_log_dir}" in result.stdout  # nosec B101
     assert "test_macos_virtualization_helper_daemon_host_gated.py" in result.stdout
     assert "test_vz_linux_real_host_e2e.py" in result.stdout
     assert not serial_log_dir.exists()
@@ -200,6 +201,49 @@ def test_host_e2e_smoke_script_refuses_non_private_socket_parent(tmp_path: Path)
 
     assert result.returncode != 0
     assert "helper socket directory must be owner-only" in result.stderr
+
+
+def test_host_e2e_smoke_script_refuses_non_private_serial_log_directory(tmp_path: Path) -> None:
+    bundle = tmp_path / "bundle"
+    bundle.mkdir()
+    (bundle / "kernel").write_bytes(b"kernel")
+    (bundle / "rootfs.img").write_bytes(b"rootfs")
+    socket_dir = tmp_path / "private-runtime"
+    socket_dir.mkdir(mode=0o700)
+    socket_dir.chmod(0o700)
+    serial_log_dir = tmp_path / "public-serial"
+    serial_log_dir.mkdir(mode=0o755)
+    serial_log_dir.chmod(0o755)
+    fake_python = tmp_path / "fake-python"
+    fake_helper = tmp_path / "fake-helper"
+    fake_python.write_text(
+        "#!/usr/bin/env python3\n"
+        "import sys\n"
+        "sys.exit(0 if sys.argv[1:3] == ['-m', 'pytest'] else 2)\n",
+        encoding="utf-8",
+    )
+    fake_helper.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
+    fake_python.chmod(0o755)
+    fake_helper.chmod(0o755)
+
+    result = _run_smoke_script(
+        "--bundle",
+        str(bundle),
+        "--helper",
+        str(fake_helper),
+        "--socket",
+        str(socket_dir / "helper.sock"),
+        "--serial-log-dir",
+        str(serial_log_dir),
+        "--python",
+        str(fake_python),
+        "--skip-build",
+        "--skip-sign",
+        env_overrides={"TLDW_HOST_E2E_SMOKE_SKIP_SOCKET_WAIT": "1"},
+    )
+
+    assert result.returncode != 0  # nosec B101
+    assert "serial log directory must be owner-only" in result.stderr  # nosec B101
 
 
 def test_host_e2e_smoke_script_refuses_regular_file_socket_path(tmp_path: Path) -> None:
