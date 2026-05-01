@@ -361,6 +361,36 @@ class VNPlayRepository:
                 )
         return self.get_session(session_id, owner_user_id=owner_user_id)
 
+    def try_acquire_turn_lock(
+        self,
+        *,
+        session_id: int,
+        owner_user_id: int,
+        turn_request_id: int,
+        expected_scene_version: int,
+    ) -> bool:
+        """Attach an active turn to a session if its scene version is still current."""
+        self._ensure_schema_initialized()
+        with self.db.transaction() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE vn_play_sessions
+                SET active_turn_request_id = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                  AND owner_user_id = ?
+                  AND deleted = 0
+                  AND active_turn_request_id IS NULL
+                  AND scene_version = ?
+                """,
+                (
+                    turn_request_id,
+                    session_id,
+                    owner_user_id,
+                    expected_scene_version,
+                ),
+            )
+            return cursor.rowcount == 1
+
     def append_event(
         self,
         *,

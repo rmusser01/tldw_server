@@ -521,7 +521,7 @@ git commit -m "feat(vn-play): add runtime gates and asset resolver"
 - Modify: `tldw_Server_API/app/core/DB_Management/VNPlay_DB.py`
 - Test: `tldw_Server_API/tests/VN_Play/test_vn_play_turns.py`
 
-- [ ] **Step 1: Write failing idempotency tests**
+- [x] **Step 1: Write failing idempotency tests**
 
 ```python
 async def test_duplicate_completed_turn_returns_stored_response(service, ready_session):
@@ -550,7 +550,7 @@ async def test_same_idempotency_key_different_payload_conflicts(service, ready_s
         await service.submit_turn(ready_session.id, input_text="Different", client_scene_version=0, idempotency_key="turn-1")
 ```
 
-- [ ] **Step 2: Write failing concurrency and failure tests**
+- [x] **Step 2: Write failing concurrency and failure tests**
 
 ```python
 async def test_stale_scene_version_conflicts(service, ready_session):
@@ -574,7 +574,7 @@ async def test_model_failure_marks_turn_failed_and_clears_lock(service_with_fail
     assert session.active_turn_request_id is None
 ```
 
-- [ ] **Step 3: Run failing turn tests**
+- [x] **Step 3: Run failing turn tests**
 
 Run:
 
@@ -584,7 +584,7 @@ Run:
 
 Expected: service import failures.
 
-- [ ] **Step 4: Implement `VNPlayService`**
+- [x] **Step 4: Implement `VNPlayService`**
 
 Implement:
 
@@ -614,7 +614,7 @@ Turn behavior:
 
 Use a deterministic test adapter for service tests and a monkeypatched `ChatVNPlayTurnAdapter` test for the real chat-service boundary. The shipped V1 adapter must be capable of calling the configured chat provider through `perform_chat_api_call_async`; tests must never call an external provider.
 
-- [ ] **Step 5: Run turn tests**
+- [x] **Step 5: Run turn tests**
 
 Run:
 
@@ -624,7 +624,7 @@ Run:
 
 Expected: all pass.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/VN_Play/service.py tldw_Server_API/app/core/DB_Management/VNPlay_DB.py tldw_Server_API/tests/VN_Play/test_vn_play_turns.py
