@@ -8,14 +8,17 @@ from tldw_Server_API.app.core.VN_Play.constants import (
     TURN_STATUS_PENDING,
 )
 from tldw_Server_API.app.core.VN_Play.models import (
+    CharacterSafetyResult,
     GateResult,
     ResolvedAsset,
     SceneState,
     TurnResult,
+    VisualDirectiveResolution,
 )
 from tldw_Server_API.app.core.VN_Play.state import derive_scene_state
 
 __all__ = [
+    "CharacterSafetyResult",
     "GateResult",
     "LINKED_CHAT_MODE_READ_ONLY_CONTEXT",
     "MODE_FREEFORM",
@@ -25,5 +28,6 @@ __all__ = [
     "SceneState",
     "TURN_STATUS_PENDING",
     "TurnResult",
+    "VisualDirectiveResolution",
     "derive_scene_state",
 ]

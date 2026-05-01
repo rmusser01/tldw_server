@@ -35,6 +35,17 @@ class GateResult:
 
 
 @dataclass(frozen=True, slots=True)
+class CharacterSafetyResult:
+    """Character metadata safety result for VN Play admission."""
+
+    allowed: bool
+    status: str
+    warning_code: str | None = None
+    error_code: str | None = None
+    message: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class ResolvedAsset:
     """Approved VN asset selected for a runtime visual directive."""
 
@@ -47,6 +58,16 @@ class ResolvedAsset:
     generated_file_id: int | None = None
     file_artifact_id: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class VisualDirectiveResolution:
+    """Result of resolving a visual directive against an approved asset manifest."""
+
+    applied: bool
+    item: dict[str, Any] | None = None
+    reason: str | None = None
+    directive: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
