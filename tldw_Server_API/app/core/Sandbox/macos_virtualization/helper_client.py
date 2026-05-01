@@ -91,6 +91,12 @@ class MacOSVirtualizationHelperClient:
         if is_truthy(os.getenv("TEST_MODE")):
             vm_name = str(request.get("vm_name") or "").strip() or "vm-test"
             runtime = str(request.get("runtime") or "").strip() or "vz_linux"
+            network_policy = self._normalize_network_policy(request.get("network_policy"))
+            if network_policy != "deny_all":
+                raise MacOSVirtualizationHelperFailure(
+                    error_code=self._network_policy_error_code(network_policy),
+                    message=network_policy,
+                )
             template_path = str(request.get("template") or request.get("template_path") or "").strip()
             raw_session_mode = request.get("session_mode")
             session_mode = _bool_field({"session_mode": raw_session_mode}, "session_mode")
@@ -110,9 +116,10 @@ class MacOSVirtualizationHelperClient:
                         "run_manifest_path": request.get("run_manifest_path") or "",
                         "planning_source": request.get("planning_source") or "",
                         "workspace_path": request.get("workspace_path") or "",
+                        "network_policy": network_policy,
                         "created_at": created_at,
                     },
-                    "details": {"runtime": runtime or None, "transport": "vsock"},
+                    "details": {"runtime": runtime or None, "transport": "vsock", "network_policy": network_policy},
                 }
             )
         payload = self._request("create_vm", request, timeout_sec=self._operation_timeout_sec(request))
@@ -130,12 +137,16 @@ class MacOSVirtualizationHelperClient:
                 reasons.append("macos_helper_missing")
             if not template_ready:
                 reasons.append("vz_linux_template_missing")
+            network_policy = self._normalize_network_policy(request.get("network_policy"))
+            if network_policy != "deny_all":
+                reasons.append(self._network_policy_error_code(network_policy))
             available = not reasons
             return {
                 "available": available,
                 "reasons": reasons,
                 "execution_mode": "real" if available else "none",
                 "transport": "vsock" if available else None,
+                "details": {"network_policy": network_policy},
             }
         parsed = parse_helper_host_validation(self._request("validate_host", request))
         return {
@@ -292,6 +303,15 @@ class MacOSVirtualizationHelperClient:
             "reasons": reasons,
             "details": {"runtime": runtime},
         }
+
+    @staticmethod
+    def _normalize_network_policy(value: Any) -> str:
+        normalized = str(value or "").strip().lower()
+        return normalized or "deny_all"
+
+    @staticmethod
+    def _network_policy_error_code(network_policy: str) -> str:
+        return "strict_allowlist_not_supported" if network_policy == "allowlist" else "unsupported_network_policy"
 
     @staticmethod
     def _read_response(client: socket.socket) -> dict[str, Any]:

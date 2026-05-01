@@ -60,6 +60,10 @@ Current limitations:
 - `vz_linux` requires helper/template readiness and reports `execution_mode=real` when the helper-backed boot and guest execution path is available.
 - `vz_macos` still requires helper/template readiness plus `*_FAKE_EXEC=1`; otherwise discovery reports `real_execution_not_implemented`.
 - Strict allowlist networking is not implemented for `vz_linux`, `vz_macos`, or `seatbelt`.
+- `vz_linux` VM creation is fail-closed at both Python admission and helper
+  protocol layers: only `network_policy=deny_all` is accepted, and the helper
+  records the accepted policy in VM metadata/status details. The current
+  Virtualization.framework configuration does not attach a network device.
 - `seatbelt` discovery may be `available=True` while `strict_deny_all_supported=False`; deny-all is a best-effort host policy claim, not a VM-grade guarantee.
 - `seatbelt` control files and isolated `HOME`/temp dirs live outside the writable workspace and are removed after each run.
 - `seatbelt` real execution still depends on deprecated `sandbox-exec` and may be blocked by an enclosing sandbox even on macOS hosts.

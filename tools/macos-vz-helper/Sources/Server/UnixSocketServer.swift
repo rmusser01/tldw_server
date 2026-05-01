@@ -141,15 +141,20 @@ final class UnixSocketServer {
                 workspacePath: workspacePath,
                 createdAt: ""
             )
-            return try encoder.encode(
-                try service.createVM(
-                    vmID: request.request["vm_name"]?.stringValue ?? request.request["run_id"]?.stringValue ?? "",
-                    templatePath: templatePath,
-                    workspacePath: workspacePath,
-                    readinessTimeoutSeconds: TimeInterval(request.request["timeout_sec"]?.intValue ?? 30),
-                    metadata: metadata
+            do {
+                return try encoder.encode(
+                    try service.createVM(
+                        vmID: request.request["vm_name"]?.stringValue ?? request.request["run_id"]?.stringValue ?? "",
+                        templatePath: templatePath,
+                        workspacePath: workspacePath,
+                        readinessTimeoutSeconds: TimeInterval(request.request["timeout_sec"]?.intValue ?? 30),
+                        metadata: metadata,
+                        networkPolicy: request.request["network_policy"]?.stringValue ?? "deny_all"
+                    )
                 )
-            )
+            } catch {
+                return encodeErrorResponse(for: error)
+            }
         case "get_vm_status":
             let vmID = request.request["vm_id"]?.stringValue ?? ""
             if let status = service.getVMStatus(vmID: vmID) {
@@ -514,6 +519,8 @@ final class UnixSocketServer {
             return "helper_socket_path_too_long"
         case UnixSocketServerError.unsupportedOperation:
             return "unsupported_operation"
+        case HelperServiceError.unsupportedNetworkPolicy(let policy):
+            return policy == "allowlist" ? "strict_allowlist_not_supported" : "unsupported_network_policy"
         case VZLinuxVMManagerError.bootNotImplemented:
             return "boot_not_implemented"
         case GuestBridgeError.guestReadinessNotImplemented:

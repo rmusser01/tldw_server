@@ -13,3 +13,13 @@ import Testing
     #expect(response.reasons.contains("macos_host_required"))
     #expect(response.reasons.contains("apple_silicon_required"))
 }
+
+@Test func validateHostRejectsAllowlistNetworkPolicy() throws {
+    let service = HelperService(hostFacts: HostFacts(isMacOS: true, isAppleSilicon: true))
+
+    let response = service.validateHost(runtime: "vz_linux", networkPolicy: "allowlist")
+
+    #expect(response.available == false)
+    #expect(response.reasons.contains("strict_allowlist_not_supported"))
+    #expect(response.details["network_policy"] == "allowlist")
+}

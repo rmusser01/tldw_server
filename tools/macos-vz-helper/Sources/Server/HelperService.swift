@@ -5,6 +5,10 @@ struct HostFacts {
     let isAppleSilicon: Bool
 }
 
+enum HelperServiceError: Error {
+    case unsupportedNetworkPolicy(String)
+}
+
 final class HelperService {
     private let protocolVersion = "1"
     private let helperVersion = "0.1.0"
@@ -43,6 +47,7 @@ final class HelperService {
 
     func validateHost(runtime: String, networkPolicy: String) -> HelperResponse {
         var reasons: [String] = []
+        let normalizedNetworkPolicy = normalizeNetworkPolicy(networkPolicy)
         if runtime != "vz_linux" {
             reasons.append("runtime_unsupported")
         }
@@ -52,8 +57,8 @@ final class HelperService {
         if !hostFacts.isAppleSilicon {
             reasons.append("apple_silicon_required")
         }
-        if networkPolicy != "deny_all" {
-            reasons.append("strict_allowlist_not_supported")
+        if normalizedNetworkPolicy != "deny_all" {
+            reasons.append(networkPolicyErrorCode(normalizedNetworkPolicy))
         }
 
         let available = reasons.isEmpty
@@ -65,7 +70,7 @@ final class HelperService {
             executionMode: available ? "real" : "none",
             transport: available ? "vsock" : nil,
             reasons: reasons,
-            details: ["runtime": runtime],
+            details: ["runtime": runtime, "network_policy": normalizedNetworkPolicy],
             errorCode: nil,
             message: nil
         )
@@ -80,12 +85,15 @@ final class HelperService {
         templatePath: String,
         workspacePath: String,
         readinessTimeoutSeconds: TimeInterval,
-        metadata: VMOwnershipMetadata = .unknown
+        metadata: VMOwnershipMetadata = .unknown,
+        networkPolicy: String = "deny_all"
     ) throws -> HelperVMResponse {
+        let normalizedNetworkPolicy = try requireSupportedNetworkPolicy(networkPolicy)
         let normalizedMetadata = normalizeMetadata(
             metadata,
             templatePath: templatePath,
-            workspacePath: workspacePath
+            workspacePath: workspacePath,
+            networkPolicy: normalizedNetworkPolicy
         )
         let record = try vmManager.createVM(
             vmID: vmID,
@@ -100,7 +108,7 @@ final class HelperService {
             vmID: record.vmID,
             state: record.state,
             metadata: record.metadata,
-            details: ["transport": "vsock"]
+            details: vmDetails(for: record)
         )
     }
 
@@ -115,7 +123,7 @@ final class HelperService {
             state: record.state,
             healthy: record.healthy,
             metadata: record.metadata,
-            details: ["transport": "vsock"]
+            details: vmDetails(for: record)
         )
     }
 
@@ -128,7 +136,7 @@ final class HelperService {
                 state: record.state,
                 healthy: record.healthy,
                 metadata: record.metadata,
-                details: ["transport": "vsock"]
+                details: vmDetails(for: record)
             )
         }
         return HelperVMListResponse(
@@ -169,7 +177,8 @@ final class HelperService {
     private func normalizeMetadata(
         _ metadata: VMOwnershipMetadata,
         templatePath: String,
-        workspacePath: String
+        workspacePath: String,
+        networkPolicy: String
     ) -> VMOwnershipMetadata {
         VMOwnershipMetadata(
             owner: metadata.owner.isEmpty ? "unknown" : metadata.owner,
@@ -182,7 +191,32 @@ final class HelperService {
             runManifestPath: metadata.runManifestPath,
             planningSource: metadata.planningSource,
             workspacePath: metadata.workspacePath.isEmpty ? workspacePath : metadata.workspacePath,
-            createdAt: metadata.createdAt.isEmpty ? metadataDateFormatter.string(from: Date()) : metadata.createdAt
+            createdAt: metadata.createdAt.isEmpty ? metadataDateFormatter.string(from: Date()) : metadata.createdAt,
+            networkPolicy: networkPolicy
         )
+    }
+
+    private func requireSupportedNetworkPolicy(_ networkPolicy: String) throws -> String {
+        let normalized = normalizeNetworkPolicy(networkPolicy)
+        guard normalized == "deny_all" else {
+            throw HelperServiceError.unsupportedNetworkPolicy(normalized)
+        }
+        return normalized
+    }
+
+    private func normalizeNetworkPolicy(_ networkPolicy: String) -> String {
+        let normalized = networkPolicy.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return normalized.isEmpty ? "deny_all" : normalized
+    }
+
+    private func networkPolicyErrorCode(_ networkPolicy: String) -> String {
+        networkPolicy == "allowlist" ? "strict_allowlist_not_supported" : "unsupported_network_policy"
+    }
+
+    private func vmDetails(for record: VMRecord) -> [String: String] {
+        [
+            "transport": "vsock",
+            "network_policy": record.metadata.networkPolicy.isEmpty ? "deny_all" : record.metadata.networkPolicy,
+        ]
     }
 }

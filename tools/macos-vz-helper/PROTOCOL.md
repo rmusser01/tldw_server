@@ -61,7 +61,8 @@ Every failure response should include:
   "transport": "vsock",
   "reasons": [],
   "details": {
-    "runtime": "vz_linux"
+    "runtime": "vz_linux",
+    "network_policy": "deny_all"
   }
 }
 ```
@@ -86,10 +87,12 @@ Every failure response should include:
     "run_manifest_path": "/var/lib/tldw/image-store/runs/run-123/manifest.json",
     "planning_source": "image_store",
     "workspace_path": "/tmp/tldw-vz-linux-workspace",
+    "network_policy": "deny_all",
     "created_at": "2026-04-30T18:00:00Z"
   },
   "details": {
-    "runtime": "vz_linux"
+    "transport": "vsock",
+    "network_policy": "deny_all"
   }
 }
 ```
@@ -115,6 +118,7 @@ Request:
     "run_manifest_path": "/var/lib/tldw/image-store/runs/run-123/manifest.json",
     "planning_source": "image_store",
     "workspace_path": "/tmp/tldw-vz-linux-workspace",
+    "network_policy": "deny_all",
     "timeout_sec": 300
   }
 }
@@ -126,6 +130,8 @@ identifier to persist in VM metadata, `template_path` mirrors the concrete bundl
 path when callers want it explicit, `run_manifest_path` points at the persisted
 per-run clone manifest when image-store planning is used, and `planning_source`
 identifies the planner, for example `image_store`.
+`network_policy` defaults to `deny_all`; helper-side VM creation rejects any
+other value and returns `strict_allowlist_not_supported` for `allowlist`.
 
 Response:
 
@@ -146,10 +152,12 @@ Response:
     "run_manifest_path": "/var/lib/tldw/image-store/runs/run-123/manifest.json",
     "planning_source": "image_store",
     "workspace_path": "/tmp/tldw-vz-linux-workspace",
+    "network_policy": "deny_all",
     "created_at": "2026-04-30T18:00:00Z"
   },
   "details": {
-    "transport": "vsock"
+    "transport": "vsock",
+    "network_policy": "deny_all"
   }
 }
 ```
@@ -193,10 +201,12 @@ Response:
         "run_manifest_path": "/var/lib/tldw/image-store/runs/run-123/manifest.json",
         "planning_source": "image_store",
         "workspace_path": "/tmp/tldw-vz-linux-workspace",
+        "network_policy": "deny_all",
         "created_at": "2026-04-30T18:00:00Z"
       },
       "details": {
-        "runtime": "vz_linux"
+        "transport": "vsock",
+        "network_policy": "deny_all"
       }
     }
   ]
@@ -212,6 +222,9 @@ Response:
 - The helper assigns `created_at` when VM creation metadata omits it. Python uses
   `owner=tldw`, `runtime=vz_linux`, non-empty `run_id`, and session metadata to
   decide whether orphan repair may terminate a live VM.
+- `vz_linux` helper VM creation accepts only `network_policy=deny_all` until a
+  separately verified allowlist implementation exists. The accepted policy is
+  echoed in VM metadata and status details.
 - Template validation must report `boot_mode` and `validation_strength` when the
   helper can resolve the template successfully.
 - Python remains the source of truth for sandbox sessions; the helper only reports
