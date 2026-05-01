@@ -67,7 +67,9 @@
     "modePrompts": "Prompts",
     "modePromptsPlayground": "Prompts",
     "modeStt": "STT Playground",
+    "modeSttHostedDesc": "Requires a self-hosted tldw server for speech transcription.",
     "modeSpeech": "Speech",
+    "modeTtsHostedDesc": "Requires a self-hosted tldw server for speech generation.",
     "modePromptStudio": "Prompt Studio",
     "modeDocumentation": "Documentation",
     "modeFlashcards": "Flashcards",
@@ -826,6 +828,15 @@
   },
   "tts": {
     "playground": "TTS Playground"
+  },
+  "hostedAudio": {
+    "badge": "Hosted mode",
+    "title": "Audio features require a self-hosted tldw server",
+    "description": "{{featureName}} depends on server-side audio runtimes, local model dependencies, host audio tooling, or provider keys that are only exposed in self-hosted deployments. The hosted product keeps these routes visible so you can find the feature boundary without exposing controls that cannot run here.",
+    "quickstart": "Open self-hosting quickstart",
+    "opensInNewTab": "(opens in new tab)",
+    "loadingTts": "Loading TTS playground.",
+    "loadingStt": "Loading STT playground."
   },
   "notesEmpty": {
     "connectTitle": "Connect to use Notes",
