@@ -427,6 +427,7 @@ const WorkspaceHeader: React.FC<{
             onClick={() => onOpenPicker("library")}
             className="rounded p-1.5 hover:bg-hover text-text-subtle hover:text-text"
             aria-label={t("option:documentWorkspace.openDocument", "Open document")}
+            data-testid="document-open-picker-button"
           >
             <Plus className="h-5 w-5" />
           </button>

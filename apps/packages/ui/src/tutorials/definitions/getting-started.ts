@@ -18,7 +18,7 @@ const gettingStarted: TutorialDefinition = {
   icon: Rocket,
   priority: 0,
   sequence: {
-    nextTutorialId: "getting-started-knowledge",
+    nextTutorialId: "knowledge-basics",
     nextRoute: "/knowledge",
     nextLabelKey: "tutorials:gettingStarted.sequence.knowledgeLabel",
     nextLabelFallback: "Continue in Knowledge"

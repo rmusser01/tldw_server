@@ -254,22 +254,27 @@ export function normalizeTutorialRoute(routeLike: string): string {
  */
 type GetTutorialsForRouteOptions = {
   ignoreRuntimeSuppression?: boolean
-  completedTutorialIds?: readonly string[]
+  completedTutorialIds?: CompletedTutorialIds
   includeLocked?: boolean
 }
 
+type CompletedTutorialIds = readonly string[] | ReadonlySet<string>
+
 const getCompletedTutorialSet = (
-  completedTutorialIds: readonly string[] = []
-): Set<string> => new Set(completedTutorialIds)
+  completedTutorialIds: CompletedTutorialIds = []
+): ReadonlySet<string> =>
+  completedTutorialIds instanceof Set
+    ? completedTutorialIds
+    : new Set(completedTutorialIds)
 
 const sortTutorialsByPriority = (
-  tutorials: TutorialDefinition[]
+  tutorials: readonly TutorialDefinition[]
 ): TutorialDefinition[] =>
-  tutorials.sort((a, b) => (a.priority ?? 100) - (b.priority ?? 100))
+  [...tutorials].sort((a, b) => (a.priority ?? 100) - (b.priority ?? 100))
 
 export function areTutorialPrerequisitesMet(
   tutorial: TutorialDefinition,
-  completedTutorialIds: readonly string[] = []
+  completedTutorialIds: CompletedTutorialIds = []
 ): boolean {
   const prerequisites = tutorial.prerequisites ?? []
   if (prerequisites.length === 0) {
@@ -293,10 +298,11 @@ export function getTutorialsForRoute(
   const matches = TUTORIAL_REGISTRY.filter((tutorial) =>
     matchRoute(tutorial.routePattern, pathname)
   )
+  const completedSet = getCompletedTutorialSet(options.completedTutorialIds)
   const eligibleMatches = options.includeLocked
     ? matches
     : matches.filter((tutorial) =>
-        areTutorialPrerequisitesMet(tutorial, options.completedTutorialIds)
+        areTutorialPrerequisitesMet(tutorial, completedSet)
       )
 
   // Sort by priority (lower priority number = higher in list)
@@ -368,12 +374,10 @@ export function getTutorialCountForRoute(
  */
 export function getNextTutorialInSequence(
   completedTutorialId: string,
-  completedTutorialIds: readonly string[] = []
+  completedTutorialIds: CompletedTutorialIds = []
 ): TutorialDefinition | undefined {
-  const completedTutorials = getCompletedTutorialSet([
-    ...completedTutorialIds,
-    completedTutorialId
-  ])
+  const completedTutorials = new Set(completedTutorialIds)
+  completedTutorials.add(completedTutorialId)
   const currentTutorial = getTutorialById(completedTutorialId)
   const explicitNextId = currentTutorial?.sequence?.nextTutorialId
 
@@ -382,10 +386,7 @@ export function getNextTutorialInSequence(
     if (
       explicitNextTutorial &&
       !completedTutorials.has(explicitNextTutorial.id) &&
-      areTutorialPrerequisitesMet(
-        explicitNextTutorial,
-        Array.from(completedTutorials)
-      )
+      areTutorialPrerequisitesMet(explicitNextTutorial, completedTutorials)
     ) {
       return explicitNextTutorial
     }
@@ -396,7 +397,7 @@ export function getNextTutorialInSequence(
       (tutorial) =>
         !completedTutorials.has(tutorial.id) &&
         (tutorial.prerequisites ?? []).includes(completedTutorialId) &&
-        areTutorialPrerequisitesMet(tutorial, Array.from(completedTutorials))
+        areTutorialPrerequisitesMet(tutorial, completedTutorials)
     )
   )[0]
 }

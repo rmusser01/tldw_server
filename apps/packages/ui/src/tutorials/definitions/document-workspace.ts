@@ -27,6 +27,15 @@ const documentWorkspaceBasics: TutorialDefinition = {
       disableBeacon: true
     },
     {
+      target: '[data-testid="document-open-picker-button"]',
+      titleKey: "tutorials:documentWorkspace.basics.openDocumentTitle",
+      titleFallback: "Open or Select a Document",
+      contentKey: "tutorials:documentWorkspace.basics.openDocumentContent",
+      contentFallback:
+        "Use the open document button to pick a saved source or upload a new PDF or EPUB for study.",
+      placement: "bottom"
+    },
+    {
       target: '[data-testid="document-workspace-toggle-left"]',
       titleKey: "tutorials:documentWorkspace.basics.leftPaneTitle",
       titleFallback: "Document Navigation",
@@ -54,7 +63,7 @@ const documentWorkspaceBasics: TutorialDefinition = {
       placement: "bottom"
     },
     {
-      target: '[data-testid="document-page-input"]',
+      target: '[data-testid="document-navigation"]',
       titleKey: "tutorials:documentWorkspace.basics.navigationTitle",
       titleFallback: "Jump Through Long Documents",
       contentKey: "tutorials:documentWorkspace.basics.navigationContent",

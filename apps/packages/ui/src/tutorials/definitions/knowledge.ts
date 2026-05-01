@@ -5,64 +5,6 @@
 import { BrainCircuit } from "lucide-react"
 import type { TutorialDefinition } from "../registry"
 
-const gettingStartedKnowledge: TutorialDefinition = {
-  id: "getting-started-knowledge",
-  routePattern: "/knowledge",
-  labelKey: "tutorials:gettingStarted.knowledge.label",
-  labelFallback: "Getting Started: Knowledge",
-  descriptionKey: "tutorials:gettingStarted.knowledge.description",
-  descriptionFallback:
-    "Continue the getting started path by searching your first indexed sources",
-  icon: BrainCircuit,
-  prerequisites: ["getting-started"],
-  priority: 0,
-  sequence: {
-    nextTutorialId: "document-workspace-basics",
-    nextRoute: "/document-workspace",
-    nextLabelKey: "tutorials:gettingStarted.sequence.documentWorkspaceLabel",
-    nextLabelFallback: "Continue in Document Workspace"
-  },
-  steps: [
-    {
-      target: '[data-testid="knowledge-page-root"]',
-      titleKey: "tutorials:gettingStarted.knowledge.workspaceTitle",
-      titleFallback: "Search Your Knowledge Base",
-      contentKey: "tutorials:gettingStarted.knowledge.workspaceContent",
-      contentFallback:
-        "Knowledge is where your ingested documents, notes, and media become searchable evidence for research questions.",
-      placement: "bottom",
-      disableBeacon: true
-    },
-    {
-      target: "#knowledge-search-input",
-      titleKey: "tutorials:gettingStarted.knowledge.searchTitle",
-      titleFallback: "Ask a Focused Question",
-      contentKey: "tutorials:gettingStarted.knowledge.searchContent",
-      contentFallback:
-        "Start with a focused question. The retrieval pipeline will search across the sources you select.",
-      placement: "bottom"
-    },
-    {
-      target: "#knowledge-source-selector-toggle",
-      titleKey: "tutorials:gettingStarted.knowledge.sourcesTitle",
-      titleFallback: "Pick the Right Sources",
-      contentKey: "tutorials:gettingStarted.knowledge.sourcesContent",
-      contentFallback:
-        "Use source groups to keep answers grounded in the documents or media that matter for the current task.",
-      placement: "bottom"
-    },
-    {
-      target: '[data-testid="knowledge-results-shell"]',
-      titleKey: "tutorials:gettingStarted.knowledge.resultsTitle",
-      titleFallback: "Review Answers and Evidence",
-      contentKey: "tutorials:gettingStarted.knowledge.resultsContent",
-      contentFallback:
-        "After a search, use the results workspace to inspect answers, citations, and supporting source snippets.",
-      placement: "left"
-    }
-  ]
-}
-
 const knowledgeBasics: TutorialDefinition = {
   id: "knowledge-basics",
   routePattern: "/knowledge",
@@ -73,6 +15,12 @@ const knowledgeBasics: TutorialDefinition = {
     "Search your indexed sources and review grounded answers with citations",
   icon: BrainCircuit,
   priority: 1,
+  sequence: {
+    nextTutorialId: "document-workspace-basics",
+    nextRoute: "/document-workspace",
+    nextLabelKey: "tutorials:gettingStarted.sequence.documentWorkspaceLabel",
+    nextLabelFallback: "Continue in Document Workspace"
+  },
   steps: [
     {
       target: "#knowledge-search-input",
@@ -124,7 +72,4 @@ const knowledgeBasics: TutorialDefinition = {
   ]
 }
 
-export const knowledgeTutorials: TutorialDefinition[] = [
-  gettingStartedKnowledge,
-  knowledgeBasics
-]
+export const knowledgeTutorials: TutorialDefinition[] = [knowledgeBasics]

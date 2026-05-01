@@ -128,13 +128,16 @@ describe("tutorial registry route matching", () => {
 
     expect(areTutorialPrerequisitesMet(lockedTutorial, [])).toBe(false)
     expect(
+      areTutorialPrerequisitesMet(lockedTutorial, new Set(["getting-started"]))
+    ).toBe(true)
+    expect(
       getTutorialsForRoute("/knowledge", { completedTutorialIds: [] }).some(
         (tutorial) => tutorial.id === lockedTutorial.id
       )
     ).toBe(false)
     expect(
       getTutorialsForRoute("/knowledge", {
-        completedTutorialIds: [],
+        completedTutorialIds: new Set<string>(),
         includeLocked: true
       }).some((tutorial) => tutorial.id === lockedTutorial.id)
     ).toBe(true)
@@ -145,9 +148,9 @@ describe("tutorial registry route matching", () => {
     ).toBe(true)
   })
 
-  it("prefers the sequence-specific tutorial once prerequisites are completed", () => {
+  it("uses knowledge basics as the second getting started sequence step", () => {
     expect(
-      getTutorialsForRoute("/knowledge", { completedTutorialIds: [] }).some(
+      TUTORIAL_REGISTRY.some(
         (tutorial) => tutorial.id === "getting-started-knowledge"
       )
     ).toBe(false)
@@ -156,15 +159,15 @@ describe("tutorial registry route matching", () => {
       completedTutorialIds: ["getting-started"]
     })
 
-    expect(primaryTutorial?.id).toBe("getting-started-knowledge")
+    expect(primaryTutorial?.id).toBe("knowledge-basics")
   })
 
   it("resolves the next eligible tutorial in the getting started sequence", () => {
     expect(getNextTutorialInSequence("getting-started")?.id).toBe(
-      "getting-started-knowledge"
+      "knowledge-basics"
     )
     expect(
-      getNextTutorialInSequence("getting-started-knowledge", ["getting-started"])
+      getNextTutorialInSequence("knowledge-basics", new Set(["getting-started"]))
         ?.id
     ).toBe("document-workspace-basics")
   })
@@ -175,6 +178,15 @@ describe("tutorial registry route matching", () => {
     expect(primaryTutorial?.id).toBe("document-workspace-basics")
     expect(primaryTutorial?.steps[0]?.target).toBe(
       '[data-testid="document-workspace-root"]'
+    )
+    expect(
+      primaryTutorial?.steps.some(
+        (step) => step.target === '[data-testid="document-open-picker-button"]'
+      )
+    ).toBe(true)
+    const lastStep = primaryTutorial?.steps[primaryTutorial.steps.length - 1]
+    expect(lastStep?.target).toBe(
+      '[data-testid="document-navigation"]'
     )
   })
 
