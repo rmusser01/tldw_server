@@ -134,7 +134,10 @@ final class UnixSocketServer {
                 runID: request.request["run_id"]?.stringValue ?? "",
                 sessionID: request.request["session_id"]?.stringValue ?? "",
                 sessionMode: request.request["session_mode"]?.boolValue ?? false,
+                templateID: request.request["template_id"]?.stringValue ?? "",
                 templatePath: templatePath,
+                runManifestPath: request.request["run_manifest_path"]?.stringValue ?? "",
+                planningSource: request.request["planning_source"]?.stringValue ?? "",
                 workspacePath: workspacePath,
                 createdAt: ""
             )

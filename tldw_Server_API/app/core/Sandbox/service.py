@@ -28,6 +28,14 @@ from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.Metrics import increment_counter, observe_histogram
 from tldw_Server_API.app.core.testing import is_truthy
 
+from .image_store import ImageStoreValidationError, SandboxImageStore
+from .macos_diagnostics import collect_macos_diagnostics, probe_helper
+from .macos_virtualization.helper_client import (
+    MacOSVirtualizationHelperClient,
+    MacOSVirtualizationHelperFailure,
+    MacOSVirtualizationHelperProtocolError,
+    MacOSVirtualizationHelperUnavailable,
+)
 from .models import (
     RunPhase,
     RunSpec,
@@ -37,16 +45,8 @@ from .models import (
     SessionSpec,
     TrustLevel,
 )
-from .macos_virtualization.helper_client import (
-    MacOSVirtualizationHelperClient,
-    MacOSVirtualizationHelperFailure,
-    MacOSVirtualizationHelperProtocolError,
-    MacOSVirtualizationHelperUnavailable,
-)
-from .macos_diagnostics import collect_macos_diagnostics, probe_helper
 from .orchestrator import SandboxOrchestrator, SessionActiveRunsConflict
 from .policy import SandboxPolicy, SandboxPolicyConfig, compute_policy_hash
-from .runtime_capabilities import RuntimePreflightResult, collect_runtime_preflights
 from .runners.docker_runner import DockerRunner, docker_available
 from .runners.firecracker_runner import FirecrackerRunner, firecracker_available, firecracker_real_enabled
 from .runners.lima_runner import LimaRunner, lima_available
@@ -54,11 +54,17 @@ from .runners.seatbelt_runner import SeatbeltRunner
 from .runners.vz_linux_runner import VZLinuxRunner
 from .runners.vz_macos_runner import VZMacOSRunner
 from .runners.worktree_runner import WorktreeRunner, worktree_available
+from .runtime_capabilities import RuntimePreflightResult, collect_runtime_preflights
 from .snapshots import SnapshotManager
 from .store import get_store_mode
 from .streams import get_hub
-from .vz_reconciliation import collect_vz_reconciliation
-from .vz_reconciliation import ORPHAN_STATUSES, REASON_OWNED_ORPHAN, REASON_UNKNOWN_OWNERSHIP, STATUS_OWNED_ORPHAN
+from .vz_reconciliation import (
+    ORPHAN_STATUSES,
+    REASON_OWNED_ORPHAN,
+    REASON_UNKNOWN_OWNERSHIP,
+    STATUS_OWNED_ORPHAN,
+    collect_vz_reconciliation,
+)
 
 _SANDBOX_SERVICE_NONCRITICAL_EXCEPTIONS = (
     asyncio.CancelledError,
@@ -98,6 +104,13 @@ _SANDBOX_WORKSPACE_FALLBACK_LOCKS_GUARD = threading.Lock()
 
 class SandboxReconciliationRepairError(RuntimeError):
     def __init__(self, reason: str, status_code: int = 503) -> None:
+        self.reason = reason
+        self.status_code = int(status_code)
+        super().__init__(reason)
+
+
+class SandboxImageStoreCleanupError(RuntimeError):
+    def __init__(self, reason: str, status_code: int = 400) -> None:
         self.reason = reason
         self.status_code = int(status_code)
         super().__init__(reason)
@@ -1006,6 +1019,182 @@ class SandboxService:
     def macos_diagnostics(self) -> dict[str, object]:
         return collect_macos_diagnostics(self._orch)
 
+    def plan_macos_image_store_cleanup(self) -> dict[str, object]:
+        payload = self.macos_diagnostics()
+        image_store = payload.get("image_store")
+        if not isinstance(image_store, dict):
+            image_store = {}
+
+        items = [item for item in list(image_store.get("items") or []) if isinstance(item, dict)]
+        actions: list[dict[str, object]] = []
+        reasons: list[str] = []
+        summary: dict[str, int] = {
+            "total_candidates": 0,
+            "planned_actions": 0,
+            "blocked_live_matches": 0,
+            "planning_only_run_manifests": 0,
+            "inactive_runs": 0,
+            "legacy_run_directories": 0,
+        }
+        action_types = {
+            "planning_only_run_manifest": "remove_run_manifest",
+            "inactive_run": "remove_run_directory",
+            "legacy_run_directory": "remove_legacy_run_directory",
+        }
+        summary_keys = {
+            "planning_only_run_manifest": "planning_only_run_manifests",
+            "inactive_run": "inactive_runs",
+            "legacy_run_directory": "legacy_run_directories",
+        }
+
+        for item in items:
+            gc_reason = str(item.get("gc_reason") or "").strip()
+            if not gc_reason:
+                continue
+            action_type = action_types.get(gc_reason)
+            if action_type is None:
+                continue
+
+            summary["total_candidates"] += 1
+            summary[summary_keys[gc_reason]] += 1
+
+            if item.get("matched_vm_id"):
+                summary["blocked_live_matches"] += 1
+                if "live_vm_matches_blocked_cleanup" not in reasons:
+                    reasons.append("live_vm_matches_blocked_cleanup")
+                continue
+
+            actions.append(
+                {
+                    "type": action_type,
+                    "run_id": str(item.get("run_id") or ""),
+                    "template_id": item.get("template_id"),
+                    "run_manifest_path": item.get("run_manifest_path"),
+                    "run_manifest_present": item.get("run_manifest_present"),
+                    "gc_reason": gc_reason,
+                    "gc_path": item.get("gc_path"),
+                    "matched_vm_id": item.get("matched_vm_id"),
+                    "matched_reconciliation_status": item.get("matched_reconciliation_status"),
+                    "matched_reconciliation_reason": item.get("matched_reconciliation_reason"),
+                    "status": "planned",
+                }
+            )
+
+        summary["planned_actions"] = len(actions)
+        return {
+            "dry_run": True,
+            "image_store": {
+                "configured": bool(image_store.get("configured")),
+                "root_path": image_store.get("root_path"),
+                "registered_templates": int(image_store.get("registered_templates") or 0),
+                "run_manifests": int(image_store.get("run_manifests") or 0),
+                "gc_candidates": int(image_store.get("gc_candidates") or 0),
+                "items": items,
+                "reasons": list(image_store.get("reasons") or []),
+            },
+            "summary": summary,
+            "actions": actions,
+            "reasons": reasons,
+        }
+
+    def cleanup_macos_image_store(
+        self,
+        *,
+        dry_run: bool = True,
+        confirm_all: bool = False,
+        action_types: list[str] | None = None,
+        run_ids: list[str] | None = None,
+    ) -> dict[str, object]:
+        plan = self.plan_macos_image_store_cleanup()
+        summary = dict(plan.get("summary") or {})
+        summary["deleted_actions"] = 0
+        actions = [dict(action) for action in list(plan.get("actions") or []) if isinstance(action, dict)]
+        image_store = plan.get("image_store")
+        if not isinstance(image_store, dict):
+            image_store = {}
+
+        allowed_action_types = {
+            str(action_type).strip()
+            for action_type in list(action_types or [])
+            if str(action_type).strip()
+        }
+        allowed_run_ids = {
+            str(run_id).strip()
+            for run_id in list(run_ids or [])
+            if str(run_id).strip()
+        }
+        if allowed_action_types:
+            actions = [
+                action for action in actions if str(action.get("type") or "").strip() in allowed_action_types
+            ]
+        if allowed_run_ids:
+            actions = [
+                action for action in actions if str(action.get("run_id") or "").strip() in allowed_run_ids
+            ]
+        summary["planned_actions"] = len(actions)
+        has_filters = bool(allowed_action_types or allowed_run_ids)
+
+        if dry_run:
+            return {
+                "dry_run": True,
+                "image_store": dict(image_store),
+                "summary": summary,
+                "actions": actions,
+                "reasons": list(plan.get("reasons") or []),
+            }
+
+        if not has_filters and not confirm_all:
+            raise SandboxImageStoreCleanupError(
+                "image_store_cleanup_confirmation_required",
+                400,
+            )
+
+        root_path = str(image_store.get("root_path") or "").strip()
+        if not root_path:
+            return {
+                "dry_run": False,
+                "image_store": dict(image_store),
+                "summary": summary,
+                "actions": actions,
+                "reasons": list(plan.get("reasons") or []),
+            }
+
+        try:
+            store = SandboxImageStore(root_path=root_path)
+        except (ImageStoreValidationError, OSError, ValueError) as exc:
+            logger.warning("image_store_cleanup_unavailable root={} error={}", root_path, exc)
+            raise SandboxImageStoreCleanupError("image_store_cleanup_unavailable", 503) from exc
+        deleted_actions = 0
+        for action in actions:
+            run_id = str(action.get("run_id") or "").strip()
+            gc_reason = str(action.get("gc_reason") or "").strip()
+            if not run_id or not gc_reason:
+                continue
+            try:
+                deleted = store.cleanup_run_candidate(run_id=run_id, reason=gc_reason)
+            except (ImageStoreValidationError, OSError, ValueError) as exc:
+                logger.warning(
+                    "image_store_cleanup_action_failed run_id={} gc_reason={} error={}",
+                    run_id,
+                    gc_reason,
+                    exc,
+                )
+                action["status"] = "error"
+                action["error"] = str(exc)
+                continue
+            action["status"] = "deleted" if deleted else "already_absent"
+            if deleted:
+                deleted_actions += 1
+
+        summary["deleted_actions"] = deleted_actions
+        return {
+            "dry_run": False,
+            "image_store": dict(image_store),
+            "summary": summary,
+            "actions": actions,
+            "reasons": list(plan.get("reasons") or []),
+        }
+
     def repair_macos_reconciliation(
         self,
         *,
@@ -1047,6 +1236,19 @@ class SandboxService:
         }
         helper_client: MacOSVirtualizationHelperClient | None = None
 
+        def _action_context(source: dict[str, object]) -> dict[str, object]:
+            keys = (
+                "run_id",
+                "template_id",
+                "planning_source",
+                "run_manifest_path",
+                "run_manifest_present",
+                "persisted_template_id",
+                "helper_template_id",
+                "template_id_matches_persisted",
+            )
+            return {key: source.get(key) for key in keys if key in source and source.get(key) is not None}
+
         for item in report_items:
             status = str(item.get("status") or "").strip()
             session_id = str(item.get("session_id") or "").strip()
@@ -1060,6 +1262,7 @@ class SandboxService:
                     "vm_id": vm_id or None,
                     "status": "skipped",
                     "reason": reason or "active_session",
+                    **_action_context(item),
                 }
                 logger.info("Skipping VZ reconciliation repair action: {}", action)
                 actions.append(action)
@@ -1081,6 +1284,7 @@ class SandboxService:
                         "status": "skipped",
                         "reason": reason or REASON_UNKNOWN_OWNERSHIP,
                         "termination_eligible": False,
+                        **_action_context(item),
                     }
                     logger.info("Skipping VZ reconciliation orphan repair action: {}", action)
                     actions.append(action)
@@ -1123,6 +1327,7 @@ class SandboxService:
                     "status": action_status,
                     "reason": reason or None,
                     "termination_eligible": True,
+                    **_action_context(item),
                 }
                 logger.info("VZ reconciliation repair action: {}", action)
                 actions.append(action)
@@ -1143,6 +1348,7 @@ class SandboxService:
                     "vm_id": vm_id or None,
                     "status": "skipped",
                     "reason": "active_session",
+                    **_action_context(item),
                 }
                 logger.info("Skipping VZ reconciliation repair action: {}", action)
                 actions.append(action)
@@ -1167,6 +1373,7 @@ class SandboxService:
                 "vm_id": vm_id or None,
                 "status": action_status,
                 "reason": reason or None,
+                **_action_context(item),
             }
             logger.info("VZ reconciliation repair action: {}", action)
             actions.append(action)

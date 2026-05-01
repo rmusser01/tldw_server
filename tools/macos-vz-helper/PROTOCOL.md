@@ -81,7 +81,10 @@ Every failure response should include:
     "run_id": "run-123",
     "session_id": "session-456",
     "session_mode": true,
+    "template_id": "vz_linux:bundle",
     "template_path": "/var/lib/tldw/vz-linux/debian-arm64",
+    "run_manifest_path": "/var/lib/tldw/image-store/runs/run-123/manifest.json",
+    "planning_source": "image_store",
     "workspace_path": "/tmp/tldw-vz-linux-workspace",
     "created_at": "2026-04-30T18:00:00Z"
   },
@@ -106,12 +109,23 @@ Request:
     "run_id": "run-123",
     "session_id": "session-456",
     "session_mode": true,
+    "template_id": "vz_linux:bundle",
     "template": "/var/lib/tldw/vz-linux/debian-arm64",
+    "template_path": "/var/lib/tldw/vz-linux/debian-arm64",
+    "run_manifest_path": "/var/lib/tldw/image-store/runs/run-123/manifest.json",
+    "planning_source": "image_store",
     "workspace_path": "/tmp/tldw-vz-linux-workspace",
     "timeout_sec": 300
   }
 }
 ```
+
+`template_id`, `template_path`, `run_manifest_path`, and `planning_source` are
+optional provenance fields. `template_id` is the logical image-store/template
+identifier to persist in VM metadata, `template_path` mirrors the concrete bundle
+path when callers want it explicit, `run_manifest_path` points at the persisted
+per-run clone manifest when image-store planning is used, and `planning_source`
+identifies the planner, for example `image_store`.
 
 Response:
 
@@ -127,7 +141,10 @@ Response:
     "run_id": "run-123",
     "session_id": "session-456",
     "session_mode": true,
+    "template_id": "vz_linux:bundle",
     "template_path": "/var/lib/tldw/vz-linux/debian-arm64",
+    "run_manifest_path": "/var/lib/tldw/image-store/runs/run-123/manifest.json",
+    "planning_source": "image_store",
     "workspace_path": "/tmp/tldw-vz-linux-workspace",
     "created_at": "2026-04-30T18:00:00Z"
   },
@@ -171,7 +188,10 @@ Response:
         "run_id": "run-123",
         "session_id": "session-456",
         "session_mode": true,
+        "template_id": "vz_linux:bundle",
         "template_path": "/var/lib/tldw/vz-linux/debian-arm64",
+        "run_manifest_path": "/var/lib/tldw/image-store/runs/run-123/manifest.json",
+        "planning_source": "image_store",
         "workspace_path": "/tmp/tldw-vz-linux-workspace",
         "created_at": "2026-04-30T18:00:00Z"
       },

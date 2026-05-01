@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shutil
 import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-
 
 MANIFEST_SCHEMA_VERSION = 1
 
@@ -74,6 +74,7 @@ class GarbageCollectionCandidate:
     path: str
     size_bytes: int
     reason: str
+    template_id: str | None = None
 
 
 @dataclass(slots=True)
@@ -91,10 +92,13 @@ class SandboxImageStore:
     the runtime authority for bootability.
     """
 
-    def __init__(self, root_path: str | Path) -> None:
+    def __init__(self, root_path: str | Path, *, create_root: bool = True) -> None:
         self.root_path = Path(root_path)
         self._templates: dict[str, TemplateRecord] = {}
-        self.root_path.mkdir(parents=True, exist_ok=True)
+        self._run_clone_manifests: dict[str, RunCloneManifest] = {}
+        self._run_clone_manifests_loaded = False
+        if create_root:
+            self.root_path.mkdir(parents=True, exist_ok=True)
         self._load_templates()
 
     def register_template(
@@ -196,20 +200,51 @@ class SandboxImageStore:
     def prepare_run_clone(self, *, template_id: str, run_id: str) -> RunCloneManifest:
         """Build a deterministic per-run clone manifest for a template."""
 
+        normalized_run_id = self._normalize_manifest_segment(run_id, "run_id")
         template = self._templates[template_id]
-        run_root = self.root_path / "runs" / str(run_id)
-        clone_items = [
-            CloneItem(
-                source_path=str(source_path),
-                target_path=str(run_root / Path(source_path).name),
-                mode="clone",
+        target_names = [Path(source_path).name for source_path in template.disk_paths]
+        seen_target_names: set[str] = set()
+        duplicate_target_names: set[str] = set()
+        for target_name in target_names:
+            if target_name in seen_target_names:
+                duplicate_target_names.add(target_name)
+            else:
+                seen_target_names.add(target_name)
+        if duplicate_target_names:
+            raise ImageStoreValidationError(
+                "run_clone_target_name_collision: "
+                f"{template.template_id}: {','.join(sorted(duplicate_target_names))}"
             )
-            for source_path in template.disk_paths
-        ]
-        return RunCloneManifest(
+        run_root = self.root_path / "runs" / normalized_run_id
+        manifest = RunCloneManifest(
             template_id=template.template_id,
-            run_id=str(run_id),
-            clone_items=clone_items,
+            run_id=normalized_run_id,
+            clone_items=[
+                CloneItem(
+                    source_path=str(source_path),
+                    target_path=str(run_root / Path(source_path).name),
+                    mode="clone",
+                )
+                for source_path in template.disk_paths
+            ],
+        )
+        self._write_run_clone_manifest(manifest)
+        self._run_clone_manifests[normalized_run_id] = manifest
+        return manifest
+
+    def get_run_clone_manifest(self, run_id: str) -> RunCloneManifest | None:
+        """Return a persisted run clone manifest by run id, or `None` when absent."""
+
+        self._ensure_run_clone_manifests_loaded()
+        return self._run_clone_manifests.get(str(run_id))
+
+    def list_run_clone_manifests(self) -> list[RunCloneManifest]:
+        """List persisted run clone manifests in deterministic run-id order."""
+
+        self._ensure_run_clone_manifests_loaded()
+        return sorted(
+            self._run_clone_manifests.values(),
+            key=lambda manifest: manifest.run_id,
         )
 
     def plan_garbage_collection(self, *, active_run_ids: set[str] | None = None) -> GarbageCollectionPlan:
@@ -218,6 +253,7 @@ class SandboxImageStore:
         This method is intentionally dry-run only. It never removes files.
         """
 
+        self._ensure_run_clone_manifests_loaded()
         active_ids = set(active_run_ids or set())
         runs_root = self.root_path / "runs"
         if not runs_root.exists():
@@ -227,15 +263,72 @@ class SandboxImageStore:
         for run_path in sorted(path for path in runs_root.iterdir() if path.is_dir()):
             if run_path.name in active_ids:
                 continue
+            manifest = self._run_clone_manifests.get(run_path.name)
+            reason = "inactive_run"
+            if manifest is None:
+                reason = "legacy_run_directory"
+            else:
+                non_manifest_children = [
+                    child.name for child in run_path.iterdir() if child.name != "manifest.json"
+                ]
+                if not non_manifest_children:
+                    reason = "planning_only_run_manifest"
             candidates.append(
                 GarbageCollectionCandidate(
                     run_id=run_path.name,
                     path=str(run_path),
                     size_bytes=self._tree_size(run_path),
-                    reason="inactive_run",
+                    reason=reason,
+                    template_id=(manifest.template_id if manifest is not None else None),
                 )
             )
         return GarbageCollectionPlan(run_candidates=candidates)
+
+    def cleanup_run_candidate(self, *, run_id: str, reason: str) -> bool:
+        """Delete one previously planned run candidate after validating its GC reason."""
+
+        normalized_run_id = self._normalize_manifest_segment(run_id, "run_id")
+        self._ensure_run_clone_manifests_loaded()
+        run_path = self.root_path / "runs" / normalized_run_id
+        manifest_path = self._run_manifest_path(normalized_run_id)
+
+        if reason == "planning_only_run_manifest":
+            if not manifest_path.exists():
+                self._run_clone_manifests.pop(normalized_run_id, None)
+                return False
+            if run_path.exists():
+                non_manifest_children = [
+                    child.name for child in run_path.iterdir() if child.name != "manifest.json"
+                ]
+                if non_manifest_children:
+                    raise ImageStoreValidationError(
+                        f"gc_reason_mismatch_planning_only_run_manifest: {normalized_run_id}"
+                    )
+            manifest_path.unlink(missing_ok=True)
+            if run_path.exists():
+                run_path.rmdir()
+            self._run_clone_manifests.pop(normalized_run_id, None)
+            return True
+
+        if reason == "inactive_run":
+            if not run_path.exists():
+                self._run_clone_manifests.pop(normalized_run_id, None)
+                return False
+            shutil.rmtree(run_path, ignore_errors=False)
+            self._run_clone_manifests.pop(normalized_run_id, None)
+            return True
+
+        if reason == "legacy_run_directory":
+            if manifest_path.exists():
+                raise ImageStoreValidationError(
+                    f"gc_reason_mismatch_legacy_run_directory: {normalized_run_id}"
+                )
+            if not run_path.exists():
+                return False
+            shutil.rmtree(run_path, ignore_errors=False)
+            return True
+
+        raise ImageStoreValidationError(f"gc_reason_unsupported: {reason}")
 
     def _load_templates(self) -> None:
         templates_root = self.root_path / "templates"
@@ -252,10 +345,48 @@ class SandboxImageStore:
                 )
             self._templates[record.template_id] = record
 
+    def _load_run_clone_manifests(self) -> None:
+        runs_root = self.root_path / "runs"
+        if not runs_root.exists():
+            return
+
+        loaded_manifests: dict[str, RunCloneManifest] = {}
+        for manifest_path in sorted(runs_root.glob("*/manifest.json")):
+            manifest = self._read_run_clone_manifest(manifest_path)
+            if manifest.run_id in self._run_clone_manifests:
+                continue
+            if manifest.run_id in loaded_manifests:
+                existing = self._run_manifest_path(manifest.run_id)
+                raise ImageStoreValidationError(
+                    f"run_manifest_duplicate_on_reload: {manifest.run_id}: {existing}: {manifest_path}"
+                )
+            loaded_manifests[manifest.run_id] = manifest
+        self._run_clone_manifests.update(loaded_manifests)
+
+    def _ensure_run_clone_manifests_loaded(self) -> None:
+        if self._run_clone_manifests_loaded:
+            return
+        self._load_run_clone_manifests()
+        self._run_clone_manifests_loaded = True
+
     def _write_manifest(self, record: TemplateRecord) -> None:
         manifest_path = Path(record.manifest_path or self._manifest_path(runtime=record.runtime, template_name=record.template_name))
-        manifest_path.parent.mkdir(parents=True, exist_ok=True)
         payload = self._record_to_manifest(record)
+        self._write_json_document(payload, manifest_path=manifest_path)
+
+    def _write_run_clone_manifest(self, manifest: RunCloneManifest) -> None:
+        self._write_json_document(
+            self._run_clone_manifest_to_payload(manifest),
+            manifest_path=self._run_manifest_path(manifest.run_id),
+        )
+
+    def _write_json_document(
+        self,
+        payload: dict[str, Any],
+        *,
+        manifest_path: Path,
+    ) -> None:
+        manifest_path.parent.mkdir(parents=True, exist_ok=True)
         tmp_path: Path | None = None
         try:
             with tempfile.NamedTemporaryFile(
@@ -383,8 +514,94 @@ class SandboxImageStore:
             "provenance": dict(record.provenance),
         }
 
+    def _run_clone_manifest_to_payload(self, manifest: RunCloneManifest) -> dict[str, Any]:
+        return {
+            "schema_version": MANIFEST_SCHEMA_VERSION,
+            "template_id": manifest.template_id,
+            "run_id": manifest.run_id,
+            "clone_items": [
+                {
+                    "source_path": item.source_path,
+                    "target_path": item.target_path,
+                    "mode": item.mode,
+                }
+                for item in manifest.clone_items
+            ],
+        }
+
+    def _read_run_clone_manifest(self, manifest_path: Path) -> RunCloneManifest:
+        try:
+            payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            raise ImageStoreValidationError(f"run_manifest_invalid_json: {manifest_path}") from exc
+        if not isinstance(payload, dict):
+            raise ImageStoreValidationError(f"run_manifest_expected_object: {manifest_path}")
+        if payload.get("schema_version") != MANIFEST_SCHEMA_VERSION:
+            raise ImageStoreValidationError(f"run_manifest_unsupported_schema: {manifest_path}")
+
+        required_fields = {"template_id", "run_id", "clone_items"}
+        missing_fields = sorted(required_fields.difference(payload))
+        if missing_fields:
+            missing_text = ",".join(missing_fields)
+            raise ImageStoreValidationError(
+                f"run_manifest_missing_fields: {manifest_path}: {missing_text}"
+            )
+
+        run_id = str(payload["run_id"])
+        expected_path = self._run_manifest_path(run_id)
+        if manifest_path != expected_path:
+            raise ImageStoreValidationError(
+                f"run_manifest_path_mismatch: {manifest_path}: {run_id}"
+            )
+
+        raw_clone_items = payload["clone_items"]
+        if not isinstance(raw_clone_items, list):
+            raise ImageStoreValidationError(f"run_manifest_clone_items_invalid: {manifest_path}")
+
+        return RunCloneManifest(
+            template_id=str(payload["template_id"]),
+            run_id=run_id,
+            clone_items=[
+                self._clone_item_from_payload(item, run_id=run_id, manifest_path=manifest_path)
+                for item in raw_clone_items
+            ],
+        )
+
+    def _clone_item_from_payload(
+        self,
+        item: Any,
+        *,
+        run_id: str,
+        manifest_path: Path,
+    ) -> CloneItem:
+        if not isinstance(item, dict):
+            raise ImageStoreValidationError(f"run_manifest_clone_item_invalid: {manifest_path}")
+        required_fields = {"source_path", "target_path", "mode"}
+        missing_fields = sorted(required_fields.difference(item))
+        if missing_fields:
+            missing_text = ",".join(missing_fields)
+            raise ImageStoreValidationError(
+                f"run_manifest_clone_item_missing_fields: {manifest_path}: {missing_text}"
+            )
+        clone_item = CloneItem(
+            source_path=str(item["source_path"]),
+            target_path=str(item["target_path"]),
+            mode=str(item["mode"]),
+        )
+        if not clone_item.source_path.strip() or not clone_item.target_path.strip():
+            raise ImageStoreValidationError(f"run_manifest_clone_item_path_invalid: {manifest_path}")
+        if clone_item.mode != "clone":
+            raise ImageStoreValidationError(f"run_manifest_clone_item_mode_invalid: {manifest_path}")
+        expected_target_root = self.root_path / "runs" / run_id
+        if Path(clone_item.target_path).parent != expected_target_root:
+            raise ImageStoreValidationError(f"run_manifest_clone_item_target_invalid: {manifest_path}")
+        return clone_item
+
     def _manifest_path(self, *, runtime: str, template_name: str) -> Path:
         return self.root_path / "templates" / runtime / template_name / "manifest.json"
+
+    def _run_manifest_path(self, run_id: str) -> Path:
+        return self.root_path / "runs" / run_id / "manifest.json"
 
     def _artifact_from_path(self, path: Path) -> TemplateArtifact:
         if not path.is_file():

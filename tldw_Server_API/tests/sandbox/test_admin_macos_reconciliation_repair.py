@@ -256,6 +256,9 @@ def test_repair_stale_row_dry_run_plans_delete_without_mutation(monkeypatch) -> 
                     "session_id": "sess-stale",
                     "vm_id": "vm-missing",
                     "reason": "vm_missing",
+                    "persisted_template_id": "vz_linux:bundle-stale",
+                    "helper_template_id": "vz_linux:bundle-old",
+                    "template_id_matches_persisted": False,
                 }
             ]
         ),
@@ -276,6 +279,9 @@ def test_repair_stale_row_dry_run_plans_delete_without_mutation(monkeypatch) -> 
             "vm_id": "vm-missing",
             "status": "planned",
             "reason": "vm_missing",
+            "persisted_template_id": "vz_linux:bundle-stale",
+            "helper_template_id": "vz_linux:bundle-old",
+            "template_id_matches_persisted": False,
         }
     ]
 
@@ -517,6 +523,11 @@ def test_repair_orphan_vm_dry_run_plans_termination_without_helper_call(
                     "vm_id": "vm-orphan",
                     "reason": "owned_orphan",
                     "termination_eligible": True,
+                    "run_id": "run-orphan",
+                    "template_id": "vz_linux:bundle-owned",
+                    "planning_source": "image_store",
+                    "run_manifest_path": "/tmp/image-store/runs/run-orphan/manifest.json",
+                    "run_manifest_present": True,
                 }
             ]
         ),
@@ -542,6 +553,11 @@ def test_repair_orphan_vm_dry_run_plans_termination_without_helper_call(
             "status": "planned",
             "reason": "owned_orphan",
             "termination_eligible": True,
+            "run_id": "run-orphan",
+            "template_id": "vz_linux:bundle-owned",
+            "planning_source": "image_store",
+            "run_manifest_path": "/tmp/image-store/runs/run-orphan/manifest.json",
+            "run_manifest_present": True,
         }
     ]
 
@@ -670,6 +686,10 @@ def test_repair_ineligible_or_unknown_orphan_vm_skips_without_helper_call(
                     "vm_id": "vm-skip",
                     "reason": reason,
                     "termination_eligible": False,
+                    "template_id": "vz_linux:bundle-skip",
+                    "planning_source": "image_store",
+                    "run_manifest_path": "/tmp/image-store/runs/run-skip/manifest.json",
+                    "run_manifest_present": False,
                 }
             ]
         ),
@@ -698,6 +718,10 @@ def test_repair_ineligible_or_unknown_orphan_vm_skips_without_helper_call(
             "status": "skipped",
             "reason": reason,
             "termination_eligible": False,
+            "template_id": "vz_linux:bundle-skip",
+            "planning_source": "image_store",
+            "run_manifest_path": "/tmp/image-store/runs/run-skip/manifest.json",
+            "run_manifest_present": False,
         }
     ]
 

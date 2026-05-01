@@ -65,6 +65,8 @@ Current limitations:
 - `seatbelt` real execution still depends on deprecated `sandbox-exec` and may be blocked by an enclosing sandbox even on macOS hosts.
 - `vz_linux` supports session VM reuse through persisted VZ session-control metadata; `vz_macos` does not.
 - `vz_linux` admin diagnostics include reconciliation data comparing persisted VZ session-control rows against live helper VM state.
+- `vz_linux` admin diagnostics also include a read-only image-store block that correlates persisted run manifests and dry-run GC classifications with reconciliation/helper state.
+- `vz_linux` also exposes `GET /api/v1/sandbox/admin/macos-image-store/cleanup-plan` for read-only GC action planning and `POST /api/v1/sandbox/admin/macos-image-store/cleanup` for explicit admin cleanup, which defaults to `dry_run=true`; unfiltered mutating cleanup requires `confirm_all=true`.
 - `vz_linux` admin diagnostics now also project an additive
   `startup_warning_summary` field from the app-owned startup warning registry;
   low-level diagnostics collection remains app-agnostic.
@@ -83,8 +85,14 @@ Current limitations:
   raw-disk compatibility mode through `boot_mode` and `validation_strength`.
 - `SandboxImageStore` persists template manifests under
   `<root>/templates/<runtime>/<template>/manifest.json`, records artifact
-  size/SHA-256 metadata plus optional bundle provenance, and exposes dry-run
-  run-directory GC planning.
+  size/SHA-256 metadata plus optional bundle provenance, persists run clone
+  planning manifests under `<root>/runs/<run_id>/manifest.json`, and exposes
+  dry-run run-directory GC planning with candidate reasons that distinguish
+  planning-only manifests, fully materialized inactive runs, and legacy run
+  directories without a persisted manifest.
+- When `TLDW_SANDBOX_IMAGE_STORE_ROOT` is configured, `vz_linux` can also
+  resolve `spec.base_image` as a registered image-store `template_id` instead
+  of a raw path, provided the template record has a stored `source_path`.
 - `seatbelt` is intentionally conservative and should not be treated as equivalent to a VM boundary.
 - Real host `vz_linux` smoke coverage should normally be run through
   `tools/macos-vz-helper/scripts/vz-helperctl.py smoke`; the lower-level
@@ -93,6 +101,8 @@ Current limitations:
   `tldw_Server_API/tests/sandbox/test_vz_linux_real_host_e2e.py` and requires
   `TLDW_SANDBOX_VZ_LINUX_E2E=1`,
   `TLDW_SANDBOX_VZ_LINUX_E2E_BASE_IMAGE=<value>`,
+  `TLDW_SANDBOX_IMAGE_STORE_ROOT=<path>` when that value is a registered
+  template id,
   `TLDW_SANDBOX_MACOS_HELPER_SOCKET=<socket>`, `SANDBOX_ENABLE_EXECUTION=1`,
   and `SANDBOX_BACKGROUND_EXECUTION=0`.
 - Real helper-daemon smoke coverage is opt-in through `tldw_Server_API/tests/sandbox/test_macos_virtualization_helper_daemon_host_gated.py` and requires `TLDW_SANDBOX_MACOS_HELPER_DAEMON_SMOKE=1`.
@@ -107,6 +117,8 @@ Current limitations:
   - `/api/v1/sandbox/runtimes`
   - `/api/v1/admin/startup-warnings`
   - `/api/v1/sandbox/admin/macos-diagnostics`
+  - `/api/v1/sandbox/admin/macos-image-store/cleanup-plan`
+  - `POST /api/v1/sandbox/admin/macos-image-store/cleanup`
   - `POST /api/v1/sandbox/admin/macos-reconciliation/repair`
   - `/api/v1/sandbox/runs`
 
@@ -114,8 +126,9 @@ Current limitations:
 `/api/v1/sandbox/admin/macos-diagnostics` is an admin-only diagnostics surface for
 operator troubleshooting and exposes helper/template readiness details that are not
 included in the public discovery payload, plus reconciliation data for persisted
-`vz_linux` session-control rows versus live helper VM state. It is read-only and
-now includes a compact `startup_warning_summary` field projected from the
+`vz_linux` session-control rows versus live helper VM state, and image-store
+correlation for persisted run manifests and dry-run GC candidates. It is
+read-only and now includes a compact `startup_warning_summary` field projected from the
 current-process startup warning registry.
 `/api/v1/admin/startup-warnings` is the generic admin-only companion surface for
 the same startup records and returns full current-process warning items plus
@@ -139,6 +152,7 @@ Selected configuration knobs:
   - `TLDW_SANDBOX_MACOS_HELPER_SOCKET`
   - `TLDW_SANDBOX_MACOS_HELPER_READY`
   - `TLDW_SANDBOX_MACOS_HELPER_PATH`
+  - `TLDW_SANDBOX_IMAGE_STORE_ROOT`
   - `TLDW_SANDBOX_VZ_LINUX_AVAILABLE`
   - `TLDW_SANDBOX_VZ_LINUX_TEMPLATE_READY`
   - `TLDW_SANDBOX_VZ_LINUX_TEMPLATE_SOURCE`

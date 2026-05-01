@@ -112,7 +112,16 @@ def _diagnostics_payload() -> dict:
             "foreign_orphaned_vm_ids": [],
             "items": [],
             "reasons": ["macos_virtualization_helper_unavailable"],
-        }
+        },
+        "image_store": {
+            "configured": False,
+            "root_path": None,
+            "registered_templates": 0,
+            "run_manifests": 0,
+            "gc_candidates": 0,
+            "items": [],
+            "reasons": [],
+        },
     }
 
 
@@ -164,6 +173,7 @@ def test_admin_macos_diagnostics_returns_structured_payload(monkeypatch) -> None
         "templates",
         "runtimes",
         "reconciliation",
+        "image_store",
         "startup_warning_summary",
     }
     assert body["host"]["supported"] is True
@@ -174,6 +184,8 @@ def test_admin_macos_diagnostics_returns_structured_payload(monkeypatch) -> None
     assert body["reconciliation"]["unhealthy_session_ids"] == []
     assert body["reconciliation"]["skipped_active_session_ids"] == []
     assert body["reconciliation"]["items"] == []
+    assert body["image_store"]["configured"] is False
+    assert body["image_store"]["items"] == []
     assert body["startup_warning_summary"] == {
         "present": True,
         "blocking": False,
@@ -209,6 +221,22 @@ def test_admin_macos_diagnostics_allows_real_vz_linux_execution_mode(monkeypatch
         }
     ]
     payload["reconciliation"]["reasons"] = []
+    payload["image_store"]["configured"] = True
+    payload["image_store"]["root_path"] = "/tmp/image-store"
+    payload["image_store"]["registered_templates"] = 1
+    payload["image_store"]["run_manifests"] = 1
+    payload["image_store"]["gc_candidates"] = 0
+    payload["image_store"]["items"] = [
+        {
+            "run_id": "run-live",
+            "template_id": "vz_linux:ubuntu-24.04",
+            "run_manifest_path": "/tmp/image-store/runs/run-live/manifest.json",
+            "run_manifest_present": True,
+            "gc_reason": None,
+            "matched_vm_id": "vm-live",
+            "matched_reconciliation_status": "healthy",
+        }
+    ]
 
     fake_service = SimpleNamespace(macos_diagnostics=lambda: payload)
     monkeypatch.setattr(sandbox_mod, "_service", fake_service, raising=True)
@@ -227,3 +255,5 @@ def test_admin_macos_diagnostics_allows_real_vz_linux_execution_mode(monkeypatch
     assert body["reconciliation"]["computed"] is True
     assert body["reconciliation"]["healthy_session_ids"] == ["sess-live"]
     assert body["reconciliation"]["items"][0]["status"] == "healthy"
+    assert body["image_store"]["configured"] is True
+    assert body["image_store"]["items"][0]["matched_vm_id"] == "vm-live"

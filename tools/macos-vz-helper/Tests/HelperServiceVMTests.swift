@@ -44,7 +44,10 @@ import Testing
         runID: "run-owned",
         sessionID: "session-owned",
         sessionMode: true,
+        templateID: "vz_linux:template-owned",
         templatePath: "/tmp/template.img",
+        runManifestPath: "/tmp/image-store/runs/run-owned/manifest.json",
+        planningSource: "image_store",
         workspacePath: "/tmp/workspace",
         createdAt: ""
     )
@@ -63,7 +66,10 @@ import Testing
     #expect(response.metadata.runID == "run-owned")
     #expect(response.metadata.sessionID == "session-owned")
     #expect(response.metadata.sessionMode == true)
+    #expect(response.metadata.templateID == "vz_linux:template-owned")
     #expect(response.metadata.templatePath == "/tmp/template.img")
+    #expect(response.metadata.runManifestPath == "/tmp/image-store/runs/run-owned/manifest.json")
+    #expect(response.metadata.planningSource == "image_store")
     #expect(response.metadata.workspacePath == "/tmp/workspace")
     #expect(response.metadata.createdAt.isEmpty == false)
     #expect(status?.metadata.runID == "run-owned")
@@ -93,6 +99,7 @@ import Testing
     #expect(response.metadata.owner == "unknown")
     #expect(response.metadata.runtime == "vz_linux")
     #expect(response.metadata.runID == "")
+    #expect(response.metadata.templateID == "")
     #expect(response.metadata.createdAt.isEmpty == false)
 }
 

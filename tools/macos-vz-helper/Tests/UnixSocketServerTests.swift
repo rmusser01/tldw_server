@@ -79,7 +79,7 @@ import Testing
     )
 
     let createRequest = """
-    {"operation":"create_vm","protocol_version":"1","request":{"vm_name":"vm-owned","owner":"tldw","runtime":"vz_linux","run_id":"run-owned","session_id":"session-owned","session_mode":true,"template":"/tmp/template.img","workspace_path":"/workspace"}}
+    {"operation":"create_vm","protocol_version":"1","request":{"vm_name":"vm-owned","owner":"tldw","runtime":"vz_linux","run_id":"run-owned","session_id":"session-owned","session_mode":true,"template_id":"vz_linux:template-owned","template":"/tmp/template.img","run_manifest_path":"/tmp/image-store/runs/run-owned/manifest.json","planning_source":"image_store","workspace_path":"/workspace"}}
     """.data(using: .utf8)!
     let createResponseData = try server.handleRequestData(createRequest)
     let createJSON = try JSONSerialization.jsonObject(with: createResponseData) as? [String: Any]
@@ -91,7 +91,10 @@ import Testing
     #expect(metadata?["run_id"] as? String == "run-owned")
     #expect(metadata?["session_id"] as? String == "session-owned")
     #expect(metadata?["session_mode"] as? Bool == true)
+    #expect(metadata?["template_id"] as? String == "vz_linux:template-owned")
     #expect(metadata?["template_path"] as? String == "/tmp/template.img")
+    #expect(metadata?["run_manifest_path"] as? String == "/tmp/image-store/runs/run-owned/manifest.json")
+    #expect(metadata?["planning_source"] as? String == "image_store")
     #expect(metadata?["workspace_path"] as? String == "/workspace")
     #expect((metadata?["created_at"] as? String)?.isEmpty == false)
 }

@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field
+
 try:
     from pydantic import model_validator
 except ImportError:  # pragma: no cover - pydantic v1 fallback
@@ -321,6 +322,15 @@ class SandboxAdminMacOSReconciliationItem(BaseModel):
     healthy: bool | None = None
     reason: str | None = None
     termination_eligible: bool | None = None
+    run_id: str | None = None
+    helper_session_id: str | None = None
+    template_id: str | None = None
+    persisted_template_id: str | None = None
+    helper_template_id: str | None = None
+    template_id_matches_persisted: bool | None = None
+    planning_source: str | None = None
+    run_manifest_path: str | None = None
+    run_manifest_present: bool | None = None
 
 
 class SandboxAdminMacOSReconciliationDiagnostics(BaseModel):
@@ -341,6 +351,28 @@ class SandboxAdminMacOSReconciliationDiagnostics(BaseModel):
     reasons: list[str] = Field(default_factory=list)
 
 
+class SandboxAdminMacOSImageStoreItem(BaseModel):
+    run_id: str
+    template_id: str | None = None
+    run_manifest_path: str | None = None
+    run_manifest_present: bool | None = None
+    gc_reason: str | None = None
+    gc_path: str | None = None
+    matched_vm_id: str | None = None
+    matched_reconciliation_status: str | None = None
+    matched_reconciliation_reason: str | None = None
+
+
+class SandboxAdminMacOSImageStoreDiagnostics(BaseModel):
+    configured: bool
+    root_path: str | None = None
+    registered_templates: int = 0
+    run_manifests: int = 0
+    gc_candidates: int = 0
+    items: list[SandboxAdminMacOSImageStoreItem] = Field(default_factory=list)
+    reasons: list[str] = Field(default_factory=list)
+
+
 class SandboxAdminStartupWarningSummary(BaseModel):
     """Compact startup warning summary projected into sandbox diagnostics."""
 
@@ -357,6 +389,7 @@ class SandboxAdminMacOSDiagnosticsResponse(BaseModel):
     templates: dict[str, SandboxAdminMacOSTemplateDiagnostics] = Field(default_factory=dict)
     runtimes: dict[str, SandboxAdminMacOSRuntimeDiagnostics] = Field(default_factory=dict)
     reconciliation: SandboxAdminMacOSReconciliationDiagnostics | None = None
+    image_store: SandboxAdminMacOSImageStoreDiagnostics | None = None
     startup_warning_summary: SandboxAdminStartupWarningSummary | None = None
 
 
@@ -374,6 +407,14 @@ class SandboxAdminMacOSReconciliationRepairAction(BaseModel):
     status: str
     reason: str | None = None
     termination_eligible: bool | None = None
+    run_id: str | None = None
+    template_id: str | None = None
+    planning_source: str | None = None
+    run_manifest_path: str | None = None
+    run_manifest_present: bool | None = None
+    persisted_template_id: str | None = None
+    helper_template_id: str | None = None
+    template_id_matches_persisted: bool | None = None
 
 
 class SandboxAdminMacOSReconciliationRepairSummary(BaseModel):
@@ -390,6 +431,63 @@ class SandboxAdminMacOSReconciliationRepairResponse(BaseModel):
     helper: dict[str, object] = Field(default_factory=dict)
     summary: SandboxAdminMacOSReconciliationRepairSummary
     actions: list[SandboxAdminMacOSReconciliationRepairAction] = Field(default_factory=list)
+    reasons: list[str] = Field(default_factory=list)
+
+
+class SandboxAdminMacOSImageStoreCleanupAction(BaseModel):
+    type: str
+    run_id: str
+    status: str
+    error: str | None = None
+    template_id: str | None = None
+    run_manifest_path: str | None = None
+    run_manifest_present: bool | None = None
+    gc_reason: str | None = None
+    gc_path: str | None = None
+    matched_vm_id: str | None = None
+    matched_reconciliation_status: str | None = None
+    matched_reconciliation_reason: str | None = None
+
+
+class SandboxAdminMacOSImageStoreCleanupPlanSummary(BaseModel):
+    total_candidates: int = 0
+    planned_actions: int = 0
+    blocked_live_matches: int = 0
+    planning_only_run_manifests: int = 0
+    inactive_runs: int = 0
+    legacy_run_directories: int = 0
+
+
+class SandboxAdminMacOSImageStoreCleanupPlanResponse(BaseModel):
+    dry_run: bool
+    image_store: SandboxAdminMacOSImageStoreDiagnostics
+    summary: SandboxAdminMacOSImageStoreCleanupPlanSummary
+    actions: list[SandboxAdminMacOSImageStoreCleanupAction] = Field(default_factory=list)
+    reasons: list[str] = Field(default_factory=list)
+
+
+class SandboxAdminMacOSImageStoreCleanupRequest(BaseModel):
+    dry_run: bool = True
+    confirm_all: bool = False
+    action_types: list[str] | None = None
+    run_ids: list[str] | None = None
+
+
+class SandboxAdminMacOSImageStoreCleanupSummary(BaseModel):
+    total_candidates: int = 0
+    planned_actions: int = 0
+    deleted_actions: int = 0
+    blocked_live_matches: int = 0
+    planning_only_run_manifests: int = 0
+    inactive_runs: int = 0
+    legacy_run_directories: int = 0
+
+
+class SandboxAdminMacOSImageStoreCleanupResponse(BaseModel):
+    dry_run: bool
+    image_store: SandboxAdminMacOSImageStoreDiagnostics
+    summary: SandboxAdminMacOSImageStoreCleanupSummary
+    actions: list[SandboxAdminMacOSImageStoreCleanupAction] = Field(default_factory=list)
     reasons: list[str] = Field(default_factory=list)
 
 

@@ -54,7 +54,10 @@ struct VMOwnershipMetadata: Codable, Equatable {
     let runID: String
     let sessionID: String
     let sessionMode: Bool
+    let templateID: String
     let templatePath: String
+    let runManifestPath: String
+    let planningSource: String
     let workspacePath: String
     let createdAt: String
 
@@ -64,7 +67,10 @@ struct VMOwnershipMetadata: Codable, Equatable {
         runID: "",
         sessionID: "",
         sessionMode: false,
+        templateID: "",
         templatePath: "",
+        runManifestPath: "",
+        planningSource: "",
         workspacePath: "",
         createdAt: ""
     )
@@ -75,7 +81,10 @@ struct VMOwnershipMetadata: Codable, Equatable {
         case runID = "run_id"
         case sessionID = "session_id"
         case sessionMode = "session_mode"
+        case templateID = "template_id"
         case templatePath = "template_path"
+        case runManifestPath = "run_manifest_path"
+        case planningSource = "planning_source"
         case workspacePath = "workspace_path"
         case createdAt = "created_at"
     }

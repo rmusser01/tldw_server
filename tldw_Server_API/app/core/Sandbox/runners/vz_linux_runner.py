@@ -12,6 +12,7 @@ from typing import Any
 
 from loguru import logger
 
+from ..image_store import ImageStoreValidationError, SandboxImageStore
 from ..macos_virtualization.helper_client import (
     MacOSVirtualizationHelperClient,
     MacOSVirtualizationHelperProtocolError,
@@ -20,8 +21,7 @@ from ..macos_virtualization.helper_client import (
 from ..models import RunPhase, RunSpec, RunStatus, RuntimeType
 from ..runtime_capabilities import RuntimePreflightResult
 from ..streams import get_hub
-from .vz_common import VZBaseRunner, _VZ_NONCRITICAL_EXCEPTIONS
-from .vz_common import vz_host_facts
+from .vz_common import _VZ_NONCRITICAL_EXCEPTIONS, VZBaseRunner, vz_host_facts
 
 _VZ_LINUX_RUNNER_NONCRITICAL_EXCEPTIONS = (
     OSError,
@@ -210,6 +210,41 @@ class VZLinuxRunner(VZBaseRunner):
         if callable(deleter):
             deleter(sid)
 
+    def _image_store(self) -> SandboxImageStore | None:
+        root_text = str(os.getenv("TLDW_SANDBOX_IMAGE_STORE_ROOT") or "").strip()
+        if not root_text:
+            return None
+        try:
+            return SandboxImageStore(root_path=root_text)
+        except (ImageStoreValidationError, OSError, ValueError) as exc:
+            logger.warning("vz_linux_image_store_unavailable root={} error={}", root_text, exc)
+            return None
+
+    def _looks_like_image_store_template_id(self, value: str) -> bool:
+        return ":" in value and "/" not in value and "\\" not in value
+
+    def _resolve_template_request(
+        self,
+        *,
+        base_image: str | None,
+    ) -> tuple[str, dict[str, str], SandboxImageStore | None]:
+        template_text = str(base_image or "").strip()
+        if not template_text or not self._looks_like_image_store_template_id(template_text):
+            return template_text, {}, None
+
+        store = self._image_store()
+        if store is None:
+            return template_text, {}, None
+        record = store.get_template(template_text)
+        if record is None:
+            return template_text, {}, None
+        if not record.source_path:
+            raise RuntimeError("image_store_template_source_missing")
+        return record.source_path, {
+            "planning_source": "image_store",
+            "template_id": record.template_id,
+        }, store
+
     @classmethod
     def cancel_run(cls, run_id: str) -> bool:
         vm_id, run_dir = cls._clear_active_run(run_id)
@@ -272,6 +307,9 @@ class VZLinuxRunner(VZBaseRunner):
             self._write_inline_files(workspace, spec.files_inline)
 
             helper = self.helper_client_cls()
+            template_request, template_request_metadata, image_store = self._resolve_template_request(
+                base_image=spec.base_image,
+            )
             session_control = self._load_session_control(spec.session_id)
             if (
                 session_mode
@@ -296,7 +334,7 @@ class VZLinuxRunner(VZBaseRunner):
                 template_validation = helper.validate_template(
                     {
                         "runtime": self.runtime_type.value,
-                        "template": spec.base_image,
+                        "template": template_request,
                     }
                 )
                 if not bool(template_validation.get("ready")):
@@ -305,8 +343,31 @@ class VZLinuxRunner(VZBaseRunner):
                     ]
                     reason_text = ", ".join(template_reasons) if template_reasons else "template_invalid"
                     raise RuntimeError(reason_text)
-                template_ref = str(template_validation.get("template_id") or "").strip() or spec.base_image
-                template_source = str(template_validation.get("source") or "").strip() or spec.base_image
+                metadata_template_id = str(template_request_metadata.get("template_id") or "").strip()
+                template_ref = (
+                    metadata_template_id
+                    or str(template_validation.get("template_id") or "").strip()
+                    or spec.base_image
+                )
+                template_source = (
+                    str(template_validation.get("source") or "").strip()
+                    or template_request
+                    or spec.base_image
+                )
+                create_vm_metadata = {
+                    key: value
+                    for key, value in template_request_metadata.items()
+                    if key not in {"template", "template_id"}
+                }
+                should_persist_run_manifest = (
+                    image_store is not None
+                    and str(template_request_metadata.get("planning_source") or "").strip() == "image_store"
+                    and bool(metadata_template_id)
+                )
+                if should_persist_run_manifest and image_store is not None:
+                    create_vm_metadata["run_manifest_path"] = str(
+                        image_store.root_path / "runs" / run_id / "manifest.json"
+                    )
                 vm = helper.create_vm(
                     {
                         "owner": "tldw",
@@ -317,12 +378,16 @@ class VZLinuxRunner(VZBaseRunner):
                         "session_mode": session_mode,
                         "workspace_path": workspace,
                         "workspace_mount": "virtiofs",
+                        "template_id": template_ref,
                         "template": template_source,
                         "network_policy": str(spec.network_policy or "deny_all").strip().lower() or "deny_all",
                         "timeout_sec": int(spec.startup_timeout_sec or spec.timeout_sec or 300),
+                        **create_vm_metadata,
                     }
                 )
                 vm_id = vm.vm_id
+                if should_persist_run_manifest and image_store is not None and metadata_template_id:
+                    image_store.prepare_run_clone(template_id=metadata_template_id, run_id=run_id)
                 should_terminate_vm = not session_mode
                 if session_mode:
                     self._store_session_control(

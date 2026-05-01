@@ -115,12 +115,16 @@ The image store is now filesystem-backed at:
         manifest.json
   runs/
     <run-id>/
+      manifest.json
 ```
 
 Template manifests include artifact paths, artifact size, SHA-256 hashes,
 labels, registration time, source path, and optional build provenance from a
-bundle `build-info.json`. The store remains an inventory and planning layer,
-not the bootability source of truth; helper `validate_template` still owns that.
+bundle `build-info.json`. Run clone manifests now persist deterministic
+per-run clone planning under `runs/<run_id>/manifest.json`, so later helper
+integration and dry-run GC can reason over store-owned run metadata. The store
+remains an inventory and planning layer, not the bootability source of truth;
+helper `validate_template` still owns that.
 
 Minimal Python registration example:
 
@@ -139,7 +143,37 @@ gc_plan = store.plan_garbage_collection(active_run_ids=set())
 ```
 
 `plan_garbage_collection()` is dry-run only. It returns candidate records for
-inactive run directories and does not delete files.
+inactive run directories and does not delete files. Candidate reasons now
+differentiate:
+
+- `planning_only_run_manifest`: a persisted run manifest exists but no clone
+  artifacts were materialized under that run directory yet
+- `inactive_run`: a persisted run manifest exists and the run directory also
+  contains clone/runtime files
+- `legacy_run_directory`: files exist under `runs/<run_id>/` without a
+  persisted run manifest
+
+The admin image-store surfaces now split planning from mutation:
+
+- `GET /api/v1/sandbox/admin/macos-image-store/cleanup-plan`: read-only
+  candidate planning derived from diagnostics correlation
+- `POST /api/v1/sandbox/admin/macos-image-store/cleanup`: explicit admin action
+  surface that defaults to `dry_run=true` and reuses the same candidate plan
+
+When `dry_run=false`, the request must either include at least one filter
+(`action_types` or `run_ids`) or set `confirm_all=true`. This keeps broad
+cleanup of every planned candidate explicit.
+
+Mutating cleanup only applies to already planned candidates that do not match a
+live VM. It currently supports:
+
+- deleting a planning-only manifest directory when it only contains
+  `manifest.json`
+- deleting a fully inactive run directory
+- deleting a legacy run directory that has no persisted manifest
+
+If a candidate still matches a live helper VM, cleanup fails closed for that
+item and reports `live_vm_matches_blocked_cleanup` instead of deleting files.
 
 ## Networking
 
@@ -170,6 +204,10 @@ It is admin-only and returns:
 - template readiness for `vz_linux` and `vz_macos`, with optional template source metadata
 - per-runtime execution mode and remediation hints
 - reconciliation data comparing persisted VZ session rows with live helper VM state
+- image-store correlation showing persisted run manifests, dry-run GC candidate
+  classification, and any matching reconciliation/helper VM records
+- an additive image-store cleanup plan endpoint and a default-dry-run cleanup
+  mutation endpoint for explicit operator action
 - additive `startup_warning_summary` showing whether current-process startup
   warnings were recorded, whether any were blocking, and which stable warning
   codes were emitted during boot
@@ -305,10 +343,19 @@ The underlying opt-in pytest module is still available directly:
 Required env for that module:
 
 - `TLDW_SANDBOX_VZ_LINUX_E2E=1`
-- `TLDW_SANDBOX_VZ_LINUX_E2E_BASE_IMAGE=<guest-template-id-or-base-image>`
+- `TLDW_SANDBOX_VZ_LINUX_E2E_BASE_IMAGE=<base-image-path-or-registered-template-id>`
 - `TLDW_SANDBOX_MACOS_HELPER_SOCKET=/path/to/helper.sock`
 - real helper reachability required through helper `ping`
 - helper-backed template validation required through `validate_template`
+
+If `TLDW_SANDBOX_VZ_LINUX_E2E_BASE_IMAGE` is a registered template id instead of
+an absolute bundle/path, also set:
+
+- `TLDW_SANDBOX_IMAGE_STORE_ROOT=/var/lib/tldw/sandbox-images`
+
+When that root is configured, the `vz_linux` runner resolves registered
+template ids through the image store, uses the stored `source_path` for helper
+validation/boot, and persists a run-scoped clone manifest before VM creation.
 
 The helper function in that test module also forces:
 
