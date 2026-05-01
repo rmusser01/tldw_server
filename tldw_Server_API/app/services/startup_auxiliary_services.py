@@ -31,12 +31,21 @@ class AuxiliaryStartupHandles:
     llm_usage_task: Any | None = None
 
 
-async def start_auxiliary_services(app_settings: Mapping[str, Any]) -> AuxiliaryStartupHandles:
-    """Start the small auxiliary startup slice and return explicit task handles."""
+async def start_auxiliary_services(
+    app_settings: Mapping[str, Any],
+    *,
+    worker_inventory: Any | None = None,
+) -> AuxiliaryStartupHandles:
+    """Start auxiliary services and return explicit task handles.
+
+    When ``worker_inventory`` is provided, usage aggregators are registered
+    with lifecycle worker management. Passing ``None`` preserves the legacy
+    direct-task path in the downstream aggregator startup helpers.
+    """
     claims_alerts_task = await _start_claims_alerts_scheduler()
     claims_review_metrics_task = await _start_claims_review_metrics_scheduler()
-    usage_task = await _start_usage_aggregator()
-    llm_usage_task = await _start_llm_usage_aggregator()
+    usage_task = await _start_usage_aggregator(worker_inventory=worker_inventory)
+    llm_usage_task = await _start_llm_usage_aggregator(worker_inventory=worker_inventory)
     await _start_personalization_consolidation(app_settings)
     return AuxiliaryStartupHandles(
         claims_alerts_task=claims_alerts_task,
@@ -68,12 +77,16 @@ async def _start_claims_review_metrics_scheduler() -> Any | None:
         return None
 
 
-async def _start_usage_aggregator() -> Any | None:
+async def _start_usage_aggregator(
+    *,
+    worker_inventory: Any | None = None,
+) -> Any | None:
+    """Start usage aggregation through lifecycle inventory or legacy task mode."""
     try:
         if _env_flag_enabled("DISABLE_USAGE_AGGREGATOR"):
             logger.info("Usage aggregator disabled via DISABLE_USAGE_AGGREGATOR")
             return None
-        task = await _start_usage_aggregator_service()
+        task = await _start_usage_aggregator_service(worker_inventory=worker_inventory)
         if task:
             logger.info("Usage aggregator started")
         return task
@@ -82,12 +95,16 @@ async def _start_usage_aggregator() -> Any | None:
         return None
 
 
-async def _start_llm_usage_aggregator() -> Any | None:
+async def _start_llm_usage_aggregator(
+    *,
+    worker_inventory: Any | None = None,
+) -> Any | None:
+    """Start LLM usage aggregation through lifecycle inventory or legacy task mode."""
     try:
         if _env_flag_enabled("DISABLE_LLM_USAGE_AGGREGATOR"):
             logger.info("LLM usage aggregator disabled via DISABLE_LLM_USAGE_AGGREGATOR")
             return None
-        task = await _start_llm_usage_aggregator_service()
+        task = await _start_llm_usage_aggregator_service(worker_inventory=worker_inventory)
         if task:
             logger.info("LLM usage aggregator started")
         return task
@@ -126,16 +143,16 @@ async def _start_claims_review_metrics_scheduler_service() -> Any | None:
     return await start_claims_review_metrics_scheduler()
 
 
-async def _start_usage_aggregator_service() -> Any | None:
+async def _start_usage_aggregator_service(**kwargs: Any) -> Any | None:
     from tldw_Server_API.app.services.usage_aggregator import start_usage_aggregator
 
-    return await start_usage_aggregator()
+    return await start_usage_aggregator(**kwargs)
 
 
-async def _start_llm_usage_aggregator_service() -> Any | None:
+async def _start_llm_usage_aggregator_service(**kwargs: Any) -> Any | None:
     from tldw_Server_API.app.services.llm_usage_aggregator import start_llm_usage_aggregator
 
-    return await start_llm_usage_aggregator()
+    return await start_llm_usage_aggregator(**kwargs)
 
 
 def _get_consolidation_service() -> Any:
