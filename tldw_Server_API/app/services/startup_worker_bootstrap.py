@@ -46,6 +46,7 @@ async def initialize_startup_worker_bootstrap(
         route_enabled=route_enabled,
         startup_guard_exceptions=startup_guard_exceptions,
         owned_job_pollers=owned_job_pollers,
+        worker_inventory=worker_inventory,
         register_owned_job_poller=register_owned_job_poller,
     )
     startup_service_tail_handles = await _initialize_startup_service_tail(

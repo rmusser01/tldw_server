@@ -102,7 +102,7 @@ async def shutdown_post_worker_services(
         jobs_notifications_bridge_task=jobs_notifications_bridge_task,
         embeddings_compactor_task=embeddings_compactor_task,
         embeddings_compactor_stop_event=embeddings_compactor_stop_event,
-        websub_renewal_task=websub_renewal_task,
+        websub_renewal_task=_task_if_not_stopped("websub_renewal_task", websub_renewal_task),
         guard_exceptions=guard_exceptions,
     )
     usage_shutdown_handles = await _stop_usage_aggregators(
@@ -299,7 +299,7 @@ async def run_shutdown_post_worker_services(
             jobs_notifications_bridge_task=jobs_notifications_bridge_task,
             embeddings_compactor_task=embeddings_compactor_task,
             embeddings_compactor_stop_event=embeddings_compactor_stop_event,
-            websub_renewal_task=websub_renewal_task,
+            websub_renewal_task=_fallback_if_not_stopped("websub_renewal_task", websub_renewal_task),
             usage_task=usage_task,
             llm_usage_task=llm_usage_task,
             jobs_metrics_task=_fallback_if_not_stopped("jobs_metrics_task", jobs_metrics_task),
