@@ -118,8 +118,11 @@ Important fields:
 - `source_world_book_ids_json`
 - `content_rating`
 - `trust_level`: `local`, `trusted_restore`, `untrusted_import`, or `mixed`
+- `linked_chat_mode`: V1 default `read_only_context`
 - `seed`
 - `settings_json`
+- `scene_version`
+- `active_turn_request_id`
 - `created_at`
 - `updated_at`
 - `deleted`
@@ -152,6 +155,9 @@ Required uniqueness:
 Core event types:
 
 - `session_started`
+- `turn_started`
+- `turn_completed`
+- `turn_failed`
 - `user_turn`
 - `model_turn`
 - `choice_presented`
@@ -169,6 +175,48 @@ Core event types:
 
 The event payload must be JSON-schema-versioned so future event fields can be
 added without breaking replay.
+
+### `vn_play_turn_requests`
+
+Durable idempotency and in-flight turn tracking. This table is required because
+turns can be slow, clients can retry, and model calls happen outside database
+transactions.
+
+Important fields:
+
+- `id`
+- `session_id`
+- `owner_user_id`
+- `idempotency_key`
+- `request_payload_hash`
+- `base_scene_version`
+- `status`: `pending`, `model_calling`, `model_failed`, `parse_failed`,
+  `completed`, `abandoned`, `cancelled`
+- `input_event_id`
+- `turn_started_event_id`
+- `turn_completed_event_id`
+- `response_payload_json`
+- `error_json`
+- `lease_owner`
+- `locked_until`
+- `created_at`
+- `updated_at`
+
+Required uniqueness:
+
+- `(owner_user_id, session_id, idempotency_key)`
+
+Idempotency behavior:
+
+- A duplicate request with the same key and identical `request_payload_hash`
+  returns the stored response when status is `completed`.
+- A duplicate request with the same key and different payload hash is rejected with
+  `409 idempotency_key_conflict`.
+- A duplicate request for an in-flight turn returns the current turn request status
+  and does not append events or call the model again.
+- A retry after `model_failed` or `parse_failed` must use `retry-last-turn` or an
+  explicit retry flag so the runtime can preserve the original input event and
+  append a new attempt event instead of duplicating the user turn.
 
 ### `vn_play_scene_state`
 
@@ -188,6 +236,7 @@ Important fields:
 - `active_branch_node_id`
 - `visible_choices_json`
 - `transcript_cursor`
+- `scene_version`
 - `warnings_json`
 - `updated_at`
 
@@ -237,19 +286,27 @@ the target checkpoint or branch node. It does not delete later events.
 ### Freeform VN Chat
 
 1. Client submits user text to `POST /vn-play/sessions/{session_id}/turn`.
-2. Backend validates session ownership, mode, status, pack readiness, character
-   links, content gates, provider capability, and token budget.
-3. Backend appends a `user_turn` event.
-4. Freeform adapter builds a chat request using the selected character/persona,
+2. Backend opens a short transaction to validate session ownership, mode, status,
+   pack readiness, character links, content gates, provider capability, token
+   budget, idempotency key, scene version, and per-session turn availability.
+3. Backend creates or reuses a `vn_play_turn_requests` row. New accepted turns append
+   `turn_started` and `user_turn` events before the model call.
+4. Backend releases the transaction before calling the model.
+5. Freeform adapter builds a chat request using the selected character/persona,
    world books, recent VN events, linked chat context if configured, and VN
    structured-output instructions.
-5. Model returns dialogue/narration plus optional scene directives.
-6. Backend parses model output into a normalized turn result.
-7. Asset resolver validates visual directives against the approved manifest.
-8. Backend appends model, directive, scene-state, and warning events.
-9. Derived scene state is updated and returned with appended events.
+6. Model returns dialogue/narration plus optional scene directives.
+7. Backend parses model output into a normalized turn result.
+8. Asset resolver validates visual directives against the approved manifest.
+9. Backend opens a second short transaction to append model, directive,
+   scene-state, warning, and `turn_completed` events, update derived scene state,
+   store the response payload, and clear the active turn.
+10. Response returns the stored turn response, appended events, and current scene.
 
 ### Story/CYOA
+
+Story turns use the same turn request, idempotency, concurrency, and transaction
+envelope as Freeform turns.
 
 1. Client submits either a selected choice ID or freeform custom action, depending
    on session settings.
@@ -266,6 +323,58 @@ the target checkpoint or branch node. It does not delete later events.
 
 Invalid model directives produce structured warning/error events. They should not
 crash a session or expose unapproved assets.
+
+## Turn Idempotency, Concurrency, And Failure Boundaries
+
+The turn endpoint must be safe under retries, slow model calls, browser refreshes,
+and double-submits.
+
+Idempotency:
+
+- `idempotency_key` is required for turn requests.
+- Keys are scoped by `(owner_user_id, session_id, idempotency_key)`.
+- The backend hashes the normalized request body into `request_payload_hash`.
+- Duplicate completed requests with the same hash return the stored
+  `response_payload_json`.
+- Duplicate in-flight requests return the current turn request status without
+  appending events or making another model call.
+- Same key with a different hash returns `409 idempotency_key_conflict`.
+
+Concurrency:
+
+- V1 allows one active turn per session.
+- `client_scene_version` must equal the current `vn_play_scene_state.scene_version`.
+- Stale scene versions return `409 stale_scene_version` with the current scene
+  version and current scene state summary.
+- If another turn is active, the endpoint returns `409 turn_in_progress` with the
+  active turn request ID and status.
+- The active-turn lock is stored on `vn_play_sessions.active_turn_request_id` and
+  mirrored by `vn_play_turn_requests.status`.
+
+Transaction boundaries:
+
+- The pre-model transaction creates the turn request, records `base_scene_version`,
+  appends `turn_started`, appends the input event, marks the request `model_calling`,
+  sets `locked_until`, and sets the active turn lock. It does not advance the
+  visible scene version before the model result or failure state is committed.
+- The model call and parsing happen outside the database transaction.
+- The post-model transaction appends output/state events, stores the exact response
+  payload, marks the turn `completed`, increments `scene_version`, and clears the
+  active turn lock.
+- Model timeout or provider failure marks the turn `model_failed`, appends
+  `turn_failed`, stores `error_json`, updates scene warnings/version as needed, and
+  clears the active turn lock.
+- Parse failure marks the turn `parse_failed`, appends `model_turn_parse_failed` and
+  `turn_failed`, stores `error_json`, updates scene warnings/version as needed, and
+  clears the active turn lock.
+- Process crash recovery treats expired `locked_until` rows as `abandoned` only
+  after confirming the session still points at that active turn. A retry must use
+  `retry-last-turn` or an explicit retry flag so the original input event remains
+  linked to the new attempt.
+
+`retry-last-turn` creates a new turn request linked to the previous failed or
+abandoned request. It does not append a second user input event unless the caller
+changes the input.
 
 ## Structured Model Contract
 
@@ -284,6 +393,22 @@ If a provider cannot support native structured output, the adapter may use a
 delimited JSON instruction and strict parser. Parse failures append
 `runtime_gate_failed` or `model_turn_parse_failed` events and return a recoverable
 error.
+
+## Linked Chat Semantics
+
+V1 treats `linked_chat_id` as read-only context.
+
+- VN turns do not write user or model messages back to the linked chat session.
+- VN Play may read a bounded snapshot of linked chat history when building model
+  context.
+- The snapshot boundary is captured per turn, for example latest linked chat message
+  ID or timestamp, inside the turn request/event payload.
+- VN events remain authoritative for VN playback. Linked chat history is auxiliary
+  context only.
+- If the linked chat changes while a VN session is active, later VN turns may include
+  newer chat context only if the session setting allows live context refresh.
+- Future write-back or two-way sync must be an explicit mode, not an implicit side
+  effect of linking a chat.
 
 ## Asset Selection
 
@@ -338,6 +463,23 @@ Gate failures should return structured API errors. When a session exists, they
 should also append `safety_gate_triggered` or `runtime_gate_failed` events where
 that helps audit/replay.
 
+Character safety metadata:
+
+- Character safety status is derived at session creation and refreshed before each
+  turn when linked character records changed.
+- Known disallowed or conflicting metadata fails closed for all modes.
+- Unknown, absent, or unparseable metadata is represented explicitly as
+  `character_safety_status="unknown"`, never silently treated as passing.
+- `general` sessions may proceed with unknown metadata and a visible runtime warning
+  unless deployment policy requires fail-closed behavior.
+- `suggestive`, `mature`, violent, or custom adult-oriented content ratings require
+  either affirmative compatible character metadata or an explicit local override
+  stored in `settings_json`.
+- Imported or untrusted character payloads require explicit opt-in before use when
+  safety metadata is missing, conflicting, or came from an untrusted bundle.
+- Freeform and Story modes use the same safety metadata rules so mode switching
+  cannot bypass gates.
+
 ## API Surface
 
 Session endpoints:
@@ -377,6 +519,7 @@ Important fields:
 - `additional_character_ids`
 - `vn_asset_pack_id`
 - `linked_chat_id`
+- `linked_chat_mode`: V1 default `read_only_context`
 - `world_book_ids`
 - `content_rating`
 - `seed`
@@ -389,8 +532,8 @@ Important fields:
 - `input_text`
 - `choice_id`
 - `custom_action`
-- `client_scene_version`
-- `idempotency_key`
+- `client_scene_version`: required
+- `idempotency_key`: required
 
 Only one of `input_text`, `choice_id`, or `custom_action` should be accepted per
 turn.
@@ -429,8 +572,15 @@ Backend tests:
 
 - Session CRUD ownership and mode validation.
 - Create-session gates for pack readiness and character links.
+- Character safety metadata gates for known, unknown, conflicting, imported, and
+  override cases.
 - Event append ordering and sequence uniqueness.
 - Replay-derived state from event logs.
+- Turn idempotency replay, in-flight duplicate behavior, and payload-hash conflict.
+- Per-session turn concurrency and stale `client_scene_version` rejection.
+- Model timeout, provider failure, parse failure, abandoned turn recovery, and
+  `retry-last-turn` behavior.
+- Linked chat read-only context snapshots and no write-back side effects.
 - Freeform turn with mocked model output and visual directives.
 - Story turn creates branch node and visible choices.
 - Asset resolver accepts approved manifest matches and rejects unapproved or missing
@@ -466,6 +616,9 @@ E2E smoke:
 
 - Model output can be malformed. Mitigate with strict parsing, structured output
   where available, recoverable parse-failure events, and retry controls.
+- Slow turns can be retried or double-submitted. Mitigate with required
+  idempotency keys, per-session active-turn locks, stored responses, and stale scene
+  version rejection.
 - Visual directives can request unavailable assets. Mitigate with approved-manifest
   validation and deterministic fallback to prior scene state.
 - Event logs can grow large. Mitigate with pagination, compact scene summaries, and
