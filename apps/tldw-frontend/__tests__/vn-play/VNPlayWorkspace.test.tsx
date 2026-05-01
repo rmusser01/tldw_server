@@ -5,18 +5,28 @@ import type { VNPlaySession } from '@web/types/vn-play';
 
 const mocks = vi.hoisted(() => ({
   createVNPlaySession: vi.fn(),
+  getVNPlaySession: vi.fn(),
+  listVNPlayEvents: vi.fn(),
   listVNPlaySessions: vi.fn(),
+  submitVNPlayTurn: vi.fn(),
 }));
 
 vi.mock('@web/lib/api/vnPlay', () => ({
   createVNPlaySession: (...args: unknown[]) => mocks.createVNPlaySession(...args),
+  getVNPlaySession: (...args: unknown[]) => mocks.getVNPlaySession(...args),
+  listVNPlayEvents: (...args: unknown[]) => mocks.listVNPlayEvents(...args),
   listVNPlaySessions: (...args: unknown[]) => mocks.listVNPlaySessions(...args),
+  submitVNPlayTurn: (...args: unknown[]) => mocks.submitVNPlayTurn(...args),
 }));
 
 import VNPlayWorkspace from '@web/components/vn-play/VNPlayWorkspace';
 
 function mockVNPlayApi({ sessions = [] }: { sessions?: VNPlaySession[] } = {}) {
   mocks.listVNPlaySessions.mockResolvedValue(sessions);
+  mocks.listVNPlayEvents.mockResolvedValue([]);
+  mocks.getVNPlaySession.mockImplementation(async (sessionId: number) =>
+    sessions.find((session) => session.id === sessionId) ?? sessions[0]
+  );
   mocks.createVNPlaySession.mockImplementation(async (request) => ({
     id: 9,
     owner_user_id: 42,
@@ -27,6 +37,25 @@ function mockVNPlayApi({ sessions = [] }: { sessions?: VNPlaySession[] } = {}) {
     scene_state: { scene_version: 0 },
     ...request,
   }));
+  mocks.submitVNPlayTurn.mockResolvedValue({
+    turn_request_id: 10,
+    status: 'completed',
+    scene_version: 1,
+    scene_state: { scene_version: 1 },
+    events: [
+      {
+        id: 2,
+        session_id: 1,
+        owner_user_id: 42,
+        sequence_number: 2,
+        event_type: 'model_turn',
+        event_payload: {
+          dialogue: [{ speaker: 'Narrator', text: 'A quiet reply.' }],
+        },
+        source: 'model',
+      },
+    ],
+  });
 }
 
 describe('VNPlayWorkspace', () => {
@@ -91,5 +120,33 @@ describe('VNPlayWorkspace', () => {
       });
     });
     expect(await screen.findByText('Moonlit Archive')).toBeInTheDocument();
+  });
+
+  it('submits a freeform turn and renders the returned dialogue', async () => {
+    const user = userEvent.setup();
+    const session: VNPlaySession = {
+      id: 1,
+      mode: 'freeform',
+      title: 'Library',
+      primary_character_id: 1,
+      vn_asset_pack_id: 2,
+      scene_version: 0,
+      scene_state: { scene_version: 0 },
+    };
+    mockVNPlayApi({ sessions: [session] });
+
+    render(<VNPlayWorkspace />);
+
+    await screen.findByText('Library');
+    await user.type(screen.getByLabelText('Freeform input'), 'Look around');
+    await user.click(screen.getByRole('button', { name: 'Send turn' }));
+
+    await waitFor(() => {
+      expect(mocks.submitVNPlayTurn).toHaveBeenCalledWith(1, expect.objectContaining({
+        input_text: 'Look around',
+        client_scene_version: 0,
+      }));
+    });
+    expect(await screen.findByText('A quiet reply.')).toBeInTheDocument();
   });
 });

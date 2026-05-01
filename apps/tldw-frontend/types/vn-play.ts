@@ -17,10 +17,22 @@ export interface VNPlayChoice {
   metadata?: Record<string, unknown>;
 }
 
+export interface VNPlaySceneAsset {
+  item_id?: number;
+  content_url?: string;
+  url?: string;
+  src?: string;
+  labels?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+}
+
 export interface VNPlaySceneState {
   session_id?: number;
   owner_user_id?: number;
   last_event_id?: number | null;
+  background?: VNPlaySceneAsset | null;
+  depth?: VNPlaySceneAsset | null;
+  active_sprites?: VNPlaySceneAsset[];
   current_background_item_id?: number | null;
   current_depth_item_id?: number | null;
   active_sprite_items?: Array<Record<string, unknown>>;

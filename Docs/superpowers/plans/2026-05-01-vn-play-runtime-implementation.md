@@ -1032,7 +1032,7 @@ git commit -m "feat(vn-play): add workspace shell"
 - Test: `apps/tldw-frontend/__tests__/vn-play/VNPlayWorkspace.test.tsx`
 - Test: `apps/tldw-frontend/e2e/smoke/vn-play.spec.ts`
 
-- [ ] **Step 1: Write failing scene component tests**
+- [x] **Step 1: Write failing scene component tests**
 
 ```tsx
 it('renders background, sprite, dialogue, and warnings', () => {
@@ -1068,7 +1068,7 @@ it('submits a story choice with current scene version', async () => {
 });
 ```
 
-- [ ] **Step 2: Write failing Playwright smoke**
+- [x] **Step 2: Write failing Playwright smoke**
 
 Create `apps/tldw-frontend/e2e/smoke/vn-play.spec.ts` that:
 
@@ -1080,7 +1080,7 @@ Create `apps/tldw-frontend/e2e/smoke/vn-play.spec.ts` that:
 - Clicks one mocked choice.
 - Verifies dialogue and updated scene text.
 
-- [ ] **Step 3: Run failing UI tests**
+- [x] **Step 3: Run failing UI tests**
 
 Run:
 
@@ -1091,7 +1091,7 @@ bunx vitest run __tests__/vn-play
 
 Expected: missing component/test failures.
 
-- [ ] **Step 4: Implement stage and interactions**
+- [x] **Step 4: Implement stage and interactions**
 
 Build:
 
@@ -1115,7 +1115,7 @@ Build:
   - handle `409 stale_scene_version` by reloading session
   - handle `409 turn_in_progress` by showing current status
 
-- [ ] **Step 5: Run UI tests**
+- [x] **Step 5: Run UI tests**
 
 Run:
 
@@ -1126,7 +1126,7 @@ bunx vitest run __tests__/vn-play
 
 Expected: all pass.
 
-- [ ] **Step 6: Run Playwright smoke**
+- [x] **Step 6: Run Playwright smoke**
 
 Run:
 
@@ -1137,7 +1137,7 @@ bunx playwright test e2e/smoke/vn-play.spec.ts --reporter=line
 
 Expected: 1 passed.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add apps/tldw-frontend/components/vn-play apps/tldw-frontend/__tests__/vn-play apps/tldw-frontend/e2e/smoke/vn-play.spec.ts

@@ -2,23 +2,51 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { BookOpen, MessageSquarePlus } from 'lucide-react';
 import { Badge } from '@web/components/ui/Badge';
 import { Button } from '@web/components/ui/Button';
+import ChoicePanel from '@web/components/vn-play/ChoicePanel';
+import DialoguePanel from '@web/components/vn-play/DialoguePanel';
 import NewSessionDialog from '@web/components/vn-play/NewSessionDialog';
+import SceneInspector from '@web/components/vn-play/SceneInspector';
+import SceneStage from '@web/components/vn-play/SceneStage';
 import SessionList, { VNPlayModeFilter } from '@web/components/vn-play/SessionList';
-import { createVNPlaySession, listVNPlaySessions } from '@web/lib/api/vnPlay';
-import type { VNPlayMode, VNPlaySession, VNPlaySessionCreate } from '@web/types/vn-play';
+import {
+  createVNPlaySession,
+  getVNPlaySession,
+  listVNPlayEvents,
+  listVNPlaySessions,
+} from '@web/lib/api/vnPlay';
+import type {
+  VNPlayChoice,
+  VNPlayEvent,
+  VNPlayMode,
+  VNPlaySceneState,
+  VNPlaySession,
+  VNPlaySessionCreate,
+  VNPlayTurnResponse,
+} from '@web/types/vn-play';
 
 function sessionModeLabel(mode: VNPlayMode): string {
   return mode === 'story' ? 'Story/CYOA' : 'Freeform';
 }
 
+function isVNPlayChoice(choice: VNPlayChoice | Record<string, unknown>): choice is VNPlayChoice {
+  return (
+    choice !== null &&
+    typeof choice === 'object' &&
+    typeof choice.id === 'string' &&
+    typeof choice.text === 'string'
+  );
+}
+
 export default function VNPlayWorkspace() {
   const [sessions, setSessions] = useState<VNPlaySession[]>([]);
   const [selectedSession, setSelectedSession] = useState<VNPlaySession | null>(null);
+  const [events, setEvents] = useState<VNPlayEvent[]>([]);
   const [modeFilter, setModeFilter] = useState<VNPlayModeFilter>('all');
   const [dialogMode, setDialogMode] = useState<VNPlayMode>('freeform');
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [turnStatus, setTurnStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -49,6 +77,32 @@ export default function VNPlayWorkspace() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!selectedSession) {
+      setEvents([]);
+      return;
+    }
+
+    let cancelled = false;
+    async function loadEvents() {
+      try {
+        const nextEvents = await listVNPlayEvents(selectedSession.id);
+        if (!cancelled) {
+          setEvents(nextEvents);
+        }
+      } catch {
+        if (!cancelled) {
+          setEvents([]);
+        }
+      }
+    }
+
+    void loadEvents();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedSession?.id]);
+
   const filteredSessions = useMemo(() => {
     if (modeFilter === 'all') return sessions;
     return sessions.filter((session) => session.mode === modeFilter);
@@ -66,6 +120,7 @@ export default function VNPlayWorkspace() {
       const created = await createVNPlaySession(request);
       setSessions((previous) => [created, ...previous.filter((session) => session.id !== created.id)]);
       setSelectedSession(created);
+      setEvents([]);
       setModeFilter('all');
       setIsDialogOpen(false);
     } catch (createError) {
@@ -75,8 +130,109 @@ export default function VNPlayWorkspace() {
     }
   }, []);
 
+  const reloadSelectedSession = useCallback(async (sessionId: number) => {
+    const [nextSession, nextEvents] = await Promise.all([
+      getVNPlaySession(sessionId),
+      listVNPlayEvents(sessionId),
+    ]);
+    setSelectedSession(nextSession);
+    setSessions((previous) =>
+      previous.map((session) => (session.id === nextSession.id ? nextSession : session))
+    );
+    setEvents(nextEvents);
+    return nextSession;
+  }, []);
+
+  const handleTurn = useCallback(async (response: VNPlayTurnResponse) => {
+    if (!selectedSession) return;
+
+    setTurnStatus(response.status);
+    const responseEvents = response.events ?? [];
+    if (responseEvents.length > 0) {
+      setEvents((previous) => {
+        const byId = new Map(previous.map((event) => [event.id, event]));
+        for (const event of responseEvents) {
+          byId.set(event.id, event);
+        }
+        return [...byId.values()].sort((left, right) => left.sequence_number - right.sequence_number);
+      });
+    }
+
+    const responseScene = response.scene_state ?? response.current_scene ?? null;
+    if (response.session) {
+      setSelectedSession(response.session);
+      setSessions((previous) =>
+        previous.map((session) => (session.id === response.session?.id ? response.session : session))
+      );
+      return;
+    }
+
+    if (responseScene) {
+      setSelectedSession((previous) =>
+        previous && previous.id === selectedSession.id
+          ? {
+              ...previous,
+              scene_version: response.scene_version,
+              scene_state: responseScene,
+              current_scene: responseScene,
+            }
+          : previous
+      );
+      setSessions((previous) =>
+        previous.map((session) =>
+          session.id === selectedSession.id
+            ? {
+                ...session,
+                scene_version: response.scene_version,
+                scene_state: responseScene,
+                current_scene: responseScene,
+              }
+            : session
+        )
+      );
+    }
+
+    try {
+      await reloadSelectedSession(selectedSession.id);
+      if (responseEvents.length > 0) {
+        setEvents((previous) => {
+          const byId = new Map(previous.map((event) => [event.id, event]));
+          for (const event of responseEvents) {
+            byId.set(event.id, event);
+          }
+          return [...byId.values()].sort((left, right) => left.sequence_number - right.sequence_number);
+        });
+      }
+    } catch {
+      // Keep response-derived state when the follow-up refresh is unavailable.
+    }
+  }, [reloadSelectedSession, selectedSession]);
+
+  const handleTurnError = useCallback(async (turnError: unknown) => {
+    const status = typeof turnError === 'object' && turnError !== null && 'status' in turnError
+      ? Number((turnError as { status?: number }).status)
+      : undefined;
+    const detail = turnError instanceof Error ? turnError.message : String(turnError);
+    const isConflict = status === 409 || /stale_scene_version|turn_in_progress/i.test(detail);
+
+    if (isConflict && selectedSession) {
+      setTurnStatus(/turn_in_progress/i.test(detail) ? 'turn_in_progress' : 'stale_scene_version');
+      try {
+        await reloadSelectedSession(selectedSession.id);
+      } catch {
+        setError(detail);
+      }
+      return;
+    }
+
+    setError(detail);
+  }, [reloadSelectedSession, selectedSession]);
+
   const selectedMode = selectedSession ? sessionModeLabel(selectedSession.mode) : null;
-  const sceneVersion = selectedSession?.scene_state?.scene_version ?? selectedSession?.scene_version ?? 0;
+  const sceneState: VNPlaySceneState | null =
+    selectedSession?.scene_state ?? selectedSession?.current_scene ?? null;
+  const sceneVersion = sceneState?.scene_version ?? selectedSession?.scene_version ?? 0;
+  const choices = (sceneState?.visible_choices ?? []).filter(isVNPlayChoice);
 
   return (
     <main className="min-h-screen bg-bg text-text">
@@ -108,6 +264,11 @@ export default function VNPlayWorkspace() {
             {error}
           </div>
         )}
+        {turnStatus && turnStatus !== 'completed' && (
+          <div className="rounded-md border border-warn/30 bg-warn/10 px-3 py-2 text-sm text-warn">
+            {turnStatus}
+          </div>
+        )}
 
         <NewSessionDialog
           initialMode={dialogMode}
@@ -129,54 +290,44 @@ export default function VNPlayWorkspace() {
           <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(300px,380px)]">
             <div className="rounded-md border border-border bg-surface p-4">
               <h2 className="mb-4 text-lg font-semibold">Scene</h2>
-              {selectedSession ? (
+              {selectedSession && sceneState ? (
                 <div className="grid gap-4">
                   <div>
                     <p className="text-xs uppercase tracking-normal text-text-muted">Selected session</p>
                     <p className="font-medium">Selected session: {selectedSession.title}</p>
                   </div>
-                  <div className="min-h-72 rounded-md border border-border bg-bg p-4">
-                    <div className="flex h-full min-h-64 items-center justify-center text-sm text-text-muted">
-                      Scene preview
-                    </div>
-                  </div>
-                  <div className="rounded-md border border-border bg-bg p-4">
-                    <h3 className="mb-2 text-sm font-semibold uppercase tracking-normal text-text-muted">
-                      Dialogue
-                    </h3>
-                    <p className="text-sm text-text-muted">No dialogue events.</p>
-                  </div>
+                  <SceneStage events={events} sceneState={sceneState} showDialogue={false} />
+                  <DialoguePanel
+                    events={events}
+                    mode={selectedSession.mode}
+                    sceneVersion={sceneVersion}
+                    sessionId={selectedSession.id}
+                    onError={handleTurnError}
+                    onTurn={(response) => void handleTurn(response)}
+                  />
+                  {selectedSession.mode === 'story' && (
+                    <ChoicePanel
+                      choices={choices}
+                      sceneVersion={sceneVersion}
+                      sessionId={selectedSession.id}
+                      onError={handleTurnError}
+                      onTurn={(response) => void handleTurn(response)}
+                    />
+                  )}
                 </div>
               ) : (
                 <p className="text-sm text-text-muted">No session selected.</p>
               )}
             </div>
 
-            <aside className="rounded-md border border-border bg-surface p-4">
-              <h2 className="mb-4 text-lg font-semibold">Runtime inspector</h2>
-              {selectedSession ? (
-                <dl className="grid gap-3 text-sm">
-                  <div>
-                    <dt className="text-xs uppercase tracking-normal text-text-muted">Mode</dt>
-                    <dd className="font-medium">{selectedMode}</dd>
-                  </div>
-                  <div>
-                    <dt className="text-xs uppercase tracking-normal text-text-muted">Character</dt>
-                    <dd className="font-medium">Character {selectedSession.primary_character_id}</dd>
-                  </div>
-                  <div>
-                    <dt className="text-xs uppercase tracking-normal text-text-muted">Asset pack</dt>
-                    <dd className="font-medium">Pack {selectedSession.vn_asset_pack_id}</dd>
-                  </div>
-                  <div>
-                    <dt className="text-xs uppercase tracking-normal text-text-muted">Scene version</dt>
-                    <dd className="font-medium">{sceneVersion}</dd>
-                  </div>
-                </dl>
-              ) : (
+            {selectedSession && sceneState ? (
+              <SceneInspector sceneState={sceneState} session={selectedSession} />
+            ) : (
+              <aside className="rounded-md border border-border bg-surface p-4">
+                <h2 className="mb-4 text-lg font-semibold">Runtime inspector</h2>
                 <p className="text-sm text-text-muted">No session metadata.</p>
-              )}
-            </aside>
+              </aside>
+            )}
           </section>
         </section>
       </div>
