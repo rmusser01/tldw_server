@@ -73,6 +73,7 @@ describe("useResolvedPersonaVoiceDefaults", () => {
         tts_provider: "openai",
         confirmation_mode: "always",
         voice_chat_trigger_phrases: ["bonjour helper"],
+        wake_behavior: "continuous",
         auto_resume: false,
         auto_commit_enabled: false,
         vad_threshold: 0.61,
@@ -89,6 +90,7 @@ describe("useResolvedPersonaVoiceDefaults", () => {
       ttsVoice: "alloy",
       confirmationMode: "always",
       voiceChatTriggerPhrases: ["bonjour helper"],
+      wakeBehavior: "continuous",
       autoResume: false,
       bargeIn: false,
       autoCommitEnabled: false,
@@ -115,6 +117,7 @@ describe("useResolvedPersonaVoiceDefaults", () => {
       ttsVoice: "voice-eleven",
       confirmationMode: "destructive_only",
       voiceChatTriggerPhrases: ["okay helper", "status check"],
+      wakeBehavior: "one_shot",
       autoResume: false,
       bargeIn: true,
       autoCommitEnabled: true,
@@ -134,5 +137,16 @@ describe("useResolvedPersonaVoiceDefaults", () => {
 
     expect(result.current.ttsProvider).toBe("tldw")
     expect(result.current.ttsVoice).toBe("Bella")
+    expect(result.current.wakeBehavior).toBe("one_shot")
+  })
+
+  it("resolves explicit persona wake behavior", () => {
+    const { result } = renderHook(() =>
+      useResolvedPersonaVoiceDefaults({
+        wake_behavior: "push_to_talk_after_wake"
+      })
+    )
+
+    expect(result.current.wakeBehavior).toBe("push_to_talk_after_wake")
   })
 })
