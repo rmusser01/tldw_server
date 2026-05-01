@@ -11,6 +11,7 @@ from typing import Any
 from loguru import logger
 
 from tldw_Server_API.app.core.testing import is_truthy as _is_truthy
+from tldw_Server_API.app.services.lifecycle_workers import ManagedWorker, ShutdownPhase
 
 _STARTUP_GUARD_EXCEPTIONS = (
     AttributeError,
@@ -35,14 +36,21 @@ class MaintenanceSchedulerHandles:
     jobs_prune_task: Any | None = None
 
 
-async def start_maintenance_schedulers() -> MaintenanceSchedulerHandles:
+async def start_maintenance_schedulers(
+    *,
+    worker_inventory: Any | None = None,
+) -> MaintenanceSchedulerHandles:
     """Start the env-gated maintenance scheduler batch and return explicit task handles."""
     return MaintenanceSchedulerHandles(
         quality_eval_task=await _start_quality_eval_scheduler(),
         outputs_purge_task=await _start_outputs_purge_scheduler(),
-        kanban_activity_cleanup_task=await _start_kanban_activity_cleanup_scheduler(),
+        kanban_activity_cleanup_task=await _start_kanban_activity_cleanup_scheduler(
+            worker_inventory=worker_inventory,
+        ),
         ingestion_sources_cleanup_task=await _start_ingestion_sources_cleanup_scheduler(),
-        kanban_purge_task=await _start_kanban_purge_scheduler(),
+        kanban_purge_task=await _start_kanban_purge_scheduler(
+            worker_inventory=worker_inventory,
+        ),
         files_export_gc_task=await _start_file_artifacts_export_gc_scheduler(),
         notifications_prune_task=await _start_notifications_prune_scheduler(),
         jobs_prune_task=await _start_jobs_prune_scheduler(),
@@ -73,13 +81,18 @@ async def _start_outputs_purge_scheduler() -> Any | None:
     )
 
 
-async def _start_kanban_activity_cleanup_scheduler() -> Any | None:
+async def _start_kanban_activity_cleanup_scheduler(
+    *,
+    worker_inventory: Any | None = None,
+) -> Any | None:
     return await _start_env_gated_task(
         env_key="KANBAN_ACTIVITY_CLEANUP_ENABLED",
         disabled_message="Kanban activity cleanup scheduler disabled (KANBAN_ACTIVITY_CLEANUP_ENABLED != true)",
         started_message="Kanban activity cleanup scheduler started",
         failure_message="Failed to start Kanban activity cleanup scheduler: {exc}",
         starter=_start_kanban_activity_cleanup_scheduler_service,
+        worker_inventory=worker_inventory,
+        worker_name="kanban_activity_cleanup_scheduler",
     )
 
 
@@ -96,13 +109,18 @@ async def _start_ingestion_sources_cleanup_scheduler() -> Any | None:
     )
 
 
-async def _start_kanban_purge_scheduler() -> Any | None:
+async def _start_kanban_purge_scheduler(
+    *,
+    worker_inventory: Any | None = None,
+) -> Any | None:
     return await _start_env_gated_task(
         env_key="KANBAN_PURGE_ENABLED",
         disabled_message="Kanban purge scheduler disabled (KANBAN_PURGE_ENABLED != true)",
         started_message="Kanban purge scheduler started",
         failure_message="Failed to start Kanban purge scheduler: {exc}",
         starter=_start_kanban_purge_scheduler_service,
+        worker_inventory=worker_inventory,
+        worker_name="kanban_purge_scheduler",
     )
 
 
@@ -143,6 +161,8 @@ async def _start_env_gated_task(
     started_message: str,
     failure_message: str,
     starter,
+    worker_inventory: Any | None = None,
+    worker_name: str | None = None,
 ) -> Any | None:
     try:
         if not _env_enabled(env_key):
@@ -150,6 +170,17 @@ async def _start_env_gated_task(
             return None
         task = await starter()
         if task:
+            if worker_inventory is not None and worker_name is not None:
+                worker_inventory.register(
+                    ManagedWorker(
+                        name=worker_name,
+                        task=task,
+                        stop_event=None,
+                        timeout_sec=5.0,
+                        category="maintenance",
+                        shutdown_phase=ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN,
+                    )
+                )
             logger.info(started_message)
         return task
     except _STARTUP_GUARD_EXCEPTIONS as exc:

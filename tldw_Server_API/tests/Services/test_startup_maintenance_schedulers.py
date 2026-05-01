@@ -29,7 +29,8 @@ async def test_start_maintenance_schedulers_combines_handles(
         calls.append("outputs")
         return "outputs-task"
 
-    async def _fake_kanban_activity():
+    async def _fake_kanban_activity(*, worker_inventory=None):
+        assert worker_inventory is None
         calls.append("kanban-activity")
         return "kanban-activity-task"
 
@@ -37,7 +38,8 @@ async def test_start_maintenance_schedulers_combines_handles(
         calls.append("ingestion-sources")
         return "ingestion-sources-task"
 
-    async def _fake_kanban_purge():
+    async def _fake_kanban_purge(*, worker_inventory=None):
+        assert worker_inventory is None
         calls.append("kanban-purge")
         return "kanban-purge-task"
 
@@ -85,6 +87,61 @@ async def test_start_maintenance_schedulers_combines_handles(
 
 
 @pytest.mark.asyncio
+async def test_start_maintenance_schedulers_passes_worker_inventory_to_kanban_helpers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_maintenance = _import_startup_maintenance_schedulers()
+    worker_inventory = object()
+    calls: list[tuple[str, object | None]] = []
+
+    async def _fake_quality():
+        return None
+
+    async def _fake_outputs():
+        return None
+
+    async def _fake_kanban_activity(*, worker_inventory=None):
+        calls.append(("kanban-activity", worker_inventory))
+        return "kanban-activity-task"
+
+    async def _fake_ingestion_sources():
+        return None
+
+    async def _fake_kanban_purge(*, worker_inventory=None):
+        calls.append(("kanban-purge", worker_inventory))
+        return "kanban-purge-task"
+
+    async def _fake_files_gc():
+        return None
+
+    async def _fake_notifications():
+        return None
+
+    async def _fake_jobs_prune():
+        return None
+
+    monkeypatch.setattr(startup_maintenance, "_start_quality_eval_scheduler", _fake_quality)
+    monkeypatch.setattr(startup_maintenance, "_start_outputs_purge_scheduler", _fake_outputs)
+    monkeypatch.setattr(startup_maintenance, "_start_kanban_activity_cleanup_scheduler", _fake_kanban_activity)
+    monkeypatch.setattr(startup_maintenance, "_start_ingestion_sources_cleanup_scheduler", _fake_ingestion_sources)
+    monkeypatch.setattr(startup_maintenance, "_start_kanban_purge_scheduler", _fake_kanban_purge)
+    monkeypatch.setattr(startup_maintenance, "_start_file_artifacts_export_gc_scheduler", _fake_files_gc)
+    monkeypatch.setattr(startup_maintenance, "_start_notifications_prune_scheduler", _fake_notifications)
+    monkeypatch.setattr(startup_maintenance, "_start_jobs_prune_scheduler", _fake_jobs_prune)
+
+    handles = await startup_maintenance.start_maintenance_schedulers(
+        worker_inventory=worker_inventory,
+    )
+
+    assert calls == [
+        ("kanban-activity", worker_inventory),
+        ("kanban-purge", worker_inventory),
+    ]
+    assert handles.kanban_activity_cleanup_task == "kanban-activity-task"
+    assert handles.kanban_purge_task == "kanban-purge-task"
+
+
+@pytest.mark.asyncio
 async def test_start_quality_eval_scheduler_skips_when_flag_disabled(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -112,3 +169,55 @@ async def test_start_jobs_prune_scheduler_starts_when_enabled(
     task = await startup_maintenance._start_jobs_prune_scheduler()
 
     assert task == "jobs-prune-task"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("starter_name", "service_name", "expected_name"),
+    [
+        (
+            "_start_kanban_activity_cleanup_scheduler",
+            "_start_kanban_activity_cleanup_scheduler_service",
+            "kanban_activity_cleanup_scheduler",
+        ),
+        (
+            "_start_kanban_purge_scheduler",
+            "_start_kanban_purge_scheduler_service",
+            "kanban_purge_scheduler",
+        ),
+    ],
+)
+async def test_kanban_maintenance_schedulers_register_background_inventory(
+    monkeypatch: pytest.MonkeyPatch,
+    starter_name: str,
+    service_name: str,
+    expected_name: str,
+) -> None:
+    startup_maintenance = _import_startup_maintenance_schedulers()
+    registrations = []
+    task = object()
+
+    class _FakeInventory:
+        def register(self, worker):
+            registrations.append(worker)
+            return worker
+
+    async def _fake_start():
+        return task
+
+    monkeypatch.setattr(startup_maintenance, "_env_enabled", lambda key: True)
+    monkeypatch.setattr(startup_maintenance, service_name, _fake_start)
+
+    started_task = await getattr(startup_maintenance, starter_name)(
+        worker_inventory=_FakeInventory(),
+    )
+
+    assert started_task is task
+    assert len(registrations) == 1
+    worker = registrations[0]
+    assert worker.name == expected_name
+    assert worker.task is task
+    assert worker.stop_event is None
+    assert worker.timeout_sec == 5.0
+    assert worker.category == "maintenance"
+    assert worker.shutdown_phase == startup_maintenance.ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN

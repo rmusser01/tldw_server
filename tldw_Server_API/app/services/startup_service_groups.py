@@ -77,7 +77,9 @@ async def start_service_groups(
         run_pg_rls_auto_ensure=run_pg_rls_auto_ensure,
         worker_inventory=worker_inventory,
     )
-    maintenance_scheduler_handles = await _start_maintenance_schedulers()
+    maintenance_scheduler_handles = await _start_maintenance_schedulers(
+        worker_inventory=worker_inventory,
+    )
     connectors_startup_handles = await _start_connectors_startup(
         app=app,
         owned_job_pollers=owned_job_pollers,
@@ -158,12 +160,12 @@ async def _start_infra_services(**kwargs):
     return await start_infra_services(**kwargs)
 
 
-async def _start_maintenance_schedulers():
+async def _start_maintenance_schedulers(**kwargs):
     from tldw_Server_API.app.services.startup_maintenance_schedulers import (
         start_maintenance_schedulers,
     )
 
-    return await start_maintenance_schedulers()
+    return await start_maintenance_schedulers(**kwargs)
 
 
 async def _start_connectors_startup(**kwargs):
