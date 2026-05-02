@@ -156,8 +156,11 @@ async def shutdown_post_worker_services(
             "jobs_metrics_task",
             jobs_metrics_stop_event,
         ),
-        loop_lag_task=loop_lag_task,
-        loop_lag_stop_event=loop_lag_stop_event,
+        loop_lag_task=_task_if_not_stopped("loop_lag_task", loop_lag_task),
+        loop_lag_stop_event=_stop_event_if_not_stopped(
+            "loop_lag_task",
+            loop_lag_stop_event,
+        ),
         guard_exceptions=guard_exceptions,
     )
     jobs_metrics_reconcile_shutdown_handles = await _shutdown_jobs_metrics_reconcile(
@@ -361,7 +364,7 @@ async def run_shutdown_post_worker_services(
             usage_task=_fallback_if_not_stopped("usage_aggregator", usage_task),
             llm_usage_task=_fallback_if_not_stopped("llm_usage_aggregator", llm_usage_task),
             jobs_metrics_task=_fallback_if_not_stopped("jobs_metrics_task", jobs_metrics_task),
-            loop_lag_task=loop_lag_task,
+            loop_lag_task=_fallback_if_not_stopped("loop_lag_task", loop_lag_task),
             jobs_metrics_reconcile_task=_fallback_if_not_stopped(
                 "jobs_metrics_reconcile_task",
                 jobs_metrics_reconcile_task,

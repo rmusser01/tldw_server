@@ -13,6 +13,7 @@ from loguru import logger
 
 from tldw_Server_API.app.core.testing import env_flag_enabled as _env_flag_enabled
 from tldw_Server_API.app.core.testing import is_truthy as _is_truthy
+from tldw_Server_API.app.services.lifecycle_workers import ShutdownPhase
 
 _STARTUP_GUARD_EXCEPTIONS = (
     AttributeError,
@@ -44,7 +45,9 @@ async def start_runtime_monitors(
         jobs_metrics_stop_event, jobs_metrics_task = await _start_jobs_metrics_gauge_worker(
             worker_inventory=worker_inventory,
         )
-    loop_lag_stop_event, loop_lag_task = await _start_loop_lag_watchdog()
+    loop_lag_stop_event, loop_lag_task = await _start_loop_lag_watchdog(
+        worker_inventory=worker_inventory,
+    )
     return RuntimeMonitorHandles(
         jobs_metrics_stop_event=jobs_metrics_stop_event,
         jobs_metrics_task=jobs_metrics_task,
@@ -95,11 +98,32 @@ async def _start_jobs_metrics_gauge_worker(
         return None, None
 
 
-async def _start_loop_lag_watchdog() -> tuple[Any | None, Any | None]:
+async def _start_loop_lag_watchdog(
+    *,
+    worker_inventory: Any | None = None,
+) -> tuple[Any | None, Any | None]:
+    """Start the event-loop lag watchdog directly or through worker inventory.
+
+    The monitor is skipped when EVENT_LOOP_LAG_WATCHDOG_ENABLED is disabled.
+    When a worker inventory is supplied, the watchdog is registered as a
+    background-phase custom worker so WorkerRegistry owns shutdown; otherwise
+    this helper preserves the legacy explicit stop-event/task handles.
+    """
     try:
         if not _env_flag_enabled("EVENT_LOOP_LAG_WATCHDOG_ENABLED"):
             logger.info("Event loop lag watchdog disabled by flag")
             return None, None
+        if worker_inventory is not None:
+            task, stop_event = await worker_inventory.register_custom(
+                name="loop_lag_task",
+                task_name="loop_lag_watchdog",
+                coroutine_factory=_run_loop_lag_watchdog_service,
+                timeout_sec=2.0,
+                category="monitoring",
+                shutdown_phase=ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN,
+            )
+            logger.info("Event loop lag watchdog started")
+            return stop_event, task
         stop_event = _make_event()
         task = _create_task(_run_loop_lag_watchdog_service(stop_event))
         logger.info("Event loop lag watchdog started")
