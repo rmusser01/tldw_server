@@ -643,6 +643,9 @@ detail because its `cursor` is a provider checkpoint, and
 `GET /api/v1/items` is also migrated as a small covered page-family tranche:
 it preserves the legacy `items/total/page/size` envelope and adds canonical
 `PagePaginationMeta` built from the existing `page`, `size`, and known total.
+`GET /api/v1/collections/feeds` preserves the legacy `items/total` envelope
+and adds canonical `PagePaginationMeta` built from `page`, `size`, and the
+filtered feed total.
 
 Verified:
 
@@ -650,6 +653,7 @@ Verified:
 python -m pytest tldw_Server_API/tests/External_Sources/test_connectors_endpoints_api.py -k canonical_cursor_pagination -q
 python -m pytest tldw_Server_API/tests/Evaluations/test_evaluations_crud_endpoint_sanitization.py -k canonical_cursor_pagination -q
 python -m pytest tldw_Server_API/tests/Items/test_items_endpoint_sanitizers.py -k canonical_page_pagination -q
+python -m pytest tldw_Server_API/tests/Collections/test_collections_feeds_endpoint_sanitization.py -k canonical_page_pagination -q
 ```
 
 ## Task 9: Classify and Migrate Custom Legacy Envelopes

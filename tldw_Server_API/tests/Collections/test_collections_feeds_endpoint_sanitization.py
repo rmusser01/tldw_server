@@ -69,6 +69,37 @@ def _source_row(*, settings: dict | None = None, tags: list[str] | None = None) 
     )
 
 
+class _ListingFeedDb:
+    def list_sources(self, **kwargs):
+        assert kwargs["limit"] == 100
+        assert kwargs["offset"] == 0
+        rows = [_source_row() for _ in range(3)]
+        for index, row in enumerate(rows, start=1):
+            row.id = index
+        return rows, 3
+
+
+async def test_list_feed_subscriptions_includes_canonical_page_pagination() -> None:
+    response = await collections_feeds.list_feed_subscriptions(
+        q=None,
+        page=2,
+        size=1,
+        current_user=SimpleNamespace(id=42),
+        db=_ListingFeedDb(),
+    )
+
+    assert response.total == 3
+    assert [item.id for item in response.items] == [2]
+    assert response.pagination.model_dump(mode="json") == {
+        "mode": "page",
+        "page": 2,
+        "per_page": 1,
+        "total": 3,
+        "total_pages": 3,
+        "has_more": True,
+    }
+
+
 def test_register_schedule_sanitizes_scheduler_failure_log(monkeypatch):
     from tldw_Server_API.app.core.DB_Management import Workflows_Scheduler_DB as wfdb_module
     from tldw_Server_API.app.services import workflows_scheduler

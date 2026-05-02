@@ -17,6 +17,8 @@ from tldw_Server_API.app.api.v1.schemas.collections_feeds_schemas import (
     CollectionsFeedsListResponse,
     CollectionsFeedUpdateRequest,
 )
+from tldw_Server_API.app.api.v1.schemas.pagination import PagePaginationMeta
+from tldw_Server_API.app.api.v1.utils.pagination import build_page_pagination_meta
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, User
 from tldw_Server_API.app.core.DB_Management.Watchlists_DB import WatchlistsDatabase
 from tldw_Server_API.app.core.Personalization import (
@@ -359,6 +361,16 @@ def _collections_feed_event_timestamp() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _feeds_pagination(*, total: int, page: int, size: int) -> PagePaginationMeta:
+    total_pages = (total + size - 1) // size if total > 0 else 0
+    return build_page_pagination_meta(
+        page=page,
+        per_page=size,
+        total=total,
+        total_pages=total_pages,
+    )
+
+
 @router.post("", response_model=CollectionsFeed, summary="Create a Collections feed subscription")
 async def create_feed_subscription(
     payload: CollectionsFeedCreateRequest = Body(...),
@@ -487,7 +499,11 @@ async def list_feed_subscriptions(
     for row, settings in paged:
         job = _load_job(db, settings)
         items.append(_to_feed_response(row, job_row=job, settings=settings))
-    return CollectionsFeedsListResponse(items=items, total=total)
+    return CollectionsFeedsListResponse(
+        items=items,
+        total=total,
+        pagination=_feeds_pagination(total=total, page=page, size=size),
+    )
 
 
 @router.get("/{feed_id}", response_model=CollectionsFeed, summary="Get a Collections feed subscription")
