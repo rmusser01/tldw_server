@@ -365,15 +365,7 @@ func sanitizeUTF8WithinLimit(value []byte, maxBytes int) string {
 	if len(value) > maxBytes {
 		value = value[:maxBytes]
 	}
-	text := strings.ToValidUTF8(string(value), "")
-	for len([]byte(text)) > maxBytes {
-		runes := []rune(text)
-		if len(runes) == 0 {
-			return ""
-		}
-		text = string(runes[:len(runes)-1])
-	}
-	return text
+	return strings.ToValidUTF8(string(value), "")
 }
 
 func flattenEnv(values map[string]string) []string {
