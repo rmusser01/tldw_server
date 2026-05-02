@@ -13,6 +13,7 @@ const createResolvedDefaults = (): React.ComponentProps<
     ttsProvider: "openai",
     ttsVoice: "alloy",
     confirmationMode: "destructive_only",
+    wakeBehavior: "one_shot",
     voiceChatTriggerPhrases: ["hey helper"],
     autoResume: true,
     bargeIn: false,
@@ -40,6 +41,11 @@ const defaultVoiceCardProps = (): React.ComponentProps<typeof AssistantVoiceCard
   textOnlyDueToTtsFailure: false,
   sessionAutoResume: true,
   sessionBargeIn: false,
+  wakeArmed: false,
+  wakeDetectorState: "idle",
+  wakeWarning: null,
+  wakeTriggerPhrases: ["hey helper"],
+  sessionWakeBehavior: "one_shot",
   autoCommitEnabled: true,
   vadPreset: "balanced",
   vadThreshold: 0.5,
@@ -50,6 +56,8 @@ const defaultVoiceCardProps = (): React.ComponentProps<typeof AssistantVoiceCard
   onSendNow: vi.fn(),
   onSessionAutoResumeChange: vi.fn(),
   onSessionBargeInChange: vi.fn(),
+  onToggleWakeArmed: vi.fn(),
+  onSessionWakeBehaviorChange: vi.fn(),
   onAutoCommitEnabledChange: vi.fn(),
   onVadPresetChange: vi.fn(),
   onVadThresholdChange: vi.fn(),
@@ -138,6 +146,48 @@ describe("AssistantVoiceCard", () => {
 
     fireEvent.click(screen.getByTestId("live-vad-preset-fast"))
     expect(props.onVadPresetChange).toHaveBeenCalledWith("fast")
+  })
+
+  it("renders wake phrase controls and current saved wake phrases", () => {
+    const props = defaultVoiceCardProps()
+
+    render(<AssistantVoiceCard {...props} />)
+
+    expect(screen.getByTestId("live-wake-toggle")).toHaveTextContent(
+      /listen for wake phrase/i
+    )
+    expect(screen.getByTestId("live-wake-phrases")).toHaveTextContent("hey helper")
+
+    fireEvent.click(screen.getByTestId("live-wake-toggle"))
+    expect(props.onToggleWakeArmed).toHaveBeenCalledTimes(1)
+  })
+
+  it("uses resolved wake defaults when session wake props are omitted", () => {
+    const props = defaultVoiceCardProps()
+    props.resolvedDefaults = {
+      ...props.resolvedDefaults,
+      voiceChatTriggerPhrases: ["fallback wake"],
+      wakeBehavior: "continuous"
+    }
+    props.wakeTriggerPhrases = undefined
+    props.sessionWakeBehavior = undefined
+
+    render(<AssistantVoiceCard {...props} />)
+
+    expect(screen.getByTestId("live-wake-phrases")).toHaveTextContent(
+      "fallback wake"
+    )
+    expect(screen.getByTestId("live-wake-behavior")).toHaveTextContent("Continuous")
+  })
+
+  it("blocks wake toggle display when no saved wake phrases are configured", () => {
+    const props = defaultVoiceCardProps()
+    props.wakeTriggerPhrases = []
+
+    render(<AssistantVoiceCard {...props} />)
+
+    expect(screen.getByTestId("live-wake-toggle")).toBeDisabled()
+    expect(screen.getByText(/add a trigger phrase/i)).toBeInTheDocument()
   })
 
   it("shows the advanced drawer and current runtime values", () => {

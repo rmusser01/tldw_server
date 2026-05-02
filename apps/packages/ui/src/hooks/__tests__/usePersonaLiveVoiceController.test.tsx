@@ -2,6 +2,7 @@ import React from "react"
 import { act, renderHook, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
+import type { WakeDetector, WakeDetectorConfig } from "../personaWakeDetector"
 import { usePersonaLiveVoiceController } from "../usePersonaLiveVoiceController"
 
 const hookMocks = vi.hoisted(() => ({
@@ -102,6 +103,7 @@ describe("usePersonaLiveVoiceController", () => {
     ttsProvider: "openai",
     ttsVoice: "alloy",
     confirmationMode: "destructive_only" as const,
+    wakeBehavior: "one_shot" as const,
     voiceChatTriggerPhrases: ["hey helper"],
     autoResume: true,
     bargeIn: false,
@@ -114,6 +116,31 @@ describe("usePersonaLiveVoiceController", () => {
 
   const getSentPayloads = (ws: WebSocket & { send: ReturnType<typeof vi.fn> }) =>
     ws.send.mock.calls.map(([payload]) => JSON.parse(String(payload)))
+
+  const createWakeDetectorHarness = () => {
+    let config: WakeDetectorConfig | null = null
+    const detector: WakeDetector = {
+      isAvailable: vi.fn(async () => true),
+      start: vi.fn(async (nextConfig) => {
+        config = nextConfig
+        nextConfig.onStateChange?.("listening")
+      }),
+      stop: vi.fn(async () => {
+        config = null
+      })
+    }
+    return {
+      detector,
+      fireWake: (canonicalPhrase = "hey helper") => {
+        config?.onWake({
+          canonicalPhrase,
+          transcript: `${canonicalPhrase} status`,
+          detectedAtMs: 1714500000000,
+          detectorKind: "browser_transcript"
+        })
+      }
+    }
+  }
 
   it("sends persona-scoped voice_config when the live websocket is connected", async () => {
     const ws = {
@@ -140,7 +167,8 @@ describe("usePersonaLiveVoiceController", () => {
           voice: {
             trigger_phrases: ["hey helper"],
             auto_resume: true,
-            barge_in: false
+            barge_in: false,
+            wake_behavior: "one_shot"
           },
           stt: {
             language: "en-US",
@@ -184,6 +212,459 @@ describe("usePersonaLiveVoiceController", () => {
     expect(controller.minSilenceMs).toBe(250)
     expect(controller.turnStopSecs).toBe(0.2)
     expect(controller.minUtteranceSecs).toBe(0.4)
+  })
+
+  it("blocks wake arming when the selected profile has no saved trigger phrases", async () => {
+    const wakeHarness = createWakeDetectorHarness()
+    const ws = {
+      readyState: WebSocket.OPEN,
+      send: vi.fn()
+    } as unknown as WebSocket
+
+    const { result } = renderHook(() =>
+      usePersonaLiveVoiceController({
+        ws,
+        connected: true,
+        sessionId: "sess-1",
+        personaId: "persona-1",
+        resolvedDefaults,
+        canUseServerStt: true,
+        wakeTriggerPhrases: [],
+        wakeDetectorFactory: () => wakeHarness.detector
+      })
+    )
+
+    await act(async () => {
+      await result.current.toggleWakeArmed()
+    })
+
+    expect(wakeHarness.detector.start).not.toHaveBeenCalled()
+    expect(result.current.wakeWarning).toMatch(/trigger phrase/i)
+  })
+
+  it("starts the wake detector with raw saved phrases", async () => {
+    const wakeHarness = createWakeDetectorHarness()
+    const ws = {
+      readyState: WebSocket.OPEN,
+      send: vi.fn()
+    } as unknown as WebSocket
+
+    const { result } = renderHook(() =>
+      usePersonaLiveVoiceController({
+        ws,
+        connected: true,
+        sessionId: "sess-1",
+        personaId: "persona-1",
+        resolvedDefaults,
+        canUseServerStt: true,
+        wakeTriggerPhrases: ["hey helper"],
+        wakeDetectorFactory: () => wakeHarness.detector
+      })
+    )
+
+    await act(async () => {
+      await result.current.toggleWakeArmed()
+    })
+
+    expect(wakeHarness.detector.start).toHaveBeenCalledWith(
+      expect.objectContaining({
+        phrases: ["hey helper"]
+      })
+    )
+    expect(result.current.wakeArmed).toBe(true)
+    expect(result.current.wakeDetectorState).toBe("listening")
+  })
+
+  it("sends wake activation when the detector hears a configured phrase", async () => {
+    const wakeHarness = createWakeDetectorHarness()
+    const ws = {
+      readyState: WebSocket.OPEN,
+      send: vi.fn()
+    } as unknown as WebSocket
+
+    const { result } = renderHook(() =>
+      usePersonaLiveVoiceController({
+        ws,
+        connected: true,
+        sessionId: "sess-1",
+        personaId: "persona-1",
+        resolvedDefaults,
+        canUseServerStt: true,
+        wakeTriggerPhrases: ["hey helper"],
+        wakeDetectorFactory: () => wakeHarness.detector
+      })
+    )
+
+    await act(async () => {
+      await result.current.toggleWakeArmed()
+    })
+    ;(ws as WebSocket & { send: ReturnType<typeof vi.fn> }).send.mockClear()
+
+    act(() => {
+      wakeHarness.fireWake()
+    })
+
+    expect(getSentPayloads(ws as WebSocket & { send: ReturnType<typeof vi.fn> })).toEqual(
+      expect.arrayContaining([
+        {
+          type: "wake_activation",
+          session_id: "sess-1",
+          matched_phrase: "hey helper",
+          detector_kind: "browser_transcript",
+          detected_at_ms: 1714500000000
+        }
+      ])
+    )
+  })
+
+  it("keeps wake armed when activation send fails", async () => {
+    const wakeHarness = createWakeDetectorHarness()
+    const ws = {
+      readyState: WebSocket.OPEN,
+      send: vi.fn((payload: string) => {
+        const parsed = JSON.parse(String(payload))
+        if (parsed.type === "wake_activation") {
+          throw new Error("socket send failed")
+        }
+      })
+    } as unknown as WebSocket
+
+    const { result } = renderHook(() =>
+      usePersonaLiveVoiceController({
+        ws,
+        connected: true,
+        sessionId: "sess-1",
+        personaId: "persona-1",
+        resolvedDefaults,
+        canUseServerStt: true,
+        wakeTriggerPhrases: ["hey helper"],
+        wakeDetectorFactory: () => wakeHarness.detector
+      })
+    )
+
+    await act(async () => {
+      await result.current.toggleWakeArmed()
+    })
+    vi.mocked(wakeHarness.detector.stop).mockClear()
+
+    act(() => {
+      wakeHarness.fireWake()
+    })
+
+    expect(result.current.wakeArmed).toBe(true)
+    expect(result.current.wakeWarning).toMatch(/activation could not be sent/i)
+    expect(wakeHarness.detector.stop).not.toHaveBeenCalled()
+    expect(hookMocks.micStart).not.toHaveBeenCalled()
+  })
+
+  it("sends wake deactivation when wake listening is disarmed", async () => {
+    const wakeHarness = createWakeDetectorHarness()
+    const ws = {
+      readyState: WebSocket.OPEN,
+      send: vi.fn()
+    } as unknown as WebSocket
+
+    const { result } = renderHook(() =>
+      usePersonaLiveVoiceController({
+        ws,
+        connected: true,
+        sessionId: "sess-1",
+        personaId: "persona-1",
+        resolvedDefaults,
+        canUseServerStt: true,
+        wakeTriggerPhrases: ["hey helper"],
+        wakeDetectorFactory: () => wakeHarness.detector
+      })
+    )
+
+    await act(async () => {
+      await result.current.toggleWakeArmed()
+    })
+    ;(ws as WebSocket & { send: ReturnType<typeof vi.fn> }).send.mockClear()
+
+    await act(async () => {
+      await result.current.toggleWakeArmed()
+    })
+
+    expect(getSentPayloads(ws as WebSocket & { send: ReturnType<typeof vi.fn> })).toEqual([
+      {
+        type: "wake_deactivation",
+        session_id: "sess-1",
+        reason: "disarmed"
+      }
+    ])
+    expect(wakeHarness.detector.stop).toHaveBeenCalled()
+    expect(result.current.wakeArmed).toBe(false)
+  })
+
+  it("sends wake deactivation on unmount when wake listening is armed", async () => {
+    const wakeHarness = createWakeDetectorHarness()
+    const ws = {
+      readyState: WebSocket.OPEN,
+      send: vi.fn()
+    } as unknown as WebSocket
+
+    const { result, unmount } = renderHook(() =>
+      usePersonaLiveVoiceController({
+        ws,
+        connected: true,
+        sessionId: "sess-1",
+        personaId: "persona-1",
+        resolvedDefaults,
+        canUseServerStt: true,
+        wakeTriggerPhrases: ["hey helper"],
+        wakeDetectorFactory: () => wakeHarness.detector
+      })
+    )
+
+    await act(async () => {
+      await result.current.toggleWakeArmed()
+    })
+    ;(ws as WebSocket & { send: ReturnType<typeof vi.fn> }).send.mockClear()
+
+    unmount()
+
+    expect(getSentPayloads(ws as WebSocket & { send: ReturnType<typeof vi.fn> })).toEqual([
+      {
+        type: "wake_deactivation",
+        session_id: "sess-1",
+        reason: "route_leave"
+      }
+    ])
+  })
+
+  it("sends wake deactivation for the previous session on persona switch", async () => {
+    const wakeHarness = createWakeDetectorHarness()
+    const ws = {
+      readyState: WebSocket.OPEN,
+      send: vi.fn()
+    } as unknown as WebSocket
+
+    const { result, rerender } = renderHook(
+      ({
+        sessionId,
+        personaId
+      }: {
+        sessionId: string
+        personaId: string
+      }) =>
+        usePersonaLiveVoiceController({
+          ws,
+          connected: true,
+          sessionId,
+          personaId,
+          resolvedDefaults,
+          canUseServerStt: true,
+          wakeTriggerPhrases: ["hey helper"],
+          wakeDetectorFactory: () => wakeHarness.detector
+        }),
+      {
+        initialProps: {
+          sessionId: "sess-old",
+          personaId: "persona-1"
+        }
+      }
+    )
+
+    await act(async () => {
+      await result.current.toggleWakeArmed()
+    })
+    ;(ws as WebSocket & { send: ReturnType<typeof vi.fn> }).send.mockClear()
+
+    rerender({
+      sessionId: "sess-new",
+      personaId: "persona-2"
+    })
+
+    await waitFor(() => {
+      expect(getSentPayloads(ws as WebSocket & { send: ReturnType<typeof vi.fn> })).toEqual(
+        expect.arrayContaining([
+          {
+            type: "wake_deactivation",
+            session_id: "sess-old",
+            reason: "persona_switch"
+          }
+        ])
+      )
+    })
+  })
+
+  it("cancels stale wake starts when disarmed before availability resolves", async () => {
+    let resolveAvailable: ((available: boolean) => void) | null = null
+    const detector: WakeDetector = {
+      isAvailable: vi.fn(
+        () =>
+          new Promise<boolean>((resolve) => {
+            resolveAvailable = resolve
+          })
+      ),
+      start: vi.fn(async () => undefined),
+      stop: vi.fn(async () => undefined)
+    }
+    const ws = {
+      readyState: WebSocket.OPEN,
+      send: vi.fn()
+    } as unknown as WebSocket
+
+    const { result } = renderHook(() =>
+      usePersonaLiveVoiceController({
+        ws,
+        connected: true,
+        sessionId: "sess-1",
+        personaId: "persona-1",
+        resolvedDefaults,
+        canUseServerStt: true,
+        wakeTriggerPhrases: ["hey helper"],
+        wakeDetectorFactory: () => detector
+      })
+    )
+
+    let armPromise: Promise<void> = Promise.resolve()
+    act(() => {
+      armPromise = result.current.toggleWakeArmed()
+    })
+
+    await waitFor(() => {
+      expect(result.current.wakeArmed).toBe(true)
+    })
+
+    await act(async () => {
+      await result.current.toggleWakeArmed()
+    })
+
+    await act(async () => {
+      resolveAvailable?.(true)
+      await armPromise
+    })
+
+    expect(detector.start).not.toHaveBeenCalled()
+    expect(result.current.wakeArmed).toBe(false)
+  })
+
+  it("stops the wake detector before live mic capture starts", async () => {
+    const wakeHarness = createWakeDetectorHarness()
+    const ws = {
+      readyState: WebSocket.OPEN,
+      send: vi.fn()
+    } as unknown as WebSocket
+
+    const { result } = renderHook(() =>
+      usePersonaLiveVoiceController({
+        ws,
+        connected: true,
+        sessionId: "sess-1",
+        personaId: "persona-1",
+        resolvedDefaults,
+        canUseServerStt: true,
+        wakeTriggerPhrases: ["hey helper"],
+        wakeDetectorFactory: () => wakeHarness.detector
+      })
+    )
+
+    await act(async () => {
+      await result.current.toggleWakeArmed()
+    })
+    const stopCallsBeforeMic = vi.mocked(wakeHarness.detector.stop).mock.calls.length
+
+    await act(async () => {
+      await result.current.startListening()
+    })
+
+    expect(vi.mocked(wakeHarness.detector.stop).mock.calls.length).toBe(
+      stopCallsBeforeMic + 1
+    )
+    expect(hookMocks.micStart).toHaveBeenCalled()
+    expect(result.current.wakeArmed).toBe(true)
+  })
+
+  it("restarts wake listening after manually stopped mic capture while armed", async () => {
+    const wakeHarness = createWakeDetectorHarness()
+    const ws = {
+      readyState: WebSocket.OPEN,
+      send: vi.fn()
+    } as unknown as WebSocket
+
+    const { result } = renderHook(() =>
+      usePersonaLiveVoiceController({
+        ws,
+        connected: true,
+        sessionId: "sess-1",
+        personaId: "persona-1",
+        resolvedDefaults,
+        canUseServerStt: true,
+        wakeTriggerPhrases: ["hey helper"],
+        wakeDetectorFactory: () => wakeHarness.detector
+      })
+    )
+
+    await act(async () => {
+      await result.current.toggleWakeArmed()
+    })
+    expect(wakeHarness.detector.start).toHaveBeenCalledTimes(1)
+
+    await act(async () => {
+      await result.current.startListening()
+    })
+    await waitFor(() => {
+      expect(result.current.isListening).toBe(true)
+    })
+
+    act(() => {
+      result.current.stopListening()
+    })
+
+    await waitFor(() => {
+      expect(wakeHarness.detector.start).toHaveBeenCalledTimes(2)
+    })
+    expect(result.current.wakeArmed).toBe(true)
+  })
+
+  it("restarts wake listening after push-to-talk wake turn finishes", async () => {
+    const wakeHarness = createWakeDetectorHarness()
+    const ws = {
+      readyState: WebSocket.OPEN,
+      send: vi.fn()
+    } as unknown as WebSocket
+    const pushToTalkDefaults = {
+      ...resolvedDefaults,
+      autoResume: false,
+      wakeBehavior: "push_to_talk_after_wake" as const
+    }
+
+    const { result } = renderHook(() =>
+      usePersonaLiveVoiceController({
+        ws,
+        connected: true,
+        sessionId: "sess-1",
+        personaId: "persona-1",
+        resolvedDefaults: pushToTalkDefaults,
+        canUseServerStt: true,
+        wakeTriggerPhrases: ["hey helper"],
+        wakeDetectorFactory: () => wakeHarness.detector
+      })
+    )
+
+    await act(async () => {
+      await result.current.toggleWakeArmed()
+    })
+    expect(wakeHarness.detector.start).toHaveBeenCalledTimes(1)
+
+    act(() => {
+      wakeHarness.fireWake()
+    })
+
+    act(() => {
+      result.current.handlePayload({
+        event: "notice",
+        reason_code: "TTS_UNAVAILABLE_TEXT_ONLY",
+        message: "text only"
+      })
+    })
+
+    await waitFor(() => {
+      expect(wakeHarness.detector.start).toHaveBeenCalledTimes(2)
+    })
+    expect(result.current.wakeArmed).toBe(true)
   })
 
   it("marks the preset as custom after an advanced runtime edit", () => {
