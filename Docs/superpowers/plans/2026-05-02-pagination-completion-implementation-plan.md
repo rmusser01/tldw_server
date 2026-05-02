@@ -619,7 +619,10 @@ canonical, while artifact/snapshot subresources and job detail responses are
 explicitly exempt. The first kanban workflow tranche migrated workflow event
 and stale-claim recovery lists with overfetch-derived offset metadata and
 classified checklist/detail/catalog/status routes that have no pagination
-inputs.
+inputs. MCP Hub custom-envelope rows have been classified without source
+changes: governance audit findings are generated filtered snapshots with no
+page inputs, and the event stream is SSE where `limit` terminates the stream
+rather than describing a response-body page.
 
 - [x] **Step 1: Pick the first custom family**
 
@@ -671,6 +674,9 @@ Watchlists findings:
 - Kanban checklist/list detail responses, mutation results, status responses,
   and small nested catalogs without pagination inputs are classified as
   non-pagination targets.
+- MCP Hub `/audit/findings` is a generated audit snapshot with filters and
+  aggregate counts but no pagination inputs. MCP Hub `/events/stream` is an SSE
+  stream; its optional `limit` is a stream cutoff rather than a page contract.
 
 - [x] **Step 3: Add route tests**
 

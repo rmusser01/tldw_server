@@ -45,6 +45,8 @@ Current pagination-sensitive examples:
 - `GET /jobs/events/stream`: SSE event stream using `after_id`; keep pagination
   semantics in the stream cursor/header channel rather than adding a response
   envelope.
+- `GET /mcp/hub/events/stream`: SSE replay/live stream. The optional `limit`
+  controls stream termination, not a response-body page contract.
 - `GET /watchlists/runs/export.csv`: CSV export; keep selection/filter inputs
   separate from response-body pagination metadata.
 
@@ -63,6 +65,9 @@ Current examples:
 - `POST /watchlists/sources/check-now`: ad hoc source-check operation result.
 - `POST /watchlists/sources/import`: OPML import operation result.
 - `GET /watchlists/items/smart-counts`: aggregate counts for UI filters.
+- `GET /mcp/hub/audit/findings`: generated governance audit snapshot with
+  filters but no page, limit, or offset inputs; `total` and `counts` summarize
+  the returned snapshot.
 - `POST /api/v1/kanban/checklists/{checklist_id}/toggle-all`: checklist
   mutation result; `total_items` is the resulting checklist size.
 
