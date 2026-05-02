@@ -134,6 +134,8 @@ def test_list_character_memories_includes_canonical_pagination(
         "has_more": True,
         "next_offset": 3,
     }
+    assert payload["has_more"] is True
+    assert payload["next_offset"] == 3
 
 
 def test_extract_character_memories_allows_string_owner_client_id(
