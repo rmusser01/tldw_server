@@ -711,6 +711,13 @@ python -m pytest tldw_Server_API/tests/kanban/test_workflow_transition_contract.
 python -m py_compile tldw_Server_API/app/api/v1/schemas/kanban_schemas.py tldw_Server_API/app/api/v1/endpoints/kanban/kanban_workflow.py tldw_Server_API/app/core/DB_Management/Kanban_DB.py
 ```
 
+Verified audiobook project-list tranche:
+
+```bash
+python -m pytest tldw_Server_API/tests/Audiobooks/integration/test_audiobook_jobs_endpoints.py -k canonical_offset_pagination -q
+python -m pytest tldw_Server_API/tests/Audiobooks/integration/test_audiobook_jobs_endpoints.py -q
+```
+
 - [ ] **Step 5: Commit one family**
 
 Use a family-specific message, for example:
