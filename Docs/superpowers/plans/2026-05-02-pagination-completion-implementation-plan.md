@@ -658,6 +658,9 @@ and the known usage total.
 `GET /api/v1/evaluations/embeddings/abtest/{test_id}/results` preserves the
 legacy `summary/results/page/page_size/total` envelope and adds canonical
 `PagePaginationMeta` built from `page`, `page_size`, and the known result total.
+`GET /api/v1/admin/users/profile` preserves the legacy
+`profiles/total/page/limit/pages` envelope and adds canonical
+`PagePaginationMeta` built from `page`, `limit`, and the known profile total.
 
 Verified:
 
@@ -670,6 +673,7 @@ python -m pytest tldw_Server_API/tests/Personalization/test_personalization_endp
 python -m pytest tldw_Server_API/tests/Admin/test_admin_usage_service.py -k canonical_page_pagination -q
 python -m pytest tldw_Server_API/tests/Prompt_Management_NEW/unit/test_prompts_endpoint_error_mapping.py -k canonical_page_pagination -q
 python -m pytest tldw_Server_API/tests/Evaluations/test_embeddings_abtest_results_api.py -k returns_rows -q
+python -m pytest tldw_Server_API/tests/Admin/test_admin_service_log_sanitizers.py -k canonical_page_pagination -q
 ```
 
 ## Task 9: Classify and Migrate Custom Legacy Envelopes
