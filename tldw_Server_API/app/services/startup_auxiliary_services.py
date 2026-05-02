@@ -4,13 +4,16 @@ Auxiliary startup-service helpers extracted from the application lifespan.
 
 from __future__ import annotations
 
+import asyncio
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Mapping
+from typing import Any
 
 from loguru import logger
 
 from tldw_Server_API.app.core.config import legacy_get as _legacy_get
 from tldw_Server_API.app.core.testing import env_flag_enabled as _env_flag_enabled
+from tldw_Server_API.app.services.lifecycle_workers import ManagedWorker, ShutdownPhase
 
 _STARTUP_GUARD_EXCEPTIONS = (
     AttributeError,
@@ -38,12 +41,17 @@ async def start_auxiliary_services(
 ) -> AuxiliaryStartupHandles:
     """Start auxiliary services and return explicit task handles.
 
-    When ``worker_inventory`` is provided, usage aggregators are registered
-    with lifecycle worker management. Passing ``None`` preserves the legacy
-    direct-task path in the downstream aggregator startup helpers.
+    When ``worker_inventory`` is provided, claims schedulers and usage
+    aggregators are registered with lifecycle worker management. Passing
+    ``None`` preserves the legacy direct-task path in downstream startup
+    helpers.
     """
-    claims_alerts_task = await _start_claims_alerts_scheduler()
-    claims_review_metrics_task = await _start_claims_review_metrics_scheduler()
+    claims_alerts_task = await _start_claims_alerts_scheduler(
+        worker_inventory=worker_inventory,
+    )
+    claims_review_metrics_task = await _start_claims_review_metrics_scheduler(
+        worker_inventory=worker_inventory,
+    )
     usage_task = await _start_usage_aggregator(worker_inventory=worker_inventory)
     llm_usage_task = await _start_llm_usage_aggregator(worker_inventory=worker_inventory)
     await _start_personalization_consolidation(app_settings)
@@ -55,10 +63,18 @@ async def start_auxiliary_services(
     )
 
 
-async def _start_claims_alerts_scheduler() -> Any | None:
+async def _start_claims_alerts_scheduler(
+    *,
+    worker_inventory: Any | None = None,
+) -> Any | None:
     try:
         task = await _start_claims_alerts_scheduler_service()
         if task:
+            await _register_auxiliary_task(
+                worker_inventory=worker_inventory,
+                task=task,
+                worker_name="claims_alerts_task",
+            )
             logger.info("Claims alerts scheduler started")
         return task
     except _STARTUP_GUARD_EXCEPTIONS as exc:
@@ -66,10 +82,18 @@ async def _start_claims_alerts_scheduler() -> Any | None:
         return None
 
 
-async def _start_claims_review_metrics_scheduler() -> Any | None:
+async def _start_claims_review_metrics_scheduler(
+    *,
+    worker_inventory: Any | None = None,
+) -> Any | None:
     try:
         task = await _start_claims_review_metrics_scheduler_service()
         if task:
+            await _register_auxiliary_task(
+                worker_inventory=worker_inventory,
+                task=task,
+                worker_name="claims_review_metrics_task",
+            )
             logger.info("Claims review metrics scheduler started")
         return task
     except _STARTUP_GUARD_EXCEPTIONS as exc:
@@ -111,6 +135,48 @@ async def _start_llm_usage_aggregator(
     except _STARTUP_GUARD_EXCEPTIONS as exc:
         logger.warning(f"Failed to start LLM usage aggregator: {exc}")
         return None
+
+
+async def _register_auxiliary_task(
+    *,
+    worker_inventory: Any | None,
+    task: Any,
+    worker_name: str,
+) -> None:
+    if worker_inventory is None:
+        return
+    try:
+        worker_inventory.register(
+            ManagedWorker(
+                name=worker_name,
+                task=task,
+                stop_event=None,
+                category="auxiliary",
+                shutdown_phase=ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN,
+            )
+        )
+    except _STARTUP_GUARD_EXCEPTIONS:
+        await _cancel_unregistered_task(task)
+        raise
+
+
+async def _cancel_unregistered_task(task: Any, *, timeout: float = 1.0) -> None:
+    try:
+        task.cancel()
+    except _STARTUP_GUARD_EXCEPTIONS as exc:
+        logger.debug(f"Auxiliary scheduler startup rollback cancel failed: {exc}")
+        return
+    try:
+        await asyncio.wait_for(task, timeout=timeout)
+    except asyncio.CancelledError:
+        pass
+    except asyncio.TimeoutError:
+        logger.warning(
+            "Auxiliary scheduler did not cancel within {}s during startup rollback",
+            timeout,
+        )
+    except _STARTUP_GUARD_EXCEPTIONS as exc:
+        logger.debug(f"Auxiliary scheduler startup rollback wait failed: {exc}")
 
 
 async def _start_personalization_consolidation(app_settings: Mapping[str, Any]) -> None:

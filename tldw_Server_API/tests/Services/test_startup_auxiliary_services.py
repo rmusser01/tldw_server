@@ -1,11 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 import importlib
 import sys
-from types import SimpleNamespace
 
 import pytest
-
+from fastapi import FastAPI
 
 pytestmark = pytest.mark.unit
 
@@ -22,11 +22,13 @@ async def test_start_auxiliary_services_combines_handles_and_starts_personalizat
     startup_aux = _import_startup_auxiliary_services()
     calls: list[str] = []
 
-    async def _fake_claims_alerts():
+    async def _fake_claims_alerts(**kwargs: object) -> str:
+        assert kwargs == {"worker_inventory": None}
         calls.append("claims-alerts")
         return "claims-alerts-task"
 
-    async def _fake_claims_review():
+    async def _fake_claims_review(**kwargs: object) -> str:
+        assert kwargs == {"worker_inventory": None}
         calls.append("claims-review")
         return "claims-review-task"
 
@@ -75,10 +77,12 @@ async def test_start_auxiliary_services_passes_worker_inventory_to_usage_aggrega
     worker_inventory = object()
     seen_inventory: list[object] = []
 
-    async def _fake_claims_alerts():
+    async def _fake_claims_alerts(**kwargs: object) -> None:
+        assert kwargs == {"worker_inventory": worker_inventory}
         return None
 
-    async def _fake_claims_review():
+    async def _fake_claims_review(**kwargs: object) -> None:
+        assert kwargs == {"worker_inventory": worker_inventory}
         return None
 
     async def _fake_usage(**kwargs: object) -> str:
@@ -106,6 +110,88 @@ async def test_start_auxiliary_services_passes_worker_inventory_to_usage_aggrega
     assert seen_inventory == [worker_inventory, worker_inventory]
     assert handles.usage_task == "usage-task"
     assert handles.llm_usage_task == "llm-usage-task"
+
+
+@pytest.mark.asyncio
+async def test_start_auxiliary_services_registers_claims_schedulers_with_worker_inventory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_aux = _import_startup_auxiliary_services()
+    from tldw_Server_API.app.services.lifecycle_workers import (
+        ShutdownPhase,
+        WorkerRegistry,
+    )
+
+    app = FastAPI()
+    worker_inventory = WorkerRegistry(app)
+    created_tasks: list[asyncio.Task[None]] = []
+
+    async def _wait_forever() -> None:
+        await asyncio.Event().wait()
+
+    def _make_task(name: str) -> asyncio.Task[None]:
+        task = asyncio.create_task(_wait_forever(), name=name)
+        created_tasks.append(task)
+        return task
+
+    async def _fake_claims_alerts_service() -> asyncio.Task[None]:
+        return _make_task("claims_alerts_scheduler")
+
+    async def _fake_claims_review_service() -> asyncio.Task[None]:
+        return _make_task("claims_review_metrics_scheduler")
+
+    async def _fake_usage(**kwargs: object) -> None:
+        assert kwargs == {"worker_inventory": worker_inventory}
+
+    async def _fake_llm_usage(**kwargs: object) -> None:
+        assert kwargs == {"worker_inventory": worker_inventory}
+
+    async def _fake_personalization(_app_settings) -> None:
+        return None
+
+    monkeypatch.setattr(
+        startup_aux,
+        "_start_claims_alerts_scheduler_service",
+        _fake_claims_alerts_service,
+    )
+    monkeypatch.setattr(
+        startup_aux,
+        "_start_claims_review_metrics_scheduler_service",
+        _fake_claims_review_service,
+    )
+    monkeypatch.setattr(startup_aux, "_start_usage_aggregator", _fake_usage)
+    monkeypatch.setattr(startup_aux, "_start_llm_usage_aggregator", _fake_llm_usage)
+    monkeypatch.setattr(startup_aux, "_start_personalization_consolidation", _fake_personalization)
+
+    try:
+        handles = await startup_aux.start_auxiliary_services(
+            {},
+            worker_inventory=worker_inventory,
+        )
+
+        assert handles.claims_alerts_task is created_tasks[0]
+        assert handles.claims_review_metrics_task is created_tasks[1]
+        assert [handle.name for handle in worker_inventory.handles] == [
+            "claims_alerts_task",
+            "claims_review_metrics_task",
+        ]
+        assert [handle.task for handle in worker_inventory.handles] == created_tasks
+        assert [handle.stop_event for handle in worker_inventory.handles] == [None, None]
+        assert [handle.category for handle in worker_inventory.handles] == [
+            "auxiliary",
+            "auxiliary",
+        ]
+        assert [
+            handle.shutdown_phase for handle in worker_inventory.handles
+        ] == [
+            ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN,
+            ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN,
+        ]
+        assert app.state._tldw_shutdown_job_poller_inventory == []
+    finally:
+        for task in created_tasks:
+            task.cancel()
+        await asyncio.gather(*created_tasks, return_exceptions=True)
 
 
 @pytest.mark.asyncio
