@@ -94,6 +94,43 @@ import Testing
     #expect(response.details["guest_capabilities"] == nil)
 }
 
+@Test func helperServiceClearsStaleGuestDetailsWhenVMIDIsReusedWithoutInfo() throws {
+    let registry = VMRegistry()
+    registry.upsert(
+        vmID: "vm-reused",
+        state: "running",
+        healthy: true,
+        guestInfo: GuestAgentInfo(
+            guestVersion: "stale",
+            workspaceRoot: "/stale",
+            capabilities: ["stale_capability"],
+            capabilitiesKnown: true
+        )
+    )
+    let manager = VZLinuxVMManager(
+        registry: registry,
+        bootDriver: RecordingBootDriver(),
+        guestBridge: ReadyGuestBridge()
+    )
+    let service = HelperService(
+        hostFacts: HostFacts(isMacOS: true, isAppleSilicon: true),
+        registry: registry,
+        vmManager: manager
+    )
+
+    let response = try service.createVM(
+        vmID: "vm-reused",
+        templatePath: "/tmp/template.img",
+        workspacePath: "/tmp/workspace",
+        readinessTimeoutSeconds: 5
+    )
+
+    #expect(response.details["guest_version"] == nil)
+    #expect(response.details["guest_workspace_root"] == nil)
+    #expect(response.details["guest_capabilities_known"] == nil)
+    #expect(response.details["guest_capabilities"] == nil)
+}
+
 @Test func helperServiceCreateVMReturnsOwnershipMetadata() throws {
     let registry = VMRegistry()
     let manager = VZLinuxVMManager(
