@@ -1166,6 +1166,8 @@ def test_outputs_preview_with_inline_data_and_generate(client_with_user, tmp_pat
     assert lst["pagination"]["total"] >= 1
     assert lst["pagination"]["limit"] == 10
     assert lst["pagination"]["offset"] == 0
+    assert lst["has_more"] == lst["pagination"]["has_more"]
+    assert lst["next_offset"] == lst["pagination"]["next_offset"]
     assert any(it["id"] == oid for it in lst.get("items", []))
 
 
