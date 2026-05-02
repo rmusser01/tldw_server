@@ -130,6 +130,7 @@ async def test_shutdown_post_worker_services_runs_helpers_in_order_and_returns_h
         workflows_gc_stop_event="workflows-gc-stop",
         workflows_maint_task="workflows-maint-task",
         workflows_maint_stop_event="workflows-maint-stop",
+        stopped_background_worker_names={"usage_aggregator"},
         guard_exceptions=guard_exceptions,
     )
 
@@ -146,6 +147,7 @@ async def test_shutdown_post_worker_services_runs_helpers_in_order_and_returns_h
     assert calls[0][1]["claims_task"] == "claims-task"
     assert calls[1][1]["jobs_notifications_bridge_task"] == "bridge-task"
     assert calls[2][1]["coordinated_legacy_component_names"] is coordinated_legacy_component_names
+    assert calls[2][1]["stopped_background_worker_names"] == {"usage_aggregator"}
     assert calls[3][1]["workflows_sched_task"] == "workflows-sched-task"
     assert calls[4][1]["jobs_metrics_task"] == "jobs-metrics-task"
     assert calls[5][1]["jobs_metrics_reconcile_task"] == "jobs-metrics-reconcile-task"
@@ -708,6 +710,8 @@ async def test_run_shutdown_post_worker_services_guard_failure_suppresses_stoppe
         guard_exceptions=(RuntimeError,),
         stopped_background_worker_names={
             "claims_rebuild",
+            "usage_aggregator",
+            "llm_usage_aggregator",
             "jobs_metrics_task",
             "jobs_metrics_reconcile_task",
             "jobs_crypto_rotate_task",
@@ -725,8 +729,8 @@ async def test_run_shutdown_post_worker_services_guard_failure_suppresses_stoppe
     assert handles.embeddings_compactor_task == "compactor-input"
     assert handles.embeddings_compactor_stop_event == "compactor-stop-input"
     assert handles.websub_renewal_task is None
-    assert handles.usage_task == "usage-input"
-    assert handles.llm_usage_task == "llm-input"
+    assert handles.usage_task is None
+    assert handles.llm_usage_task is None
     assert handles.jobs_metrics_task is None
     assert handles.loop_lag_task == "loop-lag-input"
     assert handles.jobs_metrics_reconcile_task is None

@@ -2,12 +2,17 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timezone
+from typing import Any
 
 from loguru import logger
 
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool, get_db_pool
 from tldw_Server_API.app.core.AuthNZ.repos.usage_repo import AuthnzUsageRepo
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
+from tldw_Server_API.app.services.lifecycle_workers import (
+    ShutdownPhase,
+    start_stop_event_worker,
+)
 
 _USAGE_AGGREGATOR_NONCRITICAL_EXCEPTIONS = (
     asyncio.CancelledError,
@@ -63,11 +68,30 @@ async def _aggregator_loop(stop_event: asyncio.Event):
         logger.bind(error_type=type(e).__name__).warning("Usage aggregator loop exited")
 
 
-async def start_usage_aggregator() -> asyncio.Task | None:
-    """Start background aggregator if enabled; return task or None."""
+async def start_usage_aggregator(
+    *,
+    worker_inventory: Any | None = None,
+) -> asyncio.Task | None:
+    """Start background usage aggregation if enabled.
+
+    With ``worker_inventory``, register the loop with lifecycle worker
+    management while retaining the legacy stop-event task attribute used by
+    ``stop_usage_aggregator``. Without inventory, create the legacy local task.
+    """
     settings = get_settings()
     if not getattr(settings, "USAGE_LOG_ENABLED", False):
         return None
+    if worker_inventory is not None:
+        task, stop_event = await start_stop_event_worker(
+            worker_inventory,
+            name="usage_aggregator",
+            task_name="usage_aggregator",
+            coroutine_factory=_aggregator_loop,
+            category="usage",
+            shutdown_phase=ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN,
+        )
+        task._tldw_stop_event = stop_event  # type: ignore[attr-defined]
+        return task
     stop_event = asyncio.Event()
     task = asyncio.create_task(_aggregator_loop(stop_event))
     # Attach a helper to task for stopping

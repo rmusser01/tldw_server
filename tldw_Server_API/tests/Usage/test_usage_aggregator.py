@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from types import SimpleNamespace
 from datetime import datetime, timezone
 
 import pytest
@@ -92,6 +93,49 @@ async def _insert_log(pool, *, user_id, status, latency_ms, bytes_val):
             bytes_val,
             None,
         )
+
+
+@pytest.mark.asyncio
+async def test_start_usage_aggregator_registers_background_inventory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import tldw_Server_API.app.services.usage_aggregator as usage_aggregator
+
+    class _Settings:
+        USAGE_LOG_ENABLED = True
+
+    worker_inventory = object()
+    task = SimpleNamespace()
+    stop_event = object()
+    calls: list[dict[str, object]] = []
+
+    async def _fake_start_stop_event_worker(
+        inventory: object,
+        **kwargs: object,
+    ) -> tuple[SimpleNamespace, object]:
+        calls.append({"inventory": inventory, **kwargs})
+        return task, stop_event
+
+    monkeypatch.setattr(usage_aggregator, "get_settings", lambda: _Settings())
+    monkeypatch.setattr(
+        usage_aggregator,
+        "start_stop_event_worker",
+        _fake_start_stop_event_worker,
+    )
+
+    returned_task = await usage_aggregator.start_usage_aggregator(
+        worker_inventory=worker_inventory,
+    )
+
+    assert returned_task is task
+    assert getattr(returned_task, "_tldw_stop_event") is stop_event
+    assert len(calls) == 1
+    assert calls[0]["inventory"] is worker_inventory
+    assert calls[0]["name"] == "usage_aggregator"
+    assert calls[0]["task_name"] == "usage_aggregator"
+    assert calls[0]["category"] == "usage"
+    assert calls[0]["shutdown_phase"] == usage_aggregator.ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN
+    assert callable(calls[0]["coroutine_factory"])
 
 
 @pytest.mark.asyncio

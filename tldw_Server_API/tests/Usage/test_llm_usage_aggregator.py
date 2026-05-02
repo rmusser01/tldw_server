@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import os
 from datetime import datetime, timezone
+from types import SimpleNamespace
 import uuid
 import pytest
 
@@ -114,6 +115,49 @@ async def _insert_llm_log(pool, *, user_id, operation, provider, model, status, 
             "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
             user_id, "/x", operation, provider, model, status, latency_ms, pt, ct, pt+ct, cost, "USD", 0
         )
+
+
+@pytest.mark.asyncio
+async def test_start_llm_usage_aggregator_registers_background_inventory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import tldw_Server_API.app.services.llm_usage_aggregator as llm_usage_aggregator
+
+    class _Settings:
+        LLM_USAGE_AGGREGATOR_ENABLED = True
+
+    worker_inventory = object()
+    task = SimpleNamespace()
+    stop_event = object()
+    calls: list[dict[str, object]] = []
+
+    async def _fake_start_stop_event_worker(
+        inventory: object,
+        **kwargs: object,
+    ) -> tuple[SimpleNamespace, object]:
+        calls.append({"inventory": inventory, **kwargs})
+        return task, stop_event
+
+    monkeypatch.setattr(llm_usage_aggregator, "get_settings", lambda: _Settings())
+    monkeypatch.setattr(
+        llm_usage_aggregator,
+        "start_stop_event_worker",
+        _fake_start_stop_event_worker,
+    )
+
+    returned_task = await llm_usage_aggregator.start_llm_usage_aggregator(
+        worker_inventory=worker_inventory,
+    )
+
+    assert returned_task is task
+    assert getattr(returned_task, "_tldw_stop_event") is stop_event
+    assert len(calls) == 1
+    assert calls[0]["inventory"] is worker_inventory
+    assert calls[0]["name"] == "llm_usage_aggregator"
+    assert calls[0]["task_name"] == "llm_usage_aggregator"
+    assert calls[0]["category"] == "usage"
+    assert calls[0]["shutdown_phase"] == llm_usage_aggregator.ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN
+    assert callable(calls[0]["coroutine_factory"])
 
 
 @pytest.mark.asyncio

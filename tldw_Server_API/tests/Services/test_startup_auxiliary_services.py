@@ -30,11 +30,13 @@ async def test_start_auxiliary_services_combines_handles_and_starts_personalizat
         calls.append("claims-review")
         return "claims-review-task"
 
-    async def _fake_usage():
+    async def _fake_usage(**kwargs: object) -> str:
+        assert kwargs == {"worker_inventory": None}
         calls.append("usage")
         return "usage-task"
 
-    async def _fake_llm_usage():
+    async def _fake_llm_usage(**kwargs: object) -> str:
+        assert kwargs == {"worker_inventory": None}
         calls.append("llm-usage")
         return "llm-usage-task"
 
@@ -66,6 +68,47 @@ async def test_start_auxiliary_services_combines_handles_and_starts_personalizat
 
 
 @pytest.mark.asyncio
+async def test_start_auxiliary_services_passes_worker_inventory_to_usage_aggregators(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_aux = _import_startup_auxiliary_services()
+    worker_inventory = object()
+    seen_inventory: list[object] = []
+
+    async def _fake_claims_alerts():
+        return None
+
+    async def _fake_claims_review():
+        return None
+
+    async def _fake_usage(**kwargs: object) -> str:
+        seen_inventory.append(kwargs["worker_inventory"])
+        return "usage-task"
+
+    async def _fake_llm_usage(**kwargs: object) -> str:
+        seen_inventory.append(kwargs["worker_inventory"])
+        return "llm-usage-task"
+
+    async def _fake_personalization(_app_settings):
+        return None
+
+    monkeypatch.setattr(startup_aux, "_start_claims_alerts_scheduler", _fake_claims_alerts)
+    monkeypatch.setattr(startup_aux, "_start_claims_review_metrics_scheduler", _fake_claims_review)
+    monkeypatch.setattr(startup_aux, "_start_usage_aggregator", _fake_usage)
+    monkeypatch.setattr(startup_aux, "_start_llm_usage_aggregator", _fake_llm_usage)
+    monkeypatch.setattr(startup_aux, "_start_personalization_consolidation", _fake_personalization)
+
+    handles = await startup_aux.start_auxiliary_services(
+        {},
+        worker_inventory=worker_inventory,
+    )
+
+    assert seen_inventory == [worker_inventory, worker_inventory]
+    assert handles.usage_task == "usage-task"
+    assert handles.llm_usage_task == "llm-usage-task"
+
+
+@pytest.mark.asyncio
 async def test_start_usage_aggregator_skips_when_disabled(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -84,7 +127,8 @@ async def test_start_llm_usage_aggregator_starts_when_enabled(
 ) -> None:
     startup_aux = _import_startup_auxiliary_services()
 
-    async def _fake_start():
+    async def _fake_start(**kwargs: object) -> str:
+        assert kwargs == {"worker_inventory": None}
         return "llm-usage-task"
 
     monkeypatch.setattr(startup_aux, "_env_flag_enabled", lambda key: False)

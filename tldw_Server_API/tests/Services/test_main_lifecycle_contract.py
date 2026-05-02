@@ -1452,8 +1452,9 @@ def test_lifespan_shutdown_delegates_transition_handoff(
     fake_storage_cleanup_service = object()
     recorded_calls: list[dict[str, object]] = []
 
-    async def _fake_start_auxiliary_services(_app_settings):
+    async def _fake_start_auxiliary_services(_app_settings, **kwargs):
         del _app_settings
+        assert kwargs["worker_inventory"] is not None
         return startup_auxiliary_services.AuxiliaryStartupHandles(
             usage_task=fake_usage_task,
             llm_usage_task=fake_llm_usage_task,
@@ -2597,7 +2598,8 @@ def test_shutdown_skipped_best_effort_component_falls_back_to_direct_stop(
 
     usage_task_holder: dict[str, _DummyUsageTask] = {}
 
-    async def _fake_start_usage_aggregator() -> _DummyUsageTask:
+    async def _fake_start_usage_aggregator(**kwargs) -> _DummyUsageTask:
+        assert kwargs["worker_inventory"] is not None
         task = _DummyUsageTask()
         usage_task_holder["task"] = task
         return task

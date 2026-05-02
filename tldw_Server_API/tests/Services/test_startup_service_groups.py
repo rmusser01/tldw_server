@@ -28,7 +28,7 @@ async def test_start_service_groups_runs_helpers_in_order_and_returns_handles(
     worker_inventory = object()
     worker_inventory_ref = worker_inventory
 
-    async def _record_runtime_monitors(*, worker_inventory):
+    async def _record_runtime_monitors(*, worker_inventory: object) -> SimpleNamespace:
         assert worker_inventory is worker_inventory_ref
         calls.append("runtime")
         return SimpleNamespace(
@@ -38,7 +38,7 @@ async def test_start_service_groups_runs_helpers_in_order_and_returns_handles(
             loop_lag_task="loop-lag-task",
         )
 
-    async def _record_optional_workers(*, worker_inventory):
+    async def _record_optional_workers(*, worker_inventory: object) -> SimpleNamespace:
         assert worker_inventory is worker_inventory_ref
         calls.append("optional")
         return SimpleNamespace(
@@ -60,14 +60,21 @@ async def test_start_service_groups_runs_helpers_in_order_and_returns_handles(
             jobs_integrity_task="integrity-task",
         )
 
-    async def _record_claims_rebuild_worker(seen_app_settings, **kwargs):
+    async def _record_claims_rebuild_worker(
+        seen_app_settings: object,
+        **kwargs: object,
+    ) -> str:
         assert seen_app_settings is app_settings
         assert kwargs == {"worker_inventory": worker_inventory_ref}
         calls.append("claims")
         return "claims-task"
 
-    async def _record_auxiliary_services(seen_app_settings):
+    async def _record_auxiliary_services(
+        seen_app_settings: object,
+        **kwargs: object,
+    ) -> SimpleNamespace:
         assert seen_app_settings is app_settings
+        assert kwargs == {"worker_inventory": worker_inventory_ref}
         calls.append("auxiliary")
         return SimpleNamespace(
             claims_alerts_task="claims-alerts-task",
@@ -76,7 +83,11 @@ async def test_start_service_groups_runs_helpers_in_order_and_returns_handles(
             llm_usage_task="llm-usage-task",
         )
 
-    async def _record_infra_services(*, run_pg_rls_auto_ensure, worker_inventory):
+    async def _record_infra_services(
+        *,
+        run_pg_rls_auto_ensure: object,
+        worker_inventory: object,
+    ) -> SimpleNamespace:
         assert run_pg_rls_auto_ensure is run_pg_rls_auto_ensure_ref
         assert worker_inventory is worker_inventory_ref
         calls.append("infra")
@@ -85,7 +96,10 @@ async def test_start_service_groups_runs_helpers_in_order_and_returns_handles(
             tts_history_cleanup_stop_event="tts-history-stop",
         )
 
-    async def _record_maintenance_schedulers(*, worker_inventory=None):
+    async def _record_maintenance_schedulers(
+        *,
+        worker_inventory: object | None = None,
+    ) -> SimpleNamespace:
         assert worker_inventory is worker_inventory_ref
         calls.append("maintenance")
         return SimpleNamespace(
@@ -101,10 +115,10 @@ async def test_start_service_groups_runs_helpers_in_order_and_returns_handles(
 
     async def _record_connectors_startup(
         *,
-        app,
-        owned_job_pollers,
-        register_owned_job_poller,
-    ):
+        app: object,
+        owned_job_pollers: list[object],
+        register_owned_job_poller: object,
+    ) -> SimpleNamespace:
         assert app is app_ref
         assert owned_job_pollers is owned_job_pollers_ref
         assert register_owned_job_poller is register_owned_job_poller_ref

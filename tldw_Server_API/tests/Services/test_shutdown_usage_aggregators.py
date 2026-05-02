@@ -67,6 +67,32 @@ async def test_stop_usage_aggregators_skips_coordinated_components(
 
 
 @pytest.mark.asyncio
+async def test_stop_usage_aggregators_skips_background_stopped_components(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    shutdown_usage = _import_shutdown_usage_aggregators()
+    calls: list[object] = []
+
+    async def _record_stop(task):
+        calls.append(task)
+
+    monkeypatch.setattr(shutdown_usage, "_stop_usage_aggregator_service", _record_stop)
+    monkeypatch.setattr(shutdown_usage, "_stop_llm_usage_aggregator_service", _record_stop)
+
+    handles = await shutdown_usage.stop_usage_aggregators(
+        coordinated_legacy_component_names=set(),
+        stopped_background_worker_names={"usage_aggregator", "llm_usage_aggregator"},
+        usage_task="usage-task",
+        llm_usage_task="llm-task",
+        guard_exceptions=(RuntimeError,),
+    )
+
+    assert calls == []
+    assert handles.usage_task is None
+    assert handles.llm_usage_task is None
+
+
+@pytest.mark.asyncio
 async def test_stop_usage_aggregators_cancels_usage_task_on_guard_exception(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
