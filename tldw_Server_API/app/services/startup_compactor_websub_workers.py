@@ -38,7 +38,9 @@ async def start_compactor_websub_workers(
 ) -> CompactorWebsubStartupHandles:
     """Start the embeddings compactor and WebSub renewal worker."""
 
-    embeddings_compactor_stop_event, embeddings_compactor_task = await _start_embeddings_vector_compactor()
+    embeddings_compactor_stop_event, embeddings_compactor_task = await _start_embeddings_vector_compactor(
+        worker_inventory=worker_inventory,
+    )
     websub_renewal_task = await _start_websub_renewal_worker(
         should_start_worker=should_start_worker,
         worker_inventory=worker_inventory,
@@ -59,12 +61,39 @@ def _create_task(awaitable: Any, *, name: str | None = None) -> Any:
     return asyncio.create_task(awaitable, name=name)
 
 
-async def _start_embeddings_vector_compactor() -> tuple[Any | None, Any | None]:
+async def _start_embeddings_vector_compactor(
+    *,
+    worker_inventory: Any | None = None,
+) -> tuple[Any | None, Any | None]:
+    """Start the embeddings vector compactor when enabled.
+
+    When a worker inventory is available, register the compactor as a
+    background-shutdown worker and return ``(stop_event, task)`` for legacy
+    state compatibility. Without an inventory, create the legacy stop
+    event/task pair directly.
+    """
     try:
         enabled = os.getenv("EMBEDDINGS_COMPACTOR_ENABLED", "false").lower() in _TRUTHY_ENV_VALUES
         if not enabled:
             logger.info("Embeddings Vector Compactor disabled by flag (EMBEDDINGS_COMPACTOR_ENABLED)")
             return None, None
+
+        if worker_inventory is not None:
+            from tldw_Server_API.app.services.lifecycle_workers import (
+                ShutdownPhase,
+                start_stop_event_worker,
+            )
+
+            task, stop_event = await start_stop_event_worker(
+                worker_inventory,
+                name="embeddings_compactor_task",
+                task_name="embeddings_compactor_task",
+                coroutine_factory=_run_embeddings_vector_compactor_service,
+                category="embeddings",
+                shutdown_phase=ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN,
+            )
+            logger.info("Embeddings Vector Compactor started with explicit stop_event signal")
+            return stop_event, task
 
         stop_event = _make_event()
         task = _create_task(_run_embeddings_vector_compactor_service(stop_event))
