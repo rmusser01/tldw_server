@@ -262,6 +262,8 @@ def test_project_list_includes_canonical_pagination(client: TestClient):
         "has_more": True,
         "next_offset": 1,
     }
+    assert page1["has_more"] is True
+    assert page1["next_offset"] == 1
 
     page2_resp = client.get(f"{PREFIX}/projects", params={"limit": 1, "offset": 1})
     assert page2_resp.status_code == 200, page2_resp.text
@@ -271,6 +273,8 @@ def test_project_list_includes_canonical_pagination(client: TestClient):
     assert page2["pagination"]["limit"] == 1
     assert page2["pagination"]["offset"] == 1
     assert page2["pagination"]["total"] == page2["total"]
+    assert page2["has_more"] == page2["pagination"]["has_more"]
+    assert page2["next_offset"] == page2["pagination"]["next_offset"]
 
 
 def test_manuscript_version_history_and_trash_restore(client: TestClient):
