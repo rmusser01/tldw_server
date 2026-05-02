@@ -5,7 +5,6 @@ from types import SimpleNamespace
 
 import pytest
 
-
 pytestmark = pytest.mark.unit
 
 
@@ -36,6 +35,7 @@ async def test_shutdown_final_cleanup_tail_runs_helpers_in_order_and_returns_han
         app="app",
         authnz_scheduler_started=True,
         coordinated_legacy_component_names={"coord"},
+        stopped_background_worker_names={"authnz_scheduler"},
         db_pool="db-pool",
         session_manager="session-manager",
         heavy_startup_handles="heavy-startup",
@@ -50,6 +50,7 @@ async def test_shutdown_final_cleanup_tail_runs_helpers_in_order_and_returns_han
     assert [name for name, _ in calls] == ["authnz", "cleanup", "post_runtime"]
     assert calls[0][1]["authnz_scheduler_started"] is True
     assert calls[0][1]["coordinated_legacy_component_names"] == {"coord"}
+    assert calls[0][1]["stopped_background_worker_names"] == {"authnz_scheduler"}
     assert calls[1][1]["authnz_scheduler_started"] is False
     assert calls[1][1]["db_pool"] == "db-pool"
     assert calls[1][1]["session_manager"] == "session-manager"

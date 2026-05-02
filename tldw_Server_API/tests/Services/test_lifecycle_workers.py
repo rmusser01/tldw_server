@@ -176,6 +176,46 @@ async def test_worker_inventory_publishes_full_and_filtered_views() -> None:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_worker_inventory_publishes_callback_only_background_worker() -> None:
+    from tldw_Server_API.app.services.lifecycle_workers import (
+        ManagedWorker,
+        ShutdownPhase,
+        WorkerRegistry,
+    )
+
+    app = FastAPI()
+    registry = WorkerRegistry(app)
+
+    async def _shutdown_callback() -> None:
+        return None
+
+    handle = registry.register(
+        ManagedWorker(
+            name="authnz_scheduler",
+            task=None,
+            stop_event=None,
+            shutdown_callback=_shutdown_callback,
+            category="recurring-scheduler",
+            shutdown_phase=ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN,
+        )
+    )
+
+    assert handle.task is None
+    assert app.state._tldw_shutdown_worker_inventory == [
+        {
+            "name": "authnz_scheduler",
+            "task_name": None,
+            "has_stop_event": False,
+            "timeout_sec": 5.0,
+            "category": "recurring-scheduler",
+            "shutdown_phase": "background_worker_shutdown",
+        }
+    ]
+    assert app.state._tldw_shutdown_job_poller_inventory == []
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_start_stop_event_worker_registers_named_task_and_stop_event() -> None:
     from tldw_Server_API.app.services.lifecycle_workers import (
         ShutdownPhase,
@@ -409,6 +449,82 @@ async def test_stop_registered_workers_awaits_custom_shutdown_callback() -> None
     assert shutdown_calls == 1
     assert task.cancelled() is True
     assert app.state._tldw_stopped_worker_names == ["callback_worker"]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_stop_registered_workers_awaits_callback_only_worker() -> None:
+    from tldw_Server_API.app.services.lifecycle_workers import (
+        ManagedWorker,
+        stop_registered_workers,
+    )
+
+    app = FastAPI()
+    shutdown_calls = 0
+
+    async def _shutdown_callback() -> None:
+        nonlocal shutdown_calls
+        shutdown_calls += 1
+
+    await stop_registered_workers(
+        app,
+        [
+            ManagedWorker(
+                name="authnz_scheduler",
+                task=None,
+                stop_event=None,
+                shutdown_callback=_shutdown_callback,
+                timeout_sec=1.0,
+            )
+        ],
+        stopped_names_attr="_tldw_stopped_worker_names",
+        log_label="test worker",
+    )
+
+    assert shutdown_calls == 1
+    assert app.state._tldw_stopped_worker_names == ["authnz_scheduler"]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_stop_registered_workers_handles_cancelled_shutdown_callback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.services import lifecycle_workers
+    from tldw_Server_API.app.services.lifecycle_workers import (
+        ManagedWorker,
+        stop_registered_workers,
+    )
+
+    app = FastAPI()
+    warnings: list[tuple[object, ...]] = []
+
+    async def _shutdown_callback() -> None:
+        raise asyncio.CancelledError()
+
+    monkeypatch.setattr(
+        lifecycle_workers.logger,
+        "warning",
+        lambda *args, **kwargs: warnings.append(args),
+    )
+
+    await stop_registered_workers(
+        app,
+        [
+            ManagedWorker(
+                name="cancelled_callback_worker",
+                task=None,
+                stop_event=None,
+                shutdown_callback=_shutdown_callback,
+                timeout_sec=1.0,
+            )
+        ],
+        stopped_names_attr="_tldw_stopped_worker_names",
+        log_label="test worker",
+    )
+
+    assert any("shutdown callback was cancelled" in str(args[0]) for args in warnings)
+    assert app.state._tldw_stopped_worker_names == []
 
 
 @pytest.mark.unit

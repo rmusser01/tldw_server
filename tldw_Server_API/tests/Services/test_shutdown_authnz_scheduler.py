@@ -5,7 +5,6 @@ import sys
 
 import pytest
 
-
 pytestmark = pytest.mark.unit
 
 
@@ -56,6 +55,30 @@ async def test_maybe_stop_authnz_scheduler_skips_when_component_is_coordinated(
     )
 
     assert started is True
+    assert called is False
+
+
+@pytest.mark.asyncio
+async def test_maybe_stop_authnz_scheduler_skips_when_background_stopped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    shutdown_authnz = _import_shutdown_authnz_scheduler()
+    called = False
+
+    async def _fake_stop():
+        nonlocal called
+        called = True
+
+    monkeypatch.setattr(shutdown_authnz, "_stop_authnz_scheduler_service", _fake_stop)
+
+    started = await shutdown_authnz.maybe_stop_authnz_scheduler(
+        authnz_scheduler_started=True,
+        coordinated_legacy_component_names=set(),
+        stopped_background_worker_names={"authnz_scheduler"},
+        guard_exceptions=(RuntimeError,),
+    )
+
+    assert started is False
     assert called is False
 
 

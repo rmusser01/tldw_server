@@ -13,10 +13,14 @@ async def maybe_stop_authnz_scheduler(
     *,
     authnz_scheduler_started: bool,
     coordinated_legacy_component_names: set[str],
+    stopped_background_worker_names: set[str] | None = None,
     guard_exceptions: tuple[type[BaseException], ...],
     debug_log: Callable[[str], None] | None = None,
 ) -> bool:
     """Stop the AuthNZ scheduler when it was started and is not coordinator-owned."""
+    stopped_background_worker_names = stopped_background_worker_names or set()
+    if "authnz_scheduler" in stopped_background_worker_names:
+        return False
     if not authnz_scheduler_started or "authnz_scheduler" in coordinated_legacy_component_names:
         return authnz_scheduler_started
 
