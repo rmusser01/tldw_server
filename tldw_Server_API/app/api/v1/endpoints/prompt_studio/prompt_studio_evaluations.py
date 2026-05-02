@@ -26,6 +26,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, R
 from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps import get_prompt_studio_db, get_prompt_studio_user
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.api.v1.schemas.prompt_studio_schemas import (
     EvaluationCreate,
@@ -382,7 +383,7 @@ async def list_evaluations(
     offset: int = Query(0, ge=0),
     db: PromptStudioDatabase = Depends(get_prompt_studio_db),
     user_context: dict = Depends(get_prompt_studio_user),
-) -> list[EvaluationResponse]:
+) -> EvaluationList:
     """
     List evaluations for a project.
 
@@ -427,11 +428,18 @@ async def list_evaluations(
                 metrics=eval_data.get("aggregate_metrics")
             ))
 
+        total = int(result.get("total", len(evaluations)))
         return {
             "evaluations": evaluations,
-            "total": int(result.get("total", len(evaluations))),
+            "total": total,
             "limit": limit,
             "offset": offset,
+            "pagination": build_offset_pagination_meta(
+                total=total,
+                limit=limit,
+                offset=offset,
+                count=len(evaluations),
+            ),
         }
 
     except DatabaseError as e:

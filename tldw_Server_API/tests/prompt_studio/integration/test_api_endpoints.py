@@ -1218,12 +1218,12 @@ class TestEvaluationEndpoints:
             detail = response.json().get("detail", {})
             assert detail.get("error_code") == "missing_provider_credentials"
 
-    def test_list_evaluations(self, client, auth_headers, mock_user):
+    def test_list_evaluations(self, client, auth_headers, mock_user) -> None:
 
         """Test listing evaluations."""
         with patch('tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps.get_current_active_user', return_value=mock_user):
             response = client.get(
-                "/api/v1/prompt-studio/evaluations?project_id=1",
+                "/api/v1/prompt-studio/evaluations?project_id=1&limit=10&offset=0",
                 headers=auth_headers
             )
 
@@ -1231,6 +1231,18 @@ class TestEvaluationEndpoints:
             data = response.json()
             assert "evaluations" in data
             assert isinstance(data["evaluations"], list)
+            assert data["limit"] == 10
+            assert data["offset"] == 0
+            assert data["has_more"] is False
+            assert data["next_offset"] is None
+            assert data["pagination"] == {
+                "mode": "offset",
+                "total": data["total"],
+                "limit": 10,
+                "offset": 0,
+                "has_more": False,
+                "next_offset": None,
+            }
 
     def test_create_evaluation_uses_test_runner_path(self, client, auth_headers, mock_user, test_db):
 

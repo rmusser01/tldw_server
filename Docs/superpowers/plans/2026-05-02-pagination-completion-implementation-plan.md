@@ -718,6 +718,12 @@ python -m pytest tldw_Server_API/tests/Audiobooks/integration/test_audiobook_job
 python -m pytest tldw_Server_API/tests/Audiobooks/integration/test_audiobook_jobs_endpoints.py -q
 ```
 
+Verified Prompt Studio evaluation list tranche:
+
+```bash
+python -m pytest tldw_Server_API/tests/prompt_studio/integration/test_api_endpoints.py -k "test_list_evaluations" -q
+```
+
 - [ ] **Step 5: Commit one family**
 
 Use a family-specific message, for example:
