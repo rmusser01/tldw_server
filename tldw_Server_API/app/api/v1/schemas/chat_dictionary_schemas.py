@@ -35,6 +35,15 @@ DANGEROUS_REGEX_PATTERNS = [
     r'([a-zA-Z]+)*',  # Character class with nested quantifier
 ]
 
+
+def _default_offset_pagination_aliases(response):
+    if response.has_more is None:
+        response.has_more = response.pagination.has_more
+    if response.next_offset is None:
+        response.next_offset = response.pagination.next_offset
+    return response
+
+
 MAX_DICTIONARY_TAGS = 20
 MAX_DICTIONARY_TAG_LENGTH = 40
 MAX_INCLUDED_DICTIONARIES = 50
@@ -510,7 +519,13 @@ class DictionaryActivityListResponse(BaseModel):
     total: int = Field(..., ge=0, description="Total number of matching events")
     limit: int = Field(..., ge=1, description="Applied page size")
     offset: int = Field(..., ge=0, description="Applied offset")
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
     pagination: OffsetPaginationMeta
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self):
+        return _default_offset_pagination_aliases(self)
 
 
 class DictionaryVersionSummary(BaseModel):
@@ -553,7 +568,13 @@ class DictionaryVersionListResponse(BaseModel):
     total: int = Field(..., ge=0, description="Total number of snapshots for this dictionary")
     limit: int = Field(..., ge=1, description="Applied page size")
     offset: int = Field(..., ge=0, description="Applied offset")
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
     pagination: OffsetPaginationMeta
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self):
+        return _default_offset_pagination_aliases(self)
 
 
 class DictionaryVersionRevertResponse(BaseModel):
