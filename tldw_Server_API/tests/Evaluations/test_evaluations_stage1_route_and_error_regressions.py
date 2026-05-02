@@ -230,6 +230,8 @@ def test_history_includes_canonical_offset_pagination(monkeypatch):
         "has_more": True,
         "next_offset": 2,
     }
+    assert body["has_more"] is True
+    assert body["next_offset"] == 2
 
 
 def test_propositions_uses_stable_user_id_instead_of_auth_context_token(monkeypatch):
