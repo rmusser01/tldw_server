@@ -7095,11 +7095,17 @@ async def persona_stream(
                 saved_match = _match_persona_wake_phrase(matched_phrase, saved_phrases)
                 runtime_match = _match_persona_wake_phrase(matched_phrase, runtime_phrases)
                 if not saved_match or not runtime_match:
+                    wake_rejection_reason = "phrase_not_configured"
+                    if not saved_match and runtime_match:
+                        wake_rejection_reason = "not_saved_in_profile"
+                    elif saved_match and not runtime_match:
+                        wake_rejection_reason = "missing_from_runtime_config"
                     await _emit_notice(
                         session_id=session_id,
                         level="warning",
                         reason_code="WAKE_ACTIVATION_REJECTED",
                         message="Wake activation was rejected for this persona session.",
+                        wake_rejection_reason=wake_rejection_reason,
                     )
                     continue
 

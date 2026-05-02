@@ -2441,8 +2441,10 @@ def _assert_wake_activation_rejected_keeps_trigger_gate(
     saved_phrases: list[str],
     runtime_phrases: list[str],
     matched_phrase: str,
+    expected_rejection_reason: str,
     wake_behavior: str = "one_shot",
 ) -> None:
+    """Assert rejected wake phrases keep trigger gating and emit the expected reason."""
     _install_wake_voice_fakes(monkeypatch, "summarize the current note")
     _seed_persona_session(
         tmp_path,
@@ -2495,6 +2497,7 @@ def _assert_wake_activation_rejected_keeps_trigger_gate(
                 and d.get("reason_code") == "WAKE_ACTIVATION_REJECTED",
             )
             assert rejected.get("session_id") == session_id
+            assert rejected.get("wake_rejection_reason") == expected_rejection_reason
             ws.send_text(
                 json.dumps(
                     {
@@ -2524,6 +2527,7 @@ def test_persona_wake_activation_rejects_phrase_not_saved_in_profile(
         saved_phrases=["hey helper"],
         runtime_phrases=["runtime only"],
         matched_phrase="runtime only",
+        expected_rejection_reason="not_saved_in_profile",
     )
 
 
@@ -2538,6 +2542,7 @@ def test_persona_wake_activation_rejects_phrase_missing_from_runtime_config(
         saved_phrases=["hey helper"],
         runtime_phrases=["okay helper"],
         matched_phrase="hey helper",
+        expected_rejection_reason="missing_from_runtime_config",
     )
 
 
@@ -3558,6 +3563,7 @@ def test_persona_voice_config_stores_runtime_preferences(monkeypatch):
         "trigger_phrases": ["hey helper", "ok helper"],
         "auto_resume": True,
         "barge_in": False,
+        "wake_behavior": "one_shot",
         "stt_language": "en-US",
         "stt_model": "whisper-1",
         "enable_vad": True,
