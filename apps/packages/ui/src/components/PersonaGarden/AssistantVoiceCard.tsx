@@ -120,8 +120,7 @@ export const AssistantVoiceCard: React.FC<AssistantVoiceCardProps> = ({
   onReconnectPersonaSession
 }) => {
   const sessionControlsDisabled = !connected
-  const effectiveWakeTriggerPhrases =
-    wakeTriggerPhrases ?? resolvedDefaults.voiceChatTriggerPhrases
+  const effectiveWakeTriggerPhrases = wakeTriggerPhrases ?? []
   const effectiveSessionWakeBehavior =
     sessionWakeBehavior ?? resolvedDefaults.wakeBehavior
   const normalizedWakeTriggerPhrases = React.useMemo(
