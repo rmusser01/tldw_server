@@ -193,14 +193,29 @@ async def shutdown_post_worker_services(
             "jobs_webhooks_task",
             jobs_webhooks_stop_event,
         ),
-        meetings_webhook_dlq_task=meetings_webhook_dlq_task,
-        meetings_webhook_dlq_stop_event=meetings_webhook_dlq_stop_event,
-        workflows_dlq_task=workflows_dlq_task,
-        workflows_dlq_stop_event=workflows_dlq_stop_event,
-        workflows_gc_task=workflows_gc_task,
-        workflows_gc_stop_event=workflows_gc_stop_event,
-        workflows_maint_task=workflows_maint_task,
-        workflows_maint_stop_event=workflows_maint_stop_event,
+        meetings_webhook_dlq_task=_task_if_not_stopped(
+            "meetings_webhook_dlq_task",
+            meetings_webhook_dlq_task,
+        ),
+        meetings_webhook_dlq_stop_event=_stop_event_if_not_stopped(
+            "meetings_webhook_dlq_task",
+            meetings_webhook_dlq_stop_event,
+        ),
+        workflows_dlq_task=_task_if_not_stopped("workflows_dlq_task", workflows_dlq_task),
+        workflows_dlq_stop_event=_stop_event_if_not_stopped(
+            "workflows_dlq_task",
+            workflows_dlq_stop_event,
+        ),
+        workflows_gc_task=_task_if_not_stopped("workflows_gc_task", workflows_gc_task),
+        workflows_gc_stop_event=_stop_event_if_not_stopped(
+            "workflows_gc_task",
+            workflows_gc_stop_event,
+        ),
+        workflows_maint_task=_task_if_not_stopped("workflows_maint_task", workflows_maint_task),
+        workflows_maint_stop_event=_stop_event_if_not_stopped(
+            "workflows_maint_task",
+            workflows_maint_stop_event,
+        ),
         guard_exceptions=guard_exceptions,
     )
     return PostWorkerShutdownHandles(
@@ -364,10 +379,16 @@ async def run_shutdown_post_worker_services(
                 jobs_integrity_task,
             ),
             jobs_webhooks_task=_fallback_if_not_stopped("jobs_webhooks_task", jobs_webhooks_task),
-            meetings_webhook_dlq_task=meetings_webhook_dlq_task,
-            workflows_dlq_task=workflows_dlq_task,
-            workflows_gc_task=workflows_gc_task,
-            workflows_maint_task=workflows_maint_task,
+            meetings_webhook_dlq_task=_fallback_if_not_stopped(
+                "meetings_webhook_dlq_task",
+                meetings_webhook_dlq_task,
+            ),
+            workflows_dlq_task=_fallback_if_not_stopped("workflows_dlq_task", workflows_dlq_task),
+            workflows_gc_task=_fallback_if_not_stopped("workflows_gc_task", workflows_gc_task),
+            workflows_maint_task=_fallback_if_not_stopped(
+                "workflows_maint_task",
+                workflows_maint_task,
+            ),
         )
 
 
