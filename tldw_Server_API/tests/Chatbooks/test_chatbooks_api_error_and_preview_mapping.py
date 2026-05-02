@@ -251,6 +251,8 @@ def test_job_list_routes_include_canonical_pagination():
     export_payload = export_response.json()
     assert len(export_payload["jobs"]) == 2
     assert export_payload["total"] == 3
+    assert export_payload["has_more"] is True
+    assert export_payload["next_offset"] == 2
     assert export_payload["pagination"] == {
         "mode": "offset",
         "total": 3,
@@ -264,6 +266,8 @@ def test_job_list_routes_include_canonical_pagination():
     import_payload = import_response.json()
     assert len(import_payload["jobs"]) == 1
     assert import_payload["total"] == 3
+    assert import_payload["has_more"] is True
+    assert import_payload["next_offset"] == 2
     assert import_payload["pagination"] == {
         "mode": "offset",
         "total": 3,
