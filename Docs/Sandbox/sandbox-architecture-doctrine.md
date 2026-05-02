@@ -45,7 +45,7 @@ Apple's [`container`](https://github.com/apple/container) and
 [`containerization`](https://github.com/apple/containerization) projects are
 first-party prior art for macOS-hosted Linux workloads, not a drop-in
 replacement for this sandbox subsystem. They validate several choices this
-subsystem already depends on:
+subsystem has adopted as foundational principles:
 
 - Apple silicon as the primary serious macOS VM target
 - per-workload lightweight Linux VMs instead of one shared Linux VM
