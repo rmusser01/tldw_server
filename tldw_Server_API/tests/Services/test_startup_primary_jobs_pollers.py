@@ -5,7 +5,6 @@ import sys
 
 import pytest
 
-
 pytestmark = pytest.mark.unit
 
 
@@ -66,6 +65,39 @@ async def test_start_primary_jobs_pollers_combines_handles_in_order(
 
 
 @pytest.mark.asyncio
+async def test_start_primary_jobs_pollers_passes_inventory_to_core_worker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_pollers = _import_startup_primary_jobs_pollers()
+    worker_inventory = object()
+    captured_kwargs: dict[str, object] = {}
+
+    async def _record_core(**kwargs):
+        captured_kwargs.update(kwargs)
+        return ("core-stop", "core-task")
+
+    async def _record_worker(**kwargs):
+        del kwargs
+        return (None, None)
+
+    monkeypatch.setattr(startup_pollers, "_start_core_jobs_worker", _record_core)
+    monkeypatch.setattr(startup_pollers, "_start_files_jobs_worker", _record_worker)
+    monkeypatch.setattr(startup_pollers, "_start_data_tables_jobs_worker", _record_worker)
+    monkeypatch.setattr(startup_pollers, "_start_prompt_studio_jobs_worker", _record_worker)
+
+    await startup_pollers.start_primary_jobs_pollers(
+        app="app",
+        owned_job_pollers=[],
+        register_owned_job_poller=lambda *args, **kwargs: None,
+        should_start_worker=lambda *args, **kwargs: False,
+        sidecar_mode=False,
+        worker_inventory=worker_inventory,
+    )
+
+    assert captured_kwargs["worker_inventory"] is worker_inventory
+
+
+@pytest.mark.asyncio
 async def test_start_core_jobs_worker_skips_in_sidecar_mode(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -83,6 +115,56 @@ async def test_start_core_jobs_worker_skips_in_sidecar_mode(
 
     assert stop_event is None
     assert task is None
+
+
+@pytest.mark.asyncio
+async def test_start_core_jobs_worker_registers_with_worker_inventory_when_enabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_pollers = _import_startup_primary_jobs_pollers()
+    registrations: list[dict[str, object]] = []
+
+    class _FakeWorkerInventory:
+        async def register_custom(self, **kwargs: object) -> tuple[str, str]:
+            registrations.append(kwargs)
+            return "core-task", "core-stop"
+
+    monkeypatch.setenv("CHATBOOKS_JOBS_BACKEND", "core")
+    monkeypatch.setenv("CHATBOOKS_CORE_WORKER_ENABLED", "true")
+    monkeypatch.setattr(
+        startup_pollers,
+        "_make_event",
+        lambda: (_ for _ in ()).throw(AssertionError("legacy event path should not run")),
+    )
+    monkeypatch.setattr(
+        startup_pollers,
+        "_create_task",
+        lambda coro: (_ for _ in ()).throw(AssertionError("legacy task path should not run")),
+    )
+
+    def _register_owned_job_poller(*args, **kwargs):
+        raise AssertionError("legacy poller registration should not run")
+
+    stop_event, task = await startup_pollers._start_core_jobs_worker(
+        app="app",
+        owned_job_pollers=[],
+        register_owned_job_poller=_register_owned_job_poller,
+        sidecar_mode=False,
+        worker_inventory=_FakeWorkerInventory(),
+    )
+
+    assert stop_event == "core-stop"
+    assert task == "core-task"
+    assert registrations == [
+        {
+            "name": "core_jobs_task",
+            "task_name": "core_jobs_task",
+            "coroutine_factory": startup_pollers._run_chatbooks_core_jobs_worker_service,
+            "timeout_sec": 5.0,
+            "category": "jobs",
+            "shutdown_phase": startup_pollers.ShutdownPhase.JOB_POLLER_QUIESCE,
+        }
+    ]
 
 
 @pytest.mark.asyncio

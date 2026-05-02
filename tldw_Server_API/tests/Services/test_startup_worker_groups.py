@@ -6,7 +6,6 @@ from types import SimpleNamespace
 
 import pytest
 
-
 pytestmark = pytest.mark.unit
 
 
@@ -52,8 +51,10 @@ async def test_start_worker_groups_runs_helpers_in_order_and_returns_handles(
         register_owned_job_poller,
         should_start_worker,
         sidecar_mode,
+        worker_inventory,
     ):
         assert sidecar_mode is False
+        assert worker_inventory is worker_inventory_ref
         assert should_start_worker("FILES_JOBS_WORKER_ENABLED", "files") is False
         calls.append("primary")
         return SimpleNamespace(

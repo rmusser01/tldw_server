@@ -11,6 +11,8 @@ from typing import Any, Callable
 
 from loguru import logger
 
+from tldw_Server_API.app.services.lifecycle_workers import ShutdownPhase
+
 _STARTUP_GUARD_EXCEPTIONS = (
     AttributeError,
     OSError,
@@ -43,6 +45,7 @@ async def start_primary_jobs_pollers(
     register_owned_job_poller: Callable[..., None],
     should_start_worker: Callable[[str, str], bool],
     sidecar_mode: bool,
+    worker_inventory: Any | None = None,
 ) -> PrimaryJobsPollerHandles:
     """Start the first owned jobs pollers and return their handles."""
 
@@ -51,6 +54,7 @@ async def start_primary_jobs_pollers(
         owned_job_pollers=owned_job_pollers,
         register_owned_job_poller=register_owned_job_poller,
         sidecar_mode=sidecar_mode,
+        worker_inventory=worker_inventory,
     )
     files_jobs_stop_event, files_jobs_task = await _start_files_jobs_worker(
         app=app,
@@ -96,6 +100,7 @@ async def _start_core_jobs_worker(
     owned_job_pollers: list[Any],
     register_owned_job_poller: Callable[..., None],
     sidecar_mode: bool,
+    worker_inventory: Any | None = None,
 ) -> tuple[Any | None, Any | None]:
     try:
         backend = (os.getenv("CHATBOOKS_JOBS_BACKEND") or os.getenv("TLDW_JOBS_BACKEND") or "").lower()
@@ -106,6 +111,18 @@ async def _start_core_jobs_worker(
         if not is_core or not core_worker_enabled:
             logger.info("Core Jobs worker (Chatbooks) disabled by backend selection or flag")
             return None, None
+
+        if worker_inventory is not None:
+            task, stop_event = await worker_inventory.register_custom(
+                name="core_jobs_task",
+                task_name="core_jobs_task",
+                coroutine_factory=_run_chatbooks_core_jobs_worker_service,
+                timeout_sec=5.0,
+                category="jobs",
+                shutdown_phase=ShutdownPhase.JOB_POLLER_QUIESCE,
+            )
+            logger.info("Core Jobs worker (Chatbooks) started with explicit stop_event signal")
+            return stop_event, task
 
         stop_event = _make_event()
         task = _create_task(_run_chatbooks_core_jobs_worker_service(stop_event))

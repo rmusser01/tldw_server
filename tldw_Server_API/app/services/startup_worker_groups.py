@@ -5,11 +5,11 @@ Startup worker-group orchestration extracted from the application lifespan.
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Callable, Mapping
+from typing import Any, Callable
 
 from loguru import logger
-
 
 _TRUTHY_ENV_VALUES = {"true", "1", "yes", "y", "on"}
 
@@ -120,6 +120,7 @@ async def start_worker_groups(
         register_owned_job_poller=register_owned_job_poller,
         should_start_worker=_should_start_worker,
         sidecar_mode=sidecar_mode,
+        worker_inventory=worker_inventory,
     )
     study_privilege_jobs_poller_handles = await _start_study_privilege_jobs_pollers(
         app=app,
