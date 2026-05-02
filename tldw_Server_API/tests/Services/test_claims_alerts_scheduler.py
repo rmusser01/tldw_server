@@ -9,7 +9,6 @@ import pytest
 
 from tldw_Server_API.app.services import claims_alerts_scheduler as service
 
-
 pytestmark = pytest.mark.unit
 
 
@@ -223,3 +222,30 @@ async def test_start_claims_alerts_scheduler_loop_error_log_is_sanitized(
     rendered = "\n".join(logger.debugs + logger.infos + logger.warnings)
     assert "/tmp/claims-alerts-loop" not in rendered
     assert "sk-live-loop" not in rendered
+
+
+@pytest.mark.asyncio
+async def test_start_claims_alerts_scheduler_propagates_cancelled_error_from_work(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sleep_calls = {"count": 0}
+
+    async def _cancelled_run_once() -> int:
+        raise asyncio.CancelledError()
+
+    async def _fake_sleep(_seconds: float) -> None:
+        sleep_calls["count"] += 1
+        if sleep_calls["count"] > 1:
+            raise AssertionError("scheduler continued after cancellation")
+
+    monkeypatch.setenv("CLAIMS_ALERTS_SCHEDULER_ENABLED", "true")
+    monkeypatch.setenv("CLAIMS_ALERTS_EVAL_INTERVAL_SEC", "1")
+    monkeypatch.setattr(service, "run_claims_alerts_once", _cancelled_run_once)
+    monkeypatch.setattr(service.asyncio, "sleep", _fake_sleep)
+
+    task = await service.start_claims_alerts_scheduler()
+
+    assert task is not None
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert sleep_calls["count"] == 1

@@ -27,7 +27,6 @@ from tldw_Server_API.app.core.DB_Management.media_db.api import managed_media_da
 from tldw_Server_API.app.core.testing import is_truthy
 
 _CLAIMS_REVIEW_METRICS_NONCRITICAL_EXCEPTIONS = (
-    asyncio.CancelledError,
     AttributeError,
     KeyError,
     OSError,

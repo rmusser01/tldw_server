@@ -11,7 +11,6 @@ import pytest
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.services import claims_review_metrics_scheduler as service
 
-
 pytestmark = pytest.mark.unit
 
 
@@ -195,3 +194,30 @@ async def test_start_claims_review_metrics_scheduler_loop_error_log_is_sanitized
     assert logger.binds == [{"error_type": "RuntimeError"}]
     assert "/tmp/claims-review-loop" not in _rendered_logs(logger)
     assert "sk-live-loop" not in _rendered_logs(logger)
+
+
+@pytest.mark.asyncio
+async def test_start_claims_review_metrics_scheduler_propagates_cancelled_error_from_work(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sleep_calls = {"count": 0}
+
+    async def _cancelled_run_once() -> int:
+        raise asyncio.CancelledError()
+
+    async def _fake_sleep(_seconds: float) -> None:
+        sleep_calls["count"] += 1
+        if sleep_calls["count"] > 1:
+            raise AssertionError("scheduler continued after cancellation")
+
+    monkeypatch.setenv("CLAIMS_REVIEW_METRICS_SCHEDULER_ENABLED", "true")
+    monkeypatch.setenv("CLAIMS_REVIEW_METRICS_INTERVAL_SEC", "1")
+    monkeypatch.setattr(service, "run_claims_review_metrics_once", _cancelled_run_once)
+    monkeypatch.setattr(service.asyncio, "sleep", _fake_sleep)
+
+    task = await service.start_claims_review_metrics_scheduler()
+
+    assert task is not None
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert sleep_calls["count"] == 1

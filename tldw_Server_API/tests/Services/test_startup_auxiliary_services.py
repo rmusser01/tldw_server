@@ -195,6 +195,107 @@ async def test_start_auxiliary_services_registers_claims_schedulers_with_worker_
 
 
 @pytest.mark.asyncio
+async def test_register_auxiliary_task_preserves_registration_error_when_rollback_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_aux = _import_startup_auxiliary_services()
+    task = object()
+
+    class _FailingInventory:
+        def register(self, worker: object) -> None:
+            raise AttributeError("registration failed")
+
+    async def _failing_cancel(_task: object) -> None:
+        raise LookupError("rollback failed")
+
+    monkeypatch.setattr(startup_aux, "_cancel_unregistered_task", _failing_cancel)
+
+    with pytest.raises(AttributeError, match="registration failed"):
+        await startup_aux._register_auxiliary_task(
+            worker_inventory=_FailingInventory(),
+            task=task,
+            worker_name="claims_alerts_task",
+        )
+
+
+@pytest.mark.asyncio
+async def test_start_auxiliary_services_rolls_back_claims_task_when_inventory_register_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_aux = _import_startup_auxiliary_services()
+    from tldw_Server_API.app.services.lifecycle_workers import WorkerRegistry
+
+    app = FastAPI()
+    worker_inventory = WorkerRegistry(app)
+    created_tasks: list[asyncio.Task[None]] = []
+
+    async def _wait_forever() -> None:
+        await asyncio.Event().wait()
+
+    def _make_task(name: str) -> asyncio.Task[None]:
+        task = asyncio.create_task(_wait_forever(), name=name)
+        created_tasks.append(task)
+        return task
+
+    async def _fake_claims_alerts_service() -> asyncio.Task[None]:
+        return _make_task("claims_alerts_scheduler")
+
+    def _failing_register(worker: object) -> None:
+        worker_inventory.handles.append(worker)
+        raise LookupError("registration failed")
+
+    monkeypatch.setattr(
+        startup_aux,
+        "_start_claims_alerts_scheduler_service",
+        _fake_claims_alerts_service,
+    )
+    monkeypatch.setattr(worker_inventory, "register", _failing_register)
+
+    try:
+        with pytest.raises(LookupError, match="registration failed"):
+            await startup_aux.start_auxiliary_services(
+                {},
+                worker_inventory=worker_inventory,
+            )
+
+        assert len(created_tasks) == 1
+        assert created_tasks[0].cancelled()
+        assert worker_inventory.handles == []
+    finally:
+        for task in created_tasks:
+            task.cancel()
+        await asyncio.gather(*created_tasks, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_cancel_unregistered_task_swallows_task_exception_during_rollback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_aux = _import_startup_auxiliary_services()
+    debug_messages: list[str] = []
+
+    async def _raises_on_cancel() -> None:
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError as exc:
+            raise LookupError("cleanup failed") from exc
+
+    monkeypatch.setattr(
+        startup_aux.logger,
+        "debug",
+        lambda message, *args: debug_messages.append(message.format(*args) if args else message),
+    )
+
+    task = asyncio.create_task(_raises_on_cancel(), name="claims_alerts_scheduler")
+    await asyncio.sleep(0)
+
+    await startup_aux._cancel_unregistered_task(task, timeout=0.25)
+
+    assert task.done()
+    assert debug_messages == ["Auxiliary scheduler raised during startup rollback: cleanup failed"]
+
+
+@pytest.mark.asyncio
 async def test_start_usage_aggregator_skips_when_disabled(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

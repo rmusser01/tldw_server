@@ -143,8 +143,16 @@ async def _register_auxiliary_task(
     task: Any,
     worker_name: str,
 ) -> None:
+    """Register a scheduler task for lifecycle shutdown management.
+
+    If inventory registration fails after the task has been created, the
+    task is cancelled as rollback cleanup. Rollback errors are logged without
+    replacing the original registration failure.
+    """
     if worker_inventory is None:
         return
+    inventory_handles = getattr(worker_inventory, "handles", None)
+    initial_handle_count = len(inventory_handles) if isinstance(inventory_handles, list) else None
     try:
         worker_inventory.register(
             ManagedWorker(
@@ -155,15 +163,31 @@ async def _register_auxiliary_task(
                 shutdown_phase=ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN,
             )
         )
-    except _STARTUP_GUARD_EXCEPTIONS:
-        await _cancel_unregistered_task(task)
+    except Exception:  # noqa: BLE001 - rollback must preserve the original registration failure.
+        if isinstance(inventory_handles, list) and initial_handle_count is not None:
+            del inventory_handles[initial_handle_count:]
+            publish = getattr(worker_inventory, "publish", None)
+            if callable(publish):
+                try:
+                    publish()
+                except Exception as exc:  # noqa: BLE001 - best-effort rollback state republish.
+                    logger.debug(f"Auxiliary scheduler inventory rollback publish failed: {exc}")
+        try:
+            await _cancel_unregistered_task(task)
+        except Exception as exc:  # noqa: BLE001 - cleanup must not shadow registration failure.
+            logger.debug(f"Auxiliary scheduler startup rollback failed: {exc}")
         raise
 
 
 async def _cancel_unregistered_task(task: Any, *, timeout: float = 1.0) -> None:
+    """Cancel a scheduler task that could not be registered with inventory.
+
+    The wait is bounded so startup rollback cannot hang indefinitely when a
+    task ignores cancellation.
+    """
     try:
         task.cancel()
-    except _STARTUP_GUARD_EXCEPTIONS as exc:
+    except Exception as exc:  # noqa: BLE001 - rollback cleanup is best effort.
         logger.debug(f"Auxiliary scheduler startup rollback cancel failed: {exc}")
         return
     try:
@@ -175,8 +199,8 @@ async def _cancel_unregistered_task(task: Any, *, timeout: float = 1.0) -> None:
             "Auxiliary scheduler did not cancel within {}s during startup rollback",
             timeout,
         )
-    except _STARTUP_GUARD_EXCEPTIONS as exc:
-        logger.debug(f"Auxiliary scheduler startup rollback wait failed: {exc}")
+    except Exception as exc:  # noqa: BLE001 - task exceptions during rollback are logged only.
+        logger.debug(f"Auxiliary scheduler raised during startup rollback: {exc}")
 
 
 async def _start_personalization_consolidation(app_settings: Mapping[str, Any]) -> None:
