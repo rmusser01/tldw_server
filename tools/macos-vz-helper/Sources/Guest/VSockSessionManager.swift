@@ -36,6 +36,13 @@ final class VSockSessionManager: GuestTransporting {
         return try session.sendExecRequest(requestData, timeoutSeconds: timeoutSeconds)
     }
 
+    func guestInfo(vmID: String) -> GuestAgentInfo? {
+        guard let session = try? requireSession(vmID: vmID) else {
+            return nil
+        }
+        return session.currentGuestInfo()
+    }
+
     func accept(channel: VSockChanneling, for vmID: String) -> Bool {
         do {
             let session = try requireSession(vmID: vmID)

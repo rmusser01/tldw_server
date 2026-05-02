@@ -26,6 +26,10 @@ final class RecordingGuestTransport: GuestTransporting {
         execPayload = payload
         return execResponseFactory?(payload) ?? Data()
     }
+
+    func guestInfo(vmID: String) -> GuestAgentInfo? {
+        nil
+    }
 }
 
 @Test func vsockBridgeEncodesReadyRequestsAndAcceptsReadyResponses() throws {

@@ -7,6 +7,10 @@ final class RecordingGuestBridge: GuestBridging {
 
     func waitUntilReady(vmID: String, timeoutSeconds: TimeInterval) throws {}
 
+    func guestInfo(vmID: String) -> GuestAgentInfo? {
+        nil
+    }
+
     func exec(
         vmID: String,
         argv: [String],
@@ -32,6 +36,10 @@ final class StaticOutputGuestBridge: GuestBridging {
     }
 
     func waitUntilReady(vmID: String, timeoutSeconds: TimeInterval) throws {}
+
+    func guestInfo(vmID: String) -> GuestAgentInfo? {
+        nil
+    }
 
     func exec(
         vmID: String,

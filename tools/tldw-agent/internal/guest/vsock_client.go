@@ -127,6 +127,7 @@ func (c *VSockClient) sendHandshake(conn io.Writer, reader *bufio.Reader) error 
 		ConnectionToken: c.cfg.ConnectionToken,
 		GuestVersion:    c.cfg.GuestVersion,
 		WorkspaceRoot:   c.cfg.WorkspaceRoot,
+		Capabilities:    guestCapabilities(),
 	}); err != nil {
 		return err
 	}
@@ -208,6 +209,10 @@ func (c *VSockClient) sendReady(conn io.Writer, reader *bufio.Reader, server *Se
 		return fmt.Errorf("workspace root mismatch: %s", response.WorkspaceRoot)
 	}
 	return nil
+}
+
+func guestCapabilities() []string {
+	return []string{"exec", "output_cap_v1"}
 }
 
 func loadVSockClientConfigFromEnv() (VSockClientConfig, error) {

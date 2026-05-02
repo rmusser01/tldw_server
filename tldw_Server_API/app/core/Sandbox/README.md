@@ -71,6 +71,11 @@ Current limitations:
   and terminate noisy commands when observed output exceeds it. The helper still
   applies host-side response capping as defense in depth and fallback for older
   images. Guest-side streaming remains follow-up work.
+- `vz_linux` helper VM status details include guest-agent readiness metadata
+  when available: `guest_version`, `guest_workspace_root`,
+  `guest_capabilities_known`, and `guest_capabilities`. These fields are
+  diagnostic only; old images that omit capabilities remain compatible and are
+  reported as capability-unknown.
 - `vz_linux` artifact capture is bounded by `SANDBOX_MAX_ARTIFACT_FILE_BYTES`
   and `SANDBOX_MAX_ARTIFACT_TOTAL_BYTES`. Oversized or over-budget artifacts
   are skipped without failing an otherwise successful run, and aggregate skip

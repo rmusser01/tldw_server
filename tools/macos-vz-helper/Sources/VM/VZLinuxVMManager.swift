@@ -50,12 +50,14 @@ final class VZLinuxVMManager {
                 startupTimeoutSeconds: readinessTimeoutSeconds
             )
             try guestBridge.waitUntilReady(vmID: vmID, timeoutSeconds: readinessTimeoutSeconds)
-            registry.upsert(vmID: vmID, state: "running", healthy: true)
+            let guestInfo = guestBridge.guestInfo(vmID: vmID)
+            registry.upsert(vmID: vmID, state: "running", healthy: true, guestInfo: guestInfo)
             return registry.status(vmID: vmID) ?? VMRecord(
                 vmID: vmID,
                 state: "running",
                 healthy: true,
-                metadata: metadata
+                metadata: metadata,
+                guestInfo: guestInfo
             )
         } catch {
             try? bootDriver.stop(vmID: vmID)

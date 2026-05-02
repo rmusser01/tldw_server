@@ -26,6 +26,74 @@ import Testing
     #expect(response.details["transport"] == "vsock")
 }
 
+@Test func helperServiceSurfacesGuestAgentDetailsInCreateStatusAndList() throws {
+    let registry = VMRegistry()
+    let guestInfo = GuestAgentInfo(
+        guestVersion: "1.0.0",
+        workspaceRoot: "/workspace",
+        capabilities: ["exec", "output_cap_v1"],
+        capabilitiesKnown: true
+    )
+    let manager = VZLinuxVMManager(
+        registry: registry,
+        bootDriver: RecordingBootDriver(),
+        guestBridge: ReadyGuestBridge(info: guestInfo)
+    )
+    let service = HelperService(
+        hostFacts: HostFacts(isMacOS: true, isAppleSilicon: true),
+        registry: registry,
+        vmManager: manager
+    )
+
+    let response = try service.createVM(
+        vmID: "vm-guest-details",
+        templatePath: "/tmp/template.img",
+        workspacePath: "/tmp/workspace",
+        readinessTimeoutSeconds: 5
+    )
+    let status = service.getVMStatus(vmID: "vm-guest-details")
+    let listed = service.listVMs().vms.first
+
+    for details in [response.details, status?.details, listed?.details] {
+        #expect(details?["guest_version"] == "1.0.0")
+        #expect(details?["guest_workspace_root"] == "/workspace")
+        #expect(details?["guest_capabilities_known"] == "true")
+        #expect(details?["guest_capabilities"] == "exec,output_cap_v1")
+    }
+}
+
+@Test func helperServiceSurfacesUnknownCapabilitiesForOlderGuests() throws {
+    let registry = VMRegistry()
+    let guestInfo = GuestAgentInfo(
+        guestVersion: "0.9.0",
+        workspaceRoot: "/workspace",
+        capabilities: [],
+        capabilitiesKnown: false
+    )
+    let manager = VZLinuxVMManager(
+        registry: registry,
+        bootDriver: RecordingBootDriver(),
+        guestBridge: ReadyGuestBridge(info: guestInfo)
+    )
+    let service = HelperService(
+        hostFacts: HostFacts(isMacOS: true, isAppleSilicon: true),
+        registry: registry,
+        vmManager: manager
+    )
+
+    let response = try service.createVM(
+        vmID: "vm-old-guest-details",
+        templatePath: "/tmp/template.img",
+        workspacePath: "/tmp/workspace",
+        readinessTimeoutSeconds: 5
+    )
+
+    #expect(response.details["guest_version"] == "0.9.0")
+    #expect(response.details["guest_workspace_root"] == "/workspace")
+    #expect(response.details["guest_capabilities_known"] == "false")
+    #expect(response.details["guest_capabilities"] == nil)
+}
+
 @Test func helperServiceCreateVMReturnsOwnershipMetadata() throws {
     let registry = VMRegistry()
     let manager = VZLinuxVMManager(

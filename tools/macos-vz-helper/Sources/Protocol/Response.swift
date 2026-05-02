@@ -126,17 +126,20 @@ struct VMRecord {
     let state: String
     let healthy: Bool
     let metadata: VMOwnershipMetadata
+    let guestInfo: GuestAgentInfo?
 
     init(
         vmID: String,
         state: String,
         healthy: Bool,
-        metadata: VMOwnershipMetadata = .unknown
+        metadata: VMOwnershipMetadata = .unknown,
+        guestInfo: GuestAgentInfo? = nil
     ) {
         self.vmID = vmID
         self.state = state
         self.healthy = healthy
         self.metadata = metadata
+        self.guestInfo = guestInfo
     }
 }
 
