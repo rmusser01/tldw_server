@@ -10,6 +10,7 @@ import sqlite3
 import uuid
 import zipfile
 from datetime import datetime, timedelta, timezone
+from types import MappingProxyType
 from typing import Any
 
 import pytest
@@ -265,6 +266,43 @@ async def test_list_bundles_sanitizes_noncritical_failure_log(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_list_bundles_defaults_pagination_aliases(monkeypatch):
+    from tldw_Server_API.app.api.v1.endpoints.admin import admin_bundle_ops
+
+    def _list_bundles(**_kwargs):
+        return (
+            [
+                admin_bundle_ops.svc.BundleMetadata(
+                    bundle_id="bundle-a.zip",
+                    user_id=None,
+                    created_at=datetime.now(timezone.utc),
+                    size_bytes=100,
+                    datasets=("authnz",),
+                    schema_versions=MappingProxyType({"authnz": 1}),
+                    app_version="test",
+                    manifest_version=1,
+                    notes=None,
+                )
+            ],
+            3,
+        )
+
+    monkeypatch.setattr(admin_bundle_ops.svc, "list_bundles", _list_bundles)
+
+    response = await admin_bundle_ops.list_bundles(
+        user_id=None,
+        limit=1,
+        offset=0,
+        principal=object(),
+    )
+
+    assert response.pagination.has_more is True
+    assert response.pagination.next_offset == 1
+    assert response.has_more is True
+    assert response.next_offset == 1
+
+
+@pytest.mark.asyncio
 async def test_import_bundle_sanitizes_noncritical_failure_log(monkeypatch):
     from tldw_Server_API.app.api.v1.endpoints.admin import admin_bundle_ops
 
@@ -454,6 +492,8 @@ async def test_list_bundles_empty(tmp_path):
         assert data["pagination"]["total"] == 0
         assert data["pagination"]["limit"] == 100
         assert data["pagination"]["offset"] == 0
+        assert data["has_more"] is False
+        assert data["next_offset"] is None
 
 
 @pytest.mark.asyncio
@@ -504,6 +544,8 @@ async def test_list_bundles_pagination(tmp_path):
         assert data["pagination"]["total"] >= 2
         assert data["pagination"]["limit"] == 1
         assert data["pagination"]["offset"] == 0
+        assert data["has_more"] is True
+        assert data["next_offset"] == 1
 
 
 # ---------------------------------------------------------------------------
