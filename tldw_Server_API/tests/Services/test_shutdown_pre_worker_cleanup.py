@@ -193,6 +193,36 @@ async def test_shutdown_pre_worker_cleanup_skips_coordinated_chatbooks_and_stora
 
 
 @pytest.mark.asyncio
+async def test_shutdown_pre_worker_cleanup_skips_stopped_background_chatbooks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    shutdown_cleanup = _import_shutdown_pre_worker_cleanup()
+    stop_event = _FakeStopEvent()
+    chatbooks_task = _FakeTask()
+
+    async def _noop() -> None:
+        return None
+
+    monkeypatch.setattr(shutdown_cleanup, "_reset_cleanup_service", _noop)
+    monkeypatch.setattr(shutdown_cleanup, "_reset_storage_service", _noop)
+    monkeypatch.setattr(shutdown_cleanup, "_reset_authnz_rate_limiter", _noop)
+
+    await shutdown_cleanup._shutdown_pre_worker_cleanup(
+        app=SimpleNamespace(state=SimpleNamespace()),
+        cleanup_task=None,
+        chatbooks_cleanup_task=chatbooks_task,
+        chatbooks_cleanup_stop_event=stop_event,
+        storage_cleanup_service=None,
+        coordinated_legacy_component_names=set(),
+        stopped_background_worker_names={"chatbooks_cleanup"},
+        guard_exceptions=(RuntimeError,),
+    )
+
+    assert stop_event.is_set is False
+    assert chatbooks_task.cancelled is False
+
+
+@pytest.mark.asyncio
 async def test_shutdown_pre_worker_cleanup_swallows_guard_exceptions_from_local_guarded_steps(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

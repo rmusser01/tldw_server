@@ -7,7 +7,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from tldw_Server_API.app.services.lifecycle_workers import WorkerRegistry
+from tldw_Server_API.app.services.worker_registry import WorkerRegistry
 
 
 @dataclass
@@ -72,6 +72,7 @@ async def initialize_startup_worker_bootstrap(
         startup_service_tail_handles=startup_service_tail_handles,
         worker_inventory=worker_inventory,
     )
+
 
 def _load_app_settings():
     from tldw_Server_API.app.core.config import settings as app_settings

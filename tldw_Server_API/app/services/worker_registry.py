@@ -6,6 +6,7 @@ from tldw_Server_API.app.services.lifecycle_workers import (
     ManagedWorker,
     ShutdownPhase,
     WorkerRegistry,
+    start_stop_event_worker,
 )
 
-__all__ = ["ManagedWorker", "ShutdownPhase", "WorkerRegistry"]
+__all__ = ["ManagedWorker", "ShutdownPhase", "WorkerRegistry", "start_stop_event_worker"]

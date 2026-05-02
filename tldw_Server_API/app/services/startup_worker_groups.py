@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 
 from loguru import logger
 
@@ -75,7 +75,7 @@ class StartupWorkerGroupHandles:
 async def start_worker_groups(
     *,
     app: Any,
-    app_settings: Any,
+    app_settings: Mapping[str, Any],
     test_mode: bool,
     route_enabled: Callable[..., bool],
     startup_guard_exceptions: tuple[type[BaseException], ...],
@@ -87,6 +87,7 @@ async def start_worker_groups(
     cleanup_worker_handles = await _start_cleanup_workers(
         app_settings=app_settings,
         test_mode=test_mode,
+        worker_inventory=worker_inventory,
     )
 
     def _env_flag(key: str, default: bool) -> bool:
@@ -224,10 +225,19 @@ async def start_worker_groups(
     )
 
 
-async def _start_cleanup_workers(*, app_settings: Any, test_mode: bool):
+async def _start_cleanup_workers(
+    *,
+    app_settings: Mapping[str, Any],
+    test_mode: bool,
+    worker_inventory: Any | None = None,
+) -> Any:
     from tldw_Server_API.app.services.startup_cleanup_workers import start_cleanup_workers
 
-    return await start_cleanup_workers(app_settings, test_mode=test_mode)
+    return await start_cleanup_workers(
+        app_settings,
+        test_mode=test_mode,
+        worker_inventory=worker_inventory,
+    )
 
 
 async def _start_primary_jobs_pollers(**kwargs):

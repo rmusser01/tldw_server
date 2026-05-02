@@ -30,6 +30,7 @@ async def shutdown_pre_worker_cleanup(
     storage_cleanup_service: Any | None,
     coordinated_legacy_component_names: set[str],
     guard_exceptions: tuple[type[BaseException], ...],
+    stopped_background_worker_names: set[str] | None = None,
 ) -> PreWorkerCleanupHandles:
     """Run the cleanup/reset shutdown slice that precedes the worker helpers."""
     await _shutdown_pre_worker_cleanup(
@@ -40,6 +41,7 @@ async def shutdown_pre_worker_cleanup(
         storage_cleanup_service=storage_cleanup_service,
         coordinated_legacy_component_names=coordinated_legacy_component_names,
         guard_exceptions=guard_exceptions,
+        stopped_background_worker_names=stopped_background_worker_names,
     )
     return PreWorkerCleanupHandles(
         cleanup_task=cleanup_task,
@@ -58,6 +60,7 @@ async def run_shutdown_pre_worker_cleanup(
     storage_cleanup_service: Any | None,
     coordinated_legacy_component_names: set[str],
     guard_exceptions: tuple[type[BaseException], ...],
+    stopped_background_worker_names: set[str] | None = None,
 ) -> PreWorkerCleanupHandles:
     """Run pre-worker cleanup with main-lifespan fallback behavior."""
     try:
@@ -69,6 +72,7 @@ async def run_shutdown_pre_worker_cleanup(
             storage_cleanup_service=storage_cleanup_service,
             coordinated_legacy_component_names=coordinated_legacy_component_names,
             guard_exceptions=guard_exceptions,
+            stopped_background_worker_names=stopped_background_worker_names,
         )
     except guard_exceptions as exc:
         logger.debug(f"Pre-worker cleanup skipped: {exc}")
@@ -89,14 +93,19 @@ async def _shutdown_pre_worker_cleanup(
     storage_cleanup_service: Any | None,
     coordinated_legacy_component_names: set[str],
     guard_exceptions: tuple[type[BaseException], ...],
+    stopped_background_worker_names: set[str] | None = None,
 ) -> None:
+    stopped_background_worker_names = stopped_background_worker_names or set()
     await _cancel_deferred_startup_task(
         app=app,
         guard_exceptions=guard_exceptions,
     )
     if cleanup_task:
         cleanup_task.cancel()
-    if "chatbooks_cleanup" not in coordinated_legacy_component_names:
+    if (
+        "chatbooks_cleanup" not in coordinated_legacy_component_names
+        and "chatbooks_cleanup" not in stopped_background_worker_names
+    ):
         if chatbooks_cleanup_stop_event:
             chatbooks_cleanup_stop_event.set()
         if chatbooks_cleanup_task:

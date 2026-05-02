@@ -106,6 +106,7 @@ async def run_lifespan_shutdown_sequence(
         run_coordinated_shutdown=run_coordinated_shutdown,
         startup_guard_exceptions=startup_guard_exceptions,
         import_exceptions=import_exceptions,
+        stopped_background_worker_names=stopped_background_worker_names,
     )
     coordinated_legacy_component_names = (
         coordinated_legacy_shutdown_handles.coordinated_legacy_component_names
@@ -123,6 +124,7 @@ async def run_lifespan_shutdown_sequence(
         storage_cleanup_service=worker_runtime.storage_cleanup_service,
         coordinated_legacy_component_names=coordinated_legacy_component_names,
         guard_exceptions=startup_guard_exceptions,
+        stopped_background_worker_names=stopped_background_worker_names,
     )
     worker_runtime.apply_pre_worker_cleanup_handles(pre_worker_cleanup_handles)
 

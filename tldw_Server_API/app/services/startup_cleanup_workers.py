@@ -12,6 +12,11 @@ from typing import Any, Mapping
 
 from loguru import logger
 
+from tldw_Server_API.app.services.worker_registry import (
+    ShutdownPhase,
+    start_stop_event_worker,
+)
+
 _STARTUP_GUARD_EXCEPTIONS = (
     AttributeError,
     OSError,
@@ -36,10 +41,14 @@ async def start_cleanup_workers(
     app_settings: Mapping[str, Any],
     *,
     test_mode: bool,
+    worker_inventory: Any | None = None,
 ) -> CleanupWorkerHandles:
     """Start the small cleanup-worker startup slice and return explicit handles."""
     cleanup_task = await _start_ephemeral_cleanup_worker(app_settings)
-    secondary = await _start_secondary_cleanup_workers(test_mode=test_mode)
+    secondary = await _start_secondary_cleanup_workers(
+        test_mode=test_mode,
+        worker_inventory=worker_inventory,
+    )
     return CleanupWorkerHandles(
         cleanup_task=cleanup_task,
         chatbooks_cleanup_task=secondary.chatbooks_cleanup_task,
@@ -48,9 +57,15 @@ async def start_cleanup_workers(
     )
 
 
-async def _start_secondary_cleanup_workers(*, test_mode: bool) -> CleanupWorkerHandles:
+async def _start_secondary_cleanup_workers(
+    *,
+    test_mode: bool,
+    worker_inventory: Any | None = None,
+) -> CleanupWorkerHandles:
     """Start cleanup workers whose enablement is driven by process env."""
-    chatbooks_cleanup_task, chatbooks_cleanup_stop_event = await _start_chatbooks_cleanup_worker()
+    chatbooks_cleanup_task, chatbooks_cleanup_stop_event = await _start_chatbooks_cleanup_worker(
+        worker_inventory=worker_inventory,
+    )
     storage_cleanup_service = await _start_storage_cleanup_worker(test_mode=test_mode)
     return CleanupWorkerHandles(
         chatbooks_cleanup_task=chatbooks_cleanup_task,
@@ -106,13 +121,29 @@ async def _start_ephemeral_cleanup_worker(app_settings: Mapping[str, Any]) -> An
         return None
 
 
-async def _start_chatbooks_cleanup_worker() -> tuple[Any | None, Any | None]:
+async def _start_chatbooks_cleanup_worker(
+    *,
+    worker_inventory: Any | None = None,
+) -> tuple[Any | None, Any | None]:
     """Start the scheduled chatbooks cleanup worker when enabled."""
     try:
         interval_sec = int(os.getenv("CHATBOOKS_CLEANUP_INTERVAL_SEC", "0") or "0")
         if interval_sec > 0:
-            stop_event = asyncio.Event()
-            task = asyncio.create_task(_run_chatbooks_cleanup_loop(stop_event))
+            if worker_inventory is not None:
+                task, stop_event = await start_stop_event_worker(
+                    worker_inventory,
+                    name="chatbooks_cleanup",
+                    task_name="chatbooks_cleanup_task",
+                    coroutine_factory=_run_chatbooks_cleanup_loop,
+                    category="cleanup",
+                    shutdown_phase=ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN,
+                )
+            else:
+                stop_event = asyncio.Event()
+                task = asyncio.create_task(
+                    _run_chatbooks_cleanup_loop(stop_event),
+                    name="chatbooks_cleanup_task",
+                )
             logger.info("Chatbooks cleanup worker started")
             return task, stop_event
         logger.info("Chatbooks cleanup worker disabled by settings")

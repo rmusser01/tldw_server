@@ -27,7 +27,8 @@ async def test_start_cleanup_workers_combines_all_handles(
         assert app_settings["SINGLE_USER_FIXED_ID"] == "7"
         return "ephemeral-task"
 
-    async def _fake_chatbooks():
+    async def _fake_chatbooks(*, worker_inventory=None):
+        assert worker_inventory is None
         calls.append("chatbooks")
         return ("chatbooks-task", "chatbooks-stop")
 
@@ -53,6 +54,41 @@ async def test_start_cleanup_workers_combines_all_handles(
 
 
 @pytest.mark.asyncio
+async def test_start_cleanup_workers_passes_worker_inventory_to_chatbooks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_cleanup = _import_startup_cleanup_workers()
+    worker_inventory = object()
+    calls: list[tuple[str, object | None]] = []
+
+    async def _fake_ephemeral(app_settings):
+        del app_settings
+        return None
+
+    async def _fake_chatbooks(*, worker_inventory=None):
+        calls.append(("chatbooks", worker_inventory))
+        return ("chatbooks-task", "chatbooks-stop")
+
+    async def _fake_storage(*, test_mode: bool):
+        assert test_mode is True
+        return None
+
+    monkeypatch.setattr(startup_cleanup, "_start_ephemeral_cleanup_worker", _fake_ephemeral)
+    monkeypatch.setattr(startup_cleanup, "_start_chatbooks_cleanup_worker", _fake_chatbooks)
+    monkeypatch.setattr(startup_cleanup, "_start_storage_cleanup_worker", _fake_storage)
+
+    handles = await startup_cleanup.start_cleanup_workers(
+        {"SINGLE_USER_FIXED_ID": "7"},
+        test_mode=True,
+        worker_inventory=worker_inventory,
+    )
+
+    assert calls == [("chatbooks", worker_inventory)]
+    assert handles.chatbooks_cleanup_task == "chatbooks-task"
+    assert handles.chatbooks_cleanup_stop_event == "chatbooks-stop"
+
+
+@pytest.mark.asyncio
 async def test_start_chatbooks_cleanup_worker_starts_when_interval_positive(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -64,8 +100,8 @@ async def test_start_chatbooks_cleanup_worker_starts_when_interval_positive(
     async def _fake_runner(stop_event):
         started_with.append(stop_event)
 
-    def _record_create_task(coro):
-        task = SimpleNamespace(coro=coro, cancel=lambda: None)
+    def _record_create_task(coro, *, name=None):
+        task = SimpleNamespace(coro=coro, name=name, cancel=lambda: None)
         created_tasks.append(task)
         coro.close()
         return task
@@ -76,7 +112,43 @@ async def test_start_chatbooks_cleanup_worker_starts_when_interval_positive(
     task, stop_event = await startup_cleanup._start_chatbooks_cleanup_worker()
 
     assert task is created_tasks[0]
+    assert created_tasks[0].name == "chatbooks_cleanup_task"
     assert stop_event is not None
+
+
+@pytest.mark.asyncio
+async def test_start_chatbooks_cleanup_worker_registers_background_inventory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_cleanup = _import_startup_cleanup_workers()
+    monkeypatch.setenv("CHATBOOKS_CLEANUP_INTERVAL_SEC", "30")
+    calls: list[dict[str, object]] = []
+    task = object()
+    stop_event = object()
+
+    async def _fake_start_stop_event_worker(inventory, **kwargs):
+        calls.append({"inventory": inventory, **kwargs})
+        return task, stop_event
+
+    worker_inventory = object()
+    monkeypatch.setattr(startup_cleanup, "start_stop_event_worker", _fake_start_stop_event_worker)
+
+    returned_task, returned_stop_event = await startup_cleanup._start_chatbooks_cleanup_worker(
+        worker_inventory=worker_inventory,
+    )
+
+    assert returned_task is task
+    assert returned_stop_event is stop_event
+    assert calls == [
+        {
+            "inventory": worker_inventory,
+            "name": "chatbooks_cleanup",
+            "task_name": "chatbooks_cleanup_task",
+            "coroutine_factory": startup_cleanup._run_chatbooks_cleanup_loop,
+            "category": "cleanup",
+            "shutdown_phase": startup_cleanup.ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN,
+        }
+    ]
 
 
 @pytest.mark.asyncio
@@ -127,6 +199,7 @@ async def test_start_storage_cleanup_worker_starts_enabled_service(
 @pytest.mark.asyncio
 async def test_start_ephemeral_cleanup_worker_creates_task_when_enabled(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
 ) -> None:
     startup_cleanup = _import_startup_cleanup_workers()
     created_tasks = []
@@ -140,7 +213,11 @@ async def test_start_ephemeral_cleanup_worker_creates_task_when_enabled(
     monkeypatch.setattr(startup_cleanup.asyncio, "create_task", _record_create_task)
     monkeypatch.setattr(startup_cleanup, "_create_evaluations_db", lambda db_path: SimpleNamespace())
     monkeypatch.setattr(startup_cleanup, "_create_vector_store_adapter", lambda settings, user_id: SimpleNamespace(initialize=lambda: None))
-    monkeypatch.setattr(startup_cleanup, "_get_evaluations_db_path", lambda user_id: f"/tmp/evals-{user_id}.db")
+    monkeypatch.setattr(
+        startup_cleanup,
+        "_get_evaluations_db_path",
+        lambda user_id: str(tmp_path / f"evals-{user_id}.db"),
+    )
 
     task = await startup_cleanup._start_ephemeral_cleanup_worker(
         {"SINGLE_USER_FIXED_ID": "11", "EPHEMERAL_CLEANUP_ENABLED": True, "EPHEMERAL_CLEANUP_INTERVAL_SEC": 9}
