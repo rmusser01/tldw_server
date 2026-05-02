@@ -301,6 +301,8 @@ async def test_list_invites_includes_canonical_pagination(monkeypatch):
         "has_more": True,
         "next_offset": 1,
     }
+    assert response.has_more is True
+    assert response.next_offset == 1
     assert len(response.items) == 1
     assert response.items[0].id == 42
 
