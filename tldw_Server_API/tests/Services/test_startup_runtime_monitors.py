@@ -5,7 +5,6 @@ import sys
 
 import pytest
 
-
 pytestmark = pytest.mark.unit
 
 
@@ -39,6 +38,32 @@ async def test_start_runtime_monitors_combines_handles_in_order(
     assert handles.jobs_metrics_task == "jobs-metrics-task"
     assert handles.loop_lag_stop_event == "loop-lag-stop"
     assert handles.loop_lag_task == "loop-lag-task"
+
+
+@pytest.mark.asyncio
+async def test_start_runtime_monitors_passes_inventory_to_registered_monitors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_monitors = _import_startup_runtime_monitors()
+    worker_inventory = object()
+    calls: list[str] = []
+
+    async def _record_jobs_metrics(*, worker_inventory: object):
+        calls.append("jobs-metrics")
+        return (worker_inventory, "jobs-metrics-task")
+
+    async def _record_loop_lag(*, worker_inventory: object):
+        calls.append("loop-lag")
+        return (worker_inventory, "loop-lag-task")
+
+    monkeypatch.setattr(startup_monitors, "_start_jobs_metrics_gauge_worker", _record_jobs_metrics)
+    monkeypatch.setattr(startup_monitors, "_start_loop_lag_watchdog", _record_loop_lag)
+
+    handles = await startup_monitors.start_runtime_monitors(worker_inventory=worker_inventory)
+
+    assert calls == ["jobs-metrics", "loop-lag"]
+    assert handles.jobs_metrics_stop_event is worker_inventory
+    assert handles.loop_lag_stop_event is worker_inventory
 
 
 @pytest.mark.asyncio
@@ -84,6 +109,48 @@ async def test_start_loop_lag_watchdog_skips_when_disabled(
 
     assert stop_event is None
     assert task is None
+
+
+@pytest.mark.asyncio
+async def test_start_loop_lag_watchdog_registers_background_inventory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_monitors = _import_startup_runtime_monitors()
+    registrations: list[dict[str, object]] = []
+
+    class _FakeWorkerInventory:
+        async def register_custom(self, **kwargs: object) -> tuple[str, str]:
+            registrations.append(kwargs)
+            return "loop-lag-task", "loop-lag-stop"
+
+    monkeypatch.setenv("EVENT_LOOP_LAG_WATCHDOG_ENABLED", "true")
+    monkeypatch.setattr(
+        startup_monitors,
+        "_make_event",
+        lambda: (_ for _ in ()).throw(AssertionError("legacy event path should not run")),
+    )
+    monkeypatch.setattr(
+        startup_monitors,
+        "_create_task",
+        lambda coro: (_ for _ in ()).throw(AssertionError("legacy task path should not run")),
+    )
+
+    stop_event, task = await startup_monitors._start_loop_lag_watchdog(
+        worker_inventory=_FakeWorkerInventory(),
+    )
+
+    assert stop_event == "loop-lag-stop"
+    assert task == "loop-lag-task"
+    assert registrations == [
+        {
+            "name": "loop_lag_task",
+            "task_name": "loop_lag_watchdog",
+            "coroutine_factory": startup_monitors._run_loop_lag_watchdog_service,
+            "timeout_sec": 2.0,
+            "category": "monitoring",
+            "shutdown_phase": startup_monitors.ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN,
+        }
+    ]
 
 
 @pytest.mark.asyncio
