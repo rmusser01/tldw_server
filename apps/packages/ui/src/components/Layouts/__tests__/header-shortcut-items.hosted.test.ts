@@ -28,6 +28,32 @@ describe("header shortcut items hosted mode", () => {
     )
   })
 
+  it("keeps audio playground shortcuts discoverable with self-host messaging in hosted mode", async () => {
+    vi.doMock("@/services/tldw/deployment-mode", () => ({
+      isHostedTldwDeployment: () => true,
+    }))
+
+    const mod = await import("../header-shortcut-items")
+    const shortcutItems = mod.getHeaderShortcutItems()
+
+    expect(shortcutItems).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "stt-playground",
+          to: "/stt",
+          descriptionKey: "option:header.modeSttHostedDesc",
+          descriptionDefault: expect.stringMatching(/self-hosted/i)
+        }),
+        expect.objectContaining({
+          id: "tts-playground",
+          to: "/tts",
+          descriptionKey: "option:header.modeTtsHostedDesc",
+          descriptionDefault: expect.stringMatching(/self-hosted/i)
+        })
+      ])
+    )
+  })
+
   it("re-evaluates deployment mode when shortcut groups are requested", async () => {
     const isHostedTldwDeployment = vi.fn(() => false)
     vi.doMock("@/services/tldw/deployment-mode", () => ({

@@ -145,8 +145,8 @@ Let me explain:"""
         """Load prompt snippets from rag.prompts.* with a small process cache."""
         try:
             prompt_text = load_prompt("rag", name)
-        except Exception as exc:  # noqa: BLE001 - prompt loading must remain best-effort
-            logger.debug(f"Prompt loader failed for rag prompt '{name}': {exc}")
+        except Exception:  # noqa: BLE001 - prompt loading must remain best-effort
+            logger.debug("Prompt loader failed for rag prompt '{}'", name)
             return None
         if isinstance(prompt_text, str) and prompt_text.strip():
             return prompt_text.strip()
@@ -371,8 +371,8 @@ class LLMGenerator(BaseGenerator):
                 }
             )
 
-        except Exception as e:
-            logger.error(f"Error generating response: {e}")
+        except Exception:
+            logger.error("Error generating response")
 
             # Try fallback if enabled
             if self.config.fallback_enabled:
@@ -708,8 +708,8 @@ async def generate_streaming_response(context: Any, **kwargs) -> Any:
                             context.metadata["claims_overlay"] = claims_out
                             last_emit = len(buffer)
                             last_emit_time = now
-                        except Exception as claims_overlay_error:  # noqa: BLE001 - claims overlay best-effort
-                            logger.debug("Claims overlay enrichment failed during streaming generation", exc_info=claims_overlay_error)
+                        except Exception:  # noqa: BLE001 - claims overlay best-effort
+                            logger.debug("Claims overlay enrichment failed during streaming generation")
                 # done
                 return
 

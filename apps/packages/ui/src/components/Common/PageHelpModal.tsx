@@ -218,8 +218,12 @@ export function PageHelpModal() {
 
   // Get tutorials for current route
   const availableTutorials = useMemo(
-    () => getTutorialsForRoute(location.pathname),
-    [location.pathname]
+    () =>
+      getTutorialsForRoute(location.pathname, {
+        completedTutorialIds: completedTutorials,
+        includeLocked: true
+      }),
+    [location.pathname, completedTutorials]
   )
 
   // Determine default tab based on available tutorials

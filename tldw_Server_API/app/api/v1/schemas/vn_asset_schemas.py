@@ -102,6 +102,8 @@ class VNAssetPackResponse(BaseModel):
 class VNAssetSlotCreate(BaseModel):
     """Request body for creating a VN asset slot."""
 
+    model_config = ConfigDict(extra="forbid")
+
     asset_type: str = Field(..., min_length=1, max_length=100)
     slot_key: str = Field(..., min_length=1, max_length=300)
     labels: dict[str, Any] = Field(default_factory=dict)
@@ -127,6 +129,8 @@ class VNAssetSlotCreate(BaseModel):
 
 class VNAssetSlotUpdate(BaseModel):
     """Request body for patching a VN asset slot."""
+
+    model_config = ConfigDict(extra="forbid")
 
     asset_type: str | None = Field(default=None, min_length=1, max_length=100)
     slot_key: str | None = Field(default=None, min_length=1, max_length=300)
@@ -448,6 +452,22 @@ class VNAssetCleanupResponse(BaseModel):
     files_deleted: int = 0
     skipped_file_ids: list[int] = Field(default_factory=list)
     reclaimed_bytes: int = 0
+
+
+class VNAssetStarterMatrixSummary(BaseModel):
+    """Summary of an available starter matrix."""
+
+    key: str
+    title: str
+    slot_count: int = Field(..., ge=0)
+    planned_output_count: int = Field(..., ge=0)
+    asset_types: list[str] = Field(default_factory=list)
+
+
+class VNAssetStarterMatricesResponse(BaseModel):
+    """Available VN asset starter matrices."""
+
+    matrices: list[VNAssetStarterMatrixSummary] = Field(default_factory=list)
 
 
 VALID_REVIEW_STATUSES = {

@@ -188,6 +188,52 @@ def test_history_preserves_http_403_for_non_admin_cross_user_request(monkeypatch
     assert "Admin privileges required" in response.json()["detail"]
 
 
+def test_history_includes_canonical_offset_pagination(monkeypatch):
+    app = _build_eval_only_app(monkeypatch)
+
+    class _DummyService:
+        async def get_evaluation_history(self, **_kwargs):
+            return [
+                {
+                    "id": "eval_1",
+                    "created_at": "2026-01-01T00:00:00",
+                    "evaluation_type": "g_eval",
+                }
+            ]
+
+        async def count_evaluations(self, **_kwargs):
+            return 3
+
+    monkeypatch.setattr(
+        eval_unified,
+        "get_unified_evaluation_service_for_user",
+        lambda _user_id: _DummyService(),
+    )
+    app.dependency_overrides[eval_unified.get_auth_principal] = lambda: SimpleNamespace(
+        is_admin=False, roles=[], permissions=[]
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/evaluations/history",
+            json={"limit": 1, "offset": 1},
+        )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["total_count"] == 3
+    assert body["pagination"] == {
+        "mode": "offset",
+        "limit": 1,
+        "offset": 1,
+        "total": 3,
+        "has_more": True,
+        "next_offset": 2,
+    }
+    assert body["has_more"] is True
+    assert body["next_offset"] == 2
+
+
 def test_propositions_uses_stable_user_id_instead_of_auth_context_token(monkeypatch):
     app = _build_eval_only_app(monkeypatch)
 

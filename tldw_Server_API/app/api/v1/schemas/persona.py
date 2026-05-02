@@ -18,6 +18,7 @@ PersonaExemplarKind = Literal["style", "catchphrase", "boundary", "scenario_demo
 PersonaExemplarSourceType = Literal["manual", "transcript_import", "character_seed", "generated_candidate"]
 PersonaExemplarReviewAction = Literal["approve", "reject"]
 PersonaConfirmationMode = Literal["always", "destructive_only", "never"]
+PersonaWakeBehavior = Literal["one_shot", "continuous", "push_to_talk_after_wake"]
 PersonaSetupStatus = Literal["not_started", "in_progress", "completed"]
 PersonaSetupStep = Literal["archetype", "persona", "voice", "commands", "safety", "test"]
 PersonaSetupTestType = Literal["dry_run", "live_session"]
@@ -126,6 +127,7 @@ class PersonaVoiceDefaults(BaseModel):
     tts_voice: str | None = None
     confirmation_mode: PersonaConfirmationMode | None = None
     voice_chat_trigger_phrases: list[str] = Field(default_factory=list)
+    wake_behavior: PersonaWakeBehavior | None = None
     auto_resume: bool | None = None
     barge_in: bool | None = None
     auto_commit_enabled: bool | None = None

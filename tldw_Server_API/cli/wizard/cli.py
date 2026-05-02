@@ -5,6 +5,7 @@ import difflib
 import json
 import os
 import socket
+
 # The wizard starts fixed Python module commands with shell=False.
 import subprocess  # nosec B404
 import sys
@@ -16,6 +17,7 @@ from urllib.parse import urlsplit
 
 import typer
 from loguru import logger
+
 from tldw_Server_API.app.core.testing import is_truthy
 
 from . import profile_verify
@@ -219,15 +221,40 @@ _PROVIDER_SOURCES = [
     {"name": "anthropic", "label": "Anthropic", "env_keys": ["ANTHROPIC_API_KEY"], "config_key": "anthropic_api_key"},
     {"name": "cohere", "label": "Cohere", "env_keys": ["COHERE_API_KEY"], "config_key": "cohere_api_key"},
     {"name": "groq", "label": "Groq", "env_keys": ["GROQ_API_KEY"], "config_key": "groq_api_key"},
-    {"name": "huggingface", "label": "HuggingFace", "env_keys": ["HUGGINGFACE_API_KEY"], "config_key": "huggingface_api_key"},
-    {"name": "openrouter", "label": "OpenRouter", "env_keys": ["OPENROUTER_API_KEY"], "config_key": "openrouter_api_key"},
+    {
+        "name": "huggingface",
+        "label": "HuggingFace",
+        "env_keys": ["HUGGINGFACE_API_KEY"],
+        "config_key": "huggingface_api_key",
+    },
+    {
+        "name": "openrouter",
+        "label": "OpenRouter",
+        "env_keys": ["OPENROUTER_API_KEY"],
+        "config_key": "openrouter_api_key",
+    },
     {"name": "deepseek", "label": "DeepSeek", "env_keys": ["DEEPSEEK_API_KEY"], "config_key": "deepseek_api_key"},
     {"name": "qwen", "label": "Qwen", "env_keys": ["QWEN_API_KEY"], "config_key": "qwen_api_key"},
     {"name": "mistral", "label": "Mistral", "env_keys": ["MISTRAL_API_KEY"], "config_key": "mistral_api_key"},
     {"name": "google", "label": "Google", "env_keys": ["GOOGLE_API_KEY"], "config_key": "google_api_key"},
-    {"name": "elevenlabs", "label": "ElevenLabs", "env_keys": ["ELEVENLABS_API_KEY"], "config_key": "elevenlabs_api_key"},
-    {"name": "bedrock", "label": "Bedrock", "env_keys": ["BEDROCK_API_KEY", "AWS_BEARER_TOKEN_BEDROCK"], "config_key": "bedrock_api_key"},
-    {"name": "custom_openai", "label": "Custom OpenAI", "env_keys": ["CUSTOM_OPENAI_API_KEY"], "config_key": "custom_openai_api_key"},
+    {
+        "name": "elevenlabs",
+        "label": "ElevenLabs",
+        "env_keys": ["ELEVENLABS_API_KEY"],
+        "config_key": "elevenlabs_api_key",
+    },
+    {
+        "name": "bedrock",
+        "label": "Bedrock",
+        "env_keys": ["BEDROCK_API_KEY", "AWS_BEARER_TOKEN_BEDROCK"],
+        "config_key": "bedrock_api_key",
+    },
+    {
+        "name": "custom_openai",
+        "label": "Custom OpenAI",
+        "env_keys": ["CUSTOM_OPENAI_API_KEY"],
+        "config_key": "custom_openai_api_key",
+    },
 ]
 
 _MCP_CLIENTS = {
@@ -438,9 +465,7 @@ def init(
         actions.append({"create": str(env_path)})
     actions.append({"ensure_gitignore": _ENV_GITIGNORE_ENTRIES})
 
-    uses_structured_postgres = bool(
-        setup_profile and profile_utils.profile_uses_structured_postgres(setup_profile)
-    )
+    uses_structured_postgres = bool(setup_profile and profile_utils.profile_uses_structured_postgres(setup_profile))
     existing_env = env_utils.load_env(env_path, raw_values=uses_structured_postgres)
     updates: dict[str, str | None] = {}
     if setup_profile:
@@ -468,9 +493,13 @@ def init(
         auth_mode = updates["AUTH_MODE"]
     else:
         if env_file is not None:
-            auth_mode = existing_env.get("AUTH_MODE") or os.getenv("AUTH_MODE") or ("single_user" if default or yes else "")
+            auth_mode = (
+                existing_env.get("AUTH_MODE") or os.getenv("AUTH_MODE") or ("single_user" if default or yes else "")
+            )
         else:
-            auth_mode = os.getenv("AUTH_MODE") or existing_env.get("AUTH_MODE") or ("single_user" if default or yes else "")
+            auth_mode = (
+                os.getenv("AUTH_MODE") or existing_env.get("AUTH_MODE") or ("single_user" if default or yes else "")
+            )
     initializer_action: dict[str, Any] | None = None
     validation_action: dict[str, Any] | None = None
     if auth_mode:
@@ -480,15 +509,11 @@ def init(
             existing_key = updates["SINGLE_USER_API_KEY"]
         elif env_file is not None:
             existing_key = (
-                existing_env.get("SINGLE_USER_API_KEY")
-                or os.getenv("SINGLE_USER_API_KEY")
-                or os.getenv("API_KEY")
+                existing_env.get("SINGLE_USER_API_KEY") or os.getenv("SINGLE_USER_API_KEY") or os.getenv("API_KEY")
             )
         else:
             existing_key = (
-                os.getenv("SINGLE_USER_API_KEY")
-                or os.getenv("API_KEY")
-                or existing_env.get("SINGLE_USER_API_KEY")
+                os.getenv("SINGLE_USER_API_KEY") or os.getenv("API_KEY") or existing_env.get("SINGLE_USER_API_KEY")
             )
         if not existing_key:
             existing_key = env_utils.generate_single_user_api_key()
@@ -628,9 +653,7 @@ def auth(
     initializer_action: dict[str, Any] | None = None
     if mode == "single_user":
         existing_key = (
-            os.getenv("SINGLE_USER_API_KEY")
-            or os.getenv("API_KEY")
-            or existing_env.get("SINGLE_USER_API_KEY")
+            os.getenv("SINGLE_USER_API_KEY") or os.getenv("API_KEY") or existing_env.get("SINGLE_USER_API_KEY")
         )
         if not existing_key:
             if dry_run:
@@ -720,7 +743,9 @@ def auth(
 @app.command()
 def verify(
     json_out: bool = typer.Option(False, "--json", help="Emit machine-readable JSON output"),
-    check_provider: bool = typer.Option(False, "--check-provider", help="Attempt provider checks (offline/mock in scaffold)"),
+    check_provider: bool = typer.Option(
+        False, "--check-provider", help="Attempt provider checks (offline/mock in scaffold)"
+    ),
     dry_run: bool = typer.Option(False, "--dry-run", help="Preview actions without writing"),
     profile: str | None = typer.Option(None, "--profile", help="Public setup profile"),
     env_file: Path | None = typer.Option(None, "--env-file", help="Explicit env file path"),
@@ -917,7 +942,9 @@ def verify(
 def providers(
     json_out: bool = typer.Option(False, "--json", help="Emit machine-readable JSON output"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Preview actions without writing"),
-    check_provider: bool = typer.Option(False, "--check-provider", help="Attempt provider checks (offline/mock in scaffold)"),
+    check_provider: bool = typer.Option(
+        False, "--check-provider", help="Attempt provider checks (offline/mock in scaffold)"
+    ),
     write_config: bool = typer.Option(False, "--write-config", help="Write provider keys to config.txt when set"),
 ):
     """Collect/store provider keys."""
@@ -965,7 +992,12 @@ def providers(
                 config_updates[provider["config_key"]] = value
         else:
             provider_status.append(
-                {"provider": provider["name"], "label": provider["label"], "env_key": provider["env_keys"][0], "status": "missing"}
+                {
+                    "provider": provider["name"],
+                    "label": provider["label"],
+                    "env_key": provider["env_keys"][0],
+                    "status": "missing",
+                }
             )
 
     actions.append({"providers": provider_status})
@@ -1083,7 +1115,9 @@ def db(
         result = {
             "command": "db",
             "status": "error",
-            "actions": [{"validate_database_url": {"present": True, "valid": False, "reason": f"unsupported scheme '{scheme}'"}}],
+            "actions": [
+                {"validate_database_url": {"present": True, "valid": False, "reason": f"unsupported scheme '{scheme}'"}}
+            ],
             "notes": [f"Unsupported DATABASE_URL scheme: {scheme}"],
             "dry_run": dry_run,
         }
@@ -1460,9 +1494,7 @@ def doctor(
             actions.append({"validate_database_url": {"present": False, "valid": False, "reason": "missing"}})
         else:
             valid, reason = _validate_database_url(db_url)
-            actions.append(
-                {"validate_database_url": {"present": True, "valid": valid, "reason": reason or None}}
-            )
+            actions.append({"validate_database_url": {"present": True, "valid": valid, "reason": reason or None}})
             if valid and "DATABASE_URL" not in existing_env and os.getenv("DATABASE_URL"):
                 updates["DATABASE_URL"] = db_url
 

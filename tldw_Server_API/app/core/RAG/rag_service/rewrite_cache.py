@@ -20,6 +20,10 @@ from loguru import logger
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 
 
+def _exception_type_name(exc: BaseException) -> str:
+    return type(exc).__name__
+
+
 def _safe_path(user_id: str | None) -> Path:
     try:
         base = os.getenv("RAG_REWRITE_CACHE_PATH")
@@ -30,7 +34,7 @@ def _safe_path(user_id: str | None) -> Path:
         else:
             path = DatabasePaths.get_user_rewrite_cache_path(user_id)
     except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as exc:
-        logger.error("Rewrite cache: failed to resolve cache path: {}", exc)
+        logger.error("Rewrite cache: failed to resolve cache path: {}", _exception_type_name(exc))
         raise
     else:
         return path
@@ -69,7 +73,7 @@ def _normalize_query(q: str) -> str:
                     prev_space = True
         return "".join(out).strip()
     except (AttributeError, TypeError, ValueError) as exc:
-        logger.warning("Rewrite cache: failed to normalize query; returning fallback: {}", exc)
+        logger.warning("Rewrite cache: failed to normalize query; returning fallback: {}", _exception_type_name(exc))
         return q or ""
 
 
@@ -251,5 +255,5 @@ class RewriteCache:
                 increment_counter("rag_rewrite_cache_puts_total", 1, labels={"corpus": str(corpus or ""), "intent": str(intent or "")})
             except (ImportError, AttributeError, RuntimeError, TypeError, ValueError):
                 pass
-        except (OSError, RuntimeError, TypeError, ValueError) as e:
-            logger.warning(f"Failed to persist rewrite cache: {e}")
+        except (OSError, RuntimeError, TypeError, ValueError) as exc:
+            logger.warning("Failed to persist rewrite cache: {}", _exception_type_name(exc))

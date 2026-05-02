@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 import json
 import sqlite3
@@ -62,6 +63,7 @@ from tldw_Server_API.app.core.VN_Assets.storage import (
     generated_file_matches_vn_asset,
     generated_file_size_bytes,
     image_format_from_mime_type,
+    resolve_vn_asset_storage_path,
     unlink_vn_asset_storage_file,
 )
 
@@ -287,8 +289,7 @@ class VNAssetPackService:
 
         item_ids = set(request.item_ids or [])
         skipped_file_ids: list[int] = []
-        candidates: list[tuple[dict[str, Any], dict[str, Any], int]] = []
-        candidate_reclaimed_bytes = 0
+        candidate_items: list[dict[str, Any]] = []
 
         for item in self.repo.list_items(pack_id):
             item_id = int(item["id"])
@@ -303,17 +304,24 @@ class VNAssetPackService:
             if self.repo.count_items_referencing_generated_file(file_id, exclude_item_id=item_id) > 0:
                 skipped_file_ids.append(file_id)
                 continue
+            candidate_items.append(item)
 
-            record = await _get_generated_file(files_repo, file_id)
-            if not record or not generated_file_matches_vn_asset(
-                record,
-                user_id=self.owner_user_id,
-                item_id=item_id,
-            ):
-                continue
-            byte_count = generated_file_size_bytes(record, fallback=item.get("bytes"))
-            candidates.append((item, record, byte_count))
-            candidate_reclaimed_bytes += byte_count
+        candidate_results = await asyncio.gather(
+            *(
+                _cleanup_candidate_for_item(
+                    item,
+                    files_repo=files_repo,
+                    owner_user_id=self.owner_user_id,
+                )
+                for item in candidate_items
+            )
+        )
+        candidates = [
+            candidate
+            for candidate in candidate_results
+            if candidate is not None
+        ]
+        candidate_reclaimed_bytes = sum(byte_count for _, _, byte_count in candidates)
 
         files_would_delete = len(candidates)
         if request.dry_run:
@@ -335,7 +343,7 @@ class VNAssetPackService:
             storage_path = str(record.get("storage_path") or "")
             if storage_path:
                 try:
-                    unlink_vn_asset_storage_file(
+                    resolve_vn_asset_storage_path(
                         user_id=self.owner_user_id,
                         storage_path=storage_path,
                     )
@@ -357,17 +365,16 @@ class VNAssetPackService:
                 skipped_file_ids.append(file_id)
                 continue
 
-            self.repo.update_item_storage(
-                int(item["id"]),
-                generated_file_id=None,
-                storage_ref=None,
-                mime_type=None,
-                width=None,
-                height=None,
-                bytes=None,
-                backend_metadata=None,
-            )
-            removed_item_ids.append(int(item["id"]))
+            item_id = int(item["id"])
+            self.repo.delete_item(item_id)
+            if storage_path:
+                await asyncio.to_thread(
+                    unlink_vn_asset_storage_file,
+                    user_id=self.owner_user_id,
+                    storage_path=storage_path,
+                )
+
+            removed_item_ids.append(item_id)
             files_deleted += 1
             reclaimed_bytes += byte_count
 
@@ -392,6 +399,7 @@ class VNAssetPackService:
     ) -> VNAssetItemResponse:
         self._require_pack(pack_id)
         slot = self._require_slot_in_pack(pack_id, slot_id)
+        _validate_variant_index(slot, variant_index)
         if len(self.repo.list_items(pack_id)) + 1 > self.item_limit:
             raise ValueError(ERROR_ITEM_LIMIT_EXCEEDED)
 
@@ -563,7 +571,7 @@ class VNAssetPackService:
 
         variant_count = request.variant_count
         total_variants = sum(int(variant_count or slot["variant_count"]) for slot in slots)
-        self._enforce_item_limit(total_variants)
+        self._enforce_item_limit(len(self.repo.list_items(pack_id)) + total_variants)
 
         options = dict(request.options)
         if selected_slot_ids:
@@ -694,6 +702,8 @@ class VNAssetPackService:
                 continue
             options = _loads_json(batch["options_json"], {})
             slot_ids = options.get("slot_ids") if isinstance(options, dict) else None
+            if slot_ids is None:
+                return True
             if not isinstance(slot_ids, list):
                 continue
             if depth_slot_id in {int(slot_id) for slot_id in slot_ids}:
@@ -720,11 +730,15 @@ class VNAssetPackService:
         if character is None:
             raise ValueError("primary_character_not_found")
         budgets = _prompt_budgets_from_request(request.budgets)
+        negative_prompt = _join_prompt_parts(
+            pack["negative_prompt"],
+            slot["negative_prompt_template"],
+        )
         preview = build_prompt_preview(
             character=character,
             pack_style=pack["style_prompt"],
             pack_scenario=pack["scenario_notes"],
-            negative_prompt=pack["negative_prompt"],
+            negative_prompt=negative_prompt,
             style_lock=_loads_optional_json(pack["style_lock_json"]),
             slot_template=slot["prompt_template"],
             labels=_loads_json(slot["labels_json"], {}),
@@ -1012,6 +1026,14 @@ def _cleanup_statuses(request: VNAssetCleanupRequest) -> set[str]:
     return {str(status) for status in statuses}
 
 
+def _validate_variant_index(slot: Mapping[str, Any], variant_index: int) -> None:
+    if variant_index < 0:
+        raise ValueError("invalid_variant_index")
+    slot_variant_count = int(slot["variant_count"] or 0)
+    if slot_variant_count > 0 and variant_index >= slot_variant_count:
+        raise ValueError("invalid_variant_index")
+
+
 def _approved_cleanup_confirmed(request: VNAssetCleanupRequest) -> bool:
     return (
         request.confirmation_text == VN_ASSET_APPROVED_CLEANUP_CONFIRMATION
@@ -1026,6 +1048,25 @@ async def _get_generated_file(files_repo: Any, file_id: int) -> dict[str, Any] |
     result = get_file_by_id(file_id)
     record = await result if inspect.isawaitable(result) else result
     return dict(record) if record is not None else None
+
+
+async def _cleanup_candidate_for_item(
+    item: dict[str, Any],
+    *,
+    files_repo: Any,
+    owner_user_id: int,
+) -> tuple[dict[str, Any], dict[str, Any], int] | None:
+    item_id = int(item["id"])
+    file_id = int(item["generated_file_id"])
+    record = await _get_generated_file(files_repo, file_id)
+    if not record or not generated_file_matches_vn_asset(
+        record,
+        user_id=owner_user_id,
+        item_id=item_id,
+    ):
+        return None
+    byte_count = generated_file_size_bytes(record, fallback=item.get("bytes"))
+    return item, record, byte_count
 
 
 async def _hard_delete_generated_file(
@@ -1090,6 +1131,22 @@ def _slot_create_spec(slot: VNAssetSlot) -> dict[str, Any]:
         "depends_on_slot_key": slot.depends_on_slot_key,
         "status": slot.status,
     }
+
+
+def _first_text(*values: Any) -> str | None:
+    for value in values:
+        if value is None:
+            continue
+        text = str(value).strip()
+        if text:
+            return text
+    return None
+
+
+def _join_prompt_parts(*values: Any) -> str | None:
+    parts = [_first_text(value) for value in values]
+    joined = "\n".join(part for part in parts if part)
+    return joined or None
 
 
 def _loads_json(value: Any, default: Any) -> Any:

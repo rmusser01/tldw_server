@@ -131,11 +131,11 @@ async def handle_skill_tool_call(
             "success": False,
             "error": f"Skill '{skill_name}' not found",
         }
-    except SkillsError as e:
-        logger.error(f"Error executing skill '{skill_name}': {e}")
+    except SkillsError:
+        logger.error("Error executing skill '{}'", skill_name)
         return {
             "success": False,
-            "error": str(e),
+            "error": "skill_execution_failed",
         }
 
 

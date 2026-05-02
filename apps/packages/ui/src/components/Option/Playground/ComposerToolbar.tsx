@@ -894,6 +894,18 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
     </div>
   )
 
+  const collapsedMobileToolbarLayout = isMobile ? (
+    <div
+      role="group"
+      aria-label={
+        t("playground:composer.quickActions", "Composer quick actions") as string
+      }
+      data-playground-toolbar-row="collapsed-actions"
+      className="flex items-center justify-end gap-2">
+      {attachmentButton}
+    </div>
+  ) : null
+
   return (
     <div
       data-testid="composer-options-panel"
@@ -952,7 +964,9 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
           {!isMobile && !isProMode ? casualContextStrip : contextStrip}
           {!isMobile && !isProMode ? casualAdvancedControlsPanel : null}
         </>
-      ) : null}
+      ) : (
+        collapsedMobileToolbarLayout
+      )}
     </div>
   )
 })

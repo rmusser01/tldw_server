@@ -8,6 +8,7 @@ from typing import Any, Optional
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, status
 from loguru import logger
 
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.endpoints.evaluations.evaluations_auth import (
     create_error_response,
     get_evaluation_identity,
@@ -21,7 +22,7 @@ from tldw_Server_API.app.api.v1.schemas.evaluation_schemas_unified import (
     DatasetListResponse,
     DatasetResponse,
 )
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User
 from tldw_Server_API.app.core.AuthNZ.permissions import EVALS_MANAGE, EVALS_READ
 from tldw_Server_API.app.core.Evaluations.unified_evaluation_service import (
     _UNIFIED_EVAL_NONCRITICAL_EXCEPTIONS,
@@ -88,11 +89,11 @@ async def create_dataset(
                             if response is not None:
                                 response.headers["X-Idempotent-Replay"] = "true"
                                 response.headers["Idempotency-Key"] = idempotency_key
-                        except (AttributeError, TypeError, ValueError) as e:
-                            logger.debug(f"Failed to set idempotency headers: {e}")
+                        except (AttributeError, TypeError, ValueError):
+                            logger.debug("Failed to set dataset idempotency replay headers")
                         return DatasetResponse(**_normalize_dataset_payload(existing))
-            except _UNIFIED_EVAL_NONCRITICAL_EXCEPTIONS as e:
-                logger.debug(f"Idempotency lookup failed, proceeding with creation: {e}")
+            except _UNIFIED_EVAL_NONCRITICAL_EXCEPTIONS:
+                logger.debug("Dataset idempotency lookup failed")
         dataset_id = await svc.create_dataset(
             name=dataset_request.name,
             samples=[model_dump_compat(s) for s in dataset_request.samples],
@@ -105,11 +106,11 @@ async def create_dataset(
         try:
             if idempotency_key:
                 svc.db.record_idempotency("dataset", idempotency_key, dataset_id, identity.created_by)
-        except _UNIFIED_EVAL_NONCRITICAL_EXCEPTIONS as e:
-            logger.warning(f"Failed to record idempotency key for dataset {dataset_id}: {e}")
+        except _UNIFIED_EVAL_NONCRITICAL_EXCEPTIONS:
+            logger.warning("Failed to record dataset idempotency key")
         return DatasetResponse(**normalized)
     except _UNIFIED_EVAL_NONCRITICAL_EXCEPTIONS as e:
-        logger.exception(f"Failed to create dataset: {e}")
+        logger.error("Failed to create dataset")
         raise create_error_response(
             message=f"Failed to create dataset: {sanitize_error_message(e, 'creating dataset')}",
             error_type="server_error",
@@ -132,12 +133,26 @@ async def list_datasets(
         identity = get_evaluation_identity(current_user)
         svc = get_unified_evaluation_service_for_user(identity.user_scope)
         items, has_more = svc.db.list_datasets(limit=limit, offset=offset, created_by=identity.created_by)
+        total = svc.db.count_datasets(created_by=identity.created_by)
         resp = [DatasetResponse(**_normalize_dataset_payload(r)) for r in items]
         first_id = resp[0].id if resp else None
         last_id = resp[-1].id if resp else None
-        return DatasetListResponse(data=resp, has_more=has_more, first_id=first_id, last_id=last_id)
+        return DatasetListResponse(
+            data=resp,
+            has_more=has_more,
+            first_id=first_id,
+            last_id=last_id,
+            total=total,
+            pagination=build_offset_pagination_meta(
+                total=total,
+                limit=limit,
+                offset=offset,
+                count=len(resp),
+                has_more=has_more,
+            ),
+        )
     except _UNIFIED_EVAL_NONCRITICAL_EXCEPTIONS as e:
-        logger.exception(f"Failed to list datasets: {e}")
+        logger.error("Failed to list datasets")
         raise create_error_response(
             message=f"Failed to list datasets: {sanitize_error_message(e, 'listing datasets')}",
             error_type="server_error",
@@ -178,7 +193,7 @@ async def get_dataset(
     except HTTPException:
         raise
     except _UNIFIED_EVAL_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Failed to get dataset: {e}")
+        logger.error("Failed to get dataset")
         raise create_error_response(
             message=f"Failed to get dataset: {sanitize_error_message(e, 'retrieving dataset')}",
             error_type="server_error",
@@ -215,7 +230,7 @@ async def delete_dataset(
     except HTTPException:
         raise
     except _UNIFIED_EVAL_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Failed to delete dataset: {e}")
+        logger.error("Failed to delete dataset")
         raise create_error_response(
             message=f"Failed to delete dataset: {sanitize_error_message(e, 'deleting dataset')}",
             error_type="server_error",

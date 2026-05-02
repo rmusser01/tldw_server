@@ -99,9 +99,9 @@ async def process_documents_endpoint(
             tags=["no_db"],
             metadata={"has_urls": bool(form_data.urls), "has_files": bool(files)},
         )
-    except Exception as usage_log_error:
+    except Exception:
         # Usage logging is best-effort; never fail the request.
-        logger.debug("Document process endpoint usage logging failed", exc_info=usage_log_error)
+        logger.debug("Document process endpoint usage logging failed")
     logger.debug(
         "Form data for /process-documents: has_urls={}, has_files={}, "
         "perform_analysis={}, perform_chunking={}",
@@ -271,7 +271,7 @@ async def process_documents_endpoint(
                             error,
                             exc_info=False,
                         )
-                        err_detail = f"Download/preparation failed: {str(error)}"
+                        err_detail = "Download/preparation failed"
                         batch_result["results"].append(
                             {
                                 "status": "Error",
@@ -441,9 +441,7 @@ async def process_documents_endpoint(
                         res,
                         exc_info=res,
                     )
-                    error_detail = (
-                        f"Task execution failed: {type(res).__name__}: {res}"
-                    )
+                    error_detail = "Document processing failed"
                     results.append(
                         {
                             "status": "Error",
@@ -573,7 +571,7 @@ async def process_documents_endpoint(
 
                 res["chunks"] = chunks
     except Exception:
-        logger.debug("Re-chunking failed during metadata normalization", exc_info=True)
+        logger.debug("Re-chunking failed during metadata normalization")
 
     response = JSONResponse(status_code=final_status_code, content=batch_result)
     if legacy_signal is not None:

@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 from starlette.requests import Request
 
 from tldw_Server_API.app.api.v1.API_Deps import auth_deps
+from tldw_Server_API.app.api.v1.endpoints import admin as admin_mod
 from tldw_Server_API.app.api.v1.endpoints import monitoring as monitoring_mod
 from tldw_Server_API.app.core.AuthNZ.permissions import SYSTEM_LOGS
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
@@ -42,6 +43,18 @@ def _build_app_with_overrides(
 
     monitoring_mod.get_topic_monitoring_service = _fake_get_topic_monitoring_service  # type: ignore[assignment]
 
+    return app
+
+
+def _build_admin_app_with_overrides(principal: AuthPrincipal) -> FastAPI:
+    app = FastAPI()
+    app.include_router(admin_mod.router, prefix="/api/v1")
+
+    async def _fake_get_auth_principal(request: Request) -> AuthPrincipal:  # type: ignore[override]
+        del request
+        return principal
+
+    app.dependency_overrides[auth_deps.get_auth_principal] = _fake_get_auth_principal
     return app
 
 
@@ -109,3 +122,53 @@ async def test_monitoring_watchlists_200_for_admin_principal():
     assert resp.status_code == 200
     body = resp.json()
     assert body.get("watchlists") == []
+
+
+@pytest.mark.asyncio
+async def test_monitoring_watchlists_200_for_system_logs_principal():
+    principal = _make_principal(
+        is_admin=False,
+        roles=["user"],
+        permissions=[SYSTEM_LOGS],
+    )
+    app = _build_app_with_overrides(principal=principal)
+
+    with TestClient(app) as client:
+        resp = client.get("/api/v1/monitoring/watchlists")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body.get("watchlists") == []
+
+
+@pytest.mark.asyncio
+async def test_monitoring_notification_settings_403_when_missing_system_logs_permission():
+    principal = _make_principal(
+        is_admin=False,
+        roles=["user"],
+        permissions=[],
+    )
+    app = _build_app_with_overrides(principal=principal)
+
+    with TestClient(app) as client:
+        resp = client.get("/api/v1/monitoring/notifications/settings")
+
+    assert resp.status_code == 403
+    detail = resp.json().get("detail", "")
+    assert SYSTEM_LOGS in detail
+
+
+@pytest.mark.asyncio
+async def test_admin_monitoring_routes_reject_system_logs_without_admin_role():
+    principal = _make_principal(
+        is_admin=False,
+        roles=["user"],
+        permissions=[SYSTEM_LOGS],
+    )
+    app = _build_admin_app_with_overrides(principal)
+
+    with TestClient(app) as client:
+        resp = client.get("/api/v1/admin/monitoring/alert-rules")
+
+    assert resp.status_code == 403
+    assert "Required role" in resp.json().get("detail", "")

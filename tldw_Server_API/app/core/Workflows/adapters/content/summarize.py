@@ -123,6 +123,6 @@ async def run_summarize_adapter(config: dict[str, Any], context: dict[str, Any])
             "output_length": len(summary),
         }
 
-    except Exception as e:
-        logger.exception(f"Summarize adapter error: {e}")
-        return {"error": f"summarize_error:{e}"}
+    except Exception:
+        logger.exception("Summarize adapter error")
+        return {"error": "summarize_error"}

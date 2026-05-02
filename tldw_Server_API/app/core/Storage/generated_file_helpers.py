@@ -203,8 +203,8 @@ async def save_and_register_tts_audio(
     mime_type = AUDIO_MIME_TYPES.get(audio_format.lower(), "audio/mpeg")
 
     # Register with storage service
-    service = await get_storage_service()
     try:
+        service = await get_storage_service()
         file_record = await service.register_generated_file(
             user_id=user_id,
             filename=filename,
@@ -286,8 +286,8 @@ async def save_and_register_image(
 
     mime_type = IMAGE_MIME_TYPES.get(image_format.lower(), "image/png")
 
-    service = await get_storage_service()
     try:
+        service = await get_storage_service()
         file_record = await service.register_generated_file(
             user_id=user_id,
             filename=filename,
@@ -359,8 +359,8 @@ async def save_and_register_vn_asset_image(
 
     mime_type = IMAGE_MIME_TYPES.get(image_format.lower(), "image/png")
 
-    service = await get_storage_service()
     try:
+        service = await get_storage_service()
         file_record = await service.register_generated_file(
             user_id=user_id,
             filename=filename,

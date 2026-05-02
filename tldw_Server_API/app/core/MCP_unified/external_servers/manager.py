@@ -20,6 +20,14 @@ from .transports import (
 )
 
 
+_EXTERNAL_SERVER_INITIALIZATION_FAILED = "external_server_initialization_failed"
+_EXTERNAL_SERVER_DISCOVERY_FAILED = "external_server_discovery_failed"
+_EXTERNAL_SERVER_HEALTH_CHECK_FAILED = "external_server_health_check_failed"
+_EXTERNAL_SERVER_CONNECT_FAILED = "external_server_connect_failed"
+_EXTERNAL_SERVER_CALL_TIMEOUT = "external_server_call_timeout"
+_EXTERNAL_SERVER_CALL_FAILED = "external_server_call_failed"
+
+
 @dataclass(slots=True)
 class VirtualExternalTool:
     """External tool exposed through a namespaced virtual name."""
@@ -157,12 +165,11 @@ class ExternalServerManager:
                 await self._refresh_server_tools(server.id)
                 self._discovery_errors.pop(server.id, None)
             except Exception as exc:
-                self._discovery_errors[server.id] = str(exc)
+                self._discovery_errors[server.id] = _EXTERNAL_SERVER_INITIALIZATION_FAILED
                 self._clear_server_tools(server.id)
                 logger.warning(
-                    "External MCP server '{}' failed initialization/discovery: {}",
-                    server.id,
-                    exc,
+                    "External MCP server initialization/discovery failed",
+                    error_type=type(exc).__name__,
                 )
 
         self._initialized = True
@@ -174,7 +181,11 @@ class ExternalServerManager:
             try:
                 await adapter.close()
             except Exception as exc:
-                logger.warning(f"External MCP adapter close failed for {server_id}: {exc}")
+                logger.warning(
+                    "External MCP adapter close failed for {}; error_type={}",
+                    server_id,
+                    type(exc).__name__,
+                )
         self._adapters = {}
         self._virtual_tools = {}
         self._discovery_errors = {}
@@ -196,9 +207,9 @@ class ExternalServerManager:
                 await self._refresh_server_tools(sid)
                 refreshed += 1
                 self._discovery_errors.pop(sid, None)
-            except Exception as exc:
-                errors[sid] = str(exc)
-                self._discovery_errors[sid] = str(exc)
+            except Exception:
+                errors[sid] = _EXTERNAL_SERVER_DISCOVERY_FAILED
+                self._discovery_errors[sid] = _EXTERNAL_SERVER_DISCOVERY_FAILED
                 self._clear_server_tools(sid)
 
         return {
@@ -219,9 +230,9 @@ class ExternalServerManager:
             if adapter is not None:
                 try:
                     checks = await adapter.health_check()
-                except Exception as exc:
+                except Exception:
                     checks = {"configured": True, "connected": False, "error": True}
-                    self._discovery_errors[server_id] = str(exc)
+                    self._discovery_errors[server_id] = _EXTERNAL_SERVER_HEALTH_CHECK_FAILED
 
             connected = bool(checks.get("connected"))
             discovery_ok = server_id not in self._discovery_errors
@@ -374,9 +385,9 @@ class ExternalServerManager:
             self._virtual_tools.update(server_tools)
             telemetry.discovery_successes += 1
             telemetry.last_discovered_tool_count = len(server_tools)
-        except Exception as exc:
+        except Exception:
             telemetry.discovery_failures += 1
-            telemetry.last_error = str(exc)
+            telemetry.last_error = _EXTERNAL_SERVER_DISCOVERY_FAILED
             raise
         finally:
             latency_ms = self._elapsed_ms(started_at)
@@ -414,9 +425,9 @@ class ExternalServerManager:
         try:
             await self._adapters[server_id].connect()
             telemetry.connect_successes += 1
-        except Exception as exc:
+        except Exception:
             telemetry.connect_failures += 1
-            telemetry.last_error = str(exc)
+            telemetry.last_error = _EXTERNAL_SERVER_CONNECT_FAILED
             raise
         finally:
             latency_ms = self._elapsed_ms(started_at)
@@ -458,14 +469,14 @@ class ExternalServerManager:
                 if error_text:
                     telemetry.last_error = error_text
             return result
-        except TimeoutError as exc:
+        except TimeoutError:
             telemetry.call_failures += 1
             telemetry.call_timeouts += 1
-            telemetry.last_error = str(exc)
+            telemetry.last_error = _EXTERNAL_SERVER_CALL_TIMEOUT
             raise
-        except Exception as exc:
+        except Exception:
             telemetry.call_failures += 1
-            telemetry.last_error = str(exc)
+            telemetry.last_error = _EXTERNAL_SERVER_CALL_FAILED
             raise
         finally:
             latency_ms = self._elapsed_ms(started_at)

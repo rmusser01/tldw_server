@@ -16,7 +16,9 @@ def resolve_policy_permission_tier(tool_name: str) -> str | None:
             return None
         return resolver(tool_name)
     except Exception as policy_error:
-        logger.debug("Failed to resolve ACP permission tier from admin policy store", exc_info=policy_error)
+        logger.bind(error_type=type(policy_error).__name__).debug(
+            "Failed to resolve ACP permission tier from admin policy store"
+        )
         return None
 
 

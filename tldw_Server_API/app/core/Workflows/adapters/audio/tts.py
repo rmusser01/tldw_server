@@ -199,10 +199,10 @@ async def run_tts_adapter(config: dict[str, Any], context: dict[str, Any]) -> di
                     data = bytes(chunk)
                     await writer.write(data)
                     size_bytes += len(data)
-    except _WORKFLOW_TTS_NONCRITICAL_EXCEPTIONS as e:
-        return {"error": "tts_unavailable", "details": str(e)}
-    except Exception as e:
-        return {"error": "tts_unavailable", "details": str(e)}
+    except _WORKFLOW_TTS_NONCRITICAL_EXCEPTIONS:
+        return {"error": "tts_unavailable"}
+    except Exception:
+        return {"error": "tts_unavailable"}
 
     # Optional post-process normalization via ffmpeg (best-effort)
     pp = config.get("post_process") or {}

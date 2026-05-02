@@ -16,7 +16,8 @@ from tldw_Server_API.app.api.v1.schemas.reading_progress import (
     ReadingProgressUpdate,
     ViewMode,
 )
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, User
+
 router = APIRouter(tags=["Document Workspace"])
 
 
@@ -55,8 +56,8 @@ def _ensure_progress_table(db: Any) -> None:
             if "percentage" not in columns:
                 conn.execute(f"ALTER TABLE {PROGRESS_TABLE} ADD COLUMN percentage REAL")
                 logger.info("Added percentage column to reading progress table")
-    except Exception as e:
-        logger.warning("Could not create reading progress table (may already exist): {}", e)
+    except Exception:
+        logger.warning("Could not create reading progress table")
 
 
 def _now_iso() -> str:
@@ -132,7 +133,7 @@ async def get_reading_progress(
             cursor = conn.execute(query, (media_id, user_id))
             row = cursor.fetchone()
     except Exception as e:
-        logger.error("Error fetching reading progress: {}", e)
+        logger.error("Error fetching reading progress")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to fetch reading progress",
@@ -163,13 +164,8 @@ async def get_reading_progress(
             cfi=row_dict.get("cfi"),
             last_read_at=datetime.fromisoformat(row_dict["last_read_at"]),
         )
-    except (KeyError, TypeError, ValueError) as exc:
-        logger.warning(
-            "Ignoring corrupt reading progress row for media_id={} user_id={}: {}",
-            media_id,
-            user_id,
-            exc,
-        )
+    except (KeyError, TypeError, ValueError):
+        logger.warning("Ignoring corrupt reading progress row")
         return ReadingProgressNotFound(media_id=media_id, has_progress=False)
 
 
@@ -241,7 +237,7 @@ async def update_reading_progress(
                 ),
             )
     except Exception as e:
-        logger.error("Error updating reading progress: {}", e)
+        logger.error("Error updating reading progress")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to update reading progress",
@@ -309,12 +305,12 @@ async def delete_reading_progress(
     DELETE FROM {PROGRESS_TABLE}
     WHERE media_id = ? AND user_id = ?
     """
-    delete_sql = delete_sql_template.format_map(locals())  # nosec B608
+    delete_sql = delete_sql_template.format(PROGRESS_TABLE=PROGRESS_TABLE)  # nosec B608
     try:
         with db.transaction() as cursor:
             cursor.execute(delete_sql, (media_id, user_id))
     except Exception as e:
-        logger.error("Error deleting reading progress: {}", e)
+        logger.error("Error deleting reading progress")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to delete reading progress",

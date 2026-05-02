@@ -103,4 +103,36 @@ describe('VNAssetsWorkbench', () => {
     expect(screen.getAllByText('Character 42').length).toBeGreaterThan(0);
     expect(screen.getByText('0 planned assets')).toBeInTheDocument();
   });
+
+  it('uses returned slot variants for the planned asset count after matrix apply', async () => {
+    const user = userEvent.setup();
+    mocks.applyVNAssetMatrix.mockResolvedValue([
+      {
+        id: 1,
+        pack_id: 7,
+        asset_type: 'sprite',
+        slot_key: 'sprite.primary',
+        variant_count: 2,
+        status: 'planned',
+      },
+      {
+        id: 2,
+        pack_id: 7,
+        asset_type: 'background',
+        slot_key: 'background.interior',
+        variant_count: 3,
+        status: 'planned',
+      },
+    ]);
+    render(<VNAssetsWorkbench />);
+
+    await screen.findByText('No asset packs yet.');
+    await user.click(screen.getByRole('button', { name: 'Create pack' }));
+    await user.click(await screen.findByRole('button', { name: 'Apply starter matrix' }));
+
+    await waitFor(() => {
+      expect(mocks.applyVNAssetMatrix).toHaveBeenCalledWith(7, 'starter', { variant_count: 1 });
+    });
+    expect(await screen.findByText('5 planned assets')).toBeInTheDocument();
+  });
 });

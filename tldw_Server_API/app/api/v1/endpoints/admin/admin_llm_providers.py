@@ -30,30 +30,25 @@ class AdminLLMProvidersService(Protocol):
     async def list_overrides(
         self,
         provider: str | None,
-    ) -> LLMProviderOverrideListResponse:
-        ...
+    ) -> LLMProviderOverrideListResponse: ...
 
     async def get_override(
         self,
         provider: str,
-    ) -> LLMProviderOverrideResponse:
-        ...
+    ) -> LLMProviderOverrideResponse: ...
 
     async def upsert_override(
         self,
         provider: str,
         payload: LLMProviderOverrideRequest,
-    ) -> LLMProviderOverrideResponse:
-        ...
+    ) -> LLMProviderOverrideResponse: ...
 
-    async def delete_override(self, provider: str) -> None:
-        ...
+    async def delete_override(self, provider: str) -> None: ...
 
     async def test_provider(
         self,
         payload: LLMProviderTestRequest,
-    ) -> LLMProviderTestResponse:
-        ...
+    ) -> LLMProviderTestResponse: ...
 
 
 def get_admin_llm_providers_service() -> AdminLLMProvidersService:
@@ -170,6 +165,7 @@ async def admin_llm_providers_health(
     # Get configured providers
     try:
         from tldw_Server_API.app.core.LLM_Calls.LLM_API_Calls import get_available_providers
+
         providers = get_available_providers()
     except Exception:
         providers = []
@@ -198,13 +194,14 @@ async def admin_llm_providers_health(
                 "message": test_result.message if hasattr(test_result, "message") else None,
                 "error": test_result.error if hasattr(test_result, "error") and not test_result.success else None,
             }
-        except Exception as exc:
+        except Exception:
             latency_ms = round((time.monotonic() - start) * 1000)
+            logger.warning("LLM provider health check failed")
             return {
                 "provider": provider_name,
                 "status": "error",
                 "latency_ms": latency_ms,
-                "error": str(exc),
+                "error": "Provider health check failed",
             }
 
     if providers:

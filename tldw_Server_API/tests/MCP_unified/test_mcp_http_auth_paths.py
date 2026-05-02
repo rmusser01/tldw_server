@@ -1,9 +1,12 @@
+import builtins
 import os
 from typing import Any, Dict, List, Optional
 
+from fastapi import Response
 from fastapi.testclient import TestClient
 from loguru import logger
 import pytest
+from starlette.requests import Request
 
 from tldw_Server_API.app.main import app
 from tldw_Server_API.app.api.v1.endpoints import mcp_unified_endpoint as mcp_ep
@@ -70,12 +73,82 @@ class _DummyServer:
         return [MCPResponse(result={"ok": True}, id=getattr(req, "id", None)) for req in requests]
 
 
+class _LoggerStub:
+    def __init__(self) -> None:
+        self.debug_calls: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
+
+    def debug(self, *args: Any, **kwargs: Any) -> None:
+        self.debug_calls.append((args, kwargs))
+
+
 def _install_dummy_server(monkeypatch) -> _DummyServer:
 
 
     server = _DummyServer()
     monkeypatch.setattr(mcp_ep, "get_mcp_server", lambda: server)
     return server
+
+
+def test_mcp_get_client_ip_sanitizes_resolution_failure_log(monkeypatch):
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(mcp_ep, "logger", logger_stub)
+
+    def _raise_resolution_failure(*_args: Any, **_kwargs: Any) -> str:
+        raise RuntimeError("client IP parser leaked /private/mcp-client-ip.txt")
+
+    monkeypatch.setattr(mcp_ep, "resolve_client_ip", _raise_resolution_failure)
+
+    result = mcp_ep._get_client_ip(Request({"type": "http", "headers": []}))
+
+    assert result is None
+    assert logger_stub.debug_calls == [(("Failed to extract client IP",), {})]
+    assert "/private/mcp-client-ip.txt" not in repr(logger_stub.debug_calls)
+
+
+@pytest.mark.asyncio
+async def test_mcp_initialize_session_id_logs_are_sanitized(monkeypatch):
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(mcp_ep, "logger", logger_stub)
+    _install_dummy_server(monkeypatch)
+
+    original_import = builtins.__import__
+
+    def _raise_uuid_import(name: str, *args: Any, **kwargs: Any):
+        if name == "uuid":
+            raise RuntimeError("uuid generator leaked /private/mcp-session.txt")
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", _raise_uuid_import)
+    auth = mcp_ep.McpAuthContext(user=None, principal=None, api_key_info=None, raw_api_key=None)
+    http_request = Request({"type": "http", "headers": []})
+
+    await mcp_ep.mcp_request(
+        mcp_ep.MCPRequest(method="initialize", id=1),
+        http_request,
+        client_id=None,
+        auth=auth,
+        mcp_session_id=None,
+        config=None,
+        response=Response(),
+        _guard=None,
+    )
+    await mcp_ep.mcp_request_batch(
+        [mcp_ep.MCPRequest(method="initialize", id=2)],
+        http_request,
+        client_id=None,
+        auth=auth,
+        mcp_session_id=None,
+        config=None,
+        response=Response(),
+        _guard=None,
+    )
+
+    assert [args[0] for args, _kwargs in logger_stub.debug_calls if args] == [
+        "Failed to generate session ID for initialize request",
+        "Failed to generate session ID for batch initialize",
+    ]
+    assert all(not kwargs.get("exc_info") for _args, kwargs in logger_stub.debug_calls)
+    assert "/private/mcp-session.txt" not in repr(logger_stub.debug_calls)
 
 
 class _RBACAllow:
@@ -674,7 +747,7 @@ async def test_get_current_user_authnz_and_mcp_failure_use_api_key_and_set_state
     class _DummyApiManager:
         async def validate_api_key(self, key: str, ip_address: Optional[str] = None) -> Dict[str, Any]:
             calls.append({"key": key, "ip": ip_address})
-            return {"user_id": "42", "org_id": 99, "team_id": 7}
+            return {"user_id": "42", "org_id": 99, "team_id": 7, "scope": ["read"]}
 
     async def _fake_get_api_key_manager():
         return _DummyApiManager()
@@ -697,7 +770,12 @@ async def test_get_current_user_authnz_and_mcp_failure_use_api_key_and_set_state
     assert len(calls) == 1
     assert calls[0]["key"] == "api-key-xyz"
     # Request state should carry the resolved API key metadata.
-    assert getattr(request.state, "mcp_api_key_info", None) == {"user_id": "42", "org_id": 99, "team_id": 7}
+    assert getattr(request.state, "mcp_api_key_info", None) == {
+        "user_id": "42",
+        "org_id": 99,
+        "team_id": 7,
+        "scope": ["read"],
+    }
 
 
 @pytest.mark.asyncio
@@ -795,7 +873,7 @@ async def test_single_user_test_api_key_uses_api_key_manager_outside_dev_context
     class _DummyApiManager:
         async def validate_api_key(self, key: str, ip_address: Optional[str] = None) -> Dict[str, Any]:
             calls.append({"key": key, "ip": ip_address})
-            return {"user_id": "777", "org_id": 1, "team_id": 2}
+            return {"user_id": "777", "org_id": 1, "team_id": 2, "scope": ["read"]}
 
     async def _fake_get_api_key_manager():
         return _DummyApiManager()

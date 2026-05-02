@@ -1,5 +1,6 @@
 import { apiSend } from "@/services/api-send"
 import { appendPathQuery, toAllowedPath } from "@/services/tldw/path-utils"
+import type { ApiResponseEnvelope } from "@/services/response-envelope"
 
 // Prompt Studio client – aligns with tldw_server prompt_studio endpoints.
 
@@ -10,13 +11,7 @@ export type PaginationMeta = {
   total_pages?: number
 }
 
-export type StandardResponse<T> = {
-  success: boolean
-  data?: T
-  error?: string
-  error_code?: string
-  metadata?: Record<string, any>
-}
+export type StandardResponse<T> = ApiResponseEnvelope<T>
 
 export type ListResponse<T> = StandardResponse<T[]> & {
   metadata?: PaginationMeta

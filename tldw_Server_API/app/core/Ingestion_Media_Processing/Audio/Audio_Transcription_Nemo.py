@@ -525,7 +525,7 @@ def transcribe_with_canary(
 
     except Exception as e:
         logging.exception(f"Error during Canary transcription: {e}")
-        return f"[Transcription error: {str(e)}]"
+        return "[Transcription error] Canary transcription failed"
     finally:
         if cleanup_temp and audio_path and os.path.exists(audio_path):
             try:
@@ -629,7 +629,7 @@ def transcribe_with_parakeet(
 
     except Exception as e:
         logging.exception(f"Error during Parakeet transcription: {e}")
-        return f"[Transcription error: {str(e)}]"
+        return "[Transcription error] Parakeet transcription failed"
     finally:
         if cleanup_temp and audio_path and os.path.exists(audio_path):
             try:

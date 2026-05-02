@@ -9,7 +9,9 @@ import binascii
 import contextlib
 import hashlib
 import json
+import os
 import re
+import threading
 import time
 import uuid
 from collections import defaultdict, deque
@@ -20,8 +22,8 @@ from urllib.parse import urljoin
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Response, WebSocket, WebSocketDisconnect, status
 from loguru import logger
 from starlette.requests import Request as StarletteRequest
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, get_request_user, User, verify_jwt_and_fetch_user
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.schemas.persona import (
     PersonaBuddyResponse,
@@ -89,7 +91,6 @@ from tldw_Server_API.app.core.AuthNZ.exceptions import DatabaseError, InvalidTok
 from tldw_Server_API.app.core.AuthNZ.ip_allowlist import resolve_client_ip
 from tldw_Server_API.app.core.AuthNZ.jwt_service import get_jwt_service
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user, verify_jwt_and_fetch_user
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     CharactersRAGDBError,
@@ -145,6 +146,12 @@ from tldw_Server_API.app.core.Persona.policy_evaluator import (
     evaluate_canonical_policy,
     normalize_policy_rules,
 )
+from tldw_Server_API.app.core.Persona.dialogue_tree_context import build_runtime_tree_context
+from tldw_Server_API.app.core.Persona.runtime_explorer import (
+    PersonaRuntimeExplorer,
+    RuntimeExplorerConfig,
+    RuntimeScorer,
+)
 from tldw_Server_API.app.core.Persona.session_manager import get_session_manager
 from tldw_Server_API.app.core.Personalization.companion_activity import (
     normalize_persona_activity_surface,
@@ -198,6 +205,15 @@ _PERSONA_RUNTIME_MODES = {"session_scoped", "persistent_scoped"}
 _PERSONA_WS_REQUIRED_NOTICE_LEVELS = {"info", "warning", "error"}
 _PERSONA_WS_ALLOWED_STEP_TYPES = {"mcp_tool", "skill", "rag_query", "final_answer"}
 _PERSONA_LIVE_PROCESSING_NOTICE_DELAY_S = 2.0
+_PERSONA_WAKE_BEHAVIORS = {"one_shot", "continuous", "push_to_talk_after_wake"}
+_PERSONA_WAKE_DEACTIVATION_REASONS = {
+    "disarmed",
+    "stop_live_voice",
+    "persona_switch",
+    "tab_switch",
+    "route_leave",
+    "session_close",
+}
 _PERSONA_CONNECTION_MEMORY_TYPE = "persona_connection"
 _PERSONA_CONNECTION_ALLOWED_AUTH_TYPES = {"none", "bearer", "api_key", "basic", "custom_header"}
 _PERSONA_CONNECTION_TEST_METHODS = {"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"}
@@ -216,6 +232,8 @@ _PERSONA_STATE_FIELD_LABELS = {
     "identity_md": "identity",
     "heartbeat_md": "heartbeat",
 }
+_PERSONA_RUNTIME_EXPLORER_SELECTED_KEY = "_runtime_explorer_selected"
+_PERSONA_RUNTIME_SAFE_DENIAL_TEXT = RuntimeExplorerConfig().safe_denial_text
 
 
 def _bounded_label(value: Any, *, allowed: set[str], fallback: str) -> str:
@@ -391,6 +409,209 @@ def _get_persona_rbac_flags() -> tuple[bool, bool]:
         allow_export = False
         allow_delete = False
     return allow_export, allow_delete
+
+
+def _get_persona_runtime_explorer_config() -> RuntimeExplorerConfig:
+    from tldw_Server_API.app.core.config import settings as _app_settings
+
+    return RuntimeExplorerConfig(
+        enabled=_coerce_bool(_app_settings.get("PERSONA_RUNTIME_EXPLORER_ENABLED", False), default=False),
+        max_depth=_persona_int_setting("PERSONA_RUNTIME_EXPLORER_MAX_DEPTH", 1, 1, 10),
+        max_branching=_persona_int_setting("PERSONA_RUNTIME_EXPLORER_MAX_BRANCHING", 2, 1, 10),
+        max_provider_calls=_persona_int_setting("PERSONA_RUNTIME_EXPLORER_MAX_PROVIDER_CALLS", 1, 0, 100),
+        timeout_ms=_persona_int_setting("PERSONA_RUNTIME_EXPLORER_TIMEOUT_MS", 750, 100, 60_000),
+        max_tokens=_persona_int_setting("PERSONA_RUNTIME_EXPLORER_MAX_TOKENS", 256, 16, 4096),
+        llm_judges_enabled=_coerce_bool(
+            _app_settings.get("PERSONA_RUNTIME_EXPLORER_LLM_JUDGES_ENABLED", False),
+            default=False,
+        ),
+    )
+
+
+def _persona_runtime_scorers() -> list[RuntimeScorer] | None:
+    return None
+
+
+def _persona_runtime_candidate_generator(context: dict[str, Any]) -> list[dict[str, Any]]:
+    base_plan = _sanitize_persona_runtime_plan(context.get("base_plan"))
+    user_message = str(context.get("user_message") or "")
+    candidates = [
+        {
+            "action_type": "plan",
+            "text": user_message,
+            "plan": base_plan,
+            "metadata": {"source": "existing_persona_planner", "grounded": True},
+        }
+    ]
+    if _persona_runtime_requires_safe_refusal_branch(user_message):
+        candidates.append(
+            {
+                "action_type": "plan",
+                "text": _PERSONA_RUNTIME_SAFE_DENIAL_TEXT,
+                "plan": _runtime_safe_denial_plan(_PERSONA_RUNTIME_SAFE_DENIAL_TEXT),
+                "metadata": {"source": "deterministic_safe_refusal", "grounded": True},
+            }
+        )
+    return candidates
+
+
+def _persona_runtime_requires_safe_refusal_branch(user_message: str) -> bool:
+    lowered = str(user_message or "").casefold()
+    markers = (
+        "ignore previous",
+        "ignore prior",
+        "ignore earlier",
+        "override policy",
+        "bypass safety",
+        "bypass guardrail",
+        "reveal hidden prompt",
+        "reveal system prompt",
+        "dump system prompt",
+        "ignore persona",
+    )
+    return any(marker in lowered for marker in markers)
+
+
+class PersonaRuntimeExplorerProvider:
+    """App-scoped cache for runtime explorer instances with matching dependencies."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._cache_key: tuple[Any, ...] | None = None
+        self._explorer: PersonaRuntimeExplorer | None = None
+
+    def get(self, config: RuntimeExplorerConfig) -> PersonaRuntimeExplorer:
+        scorers = _persona_runtime_scorers()
+        cache_key = (
+            config,
+            id(_persona_runtime_candidate_generator),
+            tuple(id(scorer) for scorer in (scorers or [])),
+        )
+        with self._lock:
+            if self._explorer is None or self._cache_key != cache_key:
+                self._explorer = PersonaRuntimeExplorer(
+                    config=config,
+                    candidate_generator=_persona_runtime_candidate_generator,
+                    scorers=scorers,
+                )
+                self._cache_key = cache_key
+            return self._explorer
+
+
+def get_persona_runtime_explorer_provider(ws: WebSocket) -> PersonaRuntimeExplorerProvider:
+    provider = getattr(ws.app.state, "persona_runtime_explorer_provider", None)
+    if isinstance(provider, PersonaRuntimeExplorerProvider):
+        return provider
+    provider = PersonaRuntimeExplorerProvider()
+    ws.app.state.persona_runtime_explorer_provider = provider
+    return provider
+
+
+def _sanitize_persona_runtime_plan(raw_plan: Any) -> dict[str, Any]:
+    if not isinstance(raw_plan, dict):
+        return {"steps": []}
+    steps: list[dict[str, Any]] = []
+    for fallback_idx, raw_step in enumerate(raw_plan.get("steps") or []):
+        if not isinstance(raw_step, dict):
+            continue
+        try:
+            step_idx = int(raw_step.get("idx", fallback_idx))
+        except (TypeError, ValueError):
+            step_idx = fallback_idx
+        args = raw_step.get("args")
+        steps.append(
+            {
+                "idx": step_idx,
+                "step_type": str(raw_step.get("step_type") or ""),
+                "tool": str(raw_step.get("tool") or ""),
+                "args": dict(args) if isinstance(args, dict) else {},
+                "description": str(raw_step.get("description") or ""),
+                "why": str(raw_step.get("why") or ""),
+            }
+        )
+    return {"steps": steps}
+
+
+def _runtime_safe_denial_plan(message: str) -> dict[str, Any]:
+    return {
+        "steps": [
+            {
+                "idx": 0,
+                "step_type": "final_answer",
+                "tool": "summarize",
+                "args": {"text": str(message or "I cannot safely proceed with that request.")},
+                "description": "Decline unsafe runtime candidate",
+                "why": "Runtime exploration found a hard policy or safety violation.",
+            }
+        ]
+    }
+
+
+def _apply_persona_runtime_explorer_to_plan(
+    *,
+    base_plan: dict[str, Any],
+    user_message: str,
+    session_id: str,
+    persona_id: str,
+    runtime_mode: str,
+    memory_context: list[str],
+    persona_state_fields: list[str],
+    companion_usage: dict[str, Any],
+    persona_exemplar_selection: dict[str, Any],
+    runtime_explorer_provider: PersonaRuntimeExplorerProvider | None = None,
+) -> dict[str, Any]:
+    config = _get_persona_runtime_explorer_config()
+    if not config.enabled:
+        return base_plan
+
+    sanitized_base_plan = _sanitize_persona_runtime_plan(base_plan)
+    context_counts = {
+        "memory_count": len(memory_context or []),
+        "persona_state_field_count": len(persona_state_fields or []),
+        "companion_card_count": int(companion_usage.get("applied_card_count", 0) or 0),
+        "companion_goal_count": int(companion_usage.get("applied_goal_count", 0) or 0),
+        "companion_activity_count": int(companion_usage.get("applied_activity_count", 0) or 0),
+        "persona_exemplar_selected_count": int(
+            persona_exemplar_selection.get("selected_count", 0) or 0
+        ),
+    }
+    provider_context = build_runtime_tree_context(
+        persona_id=str(persona_id or ""),
+        session_id=str(session_id or ""),
+        user_message=str(user_message or ""),
+        policy_snapshot={
+            "runtime_mode": str(runtime_mode or ""),
+            "base_plan": sanitized_base_plan,
+            "context_counts": context_counts,
+        },
+        max_text_length=max(1, int(config.max_tokens) * 4),
+    ).for_generator()
+    policy_snapshot = provider_context.get("policy_snapshot") or {}
+    runtime_context = {
+        "user_message": provider_context.get("user_message", ""),
+        "session_id": provider_context.get("session_id", ""),
+        "persona_id": provider_context.get("persona_id", ""),
+        "runtime_mode": policy_snapshot.get("runtime_mode", ""),
+        "base_plan": policy_snapshot.get("base_plan", {"steps": []}),
+        "context_counts": policy_snapshot.get("context_counts", context_counts),
+        "metadata": provider_context.get("metadata", {}),
+    }
+    provider = runtime_explorer_provider or PersonaRuntimeExplorerProvider()
+    result = provider.get(config).explore(runtime_context)
+    if result.safe_denial:
+        return _runtime_safe_denial_plan(result.safe_denial)
+    if result.selected_candidate:
+        candidate_metadata = result.selected_candidate.get("metadata")
+        if isinstance(candidate_metadata, dict) and candidate_metadata.get("source") == "existing_persona_planner":
+            selected_base_plan = dict(base_plan)
+            selected_base_plan[_PERSONA_RUNTIME_EXPLORER_SELECTED_KEY] = True
+            return selected_base_plan
+        selected_plan = result.selected_candidate.get("plan")
+        sanitized_selected_plan = _sanitize_persona_runtime_plan(selected_plan)
+        if sanitized_selected_plan.get("steps"):
+            sanitized_selected_plan[_PERSONA_RUNTIME_EXPLORER_SELECTED_KEY] = True
+            return sanitized_selected_plan
+    return base_plan
 
 
 def _get_persona_session_scopes(*, allow_export: bool, allow_delete: bool) -> set[str]:
@@ -2293,6 +2514,40 @@ def _apply_persona_live_trigger_phrases(
     return True, cleaned
 
 
+def _get_persona_wake_no_command_timeout_s() -> float:
+    """Return the bounded wake activation grace period for one-shot wake modes."""
+    try:
+        return max(
+            1.0,
+            min(300.0, float(os.getenv("PERSONA_WAKE_NO_COMMAND_TIMEOUT_S", "30"))),
+        )
+    except (TypeError, ValueError):
+        return 30.0
+
+
+def _normalize_persona_wake_phrase(value: object) -> str:
+    """Normalize wake phrases so client-reported matches can be compared safely."""
+    text = re.sub(r"[^\w\s]+|_", " ", str(value or "").strip().lower())
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _match_persona_wake_phrase(
+    matched_phrase: object,
+    configured_phrases: list[str] | None,
+) -> str | None:
+    """Return the configured phrase matching a client wake activation, if any."""
+    normalized_match = _normalize_persona_wake_phrase(matched_phrase)
+    if not normalized_match:
+        return None
+    for phrase in configured_phrases or []:
+        candidate = str(phrase or "").strip()
+        if not candidate:
+            continue
+        if _normalize_persona_wake_phrase(candidate) == normalized_match:
+            return candidate
+    return None
+
+
 async def _generate_tts_audio_chunks(
     text: str,
     audio_format: str,
@@ -2653,7 +2908,10 @@ async def create_persona_profile(
                     expected_version=int(profile.get("version") or 1),
                 )
             except PersonaBuddyRollbackError as rollback_exc:
-                raise HTTPException(status_code=500, detail=str(rollback_exc)) from rollback_exc
+                raise HTTPException(
+                    status_code=500,
+                    detail="Failed to roll back persona profile creation",
+                ) from rollback_exc
             raise HTTPException(status_code=400, detail="Persona buddy validation failed") from exc
         return _persona_profile_to_response(profile, buddy_row=buddy_row)
     except HTTPException:
@@ -2745,7 +3003,10 @@ async def update_persona_profile(
                     expected_version=int(profile.get("version") or 1),
                 )
             except PersonaBuddyRollbackError as rollback_exc:
-                raise HTTPException(status_code=500, detail=str(rollback_exc)) from rollback_exc
+                raise HTTPException(
+                    status_code=500,
+                    detail="Failed to roll back persona profile update",
+                ) from rollback_exc
             raise HTTPException(status_code=400, detail="Persona buddy validation failed") from exc
         return _persona_profile_to_response(profile, buddy_row=buddy_row)
     except HTTPException:
@@ -4749,6 +5010,7 @@ async def persona_stream(
     ws: WebSocket,
     token: str | None = Query(default=None),
     api_key: str | None = Query(default=None),
+    runtime_explorer_provider: PersonaRuntimeExplorerProvider = Depends(get_persona_runtime_explorer_provider),
 ):
     """
     Bi-directional placeholder stream.
@@ -4785,6 +5047,7 @@ async def persona_stream(
     auth_watchdog_stop: asyncio.Event | None = None
     auth_revoked_event: asyncio.Event | None = None
     persona_live_stt_state_by_session: dict[str, dict[str, Any]] = {}
+    persona_live_wake_state_by_session: dict[str, dict[str, Any]] = {}
     persona_live_summary_sessions_seen: set[str] = set()
     try:
         user_id, credentials_supplied, auth_ok = await _resolve_authenticated_user_id(ws, token=token, api_key=api_key)
@@ -5273,6 +5536,48 @@ async def persona_stream(
                     turn_detector.reset()
             voice_transcript_buffer_by_session.pop(session_id, None)
 
+        def _clear_persona_live_wake_state(session_id: str) -> None:
+            persona_live_wake_state_by_session.pop(session_id, None)
+
+        def _get_active_persona_live_wake_state(session_id: str) -> dict[str, Any] | None:
+            state = persona_live_wake_state_by_session.get(session_id)
+            if not isinstance(state, dict):
+                return None
+            expires_at = state.get("expires_at_monotonic")
+            if isinstance(expires_at, (int, float)) and time.monotonic() > float(expires_at):
+                _clear_persona_live_wake_state(session_id)
+                return None
+            return state
+
+        async def _get_saved_wake_phrases_for_session(session_id: str) -> list[str]:
+            runtime_context = await asyncio.to_thread(
+                _load_persona_policy_rules_for_session,
+                persona_scope_db,
+                session_id=session_id,
+                user_id=authenticated_user_id,
+            )
+            if not bool(runtime_context.get("session_exists")):
+                return []
+            runtime_persona_id = str(runtime_context.get("persona_id") or "").strip()
+            if not runtime_persona_id or persona_scope_db is None:
+                return []
+            profile = await asyncio.to_thread(
+                persona_scope_db.get_persona_profile,
+                runtime_persona_id,
+                user_id=authenticated_user_id,
+                include_deleted=False,
+            )
+            if not isinstance(profile, dict):
+                return []
+            voice_defaults = profile.get("voice_defaults")
+            if not isinstance(voice_defaults, dict):
+                return []
+            return [
+                str(phrase or "").strip()
+                for phrase in voice_defaults.get("voice_chat_trigger_phrases") or []
+                if str(phrase or "").strip()
+            ]
+
         def _get_or_create_persona_live_stt_state(
             session_id: str,
         ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
@@ -5523,10 +5828,15 @@ async def persona_stream(
                 if isinstance(voice_runtime, dict)
                 else []
             )
-            trigger_matched, cleaned_transcript = _apply_persona_live_trigger_phrases(
-                transcript,
-                trigger_phrases=trigger_phrases,
-            )
+            wake_state = _get_active_persona_live_wake_state(session_id)
+            if wake_state:
+                trigger_matched = True
+                cleaned_transcript = str(transcript or "").strip()
+            else:
+                trigger_matched, cleaned_transcript = _apply_persona_live_trigger_phrases(
+                    transcript,
+                    trigger_phrases=trigger_phrases,
+                )
             if not trigger_matched:
                 await _emit_notice(
                     session_id=session_id,
@@ -5567,6 +5877,11 @@ async def persona_stream(
                 voice_runtime=voice_runtime if isinstance(voice_runtime, dict) else None,
                 commit_source=commit_source,
             )
+            if wake_state and wake_state.get("wake_behavior") in {
+                "one_shot",
+                "push_to_talk_after_wake",
+            }:
+                _clear_persona_live_wake_state(session_id)
             _reset_persona_live_active_turn(session_id)
             _schedule_persona_live_processing_notice(session_id)
             await _handle_persona_live_turn(
@@ -6501,6 +6816,20 @@ async def persona_stream(
                 companion_context=companion_context,
                 persona_exemplar_sections=persona_exemplar_assembly.sections,
             )
+            plan = await asyncio.to_thread(
+                _apply_persona_runtime_explorer_to_plan,
+                base_plan=plan,
+                user_message=normalized_text,
+                session_id=session_id,
+                persona_id=runtime_persona_id,
+                runtime_mode=runtime_mode,
+                memory_context=memory_context,
+                persona_state_fields=persona_state_fields,
+                companion_usage=companion_usage,
+                persona_exemplar_selection=persona_exemplar_selection,
+                runtime_explorer_provider=runtime_explorer_provider,
+            )
+            runtime_explorer_selected_plan = bool(plan.pop(_PERSONA_RUNTIME_EXPLORER_SELECTED_KEY, False))
             plan_id = uuid.uuid4().hex
             max_tool_steps = _get_persona_max_tool_steps()
             proposed_steps = list(plan.get("steps", []))
@@ -6529,38 +6858,76 @@ async def persona_stream(
                     reason_code="PLAN_INVALID",
                 )
                 return
-            stored_steps: list[dict[str, Any]] = []
-            for step in pending_plan.steps:
-                step_type = _normalize_persona_step_type(step.step_type, tool_name=step.tool)
-                policy = _evaluate_step_policy(
-                    step_type=step_type,
-                    tool_name=step.tool,
-                    args=step.args,
-                    persona_policy_rules=persona_policy_rules,
-                    session_policy_rules=session_policy_rules,
-                    session_scopes=session_scopes,
-                    allow_export=allow_export,
-                    allow_delete=allow_delete,
-                )
-                if not bool(policy.get("allow", False)):
-                    _increment_persona_metric(
-                        "persona_ws_policy_denials_total",
-                        {
-                            "step_type": _bounded_label(step_type, allowed=_PERSONA_WS_ALLOWED_STEP_TYPES, fallback="mcp_tool"),
-                            "reason": _metric_reason_bucket(policy.get("reason_code")),
-                        },
+            def _build_stored_steps_with_policy() -> tuple[list[dict[str, Any]], bool]:
+                stored: list[dict[str, Any]] = []
+                denied = False
+                for step in pending_plan.steps:
+                    step_type = _normalize_persona_step_type(step.step_type, tool_name=step.tool)
+                    policy = _evaluate_step_policy(
+                        step_type=step_type,
+                        tool_name=step.tool,
+                        args=step.args,
+                        persona_policy_rules=persona_policy_rules,
+                        session_policy_rules=session_policy_rules,
+                        session_scopes=session_scopes,
+                        allow_export=allow_export,
+                        allow_delete=allow_delete,
                     )
-                stored_steps.append(
-                    {
-                        "idx": step.idx,
-                        "step_type": step_type,
-                        "tool": step.tool,
-                        "args": step.args,
-                        "description": step.description,
-                        "why": step.why,
-                        "policy": policy,
-                    }
-                )
+                    if not bool(policy.get("allow", False)):
+                        denied = True
+                        _increment_persona_metric(
+                            "persona_ws_policy_denials_total",
+                            {
+                                "step_type": _bounded_label(
+                                    step_type,
+                                    allowed=_PERSONA_WS_ALLOWED_STEP_TYPES,
+                                    fallback="mcp_tool",
+                                ),
+                                "reason": _metric_reason_bucket(policy.get("reason_code")),
+                            },
+                        )
+                    stored.append(
+                        {
+                            "idx": step.idx,
+                            "step_type": step_type,
+                            "tool": step.tool,
+                            "args": step.args,
+                            "description": step.description,
+                            "why": step.why,
+                            "policy": policy,
+                        }
+                    )
+                return stored, denied
+
+            async def _rewrite_runtime_policy_denial_to_safe_plan() -> list[dict[str, Any]] | None:
+                nonlocal pending_plan
+                safe_plan = _runtime_safe_denial_plan(_get_persona_runtime_explorer_config().safe_denial_text)
+                try:
+                    pending_plan = session_manager.put_plan(
+                        session_id=session_id,
+                        user_id=connection_user_id,
+                        persona_id=runtime_persona_id,
+                        plan_id=plan_id,
+                        steps=list(safe_plan.get("steps", [])),
+                    )
+                except ValueError as exc:
+                    _cancel_persona_live_processing_notice(session_id)
+                    await _emit_notice(
+                        session_id=session_id,
+                        level="error",
+                        message=str(exc),
+                        reason_code="PLAN_INVALID",
+                    )
+                    return None
+                rewritten_steps, _has_safe_denial_policy_denial = _build_stored_steps_with_policy()
+                return rewritten_steps
+
+            stored_steps, has_policy_denial = _build_stored_steps_with_policy()
+            if runtime_explorer_selected_plan and has_policy_denial:
+                rewritten_steps = await _rewrite_runtime_policy_denial_to_safe_plan()
+                if rewritten_steps is None:
+                    return
+                stored_steps = rewritten_steps
             await _emit_tool_plan(
                 session_id=session_id,
                 plan_id=plan_id,
@@ -6588,6 +6955,11 @@ async def persona_stream(
                 "trigger_phrases": normalized_trigger_phrases,
                 "auto_resume": _coerce_bool(voice_payload.get("auto_resume"), default=False),
                 "barge_in": _coerce_bool(voice_payload.get("barge_in"), default=False),
+                "wake_behavior": _bounded_label(
+                    voice_payload.get("wake_behavior"),
+                    allowed=_PERSONA_WAKE_BEHAVIORS,
+                    fallback="one_shot",
+                ),
                 "stt_language": str(stt_payload.get("language") or "").strip() or None,
                 "stt_model": str(stt_payload.get("model") or "").strip() or None,
                 "enable_vad": _coerce_bool(stt_payload.get("enable_vad"), default=True),
@@ -6677,12 +7049,105 @@ async def persona_stream(
                     session_id=session_id,
                     voice_runtime=voice_runtime,
                 )
+                _clear_persona_live_wake_state(session_id)
                 _cleanup_persona_live_stt_state(session_id)
                 await _emit_notice(
                     session_id=session_id,
                     level="info",
                     message="Voice runtime updated for this live session.",
                     reason_code="VOICE_CONFIG_UPDATED",
+                )
+            elif mtype == "wake_activation":
+                original_session_id = msg.get("session_id")
+                session_id = _normalize_ws_identifier(original_session_id, fallback="")
+                if not session_id:
+                    await _emit_notice(
+                        session_id=default_session_id,
+                        level="error",
+                        message="session_id is required",
+                        reason_code="SESSION_ID_REQUIRED",
+                    )
+                    continue
+                matched_phrase = str(msg.get("matched_phrase") or "").strip()
+                detector_kind = _bounded_label(
+                    msg.get("detector_kind"),
+                    allowed={"browser_transcript", "native_companion", "test"},
+                    fallback="browser_transcript",
+                )
+                saved_phrases = await _get_saved_wake_phrases_for_session(session_id)
+                runtime_preferences = session_manager.get_preferences(
+                    session_id=session_id,
+                    user_id=connection_user_id,
+                )
+                voice_runtime = runtime_preferences.get("voice_runtime")
+                runtime_phrases = (
+                    list(voice_runtime.get("trigger_phrases") or [])
+                    if isinstance(voice_runtime, dict)
+                    else []
+                )
+                wake_behavior = _bounded_label(
+                    voice_runtime.get("wake_behavior")
+                    if isinstance(voice_runtime, dict)
+                    else None,
+                    allowed=_PERSONA_WAKE_BEHAVIORS,
+                    fallback="one_shot",
+                )
+                saved_match = _match_persona_wake_phrase(matched_phrase, saved_phrases)
+                runtime_match = _match_persona_wake_phrase(matched_phrase, runtime_phrases)
+                if not saved_match or not runtime_match:
+                    wake_rejection_reason = "phrase_not_configured"
+                    if not saved_match and runtime_match:
+                        wake_rejection_reason = "not_saved_in_profile"
+                    elif saved_match and not runtime_match:
+                        wake_rejection_reason = "missing_from_runtime_config"
+                    await _emit_notice(
+                        session_id=session_id,
+                        level="warning",
+                        reason_code="WAKE_ACTIVATION_REJECTED",
+                        message="Wake activation was rejected for this persona session.",
+                        wake_rejection_reason=wake_rejection_reason,
+                    )
+                    continue
+
+                expires_at: float | None = None
+                if wake_behavior in {"one_shot", "push_to_talk_after_wake"}:
+                    expires_at = time.monotonic() + _get_persona_wake_no_command_timeout_s()
+                persona_live_wake_state_by_session[session_id] = {
+                    "wake_behavior": wake_behavior,
+                    "matched_phrase": saved_match,
+                    "detector_kind": detector_kind,
+                    "expires_at_monotonic": expires_at,
+                }
+                await _emit_notice(
+                    session_id=session_id,
+                    level="info",
+                    reason_code="WAKE_ACTIVATION_ACCEPTED",
+                    message="Wake activation accepted for this live session.",
+                    wake_behavior=wake_behavior,
+                    detector_kind=detector_kind,
+                )
+            elif mtype == "wake_deactivation":
+                session_id = _normalize_ws_identifier(msg.get("session_id"), fallback="")
+                if not session_id:
+                    await _emit_notice(
+                        session_id=default_session_id,
+                        level="error",
+                        message="session_id is required",
+                        reason_code="SESSION_ID_REQUIRED",
+                    )
+                    continue
+                reason = _bounded_label(
+                    msg.get("reason"),
+                    allowed=_PERSONA_WAKE_DEACTIVATION_REASONS,
+                    fallback="disarmed",
+                )
+                _clear_persona_live_wake_state(session_id)
+                await _emit_notice(
+                    session_id=session_id,
+                    level="info",
+                    reason_code="WAKE_DEACTIVATED",
+                    message="Wake activation cleared for this live session.",
+                    reason=reason,
                 )
             elif mtype == "voice_commit":
                 original_session_id = msg.get("session_id")
@@ -7353,6 +7818,7 @@ async def persona_stream(
             )
         for session_id in list(persona_live_stt_state_by_session.keys()):
             _cleanup_persona_live_stt_state(session_id)
+        persona_live_wake_state_by_session.clear()
         if stream is not None:
             with contextlib.suppress(Exception):
                 await stream.stop()

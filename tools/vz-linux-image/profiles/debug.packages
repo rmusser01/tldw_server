@@ -1,0 +1,6 @@
+# Additive debug profile layered on top of minimal.packages.
+procps
+iproute2
+strace
+less
+vim-tiny

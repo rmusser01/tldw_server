@@ -51,7 +51,7 @@
   - `JOBS_UPDATE_GAUGES_ON_PRUNE` — refresh gauges after prune when fully scoped.
 
 - Security
-  - Admin endpoints use claim-first authorization (`get_auth_principal` + `require_roles("admin")` / `require_permissions(...)`). For Postgres, RLS is set per-user and per-domain before mutating rows.
+  - Admin endpoints use claim-first authorization (`get_auth_principal` + `RequireRole("admin")` / `RequirePermission(...)`). For Postgres, RLS is set per-user and per-domain before mutating rows.
 
 ## 3. Developer-Related/Relevant Information for Contributors
 

@@ -42,11 +42,12 @@ from fastapi import (
 from fastapi.responses import HTMLResponse, PlainTextResponse, Response
 from loguru import logger
 from starlette.responses import FileResponse
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, rbac_rate_limit, resolve_user_id_for_request, User
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import rbac_rate_limit
 from tldw_Server_API.app.api.v1.API_Deps.Collections_DB_Deps import get_collections_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.Watchlists_DB_Deps import get_watchlists_db_for_user
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.core.AuthNZ.api_key_manager import get_api_key_manager
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool as _get_db_pool
 from tldw_Server_API.app.core.AuthNZ.ip_allowlist import (
@@ -54,11 +55,6 @@ from tldw_Server_API.app.core.AuthNZ.ip_allowlist import (
     resolve_client_ip,
 )
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import (
-    User,
-    get_request_user,
-    resolve_user_id_for_request,
-)
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.DB_Management.scope_context import get_scope as _get_scope
 from tldw_Server_API.app.core.DB_Management.Watchlists_DB import WatchlistsDatabase
@@ -1555,7 +1551,16 @@ async def list_sources(
                 updated_at=r.updated_at,
             )
         )
-    return SourcesListResponse(items=items, total=total)
+    return SourcesListResponse(
+        items=items,
+        total=total,
+        pagination=build_offset_pagination_meta(
+            total=total,
+            offset=offset,
+            limit=limit,
+            count=len(items),
+        ),
+    )
 
 
 # OPML import/export placed before /sources/{source_id} to avoid route conflicts
@@ -2445,7 +2450,17 @@ async def list_tags(
     limit = size
     offset = (page - 1) * limit
     rows, total = db.list_tags(q=q, limit=limit, offset=offset)
-    return TagsListResponse(items=[Tag(id=r.id, name=r.name) for r in rows], total=total)
+    items = [Tag(id=r.id, name=r.name) for r in rows]
+    return TagsListResponse(
+        items=items,
+        total=total,
+        pagination=build_offset_pagination_meta(
+            total=total,
+            offset=offset,
+            limit=limit,
+            count=len(items),
+        ),
+    )
 
 
 # --------------------
@@ -2475,7 +2490,17 @@ async def list_groups(
     limit = size
     offset = (page - 1) * limit
     rows, total = db.list_groups(q=q, limit=limit, offset=offset)
-    return GroupsListResponse(items=[Group(id=r.id, name=r.name, description=r.description, parent_group_id=r.parent_group_id) for r in rows], total=total)
+    items = [Group(id=r.id, name=r.name, description=r.description, parent_group_id=r.parent_group_id) for r in rows]
+    return GroupsListResponse(
+        items=items,
+        total=total,
+        pagination=build_offset_pagination_meta(
+            total=total,
+            offset=offset,
+            limit=limit,
+            count=len(items),
+        ),
+    )
 
 
 @router.patch("/groups/{group_id}", response_model=Group, summary="Update group")
@@ -2551,8 +2576,8 @@ async def record_watchlists_onboarding_telemetry(
         code = result.get("code")
         record_onboarding_ingest_result("accepted" if accepted else "rejected")
         return WatchlistOnboardingTelemetryIngestResponse(accepted=accepted, code=code)
-    except _WATCHLISTS_NONCRITICAL_EXCEPTIONS as exc:
-        logger.debug("watchlists onboarding telemetry ingest failed for user {}: {}", current_user.id, exc)
+    except _WATCHLISTS_NONCRITICAL_EXCEPTIONS:
+        logger.debug("watchlists onboarding telemetry ingest failed")
         record_onboarding_ingest_result("error")
         return WatchlistOnboardingTelemetryIngestResponse(
             accepted=False,
@@ -2585,7 +2610,7 @@ async def get_watchlists_onboarding_telemetry_summary(
         )
     except _WATCHLISTS_NONCRITICAL_EXCEPTIONS as exc:
         status_label = "error"
-        logger.error("watchlists onboarding telemetry summary failed for user {}: {}", current_user.id, exc)
+        logger.error("watchlists onboarding telemetry summary failed")
         raise HTTPException(
             status_code=500,
             detail="watchlists_onboarding_telemetry_summary_failed",
@@ -2673,7 +2698,7 @@ async def get_watchlists_rc_telemetry_summary(
         )
     except _WATCHLISTS_NONCRITICAL_EXCEPTIONS as exc:
         status_label = "error"
-        logger.error("watchlists RC telemetry summary failed for user {}: {}", current_user.id, exc)
+        logger.error("watchlists RC telemetry summary failed")
         raise HTTPException(status_code=500, detail="watchlists_rc_telemetry_summary_failed") from exc
     finally:
         record_summary_request(
@@ -2705,8 +2730,8 @@ async def record_watchlists_ia_experiment_telemetry(
             first_seen_at=payload.first_seen_at,
             last_seen_at=payload.last_seen_at,
         )
-    except _WATCHLISTS_NONCRITICAL_EXCEPTIONS as exc:
-        logger.debug("watchlists IA telemetry ingest failed for user {}: {}", current_user.id, exc)
+    except _WATCHLISTS_NONCRITICAL_EXCEPTIONS:
+        logger.debug("watchlists IA telemetry ingest failed")
         accepted = False
     return WatchlistIaExperimentTelemetryIngestResponse(accepted=bool(accepted))
 
@@ -2725,7 +2750,7 @@ async def get_watchlists_ia_experiment_telemetry_summary(
     try:
         items = db.summarize_ia_experiment_events(since=since, until=until)
     except _WATCHLISTS_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error("watchlists IA telemetry summary failed for user {}: {}", current_user.id, exc)
+        logger.error("watchlists IA telemetry summary failed")
         raise HTTPException(status_code=500, detail="watchlists_ia_telemetry_summary_failed") from exc
     return WatchlistIaExperimentTelemetrySummaryResponse(items=items, since=since, until=until)
 
@@ -3083,7 +3108,16 @@ async def list_jobs(
                 next_run_at=r.next_run_at,
             )
         )
-    return JobsListResponse(items=items, total=total)
+    return JobsListResponse(
+        items=items,
+        total=total,
+        pagination=build_offset_pagination_meta(
+            total=total,
+            offset=offset,
+            limit=limit,
+            count=len(items),
+        ),
+    )
 
 
 @router.get("/jobs/{job_id}", response_model=Job, summary="Get job")
@@ -3582,7 +3616,18 @@ async def list_runs_for_job(
     rows, total = target_db.list_runs_for_job(job_id, limit=limit, offset=offset)
     items = [Run(id=r.id, job_id=r.job_id, status=r.status, started_at=r.started_at, finished_at=r.finished_at, stats=(json.loads(r.stats_json or "{}") if r.stats_json else None), error_msg=r.error_msg) for r in rows]
     has_more = (offset + len(items)) < int(total or 0)
-    return RunsListResponse(items=items, total=total, has_more=has_more)
+    return RunsListResponse(
+        items=items,
+        total=total,
+        has_more=has_more,
+        pagination=build_offset_pagination_meta(
+            total=total,
+            offset=offset,
+            limit=limit,
+            count=len(items),
+            has_more=has_more,
+        ),
+    )
 
 
 @router.get("/runs", response_model=RunsListResponse, summary="List runs across all jobs")
@@ -3620,7 +3665,18 @@ async def list_runs_global(
         for r in rows
     ]
     has_more = (offset + len(items)) < int(total or 0)
-    return RunsListResponse(items=items, total=total, has_more=has_more)
+    return RunsListResponse(
+        items=items,
+        total=total,
+        has_more=has_more,
+        pagination=build_offset_pagination_meta(
+            total=total,
+            offset=offset,
+            limit=limit,
+            count=len(items),
+            has_more=has_more,
+        ),
+    )
 
 
 @router.get("/runs/export.csv", response_class=PlainTextResponse, summary="Export runs as CSV (global or by job)")
@@ -4491,7 +4547,17 @@ async def list_scraped_items(
         limit=limit,
         offset=offset,
     )
-    return ScrapedItemsListResponse(items=[_row_to_scraped_item(r) for r in rows], total=total)
+    items = [_row_to_scraped_item(r) for r in rows]
+    return ScrapedItemsListResponse(
+        items=items,
+        total=total,
+        pagination=build_offset_pagination_meta(
+            total=total,
+            offset=offset,
+            limit=limit,
+            count=len(items),
+        ),
+    )
 
 
 @router.get("/items/{item_id}", response_model=ScrapedItem, summary="Get a scraped item")
@@ -5398,7 +5464,16 @@ async def list_outputs(
         if metadata.get("origin") != "watchlists":
             continue
         items.append(_row_to_output(row, user_id=user_id))
-    return WatchlistOutputsListResponse(items=items, total=total)
+    return WatchlistOutputsListResponse(
+        items=items,
+        total=total,
+        pagination=build_offset_pagination_meta(
+            total=total,
+            offset=offset,
+            limit=limit,
+            count=len(items),
+        ),
+    )
 
 
 @router.get("/outputs/{output_id}", response_model=WatchlistOutput, summary="Get output metadata")

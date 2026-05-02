@@ -9,8 +9,8 @@ from typing import Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from loguru import logger
 from pydantic import BaseModel, Field
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User
 
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
 from tldw_Server_API.app.core.AuthNZ.permissions import EVALS_MANAGE, EVALS_READ
 from tldw_Server_API.app.core.Evaluations.benchmark_loaders import load_benchmark_dataset
 from tldw_Server_API.app.core.Evaluations.benchmark_registry import get_registry
@@ -164,7 +164,7 @@ async def run_benchmark(
             batch_results = await asyncio.gather(*tasks, return_exceptions=True)
             for item, result in zip(batch, batch_results):
                 if isinstance(result, Exception):
-                    logger.error("Benchmark evaluation failed for item_id={}: {}", item.get("id"), result)
+                    logger.error("Benchmark evaluation failed")
                     results.append({"item": item, "score": 0.0, "error": str(result)})
                 else:
                     results.append(
@@ -221,7 +221,7 @@ async def run_benchmark(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to run benchmark: {e}")
+        logger.error("Failed to run benchmark")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to run benchmark: {sanitize_error_message(e, 'benchmark run')}",

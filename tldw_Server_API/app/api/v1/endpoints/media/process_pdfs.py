@@ -114,9 +114,9 @@ async def process_pdfs_endpoint(
             tags=["no_db"],
             metadata={"has_urls": bool(form_data.urls), "has_files": bool(files)},
         )
-    except Exception as usage_log_error:
+    except Exception:
         # Usage logging is best-effort; do not fail the request.
-        logger.debug("PDF process endpoint usage logging failed", exc_info=usage_log_error)
+        logger.debug("PDF process endpoint usage logging failed")
     legacy_urls_empty_sentinel_used = bool(form_data.urls and form_data.urls == [""])
     if legacy_urls_empty_sentinel_used:
         logger.info("Received urls=[''], treating as no URLs provided for PDF processing.")
@@ -222,7 +222,7 @@ async def process_pdfs_endpoint(
                         )
                     )
                 else:
-                    error_detail = f"Download/preparation failed: {result}"
+                    error_detail = "Download/preparation failed"
                     normalized_err = normalise_pdf_result(
                         {
                             "status": "Error",
@@ -299,7 +299,7 @@ async def process_pdfs_endpoint(
                         item.local_path,
                         read_err,
                     )
-                    error_detail = f"Failed to read prepared file: {read_err}"
+                    error_detail = "Failed to read prepared file"
                     normalized_err = normalise_pdf_result(
                         {
                             "status": "Error",
@@ -376,7 +376,7 @@ async def process_pdfs_endpoint(
                         exc,
                         exc_info=True,
                     )
-                    error_detail = f"PDF processing failed: {exc}"
+                    error_detail = "PDF processing failed"
                     normalized_err = normalise_pdf_result(
                         {
                             "status": "Error",
@@ -462,9 +462,9 @@ async def process_pdfs_endpoint(
                     chunks = _improved_chunking_process(text, chunk_options_dict)
 
                 res["chunks"] = chunks
-    except Exception as rechunk_error:
+    except Exception:
         # Never fail the endpoint due to re-chunking issues.
-        logger.debug("PDF process endpoint rechunking failed; returning original result", exc_info=rechunk_error)
+        logger.debug("PDF process endpoint rechunking failed; returning original result")
 
     response = JSONResponse(status_code=final_status_code, content=batch)
     if legacy_signal is not None:

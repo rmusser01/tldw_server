@@ -247,8 +247,8 @@ class EvidenceAccumulator:
 
                         if len(all_documents) >= self.max_docs_total:
                             break
-                except Exception as e:
-                    logger.warning(f"Retrieval error in round {current_round}: {e}")
+                except Exception:
+                    logger.warning("Retrieval error during evidence accumulation round")
                     continue
 
                 if len(all_documents) >= self.max_docs_total:
@@ -317,8 +317,8 @@ class EvidenceAccumulator:
         try:
             response = await self._call_llm_for_assessment(query, evidence_summary)
             return _parse_gap_assessment(response)
-        except Exception as e:
-            logger.warning(f"LLM gap assessment failed, using heuristic: {e}")
+        except Exception:
+            logger.warning("LLM gap assessment failed, using heuristic")
             return self._heuristic_assessment(query, documents)
 
     def _heuristic_assessment(
@@ -411,8 +411,8 @@ class EvidenceAccumulator:
                 return str(result.get("answer", ""))
             return str(result)
 
-        except Exception as e:
-            logger.warning(f"LLM assessment call failed: {e}")
+        except Exception:
+            logger.warning("LLM assessment call failed")
             raise
 
     def _generate_variation(self, query: str, round_num: int) -> str:

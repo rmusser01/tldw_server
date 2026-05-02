@@ -9,16 +9,17 @@ from urllib.parse import parse_qs, urlencode
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse
 from loguru import logger
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, RequireRole, User
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import require_roles
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
-from tldw_Server_API.app.core.AuthNZ.orgs_teams import list_org_memberships_for_user
-from tldw_Server_API.app.core.AuthNZ.repos import (
-    get_workspace_provider_installations_repo as _get_workspace_provider_installations_repo_impl,
+from tldw_Server_API.app.api.v1.endpoints.slack_oauth_admin import (
+    slack_admin_delete_installation_impl,
+    slack_admin_get_policy_impl,
+    slack_admin_list_installations_impl,
+    slack_admin_set_installation_state_impl,
+    slack_admin_set_policy_impl,
+    slack_oauth_callback_impl,
+    slack_oauth_start_impl,
 )
-from tldw_Server_API.app.core.AuthNZ.settings import get_settings
-from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter
-
 from tldw_Server_API.app.api.v1.endpoints.slack_support import (
     _COMMAND_RECEIPTS,
     _EVENT_RECEIPTS,
@@ -52,20 +53,17 @@ from tldw_Server_API.app.api.v1.endpoints.slack_support import (
     _resolve_slack_actor_id,
     _safe_int,
     _set_slack_policy,
-    _slack_response_mode,
     _slack_oauth_token_exchange,
     _slack_policy_for_workspace,
+    _slack_response_mode,
     _verify_slack_signature,
 )
-from tldw_Server_API.app.api.v1.endpoints.slack_oauth_admin import (
-    slack_admin_delete_installation_impl,
-    slack_admin_get_policy_impl,
-    slack_admin_list_installations_impl,
-    slack_admin_set_installation_state_impl,
-    slack_admin_set_policy_impl,
-    slack_oauth_callback_impl,
-    slack_oauth_start_impl,
+from tldw_Server_API.app.core.AuthNZ.orgs_teams import list_org_memberships_for_user
+from tldw_Server_API.app.core.AuthNZ.repos import (
+    get_workspace_provider_installations_repo as _get_workspace_provider_installations_repo_impl,
 )
+from tldw_Server_API.app.core.AuthNZ.settings import get_settings
+from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter
 
 router = APIRouter(prefix="/slack", tags=["slack"])
 
@@ -82,8 +80,8 @@ def _metric_labels(**labels: Any) -> dict[str, str]:
 def _emit_slack_counter(metric_name: str, **labels: Any) -> None:
     try:
         log_counter(metric_name, labels=_metric_labels(**labels))
-    except Exception as exc:
-        logger.debug("Failed to emit Slack metric {}: {}", metric_name, exc)
+    except Exception:
+        logger.debug("Failed to emit Slack metric")
 
 
 async def _get_workspace_provider_installations_repo():
@@ -132,7 +130,9 @@ async def _resolve_workspace_org_id(request: Request | None, user_id: int) -> in
     )
 
 
-def _slack_policy_error_response(policy_error: dict[str, Any], *, team_id: str | None, action: str | None) -> JSONResponse:
+def _slack_policy_error_response(
+    policy_error: dict[str, Any], *, team_id: str | None, action: str | None
+) -> JSONResponse:
     status_code = int(policy_error.get("status_code") or status.HTTP_403_FORBIDDEN)
     response_payload = {k: v for k, v in policy_error.items() if k != "status_code"}
     headers: dict[str, str] = {}
@@ -346,7 +346,9 @@ async def slack_commands(request: Request) -> JSONResponse:
             content={"ok": False, **parse_error},
         )
     action = str(parsed_command.get("action") or "")
-    team_id = _coerce_nonempty_string(form_payload.get("team_id")) or _coerce_nonempty_string(form_payload.get("team_domain"))
+    team_id = _coerce_nonempty_string(form_payload.get("team_id")) or _coerce_nonempty_string(
+        form_payload.get("team_domain")
+    )
     channel_id = _coerce_nonempty_string(form_payload.get("channel_id"))
     slack_user_id = _coerce_nonempty_string(form_payload.get("user_id"))
     policy = _slack_policy_for_workspace(team_id)
@@ -412,10 +414,7 @@ async def slack_commands(request: Request) -> JSONResponse:
         status_scope = str(policy.get("status_scope") or "workspace").strip().lower()
         wrong_workspace = bool(job_team_id and team_id and job_team_id != team_id)
         wrong_user_scope = bool(
-            status_scope == "workspace_and_user"
-            and actor_user_id
-            and owner_user_id
-            and actor_user_id != owner_user_id
+            status_scope == "workspace_and_user" and actor_user_id and owner_user_id and actor_user_id != owner_user_id
         )
         if not job or wrong_workspace or wrong_user_scope:
             _emit_slack_counter("slack_requests_total", endpoint="commands", outcome="status_denied")
@@ -514,7 +513,7 @@ async def slack_oauth_callback(
 
 @router.get(
     "/admin/policy",
-    dependencies=[Depends(require_roles("admin"))],
+    dependencies=[Depends(RequireRole("admin"))],
 )
 async def slack_admin_get_policy(
     team_id: str | None = Query(default=None),
@@ -528,7 +527,7 @@ async def slack_admin_get_policy(
 
 @router.put(
     "/admin/policy",
-    dependencies=[Depends(require_roles("admin"))],
+    dependencies=[Depends(RequireRole("admin"))],
 )
 async def slack_admin_set_policy(
     payload: dict[str, Any] | None = None,
@@ -541,7 +540,7 @@ async def slack_admin_set_policy(
     )
 
 
-@router.get("/admin/installations", dependencies=[Depends(require_roles("admin"))])
+@router.get("/admin/installations", dependencies=[Depends(RequireRole("admin"))])
 async def slack_admin_list_installations(
     user: User = Depends(get_request_user),
 ):
@@ -554,7 +553,7 @@ async def slack_admin_list_installations(
     )
 
 
-@router.delete("/admin/installations/{team_id}", dependencies=[Depends(require_roles("admin"))])
+@router.delete("/admin/installations/{team_id}", dependencies=[Depends(RequireRole("admin"))])
 async def slack_admin_delete_installation(
     request: Request,
     team_id: str,
@@ -573,7 +572,7 @@ async def slack_admin_delete_installation(
     )
 
 
-@router.put("/admin/installations/{team_id}", dependencies=[Depends(require_roles("admin"))])
+@router.put("/admin/installations/{team_id}", dependencies=[Depends(RequireRole("admin"))])
 async def slack_admin_set_installation_state(
     request: Request,
     team_id: str,

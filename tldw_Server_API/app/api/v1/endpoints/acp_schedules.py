@@ -14,11 +14,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from apscheduler.triggers.cron import CronTrigger
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, User
 
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import (
-    User,
-    get_request_user,
-)
 
 router = APIRouter(prefix="/acp/schedules", tags=["acp-schedules"])
 

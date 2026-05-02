@@ -14,8 +14,9 @@ from pathlib import Path as PathlibPath
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal, get_request_user, User
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.schemas.storage_schemas import (
     BulkDeleteRequest,
     BulkDeleteResponse,
@@ -48,7 +49,6 @@ from tldw_Server_API.app.core.AuthNZ.exceptions import (
     UserNotFoundError,
 )
 from tldw_Server_API.app.core.AuthNZ.repos.generated_files_repo import FILE_CATEGORY_VOICE_CLONE
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.services.storage_quota_service import get_storage_service
@@ -200,6 +200,12 @@ async def list_files(
         total=total,
         offset=offset,
         limit=limit,
+        pagination=build_offset_pagination_meta(
+            total=total,
+            offset=offset,
+            limit=limit,
+            count=len(files),
+        ),
     )
 
 
@@ -590,6 +596,12 @@ async def list_trashed_files(
         total=total,
         offset=offset,
         limit=limit,
+        pagination=build_offset_pagination_meta(
+            total=total,
+            offset=offset,
+            limit=limit,
+            count=len(files),
+        ),
     )
 
 
@@ -686,7 +698,7 @@ async def set_user_quota(
     except UserNotFoundError:
         raise HTTPException(status_code=404, detail="User not found") from None
     except StorageError as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Failed to set user storage quota") from e
 
 
 @router.put("/admin/quotas/team/{team_id}", response_model=SetQuotaResponse)

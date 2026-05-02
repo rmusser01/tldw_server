@@ -15,7 +15,8 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from loguru import logger
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal, require_permissions
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import RequirePermission, get_auth_principal
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.schemas.monitoring_schemas import (
     AlertItem,
     AlertsListResponse,
@@ -51,7 +52,7 @@ _TOPIC_MONITORING_DB: TopicMonitoringDB | None = None
 
 # All monitoring routes require SYSTEM_LOGS permission via this dependency.
 router = APIRouter(
-    dependencies=[Depends(require_permissions(SYSTEM_LOGS))],
+    dependencies=[Depends(RequirePermission(SYSTEM_LOGS))],
 )
 
 
@@ -150,6 +151,65 @@ def _utcnow_iso() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+def _decode_alert_metadata(row: dict[str, object]) -> dict[str, object]:
+    """Return an alert row copy with runtime DB metadata normalized for AlertItem.
+
+    TopicMonitoringDB alert rows expose metadata as SQLite JSON text, a decoded
+    mapping, or an empty/null value depending on the source path. AlertItem
+    accepts a mapping or None, so this helper preserves the original row and
+    normalizes only the metadata field before response construction.
+    """
+    normalized = dict(row)
+    meta = normalized.get("metadata")
+    if isinstance(meta, str) and meta:
+        try:
+            parsed = json.loads(meta)
+        except (TypeError, json.JSONDecodeError) as e:
+            logger.debug(
+                "monitoring: failed to parse alert metadata JSON: {}",
+                e,
+            )
+            normalized["metadata"] = {"raw": meta}
+        else:
+            if parsed is None:
+                normalized["metadata"] = None
+            else:
+                normalized["metadata"] = parsed if isinstance(parsed, dict) else {"value": parsed}
+    elif meta == "":
+        normalized["metadata"] = None
+    return normalized
+
+
+async def _build_alert_mutation_response(
+    *,
+    alert_id: int,
+    db: TopicMonitoringDB,
+    repo: AuthnzAdminMonitoringRepo,
+) -> MarkReadResponse:
+    """Build the mutation response with the authoritative merged alert state.
+
+    The public read, acknowledge, and dismiss endpoints mutate overlay state,
+    then return the runtime alert row merged with the matching admin overlay row
+    so clients do not need to re-list alerts to see the updated state.
+    """
+    raw_alert = await asyncio.to_thread(db.get_alert, alert_id)
+    if raw_alert is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Alert not found")
+
+    normalized_alert = _decode_alert_metadata(raw_alert)
+    alert_identity = build_alert_identity(normalized_alert)
+    overlay_rows = await repo.list_alert_states([alert_identity])
+    merged_row = merge_runtime_alert_with_overlay(
+        normalized_alert,
+        overlay_rows[0] if overlay_rows else None,
+    )
+    return MarkReadResponse(
+        status="ok",
+        id=alert_id,
+        item=AlertItem(**merged_row),
+    )
+
+
 async def _emit_admin_audit_event(
     request: Request,
     principal: AuthPrincipal,
@@ -208,7 +268,7 @@ async def upsert_watchlist(payload: Watchlist) -> WatchlistUpsertResponse:
         # Propagate existing HTTP errors without masking them
         raise
     except Exception as e:  # Generic 500 handler
-        logger.exception("Failed to upsert watchlist")
+        logger.error("Failed to upsert watchlist")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to upsert watchlist",
@@ -300,24 +360,23 @@ async def list_alerts(
     }
     items: list[AlertItem] = []
     for r in rows:
-        # metadata column may be JSON string
-        meta = r.get("metadata")
-        if isinstance(meta, str) and meta:
-            try:
-                r["metadata"] = json.loads(meta)
-            except (TypeError, json.JSONDecodeError) as e:
-                logger.debug(
-                    "monitoring: failed to parse alert metadata JSON: {}",
-                    e,
-                )
-                r["metadata"] = {"raw": meta}
-        alert_identity = build_alert_identity(r)
+        normalized_row = _decode_alert_metadata(r)
+        alert_identity = build_alert_identity(normalized_row)
         merged_row = merge_runtime_alert_with_overlay(
-            r,
+            normalized_row,
             overlay_by_identity.get(alert_identity),
         )
         items.append(AlertItem(**merged_row))
-    return AlertsListResponse(items=items)
+    return AlertsListResponse(
+        items=items,
+        total=None,
+        pagination=build_offset_pagination_meta(
+            limit=limit,
+            offset=offset,
+            total=None,
+            count=len(items),
+        ),
+    )
 
 
 @router.post(
@@ -333,6 +392,45 @@ async def mark_alert_read(
     db: TopicMonitoringDB = Depends(get_topic_monitoring_db),  # noqa: B008
 ) -> MarkReadResponse:
     """Mark a single alert as read by ID."""
+
+    ok = await asyncio.to_thread(db.mark_read, alert_id)
+    if not ok:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Alert not found")
+
+    alert_identity = f"alert:{alert_id}"
+    actor_id = _principal_actor_id(principal)
+    read_at = _utcnow_iso()
+    repo = await _get_monitoring_repo()
+    await repo.append_alert_event(
+        alert_identity=alert_identity,
+        action="read",
+        actor_user_id=actor_id,
+        details_json=json.dumps({"alert_id": alert_id}),
+        created_at=read_at,
+    )
+    await _emit_admin_audit_event(
+        request,
+        principal,
+        action="monitoring.alert.read",
+        resource_id=alert_identity,
+        metadata={"alert_id": alert_id},
+    )
+    return await _build_alert_mutation_response(alert_id=alert_id, db=db, repo=repo)
+
+
+@router.post(
+    "/monitoring/alerts/{alert_id}/acknowledge",
+    response_model=MarkReadResponse,
+    tags=["monitoring"],
+    summary="Acknowledge an alert",
+)
+async def acknowledge_alert(
+    alert_id: int,
+    request: Request,
+    principal: AuthPrincipal = Depends(get_auth_principal),
+    db: TopicMonitoringDB = Depends(get_topic_monitoring_db),  # noqa: B008
+) -> MarkReadResponse:
+    """Acknowledge a monitoring alert using the authoritative overlay state."""
 
     ok = await asyncio.to_thread(db.mark_read, alert_id)
     if not ok:
@@ -361,29 +459,7 @@ async def mark_alert_read(
         resource_id=alert_identity,
         metadata={"alert_id": alert_id},
     )
-    return MarkReadResponse(status="ok", id=alert_id)
-
-
-@router.post(
-    "/monitoring/alerts/{alert_id}/acknowledge",
-    response_model=MarkReadResponse,
-    tags=["monitoring"],
-    summary="Acknowledge an alert",
-)
-async def acknowledge_alert(
-    alert_id: int,
-    request: Request,
-    principal: AuthPrincipal = Depends(get_auth_principal),
-    db: TopicMonitoringDB = Depends(get_topic_monitoring_db),  # noqa: B008
-) -> MarkReadResponse:
-    """Acknowledge a monitoring alert using the authoritative overlay state."""
-
-    return await mark_alert_read(
-        alert_id=alert_id,
-        request=request,
-        principal=principal,
-        db=db,
-    )
+    return await _build_alert_mutation_response(alert_id=alert_id, db=db, repo=repo)
 
 
 @router.delete(
@@ -427,7 +503,7 @@ async def dismiss_alert(
         resource_id=alert_identity,
         metadata={"alert_id": alert_id},
     )
-    return MarkReadResponse(status="ok", id=alert_id)
+    return await _build_alert_mutation_response(alert_id=alert_id, db=db, repo=repo)
 
 
 @router.get(

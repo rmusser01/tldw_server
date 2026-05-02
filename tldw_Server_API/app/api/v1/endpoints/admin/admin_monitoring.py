@@ -39,7 +39,6 @@ router = APIRouter()
 _RUNTIME_ALERT_ID_PREFIX = "alert:"
 
 
-
 def _resolve_monitoring_alerts_db_path() -> str:
     """Resolve the monitoring alerts DB path the same way the monitoring service does.
 
@@ -52,6 +51,7 @@ def _resolve_monitoring_alerts_db_path() -> str:
         return str(db_p)
     try:
         from tldw_Server_API.app.core.Utils.Utils import get_project_root as _gpr
+
         return str((Path(_gpr()).resolve() / db_p).resolve())
     except Exception:
         # Fallback: walk parents of this file looking for repo root markers
@@ -148,45 +148,45 @@ def _event_response_from_row(row: dict[str, Any]) -> AdminAlertEventResponse:
     )
 
 
-def _warn_if_overlay_identity_has_no_runtime_row(
+def _require_runtime_alert_identity(
     alert_identity: str,
     monitoring_db: TopicMonitoringDB,
-) -> None:
+) -> int:
+    """Validate that an admin overlay mutation targets an existing runtime alert."""
     if not alert_identity.startswith(_RUNTIME_ALERT_ID_PREFIX):
-        logger.info("monitoring admin overlay mutation for overlay-only identity {}", alert_identity)
-        return
+        raise HTTPException(status_code=422, detail="unsupported_alert_identity")
 
-    raw_alert_id = alert_identity[len(_RUNTIME_ALERT_ID_PREFIX):]
+    raw_alert_id = alert_identity[len(_RUNTIME_ALERT_ID_PREFIX) :]
     try:
         alert_id = int(raw_alert_id)
     except ValueError:
-        logger.warning(
-            "monitoring admin overlay mutation uses malformed runtime alert identity {}",
-            alert_identity,
-        )
-        return
+        raise HTTPException(status_code=422, detail="malformed_alert_identity") from None
 
     if monitoring_db.get_alert(alert_id) is None:
-        logger.warning(
-            "monitoring admin overlay mutation references missing runtime alert {}",
-            alert_identity,
-        )
+        raise HTTPException(status_code=404, detail="unknown_alert")
+
+    return alert_id
 
 
-async def _emit_overlay_identity_diagnostic(alert_identity: str) -> None:
-    try:
-        monitoring_db = TopicMonitoringDB(
-            _resolve_monitoring_alerts_db_path()
-        )
-        await asyncio.to_thread(
-            _warn_if_overlay_identity_has_no_runtime_row,
-            alert_identity,
-            monitoring_db,
-        )
-    except asyncio.CancelledError:
-        raise
-    except _MONITORING_NONCRITICAL_EXCEPTIONS as exc:
-        logger.debug("monitoring overlay diagnostic skipped for {}: {}", alert_identity, exc)
+async def _get_runtime_alerts_db() -> TopicMonitoringDB:
+    """Return the runtime monitoring alerts DB without blocking the event loop."""
+    return await asyncio.to_thread(
+        TopicMonitoringDB,
+        _resolve_monitoring_alerts_db_path(),
+    )
+
+
+async def _require_runtime_alert_identity_for_mutation(
+    alert_identity: str,
+    monitoring_db: TopicMonitoringDB,
+) -> str:
+    """Validate an overlay mutation target and return its canonical alert identity."""
+    alert_id = await asyncio.to_thread(
+        _require_runtime_alert_identity,
+        alert_identity,
+        monitoring_db,
+    )
+    return f"{_RUNTIME_ALERT_ID_PREFIX}{alert_id}"
 
 
 @router.on_event("startup")
@@ -211,7 +211,7 @@ async def list_alert_rules(
     except asyncio.CancelledError:
         raise
     except _MONITORING_NONCRITICAL_EXCEPTIONS as exc:
-        logger.exception("Failed to list admin alert rules")
+        logger.error("Failed to list admin alert rules")
         raise HTTPException(status_code=500, detail="Failed to list alert rules") from exc
 
 
@@ -254,12 +254,7 @@ async def create_alert_rule(
     except asyncio.CancelledError:
         raise
     except _MONITORING_NONCRITICAL_EXCEPTIONS as exc:
-        logger.exception(
-            "Failed to create admin alert rule metric={} operator={} severity={}",
-            payload.metric,
-            payload.operator,
-            payload.severity,
-        )
+        logger.error("Failed to create admin alert rule")
         raise HTTPException(status_code=500, detail="Failed to create alert rule") from exc
 
 
@@ -294,7 +289,7 @@ async def delete_alert_rule(
     except asyncio.CancelledError:
         raise
     except _MONITORING_NONCRITICAL_EXCEPTIONS as exc:
-        logger.exception("Failed to delete admin alert rule rule_id={}", rule_id)
+        logger.error("Failed to delete admin alert rule")
         raise HTTPException(status_code=500, detail="Failed to delete alert rule") from exc
 
 
@@ -304,30 +299,32 @@ async def assign_alert(
     payload: AdminAlertAssignRequest,
     request: Request,
     principal: AuthPrincipal = Depends(get_auth_principal),
+    runtime_alerts_db: TopicMonitoringDB = Depends(_get_runtime_alerts_db),  # noqa: B008
 ) -> AdminAlertStateMutationResponse:
-    """Assign or unassign a monitoring alert in authoritative overlay state."""
+    """Assign or unassign a runtime-backed monitoring alert in authoritative overlay state."""
     try:
         if payload.assigned_to_user_id is not None:
             users_repo = await _get_users_repo()
             assignee = await users_repo.get_user_by_id(payload.assigned_to_user_id)
             if assignee is None:
                 raise HTTPException(status_code=404, detail="unknown_user")
-        await _emit_overlay_identity_diagnostic(alert_identity)
+        canonical_alert_identity = await _require_runtime_alert_identity_for_mutation(
+            alert_identity,
+            runtime_alerts_db,
+        )
         repo = await _get_monitoring_repo()
         actor_id = _principal_actor_id(principal)
         event_action = "assigned" if payload.assigned_to_user_id is not None else "unassigned"
         audit_action = (
-            "monitoring.alert.assign"
-            if payload.assigned_to_user_id is not None
-            else "monitoring.alert.unassign"
+            "monitoring.alert.assign" if payload.assigned_to_user_id is not None else "monitoring.alert.unassign"
         )
         state = await repo.upsert_alert_state(
-            alert_identity=alert_identity,
+            alert_identity=canonical_alert_identity,
             assigned_to_user_id=payload.assigned_to_user_id,
             updated_by_user_id=actor_id,
         )
         await repo.append_alert_event(
-            alert_identity=alert_identity,
+            alert_identity=canonical_alert_identity,
             action=event_action,
             actor_user_id=actor_id,
             details_json=json.dumps({"assigned_to_user_id": payload.assigned_to_user_id}),
@@ -338,7 +335,7 @@ async def assign_alert(
             event_type="data.update",
             category="system",
             resource_type="monitoring_alert",
-            resource_id=alert_identity,
+            resource_id=canonical_alert_identity,
             action=audit_action,
             metadata={"assigned_to_user_id": payload.assigned_to_user_id},
         )
@@ -348,11 +345,7 @@ async def assign_alert(
     except asyncio.CancelledError:
         raise
     except _MONITORING_NONCRITICAL_EXCEPTIONS as exc:
-        logger.exception(
-            "Failed to assign monitoring alert alert_identity={} assigned_to_user_id={}",
-            alert_identity,
-            payload.assigned_to_user_id,
-        )
+        logger.error("Failed to assign monitoring alert")
         raise HTTPException(status_code=500, detail="Failed to assign alert") from exc
 
 
@@ -362,19 +355,23 @@ async def snooze_alert(
     payload: AdminAlertSnoozeRequest,
     request: Request,
     principal: AuthPrincipal = Depends(get_auth_principal),
+    runtime_alerts_db: TopicMonitoringDB = Depends(_get_runtime_alerts_db),  # noqa: B008
 ) -> AdminAlertStateMutationResponse:
-    """Snooze a monitoring alert in authoritative overlay state."""
+    """Snooze a runtime-backed monitoring alert in authoritative overlay state."""
     try:
-        await _emit_overlay_identity_diagnostic(alert_identity)
+        canonical_alert_identity = await _require_runtime_alert_identity_for_mutation(
+            alert_identity,
+            runtime_alerts_db,
+        )
         repo = await _get_monitoring_repo()
         actor_id = _principal_actor_id(principal)
         state = await repo.upsert_alert_state(
-            alert_identity=alert_identity,
+            alert_identity=canonical_alert_identity,
             snoozed_until=payload.snoozed_until.isoformat(),
             updated_by_user_id=actor_id,
         )
         await repo.append_alert_event(
-            alert_identity=alert_identity,
+            alert_identity=canonical_alert_identity,
             action="snoozed",
             actor_user_id=actor_id,
             details_json=json.dumps({"snoozed_until": payload.snoozed_until.isoformat()}),
@@ -385,7 +382,7 @@ async def snooze_alert(
             event_type="data.update",
             category="system",
             resource_type="monitoring_alert",
-            resource_id=alert_identity,
+            resource_id=canonical_alert_identity,
             action="monitoring.alert.snooze",
             metadata={"snoozed_until": payload.snoozed_until.isoformat()},
         )
@@ -395,11 +392,7 @@ async def snooze_alert(
     except asyncio.CancelledError:
         raise
     except _MONITORING_NONCRITICAL_EXCEPTIONS as exc:
-        logger.exception(
-            "Failed to snooze monitoring alert alert_identity={} snoozed_until={}",
-            alert_identity,
-            payload.snoozed_until.isoformat(),
-        )
+        logger.error("Failed to snooze monitoring alert")
         raise HTTPException(status_code=500, detail="Failed to snooze alert") from exc
 
 
@@ -409,19 +402,23 @@ async def escalate_alert(
     payload: AdminAlertEscalateRequest,
     request: Request,
     principal: AuthPrincipal = Depends(get_auth_principal),
+    runtime_alerts_db: TopicMonitoringDB = Depends(_get_runtime_alerts_db),  # noqa: B008
 ) -> AdminAlertStateMutationResponse:
-    """Escalate a monitoring alert in authoritative overlay state."""
+    """Escalate a runtime-backed monitoring alert in authoritative overlay state."""
     try:
-        await _emit_overlay_identity_diagnostic(alert_identity)
+        canonical_alert_identity = await _require_runtime_alert_identity_for_mutation(
+            alert_identity,
+            runtime_alerts_db,
+        )
         repo = await _get_monitoring_repo()
         actor_id = _principal_actor_id(principal)
         state = await repo.upsert_alert_state(
-            alert_identity=alert_identity,
+            alert_identity=canonical_alert_identity,
             escalated_severity=payload.severity,
             updated_by_user_id=actor_id,
         )
         await repo.append_alert_event(
-            alert_identity=alert_identity,
+            alert_identity=canonical_alert_identity,
             action="escalated",
             actor_user_id=actor_id,
             details_json=json.dumps({"severity": payload.severity}),
@@ -432,7 +429,7 @@ async def escalate_alert(
             event_type="data.update",
             category="system",
             resource_type="monitoring_alert",
-            resource_id=alert_identity,
+            resource_id=canonical_alert_identity,
             action="monitoring.alert.escalate",
             metadata={"severity": payload.severity},
         )
@@ -442,11 +439,7 @@ async def escalate_alert(
     except asyncio.CancelledError:
         raise
     except _MONITORING_NONCRITICAL_EXCEPTIONS as exc:
-        logger.exception(
-            "Failed to escalate monitoring alert alert_identity={} severity={}",
-            alert_identity,
-            payload.severity,
-        )
+        logger.error("Failed to escalate monitoring alert")
         raise HTTPException(status_code=500, detail="Failed to escalate alert") from exc
 
 
@@ -470,9 +463,5 @@ async def list_alert_history(
     except asyncio.CancelledError:
         raise
     except _MONITORING_NONCRITICAL_EXCEPTIONS as exc:
-        logger.exception(
-            "Failed to list admin alert history alert_identity={} limit={}",
-            alert_identity,
-            limit,
-        )
+        logger.error("Failed to list admin alert history")
         raise HTTPException(status_code=500, detail="Failed to list alert history") from exc

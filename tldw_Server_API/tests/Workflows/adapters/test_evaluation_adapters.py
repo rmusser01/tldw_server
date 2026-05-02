@@ -221,6 +221,49 @@ class TestEvaluationsAdapter:
         assert "unknown_action" in result["error"]
 
     @pytest.mark.asyncio
+    async def test_evaluations_adapter_sanitizes_backend_errors(self, monkeypatch):
+        """Test evaluations adapter hides raw backend exception details."""
+        monkeypatch.delenv("TEST_MODE", raising=False)
+
+        import importlib
+        import sys
+        import types
+
+        from tldw_Server_API.app.core.Workflows.adapters import run_evaluations_adapter
+        evaluation_adapter_module = importlib.import_module(
+            "tldw_Server_API.app.core.Workflows.adapters.evaluation.eval"
+        )
+
+        class BrokenEvaluationService:
+            def __init__(self, **_kwargs):
+                raise RuntimeError("evaluation backend exploded at /private/evaluations.db")
+
+        monkeypatch.setitem(
+            sys.modules,
+            "tldw_Server_API.app.core.Evaluations.unified_evaluation_service",
+            types.SimpleNamespace(UnifiedEvaluationService=BrokenEvaluationService),
+        )
+
+        messages = []
+        sink_id = evaluation_adapter_module.logger.add(
+            lambda message: messages.append(str(message)),
+            level="ERROR",
+        )
+        try:
+            result = await run_evaluations_adapter(
+                {"action": "geval", "response": "answer"},
+                {"user_id": "1"},
+            )
+        finally:
+            evaluation_adapter_module.logger.remove(sink_id)
+
+        assert result == {"error": "evaluations_error"}
+        assert "evaluations.db" not in str(result)
+        joined = "\n".join(messages)
+        assert "Evaluations adapter error" in joined
+        assert "evaluations.db" not in joined
+
+    @pytest.mark.asyncio
     async def test_evaluations_adapter_cancelled(self, monkeypatch):
         """Test evaluations adapter returns cancelled status when cancelled."""
         monkeypatch.setenv("TEST_MODE", "1")

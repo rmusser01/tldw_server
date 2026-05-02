@@ -79,7 +79,7 @@ def _resolve_status_file() -> Path | None:
                 probe.unlink()
             return root / STATUS_FILENAME
         except Exception:  # noqa: BLE001
-            logger.debug('Install status directory {} not writable', root, exc_info=True)
+            logger.debug('Install status directory not writable')
 
     logger.warning('No writable location found for setup install status; running without persistence.')
     return None
@@ -1355,12 +1355,15 @@ def _install_omnivoice() -> None:
     missing = installer.validate_runtime_layout(layout)
     if missing:
         raise RuntimeError(f"OmniVoice runtime layout incomplete: {', '.join(missing)}")
-    installer.patch_tts_config(
+    config_patched = installer.patch_tts_config(
         config_path=repo_root / installer.DEFAULT_CONFIG_PATH,
         layout=layout,
         source_checkout=source_checkout,
         repo_root=repo_root,
     )
+    if not config_patched:
+        logger.error("OmniVoice provider configuration was not updated after runtime installation")
+        raise RuntimeError("OmniVoice provider configuration could not be updated")
 
 
 def _download_huggingface_models(models: list[str]) -> None:
@@ -1483,6 +1486,13 @@ def _resolve_hf_revision(repo_id: str) -> str | None:
     )
 
 def _snapshot_repo(repo_id: str) -> None:
+    """Prefetch a HuggingFace repository snapshot into the local cache.
+
+    The download respects the setup download policy, optional pinned
+    repository revisions, and force-download environment flags. Network errors
+    are normalized to DownloadBlockedError so install-plan status reporting can
+    present a clear remediation message.
+    """
     _ensure_downloads_allowed(f'{repo_id} snapshot')
     try:
         from huggingface_hub import snapshot_download

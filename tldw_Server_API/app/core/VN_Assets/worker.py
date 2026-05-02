@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import Mapping
 from datetime import datetime, timedelta, timezone
@@ -22,12 +23,14 @@ from tldw_Server_API.app.core.VN_Assets.constants import (
     SLOT_STATUS_REVIEWING,
 )
 from tldw_Server_API.app.core.VN_Assets.jobs import (
+    VN_ASSETS_DOMAIN,
     VN_ASSET_ENQUEUE_BATCH_JOB_TYPE,
     VN_ASSET_GENERATE_VARIANT_JOB_TYPE,
     VN_PACK_EXPORT_JOB_TYPE,
     VN_PACK_IMPORT_COMMIT_JOB_TYPE,
     VN_PACK_IMPORT_PREVIEW_JOB_TYPE,
     create_generate_variant_job,
+    vn_asset_batch_group,
 )
 from tldw_Server_API.app.core.VN_Assets.portability.exporter import VNPackExporter
 from tldw_Server_API.app.core.VN_Assets.portability.importer import VNPackImporter
@@ -152,6 +155,14 @@ class VNAssetGenerationWorker:
             raise ValueError("vn_asset_batch_not_found")
         if int(batch["requested_by_user_id"]) != user_id:
             raise ValueError("vn_asset_job_owner_mismatch")
+        if _is_terminal_batch_status(batch["status"]):
+            self._cancel_terminal_batch_jobs(
+                user_id=user_id,
+                pack_id=pack_id,
+                batch_id=batch_id,
+                current_job_id=_positive_int(_job_id(job)),
+            )
+            raise ValueError("vn_asset_batch_terminal")
 
         slot = self.repo.get_slot(slot_id)
         if slot is None or int(slot["pack_id"]) != pack_id:
@@ -563,6 +574,7 @@ class VNAssetGenerationWorker:
             style_lock=_loads_json(pack.get("style_lock_json"), {}),
             slot_template=slot.get("prompt_template"),
             labels=labels,
+            world_book_entries=_world_book_entries_for_pack(self.repo, pack),
         )
         backend = self._resolve_backend(pack, slot)
         model = _first_text(slot.get("model_override"), pack.get("default_model"))
@@ -590,7 +602,7 @@ class VNAssetGenerationWorker:
             generation_result = self.image_registry.get_adapter(backend)
             if generation_result is None:
                 raise ValueError("image_adapter_unavailable")
-            image = generation_result.generate(request)
+            image = await asyncio.to_thread(generation_result.generate, request)
 
         prompt_snapshot = {
             "prompt": preview.prompt,
@@ -629,27 +641,32 @@ class VNAssetGenerationWorker:
             source_context_snapshot=context_snapshot,
             backend_metadata=backend_metadata,
         )
-        file_record = await _maybe_await(
-            self.save_vn_asset_image(
-                user_id=user_id,
-                image_bytes=image.content,
-                image_format=_image_format_from_content_type(image.content_type, image_format),
-                pack_id=pack_id,
-                item_id=int(item["id"]),
-                asset_type=str(slot["asset_type"]),
-                labels=labels,
+        item_id = int(item["id"])
+        try:
+            file_record = await _maybe_await(
+                self.save_vn_asset_image(
+                    user_id=user_id,
+                    image_bytes=image.content,
+                    image_format=_image_format_from_content_type(image.content_type, image_format),
+                    pack_id=pack_id,
+                    item_id=item_id,
+                    asset_type=str(slot["asset_type"]),
+                    labels=labels,
+                )
             )
-        )
-        item = self.repo.update_item_storage(
-            int(item["id"]),
-            generated_file_id=_positive_int(file_record.get("id")),
-            storage_ref=_first_text(file_record.get("storage_path")),
-            mime_type=_first_text(file_record.get("mime_type"), image.content_type),
-            width=width,
-            height=height,
-            bytes=image.bytes_len,
-            backend_metadata=backend_metadata,
-        ) or item
+            item = self.repo.update_item_storage(
+                item_id,
+                generated_file_id=_positive_int(file_record.get("id")),
+                storage_ref=_first_text(file_record.get("storage_path")),
+                mime_type=_first_text(file_record.get("mime_type"), image.content_type),
+                width=width,
+                height=height,
+                bytes=image.bytes_len,
+                backend_metadata=backend_metadata,
+            ) or item
+        except Exception:
+            self.repo.delete_item(item_id)
+            raise
         self.repo.update_slot(slot_id, {"status": SLOT_STATUS_REVIEWING, "last_error": None})
         self._record_generation_success(batch_id=batch_id)
         logger.info(
@@ -683,11 +700,12 @@ class VNAssetGenerationWorker:
         completed_count = int(batch["completed_count"] or 0) + 1
         planned_count = int(batch["planned_count"] or batch["total_variants"] or 0)
         fields: dict[str, Any] = {"completed_count": completed_count}
-        if planned_count and completed_count >= planned_count:
-            fields["status"] = "completed"
-            fields["completed_at"] = _utc_now()
-        else:
-            fields["status"] = "processing"
+        if not _is_terminal_batch_status(batch["status"]):
+            if planned_count and completed_count >= planned_count:
+                fields["status"] = "completed"
+                fields["completed_at"] = _utc_now()
+            else:
+                fields["status"] = "processing"
         self.repo.update_batch(batch_id, fields)
 
     def _record_generation_failure(self, *, batch_id: int, slot_id: int, error: str) -> None:
@@ -697,6 +715,31 @@ class VNAssetGenerationWorker:
             return
         failed_count = int(batch["failed_count"] or 0) + 1
         self.repo.update_batch(batch_id, {"status": "failed", "failed_count": failed_count})
+
+    def _cancel_terminal_batch_jobs(
+        self,
+        *,
+        user_id: int,
+        pack_id: int,
+        batch_id: int,
+        current_job_id: int | None,
+    ) -> None:
+        list_jobs = getattr(self.jobs_manager, "list_jobs", None)
+        cancel_job = getattr(self.jobs_manager, "cancel_job", None)
+        if not callable(list_jobs) or not callable(cancel_job):
+            return
+        batch_group = vn_asset_batch_group(user_id=user_id, pack_id=pack_id, batch_id=batch_id)
+        for status in ("queued", "processing"):
+            for job_row in list_jobs(
+                domain=VN_ASSETS_DOMAIN,
+                batch_group=batch_group,
+                status=status,
+                limit=500,
+            ):
+                job_id = _positive_int(job_row.get("id"))
+                if job_id is None or job_id == current_job_id:
+                    continue
+                cancel_job(job_id, reason="vn_asset_batch_terminal")
 
 
 def _payload_int(payload: Mapping[str, Any], key: str, *, default: int | None = None) -> int:
@@ -725,6 +768,13 @@ def _payload_text(payload: Mapping[str, Any], key: str) -> str:
     return value
 
 
+_TERMINAL_BATCH_STATUSES = {"cancelled", "canceled", "completed", "failed"}
+
+
+def _is_terminal_batch_status(status: Any) -> bool:
+    return str(status or "").strip().lower() in _TERMINAL_BATCH_STATUSES
+
+
 def _loads_json(value: Any, default: Any) -> Any:
     if value in (None, ""):
         return default
@@ -735,6 +785,52 @@ def _loads_json(value: Any, default: Any) -> Any:
     except json.JSONDecodeError:
         return default
     return loaded if isinstance(loaded, dict) else default
+
+
+def _loads_json_list(value: Any) -> list[Any]:
+    if value in (None, ""):
+        return []
+    if isinstance(value, list):
+        return value
+    try:
+        loaded = json.loads(str(value))
+    except json.JSONDecodeError:
+        return []
+    return loaded if isinstance(loaded, list) else []
+
+
+def _world_book_entries_for_pack(
+    repo: VNAssetPacksRepository,
+    pack: Mapping[str, Any],
+) -> list[Any]:
+    world_book_ids: list[int] = []
+    for raw_id in _loads_json_list(pack.get("source_world_book_ids_json")):
+        parsed_id = _positive_int(raw_id)
+        if parsed_id is not None:
+            world_book_ids.append(parsed_id)
+    if not world_book_ids:
+        return []
+
+    try:
+        from tldw_Server_API.app.core.Character_Chat.world_book_manager import WorldBookService
+
+        world_book_service = WorldBookService(repo.db)
+        entries: list[Any] = []
+        for world_book_id in world_book_ids:
+            entries.extend(
+                world_book_service.get_entries(
+                    world_book_id=world_book_id,
+                    enabled_only=True,
+                )
+            )
+        return entries
+    except Exception as exc:
+        logger.warning(
+            "Failed to load VN asset world-book context: pack_id={} error={}",
+            pack.get("id"),
+            exc,
+        )
+        return []
 
 
 async def _maybe_await(value: Any) -> Any:

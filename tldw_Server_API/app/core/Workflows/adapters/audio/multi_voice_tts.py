@@ -431,8 +431,8 @@ async def run_multi_voice_tts_adapter(
             await _synthesize_section(clean_text, default_model, kokoro_voice, fmt, speed, section_path)
             segment_files.append(section_path)
             sections_generated += 1
-        except _MULTI_TTS_NONCRITICAL_EXCEPTIONS as e:
-            logger.warning(f"Section {idx} TTS failed with {default_model}/{kokoro_voice}: {e}")
+        except _MULTI_TTS_NONCRITICAL_EXCEPTIONS:
+            logger.warning(f"Section {idx} TTS failed with {default_model}/{kokoro_voice}")
             # Fallback attempt
             if fallback_provider:
                 try:
@@ -441,8 +441,8 @@ async def run_multi_voice_tts_adapter(
                     )
                     segment_files.append(section_path)
                     sections_generated += 1
-                except _MULTI_TTS_NONCRITICAL_EXCEPTIONS as e2:
-                    logger.warning(f"Section {idx} fallback TTS also failed: {e2}")
+                except _MULTI_TTS_NONCRITICAL_EXCEPTIONS:
+                    logger.warning(f"Section {idx} fallback TTS also failed")
 
         # Add silence gap between sections (not after last)
         if pause_duration > 0 and idx < len(sections) - 1:

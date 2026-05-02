@@ -3,7 +3,16 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
+
+
+def _default_offset_pagination_aliases(response):
+    if response.has_more is None:
+        response.has_more = response.pagination.has_more
+    if response.next_offset is None:
+        response.next_offset = response.pagination.next_offset
+    return response
 
 
 class WritingVersionResponse(BaseModel):
@@ -52,6 +61,15 @@ class WritingSessionListItem(BaseModel):
 class WritingSessionListResponse(BaseModel):
     sessions: list[WritingSessionListItem]
     total: int
+    limit: int
+    offset: int
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+    pagination: OffsetPaginationMeta
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self):
+        return _default_offset_pagination_aliases(self)
 
 
 class WritingTemplateCreate(BaseModel):
@@ -87,6 +105,15 @@ class WritingTemplateResponse(BaseModel):
 class WritingTemplateListResponse(BaseModel):
     templates: list[WritingTemplateResponse]
     total: int
+    limit: int
+    offset: int
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+    pagination: OffsetPaginationMeta
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self):
+        return _default_offset_pagination_aliases(self)
 
 
 class WritingThemeCreate(BaseModel):
@@ -128,6 +155,15 @@ class WritingThemeResponse(BaseModel):
 class WritingThemeListResponse(BaseModel):
     themes: list[WritingThemeResponse]
     total: int
+    limit: int
+    offset: int
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+    pagination: OffsetPaginationMeta
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self):
+        return _default_offset_pagination_aliases(self)
 
 
 class WritingDefaultTemplate(BaseModel):

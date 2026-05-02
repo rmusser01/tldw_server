@@ -6,14 +6,8 @@ import asyncio
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, get_request_user, rbac_rate_limit, RequirePermission, TokenScopeGuard, User
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
-    check_rate_limit,
-    get_request_user,
-    rbac_rate_limit,
-    require_permissions,
-    require_token_scope,
-)
 from tldw_Server_API.app.api.v1.API_Deps.billing_deps import require_within_limit
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.api.v1.schemas.text2sql_schemas import (
@@ -24,7 +18,6 @@ from tldw_Server_API.app.core.AuthNZ.permissions import (
     SQL_READ,
     SQL_TARGET_ANY,
 )
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
 from tldw_Server_API.app.core.Billing.enforcement import LimitCategory
 from tldw_Server_API.app.core.Text2SQL.executor import SqliteReadOnlyExecutor
 from tldw_Server_API.app.core.Text2SQL.service import Text2SQLCoreService
@@ -98,8 +91,8 @@ def _connector_acl_allows(current_user: User, target_id: str) -> bool:
     dependencies=[
         Depends(check_rate_limit),
         Depends(rbac_rate_limit("text2sql.query")),
-        Depends(require_permissions(SQL_READ)),
-        Depends(require_token_scope("any", require_if_present=True, endpoint_id="text2sql.query", count_as="call")),
+        Depends(RequirePermission(SQL_READ)),
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="text2sql.query", count_as="call")),
         Depends(require_within_limit(LimitCategory.RAG_QUERIES_DAY, 1)),
     ],
 )
@@ -151,7 +144,7 @@ async def query_text2sql(
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"code": "sql_execution_failed", "message": str(exc)},
+            detail={"code": "sql_execution_failed", "message": "SQL execution failed"},
         ) from exc
 
     sql_text = str(result.get("sql", ""))

@@ -147,3 +147,48 @@ def test_access_log_uses_uppercase_level_names(monkeypatch):
     assert captured, "no access-log record captured"
     rec = captured[-1]
     assert rec.get("level") == "INFO"
+
+
+@pytest.mark.asyncio
+async def test_access_log_emit_failure_debug_log_is_sanitized(monkeypatch):
+    from tldw_Server_API.app.core.Logging import access_log_middleware as alm_mod
+
+    debug_records = []
+
+    class _FailingLogger:
+        def bind(self, **_kwargs):
+            return self
+
+        def log(self, _level, _message):
+            raise RuntimeError("access log sink failed at /private/access.log")
+
+        def debug(self, message, **kwargs):
+            debug_records.append({"message": message, "kwargs": kwargs})
+
+    monkeypatch.setattr(alm_mod, "logger", _FailingLogger(), raising=True)
+    alm = AccessLogMiddleware(object())
+    req = Request(
+        {
+            "type": "http",
+            "asgi": {"version": "3.0"},
+            "http_version": "1.1",
+            "method": "GET",
+            "path": "/ping",
+            "raw_path": b"/ping",
+            "headers": [(b"host", b"testserver")],
+            "client": ("127.0.0.1", 12345),
+            "server": ("testserver", 80),
+            "scheme": "http",
+        }
+    )
+
+    async def _call_next(_req: Request) -> Response:
+        return Response(content=b"{}", media_type="application/json", status_code=200)
+
+    resp = await alm.dispatch(req, _call_next)
+    joined = "\n".join(f"{record['message']} {record['kwargs']}" for record in debug_records)
+
+    assert resp.status_code == 200
+    assert "Access log middleware failed to emit request log" in joined
+    assert "access log sink failed" not in joined
+    assert "/private/access.log" not in joined

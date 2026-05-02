@@ -4,8 +4,13 @@
 #
 
 import os
+from collections.abc import Iterator
+from contextlib import contextmanager
+from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
+from fastapi import Request
 from fastapi.testclient import TestClient
 
 # Keep module-level app import lightweight for this suite.
@@ -20,9 +25,12 @@ _routes_disable.update({"media", "audio", "audio-websocket"})
 os.environ["ROUTES_DISABLE"] = ",".join(sorted(_routes_disable))
 
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
+from tldw_Server_API.app.api.v1.API_Deps import auth_deps
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+from tldw_Server_API.app.core.Skills.exceptions import SkillsError
 from tldw_Server_API.app.core.Skills.skills_service import SkillsService
 
 pytestmark = pytest.mark.integration
@@ -32,7 +40,7 @@ TEST_USER_ID = 999
 
 
 @pytest.fixture()
-def client(tmp_path, monkeypatch):
+def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
     """Provide a TestClient with mocked auth and isolated user database."""
     from tldw_Server_API.app.main import app as fastapi_app
 
@@ -43,16 +51,96 @@ def client(tmp_path, monkeypatch):
     db_path = user_base / "ChaChaNotes.db"
     chacha_db = CharactersRAGDB(db_path=db_path, client_id="test_client")
 
-    async def override_user():
+    async def override_user() -> User:
         return User(id=TEST_USER_ID, username="skills-test-user", email=None, is_active=True)
 
-    def override_chacha_db():
+    def override_chacha_db() -> CharactersRAGDB:
         return chacha_db
 
     # Monkeypatch DatabasePaths so SkillsService gets our temp dir
     monkeypatch.setattr(DatabasePaths, "get_user_base_directory", staticmethod(lambda uid: user_base))
 
     fastapi_app.dependency_overrides[get_request_user] = override_user
+    fastapi_app.dependency_overrides[get_chacha_db_for_user] = override_chacha_db
+
+    try:
+        with TestClient(fastapi_app) as c:
+            yield c
+    finally:
+        fastapi_app.dependency_overrides.clear()
+        chacha_db.close_connection()
+
+
+@pytest.fixture()
+def principal_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
+    """Provide a TestClient that authenticates skills routes through AuthPrincipal only."""
+    from tldw_Server_API.app.main import app as fastapi_app
+
+    user_base = tmp_path / "user_databases" / str(TEST_USER_ID)
+    user_base.mkdir(parents=True)
+    monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path / "user_databases"))
+
+    db_path = user_base / "ChaChaNotes.db"
+    chacha_db = CharactersRAGDB(db_path=db_path, client_id="principal_test_client")
+
+    principal = AuthPrincipal(
+        kind="user",
+        user_id=TEST_USER_ID,
+        username="skills-principal-user",
+        roles=["user"],
+        permissions=["skills.read", "skills.write"],
+        subject=f"user:{TEST_USER_ID}",
+        token_type="access",
+    )
+
+    async def override_principal(request: Request) -> AuthPrincipal:
+        request.state.auth = AuthContext(principal=principal)
+        request.state._auth_user = {
+            "id": principal.user_id,
+            "username": principal.username,
+            "roles": list(principal.roles),
+            "permissions": list(principal.permissions),
+            "is_active": True,
+            "is_verified": True,
+        }
+        request.state.user_id = principal.user_id
+        request.state.api_key_id = principal.api_key_id
+        request.state.org_ids = list(principal.org_ids)
+        request.state.team_ids = list(principal.team_ids)
+        return principal
+
+    def override_chacha_db() -> CharactersRAGDB:
+        return chacha_db
+
+    monkeypatch.setattr(DatabasePaths, "get_user_base_directory", staticmethod(lambda uid: user_base))
+
+    fastapi_app.dependency_overrides[auth_deps.get_auth_principal] = override_principal
+    fastapi_app.dependency_overrides[get_chacha_db_for_user] = override_chacha_db
+
+    try:
+        with TestClient(fastapi_app) as c:
+            yield c
+    finally:
+        fastapi_app.dependency_overrides.clear()
+        chacha_db.close_connection()
+
+
+@pytest.fixture()
+def auth_path_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
+    """Provide a TestClient that leaves get_auth_principal on the real auth path."""
+    from tldw_Server_API.app.main import app as fastapi_app
+
+    user_base = tmp_path / "user_databases" / str(TEST_USER_ID)
+    user_base.mkdir(parents=True)
+    monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path / "user_databases"))
+
+    db_path = user_base / "ChaChaNotes.db"
+    chacha_db = CharactersRAGDB(db_path=db_path, client_id="auth_path_test_client")
+
+    def override_chacha_db() -> CharactersRAGDB:
+        return chacha_db
+
+    monkeypatch.setattr(DatabasePaths, "get_user_base_directory", staticmethod(lambda uid: user_base))
     fastapi_app.dependency_overrides[get_chacha_db_for_user] = override_chacha_db
 
     try:
@@ -74,9 +162,127 @@ Process $ARGUMENTS with care.
 """
 
 
+@contextmanager
+def _capture_skills_endpoint_errors() -> Iterator[list[str]]:
+    from tldw_Server_API.app.api.v1.endpoints import skills as skills_endpoint
+
+    messages: list[str] = []
+    sink_id = skills_endpoint.logger.add(lambda message: messages.append(str(message)), level="ERROR")
+    try:
+        yield messages
+    finally:
+        skills_endpoint.logger.remove(sink_id)
+
+
 class TestListSkills:
     def test_list_skills_empty(self, client):
         r = client.get(f"{SKILLS_PREFIX}/")
+        assert r.status_code == 200, r.text
+        data = r.json()
+        assert data["skills"] == []
+        assert data["total"] == 0
+
+    def test_list_skills_uses_current_principal_alias(self, principal_client):
+        r = principal_client.get(f"{SKILLS_PREFIX}/")
+        assert r.status_code == 200, r.text
+        data = r.json()
+        assert data["skills"] == []
+        assert data["total"] == 0
+
+    def test_list_skills_current_principal_accepts_single_user_api_key(
+        self,
+        auth_path_client,
+        monkeypatch,
+    ):
+        from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
+
+        with monkeypatch.context() as env:
+            env.setenv("AUTH_MODE", "single_user")
+            env.setenv("SINGLE_USER_API_KEY", "phase34-skills-single-user-key")
+            reset_settings()
+
+            r = auth_path_client.get(
+                f"{SKILLS_PREFIX}/",
+                headers={"X-API-KEY": "phase34-skills-single-user-key"},
+            )
+
+        reset_settings()
+
+        assert r.status_code == 200, r.text
+        data = r.json()
+        assert data["skills"] == []
+        assert data["total"] == 0
+
+    def test_list_skills_current_principal_accepts_jwt(
+        self,
+        auth_path_client,
+        monkeypatch,
+    ):
+        from tldw_Server_API.app.core.AuthNZ import User_DB_Handling as udh
+        from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
+
+        async def fake_verify_jwt_and_fetch_user(request: Request, token: str) -> User:
+            assert token == "jwt.header.signature"
+            request.state.user_id = TEST_USER_ID
+            request.state.org_ids = []
+            request.state.team_ids = []
+            return User(
+                id=TEST_USER_ID,
+                username="skills-jwt-user",
+                roles=["user"],
+                permissions=["skills.read"],
+            )
+
+        monkeypatch.setattr(udh, "verify_jwt_and_fetch_user", fake_verify_jwt_and_fetch_user)
+
+        with monkeypatch.context() as env:
+            env.setenv("AUTH_MODE", "multi_user")
+            reset_settings()
+            r = auth_path_client.get(
+                f"{SKILLS_PREFIX}/",
+                headers={"Authorization": "Bearer jwt.header.signature"},
+            )
+
+        reset_settings()
+
+        assert r.status_code == 200, r.text
+        data = r.json()
+        assert data["skills"] == []
+        assert data["total"] == 0
+
+    def test_list_skills_current_principal_accepts_api_key(
+        self,
+        auth_path_client,
+        monkeypatch,
+    ):
+        from tldw_Server_API.app.core.AuthNZ import User_DB_Handling as udh
+        from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
+
+        async def fake_authenticate_api_key_user(request: Request, api_key: str) -> User:
+            assert api_key == "phase34-skills-api-key"
+            request.state.user_id = TEST_USER_ID
+            request.state.api_key_id = 321
+            request.state.org_ids = []
+            request.state.team_ids = []
+            return User(
+                id=TEST_USER_ID,
+                username="skills-api-key-user",
+                roles=["automation"],
+                permissions=["skills.read"],
+            )
+
+        monkeypatch.setattr(udh, "authenticate_api_key_user", fake_authenticate_api_key_user)
+
+        with monkeypatch.context() as env:
+            env.setenv("AUTH_MODE", "multi_user")
+            reset_settings()
+            r = auth_path_client.get(
+                f"{SKILLS_PREFIX}/",
+                headers={"X-API-KEY": "phase34-skills-api-key"},
+            )
+
+        reset_settings()
+
         assert r.status_code == 200, r.text
         data = r.json()
         assert data["skills"] == []
@@ -97,12 +303,32 @@ class TestListSkills:
         data = r.json()
         assert data["count"] == 2
         assert data["total"] == 3
+        assert data["pagination"] == {
+            "mode": "offset",
+            "limit": 2,
+            "offset": 0,
+            "total": 3,
+            "has_more": True,
+            "next_offset": 2,
+        }
+        assert data["has_more"] is True
+        assert data["next_offset"] == 2
 
         # Page 2
         r = client.get(f"{SKILLS_PREFIX}/?limit=2&offset=2")
         assert r.status_code == 200
         data = r.json()
         assert data["count"] == 1
+        assert data["pagination"] == {
+            "mode": "offset",
+            "limit": 2,
+            "offset": 2,
+            "total": 3,
+            "has_more": False,
+            "next_offset": None,
+        }
+        assert data["has_more"] is False
+        assert data["next_offset"] is None
 
 
 class TestCreateAndGetSkill:
@@ -141,6 +367,25 @@ class TestCreateAndGetSkill:
             json={"name": "dup-skill", "content": "content again"},
         )
         assert r.status_code == 409
+
+    def test_create_skill_sanitizes_skills_error(self, client, monkeypatch):
+        async def _boom(self, *, name, content, supporting_files=None):  # noqa: ANN001, ANN202
+            raise SkillsError("skills backend exploded at /private/create")
+
+        monkeypatch.setattr(SkillsService, "create_skill", _boom)
+
+        with _capture_skills_endpoint_errors() as messages:
+            r = client.post(
+                f"{SKILLS_PREFIX}/",
+                json={"name": "new-skill", "content": SAMPLE_SKILL},
+            )
+
+        joined = "\n".join(messages)
+        assert r.status_code == 500
+        assert r.json()["detail"] == "Failed to create skill"
+        assert "Error creating skill" in joined
+        assert "skills backend exploded" not in joined
+        assert "/private/" not in joined
 
 
 class TestUpdateSkill:
@@ -198,6 +443,25 @@ class TestUpdateSkill:
         assert "remove.md" not in data["supporting_files"]
         assert data["supporting_files"]["keep.md"] == "to keep"
 
+    def test_update_skill_sanitizes_skills_error(self, client, monkeypatch):
+        async def _boom(self, *, name, content=None, supporting_files=None, expected_version=None):  # noqa: ANN001, ANN202
+            raise SkillsError("skills backend exploded at /private/update")
+
+        monkeypatch.setattr(SkillsService, "update_skill", _boom)
+
+        with _capture_skills_endpoint_errors() as messages:
+            r = client.put(
+                f"{SKILLS_PREFIX}/upd-skill",
+                json={"content": "updated"},
+            )
+
+        joined = "\n".join(messages)
+        assert r.status_code == 500
+        assert r.json()["detail"] == "Failed to update skill"
+        assert "Error updating skill" in joined
+        assert "skills backend exploded" not in joined
+        assert "/private/" not in joined
+
 
 class TestDeleteSkill:
     def test_delete_skill_204(self, client):
@@ -214,6 +478,22 @@ class TestDeleteSkill:
     def test_delete_skill_not_found_404(self, client):
         r = client.delete(f"{SKILLS_PREFIX}/nonexistent")
         assert r.status_code == 404
+
+    def test_delete_skill_sanitizes_skills_error(self, client, monkeypatch):
+        async def _boom(self, name, *, expected_version=None):  # noqa: ANN001, ANN202
+            raise SkillsError("skills backend exploded at /private/delete")
+
+        monkeypatch.setattr(SkillsService, "delete_skill", _boom)
+
+        with _capture_skills_endpoint_errors() as messages:
+            r = client.delete(f"{SKILLS_PREFIX}/del-skill")
+
+        joined = "\n".join(messages)
+        assert r.status_code == 500
+        assert r.json()["detail"] == "Failed to delete skill"
+        assert "Error deleting skill" in joined
+        assert "skills backend exploded" not in joined
+        assert "/private/" not in joined
 
 
 class TestImportExport:
@@ -267,6 +547,29 @@ class TestImportExport:
         assert r.status_code == 201
         assert r.json()["description"] == "Overwritten"
 
+    def test_import_skill_sanitizes_skills_error(self, client, monkeypatch):
+        async def _boom(self, *, content, name=None, supporting_files=None, overwrite=False):  # noqa: ANN001, ANN202
+            raise SkillsError("skills backend exploded at /private/import")
+
+        monkeypatch.setattr(SkillsService, "import_skill", _boom)
+
+        with _capture_skills_endpoint_errors() as messages:
+            r = client.post(
+                f"{SKILLS_PREFIX}/import",
+                json={
+                    "name": "imported",
+                    "content": "---\ndescription: Imported\n---\nImported content",
+                    "overwrite": False,
+                },
+            )
+
+        joined = "\n".join(messages)
+        assert r.status_code == 500
+        assert r.json()["detail"] == "Failed to import skill"
+        assert "Error importing skill" in joined
+        assert "skills backend exploded" not in joined
+        assert "/private/" not in joined
+
     def test_import_skill_json_supporting_files_count_limit_422(self, client):
         files = {f"file{i:02d}.md": "content" for i in range(25)}
         r = client.post(
@@ -302,6 +605,25 @@ class TestImportExport:
                 files={"file": ("my-file-skill.md", f, "text/markdown")},
             )
         assert r.status_code == 201, r.text
+
+    def test_import_skill_file_sanitizes_skills_error(self, client, monkeypatch):
+        async def _boom(self, *, content, name=None, supporting_files=None, overwrite=False):  # noqa: ANN001, ANN202
+            raise SkillsError("skills backend exploded at /private/import-file")
+
+        monkeypatch.setattr(SkillsService, "import_skill", _boom)
+
+        with _capture_skills_endpoint_errors() as messages:
+            r = client.post(
+                f"{SKILLS_PREFIX}/import/file",
+                files={"file": ("skill.md", SAMPLE_SKILL, "text/markdown")},
+            )
+
+        joined = "\n".join(messages)
+        assert r.status_code == 500
+        assert r.json()["detail"] == "Failed to import skill from file"
+        assert "Error importing skill from file" in joined
+        assert "skills backend exploded" not in joined
+        assert "/private/" not in joined
 
     def test_import_skill_file_invalid_frontmatter_name_400(self, client, tmp_path):
         skill_file = tmp_path / "SKILL.md"
@@ -397,6 +719,22 @@ class TestImportExport:
         r = client.get(f"{SKILLS_PREFIX}/no-such-skill/export")
         assert r.status_code == 404
 
+    def test_export_skill_sanitizes_skills_error(self, client, monkeypatch):
+        async def _boom(self, name):  # noqa: ANN001, ANN202
+            raise SkillsError("skills backend exploded at /private/export")
+
+        monkeypatch.setattr(SkillsService, "export_skill", _boom)
+
+        with _capture_skills_endpoint_errors() as messages:
+            r = client.get(f"{SKILLS_PREFIX}/export-skill/export")
+
+        joined = "\n".join(messages)
+        assert r.status_code == 500
+        assert r.json()["detail"] == "Failed to export skill"
+        assert "Error exporting skill" in joined
+        assert "skills backend exploded" not in joined
+        assert "/private/" not in joined
+
 
 class TestExecuteSkill:
     def test_execute_skill_inline(self, client):
@@ -413,6 +751,61 @@ class TestExecuteSkill:
         assert result["skill_name"] == "exec-skill"
         assert "my test args" in result["rendered_prompt"]
         assert result["execution_mode"] == "inline"
+
+    def test_execute_skill_sanitizes_skills_error(self, client, monkeypatch):
+        async def _boom(self, name):  # noqa: ANN001, ANN202
+            raise SkillsError("skills backend exploded at /private/execute")
+
+        monkeypatch.setattr(SkillsService, "get_skill", _boom)
+
+        with _capture_skills_endpoint_errors() as messages:
+            r = client.post(
+                f"{SKILLS_PREFIX}/exec-skill/execute",
+                json={"args": "my test args"},
+            )
+
+        joined = "\n".join(messages)
+        assert r.status_code == 500
+        assert r.json()["detail"] == "Failed to execute skill"
+        assert "Error executing skill" in joined
+        assert "skills backend exploded" not in joined
+        assert "/private/" not in joined
+
+    def test_execute_skill_request_context_uses_current_principal_alias(
+        self,
+        principal_client,
+        monkeypatch,
+    ):
+        create_resp = principal_client.post(
+            f"{SKILLS_PREFIX}/",
+            json={"name": "principal-exec-skill", "content": "Do: $ARGUMENTS"},
+        )
+        assert create_resp.status_code == 201, create_resp.text
+        observed = {}
+
+        async def fake_execute(self, *, skill_data, arguments, context):
+            observed["user_id"] = context.user_id if context else None
+            return SimpleNamespace(
+                skill_name=skill_data["name"],
+                rendered_prompt=f"rendered {arguments}",
+                allowed_tools=[],
+                model_override=None,
+                execution_mode="inline",
+                fork_output=None,
+            )
+
+        monkeypatch.setattr(
+            "tldw_Server_API.app.api.v1.endpoints.skills.SkillExecutor.execute",
+            fake_execute,
+        )
+
+        r = principal_client.post(
+            f"{SKILLS_PREFIX}/principal-exec-skill/execute",
+            json={"args": "principal args"},
+        )
+
+        assert r.status_code == 200, r.text
+        assert observed["user_id"] == TEST_USER_ID
 
 
 class TestContextPayload:
@@ -446,6 +839,59 @@ class TestContextPayload:
         assert data["available_skills"] == []
         assert data["context_text"] == ""
         assert calls["async"] == 1
+
+
+class TestReadErrorSanitization:
+    def test_list_skills_sanitizes_skills_error(self, client, monkeypatch):
+        async def _raise_skills_error(self, *args, **kwargs):
+            _ = (self, args, kwargs)
+            raise SkillsError("skills backend exploded at /private/skills.db")
+
+        monkeypatch.setattr(SkillsService, "list_skills", _raise_skills_error)
+
+        with _capture_skills_endpoint_errors() as messages:
+            r = client.get(f"{SKILLS_PREFIX}/")
+
+        joined = "\n".join(messages)
+        assert r.status_code == 500
+        assert r.json()["detail"] == "Failed to list skills"
+        assert "Error listing skills" in joined
+        assert "skills backend exploded" not in joined
+        assert "/private/" not in joined
+
+    def test_get_skills_context_sanitizes_skills_error(self, client, monkeypatch):
+        async def _raise_skills_error(self):
+            _ = self
+            raise SkillsError("skills backend exploded at /private/context-cache")
+
+        monkeypatch.setattr(SkillsService, "get_context_payload_async", _raise_skills_error)
+
+        with _capture_skills_endpoint_errors() as messages:
+            r = client.get(f"{SKILLS_PREFIX}/context")
+
+        joined = "\n".join(messages)
+        assert r.status_code == 500
+        assert r.json()["detail"] == "Failed to get skills context"
+        assert "Error getting skills context" in joined
+        assert "skills backend exploded" not in joined
+        assert "/private/" not in joined
+
+    def test_get_skill_sanitizes_skills_error(self, client, monkeypatch):
+        async def _raise_skills_error(self, name):
+            _ = (self, name)
+            raise SkillsError("skills backend exploded at /private/skill.md")
+
+        monkeypatch.setattr(SkillsService, "get_skill", _raise_skills_error)
+
+        with _capture_skills_endpoint_errors() as messages:
+            r = client.get(f"{SKILLS_PREFIX}/broken-skill")
+
+        joined = "\n".join(messages)
+        assert r.status_code == 500
+        assert r.json()["detail"] == "Failed to get skill"
+        assert "Error getting skill" in joined
+        assert "skills backend exploded" not in joined
+        assert "/private/" not in joined
 
 
 class TestSupportingFilesLimit:

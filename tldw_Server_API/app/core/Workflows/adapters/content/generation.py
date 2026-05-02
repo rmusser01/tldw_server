@@ -208,9 +208,9 @@ async def run_flashcard_generate_adapter(config: dict[str, Any], context: dict[s
         for card in flashcards:
             card["model_type"] = card_type
         return {"flashcards": flashcards, "count": len(flashcards)}
-    except _GENERATION_NONCRITICAL_EXCEPTIONS as e:
-        logger.exception(f"Flashcard generate adapter error: {e}")
-        return {"error": f"flashcard_generate_error:{e}", "flashcards": [], "count": 0}
+    except _GENERATION_NONCRITICAL_EXCEPTIONS:
+        logger.exception("Flashcard generate adapter error")
+        return {"error": "flashcard_generate_error", "flashcards": [], "count": 0}
 
 
 @registry.register(
@@ -272,9 +272,9 @@ async def run_quiz_generate_adapter(config: dict[str, Any], context: dict[str, A
         except json.JSONDecodeError:
             questions = []
         return {"questions": questions, "count": len(questions)}
-    except _GENERATION_NONCRITICAL_EXCEPTIONS as e:
-        logger.exception(f"Quiz generate adapter error: {e}")
-        return {"error": f"quiz_generate_error:{e}", "questions": [], "count": 0}
+    except _GENERATION_NONCRITICAL_EXCEPTIONS:
+        logger.exception("Quiz generate adapter error")
+        return {"error": "quiz_generate_error", "questions": [], "count": 0}
 
 
 @registry.register(
@@ -325,9 +325,9 @@ async def run_outline_generate_adapter(config: dict[str, Any], context: dict[str
         except json.JSONDecodeError:
             pass
         return {"outline": outline, "outline_text": response_text, "sections": len(outline.get("sections", []))}
-    except _GENERATION_NONCRITICAL_EXCEPTIONS as e:
-        logger.exception(f"Outline generate error: {e}")
-        return {"error": str(e), "outline": {}, "outline_text": ""}
+    except _GENERATION_NONCRITICAL_EXCEPTIONS:
+        logger.exception("Outline generate error")
+        return {"error": "outline_generate_error", "outline": {}, "outline_text": ""}
 
 
 @registry.register(
@@ -374,9 +374,9 @@ async def run_glossary_extract_adapter(config: dict[str, Any], context: dict[str
         except json.JSONDecodeError:
             glossary = []
         return {"glossary": glossary, "count": len(glossary)}
-    except _GENERATION_NONCRITICAL_EXCEPTIONS as e:
-        logger.exception(f"Glossary extract error: {e}")
-        return {"error": str(e), "glossary": [], "count": 0}
+    except _GENERATION_NONCRITICAL_EXCEPTIONS:
+        logger.exception("Glossary extract error")
+        return {"error": "glossary_extract_error", "glossary": [], "count": 0}
 
 
 @registry.register(
@@ -427,9 +427,9 @@ async def run_mindmap_generate_adapter(config: dict[str, Any], context: dict[str
         except json.JSONDecodeError:
             pass
         return {"mindmap": mindmap, "mermaid": "", "node_count": 0}
-    except _GENERATION_NONCRITICAL_EXCEPTIONS as e:
-        logger.exception(f"Mindmap generate error: {e}")
-        return {"error": str(e), "mindmap": {}, "mermaid": ""}
+    except _GENERATION_NONCRITICAL_EXCEPTIONS:
+        logger.exception("Mindmap generate error")
+        return {"error": "mindmap_generate_error", "mindmap": {}, "mermaid": ""}
 
 
 @registry.register(
@@ -504,9 +504,9 @@ Content:
 
         return {"slides": [], "raw_text": result_text, "error": "json_parse_failed"}
 
-    except _GENERATION_NONCRITICAL_EXCEPTIONS as e:
-        logger.exception(f"Slides generate error: {e}")
-        return {"slides": [], "error": str(e)}
+    except _GENERATION_NONCRITICAL_EXCEPTIONS:
+        logger.exception("Slides generate error")
+        return {"slides": [], "error": "slides_generate_error"}
 
 
 @registry.register(
@@ -578,9 +578,9 @@ Content:
         report = extract_openai_content(response) or ""
         return {"report": report, "text": report, "title": title, "format": output_format}
 
-    except _GENERATION_NONCRITICAL_EXCEPTIONS as e:
-        logger.exception(f"Report generate error: {e}")
-        return {"report": "", "error": str(e)}
+    except _GENERATION_NONCRITICAL_EXCEPTIONS:
+        logger.exception("Report generate error")
+        return {"report": "", "error": "report_generate_error"}
 
 
 @registry.register(
@@ -663,9 +663,9 @@ Include a header, brief intro, main content sections, and a closing."""
         newsletter = extract_openai_content(response) or ""
         return {"newsletter": newsletter, "text": newsletter, "title": title}
 
-    except _GENERATION_NONCRITICAL_EXCEPTIONS as e:
-        logger.exception(f"Newsletter generate error: {e}")
-        return {"newsletter": "", "error": str(e)}
+    except _GENERATION_NONCRITICAL_EXCEPTIONS:
+        logger.exception("Newsletter generate error")
+        return {"newsletter": "", "error": "newsletter_generate_error"}
 
 
 @registry.register(
@@ -725,9 +725,9 @@ async def run_notes_studio_generate_adapter(config: dict[str, Any], context: dic
         payload.setdefault("meta", fallback_payload["meta"])
         payload.setdefault("sections", fallback_payload["sections"])
         return {"payload": payload, "source": "llm"}
-    except _GENERATION_NONCRITICAL_EXCEPTIONS as e:
-        logger.warning(f"Notes Studio generate fallback engaged: {e}")
-        return {"payload": fallback_payload, "source": "deterministic_fallback", "warning": str(e)}
+    except _GENERATION_NONCRITICAL_EXCEPTIONS:
+        logger.warning("Notes Studio generate fallback engaged")
+        return {"payload": fallback_payload, "source": "deterministic_fallback", "warning": "notes_studio_generate_warning"}
 
 
 @registry.register(
@@ -817,6 +817,6 @@ Content:
 
         return {"diagram": diagram.strip(), "format": output_format, "diagram_type": diagram_type}
 
-    except _GENERATION_NONCRITICAL_EXCEPTIONS as e:
-        logger.exception(f"Diagram generate error: {e}")
-        return {"diagram": "", "error": str(e)}
+    except _GENERATION_NONCRITICAL_EXCEPTIONS:
+        logger.exception("Diagram generate error")
+        return {"diagram": "", "error": "diagram_generate_error"}

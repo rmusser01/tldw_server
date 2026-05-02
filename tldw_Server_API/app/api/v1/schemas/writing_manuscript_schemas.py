@@ -8,6 +8,16 @@ import json
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator, model_validator
 
+from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
+
+
+def _default_offset_pagination_aliases(response):
+    if response.has_more is None:
+        response.has_more = response.pagination.has_more
+    if response.next_offset is None:
+        response.next_offset = response.pagination.next_offset
+    return response
+
 
 # ---------------------------------------------------------------------------
 # Project
@@ -68,6 +78,15 @@ class ManuscriptProjectResponse(BaseModel):
 class ManuscriptProjectListResponse(BaseModel):
     projects: list[ManuscriptProjectResponse]
     total: int
+    limit: int = Field(..., ge=1)
+    offset: int = Field(..., ge=0)
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+    pagination: OffsetPaginationMeta
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self):
+        return _default_offset_pagination_aliases(self)
 
 
 # ---------------------------------------------------------------------------
@@ -689,3 +708,40 @@ class ManuscriptAnalysisResponse(BaseModel):
 class ManuscriptAnalysisListResponse(BaseModel):
     analyses: list[ManuscriptAnalysisResponse]
     total: int
+
+
+class ManuscriptVersionCreateRequest(BaseModel):
+    label: str | None = Field(None, max_length=255, description="Optional human label for this manual snapshot")
+
+
+class ManuscriptVersionResponse(BaseModel):
+    id: str
+    entity_type: Literal["manuscript", "chapter", "scene"]
+    entity_id: str
+    project_id: str
+    version_number: int
+    label: str | None = None
+    payload: dict[str, Any]
+    created_at: datetime
+    client_id: str
+
+
+class ManuscriptVersionListResponse(BaseModel):
+    versions: list[ManuscriptVersionResponse]
+    total: int
+
+
+class ManuscriptTrashListResponse(BaseModel):
+    items: list[dict[str, Any]]
+    total: int
+
+
+class ManuscriptRestoredEntityResponse(BaseModel):
+    """Typed response for restored project/manuscript/chapter/scene records."""
+
+    model_config = ConfigDict(extra="allow")
+
+    id: str
+    title: str
+    deleted: bool
+    version: int

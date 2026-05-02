@@ -12,7 +12,7 @@ from tldw_Server_API.app.api.v1.schemas.notes_studio import (
     NoteStudioDocumentCreateRequest,
     NoteStudioDocumentResponse,
 )
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, InputError
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, ConflictError, InputError
 
 
 @pytest.fixture
@@ -90,6 +90,41 @@ def test_create_and_fetch_note_studio_document_by_note_id(db: CharactersRAGDB) -
     assert studio["template_type"] == "lined"  # nosec B101
     assert studio["handwriting_mode"] == "accented"  # nosec B101
     assert studio["payload_json"]["meta"]["source_note_id"] == note_id  # nosec B101
+
+
+def test_create_note_studio_document_translates_duplicate_to_conflict(db: CharactersRAGDB) -> None:
+    note_id = db.add_note(title="Source", content="Alpha beta gamma")
+    payload = {
+        "note_id": note_id,
+        "payload_json": {"meta": {"source_note_id": note_id}, "sections": []},
+        "template_type": "lined",
+        "handwriting_mode": "accented",
+        "source_note_id": note_id,
+        "excerpt_snapshot": "beta",
+        "excerpt_hash": "sha256:demo",
+        "companion_content_hash": "sha256:markdown",
+        "render_version": 1,
+    }
+
+    db.create_note_studio_document(**payload)
+
+    with pytest.raises(ConflictError, match="already exists"):
+        db.create_note_studio_document(**payload)
+
+
+def test_create_note_studio_document_translates_missing_note_to_conflict(db: CharactersRAGDB) -> None:
+    with pytest.raises(ConflictError, match="Note not found"):
+        db.create_note_studio_document(
+            note_id="missing-note",
+            payload_json={"meta": {}, "sections": []},
+            template_type="lined",
+            handwriting_mode="accented",
+            source_note_id=None,
+            excerpt_snapshot="beta",
+            excerpt_hash="sha256:demo",
+            companion_content_hash="sha256:markdown",
+            render_version=1,
+        )
 
 
 def test_note_studio_document_rejects_non_dict_json_shapes(db: CharactersRAGDB) -> None:

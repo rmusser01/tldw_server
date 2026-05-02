@@ -28,11 +28,17 @@ from fastapi import (
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from fastapi.routing import APIRoute
 from loguru import logger
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, RequireRole, User
 
-from tldw_Server_API.app.api.v1.API_Deps import auth_deps
 from tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps import get_audit_service_for_user
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.schemas.sandbox_schemas import (
     SandboxAdminMacOSDiagnosticsResponse,
+    SandboxAdminMacOSImageStoreCleanupRequest,
+    SandboxAdminMacOSImageStoreCleanupResponse,
+    SandboxAdminMacOSImageStoreCleanupPlanResponse,
+    SandboxAdminMacOSReconciliationRepairRequest,
+    SandboxAdminMacOSReconciliationRepairResponse,
     ArtifactListResponse,
     CancelResponse,
     SandboxAdminIdempotencyItem,
@@ -66,7 +72,6 @@ from tldw_Server_API.app.core.AuthNZ.api_key_manager import get_api_key_manager
 from tldw_Server_API.app.core.AuthNZ.ip_allowlist import is_single_user_ip_allowed, resolve_client_ip
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.config import settings as app_settings
 from tldw_Server_API.app.core.Metrics import increment_counter, observe_histogram
 from tldw_Server_API.app.core.Sandbox.models import RunSpec, SessionSpec
@@ -78,7 +83,11 @@ from tldw_Server_API.app.core.Sandbox.orchestrator import (
     SessionActiveRunsConflict,
 )
 from tldw_Server_API.app.core.Sandbox.policy import SandboxPolicy
-from tldw_Server_API.app.core.Sandbox.service import SandboxService
+from tldw_Server_API.app.core.Sandbox.service import (
+    SandboxImageStoreCleanupError,
+    SandboxReconciliationRepairError,
+    SandboxService,
+)
 from tldw_Server_API.app.core.Sandbox.streams import get_hub
 from tldw_Server_API.app.core.Streaming.streams import WebSocketStream
 from tldw_Server_API.app.core.testing import (
@@ -890,7 +899,7 @@ async def create_snapshot(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
     except OSError as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Failed to create snapshot") from e
 
 
 @router.post(
@@ -927,7 +936,7 @@ async def restore_snapshot(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
     except OSError as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Failed to restore snapshot") from e
 
 
 @router.post(
@@ -968,7 +977,7 @@ async def clone_session(
         raise HTTPException(status_code=404, detail=str(e)) from e
     except _SANDBOX_NONCRITICAL_EXCEPTIONS as e:
         logger.exception(f"Clone session failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Failed to clone session") from e
 
 
 @router.get(
@@ -1842,7 +1851,7 @@ async def cancel_run(
         raise HTTPException(status_code=500, detail={
             "error": {
                 "code": "cancel_failed",
-                "message": str(e),
+                "message": "Failed to cancel sandbox run",
                 "details": {"run_id": run_id}
             }
         }) from e
@@ -2227,12 +2236,71 @@ async def stream_run_logs(websocket: WebSocket, run_id: str) -> None:
     summary="Admin: macOS sandbox diagnostics",
 )
 async def admin_macos_diagnostics(
-    _principal: AuthPrincipal = Depends(auth_deps.require_roles("admin")),
+    request: Request,
+    _principal: AuthPrincipal = Depends(RequireRole("admin")),
     _current_user: User = Depends(get_request_user),
 ) -> SandboxAdminMacOSDiagnosticsResponse:
     """Return detailed macOS sandbox diagnostics for admin troubleshooting."""
+    payload = dict(_service.macos_diagnostics())
+    registry = getattr(request.app.state, "startup_warning_registry", None)
+    if registry is not None:
+        records = registry.list_warnings(component_prefix="sandbox.")
+        summary = registry.summary(component_prefix="sandbox.")
+        payload["startup_warning_summary"] = {
+            "present": bool(records),
+            "blocking": bool(summary["has_blocking"]),
+            "codes": sorted({record.code for record in records}),
+        }
 
-    return SandboxAdminMacOSDiagnosticsResponse.model_validate(_service.macos_diagnostics())
+    return SandboxAdminMacOSDiagnosticsResponse.model_validate(payload)
+
+
+@router.post(
+    "/admin/macos-reconciliation/repair",
+    response_model=SandboxAdminMacOSReconciliationRepairResponse,
+    summary="Admin: repair macOS sandbox reconciliation state",
+)
+async def admin_repair_macos_reconciliation(
+    request: SandboxAdminMacOSReconciliationRepairRequest = Body(default_factory=SandboxAdminMacOSReconciliationRepairRequest),
+    _principal: AuthPrincipal = Depends(RequireRole("admin")),
+    _current_user: User = Depends(get_request_user),
+) -> SandboxAdminMacOSReconciliationRepairResponse:
+    try:
+        payload = await asyncio.to_thread(_service.repair_macos_reconciliation, **request.model_dump())
+    except SandboxReconciliationRepairError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.reason) from exc
+    return SandboxAdminMacOSReconciliationRepairResponse.model_validate(payload)
+
+
+@router.get(
+    "/admin/macos-image-store/cleanup-plan",
+    response_model=SandboxAdminMacOSImageStoreCleanupPlanResponse,
+    summary="Admin: plan macOS image store cleanup actions",
+)
+async def admin_macos_image_store_cleanup_plan(
+    _principal: AuthPrincipal = Depends(RequireRole("admin")),
+    _current_user: User = Depends(get_request_user),
+) -> SandboxAdminMacOSImageStoreCleanupPlanResponse:
+    payload = await asyncio.to_thread(_service.plan_macos_image_store_cleanup)
+    return SandboxAdminMacOSImageStoreCleanupPlanResponse.model_validate(payload)
+
+
+@router.post(
+    "/admin/macos-image-store/cleanup",
+    response_model=SandboxAdminMacOSImageStoreCleanupResponse,
+    summary="Admin: cleanup macOS image store candidates",
+)
+async def admin_macos_image_store_cleanup(
+    request: SandboxAdminMacOSImageStoreCleanupRequest = Body(default_factory=SandboxAdminMacOSImageStoreCleanupRequest),
+    _principal: AuthPrincipal = Depends(RequireRole("admin")),
+    _current_user: User = Depends(get_request_user),
+) -> SandboxAdminMacOSImageStoreCleanupResponse:
+    try:
+        payload = await asyncio.to_thread(_service.cleanup_macos_image_store, **request.model_dump())
+    except SandboxImageStoreCleanupError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.reason) from exc
+    return SandboxAdminMacOSImageStoreCleanupResponse.model_validate(payload)
+
 
 @router.get(
     "/admin/runs",
@@ -2248,7 +2316,7 @@ async def admin_list_runs(
     limit: int = Query(50, ge=1, le=1000),
     offset: int = Query(0, ge=0),
     sort: str | None = Query("desc", pattern="^(asc|desc)$"),
-    principal: AuthPrincipal = Depends(auth_deps.require_roles("admin")),
+    principal: AuthPrincipal = Depends(RequireRole("admin")),
     current_user: User = Depends(get_request_user),
 ) -> SandboxAdminRunListResponse:
     items_raw = _service._orch.list_runs(  # type: ignore[attr-defined]
@@ -2293,7 +2361,20 @@ async def admin_list_runs(
             )
         )
     has_more = (offset + len(items)) < int(total)
-    return SandboxAdminRunListResponse(total=int(total), limit=int(limit), offset=int(offset), has_more=bool(has_more), items=items)
+    total_count = int(total)
+    return SandboxAdminRunListResponse(
+        total=total_count,
+        limit=int(limit),
+        offset=int(offset),
+        has_more=bool(has_more),
+        pagination=build_offset_pagination_meta(
+            total=total_count,
+            limit=int(limit),
+            offset=int(offset),
+            count=len(items),
+        ),
+        items=items,
+    )
 
 
 @router.get(
@@ -2303,7 +2384,7 @@ async def admin_list_runs(
 )
 async def admin_get_run_details(
     run_id: str = Path(..., min_length=1),
-    principal: AuthPrincipal = Depends(auth_deps.require_roles("admin")),
+    principal: AuthPrincipal = Depends(RequireRole("admin")),
     current_user: User = Depends(get_request_user),
 ) -> SandboxAdminRunDetails:
     st = _service.get_run(run_id)
@@ -2403,7 +2484,7 @@ async def admin_list_idempotency(
     limit: int = Query(50, ge=1, le=1000),
     offset: int = Query(0, ge=0),
     sort: str | None = Query("desc", pattern="^(asc|desc)$"),
-    principal: AuthPrincipal = Depends(auth_deps.require_roles("admin")),
+    principal: AuthPrincipal = Depends(RequireRole("admin")),
     current_user: User = Depends(get_request_user),
 ) -> SandboxAdminIdempotencyListResponse:
     items_raw = _service._orch._store.list_idempotency(  # type: ignore[attr-defined]
@@ -2436,7 +2517,20 @@ async def admin_list_idempotency(
             )
         )
     has_more = (offset + len(items)) < int(total)
-    return SandboxAdminIdempotencyListResponse(total=int(total), limit=int(limit), offset=int(offset), has_more=bool(has_more), items=items)
+    total_count = int(total)
+    return SandboxAdminIdempotencyListResponse(
+        total=total_count,
+        limit=int(limit),
+        offset=int(offset),
+        has_more=bool(has_more),
+        pagination=build_offset_pagination_meta(
+            total=total_count,
+            limit=int(limit),
+            offset=int(offset),
+            count=len(items),
+        ),
+        items=items,
+    )
 
 
 @router.get(
@@ -2449,7 +2543,7 @@ async def admin_usage(
     limit: int = Query(50, ge=1, le=1000),
     offset: int = Query(0, ge=0),
     sort: str | None = Query("desc", pattern="^(asc|desc)$"),
-    principal: AuthPrincipal = Depends(auth_deps.require_roles("admin")),
+    principal: AuthPrincipal = Depends(RequireRole("admin")),
     current_user: User = Depends(get_request_user),
 ) -> SandboxAdminUsageResponse:
     items_raw = _service._orch._store.list_usage(  # type: ignore[attr-defined]
@@ -2470,4 +2564,17 @@ async def admin_usage(
             )
         )
     has_more = (offset + len(items)) < int(total)
-    return SandboxAdminUsageResponse(total=int(total), limit=int(limit), offset=int(offset), has_more=bool(has_more), items=items)
+    total_count = int(total)
+    return SandboxAdminUsageResponse(
+        total=total_count,
+        limit=int(limit),
+        offset=int(offset),
+        has_more=bool(has_more),
+        pagination=build_offset_pagination_meta(
+            total=total_count,
+            limit=int(limit),
+            offset=int(offset),
+            count=len(items),
+        ),
+        items=items,
+    )

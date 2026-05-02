@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import os
 import uuid
+from types import SimpleNamespace
+
 import pytest
 
 from tldw_Server_API.app.core.Usage.usage_tracker import log_llm_usage
@@ -118,6 +120,77 @@ async def test_usage_tracker_inserts_sqlite(monkeypatch):
     assert cost > 0.0
 
 
+class _LoggerStub:
+    def __init__(self) -> None:
+        self.debugs: list[str] = []
+
+    def debug(self, message: str, *args, **kwargs) -> None:
+        self.debugs.append(message)
+
+
+def _safe_usage_settings() -> SimpleNamespace:
+    return SimpleNamespace(
+        LLM_USAGE_ENABLED=True,
+        USAGE_LOG_DISABLE_META=True,
+        PII_REDACT_LOGS=False,
+    )
+
+
+@pytest.mark.asyncio
+async def test_tokens_daily_ledger_init_failure_log_is_sanitized(monkeypatch):
+    from tldw_Server_API.app.core.Usage import usage_tracker as usage_tracker_module
+
+    class _FailingLedger:
+        async def initialize(self) -> None:
+            raise RuntimeError("ledger init failed at /private/ledger.db")
+
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(usage_tracker_module, "_tokens_daily_ledger", None)
+    monkeypatch.setattr(usage_tracker_module, "ResourceDailyLedger", _FailingLedger)
+    monkeypatch.setattr(usage_tracker_module, "LedgerEntry", object())
+    monkeypatch.setattr(usage_tracker_module, "logger", logger_stub)
+
+    ledger = await usage_tracker_module._get_tokens_daily_ledger()
+
+    assert ledger is None
+    assert logger_stub.debugs == ["LLM usage ResourceDailyLedger init failed; tokens/day caps disabled"]
+    assert "ledger init failed" not in str(logger_stub.debugs)
+    assert "/private/ledger.db" not in str(logger_stub.debugs)
+
+
+@pytest.mark.asyncio
+async def test_log_llm_usage_failure_log_is_sanitized(monkeypatch):
+    from tldw_Server_API.app.core.Usage import usage_tracker as usage_tracker_module
+
+    async def _fail_get_db_pool():
+        raise RuntimeError("usage DB failed at /private/llm-usage.db")
+
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(usage_tracker_module, "get_settings", _safe_usage_settings)
+    monkeypatch.setattr(usage_tracker_module, "get_db_pool", _fail_get_db_pool)
+    monkeypatch.setattr(usage_tracker_module, "logger", logger_stub)
+
+    await usage_tracker_module.log_llm_usage(
+        user_id=1,
+        key_id=None,
+        endpoint="POST:/api/v1/chat/completions",
+        operation="chat",
+        provider="test",
+        model="test-model",
+        status=200,
+        latency_ms=1,
+        prompt_tokens=1,
+        completion_tokens=1,
+        total_tokens=2,
+        request_id="raw-request-id",
+    )
+
+    assert logger_stub.debugs == ["LLM usage logging skipped/failed"]
+    assert "usage DB failed" not in str(logger_stub.debugs)
+    assert "/private/llm-usage.db" not in str(logger_stub.debugs)
+    assert "raw-request-id" not in str(logger_stub.debugs)
+
+
 @pytest.mark.asyncio
 async def test_log_llm_usage_persists_router_enrichment(monkeypatch):
     monkeypatch.setenv("AUTH_MODE", "single_user")
@@ -153,7 +226,7 @@ async def test_log_llm_usage_persists_router_enrichment(monkeypatch):
         request_id="req-enrich",
         remote_ip="127.0.0.1",
         user_agent="pytest-agent/1.0",
-        token_name="Admin",
+        token_name="Admin",  # nosec B106
         conversation_id="conv-1",
     )
 

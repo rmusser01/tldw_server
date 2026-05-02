@@ -47,8 +47,8 @@ async def run_s3_upload_adapter(config: dict[str, Any], context: dict[str, Any])
         try:
             resolved_path = resolve_workflow_file_path(file_path, context, config)
             content = resolved_path.read_bytes()
-        except Exception as e:
-            return {"error": f"file_read_error: {e}", "uploaded": False}
+        except Exception:
+            return {"error": "file_read_error", "uploaded": False}
     elif content is None:
         prev = context.get("prev") or context.get("last") or {}
         content = prev.get("content") or prev.get("text") or ""
@@ -78,9 +78,9 @@ async def run_s3_upload_adapter(config: dict[str, Any], context: dict[str, Any])
 
     except ImportError:
         return {"error": "boto3_not_installed", "uploaded": False}
-    except Exception as e:
-        logger.exception(f"S3 upload error: {e}")
-        return {"error": str(e), "uploaded": False}
+    except Exception:
+        logger.exception("S3 upload failed")
+        return {"error": "S3 upload failed", "uploaded": False}
 
 
 @registry.register(
@@ -128,6 +128,6 @@ async def run_s3_download_adapter(config: dict[str, Any], context: dict[str, Any
 
     except ImportError:
         return {"error": "boto3_not_installed", "content": None}
-    except Exception as e:
-        logger.exception(f"S3 download error: {e}")
-        return {"error": str(e), "content": None}
+    except Exception:
+        logger.exception("S3 download failed")
+        return {"error": "S3 download failed", "content": None}

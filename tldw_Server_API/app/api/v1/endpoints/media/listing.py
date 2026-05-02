@@ -14,32 +14,35 @@ from fastapi import (
     status,
 )
 from loguru import logger
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, rbac_rate_limit, RequirePermission, User
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import rbac_rate_limit, require_permissions
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import (
     get_media_db_for_user,
     try_get_media_db_for_user,
 )
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_page_pagination_meta
 from tldw_Server_API.app.api.v1.schemas.media_request_models import SearchRequest
 from tldw_Server_API.app.api.v1.schemas.media_response_models import (
     MediaListItem,
     MediaListResponse,
+    PaginationInfo,
 )
 from tldw_Server_API.app.api.v1.utils.cache import generate_etag, is_not_modified
+from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.core.AuthNZ.permissions import MEDIA_DELETE
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
-from tldw_Server_API.app.core.DB_Management.media_db.errors import (
-    DatabaseError,
-    InputError,
-)
+from tldw_Server_API.app.core.config import settings
 from tldw_Server_API.app.core.DB_Management.media_db.api import (
     fetch_keywords_for_media_batch,
     get_paginated_files,
     get_paginated_trash_files,
     search_media,
 )
-from tldw_Server_API.app.core.config import settings
+from tldw_Server_API.app.core.DB_Management.media_db.errors import (
+    DatabaseError,
+    InputError,
+)
 from tldw_Server_API.app.core.Utils.metadata_utils import normalize_safe_metadata
+
 from .....core.DB_Management.media_db.legacy_maintenance import (
     permanently_delete_item,
 )
@@ -90,21 +93,13 @@ _EMAIL_MEDIA_SEARCH_DELEGATION_MODES = {"opt_in", "auto_email"}
 
 
 def _normalize_media_types(media_types: list[str] | None) -> list[str]:
-    return [
-        str(media_type).strip().lower()
-        for media_type in (media_types or [])
-        if str(media_type).strip()
-    ]
+    return [str(media_type).strip().lower() for media_type in (media_types or []) if str(media_type).strip()]
 
 
 def _parse_csv_values(raw_value: str | None) -> list[str]:
     if not raw_value:
         return []
-    return [
-        value.strip()
-        for value in str(raw_value).split(",")
-        if value.strip()
-    ]
+    return [value.strip() for value in str(raw_value).split(",") if value.strip()]
 
 
 @router.get(
@@ -119,19 +114,15 @@ async def list_media_keywords(
     try:
         keywords = db.fetch_all_keywords()
     except (DatabaseError, InputError) as exc:
-        logger.error("Failed to list media keywords: {}", exc)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to load media keywords",
+        logger.error("Failed to list media keywords")
+        raise map_db_error_to_http(
+            exc,
+            default_detail="Failed to load media keywords",
         ) from exc
 
     normalized_query = str(query or "").strip().lower()
     if normalized_query:
-        keywords = [
-            keyword
-            for keyword in keywords
-            if normalized_query in str(keyword).lower()
-        ]
+        keywords = [keyword for keyword in keywords if normalized_query in str(keyword).lower()]
 
     return {"keywords": keywords[:limit]}
 
@@ -169,11 +160,7 @@ def _should_delegate_media_search_to_email(
         )
         delegation_mode = "opt_in"
 
-    return bool(
-        delegation_mode == "auto_email"
-        and email_operator_enabled
-        and email_only_media_scope
-    )
+    return bool(delegation_mode == "auto_email" and email_operator_enabled and email_only_media_scope)
 
 
 @router.get(
@@ -254,7 +241,7 @@ async def list_media_endpoint(
                 rid = int(rid_raw)
             except (TypeError, ValueError):
                 # Skip rows with invalid IDs rather than failing the entire listing
-                logger.error("Skipping media row with invalid id: {}", rid_raw)
+                logger.error("Skipping media row with invalid id")
                 skipped_count += 1
                 continue
             media_ids.append(rid)
@@ -324,14 +311,20 @@ async def list_media_endpoint(
                 base_payload["keywords"] = keywords_map.get(mid, [])
             items.append(base_payload)
 
+        pagination_info = PaginationInfo(
+            results_per_page=int(results_per_page),
+            total_items=int(total_items),
+            **build_page_pagination_meta(
+                page=int(current_page),
+                per_page=int(results_per_page),
+                total=int(total_items),
+                total_pages=int(total_pages),
+            ).model_dump(),
+        )
+
         payload: dict[str, Any] = {
             "items": items,
-            "pagination": {
-                "page": int(current_page),
-                "results_per_page": int(results_per_page),
-                "total_pages": int(total_pages),
-                "total_items": int(total_items),
-            },
+            "pagination": pagination_info.model_dump(),
         }
 
         if include_keywords and keywords_available is not None:
@@ -350,7 +343,7 @@ async def list_media_endpoint(
     except HTTPException:
         raise
     except Exception as exc:
-        logger.error(f"Error listing media: {exc}", exc_info=True)
+        logger.error("Error listing media")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to list media",
@@ -428,7 +421,7 @@ async def list_media_trash_endpoint(
             try:
                 rid = int(rid_raw)
             except (TypeError, ValueError):
-                logger.error("Skipping trashed media row with invalid id: {}", rid_raw)
+                logger.error("Skipping trashed media row with invalid id")
                 skipped_count += 1
                 continue
             media_ids.append(rid)
@@ -485,14 +478,20 @@ async def list_media_trash_endpoint(
                 base_payload["keywords"] = keywords_map.get(mid, [])
             items.append(base_payload)
 
+        pagination_info = PaginationInfo(
+            results_per_page=int(results_per_page),
+            total_items=int(total_items),
+            **build_page_pagination_meta(
+                page=int(current_page),
+                per_page=int(results_per_page),
+                total=int(total_items),
+                total_pages=int(total_pages),
+            ).model_dump(),
+        )
+
         payload: dict[str, Any] = {
             "items": items,
-            "pagination": {
-                "page": int(current_page),
-                "results_per_page": int(results_per_page),
-                "total_pages": int(total_pages),
-                "total_items": int(total_items),
-            },
+            "pagination": pagination_info.model_dump(),
         }
 
         if include_keywords and keywords_available is not None:
@@ -511,7 +510,7 @@ async def list_media_trash_endpoint(
     except HTTPException:
         raise
     except Exception as exc:
-        logger.error(f"Error listing trashed media: {exc}", exc_info=True)
+        logger.error("Error listing trashed media")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to list trashed media",
@@ -522,7 +521,7 @@ async def list_media_trash_endpoint(
     "/trash/empty",
     summary="Empty media trash",
     dependencies=[
-        Depends(require_permissions(MEDIA_DELETE)),
+        Depends(RequirePermission(MEDIA_DELETE)),
         Depends(rbac_rate_limit("media.delete")),
     ],
 )
@@ -535,9 +534,7 @@ async def empty_media_trash_endpoint(
     Permanently delete all items currently in trash.
     """
     try:
-        cursor = db.execute_query(
-            "SELECT id FROM Media WHERE deleted = 0 AND is_trash = 1"
-        )
+        cursor = db.execute_query("SELECT id FROM Media WHERE deleted = 0 AND is_trash = 1")
         rows = cursor.fetchall()
         media_ids = [row["id"] for row in rows] if rows else []
 
@@ -584,7 +581,7 @@ async def empty_media_trash_endpoint(
             "remaining_count": remaining_count,
         }
     except Exception as exc:
-        logger.error("Error emptying media trash: {}", exc, exc_info=True)
+        logger.error("Error emptying media trash")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to empty media trash",
@@ -791,7 +788,7 @@ async def search_by_metadata(
     except HTTPException:
         raise
     except Exception as exc:
-        logger.error(f"Metadata search error: {exc}", exc_info=True)
+        logger.error("Metadata search error")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error performing metadata search",
@@ -870,9 +867,7 @@ async def get_by_identifier(
         if arxiv_id:
             raw_filters.append({"field": "arxiv_id", "op": "eq", "value": arxiv_id})
         if s2_paper_id:
-            raw_filters.append(
-                {"field": "s2_paper_id", "op": "eq", "value": s2_paper_id}
-            )
+            raw_filters.append({"field": "s2_paper_id", "op": "eq", "value": s2_paper_id})
 
         for f in raw_filters:
             try:
@@ -933,7 +928,7 @@ async def get_by_identifier(
     except HTTPException:
         raise
     except Exception as exc:
-        logger.error(f"Identifier lookup error: {exc}", exc_info=True)
+        logger.error("Identifier lookup error")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error in identifier lookup",
@@ -1026,21 +1021,17 @@ async def search_media_items(
             for item in items_data
         ]
 
-        total_pages = (
-            ceil(total_items / results_per_page)
-            if results_per_page > 0 and total_items > 0
-            else 0
-        )
-
-        from tldw_Server_API.app.api.v1.schemas.media_response_models import (
-            PaginationInfo,
-        )
+        total_pages = ceil(total_items / results_per_page) if results_per_page > 0 and total_items > 0 else 0
 
         pagination_info = PaginationInfo(
-            page=page,
             results_per_page=results_per_page,
-            total_pages=total_pages,
             total_items=total_items,
+            **build_page_pagination_meta(
+                page=page,
+                per_page=results_per_page,
+                total=total_items,
+                total_pages=total_pages,
+            ).model_dump(),
         )
 
         try:
@@ -1069,12 +1060,9 @@ async def search_media_items(
             )
         except Exception as ve:
             logger.debug(
-                "Data causing validation error in search: items_count={}, "
-                "pagination={}",
+                "Data causing validation error in search: items_count={}, " "pagination={}",
                 len(formatted_items),
-                pagination_info.model_dump_json(indent=2)
-                if pagination_info
-                else "None",
+                pagination_info.model_dump_json(indent=2) if pagination_info else "None",
             )
             logger.error(
                 f"Pydantic validation error creating MediaListResponse for search: {ve}",
@@ -1089,10 +1077,7 @@ async def search_media_items(
             f"Invalid email operator query for media search bridge: {exc}",
             exc_info=True,
         )
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(exc),
-        ) from exc
+        raise map_db_error_to_http(exc) from exc
     except ValueError as ve:
         logger.warning(
             f"Invalid parameters for media search: {ve}",
@@ -1103,10 +1088,10 @@ async def search_media_items(
             detail=str(ve),
         ) from ve
     except DatabaseError as exc:
-        logger.error(f"Database error during media search: {exc}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="A database error occurred during the search.",
+        logger.error("Database error during media search")
+        raise map_db_error_to_http(
+            exc,
+            default_detail="A database error occurred during the search.",
         ) from exc
     except HTTPException:
         raise

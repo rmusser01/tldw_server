@@ -700,8 +700,11 @@ class MetricsCollector:
 
                 await asyncio.sleep(self._aggregation_interval)
 
-            except Exception as e:
-                logger.error(f"Error in metrics collection: {e}")
+            except Exception as exc:
+                logger.error(
+                    "Error in metrics collection ({error_type})",
+                    error_type=type(exc).__name__,
+                )
                 await asyncio.sleep(10)
 
     def _clean_old_metrics(self, max_age_hours: int = 24):

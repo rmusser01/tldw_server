@@ -66,6 +66,14 @@ export type ApiDataTablesListResponse = {
   total?: number
   limit?: number
   offset?: number
+  pagination?: {
+    mode?: string
+    limit?: number
+    offset?: number
+    total?: number | null
+    has_more?: boolean
+    next_offset?: number | null
+  }
 }
 
 export type ApiDataTableGenerateResponse = {
@@ -126,7 +134,7 @@ export const mapApiListToUi = (
   const tables = tablesList.map(mapApiSummaryToUi)
   const total = Array.isArray(response)
     ? tables.length
-    : response.total ?? response.count ?? tables.length
+    : response.total ?? response.pagination?.total ?? response.count ?? tables.length
   return { tables, total }
 }
 

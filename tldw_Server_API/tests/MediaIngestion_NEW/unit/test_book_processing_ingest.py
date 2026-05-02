@@ -83,3 +83,67 @@ def test_ingest_text_file_uses_managed_media_database(
     assert add_calls[0]["title"] == "Sample Book"
     assert add_calls[0]["author"] == "Author Name"
     assert add_calls[0]["keywords"] == ["text_file", "epub_converted", "fiction", "novel"]
+
+
+@pytest.mark.unit
+def test_ingest_text_file_sanitizes_backend_failure(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    text_file = tmp_path / "sample.txt"
+    text_file.write_text("Book body", encoding="utf-8")
+
+    @contextmanager
+    def _fake_managed_media_database(*_args, **_kwargs):
+        yield object()
+
+    def _fail_add_media_with_keywords(**_kwargs):
+        raise RuntimeError("media database exploded at /private/db/books.sqlite")
+
+    monkeypatch.setattr(
+        books,
+        "managed_media_database",
+        _fake_managed_media_database,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        books,
+        "get_media_repository",
+        lambda _db_instance: type(
+            "_FakeWriter",
+            (),
+            {"add_media_with_keywords": staticmethod(_fail_add_media_with_keywords)},
+        )(),
+        raising=False,
+    )
+
+    result = books.ingest_text_file(
+        str(text_file),
+        title="Sample Book",
+        author="Author Name",
+        keywords="fiction,novel",
+        base_dir=tmp_path,
+    )
+
+    assert result == "Error ingesting text file"
+    assert "media database exploded" not in result
+    assert "/private/db/books.sqlite" not in result
+
+
+@pytest.mark.unit
+def test_ingest_folder_sanitizes_unexpected_listing_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    class _FailingOs:
+        @staticmethod
+        def listdir(_folder_path):
+            raise RuntimeError("folder lister exploded at /private/books")
+
+    monkeypatch.setattr(books, "os", _FailingOs)
+
+    result = books.ingest_folder(str(tmp_path / "books"))
+
+    assert result == "Error ingesting folder"
+    assert "folder lister exploded" not in result
+    assert "/private/books" not in result

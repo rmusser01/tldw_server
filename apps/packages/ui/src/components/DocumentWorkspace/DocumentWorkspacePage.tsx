@@ -427,6 +427,7 @@ const WorkspaceHeader: React.FC<{
             onClick={() => onOpenPicker("library")}
             className="rounded p-1.5 hover:bg-hover text-text-subtle hover:text-text"
             aria-label={t("option:documentWorkspace.openDocument", "Open document")}
+            data-testid="document-open-picker-button"
           >
             <Plus className="h-5 w-5" />
           </button>
@@ -1034,7 +1035,10 @@ export const DocumentWorkspacePage: React.FC = () => {
 
     return (
       <DocumentWorkspaceErrorBoundary>
-        <div className="flex h-full min-h-0 flex-col bg-bg text-text">
+        <div
+          className="flex h-full min-h-0 flex-col bg-bg text-text"
+          data-testid="document-workspace-root"
+        >
           <WorkspaceHeader
             leftPaneOpen={false}
             rightPaneOpen={false}
@@ -1096,7 +1100,10 @@ export const DocumentWorkspacePage: React.FC = () => {
   // Tablet/Desktop layout
   return (
     <DocumentWorkspaceErrorBoundary>
-      <div className="flex h-full min-h-0 flex-col bg-bg text-text">
+      <div
+        className="flex h-full min-h-0 flex-col bg-bg text-text"
+        data-testid="document-workspace-root"
+      >
         <WorkspaceHeader
           leftPaneOpen={!!leftPaneOpen}
           rightPaneOpen={!!rightPaneOpen}

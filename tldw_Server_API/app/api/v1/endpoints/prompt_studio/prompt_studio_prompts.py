@@ -33,9 +33,15 @@ from tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps import (
     require_project_access,
     require_project_write_access,
 )
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_page_pagination_meta
+from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 
 # Local imports
-from tldw_Server_API.app.api.v1.schemas.prompt_studio_base import ListResponse, StandardResponse
+from tldw_Server_API.app.api.v1.schemas.prompt_studio_base import (
+    ListResponse,
+    PageListResponse,
+    StandardResponse,
+)
 from tldw_Server_API.app.api.v1.schemas.prompt_studio_project import (
     PromptCreate,
     StructuredPromptConvertRequest,
@@ -77,7 +83,6 @@ router = APIRouter(
         429: {"description": "Rate limit exceeded"}
     }
 )
-
 ########################################################################################################################
 # Prompt CRUD Endpoints
 
@@ -422,8 +427,8 @@ async def create_prompt(
                             user_id_str,
                             prompt_data.project_id,
                         )
-            except Exception as checkpoint_error:
-                logger.debug("Prompt Studio checkpoint sync failed after prompt create", exc_info=checkpoint_error)
+            except Exception:
+                logger.debug("Prompt Studio checkpoint sync failed after prompt create")
 
         prompt_record = db.create_prompt(
             project_id=prompt_data.project_id,
@@ -459,27 +464,30 @@ async def create_prompt(
             data=PromptResponse(**prompt_record)
         )
 
-    except ConflictError:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Prompt with this name already exists in the project"
-        ) from None
-    except DatabaseError as e:
-        logger.error(f"Database error creating prompt: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to create prompt"
+    except ConflictError as e:
+        raise map_db_error_to_http(
+            e,
+            conflict_detail="Prompt with this name already exists in the project",
         ) from e
-    except InputError as e:
-        logger.warning(f"Prompt studio input error creating prompt: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=getattr(e, "safe_message", str(e)),
+    except (DatabaseError, InputError) as e:
+        log_message = "Prompt studio storage error creating prompt"
+        if isinstance(e, InputError):
+            logger.warning(
+                "{}: {}",
+                log_message,
+                getattr(e, "original_message", str(e)),
+            )
+        else:
+            logger.error(log_message)
+        raise map_db_error_to_http(
+            e,
+            default_detail="Failed to create prompt",
+            input_detail_attr="safe_message",
         ) from e
 
 @router.get(
     "/list/{project_id}",
-    response_model=ListResponse,
+    response_model=PageListResponse,
     openapi_extra={
         "responses": {
             "200": {
@@ -516,7 +524,7 @@ async def list_prompts(
     include_deleted: bool = Query(False, description="Include deleted prompts"),
     _: bool = Depends(require_project_access),
     db: PromptStudioDatabase = Depends(get_prompt_studio_db)
-) -> ListResponse:
+) -> PageListResponse:
     """
     List prompts in a project.
 
@@ -538,28 +546,51 @@ async def list_prompts(
             include_deleted=include_deleted,
         )
         prompts = [PromptResponse(**prompt) for prompt in result.get("prompts", [])]
+        pagination_data = result.get("pagination") or {}
+        page_value = int(pagination_data.get("page") or page)
+        per_page_value = int(pagination_data.get("per_page") or pagination_data.get("limit") or per_page)
+        total_value = int(pagination_data.get("total") if pagination_data.get("total") is not None else len(prompts))
+        total_pages_value = pagination_data.get("total_pages")
+        if total_pages_value is None:
+            total_pages_value = (total_value + per_page_value - 1) // per_page_value if total_value else 0
+        total_pages_value = int(total_pages_value)
+        metadata = {
+            "page": page_value,
+            "per_page": per_page_value,
+            "total": total_value,
+            "total_pages": total_pages_value,
+        }
 
-        return ListResponse(
+        return PageListResponse(
             success=True,
             data=prompts,
-            metadata=result.get("pagination", {}),
+            metadata=metadata,
+            pagination=build_page_pagination_meta(
+                page=page_value,
+                per_page=per_page_value,
+                total=total_value,
+                total_pages=total_pages_value,
+            ),
         )
 
-    except DatabaseError as e:
-        logger.error(f"Database error listing prompts: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to list prompts"
-        ) from e
-    except InputError as e:
-        logger.warning(f"Prompt studio input error listing prompts: {getattr(e, 'original_message', str(e))}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=getattr(e, "safe_message", "Invalid input.")
+    except (DatabaseError, InputError) as e:
+        log_message = "Prompt studio storage error listing prompts"
+        if isinstance(e, InputError):
+            logger.warning(
+                "{}: {}",
+                log_message,
+                getattr(e, "original_message", str(e)),
+            )
+        else:
+            logger.error(log_message)
+        raise map_db_error_to_http(
+            e,
+            default_detail="Failed to list prompts",
+            input_detail_attr="safe_message",
         ) from e
 
 # Simple alias that mirrors the canonical list response shape
-@router.get("", response_model=ListResponse)
+@router.get("", response_model=PageListResponse)
 async def list_prompts_simple(
     project_id: int = Query(..., description="Project ID"),
     page: int = Query(1, ge=1, description="Page number"),
@@ -567,7 +598,7 @@ async def list_prompts_simple(
     include_deleted: bool = Query(False, description="Include deleted prompts"),
     _: bool = Depends(require_project_access),
     db: PromptStudioDatabase = Depends(get_prompt_studio_db)
-) -> ListResponse:
+) -> PageListResponse:
     return await list_prompts(project_id, page, per_page, include_deleted, True, db)  # type: ignore[arg-type]
 
 # Simple execute endpoint used by tests
@@ -656,9 +687,9 @@ async def preview_prompt(
     except HTTPException:
         raise
     except InputError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=getattr(e, "safe_message", str(e)),
+        raise map_db_error_to_http(
+            e,
+            input_detail_attr="safe_message",
         ) from e
     except ValidationError as e:
         raise HTTPException(
@@ -734,17 +765,20 @@ async def get_prompt(
             data=PromptResponse(**prompt)
         )
 
-    except DatabaseError as e:
-        logger.error(f"Database error getting prompt: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to get prompt"
-        ) from e
-    except InputError as e:
-        logger.warning(f"Prompt studio input error getting prompt: {getattr(e, 'original_message', str(e))}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=getattr(e, "safe_message", "Invalid input.")
+    except (DatabaseError, InputError) as e:
+        log_message = "Prompt studio storage error getting prompt"
+        if isinstance(e, InputError):
+            logger.warning(
+                "{}: {}",
+                log_message,
+                getattr(e, "original_message", str(e)),
+            )
+        else:
+            logger.error(log_message)
+        raise map_db_error_to_http(
+            e,
+            default_detail="Failed to get prompt",
+            input_detail_attr="safe_message",
         ) from e
 
 @router.put(
@@ -900,17 +934,20 @@ async def update_prompt(
             data=PromptResponse(**new_prompt)
         )
 
-    except DatabaseError as e:
-        logger.error(f"Database error updating prompt: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to update prompt"
-        ) from e
-    except InputError as e:
-        logger.warning(f"Prompt studio input error updating prompt: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=getattr(e, "safe_message", str(e)),
+    except (DatabaseError, InputError) as e:
+        log_message = "Prompt studio storage error updating prompt"
+        if isinstance(e, InputError):
+            logger.warning(
+                "{}: {}",
+                log_message,
+                getattr(e, "original_message", str(e)),
+            )
+        else:
+            logger.error(log_message)
+        raise map_db_error_to_http(
+            e,
+            default_detail="Failed to update prompt",
+            input_detail_attr="safe_message",
         ) from e
 
 @router.get("/history/{prompt_id}", response_model=StandardResponse, openapi_extra={
@@ -951,17 +988,20 @@ async def get_prompt_history(
             data=versions
         )
 
-    except DatabaseError as e:
-        logger.error(f"Database error getting prompt history: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to get prompt history"
-        ) from e
-    except InputError as e:
-        logger.warning(f"Prompt studio input error getting prompt history: {getattr(e, 'original_message', str(e))}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=getattr(e, "safe_message", "Invalid input.")
+    except (DatabaseError, InputError) as e:
+        log_message = "Prompt studio storage error getting prompt history"
+        if isinstance(e, InputError):
+            logger.warning(
+                "{}: {}",
+                log_message,
+                getattr(e, "original_message", str(e)),
+            )
+        else:
+            logger.error(log_message)
+        raise map_db_error_to_http(
+            e,
+            default_detail="Failed to get prompt history",
+            input_detail_attr="safe_message",
         ) from e
 
 @router.post("/revert/{prompt_id}/{version}", response_model=StandardResponse, openapi_extra={
@@ -1013,15 +1053,18 @@ async def revert_prompt(
             data=PromptResponse(**new_prompt)
         )
 
-    except DatabaseError as e:
-        logger.error(f"Database error reverting prompt: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to revert prompt"
-        ) from e
-    except InputError as e:
-        logger.warning(f"Prompt studio input error reverting prompt: {getattr(e, 'original_message', str(e))}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=getattr(e, "safe_message", "Invalid input.")
+    except (DatabaseError, InputError) as e:
+        log_message = "Prompt studio storage error reverting prompt"
+        if isinstance(e, InputError):
+            logger.warning(
+                "{}: {}",
+                log_message,
+                getattr(e, "original_message", str(e)),
+            )
+        else:
+            logger.error(log_message)
+        raise map_db_error_to_http(
+            e,
+            default_detail="Failed to revert prompt",
+            input_detail_attr="safe_message",
         ) from e

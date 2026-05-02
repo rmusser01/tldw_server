@@ -719,7 +719,7 @@ class TTSInputValidator:
         except TTSValidationError as e:
             return False, str(e)
         except Exception as e:
-            logger.error(f"Unexpected validation error: {e}")
+            logger.error(f"Unexpected validation error; exception_type={type(e).__name__}")
             return False, f"Validation failed: {str(e)}"
 
     def _validate_text(self, text: str, provider: Optional[str] = None):

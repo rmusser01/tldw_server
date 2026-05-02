@@ -445,7 +445,9 @@ def test_profile_checks_check_provider_false_skips_provider_probe(monkeypatch, t
     assert result["status"] == "ok"
     assert "/api/v1/llm/providers" not in seen_paths
     assert not any("chat" in action for action in result["actions"])
-    assert "Provider verification skipped; pass --check-provider to check chat provider configuration." in result["notes"]
+    assert (
+        "Provider verification skipped; pass --check-provider to check chat provider configuration." in result["notes"]
+    )
 
 
 def test_provider_endpoint_failure_is_fatal_and_sanitized_when_checked(monkeypatch, tmp_path: Path) -> None:

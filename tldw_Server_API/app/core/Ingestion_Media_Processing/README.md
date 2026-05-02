@@ -72,7 +72,7 @@ The ingestion and media processing hub for video, audio, PDF, EPUB, documents (t
 - Error Handling:
   - Functions collect non‑fatal issues in `warnings`; fatal errors set `status='Error'` with `error` details. Endpoint maps exceptions to HTTP status with consistent messages.
 - Security:
-  - Media ingestion endpoints enforce claim-first `require_permissions(MEDIA_CREATE)` + `rbac_rate_limit('media.create')`; API keys/JWTs required. Never accept client‑supplied provider API keys; providers are resolved server‑side.
+  - Media ingestion endpoints enforce claim-first `RequirePermission(MEDIA_CREATE)` + `rbac_rate_limit('media.create')`; API keys/JWTs required. Never accept client‑supplied provider API keys; providers are resolved server‑side.
 
 
 ## 3. Developer‑Related/Relevant Information for Contributors

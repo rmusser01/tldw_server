@@ -6,7 +6,7 @@ from typing import Any
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException
 from loguru import logger
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import require_token_scope
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import TokenScopeGuard
 from tldw_Server_API.app.api.v1.API_Deps.backpressure import (
     guard_backpressure_and_quota,
 )
@@ -30,7 +30,7 @@ router = APIRouter()
     dependencies=[
         Depends(guard_backpressure_and_quota),
         Depends(
-            require_token_scope(
+            TokenScopeGuard(
                 "any",
                 require_if_present=True,
                 endpoint_id="media.ingest",
@@ -74,8 +74,8 @@ async def ingest_web_content(
         # parsing / validation) so client-facing 4xx semantics are not
         # converted into generic 500s.
         raise
-    except Exception as exc:  # noqa: BLE001
-        logger.error("Web content ingestion failed: {}", exc, exc_info=True)
+    except Exception:  # noqa: BLE001
+        logger.error("Web content ingestion failed")
         raise HTTPException(
             status_code=500,
             detail="Failed to ingest web content",

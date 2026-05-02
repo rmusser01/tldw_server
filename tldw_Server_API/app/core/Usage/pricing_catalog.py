@@ -163,8 +163,8 @@ class PricingCatalog:
             try:
                 data = json.loads(raw)
                 self._merge_overrides(_lower_keys(data))
-            except Exception as e:
-                logger.warning(f"Failed to parse PRICING_OVERRIDES: {e}")
+            except Exception:
+                logger.warning("Failed to parse PRICING_OVERRIDES")
 
         # File overrides
         try:
@@ -175,8 +175,8 @@ class PricingCatalog:
             if cfg_path.exists():
                 data = json.loads(cfg_path.read_text())
                 self._merge_overrides(_lower_keys(data))
-        except Exception as e:
-            logger.warning(f"Failed to load pricing overrides file: {e}")
+        except Exception:
+            logger.warning("Failed to load pricing overrides file")
 
     def _merge_overrides(self, overrides: dict) -> None:
         for provider, models in overrides.items():

@@ -70,7 +70,9 @@ def _int_setting(env_name: str, settings_attr: str, default: int) -> int:
     try:
         return int(raw)
     except (TypeError, ValueError) as exc:
-        logger.debug(f"tts_history_cleanup: invalid {env_name} value {raw!r}: {exc}")
+        logger.bind(error_type=type(exc).__name__).debug(
+            f"tts_history_cleanup: invalid {env_name} value"
+        )
         return default
 
 
@@ -97,7 +99,9 @@ def _enumerate_user_ids_from_fs() -> list[str]:
     try:
         base = DatabasePaths.get_user_db_base_dir()
     except _TTS_HISTORY_CLEANUP_NONCRITICAL_EXCEPTIONS as exc:
-        logger.debug(f"tts_history_cleanup: failed to resolve user db base dir: {exc}")
+        logger.bind(error_type=type(exc).__name__).debug(
+            "tts_history_cleanup: failed to resolve user db base dir"
+        )
         return []
     uids: list[str] = []
     try:
@@ -107,14 +111,18 @@ def _enumerate_user_ids_from_fs() -> list[str]:
                     int(p.name)
                     uids.append(p.name)
                 except (TypeError, ValueError):
-                    logger.debug(f"tts_history_cleanup: skipping non-int user dir {p.name}")
+                    logger.debug("tts_history_cleanup: skipping non-int user dir")
     except _TTS_HISTORY_CLEANUP_NONCRITICAL_EXCEPTIONS as exc:
-        logger.debug(f"tts_history_cleanup: failed to list user dirs: {exc}")
+        logger.bind(error_type=type(exc).__name__).debug(
+            "tts_history_cleanup: failed to list user dirs"
+        )
     if not uids:
         try:
             uids = [str(DatabasePaths.get_single_user_id())]
         except _TTS_HISTORY_CLEANUP_NONCRITICAL_EXCEPTIONS as exc:
-            logger.debug(f"tts_history_cleanup: single_user_id fallback failed: {exc}")
+            logger.bind(error_type=type(exc).__name__).debug(
+                "tts_history_cleanup: single_user_id fallback failed"
+            )
             uids = []
     return sorted(set(uids))
 
@@ -137,7 +145,9 @@ def _purge_with_db(db: Any, user_ids: Iterable[str], retention_days: int, max_ro
             )
             removed_total += removed
         except _TTS_HISTORY_CLEANUP_NONCRITICAL_EXCEPTIONS as exc:
-            logger.debug(f"tts_history_cleanup: purge failed for user {uid}: {exc}")
+            logger.bind(error_type=type(exc).__name__).debug(
+                f"tts_history_cleanup: purge failed for user {uid}"
+            )
     return removed_total
 
 
@@ -149,7 +159,14 @@ async def run_tts_history_cleanup_loop(stop_event: asyncio.Event | None = None) 
         return
 
     interval_sec = max(60, interval_hours * 3600)
-    await asyncio.sleep(min(interval_sec, 60))
+    initial_delay = min(interval_sec, 60)
+    if stop_event is not None:
+        with contextlib.suppress(asyncio.TimeoutError):
+            await asyncio.wait_for(stop_event.wait(), timeout=initial_delay)
+        if stop_event.is_set():
+            return
+    else:
+        await asyncio.sleep(initial_delay)
 
     while True:
         if stop_event is not None and stop_event.is_set():
@@ -180,7 +197,9 @@ async def run_tts_history_cleanup_loop(stop_event: asyncio.Event | None = None) 
             if removed_total:
                 logger.info(f"TTS history cleanup removed={removed_total}")
         except _TTS_HISTORY_CLEANUP_NONCRITICAL_EXCEPTIONS as exc:
-            logger.debug(f"TTS history cleanup loop failed: {exc}")
+            logger.bind(error_type=type(exc).__name__).debug(
+                "TTS history cleanup loop failed"
+            )
             try:
                 get_metrics_registry().increment(
                     "app_exception_events_total",

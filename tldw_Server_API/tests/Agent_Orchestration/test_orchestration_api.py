@@ -1,12 +1,16 @@
 """Tests for Agent Orchestration API endpoints (Phase 4.2)."""
 from __future__ import annotations
 
+from unittest.mock import MagicMock
+
 import pytest
+from fastapi import HTTPException
 
 from tldw_Server_API.app.core.Agent_Orchestration.orchestration_service import (
     OrchestrationService,
 )
 from tldw_Server_API.app.core.Agent_Orchestration.models import TaskStatus
+from tldw_Server_API.app.core.DB_Management.Orchestration_DB import OrchestrationDB
 
 pytestmark = [pytest.mark.unit, pytest.mark.asyncio]
 
@@ -99,6 +103,173 @@ async def test_multiple_runs_per_task(svc):
     runs = await svc.list_runs(task.id)
     assert len(runs) == 3
     assert {r.session_id for r in runs} == {"s1", "s2", "s3"}
+
+
+class _TestUser:
+    id = 1
+    id_int = 1
+
+
+class _NoopSessionStore:
+    async def check_session_quota(self, _user_id):
+        return None
+
+    async def register_session(self, **_kwargs):
+        return None
+
+
+class _RegisterFailingSessionStore(_NoopSessionStore):
+    async def register_session(self, **_kwargs):
+        raise RuntimeError("acp register backend leaked /private/acp-store.db")
+
+
+class _CreateSessionFailingClient:
+    async def create_session(self, *_args, **_kwargs):
+        raise RuntimeError("acp create backend exploded")
+
+
+class _SuccessfulClient:
+    async def create_session(self, *_args, **_kwargs):
+        return "session-private-1"
+
+    async def prompt(self, *_args, **_kwargs):
+        return {"stopReason": "complete", "usage": {}}
+
+
+class _PromptFailingClient:
+    async def create_session(self, *_args, **_kwargs):
+        return "session-1"
+
+    async def prompt(self, *_args, **_kwargs):
+        raise RuntimeError("acp prompt backend exploded")
+
+
+async def _build_dispatch_task(tmp_path):
+    db = OrchestrationDB(user_id=1, db_dir=tmp_path)
+    project = db.create_project(name="P1")
+    task = db.create_task(project.id, title="T1", description="Dispatch me", agent_type="codex")
+    return db, task
+
+
+async def test_dispatch_run_sanitizes_create_session_failure(monkeypatch, tmp_path):
+    from tldw_Server_API.app.api.v1.endpoints import agent_orchestration as orch_mod
+
+    db, task = await _build_dispatch_task(tmp_path)
+    fake_logger = MagicMock()
+
+    async def fake_store():
+        return _NoopSessionStore()
+
+    async def fake_client():
+        return _CreateSessionFailingClient()
+
+    monkeypatch.setattr(orch_mod, "get_orchestration_db", lambda _user_id: db)
+    monkeypatch.setattr(orch_mod, "logger", fake_logger)
+    monkeypatch.setattr(
+        "tldw_Server_API.app.services.admin_acp_sessions_service.get_acp_session_store",
+        fake_store,
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Agent_Client_Protocol.runner_client.get_runner_client",
+        fake_client,
+    )
+
+    try:
+        with pytest.raises(HTTPException) as exc_info:
+            await orch_mod.dispatch_run(
+                task.id,
+                orch_mod.RunDispatchRequest(),
+                user=_TestUser(),
+            )
+
+        assert exc_info.value.status_code == 502
+        assert exc_info.value.detail == "Failed to create ACP session"
+        fake_logger.error.assert_called_once_with("Failed to create ACP session")
+    finally:
+        db.close()
+
+
+async def test_dispatch_run_sanitizes_register_session_warning(monkeypatch, tmp_path):
+    from tldw_Server_API.app.api.v1.endpoints import agent_orchestration as orch_mod
+
+    db = OrchestrationDB(user_id=1, db_dir=tmp_path)
+    project = db.create_project(name="P1")
+    task = db.create_task(
+        project.id,
+        title="T1",
+        description="Dispatch me",
+        agent_type="codex",
+        reviewer_agent_type="reviewer",
+    )
+    fake_logger = MagicMock()
+
+    async def fake_store():
+        return _RegisterFailingSessionStore()
+
+    async def fake_client():
+        return _SuccessfulClient()
+
+    monkeypatch.setattr(orch_mod, "get_orchestration_db", lambda _user_id: db)
+    monkeypatch.setattr(orch_mod, "logger", fake_logger)
+    monkeypatch.setattr(
+        "tldw_Server_API.app.services.admin_acp_sessions_service.get_acp_session_store",
+        fake_store,
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Agent_Client_Protocol.runner_client.get_runner_client",
+        fake_client,
+    )
+
+    try:
+        result = await orch_mod.dispatch_run(
+            task.id,
+            orch_mod.RunDispatchRequest(),
+            user=_TestUser(),
+        )
+
+        assert result["task_id"] == task.id
+        assert result["status"] == TaskStatus.REVIEW
+        fake_logger.warning.assert_called_once_with("Failed to register orchestration ACP session")
+    finally:
+        db.close()
+
+
+async def test_dispatch_run_sanitizes_prompt_failure(monkeypatch, tmp_path):
+    from tldw_Server_API.app.api.v1.endpoints import agent_orchestration as orch_mod
+
+    db, task = await _build_dispatch_task(tmp_path)
+    fake_logger = MagicMock()
+
+    async def fake_store():
+        return _NoopSessionStore()
+
+    async def fake_client():
+        return _PromptFailingClient()
+
+    monkeypatch.setattr(orch_mod, "get_orchestration_db", lambda _user_id: db)
+    monkeypatch.setattr(orch_mod, "logger", fake_logger)
+    monkeypatch.setattr(
+        "tldw_Server_API.app.services.admin_acp_sessions_service.get_acp_session_store",
+        fake_store,
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Agent_Client_Protocol.runner_client.get_runner_client",
+        fake_client,
+    )
+
+    try:
+        with pytest.raises(HTTPException) as exc_info:
+            await orch_mod.dispatch_run(
+                task.id,
+                orch_mod.RunDispatchRequest(),
+                user=_TestUser(),
+            )
+
+        assert exc_info.value.status_code == 502
+        assert exc_info.value.detail == "ACP prompt failed"
+        fake_logger.error.assert_called_once_with("ACP prompt failed")
+    finally:
+        db.close()
 
 
 # ---- Review gate edge cases ----

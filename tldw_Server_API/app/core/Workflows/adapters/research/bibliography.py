@@ -118,9 +118,9 @@ async def run_doi_resolve_adapter(config: dict[str, Any], context: dict[str, Any
 
             return {"metadata": metadata, "resolved": True}
 
-    except Exception as e:
-        logger.exception(f"DOI resolve error: {e}")
-        return {"metadata": {}, "error": str(e), "resolved": False}
+    except Exception:
+        logger.error("DOI resolve error")
+        return {"metadata": {}, "error": "DOI resolution failed", "resolved": False}
 
 
 @registry.register(
@@ -193,9 +193,9 @@ Return JSON only."""
 
         return {"parsed": {}, "raw_text": result_text}
 
-    except Exception as e:
-        logger.exception(f"Reference parse error: {e}")
-        return {"parsed": {}, "error": str(e)}
+    except Exception:
+        logger.error("Reference parse error")
+        return {"parsed": {}, "error": "Reference parsing failed"}
 
 
 @registry.register(
@@ -351,6 +351,6 @@ async def run_literature_review_adapter(config: dict[str, Any], context: dict[st
         review = _extract_openai_content(response) or ""
         return {"review": review, "text": review, "paper_count": len(papers), "style": style}
 
-    except Exception as e:
-        logger.exception(f"Literature review error: {e}")
-        return {"review": "", "error": str(e)}
+    except Exception:
+        logger.error("Literature review error")
+        return {"review": "", "error": "Literature review generation failed"}

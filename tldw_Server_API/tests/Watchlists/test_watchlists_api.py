@@ -92,6 +92,12 @@ def test_sources_crud_and_tags(client_with_user):
     assert r.status_code == 200
     data = r.json()
     assert data["total"] >= 1
+    assert data["pagination"]["total"] >= 1
+    assert data["pagination"]["limit"] == 50
+    assert data["pagination"]["offset"] == 0
+    assert data["pagination"]["has_more"] is False
+    assert data["has_more"] is False
+    assert data["next_offset"] is None
     assert any(it["id"] == sid for it in data["items"])
 
     # Get source
@@ -116,7 +122,14 @@ def test_sources_crud_and_tags(client_with_user):
     # Tags list
     r = c.get("/api/v1/watchlists/tags")
     assert r.status_code == 200
-    tags = r.json().get("items", [])
+    tags_payload = r.json()
+    tags = tags_payload.get("items", [])
+    pagination = tags_payload["pagination"]
+    assert pagination["total"] >= 2
+    assert pagination["limit"] == 50
+    assert pagination["offset"] == 0
+    assert tags_payload["has_more"] == pagination["has_more"]
+    assert tags_payload["next_offset"] == pagination["next_offset"]
     names = {t["name"] for t in tags}
     assert {"news", "tech", "updates"}.issubset(names)
 
@@ -238,13 +251,21 @@ def test_sources_check_now_endpoint_triggers_runs_and_items(client_with_user, mo
 
     runs_resp = c.get("/api/v1/watchlists/runs", params={"page": 1, "size": 20})
     assert runs_resp.status_code == 200, runs_resp.text
-    run_ids = [int(run["id"]) for run in runs_resp.json().get("items", [])]
+    runs_payload = runs_resp.json()
+    assert runs_payload["pagination"]["total"] >= 1
+    assert runs_payload["pagination"]["limit"] == 20
+    assert runs_payload["pagination"]["offset"] == 0
+    assert runs_payload["has_more"] == runs_payload["pagination"]["has_more"]
+    assert runs_payload["next_offset"] == runs_payload["pagination"]["next_offset"]
+    run_ids = [int(run["id"]) for run in runs_payload.get("items", [])]
     assert run_id in run_ids
 
     items_resp = c.get("/api/v1/watchlists/items", params={"source_id": source_id, "page": 1, "size": 20})
     assert items_resp.status_code == 200, items_resp.text
     items_payload = items_resp.json()
     assert int(items_payload.get("total", 0)) >= 1
+    assert items_payload["has_more"] == items_payload["pagination"]["has_more"]
+    assert items_payload["next_offset"] == items_payload["pagination"]["next_offset"]
     assert any(int(item.get("source_id", -1)) == source_id for item in items_payload.get("items", []))
 
 
@@ -504,7 +525,13 @@ def test_bulk_sources_and_groups_and_jobs(client_with_user):
     gid = g["id"]
     r = c.get("/api/v1/watchlists/groups")
     assert r.status_code == 200
-    assert any(x["id"] == gid for x in r.json().get("items", []))
+    groups_payload = r.json()
+    assert groups_payload["pagination"]["total"] >= 1
+    assert groups_payload["pagination"]["limit"] == 50
+    assert groups_payload["pagination"]["offset"] == 0
+    assert groups_payload["has_more"] == groups_payload["pagination"]["has_more"]
+    assert groups_payload["next_offset"] == groups_payload["pagination"]["next_offset"]
+    assert any(x["id"] == gid for x in groups_payload.get("items", []))
     r = c.patch(f"/api/v1/watchlists/groups/{gid}", json={"description": "Updated"})
     assert r.status_code == 200
     assert r.json()["description"] == "Updated"
@@ -523,7 +550,13 @@ def test_bulk_sources_and_groups_and_jobs(client_with_user):
     jid = job["id"]
     r = c.get("/api/v1/watchlists/jobs")
     assert r.status_code == 200
-    assert any(x["id"] == jid for x in r.json().get("items", []))
+    jobs_payload = r.json()
+    assert jobs_payload["pagination"]["total"] >= 1
+    assert jobs_payload["pagination"]["limit"] == 50
+    assert jobs_payload["pagination"]["offset"] == 0
+    assert jobs_payload["has_more"] == jobs_payload["pagination"]["has_more"]
+    assert jobs_payload["next_offset"] == jobs_payload["pagination"]["next_offset"]
+    assert any(x["id"] == jid for x in jobs_payload.get("items", []))
     r = c.get(f"/api/v1/watchlists/jobs/{jid}")
     assert r.status_code == 200
     # Update job
@@ -806,6 +839,11 @@ def test_items_and_outputs_flow(client_with_user, monkeypatch):
     assert r.status_code == 200, r.text
     data = r.json()
     assert data["total"] >= 1
+    assert data["pagination"]["total"] >= 1
+    assert data["pagination"]["limit"] == 50
+    assert data["pagination"]["offset"] == 0
+    assert data["has_more"] == data["pagination"]["has_more"]
+    assert data["next_offset"] == data["pagination"]["next_offset"]
     first_item = data["items"][0]
     item_id = first_item["id"]
     assert first_item["status"] in {"ingested", "error", "duplicate"}
@@ -920,6 +958,11 @@ def test_items_and_outputs_flow(client_with_user, monkeypatch):
     assert r.status_code == 200, r.text
     outputs = r.json()
     assert outputs["total"] >= 2
+    assert outputs["pagination"]["total"] >= 2
+    assert outputs["pagination"]["limit"] == 50
+    assert outputs["pagination"]["offset"] == 0
+    assert outputs["has_more"] == outputs["pagination"]["has_more"]
+    assert outputs["next_offset"] == outputs["pagination"]["next_offset"]
     assert any(o["id"] == output_id for o in outputs["items"])
 
     # Output metadata
@@ -1040,6 +1083,10 @@ def test_watchlists_outputs_variants_and_ingest(client_with_user, monkeypatch):
 
     monkeypatch.setattr(
         "tldw_Server_API.app.core.TTS.tts_service_v2.get_tts_service_v2",
+        _fake_get_tts_service_v2,
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.services.outputs_service.get_tts_service_v2",
         _fake_get_tts_service_v2,
     )
 
@@ -1185,6 +1232,12 @@ def test_watchlists_outputs_pagination_excludes_mixed_origin_rows(client_with_us
     assert r.status_code == 200, r.text
     page1 = r.json()
     assert page1["total"] == 2
+    assert page1["pagination"]["total"] == 2
+    assert page1["pagination"]["limit"] == 1
+    assert page1["pagination"]["offset"] == 0
+    assert page1["pagination"]["has_more"] is True
+    assert page1["has_more"] is True
+    assert page1["next_offset"] == page1["pagination"]["next_offset"]
     assert len(page1["items"]) == 1
     assert page1["items"][0]["id"] == wl_new.id
 
@@ -1192,6 +1245,12 @@ def test_watchlists_outputs_pagination_excludes_mixed_origin_rows(client_with_us
     assert r.status_code == 200, r.text
     page2 = r.json()
     assert page2["total"] == 2
+    assert page2["pagination"]["total"] == 2
+    assert page2["pagination"]["limit"] == 1
+    assert page2["pagination"]["offset"] == 1
+    assert page2["pagination"]["has_more"] is False
+    assert page2["has_more"] is False
+    assert page2["next_offset"] is None
     assert len(page2["items"]) == 1
     assert page2["items"][0]["id"] == wl_old.id
 

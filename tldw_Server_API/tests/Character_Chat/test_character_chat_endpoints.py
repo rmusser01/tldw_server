@@ -101,6 +101,16 @@ async def test_character_chat_flow_sessions_messages_worldbooks():
             # When not using format_for_completions, response is a dict with messages list
             assert "messages" in msgs
             assert any(m.get("id") == message_id for m in msgs["messages"])  # our message present
+            assert msgs["pagination"] == {
+                "mode": "offset",
+                "limit": 50,
+                "offset": 0,
+                "total": 1,
+                "has_more": False,
+                "next_offset": None,
+            }
+            assert msgs["has_more"] is False
+            assert msgs["next_offset"] is None
 
             # 6) Delete the message (optimistic lock)
             r = await client.delete(
@@ -127,11 +137,12 @@ async def test_character_chat_flow_sessions_messages_worldbooks():
 
             # 8) World book CRUD
             wb_name = f"WB Test {_uuid.uuid4()}"
+            world_book_budget = 500
             wb_create = {
                 "name": wb_name,
                 "description": "World book for tests",
                 "scan_depth": 3,
-                "token_budget": 500,
+                "token_budget": world_book_budget,
                 "recursive_scanning": False,
                 "enabled": True,
             }
@@ -265,9 +276,20 @@ async def test_message_placeholders_and_length_guard(monkeypatch):
             # Standard message listing should replace placeholders
             r = await client.get(f"/api/v1/chats/{chat_id}/messages", headers=headers)
             assert r.status_code == 200
-            msgs = r.json().get("messages", [])
+            body = r.json()
+            msgs = body.get("messages", [])
             assistant_msg = next(m for m in msgs if m.get("sender") == "assistant")
             assert assistant_msg["content"] == f"Hi User, I'm {char_name}."
+            assert body["pagination"] == {
+                "mode": "offset",
+                "limit": 50,
+                "offset": 0,
+                "total": 1,
+                "has_more": False,
+                "next_offset": None,
+            }
+            assert body["has_more"] is False
+            assert body["next_offset"] is None
 
             # Completions-formatted messages should replace placeholders in system context
             r = await client.get(
@@ -289,6 +311,440 @@ async def test_message_placeholders_and_length_guard(monkeypatch):
                 json={"role": "user", "content": "x" * 25},
             )
             assert r.status_code == 400
+    finally:
+        try:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+        except Exception:
+            _ = None
+
+
+@pytest.mark.asyncio
+async def test_send_message_returns_generic_500_for_db_error(monkeypatch):
+    tmpdir = tempfile.mkdtemp(prefix="chacha_send_message_db_error_")
+    os.environ["USER_DB_BASE_DIR"] = tmpdir
+
+    try:
+        from tldw_Server_API.app.api.v1.endpoints import character_messages as character_messages_endpoint
+        from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDBError
+        from tldw_Server_API.app.main import app
+
+        settings = get_settings()
+        headers = {"X-API-KEY": settings.SINGLE_USER_API_KEY}
+
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            chars = (await client.get("/api/v1/characters/", headers=headers)).json()
+            character_id = chars[0]["id"]
+
+            chat_resp = await client.post(
+                "/api/v1/chats/",
+                headers=headers,
+                json={"character_id": character_id, "title": "DB error chat"},
+            )
+            assert chat_resp.status_code == 201
+            chat_id = chat_resp.json()["id"]
+
+            def fake_post_message_to_conversation(*args, **kwargs):
+                raise CharactersRAGDBError("message send backend unavailable")
+
+            monkeypatch.setattr(
+                character_messages_endpoint,
+                "post_message_to_conversation",
+                fake_post_message_to_conversation,
+            )
+
+            response = await client.post(
+                f"/api/v1/chats/{chat_id}/messages",
+                headers=headers,
+                json={"role": "user", "content": "Hello"},
+            )
+
+            assert response.status_code == 500
+            assert response.json()["detail"] == "Failed to send message"
+    finally:
+        try:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+        except Exception:
+            _ = None
+
+
+@pytest.mark.asyncio
+async def test_send_message_maps_input_error_to_400(monkeypatch):
+    tmpdir = tempfile.mkdtemp(prefix="chacha_send_message_input_error_")
+    os.environ["USER_DB_BASE_DIR"] = tmpdir
+
+    try:
+        from tldw_Server_API.app.api.v1.endpoints import character_messages as character_messages_endpoint
+        from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import InputError
+        from tldw_Server_API.app.main import app
+
+        settings = get_settings()
+        headers = {"X-API-KEY": settings.SINGLE_USER_API_KEY}
+
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            chars = (await client.get("/api/v1/characters/", headers=headers)).json()
+            character_id = chars[0]["id"]
+
+            chat_resp = await client.post(
+                "/api/v1/chats/",
+                headers=headers,
+                json={"character_id": character_id, "title": "Input error chat"},
+            )
+            assert chat_resp.status_code == 201
+            chat_id = chat_resp.json()["id"]
+
+            def fake_post_message_to_conversation(*args, **kwargs):
+                raise InputError("message payload is invalid")
+
+            monkeypatch.setattr(
+                character_messages_endpoint,
+                "post_message_to_conversation",
+                fake_post_message_to_conversation,
+            )
+
+            response = await client.post(
+                f"/api/v1/chats/{chat_id}/messages",
+                headers=headers,
+                json={"role": "user", "content": "Hello"},
+            )
+
+            assert response.status_code == 400
+            assert response.json()["detail"] == "message payload is invalid"
+    finally:
+        try:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+        except Exception:
+            _ = None
+
+
+@pytest.mark.asyncio
+async def test_send_message_maps_oversize_input_error_to_413(monkeypatch):
+    tmpdir = tempfile.mkdtemp(prefix="chacha_send_message_oversize_input_")
+    os.environ["USER_DB_BASE_DIR"] = tmpdir
+
+    try:
+        from tldw_Server_API.app.api.v1.endpoints import character_messages as character_messages_endpoint
+        from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import InputError
+        from tldw_Server_API.app.main import app
+
+        settings = get_settings()
+        headers = {"X-API-KEY": settings.SINGLE_USER_API_KEY}
+
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            chars = (await client.get("/api/v1/characters/", headers=headers)).json()
+            character_id = chars[0]["id"]
+
+            chat_resp = await client.post(
+                "/api/v1/chats/",
+                headers=headers,
+                json={"character_id": character_id, "title": "Oversize input error chat"},
+            )
+            assert chat_resp.status_code == 201
+            chat_id = chat_resp.json()["id"]
+
+            def fake_post_message_to_conversation(*args, **kwargs):
+                raise InputError("Attachment exceeds maximum size")
+
+            monkeypatch.setattr(
+                character_messages_endpoint,
+                "post_message_to_conversation",
+                fake_post_message_to_conversation,
+            )
+
+            response = await client.post(
+                f"/api/v1/chats/{chat_id}/messages",
+                headers=headers,
+                json={"role": "user", "content": "Hello"},
+            )
+
+            assert response.status_code == 413
+            assert response.json()["detail"] == "Attachment exceeds maximum size"
+    finally:
+        try:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+        except Exception:
+            _ = None
+
+
+@pytest.mark.asyncio
+async def test_send_message_maps_conflict_error_to_409(monkeypatch):
+    tmpdir = tempfile.mkdtemp(prefix="chacha_send_message_conflict_")
+    os.environ["USER_DB_BASE_DIR"] = tmpdir
+
+    try:
+        from tldw_Server_API.app.api.v1.endpoints import character_messages as character_messages_endpoint
+        from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import ConflictError
+        from tldw_Server_API.app.main import app
+
+        settings = get_settings()
+        headers = {"X-API-KEY": settings.SINGLE_USER_API_KEY}
+
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            chars = (await client.get("/api/v1/characters/", headers=headers)).json()
+            character_id = chars[0]["id"]
+
+            chat_resp = await client.post(
+                "/api/v1/chats/",
+                headers=headers,
+                json={"character_id": character_id, "title": "Conflict error chat"},
+            )
+            assert chat_resp.status_code == 201
+            chat_id = chat_resp.json()["id"]
+
+            def fake_post_message_to_conversation(*args, **kwargs):
+                raise ConflictError("message version conflict")
+
+            monkeypatch.setattr(
+                character_messages_endpoint,
+                "post_message_to_conversation",
+                fake_post_message_to_conversation,
+            )
+
+            response = await client.post(
+                f"/api/v1/chats/{chat_id}/messages",
+                headers=headers,
+                json={"role": "user", "content": "Hello"},
+            )
+
+            assert response.status_code == 409
+            assert response.json()["detail"] == "message version conflict"
+    finally:
+        try:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+        except Exception:
+            _ = None
+
+
+@pytest.mark.asyncio
+async def test_edit_message_returns_generic_500_for_db_error(monkeypatch):
+    tmpdir = tempfile.mkdtemp(prefix="chacha_edit_message_db_error_")
+    os.environ["USER_DB_BASE_DIR"] = tmpdir
+
+    try:
+        from tldw_Server_API.app.api.v1.endpoints import character_messages as character_messages_endpoint
+        from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDBError
+        from tldw_Server_API.app.main import app
+
+        settings = get_settings()
+        headers = {"X-API-KEY": settings.SINGLE_USER_API_KEY}
+
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            chars = (await client.get("/api/v1/characters/", headers=headers)).json()
+            character_id = chars[0]["id"]
+
+            chat_resp = await client.post(
+                "/api/v1/chats/",
+                headers=headers,
+                json={"character_id": character_id, "title": "Edit DB error chat"},
+            )
+            assert chat_resp.status_code == 201
+            chat_id = chat_resp.json()["id"]
+
+            message_resp = await client.post(
+                f"/api/v1/chats/{chat_id}/messages",
+                headers=headers,
+                json={"role": "user", "content": "Original"},
+            )
+            assert message_resp.status_code == 201
+            message = message_resp.json()
+
+            def fake_edit_message_content(*args, **kwargs):
+                raise CharactersRAGDBError("message edit backend unavailable")
+
+            monkeypatch.setattr(
+                character_messages_endpoint,
+                "edit_message_content",
+                fake_edit_message_content,
+            )
+
+            response = await client.put(
+                f"/api/v1/messages/{message['id']}",
+                headers=headers,
+                params={"expected_version": message["version"]},
+                json={"content": "Updated"},
+            )
+
+            assert response.status_code == 500
+            assert response.json()["detail"] == "Failed to edit message"
+    finally:
+        try:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+        except Exception:
+            _ = None
+
+
+@pytest.mark.asyncio
+async def test_edit_message_maps_conflict_error_to_409(monkeypatch):
+    tmpdir = tempfile.mkdtemp(prefix="chacha_edit_message_conflict_")
+    os.environ["USER_DB_BASE_DIR"] = tmpdir
+
+    try:
+        from tldw_Server_API.app.api.v1.endpoints import character_messages as character_messages_endpoint
+        from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import ConflictError
+        from tldw_Server_API.app.main import app
+
+        settings = get_settings()
+        headers = {"X-API-KEY": settings.SINGLE_USER_API_KEY}
+
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            chars = (await client.get("/api/v1/characters/", headers=headers)).json()
+            character_id = chars[0]["id"]
+
+            chat_resp = await client.post(
+                "/api/v1/chats/",
+                headers=headers,
+                json={"character_id": character_id, "title": "Edit conflict chat"},
+            )
+            assert chat_resp.status_code == 201
+            chat_id = chat_resp.json()["id"]
+
+            message_resp = await client.post(
+                f"/api/v1/chats/{chat_id}/messages",
+                headers=headers,
+                json={"role": "user", "content": "Original"},
+            )
+            assert message_resp.status_code == 201
+            message = message_resp.json()
+
+            def fake_edit_message_content(*args, **kwargs):
+                raise ConflictError("message edit conflict")
+
+            monkeypatch.setattr(
+                character_messages_endpoint,
+                "edit_message_content",
+                fake_edit_message_content,
+            )
+
+            response = await client.put(
+                f"/api/v1/messages/{message['id']}",
+                headers=headers,
+                params={"expected_version": message["version"]},
+                json={"content": "Updated"},
+            )
+
+            assert response.status_code == 409
+            assert response.json()["detail"] == "message edit conflict"
+    finally:
+        try:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+        except Exception:
+            _ = None
+
+
+@pytest.mark.asyncio
+async def test_delete_message_returns_generic_500_for_db_error(monkeypatch):
+    tmpdir = tempfile.mkdtemp(prefix="chacha_delete_message_db_error_")
+    os.environ["USER_DB_BASE_DIR"] = tmpdir
+
+    try:
+        from tldw_Server_API.app.api.v1.endpoints import character_messages as character_messages_endpoint
+        from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDBError
+        from tldw_Server_API.app.main import app
+
+        settings = get_settings()
+        headers = {"X-API-KEY": settings.SINGLE_USER_API_KEY}
+
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            chars = (await client.get("/api/v1/characters/", headers=headers)).json()
+            character_id = chars[0]["id"]
+
+            chat_resp = await client.post(
+                "/api/v1/chats/",
+                headers=headers,
+                json={"character_id": character_id, "title": "Delete DB error chat"},
+            )
+            assert chat_resp.status_code == 201
+            chat_id = chat_resp.json()["id"]
+
+            message_resp = await client.post(
+                f"/api/v1/chats/{chat_id}/messages",
+                headers=headers,
+                json={"role": "user", "content": "Delete me"},
+            )
+            assert message_resp.status_code == 201
+            message = message_resp.json()
+
+            def fake_remove_message_from_conversation(*args, **kwargs):
+                raise CharactersRAGDBError("message delete backend unavailable")
+
+            monkeypatch.setattr(
+                character_messages_endpoint,
+                "remove_message_from_conversation",
+                fake_remove_message_from_conversation,
+            )
+
+            response = await client.delete(
+                f"/api/v1/messages/{message['id']}",
+                headers=headers,
+                params={"expected_version": message["version"]},
+            )
+
+            assert response.status_code == 500
+            assert response.json()["detail"] == "Failed to delete message"
+    finally:
+        try:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+        except Exception:
+            _ = None
+
+
+@pytest.mark.asyncio
+async def test_delete_message_maps_conflict_error_to_409(monkeypatch):
+    tmpdir = tempfile.mkdtemp(prefix="chacha_delete_message_conflict_")
+    os.environ["USER_DB_BASE_DIR"] = tmpdir
+
+    try:
+        from tldw_Server_API.app.api.v1.endpoints import character_messages as character_messages_endpoint
+        from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import ConflictError
+        from tldw_Server_API.app.main import app
+
+        settings = get_settings()
+        headers = {"X-API-KEY": settings.SINGLE_USER_API_KEY}
+
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            chars = (await client.get("/api/v1/characters/", headers=headers)).json()
+            character_id = chars[0]["id"]
+
+            chat_resp = await client.post(
+                "/api/v1/chats/",
+                headers=headers,
+                json={"character_id": character_id, "title": "Delete conflict chat"},
+            )
+            assert chat_resp.status_code == 201
+            chat_id = chat_resp.json()["id"]
+
+            message_resp = await client.post(
+                f"/api/v1/chats/{chat_id}/messages",
+                headers=headers,
+                json={"role": "user", "content": "Delete me"},
+            )
+            assert message_resp.status_code == 201
+            message = message_resp.json()
+
+            def fake_remove_message_from_conversation(*args, **kwargs):
+                raise ConflictError("message delete conflict")
+
+            monkeypatch.setattr(
+                character_messages_endpoint,
+                "remove_message_from_conversation",
+                fake_remove_message_from_conversation,
+            )
+
+            response = await client.delete(
+                f"/api/v1/messages/{message['id']}",
+                headers=headers,
+                params={"expected_version": message["version"]},
+            )
+
+            assert response.status_code == 409
+            assert response.json()["detail"] == "message delete conflict"
     finally:
         try:
             shutil.rmtree(tmpdir, ignore_errors=True)

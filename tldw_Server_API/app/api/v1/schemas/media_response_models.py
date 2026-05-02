@@ -13,17 +13,17 @@ from pydantic import BaseModel, ConfigDict, Field, HttpUrl
 #
 # Local Imports
 #
+from tldw_Server_API.app.api.v1.schemas.pagination import PagePaginationMeta
+
 #######################################################################################################################
 #
 # Functions:
 
 # --- Common Reusable Models ---
 
-class PaginationInfo(BaseModel):
-    """Model for pagination details used in list responses."""
-    page: int = Field(..., description="The current page number.", json_schema_extra={"example": 1})
+class PaginationInfo(PagePaginationMeta):
+    """Legacy media pagination plus canonical page metadata."""
     results_per_page: int = Field(..., description="Number of items requested per page.", json_schema_extra={"example": 10})
-    total_pages: int = Field(..., description="Total number of pages available.", json_schema_extra={"example": 5})
     total_items: int = Field(..., description="Total number of items matching the query.", json_schema_extra={"example": 48})
 
 class PaginationInfoSearch(BaseModel):

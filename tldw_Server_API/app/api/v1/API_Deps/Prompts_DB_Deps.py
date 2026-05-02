@@ -13,6 +13,7 @@ from cachetools import LRUCache  # Assuming cachetools is available
 from fastapi import Depends, HTTPException, Request, status
 from loguru import logger
 
+from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.config import settings
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
@@ -89,11 +90,8 @@ def _close_prompts_db_instance_sync(
         )
     except (DatabaseError, OSError, RuntimeError, ValueError, TypeError) as exc:
         logger.error(
-            'Error closing PromptsDatabase instance for cache_key={} (reason={}): {}',
-            cache_key,
-            reason,
-            exc,
-            exc_info=True,
+            "Failed to close PromptsDatabase instance",
+            error_type=type(exc).__name__,
         )
 
 
@@ -110,11 +108,8 @@ def _enqueue_prompts_db_close(
         _pending_close_queue.put_nowait((cache_key, db_instance, reason))
     except (asyncio.QueueFull, RuntimeError) as exc:
         logger.error(
-            'Failed to enqueue PromptsDatabase close for cache_key={} (reason={}): {}',
-            cache_key,
-            reason,
-            exc,
-            exc_info=True,
+            "Failed to enqueue PromptsDatabase close",
+            error_type=type(exc).__name__,
         )
 
 
@@ -152,11 +147,8 @@ async def _process_pending_closes() -> None:
             raise
         except (DatabaseError, OSError, RuntimeError, ValueError, TypeError) as exc:
             logger.error(
-                'Error processing PromptsDatabase close for cache_key={} (reason={}): {}',
-                cache_key,
-                reason,
-                exc,
-                exc_info=True,
+                "Failed to process pending PromptsDatabase close",
+                error_type=type(exc).__name__,
             )
         finally:
             queue.task_done()
@@ -235,10 +227,8 @@ class _EvictingLRUCache(LRUCache):
                 self._on_evict(cache_key, value)
             except (OSError, RuntimeError, ValueError, TypeError, KeyError) as exc:
                 logger.error(
-                    'Prompts DB cache eviction callback failed for {}: {}',
-                    cache_key,
-                    exc,
-                    exc_info=True,
+                    "Prompts DB cache eviction callback failed",
+                    error_type=type(exc).__name__,
                 )
         return cache_key, value
 
@@ -283,7 +273,12 @@ async def get_prompts_db_for_user(
     managed via the prompts_interop layer.
     """
     start_prompts_pending_close_worker()
-    assert _user_db_instances is not None and _user_db_locks is not None
+    if _user_db_instances is None or _user_db_locks is None:
+        logger.error("Prompts DB caches are not initialized.")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Prompts DB cache unavailable.",
+        )
     # More robust check for User object and its id
     if not isinstance(current_user, User) or not hasattr(current_user, 'id') or not isinstance(current_user.id, int):
         logger.error(
@@ -382,18 +377,34 @@ async def get_prompts_db_for_user(
             return db_instance
 
         except (DatabaseError, SchemaError, InputError, ConflictError) as e:
-            log_path_str = str(db_path) if db_path else f"directory for user_id {user_id}"
-            logger.error(f"Failed to initialize PromptsDatabase for user {user_id} at {log_path_str}: {e}", exc_info=True)
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Could not initialize prompts database for user: {str(e)}"
+            logger.error(
+                "Failed to initialize PromptsDatabase",
+                user_id=user_id,
+                error_type=type(e).__name__,
+            )
+            raise map_db_error_to_http(
+                e,
+                default_detail="Prompts DB unavailable",
+                input_status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                conflict_status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                conflict_detail="Prompts DB unavailable",
             ) from e
         except OSError as e:
-            logger.error(f"Failed to get PromptsDatabase path for user {user_id}: {e}", exc_info=True)
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)) from e
+            logger.error(
+                "Failed to get PromptsDatabase path",
+                user_id=user_id,
+                error_type=type(e).__name__,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Prompts DB unavailable",
+            ) from e
         except Exception as e:
-            log_path_str = str(db_path) if db_path else f"directory for user_id {user_id}"
-            logger.error(f"Unexpected error initializing PromptsDatabase for user {user_id} at {log_path_str}: {e}", exc_info=True)
+            logger.error(
+                "Unexpected error initializing PromptsDatabase",
+                user_id=user_id,
+                error_type=type(e).__name__,
+            )
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="An unexpected error occurred during prompts database setup."
@@ -414,8 +425,8 @@ async def close_all_cached_prompts_db_instances() -> None:
                 logger.info(f"Closed PromptsDatabase connection for cache_key {cache_key}.")
             except (DatabaseError, OSError, RuntimeError, ValueError, TypeError) as e:
                 logger.error(
-                    f"Error closing PromptsDatabase instance for cache_key {cache_key}: {e}",
-                    exc_info=True,
+                    "Failed to close cached PromptsDatabase instance",
+                    error_type=type(e).__name__,
                 )
         _user_db_instances.clear()
         _user_db_locks.clear()  # Clear user-specific locks as well

@@ -5,6 +5,7 @@
 import sys
 import time
 import uuid
+from unittest.mock import MagicMock
 import pytest
 #
 # Third-party Libraries
@@ -113,11 +114,16 @@ def client_module(db_instance_session):
     app.dependency_overrides[get_media_db_for_user] = override_get_media_db_for_user
     app.dependency_overrides[get_request_user] = _override_user
 
-    with TestClient(fastapi_app_instance) as client:
+    client = None
+    try:
+        client = TestClient(fastapi_app_instance)
         yield client
+    finally:
+        if client is not None:
+            client.close()
 
-    # Restore original overrides AFTER client is closed
-    app.dependency_overrides = original_overrides
+        # Restore original overrides AFTER client is closed
+        app.dependency_overrides = original_overrides
     # test_db_instance_ref = None # Consider if shutdown handler is still needed
     # print("--- CLEARED get_media_db_for_user override ---")
 
@@ -718,6 +724,62 @@ class TestMediaVersionEndpoints:
         assert response.status_code == status.HTTP_404_NOT_FOUND
         assert "not found or deleted." in response.json().get("detail", "")
 
+    def test_patch_metadata_unexpected_error_log_is_sanitized(self, monkeypatch):
+        """Unexpected metadata patch failures must not leak raw exception details to logs."""
+        logger_mock = MagicMock()
+        monkeypatch.setattr(media_versions_endpoint, "logger", logger_mock)
+
+        def _raise_leaky_failure(*_args, **_kwargs):
+            raise RuntimeError("metadata patch leaked /private/tmp/media.db token=secret-patch-token")
+
+        monkeypatch.setattr(
+            media_versions_endpoint,
+            "get_document_version",
+            _raise_leaky_failure,
+            raising=True,
+        )
+
+        response = self.client.patch(
+            f"/api/v1/media/{self.media_id}/metadata",
+            json={"safe_metadata": {"reviewed": True}},
+        )
+
+        assert response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+        assert response.json()["detail"] == "Failed to update metadata"
+        rendered_calls = repr(logger_mock.error.call_args_list)
+        assert "Error patching safe metadata for media {}" in rendered_calls
+        assert "/private/tmp/media.db" not in rendered_calls
+        assert "secret-patch-token" not in rendered_calls
+        assert all(not kwargs.get("exc_info") for _args, kwargs in logger_mock.error.call_args_list)
+
+    def test_put_version_metadata_unexpected_error_log_is_sanitized(self, monkeypatch):
+        """Unexpected version metadata update failures must not leak raw exception details to logs."""
+        logger_mock = MagicMock()
+        monkeypatch.setattr(media_versions_endpoint, "logger", logger_mock)
+
+        def _raise_leaky_failure(*_args, **_kwargs):
+            raise RuntimeError("version metadata leaked /private/tmp/version.db token=secret-put-token")
+
+        monkeypatch.setattr(
+            media_versions_endpoint,
+            "get_document_version",
+            _raise_leaky_failure,
+            raising=True,
+        )
+
+        response = self.client.put(
+            f"/api/v1/media/{self.media_id}/versions/1/metadata",
+            json={"safe_metadata": {"reviewed": True}},
+        )
+
+        assert response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+        assert response.json()["detail"] == "Failed to update version metadata"
+        rendered_calls = repr(logger_mock.error.call_args_list)
+        assert "Error updating metadata for media {} v{}" in rendered_calls
+        assert "/private/tmp/version.db" not in rendered_calls
+        assert "secret-put-token" not in rendered_calls
+        assert all(not kwargs.get("exc_info") for _args, kwargs in logger_mock.error.call_args_list)
+
 
 class TestMediaListDetailEndpoints:
     """Tests for /media listing (GET /media) and detail (GET /media/{media_id})."""
@@ -748,6 +810,10 @@ class TestMediaListDetailEndpoints:
         assert data["pagination"]["results_per_page"] > 0 # Default value
         assert data["pagination"]["total_items"] >= len(self.media_ids)
         assert data["pagination"]["total_pages"] >= 1
+        assert data["pagination"]["mode"] == "page"
+        assert data["pagination"]["per_page"] == data["pagination"]["results_per_page"]
+        assert data["pagination"]["total"] == data["pagination"]["total_items"]
+        assert isinstance(data["pagination"]["has_more"], bool)
 
     def test_get_all_media_pagination(self):
 
@@ -761,6 +827,10 @@ class TestMediaListDetailEndpoints:
         assert data["pagination"]["page"] == 1
         assert data["pagination"]["results_per_page"] == 2
         assert data["pagination"]["total_items"] >= len(self.media_ids)
+        assert data["pagination"]["mode"] == "page"
+        assert data["pagination"]["per_page"] == 2
+        assert data["pagination"]["total"] == data["pagination"]["total_items"]
+        assert data["pagination"]["has_more"] == (data["pagination"]["page"] < data["pagination"]["total_pages"])
 
         # Get page 2, 2 items per page
         response_p2 = self.client.get("/api/v1/media?page=2&results_per_page=2")
@@ -779,6 +849,23 @@ class TestMediaListDetailEndpoints:
                 assert len(data_p2["items"]) == 0 # Should be empty if past the last page
         else:
             assert len(data_p2["items"]) == 0 # Should be empty if only one page
+
+    def test_get_media_trash_pagination_includes_canonical_page_metadata(self):
+        doc_id = self.media_ids["document"]
+        trash_response = self.client.delete(f"/api/v1/media/{doc_id}")
+        assert trash_response.status_code == status.HTTP_204_NO_CONTENT
+
+        response = self.client.get("/api/v1/media/trash?page=1&results_per_page=10")
+        assert response.status_code == status.HTTP_200_OK
+        data = response.json()
+        assert "pagination" in data
+        assert data["pagination"]["page"] == 1
+        assert data["pagination"]["results_per_page"] == 10
+        assert data["pagination"]["mode"] == "page"
+        assert data["pagination"]["per_page"] == 10
+        assert data["pagination"]["total"] == data["pagination"]["total_items"]
+        assert isinstance(data["pagination"]["has_more"], bool)
+        assert any(item["id"] == doc_id for item in data["items"])
 
 
     def test_get_all_media_invalid_pagination_params(self):

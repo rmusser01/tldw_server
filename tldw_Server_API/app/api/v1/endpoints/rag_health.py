@@ -11,7 +11,7 @@ from typing import Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from loguru import logger
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import require_permissions
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import RequirePermission
 from tldw_Server_API.app.core.AuthNZ.permissions import SYSTEM_LOGS
 
 # Import RAG components
@@ -89,11 +89,11 @@ async def health_check() -> dict[str, Any]:
                 "hit_rate": cache_stats.get("hit_rate", 0),
                 "size": cache_stats.get("size", 0)
             }
-        except Exception as e:  # noqa: BLE001 - health checks should not fail on unexpected errors
-            logger.error(f"Cache health check failed: {e}")
+        except Exception:  # noqa: BLE001 - health checks should not fail on unexpected errors
+            logger.error("Cache health check failed")
             health_status["components"]["cache"] = {
                 "status": "unhealthy",
-                "error": str(e)
+                "error": "RAG cache health check failed"
             }
 
         # Check metrics collector
@@ -106,11 +106,11 @@ async def health_check() -> dict[str, Any]:
                 "status": "healthy" if metrics_healthy else "unhealthy",
                 "recent_queries": current_metrics.get("recent_queries", 0)
             }
-        except Exception as e:  # noqa: BLE001 - health checks should not fail on unexpected errors
-            logger.error(f"Metrics health check failed: {e}")
+        except Exception:  # noqa: BLE001 - health checks should not fail on unexpected errors
+            logger.error("Metrics health check failed")
             health_status["components"]["metrics"] = {
                 "status": "unhealthy",
-                "error": str(e)
+                "error": "RAG metrics health check failed"
             }
 
         # Check batch processor
@@ -124,11 +124,11 @@ async def health_check() -> dict[str, Any]:
                 "active_jobs": len(batch.active_jobs),
                 "success_rate": batch_stats.get("job_success_rate", 0)
             }
-        except Exception as e:  # noqa: BLE001 - health checks should not fail on unexpected errors
-            logger.error(f"Batch processor health check failed: {e}")
+        except Exception:  # noqa: BLE001 - health checks should not fail on unexpected errors
+            logger.error("Batch processor health check failed")
             health_status["components"]["batch_processor"] = {
                 "status": "unhealthy",
-                "error": str(e)
+                "error": "RAG batch processor health check failed"
             }
 
         # Overall health determination
@@ -147,8 +147,8 @@ async def health_check() -> dict[str, Any]:
         elif not all_healthy:
             health_status["status"] = "degraded"
 
-    except Exception as e:  # noqa: BLE001 - health checks should not fail on unexpected errors
-        logger.error(f"Health check error: {e}")
+    except Exception:  # noqa: BLE001 - health checks should not fail on unexpected errors
+        logger.error("Health check error")
         return {
             "status": "unhealthy",
             "timestamp": datetime.now().isoformat(),
@@ -187,14 +187,14 @@ async def readiness_check() -> dict[str, Any]:
     except Exception as e:  # noqa: BLE001 - readiness should return 503 on any failure
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Service not ready: {str(e)}"
+            detail="Service not ready"
         ) from e
 
 
 @router.get(
     "/cache/stats",
     summary="Get cache statistics",
-    dependencies=[Depends(require_permissions(SYSTEM_LOGS))],
+    dependencies=[Depends(RequirePermission(SYSTEM_LOGS))],
 )
 async def get_cache_statistics() -> dict[str, Any]:
     """
@@ -233,17 +233,17 @@ async def get_cache_statistics() -> dict[str, Any]:
             }
 
     except Exception as e:  # noqa: BLE001 - surface as HTTP 500 with context
-        logger.error(f"Failed to get cache statistics: {e}")
+        logger.error("Failed to get cache statistics")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to retrieve cache statistics: {str(e)}"
+            detail="Failed to retrieve cache statistics"
         ) from e
 
 
 @router.post(
     "/cache/clear",
     summary="Clear cache",
-    dependencies=[Depends(require_permissions(SYSTEM_LOGS))],
+    dependencies=[Depends(RequirePermission(SYSTEM_LOGS))],
 )
 async def clear_cache() -> dict[str, str]:
     """
@@ -263,17 +263,17 @@ async def clear_cache() -> dict[str, str]:
             "timestamp": datetime.now().isoformat()
         }
     except Exception as e:  # noqa: BLE001 - surface as HTTP 500 with context
-        logger.error(f"Failed to clear cache: {e}")
+        logger.error("Failed to clear cache")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to clear cache: {str(e)}"
+            detail="Failed to clear cache"
         ) from e
 
 
 @router.get(
     "/cache/warm",
     summary="Get cache warming status",
-    dependencies=[Depends(require_permissions(SYSTEM_LOGS))],
+    dependencies=[Depends(RequirePermission(SYSTEM_LOGS))],
 )
 async def get_cache_warming_status() -> dict[str, Any]:
     """Get status of cache warming operations."""
@@ -295,17 +295,17 @@ async def get_cache_warming_status() -> dict[str, Any]:
             }
 
     except Exception as e:  # noqa: BLE001 - surface as HTTP 500 with context
-        logger.error(f"Failed to get warming status: {e}")
+        logger.error("Failed to get warming status")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
+            detail="Failed to get cache warming status"
         ) from e
 
 
 @router.get(
     "/metrics/summary",
     summary="Get metrics summary",
-    dependencies=[Depends(require_permissions(SYSTEM_LOGS))],
+    dependencies=[Depends(RequirePermission(SYSTEM_LOGS))],
 )
 async def get_metrics_summary() -> dict[str, Any]:
     """Get summary of RAG pipeline metrics."""
@@ -332,10 +332,10 @@ async def get_metrics_summary() -> dict[str, Any]:
         }
 
     except Exception as e:  # noqa: BLE001 - surface as HTTP 500 with context
-        logger.error(f"Failed to get metrics summary: {e}")
+        logger.error("Failed to get metrics summary")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
+            detail="Failed to get metrics summary"
         ) from e
     else:
         return summary
@@ -344,7 +344,7 @@ async def get_metrics_summary() -> dict[str, Any]:
 @router.get(
     "/costs/summary",
     summary="Get cost tracking summary",
-    dependencies=[Depends(require_permissions(SYSTEM_LOGS))],
+    dependencies=[Depends(RequirePermission(SYSTEM_LOGS))],
 )
 async def get_cost_summary() -> dict[str, Any]:
     """Get summary of LLM API costs."""
@@ -380,17 +380,17 @@ async def get_cost_summary() -> dict[str, Any]:
         }
 
     except Exception as e:  # noqa: BLE001 - surface as HTTP 500 with context
-        logger.error(f"Failed to get cost summary: {e}")
+        logger.error("Failed to get cost summary")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
+            detail="Failed to get cost summary"
         ) from e
 
 
 @router.get(
     "/batch/jobs",
     summary="Get batch job statuses",
-    dependencies=[Depends(require_permissions(SYSTEM_LOGS))],
+    dependencies=[Depends(RequirePermission(SYSTEM_LOGS))],
 )
 async def get_batch_jobs() -> dict[str, Any]:
     """Get status of all batch processing jobs."""
@@ -419,17 +419,17 @@ async def get_batch_jobs() -> dict[str, Any]:
         }
 
     except Exception as e:  # noqa: BLE001 - surface as HTTP 500 with context
-        logger.error(f"Failed to get batch jobs: {e}")
+        logger.error("Failed to get batch jobs")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
+            detail="Failed to get batch jobs"
         ) from e
 
 
 @router.post(
     "/quality-gate",
     summary="Run quality gate evaluation",
-    dependencies=[Depends(require_permissions(SYSTEM_LOGS))],
+    dependencies=[Depends(RequirePermission(SYSTEM_LOGS))],
 )
 async def quality_gate_endpoint(
     metrics: dict[str, float],
@@ -453,17 +453,17 @@ async def quality_gate_endpoint(
             detail="Quality gating module not available.",
         ) from None
     except Exception as e:
-        logger.error(f"Quality gate evaluation failed: {e}")
+        logger.error("Quality gate evaluation failed")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e),
+            detail="Failed to run quality gate evaluation",
         ) from e
 
 
 @router.post(
     "/baseline/save",
     summary="Save metric baseline",
-    dependencies=[Depends(require_permissions(SYSTEM_LOGS))],
+    dependencies=[Depends(RequirePermission(SYSTEM_LOGS))],
 )
 async def save_baseline_endpoint(
     metrics: dict[str, float],
@@ -496,17 +496,17 @@ async def save_baseline_endpoint(
             detail=str(e),
         ) from e
     except Exception as e:
-        logger.error(f"Baseline save failed: {e}")
+        logger.error("Baseline save failed")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e),
+            detail="Failed to save metric baseline",
         ) from e
 
 
 @router.get(
     "/regression/check",
     summary="Check for metric regression",
-    dependencies=[Depends(require_permissions(SYSTEM_LOGS))],
+    dependencies=[Depends(RequirePermission(SYSTEM_LOGS))],
 )
 async def check_regression_endpoint(
     baseline_id: str = "latest",
@@ -545,17 +545,17 @@ async def check_regression_endpoint(
             detail=str(e),
         ) from e
     except Exception as e:
-        logger.error(f"Regression check failed: {e}")
+        logger.error("Regression check failed")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e),
+            detail="Failed to check regression",
         ) from e
 
 
 @router.post(
     "/regression/check",
     summary="Check for metric regression with current values",
-    dependencies=[Depends(require_permissions(SYSTEM_LOGS))],
+    dependencies=[Depends(RequirePermission(SYSTEM_LOGS))],
 )
 async def check_regression_post_endpoint(
     current_metrics: dict[str, float],
@@ -585,10 +585,10 @@ async def check_regression_post_endpoint(
             detail=str(e),
         ) from e
     except Exception as e:
-        logger.error(f"Regression check failed: {e}")
+        logger.error("Regression check failed")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e),
+            detail="Failed to check regression",
         ) from e
 
 

@@ -22,15 +22,10 @@ except ImportError:  # pragma: no cover - fallback for older environments
 import contextlib
 
 from loguru import logger
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal, get_request_user, RequirePermission, RequireRole, User
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
-    get_auth_principal,
-    require_permissions,
-    require_roles,
-)
 from tldw_Server_API.app.core.AuthNZ.permissions import SYSTEM_MAINTENANCE
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.DB_Management.backends.base import (
     DatabaseError as BackendDatabaseError,
 )
@@ -58,8 +53,8 @@ _job_manager_lock = threading.Lock()
 _ADMIN_CLAIM_PERMISSIONS = frozenset({"*", "system.configure"})
 
 _ADMIN_DEPS = [
-    Depends(require_roles("admin")),
-    Depends(require_permissions(SYSTEM_MAINTENANCE)),
+    Depends(RequireRole("admin")),
+    Depends(RequirePermission(SYSTEM_MAINTENANCE)),
 ]
 
 _AUDIO_JOBS_NONCRITICAL_EXCEPTIONS = (
@@ -468,7 +463,7 @@ async def list_audio_jobs_admin(
     except HTTPException:
         raise
     except _AUDIO_JOBS_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Failed to list jobs: {e}")
+        logger.error("Failed to list jobs")
         raise HTTPException(status_code=500, detail="Failed to list jobs") from e
 
 
@@ -502,7 +497,7 @@ async def summarize_audio_jobs_admin(
     except HTTPException:
         raise
     except _AUDIO_JOBS_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Failed to summarize jobs: {e}")
+        logger.error("Failed to summarize jobs")
         raise HTTPException(status_code=500, detail="Failed to summarize jobs") from e
 
 
@@ -541,7 +536,7 @@ async def summary_by_owner_admin(
     except HTTPException:
         raise
     except _AUDIO_JOBS_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Failed to summarize by owner: {e}")
+        logger.error("Failed to summarize by owner")
         raise HTTPException(status_code=500, detail="Failed to summarize by owner") from e
 
 
@@ -609,7 +604,7 @@ async def owner_processing_summary(
     except HTTPException:
         raise
     except _AUDIO_JOBS_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Failed to get owner processing summary: {e}")
+        logger.error("Failed to get owner processing summary")
         raise HTTPException(status_code=500, detail="Failed to get owner processing summary") from e
 
 
@@ -637,7 +632,7 @@ async def get_user_tier_admin(user_id: int):
     except HTTPException:
         raise
     except _AUDIO_JOBS_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Failed to get user tier: {e}")
+        logger.error("Failed to get user tier")
         raise HTTPException(status_code=500, detail="Failed to get user tier") from e
 
 
@@ -658,5 +653,5 @@ async def set_user_tier_admin(user_id: int, req: SetUserTierRequest):
     except HTTPException:
         raise
     except _AUDIO_JOBS_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Failed to set user tier: {e}")
+        logger.error("Failed to set user tier")
         raise HTTPException(status_code=500, detail="Failed to set user tier") from e

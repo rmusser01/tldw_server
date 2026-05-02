@@ -78,7 +78,10 @@ def unlink_vn_asset_storage_file(*, user_id: int, storage_path: str) -> bool:
         return False
     if not full_path.is_file():
         raise ValueError(VN_ASSET_CONTENT_NOT_FOUND)
-    full_path.unlink()
+    try:
+        full_path.unlink()
+    except FileNotFoundError:
+        return False
     return True
 
 

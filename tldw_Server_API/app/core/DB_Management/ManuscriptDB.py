@@ -49,6 +49,21 @@ _REORDER_ENTITY_TABLES = {
     "scene": "manuscript_scenes",
 }
 
+_MANUSCRIPT_ENTITY_TABLES = {
+    "project": ("manuscript_projects", "project"),
+    "manuscript": ("manuscript_parts", "manuscript"),
+    "part": ("manuscript_parts", "manuscript"),
+    "chapter": ("manuscript_chapters", "chapter"),
+    "scene": ("manuscript_scenes", "scene"),
+}
+
+_MANUSCRIPT_VERSION_TABLES = {
+    "manuscript": ("manuscript_parts", "manuscript"),
+    "part": ("manuscript_parts", "manuscript"),
+    "chapter": ("manuscript_chapters", "chapter"),
+    "scene": ("manuscript_scenes", "scene"),
+}
+
 # Column whitelists for dynamic UPDATE statements — keys are the *caller*
 # names (before any JSON-column mapping performed inside the method).
 _UPDATABLE_PROJECT_COLS = frozenset({
@@ -146,6 +161,7 @@ class ManuscriptDBHelper:
 
     def __init__(self, db: CharactersRAGDB) -> None:
         self.db = db
+        self._ensure_version_schema()
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -156,6 +172,34 @@ class ManuscriptDBHelper:
 
     def _uuid(self) -> str:
         return str(uuid.uuid4())
+
+    def _ensure_version_schema(self) -> None:
+        """Ensure manuscript manual snapshot storage exists."""
+        with self.db.transaction() as conn:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS manuscript_versions (
+                    id TEXT PRIMARY KEY,
+                    entity_type TEXT NOT NULL CHECK(entity_type IN ('manuscript','chapter','scene')),
+                    entity_id TEXT NOT NULL,
+                    project_id TEXT NOT NULL REFERENCES manuscript_projects(id) ON DELETE CASCADE,
+                    version_number INTEGER NOT NULL,
+                    label TEXT,
+                    payload_json TEXT NOT NULL,
+                    created_at DATETIME NOT NULL,
+                    client_id TEXT NOT NULL DEFAULT 'unknown',
+                    UNIQUE(entity_type, entity_id, version_number)
+                )
+                """
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_manuscript_versions_entity "
+                "ON manuscript_versions(entity_type, entity_id, version_number DESC)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_manuscript_versions_project "
+                "ON manuscript_versions(project_id, created_at DESC)"
+            )
 
     @property
     def _client_id(self) -> str:
@@ -178,6 +222,136 @@ class ManuscriptDBHelper:
         except (ValueError, TypeError):
             d["content"] = None
         return d
+
+    @staticmethod
+    def _row_to_dict(row: Any) -> dict[str, Any]:
+        return dict(row)
+
+    def _entity_row_to_dict(self, entity_type: str, row: Any) -> dict[str, Any]:
+        data = dict(row)
+        normalized_type = self._normalize_entity_type(entity_type)
+        if normalized_type == "project":
+            data = self._project_row_to_dict(data)
+        elif normalized_type == "scene":
+            data = self._scene_row_to_dict(data)
+        data["deleted"] = bool(data.get("deleted"))
+        return data
+
+    @staticmethod
+    def _normalize_entity_type(entity_type: str) -> str:
+        return "manuscript" if entity_type == "part" else entity_type
+
+    @classmethod
+    def _validate_entity_type(cls, entity_type: str) -> tuple[str, str]:
+        try:
+            return _MANUSCRIPT_ENTITY_TABLES[entity_type]
+        except KeyError as exc:
+            raise ValueError(f"Unsupported manuscript entity type: {entity_type}") from exc
+
+    @classmethod
+    def _validate_version_entity_type(cls, entity_type: str) -> tuple[str, str]:
+        try:
+            return _MANUSCRIPT_VERSION_TABLES[entity_type]
+        except KeyError as exc:
+            raise ValueError(f"Unsupported manuscript version entity type: {entity_type}") from exc
+
+    def _fetch_entity_row(
+        self,
+        conn: Any,
+        entity_type: str,
+        entity_id: str,
+        *,
+        deleted: bool | None = False,
+    ) -> dict[str, Any]:
+        table, label = self._validate_entity_type(entity_type)
+        if deleted is None:
+            deleted_clause = ""
+            params: tuple[Any, ...] = (entity_id,)
+        else:
+            deleted_clause = " AND deleted = ?"
+            params = (entity_id, 1 if deleted else 0)
+        row = conn.execute(
+            f"SELECT * FROM {table} WHERE id = ?{deleted_clause}",  # nosec B608
+            params,
+        ).fetchone()
+        if row is None:
+            deleted_label = "deleted " if deleted else ""
+            raise InputError(f"{deleted_label}{label} '{entity_id}' not found")
+        return self._entity_row_to_dict(entity_type, row)
+
+    def _version_payload_for(self, entity_type: str, entity_id: str) -> dict[str, Any]:
+        table, label = self._validate_version_entity_type(entity_type)
+        with self.db.transaction() as conn:
+            row = conn.execute(
+                f"SELECT * FROM {table} WHERE id = ? AND deleted = 0",  # nosec B608
+                (entity_id,),
+            ).fetchone()
+            if row is None:
+                raise InputError(f"{label} '{entity_id}' not found")
+            data = self._entity_row_to_dict(entity_type, row)
+
+        normalized_type = self._normalize_entity_type(entity_type)
+        if normalized_type == "scene":
+            return {
+                "title": data["title"],
+                "chapter_id": data["chapter_id"],
+                "project_id": data["project_id"],
+                "sort_order": data["sort_order"],
+                "content_json": data.get("content_json"),
+                "content": data.get("content"),
+                "content_plain": data.get("content_plain") or "",
+                "synopsis": data.get("synopsis"),
+                "word_count": data.get("word_count") or 0,
+                "status": data.get("status") or "draft",
+            }
+        if normalized_type == "chapter":
+            scenes = self.list_scenes(entity_id)
+            return {
+                "title": data["title"],
+                "project_id": data["project_id"],
+                "part_id": data.get("part_id"),
+                "sort_order": data["sort_order"],
+                "synopsis": data.get("synopsis"),
+                "word_count": data.get("word_count") or 0,
+                "status": data.get("status") or "draft",
+                "scene_ids": [scene["id"] for scene in scenes],
+                "rendered_plain": "\n\n".join(scene.get("content_plain") or "" for scene in scenes).strip(),
+            }
+
+        chapters = self.list_chapters(data["project_id"], part_id=entity_id)
+        rendered_parts: list[str] = []
+        scene_ids: list[str] = []
+        for chapter in chapters:
+            scenes = self.list_scenes(chapter["id"])
+            scene_ids.extend(scene["id"] for scene in scenes)
+            rendered_parts.extend(scene.get("content_plain") or "" for scene in scenes)
+        return {
+            "title": data["title"],
+            "project_id": data["project_id"],
+            "sort_order": data["sort_order"],
+            "synopsis": data.get("synopsis"),
+            "word_count": data.get("word_count") or 0,
+            "chapter_ids": [chapter["id"] for chapter in chapters],
+            "scene_ids": scene_ids,
+            "rendered_plain": "\n\n".join(rendered_parts).strip(),
+        }
+
+    def _next_version_number(self, conn: Any, entity_type: str, entity_id: str) -> int:
+        row = conn.execute(
+            """
+            SELECT MAX(version_number) AS max_version
+              FROM manuscript_versions
+             WHERE entity_type = ? AND entity_id = ?
+            """,
+            (self._normalize_entity_type(entity_type), entity_id),
+        ).fetchone()
+        return int(row["max_version"] or 0) + 1
+
+    @staticmethod
+    def _version_row_to_dict(row: Any) -> dict[str, Any]:
+        data = dict(row)
+        data["payload"] = json.loads(data.pop("payload_json"))
+        return data
 
     @staticmethod
     def _project_row_to_dict(row: dict[str, Any]) -> dict[str, Any]:
@@ -971,6 +1145,222 @@ class ManuscriptDBHelper:
                     chapter_id=row["chapter_id"],
                     project_id=row["project_id"],
                 )
+
+    def create_version(self, entity_type: str, entity_id: str, *, label: str | None = None) -> dict[str, Any]:
+        """Create a manual manuscript/chapter/scene snapshot."""
+        normalized_type = self._normalize_entity_type(entity_type)
+        self._validate_version_entity_type(normalized_type)
+        payload = self._version_payload_for(normalized_type, entity_id)
+        version_id = self._uuid()
+        now = self._now()
+        with self.db.transaction() as conn:
+            version_number = self._next_version_number(conn, normalized_type, entity_id)
+            conn.execute(
+                """
+                INSERT INTO manuscript_versions (
+                    id, entity_type, entity_id, project_id, version_number,
+                    label, payload_json, created_at, client_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    version_id,
+                    normalized_type,
+                    entity_id,
+                    payload["project_id"],
+                    version_number,
+                    label,
+                    json.dumps(payload, sort_keys=True),
+                    now,
+                    self._client_id,
+                ),
+            )
+        return self.get_version(normalized_type, entity_id, version_number)
+
+    def list_versions(self, entity_type: str, entity_id: str) -> list[dict[str, Any]]:
+        """List manual snapshots for a manuscript/chapter/scene."""
+        normalized_type = self._normalize_entity_type(entity_type)
+        self._validate_version_entity_type(normalized_type)
+        with self.db.transaction() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM manuscript_versions
+                 WHERE entity_type = ? AND entity_id = ?
+                 ORDER BY version_number DESC
+                """,
+                (normalized_type, entity_id),
+            ).fetchall()
+        return [self._version_row_to_dict(row) for row in rows]
+
+    def get_version(self, entity_type: str, entity_id: str, version_number: int) -> dict[str, Any]:
+        """Fetch a single manual snapshot."""
+        normalized_type = self._normalize_entity_type(entity_type)
+        self._validate_version_entity_type(normalized_type)
+        with self.db.transaction() as conn:
+            row = conn.execute(
+                """
+                SELECT * FROM manuscript_versions
+                 WHERE entity_type = ? AND entity_id = ? AND version_number = ?
+                """,
+                (normalized_type, entity_id, version_number),
+            ).fetchone()
+        if row is None:
+            raise InputError("manuscript version not found")
+        return self._version_row_to_dict(row)
+
+    def restore_version(
+        self,
+        entity_type: str,
+        entity_id: str,
+        version_number: int,
+        *,
+        expected_version: int | None = None,
+    ) -> dict[str, Any]:
+        """Restore a manual snapshot into the active working record."""
+        normalized_type = self._normalize_entity_type(entity_type)
+        version = self.get_version(normalized_type, entity_id, version_number)
+        payload = version["payload"]
+        with self.db.transaction() as conn:
+            current = self._fetch_entity_row(conn, normalized_type, entity_id, deleted=False)
+        resolved_expected = int(current["version"] if expected_version is None else expected_version)
+
+        if normalized_type == "scene":
+            if payload.get("chapter_id") != current.get("chapter_id"):
+                raise ValueError("cannot restore scene version across chapters")
+            updates = {
+                "title": payload["title"],
+                "sort_order": payload["sort_order"],
+                "content_json": payload.get("content_json"),
+                "content_plain": payload.get("content_plain") or "",
+                "synopsis": payload.get("synopsis"),
+                "status": payload.get("status") or "draft",
+            }
+            self.update_scene(entity_id, updates, resolved_expected)
+            restored = self.get_scene(entity_id)
+            if restored is None:
+                raise InputError(f"scene '{entity_id}' not found after restore")
+            return restored
+
+        if normalized_type == "chapter":
+            updates = {
+                "title": payload["title"],
+                "part_id": payload.get("part_id"),
+                "sort_order": payload["sort_order"],
+                "synopsis": payload.get("synopsis"),
+                "status": payload.get("status") or "draft",
+            }
+            self.update_chapter(entity_id, updates, resolved_expected)
+            restored = self.get_chapter(entity_id)
+            if restored is None:
+                raise InputError(f"chapter '{entity_id}' not found after restore")
+            return restored
+
+        updates = {
+            "title": payload["title"],
+            "sort_order": payload["sort_order"],
+            "synopsis": payload.get("synopsis"),
+        }
+        self.update_part(entity_id, updates, resolved_expected)
+        restored = self.get_part(entity_id)
+        if restored is None:
+            raise InputError(f"manuscript '{entity_id}' not found after restore")
+        return restored
+
+    def list_trash(self, *, entity_type: str | None = None) -> list[dict[str, Any]]:
+        """List soft-deleted project/manuscript/chapter/scene records."""
+        entities = (
+            [(self._normalize_entity_type(entity_type), *self._validate_entity_type(entity_type))]
+            if entity_type is not None
+            else [
+                (kind, *table_info)
+                for kind, table_info in (
+                    ("project", _MANUSCRIPT_ENTITY_TABLES["project"]),
+                    ("manuscript", _MANUSCRIPT_ENTITY_TABLES["manuscript"]),
+                    ("chapter", _MANUSCRIPT_ENTITY_TABLES["chapter"]),
+                    ("scene", _MANUSCRIPT_ENTITY_TABLES["scene"]),
+                )
+            ]
+        )
+        records: list[dict[str, Any]] = []
+        with self.db.transaction() as conn:
+            for kind, table, _label in entities:
+                rows = conn.execute(
+                    f"SELECT * FROM {table} WHERE deleted = 1 ORDER BY last_modified DESC",  # nosec B608
+                ).fetchall()
+                for row in rows:
+                    record = self._entity_row_to_dict(kind, row)
+                    record["entity_type"] = kind
+                    records.append(record)
+        return records
+
+    def restore_trash(
+        self,
+        entity_type: str,
+        entity_id: str,
+        *,
+        expected_version: int | None = None,
+    ) -> dict[str, Any]:
+        """Restore a soft-deleted project/manuscript/chapter/scene record."""
+        normalized_type = self._normalize_entity_type(entity_type)
+        table, label = self._validate_entity_type(normalized_type)
+        now = self._now()
+        with self.db.transaction() as conn:
+            row = self._fetch_entity_row(conn, normalized_type, entity_id, deleted=True)
+            if expected_version is not None and int(row["version"]) != int(expected_version):
+                raise ConflictError(
+                    f"{label.title()} {entity_id!r} restore failed (version conflict).",
+                    entity=table,
+                    entity_id=entity_id,
+                )
+            try:
+                if normalized_type in {"manuscript", "part"}:
+                    self._fetch_entity_row(conn, "project", row["project_id"], deleted=False)
+                elif normalized_type == "chapter":
+                    self._fetch_entity_row(conn, "project", row["project_id"], deleted=False)
+                    if row.get("part_id"):
+                        parent = self._fetch_entity_row(conn, "part", row["part_id"], deleted=False)
+                        if parent["project_id"] != row["project_id"]:
+                            raise ConflictError(
+                                f"{label.title()} {entity_id!r} restore failed (parent project mismatch).",
+                                entity=table,
+                                entity_id=entity_id,
+                            )
+                elif normalized_type == "scene":
+                    parent = self._fetch_entity_row(conn, "chapter", row["chapter_id"], deleted=False)
+                    if parent["project_id"] != row["project_id"]:
+                        raise ConflictError(
+                            f"{label.title()} {entity_id!r} restore failed (parent project mismatch).",
+                            entity=table,
+                            entity_id=entity_id,
+                        )
+            except InputError as exc:
+                raise ConflictError(
+                    f"{label.title()} {entity_id!r} restore failed (parent missing or deleted).",
+                    entity=table,
+                    entity_id=entity_id,
+                ) from exc
+            next_version = int(row["version"]) + 1
+            cur = conn.execute(
+                f"UPDATE {table} "  # nosec B608
+                "SET deleted = 0, last_modified = ?, version = ?, client_id = ? "
+                "WHERE id = ? AND deleted = 1",
+                (now, next_version, self._client_id, entity_id),
+            )
+            if cur.rowcount == 0:
+                raise ConflictError(
+                    f"{label.title()} {entity_id!r} restore failed (not found).",
+                    entity=table,
+                    entity_id=entity_id,
+                )
+            if normalized_type == "scene":
+                self._propagate_word_counts(conn, row["chapter_id"], row["project_id"])
+                self._mark_scene_family_analyses_stale_in_txn(
+                    conn,
+                    scene_id=entity_id,
+                    chapter_id=row["chapter_id"],
+                    project_id=row["project_id"],
+                )
+            restored = self._fetch_entity_row(conn, normalized_type, entity_id, deleted=False)
+        return restored
 
     def get_all_scene_texts(self, project_id: str) -> list[str]:
         """Get all scene plain texts for a project in narrative order (single query)."""

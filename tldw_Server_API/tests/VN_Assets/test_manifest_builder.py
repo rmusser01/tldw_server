@@ -178,6 +178,30 @@ def test_manifest_includes_background_depth_linkage_and_cgs() -> None:
     assert manifest["assets"]["cgs"][0]["item_id"] == 4
 
 
+def test_manifest_omits_depth_companion_when_parent_background_is_filtered_out() -> None:
+    draft_background = _item(2, "draft", slot_id=20)
+    depth = VNAssetItem(
+        id=3,
+        pack_id=1,
+        slot_id=21,
+        variant_index=0,
+        review_status="approved",
+        generated_file_id=1003,
+        mime_type="image/png",
+        depth_kind="prompted",
+        parent_item_id=2,
+    )
+
+    manifest = build_manifest(
+        pack=_pack(),
+        slots=[_background_slot(), _depth_slot()],
+        items=[draft_background, depth],
+    )
+
+    assert manifest["assets"]["backgrounds"] == []
+    assert manifest["assets"]["depth_companions"] == []
+
+
 def test_manifest_reports_unavailable_depth_when_requested_without_approved_item() -> None:
     background = _item(2, "approved", slot_id=20)
 

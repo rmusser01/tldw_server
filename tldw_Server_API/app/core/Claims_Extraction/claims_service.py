@@ -20,6 +20,7 @@ from uuid import uuid4
 from fastapi import HTTPException, status
 from loguru import logger
 
+from tldw_Server_API.app.api.v1.utils.pagination import build_offset_pagination_meta
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool, get_db_pool
 from tldw_Server_API.app.core.AuthNZ.permissions import (
     CLAIMS_ADMIN,
@@ -2220,7 +2221,7 @@ def update_claims_settings(
         try:
             setup_manager.update_config({"Claims": updates})
         except _CLAIMS_NONCRITICAL_EXCEPTIONS as exc:
-            raise HTTPException(status_code=500, detail=str(exc)) from exc
+            raise HTTPException(status_code=500, detail="Failed to update claims settings") from exc
 
     return _claims_settings_snapshot()
 
@@ -2590,7 +2591,7 @@ def claims_rebuild_status(*, rebuild_service: Any = None) -> dict[str, Any]:
     except HTTPException:
         raise
     except _CLAIMS_NONCRITICAL_EXCEPTIONS as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        raise HTTPException(status_code=500, detail="Failed to get claims rebuild status") from exc
 
 
 def claims_rebuild_health(principal: AuthPrincipal, *, summary: bool = False) -> dict[str, Any]:
@@ -3474,6 +3475,12 @@ def list_claims_analytics_exports(
         "total": int(total),
         "limit": int(limit),
         "offset": int(offset),
+        "pagination": build_offset_pagination_meta(
+            total=int(total),
+            limit=int(limit),
+            offset=int(offset),
+            count=len(exports),
+        ),
     }
 
 

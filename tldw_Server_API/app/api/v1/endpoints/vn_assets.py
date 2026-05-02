@@ -35,6 +35,7 @@ from tldw_Server_API.app.api.v1.schemas.vn_asset_schemas import (
     VNAssetSlotCreate,
     VNAssetSlotResponse,
     VNAssetSlotUpdate,
+    VNAssetStarterMatricesResponse,
     VNPackExportRequest,
     VNPackExportResponse,
     VNPackImportCommitRequest,
@@ -54,6 +55,7 @@ from tldw_Server_API.app.core.VN_Assets.jobs import (
     create_pack_import_commit_job,
     create_pack_import_preview_job,
 )
+from tldw_Server_API.app.core.VN_Assets.constants import DEFAULT_VN_ASSET_UPLOAD_MAX_BYTES
 from tldw_Server_API.app.core.VN_Assets.matrix import expand_starter_matrix
 from tldw_Server_API.app.core.VN_Assets.portability.archive import DEFAULT_MAX_ARCHIVE_SIZE_BYTES
 from tldw_Server_API.app.core.VN_Assets.portability.constants import VNPACK_EXTENSION
@@ -73,7 +75,6 @@ CONFLICT_ERROR_CODES = {
 }
 TERMINAL_JOB_STATUSES = {"completed", "failed", "cancelled", "quarantined"}
 UPLOAD_CHUNK_SIZE_BYTES = 1024 * 1024
-DEFAULT_MAX_IMAGE_UPLOAD_SIZE_BYTES = 50 * 1024 * 1024
 
 
 class VNAssetMatrixApplyRequest(BaseModel):
@@ -127,6 +128,17 @@ def _current_user_id(current_user: User) -> int:
             detail="invalid_user_id",
         )
     return user_id
+
+
+def _get_vn_asset_upload_max_bytes() -> int:
+    raw_value = os.getenv("VN_ASSET_UPLOAD_MAX_BYTES")
+    if raw_value is None:
+        return DEFAULT_VN_ASSET_UPLOAD_MAX_BYTES
+    try:
+        max_bytes = int(raw_value)
+    except ValueError:
+        return DEFAULT_VN_ASSET_UPLOAD_MAX_BYTES
+    return max_bytes if max_bytes > 0 else DEFAULT_VN_ASSET_UPLOAD_MAX_BYTES
 
 
 def _json_field(row: dict[str, Any], key: str, default: Any) -> Any:
@@ -1056,11 +1068,11 @@ async def cleanup_pack_import_commit(
     )
 
 
-@router.get("/starter-matrices")
-async def list_starter_matrices() -> dict[str, Any]:
+@router.get("/starter-matrices", response_model=VNAssetStarterMatricesResponse)
+async def list_starter_matrices() -> VNAssetStarterMatricesResponse:
     slots = expand_starter_matrix(primary_character_id=1, variant_count=1)
-    return {
-        "matrices": [
+    return VNAssetStarterMatricesResponse(
+        matrices=[
             {
                 "key": "starter",
                 "title": "Starter",
@@ -1069,7 +1081,7 @@ async def list_starter_matrices() -> dict[str, Any]:
                 "asset_types": sorted({slot.asset_type for slot in slots}),
             }
         ]
-    }
+    )
 
 
 @router.post("/packs/{pack_id}/matrix/apply", response_model=list[VNAssetSlotResponse])
@@ -1230,7 +1242,7 @@ async def upload_item(
         image_format_from_mime_type(mime_type)
         image_bytes = await _read_upload_file_with_limit(
             file,
-            max_bytes=DEFAULT_MAX_IMAGE_UPLOAD_SIZE_BYTES,
+            max_bytes=_get_vn_asset_upload_max_bytes(),
             empty_detail="vn_asset_upload_empty",
             too_large_detail="vn_asset_upload_too_large",
         )

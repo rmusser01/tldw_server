@@ -34,6 +34,25 @@ class _FakeUserDB:
         return self._has_role_result
 
 
+class _FailingUserDB:
+    def has_permission(self, user_id, permission: str) -> bool:
+        raise RuntimeError("permission database failed at /private/permissions.db")
+
+    def has_role(self, user_id, role: str) -> bool:
+        raise RuntimeError("role database failed at /private/roles.db")
+
+
+class _LoggerStub:
+    def __init__(self) -> None:
+        self.errors: list[str] = []
+
+    def error(self, message: str, *args, **kwargs) -> None:
+        self.errors.append(message)
+
+    def debug(self, message: str, *args, **kwargs) -> None:
+        pass
+
+
 def _make_user(roles=None, permissions=None, is_admin: bool = False) -> User:
     return User(
         id=1,
@@ -61,7 +80,7 @@ def _make_principal(
         user_id=user_id,
         api_key_id=api_key_id,
         subject=subject,
-        token_type="access",
+        token_type="access",  # nosec B106
         jti=None,
         roles=list(roles or []),
         permissions=list(permissions or []),
@@ -288,6 +307,42 @@ def test_check_role_without_roles_falls_back_to_db(monkeypatch):
 
     assert perms_mod.check_role(user, "admin") is True
     assert fake_db.calls == [("role", 99, "admin")]
+
+
+@pytest.mark.parametrize("redact", [False, True])
+def test_check_permission_db_failure_log_is_sanitized(monkeypatch, redact):
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(perms_mod, "get_user_database", lambda: _FailingUserDB())
+    monkeypatch.setattr(perms_mod, "get_settings", lambda: SimpleNamespace(PII_REDACT_LOGS=redact))
+    monkeypatch.setattr(perms_mod, "logger", logger_stub)
+    monkeypatch.setattr(perms_mod, "_PERMISSION_DB_FALLBACK_LOGGED", True)
+
+    user = SimpleNamespace(id=123, username="legacy-user", is_active=True)
+
+    assert perms_mod.check_permission(user, "media.secret") is False
+    assert logger_stub.errors == ["Error checking permission"]
+    assert "permission database failed" not in str(logger_stub.errors)
+    assert "/private/permissions.db" not in str(logger_stub.errors)
+    assert "media.secret" not in str(logger_stub.errors)
+    assert "123" not in str(logger_stub.errors)
+
+
+@pytest.mark.parametrize("redact", [False, True])
+def test_check_role_db_failure_log_is_sanitized(monkeypatch, redact):
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(perms_mod, "get_user_database", lambda: _FailingUserDB())
+    monkeypatch.setattr(perms_mod, "get_settings", lambda: SimpleNamespace(PII_REDACT_LOGS=redact))
+    monkeypatch.setattr(perms_mod, "logger", logger_stub)
+    monkeypatch.setattr(perms_mod, "_ROLE_DB_FALLBACK_LOGGED", True)
+
+    user = SimpleNamespace(id=456, username="legacy-user", is_active=True)
+
+    assert perms_mod.check_role(user, "admin.secret") is False
+    assert logger_stub.errors == ["Error checking role"]
+    assert "role database failed" not in str(logger_stub.errors)
+    assert "/private/roles.db" not in str(logger_stub.errors)
+    assert "admin.secret" not in str(logger_stub.errors)
+    assert "456" not in str(logger_stub.errors)
 
 
 @pytest.mark.asyncio

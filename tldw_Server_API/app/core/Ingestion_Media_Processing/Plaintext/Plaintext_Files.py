@@ -604,7 +604,7 @@ def process_document_content( # Renamed from _process_single_document for clarit
     except _PLAINTEXT_NONCRITICAL_EXCEPTIONS as e:
         logging.exception(f"Unexpected error processing document {doc_path}: {str(e)}")
         result["status"] = "Error"
-        result["error"] = f"Unexpected processing error: {str(e)}"
+        result["error"] = "Document processing failed"
         log_counter("document_processing_error", labels={"file_path": str(doc_path), "error": type(e).__name__})
 
     # Ensure warnings list is None if empty for cleaner JSON output

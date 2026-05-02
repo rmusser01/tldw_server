@@ -207,8 +207,9 @@ async def process_documents(
                 if os.path.exists(fp):
                     os.remove(fp)
                     update_progress(f"Removed temp file: {fp}")
-            except _DOC_PROCESSING_NONCRITICAL_EXCEPTIONS as e:
-                update_progress(f"Failed to remove {fp}: {str(e)}")
+            except _DOC_PROCESSING_NONCRITICAL_EXCEPTIONS:
+                logging.debug("Failed to remove temp file")
+                update_progress("Failed to remove temp file")
 
     def download_document_file(url: str, use_cookies: bool, cookies: Optional[str]) -> str:
         """
@@ -421,8 +422,9 @@ async def process_documents(
                 # Combine them in a single pass
                 combined_summary = "\n\n".join(chunk_summaries)
                 return combined_summary
-        except _DOC_PROCESSING_NONCRITICAL_EXCEPTIONS as e:
-            update_progress(f"Summarization failed: {str(e)}")
+        except _DOC_PROCESSING_NONCRITICAL_EXCEPTIONS:
+            logging.debug("Summarization failed")
+            update_progress("Summarization failed")
             return "Summary generation failed"
 
     # Process doc URLs
@@ -471,7 +473,8 @@ async def process_documents(
             except _DOC_PROCESSING_NONCRITICAL_EXCEPTIONS as exc:
                 failed_count += 1
                 item_result["error"] = str(exc)
-                update_progress(f"Failed to process URL {i}: {str(exc)}")
+                logging.debug(f"Failed to process URL {i}")
+                update_progress(f"Failed to process URL {i}")
 
             results.append(item_result)
 
@@ -519,7 +522,8 @@ async def process_documents(
             except _DOC_PROCESSING_NONCRITICAL_EXCEPTIONS as exc:
                 failed_count += 1
                 item_result["error"] = str(exc)
-                update_progress(f"Failed to process file {i} ({file_path}): {str(exc)}")
+                logging.debug(f"Failed to process file {i} ({file_path})")
+                update_progress(f"Failed to process file {i} ({file_path})")
 
             results.append(item_result)
 

@@ -51,7 +51,7 @@ def _record_backend_discovery_error(
     backend_name: str,
     exc: Exception,
 ) -> None:
-    logging.error(f"OCR backend discovery failed for {backend_name}: {exc}", exc_info=True)
+    logging.error("OCR backend discovery failed for {}", backend_name)
     out.setdefault(backend_name, {})
     out[backend_name]["error"] = str(exc)
 
@@ -254,5 +254,6 @@ def preload_points_transformers() -> dict[str, Any]:
         )
         _load_transformers()
         return {"status": "ok", "mode": "transformers"}
-    except _OCR_NONCRITICAL_EXCEPTIONS as e:
-        return {"status": "error", "error": str(e)}
+    except _OCR_NONCRITICAL_EXCEPTIONS:
+        logging.error("POINTS transformers preload failed")
+        return {"status": "error", "error": "POINTS OCR preload failed"}

@@ -29,7 +29,7 @@ from tldw_Server_API.app.api.v1.schemas.kanban_schemas import (
     WorkflowTransitionsListResponse,
     WorkflowTransitionRequest,
 )
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, User
 from tldw_Server_API.app.core.DB_Management.Kanban_DB import (
     ConflictError,
     InputError,
@@ -102,7 +102,7 @@ def _workflow_http_error(
         log.exception("Workflow request failed with Kanban DB error")
         return HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"code": "kanban_db_error", "message": str(exc)},
+            detail={"code": "kanban_db_error", "message": "Workflow database error"},
         )
 
     log.exception("Workflow request failed with unexpected error")

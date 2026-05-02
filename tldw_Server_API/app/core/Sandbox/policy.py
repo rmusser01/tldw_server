@@ -62,6 +62,8 @@ class SandboxPolicyConfig:
     artifact_ttl_hours: int = 24
     max_upload_mb: int = 64
     max_log_bytes: int = 10 * 1024 * 1024
+    max_artifact_file_bytes: int = 64 * 1024 * 1024
+    max_artifact_total_bytes: int = 256 * 1024 * 1024
     pids_limit: int = 256
     max_cpu: float = 4.0
     max_mem_mb: int = 8192
@@ -87,6 +89,9 @@ class SandboxPolicyConfig:
                 return int(getattr(app_settings, key))  # type: ignore[arg-type]
             except _POLICY_NONCRITICAL_EXCEPTIONS:
                 return dv
+        def _get_positive_int(key: str, dv: int) -> int:
+            value = _get_int(key, dv)
+            return value if value > 0 else dv
         def _get_float(key: str, dv: float) -> float:
             try:
                 return float(getattr(app_settings, key))  # type: ignore[arg-type]
@@ -118,6 +123,8 @@ class SandboxPolicyConfig:
             artifact_ttl_hours=_get_int("SANDBOX_ARTIFACT_TTL_HOURS", 24),
             max_upload_mb=_get_int("SANDBOX_MAX_UPLOAD_MB", 64),
             max_log_bytes=_get_int("SANDBOX_MAX_LOG_BYTES", 10 * 1024 * 1024),
+            max_artifact_file_bytes=_get_positive_int("SANDBOX_MAX_ARTIFACT_FILE_BYTES", cls.max_artifact_file_bytes),
+            max_artifact_total_bytes=_get_positive_int("SANDBOX_MAX_ARTIFACT_TOTAL_BYTES", cls.max_artifact_total_bytes),
             pids_limit=_get_int("SANDBOX_PIDS_LIMIT", 256),
             max_cpu=_get_float("SANDBOX_MAX_CPU", 4.0),
             max_mem_mb=_get_int("SANDBOX_MAX_MEM_MB", 8192),
@@ -405,6 +412,8 @@ def _canonical_policy_dict(cfg: SandboxPolicyConfig) -> dict:
         "artifact_ttl_hours": int(cfg.artifact_ttl_hours),
         "max_upload_mb": int(cfg.max_upload_mb),
         "max_log_bytes": int(cfg.max_log_bytes),
+        "max_artifact_file_bytes": int(cfg.max_artifact_file_bytes),
+        "max_artifact_total_bytes": int(cfg.max_artifact_total_bytes),
         "pids_limit": int(cfg.pids_limit),
         "max_cpu": float(cfg.max_cpu),
         "max_mem_mb": int(cfg.max_mem_mb),

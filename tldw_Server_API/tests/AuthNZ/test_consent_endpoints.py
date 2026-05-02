@@ -14,6 +14,7 @@ import os
 
 import pytest
 
+from tldw_Server_API.app.api.v1.endpoints import consent as consent_endpoint
 from tldw_Server_API.app.api.v1.endpoints.consent import (
     _get_consent_db_path,
     _get_consent_manager,
@@ -25,6 +26,51 @@ from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.tests.helpers.app_main_state import reload_app_main
 
 from fastapi import HTTPException
+
+
+_CONSENT_SENSITIVE_MARKERS = (
+    "consent backend leaked",
+    "local-consent-db-path",
+    "purpose-secret",
+    "42",
+)
+
+
+class _LoggerStub:
+    def __init__(self):
+        self.error_calls: list[tuple[str, tuple[object, ...], dict[str, object]]] = []
+
+    def error(self, message: str, *args: object, **kwargs: object) -> None:
+        self.error_calls.append((message, args, kwargs))
+
+
+class _ExplodingConsentManager:
+    def get_user_consents(self, user_id: int):
+        raise RuntimeError("consent backend leaked local-consent-db-path 42")
+
+    def grant_consent(
+        self,
+        user_id: int,
+        purpose: str,
+        *,
+        ip_address: str | None = None,
+        user_agent: str | None = None,
+    ):
+        raise RuntimeError("consent backend leaked local-consent-db-path purpose-secret 42")
+
+    def withdraw_consent(self, user_id: int, purpose: str):
+        raise RuntimeError("consent backend leaked local-consent-db-path purpose-secret 42")
+
+
+def _assert_sanitized_error_log(logger_stub: _LoggerStub, expected_message: str) -> None:
+    assert len(logger_stub.error_calls) == 1
+    message, args, kwargs = logger_stub.error_calls[0]
+    assert message == expected_message
+    assert args == ()
+    assert kwargs == {}
+    rendered = " ".join([message, *(str(arg) for arg in args)])
+    for marker in _CONSENT_SENSITIVE_MARKERS:
+        assert marker not in rendered
 
 
 @pytest.fixture()
@@ -53,9 +99,10 @@ class TestResolveUserId:
 
 
 class TestGetConsentDbPath:
-    def test_env_var_used(self, monkeypatch):
-        monkeypatch.setenv("CONSENT_DB_PATH", "/tmp/custom_consent.db")
-        assert _get_consent_db_path() == "/tmp/custom_consent.db"
+    def test_env_var_used(self, monkeypatch, tmp_path):
+        db_path = str(tmp_path / "custom_consent.db")
+        monkeypatch.setenv("CONSENT_DB_PATH", db_path)
+        assert _get_consent_db_path() == db_path
 
     def test_fallback_path(self, monkeypatch):
         monkeypatch.delenv("CONSENT_DB_PATH", raising=False)
@@ -183,6 +230,70 @@ class TestConsentEndpointAsync:
         with pytest.raises(HTTPException) as exc_info:
             await withdraw_consent(purpose="nonexistent", principal=principal)
         assert exc_info.value.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_get_preferences_sanitizes_backend_failure_log(self, monkeypatch, principal):
+        logger_stub = _LoggerStub()
+        monkeypatch.setattr(consent_endpoint, "logger", logger_stub)
+        monkeypatch.setattr(
+            consent_endpoint,
+            "_get_consent_manager",
+            lambda: _ExplodingConsentManager(),
+        )
+
+        with pytest.raises(HTTPException) as exc_info:
+            await consent_endpoint.get_consent_preferences(principal=principal)
+
+        assert exc_info.value.status_code == 500
+        assert exc_info.value.detail == "Failed to retrieve consent preferences."
+        _assert_sanitized_error_log(logger_stub, "Failed to get consent preferences")
+
+    @pytest.mark.asyncio
+    async def test_grant_consent_sanitizes_backend_failure_log(self, monkeypatch, principal):
+        from unittest.mock import MagicMock
+
+        logger_stub = _LoggerStub()
+        monkeypatch.setattr(consent_endpoint, "logger", logger_stub)
+        monkeypatch.setattr(
+            consent_endpoint,
+            "_get_consent_manager",
+            lambda: _ExplodingConsentManager(),
+        )
+        mock_request = MagicMock()
+        mock_request.client = MagicMock()
+        mock_request.client.host = "127.0.0.1"
+        mock_request.headers = {"user-agent": "TestBot/1.0"}
+
+        with pytest.raises(HTTPException) as exc_info:
+            await consent_endpoint.grant_consent(
+                purpose="purpose-secret",
+                request=mock_request,
+                principal=principal,
+            )
+
+        assert exc_info.value.status_code == 500
+        assert exc_info.value.detail == "Failed to record consent."
+        _assert_sanitized_error_log(logger_stub, "Failed to grant consent")
+
+    @pytest.mark.asyncio
+    async def test_withdraw_consent_sanitizes_backend_failure_log(self, monkeypatch, principal):
+        logger_stub = _LoggerStub()
+        monkeypatch.setattr(consent_endpoint, "logger", logger_stub)
+        monkeypatch.setattr(
+            consent_endpoint,
+            "_get_consent_manager",
+            lambda: _ExplodingConsentManager(),
+        )
+
+        with pytest.raises(HTTPException) as exc_info:
+            await consent_endpoint.withdraw_consent(
+                purpose="purpose-secret",
+                principal=principal,
+            )
+
+        assert exc_info.value.status_code == 500
+        assert exc_info.value.detail == "Failed to withdraw consent."
+        _assert_sanitized_error_log(logger_stub, "Failed to withdraw consent")
 
 
 class TestConsentRouterWiring:

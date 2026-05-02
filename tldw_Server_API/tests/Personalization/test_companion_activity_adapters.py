@@ -6,10 +6,12 @@ import pytest
 
 from tldw_Server_API.app.core.DB_Management.Personalization_DB import PersonalizationDB
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+from tldw_Server_API.app.core.Personalization import companion_activity as companion_activity_module
 from tldw_Server_API.app.core.Personalization.companion_activity import (
     build_note_bulk_import_activity,
     build_watchlist_source_bulk_import_activity,
     record_companion_activity,
+    record_companion_activity_events_bulk,
     record_note_created,
     record_note_deleted,
     record_note_restored,
@@ -29,6 +31,15 @@ from tldw_Server_API.app.core.config import settings
 
 
 pytestmark = pytest.mark.unit
+
+
+def _capture_companion_activity_logs() -> tuple[list[str], int]:
+    messages: list[str] = []
+    sink_id = companion_activity_module.logger.add(
+        lambda message: messages.append(str(message.record.get("message") or "")),
+        level="DEBUG",
+    )
+    return messages, sink_id
 
 
 @pytest.fixture()
@@ -260,6 +271,140 @@ def test_insert_companion_activity_events_bulk_keeps_unique_rows_when_conflict_a
     assert total == 2
     source_ids = {row["source_id"] for row in rows}
     assert source_ids == {"n1", "n2"}
+
+
+def test_record_companion_activity_capture_skip_log_omits_exception_text(monkeypatch):
+    messages, sink_id = _capture_companion_activity_logs()
+    monkeypatch.setattr(companion_activity_module, "is_personalization_enabled", lambda: True)
+    monkeypatch.setattr(
+        companion_activity_module,
+        "_open_db_for_user",
+        lambda user_id: (_ for _ in ()).throw(
+            RuntimeError("companion backend exploded /private/companion.db")
+        ),
+    )
+
+    try:
+        result = record_companion_activity(
+            user_id="77-capture-sanitizer",
+            event_type="reading_item_saved",
+            source_type="reading_item",
+            source_id="123",
+            surface="api.reading",
+            dedupe_key="reading.save:123",
+        )
+    finally:
+        companion_activity_module.logger.remove(sink_id)
+
+    assert result is None
+    log_text = "\n".join(messages)
+    assert "companion activity capture skipped" in log_text
+    assert "companion backend exploded" not in log_text
+    assert "/private/companion.db" not in log_text
+
+
+def test_record_companion_activity_insert_skip_log_omits_exception_text(monkeypatch):
+    class _ExplodingInsertDB:
+        def get_or_create_profile(self, user_id: str) -> dict[str, int]:
+            return {"enabled": 1}
+
+        def insert_companion_activity_event(self, **kwargs: Any) -> str:
+            raise sqlite3.IntegrityError("database disk image is malformed /private/companion.db")
+
+    messages, sink_id = _capture_companion_activity_logs()
+    monkeypatch.setattr(companion_activity_module, "is_personalization_enabled", lambda: True)
+    monkeypatch.setattr(
+        companion_activity_module,
+        "_open_db_for_user",
+        lambda user_id: (_ExplodingInsertDB(), str(user_id)),
+    )
+
+    try:
+        result = record_companion_activity(
+            user_id="77-insert-sanitizer",
+            event_type="reading_item_saved",
+            source_type="reading_item",
+            source_id="123",
+            surface="api.reading",
+            dedupe_key="reading.save:123",
+        )
+    finally:
+        companion_activity_module.logger.remove(sink_id)
+
+    assert result is None
+    log_text = "\n".join(messages)
+    assert "companion activity insert skipped" in log_text
+    assert "database disk image is malformed" not in log_text
+    assert "/private/companion.db" not in log_text
+
+
+def test_record_companion_activity_bulk_capture_skip_log_omits_exception_text(monkeypatch):
+    messages, sink_id = _capture_companion_activity_logs()
+    monkeypatch.setattr(companion_activity_module, "is_personalization_enabled", lambda: True)
+    monkeypatch.setattr(
+        companion_activity_module,
+        "_open_db_for_user",
+        lambda user_id: (_ for _ in ()).throw(
+            RuntimeError("companion backend exploded /private/companion.db")
+        ),
+    )
+
+    try:
+        result = record_companion_activity_events_bulk(
+            user_id="77-bulk-sanitizer",
+            events=[
+                {
+                    "event_type": "note_created",
+                    "source_type": "note",
+                    "source_id": "n1",
+                    "surface": "api.notes.import",
+                    "dedupe_key": "notes.create:n1",
+                }
+            ],
+        )
+    finally:
+        companion_activity_module.logger.remove(sink_id)
+
+    assert result == []
+    log_text = "\n".join(messages)
+    assert "companion activity bulk capture skipped" in log_text
+    assert "companion backend exploded" not in log_text
+    assert "/private/companion.db" not in log_text
+
+
+def test_watchlist_item_tags_lookup_skip_log_omits_exception_text():
+    class _ItemWithExplodingTags:
+        def tags(self) -> list[str]:
+            raise RuntimeError("watchlist tags exploded /private/watchlist.json")
+
+    messages, sink_id = _capture_companion_activity_logs()
+    try:
+        tags = companion_activity_module._watchlist_item_tags(_ItemWithExplodingTags())
+    finally:
+        companion_activity_module.logger.remove(sink_id)
+
+    assert tags == []
+    log_text = "\n".join(messages)
+    assert "watchlist item tags() lookup skipped" in log_text
+    assert "watchlist tags exploded" not in log_text
+    assert "/private/watchlist.json" not in log_text
+
+
+def test_watchlist_item_tags_json_parse_skip_log_omits_parse_error_text():
+    class _ItemWithMalformedTagsJson:
+        tags_json = '["security", "/private/watchlist.json",'
+
+    messages, sink_id = _capture_companion_activity_logs()
+    try:
+        tags = companion_activity_module._watchlist_item_tags(_ItemWithMalformedTagsJson())
+    finally:
+        companion_activity_module.logger.remove(sink_id)
+
+    assert tags == []
+    log_text = "\n".join(messages)
+    assert "watchlist item tags_json parse skipped" in log_text
+    assert "Expecting value" not in log_text
+    assert "/private/watchlist.json" not in log_text
 
 
 def test_build_note_import_created_activity_uses_import_surface_and_route():

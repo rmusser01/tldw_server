@@ -53,8 +53,8 @@ class UsageEventLogger:
         try:
             evt = UsageEvent(user_id=self.user_id, type=event_type, resource_id=resource_id, tags=tags, metadata=metadata)
             return self.db.insert_usage_event(evt)
-        except Exception as e:
-            logger.debug(f"UsageEventLogger failed (non-fatal): {e}")
+        except Exception:
+            logger.debug("UsageEventLogger failed (non-fatal)")
             return None
 
 

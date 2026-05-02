@@ -104,3 +104,36 @@ def test_create_pack_writes_minimum_row_and_json_defaults(chacha_db: CharactersR
     assert json.loads(row["source_world_book_ids_json"]) == []
     assert row["deleted"] == 0
     assert row["version"] == 1
+
+
+def test_matrix_slot_creation_supports_multi_hop_dependencies(chacha_db: CharactersRAGDB) -> None:
+    character_id = chacha_db.add_character_card({"name": "VN Primary"})
+    repo = VNAssetPacksRepository.initialized(chacha_db)
+    pack = repo.create_pack(owner_user_id=42, primary_character_id=character_id, title="Starter Pack")
+
+    slots = repo.create_slots_for_matrix(
+        pack_id=pack["id"],
+        slot_specs=[
+            {
+                "asset_type": "background",
+                "slot_key": "background.interior",
+                "variant_count": 1,
+            },
+            {
+                "asset_type": "depth_companion",
+                "slot_key": "depth.interior",
+                "variant_count": 0,
+                "depends_on_slot_key": "background.interior",
+            },
+            {
+                "asset_type": "trim_mask",
+                "slot_key": "trim.depth.interior",
+                "variant_count": 0,
+                "depends_on_slot_key": "depth.interior",
+            },
+        ],
+    )
+
+    slots_by_key = {slot["slot_key"]: slot for slot in slots}
+    assert slots_by_key["depth.interior"]["depends_on_slot_id"] == slots_by_key["background.interior"]["id"]
+    assert slots_by_key["trim.depth.interior"]["depends_on_slot_id"] == slots_by_key["depth.interior"]["id"]

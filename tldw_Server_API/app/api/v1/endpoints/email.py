@@ -11,6 +11,7 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     get_db_transaction,
 )
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
+from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.DB_Management.media_db.errors import (
     DatabaseError,
@@ -96,7 +97,7 @@ async def list_email_sources(
     try:
         rows = await list_connector_sources(db, user_id)
     except Exception as exc:
-        logger.error("Failed to list connector sources for user_id={}: {}", user_id, exc)
+        logger.error("Failed to list email sources")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to list email sources.",
@@ -116,13 +117,8 @@ async def list_email_sources(
                     source_key=str(source_id),
                     tenant_id=tenant_id,
                 )
-            except (DatabaseError, InputError) as exc:
-                logger.warning(
-                    "Failed to fetch sync state for source_id={} user_id={}: {}",
-                    source_id,
-                    user_id,
-                    exc,
-                )
+            except (DatabaseError, InputError):
+                logger.warning("Failed to fetch email sync state")
 
         sync_payload = {
             "state": _derive_sync_state(sync_state),
@@ -183,12 +179,7 @@ async def trigger_email_source_sync(
     try:
         job = await create_import_job(user_id, source_id, request_id=rid)
     except Exception as exc:
-        logger.error(
-            "Failed to queue email sync job for source_id={} user_id={}: {}",
-            source_id,
-            user_id,
-            exc,
-        )
+        logger.error("Failed to queue email sync job")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to queue email sync job.",
@@ -240,16 +231,12 @@ async def search_email_messages(
                 "total_pages": int(total_pages),
             },
         }
-    except InputError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(exc),
-        ) from exc
-    except DatabaseError as exc:
-        logger.error("Database error during email search: {}", exc, exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="A database error occurred during email search.",
+    except (InputError, DatabaseError) as exc:
+        if isinstance(exc, DatabaseError):
+            logger.error("Database error during email search")
+        raise map_db_error_to_http(
+            exc,
+            default_detail="A database error occurred during email search.",
         ) from exc
 
 
@@ -277,19 +264,10 @@ async def get_email_message_detail(
                 detail="Email message not found.",
             )
         return detail
-    except InputError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(exc),
-        ) from exc
-    except DatabaseError as exc:
-        logger.error(
-            "Database error during email detail lookup (email_message_id={}): {}",
-            email_message_id,
+    except (InputError, DatabaseError) as exc:
+        if isinstance(exc, DatabaseError):
+            logger.error("Database error during email detail lookup")
+        raise map_db_error_to_http(
             exc,
-            exc_info=True,
-        )
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="A database error occurred while fetching email message detail.",
+            default_detail="A database error occurred while fetching email message detail.",
         ) from exc

@@ -245,6 +245,83 @@ class TestWebSocketAuthentication:
     """Tests for WebSocket authentication."""
 
     @pytest.mark.asyncio
+    async def test_auth_sanitizes_db_init_failure_log(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        mock_ws_dependencies,
+    ) -> None:
+        """Test DB init failures during auth do not leak backend details to logs."""
+        logged_warnings = []
+
+        class LoggerStub:
+            def warning(self, message, *args, **kwargs):
+                logged_warnings.append((message, args, kwargs))
+
+            def info(self, *args, **kwargs):
+                return None
+
+            def error(self, *args, **kwargs):
+                return None
+
+        async def _fail_get_db_for_user_id(*args, **kwargs):
+            raise RuntimeError("voice db exploded /private/voice.db")
+
+        monkeypatch.setattr(voice_assistant, "logger", LoggerStub())
+        monkeypatch.setattr(
+            voice_assistant,
+            "get_chacha_db_for_user_id",
+            _fail_get_db_for_user_id,
+        )
+
+        messages = [
+            {"type": "auth", "token": "valid-token"},
+            {"type": "config"},
+        ]
+        ws = DummyWebSocket(messages)
+
+        await voice_assistant.websocket_voice_assistant(ws, token=None)
+
+        assert logged_warnings == [("Voice assistant DB init failed", (), {})]
+
+    @pytest.mark.asyncio
+    async def test_websocket_outer_error_sanitizes_failure_log(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        mock_ws_dependencies,
+    ) -> None:
+        """Test top-level WebSocket failures do not leak backend details to logs."""
+        logged_errors = []
+
+        class LoggerStub:
+            def error(self, message, *args, **kwargs):
+                logged_errors.append((message, args, kwargs))
+
+            def info(self, *args, **kwargs):
+                return None
+
+            def warning(self, *args, **kwargs):
+                return None
+
+        def _fail_get_session_manager():
+            raise RuntimeError("session manager exploded /private/ws-session.db")
+
+        monkeypatch.setattr(voice_assistant, "logger", LoggerStub())
+        monkeypatch.setattr(
+            voice_assistant,
+            "get_voice_session_manager",
+            _fail_get_session_manager,
+        )
+
+        messages = [
+            {"type": "auth", "token": "valid-token"},
+        ]
+        ws = DummyWebSocket(messages)
+
+        await voice_assistant.websocket_voice_assistant(ws, token=None)
+
+        assert logged_errors == [("Voice assistant WebSocket error", (), {})]
+
+    @pytest.mark.asyncio
     async def test_auth_success(self, mock_ws_dependencies) -> None:
         """Test successful WebSocket authentication."""
         session_manager, _ = mock_ws_dependencies

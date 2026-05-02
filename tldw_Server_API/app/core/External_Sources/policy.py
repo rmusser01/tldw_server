@@ -85,8 +85,8 @@ def evaluate_policy_constraints(
             if allow_ws and notion_workspace_id not in allow_ws:
                 return False, "Notion workspace not in allowed set"
         return True, None
-    except Exception as e:
-        logger.warning(f"Policy evaluation error: {e}")
+    except Exception:
+        logger.warning("Policy evaluation error")
         return False, "Policy evaluation failed"
 
 

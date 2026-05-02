@@ -120,6 +120,8 @@ _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS = (
     InvalidParamsException,
 )
 
+_MCP_TOOL_EXECUTION_ERROR = "tool_execution_error"
+
 
 class MCPRequest(BaseModel):
     """MCP request following JSON-RPC 2.0 specification"""
@@ -953,7 +955,7 @@ class MCPProtocol:
                 status=status,
             )
             if error:
-                log.error("MCP tool execution failed", error_type=error.__class__.__name__, error_message=str(error)[:200])
+                log.error("MCP tool execution failed", error_type=error.__class__.__name__)
             else:
                 log.info("MCP tool executed")
         except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS:
@@ -1245,7 +1247,7 @@ class MCPProtocol:
             except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS as exc:
                 log.debug(
                     "Failed to read rg_ingress_enforced from metadata; rate limit will be enforced",
-                    error=str(exc),
+                    error_type=type(exc).__name__,
                 )
                 skip_rate_limit = False
             if not skip_rate_limit:
@@ -1503,6 +1505,17 @@ class MCPProtocol:
             sanitized.args = (masked,)
         with contextlib.suppress(Exception):
             setattr(sanitized, "_mcp_masked_secret", True)
+        return sanitized
+
+    @staticmethod
+    def _generic_exception_like(exc: Exception, message: str) -> Exception:
+        """Return an exception of the same class when possible, with safe text only."""
+        try:
+            sanitized = exc.__class__(message)
+        except Exception:
+            sanitized = RuntimeError(message)
+        with contextlib.suppress(Exception):
+            setattr(sanitized, "_mcp_sanitized_error", True)
         return sanitized
 
     def _error_response(
@@ -2563,10 +2576,14 @@ class MCPProtocol:
                             self.metrics.record_tool_invalid_params(getattr(module, "name", "unknown"), str(tool_name))
                         raise InvalidParamsException(str(_tool_e)) from _tool_e
                     except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS as _tool_e:
+                        sanitized_tool_error = self._generic_exception_like(
+                            _tool_e,
+                            _MCP_TOOL_EXECUTION_ERROR,
+                        )
                         span.set_attribute("mcp.status", "failure")
-                        span.set_attribute("mcp.error_type", _tool_e.__class__.__name__)
-                        span.set_attribute("mcp.error_message", str(_tool_e)[:200])
-                        raise
+                        span.set_attribute("mcp.error_type", sanitized_tool_error.__class__.__name__)
+                        span.set_attribute("mcp.error_message", _MCP_TOOL_EXECUTION_ERROR)
+                        raise sanitized_tool_error from None
                     finally:
                         span.set_attribute("mcp.duration_ms", max(0.0, (time.time() - t0) * 1000.0))
 
@@ -2600,8 +2617,7 @@ class MCPProtocol:
                 return response_payload
 
             except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS as e:
-                sanitized_error = self._mask_secrets(str(e))
-                context.logger.exception(f"Tool execution failed: {tool_name} - {sanitized_error}")
+                context.logger.error("Tool execution failed", error_type=e.__class__.__name__)
                 try:
                     duration = max(0.0, time.time() - t0)
                     self.metrics.record_module_operation(module=getattr(module, "name", "unknown"), operation="tools_call", duration=duration, success=False)

@@ -132,7 +132,7 @@ results = await rag_eval.evaluate(
 - PDF path: `POST /ocr-pdf` (multipart) runs OCR (backend selectable) then computes metrics against provided ground truths; tune via form fields (dpi, lang, mode, min chars).
 
 **Auth, Limits, and Error Handling**
-- Auth modes handled in `evaluations_auth.verify_api_key`; admin gating is claim-first (`get_auth_principal` + `require_roles("admin")` / heavy-admin claim checks).
+- Auth modes handled in `evaluations_auth.verify_api_key`; admin gating is claim-first (`get_auth_principal` + `RequireRole("admin")` / heavy-admin claim checks).
 - Path limiter (`check_evaluation_rate_limit`) + per‑user `UserRateLimiter` estimate tokens and enforce daily/cost quotas; usage headers are applied by helpers.
 - Errors are normalized via `create_error_response` and `sanitize_error_message` for consistent API error shapes.
 

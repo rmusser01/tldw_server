@@ -1210,6 +1210,99 @@ def load_settings():
     SANDBOX_STORE_BACKEND = _sbx_env_or_cfg("SANDBOX_STORE_BACKEND", "store_backend", "memory").lower()
     SANDBOX_STORE_DB_PATH = os.getenv("SANDBOX_STORE_DB_PATH") or _sbx_get("store_db_path", None)
 
+    persona_config = load_comprehensive_config()
+
+    def _persona_cfg_get(option: str) -> Optional[str]:
+        try:
+            if persona_config and persona_config.has_section("persona"):
+                return persona_config.get("persona", option, fallback=None)
+        except _CONFIG_NONCRITICAL_EXCEPTIONS:
+            return None
+        return None
+
+    def _persona_bool(env_key: str, option: str, default: bool) -> bool:
+        env_value = os.getenv(env_key)
+        if env_value is not None:
+            text = str(env_value).strip()
+            if text and text.lower() not in {"none", "null", "nil"}:
+                return is_truthy(text)
+        cfg_value = _persona_cfg_get(option)
+        if cfg_value is None:
+            return default
+        return is_truthy(str(cfg_value))
+
+    def _persona_int(env_key: str, option: str, default: int) -> int:
+        env_value = os.getenv(env_key)
+        if env_value is not None:
+            text = str(env_value).strip()
+            if text and text.lower() not in {"none", "null", "nil"}:
+                try:
+                    return int(text)
+                except (TypeError, ValueError) as exc:
+                    raise ValueError(f"{env_key} must be an integer") from exc
+
+        cfg_value = _persona_cfg_get(option)
+        if cfg_value is None:
+            return default
+        text = str(cfg_value).strip()
+        if not text or text.lower() in {"none", "null", "nil"}:
+            return default
+        try:
+            return int(text)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"[persona] {option} must be an integer") from exc
+
+    PERSONA_DIALOGUE_TREE_EVAL_ENABLED = _persona_bool(
+        "PERSONA_DIALOGUE_TREE_EVAL_ENABLED",
+        "dialogue_tree_eval_enabled",
+        False,
+    )
+    PERSONA_RUNTIME_EXPLORER_ENABLED = _persona_bool(
+        "PERSONA_RUNTIME_EXPLORER_ENABLED",
+        "runtime_explorer_enabled",
+        False,
+    )
+    PERSONA_RUNTIME_EXPLORER_MAX_DEPTH = _persona_int(
+        "PERSONA_RUNTIME_EXPLORER_MAX_DEPTH",
+        "runtime_explorer_max_depth",
+        1,
+    )
+    PERSONA_RUNTIME_EXPLORER_MAX_BRANCHING = _persona_int(
+        "PERSONA_RUNTIME_EXPLORER_MAX_BRANCHING",
+        "runtime_explorer_max_branching",
+        2,
+    )
+    PERSONA_RUNTIME_EXPLORER_MAX_PROVIDER_CALLS = _persona_int(
+        "PERSONA_RUNTIME_EXPLORER_MAX_PROVIDER_CALLS",
+        "runtime_explorer_max_provider_calls",
+        1,
+    )
+    PERSONA_RUNTIME_EXPLORER_TIMEOUT_MS = _persona_int(
+        "PERSONA_RUNTIME_EXPLORER_TIMEOUT_MS",
+        "runtime_explorer_timeout_ms",
+        750,
+    )
+    PERSONA_RUNTIME_EXPLORER_MAX_TOKENS = _persona_int(
+        "PERSONA_RUNTIME_EXPLORER_MAX_TOKENS",
+        "runtime_explorer_max_tokens",
+        256,
+    )
+    PERSONA_RUNTIME_EXPLORER_P95_ADDED_LATENCY_MS = _persona_int(
+        "PERSONA_RUNTIME_EXPLORER_P95_ADDED_LATENCY_MS",
+        "runtime_explorer_p95_added_latency_ms",
+        1000,
+    )
+    PERSONA_RUNTIME_EXPLORER_LLM_JUDGES_ENABLED = _persona_bool(
+        "PERSONA_RUNTIME_EXPLORER_LLM_JUDGES_ENABLED",
+        "runtime_explorer_llm_judges_enabled",
+        False,
+    )
+    PERSONA_DIALOGUE_TREE_TRACE_RETENTION_DAYS = _persona_int(
+        "PERSONA_DIALOGUE_TREE_TRACE_RETENTION_DAYS",
+        "dialogue_tree_trace_retention_days",
+        7,
+    )
+
     config_dict = {
         # General App
         "APP_MODE_STR": single_user_mode_str,
@@ -1853,33 +1946,69 @@ def load_settings():
         "PERSONA_DEFAULT_PERSONA": (lambda _cp: (
             _cp.get('persona', 'default_persona', fallback='Research Assistant') if _cp and _cp.has_section('persona') else 'Research Assistant'
         ))(load_comprehensive_config()),
-        "PERSONA_VOICE": (lambda _cp: (
-            _cp.get('persona', 'voice', fallback='default') if _cp and _cp.has_section('persona') else 'default'
-        ))(load_comprehensive_config()),
-        "PERSONA_STT": (lambda _cp: (
-            _cp.get('persona', 'stt', fallback='faster_whisper') if _cp and _cp.has_section('persona') else 'faster_whisper'
-        ))(load_comprehensive_config()),
-        "PERSONA_MAX_TOOL_STEPS": (lambda _cp: (
-            int(_cp.get('persona', 'max_tool_steps', fallback='3')) if _cp and _cp.has_section('persona') else 3
-        ))(load_comprehensive_config()),
-        "PERSONA_MEMORY_READ_MODE": (lambda _env, _cp: (
-            str(_env).strip().lower() if _env is not None else (
-                _cp.get('persona', 'persona_memory_read_mode', fallback='legacy_only').strip().lower()
-                if _cp and _cp.has_section('persona') else 'legacy_only'
+        "PERSONA_VOICE": (
+            lambda _cp: (
+                _cp.get("persona", "voice", fallback="default") if _cp and _cp.has_section("persona") else "default"
             )
-        ))(os.getenv('PERSONA_MEMORY_READ_MODE'), load_comprehensive_config()),
-        "PERSONA_MEMORY_WRITE_MODE": (lambda _env, _cp: (
-            str(_env).strip().lower() if _env is not None else (
-                _cp.get('persona', 'persona_memory_write_mode', fallback='legacy_only').strip().lower()
-                if _cp and _cp.has_section('persona') else 'legacy_only'
+        )(load_comprehensive_config()),
+        "PERSONA_STT": (
+            lambda _cp: (
+                _cp.get("persona", "stt", fallback="faster_whisper")
+                if _cp and _cp.has_section("persona")
+                else "faster_whisper"
             )
-        ))(os.getenv('PERSONA_MEMORY_WRITE_MODE'), load_comprehensive_config()),
-        "PERSONA_RBAC_ALLOW_EXPORT": (lambda _cp: (
-            _cp.getboolean('persona.rbac', 'allow_export', fallback=False) if _cp and _cp.has_section('persona.rbac') else False
-        ))(load_comprehensive_config()),
-        "PERSONA_RBAC_ALLOW_DELETE": (lambda _cp: (
-            _cp.getboolean('persona.rbac', 'allow_delete', fallback=False) if _cp and _cp.has_section('persona.rbac') else False
-        ))(load_comprehensive_config()),
+        )(load_comprehensive_config()),
+        "PERSONA_MAX_TOOL_STEPS": (
+            lambda _cp: (
+                int(_cp.get("persona", "max_tool_steps", fallback="3")) if _cp and _cp.has_section("persona") else 3
+            )
+        )(load_comprehensive_config()),
+        "PERSONA_MEMORY_READ_MODE": (
+            lambda _env, _cp: (
+                str(_env).strip().lower()
+                if _env is not None
+                else (
+                    _cp.get("persona", "persona_memory_read_mode", fallback="legacy_only").strip().lower()
+                    if _cp and _cp.has_section("persona")
+                    else "legacy_only"
+                )
+            )
+        )(os.getenv("PERSONA_MEMORY_READ_MODE"), load_comprehensive_config()),
+        "PERSONA_MEMORY_WRITE_MODE": (
+            lambda _env, _cp: (
+                str(_env).strip().lower()
+                if _env is not None
+                else (
+                    _cp.get("persona", "persona_memory_write_mode", fallback="legacy_only").strip().lower()
+                    if _cp and _cp.has_section("persona")
+                    else "legacy_only"
+                )
+            )
+        )(os.getenv("PERSONA_MEMORY_WRITE_MODE"), load_comprehensive_config()),
+        "PERSONA_DIALOGUE_TREE_EVAL_ENABLED": PERSONA_DIALOGUE_TREE_EVAL_ENABLED,
+        "PERSONA_RUNTIME_EXPLORER_ENABLED": PERSONA_RUNTIME_EXPLORER_ENABLED,
+        "PERSONA_RUNTIME_EXPLORER_MAX_DEPTH": PERSONA_RUNTIME_EXPLORER_MAX_DEPTH,
+        "PERSONA_RUNTIME_EXPLORER_MAX_BRANCHING": PERSONA_RUNTIME_EXPLORER_MAX_BRANCHING,
+        "PERSONA_RUNTIME_EXPLORER_MAX_PROVIDER_CALLS": PERSONA_RUNTIME_EXPLORER_MAX_PROVIDER_CALLS,
+        "PERSONA_RUNTIME_EXPLORER_TIMEOUT_MS": PERSONA_RUNTIME_EXPLORER_TIMEOUT_MS,
+        "PERSONA_RUNTIME_EXPLORER_MAX_TOKENS": PERSONA_RUNTIME_EXPLORER_MAX_TOKENS,
+        "PERSONA_RUNTIME_EXPLORER_P95_ADDED_LATENCY_MS": PERSONA_RUNTIME_EXPLORER_P95_ADDED_LATENCY_MS,
+        "PERSONA_RUNTIME_EXPLORER_LLM_JUDGES_ENABLED": PERSONA_RUNTIME_EXPLORER_LLM_JUDGES_ENABLED,
+        "PERSONA_DIALOGUE_TREE_TRACE_RETENTION_DAYS": PERSONA_DIALOGUE_TREE_TRACE_RETENTION_DAYS,
+        "PERSONA_RBAC_ALLOW_EXPORT": (
+            lambda _cp: (
+                _cp.getboolean("persona.rbac", "allow_export", fallback=False)
+                if _cp and _cp.has_section("persona.rbac")
+                else False
+            )
+        )(load_comprehensive_config()),
+        "PERSONA_RBAC_ALLOW_DELETE": (
+            lambda _cp: (
+                _cp.getboolean("persona.rbac", "allow_delete", fallback=False)
+                if _cp and _cp.has_section("persona.rbac")
+                else False
+            )
+        )(load_comprehensive_config()),
     }
     # Only include explicit Character-Chat CHARACTER_RATE_LIMIT_ENABLED if present in config.txt
     try:

@@ -101,8 +101,8 @@ def _ensure_stream_metrics_registered() -> None:
             )
         )
         _STREAM_METRICS_REGISTERED = True
-    except _STREAMING_NONCRITICAL_EXCEPTIONS as e:
-        logger.debug(f"Stream metrics registration failed or already registered: {e}")
+    except _STREAMING_NONCRITICAL_EXCEPTIONS:
+        logger.debug("Stream metrics registration failed or already registered")
 
 
 class SSEStream:
@@ -543,5 +543,5 @@ def _parse_float_env(name: str) -> Optional[float]:
     try:
         return float(raw)
     except _STREAMING_NONCRITICAL_EXCEPTIONS:
-        logger.debug(f"Invalid float in env {name}={raw}")
+        logger.debug("Invalid float in stream env")
         return None

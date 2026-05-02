@@ -143,6 +143,168 @@ def _make_principal(
     )
 
 
+class _LoggerStub:
+    def __init__(self) -> None:
+        self.debugs: list[str] = []
+        self.debug_kwargs: list[dict[str, object]] = []
+        self.warnings: list[str] = []
+
+    def debug(self, message: str, *args: Any, **kwargs: Any) -> None:
+        self.debugs.append(message.format(*args) if args else message)
+        self.debug_kwargs.append(dict(kwargs))
+
+    def warning(self, message: str, *args: Any, **kwargs: Any) -> None:
+        self.warnings.append(message.format(*args) if args else message)
+
+
+def _assert_sanitized_debug_logs(logger: _LoggerStub, expected: list[str]) -> None:
+    assert logger.debugs == expected
+    rendered = "\n".join(logger.debugs)
+    assert "exploded" not in rendered
+    assert "/private/" not in rendered
+    assert "sched-secret" not in rendered
+    assert all(not kwargs for kwargs in logger.debug_kwargs)
+
+
+@pytest.mark.asyncio
+async def test_scheduler_admin_rescan_failure_log_is_sanitized(monkeypatch):
+    class _FailingScheduler:
+        async def _rescan_once(self) -> None:
+            raise RuntimeError("scheduler backend exploded at /private/scheduler.db")
+
+    logger = _LoggerStub()
+    monkeypatch.setattr(sched_mod, "logger", logger)
+    monkeypatch.setattr(sched_mod, "get_workflows_scheduler", lambda: _FailingScheduler())
+
+    with pytest.raises(sched_mod.HTTPException) as exc_info:
+        await sched_mod.admin_rescan(_principal=_make_principal())
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "Rescan failed"
+    assert logger.warnings == ["Admin rescan failed"]
+    warning_text = "\n".join(logger.warnings)
+    assert "scheduler backend exploded" not in warning_text
+    assert "/private/scheduler.db" not in warning_text
+
+
+@pytest.mark.asyncio
+async def test_scheduler_admin_rescan_job_count_failure_log_is_sanitized(monkeypatch):
+    class _FailingAps:
+        def get_jobs(self):
+            raise RuntimeError("scheduler job backend exploded at /private/scheduler.db")
+
+    class _Scheduler:
+        _aps = _FailingAps()
+
+        async def _rescan_once(self) -> None:
+            return None
+
+    logger = _LoggerStub()
+    monkeypatch.setattr(sched_mod, "logger", logger)
+    monkeypatch.setattr(sched_mod, "get_workflows_scheduler", lambda: _Scheduler())
+
+    result = await sched_mod.admin_rescan(_principal=_make_principal())
+
+    assert result == {"ok": True, "jobs": 0}
+    _assert_sanitized_debug_logs(
+        logger,
+        ["Failed to collect APScheduler job count after admin rescan"],
+    )
+
+
+@pytest.mark.asyncio
+async def test_scheduler_get_schedule_next_run_persist_failure_log_is_sanitized(monkeypatch):
+    class _FailingDb:
+        def set_history(self, *_args, **_kwargs):
+            raise RuntimeError("scheduler history backend exploded at /private/scheduler.db")
+
+    class _Scheduler:
+        def __init__(self) -> None:
+            self._schedule = SimpleNamespace(
+                id="sched-secret",
+                workflow_id=123,
+                name="test",
+                cron="*/15 * * * *",
+                timezone="UTC",
+                inputs_json="{}",
+                run_mode="async",
+                validation_mode="block",
+                enabled=True,
+                tenant_id="default",
+                user_id="2",
+                concurrency_mode="skip",
+                misfire_grace_sec=300,
+                coalesce=True,
+                require_online=False,
+                last_run_at=None,
+                next_run_at=None,
+                last_status=None,
+            )
+
+        def get(self, schedule_id: str):
+            if schedule_id == self._schedule.id:
+                return self._schedule
+            return None
+
+        def _get_db(self, _user_id: int):
+            return _FailingDb()
+
+    logger = _LoggerStub()
+    monkeypatch.setattr(sched_mod, "logger", logger)
+    monkeypatch.setattr(sched_mod, "get_workflows_scheduler", lambda: _Scheduler())
+
+    result = await sched_mod.get_schedule(
+        "sched-secret",
+        current_user=SimpleNamespace(id=2, roles=[], permissions=[], tenant_id="default"),
+    )
+
+    assert result.id == "sched-secret"
+    _assert_sanitized_debug_logs(logger, ["Failed to persist computed next_run_at"])
+
+
+@pytest.mark.asyncio
+async def test_scheduler_get_schedule_cron_parse_failure_log_is_sanitized(monkeypatch):
+    class _Scheduler:
+        def __init__(self) -> None:
+            self._schedule = SimpleNamespace(
+                id="sched-secret",
+                workflow_id=123,
+                name="test",
+                cron="not a valid cron",
+                timezone="UTC",
+                inputs_json="{}",
+                run_mode="async",
+                validation_mode="block",
+                enabled=True,
+                tenant_id="default",
+                user_id="2",
+                concurrency_mode="skip",
+                misfire_grace_sec=300,
+                coalesce=True,
+                require_online=False,
+                last_run_at=None,
+                next_run_at=None,
+                last_status=None,
+            )
+
+        def get(self, schedule_id: str):
+            if schedule_id == self._schedule.id:
+                return self._schedule
+            return None
+
+    logger = _LoggerStub()
+    monkeypatch.setattr(sched_mod, "logger", logger)
+    monkeypatch.setattr(sched_mod, "get_workflows_scheduler", lambda: _Scheduler())
+
+    result = await sched_mod.get_schedule(
+        "sched-secret",
+        current_user=SimpleNamespace(id=2, roles=[], permissions=[], tenant_id="default"),
+    )
+
+    assert result.id == "sched-secret"
+    _assert_sanitized_debug_logs(logger, ["Failed to compute next_run_at from crontab"])
+
+
 @pytest.mark.asyncio
 async def test_scheduler_admin_rescan_forbidden_for_non_admin_without_claims(monkeypatch):
     principal = _make_principal(

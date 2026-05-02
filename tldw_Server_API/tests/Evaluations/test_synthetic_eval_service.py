@@ -248,6 +248,27 @@ def test_service_filters_queue_by_generation_batch_id(tmp_path) -> None:
     assert [row["sample_id"] for row in queue["data"]] == ["sample-service-a"]  # nosec B101
 
 
+def test_service_reports_true_queue_total_before_pagination(tmp_path) -> None:
+    service = _workflow_service(tmp_path)
+
+    for sample_id in ("sample-total-a", "sample-total-b", "sample-total-c"):
+        service.repository.create_draft_sample(
+            sample_id=sample_id,
+            recipe_kind="rag_answer_quality",
+            sample_payload={"query": sample_id},
+            provenance=SyntheticEvalProvenance.SYNTHETIC_FROM_CORPUS.value,
+            review_state=SyntheticEvalReviewState.DRAFT.value,
+            sample_metadata={"generation_batch_id": "batch-total"},
+        )
+
+    queue = service.list_queue(generation_batch_id="batch-total", limit=2, offset=0)
+
+    page_sample_ids = {row["sample_id"] for row in queue["data"]}
+    assert len(page_sample_ids) == 2  # nosec B101
+    assert page_sample_ids <= {"sample-total-a", "sample-total-b", "sample-total-c"}  # nosec B101
+    assert queue["total"] == 3  # nosec B101
+
+
 def test_generation_prefers_real_examples_before_seed_and_synthetic_fill(tmp_path) -> None:
     service = _service(tmp_path)
     generation_calls: list[dict[str, object]] = []

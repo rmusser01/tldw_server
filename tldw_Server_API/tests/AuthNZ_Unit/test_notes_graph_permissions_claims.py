@@ -10,6 +10,31 @@ from tldw_Server_API.app.api.v1.API_Deps import auth_deps
 from tldw_Server_API.app.api.v1.endpoints import notes_graph as notes_graph_mod
 from tldw_Server_API.app.core.AuthNZ.permissions import NOTES_GRAPH_READ, NOTES_GRAPH_WRITE
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDBError, InputError
+
+
+class _LoggerStub:
+    def __init__(self) -> None:
+        self.errors: list[str] = []
+
+    def error(self, message: str, *args: Any, **kwargs: Any) -> None:
+        self.errors.append(str(message))
+
+
+class _QueryParamsStub:
+    def getlist(self, _name: str) -> list[str]:
+        return []
+
+
+class _RequestStub:
+    query_params = _QueryParamsStub()
+
+
+def _assert_sanitized_error_log(logger_stub: _LoggerStub, expected_message: str) -> None:
+    assert logger_stub.errors == [expected_message]
+    rendered = " ".join(logger_stub.errors)
+    assert "/private/" not in rendered
+    assert "exploded" not in rendered
 
 
 def _make_principal(
@@ -234,3 +259,165 @@ async def test_notes_graph_write_allowed_when_principal_has_permission():
     assert resp.status_code == 200
     body = resp.json()
     assert body.get("status") in {"created", "stub"}
+
+
+@pytest.mark.asyncio
+async def test_notes_graph_read_maps_input_error_to_400(monkeypatch: pytest.MonkeyPatch):
+    principal = _make_principal(
+        roles=["user"],
+        permissions=[NOTES_GRAPH_READ],
+        is_admin=False,
+    )
+    app = _build_app_with_overrides(
+        principal,
+        user_permissions=[NOTES_GRAPH_READ],
+    )
+
+    def _raise_input_error(*_args, **_kwargs):
+        raise InputError("invalid graph request")
+
+    monkeypatch.setattr(notes_graph_mod.NoteGraphService, "generate_graph", _raise_input_error)
+
+    with TestClient(app) as client:
+        resp = client.get("/api/v1/notes/graph")
+
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "invalid graph request"
+
+
+@pytest.mark.asyncio
+async def test_notes_graph_neighbors_maps_db_error_to_500(monkeypatch: pytest.MonkeyPatch):
+    principal = _make_principal(
+        roles=["user"],
+        permissions=[NOTES_GRAPH_READ],
+        is_admin=False,
+    )
+    app = _build_app_with_overrides(
+        principal,
+        user_permissions=[NOTES_GRAPH_READ],
+    )
+
+    def _raise_db_error(*_args, **_kwargs):
+        raise CharactersRAGDBError("graph backend unavailable")
+
+    monkeypatch.setattr(notes_graph_mod.NoteGraphService, "generate_graph", _raise_db_error)
+
+    with TestClient(app) as client:
+        resp = client.get("/api/v1/notes/n-1/neighbors")
+
+    assert resp.status_code == 500
+    assert resp.json()["detail"] == "Graph fetch failed"
+
+
+@pytest.mark.asyncio
+async def test_notes_graph_read_sanitizes_generic_error_log(monkeypatch: pytest.MonkeyPatch):
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(notes_graph_mod, "logger", logger_stub)
+    monkeypatch.setattr(notes_graph_mod, "NOTES_GRAPH_ENABLED", lambda: True)
+
+    def _raise_generic_error(*_args: Any, **_kwargs: Any) -> None:
+        raise RuntimeError("notes graph backend exploded at /private/notes-graph.db")
+
+    monkeypatch.setattr(notes_graph_mod.NoteGraphService, "generate_graph", _raise_generic_error)
+
+    with pytest.raises(Exception) as exc_info:
+        await notes_graph_mod.get_notes_graph(
+            _RequestStub(),  # type: ignore[arg-type]
+            notes_graph_mod.NoteGraphRequest(),
+            SimpleNamespace(id_str="1"),
+            object(),  # type: ignore[arg-type]
+            None,
+            None,
+            None,
+        )
+
+    assert getattr(exc_info.value, "status_code", None) == 500
+    assert getattr(exc_info.value, "detail", None) == "Graph fetch failed"
+    _assert_sanitized_error_log(logger_stub, "notes.graph.read failed")
+
+
+@pytest.mark.asyncio
+async def test_notes_graph_neighbors_sanitizes_generic_error_log(monkeypatch: pytest.MonkeyPatch):
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(notes_graph_mod, "logger", logger_stub)
+    monkeypatch.setattr(notes_graph_mod, "NOTES_GRAPH_ENABLED", lambda: True)
+
+    def _raise_generic_error(*_args: Any, **_kwargs: Any) -> None:
+        raise RuntimeError("notes graph backend exploded at /private/notes-graph.db")
+
+    monkeypatch.setattr(notes_graph_mod.NoteGraphService, "generate_graph", _raise_generic_error)
+
+    with pytest.raises(Exception) as exc_info:
+        await notes_graph_mod.get_note_neighbors(
+            "note-1",
+            _RequestStub(),  # type: ignore[arg-type]
+            notes_graph_mod.NoteGraphRequest(),
+            SimpleNamespace(id_str="1"),
+            object(),  # type: ignore[arg-type]
+            None,
+            None,
+            None,
+        )
+
+    assert getattr(exc_info.value, "status_code", None) == 500
+    assert getattr(exc_info.value, "detail", None) == "Graph fetch failed"
+    _assert_sanitized_error_log(logger_stub, "notes.graph.neighbors failed")
+
+
+@pytest.mark.asyncio
+async def test_notes_graph_create_link_maps_input_error_to_400():
+    principal = _make_principal(
+        roles=["user"],
+        permissions=[NOTES_GRAPH_WRITE],
+        is_admin=False,
+    )
+    app = _build_app_with_overrides(
+        principal,
+        user_permissions=[NOTES_GRAPH_WRITE],
+    )
+
+    class _CreateFailsDB:
+        def create_manual_note_edge(self, **_kwargs):
+            raise InputError("invalid link request")
+
+    async def _fake_get_chacha_db_for_user():
+        return _CreateFailsDB()
+
+    app.dependency_overrides[notes_graph_mod.get_chacha_db_for_user] = _fake_get_chacha_db_for_user
+
+    with TestClient(app) as client:
+        resp = client.post(
+            "/api/v1/notes/n-1/links",
+            json={"to_note_id": "n-2"},
+        )
+
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "invalid link request"
+
+
+@pytest.mark.asyncio
+async def test_notes_graph_delete_link_maps_db_error_to_500():
+    principal = _make_principal(
+        roles=["user"],
+        permissions=[NOTES_GRAPH_WRITE],
+        is_admin=False,
+    )
+    app = _build_app_with_overrides(
+        principal,
+        user_permissions=[NOTES_GRAPH_WRITE],
+    )
+
+    class _DeleteFailsDB:
+        def delete_manual_note_edge(self, **_kwargs):
+            raise CharactersRAGDBError("delete backend unavailable")
+
+    async def _fake_get_chacha_db_for_user():
+        return _DeleteFailsDB()
+
+    app.dependency_overrides[notes_graph_mod.get_chacha_db_for_user] = _fake_get_chacha_db_for_user
+
+    with TestClient(app) as client:
+        resp = client.delete("/api/v1/notes/links/e:123e4567-e89b-12d3-a456-426614174000")
+
+    assert resp.status_code == 500
+    assert resp.json()["detail"] == "Link deletion failed"

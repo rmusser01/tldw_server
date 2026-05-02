@@ -8,7 +8,7 @@ from fastapi import APIRouter, Body, Depends, Path, Query
 from fastapi.responses import JSONResponse
 from loguru import logger
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import require_roles
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import RequireRole
 from tldw_Server_API.app.main import app as _app
 
 router = APIRouter()
@@ -61,16 +61,16 @@ def _get_or_init_governor() -> Any | None:
             if loader is not None:
                 gov = MemoryResourceGovernor(policy_loader=loader)
                 app.state.rg_governor = gov
-        except _RG_ENDPOINT_NONCRITICAL_EXCEPTIONS as e:
+        except _RG_ENDPOINT_NONCRITICAL_EXCEPTIONS:
             # Keep behavior consistent with previous code path: best-effort only.
-            logger.debug(f"Resource governor lazy-init skipped: {e}")
+            logger.debug("Resource governor lazy-init skipped")
             gov = None
     return gov
 
 
 @router.get(
     "/resource-governor/policy",
-    dependencies=[Depends(require_roles("admin"))],
+    dependencies=[Depends(RequireRole("admin"))],
 )
 async def get_resource_governor_policy(
     include: str | None = Query(None, description="Include extra data: 'ids' or 'full'"),
@@ -138,9 +138,9 @@ async def get_resource_governor_policy(
                         await loader.load_once()
                         app.state.rg_policy_loader = loader
                         app.state.rg_policy_store = "db"
-                    except _RG_ENDPOINT_NONCRITICAL_EXCEPTIONS as _db_e:
+                    except _RG_ENDPOINT_NONCRITICAL_EXCEPTIONS:
                         # Fall back to file loader if DB path can't init
-                        logger.warning(f"RG policy loader DB init failed; falling back to file store: {_db_e}")
+                        logger.warning("RG policy loader DB init failed; falling back to file store")
                         if env_path:
                             reload_enabled = (os.getenv("RG_POLICY_RELOAD_ENABLED", "true").lower() in {"1", "true", "yes"})
                             interval = int(os.getenv("RG_POLICY_RELOAD_INTERVAL_SEC", "10") or "10")
@@ -168,19 +168,11 @@ async def get_resource_governor_policy(
                     snap_meta = loader.get_snapshot()
                     app.state.rg_policy_version = int(getattr(snap_meta, "version", 0) or 0)
                     app.state.rg_policy_count = len(getattr(snap_meta, "policies", {}) or {})
-                except _RG_ENDPOINT_NONCRITICAL_EXCEPTIONS as meta_exc:
+                except _RG_ENDPOINT_NONCRITICAL_EXCEPTIONS:
                     # Log with context and stack trace but do not interrupt flow
-                    loader_name = type(loader).__name__ if loader is not None else "None"
-                    snap_type = type(snap_meta).__name__ if "snap_meta" in locals() and snap_meta is not None else "None"
-                    logger.exception(
-                        "Failed updating app.state RG metadata (keys=['rg_policy_version','rg_policy_count']). "
-                        "loader={}, snapshot_type={}. Error: {}",
-                        loader_name,
-                        snap_type,
-                        repr(meta_exc),
-                    )
-            except _RG_ENDPOINT_NONCRITICAL_EXCEPTIONS as _init_exc:
-                logger.exception("Resource governor policy loader init failed: {}", repr(_init_exc))
+                    logger.exception("Failed updating app.state RG metadata")
+            except _RG_ENDPOINT_NONCRITICAL_EXCEPTIONS:
+                logger.exception("Resource governor policy loader init failed")
                 return JSONResponse({"status": "unavailable", "reason": "policy_loader_not_initialized"}, status_code=503)
         # Ensure response reflects the effective store mode after init/fallback.
         store = getattr(app.state, "rg_policy_store", None) or store
@@ -203,7 +195,7 @@ async def get_resource_governor_policy(
         return JSONResponse({"status": "error", "error": "internal server error"}, status_code=500)
 
 
-# --- Policy admin endpoints (gated by require_roles('admin')) ---
+# --- Policy admin endpoints (gated by RequireRole('admin')) ---
 from pydantic import BaseModel, Field
 
 from tldw_Server_API.app.core.Resource_Governance.policy_admin import (
@@ -219,7 +211,7 @@ class PolicyUpsertRequest(BaseModel):
 
 @router.put(
     "/resource-governor/policy/{policy_id}",
-    dependencies=[Depends(require_roles("admin"))],
+    dependencies=[Depends(RequireRole("admin"))],
 )
 async def upsert_policy(
     policy_id: str = Path(..., description="Policy identifier, e.g., 'chat.default'"),
@@ -257,15 +249,15 @@ async def upsert_policy(
                         await loader.load_once()
                         app.state.rg_policy_loader = loader
                         app.state.rg_policy_store = "db"
-                    except _RG_ENDPOINT_NONCRITICAL_EXCEPTIONS as _boot_err:
-                        logger.debug(f"Policy upsert DB loader init skipped: {_boot_err}")
+                    except _RG_ENDPOINT_NONCRITICAL_EXCEPTIONS:
+                        logger.debug("Policy upsert DB loader init skipped")
                 elif loader is not None:
                     await loader.load_once()
-        except _RG_ENDPOINT_NONCRITICAL_EXCEPTIONS as _ref_e:
-            logger.debug(f"Policy upsert refresh skipped: {_ref_e}")
+        except _RG_ENDPOINT_NONCRITICAL_EXCEPTIONS:
+            logger.debug("Policy upsert refresh skipped")
         return JSONResponse({"status": "ok", "policy_id": policy_id})
-    except PolicyVersionConflictError as e:
-        logger.debug(f"upsert_policy version conflict for {policy_id}: {e}")
+    except PolicyVersionConflictError:
+        logger.debug("upsert_policy version conflict")
         return JSONResponse(
             {
                 "status": "conflict",
@@ -282,7 +274,7 @@ async def upsert_policy(
 
 @router.delete(
     "/resource-governor/policy/{policy_id}",
-    dependencies=[Depends(require_roles("admin"))],
+    dependencies=[Depends(RequireRole("admin"))],
 )
 async def delete_policy(
     policy_id: str = Path(..., description="Policy identifier"),
@@ -320,15 +312,15 @@ async def delete_policy(
                         await loader.load_once()
                         app.state.rg_policy_loader = loader
                         app.state.rg_policy_store = "db"
-                    except _RG_ENDPOINT_NONCRITICAL_EXCEPTIONS as _boot_err:
-                        logger.debug(f"Policy delete DB loader init skipped: {_boot_err}")
+                    except _RG_ENDPOINT_NONCRITICAL_EXCEPTIONS:
+                        logger.debug("Policy delete DB loader init skipped")
                 elif loader is not None:
                     await loader.load_once()
-        except _RG_ENDPOINT_NONCRITICAL_EXCEPTIONS as _ref_e:
-            logger.debug(f"Policy delete refresh skipped: {_ref_e}")
+        except _RG_ENDPOINT_NONCRITICAL_EXCEPTIONS:
+            logger.debug("Policy delete refresh skipped")
         return JSONResponse({"status": "ok", "deleted": int(deleted)})
-    except PolicyVersionConflictError as e:
-        logger.debug(f"delete_policy version conflict for {policy_id}: {e}")
+    except PolicyVersionConflictError:
+        logger.debug("delete_policy version conflict")
         return JSONResponse(
             {
                 "status": "conflict",
@@ -345,7 +337,7 @@ async def delete_policy(
 
 @router.get(
     "/resource-governor/policies",
-    dependencies=[Depends(require_roles("admin"))],
+    dependencies=[Depends(RequireRole("admin"))],
 )
 async def list_policies():
     try:
@@ -359,7 +351,7 @@ async def list_policies():
 
 @router.get(
     "/resource-governor/policy/{policy_id}",
-    dependencies=[Depends(require_roles("admin"))],
+    dependencies=[Depends(RequireRole("admin"))],
 )
 async def get_policy(policy_id: str = Path(..., description="Policy identifier")):
     try:
@@ -376,7 +368,7 @@ async def get_policy(policy_id: str = Path(..., description="Policy identifier")
 # --- Diagnostics (admin) ---
 @router.get(
     "/resource-governor/diag/peek",
-    dependencies=[Depends(require_roles("admin"))],
+    dependencies=[Depends(RequireRole("admin"))],
 )
 async def rg_diag_peek(
     entity: str = Query(..., description="Entity key, e.g., 'user:123'"),
@@ -405,7 +397,7 @@ async def rg_diag_peek(
 
 @router.get(
     "/resource-governor/diag/query",
-    dependencies=[Depends(require_roles("admin"))],
+    dependencies=[Depends(RequireRole("admin"))],
 )
 async def rg_diag_query(
     entity: str = Query(..., description="Entity key, e.g., 'user:123'"),
@@ -426,7 +418,7 @@ async def rg_diag_query(
 
 @router.get(
     "/resource-governor/diag/media-budget",
-    dependencies=[Depends(require_roles("admin"))],
+    dependencies=[Depends(RequireRole("admin"))],
 )
 async def rg_diag_media_budget(
     user_id: int = Query(..., ge=1, description="User id to inspect, e.g., 123"),
@@ -553,7 +545,7 @@ async def rg_diag_media_budget(
 
 @router.get(
     "/resource-governor/diag/capabilities",
-    dependencies=[Depends(require_roles("admin"))],
+    dependencies=[Depends(RequireRole("admin"))],
 )
 async def rg_diag_capabilities():
     """Tiny capability probe to report whether Lua or fallback paths are in use."""
@@ -578,7 +570,7 @@ async def rg_diag_capabilities():
 
 @router.get(
     "/diag/coverage",
-    dependencies=[Depends(require_roles("admin"))],
+    dependencies=[Depends(RequireRole("admin"))],
     summary="Resource Governor endpoint coverage audit",
 )
 async def rg_coverage_audit():

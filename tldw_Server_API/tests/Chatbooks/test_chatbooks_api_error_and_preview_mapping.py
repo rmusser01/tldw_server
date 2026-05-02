@@ -9,7 +9,14 @@ from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.api.v1.endpoints import chatbooks as chatbooks_endpoints
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
-from tldw_Server_API.app.core.Chatbooks.chatbook_models import ChatbookManifest, ChatbookVersion
+from tldw_Server_API.app.core.Chatbooks.chatbook_models import (
+    ChatbookManifest,
+    ChatbookVersion,
+    ExportJob,
+    ExportStatus,
+    ImportJob,
+    ImportStatus,
+)
 from tldw_Server_API.app.core.Chatbooks.exceptions import JobError
 
 
@@ -113,6 +120,53 @@ class _PreviewExplodingService:
         raise RuntimeError("preview exploded")
 
 
+class _ListJobsService:
+    db = None
+
+    def __init__(self) -> None:
+        created = datetime(2024, 1, 1)
+        self._export_jobs = [
+            ExportJob(
+                job_id=f"export-{index}",
+                user_id="1",
+                status=ExportStatus.PENDING,
+                chatbook_name=f"Export {index}",
+                created_at=created,
+            )
+            for index in range(3)
+        ]
+        self._import_jobs = [
+            ImportJob(
+                job_id=f"import-{index}",
+                user_id="1",
+                status=ImportStatus.PENDING,
+                chatbook_path=f"/tmp/import-{index}.chatbook",
+                created_at=created,
+            )
+            for index in range(3)
+        ]
+
+    def count_export_jobs(self) -> int:
+        return len(self._export_jobs)
+
+    def list_export_jobs(self, *, limit: int, offset: int):
+        return self._export_jobs[offset:offset + limit]
+
+    def count_import_jobs(self) -> int:
+        return len(self._import_jobs)
+
+    def list_import_jobs(self, *, limit: int, offset: int):
+        return self._import_jobs[offset:offset + limit]
+
+
+class _ContinuationFailedService:
+    db = None
+
+    async def continue_chatbook_export(self, **kwargs):
+        _ = kwargs
+        return False, "continuation backend exploded at /private/db/path", None
+
+
 @pytest.mark.parametrize(
     "path",
     [
@@ -184,3 +238,77 @@ def test_preview_maps_unexpected_service_failures_to_500():
 
     assert response.status_code == 500
     assert response.json().get("detail") == "An error occurred while previewing the chatbook"
+
+
+def test_job_list_routes_include_canonical_pagination():
+    app = _make_app(_ListJobsService())
+
+    with TestClient(app) as client:
+        export_response = client.get("/api/v1/chatbooks/export/jobs?limit=2&offset=0")
+        import_response = client.get("/api/v1/chatbooks/import/jobs?limit=1&offset=1")
+
+    assert export_response.status_code == 200, export_response.text
+    export_payload = export_response.json()
+    assert len(export_payload["jobs"]) == 2
+    assert export_payload["total"] == 3
+    assert export_payload["has_more"] is True
+    assert export_payload["next_offset"] == 2
+    assert export_payload["pagination"] == {
+        "mode": "offset",
+        "total": 3,
+        "limit": 2,
+        "offset": 0,
+        "has_more": True,
+        "next_offset": 2,
+    }
+
+    assert import_response.status_code == 200, import_response.text
+    import_payload = import_response.json()
+    assert len(import_payload["jobs"]) == 1
+    assert import_payload["total"] == 3
+    assert import_payload["has_more"] is True
+    assert import_payload["next_offset"] == 2
+    assert import_payload["pagination"] == {
+        "mode": "offset",
+        "total": 3,
+        "limit": 1,
+        "offset": 1,
+        "has_more": True,
+        "next_offset": 2,
+    }
+
+
+def test_continue_export_sanitizes_service_failure_message():
+    app = _make_app(_ContinuationFailedService())
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/chatbooks/export/continue",
+            json={
+                "export_id": "export-1",
+                "continuations": [{"kind": "evaluations", "offset": 100}],
+            },
+        )
+
+    assert response.status_code == 500
+    assert response.json().get("detail") == "An error occurred while continuing the chatbook export"
+
+
+def test_health_sanitizes_storage_base_failure(monkeypatch):
+    def _explode_storage_base():
+        raise RuntimeError("chatbook storage exploded at /private/chatbooks")
+
+    monkeypatch.setattr(
+        chatbooks_endpoints.DatabasePaths,
+        "get_user_db_base_dir",
+        _explode_storage_base,
+    )
+    app = _make_app(object())
+
+    with TestClient(app) as client:
+        response = client.get("/api/v1/chatbooks/health")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "unhealthy"
+    assert body["error"] == "Chatbooks health check failed"

@@ -3,13 +3,10 @@ from typing import Any, Optional
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
 from loguru import logger
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, rbac_rate_limit, RequirePermission, TokenScopeGuard, User
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
-    rbac_rate_limit,
-    require_permissions,
-    require_token_scope,
-)
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
+from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.api.v1.schemas.notes_graph import (
     EdgeType,
     GraphFormat,
@@ -17,7 +14,6 @@ from tldw_Server_API.app.api.v1.schemas.notes_graph import (
     NoteLinkCreate,
 )
 from tldw_Server_API.app.core.AuthNZ.permissions import NOTES_GRAPH_READ, NOTES_GRAPH_WRITE
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     CharactersRAGDBError,
@@ -101,8 +97,8 @@ async def get_notes_graph(
     current_user: User = Depends(get_request_user),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
     _: None = Depends(rbac_rate_limit("notes.graph.read")),
-    __: None = Depends(require_permissions(NOTES_GRAPH_READ)),
-    ___: None = Depends(require_token_scope("notes", require_if_present=True, endpoint_id="notes.graph.read")),
+    __: None = Depends(RequirePermission(NOTES_GRAPH_READ)),
+    ___: None = Depends(TokenScopeGuard("notes", require_if_present=True, endpoint_id="notes.graph.read")),
 ):
     """Return a bounded subgraph of notes, tags, and sources."""
     if not NOTES_GRAPH_ENABLED():
@@ -133,13 +129,10 @@ async def get_notes_graph(
         return graph
     except HTTPException:
         raise
-    except InputError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
-    except CharactersRAGDBError as e:
-        logger.error(f"notes.graph.read failed: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Graph fetch failed") from e
+    except (InputError, CharactersRAGDBError) as e:
+        raise map_db_error_to_http(e, default_detail="Graph fetch failed") from e
     except Exception as e:
-        logger.error(f"notes.graph.read failed: {e}")
+        logger.error("notes.graph.read failed")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Graph fetch failed") from e
 
 
@@ -168,8 +161,8 @@ async def get_note_neighbors(
     current_user: User = Depends(get_request_user),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
     _: None = Depends(rbac_rate_limit("notes.graph.read")),
-    __: None = Depends(require_permissions(NOTES_GRAPH_READ)),
-    ___: None = Depends(require_token_scope("notes", require_if_present=True, endpoint_id="notes.graph.read")),
+    __: None = Depends(RequirePermission(NOTES_GRAPH_READ)),
+    ___: None = Depends(TokenScopeGuard("notes", require_if_present=True, endpoint_id="notes.graph.read")),
 ):
     """Return a radius=1 ego network for the given note."""
     if not NOTES_GRAPH_ENABLED():
@@ -201,13 +194,10 @@ async def get_note_neighbors(
         return graph
     except HTTPException:
         raise
-    except InputError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
-    except CharactersRAGDBError as e:
-        logger.error(f"notes.graph.neighbors failed: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Graph fetch failed") from e
+    except (InputError, CharactersRAGDBError) as e:
+        raise map_db_error_to_http(e, default_detail="Graph fetch failed") from e
     except Exception as e:
-        logger.error(f"notes.graph.neighbors failed: {e}")
+        logger.error("notes.graph.neighbors failed")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Graph fetch failed") from e
 
 
@@ -250,8 +240,8 @@ async def create_manual_link(
     current_user: User = Depends(get_request_user),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
     _: None = Depends(rbac_rate_limit("notes.graph.write")),
-    __: None = Depends(require_permissions(NOTES_GRAPH_WRITE)),
-    ___: None = Depends(require_token_scope("notes", require_if_present=True, endpoint_id="notes.graph.write")),
+    __: None = Depends(RequirePermission(NOTES_GRAPH_WRITE)),
+    ___: None = Depends(TokenScopeGuard("notes", require_if_present=True, endpoint_id="notes.graph.write")),
 ) -> dict[str, Any]:
     """
     Create a manual link in the user's ChaChaNotes DB. Populates created_by.
@@ -271,13 +261,10 @@ async def create_manual_link(
             created_by=principal,
         )
         return {"status": "created", "edge": edge}
-    except ConflictError:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="duplicate manual link") from None
-    except InputError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
-    except CharactersRAGDBError as e:
-        logger.error(f"Failed to create manual note link: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Link creation failed") from e
+    except ConflictError as e:
+        raise map_db_error_to_http(e, conflict_detail="duplicate manual link") from e
+    except (InputError, CharactersRAGDBError) as e:
+        raise map_db_error_to_http(e, default_detail="Link creation failed") from e
 
 
 @router.delete(
@@ -313,8 +300,8 @@ async def delete_manual_link(
     current_user: User = Depends(get_request_user),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
     _: None = Depends(rbac_rate_limit("notes.graph.write")),
-    __: None = Depends(require_permissions(NOTES_GRAPH_WRITE)),
-    ___: None = Depends(require_token_scope("notes", require_if_present=True, endpoint_id="notes.graph.write")),
+    __: None = Depends(RequirePermission(NOTES_GRAPH_WRITE)),
+    ___: None = Depends(TokenScopeGuard("notes", require_if_present=True, endpoint_id="notes.graph.write")),
 ) -> dict[str, Any]:
     """
     Delete a manual link by id for the current user.
@@ -323,8 +310,5 @@ async def delete_manual_link(
         normalized_edge_id = _normalize_edge_id(edge_id)
         deleted = db.delete_manual_note_edge(user_id=str(current_user.id_str), edge_id=normalized_edge_id)
         return {"deleted": bool(deleted), "edge_id": normalized_edge_id}
-    except InputError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
-    except CharactersRAGDBError as e:
-        logger.error(f"Failed to delete manual note link: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Link deletion failed") from e
+    except (InputError, CharactersRAGDBError) as e:
+        raise map_db_error_to_http(e, default_detail="Link deletion failed") from e

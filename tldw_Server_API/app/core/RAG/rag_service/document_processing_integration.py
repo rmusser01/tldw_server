@@ -173,10 +173,10 @@ class DocumentProcessor:
             return enhanced_chunks
 
         except (ChunkingError, InvalidInputError) as e:
-            logger.error(f"Chunking error: {e}")
+            logger.error(f"Chunking error during document processing: {type(e).__name__}")
             return []
         except Exception as e:
-            logger.error(f"Unexpected error during document processing: {e}")
+            logger.error(f"Unexpected error during document processing: {type(e).__name__}")
             return []
 
     def _clean_artifacts(self, content: str) -> str:
@@ -218,8 +218,8 @@ class DocumentProcessor:
         try:
             # Attempt to decode as UTF-8 and re-encode
             fixed = fixed.encode('latin-1', errors='ignore').decode('utf-8', errors='ignore')
-        except Exception as e:
-            logger.debug(f"Mojibake fix failed; returning replacements-only content. error={e}")
+        except Exception:
+            logger.debug("Mojibake fix failed; returning replacements-only content")
 
         return fixed
 

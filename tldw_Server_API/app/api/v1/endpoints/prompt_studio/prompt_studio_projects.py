@@ -39,6 +39,8 @@ from tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps import (
     require_project_access,
     require_project_write_access,
 )
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_page_pagination_meta
+from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 
 # Local imports
 from tldw_Server_API.app.api.v1.schemas.prompt_studio_base import ListResponse, StandardResponse
@@ -50,7 +52,6 @@ from tldw_Server_API.app.api.v1.schemas.prompt_studio_project import (
 )
 from tldw_Server_API.app.core.DB_Management.PromptStudioDatabase import ConflictError, DatabaseError, InputError
 from tldw_Server_API.app.core.Logging.log_context import ensure_request_id, ensure_traceparent, get_ps_logger
-from tldw_Server_API.app.core.testing import is_test_mode
 from tldw_Server_API.app.core.Utils.pydantic_compat import model_dump_compat
 
 ########################################################################################################################
@@ -188,8 +189,8 @@ async def create_project(
                             idempotency_key,
                             user_id_str,
                         )
-            except DatabaseError as e:
-                logger.warning(f"Idempotency lookup failed for key {idempotency_key}: {e}")
+            except DatabaseError:
+                logger.warning("Idempotency lookup failed")
 
         # Create project
         project = db.create_project(
@@ -231,21 +232,15 @@ async def create_project(
             if row:
                 project = db._row_to_dict(cursor, row)
                 return StandardResponse(success=True, data=ProjectResponse(**project))
-        except DatabaseError as fallback_err:
-            logger.error(f"Failed to retrieve existing project after conflict: {fallback_err}")
-        except Exception as fallback_err:
-            logger.exception(f"Unexpected error retrieving existing project after conflict: {fallback_err}")
+        except DatabaseError:
+            logger.error("Failed to retrieve existing project after conflict")
+        except Exception:
+            logger.error("Unexpected error retrieving existing project after conflict")
             raise
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=str(e)
-        ) from e
+        raise map_db_error_to_http(e) from e
     except DatabaseError as e:
-        logger.error(f"Database error creating project: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to create project"
-        ) from e
+        logger.error("Database error creating project")
+        raise map_db_error_to_http(e, default_detail="Failed to create project") from e
 
 @router.get("/", response_model=None, openapi_extra={
     "responses": {
@@ -308,24 +303,24 @@ async def list_projects(
             "success": True,
             "data": projects,
             "metadata": result["pagination"],
-            "pagination": result["pagination"],
+            "pagination": model_dump_compat(
+                build_page_pagination_meta(
+                    page=result["pagination"]["page"],
+                    per_page=result["pagination"]["per_page"],
+                    total=result["pagination"]["total"],
+                    total_pages=result["pagination"]["total_pages"],
+                )
+            ),
             "projects": [p.model_dump() if hasattr(p, 'model_dump') else dict(p) for p in projects]
         }
 
     except DatabaseError as e:
-        logger.error(f"Database error listing projects: {e}")
         detail = "Failed to list projects"
-        if is_test_mode():
-            detail = f"{detail}: {e}"
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=detail,
-        ) from e
+        logger.error("Database error listing projects")
+        raise map_db_error_to_http(e, default_detail=detail) from e
     except Exception as e:  # noqa: BLE001
-        logger.exception("Unexpected error listing projects: {}", e)
+        logger.error("Unexpected error listing projects")
         detail = "Failed to list projects"
-        if is_test_mode():
-            detail = f"{detail}: {e}"
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=detail,
@@ -389,11 +384,8 @@ async def get_project(
         )
 
     except DatabaseError as e:
-        logger.error(f"Database error getting project: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to get project"
-        ) from e
+        logger.error("Database error getting project")
+        raise map_db_error_to_http(e, default_detail="Failed to get project") from e
 
 # Compatibility: GET on base path with ID
 @router.get("/{project_id}")
@@ -467,16 +459,13 @@ async def update_project(
         )
 
     except InputError as e:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=str(e)
+        raise map_db_error_to_http(
+            e,
+            input_status_code=status.HTTP_404_NOT_FOUND,
         ) from e
     except DatabaseError as e:
-        logger.error(f"Database error updating project: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to update project"
-        ) from e
+        logger.error("Database error updating project")
+        raise map_db_error_to_http(e, default_detail="Failed to update project") from e
 
 @router.delete("/delete/{project_id}", response_model=StandardResponse, openapi_extra={
     "responses": {
@@ -522,12 +511,12 @@ async def delete_project(
             data={"message": f"Project {'permanently' if permanent else 'soft'} deleted"}
         )
 
-    except DatabaseError as e:
-        logger.error(f"Database error deleting project: {e}")
+    except DatabaseError:
+        logger.error("Database error deleting project")
         # Fallback: try to mark as archived to keep operation idempotent for tests
         try:
             _ = db.update_project(project_id, {"status": "archived"})
-            logger.warning(f"Fallback archive applied for project {project_id} after delete failure")
+            logger.warning("Fallback archive applied after project delete failure")
             return StandardResponse(
                 success=True,
                 data={"message": "Project soft deleted (fallback archive applied)"}
@@ -578,16 +567,13 @@ async def archive_project(
         )
 
     except InputError as e:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=str(e)
+        raise map_db_error_to_http(
+            e,
+            input_status_code=status.HTTP_404_NOT_FOUND,
         ) from e
     except DatabaseError as e:
-        logger.error(f"Database error archiving project: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to archive project"
-        ) from e
+        logger.error("Database error archiving project")
+        raise map_db_error_to_http(e, default_detail="Failed to archive project") from e
 
 @router.post("/unarchive/{project_id}", response_model=StandardResponse, openapi_extra={
     "responses": {
@@ -629,16 +615,13 @@ async def unarchive_project(
         )
 
     except InputError as e:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=str(e)
+        raise map_db_error_to_http(
+            e,
+            input_status_code=status.HTTP_404_NOT_FOUND,
         ) from e
     except DatabaseError as e:
-        logger.error(f"Database error unarchiving project: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to unarchive project"
-        ) from e
+        logger.error("Database error unarchiving project")
+        raise map_db_error_to_http(e, default_detail="Failed to unarchive project") from e
 
 ########################################################################################################################
 # Project Statistics Endpoint
@@ -689,8 +672,5 @@ async def get_project_stats(
         )
 
     except DatabaseError as e:
-        logger.error(f"Database error getting project stats: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to get project statistics"
-        ) from e
+        logger.error("Database error getting project stats")
+        raise map_db_error_to_http(e, default_detail="Failed to get project statistics") from e

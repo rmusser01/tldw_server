@@ -258,7 +258,7 @@ class ParakeetStreamingTranscriber:
 
         except Exception as e:
             logger.exception(f"Error processing audio chunk: {e}")
-            return {"type": "error", "message": str(e)}
+            return {"type": "error", "message": "Audio chunk processing failed"}
 
     async def _transcribe_chunk(self, audio_chunk: np.ndarray) -> Optional[str]:
         """Transcribe an audio chunk using the appropriate variant.
@@ -442,7 +442,7 @@ def create_streaming_generator(
 
         except Exception as e:
             logger.exception(f"Streaming error: {e}")
-            yield f"[Error: {str(e)}]"
+            yield "[Error: Streaming transcription failed]"
 
     return generate()
 

@@ -16,6 +16,7 @@ from tldw_Server_API.app.api.v1.API_Deps.kanban_deps import (
     handle_kanban_db_error,
     kanban_rate_limit,
 )
+from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.api.v1.schemas.kanban_schemas import (
     ChecklistCreate,
     ChecklistItemCreate,
@@ -31,7 +32,11 @@ from tldw_Server_API.app.api.v1.schemas.kanban_schemas import (
     ToggleAllChecklistItemsRequest,
 )
 from tldw_Server_API.app.core.DB_Management.Kanban_DB import (
+    ConflictError,
+    InputError,
     KanbanDB,
+    KanbanDBError,
+    NotFoundError,
 )
 
 router = APIRouter(tags=["Kanban Checklists"])
@@ -73,6 +78,8 @@ async def create_checklist(
             position=checklist_in.position
         )
         return ChecklistResponse(**checklist)
+    except (InputError, ConflictError, NotFoundError, KanbanDBError) as e:
+        raise map_db_error_to_http(e, default_detail="Failed to create checklist") from e
     except Exception as e:
         raise _handle_error(e) from e
 @router.get(
@@ -92,6 +99,8 @@ async def list_checklists(
         return ChecklistsListResponse(
             checklists=[ChecklistResponse(**cl) for cl in checklists]
         )
+    except (InputError, ConflictError, NotFoundError, KanbanDBError) as e:
+        raise map_db_error_to_http(e, default_detail="Failed to fetch checklists") from e
     except Exception as e:
         raise _handle_error(e) from e
 @router.get(
@@ -116,6 +125,8 @@ async def get_checklist(
         return ChecklistWithItemsResponse(**checklist)
     except HTTPException:
         raise
+    except (InputError, ConflictError, NotFoundError, KanbanDBError) as e:
+        raise map_db_error_to_http(e, default_detail="Failed to fetch checklist") from e
     except Exception as e:
         raise _handle_error(e) from e
 @router.patch(
@@ -141,6 +152,8 @@ async def update_checklist(
             name=checklist_in.name
         )
         return ChecklistResponse(**checklist)
+    except (InputError, ConflictError, NotFoundError, KanbanDBError) as e:
+        raise map_db_error_to_http(e, default_detail="Failed to update checklist") from e
     except Exception as e:
         raise _handle_error(e) from e
 @router.delete(
@@ -166,6 +179,8 @@ async def delete_checklist(
         return Response(status_code=status.HTTP_204_NO_CONTENT)
     except HTTPException:
         raise
+    except (InputError, ConflictError, NotFoundError, KanbanDBError) as e:
+        raise map_db_error_to_http(e, default_detail="Failed to delete checklist") from e
     except Exception as e:
         raise _handle_error(e) from e
 @router.post(
@@ -193,6 +208,8 @@ async def reorder_checklists(
         return ChecklistsListResponse(
             checklists=[ChecklistResponse(**cl) for cl in checklists]
         )
+    except (InputError, ConflictError, NotFoundError, KanbanDBError) as e:
+        raise map_db_error_to_http(e, default_detail="Failed to reorder checklists") from e
     except Exception as e:
         raise _handle_error(e) from e
 # =============================================================================
@@ -227,6 +244,8 @@ async def create_checklist_item(
             checked=item_in.checked
         )
         return ChecklistItemResponse(**item)
+    except (InputError, ConflictError, NotFoundError, KanbanDBError) as e:
+        raise map_db_error_to_http(e, default_detail="Failed to create checklist item") from e
     except Exception as e:
         raise _handle_error(e) from e
 @router.get(
@@ -246,6 +265,8 @@ async def list_checklist_items(
         return ChecklistItemsListResponse(
             items=[ChecklistItemResponse(**item) for item in items]
         )
+    except (InputError, ConflictError, NotFoundError, KanbanDBError) as e:
+        raise map_db_error_to_http(e, default_detail="Failed to fetch checklist items") from e
     except Exception as e:
         raise _handle_error(e) from e
 @router.get(
@@ -270,6 +291,8 @@ async def get_checklist_item(
         return ChecklistItemResponse(**item)
     except HTTPException:
         raise
+    except (InputError, ConflictError, NotFoundError, KanbanDBError) as e:
+        raise map_db_error_to_http(e, default_detail="Failed to fetch checklist item") from e
     except Exception as e:
         raise _handle_error(e) from e
 @router.patch(
@@ -297,6 +320,8 @@ async def update_checklist_item(
             checked=item_in.checked
         )
         return ChecklistItemResponse(**item)
+    except (InputError, ConflictError, NotFoundError, KanbanDBError) as e:
+        raise map_db_error_to_http(e, default_detail="Failed to update checklist item") from e
     except Exception as e:
         raise _handle_error(e) from e
 @router.delete(
@@ -322,6 +347,8 @@ async def delete_checklist_item(
         return Response(status_code=status.HTTP_204_NO_CONTENT)
     except HTTPException:
         raise
+    except (InputError, ConflictError, NotFoundError, KanbanDBError) as e:
+        raise map_db_error_to_http(e, default_detail="Failed to delete checklist item") from e
     except Exception as e:
         raise _handle_error(e) from e
 @router.post(
@@ -349,6 +376,8 @@ async def reorder_checklist_items(
         return ChecklistItemsListResponse(
             items=[ChecklistItemResponse(**item) for item in items]
         )
+    except (InputError, ConflictError, NotFoundError, KanbanDBError) as e:
+        raise map_db_error_to_http(e, default_detail="Failed to reorder checklist items") from e
     except Exception as e:
         raise _handle_error(e) from e
 # =============================================================================
@@ -370,6 +399,8 @@ async def check_item(
     try:
         item = db.update_checklist_item(item_id=item_id, checked=True)
         return ChecklistItemResponse(**item)
+    except (InputError, ConflictError, NotFoundError, KanbanDBError) as e:
+        raise map_db_error_to_http(e, default_detail="Failed to check checklist item") from e
     except Exception as e:
         raise _handle_error(e) from e
 @router.post(
@@ -387,6 +418,8 @@ async def uncheck_item(
     try:
         item = db.update_checklist_item(item_id=item_id, checked=False)
         return ChecklistItemResponse(**item)
+    except (InputError, ConflictError, NotFoundError, KanbanDBError) as e:
+        raise map_db_error_to_http(e, default_detail="Failed to uncheck checklist item") from e
     except Exception as e:
         raise _handle_error(e) from e
 @router.post(
@@ -412,5 +445,7 @@ async def toggle_all_checklist_items(
             checked=request.checked
         )
         return ChecklistWithItemsResponse(**checklist)
+    except (InputError, ConflictError, NotFoundError, KanbanDBError) as e:
+        raise map_db_error_to_http(e, default_detail="Failed to toggle checklist items") from e
     except Exception as e:
         raise _handle_error(e) from e

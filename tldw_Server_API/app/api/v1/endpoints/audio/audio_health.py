@@ -130,25 +130,27 @@ def _serialize_tts_caps_for_health(tts_service: TTSServiceV2, caps: Any) -> Any:
     if callable(serializer):
         try:
             return serializer(caps)
-        except Exception as exc:
-            logger.debug(f"TTS health capabilities serialization failed via service helper: {exc}")
+        except Exception:
+            logger.debug("TTS health capabilities serialization failed via service helper")
     if isinstance(caps, dict):
         return dict(caps)
     try:
         dumped = model_dump_compat(caps)
         if isinstance(dumped, dict):
             return dumped
-    except Exception as dump_error:
-        logger.debug("TTS health capabilities model dump failed", exc_info=dump_error)
+    except Exception:
+        logger.debug("TTS health capabilities model dump failed")
     try:
         if is_dataclass(caps):
             return asdict(caps)
-    except Exception as dataclass_error:
-        logger.debug("TTS health capabilities dataclass conversion failed", exc_info=dataclass_error)
+    except Exception:
+        logger.debug("TTS health capabilities dataclass conversion failed")
     return None
 
 
 def _sanitize_public_provider_detail(value: Any) -> Any:
+    """Remove sensitive keys and suspicious runtime diagnostics from public TTS health details."""
+
     if isinstance(value, str):
         if _SUSPICIOUS_PUBLIC_HEALTH_RE.search(value):
             return _SANITIZED_PUBLIC_HEALTH_MESSAGE
@@ -167,6 +169,8 @@ def _sanitize_public_provider_detail(value: Any) -> Any:
 
 
 def _normalize_public_health_key(value: Any) -> str:
+    """Normalize a provider-detail key before comparing it with the sensitive-key denylist."""
+
     return re.sub(r"[^a-z0-9]+", "", str(value or "").strip().lower())
 
 
@@ -179,6 +183,8 @@ def _derive_omnivoice_supervisor_health(
     tts_service: Any,
     current_detail: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
+    """Summarize OmniVoice sidecar supervisor state without exposing process internals."""
+
     current_detail = current_detail if isinstance(current_detail, dict) else {}
     availability = str(current_detail.get("availability") or "").strip().lower()
 
@@ -243,8 +249,8 @@ def _load_auth_provider_configs() -> tuple[bool, dict[str, Any]]:
             provider_name: config_manager.get_provider_config(provider_name)
             for provider_name in _AUTH_HEALTH_PROVIDERS
         }
-    except Exception as exc:
-        logger.debug(f"TTS health auth config lookup failed: {exc}")
+    except Exception:
+        logger.debug("TTS health auth config lookup failed")
         return False, {}
 
 
@@ -255,8 +261,8 @@ def _load_detailed_circuit_breakers(tts_service: Any) -> dict[str, Any]:
     try:
         detailed = circuit_manager.get_all_status(detailed=True)
         return detailed if isinstance(detailed, dict) else {}
-    except Exception as exc:
-        logger.debug(f"TTS health detailed circuit-breaker lookup failed: {exc}")
+    except Exception:
+        logger.debug("TTS health detailed circuit-breaker lookup failed")
         return {}
 
 
@@ -447,8 +453,8 @@ def _discover_kokoro_espeak_library(adapter: Any) -> Optional[str]:
         discovered_name = _ctypes_find_library("espeak-ng") or _ctypes_find_library("espeak")
         if discovered_name and os.path.isabs(discovered_name) and os.path.exists(discovered_name):
             candidates.insert(0, discovered_name)
-    except Exception as exc:
-        logger.debug(f"Unable to discover eSpeak library via ctypes lookup: {exc}")
+    except Exception:
+        logger.debug("Unable to discover eSpeak library via ctypes lookup")
 
     for candidate in candidates:
         if candidate and os.path.exists(candidate):
@@ -579,8 +585,8 @@ async def get_tts_health(request: Request, tts_service: TTSServiceV2 = Depends(g
                                 "initialized": False,
                                 "failed": availability == "failed",
                             }
-        except Exception as envelope_exc:
-            logger.debug(f"TTS health envelope enrichment failed: {envelope_exc}")
+        except Exception:
+            logger.debug("TTS health envelope enrichment failed")
 
         if capability_envelopes:
             if not total_providers:
@@ -656,8 +662,8 @@ async def get_tts_health(request: Request, tts_service: TTSServiceV2 = Depends(g
                     kokoro_info["espeak_lib_env"] = _sanitize_health_path_value(es_env)
                     kokoro_info["espeak_lib_path"] = runtime_diagnostics.get("espeak_lib_path")
                     kokoro_info["espeak_lib_exists"] = bool(runtime_diagnostics.get("espeak_lib_exists"))
-                except Exception as exc:
-                    logger.debug(f"Kokoro health: espeak library introspection failed: {exc}")
+                except Exception:
+                    logger.debug("Kokoro health eSpeak library introspection failed")
                 kokoro_detail = provider_details.get("kokoro")
                 if not isinstance(kokoro_detail, dict):
                     kokoro_detail = {}
@@ -679,12 +685,12 @@ async def get_tts_health(request: Request, tts_service: TTSServiceV2 = Depends(g
 
                 _recompute_health_rollup(health, provider_details, capability_envelopes)
                 health["providers"]["kokoro"] = kokoro_info
-        except Exception as e:
-            logger.debug(f"Kokoro health enrichment failed: {e}")
+        except Exception:
+            logger.debug("Kokoro health enrichment failed")
 
         return health
     except Exception as e:
-        logger.error(f"Error getting TTS health: {e}", exc_info=True)
+        logger.error("Error getting TTS health")
         request_id = ensure_request_id(request)
         payload = _http_error_detail("TTS health check failed", request_id, exc=e)
         return {"status": "error", **payload, "timestamp": datetime.utcnow().isoformat()}
@@ -804,7 +810,7 @@ async def get_stt_health(
             health["message"] = f"Model {resolved_model} is available and ready for use"
             health["estimated_size"] = None
         except Exception:
-            logger.exception(f"STT health warm-up failed for model={resolved_model}, device={device}")
+            logger.exception("STT health warm-up failed")
             warm_info = {
                 "ok": False,
                 "device": device,

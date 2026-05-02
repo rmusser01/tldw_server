@@ -160,6 +160,7 @@ def test_duplicate_undirected_conflict(client_with_graph_db: TestClient):
     # Duplicate (same endpoints, undirected) should 409
     dup = client.post(f"/api/v1/notes/{b}/links", json={"to_note_id": a, "directed": False}, headers=headers)
     assert dup.status_code == 409
+    assert dup.json()["detail"] == "duplicate manual link"
 
 
 def test_directed_both_directions_allowed(client_with_graph_db: TestClient):

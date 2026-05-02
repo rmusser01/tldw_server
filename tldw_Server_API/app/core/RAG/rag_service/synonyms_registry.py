@@ -114,6 +114,6 @@ def get_corpus_synonyms(corpus: str | None) -> dict[str, list[str]]:
                             elif isinstance(v, str):
                                 out[k.lower()] = [v.lower()]
                     return out
-    except Exception as e:
-        logger.warning(f"Failed to load synonyms for corpus '{corpus}': {e}")
+    except Exception:
+        logger.warning(f"Failed to load synonyms for corpus '{corpus}'")
     return {}

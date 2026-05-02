@@ -6,26 +6,25 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 from loguru import logger
 from pydantic import BaseModel, Field
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal, get_request_user, RequirePermission, TokenScopeGuard, User
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
-    get_auth_principal,
-    require_permissions,
-    require_token_scope,
-)
 from tldw_Server_API.app.core.AuthNZ.permissions import WORKFLOWS_ADMIN
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.Scheduler import get_global_scheduler
-from tldw_Server_API.app.services.workflows_scheduler import get_workflows_scheduler
+from tldw_Server_API.app.services.workflows_scheduler import (
+    build_schedule_payload,
+    get_workflows_scheduler,
+    resolve_schedule_submission_target,
+)
 
 router = APIRouter(prefix="/api/v1/scheduler/workflows", tags=["scheduler", "workflows"])
 
-_ADMIN_RESCAN_SCOPE_DEP = require_token_scope(
+_ADMIN_RESCAN_SCOPE_DEP = TokenScopeGuard(
     "workflows",
     require_if_present=True,
     endpoint_id="scheduler.workflows.admin_rescan",
 )
-_ADMIN_RESCAN_PERMISSIONS_DEP = require_permissions(WORKFLOWS_ADMIN)
+_ADMIN_RESCAN_PERMISSIONS_DEP = RequirePermission(WORKFLOWS_ADMIN)
 
 
 class ScheduleCreateRequest(BaseModel):
@@ -126,7 +125,7 @@ def _is_scheduler_admin_user(current_user: User) -> bool:
     "",
     response_model=dict[str, str],
     status_code=201,
-    dependencies=[Depends(require_token_scope("workflows", require_if_present=True, endpoint_id="scheduler.workflows.create"))],
+    dependencies=[Depends(TokenScopeGuard("workflows", require_if_present=True, endpoint_id="scheduler.workflows.create"))],
 )
 async def create_schedule(
     body: ScheduleCreateRequest,
@@ -177,20 +176,20 @@ async def admin_rescan(
     try:
         await svc._rescan_once()  # type: ignore[attr-defined]
     except Exception as e:
-        logger.warning(f"Admin rescan failed: {e}")
+        logger.warning("Admin rescan failed")
         raise HTTPException(status_code=500, detail="Rescan failed") from e
     jobs = 0
     try:
         jobs = len(svc._aps.get_jobs()) if getattr(svc, "_aps", None) else 0  # type: ignore[attr-defined]
-    except Exception as jobs_count_error:
-        logger.debug("Failed to collect APScheduler job count after admin rescan", exc_info=jobs_count_error)
+    except Exception:
+        logger.debug("Failed to collect APScheduler job count after admin rescan")
     return {"ok": True, "jobs": jobs}
 
 
 @router.get(
     "",
     response_model=list[ScheduleResponse],
-    dependencies=[Depends(require_token_scope("workflows", require_if_present=True, endpoint_id="scheduler.workflows.list"))],
+    dependencies=[Depends(TokenScopeGuard("workflows", require_if_present=True, endpoint_id="scheduler.workflows.list"))],
 )
 async def list_schedules(
     owner: str | None = Query(None, description="Admin-only: filter by owner user_id"),
@@ -244,7 +243,7 @@ async def list_schedules(
 @router.get(
     "/{schedule_id}",
     response_model=ScheduleResponse,
-    dependencies=[Depends(require_token_scope("workflows", require_if_present=True, endpoint_id="scheduler.workflows.get"))],
+    dependencies=[Depends(TokenScopeGuard("workflows", require_if_present=True, endpoint_id="scheduler.workflows.get"))],
 )
 async def get_schedule(
     schedule_id: str,
@@ -270,12 +269,12 @@ async def get_schedule(
             if nxt is not None:
                 try:
                     svc._get_db(int(s.user_id)).set_history(s.id, next_run_at=nxt.isoformat())  # type: ignore[attr-defined]
-                except Exception as persist_next_run_error:
-                    logger.debug("Failed to persist computed next_run_at for schedule {}", s.id, exc_info=persist_next_run_error)
+                except Exception:
+                    logger.debug("Failed to persist computed next_run_at")
                 # Refresh s to reflect persisted value
                 s = svc.get(schedule_id) or s
-        except Exception as cron_parse_error:
-            logger.debug("Failed to compute next_run_at from crontab for schedule {}", s.id, exc_info=cron_parse_error)
+        except Exception:
+            logger.debug("Failed to compute next_run_at from crontab")
     try:
         inputs = json.loads(s.inputs_json or "{}")
     except Exception:
@@ -305,7 +304,7 @@ async def get_schedule(
 @router.patch(
     "/{schedule_id}",
     response_model=dict[str, bool],
-    dependencies=[Depends(require_token_scope("workflows", require_if_present=True, endpoint_id="scheduler.workflows.update"))],
+    dependencies=[Depends(TokenScopeGuard("workflows", require_if_present=True, endpoint_id="scheduler.workflows.update"))],
 )
 async def update_schedule(
     schedule_id: str,
@@ -350,7 +349,7 @@ async def update_schedule(
 @router.delete(
     "/{schedule_id}",
     response_model=dict[str, bool],
-    dependencies=[Depends(require_token_scope("workflows", require_if_present=True, endpoint_id="scheduler.workflows.delete"))],
+    dependencies=[Depends(TokenScopeGuard("workflows", require_if_present=True, endpoint_id="scheduler.workflows.delete"))],
 )
 async def delete_schedule(
     schedule_id: str,
@@ -370,7 +369,7 @@ async def delete_schedule(
 @router.post(
     "/{schedule_id}/run-now",
     response_model=dict[str, str],
-    dependencies=[Depends(require_token_scope("workflows", require_if_present=True, require_schedule_match=True, schedule_path_param="schedule_id", allow_admin_bypass=True, endpoint_id="scheduler.workflows.run_now", count_as="run"))],
+    dependencies=[Depends(TokenScopeGuard("workflows", require_if_present=True, require_schedule_match=True, schedule_path_param="schedule_id", allow_admin_bypass=True, endpoint_id="scheduler.workflows.run_now", count_as="run"))],
 )
 async def run_now(
     schedule_id: str,
@@ -384,17 +383,11 @@ async def run_now(
     if str(current_user.id) != s.user_id and not is_admin:
         raise HTTPException(status_code=403, detail="Forbidden")
     # Submit immediate job to core Scheduler
-    payload = {
-        "workflow_id": s.workflow_id,
-        "inputs": __import__("json").loads(s.inputs_json or "{}"),
-        "user_id": s.user_id,
-        "tenant_id": s.tenant_id,
-        "mode": s.run_mode,
-        "validation_mode": s.validation_mode,
-    }
+    payload = build_schedule_payload(s)
+    handler_name, queue_name = resolve_schedule_submission_target(payload)
     # Use the global scheduler instance to avoid duplicate worker pools
     core = await get_global_scheduler()
-    task_id = await core.submit("workflow_run", payload=payload, queue_name="workflows", metadata={"user_id": s.user_id})
+    task_id = await core.submit(handler_name, payload=payload, queue_name=queue_name, metadata={"user_id": s.user_id})
     return {"task_id": task_id}
 
 
@@ -413,7 +406,7 @@ class DryRunRequest(BaseModel):
 @router.post(
     "/dry-run",
     response_model=dict[str, Any],
-    dependencies=[Depends(require_token_scope("workflows", require_if_present=True, endpoint_id="scheduler.workflows.dry_run"))],
+    dependencies=[Depends(TokenScopeGuard("workflows", require_if_present=True, endpoint_id="scheduler.workflows.dry_run"))],
 )
 async def dry_run_schedule(body: DryRunRequest, current_user: User = Depends(get_request_user)):
     """Validate cron/timezone and return next run time and echo inputs.

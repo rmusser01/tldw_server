@@ -110,9 +110,15 @@ def _normalize_user_db_base_dir(raw_path: Path) -> Path:
     return candidate
 
 
-def _ensure_dir(path: Path, *, label: str) -> None:
+def _ensure_dir(path: Path, *, label: str) -> bool:
     try:
-        path.mkdir(parents=True, exist_ok=True)
+        path.mkdir(parents=True, exist_ok=False)
+        return True
+    except FileExistsError as e:
+        if path.is_dir():
+            return False
+        logger.error(f"Failed to create {label} directory {path}: {e}")
+        raise StorageUnavailableError(f"Failed to create {label} directory") from e
     except OSError as e:
         logger.error(f"Failed to create {label} directory {path}: {e}")
         raise StorageUnavailableError(f"Failed to create {label} directory") from e
@@ -289,15 +295,15 @@ def require_trusted_database_parent_exists(
     return resolved_db_path
 
 
-def _build_user_dir(base_path: Path, user_id: Optional[UserId]) -> Path:
+def _build_user_dir(base_path: Path, user_id: Optional[UserId]) -> tuple[Path, bool]:
     safe_user_id = _resolve_user_id_for_storage(user_id)
     user_dir = (base_path / safe_user_id).resolve()
     try:
         user_dir.relative_to(base_path)
     except ValueError as exc:
         raise ValueError(f"Computed user directory escapes base path: {user_dir!r}") from exc
-    _ensure_dir(user_dir, label="user")
-    return user_dir
+    created = _ensure_dir(user_dir, label="user")
+    return user_dir, created
 
 
 def normalize_output_storage_filename(
@@ -505,8 +511,9 @@ class DatabasePaths:
             _ensure_dir(base_path, label="user database base")
         else:
             base_path = DatabasePaths.get_user_db_base_dir(allow_legacy_alias=allow_legacy_alias)
-        user_dir = _build_user_dir(base_path, user_id)
-        logger.debug(f"Ensured user directory exists: {user_dir}")
+        user_dir, created = _build_user_dir(base_path, user_id)
+        if created:
+            logger.debug(f"Created user directory: {user_dir}")
         return user_dir
 
     @staticmethod
@@ -782,7 +789,7 @@ class DatabasePaths:
     def get_user_rewrite_cache_path(user_id: Optional[UserId]) -> Path:
         """Get the path to the user's rewrite cache file."""
         base_path = DatabasePaths.get_user_db_base_dir(allow_legacy_alias=True)
-        user_dir = _build_user_dir(base_path, user_id)
+        user_dir, _ = _build_user_dir(base_path, user_id)
         cache_dir = user_dir / DatabasePaths.REWRITE_CACHE_SUBDIR
         _ensure_dir(cache_dir, label="rewrite cache")
         return cache_dir / "rewrite_cache.jsonl"

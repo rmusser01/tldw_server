@@ -78,8 +78,8 @@ class ChromaDBAdapter(VectorStoreAdapter):
             self._loop = asyncio.get_event_loop()
             logger.info(f"ChromaDB adapter initialized for user {self.config.user_id}")
 
-        except Exception as e:  # noqa: BLE001 - surface initialization failures
-            logger.error(f"Failed to initialize ChromaDB adapter: {e}")
+        except Exception:  # noqa: BLE001 - surface initialization failures
+            logger.error("Failed to initialize ChromaDB adapter")
             raise
 
     async def create_collection(self, collection_name: str, metadata: Optional[dict[str, Any]] = None) -> None:
@@ -114,8 +114,8 @@ class ChromaDBAdapter(VectorStoreAdapter):
 
             logger.info(f"Created/accessed collection '{collection_name}'")
 
-        except Exception as e:
-            logger.error(f"Failed to create collection '{collection_name}': {e}")
+        except Exception:
+            logger.error("Failed to create ChromaDB collection")
             raise
 
     async def delete_collection(self, collection_name: str) -> None:
@@ -132,8 +132,8 @@ class ChromaDBAdapter(VectorStoreAdapter):
             manager = self._require_manager()
             manager.client.delete_collection(name=collection_name)
             logger.info(f"Deleted collection '{collection_name}'")
-        except Exception as e:
-            logger.error(f"Failed to delete collection '{collection_name}': {e}")
+        except Exception:
+            logger.error("Failed to delete ChromaDB collection")
             raise
 
     async def list_collections(self) -> list[str]:
@@ -150,8 +150,8 @@ class ChromaDBAdapter(VectorStoreAdapter):
             manager = self._require_manager()
             collections = manager.client.list_collections()
             return [col.name for col in collections]
-        except Exception as e:
-            logger.error(f"Failed to list collections: {e}")
+        except Exception:
+            logger.error("Failed to list ChromaDB collections")
             raise
 
     async def upsert_vectors(
@@ -194,8 +194,8 @@ class ChromaDBAdapter(VectorStoreAdapter):
                     metadatas=metadatas
                 )
             logger.info(f"Upserted {len(vectors)} vectors to collection '{collection_name}'")
-        except Exception as e:
-            logger.error(f"Failed to upsert vectors to '{collection_name}': {e}")
+        except Exception:
+            logger.error("Failed to upsert ChromaDB vectors")
             raise
 
     async def delete_vectors(self, collection_name: str, ids: list[str]) -> None:
@@ -225,8 +225,8 @@ class ChromaDBAdapter(VectorStoreAdapter):
                 raise
             collection.delete(ids=ids)
             logger.info(f"Deleted {len(ids)} vectors from collection '{collection_name}'")
-        except Exception as e:
-            logger.error(f"Failed to delete vectors from '{collection_name}': {e}")
+        except Exception:
+            logger.error("Failed to delete ChromaDB vectors")
             raise
 
     async def delete_by_filter(self, collection_name: str, filter: dict[str, Any]) -> int:
@@ -242,8 +242,8 @@ class ChromaDBAdapter(VectorStoreAdapter):
             delete = getattr(collection, 'delete', None)
             if callable(delete):
                 delete(where=filter)
-        except Exception as e:  # noqa: BLE001 - best-effort delete
-            logger.error(f"Failed to delete by filter in '{collection_name}': {e}")
+        except Exception:  # noqa: BLE001 - best-effort delete
+            logger.error("Failed to delete ChromaDB vectors by filter")
         else:
             return 0
         return 0
@@ -317,8 +317,8 @@ class ChromaDBAdapter(VectorStoreAdapter):
             try:
                 if hasattr(embs, 'tolist'):
                     embs = embs.tolist()
-            except Exception as vector_convert_error:  # noqa: BLE001 - best-effort conversion
-                logger.debug("Chroma adapter failed to convert embeddings to list", exc_info=vector_convert_error)
+            except Exception:  # noqa: BLE001 - best-effort conversion
+                logger.debug("Chroma adapter failed to convert embeddings to list")
             for i, vid in enumerate(data_dict['ids']):
                 vec: list[float] = []
                 try:
@@ -391,8 +391,8 @@ class ChromaDBAdapter(VectorStoreAdapter):
                     )
                     search_results.append(result)
 
-        except Exception as e:  # noqa: BLE001 - surface as adapter error
-            logger.error(f"Failed to search in collection '{collection_name}': {e}")
+        except Exception:  # noqa: BLE001 - surface as adapter error
+            logger.error("Failed to search ChromaDB collection")
             raise
         else:
             return search_results
@@ -457,16 +457,16 @@ class ChromaDBAdapter(VectorStoreAdapter):
                     for result in results:
                         result.metadata["source_collection"] = collection_name
                     all_results.extend(results)
-                except Exception as e:  # noqa: BLE001 - best-effort per-collection search
-                    logger.warning(f"Failed to search collection '{collection_name}': {e}")
+                except Exception:  # noqa: BLE001 - best-effort per-collection search
+                    logger.warning("Failed to search ChromaDB collection during multi-search")
                     continue
 
             # Sort by score and return top k overall
             all_results.sort(key=lambda x: x.score, reverse=True)
             return all_results[:k]
 
-        except Exception as e:  # noqa: BLE001 - surface as adapter error
-            logger.error(f"Failed to perform multi-search: {e}")
+        except Exception:  # noqa: BLE001 - surface as adapter error
+            logger.error("Failed to perform ChromaDB multi-search")
             raise
 
     async def get_collection_stats(self, collection_name: str) -> dict[str, Any]:
@@ -514,12 +514,12 @@ class ChromaDBAdapter(VectorStoreAdapter):
                 if emb_list:
                     try:
                         dimension = len(emb_list[0])
-                    except Exception as shape_error:  # noqa: BLE001 - best-effort shape inspection
-                        logger.debug("Chroma adapter failed to inspect embedding shape", exc_info=shape_error)
+                    except Exception:  # noqa: BLE001 - best-effort shape inspection
+                        logger.debug("Chroma adapter failed to inspect embedding shape")
             if dimension is None:
                 dimension = self.config.embedding_dim
-        except Exception as e:  # noqa: BLE001 - surface as adapter error
-            logger.error(f"Failed to get stats for collection '{collection_name}': {e}")
+        except Exception:  # noqa: BLE001 - surface as adapter error
+            logger.error("Failed to get ChromaDB collection stats")
             raise
         else:
             return {

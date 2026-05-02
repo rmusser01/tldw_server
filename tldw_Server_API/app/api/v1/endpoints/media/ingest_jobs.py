@@ -17,13 +17,8 @@ from fastapi.responses import StreamingResponse
 from loguru import logger
 from pydantic import BaseModel, Field
 from starlette.responses import JSONResponse
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, get_auth_principal, get_request_user, rbac_rate_limit, RequirePermission, User
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
-    check_rate_limit,
-    get_auth_principal,
-    rbac_rate_limit,
-    require_permissions,
-)
 from tldw_Server_API.app.api.v1.API_Deps.billing_deps import require_within_limit
 from tldw_Server_API.app.api.v1.API_Deps.storage_quota_guard import guard_storage_quota
 from tldw_Server_API.app.core.Billing.enforcement import LimitCategory
@@ -32,7 +27,6 @@ from tldw_Server_API.app.api.v1.API_Deps.validations_deps import file_validator_
 from tldw_Server_API.app.api.v1.schemas.media_request_models import AddMediaForm
 from tldw_Server_API.app.core.AuthNZ.permissions import MEDIA_CREATE
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.Ingestion_Media_Processing.input_sourcing import (
     TempDirManager,
     save_uploaded_files,
@@ -133,8 +127,8 @@ class MediaIngestJobListResponse(BaseModel):
 def _cleanup_dir(path_str: str) -> None:
     try:
         shutil.rmtree(path_str, ignore_errors=True)
-    except Exception as exc:
-        logger.debug("Failed to cleanup temp dir {}: {}", path_str, exc)
+    except Exception:
+        logger.debug("Failed to cleanup media ingest temp dir")
 
 
 def _validate_submit_inputs(
@@ -409,7 +403,7 @@ def _resolve_batch_or_session_id(
     summary="Submit async media ingestion jobs (one job per item)",
     tags=["Media Ingestion Jobs"],
     dependencies=[
-        Depends(require_permissions(MEDIA_CREATE)),
+        Depends(RequirePermission(MEDIA_CREATE)),
         Depends(rbac_rate_limit("media.create")),
         Depends(guard_storage_quota),
         # Pessimistic pre-check: verifies at least 1 MB of storage quota
@@ -542,9 +536,9 @@ async def submit_media_ingest_jobs(
                 )
             except HTTPException:
                 raise
-            except Exception as exc:
-                logger.warning("Failed to stage upload for ingest jobs: {}", exc)
-                errors.append(f"Upload staging failed: {exc}")
+            except Exception:
+                logger.warning("Failed to stage upload for ingest jobs")
+                errors.append("Upload staging failed")
                 if temp_dir_path:
                     _cleanup_dir(temp_dir_path)
 

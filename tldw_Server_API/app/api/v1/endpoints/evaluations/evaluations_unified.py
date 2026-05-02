@@ -14,8 +14,9 @@ from typing import Annotated, Any, Optional, Union
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, Request, Response, UploadFile, status
 from fastapi.routing import APIRoute
 from loguru import logger
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal, rbac_rate_limit, RequireRole, User
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import rbac_rate_limit, require_roles
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 
 # Import unified schemas
 from tldw_Server_API.app.api.v1.schemas.evaluation_schemas_unified import (
@@ -42,7 +43,6 @@ from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
     record_byok_missing_credentials,
     resolve_byok_credentials,
 )
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
 from tldw_Server_API.app.core.AuthNZ.permissions import EVALS_READ
 from tldw_Server_API.app.core.Chat.chat_service import resolve_provider_api_key
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
@@ -96,7 +96,6 @@ _wm_lock = None
 
 import contextlib
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 
 from .evaluations_auth import (
@@ -536,7 +535,7 @@ async def delete_embeddings_abtest(
 @router.get(
     "/embeddings/abtest/{test_id}/export",
     dependencies=[
-        Depends(require_roles("admin")),
+        Depends(RequireRole("admin")),
         Depends(rbac_rate_limit("evals.abtest.export")),
     ],
 )
@@ -1673,19 +1672,21 @@ async def batch_evaluate(
                                 }
                                 failed_count += 1
                         except _EVALS_NONCRITICAL_EXCEPTIONS as e:
+                            logger.error(f"Batch evaluation item failed: {e}", exc_info=True)
                             results_by_index[item_index] = {
                                 "evaluation_id": None,
                                 "status": "failed",
-                                "error": str(e),
+                                "error": "Evaluation item failed",
                             }
                             failed_count += 1
                             if not request.continue_on_error:
                                 fail_fast_cancelled = True
                         except Exception as e:
+                            logger.error(f"Batch evaluation item failed: {e}", exc_info=True)
                             results_by_index[item_index] = {
                                 "evaluation_id": None,
                                 "status": "failed",
-                                "error": str(e),
+                                "error": "Evaluation item failed",
                             }
                             failed_count += 1
                             if not request.continue_on_error:
@@ -1831,10 +1832,11 @@ async def batch_evaluate(
                     })
 
                 except _EVALS_NONCRITICAL_EXCEPTIONS as e:
+                    logger.error(f"Batch evaluation item failed: {e}", exc_info=True)
                     results.append({
                         "evaluation_id": None,
                         "status": "failed",
-                        "error": str(e)
+                        "error": "Evaluation item failed"
                     })
                     failed_count += 1
 
@@ -2150,7 +2152,13 @@ async def get_evaluation_history(
                         "end": request.end_date.isoformat() if request.end_date else None
                     }
                 }
-            }
+            },
+            pagination=build_offset_pagination_meta(
+                total=total_count,
+                limit=request.limit or 100,
+                offset=request.offset or 0,
+                count=len(evaluations),
+            ),
         )
 
     except _EVALS_NONCRITICAL_EXCEPTIONS as e:

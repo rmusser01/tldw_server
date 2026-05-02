@@ -4,13 +4,22 @@ from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field
+
 try:
     from pydantic import model_validator
 except ImportError:  # pragma: no cover - pydantic v1 fallback
     from pydantic import root_validator as model_validator  # type: ignore
 
+from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
+
 RuntimeType = Literal["docker", "firecracker", "lima", "vz_linux", "vz_macos", "seatbelt"]
 TrustLevelType = Literal["trusted", "standard", "untrusted"]
+
+
+def _default_offset_pagination_aliases(response):
+    if response.next_offset is None:
+        response.next_offset = response.pagination.next_offset
+    return response
 
 
 class SandboxRuntimeInfo(BaseModel):
@@ -23,6 +32,8 @@ class SandboxRuntimeInfo(BaseModel):
     max_mem_mb: int | None = Field(default=None, description="Max memory (MB) per run")
     max_upload_mb: int | None = Field(default=None, description="Max inline/session upload size (MB)")
     max_log_bytes: int | None = Field(default=None, description="Max bytes streamed to logs per run")
+    max_artifact_file_bytes: int | None = Field(default=None, description="Max bytes captured for a single artifact file")
+    max_artifact_total_bytes: int | None = Field(default=None, description="Max total artifact bytes captured per run")
     queue_max_length: int | None = Field(default=None, description="Max queued runs before 429 is returned")
     queue_ttl_sec: int | None = Field(default=None, description="Maximum time a run may remain queued before being dropped")
     workspace_cap_mb: int | None = Field(default=None, description="Default workspace size cap (MB)")
@@ -228,7 +239,13 @@ class SandboxAdminRunListResponse(BaseModel):
     limit: int
     offset: int
     has_more: bool
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+    pagination: OffsetPaginationMeta
     items: list[SandboxAdminRunSummary]
+
+    @model_validator(mode="after")
+    def default_pagination_aliases(self) -> "SandboxAdminRunListResponse":
+        return _default_offset_pagination_aliases(self)
 
 
 class SandboxAdminRunDetails(SandboxAdminRunSummary):
@@ -250,7 +267,13 @@ class SandboxAdminIdempotencyListResponse(BaseModel):
     limit: int
     offset: int
     has_more: bool
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+    pagination: OffsetPaginationMeta
     items: list[SandboxAdminIdempotencyItem]
+
+    @model_validator(mode="after")
+    def default_pagination_aliases(self) -> "SandboxAdminIdempotencyListResponse":
+        return _default_offset_pagination_aliases(self)
 
 
 # Admin: Usage aggregates
@@ -266,7 +289,13 @@ class SandboxAdminUsageResponse(BaseModel):
     limit: int
     offset: int
     has_more: bool
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+    pagination: OffsetPaginationMeta
     items: list[SandboxAdminUsageItem]
+
+    @model_validator(mode="after")
+    def default_pagination_aliases(self) -> "SandboxAdminUsageResponse":
+        return _default_offset_pagination_aliases(self)
 
 
 class SandboxAdminMacOSHostDiagnostics(BaseModel):
@@ -289,6 +318,8 @@ class SandboxAdminMacOSHelperDiagnostics(BaseModel):
     executable: bool
     ready: bool
     transport: str | None = None
+    protocol_version: str | None = None
+    helper_version: str | None = None
     reasons: list[str] = Field(default_factory=list)
 
 
@@ -311,6 +342,73 @@ class SandboxAdminMacOSRuntimeDiagnostics(BaseModel):
     remediation: str | None = None
 
 
+class SandboxAdminMacOSReconciliationItem(BaseModel):
+    status: str
+    session_id: str | None = None
+    vm_id: str | None = None
+    state: str | None = None
+    healthy: bool | None = None
+    reason: str | None = None
+    termination_eligible: bool | None = None
+    run_id: str | None = None
+    helper_session_id: str | None = None
+    template_id: str | None = None
+    persisted_template_id: str | None = None
+    helper_template_id: str | None = None
+    template_id_matches_persisted: bool | None = None
+    planning_source: str | None = None
+    run_manifest_path: str | None = None
+    run_manifest_present: bool | None = None
+
+
+class SandboxAdminMacOSReconciliationDiagnostics(BaseModel):
+    """Admin-facing comparison between persisted VZ session state and live helper VMs."""
+
+    computed: bool
+    persisted_sessions: int
+    live_vms: int
+    healthy_session_ids: list[str] = Field(default_factory=list)
+    stale_session_ids: list[str] = Field(default_factory=list)
+    unhealthy_session_ids: list[str] = Field(default_factory=list)
+    skipped_active_session_ids: list[str] = Field(default_factory=list)
+    orphaned_vm_ids: list[str] = Field(default_factory=list)
+    owned_orphaned_vm_ids: list[str] = Field(default_factory=list)
+    unknown_orphaned_vm_ids: list[str] = Field(default_factory=list)
+    foreign_orphaned_vm_ids: list[str] = Field(default_factory=list)
+    items: list[SandboxAdminMacOSReconciliationItem] = Field(default_factory=list)
+    reasons: list[str] = Field(default_factory=list)
+
+
+class SandboxAdminMacOSImageStoreItem(BaseModel):
+    run_id: str
+    template_id: str | None = None
+    run_manifest_path: str | None = None
+    run_manifest_present: bool | None = None
+    gc_reason: str | None = None
+    gc_path: str | None = None
+    matched_vm_id: str | None = None
+    matched_reconciliation_status: str | None = None
+    matched_reconciliation_reason: str | None = None
+
+
+class SandboxAdminMacOSImageStoreDiagnostics(BaseModel):
+    configured: bool
+    root_path: str | None = None
+    registered_templates: int = 0
+    run_manifests: int = 0
+    gc_candidates: int = 0
+    items: list[SandboxAdminMacOSImageStoreItem] = Field(default_factory=list)
+    reasons: list[str] = Field(default_factory=list)
+
+
+class SandboxAdminStartupWarningSummary(BaseModel):
+    """Compact startup warning summary projected into sandbox diagnostics."""
+
+    present: bool
+    blocking: bool
+    codes: list[str] = Field(default_factory=list)
+
+
 class SandboxAdminMacOSDiagnosticsResponse(BaseModel):
     """Structured admin response for macOS sandbox diagnostics."""
 
@@ -318,6 +416,107 @@ class SandboxAdminMacOSDiagnosticsResponse(BaseModel):
     helper: SandboxAdminMacOSHelperDiagnostics
     templates: dict[str, SandboxAdminMacOSTemplateDiagnostics] = Field(default_factory=dict)
     runtimes: dict[str, SandboxAdminMacOSRuntimeDiagnostics] = Field(default_factory=dict)
+    reconciliation: SandboxAdminMacOSReconciliationDiagnostics | None = None
+    image_store: SandboxAdminMacOSImageStoreDiagnostics | None = None
+    startup_warning_summary: SandboxAdminStartupWarningSummary | None = None
+
+
+class SandboxAdminMacOSReconciliationRepairRequest(BaseModel):
+    delete_stale_session_controls: bool = True
+    delete_unhealthy_session_controls: bool = True
+    terminate_orphaned_vms: bool = False
+    dry_run: bool = True
+
+
+class SandboxAdminMacOSReconciliationRepairAction(BaseModel):
+    type: str
+    session_id: str | None = None
+    vm_id: str | None = None
+    status: str
+    reason: str | None = None
+    termination_eligible: bool | None = None
+    run_id: str | None = None
+    template_id: str | None = None
+    planning_source: str | None = None
+    run_manifest_path: str | None = None
+    run_manifest_present: bool | None = None
+    persisted_template_id: str | None = None
+    helper_template_id: str | None = None
+    template_id_matches_persisted: bool | None = None
+
+
+class SandboxAdminMacOSReconciliationRepairSummary(BaseModel):
+    stale_session_controls: int = 0
+    unhealthy_session_controls: int = 0
+    deleted_session_controls: int = 0
+    skipped_active_sessions: int = 0
+    orphaned_vms: int = 0
+    terminated_orphaned_vms: int = 0
+
+
+class SandboxAdminMacOSReconciliationRepairResponse(BaseModel):
+    dry_run: bool
+    helper: dict[str, object] = Field(default_factory=dict)
+    summary: SandboxAdminMacOSReconciliationRepairSummary
+    actions: list[SandboxAdminMacOSReconciliationRepairAction] = Field(default_factory=list)
+    reasons: list[str] = Field(default_factory=list)
+
+
+class SandboxAdminMacOSImageStoreCleanupAction(BaseModel):
+    type: str
+    run_id: str
+    status: str
+    error: str | None = None
+    template_id: str | None = None
+    run_manifest_path: str | None = None
+    run_manifest_present: bool | None = None
+    gc_reason: str | None = None
+    gc_path: str | None = None
+    matched_vm_id: str | None = None
+    matched_reconciliation_status: str | None = None
+    matched_reconciliation_reason: str | None = None
+
+
+class SandboxAdminMacOSImageStoreCleanupPlanSummary(BaseModel):
+    total_candidates: int = 0
+    planned_actions: int = 0
+    blocked_live_matches: int = 0
+    planning_only_run_manifests: int = 0
+    inactive_runs: int = 0
+    legacy_run_directories: int = 0
+
+
+class SandboxAdminMacOSImageStoreCleanupPlanResponse(BaseModel):
+    dry_run: bool
+    image_store: SandboxAdminMacOSImageStoreDiagnostics
+    summary: SandboxAdminMacOSImageStoreCleanupPlanSummary
+    actions: list[SandboxAdminMacOSImageStoreCleanupAction] = Field(default_factory=list)
+    reasons: list[str] = Field(default_factory=list)
+
+
+class SandboxAdminMacOSImageStoreCleanupRequest(BaseModel):
+    dry_run: bool = True
+    confirm_all: bool = False
+    action_types: list[str] | None = None
+    run_ids: list[str] | None = None
+
+
+class SandboxAdminMacOSImageStoreCleanupSummary(BaseModel):
+    total_candidates: int = 0
+    planned_actions: int = 0
+    deleted_actions: int = 0
+    blocked_live_matches: int = 0
+    planning_only_run_manifests: int = 0
+    inactive_runs: int = 0
+    legacy_run_directories: int = 0
+
+
+class SandboxAdminMacOSImageStoreCleanupResponse(BaseModel):
+    dry_run: bool
+    image_store: SandboxAdminMacOSImageStoreDiagnostics
+    summary: SandboxAdminMacOSImageStoreCleanupSummary
+    actions: list[SandboxAdminMacOSImageStoreCleanupAction] = Field(default_factory=list)
+    reasons: list[str] = Field(default_factory=list)
 
 
 # Snapshot/Clone Schemas

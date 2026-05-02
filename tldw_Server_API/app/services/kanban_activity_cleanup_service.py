@@ -35,7 +35,9 @@ def _enumerate_user_ids() -> list[int]:
     try:
         base = DatabasePaths.get_user_db_base_dir()
     except _KANBAN_ACTIVITY_CLEANUP_NONCRITICAL_EXCEPTIONS as exc:
-        logger.debug(f"kanban_activity_cleanup: failed to resolve user db base dir: {exc}")
+        logger.bind(error_type=type(exc).__name__).debug(
+            "kanban_activity_cleanup: failed to resolve user db base dir"
+        )
         return []
 
     uids: list[int] = []
@@ -85,7 +87,9 @@ async def start_kanban_activity_cleanup_scheduler() -> asyncio.Task | None:
                 if total_deleted:
                     logger.info(f"Kanban activity cleanup removed {total_deleted} old activities")
             except _KANBAN_ACTIVITY_CLEANUP_NONCRITICAL_EXCEPTIONS as exc:
-                logger.debug(f"kanban_activity_cleanup: cleanup run failed: {exc}")
+                logger.bind(error_type=type(exc).__name__).debug(
+                    "kanban_activity_cleanup: cleanup run failed"
+                )
             await asyncio.sleep(interval)
 
     task = asyncio.create_task(_runner(), name="kanban_activity_cleanup_scheduler")

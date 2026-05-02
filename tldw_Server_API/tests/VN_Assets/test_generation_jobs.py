@@ -21,6 +21,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGD
 from tldw_Server_API.app.core.Image_Generation.adapters.base import ImageGenResult
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.VN_Assets.concurrency import BackendGenerationLease
+from tldw_Server_API.app.core.VN_Assets.constants import ERROR_ITEM_LIMIT_EXCEEDED
 from tldw_Server_API.app.core.VN_Assets.jobs import (
     enqueue_batch_idempotency_key,
     generate_variant_idempotency_key,
@@ -33,6 +34,7 @@ class FakeJobs:
     def __init__(self) -> None:
         self.created: list[dict[str, Any]] = []
         self._by_idempotency_key: dict[str, dict[str, Any]] = {}
+        self.cancelled_ids: list[int] = []
 
     def create_job(self, **kwargs: Any) -> dict[str, Any]:
         idempotency_key = str(kwargs.get("idempotency_key") or "")
@@ -48,6 +50,23 @@ class FakeJobs:
         if idempotency_key:
             self._by_idempotency_key[idempotency_key] = job
         return job
+
+    def list_jobs(self, **filters: Any) -> list[dict[str, Any]]:
+        jobs = self.created
+        for key, value in filters.items():
+            if key in {"limit", "sort_by", "sort_order"} or value is None:
+                continue
+            jobs = [job for job in jobs if job.get(key) == value]
+        return jobs[: int(filters.get("limit") or len(jobs))]
+
+    def cancel_job(self, job_id: int, *, reason: str | None = None) -> bool:
+        self.cancelled_ids.append(job_id)
+        for job in self.created:
+            if int(job["id"]) == job_id:
+                job["status"] = "cancelled"
+                job["cancellation_reason"] = reason
+                return True
+        return False
 
 
 class RejectingJobs:
@@ -118,6 +137,11 @@ class RecordingVNSaver:
             "storage_path": "vn_assets/2026/04/24/generated.png",
             "mime_type": "image/png",
         }
+
+
+class FailingVNSaver:
+    async def __call__(self, **_kwargs: Any) -> dict[str, Any]:
+        raise RuntimeError("storage failed")
 
 
 @pytest.fixture
@@ -255,6 +279,34 @@ def test_generation_marks_batch_failed_when_parent_enqueue_is_rejected(
     assert batches[0]["enqueue_error"] == "queued job quota exceeded"
 
 
+def test_start_generation_enforces_item_limit_against_existing_items(
+    chacha_db: CharactersRAGDB,
+    character_id: int,
+    fake_jobs: FakeJobs,
+) -> None:
+    limited_service = VNAssetPackService(
+        chacha_db,
+        owner_user_id=1,
+        jobs_manager=fake_jobs,
+        item_limit=1,
+    )
+    pack = limited_service.create_pack(
+        VNAssetPackCreate(title="Limited Pack", primary_character_id=character_id)
+    )
+    slot = limited_service.create_slot(
+        pack.id,
+        VNAssetSlotCreate(asset_type="sprite", slot_key="sprite.primary", variant_count=1),
+    )
+    limited_service.repo.create_item(
+        pack_id=pack.id,
+        slot_id=slot.id,
+        variant_index=0,
+    )
+
+    with pytest.raises(ValueError, match=ERROR_ITEM_LIMIT_EXCEEDED):
+        limited_service.start_generation(pack.id, user_id=1)
+
+
 def test_fanout_uses_deterministic_child_idempotency(
     fake_jobs: FakeJobs,
     service: VNAssetPackService,
@@ -363,6 +415,233 @@ async def test_generate_variant_creates_draft_item_with_generated_file(
     assert service.repo.get_slot(slot.id)["status"] == "reviewing"
 
 
+@pytest.mark.asyncio
+async def test_generate_variant_rolls_back_item_when_file_persistence_fails(
+    fake_jobs: FakeJobs,
+    service: VNAssetPackService,
+    pack_with_slots: SimpleNamespace,
+) -> None:
+    from tldw_Server_API.app.core.VN_Assets.worker import VNAssetGenerationWorker
+
+    slot = pack_with_slots.slots[0]
+    batch = service.repo.create_batch(
+        pack_id=pack_with_slots.id,
+        requested_by_user_id=1,
+        status="enqueued",
+        total_slots=1,
+        total_variants=1,
+        planned_count=1,
+    )
+    worker = VNAssetGenerationWorker(
+        repo=service.repo,
+        jobs_manager=fake_jobs,
+        image_registry=FakeImageRegistry(FakeImageAdapter()),
+        backend_gate=FakeGenerationGate(),
+        save_vn_asset_image=FailingVNSaver(),
+    )
+
+    with pytest.raises(RuntimeError, match="storage failed"):
+        await worker.handle_generate_variant(
+            {
+                "pack_id": pack_with_slots.id,
+                "slot_id": slot.id,
+                "variant_index": 0,
+                "batch_id": batch["id"],
+                "user_id": 1,
+            }
+        )
+
+    assert service.repo.list_items(pack_with_slots.id) == []
+
+
+@pytest.mark.asyncio
+async def test_generate_variant_includes_pack_world_book_context(
+    chacha_db: CharactersRAGDB,
+    fake_jobs: FakeJobs,
+    character_id: int,
+) -> None:
+    from tldw_Server_API.app.core.Character_Chat.world_book_manager import WorldBookService
+    from tldw_Server_API.app.core.VN_Assets.worker import VNAssetGenerationWorker
+
+    world_books = WorldBookService(chacha_db)
+    world_book_id = world_books.create_world_book("Archive Lore")
+    world_books.add_entry(
+        world_book_id=world_book_id,
+        keywords=["archive"],
+        content="Orbital archive doors glow blue.",
+        priority=10,
+    )
+    service = VNAssetPackService(chacha_db, owner_user_id=1, jobs_manager=fake_jobs)
+    pack = service.create_pack(
+        VNAssetPackCreate(
+            title="Lore Pack",
+            primary_character_id=character_id,
+            source_world_book_ids=[world_book_id],
+        )
+    )
+    slot = service.create_slot(
+        pack.id,
+        VNAssetSlotCreate(asset_type="sprite", slot_key="sprite.primary", variant_count=1),
+    )
+    batch = service.repo.create_batch(
+        pack_id=pack.id,
+        requested_by_user_id=1,
+        status="enqueued",
+        total_slots=1,
+        total_variants=1,
+        planned_count=1,
+    )
+    adapter = FakeImageAdapter()
+    worker = VNAssetGenerationWorker(
+        repo=service.repo,
+        jobs_manager=fake_jobs,
+        image_registry=FakeImageRegistry(adapter),
+        backend_gate=FakeGenerationGate(),
+        save_vn_asset_image=RecordingVNSaver(),
+    )
+
+    await worker.handle_generate_variant(
+        {
+            "pack_id": pack.id,
+            "slot_id": slot.id,
+            "variant_index": 0,
+            "batch_id": batch["id"],
+            "user_id": 1,
+        }
+    )
+
+    assert "Orbital archive doors glow blue." in adapter.requests[0].prompt
+
+
+@pytest.mark.asyncio
+async def test_terminal_batch_cancels_remaining_jobs_and_skips_generation(
+    fake_jobs: FakeJobs,
+    service: VNAssetPackService,
+    pack_with_slots: SimpleNamespace,
+) -> None:
+    from tldw_Server_API.app.core.VN_Assets.jobs import vn_asset_batch_group
+    from tldw_Server_API.app.core.VN_Assets.worker import VNAssetGenerationWorker
+
+    slot = pack_with_slots.slots[0]
+    batch = service.repo.create_batch(
+        pack_id=pack_with_slots.id,
+        requested_by_user_id=1,
+        status="cancelled",
+        total_slots=1,
+        total_variants=1,
+        planned_count=1,
+    )
+    fake_jobs.created.append(
+        {
+            "id": 10,
+            "status": "queued",
+            "domain": "vn_assets",
+            "batch_group": vn_asset_batch_group(user_id=1, pack_id=pack_with_slots.id, batch_id=batch["id"]),
+        }
+    )
+    worker = VNAssetGenerationWorker(
+        repo=service.repo,
+        jobs_manager=fake_jobs,
+        image_registry=FakeImageRegistry(FakeImageAdapter()),
+        backend_gate=FakeGenerationGate(),
+        save_vn_asset_image=RecordingVNSaver(),
+    )
+
+    with pytest.raises(ValueError, match="vn_asset_batch_terminal"):
+        await worker.handle_generate_variant(
+            {
+                "pack_id": pack_with_slots.id,
+                "slot_id": slot.id,
+                "variant_index": 0,
+                "batch_id": batch["id"],
+                "user_id": 1,
+            },
+            job={"id": 99},
+        )
+
+    assert fake_jobs.cancelled_ids == [10]
+    assert service.repo.list_items(pack_with_slots.id) == []
+
+
+def test_record_generation_success_preserves_terminal_batch_state(
+    fake_jobs: FakeJobs,
+    service: VNAssetPackService,
+    pack_with_slots: SimpleNamespace,
+) -> None:
+    from tldw_Server_API.app.core.VN_Assets.worker import VNAssetGenerationWorker
+
+    batch = service.repo.create_batch(
+        pack_id=pack_with_slots.id,
+        requested_by_user_id=1,
+        status="failed",
+        total_slots=1,
+        total_variants=2,
+        planned_count=2,
+    )
+    worker = VNAssetGenerationWorker(repo=service.repo, jobs_manager=fake_jobs)
+
+    worker._record_generation_success(batch_id=batch["id"])
+
+    updated = service.repo.get_batch(batch["id"])
+    assert updated["status"] == "failed"
+    assert updated["completed_count"] == 1
+    assert updated["completed_at"] is None
+
+
+@pytest.mark.asyncio
+async def test_generate_variant_offloads_sync_image_generation(
+    fake_jobs: FakeJobs,
+    service: VNAssetPackService,
+    pack_with_slots: SimpleNamespace,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core.VN_Assets import worker as worker_module
+    from tldw_Server_API.app.core.VN_Assets.worker import VNAssetGenerationWorker
+
+    to_thread_calls: list[tuple[Any, tuple[Any, ...]]] = []
+
+    async def fake_to_thread(func: Any, /, *args: Any, **_kwargs: Any) -> Any:
+        to_thread_calls.append((func, args))
+        return func(*args)
+
+    monkeypatch.setattr(
+        worker_module,
+        "asyncio",
+        SimpleNamespace(to_thread=fake_to_thread),
+        raising=False,
+    )
+
+    adapter = FakeImageAdapter()
+    worker = VNAssetGenerationWorker(
+        repo=service.repo,
+        jobs_manager=fake_jobs,
+        image_registry=FakeImageRegistry(adapter),
+        backend_gate=FakeGenerationGate(),
+        save_vn_asset_image=RecordingVNSaver(),
+    )
+    slot = pack_with_slots.slots[0]
+    batch = service.repo.create_batch(
+        pack_id=pack_with_slots.id,
+        requested_by_user_id=1,
+        status="enqueued",
+        total_slots=1,
+        total_variants=1,
+        planned_count=1,
+    )
+
+    await worker.handle_generate_variant(
+        {
+            "pack_id": pack_with_slots.id,
+            "slot_id": slot.id,
+            "variant_index": 0,
+            "batch_id": batch["id"],
+            "user_id": 1,
+        }
+    )
+
+    assert to_thread_calls == [(adapter.generate, (adapter.requests[0],))]
+
+
 def test_approved_background_item_enqueues_lazy_depth_generation(
     service: VNAssetPackService,
     character_id: int,
@@ -457,6 +736,54 @@ def test_lazy_depth_generation_does_not_duplicate_active_depth_batch(
     )
 
     assert len(fake_jobs.created) == 1
+
+
+def test_lazy_depth_generation_treats_full_pack_batch_as_active(
+    service: VNAssetPackService,
+    character_id: int,
+    fake_jobs: FakeJobs,
+) -> None:
+    pack = service.create_pack(
+        VNAssetPackCreate(title="Depth Pack", primary_character_id=character_id)
+    )
+    background = service.create_slot(
+        pack.id,
+        VNAssetSlotCreate(
+            asset_type="background",
+            slot_key="background.interior",
+            variant_count=1,
+        ),
+    )
+    service.create_slot(
+        pack.id,
+        VNAssetSlotCreate(
+            asset_type="depth_companion",
+            slot_key="depth.interior",
+            variant_count=0,
+            required_for_runtime=False,
+            depends_on_slot_id=background.id,
+        ),
+    )
+    service.repo.create_batch(
+        pack_id=pack.id,
+        requested_by_user_id=1,
+        status="queued",
+        options={},
+    )
+    item = service.repo.create_item(
+        pack_id=pack.id,
+        slot_id=background.id,
+        variant_index=0,
+        review_status="draft",
+    )
+
+    service.review_item_for_pack(
+        pack.id,
+        int(item["id"]),
+        VNAssetReviewRequest(review_status="approved", preferred=True),
+    )
+
+    assert fake_jobs.created == []
 
 
 def test_failed_fanout_preserves_full_planned_count(

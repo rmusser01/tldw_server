@@ -1,3 +1,6 @@
+from types import SimpleNamespace
+
+from tldw_Server_API.app.core.VN_Assets import prompts as prompts_module
 from tldw_Server_API.app.core.VN_Assets.prompts import (
     PromptBudgets,
     build_prompt_preview,
@@ -62,7 +65,7 @@ def test_prompt_preview_is_deterministic_with_stable_label_ordering() -> None:
     assert first.prompt.index("pose=standing") < first.prompt.index("variant=2")
 
 
-def test_negative_prompt_and_pack_context_are_preserved_before_lower_priority_sources() -> None:
+def test_negative_prompt_stays_separate_from_positive_pack_context() -> None:
     preview = build_prompt_preview(
         character=long_character,
         world_book_entries=[very_long_world_book],
@@ -77,14 +80,14 @@ def test_negative_prompt_and_pack_context_are_preserved_before_lower_priority_so
     assert "waist-up sprite" in preview.prompt
     assert "moonlit archive" in preview.prompt
     assert "clean watercolor" in preview.prompt
-    assert "Negative prompt:" in preview.prompt
+    assert "Negative prompt:" not in preview.prompt
     assert "blurry" in preview.negative_prompt
     assert preview.prompt.index("clean watercolor") < preview.prompt.index("Character name")
     assert preview.omitted_source_counts["character"] > 0
     assert preview.omitted_source_counts["world_book"] > 0
 
 
-def test_long_pack_scenario_does_not_crowd_out_style_or_negative_prompt() -> None:
+def test_long_pack_scenario_does_not_crowd_out_style_or_separate_negative_prompt() -> None:
     preview = build_prompt_preview(
         character={"name": "Mira"},
         world_book_entries=["Archive hallway"],
@@ -97,9 +100,9 @@ def test_long_pack_scenario_does_not_crowd_out_style_or_negative_prompt() -> Non
     )
 
     assert "watercolor" in preview.prompt
-    assert "Negative prompt:" in preview.prompt
-    assert "blurry" in preview.prompt
-    assert "scenario detail" not in preview.prompt
+    assert "Negative prompt:" not in preview.prompt
+    assert "blurry" not in preview.prompt
+    assert "blurry" in preview.negative_prompt
     assert preview.omitted_source_counts["pack"] > 0
 
 
@@ -144,6 +147,18 @@ def test_prompt_preview_handles_character_ceiling_separator_edge_case() -> None:
 
     assert estimate_prompt_tokens(preview.prompt) <= 2
     assert preview.token_estimates["total"] <= 2
+
+
+def test_estimate_prompt_tokens_prefers_available_token_encoder(monkeypatch) -> None:
+    fake_encoder = SimpleNamespace(encode=lambda text: ["tok"] * 3)
+    monkeypatch.setattr(
+        prompts_module,
+        "_get_prompt_token_encoder",
+        lambda: fake_encoder,
+        raising=False,
+    )
+
+    assert estimate_prompt_tokens("single-token-ish text") == 3
 
 
 def test_prompt_preview_reports_omissions_and_warnings_when_truncated() -> None:

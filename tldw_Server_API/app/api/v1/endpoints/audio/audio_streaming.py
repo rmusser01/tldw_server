@@ -18,8 +18,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket
 from fastapi.responses import JSONResponse
 from loguru import logger
 from starlette import status
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, TokenScopeGuard, User
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import require_token_scope
 from tldw_Server_API.app.api.v1.API_Deps.billing_deps import resolve_org_id_for_principal
 from tldw_Server_API.app.core.Resource_Governance import cost_units
 from tldw_Server_API.app.core.Billing.enforcement import (
@@ -68,7 +68,6 @@ from tldw_Server_API.app.core.Audio.streaming_service import (
 )
 from tldw_Server_API.app.core.AuthNZ.byok_runtime import resolve_byok_credentials
 from tldw_Server_API.app.core.AuthNZ.settings import is_multi_user_mode
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.Chat.chat_service import perform_chat_api_call_async as chat_api_call_async
 from tldw_Server_API.app.core.Chat.chat_helpers import (
     get_or_create_character_context,
@@ -759,7 +758,7 @@ async def _finish_job(user_id: int):
     summary="Non-streaming Speech-to-Speech chat (STT → LLM → TTS)",
     dependencies=[
         Depends(
-            require_token_scope(
+            TokenScopeGuard(
                 "any",
                 require_if_present=True,
                 endpoint_id="audio.chat",
@@ -2579,7 +2578,7 @@ async def websocket_audio_chat_stream(
                             )
                             if overlap_warning:
                                 await _outer_stream.send_json(
-                                    {"type": "warning", "message": str(overlap_warning)}
+                                    {"type": "warning", "message": "Realtime TTS session warning"}
                                 )
 
                         async def _overlap_audio_sender() -> None:

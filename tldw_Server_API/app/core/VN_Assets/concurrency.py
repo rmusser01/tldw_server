@@ -115,11 +115,13 @@ def _backend_override_env_name(backend: str) -> str:
 
 
 _DEFAULT_BACKEND_GENERATION_GATE: BackendGenerationGate | None = None
+_DEFAULT_BACKEND_GENERATION_GATE_LOCK = Lock()
 
 
 def get_default_backend_generation_gate() -> BackendGenerationGate:
     """Return the process-local default generation gate."""
     global _DEFAULT_BACKEND_GENERATION_GATE
-    if _DEFAULT_BACKEND_GENERATION_GATE is None:
-        _DEFAULT_BACKEND_GENERATION_GATE = BackendGenerationGate()
+    with _DEFAULT_BACKEND_GENERATION_GATE_LOCK:
+        if _DEFAULT_BACKEND_GENERATION_GATE is None:
+            _DEFAULT_BACKEND_GENERATION_GATE = BackendGenerationGate()
     return _DEFAULT_BACKEND_GENERATION_GATE

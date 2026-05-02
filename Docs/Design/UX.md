@@ -113,12 +113,21 @@ https://medium.com/design-bootcamp/how-to-build-your-startups-first-design-syste
 https://medium.com/design-bootcamp/unlocking-the-power-of-color-psychology-in-ui-ux-design-b58f874018c3
 https://medium.muz.li/how-i-think-like-a-product-designer-not-just-a-ui-designer-2dc6bbe04aa4
 https://medium.muz.li/the-ux-secrets-behind-billion-dollar-apps-20b40fc89755?gi=c766c0693a56
+https://medium.muz.li/the-ux-secrets-behind-billion-dollar-apps-20b40fc89755
+https://www.youtube.com/watch?v=3md1R5OIV6o
 https://medium.muz.li/what-working-as-a-ui-ux-designer-in-sri-lanka-really-looks-like-6c2341da365f
 https://medium.muz.li/how-good-ux-increased-engagement-in-my-product-design-35caef3fccb6
 https://medium.muz.li/from-0-to-production-my-ui-ux-process-for-a-real-startup-product-030ad67f05f8
 https://medium.com/design-bootcamp/my-journey-from-zero-to-associate-ui-ux-engineer-insights-and-common-questions-from-20-interviews-a185d3ec10fb
 
+https://github.com/Classic298/open-webui-plugins/tree/main/inline-visualizer-v2
+https://medium.com/design-bootcamp/prompt-engineering-for-designers-how-to-get-stunning-uis-from-ai-in-2026-a431dd241588
+https://www.whichai.dev/
+https://medium.com/design-bootcamp/a-designers-guide-to-organizing-ai-skills-and-tools-in-claude-code-f87477c35b82
+https://rifkiamil.medium.com/ux-research-synthesis-report-by-gemini-pro-3-1-notebooklm-first-time-professional-user-experience-acf861c49c3f
+https://rifkiamil.medium.com/ux-research-synthesis-report-by-chatgpt-5-4-pro-notebooklm-first-time-professional-user-experience-7efbf5e6dde2
 
+https://medium.com/@mohitphogat/ui-trends-that-are-actually-happening-and-worth-paying-attention-to-4c632440ba8b
 https://www.reddit.com/r/UXDesign/comments/1hy761l/how_do_you_guys_plan_your_design_systems_and/
 https://dessign.net/creating-a-design-system/
 https://www.youtube.com/watch?v=1fZTOjd_bOQ
@@ -391,6 +400,3 @@ https://github.com/albirrkarim/react-speech-highlight-demo
   - Start with a Noun or verb
   - Drop Articles (a, the, an)
   - Be clear & Direct
-
-
-

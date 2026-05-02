@@ -186,8 +186,10 @@ export default function VNAssetsWorkbench() {
     setError(null);
     try {
       const nextSlots = await applyVNAssetMatrix(selectedPack.id, matrixKey, overrides);
-      const variantCount = Number(overrides.variant_count) || 1;
-      const plannedOutputCount = starterMatrix.planned_output_count * Math.max(1, Math.floor(variantCount));
+      const plannedOutputCount = nextSlots.reduce(
+        (total, slot) => total + Math.max(0, slot.variant_count),
+        0
+      );
       setSlots(nextSlots);
       setSelectedPack((previous) =>
         previous && previous.id === selectedPack.id

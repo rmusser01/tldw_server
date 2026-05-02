@@ -148,8 +148,8 @@ async def run_moderation_adapter(config: dict[str, Any], context: dict[str, Any]
                             pat = re.compile(pattern_str.strip(), flags=re.IGNORECASE)
                             redacted, count = pat.subn(policy.redact_replacement or "[REDACTED]", redacted)
                             custom_count += count
-                        except re.error as pe:
-                            logger.warning(f"Invalid custom redaction pattern '{pattern_str}': {pe}")
+                        except re.error:
+                            logger.warning("Invalid custom redaction pattern skipped")
 
             redaction_count = int(base_count or 0) + custom_count
             return {
@@ -162,9 +162,9 @@ async def run_moderation_adapter(config: dict[str, Any], context: dict[str, Any]
 
         return {"error": f"unknown_action:{action}"}
 
-    except Exception as e:
-        logger.exception(f"Moderation adapter error: {e}")
-        return {"error": f"moderation_error:{e}"}
+    except Exception:
+        logger.exception("Moderation adapter error")
+        return {"error": "moderation_error"}
 
 
 @registry.register(
@@ -239,10 +239,12 @@ async def run_policy_check_adapter(config: dict[str, Any], context: dict[str, An
         low = (text or "").lower()
         for w in block_words:
             try:
-                if w and str(w).lower() in low:
-                    found.append(w)
-            except Exception:
-                continue
+                needle = str(w).lower() if w else ""
+            except Exception as block_word_error:
+                logger.debug("Moderation block-word normalization failed; skipping entry", exc_info=block_word_error)
+                needle = ""
+            if needle and needle in low:
+                found.append(w)
         if found:
             flags["block_words"] = found
             blocked = True

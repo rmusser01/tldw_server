@@ -114,8 +114,8 @@ async def admin_get_bulk_mfa_status(
             status = await admin_sessions_mfa_service.get_user_mfa_status(principal, uid)
             enabled = bool(status.get("enabled", False)) if isinstance(status, dict) else False
             return uid, enabled
-        except Exception as exc:
-            logger.warning("bulk MFA status: failed for user {}: {}", uid, exc)
+        except Exception:
+            logger.warning("bulk MFA status: failed for user")
             return uid, None
 
     pairs = await asyncio.gather(*[_fetch_one(uid) for uid in user_ids])

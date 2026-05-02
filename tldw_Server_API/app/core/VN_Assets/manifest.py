@@ -51,12 +51,18 @@ def build_manifest(
         ),
         key=lambda item: (slot_by_id[item.slot_id].slot_key, item.variant_index, item.id),
     )
+    approved_background_item_ids = {
+        item.id
+        for item in approved_items
+        if item.id is not None and slot_by_id[item.slot_id].asset_type == ASSET_TYPE_BACKGROUND
+    }
     approved_depth_by_parent_item_id = {
         item.parent_item_id: item
         for item in approved_items
         if (
             slot_by_id[item.slot_id].asset_type == ASSET_TYPE_DEPTH_COMPANION
             and item.parent_item_id is not None
+            and item.parent_item_id in approved_background_item_ids
         )
     }
     depth_slots_by_parent_slot_id = {
@@ -102,6 +108,8 @@ def build_manifest(
             ):
                 asset["depth_companion_status"] = "unavailable"
         elif slot.asset_type == ASSET_TYPE_DEPTH_COMPANION:
+            if item.parent_item_id not in approved_background_item_ids:
+                continue
             asset.update(
                 {
                     "parent_item_id": item.parent_item_id,

@@ -38,5 +38,7 @@ def resolve_oa_pdf(doi: str) -> tuple[str | None, str | None]:
                 if pdf:
                     break
         return (pdf if pdf else None), None
-    except Exception as e:
-        return None, f"Unpaywall error: {str(e)}"
+    except TimeoutError:
+        return None, "Unpaywall request timed out."
+    except Exception:
+        return None, "Unpaywall request failed."

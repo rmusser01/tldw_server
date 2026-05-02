@@ -127,9 +127,9 @@ async def run_arxiv_search_adapter(config: dict[str, Any], context: dict[str, An
 
     except ImportError:
         return {"papers": [], "error": "arxiv_library_not_installed"}
-    except Exception as e:
-        logger.exception(f"arXiv search error: {e}")
-        return {"papers": [], "error": str(e)}
+    except Exception:
+        logger.error("arXiv search error")
+        return {"papers": [], "error": "arXiv search failed"}
 
 
 @registry.register(
@@ -210,9 +210,9 @@ async def run_arxiv_download_adapter(config: dict[str, Any], context: dict[str, 
 
     except ImportError:
         return {"error": "arxiv_library_not_installed", "downloaded": False}
-    except Exception as e:
-        logger.exception(f"arXiv download error: {e}")
-        return {"error": str(e), "downloaded": False}
+    except Exception:
+        logger.error("arXiv download error")
+        return {"error": "arXiv download failed", "downloaded": False}
 
 
 @registry.register(
@@ -313,9 +313,9 @@ async def run_pubmed_search_adapter(config: dict[str, Any], context: dict[str, A
 
             return {"papers": papers, "total_results": len(papers), "query": query}
 
-    except Exception as e:
-        logger.exception(f"PubMed search error: {e}")
-        return {"papers": [], "error": str(e)}
+    except Exception:
+        logger.error("PubMed search error")
+        return {"papers": [], "error": "PubMed search failed"}
 
 
 @registry.register(
@@ -401,9 +401,9 @@ async def run_semantic_scholar_search_adapter(config: dict[str, Any], context: d
 
             return {"papers": papers, "total_results": data.get("total", len(papers)), "query": query}
 
-    except Exception as e:
-        logger.exception(f"Semantic Scholar search error: {e}")
-        return {"papers": [], "error": str(e)}
+    except Exception:
+        logger.error("Semantic Scholar search error")
+        return {"papers": [], "error": "Semantic Scholar search failed"}
 
 
 @registry.register(
@@ -480,9 +480,9 @@ async def run_google_scholar_search_adapter(config: dict[str, Any], context: dic
 
     except ImportError:
         return {"papers": [], "error": "scholarly_library_not_installed"}
-    except Exception as e:
-        logger.exception(f"Google Scholar search error: {e}")
-        return {"papers": [], "error": str(e)}
+    except Exception:
+        logger.error("Google Scholar search error")
+        return {"papers": [], "error": "Google Scholar search failed"}
 
 
 @registry.register(
@@ -570,6 +570,6 @@ async def run_patent_search_adapter(config: dict[str, Any], context: dict[str, A
 
             return {"patents": [], "total_results": 0, "query": query, "note": "google_patents_api_unavailable"}
 
-    except Exception as e:
-        logger.exception(f"Patent search error: {e}")
-        return {"patents": [], "error": str(e)}
+    except Exception:
+        logger.error("Patent search error")
+        return {"patents": [], "error": "Patent search failed"}

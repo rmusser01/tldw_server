@@ -29,7 +29,8 @@ from tldw_Server_API.app.api.v1.schemas.sync_server_models import (
     ServerChangesResponse,
     SyncLogEntry,
 )
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, User
 
 #
 # DB Mgmt
@@ -158,14 +159,19 @@ async def receive_changes_from_client(
         # --- End Thread Pool Execution ---
 
         if not success:
-            detail = {"message": "Failed to apply changes atomically.", "errors": errors}
             logger.error(f"[{user_id.username}] Failed processing batch from {requesting_client_id}: {errors}")
             # Use 400 Bad Request if errors suggest bad client data, 500 otherwise.
+            is_client_error = _is_client_validation_error(errors)
             error_code = (
                 status.HTTP_400_BAD_REQUEST
-                if _is_client_validation_error(errors)
+                if is_client_error
                 else status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+            safe_errors = errors if is_client_error else ["Internal sync processing failed."]
+            detail = {
+                "message": "Failed to apply changes atomically.",
+                "errors": safe_errors,
+            }
             raise HTTPException(status_code=error_code, detail=detail)
 
         logger.info(f"[{user_id.username}] Successfully processed batch from client {requesting_client_id}.")
@@ -223,7 +229,9 @@ async def send_changes_to_client(
             latest_id = latest_row[0] if latest_row and latest_row[0] is not None else 0
             return changes_raw_list, latest_id
         except (DatabaseError, sqlite3.Error) as db_err:
-            logger.error(f"[{user_id.username}] Sync DB error in _get_changes_sync for client {client_id}: {db_err}", exc_info=True)
+            logger.bind(error_type=type(db_err).__name__).error(
+                "Sync DB error in _get_changes_sync"
+            )
             # Re-raise to be caught by the main handler
             raise
 
@@ -246,10 +254,11 @@ async def send_changes_to_client(
                       row_change_id = dict(row_dict).get("change_id", "N/A")
                   except Exception as change_id_error:
                       logger.debug("Failed to extract change_id from sync log row during validation error path", exc_info=change_id_error)
-                  logger.error(
-                      f"[{user_id.username}] Error validating sync log entry data "
-                      f"(ID: {row_change_id}) against model: {pydantic_err}",
-                      exc_info=True,
+                  logger.bind(
+                      error_type=type(pydantic_err).__name__,
+                      change_id=row_change_id,
+                  ).error(
+                      "Invalid sync log entry encountered during /sync/get validation"
                   )
                   if isinstance(row_change_id, int):
                       invalid_rows.append(row_change_id)
@@ -268,13 +277,25 @@ async def send_changes_to_client(
             latest_change_id=latest_server_id
         )
 
-    except (DatabaseError, sqlite3.Error) as e: # Catch errors raised from sync helper
-        logger.error(f"Database error getting changes for user '{user_id.username}', client '{client_id}': {e}", exc_info=True)
+    except DatabaseError as e: # Catch mapped DB-layer errors raised from sync helper
+        logger.bind(error_type=type(e).__name__).error(
+            "Database error getting changes from sync store"
+        )
+        raise map_db_error_to_http(
+            e,
+            default_detail="Failed to retrieve changes from database.",
+        ) from e
+    except sqlite3.Error as e: # Catch raw sqlite errors raised from sync helper
+        logger.bind(error_type=type(e).__name__).error(
+            "Database error getting changes from sync store"
+        )
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to retrieve changes from database.") from e
     except HTTPException:
         raise
     except Exception as e: # Catch unexpected errors
-        logger.error(f"Unexpected server error getting changes for user '{user_id.username}', client '{client_id}': {e}", exc_info=True)
+        logger.bind(error_type=type(e).__name__).error(
+            "Unexpected server error getting changes from sync store"
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Internal server error while retrieving sync changes.",

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+from unittest.mock import MagicMock
 
 import pytest
 from fastapi import Request
@@ -315,3 +316,83 @@ def test_telegram_webhook_rejects_malformed_payload(client, principal_override):
 
     assert response.status_code == 400
     assert response.json()["error"] == "invalid_json"
+
+
+@pytest.mark.asyncio
+async def test_telegram_webhook_execution_identity_failure_log_is_sanitized(monkeypatch):
+    class _FakeSecretRepo:
+        async def list_secrets(self, provider: str):
+            assert provider == "telegram"
+            return [{"scope_type": "team", "scope_id": 22}]
+
+        async def fetch_secret(self, scope_type: str, scope_id: int, provider: str):
+            assert provider == "telegram"
+            assert scope_type == "team"
+            assert scope_id == 22
+            return {"encrypted_blob": "telegram-secret-envelope"}
+
+    class _FakeRuntimeRepo:
+        async def store_webhook_receipt(self, **kwargs):
+            assert kwargs["scope_type"] == "team"
+            assert kwargs["scope_id"] == 22
+            return True
+
+        async def get_actor_link(self, **kwargs):
+            assert kwargs["scope_type"] == "team"
+            assert kwargs["scope_id"] == 22
+            assert kwargs["telegram_user_id"] == 123456
+            return {"auth_user_id": 202}
+
+    class _FailingExecutionIdentityService:
+        def mint_telegram_identity(self, **kwargs):
+            raise RuntimeError("telegram identity token at /private/identity.pem")
+
+    async def _get_secret_repo():
+        return _FakeSecretRepo()
+
+    async def _get_runtime_repo():
+        return _FakeRuntimeRepo()
+
+    async def _get_execution_identity_service():
+        return _FailingExecutionIdentityService()
+
+    monkeypatch.setattr(
+        telegram_support,
+        "_decrypt_telegram_payload",
+        lambda _encrypted_blob: {
+            "provider": "telegram",
+            "credential_version": 1,
+            "bot_username": "example_bot",
+            "enabled": True,
+            "bot_token": "123:abc",
+            "webhook_secret": "stored-secret-123",
+        },
+    )
+    fake_logger = MagicMock()
+    monkeypatch.setattr(telegram_support, "logger", fake_logger)
+    request = _build_request(
+        json.dumps(
+            {
+                "update_id": 6001,
+                "message": {
+                    "message_id": 14,
+                    "from": {"id": 123456, "username": "alice"},
+                    "chat": {"id": 555, "type": "private"},
+                    "text": "/ask hello",
+                },
+            }
+        ).encode("utf-8"),
+        secret="stored-secret-123",
+    )
+
+    response = await telegram_webhook_impl(
+        request=request,
+        job_manager=object(),
+        get_org_secret_repo=_get_secret_repo,
+        get_telegram_runtime_repo=_get_runtime_repo,
+        get_execution_identity_service=_get_execution_identity_service,
+    )
+
+    assert response.status_code == 503
+    assert json.loads(response.body) == {"ok": False, "error": "execution_identity_unavailable"}
+    fake_logger.error.assert_called_once_with("Failed to mint Telegram execution identity")

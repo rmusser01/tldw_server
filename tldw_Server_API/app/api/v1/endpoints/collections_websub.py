@@ -20,7 +20,7 @@ from tldw_Server_API.app.api.v1.schemas.collections_websub_schemas import (
     WebSubSubscriptionResponse,
     WebSubUnsubscribeResponse,
 )
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, User
 from tldw_Server_API.app.core.DB_Management.Watchlists_DB import WatchlistsDatabase
 
 _WEBSUB_NONCRITICAL_EXCEPTIONS = (
@@ -108,7 +108,7 @@ async def websub_subscribe(
     except HTTPException:
         raise
     except _WEBSUB_NONCRITICAL_EXCEPTIONS as exc:
-        logger.warning(f"WebSub hub discovery failed for feed {feed_id}: {exc}")
+        logger.warning("WebSub hub discovery failed")
         raise HTTPException(status_code=502, detail="hub_discovery_failed") from exc
 
     if not hub_url:
@@ -153,9 +153,9 @@ async def websub_subscribe(
             lease_seconds=payload.lease_seconds,
         )
         if not result.get("ok"):
-            logger.warning(f"WebSub: hub returned non-2xx for subscribe: {result}")
-    except _WEBSUB_NONCRITICAL_EXCEPTIONS as exc:
-        logger.warning(f"WebSub: subscribe request failed: {exc}")
+            logger.warning("WebSub: hub returned non-2xx for subscribe")
+    except _WEBSUB_NONCRITICAL_EXCEPTIONS:
+        logger.warning("WebSub: subscribe request failed")
 
     # Re-fetch to get latest state
     try:
@@ -191,8 +191,8 @@ async def websub_unsubscribe(
             topic_url=sub.topic_url,
             secret=sub.secret,
         )
-    except _WEBSUB_NONCRITICAL_EXCEPTIONS as exc:
-        logger.warning(f"WebSub: unsubscribe request failed: {exc}")
+    except _WEBSUB_NONCRITICAL_EXCEPTIONS:
+        logger.warning("WebSub: unsubscribe request failed")
 
     db.update_websub_subscription(sub.id, {"state": "unsubscribed"})
 
@@ -289,7 +289,7 @@ async def websub_push_callback(
 
     signature_header = request.headers.get("X-Hub-Signature")
     if not verify_hub_signature(body, signature_header, sub.secret):
-        logger.warning(f"WebSub: invalid signature for token {callback_token[:8]}...")
+        logger.warning("WebSub: invalid signature")
         raise HTTPException(status_code=403, detail="invalid_signature")
 
     # Parse items from push XML
@@ -342,8 +342,8 @@ def _process_and_record_push(sub, items: list[dict[str, Any]]) -> None:
 
     try:
         _process_push_items(sub, items)
-    except _WEBSUB_NONCRITICAL_EXCEPTIONS as exc:
-        logger.warning(f"WebSub: error processing push items: {exc}")
+    except _WEBSUB_NONCRITICAL_EXCEPTIONS:
+        logger.warning("WebSub: error processing push items")
 
     _record_push_timestamp(sub)
 
@@ -405,8 +405,8 @@ def _process_push_items(sub, items: list[dict[str, Any]]) -> int:
                 source_id=sub.source_id,
             )
             count += 1
-        except _WEBSUB_NONCRITICAL_EXCEPTIONS as exc:
-            logger.debug(f"WebSub: upsert failed for {url}: {exc}")
+        except _WEBSUB_NONCRITICAL_EXCEPTIONS:
+            logger.debug("WebSub: upsert failed")
             continue
 
         # Mark seen

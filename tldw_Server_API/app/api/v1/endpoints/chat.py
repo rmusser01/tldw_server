@@ -51,11 +51,7 @@ from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
 # ---------------------------------------------------------------------------
 # Imports
 # ---------------------------------------------------------------------------
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import (
-    User,
-    get_request_user,
-    resolve_user_id_for_request,
-)
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal, get_request_user, rbac_rate_limit, RequirePermission, resolve_user_id_for_request, TokenScopeGuard, User
 from tldw_Server_API.app.core.Utils.image_validation import (
     get_max_base64_bytes,
     validate_image_url,
@@ -211,12 +207,6 @@ _ORIGINAL_PERFORM_CHAT_API_CALL = perform_chat_api_call
 from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel, Field, ValidationError
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
-    get_auth_principal,
-    rbac_rate_limit,
-    require_permissions,
-    require_token_scope,
-)
 from tldw_Server_API.app.api.v1.API_Deps.llm_routing_deps import (
     get_request_routing_decision_store,
 )
@@ -230,6 +220,7 @@ from tldw_Server_API.app.api.v1.schemas.chat_dictionary_schemas import (
     ValidateDictionaryResponse,
     ValidationIssue,
 )
+from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
     ResolvedByokCredentials,
     record_byok_missing_credentials,
@@ -652,6 +643,21 @@ def _schedule_audit_background_task(awaitable: Any, *, task_name: str) -> asynci
 
     task.add_done_callback(_consume)
     return task
+
+
+def _build_chat_error_audit_metadata(
+    e_chat: BaseException,
+    *,
+    provider: Any,
+    model: Any,
+) -> dict[str, Any]:
+    """Build chat error audit metadata without persisting raw exception text."""
+    return {
+        "error_type": type(e_chat).__name__,
+        "error_message": "Chat completion failed",
+        "provider": provider,
+        "model": model,
+    }
 
 
 def _extract_text_from_message_content(content: Any) -> str:
@@ -1510,7 +1516,7 @@ async def _maybe_rg_shadow_chat_decision(
     tags=["chat"],
     dependencies=[
         Depends(rbac_rate_limit("chat.commands.list")),
-        Depends(require_token_scope("any", require_if_present=True, endpoint_id="chat.commands.list")),
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="chat.commands.list")),
     ],
 )
 async def list_chat_commands(
@@ -1614,7 +1620,7 @@ async def list_chat_commands(
     },
     dependencies=[
         Depends(rbac_rate_limit("chat.dictionaries.validate")),
-        Depends(require_token_scope("any", require_if_present=True, endpoint_id="chat.dictionaries.validate")),
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="chat.dictionaries.validate")),
         Depends(get_request_user),
     ],
 )
@@ -2244,7 +2250,7 @@ async def _persist_system_message_if_needed(
     },
     dependencies=[
         Depends(rbac_rate_limit("chat.create")),
-        Depends(require_token_scope("any", require_if_present=True, endpoint_id="chat.completions", count_as="call")),
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="chat.completions", count_as="call")),
         Depends(get_auth_principal),  # Establish AuthPrincipal/AuthContext early for guardrails
         Depends(enforce_llm_budget),  # Hard budget stop before handler runs
         Depends(require_within_limit(LimitCategory.API_CALLS_DAY, 1)),  # Billing: daily API call limit
@@ -4307,12 +4313,11 @@ async def create_chat_completion(
                     context=context,
                     action="chat_error",
                     result="failure",
-                    metadata={
-                        "error_type": type(e_chat).__name__,
-                        "error_message": str(e_chat),
-                        "provider": provider,
-                        "model": model
-                    }
+                    metadata=_build_chat_error_audit_metadata(
+                        e_chat,
+                        provider=provider,
+                        model=model,
+                    )
                 )
             # Determine status robustly across possible module/class identity mismatches
             if is_chat_lib_error:
@@ -4433,7 +4438,7 @@ async def create_chat_completion(
     tags=["chat"],
     dependencies=[
         Depends(rbac_rate_limit("chat.queue.status")),
-        Depends(require_permissions(SYSTEM_LOGS)),
+        Depends(RequirePermission(SYSTEM_LOGS)),
     ],
 )
 async def get_chat_queue_status():
@@ -4458,7 +4463,7 @@ async def get_chat_queue_status():
     tags=["chat"],
     dependencies=[
         Depends(rbac_rate_limit("chat.queue.activity")),
-        Depends(require_permissions(SYSTEM_LOGS)),
+        Depends(RequirePermission(SYSTEM_LOGS)),
     ],
 )
 async def get_chat_queue_activity(
@@ -4997,7 +5002,7 @@ class SharedConversationResolveResponse(BaseModel):
     tags=["chat"],
     dependencies=[
         Depends(rbac_rate_limit("chat.knowledge.save")),
-        Depends(require_token_scope("any", require_if_present=True, endpoint_id="chat.knowledge.save")),
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="chat.knowledge.save")),
     ],
 )
 async def save_chat_knowledge(
@@ -5094,7 +5099,7 @@ async def save_chat_knowledge(
     tags=["chat"],
     dependencies=[
         Depends(rbac_rate_limit("chat.conversations.list")),
-        Depends(require_token_scope("any", require_if_present=True, endpoint_id="chat.conversations.list")),
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="chat.conversations.list")),
     ],
 )
 @conversations_alias_router.get(
@@ -5104,7 +5109,7 @@ async def save_chat_knowledge(
     tags=["chat"],
     dependencies=[
         Depends(rbac_rate_limit("chat.conversations.list")),
-        Depends(require_token_scope("any", require_if_present=True, endpoint_id="chat.conversations.list")),
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="chat.conversations.list")),
     ],
     include_in_schema=False,
 )
@@ -5252,7 +5257,7 @@ async def list_chat_conversations(
         return ConversationListResponse(items=items, pagination=pagination)
     except InputError as exc:
         _record_search_outcome("validation")
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        raise map_db_error_to_http(exc) from exc
     except HTTPException as exc:
         if 400 <= exc.status_code < 500:
             _record_search_outcome("validation")
@@ -5291,7 +5296,7 @@ async def list_chat_conversations(
     tags=["chat"],
     dependencies=[
         Depends(rbac_rate_limit("chat.conversations.list")),
-        Depends(require_token_scope("any", require_if_present=True, endpoint_id="chat.conversations.list")),
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="chat.conversations.list")),
     ],
 )
 @conversations_alias_router.get(
@@ -5301,7 +5306,7 @@ async def list_chat_conversations(
     tags=["chat"],
     dependencies=[
         Depends(rbac_rate_limit("chat.conversations.list")),
-        Depends(require_token_scope("any", require_if_present=True, endpoint_id="chat.conversations.list")),
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="chat.conversations.list")),
     ],
     include_in_schema=False,
 )
@@ -5356,7 +5361,7 @@ async def get_chat_conversation(
     tags=["chat"],
     dependencies=[
         Depends(rbac_rate_limit("chat.conversations.update")),
-        Depends(require_token_scope("any", require_if_present=True, endpoint_id="chat.conversations.update")),
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="chat.conversations.update")),
     ],
 )
 @conversations_alias_router.patch(
@@ -5366,7 +5371,7 @@ async def get_chat_conversation(
     tags=["chat"],
     dependencies=[
         Depends(rbac_rate_limit("chat.conversations.update")),
-        Depends(require_token_scope("any", require_if_present=True, endpoint_id="chat.conversations.update")),
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="chat.conversations.update")),
     ],
     include_in_schema=False,
 )
@@ -5457,10 +5462,8 @@ async def update_chat_conversation(
             external_ref=updated.get("external_ref"),
             version=updated.get("version") or payload.version + 1,
         )
-    except ConflictError as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-    except InputError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except (ConflictError, InputError) as exc:
+        raise map_db_error_to_http(exc) from exc
     except HTTPException:
         raise
     except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as exc:
@@ -5475,7 +5478,7 @@ async def update_chat_conversation(
     tags=["chat"],
     dependencies=[
         Depends(rbac_rate_limit("chat.conversations.tree")),
-        Depends(require_token_scope("any", require_if_present=True, endpoint_id="chat.conversations.tree")),
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="chat.conversations.tree")),
     ],
 )
 @conversations_alias_router.get(
@@ -5485,7 +5488,7 @@ async def update_chat_conversation(
     tags=["chat"],
     dependencies=[
         Depends(rbac_rate_limit("chat.conversations.tree")),
-        Depends(require_token_scope("any", require_if_present=True, endpoint_id="chat.conversations.tree")),
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="chat.conversations.tree")),
     ],
     include_in_schema=False,
 )
@@ -5667,7 +5670,7 @@ async def get_conversation_tree(
     tags=["chat"],
     dependencies=[
         Depends(rbac_rate_limit("chat.conversations.share_links")),
-        Depends(require_token_scope("any", require_if_present=True, endpoint_id="chat.conversations.share_links")),
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="chat.conversations.share_links")),
     ],
 )
 @conversations_alias_router.post(
@@ -5677,7 +5680,7 @@ async def get_conversation_tree(
     tags=["chat"],
     dependencies=[
         Depends(rbac_rate_limit("chat.conversations.share_links")),
-        Depends(require_token_scope("any", require_if_present=True, endpoint_id="chat.conversations.share_links")),
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="chat.conversations.share_links")),
     ],
     include_in_schema=False,
 )
@@ -5740,7 +5743,7 @@ async def create_conversation_share_link(
     tags=["chat"],
     dependencies=[
         Depends(rbac_rate_limit("chat.conversations.share_links")),
-        Depends(require_token_scope("any", require_if_present=True, endpoint_id="chat.conversations.share_links")),
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="chat.conversations.share_links")),
     ],
 )
 @conversations_alias_router.get(
@@ -5750,7 +5753,7 @@ async def create_conversation_share_link(
     tags=["chat"],
     dependencies=[
         Depends(rbac_rate_limit("chat.conversations.share_links")),
-        Depends(require_token_scope("any", require_if_present=True, endpoint_id="chat.conversations.share_links")),
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="chat.conversations.share_links")),
     ],
     include_in_schema=False,
 )
@@ -5815,7 +5818,7 @@ async def list_conversation_share_links(
     tags=["chat"],
     dependencies=[
         Depends(rbac_rate_limit("chat.conversations.share_links")),
-        Depends(require_token_scope("any", require_if_present=True, endpoint_id="chat.conversations.share_links")),
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="chat.conversations.share_links")),
     ],
 )
 @conversations_alias_router.delete(
@@ -5825,7 +5828,7 @@ async def list_conversation_share_links(
     tags=["chat"],
     dependencies=[
         Depends(rbac_rate_limit("chat.conversations.share_links")),
-        Depends(require_token_scope("any", require_if_present=True, endpoint_id="chat.conversations.share_links")),
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="chat.conversations.share_links")),
     ],
     include_in_schema=False,
 )
@@ -5941,7 +5944,7 @@ async def resolve_conversation_share_token(
     tags=["chat"],
     dependencies=[
         Depends(rbac_rate_limit("chat.analytics")),
-        Depends(require_token_scope("any", require_if_present=True, endpoint_id="chat.analytics")),
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="chat.analytics")),
     ],
 )
 async def get_chat_analytics(
@@ -6082,7 +6085,7 @@ class ConversationCitationsResponse(BaseModel):
     tags=["chat", "rag"],
     dependencies=[
         Depends(rbac_rate_limit("chat.messages.rag_context")),
-        Depends(require_token_scope("any", require_if_present=True, endpoint_id="chat.messages.rag_context")),
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="chat.messages.rag_context")),
     ],
 )
 async def persist_rag_context(
@@ -6138,7 +6141,7 @@ async def persist_rag_context(
     tags=["chat", "rag"],
     dependencies=[
         Depends(rbac_rate_limit("chat.messages.rag_context")),
-        Depends(require_token_scope("any", require_if_present=True, endpoint_id="chat.messages.rag_context")),
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="chat.messages.rag_context")),
     ],
 )
 async def get_rag_context(
@@ -6182,7 +6185,7 @@ async def get_rag_context(
     tags=["chat", "rag"],
     dependencies=[
         Depends(rbac_rate_limit("chat.conversations.messages")),
-        Depends(require_token_scope("any", require_if_present=True, endpoint_id="chat.conversations.messages")),
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="chat.conversations.messages")),
     ],
 )
 async def get_messages_with_rag_context(
@@ -6233,7 +6236,7 @@ async def get_messages_with_rag_context(
     tags=["chat", "rag"],
     dependencies=[
         Depends(rbac_rate_limit("chat.conversations.citations")),
-        Depends(require_token_scope("any", require_if_present=True, endpoint_id="chat.conversations.citations")),
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="chat.conversations.citations")),
     ],
 )
 async def get_conversation_citations(

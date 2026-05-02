@@ -14,6 +14,14 @@ from tldw_Server_API.app.core.exceptions import BadRequestError
 pytestmark = pytest.mark.unit
 
 
+class _LoggerStub:
+    def __init__(self) -> None:
+        self.warnings: list[str] = []
+
+    def warning(self, message: str, *args: object, **kwargs: object) -> None:
+        self.warnings.append(message.format(*args, **kwargs) if args or kwargs else message)
+
+
 @pytest.fixture
 def media_ingest_jobs_client(monkeypatch, tmp_path):
     monkeypatch.setenv("TEST_MODE", "true")
@@ -110,6 +118,47 @@ def test_submit_media_ingest_jobs_creates_one_job_per_item(
     assert Path(file_payload["source"]).exists()
 
     shutil.rmtree(file_payload["temp_dir"], ignore_errors=True)
+
+
+def test_submit_media_ingest_jobs_sanitizes_upload_staging_failure(
+    media_ingest_jobs_client,
+    monkeypatch,
+    tmp_path,
+):
+    from tldw_Server_API.app.api.v1.endpoints.media import ingest_jobs
+
+    logger_stub = _LoggerStub()
+
+    async def fake_save_uploaded_files(*_args, **_kwargs):
+        raise RuntimeError("staging backend exploded at /private/cache/upload.txt")
+
+    monkeypatch.setattr(ingest_jobs, "logger", logger_stub)
+    monkeypatch.setattr(
+        ingest_jobs,
+        "save_uploaded_files",
+        fake_save_uploaded_files,
+        raising=True,
+    )
+
+    upload_path = tmp_path / "sample.txt"
+    upload_path.write_text("hello ingest job", encoding="utf-8")
+
+    resp = media_ingest_jobs_client.post(
+        "/api/v1/media/ingest/jobs",
+        data={"media_type": "document"},
+        files=[("files", ("sample.txt", upload_path.read_bytes(), "text/plain"))],
+        headers={"X-API-KEY": "test-api-key-12345"},
+    )
+
+    assert resp.status_code == 207, resp.text
+    body = resp.json()
+    assert body["jobs"] == []
+    assert body["errors"] == ["Upload staging failed"]
+    assert logger_stub.warnings == ["Failed to stage upload for ingest jobs"]
+    assert "staging backend exploded" not in str(logger_stub.warnings)
+    assert "/private/cache/upload.txt" not in str(logger_stub.warnings)
+    assert "staging backend exploded" not in resp.text
+    assert "/private/cache/upload.txt" not in resp.text
 
 
 def test_get_media_ingest_job_includes_result_media_id(

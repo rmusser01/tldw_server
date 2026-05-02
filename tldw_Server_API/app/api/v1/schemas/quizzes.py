@@ -3,12 +3,22 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
+
 from .flashcards import (
     DeckReviewPromptSide,
     DeckSchedulerSettingsEnvelope,
     DeckSchedulerType,
     _coerce_scheduler_settings_envelope,
 )
+
+
+def _default_offset_pagination_aliases(response):
+    if response.has_more is None:
+        response.has_more = response.pagination.has_more
+    if response.next_offset is None:
+        response.next_offset = response.pagination.next_offset
+    return response
 
 
 class QuestionType(str, Enum):
@@ -95,6 +105,13 @@ class QuizResponse(BaseModel):
 class QuizListResponse(BaseModel):
     items: list[QuizResponse]
     count: int
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+    pagination: OffsetPaginationMeta
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self):
+        return _default_offset_pagination_aliases(self)
 
 
 class QuestionCreate(BaseModel):
@@ -155,6 +172,13 @@ class QuestionAdminResponse(QuestionPublicResponse):
 class QuestionListResponse(BaseModel):
     items: list[QuestionPublicResponse | QuestionAdminResponse]
     count: int
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+    pagination: OffsetPaginationMeta
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self):
+        return _default_offset_pagination_aliases(self)
 
 
 class QuizAnswerInput(BaseModel):
@@ -196,6 +220,13 @@ class AttemptResponse(BaseModel):
 class AttemptListResponse(BaseModel):
     items: list[AttemptResponse]
     count: int
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+    pagination: OffsetPaginationMeta
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self):
+        return _default_offset_pagination_aliases(self)
 
 
 class QuizRemediationConversionSummary(BaseModel):

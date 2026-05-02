@@ -92,6 +92,10 @@ def test_dataset_routes_require_read_vs_manage_permissions(monkeypatch):
             _ = (limit, offset, created_by)
             return [stored_datasets["ds_1"]], False
 
+        def count_datasets(self, *, created_by, after=None):
+            _ = (created_by, after)
+            return len(stored_datasets)
+
         def get_dataset(
             self,
             dataset_id,
@@ -163,6 +167,9 @@ def test_dataset_routes_require_read_vs_manage_permissions(monkeypatch):
         current_permissions[:] = [EVALS_READ]
         list_resp = client.get("/api/v1/evaluations/datasets")
         assert list_resp.status_code == 200, list_resp.text
+        list_payload = list_resp.json()
+        assert list_payload["has_more"] == list_payload["pagination"]["has_more"]
+        assert list_payload["next_offset"] == list_payload["pagination"]["next_offset"]
         get_resp = client.get("/api/v1/evaluations/datasets/ds_1")
         assert get_resp.status_code == 200, get_resp.text
 

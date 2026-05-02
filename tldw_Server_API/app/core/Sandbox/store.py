@@ -204,6 +204,28 @@ class SandboxStore:
     def delete_acp_session_control(self, session_id: str) -> bool:
         raise NotImplementedError
 
+    # Virtualization session control metadata for persisted VM/session bookkeeping.
+    def put_vz_session_control(
+        self,
+        *,
+        session_id: str,
+        runtime: str,
+        vm_id: str,
+        template_id: str | None,
+        workspace_mount: str | None,
+        agent_ready: bool,
+    ) -> None:
+        raise NotImplementedError
+
+    def get_vz_session_control(self, session_id: str) -> dict[str, Any] | None:
+        raise NotImplementedError
+
+    def delete_vz_session_control(self, session_id: str) -> bool:
+        raise NotImplementedError
+
+    def list_vz_session_controls(self) -> list[dict[str, Any]]:
+        raise NotImplementedError
+
     def get_user_artifact_bytes(self, user_id: str) -> int:
         return 0
 
@@ -358,6 +380,7 @@ class InMemoryStore(SandboxStore):
         self._owners: dict[str, str] = {}
         self._sessions: dict[str, dict[str, Any]] = {}
         self._acp_sessions: dict[str, dict[str, Any]] = {}
+        self._vz_sessions: dict[str, dict[str, Any]] = {}
         self._user_bytes: dict[str, int] = {}
         self._run_queue: list[dict[str, Any]] = []
         self._lock = threading.RLock()
@@ -686,6 +709,48 @@ class InMemoryStore(SandboxStore):
     def delete_acp_session_control(self, session_id: str) -> bool:
         with self._lock:
             return self._acp_sessions.pop(str(session_id), None) is not None
+
+    def put_vz_session_control(
+        self,
+        *,
+        session_id: str,
+        runtime: str,
+        vm_id: str,
+        template_id: str | None,
+        workspace_mount: str | None,
+        agent_ready: bool,
+    ) -> None:
+        now_ts = time.time()
+        with self._lock:
+            existing = self._vz_sessions.get(str(session_id), {})
+            created_at = existing.get("created_at", now_ts)
+            self._vz_sessions[str(session_id)] = {
+                "id": str(session_id),
+                "runtime": str(runtime),
+                "vm_id": str(vm_id),
+                "template_id": (str(template_id) if template_id is not None else None),
+                "workspace_mount": (str(workspace_mount) if workspace_mount is not None else None),
+                "agent_ready": bool(agent_ready),
+                "created_at": float(created_at),
+                "updated_at": float(now_ts),
+            }
+
+    def get_vz_session_control(self, session_id: str) -> dict[str, Any] | None:
+        with self._lock:
+            row = self._vz_sessions.get(str(session_id))
+            return dict(row) if isinstance(row, dict) else None
+
+    def delete_vz_session_control(self, session_id: str) -> bool:
+        with self._lock:
+            return self._vz_sessions.pop(str(session_id), None) is not None
+
+    def list_vz_session_controls(self) -> list[dict[str, Any]]:
+        with self._lock:
+            return [
+                dict(row)
+                for row in self._vz_sessions.values()
+                if isinstance(row, dict)
+            ]
 
     def get_user_artifact_bytes(self, user_id: str) -> int:
         with self._lock:
@@ -1063,6 +1128,16 @@ class SQLiteStore(SandboxStore):
                     user_id TEXT NOT NULL,
                     priority INTEGER DEFAULT 0,
                     enqueued_at TEXT NOT NULL DEFAULT (datetime('now'))
+                );
+                CREATE TABLE IF NOT EXISTS sandbox_vz_sessions (
+                    id TEXT PRIMARY KEY,
+                    runtime TEXT,
+                    vm_id TEXT,
+                    template_id TEXT,
+                    workspace_mount TEXT,
+                    agent_ready INTEGER,
+                    created_at REAL,
+                    updated_at REAL
                 );
                 """
             )
@@ -1785,6 +1860,79 @@ class SQLiteStore(SandboxStore):
                 deleted = 0
             return deleted > 0
 
+    def put_vz_session_control(
+        self,
+        *,
+        session_id: str,
+        runtime: str,
+        vm_id: str,
+        template_id: str | None,
+        workspace_mount: str | None,
+        agent_ready: bool,
+    ) -> None:
+        now_ts = time.time()
+        with self._lock, self._conn() as con:
+            con.execute(
+                (
+                    "INSERT INTO sandbox_vz_sessions("
+                    "id,runtime,vm_id,template_id,workspace_mount,agent_ready,created_at,updated_at"
+                    ") VALUES (?,?,?,?,?,?,?,?) "
+                    "ON CONFLICT(id) DO UPDATE SET "
+                    "runtime=excluded.runtime,"
+                    "vm_id=excluded.vm_id,"
+                    "template_id=excluded.template_id,"
+                    "workspace_mount=excluded.workspace_mount,"
+                    "agent_ready=excluded.agent_ready,"
+                    "updated_at=excluded.updated_at"
+                ),
+                (
+                    str(session_id),
+                    str(runtime),
+                    str(vm_id),
+                    (str(template_id) if template_id is not None else None),
+                    (str(workspace_mount) if workspace_mount is not None else None),
+                    1 if agent_ready else 0,
+                    float(now_ts),
+                    float(now_ts),
+                ),
+            )
+
+    def get_vz_session_control(self, session_id: str) -> dict[str, Any] | None:
+        with self._lock, self._conn() as con:
+            cur = con.execute(
+                (
+                    "SELECT id,runtime,vm_id,template_id,workspace_mount,agent_ready,created_at,updated_at "
+                    "FROM sandbox_vz_sessions WHERE id=?"
+                ),
+                (str(session_id),),
+            )
+            row = cur.fetchone()
+            if not row:
+                return None
+            row_dict = dict(row)
+            row_dict["agent_ready"] = bool(row_dict.get("agent_ready"))
+            return row_dict
+
+    def delete_vz_session_control(self, session_id: str) -> bool:
+        with self._lock, self._conn() as con:
+            cur = con.execute("DELETE FROM sandbox_vz_sessions WHERE id=?", (str(session_id),))
+            try:
+                deleted = int(getattr(cur, "rowcount", 0))
+            except _SANDBOX_STORE_NONCRITICAL_EXCEPTIONS:
+                deleted = 0
+            return deleted > 0
+
+    def list_vz_session_controls(self) -> list[dict[str, Any]]:
+        with self._lock, self._conn() as con:
+            cur = con.execute(
+                "SELECT id,runtime,vm_id,template_id,workspace_mount,agent_ready,created_at,updated_at "
+                "FROM sandbox_vz_sessions ORDER BY id"
+            )
+            rows = [dict(row) for row in cur.fetchall() or []]
+            for row in rows:
+                row["agent_ready"] = bool(row.get("agent_ready"))
+            return rows
+
     def get_user_artifact_bytes(self, user_id: str) -> int:
         with self._lock, self._conn() as con:
             cur = con.execute("SELECT artifact_bytes FROM sandbox_usage WHERE user_id=?", (user_id,))
@@ -2218,6 +2366,20 @@ class PostgresStore(SandboxStore):
                         scope_snapshot_id TEXT,
                         expires_at TEXT,
                         workspace_path TEXT,
+                        created_at DOUBLE PRECISION,
+                        updated_at DOUBLE PRECISION
+                    );
+                    """
+            )
+            cur.execute(
+                """
+                    CREATE TABLE IF NOT EXISTS sandbox_vz_sessions (
+                        id TEXT PRIMARY KEY,
+                        runtime TEXT,
+                        vm_id TEXT,
+                        template_id TEXT,
+                        workspace_mount TEXT,
+                        agent_ready BOOLEAN,
                         created_at DOUBLE PRECISION,
                         updated_at DOUBLE PRECISION
                     );
@@ -2969,6 +3131,74 @@ class PostgresStore(SandboxStore):
             except _SANDBOX_STORE_NONCRITICAL_EXCEPTIONS:
                 deleted = 0
             return deleted > 0
+
+    def put_vz_session_control(
+        self,
+        *,
+        session_id: str,
+        runtime: str,
+        vm_id: str,
+        template_id: str | None,
+        workspace_mount: str | None,
+        agent_ready: bool,
+    ) -> None:
+        now_ts = time.time()
+        with self._lock, self._conn() as con:
+            with con.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO sandbox_vz_sessions(
+                        id,runtime,vm_id,template_id,workspace_mount,agent_ready,created_at,updated_at
+                    )
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+                    ON CONFLICT (id) DO UPDATE SET
+                        runtime=EXCLUDED.runtime,
+                        vm_id=EXCLUDED.vm_id,
+                        template_id=EXCLUDED.template_id,
+                        workspace_mount=EXCLUDED.workspace_mount,
+                        agent_ready=EXCLUDED.agent_ready,
+                        updated_at=EXCLUDED.updated_at
+                    """,
+                    (
+                        str(session_id),
+                        str(runtime),
+                        str(vm_id),
+                        (str(template_id) if template_id is not None else None),
+                        (str(workspace_mount) if workspace_mount is not None else None),
+                        bool(agent_ready),
+                        float(now_ts),
+                        float(now_ts),
+                    ),
+                )
+
+    def get_vz_session_control(self, session_id: str) -> dict[str, Any] | None:
+        with self._lock, self._conn() as con, con.cursor() as cur:
+            cur.execute(
+                (
+                    "SELECT id,runtime,vm_id,template_id,workspace_mount,agent_ready,created_at,updated_at "
+                    "FROM sandbox_vz_sessions WHERE id=%s"
+                ),
+                (str(session_id),),
+            )
+            row = cur.fetchone()
+            return dict(row) if isinstance(row, dict) else None
+
+    def delete_vz_session_control(self, session_id: str) -> bool:
+        with self._lock, self._conn() as con, con.cursor() as cur:
+            cur.execute("DELETE FROM sandbox_vz_sessions WHERE id=%s", (str(session_id),))
+            try:
+                deleted = int(getattr(cur, "rowcount", 0))
+            except _SANDBOX_STORE_NONCRITICAL_EXCEPTIONS:
+                deleted = 0
+            return deleted > 0
+
+    def list_vz_session_controls(self) -> list[dict[str, Any]]:
+        with self._lock, self._conn() as con, con.cursor() as cur:
+            cur.execute(
+                "SELECT id,runtime,vm_id,template_id,workspace_mount,agent_ready,created_at,updated_at "
+                "FROM sandbox_vz_sessions ORDER BY id"
+            )
+            return [dict(row) for row in cur.fetchall() or [] if isinstance(row, dict)]
 
     def get_user_artifact_bytes(self, user_id: str) -> int:
         with self._lock, self._conn() as con, con.cursor() as cur:

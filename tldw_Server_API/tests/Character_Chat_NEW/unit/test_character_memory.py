@@ -10,6 +10,7 @@ Covers:
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -361,6 +362,310 @@ class TestGetOrCreatePersonaProfile:
         assert call_data["id"] == "char:42"
         assert call_data["name"] == "char_memory:42"
         assert call_data["origin_character_name"] == "Luna"
+
+    def test_profile_creation_failure_log_is_sanitized(self, monkeypatch):
+        from fastapi import HTTPException
+
+        from tldw_Server_API.app.api.v1.endpoints import character_memory
+
+        db = MagicMock()
+        db.get_persona_profile.side_effect = [None, None]
+        db.create_persona_profile.side_effect = RuntimeError(
+            "profile create exploded at /private/character-memory.db"
+        )
+        fake_logger = MagicMock()
+        monkeypatch.setattr(character_memory, "logger", fake_logger)
+
+        with pytest.raises(HTTPException) as exc_info:
+            character_memory.get_or_create_character_persona_profile(db, "42", "Luna", "1")
+
+        assert exc_info.value.status_code == 500
+        assert exc_info.value.detail == "Failed to initialize character memory storage."
+        fake_logger.error.assert_called_once_with("Failed to create persona profile")
+
+
+# ---------------------------------------------------------------------------
+# Endpoint DB error mapping tests
+# ---------------------------------------------------------------------------
+
+
+class TestCharacterMemoryEndpointDbErrorMapping:
+
+    @pytest.mark.asyncio
+    async def test_list_character_memories_maps_db_error_to_500(self):
+        from fastapi import HTTPException
+
+        from tldw_Server_API.app.api.v1.endpoints.character_memory import (
+            list_character_memories,
+        )
+        from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
+        from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDBError
+
+        class _BrokenListDb:
+            def get_character_card_by_id(self, character_id: int):
+                return {"id": character_id, "name": "Luna"}
+
+            def list_persona_memory_entries(self, **_kwargs):
+                raise CharactersRAGDBError("list failed")
+
+        with pytest.raises(HTTPException) as exc_info:
+            await list_character_memories(
+                character_id="42",
+                db=_BrokenListDb(),
+                current_user=User(id=1, username="tester", email=None, is_active=True),
+            )
+
+        assert exc_info.value.status_code == 500
+        assert exc_info.value.detail == "Failed to list character memories"
+
+    @pytest.mark.asyncio
+    async def test_archive_character_memory_maps_input_error_to_400(self):
+        from fastapi import HTTPException
+
+        from tldw_Server_API.app.api.v1.endpoints.character_memory import (
+            archive_character_memory,
+        )
+        from tldw_Server_API.app.api.v1.schemas.character_memory_schemas import (
+            CharacterMemoryArchiveRequest,
+        )
+        from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
+        from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import InputError
+
+        class _InputErrorArchiveDb:
+            def get_character_card_by_id(self, character_id: int):
+                return {"id": character_id, "name": "Luna"}
+
+            def set_persona_memory_archived(self, **_kwargs):
+                raise InputError("invalid archive transition")
+
+        with pytest.raises(HTTPException) as exc_info:
+            await archive_character_memory(
+                character_id="42",
+                memory_id="mem-1",
+                body=CharacterMemoryArchiveRequest(archived=True),
+                db=_InputErrorArchiveDb(),
+                current_user=User(id=1, username="tester", email=None, is_active=True),
+            )
+
+        assert exc_info.value.status_code == 400
+        assert exc_info.value.detail == "invalid archive transition"
+
+    @pytest.mark.asyncio
+    async def test_archive_character_memory_maps_db_error_to_500(self):
+        from fastapi import HTTPException
+
+        from tldw_Server_API.app.api.v1.endpoints.character_memory import (
+            archive_character_memory,
+        )
+        from tldw_Server_API.app.api.v1.schemas.character_memory_schemas import (
+            CharacterMemoryArchiveRequest,
+        )
+        from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
+        from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDBError
+
+        class _BrokenArchiveDb:
+            def get_character_card_by_id(self, character_id: int):
+                return {"id": character_id, "name": "Luna"}
+
+            def set_persona_memory_archived(self, **_kwargs):
+                raise CharactersRAGDBError("archive failed")
+
+        with pytest.raises(HTTPException) as exc_info:
+            await archive_character_memory(
+                character_id="42",
+                memory_id="mem-1",
+                body=CharacterMemoryArchiveRequest(archived=True),
+                db=_BrokenArchiveDb(),
+                current_user=User(id=1, username="tester", email=None, is_active=True),
+            )
+
+        assert exc_info.value.status_code == 500
+        assert exc_info.value.detail == "Failed to update character memory archive state"
+
+    @pytest.mark.asyncio
+    async def test_create_character_memory_maps_db_error_to_500(self):
+        from fastapi import HTTPException
+
+        from tldw_Server_API.app.api.v1.endpoints.character_memory import (
+            create_character_memory,
+        )
+        from tldw_Server_API.app.api.v1.schemas.character_memory_schemas import (
+            CharacterMemoryCreate,
+        )
+        from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
+        from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDBError
+
+        class _BrokenCreateDb:
+            def get_character_card_by_id(self, character_id: int):
+                return {"id": character_id, "name": "Luna"}
+
+            def get_persona_profile(self, persona_id: str, user_id: str):
+                return {"id": persona_id, "user_id": user_id}
+
+            def add_persona_memory_entry(self, _payload):
+                raise CharactersRAGDBError("create failed")
+
+        with pytest.raises(HTTPException) as exc_info:
+            await create_character_memory(
+                character_id="42",
+                body=CharacterMemoryCreate(content="User likes tea."),
+                db=_BrokenCreateDb(),
+                current_user=User(id=1, username="tester", email=None, is_active=True),
+            )
+
+        assert exc_info.value.status_code == 500
+        assert exc_info.value.detail == "Failed to create character memory"
+
+    @pytest.mark.asyncio
+    async def test_update_character_memory_maps_db_error_to_500(self):
+        from fastapi import HTTPException
+
+        from tldw_Server_API.app.api.v1.endpoints.character_memory import (
+            update_character_memory,
+        )
+        from tldw_Server_API.app.api.v1.schemas.character_memory_schemas import (
+            CharacterMemoryUpdate,
+        )
+        from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
+        from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDBError
+
+        class _BrokenUpdateDb:
+            def get_character_card_by_id(self, character_id: int):
+                return {"id": character_id, "name": "Luna"}
+
+            def update_persona_memory_entry(self, **_kwargs):
+                raise CharactersRAGDBError("update failed")
+
+        with pytest.raises(HTTPException) as exc_info:
+            await update_character_memory(
+                character_id="42",
+                memory_id="mem-1",
+                body=CharacterMemoryUpdate(content="Updated memory."),
+                db=_BrokenUpdateDb(),
+                current_user=User(id=1, username="tester", email=None, is_active=True),
+            )
+
+        assert exc_info.value.status_code == 500
+        assert exc_info.value.detail == "Failed to update character memory"
+
+    @pytest.mark.asyncio
+    async def test_update_character_memory_maps_fetch_db_error_to_500(self):
+        from fastapi import HTTPException
+
+        from tldw_Server_API.app.api.v1.endpoints.character_memory import (
+            update_character_memory,
+        )
+        from tldw_Server_API.app.api.v1.schemas.character_memory_schemas import (
+            CharacterMemoryUpdate,
+        )
+        from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
+        from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDBError
+
+        class _BrokenUpdateFetchDb:
+            def get_character_card_by_id(self, character_id: int):
+                return {"id": character_id, "name": "Luna"}
+
+            def update_persona_memory_entry(self, **_kwargs):
+                return True
+
+            def get_persona_memory_entry_by_id(self, **_kwargs):
+                raise CharactersRAGDBError("fetch failed")
+
+        with pytest.raises(HTTPException) as exc_info:
+            await update_character_memory(
+                character_id="42",
+                memory_id="mem-1",
+                body=CharacterMemoryUpdate(content="Updated memory."),
+                db=_BrokenUpdateFetchDb(),
+                current_user=User(id=1, username="tester", email=None, is_active=True),
+            )
+
+        assert exc_info.value.status_code == 500
+        assert exc_info.value.detail == "Failed to fetch character memory"
+
+    @pytest.mark.asyncio
+    async def test_delete_character_memory_maps_db_error_to_500(self):
+        from fastapi import HTTPException
+
+        from tldw_Server_API.app.api.v1.endpoints.character_memory import (
+            delete_character_memory,
+        )
+        from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
+        from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDBError
+
+        class _BrokenDeleteDb:
+            def get_character_card_by_id(self, character_id: int):
+                return {"id": character_id, "name": "Luna"}
+
+            def update_persona_memory_entry(self, **_kwargs):
+                raise CharactersRAGDBError("delete failed")
+
+        with pytest.raises(HTTPException) as exc_info:
+            await delete_character_memory(
+                character_id="42",
+                memory_id="mem-1",
+                db=_BrokenDeleteDb(),
+                current_user=User(id=1, username="tester", email=None, is_active=True),
+            )
+
+        assert exc_info.value.status_code == 500
+        assert exc_info.value.detail == "Failed to delete character memory"
+
+    @pytest.mark.asyncio
+    async def test_extract_character_memories_persist_failure_log_is_sanitized(self, monkeypatch):
+        from tldw_Server_API.app.api.v1.endpoints import character_memory
+        from tldw_Server_API.app.api.v1.schemas.character_memory_schemas import (
+            CharacterMemoryExtractRequest,
+        )
+        from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
+        from tldw_Server_API.app.core.Character_Chat.modules import character_memory_extraction
+
+        class _PersistFailDb:
+            def get_character_card_by_id(self, character_id: int):
+                return {"id": character_id, "name": "Luna"}
+
+            def get_conversation_by_id(self, chat_id: str):
+                assert chat_id == "chat-1"
+                return {"id": chat_id, "client_id": 1, "character_id": 42, "user_name": "Alex"}
+
+            def get_persona_profile(self, persona_id: str, user_id: str):
+                return {"id": persona_id, "user_id": user_id}
+
+            def get_messages_for_conversation(self, chat_id: str, limit: int, offset: int):
+                assert chat_id == "chat-1"
+                return [{"role": "user", "content": "I like tea.", "deleted": False}]
+
+            def list_persona_memory_entries(self, **_kwargs):
+                return []
+
+            def add_persona_memory_entry(self, _payload):
+                raise RuntimeError("memory persist exploded at /private/character-memory.db")
+
+        def _fake_extract_character_memories(**_kwargs):
+            return SimpleNamespace(
+                unique=[{"category": "fact", "content": "User likes tea.", "salience": 0.8}],
+                duplicates_skipped=0,
+            )
+
+        fake_logger = MagicMock()
+        monkeypatch.setattr(character_memory, "logger", fake_logger)
+        monkeypatch.setattr(
+            character_memory_extraction,
+            "extract_character_memories",
+            _fake_extract_character_memories,
+        )
+
+        response = await character_memory.extract_character_memories_endpoint(
+            character_id="42",
+            body=CharacterMemoryExtractRequest(chat_id="chat-1"),
+            db=_PersistFailDb(),
+            current_user=User(id=1, username="tester", email=None, is_active=True),
+        )
+
+        assert response.extracted == 0
+        assert response.skipped_duplicates == 0
+        assert response.memories == []
+        fake_logger.warning.assert_called_once_with("Failed to persist extracted memory")
 
 
 # ---------------------------------------------------------------------------

@@ -12,7 +12,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from loguru import logger
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, require_roles
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import RequireRole, check_rate_limit
 from tldw_Server_API.app.api.v1.schemas.config_schemas import (
     ConfigValue,
     EffectiveConfigResponse,
@@ -36,7 +36,7 @@ from tldw_Server_API.app.core.TTS.tts_config import get_tts_config_manager
 router = APIRouter(
     prefix="/admin/config",
     tags=["admin", "config"],
-    dependencies=[Depends(check_rate_limit), Depends(require_roles("admin"))],
+    dependencies=[Depends(check_rate_limit), Depends(RequireRole("admin"))],
 )
 
 _SENSITIVE_KEY_PATTERN = re.compile(
@@ -103,14 +103,14 @@ def _build_config_txt_values() -> dict[str, ConfigValue]:
     try:
         sections = config_parser.sections()
     except configparser.Error:
-        logger.exception("Error reading config sections")
+        logger.error("Error reading config sections")
         sections = []
 
     for section in sections:
         try:
             items = config_parser.items(section)
         except configparser.Error:
-            logger.exception("Error reading items for section {}", section)
+            logger.error("Error reading config items")
             items = []
         for key, raw_value in items:
             path = f"{section}.{key}"
@@ -197,8 +197,11 @@ async def get_effective_config(
         config_file = resolve_config_file()
         prompts_dir = resolve_prompts_dir()
     except FileNotFoundError as exc:
-        logger.debug("Effective config resolution failed: {}", exc)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+        logger.debug("Effective config resolution failed")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to resolve effective configuration",
+        ) from exc
 
     tts_yaml = resolve_module_yaml("tts")
     embeddings_yaml = resolve_module_yaml(
@@ -259,15 +262,14 @@ class ConfigProfileSaveRequest(BaseModel):
 
 
 class ConfigImportRequest(BaseModel):
-    sections: dict[str, dict[str, str]] = Field(
-        ..., description="Sections to import (section_name -> {key: value})"
-    )
+    sections: dict[str, dict[str, str]] = Field(..., description="Sections to import (section_name -> {key: value})")
 
 
 @router.get("/profiles")
 async def list_config_profiles() -> dict[str, Any]:
     """List saved config profiles."""
     from tldw_Server_API.app.services.admin_config_profiles_service import get_config_profile_store
+
     store = await get_config_profile_store()
     profiles = await store.list_profiles()
     return {"profiles": profiles}
@@ -277,6 +279,7 @@ async def list_config_profiles() -> dict[str, Any]:
 async def snapshot_config_profile(payload: ConfigProfileSaveRequest) -> dict[str, Any]:
     """Save the current config.txt as a named profile (snapshot)."""
     from tldw_Server_API.app.services.admin_config_profiles_service import get_config_profile_store
+
     store = await get_config_profile_store()
     profile = await store.snapshot_current_config(payload.name, payload.description)
     return {"status": "ok", "profile": {"name": profile["name"], "created_at": profile["created_at"]}}
@@ -286,6 +289,7 @@ async def snapshot_config_profile(payload: ConfigProfileSaveRequest) -> dict[str
 async def get_config_profile(profile_name: str) -> dict[str, Any]:
     """Get a specific config profile."""
     from tldw_Server_API.app.services.admin_config_profiles_service import get_config_profile_store
+
     store = await get_config_profile_store()
     profile = await store.get_profile(profile_name)
     if not profile:
@@ -300,6 +304,7 @@ async def restore_config_profile(profile_name: str) -> dict[str, Any]:
     Creates a 'pre_restore' snapshot before applying changes.
     """
     from tldw_Server_API.app.services.admin_config_profiles_service import get_config_profile_store
+
     store = await get_config_profile_store()
     profile = await store.get_profile(profile_name)
     if not profile:
@@ -320,6 +325,7 @@ async def restore_config_profile(profile_name: str) -> dict[str, Any]:
 async def delete_config_profile(profile_name: str) -> dict[str, str]:
     """Delete a config profile."""
     from tldw_Server_API.app.services.admin_config_profiles_service import get_config_profile_store
+
     store = await get_config_profile_store()
     deleted = await store.delete_profile(profile_name)
     if not deleted:
@@ -334,6 +340,7 @@ async def update_config_section(section: str, payload: ConfigSectionUpdateReques
     Creates an auto-snapshot before applying changes.
     """
     from tldw_Server_API.app.services.admin_config_profiles_service import get_config_profile_store
+
     store = await get_config_profile_store()
     # Auto-snapshot before edit
     await store.snapshot_current_config(
@@ -348,6 +355,7 @@ async def update_config_section(section: str, payload: ConfigSectionUpdateReques
 async def export_config() -> dict[str, Any]:
     """Export the current config.txt as JSON."""
     from tldw_Server_API.app.services.admin_config_profiles_service import get_config_profile_store
+
     store = await get_config_profile_store()
     return await store.export_config()
 
@@ -359,6 +367,7 @@ async def import_config(payload: ConfigImportRequest) -> dict[str, Any]:
     Creates an auto-snapshot before applying changes.
     """
     from tldw_Server_API.app.services.admin_config_profiles_service import get_config_profile_store
+
     store = await get_config_profile_store()
     await store.snapshot_current_config("pre_import", "Auto-snapshot before config import")
     result = await store.import_config(payload.sections)

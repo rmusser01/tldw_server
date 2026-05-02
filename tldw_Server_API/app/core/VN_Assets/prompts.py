@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
+from functools import lru_cache
 from math import ceil
 from typing import Any
 
@@ -84,7 +85,6 @@ def build_prompt_preview(
             _build_pack_source(
                 pack_scenario=pack_scenario,
                 pack_style=pack_style,
-                negative_prompt=negative_source,
                 style_lock=style_lock,
             ),
             effective_budgets.pack,
@@ -133,13 +133,32 @@ def build_prompt_preview(
 
 
 def estimate_prompt_tokens(text: str | None) -> int:
-    """Estimate tokens using the local fallback: max(words, ceil(chars / 4))."""
+    """Estimate tokens using a tokenizer when available, with a deterministic fallback."""
     normalized = _normalize_text(text)
     if not normalized:
         return 0
+    encoder = _get_prompt_token_encoder()
+    if encoder is not None:
+        try:
+            return max(0, len(encoder.encode(normalized)))
+        except (AttributeError, RuntimeError, TypeError, ValueError):
+            pass
     word_count = len(normalized.split())
     char_count = len(normalized)
     return max(word_count, ceil(char_count / 4))
+
+
+@lru_cache(maxsize=1)
+def _get_prompt_token_encoder() -> Any | None:
+    try:
+        import tiktoken  # type: ignore
+    except ImportError:
+        return None
+
+    try:
+        return tiktoken.get_encoding("cl100k_base")
+    except (AttributeError, KeyError, RuntimeError, ValueError):
+        return None
 
 
 def _truncate_to_budget(text: str, budget: int) -> tuple[str, int]:
@@ -214,7 +233,6 @@ def _build_pack_source(
     *,
     pack_scenario: str | None,
     pack_style: str | None,
-    negative_prompt: str | None,
     style_lock: Mapping[str, Any] | None,
 ) -> str:
     parts: list[str] = []
@@ -222,9 +240,6 @@ def _build_pack_source(
     style = _normalize_text(pack_style)
     if style:
         parts.append(f"Pack style: {style}")
-    negative = _normalize_text(negative_prompt)
-    if negative:
-        parts.append(f"Negative prompt: {negative}")
     if style_lock:
         style_lock_text = ", ".join(
             f"{key}={_stringify_value(style_lock[key])}" for key in sorted(style_lock, key=lambda value: str(value))

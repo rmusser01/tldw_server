@@ -2,12 +2,8 @@ from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import Response
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import AdminPrincipal, get_auth_principal, get_request_user, RequirePermission, User
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
-    get_auth_principal,
-    require_permissions,
-    require_roles,
-)
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.api.v1.schemas.claims_schemas import (
     ClaimNotificationResponse,
@@ -40,7 +36,6 @@ from tldw_Server_API.app.api.v1.schemas.claims_schemas import (
 )
 from tldw_Server_API.app.core.AuthNZ.permissions import SYSTEM_CONFIGURE
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.Claims_Extraction import claims_service
 from tldw_Server_API.app.core.Claims_Extraction.claims_rebuild_service import get_claims_rebuild_service
 
@@ -48,9 +43,7 @@ router = APIRouter(prefix="/claims", tags=["claims"])
 
 
 @router.get("/status")
-def claims_rebuild_status(
-    _principal: AuthPrincipal = Depends(require_roles("admin")),  # noqa: B008
-) -> dict[str, Any]:
+def claims_rebuild_status(_principal: AdminPrincipal) -> dict[str, Any]:
     """Return statistics about the claims rebuild worker. Admin only."""
     return claims_service.claims_rebuild_status(
         rebuild_service=get_claims_rebuild_service(),
@@ -191,7 +184,7 @@ def evaluate_watchlist_notifications(
 
 @router.get("/settings", response_model=ClaimsSettingsResponse)
 def get_claims_settings(
-    _principal: AuthPrincipal = Depends(require_roles("admin")),  # noqa: B008
+    _principal: AdminPrincipal,
 ) -> ClaimsSettingsResponse:
     """Return current claims settings."""
     return claims_service.get_claims_settings(_principal)
@@ -200,8 +193,8 @@ def get_claims_settings(
 @router.put("/settings", response_model=ClaimsSettingsResponse)
 def update_claims_settings(
     payload: ClaimsSettingsUpdate,
-    principal: AuthPrincipal = Depends(require_roles("admin")),  # noqa: B008
-    _perm: AuthPrincipal = Depends(require_permissions(SYSTEM_CONFIGURE)),  # noqa: B008
+    principal: AdminPrincipal,
+    _perm: AuthPrincipal = Depends(RequirePermission(SYSTEM_CONFIGURE)),  # noqa: B008
 ) -> ClaimsSettingsResponse:
     """Update claims settings (optionally persisted)."""
     return claims_service.update_claims_settings(

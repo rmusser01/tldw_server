@@ -6,10 +6,11 @@ from types import SimpleNamespace
 from urllib.parse import parse_qs, urlparse
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.api.v1.endpoints import discord as discord_endpoint
+from tldw_Server_API.app.api.v1.endpoints import discord_support
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user
 
 
@@ -226,3 +227,29 @@ def test_discord_admin_toggle_and_delete(discord_oauth_client: tuple[TestClient,
     listed_after_delete = client.get("/api/v1/discord/admin/installations")
     assert listed_after_delete.status_code == 200
     assert listed_after_delete.json()["installations"] == []
+
+
+@pytest.mark.asyncio
+async def test_discord_oauth_token_exchange_sanitizes_provider_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _FakeResponse:
+        status_code = 400
+
+        def json(self) -> dict[str, str]:
+            return {"error_description": "client authentication failed"}
+
+        async def aclose(self) -> None:
+            return None
+
+    async def _fake_http_afetch(**_kwargs):
+        return _FakeResponse()
+
+    monkeypatch.setattr(discord_support, "_http_afetch", _fake_http_afetch)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await discord_endpoint._discord_oauth_token_exchange(
+            token_url="https://discord.test/api/oauth2/token",
+            form_data={"code": "bad-code"},
+        )
+
+    assert exc_info.value.status_code == 502
+    assert exc_info.value.detail == "Discord OAuth token exchange failed"

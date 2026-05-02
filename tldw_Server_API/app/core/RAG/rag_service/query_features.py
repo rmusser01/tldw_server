@@ -41,8 +41,8 @@ def _download_with_timeout(resource: str, timeout_s: int = 60) -> bool:
         ok = False
         try:
             ok = nltk.download(resource, quiet=True)
-        except Exception as e:  # pragma: no cover - defensive
-            logger.warning(f"NLTK download error for '{resource}': {e}")
+        except Exception:  # pragma: no cover - defensive
+            logger.warning("NLTK download error; continuing without resource")
             ok = False
         with contextlib.suppress(Exception):
             q.put_nowait(ok)

@@ -1146,14 +1146,15 @@ def process_videos(
         except _VIDEO_NONCRITICAL_EXCEPTIONS as exc:
             msg = f"Exception processing '{video_input}': {exc}"
             logging.exception(msg)
-            errors.append(msg)
+            public_error = "Video processing failed"
+            errors.append(public_error)
             # Append an error result structure
             results.append({
                 "status": "Error",
                 "input_ref": video_input,
                 "processing_source": video_input,
                 "media_type": "video",
-                "error": msg,
+                "error": public_error,
                 # Fill other fields with None/defaults
                 "metadata": {}, "transcript": None, "segments": None, "chunks": None, "summary": None,
                 "analysis_details": None, "warnings": None
@@ -1672,7 +1673,7 @@ def process_single_video(
         # Catch-all for unexpected errors during the process
         logger.exception(f"Unexpected exception processing {video_input}: {e}")
         processing_result["status"] = "Error"
-        processing_result["error"] = f"Unexpected error: {type(e).__name__}: {str(e)}"
+        processing_result["error"] = "Video processing failed"
         # *** Ensure input_ref is original on error ***
         processing_result["input_ref"] = video_input
         return processing_result

@@ -193,6 +193,6 @@ async def run_rerank_adapter(config: dict[str, Any], context: dict[str, Any]) ->
             "query": query,
         }
 
-    except _RERANK_NONCRITICAL_EXCEPTIONS as e:
-        logger.exception(f"Rerank adapter error: {e}")
-        return {"error": f"rerank_error:{e}"}
+    except _RERANK_NONCRITICAL_EXCEPTIONS:
+        logger.exception("Rerank adapter error")
+        return {"error": "rerank_error"}

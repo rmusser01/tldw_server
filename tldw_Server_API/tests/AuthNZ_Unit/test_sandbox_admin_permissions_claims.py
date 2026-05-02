@@ -182,6 +182,52 @@ async def test_sandbox_admin_runs_allowed_for_admin_principal(monkeypatch):
     body = resp.json()
     assert isinstance(body.get("items"), list)
     assert body.get("total") == 0
+    assert body["has_more"] is False
+    assert body["next_offset"] is None
+
+
+@pytest.mark.asyncio
+async def test_sandbox_admin_idempotency_includes_pagination_aliases(monkeypatch):
+    principal = _make_principal(
+        roles=[ROLE_ADMIN],
+        permissions=[],
+        is_admin=True,
+    )
+    fake_service = _FakeService()
+    monkeypatch.setattr(sandbox_mod, "_service", fake_service, raising=True)
+
+    app = _build_app_with_overrides(principal)
+
+    with TestClient(app) as client:
+        resp = client.get("/api/v1/sandbox/admin/idempotency")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert isinstance(body.get("items"), list)
+    assert body.get("total") == 0
+    assert body["has_more"] is False
+    assert body["next_offset"] is None
+
+
+@pytest.mark.asyncio
+async def test_sandbox_admin_usage_includes_pagination_aliases(monkeypatch):
+    principal = _make_principal(
+        roles=[ROLE_ADMIN],
+        permissions=[],
+        is_admin=True,
+    )
+    fake_service = _FakeService()
+    monkeypatch.setattr(sandbox_mod, "_service", fake_service, raising=True)
+
+    app = _build_app_with_overrides(principal)
+
+    with TestClient(app) as client:
+        resp = client.get("/api/v1/sandbox/admin/usage")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert isinstance(body.get("items"), list)
+    assert body.get("total") == 0
+    assert body["has_more"] is False
+    assert body["next_offset"] is None
 
 
 @pytest.mark.asyncio

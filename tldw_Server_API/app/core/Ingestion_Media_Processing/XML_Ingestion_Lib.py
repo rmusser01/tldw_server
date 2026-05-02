@@ -101,8 +101,8 @@ def xml_to_text(xml_file):
             if elem.text and elem.text.strip():
                 text_content.append(elem.text.strip())
         return '\n'.join(text_content)
-    except Exception as e:
-        logging.error(f"Error parsing XML file: {str(e)}")
+    except Exception:
+        logging.exception("Error parsing XML file")
         return None
 
 
@@ -174,12 +174,12 @@ def import_xml_handler(import_file, title, author, keywords, system_prompt,
                 overwrite=False
             )
 
-    except getattr(DET, "ParseError", ValueError) as e:  # type: ignore[arg-type]
-        logging.error(f"XML parsing error: {str(e)}")
-        return f"Error parsing XML file: {str(e)}"
+    except getattr(DET, "ParseError", ValueError):  # type: ignore[arg-type]
+        logging.exception("XML parsing error")
+        return "Error parsing XML file"
     except Exception as e:
         logging.error(f"Error processing XML file: {str(e)}")
-        return f"Error processing XML file: {str(e)}"
+        return "Error processing XML file"
     else:
         return f"XML file '{display_name}' import complete. Database result: {result}"
 

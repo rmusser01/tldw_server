@@ -1658,7 +1658,7 @@ class UnifiedRAGResponse(BaseModel):
         description="Feedback tracking ID"
     )
 
-    generated_answer: Optional[str] = Field(
+    generated_answer: Optional[str | dict[str, Any]] = Field(
         default=None,
         description="Generated answer from context"
     )

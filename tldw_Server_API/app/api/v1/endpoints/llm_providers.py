@@ -954,10 +954,10 @@ async def llm_health():
                     "per_user_tokens_per_minute": cfg.per_user_tokens_per_minute
                 }
             }
-    except _LLM_PROVIDERS_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"LLM health check error: {e}")
+    except _LLM_PROVIDERS_NONCRITICAL_EXCEPTIONS:
+        logger.error("LLM health check failed")
         health["status"] = "unhealthy"
-        health["error"] = str(e)
+        health["error"] = "LLM health check failed"
 
     return health
 
@@ -1133,7 +1133,7 @@ def discover_models_from_endpoint(
             )
             try:
                 if resp.status_code >= 400:
-                    logger.debug(f"[Model discovery] {provider}: {url} responded with {resp.status_code}")
+                    logger.debug("Model discovery endpoint returned an error status")
                     continue
                 discovered = _extract_models_from_response(resp.json())
                 if discovered:
@@ -1143,11 +1143,11 @@ def discover_models_from_endpoint(
                 close = getattr(resp, "close", None)
                 if callable(close):
                     close()
-        except _LLM_PROVIDERS_NONCRITICAL_EXCEPTIONS as exc:
-            logger.debug(f"[Model discovery] {provider}: error querying {url}: {exc}")
+        except _LLM_PROVIDERS_NONCRITICAL_EXCEPTIONS:
+            logger.debug("Model discovery endpoint query failed")
             continue
-        except Exception as exc:  # noqa: BLE001 - best-effort local discovery must fail open
-            logger.debug(f"[Model discovery] {provider}: unexpected error querying {url}: {exc}")
+        except Exception:  # noqa: BLE001 - best-effort local discovery must fail open
+            logger.debug("Model discovery endpoint query failed unexpectedly")
             continue
 
     _LOCAL_MODEL_CACHE[cache_key] = (now, discovered)
@@ -1817,8 +1817,8 @@ def get_configured_providers(
             'total_configured': len(providers)
         }
 
-    except _LLM_PROVIDERS_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Error getting configured providers: {e}", exc_info=True)
+    except _LLM_PROVIDERS_NONCRITICAL_EXCEPTIONS:
+        logger.error("Error getting configured providers")
         return {
             'providers': [],
             'default_provider': 'openai',
@@ -2104,10 +2104,10 @@ async def get_llm_providers(include_deprecated: bool = False):
         return result
 
     except _LLM_PROVIDERS_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Error in get_llm_providers endpoint: {e}", exc_info=True)
+        logger.error("Error in get_llm_providers endpoint")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to retrieve LLM providers: {str(e)}"
+            detail="Failed to retrieve LLM providers"
         ) from e
 
 
@@ -2168,8 +2168,8 @@ async def get_models_metadata(
         # Append image generation backends to the catalog
         try:
             image_models = list_image_models_for_catalog()
-        except _LLM_PROVIDERS_NONCRITICAL_EXCEPTIONS as exc:
-            logger.warning(f"Failed to list image generation models: {exc}")
+        except _LLM_PROVIDERS_NONCRITICAL_EXCEPTIONS:
+            logger.warning("Failed to list image generation models")
             image_models = []
         for entry in image_models:
             if not _model_matches_filters(
@@ -2185,10 +2185,10 @@ async def get_models_metadata(
             'total': len(flattened)
         }
     except _LLM_PROVIDERS_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Error getting models metadata: {e}", exc_info=True)
+        logger.error("Error getting models metadata")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to retrieve model metadata: {str(e)}"
+            detail="Failed to retrieve model metadata"
         ) from e
 
 @router.get("/llm/providers/{provider_name}",
@@ -2223,10 +2223,10 @@ async def get_provider_details(provider_name: str, include_deprecated: bool = Fa
     except HTTPException:
         raise
     except _LLM_PROVIDERS_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Error getting provider details for {provider_name}: {e}", exc_info=True)
+        logger.error("Error getting provider details")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to retrieve provider details: {str(e)}"
+            detail="Failed to retrieve provider details"
         ) from e
 
 @router.get("/llm/models",
@@ -2282,8 +2282,8 @@ async def get_all_models(
         # Append image generation backends to the flat list
         try:
             image_models = list_image_models_for_catalog()
-        except _LLM_PROVIDERS_NONCRITICAL_EXCEPTIONS as exc:
-            logger.warning(f"Failed to list image generation models: {exc}")
+        except _LLM_PROVIDERS_NONCRITICAL_EXCEPTIONS:
+            logger.warning("Failed to list image generation models")
             image_models = []
         for entry in image_models:
             if not _model_matches_filters(
@@ -2299,10 +2299,10 @@ async def get_all_models(
         logger.info(f"Found {len(models)} total models across all providers")
         return models
     except _LLM_PROVIDERS_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Error getting all models: {e}", exc_info=True)
+        logger.error("Error getting all models")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to retrieve models: {str(e)}"
+            detail="Failed to retrieve models"
         ) from e
 
 # End of llm_providers.py

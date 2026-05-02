@@ -254,8 +254,8 @@ async def run_image_gen_adapter(config: dict[str, Any], context: dict[str, Any])
                     },
                 )
                 artifact_registered = True
-            except Exception as art_e:
-                logger.warning(f"Image gen: failed to register artifact: {art_e}")
+            except Exception:
+                logger.warning("Image gen: failed to register artifact", exc_info=True)
 
         return {
             "images": images_output,
@@ -267,9 +267,9 @@ async def run_image_gen_adapter(config: dict[str, Any], context: dict[str, Any])
             "artifact_registered": artifact_registered,
         }
 
-    except Exception as e:
-        logger.exception(f"Image gen adapter error: {e}")
-        return {"error": f"image_gen_error:{e}"}
+    except Exception:
+        logger.exception("Image gen adapter error")
+        return {"error": "image_gen_error"}
 
 
 @registry.register(
@@ -311,8 +311,8 @@ async def run_image_describe_adapter(config: dict[str, Any], context: dict[str, 
             path = resolve_workflow_file_path(config.get("image_path"), context, config)
             with open(path, "rb") as f:
                 image_data = base64.b64encode(f.read()).decode("utf-8")
-        except Exception as e:
-            return {"description": "", "error": f"image_read_error: {e}"}
+        except Exception:
+            return {"description": "", "error": "image_read_error"}
 
     if not image_data and not image_url:
         return {"description": "", "error": "missing_image"}
@@ -336,6 +336,6 @@ async def run_image_describe_adapter(config: dict[str, Any], context: dict[str, 
         description = extract_openai_content(response) or ""
         return {"description": description, "text": description}
 
-    except Exception as e:
-        logger.exception(f"Image describe error: {e}")
-        return {"description": "", "error": str(e)}
+    except Exception:
+        logger.exception("Image describe error")
+        return {"description": "", "error": "image_describe_error"}

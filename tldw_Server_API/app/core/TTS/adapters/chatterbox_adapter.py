@@ -248,7 +248,7 @@ class ChatterboxAdapter(TTSAdapter):
             self._status = ProviderStatus.AVAILABLE
             return True
         except (TTSModelLoadError, *_CHATTERBOX_RUNTIME_EXCEPTIONS) as e:
-            logger.error(f"{self.provider_name}: Initialization failed: {e}")
+            logger.error(f"{self.provider_name}: Initialization failed ({type(e).__name__})")
             self._status = ProviderStatus.ERROR
             return False
 
@@ -472,7 +472,7 @@ class ChatterboxAdapter(TTSAdapter):
             )
 
             if error:
-                logger.error(f"Voice reference processing failed: {error}")
+                logger.error("Voice reference processing failed")
                 return None
 
             # Save to temporary file
@@ -484,11 +484,11 @@ class ChatterboxAdapter(TTSAdapter):
                 tmp_file.write(processed_audio)
                 tmp_path = tmp_file.name
 
-            logger.info(f"Voice reference prepared: {tmp_path}")
+            logger.info("Voice reference prepared")
             return tmp_path
 
         except _CHATTERBOX_RUNTIME_EXCEPTIONS as e:
-            logger.error(f"Failed to prepare voice reference: {e}")
+            logger.error(f"Failed to prepare voice reference ({type(e).__name__})")
             return None
 
     def map_voice(self, voice_id: str) -> str:

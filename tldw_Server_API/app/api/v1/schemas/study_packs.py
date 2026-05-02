@@ -109,6 +109,13 @@ class StudyPackJobStatusResponse(BaseModel):
     error: Optional[str] = None
 
 
+class StudyPackJobListResponse(BaseModel):
+    """Paginated summary envelope for study-pack job discovery."""
+
+    jobs: list[StudyPackJobSummaryResponse] = Field(default_factory=list)
+    total: int = Field(default=0, ge=0)
+
+
 class FlashcardCitationResponse(BaseModel):
     """Serialized flashcard citation row used by remediation UI."""
 

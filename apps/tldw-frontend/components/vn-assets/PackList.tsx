@@ -25,6 +25,7 @@ export default function PackList({ packs, selectedPackId, onSelectPack }: PackLi
             return (
               <button
                 key={pack.id}
+                aria-pressed={selected}
                 className={`rounded-md border px-3 py-2 text-left text-sm transition-colors ${
                   selected
                     ? 'border-primary bg-primary/10 text-primary'

@@ -53,3 +53,11 @@ def test_hf_unload_clears_memory_usage(monkeypatch, tmp_path):
     embedder.unload_model()
 
     assert EC.model_memory_usage["huggingface:dummy"] == 0.0
+
+
+@pytest.mark.unit
+def test_hf_embedder_del_tolerates_partial_initialization():
+    embedder = object.__new__(EC.HuggingFaceEmbedder)
+    embedder.model_identifier = "huggingface:partial"
+
+    embedder.__del__()

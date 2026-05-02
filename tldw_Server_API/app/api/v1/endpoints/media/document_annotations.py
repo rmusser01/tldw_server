@@ -19,7 +19,7 @@ from tldw_Server_API.app.api.v1.schemas.document_annotations import (
     AnnotationSyncResponse,
     AnnotationUpdate,
 )
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, User
 
 router = APIRouter(tags=["Document Workspace"])
 
@@ -62,17 +62,13 @@ def _ensure_annotations_table(db: Any) -> None:
             cursor = conn.execute(f"PRAGMA table_info({ANNOTATIONS_TABLE})")
             columns = {row["name"] for row in cursor.fetchall()}
             if "chapter_title" not in columns:
-                conn.execute(
-                    f"ALTER TABLE {ANNOTATIONS_TABLE} ADD COLUMN chapter_title TEXT"
-                )
+                conn.execute(f"ALTER TABLE {ANNOTATIONS_TABLE} ADD COLUMN chapter_title TEXT")
                 logger.info("Added chapter_title column to annotations table")
             if "percentage" not in columns:
-                conn.execute(
-                    f"ALTER TABLE {ANNOTATIONS_TABLE} ADD COLUMN percentage REAL"
-                )
+                conn.execute(f"ALTER TABLE {ANNOTATIONS_TABLE} ADD COLUMN percentage REAL")
                 logger.info("Added percentage column to annotations table")
-    except Exception as e:
-        logger.warning("Could not create annotations table (may already exist): {}", e)
+    except Exception:
+        logger.warning("Could not create annotations table")
 
 
 def _generate_annotation_id() -> str:
@@ -170,7 +166,7 @@ async def list_annotations(
             cursor = conn.execute(query, (media_id, user_id))
             rows = cursor.fetchall()
     except Exception as e:
-        logger.error("Error fetching annotations: {}", e)
+        logger.error("Error fetching annotations")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to fetch annotations",
@@ -255,7 +251,7 @@ async def create_annotation(
                 ),
             )
     except Exception as e:
-        logger.error("Error creating annotation: {}", e)
+        logger.error("Error creating annotation")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to create annotation",
@@ -320,7 +316,7 @@ async def update_annotation(
             cursor = conn.execute(select_sql, (annotation_id, media_id, user_id))
             row = cursor.fetchone()
     except Exception as e:
-        logger.error("Error fetching annotation: {}", e)
+        logger.error("Error fetching annotation")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to fetch annotation",
@@ -372,7 +368,7 @@ async def update_annotation(
         with db.transaction() as conn:
             conn.execute(update_sql, tuple(params))
     except Exception as e:
-        logger.error("Error updating annotation: {}", e)
+        logger.error("Error updating annotation")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to update annotation",
@@ -431,7 +427,7 @@ async def delete_annotation(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error("Error deleting annotation: {}", e)
+        logger.error("Error deleting annotation")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to delete annotation",
@@ -538,7 +534,7 @@ async def sync_annotations(
                     id_mapping[body.client_ids[i]] = annotation_id
 
     except Exception as e:
-        logger.error("Error syncing annotations: {}", e)
+        logger.error("Error syncing annotations")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to sync annotations",

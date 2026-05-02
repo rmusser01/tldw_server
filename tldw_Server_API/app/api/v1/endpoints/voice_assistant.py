@@ -59,7 +59,7 @@ from tldw_Server_API.app.api.v1.schemas.voice_assistant_schemas import (
     WSWorkflowCompleteMessage,
     WSWorkflowProgressMessage,
 )
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, User
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.TTS.tts_exceptions import TTSError
 from tldw_Server_API.app.core.TTS.tts_request_resolution import (
@@ -276,8 +276,8 @@ async def _generate_tts_audio(
 
         return audio_bytes, mime_type
 
-    except (AttributeError, ImportError, ModuleNotFoundError, OSError, RuntimeError, TypeError, ValueError) as e:
-        logger.error(f"TTS generation failed: {e}")
+    except (AttributeError, ImportError, ModuleNotFoundError, OSError, RuntimeError, TypeError, ValueError):
+        logger.error("TTS generation failed")
         return b"", "audio/mpeg"
 
 
@@ -1073,8 +1073,8 @@ async def websocket_voice_assistant(
             registry = get_voice_command_registry()
             registry.load_defaults()
             registry.refresh_user_commands(db, user_id, include_disabled=True)
-        except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as _db_err:
-            logger.warning(f"Voice assistant DB init failed (session={session_id}): {_db_err}")
+        except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
+            logger.warning("Voice assistant DB init failed")
 
         await websocket.send_json(
             WSAuthOKMessage(
@@ -1243,7 +1243,7 @@ async def websocket_voice_assistant(
         logger.info(f"Voice assistant WebSocket disconnected: session={session_id}")
 
     except (AttributeError, OSError, RuntimeError, TypeError, ValueError, asyncio.TimeoutError) as e:
-        logger.error(f"Voice assistant WebSocket error: {e}")
+        logger.error("Voice assistant WebSocket error")
         try:
             await websocket.send_json(
                 WSErrorMessage(
@@ -1310,7 +1310,7 @@ async def _process_audio_command(
         )
 
     except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
-        logger.error(f"Transcription failed: {e}")
+        logger.error("Transcription failed")
         await websocket.send_json(
             WSErrorMessage(
                 error=f"Transcription failed: {e}",
@@ -1359,8 +1359,8 @@ async def _transcribe_audio(
             return result.get("text", "")
         return str(result) if result else ""
 
-    except Exception as e:
-        logger.error(f"Audio transcription failed: {e}")
+    except Exception:
+        logger.error("Audio transcription failed")
         raise
 
 
@@ -1482,7 +1482,7 @@ async def _stream_tts_response(
         )
 
     except (TTSError, AttributeError, ImportError, ModuleNotFoundError, OSError, RuntimeError, TypeError, ValueError) as e:
-        logger.error(f"TTS streaming failed: {e}")
+        logger.error("TTS streaming failed")
         await websocket.send_json(
             WSErrorMessage(
                 error=f"TTS failed: {e}",
@@ -1531,7 +1531,7 @@ async def _stream_workflow_progress(
                 )
 
     except (AttributeError, OSError, RuntimeError, TypeError, ValueError, asyncio.TimeoutError) as e:
-        logger.error(f"Workflow progress streaming failed: {e}")
+        logger.error("Workflow progress streaming failed")
         await websocket.send_json(
             WSErrorMessage(
                 error=f"Workflow progress failed: {e}",
@@ -1628,13 +1628,13 @@ async def voice_command_dry_run(
     except ImportError as exc:
         raise HTTPException(
             status_code=501,
-            detail=f"Voice assistant module not available: {exc}",
+            detail="Voice assistant module not available",
         ) from exc
     except Exception as exc:
-        logger.error("Voice command dry-run failed: {}", exc)
+        logger.error("Voice command dry-run failed")
         raise HTTPException(
             status_code=500,
-            detail=f"Dry-run failed: {exc}",
+            detail="Dry-run failed",
         ) from exc
 
 

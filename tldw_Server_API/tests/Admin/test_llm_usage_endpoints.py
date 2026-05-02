@@ -136,6 +136,11 @@ async def test_llm_usage_endpoints_sqlite(monkeypatch, tmp_path):
         data = r.json()
         assert isinstance(data.get('items'), list)
         assert any(row.get('operation') == 'chat' for row in data['items'])
+        assert data["pagination"]["total"] == data["total"]
+        assert data["pagination"]["limit"] == 10
+        assert data["pagination"]["offset"] == 0
+        assert data["has_more"] == data["pagination"]["has_more"]
+        assert data["next_offset"] == data["pagination"]["next_offset"]
 
         # Summary by user
         r2 = client.get("/api/v1/admin/llm-usage/summary?group_by=user")

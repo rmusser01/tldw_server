@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 from fastapi import HTTPException
 
+import tldw_Server_API.app.api.v1.endpoints.mcp_unified_endpoint as mcp_endpoint
 from tldw_Server_API.app.api.v1.endpoints.mcp_unified_endpoint import (
     MCPConnectionTestRequest,
     list_mcp_catalog,
@@ -99,6 +100,41 @@ async def test_connection_unreachable(monkeypatch: pytest.MonkeyPatch):
     assert resp.error is not None
     assert isinstance(resp.error, str)
     assert resp.tools_discovered == []
+
+
+@pytest.mark.asyncio
+async def test_connection_failure_logs_canonical_url_without_request_secrets(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    logged_messages: list[str] = []
+    probed_urls: list[str] = []
+
+    class _FakeLogger:
+        def opt(self, **_kwargs):
+            return self
+
+        def warning(self, message: str, *args: object) -> None:
+            logged_messages.append(message.format(*args))
+
+    async def _failing_probe(url: str, _headers: dict[str, str]) -> None:
+        probed_urls.append(url)
+        raise OSError("network down")
+
+    monkeypatch.setattr(mcp_endpoint, "logger", _FakeLogger())
+    monkeypatch.setattr(mcp_endpoint, "_is_private_ip", lambda _host: False)
+    monkeypatch.setattr(mcp_endpoint, "_probe_mcp_connection", _failing_probe)
+
+    req = MCPConnectionTestRequest(
+        url="https://api.github.com?token=secret-token#frag",
+    )
+
+    resp = await check_mcp_connection(req)
+
+    assert resp.reachable is False
+    assert probed_urls == ["https://api.github.com"]
+    assert logged_messages == ["MCP connection test failed for https://api.github.com"]
+    assert "secret-token" not in logged_messages[0]
+    assert "#frag" not in logged_messages[0]
 
 
 @pytest.mark.asyncio

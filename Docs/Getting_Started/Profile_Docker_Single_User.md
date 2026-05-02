@@ -41,15 +41,10 @@ make start-docker-single
 PowerShell / no-`make` equivalent:
 
 ```powershell
-# Optional advanced/custom-host browser access:
-# $env:NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE="advanced"
-# $env:NEXT_PUBLIC_API_URL="http://YOUR_HOST_OR_DOMAIN:8000"
 docker compose --env-file tldw_Server_API/Config_Files/.env -f Dockerfiles/docker-compose.single-user.yml -f Dockerfiles/docker-compose.webui.yml up -d --wait
 ```
 
-The API starts at http://127.0.0.1:8000 and the WebUI starts at http://127.0.0.1:8080. The WebUI uses same-origin browser API requests through the WebUI proxy by default, so browser requests stay on the WebUI origin unless you intentionally configure LAN/custom-host browser access as advanced configuration.
-
-For advanced/custom-host browser access, set `NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE=advanced` together with the browser-visible API URL before starting the WebUI overlay.
+The API starts at http://127.0.0.1:8000 and the WebUI starts at http://127.0.0.1:8080. The default browser path uses same-origin browser API requests through the WebUI proxy. Treat LAN/custom-host browser access as advanced configuration; if you intentionally need that path, set `NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE=advanced` together with `NEXT_PUBLIC_API_URL`.
 
 Default persistence uses Docker named volumes:
 

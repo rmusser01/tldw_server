@@ -824,6 +824,20 @@ scopes:
     ownership_predicates:
       - same_org
     doc_url: https://docs.example.com/privileges/workflows-run-saved
+  - id: workflows.run_adhoc
+    description: Trigger an ad-hoc workflow definition manually.
+    resource_tags:
+      - workflows
+      - automation
+    sensitivity_tier: high
+    rate_limit_class: elevated
+    default_roles:
+      - admin
+      - automation_manager
+    feature_flag_id: null
+    ownership_predicates:
+      - same_org
+    doc_url: https://docs.example.com/privileges/workflows-run-adhoc
   - id: evals.create_run
     description: Launch evaluation runs from existing evaluation definitions.
     resource_tags:

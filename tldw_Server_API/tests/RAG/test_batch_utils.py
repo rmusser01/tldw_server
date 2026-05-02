@@ -15,11 +15,21 @@ from unittest.mock import MagicMock
 
 import pytest
 
+import tldw_Server_API.app.core.RAG.rag_service.batch_utils as batch_utils
 from tldw_Server_API.app.core.RAG.rag_service.batch_utils import (
     BatchResult,
     run_batch,
     run_batch_indexed,
 )
+
+
+def _capture_batch_logs(level: str = "WARNING") -> tuple[list[str], int]:
+    messages: list[str] = []
+    sink_id = batch_utils.logger.add(
+        lambda message: messages.append(str(message.record.get("message") or "")),
+        level=level,
+    )
+    return messages, sink_id
 
 
 # ---------------------------------------------------------------------------
@@ -137,6 +147,49 @@ class TestRunBatch:
         assert error_indices == [1, 3]
         for idx, exc in result.errors:
             assert isinstance(exc, ValueError)
+
+    async def test_failure_log_sanitizes_exception_details(self):
+        """Failure logs should not expose raw exception details."""
+        secret_path = "/private/rag-batch.db?token=secret-batch-token"
+        exc = RuntimeError(f"batch backend failed at {secret_path}")
+        messages, sink_id = _capture_batch_logs()
+
+        async def fail(_item: int) -> int:
+            raise exc
+
+        try:
+            result = await run_batch([1], fail, max_concurrency=1, fail_fast=False)
+        finally:
+            batch_utils.logger.remove(sink_id)
+
+        assert result.errors[0][1] is exc
+        assert secret_path in str(result.errors[0][1])
+        joined = "\n".join(messages)
+        assert "Batch item 0 failed" in joined
+        assert "rag-batch.db" not in joined
+        assert "secret-batch-token" not in joined
+
+    async def test_fail_fast_log_sanitizes_exception_details(self):
+        """fail_fast cancellation logs should not expose raw exception details."""
+        secret_path = "/private/rag-batch-fail-fast.db?token=secret-fail-fast-token"
+        exc = RuntimeError(f"fail_fast backend failed at {secret_path}")
+        messages, sink_id = _capture_batch_logs()
+
+        async def fail(_item: int) -> int:
+            raise exc
+
+        try:
+            result = await run_batch([1, 2], fail, max_concurrency=1, fail_fast=True)
+        finally:
+            batch_utils.logger.remove(sink_id)
+
+        assert result.cancelled is True
+        assert result.errors[0][1] is exc
+        assert secret_path in str(result.errors[0][1])
+        joined = "\n".join(messages)
+        assert "Batch item 0 failed (fail_fast=True), cancelling remaining" in joined
+        assert "rag-batch-fail-fast.db" not in joined
+        assert "secret-fail-fast-token" not in joined
 
     async def test_fail_fast_cancels_remaining(self):
         """With fail_fast=True the batch should set cancelled and stop early."""
@@ -305,6 +358,28 @@ class TestRunBatchIndexed:
         assert result.total == 4
         error_indices = sorted(idx for idx, _ in result.errors)
         assert error_indices == [1, 3]
+
+    async def test_indexed_failure_log_sanitizes_exception_details(self):
+        """Indexed failure logs should not expose raw exception details."""
+        secret_path = "/private/rag-indexed.db?token=secret-indexed-token"
+        exc = RuntimeError(f"indexed backend failed at {secret_path}")
+        messages, sink_id = _capture_batch_logs()
+
+        async def fail(index: int, item: int) -> int:
+            _ = (index, item)
+            raise exc
+
+        try:
+            result = await run_batch_indexed([10], fail, max_concurrency=1, fail_fast=False)
+        finally:
+            batch_utils.logger.remove(sink_id)
+
+        assert result.errors[0][1] is exc
+        assert secret_path in str(result.errors[0][1])
+        joined = "\n".join(messages)
+        assert "Batch item 0 failed" in joined
+        assert "rag-indexed.db" not in joined
+        assert "secret-indexed-token" not in joined
 
     async def test_indexed_empty_items(self):
         """Empty items list should return zero-count BatchResult."""

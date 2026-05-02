@@ -5,6 +5,8 @@ import zipfile
 import pytest
 from types import SimpleNamespace
 from fastapi import FastAPI
+from fastapi import HTTPException
+from fastapi import Response
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
@@ -12,11 +14,16 @@ from tldw_Server_API.app.api.v1.API_Deps.Collections_DB_Deps import get_collecti
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.Slides_DB_Deps import get_slides_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
+from tldw_Server_API.app.api.v1.endpoints import slides as slides_ep
 from tldw_Server_API.app.api.v1.endpoints.slides import router as slides_router
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
+from tldw_Server_API.app.core.Slides.slides_db import ConflictError as SlidesConflictError
+from tldw_Server_API.app.core.Slides.slides_db import InputError as SlidesInputError
 from tldw_Server_API.app.core.Slides.slides_db import SlidesDatabase
 from tldw_Server_API.app.core.Slides.slides_export import SlidesExportError, SlidesExportInputError
+from tldw_Server_API.app.core.Slides.slides_generator import SlidesGenerationError
+from tldw_Server_API.app.core.Slides.slides_templates import SlidesTemplateInvalidError
 from tldw_Server_API.app.core.Slides.visual_styles import list_builtin_visual_styles
 
 _SAMPLE_PNG_B64 = (
@@ -126,7 +133,7 @@ def slides_client(tmp_path):
             user_id=1,
             api_key_id=None,
             subject="test-user",
-            token_type="single_user",
+            token_type="single_user",  # nosec B106 - auth principal stub token type, not a credential
             jti=None,
             roles=["admin"],
             permissions=["media.create", "media.read", "media.update", "media.delete"],
@@ -175,7 +182,7 @@ def slides_client_with_sources(tmp_path):
             user_id=1,
             api_key_id=None,
             subject="test-user",
-            token_type="single_user",
+            token_type="single_user",  # nosec B106 - auth principal stub token type, not a credential
             jti=None,
             roles=["admin"],
             permissions=["media.create", "media.read", "media.update", "media.delete"],
@@ -276,6 +283,115 @@ def _assert_compact_builtin_snapshot(snapshot: dict) -> None:
     assert snapshot["resolution"]["style_pack_version"] == 1
     assert "custom_css" not in snapshot
     assert "custom_css" not in snapshot["resolution"]
+
+
+def _create_presentation(slides_client: TestClient):
+    payload = {
+        "title": "Deck",
+        "description": None,
+        "theme": "black",
+        "settings": {"controls": True},
+        "slides": [
+            {"order": 0, "layout": "title", "title": "Deck", "content": "", "speaker_notes": None, "metadata": {}},
+            {"order": 1, "layout": "content", "title": "Slide", "content": "- A\n- B", "speaker_notes": None, "metadata": {}},
+        ],
+        "custom_css": None,
+    }
+    response = slides_client.post("/api/v1/slides/presentations", json=payload)
+    assert response.status_code == 201, response.text
+    return response
+
+
+def _presentation_update_payload() -> dict:
+    return {
+        "title": "Deck Updated",
+        "description": None,
+        "theme": "black",
+        "settings": {"controls": True},
+        "slides": [
+            {
+                "order": 0,
+                "layout": "title",
+                "title": "Deck Updated",
+                "content": "",
+                "speaker_notes": None,
+                "metadata": {},
+            },
+            {
+                "order": 1,
+                "layout": "content",
+                "title": "Slide",
+                "content": "- A\n- B",
+                "speaker_notes": None,
+                "metadata": {},
+            },
+        ],
+        "custom_css": None,
+    }
+
+
+def _assert_precondition_failed(response) -> None:
+    assert response.status_code == 412
+    assert response.json()["detail"] == "precondition_failed"
+
+
+def test_resolve_template_sanitizes_invalid_template_error(monkeypatch):
+    def _raise_invalid(template_id):
+        _ = template_id
+        raise SlidesTemplateInvalidError("template parse exploded")
+
+    monkeypatch.setattr(slides_ep, "get_slide_template", _raise_invalid)
+
+    with pytest.raises(HTTPException) as exc_info:
+        slides_ep._resolve_template("broken-template")
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "Failed to resolve slide template"
+
+
+def test_generate_presentation_sanitizes_generation_error(monkeypatch):
+    class _RaisingGenerator:
+        def generate_from_text(self, **kwargs):
+            _ = kwargs
+            raise SlidesGenerationError("llm backend exploded")
+
+    monkeypatch.setattr(slides_ep, "_resolve_provider", lambda provider: "stub-provider")
+    monkeypatch.setattr(slides_ep, "SlidesGenerator", _RaisingGenerator)
+    monkeypatch.setattr(slides_ep, "get_metrics_registry", lambda: None)
+
+    request = SimpleNamespace(
+        visual_style_id=None,
+        visual_style_scope=None,
+        template_id=None,
+        theme="black",
+        marp_theme=None,
+        settings={"controls": True},
+        provider="stub-provider",
+        model=None,
+        title_hint="Deck",
+        temperature=None,
+        max_tokens=None,
+        max_source_tokens=None,
+        max_source_chars=None,
+        enable_chunking=True,
+        chunk_size_tokens=None,
+        summary_tokens=None,
+        custom_css=None,
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        slides_ep._generate_presentation(
+            response=Response(),
+            db=SimpleNamespace(client_id="1"),
+            request=request,
+            source_text="Source text",
+            source_type="prompt",
+            source_ref=None,
+            source_query=None,
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "Failed to generate presentation"
 
 
 _TOO_LARGE_CASES = [
@@ -734,7 +850,57 @@ def test_slides_export_pdf_failure(slides_client, monkeypatch):
     presentation_id = resp.json()["id"]
     export_resp = slides_client.get(f"/api/v1/slides/presentations/{presentation_id}/export?format=pdf")
     assert export_resp.status_code == 500
-    assert export_resp.json()["detail"] == "pdf_render_failed"
+    assert export_resp.json()["detail"] == "Failed to export presentation as pdf"
+
+
+def test_slides_export_markdown_failure(slides_client, monkeypatch):
+    def _stub_export(**kwargs):
+        raise SlidesExportError("markdown_render_failed")
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.endpoints.slides.export_presentation_markdown",
+        _stub_export,
+    )
+    payload = {
+        "title": "Deck",
+        "description": None,
+        "theme": "black",
+        "settings": {"controls": True},
+        "slides": [
+            {"order": 0, "layout": "title", "title": "Deck", "content": "", "speaker_notes": None, "metadata": {}},
+        ],
+        "custom_css": None,
+    }
+    resp = slides_client.post("/api/v1/slides/presentations", json=payload)
+    presentation_id = resp.json()["id"]
+    export_resp = slides_client.get(f"/api/v1/slides/presentations/{presentation_id}/export?format=markdown")
+    assert export_resp.status_code == 500
+    assert export_resp.json()["detail"] == "Failed to export presentation as markdown"
+
+
+def test_slides_export_reveal_failure(slides_client, monkeypatch):
+    def _stub_export(**kwargs):
+        raise SlidesExportError("reveal_bundle_failed")
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.endpoints.slides.export_presentation_bundle",
+        _stub_export,
+    )
+    payload = {
+        "title": "Deck",
+        "description": None,
+        "theme": "black",
+        "settings": {"controls": True},
+        "slides": [
+            {"order": 0, "layout": "title", "title": "Deck", "content": "", "speaker_notes": None, "metadata": {}},
+        ],
+        "custom_css": None,
+    }
+    resp = slides_client.post("/api/v1/slides/presentations", json=payload)
+    presentation_id = resp.json()["id"]
+    export_resp = slides_client.get(f"/api/v1/slides/presentations/{presentation_id}/export?format=revealjs")
+    assert export_resp.status_code == 500
+    assert export_resp.json()["detail"] == "Failed to export presentation as revealjs"
 
 
 def test_slides_templates_list_and_get(slides_client, tmp_path, monkeypatch):
@@ -782,6 +948,14 @@ def test_slides_styles_list_returns_builtin_and_user_styles(slides_client):
     assert payload["total_count"] >= len(styles)
     assert payload["limit"] == 50
     assert payload["offset"] == 0
+    assert payload["pagination"]["mode"] == "offset"
+    assert payload["pagination"]["limit"] == 50
+    assert payload["pagination"]["offset"] == 0
+    assert payload["pagination"]["total"] == payload["total_count"]
+    assert payload["pagination"]["has_more"] is False
+    assert payload["pagination"]["next_offset"] is None
+    assert payload["has_more"] is False
+    assert payload["next_offset"] is None
 
 
 def test_slides_builtin_style_detail_exposes_catalog_metadata_and_compact_defaults(slides_client):
@@ -865,6 +1039,60 @@ def test_slides_styles_list_supports_pagination(slides_client):
     assert payload["offset"] == builtin_count
     assert len(payload["styles"]) == 1
     assert payload["styles"][0]["scope"] == "user"
+    assert payload["pagination"] == {
+        "mode": "offset",
+        "limit": 1,
+        "offset": builtin_count,
+        "total": payload["total_count"],
+        "has_more": False,
+        "next_offset": None,
+    }
+    assert payload["has_more"] is False
+    assert payload["next_offset"] is None
+
+
+def test_slides_presentations_list_and_search_include_pagination_metadata(slides_client):
+    first_resp = slides_client.post(
+        "/api/v1/slides/presentations",
+        json={"title": "Alpha Deck", "slides": []},
+    )
+    assert first_resp.status_code == 201, first_resp.text
+
+    second_resp = slides_client.post(
+        "/api/v1/slides/presentations",
+        json={"title": "Beta Deck", "slides": []},
+    )
+    assert second_resp.status_code == 201, second_resp.text
+
+    list_resp = slides_client.get("/api/v1/slides/presentations?limit=1&offset=0")
+    assert list_resp.status_code == 200, list_resp.text
+    list_payload = list_resp.json()
+    assert len(list_payload["presentations"]) == 1
+    assert list_payload["pagination"] == {
+        "mode": "offset",
+        "limit": 1,
+        "offset": 0,
+        "total": 2,
+        "has_more": True,
+        "next_offset": 1,
+    }
+    assert list_payload["has_more"] is True
+    assert list_payload["next_offset"] == 1
+
+    search_resp = slides_client.get("/api/v1/slides/presentations/search?q=Deck&limit=1&offset=1")
+    assert search_resp.status_code == 200, search_resp.text
+    search_payload = search_resp.json()
+    assert len(search_payload["presentations"]) == 1
+    assert search_payload["pagination"] == {
+        "mode": "offset",
+        "limit": 1,
+        "offset": 1,
+        "total": 2,
+        "has_more": False,
+        "next_offset": None,
+    }
+    assert search_payload["has_more"] is False
+    assert search_payload["next_offset"] is None
 
 
 def test_slides_styles_crud_for_user_styles(slides_client):
@@ -1031,6 +1259,42 @@ def test_slides_styles_patch_accepts_null_theme_in_appearance_defaults(slides_cl
     )
     assert patch_resp.status_code == 200, patch_resp.text
     assert patch_resp.json()["appearance_defaults"]["theme"] is None
+
+
+def test_slides_styles_patch_maps_conflict_error(slides_client, monkeypatch):
+    create_style_resp = slides_client.post(
+        "/api/v1/slides/styles",
+        json={
+            "name": "Exam Sprint",
+            "description": "Recall-first deck",
+            "generation_rules": {"exam_focus": True},
+            "artifact_preferences": ["stat_group"],
+            "appearance_defaults": {"theme": "white"},
+            "fallback_policy": {"mode": "key-points"},
+        },
+    )
+    assert create_style_resp.status_code == 201, create_style_resp.text
+    style_id = create_style_resp.json()["id"]
+
+    def _raise_conflict_error(
+        self,
+        *,
+        style_id: str,
+        name: str,
+        style_payload: str,
+        expected_updated_at: str,
+    ):
+        raise SlidesConflictError("visual style update conflicted with a newer revision")
+
+    monkeypatch.setattr(SlidesDatabase, "update_visual_style", _raise_conflict_error)
+
+    patch_resp = slides_client.patch(
+        f"/api/v1/slides/styles/{style_id}",
+        json={"description": "Updated"},
+    )
+
+    assert patch_resp.status_code == 409
+    assert patch_resp.json()["detail"] == "visual_style_version_conflict"
 
 
 def test_slides_styles_delete_rejects_styles_in_use(slides_client):
@@ -1410,19 +1674,7 @@ def test_slides_generate_with_visual_style_snapshot(slides_client, monkeypatch):
 
 
 def test_slides_reorder(slides_client):
-    payload = {
-        "title": "Deck",
-        "description": None,
-        "theme": "black",
-        "settings": {"controls": True},
-        "slides": [
-            {"order": 0, "layout": "title", "title": "Deck", "content": "", "speaker_notes": None, "metadata": {}},
-            {"order": 1, "layout": "content", "title": "Slide", "content": "- A\n- B", "speaker_notes": None, "metadata": {}},
-        ],
-        "custom_css": None,
-    }
-    resp = slides_client.post("/api/v1/slides/presentations", json=payload)
-    assert resp.status_code == 201
+    resp = _create_presentation(slides_client)
     presentation_id = resp.json()["id"]
     etag = resp.headers["ETag"]
     reorder_resp = slides_client.post(
@@ -1433,6 +1685,242 @@ def test_slides_reorder(slides_client):
     assert reorder_resp.status_code == 200
     reordered = reorder_resp.json()
     assert reordered["slides"][0]["title"] == "Slide"
+
+
+def test_slides_patch_maps_input_error(slides_client, monkeypatch):
+    create_resp = _create_presentation(slides_client)
+    presentation_id = create_resp.json()["id"]
+    etag = create_resp.headers["ETag"]
+
+    def _raise_input_error(self, presentation_id: str, update_fields: dict, expected_version: int | None):
+        raise SlidesInputError("patch_invalid")
+
+    monkeypatch.setattr(SlidesDatabase, "update_presentation", _raise_input_error)
+
+    response = slides_client.patch(
+        f"/api/v1/slides/presentations/{presentation_id}",
+        json={"title": "Updated"},
+        headers={"If-Match": etag},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "patch_invalid"
+
+
+def test_slides_reorder_maps_input_error(slides_client, monkeypatch):
+    create_resp = _create_presentation(slides_client)
+    presentation_id = create_resp.json()["id"]
+    etag = create_resp.headers["ETag"]
+
+    def _raise_input_error(self, presentation_id: str, update_fields: dict, expected_version: int | None):
+        raise SlidesInputError("reorder_invalid")
+
+    monkeypatch.setattr(SlidesDatabase, "update_presentation", _raise_input_error)
+
+    response = slides_client.post(
+        f"/api/v1/slides/presentations/{presentation_id}/reorder",
+        json={"order": [1, 0]},
+        headers={"If-Match": etag},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "reorder_invalid"
+
+
+def test_slides_delete_maps_input_error(slides_client, monkeypatch):
+    create_resp = _create_presentation(slides_client)
+    presentation_id = create_resp.json()["id"]
+    etag = create_resp.headers["ETag"]
+
+    def _raise_input_error(self, presentation_id: str, expected_version: int | None):
+        raise SlidesInputError("delete_invalid")
+
+    monkeypatch.setattr(SlidesDatabase, "soft_delete_presentation", _raise_input_error)
+
+    response = slides_client.delete(
+        f"/api/v1/slides/presentations/{presentation_id}",
+        headers={"If-Match": etag},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "delete_invalid"
+
+
+def test_slides_restore_maps_input_error(slides_client, monkeypatch):
+    create_resp = _create_presentation(slides_client)
+    presentation_id = create_resp.json()["id"]
+    etag = create_resp.headers["ETag"]
+    delete_resp = slides_client.delete(
+        f"/api/v1/slides/presentations/{presentation_id}",
+        headers={"If-Match": etag},
+    )
+    assert delete_resp.status_code == 200
+
+    def _raise_input_error(self, presentation_id: str, expected_version: int | None):
+        raise SlidesInputError("restore_invalid")
+
+    monkeypatch.setattr(SlidesDatabase, "restore_presentation", _raise_input_error)
+
+    response = slides_client.post(
+        f"/api/v1/slides/presentations/{presentation_id}/restore",
+        headers={"If-Match": delete_resp.headers["ETag"]},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "restore_invalid"
+
+
+def test_slides_put_maps_input_error(slides_client, monkeypatch):
+    create_resp = _create_presentation(slides_client)
+    presentation_id = create_resp.json()["id"]
+    etag = create_resp.headers["ETag"]
+
+    def _raise_input_error(self, presentation_id: str, update_fields: dict, expected_version: int | None):
+        raise SlidesInputError("put_invalid")
+
+    monkeypatch.setattr(SlidesDatabase, "update_presentation", _raise_input_error)
+
+    response = slides_client.put(
+        f"/api/v1/slides/presentations/{presentation_id}",
+        json=_presentation_update_payload(),
+        headers={"If-Match": etag},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "put_invalid"
+
+
+def test_slides_put_maps_conflict_error(slides_client, monkeypatch):
+    create_resp = _create_presentation(slides_client)
+    presentation_id = create_resp.json()["id"]
+    etag = create_resp.headers["ETag"]
+
+    def _raise_conflict_error(self, presentation_id: str, update_fields: dict, expected_version: int | None):
+        raise SlidesConflictError("version_conflict")
+
+    monkeypatch.setattr(SlidesDatabase, "update_presentation", _raise_conflict_error)
+
+    response = slides_client.put(
+        f"/api/v1/slides/presentations/{presentation_id}",
+        json=_presentation_update_payload(),
+        headers={"If-Match": etag},
+    )
+
+    _assert_precondition_failed(response)
+
+
+def test_slides_patch_maps_conflict_error(slides_client, monkeypatch):
+    create_resp = _create_presentation(slides_client)
+    presentation_id = create_resp.json()["id"]
+    etag = create_resp.headers["ETag"]
+
+    def _raise_conflict_error(self, presentation_id: str, update_fields: dict, expected_version: int | None):
+        raise SlidesConflictError("version_conflict")
+
+    monkeypatch.setattr(SlidesDatabase, "update_presentation", _raise_conflict_error)
+
+    response = slides_client.patch(
+        f"/api/v1/slides/presentations/{presentation_id}",
+        json={"title": "Updated"},
+        headers={"If-Match": etag},
+    )
+
+    _assert_precondition_failed(response)
+
+
+def test_slides_reorder_maps_conflict_error(slides_client, monkeypatch):
+    create_resp = _create_presentation(slides_client)
+    presentation_id = create_resp.json()["id"]
+    etag = create_resp.headers["ETag"]
+
+    def _raise_conflict_error(self, presentation_id: str, update_fields: dict, expected_version: int | None):
+        raise SlidesConflictError("version_conflict")
+
+    monkeypatch.setattr(SlidesDatabase, "update_presentation", _raise_conflict_error)
+
+    response = slides_client.post(
+        f"/api/v1/slides/presentations/{presentation_id}/reorder",
+        json={"order": [1, 0]},
+        headers={"If-Match": etag},
+    )
+
+    _assert_precondition_failed(response)
+
+
+def test_slides_delete_maps_conflict_error(slides_client, monkeypatch):
+    create_resp = _create_presentation(slides_client)
+    presentation_id = create_resp.json()["id"]
+    etag = create_resp.headers["ETag"]
+
+    def _raise_conflict_error(self, presentation_id: str, expected_version: int | None):
+        raise SlidesConflictError("version_conflict")
+
+    monkeypatch.setattr(SlidesDatabase, "soft_delete_presentation", _raise_conflict_error)
+
+    response = slides_client.delete(
+        f"/api/v1/slides/presentations/{presentation_id}",
+        headers={"If-Match": etag},
+    )
+
+    _assert_precondition_failed(response)
+
+
+def test_slides_restore_maps_conflict_error(slides_client, monkeypatch):
+    create_resp = _create_presentation(slides_client)
+    presentation_id = create_resp.json()["id"]
+    etag = create_resp.headers["ETag"]
+    delete_resp = slides_client.delete(
+        f"/api/v1/slides/presentations/{presentation_id}",
+        headers={"If-Match": etag},
+    )
+    assert delete_resp.status_code == 200
+
+    def _raise_conflict_error(self, presentation_id: str, expected_version: int | None):
+        raise SlidesConflictError("version_conflict")
+
+    monkeypatch.setattr(SlidesDatabase, "restore_presentation", _raise_conflict_error)
+
+    response = slides_client.post(
+        f"/api/v1/slides/presentations/{presentation_id}/restore",
+        headers={"If-Match": delete_resp.headers["ETag"]},
+    )
+
+    _assert_precondition_failed(response)
+
+
+def test_slides_restore_version_maps_conflict_error(slides_client, monkeypatch):
+    create_resp = _create_presentation(slides_client)
+    presentation_id = create_resp.json()["id"]
+
+    def _raise_conflict_error(self, presentation_id: str, update_fields: dict, expected_version: int | None):
+        raise SlidesConflictError("version_conflict")
+
+    monkeypatch.setattr(SlidesDatabase, "update_presentation", _raise_conflict_error)
+
+    response = slides_client.post(
+        f"/api/v1/slides/presentations/{presentation_id}/versions/1/restore",
+        headers={"If-Match": create_resp.headers["ETag"]},
+    )
+
+    _assert_precondition_failed(response)
+
+
+def test_slides_restore_version_maps_input_error(slides_client, monkeypatch):
+    create_resp = _create_presentation(slides_client)
+    presentation_id = create_resp.json()["id"]
+
+    def _raise_input_error(self, presentation_id: str, update_fields: dict, expected_version: int | None):
+        raise SlidesInputError("restore_version_invalid")
+
+    monkeypatch.setattr(SlidesDatabase, "update_presentation", _raise_input_error)
+
+    response = slides_client.post(
+        f"/api/v1/slides/presentations/{presentation_id}/versions/1/restore",
+        headers={"If-Match": create_resp.headers["ETag"]},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "restore_version_invalid"
 
 
 def test_slides_versions_and_restore(slides_client):
@@ -1475,6 +1963,16 @@ def test_slides_versions_and_restore(slides_client):
     versions_data = versions_resp.json()
     assert versions_data["total"] == 2
     assert versions_data["versions"][0]["version"] == 2
+    assert versions_data["pagination"] == {
+        "mode": "offset",
+        "limit": 50,
+        "offset": 0,
+        "total": 2,
+        "has_more": False,
+        "next_offset": None,
+    }
+    assert versions_data["has_more"] is False
+    assert versions_data["next_offset"] is None
 
     version_resp = slides_client.get(f"/api/v1/slides/presentations/{presentation_id}/versions/1")
     assert version_resp.status_code == 200

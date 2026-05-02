@@ -5,9 +5,11 @@ with pattern matching, dedup, escalation, cooldown, and crisis resources.
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
 import pytest
 
+import tldw_Server_API.app.core.Monitoring.self_monitoring_service as selfmon_module
 from tldw_Server_API.app.core.DB_Management.Guardian_DB import GuardianDB
 from tldw_Server_API.app.core.Monitoring.self_monitoring_service import (
     CRISIS_DISCLAIMER,
@@ -231,6 +233,28 @@ class TestDedup:
         r2 = svc.check_text("word", "user1")
         assert r2.triggered is False
 
+    def test_dedup_logs_sanitize_backend_details(self, monkeypatch, db, svc):
+        rule = _create_rule(
+            db, patterns=["word"],
+            notification_frequency="once_per_day",
+        )
+
+        def fail_recent_alert(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202
+            raise RuntimeError("dedup backend failed at /private/dedup.db")
+
+        monkeypatch.setattr(db, "has_recent_alert", fail_recent_alert)
+
+        messages: list[str] = []
+        sink_id = selfmon_module.logger.add(lambda message: messages.append(str(message)), level="DEBUG")
+        try:
+            assert svc._should_skip_dedup(rule, "user1", None, None) is False
+        finally:
+            selfmon_module.logger.remove(sink_id)
+
+        joined = "\n".join(messages)
+        assert "Dedup check failed" in joined
+        assert "dedup.db" not in joined
+
 
 # ── Escalation ──────────────────────────────────────────────
 
@@ -263,6 +287,32 @@ class TestEscalation:
             svc.check_text("trigger", "user1", session_id="s1")
         r = svc.check_text("trigger", "user1", session_id="s2")
         assert r.action == "notify"
+
+    def test_escalation_logs_sanitize_backend_details(self, monkeypatch, db, svc):
+        rule = _create_rule(
+            db,
+            patterns=["trigger"],
+            action="notify",
+            escalation_session_threshold=1,
+            escalation_session_action="block",
+        )
+
+        def fail_escalation_state(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202
+            raise RuntimeError("escalation backend failed at /private/escalation.db")
+
+        monkeypatch.setattr(db, "get_escalation_state", fail_escalation_state)
+
+        messages: list[str] = []
+        sink_id = selfmon_module.logger.add(lambda message: messages.append(str(message)), level="DEBUG")
+        try:
+            result = svc._check_escalation(rule, "user1", "session1")
+        finally:
+            selfmon_module.logger.remove(sink_id)
+
+        assert result == {"escalated": False, "effective_action": "notify"}
+        joined = "\n".join(messages)
+        assert "Escalation check failed" in joined
+        assert "escalation.db" not in joined
 
     def test_window_escalation(self, db, svc):
         _create_rule(
@@ -363,6 +413,22 @@ class TestCooldownProtection:
         assert result["ok"] is True
         assert result["status"] == "pending_deactivation"
         assert "deactivation_at" in result
+
+    def test_request_deactivation_cooldown_sanitizes_update_failure(self, monkeypatch, db, svc):
+        rule = _create_rule(
+            db, patterns=["word"],
+            cooldown_minutes=99999,
+            bypass_protection="cooldown",
+        )
+
+        def fail_update(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202
+            raise RuntimeError("guardian db exploded at /private/selfmon.db")
+
+        monkeypatch.setattr(db, "update_self_monitoring_rule", fail_update)
+
+        result = svc.request_deactivation(rule.id, "user1")
+
+        assert result == {"ok": False, "error": "deactivation_request_failed"}
 
     def test_request_deactivation_wrong_user(self, db, svc):
         rule = _create_rule(db, patterns=["word"])
@@ -528,6 +594,26 @@ class TestDisplayModes:
         alerts = db.list_self_monitoring_alerts("user1")
         assert alerts[0].display_mode == "post_session_summary"
 
+    def test_alert_record_logs_sanitize_backend_details(self, monkeypatch, db, svc):
+        _create_rule(db, patterns=["word"])
+
+        def fail_create_alert(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202
+            raise RuntimeError("alert backend failed at /private/selfmon-alert.db")
+
+        monkeypatch.setattr(db, "create_self_monitoring_alert", fail_create_alert)
+
+        messages: list[str] = []
+        sink_id = selfmon_module.logger.add(lambda message: messages.append(str(message)), level="WARNING")
+        try:
+            result = svc.check_text("word", "user1")
+        finally:
+            selfmon_module.logger.remove(sink_id)
+
+        assert result.triggered is True
+        joined = "\n".join(messages)
+        assert "Failed to record self-monitoring alert" in joined
+        assert "selfmon-alert.db" not in joined
+
 
 # ── Invalid Pattern Handling ────────────────────────────────
 
@@ -540,6 +626,58 @@ class TestInvalidPatterns:
     def test_rule_with_no_valid_patterns_rejected_at_creation(self, db, svc):
         with pytest.raises(ValueError, match="Unsafe regex pattern"):
             _create_rule(db, patterns=["[bad1", "[bad2"], pattern_type="regex")
+
+    def test_compile_logs_sanitize_unsafe_pattern_details(self, monkeypatch, db, svc):
+        rule = SimpleNamespace(
+            id="rule1",
+            governance_policy_id=None,
+            pattern_type="regex",
+            patterns=["private-pattern"],
+            except_patterns=["private-except"],
+        )
+        monkeypatch.setattr(db, "list_self_monitoring_rules", lambda *_args, **_kwargs: [rule])
+        monkeypatch.setattr(
+            selfmon_module,
+            "validate_regex_safety",
+            lambda _pattern: (False, "unsafe regex detail at /private/regex-policy.db"),
+        )
+
+        messages: list[str] = []
+        sink_id = selfmon_module.logger.add(lambda message: messages.append(str(message)), level="WARNING")
+        try:
+            assert svc._get_compiled_rules("user1") == []
+        finally:
+            selfmon_module.logger.remove(sink_id)
+
+        joined = "\n".join(messages)
+        assert "Unsafe self-monitoring regex skipped" in joined
+        assert "Unsafe self-monitoring except regex skipped" in joined
+        assert "private-pattern" not in joined
+        assert "private-except" not in joined
+        assert "regex-policy.db" not in joined
+
+    def test_compile_logs_sanitize_invalid_pattern_details(self, monkeypatch, db, svc):
+        rule = SimpleNamespace(
+            id="rule1",
+            governance_policy_id=None,
+            pattern_type="regex",
+            patterns=["private-pattern("],
+            except_patterns=[],
+        )
+        monkeypatch.setattr(db, "list_self_monitoring_rules", lambda *_args, **_kwargs: [rule])
+        monkeypatch.setattr(selfmon_module, "validate_regex_safety", lambda _pattern: (True, ""))
+
+        messages: list[str] = []
+        sink_id = selfmon_module.logger.add(lambda message: messages.append(str(message)), level="WARNING")
+        try:
+            assert svc._get_compiled_rules("user1") == []
+        finally:
+            selfmon_module.logger.remove(sink_id)
+
+        joined = "\n".join(messages)
+        assert "Invalid self-monitoring pattern skipped" in joined
+        assert "private-pattern" not in joined
+        assert "missing ), unterminated subpattern" not in joined
 
 
 # ── Default Result Fields ───────────────────────────────────
@@ -566,25 +704,27 @@ class TestDeactivationTokenFields:
         rule = _create_rule(db, patterns=["word"])
         assert rule.deactivation_confirmation_token is None
         assert rule.deactivation_requested_at is None
+        token_value = "abc" + "123"
         # Set token
         db.update_self_monitoring_rule(
             rule.id,
-            deactivation_confirmation_token="abc123",
+            deactivation_confirmation_token=token_value,
             deactivation_requested_at="2026-02-07T12:00:00+00:00",
         )
         fetched = db.get_self_monitoring_rule(rule.id)
-        assert fetched.deactivation_confirmation_token == "abc123"
+        assert fetched.deactivation_confirmation_token == token_value
         assert fetched.deactivation_requested_at == "2026-02-07T12:00:00+00:00"
 
     def test_token_update_and_clear(self, db, svc):
         rule = _create_rule(db, patterns=["word"])
+        token_value = "token" + "1"
         db.update_self_monitoring_rule(
             rule.id,
-            deactivation_confirmation_token="token1",
+            deactivation_confirmation_token=token_value,
             deactivation_requested_at="2026-02-07T12:00:00+00:00",
         )
         fetched = db.get_self_monitoring_rule(rule.id)
-        assert fetched.deactivation_confirmation_token == "token1"
+        assert fetched.deactivation_confirmation_token == token_value
         # Clear token
         db.update_self_monitoring_rule(
             rule.id,

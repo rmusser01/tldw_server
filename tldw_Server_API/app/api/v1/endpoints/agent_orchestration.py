@@ -13,9 +13,8 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from loguru import logger
 from pydantic import BaseModel, Field, field_validator
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, TokenScopeGuard, User
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import require_token_scope
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.Agent_Orchestration.models import TaskStatus
 from tldw_Server_API.app.core.Agent_Orchestration.orchestration_service import (
     CycleDependencyError,
@@ -285,7 +284,7 @@ class ReviewRequest(BaseModel):
     "/workspaces",
     response_model=ACPWorkspaceResponse,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(require_token_scope("any", require_if_present=True, endpoint_id="agent_orchestration.workspaces.manage"))],
+    dependencies=[Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="agent_orchestration.workspaces.manage"))],
 )
 async def create_workspace(
     payload: ACPWorkspaceCreateRequest,
@@ -314,7 +313,7 @@ async def create_workspace(
 @router.get(
     "/workspaces",
     response_model=list[ACPWorkspaceResponse],
-    dependencies=[Depends(require_token_scope("any", require_if_present=True, endpoint_id="agent_orchestration.workspaces.read"))],
+    dependencies=[Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="agent_orchestration.workspaces.read"))],
 )
 async def list_workspaces(
     workspace_type: str | None = Query(default=None, description="Filter by type"),
@@ -333,7 +332,7 @@ async def list_workspaces(
 @router.get(
     "/workspaces/{workspace_id}",
     response_model=ACPWorkspaceResponse,
-    dependencies=[Depends(require_token_scope("any", require_if_present=True, endpoint_id="agent_orchestration.workspaces.read"))],
+    dependencies=[Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="agent_orchestration.workspaces.read"))],
 )
 async def get_workspace(
     workspace_id: int,
@@ -357,7 +356,7 @@ async def get_workspace(
 @router.put(
     "/workspaces/{workspace_id}",
     response_model=ACPWorkspaceResponse,
-    dependencies=[Depends(require_token_scope("any", require_if_present=True, endpoint_id="agent_orchestration.workspaces.manage"))],
+    dependencies=[Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="agent_orchestration.workspaces.manage"))],
 )
 async def update_workspace(
     workspace_id: int,
@@ -383,7 +382,7 @@ async def update_workspace(
 
 @router.delete(
     "/workspaces/{workspace_id}",
-    dependencies=[Depends(require_token_scope("any", require_if_present=True, endpoint_id="agent_orchestration.workspaces.manage"))],
+    dependencies=[Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="agent_orchestration.workspaces.manage"))],
 )
 async def delete_workspace(
     workspace_id: int,
@@ -404,7 +403,7 @@ async def delete_workspace(
 
 @router.get(
     "/workspaces/{workspace_id}/health",
-    dependencies=[Depends(require_token_scope("any", require_if_present=True, endpoint_id="agent_orchestration.workspaces.read"))],
+    dependencies=[Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="agent_orchestration.workspaces.read"))],
 )
 async def check_workspace_health(
     workspace_id: int,
@@ -436,7 +435,7 @@ async def check_workspace_health(
 
 @router.post(
     "/workspaces/health/refresh-all",
-    dependencies=[Depends(require_token_scope("any", require_if_present=True, endpoint_id="agent_orchestration.workspaces.manage"))],
+    dependencies=[Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="agent_orchestration.workspaces.manage"))],
 )
 async def refresh_all_workspace_health(
     user: User = Depends(get_request_user),
@@ -457,7 +456,7 @@ async def refresh_all_workspace_health(
 
 @router.get(
     "/workspaces/{workspace_id}/mcp-servers",
-    dependencies=[Depends(require_token_scope("any", require_if_present=True, endpoint_id="agent_orchestration.workspaces.read"))],
+    dependencies=[Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="agent_orchestration.workspaces.read"))],
 )
 async def list_workspace_mcp_servers(
     workspace_id: int,
@@ -475,7 +474,7 @@ async def list_workspace_mcp_servers(
 @router.post(
     "/workspaces/{workspace_id}/mcp-servers",
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(require_token_scope("any", require_if_present=True, endpoint_id="agent_orchestration.workspaces.manage"))],
+    dependencies=[Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="agent_orchestration.workspaces.manage"))],
 )
 async def create_workspace_mcp_server(
     workspace_id: int,
@@ -504,7 +503,7 @@ async def create_workspace_mcp_server(
 
 @router.delete(
     "/workspaces/{workspace_id}/mcp-servers/{server_id}",
-    dependencies=[Depends(require_token_scope("any", require_if_present=True, endpoint_id="agent_orchestration.workspaces.manage"))],
+    dependencies=[Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="agent_orchestration.workspaces.manage"))],
 )
 async def delete_workspace_mcp_server(
     workspace_id: int,
@@ -532,7 +531,7 @@ async def delete_workspace_mcp_server(
 
 @router.post(
     "/workspaces/discover",
-    dependencies=[Depends(require_token_scope("any", require_if_present=True, endpoint_id="agent_orchestration.workspaces.manage"))],
+    dependencies=[Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="agent_orchestration.workspaces.manage"))],
 )
 async def discover_workspaces(
     payload: WorkspaceDiscoverRequest,
@@ -576,7 +575,7 @@ async def discover_workspaces(
     "/projects",
     response_model=ProjectResponse,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(require_token_scope("any", require_if_present=True, endpoint_id="agent_orchestration.projects.manage"))],
+    dependencies=[Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="agent_orchestration.projects.manage"))],
 )
 async def create_project(
     payload: ProjectCreateRequest,
@@ -599,7 +598,7 @@ async def create_project(
 @router.get(
     "/projects",
     response_model=list[ProjectResponse],
-    dependencies=[Depends(require_token_scope("any", require_if_present=True, endpoint_id="agent_orchestration.projects.read"))],
+    dependencies=[Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="agent_orchestration.projects.read"))],
 )
 async def list_projects(
     workspace_id: int | None = Query(default=None, description="Filter by workspace ID (omit for all)"),
@@ -636,7 +635,7 @@ async def list_projects(
 @router.get(
     "/projects/{project_id}",
     response_model=ProjectResponse,
-    dependencies=[Depends(require_token_scope("any", require_if_present=True, endpoint_id="agent_orchestration.projects.read"))],
+    dependencies=[Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="agent_orchestration.projects.read"))],
 )
 async def get_project(
     project_id: int,
@@ -659,7 +658,7 @@ async def get_project(
 
 @router.delete(
     "/projects/{project_id}",
-    dependencies=[Depends(require_token_scope("any", require_if_present=True, endpoint_id="agent_orchestration.projects.manage"))],
+    dependencies=[Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="agent_orchestration.projects.manage"))],
 )
 async def delete_project(
     project_id: int,
@@ -683,7 +682,7 @@ async def delete_project(
     "/projects/{project_id}/tasks",
     response_model=TaskResponse,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(require_token_scope("any", require_if_present=True, endpoint_id="agent_orchestration.tasks.manage"))],
+    dependencies=[Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="agent_orchestration.tasks.manage"))],
 )
 async def create_task(
     project_id: int,
@@ -722,7 +721,7 @@ async def create_task(
 @router.get(
     "/projects/{project_id}/tasks",
     response_model=list[TaskResponse],
-    dependencies=[Depends(require_token_scope("any", require_if_present=True, endpoint_id="agent_orchestration.tasks.read"))],
+    dependencies=[Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="agent_orchestration.tasks.read"))],
 )
 async def list_tasks(
     project_id: int,
@@ -747,7 +746,7 @@ async def list_tasks(
 @router.get(
     "/tasks/{task_id}",
     response_model=TaskResponse,
-    dependencies=[Depends(require_token_scope("any", require_if_present=True, endpoint_id="agent_orchestration.tasks.read"))],
+    dependencies=[Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="agent_orchestration.tasks.read"))],
 )
 async def get_task(
     task_id: int,
@@ -771,7 +770,7 @@ async def get_task(
 
 @router.post(
     "/tasks/{task_id}/run",
-    dependencies=[Depends(require_token_scope("any", require_if_present=True, endpoint_id="agent_orchestration.tasks.manage"))],
+    dependencies=[Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="agent_orchestration.tasks.manage"))],
 )
 async def dispatch_run(
     task_id: int,
@@ -870,19 +869,19 @@ async def dispatch_run(
                 cwd=effective_cwd,
             )
         except Exception as reg_exc:
-            logger.warning("Failed to register orchestration ACP session {}: {}", session_id, reg_exc)
+            logger.warning("Failed to register orchestration ACP session")
 
     except HTTPException:
         raise
     except Exception as exc:
-        logger.error("Failed to create ACP session for task {}: {}", task_id, exc)
+        logger.error("Failed to create ACP session")
         # Create a failed run record
         run = await _run_sync(lambda: db.create_run(task_id, agent_type=agent_type))
         await _run_sync(lambda: db.fail_run(run.id, error=str(exc)))
         await _run_sync(lambda: db.transition_task(task_id, TaskStatus.TRIAGE))
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Failed to create ACP session: {exc}",
+            detail="Failed to create ACP session",
         ) from exc
 
     # Create run record
@@ -915,12 +914,12 @@ async def dispatch_run(
             await _run_sync(lambda: db.transition_task(task_id, TaskStatus.COMPLETE))
 
     except Exception as exc:
-        logger.error("ACP prompt failed for task {}: {}", task_id, exc)
+        logger.error("ACP prompt failed")
         await _run_sync(lambda: db.fail_run(run.id, error=str(exc)))
         await _run_sync(lambda: db.transition_task(task_id, TaskStatus.TRIAGE))
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"ACP prompt failed: {exc}",
+            detail="ACP prompt failed",
         ) from exc
 
     # Refetch task to get post-transition status
@@ -942,7 +941,7 @@ async def dispatch_run(
 @router.post(
     "/tasks/{task_id}/review",
     response_model=TaskResponse,
-    dependencies=[Depends(require_token_scope("any", require_if_present=True, endpoint_id="agent_orchestration.tasks.manage"))],
+    dependencies=[Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="agent_orchestration.tasks.manage"))],
 )
 async def submit_review(
     task_id: int,

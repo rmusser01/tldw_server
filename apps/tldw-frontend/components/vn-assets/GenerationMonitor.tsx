@@ -30,6 +30,9 @@ export default function GenerationMonitor({
   onStartGeneration,
 }: GenerationMonitorProps) {
   const status = generation?.status ?? 'idle';
+  const generationActive = status === 'queued' || status === 'enqueued' || status === 'processing';
+  const canStartGeneration = slots.length > 0 && !generationActive && !isStarting;
+  const canCancelGeneration = generationActive && !isCancelling;
 
   return (
     <section className="rounded-md border border-border bg-surface p-4">
@@ -58,7 +61,7 @@ export default function GenerationMonitor({
       <div className="mt-4 flex flex-wrap gap-2">
         <Button
           className="gap-2"
-          disabled={slots.length === 0}
+          disabled={!canStartGeneration}
           loading={isStarting}
           onClick={onStartGeneration}
           size="sm"
@@ -69,7 +72,7 @@ export default function GenerationMonitor({
         </Button>
         <Button
           className="gap-2"
-          disabled={status === 'idle' || status === 'completed'}
+          disabled={!canCancelGeneration}
           loading={isCancelling}
           onClick={onCancelGeneration}
           size="sm"

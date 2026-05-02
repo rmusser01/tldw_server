@@ -24,6 +24,7 @@ class RuntimePreflightResult:
     runtime: RuntimeType
     available: bool
     reasons: list[str] = field(default_factory=list)
+    execution_mode: str = "none"
     supported_trust_levels: list[str] = field(
         default_factory=lambda: ["trusted", "standard", "untrusted"]
     )

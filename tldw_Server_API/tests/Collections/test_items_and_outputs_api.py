@@ -4,20 +4,42 @@ import shutil
 import hashlib
 from datetime import datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
 
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from importlib import import_module, reload
+from tldw_Server_API.app.api.v1.endpoints import items as items_endpoint
+from tldw_Server_API.app.api.v1.endpoints import outputs as outputs_endpoint
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.config import settings
+from tldw_Server_API.app.core.DB_Management.backends.factory import close_all_backends
 from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
+from tldw_Server_API.app.core.DB_Management.media_db.errors import InputError
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.exceptions import InvalidStoragePathError
 from tldw_Server_API.app.api.v1.endpoints.outputs import _resolve_output_path_for_user, _strip_html_for_tts
 
 
 pytestmark = pytest.mark.unit
+
+
+class _LoggerStub:
+    def __init__(self) -> None:
+        self.errors: list[str] = []
+        self.warnings: list[str] = []
+        self.debugs: list[str] = []
+
+    def error(self, message: str, *args: Any, **kwargs: Any) -> None:
+        self.errors.append(message.format(*args) if args else message)
+
+    def warning(self, message: str, *args: Any, **kwargs: Any) -> None:
+        self.warnings.append(message.format(*args) if args else message)
+
+    def debug(self, message: str, *args: Any, **kwargs: Any) -> None:
+        self.debugs.append(message.format(*args) if args else message)
 
 
 def _insert_output_row_raw(
@@ -61,6 +83,7 @@ def client_with_user(monkeypatch):
 
     # Force per-user DB dir into project Databases/ for sandbox write allowance
     base_dir = Path.cwd() / "Databases" / "test_user_dbs"
+    close_all_backends()
     shutil.rmtree(base_dir, ignore_errors=True)
     base_dir.mkdir(parents=True, exist_ok=True)
     prev_base_dir = settings.get("USER_DB_BASE_DIR")
@@ -79,6 +102,7 @@ def client_with_user(monkeypatch):
     finally:
         if app is not None:
             app.dependency_overrides.clear()
+        close_all_backends()
         if prev_base_dir is not None:
             settings.USER_DB_BASE_DIR = prev_base_dir
         else:
@@ -159,6 +183,917 @@ def test_items_get_by_id(client_with_user):
     assert item["favorite"] is False
 
 
+def test_items_endpoint_maps_media_input_error_to_400(client_with_user, monkeypatch):
+
+    client = client_with_user
+
+    def _raise_input_error(*args, **kwargs):
+        _ = (args, kwargs)
+        raise InputError("invalid items query")
+
+    monkeypatch.setattr(items_endpoint, "search_media", _raise_input_error)
+
+    r = client.get("/api/v1/items", params={"q": "budget"})
+    assert r.status_code == 400, r.text
+    assert r.json()["detail"] == "invalid items query"
+
+
+def test_items_get_by_id_maps_media_input_error_to_400(client_with_user, monkeypatch):
+
+    client = client_with_user
+
+    def _raise_input_error(*args, **kwargs):
+        _ = (args, kwargs)
+        raise InputError("invalid item lookup")
+
+    monkeypatch.setattr(items_endpoint, "search_media", _raise_input_error)
+
+    r = client.get("/api/v1/items/99999")
+    assert r.status_code == 400, r.text
+    assert r.json()["detail"] == "invalid item lookup"
+
+
+@pytest.mark.asyncio
+async def test_items_list_collections_failure_log_is_sanitized(monkeypatch):
+    class _FailingCollectionsDB:
+        def list_content_items(self, **kwargs: Any):
+            raise RuntimeError("collections backend exploded at /private/items.db")
+
+    logger = _LoggerStub()
+    monkeypatch.setattr(items_endpoint, "logger", logger)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await items_endpoint.list_items(
+            ids=None,
+            q=None,
+            tags=None,
+            domain=None,
+            date_from=None,
+            date_to=None,
+            status_filter=None,
+            favorite=None,
+            origin=None,
+            job_id=None,
+            run_id=None,
+            page=1,
+            size=20,
+            current_user=User(id=123, username="tester", email=None, is_active=True),
+            db=object(),
+            collections_db=_FailingCollectionsDB(),
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "items_query_failed"
+    assert logger.errors == ["collections items query failed"]
+    logged = "\n".join(logger.errors)
+    assert "collections backend exploded" not in logged
+    assert "/private/items.db" not in logged
+
+
+@pytest.mark.asyncio
+async def test_items_list_media_fallback_failure_log_is_sanitized(monkeypatch):
+    class _EmptyCollectionsDB:
+        def list_content_items(self, **kwargs: Any):
+            return [], 0
+
+    def _raise_runtime_error(*args: Any, **kwargs: Any):
+        raise RuntimeError("media backend exploded at /private/media.db")
+
+    logger = _LoggerStub()
+    monkeypatch.setattr(items_endpoint, "logger", logger)
+    monkeypatch.setattr(items_endpoint, "search_media", _raise_runtime_error)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await items_endpoint.list_items(
+            ids=None,
+            q=None,
+            tags=None,
+            domain=None,
+            date_from=None,
+            date_to=None,
+            status_filter=None,
+            favorite=None,
+            origin=None,
+            job_id=None,
+            run_id=None,
+            page=1,
+            size=20,
+            current_user=User(id=123, username="tester", email=None, is_active=True),
+            db=object(),
+            collections_db=_EmptyCollectionsDB(),
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "items_query_failed"
+    assert logger.errors == ["items list failed"]
+    logged = "\n".join(logger.errors)
+    assert "media backend exploded" not in logged
+    assert "/private/media.db" not in logged
+
+
+@pytest.mark.asyncio
+async def test_items_get_collections_fetch_failure_log_is_sanitized(monkeypatch):
+    class _FailingCollectionsDB:
+        def get_content_item(self, item_id: int):
+            raise RuntimeError("collections backend exploded at /private/items.db")
+
+    logger = _LoggerStub()
+    monkeypatch.setattr(items_endpoint, "logger", logger)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await items_endpoint.get_item(
+            item_id=1,
+            current_user=User(id=123, username="tester", email=None, is_active=True),
+            db=object(),
+            collections_db=_FailingCollectionsDB(),
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "item_fetch_failed"
+    assert logger.errors == ["collections item fetch failed"]
+    logged = "\n".join(logger.errors)
+    assert "collections backend exploded" not in logged
+    assert "/private/items.db" not in logged
+
+
+@pytest.mark.asyncio
+async def test_items_get_collections_media_id_fetch_failure_log_is_sanitized(monkeypatch):
+    class _FailingCollectionsDB:
+        def get_content_item(self, item_id: int):
+            raise KeyError(item_id)
+
+        def get_content_item_by_media_id(self, media_id: int):
+            raise RuntimeError("collections backend exploded at /private/items.db")
+
+    logger = _LoggerStub()
+    monkeypatch.setattr(items_endpoint, "logger", logger)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await items_endpoint.get_item(
+            item_id=1,
+            current_user=User(id=123, username="tester", email=None, is_active=True),
+            db=object(),
+            collections_db=_FailingCollectionsDB(),
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "item_fetch_failed"
+    assert logger.errors == ["collections item fetch by media_id failed"]
+    logged = "\n".join(logger.errors)
+    assert "collections backend exploded" not in logged
+    assert "/private/items.db" not in logged
+
+
+@pytest.mark.asyncio
+async def test_items_get_media_fetch_failure_log_is_sanitized(monkeypatch):
+    class _MissingCollectionsDB:
+        def get_content_item(self, item_id: int):
+            raise KeyError(item_id)
+
+        def get_content_item_by_media_id(self, media_id: int):
+            raise KeyError(media_id)
+
+    def _raise_runtime_error(*args: Any, **kwargs: Any):
+        raise RuntimeError("media backend exploded at /private/media.db")
+
+    logger = _LoggerStub()
+    monkeypatch.setattr(items_endpoint, "logger", logger)
+    monkeypatch.setattr(items_endpoint, "search_media", _raise_runtime_error)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await items_endpoint.get_item(
+            item_id=1,
+            current_user=User(id=123, username="tester", email=None, is_active=True),
+            db=object(),
+            collections_db=_MissingCollectionsDB(),
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "item_fetch_failed"
+    assert logger.errors == ["media item fetch failed"]
+    logged = "\n".join(logger.errors)
+    assert "media backend exploded" not in logged
+    assert "/private/media.db" not in logged
+
+
+def test_outputs_normalize_storage_path_update_failure_log_is_sanitized(monkeypatch):
+    def _raise_update_failure(*args: Any, **kwargs: Any) -> None:
+        raise RuntimeError("output backend exploded at /private/outputs.db")
+
+    logger = _LoggerStub()
+    monkeypatch.setattr(outputs_endpoint, "logger", logger)
+    monkeypatch.setattr(outputs_endpoint, "normalize_output_storage_path", lambda *_args: "normalized/output.md")
+    monkeypatch.setattr(outputs_endpoint, "update_output_artifact_db", _raise_update_failure)
+
+    with pytest.raises(HTTPException) as exc_info:
+        outputs_endpoint._normalize_output_storage_path_for_user(
+            cdb=object(),
+            user_id=123,
+            output_id=777,
+            storage_path="legacy/output.md",
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "db_update_failed"
+    assert logger.errors == ["outputs storage_path normalization update failed"]
+    logged = "\n".join(logger.errors)
+    assert "777" not in logged
+    assert "output backend exploded" not in logged
+    assert "/private/outputs.db" not in logged
+
+
+@pytest.mark.asyncio
+async def test_outputs_create_render_failure_log_is_sanitized(monkeypatch):
+    class _Template:
+        id = 1
+        name = "Template"
+        body = "{{ broken }}"
+        type = "newsletter_markdown"
+        format = "md"
+
+    class _CollectionsDB:
+        def get_output_template(self, _template_id: int):
+            return _Template()
+
+    def _raise_render_failure(*args: Any, **kwargs: Any) -> str:
+        raise RuntimeError("render backend exploded at /private/output-template.md")
+
+    logger = _LoggerStub()
+    monkeypatch.setattr(outputs_endpoint, "logger", logger)
+    monkeypatch.setattr(outputs_endpoint, "render_output_template", _raise_render_failure)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await outputs_endpoint.create_output(
+            payload=outputs_endpoint.OutputCreateRequest(
+                template_id=1,
+                data={"items": []},
+                title="demo",
+            ),
+            current_user=User(id=123, username="tester", email=None, is_active=True),
+            cdb=_CollectionsDB(),
+            media_db=object(),
+        )
+
+    assert exc_info.value.status_code == 422
+    assert exc_info.value.detail == "render_failed"
+    assert logger.errors == ["outputs render failed"]
+    logged = "\n".join(logger.errors)
+    assert "render backend exploded" not in logged
+    assert "/private/output-template.md" not in logged
+
+
+@pytest.mark.asyncio
+async def test_outputs_create_directory_failure_log_is_sanitized(monkeypatch):
+    class _Template:
+        id = 1
+        name = "Template"
+        body = "hello"
+        type = "newsletter_markdown"
+        format = "md"
+
+    class _CollectionsDB:
+        def get_output_template(self, _template_id: int):
+            return _Template()
+
+    class _OutputDir:
+        def mkdir(self, *args: Any, **kwargs: Any) -> None:
+            raise OSError("mkdir exploded at /private/generated-outputs")
+
+    logger = _LoggerStub()
+    monkeypatch.setattr(outputs_endpoint, "logger", logger)
+    monkeypatch.setattr(outputs_endpoint, "render_output_template", lambda *_args: "rendered")
+    monkeypatch.setattr(outputs_endpoint, "_outputs_dir_for_user", lambda _user_id: _OutputDir())
+
+    with pytest.raises(HTTPException) as exc_info:
+        await outputs_endpoint.create_output(
+            payload=outputs_endpoint.OutputCreateRequest(
+                template_id=1,
+                data={"items": []},
+                title="demo",
+            ),
+            current_user=User(id=123, username="tester", email=None, is_active=True),
+            cdb=_CollectionsDB(),
+            media_db=object(),
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "storage_unavailable"
+    assert logger.errors == ["outputs directory creation failed"]
+    logged = "\n".join(logger.errors)
+    assert "mkdir exploded" not in logged
+    assert "/private/generated-outputs" not in logged
+
+
+@pytest.mark.asyncio
+async def test_outputs_create_tts_generation_failure_log_is_sanitized(monkeypatch):
+    class _Template:
+        id = 1
+        name = "Audio Template"
+        body = "hello"
+        type = "tts_audio"
+        format = "mp3"
+
+    class _CollectionsDB:
+        def get_output_template(self, _template_id: int):
+            return _Template()
+
+    class _OutputDir:
+        def mkdir(self, *args: Any, **kwargs: Any) -> None:
+            return None
+
+    async def _raise_tts_failure(*args: Any, **kwargs: Any) -> None:
+        raise RuntimeError("tts backend exploded at /private/output-audio.mp3")
+
+    logger = _LoggerStub()
+    monkeypatch.setattr(outputs_endpoint, "logger", logger)
+    monkeypatch.setattr(outputs_endpoint, "render_output_template", lambda *_args: "rendered")
+    monkeypatch.setattr(outputs_endpoint, "_outputs_dir_for_user", lambda _user_id: _OutputDir())
+    monkeypatch.setattr(outputs_endpoint, "_write_tts_audio_file", _raise_tts_failure)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await outputs_endpoint.create_output(
+            payload=outputs_endpoint.OutputCreateRequest(
+                template_id=1,
+                data={"items": []},
+                title="demo",
+            ),
+            current_user=User(id=123, username="tester", email=None, is_active=True),
+            cdb=_CollectionsDB(),
+            media_db=object(),
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "tts_generation_failed"
+    assert logger.errors == ["outputs tts generation failed"]
+    logged = "\n".join(logger.errors)
+    assert "tts backend exploded" not in logged
+    assert "/private/output-audio.mp3" not in logged
+
+
+@pytest.mark.asyncio
+async def test_outputs_create_write_failure_log_is_sanitized(monkeypatch):
+    class _Template:
+        id = 1
+        name = "Markdown Template"
+        body = "hello"
+        type = "newsletter_markdown"
+        format = "md"
+
+    class _CollectionsDB:
+        def get_output_template(self, _template_id: int):
+            return _Template()
+
+    class _OutputDir:
+        def mkdir(self, *args: Any, **kwargs: Any) -> None:
+            return None
+
+    class _OutputPath:
+        def write_text(self, *args: Any, **kwargs: Any) -> None:
+            raise OSError("write exploded at /private/output.md")
+
+    logger = _LoggerStub()
+    monkeypatch.setattr(outputs_endpoint, "logger", logger)
+    monkeypatch.setattr(outputs_endpoint, "render_output_template", lambda *_args: "rendered")
+    monkeypatch.setattr(outputs_endpoint, "_outputs_dir_for_user", lambda _user_id: _OutputDir())
+    monkeypatch.setattr(outputs_endpoint, "_resolve_output_path_for_user", lambda *_args: _OutputPath())
+
+    with pytest.raises(HTTPException) as exc_info:
+        await outputs_endpoint.create_output(
+            payload=outputs_endpoint.OutputCreateRequest(
+                template_id=1,
+                data={"items": []},
+                title="demo",
+            ),
+            current_user=User(id=123, username="tester", email=None, is_active=True),
+            cdb=_CollectionsDB(),
+            media_db=object(),
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "write_failed"
+    assert logger.errors == ["outputs file write failed"]
+    logged = "\n".join(logger.errors)
+    assert "write exploded" not in logged
+    assert "/private/output.md" not in logged
+
+
+@pytest.mark.asyncio
+async def test_outputs_create_db_insert_failure_log_is_sanitized(monkeypatch):
+    class _Template:
+        id = 1
+        name = "Markdown Template"
+        body = "hello"
+        type = "newsletter_markdown"
+        format = "md"
+
+    class _CollectionsDB:
+        def get_output_template(self, _template_id: int):
+            return _Template()
+
+        def create_output_artifact(self, **_kwargs: Any):
+            raise RuntimeError("output insert exploded at /private/outputs.db")
+
+    class _OutputDir:
+        def mkdir(self, *args: Any, **kwargs: Any) -> None:
+            return None
+
+    class _OutputPath:
+        def write_text(self, *args: Any, **kwargs: Any) -> None:
+            return None
+
+    logger = _LoggerStub()
+    monkeypatch.setattr(outputs_endpoint, "logger", logger)
+    monkeypatch.setattr(outputs_endpoint, "render_output_template", lambda *_args: "rendered")
+    monkeypatch.setattr(outputs_endpoint, "_outputs_dir_for_user", lambda _user_id: _OutputDir())
+    monkeypatch.setattr(outputs_endpoint, "_resolve_output_path_for_user", lambda *_args: _OutputPath())
+    monkeypatch.setattr(outputs_endpoint.os, "remove", lambda _path: None)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await outputs_endpoint.create_output(
+            payload=outputs_endpoint.OutputCreateRequest(
+                template_id=1,
+                data={"items": []},
+                title="demo",
+            ),
+            current_user=User(id=123, username="tester", email=None, is_active=True),
+            cdb=_CollectionsDB(),
+            media_db=object(),
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "db_insert_failed"
+    assert logger.errors == ["outputs row insert failed"]
+    logged = "\n".join(logger.errors)
+    assert "output insert exploded" not in logged
+    assert "/private/outputs.db" not in logged
+
+
+@pytest.mark.asyncio
+async def test_outputs_create_insert_cleanup_failure_log_is_sanitized(monkeypatch):
+    class _Template:
+        id = 1
+        name = "Markdown Template"
+        body = "hello"
+        type = "newsletter_markdown"
+        format = "md"
+
+    class _CollectionsDB:
+        def get_output_template(self, _template_id: int):
+            return _Template()
+
+        def create_output_artifact(self, **_kwargs: Any):
+            raise RuntimeError("output insert exploded at /private/outputs.db")
+
+    class _OutputDir:
+        def mkdir(self, *args: Any, **kwargs: Any) -> None:
+            return None
+
+    class _OutputPath:
+        def write_text(self, *args: Any, **kwargs: Any) -> None:
+            return None
+
+    def _raise_cleanup_failure(_path: Any) -> None:
+        raise OSError("cleanup exploded at /private/output.md")
+
+    logger = _LoggerStub()
+    monkeypatch.setattr(outputs_endpoint, "logger", logger)
+    monkeypatch.setattr(outputs_endpoint, "render_output_template", lambda *_args: "rendered")
+    monkeypatch.setattr(outputs_endpoint, "_outputs_dir_for_user", lambda _user_id: _OutputDir())
+    monkeypatch.setattr(outputs_endpoint, "_resolve_output_path_for_user", lambda *_args: _OutputPath())
+    monkeypatch.setattr(outputs_endpoint.os, "remove", _raise_cleanup_failure)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await outputs_endpoint.create_output(
+            payload=outputs_endpoint.OutputCreateRequest(
+                template_id=1,
+                data={"items": []},
+                title="demo",
+            ),
+            current_user=User(id=123, username="tester", email=None, is_active=True),
+            cdb=_CollectionsDB(),
+            media_db=object(),
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "db_insert_failed"
+    assert logger.errors == ["outputs row insert failed"]
+    assert logger.warnings == ["outputs insert cleanup file removal failed"]
+    logged = "\n".join(logger.errors + logger.warnings)
+    assert "output insert exploded" not in logged
+    assert "cleanup exploded" not in logged
+    assert "/private/outputs.db" not in logged
+    assert "/private/output.md" not in logged
+
+
+@pytest.mark.asyncio
+async def test_outputs_create_variant_cleanup_failure_logs_are_sanitized(monkeypatch):
+    class _Template:
+        id = 1
+        name = "Markdown Template"
+        body = "hello"
+        type = "newsletter_markdown"
+        format = "md"
+
+    class _Row:
+        id = 777
+        title = "demo"
+        storage_path = "demo.md"
+        media_item_id = None
+        created_at = "2024-01-01T00:00:00"
+
+    class _CollectionsDB:
+        def get_output_template(self, _template_id: int):
+            return _Template()
+
+        def get_default_output_template_by_type(self, _template_type: str):
+            return None
+
+        def create_output_artifact(self, **_kwargs: Any):
+            return _Row()
+
+        def delete_output_artifact(self, _output_id: int, *, hard: bool) -> bool:
+            assert hard is True
+            raise RuntimeError("cleanup row exploded at /private/outputs.db")
+
+    class _OutputDir:
+        def mkdir(self, *args: Any, **kwargs: Any) -> None:
+            return None
+
+    class _OutputPath:
+        def write_text(self, *args: Any, **kwargs: Any) -> None:
+            return None
+
+        def exists(self) -> bool:
+            return True
+
+        def unlink(self) -> None:
+            raise OSError("cleanup file exploded at /private/output.md")
+
+    logger = _LoggerStub()
+    monkeypatch.setattr(outputs_endpoint, "logger", logger)
+    monkeypatch.setattr(outputs_endpoint, "render_output_template", lambda *_args: "rendered")
+    monkeypatch.setattr(outputs_endpoint, "_outputs_dir_for_user", lambda _user_id: _OutputDir())
+    monkeypatch.setattr(outputs_endpoint, "_resolve_output_path_for_user", lambda *_args: _OutputPath())
+
+    with pytest.raises(HTTPException) as exc_info:
+        await outputs_endpoint.create_output(
+            payload=outputs_endpoint.OutputCreateRequest(
+                template_id=1,
+                data={"items": []},
+                title="demo",
+                generate_mece=True,
+            ),
+            current_user=User(id=123, username="tester", email=None, is_active=True),
+            cdb=_CollectionsDB(),
+            media_db=object(),
+        )
+
+    assert exc_info.value.status_code == 404
+    assert exc_info.value.detail == "mece_template_not_found"
+    assert logger.warnings == [
+        "failed to cleanup output file",
+        "failed to cleanup output row",
+    ]
+    logged = "\n".join(logger.warnings)
+    assert "777" not in logged
+    assert "cleanup file exploded" not in logged
+    assert "cleanup row exploded" not in logged
+    assert "/private/output.md" not in logged
+    assert "/private/outputs.db" not in logged
+
+
+@pytest.mark.asyncio
+async def test_outputs_list_invalid_path_fallback_log_is_sanitized(monkeypatch):
+    row = SimpleNamespace(
+        id=777,
+        title="legacy",
+        type="newsletter_markdown",
+        format="md",
+        storage_path="../private/output.md",
+        media_item_id=None,
+        created_at=datetime.utcnow().replace(microsecond=0).isoformat(),
+        workspace_tag=None,
+    )
+
+    class _CollectionsDB:
+        def list_output_artifacts(self, **_kwargs: Any):
+            return [row], 1
+
+    def _raise_invalid_path(**_kwargs: Any) -> str:
+        raise HTTPException(status_code=400, detail="invalid path /private/output.md")
+
+    logger = _LoggerStub()
+    monkeypatch.setattr(outputs_endpoint, "logger", logger)
+    monkeypatch.setattr(outputs_endpoint, "_normalize_output_storage_path_for_user", _raise_invalid_path)
+
+    result = await outputs_endpoint.list_outputs(
+        _current_user=User(id=123, username="tester", email=None, is_active=True),
+        cdb=_CollectionsDB(),
+    )
+
+    assert result.items[0].storage_path == "../private/output.md"
+    assert logger.warnings == ["outputs.list: invalid storage path skipped"]
+    logged = "\n".join(logger.warnings)
+    assert "777" not in logged
+    assert "invalid path" not in logged
+    assert "/private/output.md" not in logged
+
+
+@pytest.mark.asyncio
+async def test_outputs_list_deleted_invalid_path_fallback_log_is_sanitized(monkeypatch):
+    row = SimpleNamespace(
+        id=888,
+        title="deleted",
+        type="newsletter_markdown",
+        format="md",
+        storage_path="../private/deleted.md",
+        media_item_id=None,
+        created_at=datetime.utcnow().replace(microsecond=0).isoformat(),
+        workspace_tag=None,
+    )
+
+    class _CollectionsDB:
+        def list_output_artifacts(self, **_kwargs: Any):
+            return [row], 1
+
+    def _raise_invalid_path(**_kwargs: Any) -> str:
+        raise HTTPException(status_code=400, detail="invalid path /private/deleted.md")
+
+    logger = _LoggerStub()
+    monkeypatch.setattr(outputs_endpoint, "logger", logger)
+    monkeypatch.setattr(outputs_endpoint, "_normalize_output_storage_path_for_user", _raise_invalid_path)
+
+    result = await outputs_endpoint.list_deleted_outputs(
+        _current_user=User(id=123, username="tester", email=None, is_active=True),
+        cdb=_CollectionsDB(),
+    )
+
+    assert result.items[0].storage_path == "../private/deleted.md"
+    assert result.pagination.total == 1
+    assert result.pagination.limit == 50
+    assert result.pagination.offset == 0
+    assert result.pagination.has_more is False
+    assert logger.warnings == ["outputs.list_deleted: invalid storage path skipped"]
+    logged = "\n".join(logger.warnings)
+    assert "888" not in logged
+    assert "invalid path" not in logged
+    assert "/private/deleted.md" not in logged
+
+
+@pytest.mark.asyncio
+async def test_outputs_create_generic_failure_log_is_sanitized(monkeypatch):
+    class _Template:
+        id = 1
+        name = "Markdown Template"
+        body = "hello"
+        type = "newsletter_markdown"
+        format = "md"
+
+    class _Row:
+        id = 777
+        title = "demo"
+        storage_path = "demo.md"
+        media_item_id = None
+        created_at = "2024-01-01T00:00:00"
+
+    class _CollectionsDB:
+        def get_output_template(self, template_id: int):
+            if template_id == 1:
+                return _Template()
+            raise RuntimeError("variant template backend exploded at /private/outputs.db")
+
+        def create_output_artifact(self, **_kwargs: Any):
+            return _Row()
+
+        def delete_output_artifact(self, _output_id: int, *, hard: bool) -> bool:
+            assert hard is True
+            return True
+
+    class _OutputDir:
+        def mkdir(self, *args: Any, **kwargs: Any) -> None:
+            return None
+
+    class _OutputPath:
+        def write_text(self, *args: Any, **kwargs: Any) -> None:
+            return None
+
+        def exists(self) -> bool:
+            return False
+
+    logger = _LoggerStub()
+    monkeypatch.setattr(outputs_endpoint, "logger", logger)
+    monkeypatch.setattr(outputs_endpoint, "render_output_template", lambda *_args: "rendered")
+    monkeypatch.setattr(outputs_endpoint, "_outputs_dir_for_user", lambda _user_id: _OutputDir())
+    monkeypatch.setattr(outputs_endpoint, "_resolve_output_path_for_user", lambda *_args: _OutputPath())
+
+    with pytest.raises(HTTPException) as exc_info:
+        await outputs_endpoint.create_output(
+            payload=outputs_endpoint.OutputCreateRequest(
+                template_id=1,
+                data={"items": []},
+                title="demo",
+                generate_mece=True,
+                mece_template_id=2,
+            ),
+            current_user=User(id=123, username="tester", email=None, is_active=True),
+            cdb=_CollectionsDB(),
+            media_db=object(),
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "output_create_failed"
+    assert logger.errors == ["outputs.create failed"]
+    logged = "\n".join(logger.errors + logger.warnings)
+    assert "variant template backend exploded" not in logged
+    assert "/private/outputs.db" not in logged
+
+
+@pytest.mark.asyncio
+async def test_outputs_delete_tts_history_failure_log_is_sanitized(monkeypatch):
+    class _CollectionsDB:
+        def delete_output_artifact(self, _output_id: int, *, hard: bool) -> bool:
+            assert hard is False
+            return True
+
+    class _MediaDB:
+        def mark_tts_history_artifacts_deleted_for_output(self, **_kwargs: Any) -> None:
+            raise RuntimeError("tts history backend exploded at /private/media.db")
+
+    logger = _LoggerStub()
+    monkeypatch.setattr(outputs_endpoint, "logger", logger)
+
+    result = await outputs_endpoint.delete_output(
+        output_id=777,
+        hard=False,
+        delete_file=False,
+        current_user=User(id=123, username="tester", email=None, is_active=True),
+        cdb=_CollectionsDB(),
+        media_db=_MediaDB(),
+    )
+
+    assert result == {"success": True, "file_deleted": False}
+    assert logger.debugs == ["outputs.delete: failed to update tts_history"]
+    logged = "\n".join(logger.debugs)
+    assert "777" not in logged
+    assert "tts history backend exploded" not in logged
+    assert "/private/media.db" not in logged
+
+
+@pytest.mark.asyncio
+async def test_outputs_purge_enumerate_failure_log_is_sanitized(monkeypatch):
+    class _CollectionsDB:
+        user_id = 123
+
+    def _raise_enumerate_failure(*args: Any, **kwargs: Any):
+        raise RuntimeError("purge enumerate exploded at /private/outputs.db")
+
+    logger = _LoggerStub()
+    monkeypatch.setattr(outputs_endpoint, "logger", logger)
+    monkeypatch.setattr(outputs_endpoint, "find_outputs_to_purge", _raise_enumerate_failure)
+
+    result = await outputs_endpoint.purge_outputs(
+        payload=outputs_endpoint.OutputsPurgeRequest(delete_files=False),
+        current_user=User(id=123, username="tester", email=None, is_active=True),
+        cdb=_CollectionsDB(),
+    )
+
+    assert result == {"removed": 0, "files_deleted": 0}
+    assert logger.errors == ["outputs.purge: failed to enumerate purge candidates"]
+    logged = "\n".join(logger.errors)
+    assert "purge enumerate exploded" not in logged
+    assert "/private/outputs.db" not in logged
+
+
+@pytest.mark.asyncio
+async def test_outputs_purge_db_delete_failure_log_is_sanitized(monkeypatch):
+    class _CollectionsDB:
+        user_id = 123
+
+    def _raise_delete_failure(*args: Any, **kwargs: Any):
+        raise RuntimeError("purge delete exploded at /private/outputs.db")
+
+    logger = _LoggerStub()
+    monkeypatch.setattr(outputs_endpoint, "logger", logger)
+    monkeypatch.setattr(outputs_endpoint, "find_outputs_to_purge", lambda **_kwargs: {777: "output.md"})
+    monkeypatch.setattr(outputs_endpoint, "delete_outputs_by_ids", _raise_delete_failure)
+
+    result = await outputs_endpoint.purge_outputs(
+        payload=outputs_endpoint.OutputsPurgeRequest(delete_files=False),
+        current_user=User(id=123, username="tester", email=None, is_active=True),
+        cdb=_CollectionsDB(),
+    )
+
+    assert result == {"removed": 0, "files_deleted": 0}
+    assert logger.errors == ["outputs.purge: DB delete failed"]
+    logged = "\n".join(logger.errors)
+    assert "777" not in logged
+    assert "purge delete exploded" not in logged
+    assert "/private/outputs.db" not in logged
+
+
+@pytest.mark.asyncio
+async def test_outputs_purge_file_delete_failure_log_is_sanitized(monkeypatch):
+    class _CollectionsDB:
+        user_id = 123
+
+    class _OutputPath:
+        def exists(self) -> bool:
+            return True
+
+        def unlink(self) -> None:
+            raise OSError("purge file delete exploded at /private/output.md")
+
+    logger = _LoggerStub()
+    monkeypatch.setattr(outputs_endpoint, "logger", logger)
+    monkeypatch.setattr(outputs_endpoint, "find_outputs_to_purge", lambda **_kwargs: {777: "output.md"})
+    monkeypatch.setattr(outputs_endpoint, "delete_outputs_by_ids", lambda **_kwargs: 1)
+    monkeypatch.setattr(outputs_endpoint, "_normalize_output_storage_path_for_user", lambda **_kwargs: "output.md")
+    monkeypatch.setattr(outputs_endpoint, "_resolve_output_path_for_user", lambda *_args: _OutputPath())
+
+    result = await outputs_endpoint.purge_outputs(
+        payload=outputs_endpoint.OutputsPurgeRequest(delete_files=True),
+        current_user=User(id=123, username="tester", email=None, is_active=True),
+        cdb=_CollectionsDB(),
+    )
+
+    assert result == {"removed": 1, "files_deleted": 0}
+    assert logger.warnings == ["outputs.purge: failed to delete file"]
+    logged = "\n".join(logger.warnings)
+    assert "777" not in logged
+    assert "output.md" not in logged
+    assert "purge file delete exploded" not in logged
+    assert "/private/output.md" not in logged
+
+
+@pytest.mark.asyncio
+async def test_outputs_update_old_file_cleanup_failure_log_is_sanitized(monkeypatch):
+    class _Row:
+        id = 777
+        title = "Old Output"
+        type = "newsletter_markdown"
+        format = "md"
+        storage_path = "old-output.md"
+        media_item_id = None
+        created_at = "2024-01-01T00:00:00"
+
+    class _CollectionsDB:
+        def get_output_artifact(self, _output_id: int):
+            return _Row()
+
+    class _OutputPath:
+        def __init__(self, name: str) -> None:
+            self.name = name
+
+        @property
+        def suffix(self) -> str:
+            return "." + self.name.rsplit(".", 1)[-1]
+
+        @property
+        def stem(self) -> str:
+            return self.name.rsplit(".", 1)[0]
+
+        def read_text(self, **_kwargs: Any) -> str:
+            return "# hello"
+
+        def write_text(self, *_args: Any, **_kwargs: Any) -> None:
+            return None
+
+        def resolve(self) -> str:
+            return f"/private/outputs/{self.name}"
+
+        def exists(self) -> bool:
+            return True
+
+        def unlink(self) -> None:
+            raise OSError("old output cleanup exploded at /private/outputs/old-output.md")
+
+    def _resolve_path(_user_id: int, name: str) -> _OutputPath:
+        return _OutputPath(name)
+
+    def _update_output_artifact_db(**kwargs: Any):
+        assert kwargs["new_format"] == "html"
+        return _Row()
+
+    logger = _LoggerStub()
+    monkeypatch.setattr(outputs_endpoint, "logger", logger)
+    monkeypatch.setattr(outputs_endpoint, "_resolve_output_path_for_user", _resolve_path)
+    monkeypatch.setattr(outputs_endpoint, "update_output_artifact_db", _update_output_artifact_db)
+
+    result = await outputs_endpoint.update_output(
+        output_id=777,
+        payload=outputs_endpoint.OutputUpdateRequest(format="html"),
+        current_user=User(id=123, username="tester", email=None, is_active=True),
+        cdb=_CollectionsDB(),
+    )
+
+    assert result.id == 777
+    assert logger.warnings == ["failed to remove old output file"]
+    logged = "\n".join(logger.warnings)
+    assert "old-output.md" not in logged
+    assert "old output cleanup exploded" not in logged
+    assert "/private/outputs" not in logged
+
+
 def test_outputs_preview_with_inline_data_and_generate(client_with_user, tmp_path):
 
     client = client_with_user
@@ -228,6 +1163,11 @@ def test_outputs_preview_with_inline_data_and_generate(client_with_user, tmp_pat
     assert r.status_code == 200
     lst = r.json()
     assert lst["total"] >= 1
+    assert lst["pagination"]["total"] >= 1
+    assert lst["pagination"]["limit"] == 10
+    assert lst["pagination"]["offset"] == 0
+    assert lst["has_more"] == lst["pagination"]["has_more"]
+    assert lst["next_offset"] == lst["pagination"]["next_offset"]
     assert any(it["id"] == oid for it in lst.get("items", []))
 
 
@@ -243,6 +1183,10 @@ def test_outputs_generate_variants_and_ingest(client_with_user, monkeypatch):
 
     monkeypatch.setattr(
         "tldw_Server_API.app.core.TTS.tts_service_v2.get_tts_service_v2",
+        _fake_get_tts_service_v2,
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.services.outputs_service.get_tts_service_v2",
         _fake_get_tts_service_v2,
     )
 

@@ -100,9 +100,9 @@ async def process_code_endpoint(
             # TEST_MODE diagnostics for upload validation behavior
             try:
                 if is_test_mode() and upload_errors:
-                    logger.warning(f"TEST_MODE: process-code upload_errors={upload_errors}")
-            except Exception as test_mode_log_error:
-                logger.debug("Failed to emit TEST_MODE upload diagnostics", exc_info=test_mode_log_error)
+                    logger.warning("TEST_MODE: process-code upload errors")
+            except Exception:
+                logger.debug("Failed to emit TEST_MODE upload diagnostics")
 
             for err in upload_errors:
                 batch["results"].append(
@@ -170,7 +170,7 @@ async def process_code_endpoint(
                             "input_ref": url,
                             "processing_source": None,
                             "media_type": "code",
-                            "error": f"Download/preparation failed: {res}",
+                            "error": "Download/preparation failed",
                             "metadata": {},
                             "content": None,
                             "chunks": None,
@@ -226,19 +226,16 @@ async def process_code_endpoint(
                     # TEST_MODE diagnostics for read errors after successful save
                     try:
                         if is_test_mode():
-                            logger.warning(
-                                "TEST_MODE: process-code read-error "
-                                f"file='{filename}' path='{local_path}': {type(exc).__name__}: {exc}"
-                            )
-                    except Exception as test_mode_log_error:
-                        logger.debug("Failed to emit TEST_MODE read-error diagnostics", exc_info=test_mode_log_error)
+                            logger.warning("TEST_MODE: process-code read error")
+                    except Exception:
+                        logger.debug("Failed to emit TEST_MODE read-error diagnostics")
                     results.append(
                         {
                             "status": "Error",
                             "input_ref": input_ref,
                             "processing_source": str(local_path),
                             "media_type": "code",
-                            "error": f"Failed to read code file: {exc}",
+                            "error": "Failed to read code file",
                             "metadata": {},
                             "content": None,
                             "chunks": None,
@@ -310,8 +307,8 @@ async def process_code_endpoint(
                                             md["start_line"] = int(min(starts))
                                         if ends:
                                             md["end_line"] = int(max(ends))
-                                    except Exception as metadata_bounds_error:
-                                        logger.debug("Failed to derive code chunk line bounds", exc_info=metadata_bounds_error)
+                                    except Exception:
+                                        logger.debug("Failed to derive code chunk line bounds")
                                 md["chunk_index"] = idx + 1
                                 md["total_chunks"] = total
                                 chunks.append({"text": cr.text, "metadata": md})

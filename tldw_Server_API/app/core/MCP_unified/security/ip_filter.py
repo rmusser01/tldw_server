@@ -91,8 +91,8 @@ class IPAccessController:
             # Optionally honor X-Real-IP only when supplied by a trusted proxy.
             elif self.trust_x_forwarded_for and real_ip and self._is_trusted_proxy(remote_addr):
                 candidate = real_ip.strip() or remote_addr
-        except Exception as exc:
-            logger.debug(f"Failed to parse X-Forwarded-For header: {exc}")
+        except Exception:
+            logger.debug("Failed to parse X-Forwarded-For header")
         return candidate
 
     def is_allowed(self, ip_str: str | None) -> bool:

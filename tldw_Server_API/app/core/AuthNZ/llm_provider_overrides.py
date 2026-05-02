@@ -96,8 +96,8 @@ def _parse_override_row(row: dict[str, Any]) -> LLMProviderOverride:
             credential_fields_raw = payload.get("credential_fields")
             if isinstance(credential_fields_raw, dict):
                 credential_fields = credential_fields_raw
-        except Exception as exc:
-            logger.warning(f"Provider override decrypt failed for {provider}: {exc}")
+        except Exception:
+            logger.warning("Provider override decrypt failed")
 
     return LLMProviderOverride(
         provider=provider,
@@ -281,8 +281,8 @@ async def refresh_llm_provider_overrides(pool: DatabasePool | None = None) -> di
         repo = AuthnzLLMProviderOverridesRepo(db_pool)
         await repo.ensure_tables()
         rows = await repo.list_overrides()
-    except Exception as exc:
-        logger.warning(f"Failed to load provider overrides: {exc}")
+    except Exception:
+        logger.warning("Failed to load provider overrides")
         rows = []
 
     overrides: dict[str, LLMProviderOverride] = {}
@@ -290,8 +290,8 @@ async def refresh_llm_provider_overrides(pool: DatabasePool | None = None) -> di
         try:
             override = _parse_override_row(row)
             overrides[override.provider] = override
-        except Exception as exc:
-            logger.warning(f"Failed to parse provider override row: {exc}")
+        except Exception:
+            logger.warning("Failed to parse provider override row")
 
     with _OVERRIDE_LOCK:
         _OVERRIDE_CACHE.clear()

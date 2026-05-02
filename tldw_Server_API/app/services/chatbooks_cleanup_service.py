@@ -27,7 +27,9 @@ def _enumerate_user_ids() -> list[int]:
     try:
         base = DatabasePaths.get_user_db_base_dir()
     except _CHATBOOKS_NONCRITICAL_EXCEPTIONS as exc:
-        logger.debug(f"chatbooks_cleanup: failed to resolve user db base dir: {exc}")
+        logger.bind(error_type=type(exc).__name__).debug(
+            "chatbooks_cleanup: failed to resolve user db base dir"
+        )
         return []
 
     uids: list[int] = []
@@ -79,5 +81,5 @@ async def run_chatbooks_cleanup_loop(stop_event: asyncio.Event | None = None) ->
             if deleted_imports:
                 logger.info(f"Chatbooks cleanup removed {deleted_imports} orphaned import files")
         except _CHATBOOKS_NONCRITICAL_EXCEPTIONS as exc:
-            logger.warning(f"Chatbooks cleanup loop error: {exc}")
+            logger.bind(error_type=type(exc).__name__).warning("Chatbooks cleanup loop error")
         await asyncio.sleep(interval_sec)

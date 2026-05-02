@@ -166,10 +166,7 @@ async def run_audio_batch(
         logger.error(
             "Error executing process_audio_files: {}", exec_err, exc_info=True
         )
-        error_msg = (
-            f"Error during audio processing execution: "
-            f"{type(exec_err).__name__}: {exec_err}"
-        )
+        error_msg = "Audio processing failed"
         num_attempted = len(all_inputs)
         batch_result["errors_count"] += num_attempted
         batch_result["errors"].append(error_msg)

@@ -11,6 +11,7 @@ from pydantic import BaseModel
 
 #
 # Local Imports
+from tldw_Server_API.app.api.v1.schemas.pagination import PagePaginationMeta
 from tldw_Server_API.app.core.Third_Party.Arxiv import ARXIV_DEFAULT_PAGE_SIZE
 from tldw_Server_API.app.core.Third_Party.Semantic_Scholar import FIELDS_OF_STUDY_CHOICES, PUBLICATION_TYPE_CHOICES
 
@@ -36,6 +37,7 @@ class ArxivSearchResponse(BaseModel):
     page: int
     results_per_page: int
     total_pages: int
+    pagination: PagePaginationMeta
 
 
 class ArxivSearchRequestForm:
@@ -95,6 +97,7 @@ class SemanticScholarSearchResponse(BaseModel):
     next_offset: Optional[int] = None # Semantic Scholar provides 'next' which is the next offset
     page: int # Calculated for user convenience
     total_pages: int # Calculated
+    pagination: PagePaginationMeta
 
 class SemanticScholarSearchRequestForm:
     def __init__(

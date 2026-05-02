@@ -195,7 +195,9 @@ def _get_app_version() -> str | None:
         from importlib.metadata import version
         return version("tldw_Server_API")
     except Exception as metadata_error:
-        logger.debug("Failed to resolve app version from package metadata", exc_info=metadata_error)
+        logger.bind(error_type=type(metadata_error).__name__).debug(
+            "Failed to resolve app version from package metadata"
+        )
     try:
         import tomllib
         pyproject = os.path.join(
@@ -207,7 +209,9 @@ def _get_app_version() -> str | None:
                 data = tomllib.load(f)
             return data.get("project", {}).get("version")
     except Exception as pyproject_error:
-        logger.debug("Failed to resolve app version from pyproject", exc_info=pyproject_error)
+        logger.bind(error_type=type(pyproject_error).__name__).debug(
+            "Failed to resolve app version from pyproject"
+        )
     return None
 
 
@@ -219,7 +223,10 @@ def _estimate_total_db_size(datasets: list[str], user_id: int | None) -> int:
             if os.path.isfile(db_path):
                 total += os.path.getsize(db_path)
         except Exception as size_error:
-            logger.debug("Failed to estimate dataset DB size for {}", ds, exc_info=size_error)
+            logger.bind(error_type=type(size_error).__name__).debug(
+                "Failed to estimate dataset DB size for {}",
+                ds,
+            )
     return max(total, 1024)  # at least 1 KB estimate
 
 
@@ -292,7 +299,9 @@ def _read_manifest_cached(zip_path: str) -> dict[str, Any]:
             with open(sc, encoding="utf-8") as f:
                 return json.loads(f.read())
         except Exception as sidecar_error:
-            logger.debug("Failed to read bundle sidecar manifest; falling back to ZIP", exc_info=sidecar_error)
+            logger.bind(error_type=type(sidecar_error).__name__).debug(
+                "Failed to read bundle sidecar manifest; falling back to ZIP"
+            )
     return _read_manifest_from_zip(zip_path)
 
 
@@ -867,9 +876,9 @@ def import_bundle(
                                 "Rollback failed for {}: {}", restored_ds, rollback_exc
                             )
                             rollback_failures.append(
-                                f"{restored_ds}: {rollback_exc}"
+                                f"{restored_ds}: rollback operation failed"
                             )
-                detail = f"restore_failed:{ds}: {exc}"
+                detail = f"restore_failed:{ds}: restore operation failed"
                 if isinstance(exc, sqlite3.Error) and _sqlite_error_is_busy(exc):
                     detail = (
                         f"restore_failed:{ds}: target database is busy/locked; "

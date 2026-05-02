@@ -41,6 +41,31 @@ def test_omnivoice_installer_creates_runtime_layout(tmp_path):
 
 
 @pytest.mark.unit
+def test_omnivoice_installer_installs_source_dependencies_by_default(tmp_path, monkeypatch):
+    from Helper_Scripts.TTS_Installers import install_tts_omnivoice_sidecar as installer
+
+    commands = []
+    source_checkout = tmp_path / "OmniVoice"
+    source_checkout.mkdir()
+
+    def _fake_run(command, **kwargs):  # noqa: ARG001
+        commands.append(command)
+
+    monkeypatch.setattr(installer.subprocess, "run", _fake_run)
+
+    installer.install_sidecar_runtime(
+        interpreter_path=tmp_path / ".venv" / "bin" / "python",
+        repo_root=tmp_path,
+        source_checkout=source_checkout,
+    )
+
+    editable_install = commands[-1]
+    assert "-e" in editable_install  # nosec B101
+    assert "--no-deps" not in editable_install  # nosec B101
+    assert str(source_checkout) in editable_install  # nosec B101
+
+
+@pytest.mark.unit
 def test_omnivoice_installer_updates_only_provider_block(tmp_path):
     from Helper_Scripts.TTS_Installers.install_tts_omnivoice_sidecar import (
         build_runtime_layout,

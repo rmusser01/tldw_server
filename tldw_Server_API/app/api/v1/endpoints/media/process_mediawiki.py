@@ -173,7 +173,7 @@ async def _process_mediawiki_dump(
             shutil.rmtree(temp_dir_path, ignore_errors=True)
             raise
         except Exception as exc:  # noqa: BLE001
-            logger.error("Failed to save uploaded MediaWiki dump: {}", exc, exc_info=True)
+            logger.error("Failed to save uploaded MediaWiki dump")
             shutil.rmtree(temp_dir_path, ignore_errors=True)
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -227,7 +227,7 @@ async def _process_mediawiki_dump(
                     shutil.rmtree(temp_dir_path, ignore_errors=True)
                     logger.info("Cleaned up temporary directory: {}", temp_dir_path)
                 except Exception:  # noqa: BLE001
-                    logger.warning("Failed to cleanup temporary directory: {}", temp_dir_path)
+                    logger.warning("Failed to cleanup temporary directory")
 
         return StreamingResponse(
             stream_ingestion_results(),

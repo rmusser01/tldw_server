@@ -76,7 +76,7 @@ async def list_user_api_keys(
     except HTTPException:
         raise
     except _ADMIN_API_KEYS_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Admin failed to list API keys for user {user_id}: {e}")
+        logger.error("Failed to list API keys")
         raise HTTPException(status_code=500, detail="Failed to list API keys") from e
 
 
@@ -100,10 +100,10 @@ async def create_user_api_key(
     except HTTPException:
         raise
     except MandatoryAuditWriteError as e:
-        logger.error(f"Admin mandatory audit write failed while creating API key for user {user_id}: {e}")
+        logger.error("Mandatory audit write failed while creating API key")
         raise HTTPException(status_code=503, detail="Mandatory audit persistence unavailable") from e
     except _ADMIN_API_KEYS_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Admin failed to create API key for user {user_id}: {e}")
+        logger.error("Failed to create API key")
         raise HTTPException(status_code=500, detail="Failed to create API key") from e
 
 
@@ -126,10 +126,10 @@ async def rotate_user_api_key(
     except HTTPException:
         raise
     except MandatoryAuditWriteError as e:
-        logger.error(f"Admin mandatory audit write failed while rotating API key {key_id} for user {user_id}: {e}")
+        logger.error("Mandatory audit write failed while rotating API key")
         raise HTTPException(status_code=503, detail="Mandatory audit persistence unavailable") from e
     except _ADMIN_API_KEYS_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Admin failed to rotate API key {key_id} for user {user_id}: {e}")
+        logger.error("Failed to rotate API key")
         raise HTTPException(status_code=500, detail="Failed to rotate API key") from e
 
 
@@ -152,10 +152,10 @@ async def revoke_user_api_key(
     except HTTPException:
         raise
     except MandatoryAuditWriteError as e:
-        logger.error(f"Admin mandatory audit write failed while revoking API key {key_id} for user {user_id}: {e}")
+        logger.error("Mandatory audit write failed while revoking API key")
         raise HTTPException(status_code=503, detail="Mandatory audit persistence unavailable") from e
     except _ADMIN_API_KEYS_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Admin failed to revoke API key {key_id} for user {user_id}: {e}")
+        logger.error("Failed to revoke API key")
         raise HTTPException(status_code=500, detail="Failed to revoke API key") from e
 
 
@@ -188,7 +188,7 @@ async def update_user_api_key(
     except HTTPException:
         raise
     except _ADMIN_API_KEYS_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Admin failed to update API key {key_id} for user {user_id}: {e}")
+        logger.error("Failed to update API key")
         raise HTTPException(status_code=500, detail="Failed to update API key") from e
 
 
@@ -230,10 +230,10 @@ async def create_virtual_key(
     except HTTPException:
         raise
     except MandatoryAuditWriteError as e:
-        logger.error(f"Admin mandatory audit write failed while creating virtual key for user {user_id}: {e}")
+        logger.error("Mandatory audit write failed while creating virtual key")
         raise HTTPException(status_code=503, detail="Mandatory audit persistence unavailable") from e
     except _ADMIN_API_KEYS_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Admin failed to create virtual key for user {user_id}: {e}")
+        logger.error("Failed to create virtual key")
         raise HTTPException(status_code=500, detail="Failed to create virtual key") from e
 
 
@@ -362,7 +362,7 @@ async def list_virtual_keys(
     except HTTPException:
         raise
     except _ADMIN_API_KEYS_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Admin failed to list virtual keys for user {user_id}: {e}")
+        logger.error("Failed to list virtual keys")
         raise HTTPException(status_code=500, detail="Failed to list virtual keys") from e
 
 
@@ -422,5 +422,5 @@ async def get_api_key_audit_log(
     except HTTPException:
         raise
     except _ADMIN_API_KEYS_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Admin failed to fetch audit log for key {key_id}: {e}")
+        logger.error("Failed to load audit log")
         raise HTTPException(status_code=500, detail="Failed to load audit log") from e

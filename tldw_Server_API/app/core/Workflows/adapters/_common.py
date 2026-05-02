@@ -95,13 +95,13 @@ def is_subpath(parent: Path, child: Path) -> bool:
     """
     try:
         parent_resolved = parent.resolve(strict=False)
-    except (OSError, ValueError, RuntimeError) as e:
-        logger.debug(f"Failed to resolve parent path {parent}: {e}")
+    except (OSError, ValueError, RuntimeError):
+        logger.debug("Failed to resolve workflow parent path")
         parent_resolved = parent
     try:
         child_resolved = child.resolve(strict=False)
-    except (OSError, ValueError, RuntimeError) as e:
-        logger.debug(f"Failed to resolve child path {child}: {e}")
+    except (OSError, ValueError, RuntimeError):
+        logger.debug("Failed to resolve workflow child path")
         child_resolved = child
     try:
         child_resolved.relative_to(parent_resolved)
@@ -166,11 +166,8 @@ def resolve_artifacts_dir(step_run_id: str | None) -> Path:
     base_dir = artifacts_base_dir()
     try:
         base_resolved = base_dir.resolve(strict=False)
-    except _WORKFLOW_COMMON_NONCRITICAL_EXCEPTIONS as exc:
-        logger.opt(exception=exc).debug(
-            "Artifacts base dir resolve failed for {}. Using unresolved base dir.",
-            base_dir,
-        )
+    except _WORKFLOW_COMMON_NONCRITICAL_EXCEPTIONS:
+        logger.debug("Artifacts base dir resolve failed. Using unresolved base dir.")
         base_resolved = base_dir
     safe_id = sanitize_path_component(step_run_id or "", f"artifact_{int(time.time() * 1000)}")
     safe_id = Path(safe_id).name or f"artifact_{int(time.time() * 1000)}"
@@ -235,8 +232,8 @@ def resolve_workflows_file_allowlist_paths(paths: list[str]) -> list[Path]:
     try:
         from tldw_Server_API.app.core.Utils.Utils import get_project_root
         project_root = Path(get_project_root())
-    except _WORKFLOW_COMMON_NONCRITICAL_EXCEPTIONS as exc:
-        logger.debug(f"Workflow file allowlist: failed to resolve project root: {exc}")
+    except _WORKFLOW_COMMON_NONCRITICAL_EXCEPTIONS:
+        logger.debug("Workflow file allowlist: failed to resolve project root")
     resolved: list[Path] = []
     for raw in paths:
         try:
@@ -249,8 +246,8 @@ def resolve_workflows_file_allowlist_paths(paths: list[str]) -> list[Path]:
             else:
                 candidate = candidate.resolve(strict=False)
             resolved.append(candidate)
-        except _WORKFLOW_COMMON_NONCRITICAL_EXCEPTIONS as exc:
-            logger.debug(f"Workflow file allowlist: invalid path {raw!r}: {exc}")
+        except _WORKFLOW_COMMON_NONCRITICAL_EXCEPTIONS:
+            logger.debug("Workflow file allowlist: invalid path skipped")
     return resolved
 
 
@@ -282,8 +279,8 @@ def workflow_file_base_dir(context: dict[str, Any], config: dict[str, Any] | Non
             try:
                 from tldw_Server_API.app.core.Utils.Utils import get_project_root
                 base = (Path(get_project_root()) / base).resolve()
-            except _WORKFLOW_COMMON_NONCRITICAL_EXCEPTIONS as exc:
-                logger.debug(f"Workflow file base dir: failed to resolve relative WORKFLOWS_FILE_BASE_DIR {env_override!r}: {exc}")
+            except _WORKFLOW_COMMON_NONCRITICAL_EXCEPTIONS:
+                logger.debug("Workflow file base dir: failed to resolve relative override")
                 base = base.resolve()
         else:
             base = base.resolve()
@@ -293,12 +290,12 @@ def workflow_file_base_dir(context: dict[str, Any], config: dict[str, Any] | Non
         raw_user_id = context.get("user_id") if isinstance(context, dict) else None
         try:
             user_id = int(raw_user_id) if raw_user_id is not None else DatabasePaths.get_single_user_id()
-        except _WORKFLOW_COMMON_NONCRITICAL_EXCEPTIONS as exc:
-            logger.debug(f"Workflow file base dir: invalid user_id {raw_user_id!r}; using single-user fallback: {exc}")
+        except _WORKFLOW_COMMON_NONCRITICAL_EXCEPTIONS:
+            logger.debug("Workflow file base dir: invalid user id; using single-user fallback")
             user_id = DatabasePaths.get_single_user_id()
         return DatabasePaths.get_user_base_directory(user_id)
-    except _WORKFLOW_COMMON_NONCRITICAL_EXCEPTIONS as exc:
-        logger.debug(f"Workflow file base dir: failed to resolve per-user base dir; using Databases/: {exc}")
+    except _WORKFLOW_COMMON_NONCRITICAL_EXCEPTIONS:
+        logger.debug("Workflow file base dir: failed to resolve per-user base dir; using Databases fallback")
         return Path("Databases").resolve()
 
 
@@ -320,8 +317,8 @@ def resolve_workflow_file_path(path_value: str, context: dict[str, Any], config:
     base_dir = workflow_file_base_dir(context, config)
     try:
         base_resolved = base_dir.resolve(strict=False)
-    except _WORKFLOW_COMMON_NONCRITICAL_EXCEPTIONS as exc:
-        logger.debug(f"Failed to resolve base directory {base_dir}: {exc}")
+    except _WORKFLOW_COMMON_NONCRITICAL_EXCEPTIONS:
+        logger.debug("Failed to resolve workflow file base directory")
         base_resolved = base_dir
     candidate = Path(path_value).expanduser()
     if candidate.is_absolute():
@@ -332,8 +329,8 @@ def resolve_workflow_file_path(path_value: str, context: dict[str, Any], config:
         allowed_bases = [base_resolved]
         try:
             allowed_bases.extend(workflow_file_allowlist(context))
-        except _WORKFLOW_COMMON_NONCRITICAL_EXCEPTIONS as exc:
-            logger.debug(f"Workflow file allowlist: failed to resolve allowlist: {exc}")
+        except _WORKFLOW_COMMON_NONCRITICAL_EXCEPTIONS:
+            logger.debug("Workflow file allowlist: failed to resolve allowlist")
         if not any(is_subpath(base, resolved) for base in allowed_bases):
             raise AdapterError("file_access_denied")
         return resolved

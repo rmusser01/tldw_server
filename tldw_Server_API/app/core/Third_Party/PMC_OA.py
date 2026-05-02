@@ -11,14 +11,13 @@ from __future__ import annotations
 import contextlib
 from typing import Any
 from defusedxml import ElementTree as DET
-from xml.etree import ElementTree as ET
 
 from tldw_Server_API.app.core.http_client import fetch
 
 BASE_URL = "https://www.ncbi.nlm.nih.gov/pmc/utils/oa/oa.fcgi"
 
 
-def _get_xml(params: dict[str, Any]) -> ET.Element:
+def _get_xml(params: dict[str, Any]) -> Any:
     r = fetch(method="GET", url=BASE_URL, params=params, headers={"Accept": "application/xml"}, timeout=20)
     if r.status_code >= 400:
         raise RuntimeError(f"HTTP {r.status_code}")
@@ -45,11 +44,13 @@ def pmc_oa_identify() -> tuple[dict[str, Any] | None, str | None]:
             "latest": latest.text if latest is not None else None,
         })
         return info, None
-    except Exception as e:
-        return None, f"PMC OA Identify error: {str(e)}"
+    except TimeoutError:
+        return None, "PMC OA Identify request timed out."
+    except Exception:
+        return None, "PMC OA Identify request failed."
 
 
-def _parse_resumption(root: ET.Element) -> str | None:
+def _parse_resumption(root: Any) -> str | None:
     res = root.find("resumption")
     if res is None:
         return None
@@ -106,8 +107,10 @@ def pmc_oa_query(
                 "links": links,
             })
         return records, _parse_resumption(root), None
-    except Exception as e:
-        return None, None, f"PMC OA query error: {str(e)}"
+    except TimeoutError:
+        return None, None, "PMC OA query request timed out."
+    except Exception:
+        return None, None, "PMC OA query request failed."
 
 
 def download_pmc_pdf(pmcid: str) -> tuple[bytes | None, str | None, str | None]:
@@ -129,5 +132,7 @@ def download_pmc_pdf(pmcid: str) -> tuple[bytes | None, str | None, str | None]:
         if cd and "filename=" in cd:
             filename = cd.split("filename=")[-1].strip('"')
         return r.content, filename, None
-    except Exception as e:
-        return None, None, f"PMC PDF download error: {str(e)}"
+    except TimeoutError:
+        return None, None, "PMC PDF download timed out."
+    except Exception:
+        return None, None, "PMC PDF download failed."

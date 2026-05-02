@@ -16,9 +16,8 @@ from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
 from loguru import logger
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, rbac_rate_limit, User
 
-from ....core.AuthNZ.User_DB_Handling import User, get_request_user
-from ..API_Deps.auth_deps import rbac_rate_limit
 from ..schemas.sharing_schemas import (
     AdminShareListResponse,
     AuditEventResponse,
@@ -207,9 +206,9 @@ async def _verify_workspace_ownership(workspace_id: str, user: User) -> None:
         # In single-user mode, workspace validation may not be available
         from ....core.AuthNZ.settings import get_settings
         if get_settings().auth_mode == "single_user":
-            logger.warning(f"Workspace ownership check skipped in single-user mode: {exc}")
+            logger.warning("Workspace ownership check skipped in single-user mode")
             return
-        logger.error(f"Workspace ownership check failed: {exc}")
+        logger.error("Workspace ownership check failed")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Could not verify workspace ownership due to a database error.",
@@ -254,7 +253,7 @@ async def share_workspace(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="This workspace is already shared with the specified scope.",
             ) from exc
-        logger.error(f"Failed to create share for workspace {workspace_id}: {exc}")
+        logger.error("Failed to create share")
         raise HTTPException(
             status_code=500,
             detail="An internal error occurred while creating the share.",
@@ -423,8 +422,8 @@ async def shared_with_me(
             for oid in owner_ids:
                 try:
                     owner_dbs[oid] = await get_chacha_db_for_owner(oid)
-                except Exception as exc:
-                    logger.debug("Skipping shared workspace name preload for owner {}: {}", oid, exc)
+                except Exception:
+                    logger.debug("Skipping shared workspace name preload")
 
             for item in items:
                 db = owner_dbs.get(item.owner_user_id)
@@ -433,15 +432,10 @@ async def shared_with_me(
                         ws = db.get_workspace(item.workspace_id)
                         if ws:
                             item.workspace_name = ws.get("name")
-                    except Exception as exc:
-                        logger.debug(
-                            "Failed to resolve shared workspace name share_id={} owner_user_id={}: {}",
-                            item.share_id,
-                            item.owner_user_id,
-                            exc,
-                        )
-        except Exception as exc:
-            logger.debug("Shared workspace name population skipped: {}", exc)
+                    except Exception:
+                        logger.debug("Failed to resolve shared workspace name")
+        except Exception:
+            logger.debug("Shared workspace name population skipped")
 
     return SharedWithMeResponse(items=items, total=len(items))
 
@@ -551,8 +545,8 @@ def _run_clone_task(
                 )
                 result = svc.clone_workspace(workspace_id, new_name=new_name)
             logger.info(f"Clone job {job_id} completed: {result.get('workspace_id')}")
-        except Exception as exc:
-            logger.error(f"Clone job {job_id} failed: {exc}")
+        except Exception:
+            logger.error("Clone job failed")
 
     try:
         loop = asyncio.get_event_loop()
@@ -711,8 +705,8 @@ async def chat_with_shared_workspace(
             status_code=501,
             detail="RAG pipeline not available",
         ) from None
-    except Exception as exc:
-        logger.error(f"Shared workspace chat failed for share {share_id}: {exc}")
+    except Exception:
+        logger.error("Shared workspace chat failed")
         raise HTTPException(status_code=500, detail="Chat request failed") from None
 
 

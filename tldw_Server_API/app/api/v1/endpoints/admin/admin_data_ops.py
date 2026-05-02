@@ -7,18 +7,21 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import (
+    build_offset_pagination_meta,
+)
 from tldw_Server_API.app.api.v1.schemas.admin_schemas import (
     BackupCreateRequest,
     BackupCreateResponse,
     BackupItem,
     BackupListResponse,
+    BackupRestoreRequest,
+    BackupRestoreResponse,
     BackupScheduleCreateRequest,
     BackupScheduleItem,
     BackupScheduleListResponse,
     BackupScheduleMutationResponse,
     BackupScheduleUpdateRequest,
-    BackupRestoreRequest,
-    BackupRestoreResponse,
     DataSubjectRequestCreateRequest,
     DataSubjectRequestCreateResponse,
     DataSubjectRequestItem,
@@ -37,24 +40,44 @@ from tldw_Server_API.app.core.AuthNZ.repos.data_subject_requests_repo import (
     AuthnzDataSubjectRequestsRepo,
 )
 from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
+from tldw_Server_API.app.services.admin_backup_schedules_service import (
+    AdminBackupSchedulesService,
+)
+from tldw_Server_API.app.services.admin_data_ops_service import (
+    build_retention_preview_signature as svc_build_retention_preview_signature,
+)
 from tldw_Server_API.app.services.admin_data_ops_service import (
     create_backup_snapshot as svc_create_backup_snapshot,
+)
+from tldw_Server_API.app.services.admin_data_ops_service import (
     list_backup_items as svc_list_backup_items,
+)
+from tldw_Server_API.app.services.admin_data_ops_service import (
     list_retention_policies as svc_list_retention_policies,
+)
+from tldw_Server_API.app.services.admin_data_ops_service import (
     preview_retention_policy as svc_preview_retention_policy,
+)
+from tldw_Server_API.app.services.admin_data_ops_service import (
     restore_backup_snapshot as svc_restore_backup_snapshot,
-    build_retention_preview_signature as svc_build_retention_preview_signature,
+)
+from tldw_Server_API.app.services.admin_data_ops_service import (
     update_retention_policy as svc_update_retention_policy,
+)
+from tldw_Server_API.app.services.admin_data_ops_service import (
     verify_retention_preview_signature as svc_verify_retention_preview_signature,
 )
 from tldw_Server_API.app.services.admin_data_subject_requests_service import (
     execute_dsr_erasure as svc_execute_dsr_erasure,
-    list_data_subject_requests as svc_list_data_subject_requests,
-    preview_data_subject_request as svc_preview_data_subject_request,
-    record_data_subject_request as svc_record_data_subject_request,
 )
-from tldw_Server_API.app.services.admin_backup_schedules_service import (
-    AdminBackupSchedulesService,
+from tldw_Server_API.app.services.admin_data_subject_requests_service import (
+    list_data_subject_requests as svc_list_data_subject_requests,
+)
+from tldw_Server_API.app.services.admin_data_subject_requests_service import (
+    preview_data_subject_request as svc_preview_data_subject_request,
+)
+from tldw_Server_API.app.services.admin_data_subject_requests_service import (
+    record_data_subject_request as svc_record_data_subject_request,
 )
 
 if TYPE_CHECKING:
@@ -133,6 +156,7 @@ async def _emit_admin_audit_event(
         action=action,
         metadata=metadata,
     )
+
 
 _BACKUP_DATASETS = {"media", "chacha", "prompts", "evaluations", "audit", "authnz"}
 _PER_USER_BACKUP_DATASETS = _BACKUP_DATASETS - {"authnz"}
@@ -231,11 +255,22 @@ async def list_backups(
             )
             for item in items
         ]
-        return BackupListResponse(items=payload, total=total, limit=limit, offset=offset)
+        return BackupListResponse(
+            items=payload,
+            total=total,
+            limit=limit,
+            offset=offset,
+            pagination=build_offset_pagination_meta(
+                total=total,
+                offset=offset,
+                limit=limit,
+                count=len(payload),
+            ),
+        )
     except HTTPException:
         raise
     except _DATA_OPS_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error(f"Failed to list backups: {exc}")
+        logger.error("Failed to list backups")
         raise HTTPException(status_code=500, detail="Failed to list backups") from exc
 
 
@@ -289,7 +324,7 @@ async def create_backup(
     except HTTPException:
         raise
     except _DATA_OPS_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error(f"Failed to create backup: {exc}")
+        logger.error("Failed to create backup")
         raise HTTPException(status_code=500, detail="Failed to create backup") from exc
 
 
@@ -335,7 +370,7 @@ async def restore_backup(
     except HTTPException:
         raise
     except _DATA_OPS_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error(f"Failed to restore backup: {exc}")
+        logger.error("Failed to restore backup")
         raise HTTPException(status_code=500, detail="Failed to restore backup") from exc
 
 
@@ -355,7 +390,18 @@ async def list_backup_schedules(
         )
         items = service.filter_visible_items(items, principal=principal)
         payload = [_serialize_backup_schedule_item(item) for item in items]
-        return BackupScheduleListResponse(items=payload, total=total, limit=limit, offset=offset)
+        return BackupScheduleListResponse(
+            items=payload,
+            total=total,
+            limit=limit,
+            offset=offset,
+            pagination=build_offset_pagination_meta(
+                total=total,
+                limit=limit,
+                offset=offset,
+                count=len(payload),
+            ),
+        )
     except HTTPException:
         raise
     except _DATA_OPS_NONCRITICAL_EXCEPTIONS as exc:
@@ -557,7 +603,8 @@ async def delete_backup_schedule(
         elif current.get("target_user_id") is not None:
             await _enforce_admin_user_scope(principal, int(current["target_user_id"]), require_hierarchy=False)
 
-        from datetime import datetime, timezone as dt_timezone
+        from datetime import datetime
+        from datetime import timezone as dt_timezone
 
         deleted_at = datetime.now(dt_timezone.utc).isoformat()
         deleted = await repo.delete_schedule(schedule_id, deleted_at=deleted_at)
@@ -618,7 +665,7 @@ async def preview_data_subject_request(
     except HTTPException:
         raise
     except _DATA_OPS_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error(f"Failed to preview data subject request: {exc}")
+        logger.error("Failed to preview data subject request")
         raise HTTPException(status_code=500, detail="Failed to preview data subject request") from exc
 
 
@@ -667,7 +714,7 @@ async def create_data_subject_request(
     except HTTPException:
         raise
     except _DATA_OPS_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error(f"Failed to record data subject request: {exc}")
+        logger.error("Failed to record data subject request")
         raise HTTPException(status_code=500, detail="Failed to record data subject request") from exc
 
 
@@ -690,11 +737,17 @@ async def list_data_subject_requests(
             total=total,
             limit=limit,
             offset=offset,
+            pagination=build_offset_pagination_meta(
+                total=total,
+                limit=limit,
+                offset=offset,
+                count=len(items),
+            ),
         )
     except HTTPException:
         raise
     except _DATA_OPS_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error(f"Failed to list data subject requests: {exc}")
+        logger.error("Failed to list data subject requests")
         raise HTTPException(status_code=500, detail="Failed to list data subject requests") from exc
 
 
@@ -731,7 +784,9 @@ async def execute_data_subject_request(
             raise HTTPException(status_code=400, detail="resolved_user_id_missing")
 
         await _enforce_admin_user_scope(
-            principal, int(resolved_user_id), require_hierarchy=True,
+            principal,
+            int(resolved_user_id),
+            require_hierarchy=True,
         )
 
         selected_categories = record.get("selected_categories", [])
@@ -764,7 +819,7 @@ async def execute_data_subject_request(
     except HTTPException:
         raise
     except _DATA_OPS_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error(f"Failed to execute data subject request: {exc}")
+        logger.error("Failed to execute data subject request")
         raise HTTPException(status_code=500, detail="Failed to execute data subject request") from exc
 
 
@@ -777,7 +832,7 @@ async def list_retention_policies(
         policies = [RetentionPolicy(**item) for item in await svc_list_retention_policies()]
         return RetentionPoliciesResponse(policies=policies)
     except _DATA_OPS_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error(f"Failed to list retention policies: {exc}")
+        logger.error("Failed to list retention policies")
         raise HTTPException(status_code=500, detail="Failed to list retention policies") from exc
 
 
@@ -810,12 +865,7 @@ async def preview_retention_policy(
             raise HTTPException(status_code=409, detail="stale_current_days") from exc
         raise HTTPException(status_code=400, detail="invalid_retention_preview") from exc
     except _DATA_OPS_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error(
-            "Failed to preview retention policy: policy_key={} principal_id={} error={}",
-            policy_key,
-            principal.principal_id,
-            exc,
-        )
+        logger.error("Failed to preview retention policy")
         raise HTTPException(status_code=500, detail="Failed to preview retention policy") from exc
 
 
@@ -855,5 +905,5 @@ async def update_retention_policy(
             raise HTTPException(status_code=400, detail=detail) from exc
         raise HTTPException(status_code=400, detail="invalid_retention_update") from exc
     except _DATA_OPS_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error(f"Failed to update retention policy: {exc}")
+        logger.error("Failed to update retention policy")
         raise HTTPException(status_code=500, detail="Failed to update retention policy") from exc

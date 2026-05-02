@@ -848,7 +848,8 @@ def start_new_chat_session(
             if greeting_strategy in {"alternate_random", "alternate_index"} and original_alternate_greetings:
                 if greeting_strategy == "alternate_random":
                     if original_alternate_greetings:
-                        selected_alt = random.choice(original_alternate_greetings)
+                        # Non-security greeting selection.
+                        selected_alt = random.choice(original_alternate_greetings)  # nosec B311
                 elif greeting_strategy == "alternate_index":
                     if isinstance(alternate_index, int) and alternate_index >= 0 and alternate_index < len(original_alternate_greetings):
                         selected_alt = original_alternate_greetings[alternate_index]
@@ -1500,6 +1501,7 @@ def find_messages_in_conversation(
     character_name_for_placeholders: str,
     user_name_for_placeholders: Optional[str],
     limit: int = 10,
+    offset: int = 0,
 ) -> list[dict[str, Any]]:
     """Search for messages within a specific conversation by content."""
 
@@ -1508,6 +1510,7 @@ def find_messages_in_conversation(
             content_query=search_query,
             conversation_id=conversation_id,
             limit=limit,
+            offset=offset,
         )
 
         processed_results = []

@@ -92,8 +92,8 @@ class RAGHealthChecker:
                 await asyncio.sleep(self.check_interval)
             except asyncio.CancelledError:
                 break
-            except Exception as e:
-                logger.error(f"Error in periodic health check: {e}")
+            except Exception:
+                logger.error("Error in periodic health check")
                 await asyncio.sleep(self.check_interval)
 
     async def check_all(self) -> dict[str, ComponentHealth]:
@@ -150,14 +150,14 @@ class RAGHealthChecker:
                 last_check=time.time()
             )
 
-        except Exception as e:
+        except Exception:
             response_time = time.time() - start
-            logger.error(f"Vector store health check failed: {e}")
+            logger.error("Vector store health check failed")
 
             return ComponentHealth(
                 name="vector_store",
                 status=HealthStatus.UNHEALTHY,
-                message=f"Connection failed: {str(e)}",
+                message="Vector store connection failed",
                 response_time=response_time,
                 last_check=time.time()
             )
@@ -187,14 +187,14 @@ class RAGHealthChecker:
                 last_check=time.time()
             )
 
-        except Exception as e:
+        except Exception:
             response_time = time.time() - start
-            logger.error(f"Database health check failed: {e}")
+            logger.error("Database health check failed")
 
             return ComponentHealth(
                 name="database",
                 status=HealthStatus.UNHEALTHY,
-                message=f"Connection failed: {str(e)}",
+                message="Database connection failed",
                 response_time=response_time,
                 last_check=time.time()
             )
@@ -229,14 +229,14 @@ class RAGHealthChecker:
                 last_check=time.time()
             )
 
-        except Exception as e:
+        except Exception:
             response_time = time.time() - start
-            logger.error(f"Embedding service health check failed: {e}")
+            logger.error("Embedding service health check failed")
 
             return ComponentHealth(
                 name="embeddings",
                 status=HealthStatus.UNHEALTHY,
-                message=f"Service check failed: {str(e)}",
+                message="Embedding service check failed",
                 response_time=response_time,
                 last_check=time.time()
             )
@@ -283,14 +283,14 @@ class RAGHealthChecker:
                     last_check=time.time()
                 )
 
-        except Exception as e:
+        except Exception:
             response_time = time.time() - start
-            logger.error(f"Search index health check failed: {e}")
+            logger.error("Search index health check failed")
 
             return ComponentHealth(
                 name="search_index",
                 status=HealthStatus.UNHEALTHY,
-                message=f"Index check failed: {str(e)}",
+                message="Search index check failed",
                 response_time=response_time,
                 last_check=time.time()
             )
@@ -303,8 +303,8 @@ class RAGHealthChecker:
             db_url = cfg.get("DATABASE_URL")
             if isinstance(db_url, str) and db_url.startswith("sqlite:///"):
                 return db_url.replace("sqlite:///", "")
-        except Exception as e:
-            logger.debug(f"Health check db path fallback: {e}")
+        except Exception:
+            logger.debug("Health check db path fallback")
 
         return ":memory:"
 

@@ -187,7 +187,7 @@ def test_web_clipper_save_returns_500_for_failed_canonical_save_payload(
             note=None,
             workspace_placement=None,
             attachments=[],
-            warnings=["Canonical note save failed: write failed"],
+            warnings=["Canonical note save failed: write failed at /private/clipper.db"],
             note_id="clip-123",
             workspace_placement_saved=False,
             workspace_placement_count=0,
@@ -198,4 +198,4 @@ def test_web_clipper_save_returns_500_for_failed_canonical_save_payload(
     response = client.post("/api/v1/web-clipper/save", json=_save_payload())
 
     assert response.status_code == 500, response.text
-    assert response.json()["detail"] == "Canonical note save failed: write failed"
+    assert response.json()["detail"] == "Canonical note save failed."

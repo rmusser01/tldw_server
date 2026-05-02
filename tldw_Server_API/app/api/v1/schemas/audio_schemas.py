@@ -12,6 +12,8 @@ from typing import Any, Literal, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from tldw_Server_API.app.api.v1.schemas.pagination import CursorPaginationMeta
+
 
 class NormalizationOptions(BaseModel):
     """Options for the normalization system"""
@@ -615,6 +617,7 @@ class TTSHistoryListResponse(BaseModel):
     limit: int
     offset: int
     next_cursor: Optional[str] = None
+    pagination: CursorPaginationMeta
 
 
 class TTSHistoryDetailResponse(BaseModel):

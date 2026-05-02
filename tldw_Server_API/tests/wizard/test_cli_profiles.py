@@ -246,14 +246,13 @@ def test_init_profile_writes_repo_env_path_in_dry_run(tmp_path: Path, monkeypatc
     assert str(set_env["SINGLE_USER_API_KEY"]).startswith("*")
 
 
-def test_init_profile_does_not_format_unrelated_repo_changes_by_default(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_init_profile_does_not_format_unrelated_repo_changes_by_default(tmp_path: Path, monkeypatch) -> None:
     repo = tmp_path / "repo"
     (repo / ".git").mkdir(parents=True)
     (repo / "tldw_Server_API" / "Config_Files").mkdir(parents=True)
     (repo / "pyproject.toml").write_text("[project]\nname='tldw-server'\n", encoding="utf-8")
     monkeypatch.chdir(repo)
+
     def fail_changed_files(_base: Path) -> list[str]:
         raise AssertionError("init must not inspect or format unrelated repo changes")
 
@@ -267,9 +266,7 @@ def test_init_profile_does_not_format_unrelated_repo_changes_by_default(
     assert result.exit_code == 0, result.output
 
 
-def test_init_profile_rewrites_legacy_single_user_api_key(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_init_profile_rewrites_legacy_single_user_api_key(tmp_path: Path, monkeypatch) -> None:
     repo = tmp_path / "repo"
     env_path = tmp_path / "custom.env"
     (repo / "tldw_Server_API" / "Config_Files").mkdir(parents=True)
@@ -299,9 +296,7 @@ def test_init_profile_rewrites_legacy_single_user_api_key(
     assert parse_api_key(written_env["SINGLE_USER_API_KEY"]) is not None
 
 
-def test_init_multi_user_profile_masks_admin_password_in_dry_run(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_init_multi_user_profile_masks_admin_password_in_dry_run(tmp_path: Path, monkeypatch) -> None:
     admin_pw = _literal("CorrectHorse", "BatteryStaple", "1!")
     repo = tmp_path / "repo"
     (repo / "tldw_Server_API" / "Config_Files").mkdir(parents=True)
@@ -368,9 +363,7 @@ def test_init_multi_user_profile_reports_reserved_admin_username(tmp_path: Path,
     assert "reserved" in actions[0]["admin_username"]["reason"]
 
 
-def test_init_multi_user_profile_reads_admin_env_and_masks_password(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_init_multi_user_profile_reads_admin_env_and_masks_password(tmp_path: Path, monkeypatch) -> None:
     repo = tmp_path / "repo"
     (repo / "tldw_Server_API" / "Config_Files").mkdir(parents=True)
     (repo / "pyproject.toml").write_text("[project]\nname='tldw-server'\n", encoding="utf-8")
@@ -414,9 +407,7 @@ def test_init_invalid_profile_returns_json_error() -> None:
     assert "Unsupported setup profile" in payload["notes"][0]
 
 
-def test_init_docker_multi_profile_defers_initializer_for_yes(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_init_docker_multi_profile_defers_initializer_for_yes(tmp_path: Path, monkeypatch) -> None:
     repo = tmp_path / "repo"
     env_path = tmp_path / "custom.env"
     (repo / "tldw_Server_API" / "Config_Files").mkdir(parents=True)
@@ -455,9 +446,7 @@ def test_init_docker_multi_profile_defers_initializer_for_yes(
     assert "JOBS_DB_URL" not in written_env
 
 
-def test_init_docker_multi_profile_clears_stale_database_urls(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_init_docker_multi_profile_clears_stale_database_urls(tmp_path: Path, monkeypatch) -> None:
     repo = tmp_path / "repo"
     env_path = tmp_path / "custom.env"
     (repo / "tldw_Server_API" / "Config_Files").mkdir(parents=True)
@@ -503,9 +492,7 @@ def test_init_docker_multi_profile_clears_stale_database_urls(
     assert "JOBS_DB_URL=" not in content
 
 
-def test_init_docker_multi_profile_writes_raw_env_values_for_compose(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_init_docker_multi_profile_writes_raw_env_values_for_compose(tmp_path: Path, monkeypatch) -> None:
     repo = tmp_path / "repo"
     env_path = tmp_path / "custom.env"
     admin_secret = _literal("Admin ", "#", "$Dollar", "1!")

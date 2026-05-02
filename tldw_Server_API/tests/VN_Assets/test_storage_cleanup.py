@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio as real_asyncio
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -210,6 +211,35 @@ async def test_save_vn_asset_image_registers_vn_source_feature(tmp_path: Path, m
     assert (outputs_dir / record["storage_path"]).read_bytes() == PNG_BYTES
 
 
+@pytest.mark.asyncio
+async def test_save_vn_asset_image_cleans_file_when_storage_service_lookup_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+    from tldw_Server_API.app.core.Storage import generated_file_helpers
+
+    outputs_dir = tmp_path / "outputs"
+    monkeypatch.setattr(DatabasePaths, "get_user_outputs_dir", staticmethod(lambda user_id: outputs_dir))
+
+    async def fail_get_storage_service() -> Any:
+        raise RuntimeError("storage unavailable")
+
+    monkeypatch.setattr(generated_file_helpers, "get_storage_service", fail_get_storage_service)
+
+    with pytest.raises(RuntimeError, match="storage unavailable"):
+        await generated_file_helpers.save_and_register_vn_asset_image(
+            user_id=1,
+            image_bytes=PNG_BYTES,
+            image_format="png",
+            pack_id=10,
+            item_id=20,
+            asset_type="sprite",
+        )
+
+    assert [path for path in outputs_dir.glob("**/*") if path.is_file()] == []
+
+
 def test_storage_schema_accepts_vn_assets_source_feature() -> None:
     now = datetime.now(timezone.utc)
 
@@ -226,6 +256,24 @@ def test_storage_schema_accepts_vn_assets_source_feature() -> None:
     )
 
     assert file_record.source_feature == "vn_assets"
+
+
+def test_unlink_vn_asset_storage_file_treats_delete_race_as_missing(
+    outputs_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core.VN_Assets.storage import unlink_vn_asset_storage_file
+
+    file_path = outputs_dir / "vn_assets" / "race.png"
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    file_path.write_bytes(PNG_BYTES)
+
+    def race_unlink(self: Path) -> None:
+        raise FileNotFoundError(str(self))
+
+    monkeypatch.setattr(Path, "unlink", race_unlink)
+
+    assert unlink_vn_asset_storage_file(user_id=USER_ID, storage_path="vn_assets/race.png") is False
 
 
 def test_content_endpoint_streams_owned_generated_file(
@@ -306,7 +354,7 @@ async def test_cleanup_dry_run_does_not_delete_files(
 
 
 @pytest.mark.asyncio
-async def test_cleanup_executes_rejected_file_delete_and_clears_item_storage(
+async def test_cleanup_executes_rejected_file_delete_and_removes_item(
     chacha_db: CharactersRAGDB,
     asset_with_generated_file: SimpleNamespace,
     fake_generated_files_repo: FakeGeneratedFilesRepo,
@@ -330,11 +378,7 @@ async def test_cleanup_executes_rejected_file_delete_and_clears_item_storage(
     assert response.reclaimed_bytes == len(PNG_BYTES)
     assert fake_generated_files_repo.hard_deleted_ids == [asset_with_generated_file.file_id]
     assert not (outputs_dir / "vn_assets/fixture.png").exists()
-    item = service.get_item_for_pack(asset_with_generated_file.pack_id, asset_with_generated_file.item_id)
-    assert item.generated_file_id is None
-    assert item.storage_ref is None
-    assert item.mime_type is None
-    assert item.bytes is None
+    assert service.repo.get_item(asset_with_generated_file.item_id) is None
 
 
 @pytest.mark.asyncio
@@ -439,7 +483,7 @@ def test_upload_endpoint_creates_draft_uploaded_item(
 
     response = client.post(
         f"/api/v1/vn-assets/packs/{pack.id}/items/upload",
-        data={"slot_id": str(slot.id), "variant_index": "2"},
+        data={"slot_id": str(slot.id), "variant_index": "0"},
         files={"file": ("sprite.png", VALID_PNG_BYTES, "image/png")},
     )
 
@@ -447,7 +491,7 @@ def test_upload_endpoint_creates_draft_uploaded_item(
     body = response.json()
     assert body["pack_id"] == pack.id
     assert body["slot_id"] == slot.id
-    assert body["variant_index"] == 2
+    assert body["variant_index"] == 0
     assert body["review_status"] == "draft"
     assert body["source"] == "uploaded"
     assert body["generated_file_id"] == 901
@@ -456,3 +500,173 @@ def test_upload_endpoint_creates_draft_uploaded_item(
     assert fake_service.calls[0]["source_feature"] == "vn_assets"
     assert fake_service.calls[0]["source_ref"] == f"vn_asset_item:{body['id']}"
     assert (outputs_dir / fake_service.calls[0]["storage_path"]).read_bytes() == VALID_PNG_BYTES
+
+
+def test_upload_endpoint_rejects_oversized_asset_before_storage_registration(
+    client: TestClient,
+    chacha_db: CharactersRAGDB,
+    character_id: int,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = VNAssetPackService(chacha_db, owner_user_id=USER_ID)
+    pack = service.create_pack(VNAssetPackCreate(title="Upload Pack", primary_character_id=character_id))
+    slot = service.apply_matrix(pack.id, "starter", {"variant_count": 1})[0]
+
+    monkeypatch.setattr(
+        vn_assets_endpoint,
+        "_get_vn_asset_upload_max_bytes",
+        lambda: len(VALID_PNG_BYTES) - 1,
+        raising=False,
+    )
+
+    response = client.post(
+        f"/api/v1/vn-assets/packs/{pack.id}/items/upload",
+        data={"slot_id": str(slot.id), "variant_index": "0"},
+        files={"file": ("sprite.png", VALID_PNG_BYTES, "image/png")},
+    )
+
+    assert response.status_code == 413
+    assert response.json()["detail"] == "vn_asset_upload_too_large"
+    assert service.repo.list_items(pack.id) == []
+
+
+@pytest.mark.parametrize("variant_index", [-1, 1])
+def test_upload_endpoint_rejects_invalid_variant_index(
+    client: TestClient,
+    chacha_db: CharactersRAGDB,
+    character_id: int,
+    outputs_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    variant_index: int,
+) -> None:
+    from tldw_Server_API.app.core.Storage import generated_file_helpers
+
+    fake_service = FakeStorageService()
+    service = VNAssetPackService(chacha_db, owner_user_id=USER_ID)
+    pack = service.create_pack(VNAssetPackCreate(title="Upload Pack", primary_character_id=character_id))
+    slot = service.apply_matrix(pack.id, "starter", {"variant_count": 1})[0]
+
+    async def fake_get_storage_service() -> FakeStorageService:
+        return fake_service
+
+    monkeypatch.setattr(generated_file_helpers, "get_storage_service", fake_get_storage_service)
+
+    response = client.post(
+        f"/api/v1/vn-assets/packs/{pack.id}/items/upload",
+        data={"slot_id": str(slot.id), "variant_index": str(variant_index)},
+        files={"file": ("sprite.png", VALID_PNG_BYTES, "image/png")},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "invalid_variant_index"
+    assert service.repo.list_items(pack.id) == []
+    assert fake_service.calls == []
+    assert list(outputs_dir.glob("**/*")) == []
+
+
+@pytest.mark.asyncio
+async def test_upload_item_rolls_back_item_when_storage_registration_fails(
+    chacha_db: CharactersRAGDB,
+    character_id: int,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core.Storage import generated_file_helpers
+
+    service = VNAssetPackService(chacha_db, owner_user_id=USER_ID)
+    pack = service.create_pack(VNAssetPackCreate(title="Upload Pack", primary_character_id=character_id))
+    slot = service.apply_matrix(pack.id, "starter", {"variant_count": 1})[0]
+
+    async def fail_register(**_kwargs: Any) -> dict[str, Any]:
+        raise RuntimeError("storage registration failed")
+
+    monkeypatch.setattr(
+        generated_file_helpers,
+        "save_and_register_vn_asset_image",
+        fail_register,
+    )
+
+    with pytest.raises(RuntimeError, match="storage registration failed"):
+        await service.upload_item(
+            pack.id,
+            slot_id=slot.id,
+            image_bytes=VALID_PNG_BYTES,
+            mime_type="image/png",
+            variant_index=0,
+        )
+
+    assert service.repo.list_items(pack.id) == []
+
+
+@pytest.mark.asyncio
+async def test_cleanup_deletes_item_before_unlinking_file(
+    chacha_db: CharactersRAGDB,
+    asset_with_generated_file: SimpleNamespace,
+    fake_generated_files_repo: FakeGeneratedFilesRepo,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core.VN_Assets import service as service_module
+
+    service = VNAssetPackService(chacha_db, owner_user_id=USER_ID)
+    service.review_item(
+        asset_with_generated_file.item_id,
+        VNAssetReviewRequest(review_status="rejected"),
+    )
+    unlink_calls: list[str] = []
+
+    def fake_unlink_vn_asset_storage_file(*, user_id: int, storage_path: str) -> bool:
+        item = service.repo.get_item(asset_with_generated_file.item_id)
+        assert item is None
+        unlink_calls.append(storage_path)
+        return True
+
+    monkeypatch.setattr(
+        service_module,
+        "unlink_vn_asset_storage_file",
+        fake_unlink_vn_asset_storage_file,
+    )
+
+    response = await service.cleanup_pack(
+        asset_with_generated_file.pack_id,
+        VNAssetCleanupRequest(dry_run=False, statuses=["rejected"]),
+        files_repo=fake_generated_files_repo,
+    )
+
+    assert response.files_deleted == 1
+    assert unlink_calls == ["vn_assets/fixture.png"]
+    assert service.repo.get_item(asset_with_generated_file.item_id) is None
+
+
+@pytest.mark.asyncio
+async def test_cleanup_offloads_storage_unlink_to_thread(
+    chacha_db: CharactersRAGDB,
+    asset_with_generated_file: SimpleNamespace,
+    fake_generated_files_repo: FakeGeneratedFilesRepo,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core.VN_Assets import service as service_module
+
+    service = VNAssetPackService(chacha_db, owner_user_id=USER_ID)
+    service.review_item(
+        asset_with_generated_file.item_id,
+        VNAssetReviewRequest(review_status="rejected"),
+    )
+    to_thread_calls: list[Any] = []
+
+    class FakeAsyncio:
+        async def to_thread(self, func: Any, /, *args: Any, **kwargs: Any) -> Any:
+            to_thread_calls.append(func)
+            return func(*args, **kwargs)
+
+        async def gather(self, *awaitables: Any) -> list[Any]:
+            return list(await real_asyncio.gather(*awaitables))
+
+    monkeypatch.setattr(service_module, "asyncio", FakeAsyncio(), raising=False)
+
+    response = await service.cleanup_pack(
+        asset_with_generated_file.pack_id,
+        VNAssetCleanupRequest(dry_run=False, statuses=["rejected"]),
+        files_repo=fake_generated_files_repo,
+    )
+
+    assert response.files_deleted == 1
+    assert service_module.unlink_vn_asset_storage_file in to_thread_calls

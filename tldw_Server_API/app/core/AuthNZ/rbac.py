@@ -9,7 +9,7 @@ and now uses the AuthnzRbacRepo facade for database access.
 from loguru import logger
 
 from tldw_Server_API.app.core.AuthNZ.repos.rbac_repo import AuthnzRbacRepo
-from tldw_Server_API.app.core.AuthNZ.settings import get_settings, get_settings_generation
+from tldw_Server_API.app.core.AuthNZ.settings import get_settings_generation
 
 _RBAC_REPO: AuthnzRbacRepo | None = None
 _RBAC_SETTINGS_GEN: int = -1
@@ -52,16 +52,9 @@ def get_effective_permissions(user_id: int) -> list[str]:
     try:
         return _get_rbac_repo().get_effective_permissions(user_id)
     except Exception as e:
-        try:
-            redact_logs = get_settings().PII_REDACT_LOGS
-        except Exception:
-            redact_logs = False
-        if redact_logs:
-            logger.error(f"RBAC: failed to compute effective permissions for authenticated user (details redacted): {e}")
-        else:
-            logger.error(f"RBAC: failed to compute effective permissions for user {user_id}: {e}")
+        logger.error("RBAC effective permissions check failed")
         # SECURITY: Raise instead of returning [] to force callers to handle error
-        raise RBACError(f"Failed to compute effective permissions: {e}") from e
+        raise RBACError("Failed to compute effective permissions") from e
 
 
 def user_has_permission(user_id: int, permission: str) -> bool:
@@ -79,13 +72,6 @@ def user_has_permission(user_id: int, permission: str) -> bool:
     try:
         return _get_rbac_repo().has_permission(user_id, permission)
     except Exception as e:
-        try:
-            redact_logs = get_settings().PII_REDACT_LOGS
-        except Exception:
-            redact_logs = False
-        if redact_logs:
-            logger.error(f"RBAC: permission check failed for authenticated user (details redacted), perm={permission}: {e}")
-        else:
-            logger.error(f"RBAC: permission check failed for user {user_id}, perm={permission}: {e}")
+        logger.error("RBAC permission check failed")
         # SECURITY: Raise instead of returning False to force callers to handle error
-        raise RBACError(f"Failed to check permission {permission}: {e}") from e
+        raise RBACError("Failed to check permission") from e

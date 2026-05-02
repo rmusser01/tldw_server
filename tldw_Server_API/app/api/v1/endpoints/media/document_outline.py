@@ -13,7 +13,7 @@ from tldw_Server_API.app.api.v1.schemas.document_outline import (
     DocumentOutlineResponse,
     OutlineEntry,
 )
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, User
 from tldw_Server_API.app.core.Storage import get_storage_backend
 from tldw_Server_API.app.core.Storage.storage_interface import StorageError
 
@@ -27,6 +27,7 @@ def _check_pymupdf_available() -> bool:
     """Check if PyMuPDF is available for import."""
     try:
         import pymupdf  # noqa: F401
+
         return True
     except ImportError:
         return False
@@ -76,9 +77,7 @@ def _extract_pdf_outline(pdf_data: bytes | BinaryIO) -> tuple[list[OutlineEntry]
                     # Filter out entries with empty titles
                     title_stripped = title.strip()
                     if title_stripped:
-                        entries.append(
-                            OutlineEntry(level=level, title=title_stripped, page=page)
-                        )
+                        entries.append(OutlineEntry(level=level, title=title_stripped, page=page))
 
         doc.close()
         logger.debug(
@@ -88,8 +87,8 @@ def _extract_pdf_outline(pdf_data: bytes | BinaryIO) -> tuple[list[OutlineEntry]
         )
         return entries, total_pages
 
-    except Exception as e:
-        logger.error("Error extracting PDF outline: {}", e)
+    except Exception:
+        logger.error("Error extracting PDF outline")
         return [], 0
 
 
@@ -99,9 +98,7 @@ def _extract_pdf_outline(pdf_data: bytes | BinaryIO) -> tuple[list[OutlineEntry]
     summary="Get Document Outline/Table of Contents",
     response_model=DocumentOutlineResponse,
     responses={
-        200: {
-            "description": "Outline retrieved (may be empty if document has no TOC or is not a PDF)"
-        },
+        200: {"description": "Outline retrieved (may be empty if document has no TOC or is not a PDF)"},
         404: {"description": "Media item not found"},
         413: {"description": "File too large for outline extraction (max 500MB)"},
         500: {"description": "Server error (database, storage, or extraction failure)"},
@@ -163,7 +160,7 @@ async def get_document_outline(
     try:
         media = db.get_media_by_id(media_id, include_deleted=False, include_trash=False)
     except Exception as e:
-        logger.error("Database error fetching media_id={}: {}", media_id, e)
+        logger.error("Database error fetching media item")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Database error while fetching media item",
@@ -287,11 +284,7 @@ async def get_document_outline(
         pdf_file = await storage.retrieve(storage_path)
 
     except StorageError as e:
-        logger.error(
-            "Storage error retrieving file for outline: {} - {}",
-            storage_path,
-            e,
-        )
+        logger.error("Storage error retrieving file for outline")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error accessing file storage",
@@ -309,12 +302,7 @@ async def get_document_outline(
         )
 
     except Exception as e:
-        logger.error(
-            "Error extracting outline for media_id={}: {}",
-            media_id,
-            e,
-            exc_info=True,
-        )
+        logger.error("Error extracting document outline")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error extracting document outline",
