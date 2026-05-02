@@ -162,6 +162,63 @@ Response:
 }
 ```
 
+### `exec_guest`
+
+Request:
+
+```json
+{
+  "operation": "exec_guest",
+  "protocol_version": "1",
+  "request": {
+    "vm_id": "run-123",
+    "argv": ["/bin/echo", "ok"],
+    "cwd": "/workspace",
+    "env": {
+      "PATH": "/usr/local/bin:/usr/bin:/bin"
+    },
+    "timeout_sec": 30
+  }
+}
+```
+
+`vm_id` and `argv` are required. `cwd` defaults to `/workspace`, `env` defaults
+to an empty object, and `timeout_sec` defaults to `30`.
+
+The helper enforces this request contract before forwarding execution to the
+guest agent:
+
+- `argv` must be a non-empty string array, cannot contain empty or NUL-bearing
+  arguments, and is capped at 128 arguments / 32 KiB total argument text.
+- `cwd` must lexically remain under `/workspace` and cannot contain `..` path
+  components. This is a helper protocol boundary, not a full guest filesystem
+  authorization model.
+- `env` must be a string-to-string object with at most 128 entries / 32 KiB
+  total text. Keys must be non-empty and cannot contain `=`, NUL, or control
+  characters. Values cannot contain NUL.
+- `timeout_sec` must be finite, positive, and no greater than 3600 seconds.
+
+Malformed JSON shape or missing required fields returns `invalid_request`.
+Semantic contract denials return one of `exec_argv_invalid`, `exec_cwd_invalid`,
+`exec_env_invalid`, or `exec_timeout_invalid`; the `message` field contains the
+stable reason.
+
+Response:
+
+```json
+{
+  "protocol_version": "1",
+  "helper_version": "0.1.0",
+  "exit_code": 0,
+  "stdout": "ok\n",
+  "stderr": "",
+  "details": {
+    "transport": "vsock",
+    "vm_id": "run-123"
+  }
+}
+```
+
 ### `validate_template`
 
 ```json

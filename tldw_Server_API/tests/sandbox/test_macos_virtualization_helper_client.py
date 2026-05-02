@@ -28,6 +28,7 @@ class _FakeClientSocket:
         self._responses = responses
         self._requests = requests
         self._buffer = b""
+        self._timeout: float | None = None
 
     def __enter__(self) -> "_FakeClientSocket":
         return self
@@ -36,7 +37,7 @@ class _FakeClientSocket:
         self.close()
 
     def settimeout(self, timeout: float) -> None:
-        del timeout
+        self._timeout = timeout
 
     def connect(self, path: str) -> None:
         if path != self._socket_path:
@@ -44,6 +45,7 @@ class _FakeClientSocket:
 
     def sendall(self, payload: bytes) -> None:
         request = json.loads(payload.decode("utf-8").strip())
+        request["_socket_timeout"] = self._timeout
         self._requests.append(request)
         operation = str(request["operation"])
         response = self._responses[operation]
@@ -154,6 +156,25 @@ def test_fake_helper_supports_vz_linux_vm_create_and_exec(monkeypatch) -> None:
     assert exec_reply.exit_code == 0
     assert exec_reply.stdout == b"ok\n"
     assert exec_reply.details["vm_id"] == "vz-linux-run-1"
+
+
+def test_fake_helper_rejects_invalid_exec_guest_contract(monkeypatch) -> None:
+    monkeypatch.setenv("TEST_MODE", "1")
+
+    client = MacOSVirtualizationHelperClient()
+    invalid_requests = [
+        ({"argv": [], "cwd": "/workspace"}, "exec_argv_invalid"),
+        ({"argv": ["/bin/echo", ""], "cwd": "/workspace"}, "exec_argv_invalid"),
+        ({"argv": ["/bin/echo"], "cwd": "/tmp"}, "exec_cwd_invalid"),
+        ({"argv": ["/bin/echo"], "cwd": "/workspace/../tmp"}, "exec_cwd_invalid"),
+        ({"argv": ["/bin/echo"], "cwd": "/workspace", "env": {"BAD=KEY": "1"}}, "exec_env_invalid"),
+        ({"argv": ["/bin/echo"], "cwd": "/workspace", "timeout_sec": 0}, "exec_timeout_invalid"),
+    ]
+
+    for request, expected_code in invalid_requests:
+        with pytest.raises(MacOSVirtualizationHelperFailure) as exc_info:
+            client.exec_guest(vm_id="vm-test", request=request)
+        assert exc_info.value.error_code == expected_code
 
 
 def test_helper_create_vm_fails_closed_without_test_mode(monkeypatch) -> None:
@@ -509,6 +530,40 @@ def test_socket_helper_supports_ping_validate_create_exec_status_and_terminate(m
     assert requests[2]["request"]["template_id"] == "vz_linux:debian-bookworm-arm64"
     assert requests[2]["request"]["run_manifest_path"] == "/tmp/image-store/runs/run-1/manifest.json"
     assert requests[2]["request"]["planning_source"] == "image_store"
+    assert requests[3]["_socket_timeout"] == 35.0
+
+
+def test_socket_helper_treats_non_finite_exec_timeout_as_missing(monkeypatch) -> None:
+    monkeypatch.delenv("TEST_MODE", raising=False)
+    responses = [
+        {
+            "protocol_version": "1",
+            "helper_version": "0.1.0",
+            "exit_code": 0,
+            "stdout": "ok\n",
+            "stderr": "",
+            "details": {"vm_id": "vm-transport-1", "transport": "vsock"},
+        },
+        {
+            "protocol_version": "1",
+            "helper_version": "0.1.0",
+            "exit_code": 0,
+            "stdout": "ok\n",
+            "stderr": "",
+            "details": {"vm_id": "vm-transport-1", "transport": "vsock"},
+        },
+    ]
+    requests = _install_fake_helper_socket(monkeypatch, responses={"exec_guest": responses})
+
+    client = MacOSVirtualizationHelperClient()
+
+    for raw_timeout in ("inf", "nan"):
+        client.exec_guest(
+            vm_id="vm-transport-1",
+            request={"argv": ["/bin/echo", "ok"], "timeout_sec": raw_timeout},
+        )
+
+    assert [request["_socket_timeout"] for request in requests] == [35.0, 35.0]
 
 
 def test_socket_helper_raises_protocol_error_for_mismatched_protocol(monkeypatch) -> None:

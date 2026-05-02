@@ -196,17 +196,36 @@ final class UnixSocketServer {
                 )
             )
         case "exec_guest":
-            let argv = (request.request["argv"]?.arrayValue ?? []).compactMap { $0.stringValue }
-            let env = request.request["env"]?.objectValue?.compactMapValues { $0.stringValue } ?? [:]
-            return try encoder.encode(
-                try service.execGuest(
-                    vmID: request.request["vm_id"]?.stringValue ?? "",
-                    argv: argv,
-                    cwd: request.request["cwd"]?.stringValue ?? "",
-                    env: env,
-                    timeoutSeconds: TimeInterval(request.request["timeout_sec"]?.intValue ?? 30)
+            do {
+                let vmID = try requiredStringField(request.request, key: "vm_id")
+                let argv = try requiredStringArrayField(request.request, key: "argv")
+                let cwd = try optionalStringField(
+                    request.request,
+                    key: "cwd",
+                    defaultValue: "/workspace"
                 )
-            )
+                let env = try optionalStringDictionaryField(
+                    request.request,
+                    key: "env",
+                    defaultValue: [:]
+                )
+                let timeoutSeconds = try optionalTimeIntervalField(
+                    request.request,
+                    key: "timeout_sec",
+                    defaultValue: 30
+                )
+                return try encoder.encode(
+                    try service.execGuest(
+                        vmID: vmID,
+                        argv: argv,
+                        cwd: cwd,
+                        env: env,
+                        timeoutSeconds: timeoutSeconds
+                    )
+                )
+            } catch {
+                return encodeErrorResponse(for: error)
+            }
         default:
             return try encoder.encode(
                 HelperErrorResponse(
@@ -536,6 +555,76 @@ final class UnixSocketServer {
         return stringValue
     }
 
+    private func requiredStringField(
+        _ request: [String: JSONValue],
+        key: String
+    ) throws -> String {
+        guard let value = request[key] else {
+            throw UnixSocketServerError.invalidRequest
+        }
+        guard let stringValue = value.stringValue else {
+            throw UnixSocketServerError.invalidRequest
+        }
+        return stringValue
+    }
+
+    private func requiredStringArrayField(
+        _ request: [String: JSONValue],
+        key: String
+    ) throws -> [String] {
+        guard let value = request[key] else {
+            throw UnixSocketServerError.invalidRequest
+        }
+        guard let arrayValue = value.arrayValue else {
+            throw UnixSocketServerError.invalidRequest
+        }
+        return try arrayValue.map { item in
+            guard let stringValue = item.stringValue else {
+                throw UnixSocketServerError.invalidRequest
+            }
+            return stringValue
+        }
+    }
+
+    private func optionalStringDictionaryField(
+        _ request: [String: JSONValue],
+        key: String,
+        defaultValue: [String: String]
+    ) throws -> [String: String] {
+        guard let value = request[key] else {
+            return defaultValue
+        }
+        guard let objectValue = value.objectValue else {
+            throw UnixSocketServerError.invalidRequest
+        }
+        var parsed: [String: String] = [:]
+        for (envKey, envValue) in objectValue {
+            guard let stringValue = envValue.stringValue else {
+                throw UnixSocketServerError.invalidRequest
+            }
+            parsed[envKey] = stringValue
+        }
+        return parsed
+    }
+
+    private func optionalTimeIntervalField(
+        _ request: [String: JSONValue],
+        key: String,
+        defaultValue: TimeInterval
+    ) throws -> TimeInterval {
+        guard let value = request[key] else {
+            return defaultValue
+        }
+        switch value {
+        case .int(let intValue):
+            return TimeInterval(intValue)
+        case .double(let doubleValue):
+            return TimeInterval(doubleValue)
+        default:
+            throw UnixSocketServerError.invalidRequest
+        }
+    }
+
     private func errorCode(for error: Error) -> String {
         switch error {
         case UnixSocketServerError.invalidRequest, is DecodingError:
@@ -548,6 +637,14 @@ final class UnixSocketServer {
             return "unsupported_operation"
         case HelperServiceError.unsupportedNetworkPolicy(let policy):
             return policy == "allowlist" ? "strict_allowlist_not_supported" : "unsupported_network_policy"
+        case HelperServiceError.invalidExecArgv:
+            return "exec_argv_invalid"
+        case HelperServiceError.invalidExecCwd:
+            return "exec_cwd_invalid"
+        case HelperServiceError.invalidExecEnv:
+            return "exec_env_invalid"
+        case HelperServiceError.invalidExecTimeout:
+            return "exec_timeout_invalid"
         case VZLinuxVMManagerError.bootNotImplemented:
             return "boot_not_implemented"
         case GuestBridgeError.guestReadinessNotImplemented:
@@ -582,6 +679,11 @@ final class UnixSocketServer {
             return "invalid_request"
         case HelperServiceError.unsupportedNetworkPolicy(let policy):
             return policy
+        case HelperServiceError.invalidExecArgv(let reason),
+             HelperServiceError.invalidExecCwd(let reason),
+             HelperServiceError.invalidExecEnv(let reason),
+             HelperServiceError.invalidExecTimeout(let reason):
+            return reason
         default:
             return String(describing: error)
         }

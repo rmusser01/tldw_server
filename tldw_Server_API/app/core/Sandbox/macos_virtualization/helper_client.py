@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import socket
 from datetime import datetime, timezone
@@ -26,7 +27,14 @@ from .models import (
 EXPECTED_HELPER_PROTOCOL_VERSION = "1"
 _DEFAULT_PROTOCOL_VERSION = EXPECTED_HELPER_PROTOCOL_VERSION
 _DEFAULT_SOCKET_TIMEOUT_SEC = 5.0
+_DEFAULT_EXEC_TIMEOUT_SEC = 30.0
 _HELPER_SOCKET_ENV = "TLDW_SANDBOX_MACOS_HELPER_SOCKET"
+_EXEC_WORKSPACE_ROOT = "/workspace"
+_MAX_EXEC_ARGV_COUNT = 128
+_MAX_EXEC_ARGV_BYTES = 32 * 1024
+_MAX_EXEC_ENV_COUNT = 128
+_MAX_EXEC_ENV_BYTES = 32 * 1024
+_MAX_EXEC_TIMEOUT_SEC = 3_600.0
 
 
 class MacOSVirtualizationHelperUnavailable(RuntimeError):
@@ -161,7 +169,7 @@ class MacOSVirtualizationHelperClient:
 
     def exec_guest(self, *, vm_id: str, request: dict[str, Any]) -> HelperExecReply:
         if is_truthy(os.getenv("TEST_MODE")):
-            argv = list(request.get("argv") or [])
+            argv, _cwd, _env, _timeout_sec = self._validate_exec_guest_request(request)
             stdout = b""
             if argv[:2] == ["/bin/echo", "ok"]:
                 stdout = b"ok\n"
@@ -173,7 +181,10 @@ class MacOSVirtualizationHelperClient:
         payload = self._request(
             "exec_guest",
             {"vm_id": vm_id, **dict(request)},
-            timeout_sec=self._operation_timeout_sec(request),
+            timeout_sec=self._operation_timeout_sec(
+                request,
+                default_request_timeout_sec=_DEFAULT_EXEC_TIMEOUT_SEC,
+            ),
         )
         stdout = payload.get("stdout", "")
         stderr = payload.get("stderr", "")
@@ -255,14 +266,33 @@ class MacOSVirtualizationHelperClient:
             )
         return response
 
-    def _operation_timeout_sec(self, request: dict[str, Any]) -> float:
+    def _operation_timeout_sec(
+        self,
+        request: dict[str, Any],
+        *,
+        default_request_timeout_sec: float | None = None,
+    ) -> float:
+        base_timeout = self._finite_positive_timeout(self._timeout_sec) or _DEFAULT_SOCKET_TIMEOUT_SEC
+        default_timeout = self._finite_positive_timeout(default_request_timeout_sec)
         try:
             requested = float(request.get("timeout_sec") or 0)
         except (TypeError, ValueError):
             requested = 0.0
+        if not math.isfinite(requested) or requested <= 0:
+            requested = default_timeout or 0.0
         if requested <= 0:
-            return self._timeout_sec
-        return max(self._timeout_sec, requested + 5.0)
+            return base_timeout
+        return max(base_timeout, requested + 5.0)
+
+    @staticmethod
+    def _finite_positive_timeout(value: Any) -> float | None:
+        try:
+            timeout = float(value or 0)
+        except (TypeError, ValueError):
+            return None
+        if not math.isfinite(timeout) or timeout <= 0:
+            return None
+        return timeout
 
     def _fake_template_reply(self, request: dict[str, Any]) -> dict[str, Any]:
         runtime = str(request.get("runtime") or "vz_linux").strip().lower() or "vz_linux"
@@ -314,6 +344,94 @@ class MacOSVirtualizationHelperClient:
     def _network_policy_error_code(network_policy: str) -> str:
         """Return the stable helper error code for an unsupported normalized network policy."""
         return "strict_allowlist_not_supported" if network_policy == "allowlist" else "unsupported_network_policy"
+
+    @classmethod
+    def _validate_exec_guest_request(
+        cls,
+        request: dict[str, Any],
+    ) -> tuple[list[str], str, dict[str, str], float]:
+        if not isinstance(request, dict):
+            raise MacOSVirtualizationHelperFailure("invalid_request", "invalid_request")
+
+        if "argv" not in request:
+            raise MacOSVirtualizationHelperFailure("invalid_request", "invalid_request")
+        raw_argv = request["argv"]
+        if not isinstance(raw_argv, list) or any(not isinstance(item, str) for item in raw_argv):
+            raise MacOSVirtualizationHelperFailure("invalid_request", "invalid_request")
+        argv = list(raw_argv)
+
+        raw_cwd = request.get("cwd", _EXEC_WORKSPACE_ROOT)
+        if not isinstance(raw_cwd, str):
+            raise MacOSVirtualizationHelperFailure("invalid_request", "invalid_request")
+        cwd = raw_cwd
+
+        raw_env = request.get("env", {})
+        if not isinstance(raw_env, dict):
+            raise MacOSVirtualizationHelperFailure("invalid_request", "invalid_request")
+        if any(not isinstance(key, str) or not isinstance(value, str) for key, value in raw_env.items()):
+            raise MacOSVirtualizationHelperFailure("invalid_request", "invalid_request")
+        env = dict(raw_env)
+
+        raw_timeout_sec = request.get("timeout_sec", _DEFAULT_EXEC_TIMEOUT_SEC)
+        if isinstance(raw_timeout_sec, bool) or not isinstance(raw_timeout_sec, (int, float)):
+            raise MacOSVirtualizationHelperFailure("invalid_request", "invalid_request")
+        timeout_sec = float(raw_timeout_sec)
+
+        cls._validate_exec_argv(argv)
+        cls._validate_exec_cwd(cwd)
+        cls._validate_exec_env(env)
+        cls._validate_exec_timeout(timeout_sec)
+        return argv, cwd, env, timeout_sec
+
+    @staticmethod
+    def _validate_exec_argv(argv: list[str]) -> None:
+        if not argv:
+            raise MacOSVirtualizationHelperFailure("exec_argv_invalid", "argv_required")
+        if len(argv) > _MAX_EXEC_ARGV_COUNT:
+            raise MacOSVirtualizationHelperFailure("exec_argv_invalid", "argv_too_large")
+        total_bytes = 0
+        for argument in argv:
+            if not argument:
+                raise MacOSVirtualizationHelperFailure("exec_argv_invalid", "argv_empty_argument")
+            if "\x00" in argument:
+                raise MacOSVirtualizationHelperFailure("exec_argv_invalid", "argv_invalid")
+            total_bytes += len(argument.encode("utf-8"))
+            if total_bytes > _MAX_EXEC_ARGV_BYTES:
+                raise MacOSVirtualizationHelperFailure("exec_argv_invalid", "argv_too_large")
+
+    @staticmethod
+    def _validate_exec_cwd(cwd: str) -> None:
+        if (
+            not cwd
+            or "\x00" in cwd
+            or (cwd != _EXEC_WORKSPACE_ROOT and not cwd.startswith(f"{_EXEC_WORKSPACE_ROOT}/"))
+            or ".." in cwd.split("/")
+        ):
+            raise MacOSVirtualizationHelperFailure("exec_cwd_invalid", "cwd_outside_workspace")
+
+    @staticmethod
+    def _validate_exec_env(env: dict[str, str]) -> None:
+        if len(env) > _MAX_EXEC_ENV_COUNT:
+            raise MacOSVirtualizationHelperFailure("exec_env_invalid", "env_too_large")
+        total_bytes = 0
+        for key, value in env.items():
+            if (
+                not key
+                or "=" in key
+                or "\x00" in key
+                or any(ord(character) < 0x20 or ord(character) == 0x7F for character in key)
+            ):
+                raise MacOSVirtualizationHelperFailure("exec_env_invalid", "env_key_invalid")
+            if "\x00" in value:
+                raise MacOSVirtualizationHelperFailure("exec_env_invalid", "env_value_invalid")
+            total_bytes += len(key.encode("utf-8")) + len(value.encode("utf-8"))
+            if total_bytes > _MAX_EXEC_ENV_BYTES:
+                raise MacOSVirtualizationHelperFailure("exec_env_invalid", "env_too_large")
+
+    @staticmethod
+    def _validate_exec_timeout(timeout_sec: float) -> None:
+        if not math.isfinite(timeout_sec) or timeout_sec <= 0 or timeout_sec > _MAX_EXEC_TIMEOUT_SEC:
+            raise MacOSVirtualizationHelperFailure("exec_timeout_invalid", "timeout_out_of_range")
 
     @staticmethod
     def _read_response(client: socket.socket) -> dict[str, Any]:

@@ -50,7 +50,7 @@ import Testing
     #expect(createJSON?["state"] as? String == "running")
 
     let execRequest = """
-    {"operation":"exec_guest","protocol_version":"1","request":{"vm_id":"vm-route","argv":["/bin/echo","ok"],"cwd":"/workspace","timeout_sec":15}}
+    {"operation":"exec_guest","protocol_version":"1","request":{"vm_id":"vm-route","argv":["/bin/echo","ok"],"cwd":"/workspace","timeout_sec":15.5}}
     """.data(using: .utf8)!
     let execResponseData = try server.handleRequestData(execRequest)
     let execJSON = try JSONSerialization.jsonObject(with: execResponseData) as? [String: Any]
@@ -59,6 +59,110 @@ import Testing
     #expect(execJSON?["exit_code"] as? Int == 0)
     #expect(execJSON?["stdout"] as? String == "ok\n")
     #expect(guestBridge.lastExec?.vmID == "vm-route")
+    #expect(guestBridge.lastExec?.timeout == 15.5)
+}
+
+@Test func unixSocketServerRejectsMalformedExecGuestRequestShape() throws {
+    let registry = VMRegistry()
+    let manager = VZLinuxVMManager(
+        registry: registry,
+        bootDriver: RecordingBootDriver(),
+        guestBridge: RecordingGuestBridge()
+    )
+    let service = HelperService(
+        hostFacts: HostFacts(isMacOS: true, isAppleSilicon: true),
+        registry: registry,
+        vmManager: manager
+    )
+    let server = UnixSocketServer(
+        socketPath: "/tmp/macos-vz-helper.sock",
+        service: service
+    )
+
+    let createRequest = """
+    {"operation":"create_vm","protocol_version":"1","request":{"vm_name":"vm-exec-shape","template":"/tmp/template.img","workspace_path":"/workspace"}}
+    """.data(using: .utf8)!
+    _ = try server.handleRequestData(createRequest)
+
+    let malformedRequests = [
+        """
+        {"operation":"exec_guest","protocol_version":"1","request":{"vm_id":"vm-exec-shape","argv":"/bin/echo","cwd":"/workspace","timeout_sec":15}}
+        """,
+        """
+        {"operation":"exec_guest","protocol_version":"1","request":{"vm_id":"vm-exec-shape","argv":["/bin/echo",1],"cwd":"/workspace","timeout_sec":15}}
+        """,
+        """
+        {"operation":"exec_guest","protocol_version":"1","request":{"vm_id":"vm-exec-shape","argv":["/bin/echo"],"cwd":["/workspace"],"timeout_sec":15}}
+        """,
+        """
+        {"operation":"exec_guest","protocol_version":"1","request":{"vm_id":"vm-exec-shape","argv":["/bin/echo"],"cwd":"/workspace","env":{"OK":1},"timeout_sec":15}}
+        """,
+        """
+        {"operation":"exec_guest","protocol_version":"1","request":{"vm_id":"vm-exec-shape","argv":["/bin/echo"],"cwd":"/workspace","timeout_sec":"15"}}
+        """,
+    ]
+
+    for request in malformedRequests {
+        let responseData = try server.handleRequestData(request.data(using: .utf8)!)
+        let json = try JSONSerialization.jsonObject(with: responseData) as? [String: Any]
+        #expect(json?["error_code"] as? String == "invalid_request")
+    }
+}
+
+@Test func unixSocketServerRejectsInvalidExecGuestContract() throws {
+    let registry = VMRegistry()
+    let manager = VZLinuxVMManager(
+        registry: registry,
+        bootDriver: RecordingBootDriver(),
+        guestBridge: RecordingGuestBridge()
+    )
+    let service = HelperService(
+        hostFacts: HostFacts(isMacOS: true, isAppleSilicon: true),
+        registry: registry,
+        vmManager: manager
+    )
+    let server = UnixSocketServer(
+        socketPath: "/tmp/macos-vz-helper.sock",
+        service: service
+    )
+
+    let createRequest = """
+    {"operation":"create_vm","protocol_version":"1","request":{"vm_name":"vm-exec-contract","template":"/tmp/template.img","workspace_path":"/workspace"}}
+    """.data(using: .utf8)!
+    _ = try server.handleRequestData(createRequest)
+
+    let invalidRequestsAndCodes = [
+        (
+            """
+            {"operation":"exec_guest","protocol_version":"1","request":{"vm_id":"vm-exec-contract","argv":[],"cwd":"/workspace","timeout_sec":15}}
+            """,
+            "exec_argv_invalid"
+        ),
+        (
+            """
+            {"operation":"exec_guest","protocol_version":"1","request":{"vm_id":"vm-exec-contract","argv":["/bin/echo"],"cwd":"/workspace/../tmp","timeout_sec":15}}
+            """,
+            "exec_cwd_invalid"
+        ),
+        (
+            """
+            {"operation":"exec_guest","protocol_version":"1","request":{"vm_id":"vm-exec-contract","argv":["/bin/echo"],"cwd":"/workspace","env":{"BAD=KEY":"1"},"timeout_sec":15}}
+            """,
+            "exec_env_invalid"
+        ),
+        (
+            """
+            {"operation":"exec_guest","protocol_version":"1","request":{"vm_id":"vm-exec-contract","argv":["/bin/echo"],"cwd":"/workspace","timeout_sec":0}}
+            """,
+            "exec_timeout_invalid"
+        ),
+    ]
+
+    for (request, expectedCode) in invalidRequestsAndCodes {
+        let responseData = try server.handleRequestData(request.data(using: .utf8)!)
+        let json = try JSONSerialization.jsonObject(with: responseData) as? [String: Any]
+        #expect(json?["error_code"] as? String == expectedCode)
+    }
 }
 
 @Test func unixSocketServerForwardsCreateVMOwnershipMetadata() throws {
