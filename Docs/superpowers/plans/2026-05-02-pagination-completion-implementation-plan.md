@@ -746,6 +746,17 @@ Classified Paper Search provider/detail rows:
 - Research run events use an SSE stream with `after_id`, not response-body
   pagination.
 
+Classified Media page-family rows:
+
+- Media list, trash, metadata search, and search routes already expose
+  canonical page pagination.
+- Document annotation/figure/outline and reading-progress routes are bounded
+  detail/artifact responses where totals are resource metadata.
+- Media ingest job events use an SSE stream with `after_id`.
+- Media keywords is a bounded suggestion list; the ingest job list remains the
+  unresolved Media candidate because it has a limit cap but no continuation
+  input yet.
+
 - [ ] **Step 5: Commit one family**
 
 Use a family-specific message, for example:

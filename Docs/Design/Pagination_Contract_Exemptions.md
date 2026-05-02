@@ -62,6 +62,8 @@ Current pagination-sensitive examples:
   controls stream termination, not a response-body page contract.
 - `GET /research/runs/{session_id}/events/stream`: SSE event stream using
   `after_id`; keep continuation in the stream cursor channel.
+- `GET /api/v1/media/ingest/jobs/events/stream`: SSE event stream using
+  `after_id`; keep continuation in the stream cursor channel.
 - `GET /watchlists/runs/export.csv`: CSV export; keep selection/filter inputs
   separate from response-body pagination metadata.
 
@@ -150,6 +152,15 @@ Current examples:
   `GET /api/v1/paper-search/arxiv/by-id` and
   `GET /api/v1/paper-search/wiley/by-doi`: single-record provider/detail
   lookups, not collection pages.
+- `GET /api/v1/media/{media_id}/annotations` and
+  `GET /api/v1/media/{media_id}/figures`: bounded document artifact snapshots
+  without pagination inputs.
+- `GET /api/v1/media/{media_id}/outline`: document structure response;
+  `total_pages` is document metadata, not a pagination contract.
+- `GET` and `PUT /api/v1/media/{media_id}/progress`: reading progress state;
+  `total_pages` is reading-position metadata, not collection pagination.
+- `GET /api/v1/media/keywords`: bounded keyword suggestion list with a limit
+  cap but no continuation input.
 
 ## Review Rules
 
