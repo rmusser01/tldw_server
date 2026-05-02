@@ -5,13 +5,14 @@ Maintenance-scheduler startup helpers extracted from the application lifespan.
 from __future__ import annotations
 
 import os
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
 from loguru import logger
 
 from tldw_Server_API.app.core.testing import is_truthy as _is_truthy
-from tldw_Server_API.app.services.lifecycle_workers import ManagedWorker, ShutdownPhase
+from tldw_Server_API.app.services.lifecycle_workers import ManagedWorker, ShutdownPhase, WorkerInventory
 
 _STARTUP_GUARD_EXCEPTIONS = (
     AttributeError,
@@ -38,7 +39,7 @@ class MaintenanceSchedulerHandles:
 
 async def start_maintenance_schedulers(
     *,
-    worker_inventory: Any | None = None,
+    worker_inventory: WorkerInventory | None = None,
 ) -> MaintenanceSchedulerHandles:
     """Start the env-gated maintenance scheduler batch and return explicit task handles."""
     return MaintenanceSchedulerHandles(
@@ -83,7 +84,7 @@ async def _start_outputs_purge_scheduler() -> Any | None:
 
 async def _start_kanban_activity_cleanup_scheduler(
     *,
-    worker_inventory: Any | None = None,
+    worker_inventory: WorkerInventory | None = None,
 ) -> Any | None:
     return await _start_env_gated_task(
         env_key="KANBAN_ACTIVITY_CLEANUP_ENABLED",
@@ -111,7 +112,7 @@ async def _start_ingestion_sources_cleanup_scheduler() -> Any | None:
 
 async def _start_kanban_purge_scheduler(
     *,
-    worker_inventory: Any | None = None,
+    worker_inventory: WorkerInventory | None = None,
 ) -> Any | None:
     return await _start_env_gated_task(
         env_key="KANBAN_PURGE_ENABLED",
@@ -160,10 +161,16 @@ async def _start_env_gated_task(
     disabled_message: str,
     started_message: str,
     failure_message: str,
-    starter,
-    worker_inventory: Any | None = None,
+    starter: Callable[[], Awaitable[Any | None]],
+    worker_inventory: WorkerInventory | None = None,
     worker_name: str | None = None,
 ) -> Any | None:
+    """Start one env-gated scheduler and optionally register it for managed shutdown.
+
+    Scheduler startup failures return ``None``. Inventory registration failures
+    are logged without hiding a successfully started task handle.
+    """
+
     try:
         if not _env_enabled(env_key):
             logger.info(disabled_message)
@@ -171,16 +178,21 @@ async def _start_env_gated_task(
         task = await starter()
         if task:
             if worker_inventory is not None and worker_name is not None:
-                worker_inventory.register(
-                    ManagedWorker(
-                        name=worker_name,
-                        task=task,
-                        stop_event=None,
-                        timeout_sec=5.0,
-                        category="maintenance",
-                        shutdown_phase=ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN,
+                try:
+                    worker_inventory.register(
+                        ManagedWorker(
+                            name=worker_name,
+                            task=task,
+                            stop_event=None,
+                            timeout_sec=5.0,
+                            category="maintenance",
+                            shutdown_phase=ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN,
+                        )
                     )
-                )
+                except _STARTUP_GUARD_EXCEPTIONS as exc:
+                    logger.warning(
+                        f"Started {worker_name} but failed to register it in worker inventory: {exc}"
+                    )
             logger.info(started_message)
         return task
     except _STARTUP_GUARD_EXCEPTIONS as exc:

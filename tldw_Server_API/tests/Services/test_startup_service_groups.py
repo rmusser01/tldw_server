@@ -155,3 +155,145 @@ async def test_start_service_groups_runs_helpers_in_order_and_returns_handles(
     assert handles.tts_history_cleanup_task == "tts-history-task"
     assert handles.jobs_prune_task == "jobs-prune-task"
     assert handles.connectors_jobs_task == "connectors-task"
+
+
+@pytest.mark.asyncio
+async def test_start_service_groups_keeps_no_arg_maintenance_compatibility(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_groups = _import_startup_service_groups()
+    calls: list[str] = []
+
+    async def _record_runtime_monitors():
+        calls.append("runtime")
+        return SimpleNamespace(
+            jobs_metrics_stop_event=None,
+            jobs_metrics_task=None,
+            loop_lag_stop_event=None,
+            loop_lag_task=None,
+        )
+
+    async def _record_optional_workers():
+        calls.append("optional")
+        return SimpleNamespace(
+            jobs_metrics_reconcile_stop=None,
+            jobs_metrics_reconcile_task=None,
+            jobs_crypto_rotate_stop_event=None,
+            jobs_crypto_rotate_task=None,
+            jobs_webhooks_stop_event=None,
+            jobs_webhooks_task=None,
+            meetings_webhook_dlq_stop_event=None,
+            meetings_webhook_dlq_task=None,
+            workflows_dlq_stop_event=None,
+            workflows_dlq_task=None,
+            workflows_gc_stop_event=None,
+            workflows_gc_task=None,
+            workflows_maint_stop_event=None,
+            workflows_maint_task=None,
+            jobs_integrity_stop_event=None,
+            jobs_integrity_task=None,
+        )
+
+    async def _record_claims_rebuild_worker(app_settings):
+        calls.append("claims")
+        return None
+
+    async def _record_auxiliary_services(app_settings):
+        calls.append("auxiliary")
+        return SimpleNamespace(
+            claims_alerts_task=None,
+            claims_review_metrics_task=None,
+            usage_task=None,
+            llm_usage_task=None,
+        )
+
+    async def _record_infra_services(*, run_pg_rls_auto_ensure, worker_inventory=None):
+        assert worker_inventory is None
+        calls.append("infra")
+        return SimpleNamespace(
+            tts_history_cleanup_task=None,
+            tts_history_cleanup_stop_event=None,
+        )
+
+    async def _record_maintenance_schedulers():
+        calls.append("maintenance")
+        return SimpleNamespace(
+            quality_eval_task=None,
+            outputs_purge_task=None,
+            kanban_activity_cleanup_task=None,
+            ingestion_sources_cleanup_task=None,
+            kanban_purge_task=None,
+            files_export_gc_task=None,
+            notifications_prune_task=None,
+            jobs_prune_task=None,
+        )
+
+    async def _record_connectors_startup(
+        *,
+        app,
+        owned_job_pollers,
+        register_owned_job_poller,
+    ):
+        calls.append("connectors")
+        return SimpleNamespace(
+            connectors_jobs_task=None,
+            connectors_jobs_stop_event=None,
+        )
+
+    monkeypatch.setattr(startup_groups, "_start_runtime_monitors", _record_runtime_monitors)
+    monkeypatch.setattr(startup_groups, "_start_optional_workers", _record_optional_workers)
+    monkeypatch.setattr(startup_groups, "_start_claims_rebuild_worker", _record_claims_rebuild_worker)
+    monkeypatch.setattr(startup_groups, "_start_auxiliary_services", _record_auxiliary_services)
+    monkeypatch.setattr(startup_groups, "_start_infra_services", _record_infra_services)
+    monkeypatch.setattr(
+        startup_groups,
+        "_start_maintenance_schedulers",
+        _record_maintenance_schedulers,
+    )
+    monkeypatch.setattr(startup_groups, "_start_connectors_startup", _record_connectors_startup)
+
+    await startup_groups.start_service_groups(
+        app=object(),
+        app_settings={},
+        run_pg_rls_auto_ensure=object(),
+        owned_job_pollers=[],
+        register_owned_job_poller=lambda *args, **kwargs: None,
+    )
+
+    assert calls == [
+        "runtime",
+        "optional",
+        "claims",
+        "auxiliary",
+        "infra",
+        "maintenance",
+        "connectors",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_start_maintenance_schedulers_wrapper_supports_no_arg_fakes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_groups = _import_startup_service_groups()
+    startup_maintenance = importlib.import_module(
+        "tldw_Server_API.app.services.startup_maintenance_schedulers"
+    )
+    calls: list[str] = []
+
+    async def _fake_start_maintenance_schedulers():
+        calls.append("maintenance")
+        return "maintenance-handles"
+
+    monkeypatch.setattr(
+        startup_maintenance,
+        "start_maintenance_schedulers",
+        _fake_start_maintenance_schedulers,
+    )
+
+    handles = await startup_groups._start_maintenance_schedulers(
+        worker_inventory=object(),
+    )
+
+    assert handles == "maintenance-handles"
+    assert calls == ["maintenance"]

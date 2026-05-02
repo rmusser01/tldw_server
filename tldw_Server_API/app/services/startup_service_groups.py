@@ -4,6 +4,7 @@ Startup service-tail orchestration extracted from the application lifespan.
 
 from __future__ import annotations
 
+import inspect
 from dataclasses import dataclass
 from typing import Any, Callable
 
@@ -77,9 +78,12 @@ async def start_service_groups(
         run_pg_rls_auto_ensure=run_pg_rls_auto_ensure,
         worker_inventory=worker_inventory,
     )
-    maintenance_scheduler_handles = await _start_maintenance_schedulers(
-        worker_inventory=worker_inventory,
-    )
+    if worker_inventory is None:
+        maintenance_scheduler_handles = await _start_maintenance_schedulers()
+    else:
+        maintenance_scheduler_handles = await _start_maintenance_schedulers(
+            worker_inventory=worker_inventory,
+        )
     connectors_startup_handles = await _start_connectors_startup(
         app=app,
         owned_job_pollers=owned_job_pollers,
@@ -160,12 +164,40 @@ async def _start_infra_services(**kwargs):
     return await start_infra_services(**kwargs)
 
 
-async def _start_maintenance_schedulers(**kwargs):
+async def _start_maintenance_schedulers(**kwargs: Any) -> Any:
+    """Start maintenance schedulers while preserving no-arg monkeypatch compatibility."""
+
     from tldw_Server_API.app.services.startup_maintenance_schedulers import (
         start_maintenance_schedulers,
     )
 
+    if "worker_inventory" in kwargs and not _accepts_keyword(
+        start_maintenance_schedulers,
+        "worker_inventory",
+    ):
+        kwargs = {key: value for key, value in kwargs.items() if key != "worker_inventory"}
     return await start_maintenance_schedulers(**kwargs)
+
+
+def _accepts_keyword(func: Callable[..., Any], keyword: str) -> bool:
+    """Return whether a callable can accept the given keyword argument."""
+
+    try:
+        signature = inspect.signature(func)
+    except (TypeError, ValueError):
+        return True
+
+    parameter = signature.parameters.get(keyword)
+    if parameter is not None and parameter.kind in {
+        inspect.Parameter.KEYWORD_ONLY,
+        inspect.Parameter.POSITIONAL_OR_KEYWORD,
+    }:
+        return True
+
+    return any(
+        parameter.kind is inspect.Parameter.VAR_KEYWORD
+        for parameter in signature.parameters.values()
+    )
 
 
 async def _start_connectors_startup(**kwargs):

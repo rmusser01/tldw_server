@@ -5,7 +5,6 @@ import sys
 
 import pytest
 
-
 pytestmark = pytest.mark.unit
 
 
@@ -221,3 +220,32 @@ async def test_kanban_maintenance_schedulers_register_background_inventory(
     assert worker.timeout_sec == 5.0
     assert worker.category == "maintenance"
     assert worker.shutdown_phase == startup_maintenance.ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN
+
+
+@pytest.mark.asyncio
+async def test_start_env_gated_task_returns_task_when_inventory_registration_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_maintenance = _import_startup_maintenance_schedulers()
+    task = object()
+
+    class _FailingInventory:
+        def register(self, worker):
+            raise AttributeError("registration unavailable")
+
+    async def _fake_start():
+        return task
+
+    monkeypatch.setattr(startup_maintenance, "_env_enabled", lambda key: True)
+
+    started_task = await startup_maintenance._start_env_gated_task(
+        env_key="KANBAN_PURGE_ENABLED",
+        disabled_message="disabled",
+        started_message="started",
+        failure_message="failed: {exc}",
+        starter=_fake_start,
+        worker_inventory=_FailingInventory(),
+        worker_name="kanban_purge_scheduler",
+    )
+
+    assert started_task is task
