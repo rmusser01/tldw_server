@@ -54,6 +54,45 @@ async def test_start_claims_rebuild_worker_creates_task_when_enabled(
     assert getattr(task, "_tldw_claims_rebuild_stop_event") is not None
 
 
+@pytest.mark.asyncio
+async def test_start_claims_rebuild_worker_registers_background_inventory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_claims = _import_startup_claims_rebuild()
+    worker_inventory = object()
+    task = object()
+    stop_event = object()
+    calls: list[dict[str, object]] = []
+
+    async def _fake_start_stop_event_worker(inventory, **kwargs):
+        calls.append({"inventory": inventory, **kwargs})
+        return task, stop_event
+
+    monkeypatch.setattr(
+        startup_claims,
+        "start_stop_event_worker",
+        _fake_start_stop_event_worker,
+    )
+
+    returned_task = await startup_claims.start_claims_rebuild_worker(
+        {
+            "CLAIMS_REBUILD_ENABLED": True,
+            "CLAIMS_REBUILD_INTERVAL_SEC": 17,
+            "CLAIMS_REBUILD_POLICY": "stale",
+        },
+        worker_inventory=worker_inventory,
+    )
+
+    assert returned_task is task
+    assert len(calls) == 1
+    assert calls[0]["inventory"] is worker_inventory
+    assert calls[0]["name"] == "claims_rebuild"
+    assert calls[0]["task_name"] == "claims_task"
+    assert calls[0]["category"] == "claims"
+    assert calls[0]["shutdown_phase"] == startup_claims.ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN
+    assert callable(calls[0]["coroutine_factory"])
+
+
 def test_run_claims_rebuild_iteration_submits_selected_media_ids(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

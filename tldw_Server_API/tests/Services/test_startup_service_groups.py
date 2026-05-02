@@ -60,8 +60,9 @@ async def test_start_service_groups_runs_helpers_in_order_and_returns_handles(
             jobs_integrity_task="integrity-task",
         )
 
-    async def _record_claims_rebuild_worker(seen_app_settings):
+    async def _record_claims_rebuild_worker(seen_app_settings, **kwargs):
         assert seen_app_settings is app_settings
+        assert kwargs == {"worker_inventory": worker_inventory_ref}
         calls.append("claims")
         return "claims-task"
 

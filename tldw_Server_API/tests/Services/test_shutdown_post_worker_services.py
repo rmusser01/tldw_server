@@ -533,6 +533,123 @@ async def test_run_shutdown_post_worker_services_delegates_and_returns_handles(
 
 
 @pytest.mark.asyncio
+async def test_shutdown_post_worker_services_skips_claims_after_background_phase(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.services import shutdown_post_worker_services as shutdown_services
+
+    recorded_claims_kwargs: dict[str, object] = {}
+
+    async def _record_claims(**kwargs):
+        recorded_claims_kwargs.update(kwargs)
+        return SimpleNamespace(
+            claims_task=kwargs["claims_task"],
+            jobs_prune_task=kwargs["jobs_prune_task"],
+            files_export_gc_task=kwargs["files_export_gc_task"],
+            notifications_prune_task=kwargs["notifications_prune_task"],
+        )
+
+    async def _record_notifications(**kwargs):
+        return SimpleNamespace(
+            jobs_notifications_bridge_task=kwargs["jobs_notifications_bridge_task"],
+            embeddings_compactor_task=kwargs["embeddings_compactor_task"],
+            embeddings_compactor_stop_event=kwargs["embeddings_compactor_stop_event"],
+            websub_renewal_task=kwargs["websub_renewal_task"],
+        )
+
+    async def _record_usage(**kwargs):
+        return SimpleNamespace(
+            usage_task=kwargs["usage_task"],
+            llm_usage_task=kwargs["llm_usage_task"],
+        )
+
+    async def _record_noop(**kwargs):
+        del kwargs
+
+    async def _record_runtime(**kwargs):
+        return SimpleNamespace(
+            jobs_metrics_task=kwargs["jobs_metrics_task"],
+            loop_lag_task=kwargs["loop_lag_task"],
+        )
+
+    async def _record_reconcile(**kwargs):
+        return SimpleNamespace(
+            jobs_metrics_reconcile_task=kwargs["jobs_metrics_reconcile_task"],
+            jobs_metrics_reconcile_stop=kwargs["jobs_metrics_reconcile_stop"],
+        )
+
+    async def _record_optional(**kwargs):
+        return SimpleNamespace(
+            jobs_crypto_rotate_task=kwargs["jobs_crypto_rotate_task"],
+            jobs_integrity_task=kwargs["jobs_integrity_task"],
+            jobs_webhooks_task=kwargs["jobs_webhooks_task"],
+            meetings_webhook_dlq_task=kwargs["meetings_webhook_dlq_task"],
+            workflows_dlq_task=kwargs["workflows_dlq_task"],
+            workflows_gc_task=kwargs["workflows_gc_task"],
+            workflows_maint_task=kwargs["workflows_maint_task"],
+        )
+
+    monkeypatch.setattr(shutdown_services, "_shutdown_claims_maintenance_tasks", _record_claims)
+    monkeypatch.setattr(
+        shutdown_services,
+        "_shutdown_notifications_compactor_websub_workers",
+        _record_notifications,
+    )
+    monkeypatch.setattr(shutdown_services, "_stop_usage_aggregators", _record_usage)
+    monkeypatch.setattr(shutdown_services, "_stop_recurring_schedulers", _record_noop)
+    monkeypatch.setattr(shutdown_services, "_shutdown_runtime_monitors", _record_runtime)
+    monkeypatch.setattr(shutdown_services, "_shutdown_jobs_metrics_reconcile", _record_reconcile)
+    monkeypatch.setattr(shutdown_services, "_shutdown_personalization_consolidation", _record_noop)
+    monkeypatch.setattr(shutdown_services, "_shutdown_optional_workers", _record_optional)
+
+    handles = await shutdown_services.shutdown_post_worker_services(
+        claims_task="claims-task",
+        jobs_prune_task="jobs-prune-task",
+        files_export_gc_task="files-gc-task",
+        notifications_prune_task="notifications-prune-task",
+        jobs_notifications_bridge_task=None,
+        embeddings_compactor_task=None,
+        embeddings_compactor_stop_event=None,
+        websub_renewal_task=None,
+        coordinated_legacy_component_names=set(),
+        usage_task=None,
+        llm_usage_task=None,
+        workflows_sched_task=None,
+        reading_digest_sched_task=None,
+        admin_backup_sched_task=None,
+        companion_reflection_sched_task=None,
+        reminders_sched_task=None,
+        connectors_sync_sched_task=None,
+        jobs_metrics_task=None,
+        jobs_metrics_stop_event=None,
+        loop_lag_task=None,
+        loop_lag_stop_event=None,
+        jobs_metrics_reconcile_task=None,
+        jobs_metrics_reconcile_stop=None,
+        jobs_crypto_rotate_task=None,
+        jobs_crypto_rotate_stop_event=None,
+        jobs_integrity_task=None,
+        jobs_integrity_stop_event=None,
+        jobs_webhooks_task=None,
+        jobs_webhooks_stop_event=None,
+        meetings_webhook_dlq_task=None,
+        meetings_webhook_dlq_stop_event=None,
+        workflows_dlq_task=None,
+        workflows_dlq_stop_event=None,
+        workflows_gc_task=None,
+        workflows_gc_stop_event=None,
+        workflows_maint_task=None,
+        workflows_maint_stop_event=None,
+        guard_exceptions=(RuntimeError,),
+        stopped_background_worker_names={"claims_rebuild"},
+    )
+
+    assert recorded_claims_kwargs["claims_task"] is None
+    assert handles.claims_task is None
+    assert handles.jobs_prune_task == "jobs-prune-task"
+
+
+@pytest.mark.asyncio
 async def test_run_shutdown_post_worker_services_guard_failure_suppresses_stopped_background_handles(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -590,6 +707,7 @@ async def test_run_shutdown_post_worker_services_guard_failure_suppresses_stoppe
         workflows_maint_stop_event="maint-stop-input",
         guard_exceptions=(RuntimeError,),
         stopped_background_worker_names={
+            "claims_rebuild",
             "jobs_metrics_task",
             "jobs_metrics_reconcile_task",
             "jobs_crypto_rotate_task",
@@ -599,7 +717,7 @@ async def test_run_shutdown_post_worker_services_guard_failure_suppresses_stoppe
     )
 
     assert log_messages == ["Post-worker services skipped: post-worker boom"]
-    assert handles.claims_task == "claims-input"
+    assert handles.claims_task is None
     assert handles.jobs_prune_task == "prune-input"
     assert handles.files_export_gc_task == "files-input"
     assert handles.notifications_prune_task == "notifications-input"

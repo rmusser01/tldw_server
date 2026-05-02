@@ -72,7 +72,13 @@ async def start_service_groups(
         optional_worker_handles = await _start_optional_workers(
             worker_inventory=worker_inventory,
         )
-    claims_task = await _start_claims_rebuild_worker(app_settings)
+    if worker_inventory is None:
+        claims_task = await _start_claims_rebuild_worker(app_settings)
+    else:
+        claims_task = await _start_claims_rebuild_worker(
+            app_settings,
+            worker_inventory=worker_inventory,
+        )
     auxiliary_startup_handles = await _start_auxiliary_services(app_settings)
     infra_startup_handles = await _start_infra_services(
         run_pg_rls_auto_ensure=run_pg_rls_auto_ensure,
@@ -142,12 +148,12 @@ async def _start_optional_workers(**kwargs: Any) -> Any:
     return await start_optional_workers(**kwargs)
 
 
-async def _start_claims_rebuild_worker(app_settings: Any):
+async def _start_claims_rebuild_worker(app_settings: Any, **kwargs: Any) -> Any:
     from tldw_Server_API.app.services.startup_claims_rebuild import (
         start_claims_rebuild_worker,
     )
 
-    return await start_claims_rebuild_worker(app_settings)
+    return await start_claims_rebuild_worker(app_settings, **kwargs)
 
 
 async def _start_auxiliary_services(app_settings: Any):
