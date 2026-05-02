@@ -33,9 +33,50 @@ This doctrine synthesizes lessons from:
 - Nono
 - CUA/Lume
 - CodeRunner
+- Apple [`container`](https://github.com/apple/container) and
+  [`containerization`](https://github.com/apple/containerization)
 
 It encodes the parts that are useful as enduring subsystem rules rather than
 copying any one implementation wholesale.
+
+## Apple Container Prior-Art Guidance
+
+Apple's [`container`](https://github.com/apple/container) and
+[`containerization`](https://github.com/apple/containerization) projects are
+first-party prior art for macOS-hosted Linux workloads, not a drop-in
+replacement for this sandbox subsystem. They validate several choices this
+subsystem already depends on:
+
+- Apple silicon as the primary serious macOS VM target
+- per-workload lightweight Linux VMs instead of one shared Linux VM
+- `Virtualization.framework` as the VM control surface
+- host services managed through `launchd`, XPC-style helper boundaries, and
+  unified logging
+- OCI-compatible image flow for portable Linux workload artifacts
+- vmnet-backed networking when network access is intentionally enabled
+- a guest init/control service over vsock
+
+Future macOS VM plans should compare against this prior art before inventing
+new helper, image, network, or guest-control mechanics. That comparison must be
+bounded by this repo's sandbox contract:
+
+- Python still owns admission, run/session identity, policy, artifacts, queueing,
+  and audit.
+- The host helper still owns live VM truth and must expose a stable repo-owned
+  protocol.
+- The guest agent still owns in-guest execution readiness and must remain
+  versioned separately from the host helper protocol.
+- `untrusted` workloads still require VM-grade isolation and fail-closed
+  admission.
+- `seatbelt` and future `vz_macos` work must not be forced through a
+  Linux-container abstraction.
+
+Do not require the `container` CLI to be installed for the sandbox module.
+Direct Swift package reuse from `containerization` is allowed only after a
+focused evaluation shows that it preserves the runtime contract, works on the
+intended macOS support window, accounts for upstream source-stability risk, and
+reduces custom code without weakening diagnostics, audit, or security
+reviewability.
 
 ## Non-Negotiable Boundaries
 
@@ -70,6 +111,13 @@ VM-backed runtimes should preserve three distinct layers:
 
 Host-local runtimes like `seatbelt` may not need a guest layer, but they still
 must keep execution logic outside policy description and diagnostics logic.
+
+Host-side helpers should be decomposed by trust boundary and operational
+responsibility rather than growing into one ambient daemon. Apple `container`
+is useful prior art here: image/content management, network management, and
+per-workload runtime management can have distinct lifecycle and permission
+profiles. This repo should adopt that shape only when a split materially
+improves safety, diagnostics, or operator control.
 
 ## Layered Readiness Model
 
@@ -164,6 +212,16 @@ Canonical artifacts should have stronger validation and deterministic metadata.
 Compatibility paths may exist, but their weaker validation strength should be
 reported explicitly.
 
+The long-term canonical Linux artifact path should be OCI-aware even if the
+current implementation remains a repo-owned bundle format. Image-store metadata
+should be structured so templates can later map to OCI manifests, layers,
+digests, registry provenance, or a dedicated `vz_oci_linux` runtime without
+rewriting run/session/audit semantics.
+
+The current bundle path remains valid for near-term `vz_linux` work. Do not
+switch to OCI or `containerization` as a side effect of unrelated helper,
+diagnostics, or policy hardening.
+
 ### Reproducible Builder Outputs
 
 Repo-owned builders should emit inspectable outputs and provenance metadata.
@@ -184,6 +242,7 @@ Builder outputs should emit deterministic metadata such as:
 - profile
 - kernel package or image family
 - selected package set or source artifact paths
+- OCI source image, manifest digest, or registry provenance when applicable
 
 Cryptographic signing or attestation can layer on top later, but provenance
 metadata is mandatory even before signing exists.
@@ -209,6 +268,19 @@ policy description distinct.
 - policy/profile decisions should live in one auditable source of truth
 - security-relevant config should be explicit and reviewable
 - ambient environment variables should not become the long-term policy model
+
+### Network Policy Doctrine
+
+VM networking must be explicit policy, not an implementation side effect.
+Apple `container` shows that vmnet can provide a first-party macOS networking
+surface for Linux VMs, but this subsystem's strict baseline remains no attached
+guest network for `vz_linux` unless a policy implementation can prove and
+diagnose the requested guarantee.
+
+`deny_all` should continue to mean no guest network device unless a runtime has
+a separately reviewed enforcement layer. Future allowlist work must expose
+host/helper truth in diagnostics and must not silently downgrade to best-effort
+networking.
 
 ## Lifecycle And Recovery Doctrine
 
