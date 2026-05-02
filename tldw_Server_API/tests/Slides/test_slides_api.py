@@ -954,6 +954,8 @@ def test_slides_styles_list_returns_builtin_and_user_styles(slides_client):
     assert payload["pagination"]["total"] == payload["total_count"]
     assert payload["pagination"]["has_more"] is False
     assert payload["pagination"]["next_offset"] is None
+    assert payload["has_more"] is False
+    assert payload["next_offset"] is None
 
 
 def test_slides_builtin_style_detail_exposes_catalog_metadata_and_compact_defaults(slides_client):
@@ -1045,6 +1047,8 @@ def test_slides_styles_list_supports_pagination(slides_client):
         "has_more": False,
         "next_offset": None,
     }
+    assert payload["has_more"] is False
+    assert payload["next_offset"] is None
 
 
 def test_slides_presentations_list_and_search_include_pagination_metadata(slides_client):
@@ -1072,6 +1076,8 @@ def test_slides_presentations_list_and_search_include_pagination_metadata(slides
         "has_more": True,
         "next_offset": 1,
     }
+    assert list_payload["has_more"] is True
+    assert list_payload["next_offset"] == 1
 
     search_resp = slides_client.get("/api/v1/slides/presentations/search?q=Deck&limit=1&offset=1")
     assert search_resp.status_code == 200, search_resp.text
@@ -1085,6 +1091,8 @@ def test_slides_presentations_list_and_search_include_pagination_metadata(slides
         "has_more": False,
         "next_offset": None,
     }
+    assert search_payload["has_more"] is False
+    assert search_payload["next_offset"] is None
 
 
 def test_slides_styles_crud_for_user_styles(slides_client):
@@ -1963,6 +1971,8 @@ def test_slides_versions_and_restore(slides_client):
         "has_more": False,
         "next_offset": None,
     }
+    assert versions_data["has_more"] is False
+    assert versions_data["next_offset"] is None
 
     version_resp = slides_client.get(f"/api/v1/slides/presentations/{presentation_id}/versions/1")
     assert version_resp.status_code == 200
