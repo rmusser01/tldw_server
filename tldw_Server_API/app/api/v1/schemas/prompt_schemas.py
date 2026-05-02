@@ -7,7 +7,11 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta, default_offset_pagination_aliases
+from tldw_Server_API.app.api.v1.schemas.pagination import (
+    OffsetPaginationMeta,
+    PagePaginationMeta,
+    default_offset_pagination_aliases,
+)
 
 
 #
@@ -103,6 +107,7 @@ class PaginatedPromptsResponse(BaseModel):
     total_pages: int
     current_page: int
     total_items: int
+    pagination: PagePaginationMeta
 
 
 class PromptSearchResultItem(PromptResponse):  # Or a more specific search result schema
