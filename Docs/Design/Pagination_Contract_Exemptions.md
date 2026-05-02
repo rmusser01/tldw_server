@@ -16,6 +16,19 @@ stays provider-compatible.
 
 Route-level matrix status: `exempt-provider`.
 
+Current pagination-sensitive examples:
+
+- `GET /api/v1/paper-search/biorxiv/raw/*` and
+  `GET /api/v1/paper-search/medrxiv/raw/*`: provider raw passthroughs using
+  provider cursor semantics in the upstream response body.
+- `GET /api/v1/paper-search/osf/raw`: provider raw passthrough using OSF query
+  parameters such as `page[size]`; preserve the provider payload.
+- `GET /api/v1/paper-search/pmc-oai/list-identifiers`,
+  `GET /api/v1/paper-search/pmc-oai/list-records`, and
+  `GET /api/v1/paper-search/pmc-oai/list-sets`: OAI-PMH resumption-token
+  contract; do not replace provider continuation metadata with the canonical
+  response envelope without a versioned route.
+
 ### Raw List Routes
 
 Routes returning raw `list[...]` payloads cannot receive a top-level
@@ -47,6 +60,8 @@ Current pagination-sensitive examples:
   envelope.
 - `GET /mcp/hub/events/stream`: SSE replay/live stream. The optional `limit`
   controls stream termination, not a response-body page contract.
+- `GET /research/runs/{session_id}/events/stream`: SSE event stream using
+  `after_id`; keep continuation in the stream cursor channel.
 - `GET /watchlists/runs/export.csv`: CSV export; keep selection/filter inputs
   separate from response-body pagination metadata.
 
@@ -70,6 +85,9 @@ Current examples:
   the returned snapshot.
 - `POST /api/v1/kanban/checklists/{checklist_id}/toggle-all`: checklist
   mutation result; `total_items` is the resulting checklist size.
+- `GET /api/v1/paper-search/biorxiv/reports/summary` and
+  `GET /api/v1/paper-search/biorxiv/reports/usage`: aggregate provider
+  reports, not paginated result sets.
 
 ### Bounded Preview Routes
 
@@ -128,6 +146,10 @@ Current examples:
   input.
 - `GET /api/v1/prompt-studio/prompts/history/{prompt_id}`: bounded version
   history snapshot for one prompt with no pagination inputs.
+- Paper search `by-id` and `by-doi` routes, such as
+  `GET /api/v1/paper-search/arxiv/by-id` and
+  `GET /api/v1/paper-search/wiley/by-doi`: single-record provider/detail
+  lookups, not collection pages.
 
 ## Review Rules
 

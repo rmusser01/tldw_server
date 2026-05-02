@@ -737,6 +737,15 @@ Classified remaining Prompt Studio page-family rows:
 - Optimization and prompt history routes are bounded per-resource snapshots with
   no pagination inputs.
 
+Classified Paper Search provider/detail rows:
+
+- BioRxiv, MedRxiv, OSF raw endpoints preserve provider raw payloads.
+- PMC OAI list endpoints preserve OAI-PMH resumption-token semantics.
+- `by-id`/`by-doi` routes are single-record detail lookups.
+- BioRxiv summary/usage report routes are aggregate reports.
+- Research run events use an SSE stream with `after_id`, not response-body
+  pagination.
+
 - [ ] **Step 5: Commit one family**
 
 Use a family-specific message, for example:
