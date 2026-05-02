@@ -375,7 +375,10 @@ def test_persona_wake_activation_allows_next_voice_turn_without_trigger(
             ws.send_text(json.dumps({
                 "type": "voice_config",
                 "session_id": "sess_wake_valid",
-                "voice": {"trigger_phrases": ["hey helper"]},
+                "voice": {
+                    "trigger_phrases": ["hey helper"],
+                    "wake_behavior": "one_shot",
+                },
                 "stt": {"enable_vad": True},
             }))
             _ = _recv_until(
@@ -388,7 +391,6 @@ def test_persona_wake_activation_allows_next_voice_turn_without_trigger(
                 "session_id": "sess_wake_valid",
                 "matched_phrase": "hey helper",
                 "detector_kind": "browser_transcript",
-                "wake_behavior": "one_shot",
                 "detected_at_ms": 1714500000000,
             }))
             accepted = _recv_until(
@@ -445,7 +447,10 @@ def _assert_wake_activation_rejected_keeps_trigger_gate(
             ws.send_text(json.dumps({
                 "type": "voice_config",
                 "session_id": session_id,
-                "voice": {"trigger_phrases": runtime_phrases},
+                "voice": {
+                    "trigger_phrases": runtime_phrases,
+                    "wake_behavior": wake_behavior,
+                },
                 "stt": {"model": "whisper-1", "language": "en-US"},
             }))
             _ = _recv_until(ws, lambda d: d.get("reason_code") == "VOICE_CONFIG_UPDATED")
@@ -454,7 +459,6 @@ def _assert_wake_activation_rejected_keeps_trigger_gate(
                 "session_id": session_id,
                 "matched_phrase": matched_phrase,
                 "detector_kind": "browser_transcript",
-                "wake_behavior": wake_behavior,
                 "detected_at_ms": 1714500000000,
             }))
             rejected = _recv_until(
@@ -477,7 +481,7 @@ def _assert_wake_activation_rejected_keeps_trigger_gate(
             assert ignored.get("session_id") == session_id
 ```
 
-Add these three tests:
+Add these rejection tests:
 
 ```python
 def test_persona_wake_activation_rejects_phrase_not_saved_in_profile(tmp_path, monkeypatch):
@@ -500,19 +504,9 @@ def test_persona_wake_activation_rejects_phrase_missing_from_runtime_config(tmp_
         runtime_phrases=["okay helper"],
         matched_phrase="hey helper",
     )
-
-
-def test_persona_wake_activation_rejects_invalid_wake_behavior(tmp_path, monkeypatch):
-    _assert_wake_activation_rejected_keeps_trigger_gate(
-        tmp_path=tmp_path,
-        monkeypatch=monkeypatch,
-        session_id="sess_wake_reject_behavior",
-        saved_phrases=["hey helper"],
-        runtime_phrases=["hey helper"],
-        matched_phrase="hey helper",
-        wake_behavior="always_on_background",
-    )
 ```
+
+Also add a positive test proving the server derives wake behavior from `voice_config.voice.wake_behavior` and ignores any client-supplied `wake_behavior` on `wake_activation`.
 
 - [ ] **Step 4: Add failing deactivation and expiry tests**
 
@@ -540,7 +534,10 @@ def test_persona_wake_deactivation_restores_trigger_gating(tmp_path, monkeypatch
             ws.send_text(json.dumps({
                 "type": "voice_config",
                 "session_id": "sess_wake_deactivated",
-                "voice": {"trigger_phrases": ["hey helper"]},
+                "voice": {
+                    "trigger_phrases": ["hey helper"],
+                    "wake_behavior": "continuous",
+                },
                 "stt": {"model": "whisper-1", "language": "en-US"},
             }))
             _ = _recv_until(ws, lambda d: d.get("reason_code") == "VOICE_CONFIG_UPDATED")
@@ -549,7 +546,6 @@ def test_persona_wake_deactivation_restores_trigger_gating(tmp_path, monkeypatch
                 "session_id": "sess_wake_deactivated",
                 "matched_phrase": "hey helper",
                 "detector_kind": "browser_transcript",
-                "wake_behavior": "continuous",
                 "detected_at_ms": 1714500000000,
             }))
             _ = _recv_until(ws, lambda d: d.get("reason_code") == "WAKE_ACTIVATION_ACCEPTED")
@@ -597,7 +593,10 @@ def test_persona_wake_activation_one_shot_expires_after_commit(tmp_path, monkeyp
             ws.send_text(json.dumps({
                 "type": "voice_config",
                 "session_id": "sess_wake_one_shot",
-                "voice": {"trigger_phrases": ["hey helper"]},
+                "voice": {
+                    "trigger_phrases": ["hey helper"],
+                    "wake_behavior": "one_shot",
+                },
                 "stt": {"model": "whisper-1", "language": "en-US"},
             }))
             _ = _recv_until(ws, lambda d: d.get("reason_code") == "VOICE_CONFIG_UPDATED")
@@ -606,7 +605,6 @@ def test_persona_wake_activation_one_shot_expires_after_commit(tmp_path, monkeyp
                 "session_id": "sess_wake_one_shot",
                 "matched_phrase": "hey helper",
                 "detector_kind": "browser_transcript",
-                "wake_behavior": "one_shot",
                 "detected_at_ms": 1714500000000,
             }))
             _ = _recv_until(ws, lambda d: d.get("reason_code") == "WAKE_ACTIVATION_ACCEPTED")
@@ -659,7 +657,10 @@ def test_persona_wake_activation_expires_after_no_command_timeout(tmp_path, monk
             ws.send_text(json.dumps({
                 "type": "voice_config",
                 "session_id": "sess_wake_timeout",
-                "voice": {"trigger_phrases": ["hey helper"]},
+                "voice": {
+                    "trigger_phrases": ["hey helper"],
+                    "wake_behavior": "one_shot",
+                },
                 "stt": {"model": "whisper-1", "language": "en-US"},
             }))
             _ = _recv_until(ws, lambda d: d.get("reason_code") == "VOICE_CONFIG_UPDATED")
@@ -668,7 +669,6 @@ def test_persona_wake_activation_expires_after_no_command_timeout(tmp_path, monk
                 "session_id": "sess_wake_timeout",
                 "matched_phrase": "hey helper",
                 "detector_kind": "browser_transcript",
-                "wake_behavior": "one_shot",
                 "detected_at_ms": 1714500000000,
             }))
             _ = _recv_until(ws, lambda d: d.get("reason_code") == "WAKE_ACTIVATION_ACCEPTED")
@@ -841,7 +841,6 @@ elif mtype == "wake_activation":
         )
         continue
 
-    wake_behavior = str(msg.get("wake_behavior") or "one_shot").strip()
     matched_phrase = str(msg.get("matched_phrase") or "").strip()
     detector_kind = _bounded_label(
         msg.get("detector_kind"),
@@ -859,13 +858,16 @@ elif mtype == "wake_activation":
         if isinstance(voice_runtime, dict)
         else []
     )
+    wake_behavior = _bounded_label(
+        voice_runtime.get("wake_behavior")
+        if isinstance(voice_runtime, dict)
+        else None,
+        allowed=_PERSONA_WAKE_BEHAVIORS,
+        fallback="one_shot",
+    )
     saved_match = _match_persona_wake_phrase(matched_phrase, saved_phrases)
     runtime_match = _match_persona_wake_phrase(matched_phrase, runtime_phrases)
-    if (
-        wake_behavior not in _PERSONA_WAKE_BEHAVIORS
-        or not saved_match
-        or not runtime_match
-    ):
+    if not saved_match or not runtime_match:
         await _emit_notice(
             session_id=session_id,
             level="warning",
@@ -1480,7 +1482,7 @@ it("starts the wake detector with raw saved phrases", async () => {
 
 Add tests that assert:
 
-- `fireWake()` sends:
+- `fireWake()` sends activation metadata only; wake behavior is already carried by `voice_config.voice.wake_behavior`:
 
 ```ts
 {
@@ -1488,7 +1490,6 @@ Add tests that assert:
   session_id: "sess-1",
   matched_phrase: "hey helper",
   detector_kind: "browser_transcript",
-  wake_behavior: "one_shot",
   detected_at_ms: 1714500000000
 }
 ```
@@ -1571,10 +1572,9 @@ const sendWakeActivation = React.useCallback((event: WakeDetectedEvent) => {
     session_id: sessionId,
     matched_phrase: event.canonicalPhrase,
     detector_kind: event.detectorKind,
-    wake_behavior: sessionWakeBehavior,
     detected_at_ms: event.detectedAtMs
   }))
-}, [connected, sessionId, sessionWakeBehavior, ws])
+}, [connected, sessionId, ws])
 
 const sendWakeDeactivation = React.useCallback((reason: string) => {
   if (!sessionId || !ws || ws.readyState !== WebSocket.OPEN) return

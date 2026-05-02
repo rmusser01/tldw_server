@@ -197,8 +197,9 @@ Profile settings should add the persistent default wake behavior near existing v
 3. Controller debounces duplicate detections.
 4. Controller ensures the persona websocket session is connected.
 5. Controller sends or refreshes `voice_config` with the saved persona wake trigger phrases for this wake-armed session.
-6. Controller sends a `wake_activation` frame with the canonical matched phrase, detector kind, timestamp, and selected wake behavior.
-7. Controller applies the current wake behavior.
+6. Controller sends a `wake_activation` frame with the canonical matched phrase, detector kind, and timestamp.
+7. Server derives the effective wake behavior from the current session `voice_runtime.wake_behavior`, which was sent through `voice_config`.
+8. Controller applies the current session-local wake behavior for UI flow.
 
 ### Wake Activation Frame
 
@@ -210,19 +211,18 @@ Add a small persona websocket frame for V1:
   "session_id": "<persona-session-id>",
   "matched_phrase": "hey helper",
   "detector_kind": "browser_transcript",
-  "wake_behavior": "one_shot",
   "detected_at_ms": 1714500000000
 }
 ```
 
-The server should store this as session-local runtime state. It is not a persisted memory, not a command, and not an authorization grant.
+The client must not be treated as authoritative for wake behavior in this frame. The selected behavior is sent through `voice_config.voice.wake_behavior`; the server normalizes that runtime value and stores it with the accepted wake activation as session-local runtime state. It is not a persisted memory, not a command, and not an authorization grant.
 
 The server should accept `wake_activation` only when all of these are true:
 
 - `session_id` normalizes to an existing session for the authenticated user.
 - The session has current `voice_runtime.trigger_phrases` from a prior `voice_config`.
+- The server can derive `voice_runtime.wake_behavior` as one of `one_shot`, `continuous`, or `push_to_talk_after_wake`, falling back to `one_shot` when unset.
 - The server can resolve the session's persona profile for the authenticated user.
-- `wake_behavior` is one of `one_shot`, `continuous`, or `push_to_talk_after_wake`.
 - `matched_phrase` is non-empty.
 - `matched_phrase` is the canonical configured phrase after detector normalization, not the raw recognized text.
 - `matched_phrase` matches one of the saved persona profile `voice_defaults.voice_chat_trigger_phrases`.
@@ -278,7 +278,7 @@ The backend should remain additive:
 
 - Validate and persist `voice_defaults.wake_behavior`.
 - Return the saved nullable `voice_defaults.wake_behavior` in persona profile responses; frontend resolution applies the `one_shot` fallback.
-- Accept `wake_activation` websocket frames and store active wake state in session-local runtime preferences.
+- Accept `wake_activation` websocket frames and store active wake state in session-local runtime preferences using server-derived `voice_runtime.wake_behavior`.
 - Accept `wake_deactivation` websocket frames and clear active wake state for the session.
 - Validate wake activation phrases against the saved persona profile, not only client-supplied `voice_config`.
 - Keep existing server-side trigger phrase gating on committed transcripts when no wake activation is active.
@@ -343,6 +343,7 @@ Backend:
 - websocket `wake_activation` allows the next post-wake voice turn to omit the trigger phrase.
 - invalid `wake_activation` frames are rejected without disabling trigger phrase gating.
 - `wake_activation` is rejected when `matched_phrase` exists only in client-supplied runtime config and not in saved persona profile trigger phrases.
+- client-supplied `wake_behavior` in `wake_activation`, if present, is ignored in favor of the server-side runtime value.
 - websocket `wake_deactivation` clears continuous wake activation while the socket stays open.
 - websocket trigger phrase gating still rejects transcripts without trigger phrases when no wake activation is active.
 - `one_shot` wake activation expires after one committed voice turn.
