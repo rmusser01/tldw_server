@@ -646,6 +646,9 @@ it preserves the legacy `items/total/page/size` envelope and adds canonical
 `GET /api/v1/collections/feeds` preserves the legacy `items/total` envelope
 and adds canonical `PagePaginationMeta` built from `page`, `size`, and the
 filtered feed total.
+`GET /api/v1/personalization/memories` preserves the legacy
+`items/total/page/size` envelope and adds canonical `PagePaginationMeta` built
+from `page`, `size`, and the known semantic-memory total.
 
 Verified:
 
@@ -654,6 +657,7 @@ python -m pytest tldw_Server_API/tests/External_Sources/test_connectors_endpoint
 python -m pytest tldw_Server_API/tests/Evaluations/test_evaluations_crud_endpoint_sanitization.py -k canonical_cursor_pagination -q
 python -m pytest tldw_Server_API/tests/Items/test_items_endpoint_sanitizers.py -k canonical_page_pagination -q
 python -m pytest tldw_Server_API/tests/Collections/test_collections_feeds_endpoint_sanitization.py -k canonical_page_pagination -q
+python -m pytest tldw_Server_API/tests/Personalization/test_personalization_endpoints.py -k test_memories_crud -q
 ```
 
 ## Task 9: Classify and Migrate Custom Legacy Envelopes

@@ -188,6 +188,14 @@ def test_memories_crud(client_with_personalization_db: TestClient):
     assert lst.status_code == 200
     data = lst.json()
     assert data["total"] >= 1
+    assert data["pagination"] == {
+        "mode": "page",
+        "page": 1,
+        "per_page": 50,
+        "total": data["total"],
+        "total_pages": 1,
+        "has_more": False,
+    }
 
     # Patch (update)
     patch_r = c.patch(
