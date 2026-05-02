@@ -37,7 +37,12 @@ class OrganizationListResponse(BaseModel):
     limit: int
     offset: int
     has_more: bool
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
     pagination: OffsetPaginationMeta
+
+    @model_validator(mode="after")
+    def default_pagination_aliases(self) -> "OrganizationListResponse":
+        return _default_offset_pagination_aliases(self)
 
 
 class TeamCreateRequest(BaseModel):

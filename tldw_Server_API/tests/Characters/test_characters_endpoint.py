@@ -1808,6 +1808,7 @@ class TestCharacterAPIIntegration:
         assert page_data["pagination"]["offset"] == 0
         assert page_data["pagination"]["has_more"] is True
         assert page_data["pagination"]["next_offset"] == 2
+        assert page_data["next_offset"] == 2
         assert len(page_data["items"]) <= 2
         assert page_data["total"] >= 3
 

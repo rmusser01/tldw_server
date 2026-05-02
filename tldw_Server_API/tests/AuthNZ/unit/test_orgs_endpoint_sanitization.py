@@ -348,6 +348,7 @@ async def test_list_my_orgs_includes_canonical_pagination(monkeypatch):
     assert response.limit == 1
     assert response.offset == 0
     assert response.has_more is True
+    assert response.next_offset == 1
     assert response.pagination.model_dump() == {
         "mode": "offset",
         "limit": 1,

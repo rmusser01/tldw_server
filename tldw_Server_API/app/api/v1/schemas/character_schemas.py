@@ -191,7 +191,14 @@ class CharacterListQueryResponse(BaseModel):
     page: int = Field(default=1, ge=1)
     page_size: int = Field(default=25, ge=1)
     has_more: bool = False
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
     pagination: OffsetPaginationMeta
+
+    @model_validator(mode="after")
+    def default_pagination_aliases(self) -> "CharacterListQueryResponse":
+        if self.next_offset is None:
+            self.next_offset = self.pagination.next_offset
+        return self
 
 
 class CharacterTagOperationRequest(BaseModel):
