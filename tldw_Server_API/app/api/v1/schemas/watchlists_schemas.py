@@ -3,10 +3,18 @@ from __future__ import annotations
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import AnyUrl, BaseModel, Field, field_validator
+from pydantic import AnyUrl, BaseModel, Field, field_validator, model_validator
 from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
 
 SourceType = Literal["rss", "site", "forum"]  # forums are feature-flagged for Phase 3
+
+
+def _default_offset_pagination_aliases(response):
+    if response.has_more is None:
+        response.has_more = response.pagination.has_more
+    if response.next_offset is None:
+        response.next_offset = response.pagination.next_offset
+    return response
 
 
 # --------------------
@@ -90,6 +98,12 @@ class SourcesListResponse(BaseModel):
     items: list[Source]
     total: int
     pagination: OffsetPaginationMeta
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self):
+        return _default_offset_pagination_aliases(self)
 
 
 class ReversibleDeleteResponse(BaseModel):
@@ -189,6 +203,12 @@ class GroupsListResponse(BaseModel):
     items: list[Group]
     total: int
     pagination: OffsetPaginationMeta
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self):
+        return _default_offset_pagination_aliases(self)
 
 
 class Tag(BaseModel):
@@ -200,6 +220,12 @@ class TagsListResponse(BaseModel):
     items: list[Tag]
     total: int
     pagination: OffsetPaginationMeta
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self):
+        return _default_offset_pagination_aliases(self)
 
 
 class JobCreateRequest(BaseModel):
@@ -269,6 +295,12 @@ class JobsListResponse(BaseModel):
     items: list[Job]
     total: int
     pagination: OffsetPaginationMeta
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self):
+        return _default_offset_pagination_aliases(self)
 
 
 class JobDeleteResponse(ReversibleDeleteResponse):
@@ -295,8 +327,13 @@ class RunCancelResponse(BaseModel):
 class RunsListResponse(BaseModel):
     items: list[Run]
     total: int
-    has_more: bool | None = None
     pagination: OffsetPaginationMeta
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self):
+        return _default_offset_pagination_aliases(self)
 
 
 class WatchlistOnboardingTelemetryIngestRequest(BaseModel):
@@ -438,6 +475,12 @@ class ScrapedItemsListResponse(BaseModel):
     items: list[ScrapedItem]
     total: int
     pagination: OffsetPaginationMeta
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self):
+        return _default_offset_pagination_aliases(self)
 
 
 class ScrapedItemSmartCountsResponse(BaseModel):
@@ -598,6 +641,12 @@ class WatchlistOutputsListResponse(BaseModel):
     items: list[WatchlistOutput]
     total: int
     pagination: OffsetPaginationMeta
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self):
+        return _default_offset_pagination_aliases(self)
 
 
 class WatchlistTemplateSummary(BaseModel):
