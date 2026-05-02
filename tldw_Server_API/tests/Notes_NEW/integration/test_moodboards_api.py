@@ -100,6 +100,8 @@ def test_moodboard_crud_and_membership_flow(moodboard_client: TestClient):
         "has_more": False,
         "next_offset": None,
     }
+    assert list_payload["has_more"] is False
+    assert list_payload["next_offset"] is None
 
     pin_manual = client.post(f"/api/v1/notes/moodboards/{moodboard_id}/notes/{note_manual['id']}")
     pin_both = client.post(f"/api/v1/notes/moodboards/{moodboard_id}/notes/{note_both['id']}")
@@ -129,6 +131,8 @@ def test_moodboard_crud_and_membership_flow(moodboard_client: TestClient):
         "has_more": True,
         "next_offset": 1,
     }
+    assert paged_body["has_more"] is True
+    assert paged_body["next_offset"] == 1
 
     unpin_both = client.delete(f"/api/v1/notes/moodboards/{moodboard_id}/notes/{note_both['id']}")
     assert unpin_both.status_code == 200
