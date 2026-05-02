@@ -162,7 +162,7 @@ describe("AssistantVoiceCard", () => {
     expect(props.onToggleWakeArmed).toHaveBeenCalledTimes(1)
   })
 
-  it("uses resolved wake defaults when session wake props are omitted", () => {
+  it("does not arm wake from resolved fallback trigger phrases when session wake props are omitted", () => {
     const props = defaultVoiceCardProps()
     props.resolvedDefaults = {
       ...props.resolvedDefaults,
@@ -175,8 +175,9 @@ describe("AssistantVoiceCard", () => {
     render(<AssistantVoiceCard {...props} />)
 
     expect(screen.getByTestId("live-wake-phrases")).toHaveTextContent(
-      "fallback wake"
+      /add a trigger phrase/i
     )
+    expect(screen.getByTestId("live-wake-toggle")).toBeDisabled()
     expect(screen.getByTestId("live-wake-behavior")).toHaveTextContent("Continuous")
   })
 
