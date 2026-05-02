@@ -63,6 +63,8 @@ Current examples:
 - `POST /watchlists/sources/check-now`: ad hoc source-check operation result.
 - `POST /watchlists/sources/import`: OPML import operation result.
 - `GET /watchlists/items/smart-counts`: aggregate counts for UI filters.
+- `POST /api/v1/kanban/checklists/{checklist_id}/toggle-all`: checklist
+  mutation result; `total_items` is the resulting checklist size.
 
 ### Bounded Preview Routes
 
@@ -106,6 +108,16 @@ Current examples:
   without pagination inputs.
 - `GET /sandbox/runs/{run_id}/{rest:path}`: path guard/fallback route, not a
   collection response.
+- `GET /api/v1/kanban/checklists/{checklist_id}` and
+  `GET /api/v1/kanban/lists/{list_id}`: detail responses.
+- `GET /api/v1/kanban/checklists/{checklist_id}/items`,
+  `GET /api/v1/kanban/cards/{card_id}/checklists`,
+  `GET /api/v1/kanban/boards/{board_id}/labels`,
+  `GET /api/v1/kanban/workflow/boards/{board_id}/statuses`, and
+  `GET /api/v1/kanban/workflow/boards/{board_id}/transitions`: small nested
+  subresource/catalog responses without pagination inputs.
+- `GET /api/v1/kanban/search/status`: status/capability response, not a search
+  result page.
 
 ## Review Rules
 

@@ -616,7 +616,10 @@ responses and classified operation-result, aggregate-count, file-export, and
 small catalog routes as non-pagination targets. Sandbox and chatbooks custom
 families have also been classified: their true list endpoints are already
 canonical, while artifact/snapshot subresources and job detail responses are
-explicitly exempt.
+explicitly exempt. The first kanban workflow tranche migrated workflow event
+and stale-claim recovery lists with overfetch-derived offset metadata and
+classified checklist/detail/catalog/status routes that have no pagination
+inputs.
 
 - [x] **Step 1: Pick the first custom family**
 
@@ -662,6 +665,12 @@ Watchlists findings:
 - Sandbox admin runs, usage, and idempotency routes already expose canonical
   offset metadata; artifacts, snapshots, and fallback guard routes have no
   pagination inputs and stay exempt.
+- Kanban workflow events and stale-claim recovery routes now overfetch
+  `limit + 1`, trim to the requested `limit`, and return canonical
+  `OffsetPaginationMeta` with `total=None`.
+- Kanban checklist/list detail responses, mutation results, status responses,
+  and small nested catalogs without pagination inputs are classified as
+  non-pagination targets.
 
 - [x] **Step 3: Add route tests**
 
@@ -686,6 +695,15 @@ python -m bandit -r tldw_Server_API/app/api/v1/endpoints/watchlists.py tldw_Serv
 ```
 
 Bandit produced zero findings for the touched watchlists source scope.
+
+Verified kanban workflow tranche:
+
+```bash
+python -m pytest tldw_Server_API/tests/kanban/test_workflow_endpoints.py -k canonical_pagination -q
+python -m pytest tldw_Server_API/tests/kanban/test_workflow_endpoints.py -q
+python -m pytest tldw_Server_API/tests/kanban/test_workflow_transition_contract.py -q
+python -m py_compile tldw_Server_API/app/api/v1/schemas/kanban_schemas.py tldw_Server_API/app/api/v1/endpoints/kanban/kanban_workflow.py tldw_Server_API/app/core/DB_Management/Kanban_DB.py
+```
 
 - [ ] **Step 5: Commit one family**
 
