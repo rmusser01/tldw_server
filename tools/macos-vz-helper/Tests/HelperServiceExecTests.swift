@@ -19,6 +19,28 @@ final class RecordingGuestBridge: GuestBridging {
     }
 }
 
+final class StaticOutputGuestBridge: GuestBridging {
+    let stdout: String
+    let stderr: String
+
+    init(stdout: String, stderr: String) {
+        self.stdout = stdout
+        self.stderr = stderr
+    }
+
+    func waitUntilReady(vmID: String, timeoutSeconds: TimeInterval) throws {}
+
+    func exec(
+        vmID: String,
+        argv: [String],
+        cwd: String,
+        env: [String: String],
+        timeoutSeconds: TimeInterval
+    ) throws -> GuestExecResult {
+        return GuestExecResult(exitCode: 0, stdout: stdout, stderr: stderr)
+    }
+}
+
 @Test func helperServiceExecGuestBridgesThroughGuestAgent() throws {
     let registry = VMRegistry()
     let guestBridge = RecordingGuestBridge()
@@ -56,6 +78,118 @@ final class RecordingGuestBridge: GuestBridging {
     #expect(guestBridge.lastExec?.cwd == "/workspace")
     #expect(guestBridge.lastExec?.env == ["FOO": "1"])
     #expect(guestBridge.lastExec?.timeout == 15)
+}
+
+@Test func helperServiceExecGuestCapsReturnedOutputAndRecordsDetails() throws {
+    let registry = VMRegistry()
+    let manager = VZLinuxVMManager(
+        registry: registry,
+        bootDriver: RecordingBootDriver(),
+        guestBridge: StaticOutputGuestBridge(stdout: String(repeating: "o", count: 100), stderr: String(repeating: "e", count: 100))
+    )
+    let service = HelperService(
+        hostFacts: HostFacts(isMacOS: true, isAppleSilicon: true),
+        registry: registry,
+        vmManager: manager
+    )
+
+    _ = try service.createVM(
+        vmID: "vm-exec-output-cap",
+        templatePath: "/tmp/template.img",
+        workspacePath: "/workspace",
+        readinessTimeoutSeconds: 5
+    )
+
+    let response = try service.execGuest(
+        vmID: "vm-exec-output-cap",
+        argv: ["/bin/echo", "ok"],
+        cwd: "/workspace",
+        env: [:],
+        timeoutSeconds: 15,
+        maxOutputBytes: 10
+    )
+
+    #expect(Data(response.stdout.utf8).count + Data(response.stderr.utf8).count <= 10)
+    #expect(response.stdout.isEmpty == false)
+    #expect(response.stderr.isEmpty == false)
+    #expect(response.details["output_limit_bytes"] == "10")
+    #expect(response.details["stdout_bytes_original"] == "100")
+    #expect(response.details["stderr_bytes_original"] == "100")
+    #expect(response.details["stdout_truncated"] == "true")
+    #expect(response.details["stderr_truncated"] == "true")
+}
+
+@Test func helperServiceExecGuestCapsOutputAtUtf8Boundary() throws {
+    let registry = VMRegistry()
+    let manager = VZLinuxVMManager(
+        registry: registry,
+        bootDriver: RecordingBootDriver(),
+        guestBridge: StaticOutputGuestBridge(stdout: "ééé", stderr: "")
+    )
+    let service = HelperService(
+        hostFacts: HostFacts(isMacOS: true, isAppleSilicon: true),
+        registry: registry,
+        vmManager: manager
+    )
+
+    _ = try service.createVM(
+        vmID: "vm-exec-utf8-cap",
+        templatePath: "/tmp/template.img",
+        workspacePath: "/workspace",
+        readinessTimeoutSeconds: 5
+    )
+
+    let response = try service.execGuest(
+        vmID: "vm-exec-utf8-cap",
+        argv: ["/bin/echo", "ok"],
+        cwd: "/workspace",
+        env: [:],
+        timeoutSeconds: 15,
+        maxOutputBytes: 5
+    )
+
+    #expect(Data(response.stdout.utf8).count <= 5)
+    #expect(response.stdout == "éé")
+    #expect(response.details["stdout_bytes_original"] == "6")
+    #expect(response.details["stdout_bytes_returned"] == "4")
+    #expect(response.details["stdout_truncated"] == "true")
+}
+
+@Test func helperServiceExecGuestRejectsInvalidOutputLimit() throws {
+    let registry = VMRegistry()
+    let manager = VZLinuxVMManager(
+        registry: registry,
+        bootDriver: RecordingBootDriver(),
+        guestBridge: RecordingGuestBridge()
+    )
+    let service = HelperService(
+        hostFacts: HostFacts(isMacOS: true, isAppleSilicon: true),
+        registry: registry,
+        vmManager: manager
+    )
+
+    _ = try service.createVM(
+        vmID: "vm-exec-invalid-output-cap",
+        templatePath: "/tmp/template.img",
+        workspacePath: "/workspace",
+        readinessTimeoutSeconds: 5
+    )
+
+    do {
+        _ = try service.execGuest(
+            vmID: "vm-exec-invalid-output-cap",
+            argv: ["/bin/echo"],
+            cwd: "/workspace",
+            env: [:],
+            timeoutSeconds: 15,
+            maxOutputBytes: 0
+        )
+        Issue.record("expected invalid output cap to be rejected")
+    } catch HelperServiceError.invalidExecOutputLimit(let reason) {
+        #expect(reason == "output_limit_out_of_range")
+    } catch {
+        Issue.record("expected invalidExecOutputLimit, got \(error)")
+    }
 }
 
 @Test func helperServiceExecGuestRejectsInvalidCommandContract() throws {

@@ -11,6 +11,7 @@ enum HelperServiceError: Error {
     case invalidExecCwd(String)
     case invalidExecEnv(String)
     case invalidExecTimeout(String)
+    case invalidExecOutputLimit(String)
 }
 
 final class HelperService {
@@ -21,6 +22,7 @@ final class HelperService {
     private static let maxExecEnvCount = 128
     private static let maxExecEnvBytes = 32 * 1024
     private static let maxExecTimeoutSeconds: TimeInterval = 3_600
+    private static let maxExecOutputBytes = 256 * 1024 * 1024
 
     private let protocolVersion = "1"
     private let helperVersion = "0.1.0"
@@ -167,13 +169,15 @@ final class HelperService {
         argv: [String],
         cwd: String,
         env: [String: String],
-        timeoutSeconds: TimeInterval
+        timeoutSeconds: TimeInterval,
+        maxOutputBytes: Int? = nil
     ) throws -> HelperExecResponse {
         try validateExecGuestContract(
             argv: argv,
             cwd: cwd,
             env: env,
-            timeoutSeconds: timeoutSeconds
+            timeoutSeconds: timeoutSeconds,
+            maxOutputBytes: maxOutputBytes
         )
         let result = try vmManager.execGuest(
             vmID: vmID,
@@ -182,13 +186,22 @@ final class HelperService {
             env: env,
             timeoutSeconds: timeoutSeconds
         )
+        let cappedOutput = capExecOutput(
+            stdout: result.stdout,
+            stderr: result.stderr,
+            maxOutputBytes: maxOutputBytes
+        )
+        var details = ["transport": "vsock", "vm_id": vmID]
+        for (key, value) in cappedOutput.details {
+            details[key] = value
+        }
         return HelperExecResponse(
             protocolVersion: protocolVersion,
             helperVersion: helperVersion,
             exitCode: result.exitCode,
-            stdout: result.stdout,
-            stderr: result.stderr,
-            details: ["transport": "vsock", "vm_id": vmID]
+            stdout: cappedOutput.stdout,
+            stderr: cappedOutput.stderr,
+            details: details
         )
     }
 
@@ -242,12 +255,14 @@ final class HelperService {
         argv: [String],
         cwd: String,
         env: [String: String],
-        timeoutSeconds: TimeInterval
+        timeoutSeconds: TimeInterval,
+        maxOutputBytes: Int?
     ) throws {
         try validateExecArgv(argv)
         try validateExecCwd(cwd)
         try validateExecEnv(env)
         try validateExecTimeout(timeoutSeconds)
+        try validateExecOutputLimit(maxOutputBytes)
     }
 
     private func validateExecArgv(_ argv: [String]) throws {
@@ -312,6 +327,123 @@ final class HelperService {
               timeoutSeconds <= Self.maxExecTimeoutSeconds else {
             throw HelperServiceError.invalidExecTimeout("timeout_out_of_range")
         }
+    }
+
+    private func validateExecOutputLimit(_ maxOutputBytes: Int?) throws {
+        guard let maxOutputBytes else {
+            return
+        }
+        guard maxOutputBytes > 0, maxOutputBytes <= Self.maxExecOutputBytes else {
+            throw HelperServiceError.invalidExecOutputLimit("output_limit_out_of_range")
+        }
+    }
+
+    private func capExecOutput(
+        stdout: String,
+        stderr: String,
+        maxOutputBytes: Int?
+    ) -> (stdout: String, stderr: String, details: [String: String]) {
+        guard let cap = maxOutputBytes else {
+            return (stdout, stderr, [:])
+        }
+
+        let stdoutOriginal = Data(stdout.utf8).count
+        let stderrOriginal = Data(stderr.utf8).count
+        if stdoutOriginal + stderrOriginal <= cap {
+            return (
+                stdout,
+                stderr,
+                outputLimitDetails(
+                    cap: cap,
+                    stdoutOriginal: stdoutOriginal,
+                    stderrOriginal: stderrOriginal,
+                    stdoutReturned: stdoutOriginal,
+                    stderrReturned: stderrOriginal
+                )
+            )
+        }
+
+        let budgets = outputBudgets(
+            stdoutBytes: stdoutOriginal,
+            stderrBytes: stderrOriginal,
+            cap: cap
+        )
+        let returnedStdout = utf8Prefix(stdout, maxBytes: budgets.stdout)
+        let returnedStderr = utf8Prefix(stderr, maxBytes: budgets.stderr)
+        let stdoutReturned = Data(returnedStdout.utf8).count
+        let stderrReturned = Data(returnedStderr.utf8).count
+        return (
+            returnedStdout,
+            returnedStderr,
+            outputLimitDetails(
+                cap: cap,
+                stdoutOriginal: stdoutOriginal,
+                stderrOriginal: stderrOriginal,
+                stdoutReturned: stdoutReturned,
+                stderrReturned: stderrReturned
+            )
+        )
+    }
+
+    private func outputBudgets(
+        stdoutBytes: Int,
+        stderrBytes: Int,
+        cap: Int
+    ) -> (stdout: Int, stderr: Int) {
+        if stdoutBytes > 0, stderrBytes > 0, cap >= 2 {
+            var stdoutBudget = min(stdoutBytes, max(1, cap / 2))
+            var stderrBudget = min(stderrBytes, max(1, cap - stdoutBudget))
+            var unused = cap - stdoutBudget - stderrBudget
+            if unused > 0, stdoutBytes > stdoutBudget {
+                let extra = min(unused, stdoutBytes - stdoutBudget)
+                stdoutBudget += extra
+                unused -= extra
+            }
+            if unused > 0, stderrBytes > stderrBudget {
+                let extra = min(unused, stderrBytes - stderrBudget)
+                stderrBudget += extra
+            }
+            return (stdoutBudget, stderrBudget)
+        }
+        if stdoutBytes > 0 {
+            return (min(stdoutBytes, cap), 0)
+        }
+        return (0, min(stderrBytes, cap))
+    }
+
+    private func utf8Prefix(_ value: String, maxBytes: Int) -> String {
+        guard maxBytes > 0 else {
+            return ""
+        }
+        var used = 0
+        var result = ""
+        for character in value {
+            let byteCount = String(character).utf8.count
+            guard used + byteCount <= maxBytes else {
+                break
+            }
+            result.append(character)
+            used += byteCount
+        }
+        return result
+    }
+
+    private func outputLimitDetails(
+        cap: Int,
+        stdoutOriginal: Int,
+        stderrOriginal: Int,
+        stdoutReturned: Int,
+        stderrReturned: Int
+    ) -> [String: String] {
+        [
+            "output_limit_bytes": "\(cap)",
+            "stdout_bytes_original": "\(stdoutOriginal)",
+            "stderr_bytes_original": "\(stderrOriginal)",
+            "stdout_bytes_returned": "\(stdoutReturned)",
+            "stderr_bytes_returned": "\(stderrReturned)",
+            "stdout_truncated": stdoutReturned < stdoutOriginal ? "true" : "false",
+            "stderr_truncated": stderrReturned < stderrOriginal ? "true" : "false",
+        ]
     }
 
     private func containsNUL(_ value: String) -> Bool {
