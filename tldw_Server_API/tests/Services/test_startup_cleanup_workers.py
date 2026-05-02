@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 import importlib
 import sys
+from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -10,7 +13,7 @@ import pytest
 pytestmark = pytest.mark.unit
 
 
-def _import_startup_cleanup_workers():
+def _import_startup_cleanup_workers() -> Any:
     sys.modules.pop("tldw_Server_API.app.services.startup_cleanup_workers", None)
     return importlib.import_module("tldw_Server_API.app.services.startup_cleanup_workers")
 
@@ -22,17 +25,22 @@ async def test_start_cleanup_workers_combines_all_handles(
     startup_cleanup = _import_startup_cleanup_workers()
     calls: list[str] = []
 
-    async def _fake_ephemeral(app_settings):
+    async def _fake_ephemeral(
+        app_settings: dict[str, str],
+        *,
+        worker_inventory: object | None = None,
+    ) -> str:
+        assert worker_inventory is None
         calls.append("ephemeral")
         assert app_settings["SINGLE_USER_FIXED_ID"] == "7"
         return "ephemeral-task"
 
-    async def _fake_chatbooks(*, worker_inventory=None):
+    async def _fake_chatbooks(*, worker_inventory: object | None = None) -> tuple[str, str]:
         assert worker_inventory is None
         calls.append("chatbooks")
         return ("chatbooks-task", "chatbooks-stop")
 
-    async def _fake_storage(*, test_mode: bool):
+    async def _fake_storage(*, test_mode: bool) -> str:
         calls.append("storage")
         assert test_mode is True
         return "storage-service"
@@ -54,22 +62,27 @@ async def test_start_cleanup_workers_combines_all_handles(
 
 
 @pytest.mark.asyncio
-async def test_start_cleanup_workers_passes_worker_inventory_to_chatbooks(
+async def test_start_cleanup_workers_passes_worker_inventory_to_registered_cleanup_workers(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     startup_cleanup = _import_startup_cleanup_workers()
     worker_inventory = object()
     calls: list[tuple[str, object | None]] = []
 
-    async def _fake_ephemeral(app_settings):
-        del app_settings
-        return None
+    async def _fake_ephemeral(
+        app_settings: dict[str, str],
+        *,
+        worker_inventory: object | None = None,
+    ) -> str:
+        assert app_settings["SINGLE_USER_FIXED_ID"] == "7"
+        calls.append(("ephemeral", worker_inventory))
+        return "ephemeral-task"
 
-    async def _fake_chatbooks(*, worker_inventory=None):
+    async def _fake_chatbooks(*, worker_inventory: object | None = None) -> tuple[str, str]:
         calls.append(("chatbooks", worker_inventory))
         return ("chatbooks-task", "chatbooks-stop")
 
-    async def _fake_storage(*, test_mode: bool):
+    async def _fake_storage(*, test_mode: bool) -> None:
         assert test_mode is True
         return None
 
@@ -83,7 +96,8 @@ async def test_start_cleanup_workers_passes_worker_inventory_to_chatbooks(
         worker_inventory=worker_inventory,
     )
 
-    assert calls == [("chatbooks", worker_inventory)]
+    assert calls == [("ephemeral", worker_inventory), ("chatbooks", worker_inventory)]
+    assert handles.cleanup_task == "ephemeral-task"
     assert handles.chatbooks_cleanup_task == "chatbooks-task"
     assert handles.chatbooks_cleanup_stop_event == "chatbooks-stop"
 
@@ -95,12 +109,12 @@ async def test_start_chatbooks_cleanup_worker_starts_when_interval_positive(
     startup_cleanup = _import_startup_cleanup_workers()
     monkeypatch.setenv("CHATBOOKS_CLEANUP_INTERVAL_SEC", "30")
     started_with: list[object] = []
-    created_tasks = []
+    created_tasks: list[SimpleNamespace] = []
 
-    async def _fake_runner(stop_event):
+    async def _fake_runner(stop_event: object) -> None:
         started_with.append(stop_event)
 
-    def _record_create_task(coro, *, name=None):
+    def _record_create_task(coro: Any, *, name: str | None = None) -> SimpleNamespace:
         task = SimpleNamespace(coro=coro, name=name, cancel=lambda: None)
         created_tasks.append(task)
         coro.close()
@@ -126,7 +140,10 @@ async def test_start_chatbooks_cleanup_worker_registers_background_inventory(
     task = object()
     stop_event = object()
 
-    async def _fake_start_stop_event_worker(inventory, **kwargs):
+    async def _fake_start_stop_event_worker(
+        inventory: object,
+        **kwargs: object,
+    ) -> tuple[object, object]:
         calls.append({"inventory": inventory, **kwargs})
         return task, stop_event
 
@@ -199,20 +216,24 @@ async def test_start_storage_cleanup_worker_starts_enabled_service(
 @pytest.mark.asyncio
 async def test_start_ephemeral_cleanup_worker_creates_task_when_enabled(
     monkeypatch: pytest.MonkeyPatch,
-    tmp_path,
+    tmp_path: Path,
 ) -> None:
     startup_cleanup = _import_startup_cleanup_workers()
-    created_tasks = []
+    created_tasks: list[SimpleNamespace] = []
 
-    def _record_create_task(coro):
-        task = SimpleNamespace(coro=coro, cancel=lambda: None)
+    def _record_create_task(coro: Any, *, name: str | None = None) -> SimpleNamespace:
+        task = SimpleNamespace(coro=coro, name=name, cancel=lambda: None)
         created_tasks.append(task)
         coro.close()
         return task
 
     monkeypatch.setattr(startup_cleanup.asyncio, "create_task", _record_create_task)
     monkeypatch.setattr(startup_cleanup, "_create_evaluations_db", lambda db_path: SimpleNamespace())
-    monkeypatch.setattr(startup_cleanup, "_create_vector_store_adapter", lambda settings, user_id: SimpleNamespace(initialize=lambda: None))
+    monkeypatch.setattr(
+        startup_cleanup,
+        "_create_vector_store_adapter",
+        lambda settings, user_id: SimpleNamespace(initialize=lambda: None),
+    )
     monkeypatch.setattr(
         startup_cleanup,
         "_get_evaluations_db_path",
@@ -224,6 +245,114 @@ async def test_start_ephemeral_cleanup_worker_creates_task_when_enabled(
     )
 
     assert task is created_tasks[0]
+
+
+@pytest.mark.asyncio
+async def test_start_ephemeral_cleanup_worker_registers_background_inventory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_cleanup = _import_startup_cleanup_workers()
+    worker_inventory = object()
+    task = object()
+    stop_event = object()
+    calls: list[dict[str, object]] = []
+
+    async def _fake_start_stop_event_worker(
+        inventory: object,
+        **kwargs: object,
+    ) -> tuple[object, object]:
+        calls.append({"inventory": inventory, **kwargs})
+        return task, stop_event
+
+    monkeypatch.setattr(startup_cleanup, "start_stop_event_worker", _fake_start_stop_event_worker)
+    monkeypatch.setattr(startup_cleanup, "_create_evaluations_db", lambda db_path: SimpleNamespace())
+    monkeypatch.setattr(
+        startup_cleanup,
+        "_create_vector_store_adapter",
+        lambda settings, user_id: SimpleNamespace(initialize=lambda: None),
+    )
+    monkeypatch.setattr(
+        startup_cleanup,
+        "_get_evaluations_db_path",
+        lambda user_id: f"evals-{user_id}.db",
+    )
+
+    returned_task = await startup_cleanup._start_ephemeral_cleanup_worker(
+        {"SINGLE_USER_FIXED_ID": "11", "EPHEMERAL_CLEANUP_ENABLED": True},
+        worker_inventory=worker_inventory,
+    )
+
+    assert returned_task is task
+    assert len(calls) == 1
+    assert calls[0]["inventory"] is worker_inventory
+    assert calls[0]["name"] == "ephemeral_cleanup_task"
+    assert calls[0]["task_name"] == "ephemeral_cleanup_task"
+    assert calls[0]["category"] == "cleanup"
+    assert calls[0]["shutdown_phase"] == startup_cleanup.ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN
+    assert callable(calls[0]["coroutine_factory"])
+
+
+@pytest.mark.asyncio
+async def test_run_ephemeral_cleanup_loop_exits_when_stop_event_is_set(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_cleanup = _import_startup_cleanup_workers()
+    stop_event = asyncio.Event()
+    stop_event.set()
+
+    def _fail_create_evaluations_db(_db_path: str) -> None:
+        raise AssertionError("cleanup loop should not initialize DB after stop")
+
+    monkeypatch.setattr(startup_cleanup, "_create_evaluations_db", _fail_create_evaluations_db)
+
+    await startup_cleanup._run_ephemeral_cleanup_loop(
+        {"SINGLE_USER_FIXED_ID": "11", "EPHEMERAL_CLEANUP_INTERVAL_SEC": 1},
+        stop_event=stop_event,
+    )
+
+
+@pytest.mark.asyncio
+async def test_run_ephemeral_cleanup_loop_stops_delete_batch_after_stop_request(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    startup_cleanup = _import_startup_cleanup_workers()
+    stop_event = asyncio.Event()
+    deleted: list[str] = []
+    marked: list[str] = []
+
+    class _FakeDB:
+        def list_expired_ephemeral_collections(self) -> list[str]:
+            return ["expired-a", "expired-b"]
+
+        def mark_ephemeral_deleted(self, collection_name: str) -> None:
+            marked.append(collection_name)
+
+    class _FakeAdapter:
+        def initialize(self) -> None:
+            return None
+
+        async def delete_collection(self, collection_name: str) -> None:
+            deleted.append(collection_name)
+            stop_event.set()
+
+    monkeypatch.setattr(startup_cleanup, "_create_evaluations_db", lambda db_path: _FakeDB())
+    monkeypatch.setattr(
+        startup_cleanup,
+        "_create_vector_store_adapter",
+        lambda settings, user_id: _FakeAdapter(),
+    )
+
+    await startup_cleanup._run_ephemeral_cleanup_loop(
+        {"SINGLE_USER_FIXED_ID": "11", "EPHEMERAL_CLEANUP_INTERVAL_SEC": 1},
+        single_uid=11,
+        db_path=str(tmp_path / "evals.db"),
+        interval_sec=1,
+        stop_event=stop_event,
+    )
+
+    assert deleted == ["expired-a"]
+    assert marked == ["expired-a"]
 
 
 @pytest.mark.asyncio

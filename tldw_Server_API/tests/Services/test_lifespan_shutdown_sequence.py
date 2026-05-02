@@ -104,6 +104,25 @@ async def test_run_lifespan_shutdown_sequence_runs_wrappers_in_order_and_updates
         calls.append(("pollers", kwargs))
         return SimpleNamespace(should_run_late_stop=True)
 
+    async def _fake_stop_registered_workers(
+        app: FastAPI,
+        handles: list[object],
+        *,
+        stopped_names_attr: str,
+        log_label: str,
+    ) -> None:
+        calls.append(
+            (
+                "stop-background",
+                {
+                    "handles": handles,
+                    "stopped_names_attr": stopped_names_attr,
+                    "log_label": log_label,
+                },
+            )
+        )
+        setattr(app.state, stopped_names_attr, ["chatbooks_cleanup", "ephemeral_cleanup_task"])
+
     async def _fake_coordinated_shutdown(**kwargs):
         calls.append(("coordinated", kwargs))
         return SimpleNamespace(
@@ -112,7 +131,10 @@ async def test_run_lifespan_shutdown_sequence_runs_wrappers_in_order_and_updates
 
     async def _fake_pre_worker_cleanup(**kwargs):
         calls.append(("pre", kwargs))
-        assert kwargs["stopped_background_worker_names"] == {"chatbooks_cleanup"}
+        assert kwargs["stopped_background_worker_names"] == {
+            "chatbooks_cleanup",
+            "ephemeral_cleanup_task",
+        }
         return SimpleNamespace(
             cleanup_task="cleanup-after",
             chatbooks_cleanup_task="chatbooks-after",
@@ -150,10 +172,6 @@ async def test_run_lifespan_shutdown_sequence_runs_wrappers_in_order_and_updates
             files_export_gc_task="files-gc-final",
         )
 
-    async def _fake_stop_registered_workers(app, handles, *, stopped_names_attr, log_label):
-        del handles, log_label
-        setattr(app.state, stopped_names_attr, ["chatbooks_cleanup"])
-
     monkeypatch.setattr(
         shutdown_transition_handoff,
         "shutdown_transition_handoff",
@@ -163,6 +181,11 @@ async def test_run_lifespan_shutdown_sequence_runs_wrappers_in_order_and_updates
         shutdown_job_poller_handoff,
         "run_shutdown_job_poller_handoff",
         _fake_job_poller_handoff,
+    )
+    monkeypatch.setattr(
+        lifespan_shutdown_sequence,
+        "stop_registered_workers",
+        _fake_stop_registered_workers,
     )
     monkeypatch.setattr(
         shutdown_coordinated_legacy_components,
@@ -194,12 +217,6 @@ async def test_run_lifespan_shutdown_sequence_runs_wrappers_in_order_and_updates
         "shutdown_final_cleanup_tail",
         _fake_final_cleanup,
     )
-    monkeypatch.setattr(
-        lifespan_shutdown_sequence,
-        "stop_registered_workers",
-        _fake_stop_registered_workers,
-    )
-
     await lifespan_shutdown_sequence.run_lifespan_shutdown_sequence(
         app=app,
         worker_runtime=worker_runtime,
@@ -225,6 +242,7 @@ async def test_run_lifespan_shutdown_sequence_runs_wrappers_in_order_and_updates
         "transition",
         "pollers",
         "segment",
+        "stop-background",
         "coordinated",
         "pre",
         "primary",
@@ -236,18 +254,22 @@ async def test_run_lifespan_shutdown_sequence_runs_wrappers_in_order_and_updates
     assert calls[1][1]["usage_task"] == "usage-start"
     assert calls[2][1]["owned_job_pollers"] == ["poller-a"]
     assert calls[3][1]["segment_name"] == "background_worker_shutdown"
-    assert calls[4][1]["legacy_shutdown_plan"] == ["transition-plan"]
-    assert calls[4][1]["stopped_background_worker_names"] == {"chatbooks_cleanup"}
-    assert calls[5][1]["coordinated_legacy_component_names"] == {"usage_aggregator"}
-    assert calls[6][1]["should_run_late_stop"] is True
+    assert calls[4][1]["stopped_names_attr"] == "_tldw_shutdown_stopped_background_worker_names"
+    assert calls[5][1]["legacy_shutdown_plan"] == ["transition-plan"]
+    assert calls[6][1]["coordinated_legacy_component_names"] == {"usage_aggregator"}
+    assert calls[6][1]["stopped_background_worker_names"] == {
+        "chatbooks_cleanup",
+        "ephemeral_cleanup_task",
+    }
     assert calls[7][1]["should_run_late_stop"] is True
-    assert calls[8][1]["claims_task"] == "claims-start"
-    assert calls[9][1]["authnz_scheduler_started"] is True
-    assert calls[9][1]["db_pool"] == "db-pool"
-    assert calls[9][1]["session_manager"] == "session-manager"
-    assert calls[9][1]["heavy_startup_handles"] == "heavy-handles"
-    assert calls[9][1]["in_pytest_for_db_pool_shutdown"] is True
-    assert calls[9][1]["in_pytest_for_tts_shutdown"] is True
+    assert calls[8][1]["should_run_late_stop"] is True
+    assert calls[9][1]["claims_task"] == "claims-start"
+    assert calls[10][1]["authnz_scheduler_started"] is True
+    assert calls[10][1]["db_pool"] == "db-pool"
+    assert calls[10][1]["session_manager"] == "session-manager"
+    assert calls[10][1]["heavy_startup_handles"] == "heavy-handles"
+    assert calls[10][1]["in_pytest_for_db_pool_shutdown"] is True
+    assert calls[10][1]["in_pytest_for_tts_shutdown"] is True
     assert worker_runtime.cleanup_task == "cleanup-after"
     assert worker_runtime.chatbooks_cleanup_task == "chatbooks-after"
     assert worker_runtime.storage_cleanup_service == "storage-after"

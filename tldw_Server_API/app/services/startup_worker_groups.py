@@ -164,59 +164,41 @@ async def start_worker_groups(
         prompt_studio_jobs_task=primary_jobs_poller_handles.prompt_studio_jobs_task,
         study_pack_jobs_stop_event=study_privilege_jobs_poller_handles.study_pack_jobs_stop_event,
         study_pack_jobs_task=study_privilege_jobs_poller_handles.study_pack_jobs_task,
-        study_suggestions_jobs_stop_event=(
-            study_privilege_jobs_poller_handles.study_suggestions_jobs_stop_event
-        ),
+        study_suggestions_jobs_stop_event=(study_privilege_jobs_poller_handles.study_suggestions_jobs_stop_event),
         study_suggestions_jobs_task=study_privilege_jobs_poller_handles.study_suggestions_jobs_task,
         privilege_snapshot_stop_event=study_privilege_jobs_poller_handles.privilege_snapshot_stop_event,
         privilege_snapshot_task=study_privilege_jobs_poller_handles.privilege_snapshot_task,
-        embeddings_compactor_stop_event=(
-            compactor_websub_startup_handles.embeddings_compactor_stop_event
-        ),
+        embeddings_compactor_stop_event=(compactor_websub_startup_handles.embeddings_compactor_stop_event),
         embeddings_compactor_task=compactor_websub_startup_handles.embeddings_compactor_task,
         websub_renewal_task=compactor_websub_startup_handles.websub_renewal_task,
         audio_jobs_stop_event=content_jobs_poller_handles.audio_jobs_stop_event,
         audio_jobs_task=content_jobs_poller_handles.audio_jobs_task,
         audiobook_jobs_stop_event=content_jobs_poller_handles.audiobook_jobs_stop_event,
         audiobook_jobs_task=content_jobs_poller_handles.audiobook_jobs_task,
-        presentation_render_jobs_stop_event=(
-            content_jobs_poller_handles.presentation_render_jobs_stop_event
-        ),
+        presentation_render_jobs_stop_event=(content_jobs_poller_handles.presentation_render_jobs_stop_event),
         presentation_render_jobs_task=content_jobs_poller_handles.presentation_render_jobs_task,
         media_ingest_jobs_stop_event=content_jobs_poller_handles.media_ingest_jobs_stop_event,
         media_ingest_jobs_task=content_jobs_poller_handles.media_ingest_jobs_task,
-        media_ingest_heavy_jobs_stop_event=(
-            content_jobs_poller_handles.media_ingest_heavy_jobs_stop_event
-        ),
+        media_ingest_heavy_jobs_stop_event=(content_jobs_poller_handles.media_ingest_heavy_jobs_stop_event),
         media_ingest_heavy_jobs_task=content_jobs_poller_handles.media_ingest_heavy_jobs_task,
         reading_digest_jobs_stop_event=content_jobs_poller_handles.reading_digest_jobs_stop_event,
         reading_digest_jobs_task=content_jobs_poller_handles.reading_digest_jobs_task,
         vn_asset_jobs_stop_event=content_jobs_poller_handles.vn_asset_jobs_stop_event,
         vn_asset_jobs_task=content_jobs_poller_handles.vn_asset_jobs_task,
-        vn_asset_generation_jobs_stop_event=(
-            content_jobs_poller_handles.vn_asset_generation_jobs_stop_event
-        ),
-        vn_asset_generation_jobs_task=(
-            content_jobs_poller_handles.vn_asset_generation_jobs_task
-        ),
-        companion_reflection_jobs_stop_event=(
-            content_jobs_poller_handles.companion_reflection_jobs_stop_event
-        ),
+        vn_asset_generation_jobs_stop_event=(content_jobs_poller_handles.vn_asset_generation_jobs_stop_event),
+        vn_asset_generation_jobs_task=(content_jobs_poller_handles.vn_asset_generation_jobs_task),
+        companion_reflection_jobs_stop_event=(content_jobs_poller_handles.companion_reflection_jobs_stop_event),
         companion_reflection_jobs_task=content_jobs_poller_handles.companion_reflection_jobs_task,
         reminder_jobs_stop_event=sidecar_owned_jobs_poller_handles.reminder_jobs_stop_event,
         reminder_jobs_task=sidecar_owned_jobs_poller_handles.reminder_jobs_task,
         admin_backup_jobs_stop_event=sidecar_owned_jobs_poller_handles.admin_backup_jobs_stop_event,
         admin_backup_jobs_task=sidecar_owned_jobs_poller_handles.admin_backup_jobs_task,
-        admin_byok_validation_jobs_stop_event=(
-            sidecar_owned_jobs_poller_handles.admin_byok_validation_jobs_stop_event
-        ),
+        admin_byok_validation_jobs_stop_event=(sidecar_owned_jobs_poller_handles.admin_byok_validation_jobs_stop_event),
         admin_byok_validation_jobs_task=sidecar_owned_jobs_poller_handles.admin_byok_validation_jobs_task,
         admin_maintenance_rotation_jobs_stop_event=(
             sidecar_owned_jobs_poller_handles.admin_maintenance_rotation_jobs_stop_event
         ),
-        admin_maintenance_rotation_jobs_task=(
-            sidecar_owned_jobs_poller_handles.admin_maintenance_rotation_jobs_task
-        ),
+        admin_maintenance_rotation_jobs_task=(sidecar_owned_jobs_poller_handles.admin_maintenance_rotation_jobs_task),
         recipe_run_jobs_stop_event=sidecar_owned_jobs_poller_handles.recipe_run_jobs_stop_event,
         recipe_run_jobs_task=sidecar_owned_jobs_poller_handles.recipe_run_jobs_task,
         jobs_notifications_bridge_task=notifications_abtest_startup_handles.jobs_notifications_bridge_task,

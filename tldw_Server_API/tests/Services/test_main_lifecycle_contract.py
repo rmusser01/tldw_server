@@ -154,7 +154,9 @@ def test_apply_shutdown_transition_gate_logs_guard_failures(
 
     monkeypatch.setattr(main_module, "get_or_create_lifecycle_state", _raise_lifecycle_state)
     monkeypatch.setattr(main_module, "mark_lifecycle_shutdown", _raise_mark_shutdown)
-    monkeypatch.setattr(main_module.logger, "debug", lambda message, *args, **kwargs: debug_messages.append(str(message)))
+    monkeypatch.setattr(
+        main_module.logger, "debug", lambda message, *args, **kwargs: debug_messages.append(str(message))
+    )
     monkeypatch.setattr(
         main_module.logger,
         "warning",
@@ -788,9 +790,7 @@ def test_lifespan_startup_delegates_worker_bootstrap(
     assert recorded_calls[0]["route_enabled"] is main_module.route_enabled
     assert recorded_calls[0]["run_pg_rls_auto_ensure"] is main_module._run_pg_rls_auto_ensure
     assert recorded_calls[0]["register_owned_job_poller"] is main_module._register_owned_job_poller
-    assert recorded_calls[0]["replace_owned_job_poller_inventory"] is (
-        main_module._replace_owned_job_poller_inventory
-    )
+    assert recorded_calls[0]["replace_owned_job_poller_inventory"] is (main_module._replace_owned_job_poller_inventory)
     assert "publish_shutdown_job_poller_inventory" not in recorded_calls[0]
     assert recorded_calls[0]["logger"] is main_module.logger
     assert recorded_calls[0]["startup_api_key_log_value"] is main_module._startup_api_key_log_value
@@ -948,9 +948,7 @@ def test_lifespan_startup_delegates_service_tail(
     assert isinstance(recorded_calls[0]["owned_job_pollers"], list)
     assert recorded_calls[0]["register_owned_job_poller"] is main_module._register_owned_job_poller
     assert recorded_calls[0]["run_pg_rls_auto_ensure"] is main_module._run_pg_rls_auto_ensure
-    assert recorded_calls[0]["replace_owned_job_poller_inventory"] is (
-        main_module._replace_owned_job_poller_inventory
-    )
+    assert recorded_calls[0]["replace_owned_job_poller_inventory"] is (main_module._replace_owned_job_poller_inventory)
     assert isinstance(
         recorded_calls[0]["startup_worker_group_handles"],
         object,
@@ -1386,11 +1384,11 @@ def test_lifespan_shutdown_delegates_pre_worker_cleanup(
     recorded_calls: list[dict[str, object]] = []
 
     async def _fake_start_cleanup_workers(
-        app_settings,
+        app_settings: object,
         *,
         test_mode: bool,
-        worker_inventory,
-    ):
+        worker_inventory: object,
+    ) -> startup_cleanup_workers.CleanupWorkerHandles:
         del app_settings, test_mode
         assert worker_inventory is not None
         return startup_cleanup_workers.CleanupWorkerHandles(
@@ -1461,11 +1459,11 @@ def test_lifespan_shutdown_delegates_transition_handoff(
         )
 
     async def _fake_start_cleanup_workers(
-        app_settings,
+        app_settings: object,
         *,
         test_mode: bool,
-        worker_inventory,
-    ):
+        worker_inventory: object,
+    ) -> startup_cleanup_workers.CleanupWorkerHandles:
         del app_settings, test_mode
         assert worker_inventory is not None
         return startup_cleanup_workers.CleanupWorkerHandles(
@@ -2384,6 +2382,7 @@ def test_shutdown_falls_back_to_direct_drain_when_transition_gate_component_fail
         "set_acquire_gate",
         classmethod(_record_gate),
     )
+
     def _failing_transition_stop() -> None:
         raise RuntimeError("shadow transition component failed")
 
@@ -2521,9 +2520,7 @@ def test_shutdown_migrated_legacy_slice_uses_prod_drain_profile(
             ),
         ]
 
-    fake_shutdown_legacy_adapters = types.ModuleType(
-        "tldw_Server_API.app.services.shutdown_legacy_adapters"
-    )
+    fake_shutdown_legacy_adapters = types.ModuleType("tldw_Server_API.app.services.shutdown_legacy_adapters")
     fake_shutdown_legacy_adapters.LegacyShutdownContext = shutdown_legacy_adapters.LegacyShutdownContext
     fake_shutdown_legacy_adapters.build_legacy_shutdown_plan = _fake_build_legacy_shutdown_plan
     fake_shutdown_legacy_adapters.register_legacy_shutdown_components = (
@@ -2562,9 +2559,7 @@ def test_shutdown_migrated_legacy_slice_uses_prod_drain_profile(
         "lifecycle_gate",
     ]
     expected_transport_names = getattr(app.state, "_tldw_shutdown_transport_component_names", [])
-    migrated_registered_names = [
-        component.name for component in _SpyShutdownCoordinator.instances[1].registered
-    ]
+    migrated_registered_names = [component.name for component in _SpyShutdownCoordinator.instances[1].registered]
     assert migrated_registered_names == expected_migrated_names + expected_transport_names
     assert "lifecycle_gate" not in migrated_registered_names
 
@@ -2680,9 +2675,7 @@ def test_shutdown_skipped_best_effort_component_falls_back_to_direct_stop(
             ),
         ]
 
-    fake_shutdown_legacy_adapters = types.ModuleType(
-        "tldw_Server_API.app.services.shutdown_legacy_adapters"
-    )
+    fake_shutdown_legacy_adapters = types.ModuleType("tldw_Server_API.app.services.shutdown_legacy_adapters")
     fake_shutdown_legacy_adapters.LegacyShutdownContext = shutdown_legacy_adapters.LegacyShutdownContext
     fake_shutdown_legacy_adapters.build_legacy_shutdown_plan = _fake_build_legacy_shutdown_plan
     fake_shutdown_legacy_adapters.register_legacy_shutdown_components = (

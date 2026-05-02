@@ -92,9 +92,7 @@ async def run_lifespan_shutdown_sequence(
             stopped_names_attr="_tldw_shutdown_stopped_background_worker_names",
             log_label="background worker",
         )
-        stopped_background_worker_names = set(
-            getattr(app.state, "_tldw_shutdown_stopped_background_worker_names", [])
-        )
+        stopped_background_worker_names = set(getattr(app.state, "_tldw_shutdown_stopped_background_worker_names", []))
 
     from tldw_Server_API.app.services.shutdown_coordinated_legacy_components import (
         run_shutdown_coordinated_legacy_components,
@@ -108,9 +106,7 @@ async def run_lifespan_shutdown_sequence(
         import_exceptions=import_exceptions,
         stopped_background_worker_names=stopped_background_worker_names,
     )
-    coordinated_legacy_component_names = (
-        coordinated_legacy_shutdown_handles.coordinated_legacy_component_names
-    )
+    coordinated_legacy_component_names = coordinated_legacy_shutdown_handles.coordinated_legacy_component_names
 
     from tldw_Server_API.app.services.shutdown_pre_worker_cleanup import (
         run_shutdown_pre_worker_cleanup,

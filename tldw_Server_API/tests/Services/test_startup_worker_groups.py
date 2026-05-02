@@ -28,7 +28,12 @@ async def test_start_worker_groups_runs_helpers_in_order_and_returns_handles(
     worker_inventory = object()
     worker_inventory_ref = worker_inventory
 
-    async def _record_cleanup_workers(*, app_settings, test_mode, worker_inventory=None):
+    async def _record_cleanup_workers(
+        *,
+        app_settings: dict[str, str],
+        test_mode: bool,
+        worker_inventory: object | None = None,
+    ) -> SimpleNamespace:
         assert app_settings == {"SINGLE_USER_FIXED_ID": "7"}
         assert test_mode is True
         assert worker_inventory is worker_inventory_ref
@@ -159,6 +164,7 @@ async def test_start_worker_groups_runs_helpers_in_order_and_returns_handles(
 
     monkeypatch.setenv("AUDIO_JOBS_WORKER_ENABLED", "1")
     monkeypatch.delenv("TLDW_WORKERS_SIDECAR_MODE", raising=False)
+    worker_inventory_ref = worker_inventory
     monkeypatch.setattr(startup_groups, "_start_cleanup_workers", _record_cleanup_workers)
     monkeypatch.setattr(startup_groups, "_start_primary_jobs_pollers", _record_primary_jobs_pollers)
     monkeypatch.setattr(
@@ -187,9 +193,7 @@ async def test_start_worker_groups_runs_helpers_in_order_and_returns_handles(
         app=app,
         app_settings={"SINGLE_USER_FIXED_ID": "7"},
         test_mode=True,
-        route_enabled=lambda route_key, *, default_stable=True: route_enabled_calls.append(
-            (route_key, default_stable)
-        ),
+        route_enabled=lambda route_key, *, default_stable=True: route_enabled_calls.append((route_key, default_stable)),
         startup_guard_exceptions=(RuntimeError,),
         owned_job_pollers=owned_job_pollers,
         register_owned_job_poller=register_owned_job_poller,

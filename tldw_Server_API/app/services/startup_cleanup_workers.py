@@ -44,7 +44,10 @@ async def start_cleanup_workers(
     worker_inventory: Any | None = None,
 ) -> CleanupWorkerHandles:
     """Start the small cleanup-worker startup slice and return explicit handles."""
-    cleanup_task = await _start_ephemeral_cleanup_worker(app_settings)
+    cleanup_task = await _start_ephemeral_cleanup_worker(
+        app_settings,
+        worker_inventory=worker_inventory,
+    )
     secondary = await _start_secondary_cleanup_workers(
         test_mode=test_mode,
         worker_inventory=worker_inventory,
@@ -74,51 +77,93 @@ async def _start_secondary_cleanup_workers(
     )
 
 
-async def _start_ephemeral_cleanup_worker(app_settings: Mapping[str, Any]) -> Any | None:
+async def _start_ephemeral_cleanup_worker(
+    app_settings: Mapping[str, Any],
+    *,
+    worker_inventory: Any | None = None,
+) -> Any | None:
     """Start the ephemeral collections cleanup loop when enabled."""
     try:
-        single_uid = int(app_settings.get("SINGLE_USER_FIXED_ID", "1"))
-        db_path = str(_get_evaluations_db_path(single_uid))
+        single_uid, db_path, interval_sec = _resolve_ephemeral_cleanup_config(app_settings)
         enabled = _settings_truthy(app_settings.get("EPHEMERAL_CLEANUP_ENABLED", True))
-        interval_sec = int(app_settings.get("EPHEMERAL_CLEANUP_INTERVAL_SEC", 1800))
-
-        async def _ephemeral_cleanup_loop() -> None:
-            logger.info(f"Starting ephemeral collections cleanup worker (every {interval_sec}s)")
-            db = _create_evaluations_db(db_path)
-            adapter = _create_vector_store_adapter(app_settings, str(app_settings.get("SINGLE_USER_FIXED_ID", "1")))
-            await _maybe_await(getattr(adapter, "initialize", lambda: None)())
-            while True:
-                try:
-                    enabled_dyn = _settings_truthy(app_settings.get("EPHEMERAL_CLEANUP_ENABLED", True))
-                    interval_dyn = int(app_settings.get("EPHEMERAL_CLEANUP_INTERVAL_SEC", interval_sec))
-                    if not enabled_dyn:
-                        await asyncio.sleep(interval_sec)
-                        continue
-                    expired = db.list_expired_ephemeral_collections()
-                    if expired:
-                        deleted = 0
-                        for collection_name in expired:
-                            try:
-                                await _maybe_await(adapter.delete_collection(collection_name))
-                                db.mark_ephemeral_deleted(collection_name)
-                                deleted += 1
-                            except _STARTUP_GUARD_EXCEPTIONS as exc:
-                                logger.warning(f"Ephemeral cleanup: failed to delete {collection_name}: {exc}")
-                        if deleted:
-                            logger.info(
-                                f"Ephemeral cleanup: deleted {deleted}/{len(expired)} expired collections"
-                            )
-                except _STARTUP_GUARD_EXCEPTIONS as exc:
-                    logger.warning(f"Ephemeral cleanup loop error: {exc}")
-                await asyncio.sleep(interval_dyn)
 
         if enabled:
-            return asyncio.create_task(_ephemeral_cleanup_loop())
+            if worker_inventory is not None:
+                task, _stop_event = await start_stop_event_worker(
+                    worker_inventory,
+                    name="ephemeral_cleanup_task",
+                    task_name="ephemeral_cleanup_task",
+                    coroutine_factory=lambda stop_event: _run_ephemeral_cleanup_loop(
+                        app_settings,
+                        single_uid=single_uid,
+                        db_path=db_path,
+                        interval_sec=interval_sec,
+                        stop_event=stop_event,
+                    ),
+                    category="cleanup",
+                    shutdown_phase=ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN,
+                )
+                return task
+            return asyncio.create_task(
+                _run_ephemeral_cleanup_loop(
+                    app_settings,
+                    single_uid=single_uid,
+                    db_path=db_path,
+                    interval_sec=interval_sec,
+                ),
+                name="ephemeral_cleanup_task",
+            )
         logger.info("Ephemeral cleanup worker disabled by settings")
         return None
     except _STARTUP_GUARD_EXCEPTIONS as exc:
         logger.warning(f"Failed to start ephemeral cleanup worker: {exc}")
         return None
+
+
+async def _run_ephemeral_cleanup_loop(
+    app_settings: Mapping[str, Any],
+    *,
+    single_uid: int | None = None,
+    db_path: str | None = None,
+    interval_sec: int | None = None,
+    stop_event: Any | None = None,
+) -> None:
+    """Run ephemeral collection cleanup until cancelled or the stop event is set."""
+    if _stop_requested(stop_event):
+        return
+
+    if single_uid is None or db_path is None or interval_sec is None:
+        single_uid, db_path, interval_sec = _resolve_ephemeral_cleanup_config(app_settings)
+    user_id = str(single_uid)
+    logger.info(f"Starting ephemeral collections cleanup worker (every {interval_sec}s)")
+    db = _create_evaluations_db(db_path)
+    adapter = _create_vector_store_adapter(app_settings, user_id)
+    await _maybe_await(getattr(adapter, "initialize", lambda: None)())
+    while not _stop_requested(stop_event):
+        sleep_for = interval_sec
+        try:
+            enabled_dyn = _settings_truthy(app_settings.get("EPHEMERAL_CLEANUP_ENABLED", True))
+            interval_dyn = int(app_settings.get("EPHEMERAL_CLEANUP_INTERVAL_SEC", interval_sec))
+            sleep_for = interval_dyn if enabled_dyn else interval_sec
+            if enabled_dyn:
+                expired = db.list_expired_ephemeral_collections()
+                if expired:
+                    deleted = 0
+                    for collection_name in expired:
+                        if _stop_requested(stop_event):
+                            logger.info("Ephemeral cleanup: stop requested; exiting delete batch early")
+                            break
+                        try:
+                            await _maybe_await(adapter.delete_collection(collection_name))
+                            db.mark_ephemeral_deleted(collection_name)
+                            deleted += 1
+                        except _STARTUP_GUARD_EXCEPTIONS as exc:
+                            logger.warning(f"Ephemeral cleanup: failed to delete {collection_name}: {exc}")
+                    if deleted:
+                        logger.info(f"Ephemeral cleanup: deleted {deleted}/{len(expired)} expired collections")
+        except _STARTUP_GUARD_EXCEPTIONS as exc:
+            logger.warning(f"Ephemeral cleanup loop error: {exc}")
+        await _sleep_or_stop(stop_event, sleep_for)
 
 
 async def _start_chatbooks_cleanup_worker(
@@ -183,10 +228,43 @@ async def _maybe_await(value: Any) -> Any:
     return value
 
 
+def _stop_requested(stop_event: Any | None) -> bool:
+    """Return whether a lifecycle stop event has been signaled."""
+    if stop_event is None:
+        return False
+    is_set = getattr(stop_event, "is_set", None)
+    if not callable(is_set):
+        return False
+    return bool(is_set())
+
+
+async def _sleep_or_stop(stop_event: Any | None, delay: int) -> None:
+    """Sleep for delay seconds, returning early when a stop event is signaled."""
+    if stop_event is None:
+        await asyncio.sleep(delay)
+        return
+    wait = getattr(stop_event, "wait", None)
+    if not callable(wait):
+        await asyncio.sleep(delay)
+        return
+    try:
+        await asyncio.wait_for(wait(), timeout=delay)
+    except asyncio.TimeoutError:
+        pass
+
+
 def _settings_truthy(value: Any) -> bool:
     if isinstance(value, str):
         return value.strip().lower() in _TRUTHY_VALUES
     return bool(value)
+
+
+def _resolve_ephemeral_cleanup_config(app_settings: Mapping[str, Any]) -> tuple[int, str, int]:
+    """Resolve and validate the ephemeral cleanup user, DB path, and interval."""
+    single_uid = int(app_settings.get("SINGLE_USER_FIXED_ID", "1"))
+    db_path = str(_get_evaluations_db_path(single_uid))
+    interval_sec = int(app_settings.get("EPHEMERAL_CLEANUP_INTERVAL_SEC", 1800))
+    return single_uid, db_path, interval_sec
 
 
 def _create_evaluations_db(db_path: str) -> Any:
