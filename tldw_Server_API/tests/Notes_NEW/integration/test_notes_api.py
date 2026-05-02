@@ -247,12 +247,16 @@ def test_list_and_search_pagination_and_404s(client_with_notes_db: TestClient):
     assert d1["pagination"]["total"] == d1["total"]
     assert d1["pagination"]["has_more"] is True
     assert d1["pagination"]["next_offset"] == 2
+    assert d1["has_more"] is True
+    assert d1["next_offset"] == 2
     assert d2["pagination"]["mode"] == "offset"
     assert d2["pagination"]["limit"] == 2
     assert d2["pagination"]["offset"] == 2
     assert d2["pagination"]["total"] == d2["total"]
     assert d2["pagination"]["has_more"] is True
     assert d2["pagination"]["next_offset"] == 4
+    assert d2["has_more"] is True
+    assert d2["next_offset"] == 4
     # Verify disjointness of pages by IDs
     ids1 = {n.get("id") for n in d1.get("notes", [])}
     ids2 = {n.get("id") for n in d2.get("notes", [])}
@@ -385,6 +389,8 @@ def test_keyword_collections_list_includes_canonical_pagination(client_with_note
         "has_more": True,
         "next_offset": 1,
     }
+    assert payload1["has_more"] is True
+    assert payload1["next_offset"] == 1
     assert payload2["total"] == 2
     assert payload2["count"] == 1
     assert payload2["limit"] == 1
@@ -397,6 +403,8 @@ def test_keyword_collections_list_includes_canonical_pagination(client_with_note
         "has_more": False,
         "next_offset": None,
     }
+    assert payload2["has_more"] is False
+    assert payload2["next_offset"] is None
 
 
 def test_keywords_list_without_trailing_slash_does_not_hit_note_lookup(client_with_notes_db: TestClient):
