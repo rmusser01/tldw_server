@@ -239,6 +239,7 @@ async def run_lifespan_shutdown_sequence(
         app=app,
         authnz_scheduler_started=worker_runtime.authnz_scheduler_started,
         coordinated_legacy_component_names=coordinated_legacy_component_names,
+        stopped_background_worker_names=stopped_background_worker_names,
         db_pool=db_pool,
         session_manager=session_manager,
         heavy_startup_handles=heavy_startup_handles,

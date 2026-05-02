@@ -18,6 +18,7 @@ async def shutdown_final_cleanup_tail(
     app: Any,
     authnz_scheduler_started: bool,
     coordinated_legacy_component_names: set[str],
+    stopped_background_worker_names: set[str] | None = None,
     db_pool: Any | None,
     session_manager: Any | None,
     heavy_startup_handles: Any | None,
@@ -32,6 +33,7 @@ async def shutdown_final_cleanup_tail(
     authnz_scheduler_started = await _maybe_stop_authnz_scheduler(
         authnz_scheduler_started=authnz_scheduler_started,
         coordinated_legacy_component_names=coordinated_legacy_component_names,
+        stopped_background_worker_names=stopped_background_worker_names,
         guard_exceptions=startup_guard_exceptions,
     )
     cleanup_timed_shutdown_handles = await _shutdown_cleanup_timed_segments(

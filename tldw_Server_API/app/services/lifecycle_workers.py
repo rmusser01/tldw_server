@@ -30,7 +30,7 @@ class ManagedWorker:
     """Runtime handle for one lifecycle-managed worker task."""
 
     name: str
-    task: asyncio.Task[Any]
+    task: asyncio.Task[Any] | None
     stop_event: asyncio.Event | None = None
     shutdown_callback: Callable[[], Awaitable[None]] | None = None
     timeout_sec: float = 5.0
@@ -174,14 +174,18 @@ async def stop_registered_workers(
 ) -> None:
     """Stop registered workers concurrently and publish stopped worker names."""
 
-    async def _request_worker_stop(handle: ManagedWorker) -> None:
+    async def _request_worker_stop(handle: ManagedWorker) -> bool | None:
         if handle.stop_event is not None:
             handle.stop_event.set()
-            return
+            if handle.task is None:
+                return True
+            return None
         if handle.shutdown_callback is not None:
             try:
                 await asyncio.wait_for(handle.shutdown_callback(), timeout=handle.timeout_sec)
-                return
+                if handle.task is None:
+                    return True
+                return None
             except asyncio.TimeoutError:
                 logger.warning(
                     "App Shutdown: Timed out waiting for {} {} shutdown callback after {}s; cancelling",
@@ -196,6 +200,8 @@ async def stop_registered_workers(
                     handle.name,
                     exc,
                 )
+        if handle.task is None:
+            return False
         try:
             handle.task.cancel()
         except Exception as exc:  # noqa: BLE001 - cancel hooks can raise arbitrary errors.
@@ -205,8 +211,11 @@ async def stop_registered_workers(
                 handle.name,
                 exc,
             )
+        return None
 
-    async def _await_worker_shutdown(handle: ManagedWorker) -> bool:
+    async def _await_worker_shutdown(handle: ManagedWorker, stop_result: bool | None) -> bool:
+        if handle.task is None:
+            return bool(stop_result)
         try:
             await asyncio.wait_for(asyncio.shield(handle.task), timeout=handle.timeout_sec)
         except asyncio.CancelledError:
@@ -245,13 +254,16 @@ async def stop_registered_workers(
             )
         return bool(handle.task.done())
 
-    await asyncio.gather(
+    stop_results = await asyncio.gather(
         *(_request_worker_stop(handle) for handle in handles),
         return_exceptions=False,
     )
 
     stopped_results = await asyncio.gather(
-        *(_await_worker_shutdown(handle) for handle in handles),
+        *(
+            _await_worker_shutdown(handle, stop_result)
+            for handle, stop_result in zip(handles, stop_results)
+        ),
         return_exceptions=False,
     )
     try:
@@ -295,7 +307,9 @@ async def start_stop_event_worker(
     return task, stop_event
 
 
-def _task_name(task: asyncio.Task[Any]) -> str:
+def _task_name(task: asyncio.Task[Any] | None) -> str | None:
+    if task is None:
+        return None
     get_name = getattr(task, "get_name", None)
     if callable(get_name):
         return str(get_name())

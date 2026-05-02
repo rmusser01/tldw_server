@@ -6,7 +6,6 @@ from types import SimpleNamespace
 import pytest
 from fastapi import FastAPI
 
-
 pytestmark = pytest.mark.unit
 
 
@@ -14,15 +13,17 @@ pytestmark = pytest.mark.unit
 async def test_run_lifespan_shutdown_sequence_runs_wrappers_in_order_and_updates_runtime(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from tldw_Server_API.app.services import shutdown_coordinated_legacy_components
-    from tldw_Server_API.app.services import shutdown_final_cleanup_tail
-    from tldw_Server_API.app.services import shutdown_grouped_late_stop_workers
-    from tldw_Server_API.app.services import shutdown_job_poller_handoff
-    from tldw_Server_API.app.services import shutdown_post_worker_services
-    from tldw_Server_API.app.services import shutdown_pre_worker_cleanup
-    from tldw_Server_API.app.services import shutdown_primary_late_stop_workers
-    from tldw_Server_API.app.services import shutdown_transition_handoff
-    from tldw_Server_API.app.services import lifespan_shutdown_sequence
+    from tldw_Server_API.app.services import (
+        lifespan_shutdown_sequence,
+        shutdown_coordinated_legacy_components,
+        shutdown_final_cleanup_tail,
+        shutdown_grouped_late_stop_workers,
+        shutdown_job_poller_handoff,
+        shutdown_post_worker_services,
+        shutdown_pre_worker_cleanup,
+        shutdown_primary_late_stop_workers,
+        shutdown_transition_handoff,
+    )
     from tldw_Server_API.app.services.lifespan_worker_runtime_state import (
         LifespanWorkerRuntimeState,
     )
@@ -121,7 +122,11 @@ async def test_run_lifespan_shutdown_sequence_runs_wrappers_in_order_and_updates
                 },
             )
         )
-        setattr(app.state, stopped_names_attr, ["chatbooks_cleanup", "ephemeral_cleanup_task"])
+        setattr(
+            app.state,
+            stopped_names_attr,
+            ["authnz_scheduler", "chatbooks_cleanup", "ephemeral_cleanup_task"],
+        )
 
     async def _fake_coordinated_shutdown(**kwargs):
         calls.append(("coordinated", kwargs))
@@ -132,6 +137,7 @@ async def test_run_lifespan_shutdown_sequence_runs_wrappers_in_order_and_updates
     async def _fake_pre_worker_cleanup(**kwargs):
         calls.append(("pre", kwargs))
         assert kwargs["stopped_background_worker_names"] == {
+            "authnz_scheduler",
             "chatbooks_cleanup",
             "ephemeral_cleanup_task",
         }
@@ -258,6 +264,7 @@ async def test_run_lifespan_shutdown_sequence_runs_wrappers_in_order_and_updates
     assert calls[5][1]["legacy_shutdown_plan"] == ["transition-plan"]
     assert calls[6][1]["coordinated_legacy_component_names"] == {"usage_aggregator"}
     assert calls[6][1]["stopped_background_worker_names"] == {
+        "authnz_scheduler",
         "chatbooks_cleanup",
         "ephemeral_cleanup_task",
     }
@@ -265,6 +272,11 @@ async def test_run_lifespan_shutdown_sequence_runs_wrappers_in_order_and_updates
     assert calls[8][1]["should_run_late_stop"] is True
     assert calls[9][1]["claims_task"] == "claims-start"
     assert calls[10][1]["authnz_scheduler_started"] is True
+    assert calls[10][1]["stopped_background_worker_names"] == {
+        "authnz_scheduler",
+        "chatbooks_cleanup",
+        "ephemeral_cleanup_task",
+    }
     assert calls[10][1]["db_pool"] == "db-pool"
     assert calls[10][1]["session_manager"] == "session-manager"
     assert calls[10][1]["heavy_startup_handles"] == "heavy-handles"

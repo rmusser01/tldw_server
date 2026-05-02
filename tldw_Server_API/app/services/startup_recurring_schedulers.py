@@ -51,7 +51,9 @@ async def start_recurring_schedulers(
 ) -> RecurringSchedulerHandles:
     """Start the recurring scheduler batch and return explicit scheduler handles."""
     return RecurringSchedulerHandles(
-        authnz_scheduler_started=await _start_authnz_scheduler(),
+        authnz_scheduler_started=await _start_authnz_scheduler(
+            worker_inventory=worker_inventory,
+        ),
         workflows_sched_task=await _start_with_optional_inventory(
             _start_workflows_scheduler,
             worker_inventory,
@@ -112,17 +114,58 @@ async def _start_reading_digest_with_optional_inventory(
     )
 
 
-async def _start_authnz_scheduler() -> bool:
+async def _start_authnz_scheduler(
+    *,
+    worker_inventory: Any | None = None,
+) -> bool:
     try:
         if _env_flag_enabled("DISABLE_AUTHNZ_SCHEDULER"):
             logger.info("AuthNZ scheduler disabled via DISABLE_AUTHNZ_SCHEDULER env var")
             return False
         await _start_authnz_scheduler_service()
+        try:
+            await _register_authnz_scheduler(worker_inventory=worker_inventory)
+        except _STARTUP_GUARD_EXCEPTIONS:
+            await _stop_authnz_scheduler_after_registration_failure()
+            raise
         logger.info("AuthNZ scheduler started")
         return True
     except _STARTUP_GUARD_EXCEPTIONS as exc:
         logger.warning(f"Failed to start AuthNZ scheduler: {exc}")
         return False
+
+
+async def _register_authnz_scheduler(
+    *,
+    worker_inventory: Any | None,
+) -> None:
+    """Register AuthNZ scheduler as callback-only lifecycle work."""
+
+    if worker_inventory is None:
+        return
+
+    from tldw_Server_API.app.services.lifecycle_workers import (
+        ManagedWorker,
+        ShutdownPhase,
+    )
+
+    worker_inventory.register(
+        ManagedWorker(
+            name="authnz_scheduler",
+            task=None,
+            stop_event=None,
+            shutdown_callback=_stop_authnz_scheduler_service,
+            category="recurring-scheduler",
+            shutdown_phase=ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN,
+        )
+    )
+
+
+async def _stop_authnz_scheduler_after_registration_failure() -> None:
+    try:
+        await _stop_authnz_scheduler_service()
+    except _STARTUP_GUARD_EXCEPTIONS as exc:
+        logger.debug(f"AuthNZ scheduler startup rollback stop failed: {exc}")
 
 
 async def _start_workflows_scheduler(
@@ -367,6 +410,12 @@ async def _start_authnz_scheduler_service() -> None:
     from tldw_Server_API.app.core.AuthNZ.scheduler import start_authnz_scheduler
 
     await start_authnz_scheduler()
+
+
+async def _stop_authnz_scheduler_service() -> None:
+    from tldw_Server_API.app.core.AuthNZ.scheduler import stop_authnz_scheduler
+
+    await stop_authnz_scheduler()
 
 
 async def _start_workflows_scheduler_service() -> Any | None:

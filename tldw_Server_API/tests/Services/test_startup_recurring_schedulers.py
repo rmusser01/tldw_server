@@ -26,7 +26,8 @@ async def test_start_recurring_schedulers_combines_handles(
     startup_recurring = _import_startup_recurring_schedulers()
     calls: list[str] = []
 
-    async def _fake_authnz():
+    async def _fake_authnz(*, worker_inventory: object | None = None):
+        assert worker_inventory is None
         calls.append("authnz")
         return True
 
@@ -144,14 +145,18 @@ async def test_start_recurring_schedulers_registers_background_inventory_with_sh
     worker_inventory = WorkerRegistry(app)
     created_tasks: list[asyncio.Task[None]] = []
     stopped: list[str] = []
+    service_calls: list[str] = []
 
     def _make_task(name: str) -> asyncio.Task[None]:
         task = asyncio.create_task(_wait_forever(), name=name)
         created_tasks.append(task)
         return task
 
-    async def _fake_authnz():
-        return True
+    async def _fake_authnz_start() -> None:
+        service_calls.append("start-authnz")
+
+    async def _fake_authnz_stop() -> None:
+        stopped.append("authnz")
 
     async def _fake_workflows():
         return _make_task("workflows_recurring_scheduler")
@@ -184,7 +189,9 @@ async def test_start_recurring_schedulers_registers_background_inventory_with_sh
 
         return _stop
 
-    monkeypatch.setattr(startup_recurring, "_start_authnz_scheduler", _fake_authnz)
+    monkeypatch.setattr(startup_recurring, "_env_flag_enabled", lambda key: False)
+    monkeypatch.setattr(startup_recurring, "_start_authnz_scheduler_service", _fake_authnz_start)
+    monkeypatch.setattr(startup_recurring, "_stop_authnz_scheduler_service", _fake_authnz_stop)
     monkeypatch.setattr(startup_recurring, "_start_workflows_scheduler_service", _fake_workflows)
     monkeypatch.setattr(startup_recurring, "_start_reading_digest_scheduler_service", _fake_reading_digest)
     monkeypatch.setattr(startup_recurring, "_start_admin_backup_scheduler_service", _fake_admin_backup)
@@ -218,6 +225,7 @@ async def test_start_recurring_schedulers_registers_background_inventory_with_sh
         )
 
         assert handles.authnz_scheduler_started is True
+        assert service_calls == ["start-authnz"]
         assert handles.workflows_sched_task in created_tasks
         assert handles.reading_digest_sched_task in created_tasks
         assert handles.admin_backup_sched_task in created_tasks
@@ -228,6 +236,7 @@ async def test_start_recurring_schedulers_registers_background_inventory_with_sh
             handle.name: handle.shutdown_phase
             for handle in worker_inventory.handles
         } == {
+            "authnz_scheduler": ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN,
             "workflows_sched_task": ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN,
             "reading_digest_sched_task": ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN,
             "admin_backup_sched_task": ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN,
@@ -244,6 +253,7 @@ async def test_start_recurring_schedulers_registers_background_inventory_with_sh
             await handle.shutdown_callback()
 
         assert stopped == [
+            "authnz",
             "workflows",
             "reading-digest",
             "admin-backup",
@@ -255,6 +265,57 @@ async def test_start_recurring_schedulers_registers_background_inventory_with_sh
         for task in created_tasks:
             task.cancel()
         await asyncio.gather(*created_tasks, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_start_authnz_scheduler_registers_callback_only_inventory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_recurring = _import_startup_recurring_schedulers()
+    from tldw_Server_API.app.services.lifecycle_workers import ShutdownPhase, WorkerRegistry
+
+    app = FastAPI()
+    worker_inventory = WorkerRegistry(app)
+    service_calls: list[str] = []
+
+    async def _fake_start() -> None:
+        service_calls.append("start")
+
+    async def _fake_stop() -> None:
+        service_calls.append("stop")
+
+    monkeypatch.setattr(startup_recurring, "_env_flag_enabled", lambda key: False)
+    monkeypatch.setattr(startup_recurring, "_start_authnz_scheduler_service", _fake_start)
+    monkeypatch.setattr(startup_recurring, "_stop_authnz_scheduler_service", _fake_stop)
+
+    started = await startup_recurring._start_authnz_scheduler(
+        worker_inventory=worker_inventory,
+    )
+
+    assert started is True
+    assert service_calls == ["start"]
+    assert len(worker_inventory.handles) == 1
+    handle = worker_inventory.handles[0]
+    assert handle.name == "authnz_scheduler"
+    assert handle.task is None
+    assert handle.stop_event is None
+    assert handle.shutdown_callback is not None
+    assert handle.category == "recurring-scheduler"
+    assert handle.shutdown_phase is ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN
+    assert app.state._tldw_shutdown_worker_inventory == [
+        {
+            "name": "authnz_scheduler",
+            "task_name": None,
+            "has_stop_event": False,
+            "timeout_sec": 5.0,
+            "category": "recurring-scheduler",
+            "shutdown_phase": "background_worker_shutdown",
+        }
+    ]
+    assert app.state._tldw_shutdown_job_poller_inventory == []
+
+    await handle.shutdown_callback()
+    assert service_calls == ["start", "stop"]
 
 
 @pytest.mark.asyncio
