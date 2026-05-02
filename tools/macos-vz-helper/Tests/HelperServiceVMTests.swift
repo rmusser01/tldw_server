@@ -49,7 +49,8 @@ import Testing
         runManifestPath: "/tmp/image-store/runs/run-owned/manifest.json",
         planningSource: "image_store",
         workspacePath: "/tmp/workspace",
-        createdAt: ""
+        createdAt: "",
+        networkPolicy: "allowlist"
     )
 
     let response = try service.createVM(
@@ -71,9 +72,42 @@ import Testing
     #expect(response.metadata.runManifestPath == "/tmp/image-store/runs/run-owned/manifest.json")
     #expect(response.metadata.planningSource == "image_store")
     #expect(response.metadata.workspacePath == "/tmp/workspace")
+    #expect(response.metadata.networkPolicy == "deny_all")
     #expect(response.metadata.createdAt.isEmpty == false)
     #expect(status?.metadata.runID == "run-owned")
+    #expect(status?.details["network_policy"] == "deny_all")
     #expect(listed?.metadata.runID == "run-owned")
+    #expect(listed?.details["network_policy"] == "deny_all")
+}
+
+@Test func helperServiceCreateVMRejectsUnsupportedNetworkPolicy() throws {
+    let registry = VMRegistry()
+    let manager = VZLinuxVMManager(
+        registry: registry,
+        bootDriver: RecordingBootDriver(),
+        guestBridge: ReadyGuestBridge()
+    )
+    let service = HelperService(
+        hostFacts: HostFacts(isMacOS: true, isAppleSilicon: true),
+        registry: registry,
+        vmManager: manager
+    )
+
+    do {
+        _ = try service.createVM(
+            vmID: "vm-allowlist",
+            templatePath: "/tmp/template.img",
+            workspacePath: "/tmp/workspace",
+            readinessTimeoutSeconds: 5,
+            networkPolicy: "allowlist"
+        )
+        Issue.record("expected unsupported network policy")
+    } catch HelperServiceError.unsupportedNetworkPolicy(let policy) {
+        #expect(policy == "allowlist")
+    } catch {
+        Issue.record("expected unsupportedNetworkPolicy, got \(error)")
+    }
+    #expect(registry.status(vmID: "vm-allowlist") == nil)
 }
 
 @Test func helperServiceCreateVMDefaultsMissingOwnershipMetadataToUnknown() throws {

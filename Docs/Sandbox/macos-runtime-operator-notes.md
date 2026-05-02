@@ -178,6 +178,13 @@ item and reports `live_vm_matches_blocked_cleanup` instead of deleting files.
 ## Networking
 
 - `deny_all` is the intended strict baseline for the new macOS runtimes.
+- `vz_linux` enforces that baseline in both layers: Python policy admission
+  rejects unsupported policies before dispatch, and the Swift helper rejects
+  direct `create_vm` requests unless `network_policy=deny_all`. The helper also
+  echoes the accepted policy in VM metadata/status details for diagnostics.
+- The current `vz_linux` Virtualization.framework configuration omits network
+  device attachment; guest command transport uses vsock rather than guest
+  network access.
 - `seatbelt` only offers a best-effort deny-all claim via seatbelt policy; discovery should not be read as VM-grade or firewall-backed network isolation.
 - `strict_allowlist_not_supported` is still the expected result for:
   - `vz_linux`

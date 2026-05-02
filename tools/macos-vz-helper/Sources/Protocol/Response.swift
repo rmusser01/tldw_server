@@ -60,6 +60,7 @@ struct VMOwnershipMetadata: Codable, Equatable {
     let planningSource: String
     let workspacePath: String
     let createdAt: String
+    let networkPolicy: String
 
     static let unknown = VMOwnershipMetadata(
         owner: "unknown",
@@ -72,7 +73,8 @@ struct VMOwnershipMetadata: Codable, Equatable {
         runManifestPath: "",
         planningSource: "",
         workspacePath: "",
-        createdAt: ""
+        createdAt: "",
+        networkPolicy: ""
     )
 
     private enum CodingKeys: String, CodingKey {
@@ -87,6 +89,35 @@ struct VMOwnershipMetadata: Codable, Equatable {
         case planningSource = "planning_source"
         case workspacePath = "workspace_path"
         case createdAt = "created_at"
+        case networkPolicy = "network_policy"
+    }
+
+    init(
+        owner: String,
+        runtime: String,
+        runID: String,
+        sessionID: String,
+        sessionMode: Bool,
+        templateID: String,
+        templatePath: String,
+        runManifestPath: String,
+        planningSource: String,
+        workspacePath: String,
+        createdAt: String,
+        networkPolicy: String = ""
+    ) {
+        self.owner = owner
+        self.runtime = runtime
+        self.runID = runID
+        self.sessionID = sessionID
+        self.sessionMode = sessionMode
+        self.templateID = templateID
+        self.templatePath = templatePath
+        self.runManifestPath = runManifestPath
+        self.planningSource = planningSource
+        self.workspacePath = workspacePath
+        self.createdAt = createdAt
+        self.networkPolicy = networkPolicy
     }
 }
 

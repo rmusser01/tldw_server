@@ -58,6 +58,7 @@ class HelperVMMetadata:
     run_manifest_path: str = ""
     planning_source: str = ""
     workspace_path: str = ""
+    network_policy: str = ""
     created_at: str = ""
 
     @property
@@ -80,6 +81,7 @@ def _metadata_field(payload: dict[str, Any]) -> HelperVMMetadata:
         "run_manifest_path",
         "planning_source",
         "workspace_path",
+        "network_policy",
         "created_at",
     )
     for key in string_keys:
@@ -100,6 +102,7 @@ def _metadata_field(payload: dict[str, Any]) -> HelperVMMetadata:
         run_manifest_path=_str_field(raw, "run_manifest_path").strip(),
         planning_source=_str_field(raw, "planning_source").strip(),
         workspace_path=_str_field(raw, "workspace_path").strip(),
+        network_policy=_str_field(raw, "network_policy").strip(),
         created_at=_str_field(raw, "created_at").strip(),
     )
 

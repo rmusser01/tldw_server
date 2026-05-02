@@ -140,9 +140,11 @@ def test_fake_helper_supports_vz_linux_vm_create_and_exec(monkeypatch) -> None:
     assert created.metadata.run_manifest_path == "/tmp/image-store/runs/run-1/manifest.json"
     assert created.metadata.planning_source == "image_store"
     assert created.metadata.workspace_path == "/tmp/workspace"
+    assert created.metadata.network_policy == "deny_all"
     assert created.metadata.created_at != ""
-    assert created.details["runtime"] == "vz_linux"
+    assert "runtime" not in created.details
     assert created.details["transport"] == "vsock"
+    assert created.details["network_policy"] == "deny_all"
 
     exec_reply = client.exec_guest(
         vm_id=created.vm_id,
@@ -175,6 +177,29 @@ def test_fake_helper_validates_vz_linux_host_readiness(monkeypatch) -> None:
     assert result["available"] is True
     assert result["execution_mode"] == "real"
     assert result["reasons"] == []
+    assert result["details"] == {"runtime": "vz_linux", "network_policy": "deny_all"}
+
+
+def test_fake_helper_rejects_unsupported_vz_linux_network_policy(monkeypatch) -> None:
+    monkeypatch.setenv("TEST_MODE", "1")
+    monkeypatch.setenv("TLDW_SANDBOX_MACOS_HELPER_READY", "1")
+    monkeypatch.setenv("TLDW_SANDBOX_VZ_LINUX_TEMPLATE_READY", "1")
+    monkeypatch.setenv("TLDW_SANDBOX_VZ_LINUX_AVAILABLE", "1")
+
+    client = MacOSVirtualizationHelperClient()
+    result = client.validate_vz_linux_host({"network_policy": "allowlist"})
+
+    assert result["available"] is False
+    assert "strict_allowlist_not_supported" in result["reasons"]
+    with pytest.raises(MacOSVirtualizationHelperFailure) as exc_info:
+        client.create_vm(
+            {
+                "runtime": "vz_linux",
+                "vm_name": "vz-linux-run-allowlist",
+                "network_policy": "allowlist",
+            }
+        )
+    assert exc_info.value.error_code == "strict_allowlist_not_supported"
 
 
 def test_fake_helper_validate_template_includes_boot_metadata(monkeypatch) -> None:
@@ -270,6 +295,7 @@ def test_parse_helper_vm_status_reads_metadata() -> None:
                 "session_mode": True,
                 "template_path": "/tmp/bundle",
                 "workspace_path": "/tmp/workspace",
+                "network_policy": "deny_all",
                 "created_at": "2026-04-30T18:00:00Z",
             },
         }
@@ -282,6 +308,7 @@ def test_parse_helper_vm_status_reads_metadata() -> None:
     assert result.metadata.session_mode is True
     assert result.metadata.template_path == "/tmp/bundle"
     assert result.metadata.workspace_path == "/tmp/workspace"
+    assert result.metadata.network_policy == "deny_all"
     assert result.metadata.created_at == "2026-04-30T18:00:00Z"
     assert result.metadata.has_tldw_owner is True
 
@@ -345,6 +372,7 @@ def test_fake_helper_create_vm_normalizes_string_session_mode_and_created_at(mon
 
     assert created.metadata.runtime == "vz_linux"
     assert created.metadata.session_mode is False
+    assert created.metadata.network_policy == "deny_all"
     assert created.metadata.created_at != ""
 
 
