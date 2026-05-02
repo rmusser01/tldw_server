@@ -231,7 +231,7 @@ export const TTSModeSettings = ({ hideBorder }: { hideBorder?: boolean }) => {
         }
       }
     },
-    [form, form.values, message, queryClient, t]
+    [form, message, queryClient, t]
   )
 
   React.useEffect(() => {

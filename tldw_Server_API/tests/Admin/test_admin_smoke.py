@@ -1,20 +1,19 @@
 import asyncio
 import importlib
 import os
-import tempfile
-import importlib
-import asyncio
 import shutil
-from contextlib import suppress
-from uuid import uuid4
+import tempfile
+from contextlib import contextmanager, suppress
 from pathlib import Path
-from typing import Optional
+from typing import Iterator, Optional
 from uuid import uuid4
 
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool
+from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
 from tldw_Server_API.app.core.AuthNZ.initialize import ensure_single_user_rbac_seed_if_needed
+from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 from tldw_Server_API.app.core.DB_Management.backends import factory as backend_factory
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 
@@ -82,14 +81,20 @@ def _fresh_client(test_mode: bool = False, user_db_base_dir: Optional[str] = Non
     }
 
     try:
-        asyncio.run(reset_db_pool())
-    except Exception:
-        _ = None
-    _reset_media_storage_state()
+        os.environ["AUTH_MODE"] = "single_user"
+        os.environ["SINGLE_USER_API_KEY"] = os.getenv("SINGLE_USER_API_KEY", "test-api-key-12345")
+        os.environ["DATABASE_URL"] = f"sqlite:///{tmp_path}"
+        os.environ["TEST_MODE"] = "1" if test_mode else "0"
+        os.environ["TLDW_TEST_MODE"] = "1" if test_mode else "0"
+        if user_db_base_dir:
+            os.environ["USER_DB_BASE_DIR"] = user_db_base_dir
+        else:
+            os.environ.pop("USER_DB_BASE_DIR", None)
 
-        # Reset singletons so the app picks up new settings/DB
+        # Reset singletons so the app picks up the isolated settings and DB.
         reset_settings()
         _reset_auth_pool_for_smoke()
+        _reset_media_storage_state()
 
         # Ensure schema migrations and RBAC seed exist on the fresh database
         ensure_authnz_tables(Path(tmp_path))
