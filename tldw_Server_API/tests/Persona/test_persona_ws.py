@@ -2271,7 +2271,10 @@ class _WakeFakeTurnDetector:
         self._triggered = False
 
 
-def _install_wake_voice_fakes(monkeypatch, transcript: str):
+def _install_wake_voice_fakes(
+    monkeypatch: pytest.MonkeyPatch,
+    transcript: str,
+) -> tuple[_WakeFakePersonaTranscriber, _WakeFakeTurnDetector]:
     fake_transcriber = _WakeFakePersonaTranscriber(transcript)
     fake_turn_detector = _WakeFakeTurnDetector()
     monkeypatch.setattr(

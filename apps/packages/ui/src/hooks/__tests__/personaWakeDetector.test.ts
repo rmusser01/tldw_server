@@ -110,6 +110,9 @@ describe("personaWakeDetector", () => {
 
     await detector.stop()
     expect(recognition.current.stop).toHaveBeenCalledTimes(1)
+    expect(recognition.current.onresult).toBeNull()
+    expect(recognition.current.onerror).toBeNull()
+    expect(recognition.current.onend).toBeNull()
   })
 
   it("restarts browser recognition when it ends while still active", async () => {

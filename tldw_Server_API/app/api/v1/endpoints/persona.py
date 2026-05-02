@@ -2514,6 +2514,7 @@ def _apply_persona_live_trigger_phrases(
 
 
 def _get_persona_wake_no_command_timeout_s() -> float:
+    """Return the bounded wake activation grace period for one-shot wake modes."""
     try:
         return max(
             1.0,
@@ -2524,6 +2525,7 @@ def _get_persona_wake_no_command_timeout_s() -> float:
 
 
 def _normalize_persona_wake_phrase(value: object) -> str:
+    """Normalize wake phrases so client-reported matches can be compared safely."""
     text = re.sub(r"[^\w\s]+|_", " ", str(value or "").strip().lower())
     return re.sub(r"\s+", " ", text).strip()
 
@@ -2532,6 +2534,7 @@ def _match_persona_wake_phrase(
     matched_phrase: object,
     configured_phrases: list[str] | None,
 ) -> str | None:
+    """Return the configured phrase matching a client wake activation, if any."""
     normalized_match = _normalize_persona_wake_phrase(matched_phrase)
     if not normalized_match:
         return None

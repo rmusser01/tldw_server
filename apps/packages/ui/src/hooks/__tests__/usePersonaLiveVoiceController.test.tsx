@@ -125,7 +125,9 @@ describe("usePersonaLiveVoiceController", () => {
         config = nextConfig
         nextConfig.onStateChange?.("listening")
       }),
-      stop: vi.fn(async () => undefined)
+      stop: vi.fn(async () => {
+        config = null
+      })
     }
     return {
       detector,

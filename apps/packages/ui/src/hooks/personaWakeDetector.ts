@@ -110,6 +110,13 @@ export class BrowserTranscriptWakeDetector implements WakeDetector {
   private recognition: SpeechRecognitionLike | null = null
   private active = false
 
+  private clearRecognitionHandlers(recognition: SpeechRecognitionLike | null): void {
+    if (!recognition) return
+    recognition.onresult = null
+    recognition.onerror = null
+    recognition.onend = null
+  }
+
   async isAvailable(): Promise<boolean> {
     return Boolean(getSpeechRecognitionCtor())
   }
@@ -182,6 +189,8 @@ export class BrowserTranscriptWakeDetector implements WakeDetector {
       recognition?.stop()
     } catch {
       // SpeechRecognition implementations throw when stop races with end.
+    } finally {
+      this.clearRecognitionHandlers(recognition)
     }
   }
 }
