@@ -12,6 +12,9 @@ from pathlib import Path
 from typing import Any
 
 MANIFEST_SCHEMA_VERSION = 1
+_ALLOWED_ARTIFACT_FORMATS = frozenset({"tldw_bundle", "raw_artifacts", "oci_image", "unknown"})
+_MAX_METADATA_TEXT_BYTES = 2048
+_MAX_OCI_LAYER_DIGESTS = 128
 
 
 class ImageStoreError(RuntimeError):
@@ -64,6 +67,14 @@ class TemplateRecord:
     provenance: dict[str, Any] = field(default_factory=dict)
     registered_at: str | None = None
     manifest_path: str | None = None
+    artifact_format: str = "unknown"
+    oci_image_ref: str | None = None
+    oci_platform: str | None = None
+    oci_manifest_digest: str | None = None
+    oci_config_digest: str | None = None
+    oci_layer_digests: list[str] = field(default_factory=list)
+    registry: str | None = None
+    imported_at: str | None = None
 
 
 @dataclass(slots=True)
@@ -110,6 +121,14 @@ class SandboxImageStore:
         source_path: str | Path | None = None,
         labels: dict[str, str] | None = None,
         provenance: dict[str, Any] | None = None,
+        artifact_format: str | None = None,
+        oci_image_ref: str | None = None,
+        oci_platform: str | None = None,
+        oci_manifest_digest: str | None = None,
+        oci_config_digest: str | None = None,
+        oci_layer_digests: list[str] | None = None,
+        registry: str | None = None,
+        imported_at: str | None = None,
         allow_existing: bool = False,
     ) -> str:
         """Register artifact paths as a durable template manifest.
@@ -143,6 +162,20 @@ class SandboxImageStore:
             provenance=dict(provenance or {}),
             registered_at=registered_at,
             manifest_path=str(manifest_path),
+            artifact_format=self._normalize_artifact_format(artifact_format, default="raw_artifacts"),
+            oci_image_ref=self._normalize_optional_metadata_text(oci_image_ref, "oci_image_ref"),
+            oci_platform=self._normalize_optional_metadata_text(oci_platform, "oci_platform"),
+            oci_manifest_digest=self._normalize_optional_metadata_text(
+                oci_manifest_digest,
+                "oci_manifest_digest",
+            ),
+            oci_config_digest=self._normalize_optional_metadata_text(
+                oci_config_digest,
+                "oci_config_digest",
+            ),
+            oci_layer_digests=self._normalize_oci_layer_digests(oci_layer_digests),
+            registry=self._normalize_optional_metadata_text(registry, "registry"),
+            imported_at=self._normalize_optional_metadata_text(imported_at, "imported_at"),
         )
         self._write_manifest(record)
         self._templates[template_id] = record
@@ -180,6 +213,7 @@ class SandboxImageStore:
             source_path=bundle,
             labels=labels,
             provenance=provenance,
+            artifact_format="tldw_bundle",
             allow_existing=allow_existing,
         )
 
@@ -461,6 +495,20 @@ class SandboxImageStore:
             provenance=dict(payload.get("provenance", {})),
             registered_at=payload.get("registered_at"),
             manifest_path=str(manifest_path),
+            artifact_format=self._normalize_artifact_format(payload.get("artifact_format"), default="unknown"),
+            oci_image_ref=self._normalize_optional_metadata_text(payload.get("oci_image_ref"), "oci_image_ref"),
+            oci_platform=self._normalize_optional_metadata_text(payload.get("oci_platform"), "oci_platform"),
+            oci_manifest_digest=self._normalize_optional_metadata_text(
+                payload.get("oci_manifest_digest"),
+                "oci_manifest_digest",
+            ),
+            oci_config_digest=self._normalize_optional_metadata_text(
+                payload.get("oci_config_digest"),
+                "oci_config_digest",
+            ),
+            oci_layer_digests=self._normalize_oci_layer_digests(payload.get("oci_layer_digests")),
+            registry=self._normalize_optional_metadata_text(payload.get("registry"), "registry"),
+            imported_at=self._normalize_optional_metadata_text(payload.get("imported_at"), "imported_at"),
         )
 
     def _validated_artifact_paths(
@@ -500,6 +548,14 @@ class SandboxImageStore:
             "template_name": record.template_name,
             "source_path": record.source_path,
             "registered_at": record.registered_at,
+            "artifact_format": record.artifact_format,
+            "oci_image_ref": record.oci_image_ref,
+            "oci_platform": record.oci_platform,
+            "oci_manifest_digest": record.oci_manifest_digest,
+            "oci_config_digest": record.oci_config_digest,
+            "oci_layer_digests": list(record.oci_layer_digests),
+            "registry": record.registry,
+            "imported_at": record.imported_at,
             "disk_paths": list(record.disk_paths),
             "artifacts": [
                 {
@@ -650,6 +706,37 @@ class SandboxImageStore:
             raise ImageStoreValidationError(f"{field_name}_required")
         if normalized in {".", ".."} or "/" in normalized or "\\" in normalized:
             raise ImageStoreValidationError(f"{field_name}_invalid")
+        return normalized
+
+    def _normalize_artifact_format(self, value: Any, *, default: str) -> str:
+        normalized = str(value if value is not None else default).strip()
+        if normalized not in _ALLOWED_ARTIFACT_FORMATS:
+            raise ImageStoreValidationError(f"artifact_format_invalid: {normalized}")
+        return normalized
+
+    def _normalize_optional_metadata_text(self, value: Any, field_name: str) -> str | None:
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            raise ImageStoreValidationError(f"{field_name}_invalid")
+        normalized = value.strip()
+        if not normalized:
+            return None
+        if len(normalized.encode("utf-8")) > _MAX_METADATA_TEXT_BYTES:
+            raise ImageStoreValidationError(f"{field_name}_too_long")
+        return normalized
+
+    def _normalize_oci_layer_digests(self, values: Any) -> list[str]:
+        if values is None:
+            return []
+        if not isinstance(values, list) or len(values) > _MAX_OCI_LAYER_DIGESTS:
+            raise ImageStoreValidationError("oci_layer_digests_invalid")
+        normalized: list[str] = []
+        for value in values:
+            item = self._normalize_optional_metadata_text(value, "oci_layer_digest")
+            if item is None:
+                raise ImageStoreValidationError("oci_layer_digests_invalid")
+            normalized.append(item)
         return normalized
 
     def _sha256_file(self, path: Path) -> str:
