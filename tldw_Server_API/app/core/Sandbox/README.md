@@ -66,10 +66,11 @@ Current limitations:
   Virtualization.framework configuration does not attach a network device.
 - `vz_linux` passes `SANDBOX_MAX_LOG_BYTES` to helper `exec_guest` as
   `max_output_bytes`, clamped to the helper protocol ceiling of 256 MiB, and
-  also uses the effective cap when publishing stdout/stderr frames. This bounds
-  helper-returned output and WebSocket log publication, but it is not a
-  guest-agent kill-on-cap mechanism; guest-side streaming and early termination
-  remain follow-up work.
+  also uses the effective cap when publishing stdout/stderr frames. Rebuilt
+  images with the updated `tldw-agent-guest` enforce the cap inside the guest
+  and terminate noisy commands when observed output exceeds it. The helper still
+  applies host-side response capping as defense in depth and fallback for older
+  images. Guest-side streaming remains follow-up work.
 - `vz_linux` artifact capture is bounded by `SANDBOX_MAX_ARTIFACT_FILE_BYTES`
   and `SANDBOX_MAX_ARTIFACT_TOTAL_BYTES`. Oversized or over-budget artifacts
   are skipped without failing an otherwise successful run, and aggregate skip

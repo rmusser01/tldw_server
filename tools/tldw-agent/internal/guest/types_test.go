@@ -1,6 +1,9 @@
 package guest
 
-import "testing"
+import (
+	"encoding/json"
+	"testing"
+)
 
 func TestParseExecRequest(t *testing.T) {
 	req := ExecRequest{
@@ -21,5 +24,25 @@ func TestParseExecRequest(t *testing.T) {
 	}
 	if req.Cwd != "/workspace" {
 		t.Fatalf("expected cwd /workspace, got %q", req.Cwd)
+	}
+}
+
+func TestExecRequestMaxOutputBytesOptional(t *testing.T) {
+	var req ExecRequest
+	if err := json.Unmarshal([]byte(`{"protocol_version":"1","request_id":"req-1","type":"exec","argv":["/bin/echo","ok"]}`), &req); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if req.MaxOutputBytes != nil {
+		t.Fatalf("expected nil MaxOutputBytes, got %v", *req.MaxOutputBytes)
+	}
+}
+
+func TestExecRequestMaxOutputBytesPreservesExplicitZero(t *testing.T) {
+	var req ExecRequest
+	if err := json.Unmarshal([]byte(`{"protocol_version":"1","request_id":"req-1","type":"exec","argv":["/bin/echo","ok"],"max_output_bytes":0}`), &req); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if req.MaxOutputBytes == nil || *req.MaxOutputBytes != 0 {
+		t.Fatalf("expected explicit zero cap, got %#v", req.MaxOutputBytes)
 	}
 }

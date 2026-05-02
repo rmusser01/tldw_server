@@ -28,9 +28,10 @@ final class ReadyGuestBridge: GuestBridging {
         argv: [String],
         cwd: String,
         env: [String : String],
-        timeoutSeconds: TimeInterval
+        timeoutSeconds: TimeInterval,
+        maxOutputBytes: Int?
     ) throws -> GuestExecResult {
-        GuestExecResult(exitCode: 0, stdout: "", stderr: "")
+        GuestExecResult(exitCode: 0, stdout: "", stderr: "", details: [:])
     }
 }
 
@@ -50,7 +51,8 @@ final class FailingGuestBridge: GuestBridging {
         argv: [String],
         cwd: String,
         env: [String : String],
-        timeoutSeconds: TimeInterval
+        timeoutSeconds: TimeInterval,
+        maxOutputBytes: Int?
     ) throws -> GuestExecResult {
         throw error
     }

@@ -200,19 +200,21 @@ guest agent:
   characters. Values cannot contain NUL.
 - `timeout_sec` must be finite, positive, and no greater than 3600 seconds.
 - `max_output_bytes`, when present, must be a JSON integer in the range
-  `1...268435456`. It caps the combined stdout/stderr bytes returned in the
-  helper response. When both streams exceed the cap and the cap is at least 2
-  bytes, each stream receives a non-empty fair share and unused stream budget may
-  be reused by the other stream.
+  `1...268435456`. It is forwarded to guest agents that support guest-side
+  output cap enforcement and also caps the combined stdout/stderr bytes returned
+  in the helper response. When both streams exceed the helper response cap and
+  the cap is at least 2 bytes, each stream receives a non-empty fair share and
+  unused stream budget may be reused by the other stream.
 
 Malformed JSON shape or missing required fields returns `invalid_request`.
 Semantic contract denials return one of `exec_argv_invalid`, `exec_cwd_invalid`,
 `exec_env_invalid`, `exec_timeout_invalid`, or `exec_output_limit_invalid`; the
 `message` field contains the stable reason.
 
-`max_output_bytes` is a host response cap only. It does not stop guest-agent or
-bridge-side buffering, and it does not kill the guest process when the cap is
-reached.
+Guest agents rebuilt with output-cap support terminate the command when the
+combined stdout/stderr observation exceeds `max_output_bytes` and return
+guest-prefixed detail metadata. The helper still applies host-side response
+capping as defense in depth and as fallback for older guest agents.
 
 Response:
 
@@ -227,6 +229,12 @@ Response:
     "transport": "vsock",
     "vm_id": "run-123",
     "output_limit_bytes": "10485760",
+    "guest_output_limit_bytes": "10485760",
+    "guest_output_limit_exceeded": "false",
+    "guest_stdout_bytes_observed": "3",
+    "guest_stderr_bytes_observed": "0",
+    "guest_stdout_bytes_returned": "3",
+    "guest_stderr_bytes_returned": "0",
     "stdout_bytes_original": "3",
     "stderr_bytes_original": "0",
     "stdout_bytes_returned": "3",
@@ -238,7 +246,11 @@ Response:
 ```
 
 Output limit detail values are encoded as strings to preserve the existing
-`details` shape.
+`details` shape. Guest-side counters use `guest_` prefixes and host-side
+response-cap counters keep the existing unprefixed keys.
+Guest-prefixed counters are conditional: older guest agents may omit `guest_*`
+metadata and rely only on host-side fallback counters. Clients must fall back to
+the unprefixed keys when `guest_*` keys are absent during mixed-version rollouts.
 
 ### `validate_template`
 

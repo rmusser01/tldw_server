@@ -821,6 +821,27 @@ def test_vz_linux_collect_artifacts_uses_policy_caps(monkeypatch, tmp_path) -> N
     assert artifacts == {}
 
 
+def test_output_counters_include_guest_enforcement_details() -> None:
+    counters = VZLinuxRunner._output_counters_from_details(
+        {
+            "guest_output_limit_bytes": "16",
+            "guest_output_limit_exceeded": "true",
+            "guest_stdout_bytes_observed": "17",
+            "guest_stderr_bytes_observed": "0",
+            "guest_stdout_bytes_returned": "16",
+            "guest_stderr_bytes_returned": "0",
+            "guest_output_kill_reason": "output_limit",
+            "ignored": "not-int",
+        }
+    )
+
+    assert counters["guest_output_limit_bytes"] == 16
+    assert counters["guest_output_limit_exceeded"] == 1
+    assert counters["guest_stdout_bytes_observed"] == 17
+    assert counters["guest_stdout_bytes_returned"] == 16
+    assert "guest_output_kill_reason" not in counters
+
+
 def test_vz_linux_start_run_records_output_limit_counters(monkeypatch, tmp_path) -> None:
     monkeypatch.delenv("TLDW_SANDBOX_VZ_LINUX_FAKE_EXEC", raising=False)
     monkeypatch.setattr(

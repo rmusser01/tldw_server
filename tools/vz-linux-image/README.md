@@ -175,6 +175,10 @@ The install script now also stages `/workspace`, installs `workspace.mount`,
 and enables both `workspace.mount` and `tldw-agent-guest.service` by creating
 the expected `multi-user.target.wants/` symlinks inside the rootfs.
 
+Guest-side kill-on-output-cap requires images rebuilt with the updated
+`tldw-agent-guest` binary. Older images still boot and execute, but only the
+host helper response cap is guaranteed.
+
 ## Helper Smoke
 
 The canonical bundle can also drive the repeatable host-side E2E smoke:

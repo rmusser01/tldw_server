@@ -10,6 +10,7 @@ struct GuestExecResult {
     let exitCode: Int
     let stdout: String
     let stderr: String
+    let details: [String: String]
 }
 
 protocol GuestBridging: GuestReadinessBridging {
@@ -18,7 +19,8 @@ protocol GuestBridging: GuestReadinessBridging {
         argv: [String],
         cwd: String,
         env: [String: String],
-        timeoutSeconds: TimeInterval
+        timeoutSeconds: TimeInterval,
+        maxOutputBytes: Int?
     ) throws -> GuestExecResult
 }
 
@@ -50,6 +52,7 @@ private struct GuestExecRequest: Encodable {
     let cwd: String
     let env: [String: String]
     let timeoutSeconds: Int
+    let maxOutputBytes: Int?
 
     private enum CodingKeys: String, CodingKey {
         case protocolVersion = "protocol_version"
@@ -59,6 +62,7 @@ private struct GuestExecRequest: Encodable {
         case cwd
         case env
         case timeoutSeconds = "timeout_sec"
+        case maxOutputBytes = "max_output_bytes"
     }
 }
 
@@ -82,6 +86,7 @@ private struct GuestExecResponse: Decodable {
     let exitCode: Int
     let stdout: String
     let stderr: String
+    let details: [String: String]
 
     private enum CodingKeys: String, CodingKey {
         case protocolVersion = "protocol_version"
@@ -89,6 +94,7 @@ private struct GuestExecResponse: Decodable {
         case exitCode = "exit_code"
         case stdout
         case stderr
+        case details
     }
 
     init(from decoder: Decoder) throws {
@@ -98,6 +104,22 @@ private struct GuestExecResponse: Decodable {
         exitCode = try container.decode(Int.self, forKey: .exitCode)
         stdout = try container.decodeIfPresent(String.self, forKey: .stdout) ?? ""
         stderr = try container.decodeIfPresent(String.self, forKey: .stderr) ?? ""
+        let decodedDetails = (try? container.decodeIfPresent([String: StringOnlyDetailValue].self, forKey: .details)) ?? [:]
+        details = decodedDetails.reduce(into: [String: String]()) { result, item in
+            guard item.key.hasPrefix("guest_"), let value = item.value.value else {
+                return
+            }
+            result[item.key] = value
+        }
+    }
+}
+
+private struct StringOnlyDetailValue: Decodable {
+    let value: String?
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        value = try? container.decode(String.self)
     }
 }
 
@@ -148,8 +170,12 @@ final class VSockBridge: GuestBridging {
         argv: [String],
         cwd: String,
         env: [String: String],
-        timeoutSeconds: TimeInterval
+        timeoutSeconds: TimeInterval,
+        maxOutputBytes: Int? = nil
     ) throws -> GuestExecResult {
+        if let maxOutputBytes, maxOutputBytes < 0 {
+            throw GuestBridgeError.guestProtocolError("invalid_max_output_bytes")
+        }
         let requestID = UUID().uuidString
         let requestData = try encoder.encode(
             GuestExecRequest(
@@ -159,7 +185,8 @@ final class VSockBridge: GuestBridging {
                 argv: argv,
                 cwd: cwd,
                 env: env,
-                timeoutSeconds: Int(timeoutSeconds.rounded(.up))
+                timeoutSeconds: Int(timeoutSeconds.rounded(.up)),
+                maxOutputBytes: maxOutputBytes
             )
         )
         let responseData = try transport.sendExecRequest(
@@ -175,7 +202,8 @@ final class VSockBridge: GuestBridging {
         return GuestExecResult(
             exitCode: response.exitCode,
             stdout: response.stdout,
-            stderr: response.stderr
+            stderr: response.stderr,
+            details: response.details
         )
     }
 

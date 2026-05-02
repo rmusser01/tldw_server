@@ -184,7 +184,8 @@ final class HelperService {
             argv: argv,
             cwd: cwd,
             env: env,
-            timeoutSeconds: timeoutSeconds
+            timeoutSeconds: timeoutSeconds,
+            maxOutputBytes: maxOutputBytes
         )
         let cappedOutput = capExecOutput(
             stdout: result.stdout,
@@ -192,6 +193,9 @@ final class HelperService {
             maxOutputBytes: maxOutputBytes
         )
         var details = ["transport": "vsock", "vm_id": vmID]
+        for (key, value) in result.details where key.hasPrefix("guest_") {
+            details[key] = value
+        }
         for (key, value) in cappedOutput.details {
             details[key] = value
         }

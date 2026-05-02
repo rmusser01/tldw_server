@@ -41,6 +41,12 @@ _OUTPUT_COUNTER_KEYS = frozenset(
         "stderr_bytes_returned",
         "stdout_truncated",
         "stderr_truncated",
+        "guest_output_limit_bytes",
+        "guest_output_limit_exceeded",
+        "guest_stdout_bytes_observed",
+        "guest_stderr_bytes_observed",
+        "guest_stdout_bytes_returned",
+        "guest_stderr_bytes_returned",
     }
 )
 

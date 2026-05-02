@@ -72,14 +72,16 @@ type ExecRequest struct {
 	Cwd             string            `json:"cwd,omitempty"`
 	Env             map[string]string `json:"env,omitempty"`
 	TimeoutSec      int               `json:"timeout_sec,omitempty"`
+	MaxOutputBytes  *int              `json:"max_output_bytes,omitempty"`
 }
 
 type ExecResponse struct {
-	ProtocolVersion string `json:"protocol_version"`
-	RequestID       string `json:"request_id"`
-	ExitCode        int    `json:"exit_code"`
-	Stdout          string `json:"stdout,omitempty"`
-	Stderr          string `json:"stderr,omitempty"`
+	ProtocolVersion string            `json:"protocol_version"`
+	RequestID       string            `json:"request_id"`
+	ExitCode        int               `json:"exit_code"`
+	Stdout          string            `json:"stdout,omitempty"`
+	Stderr          string            `json:"stderr,omitempty"`
+	Details         map[string]string `json:"details,omitempty"`
 }
 
 type ErrorResponse struct {
