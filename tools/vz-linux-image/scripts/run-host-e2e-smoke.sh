@@ -259,6 +259,15 @@ prepare_private_serial_log_dir() {
   fi
 }
 
+prepare_runtime_paths() {
+  if [[ "${DRY_RUN}" -eq 1 ]]; then
+    return 0
+  fi
+  prepare_private_socket_parent
+  prepare_socket_path
+  prepare_private_serial_log_dir
+}
+
 run_helper_daemon_smoke() {
   run_cmd env \
     TLDW_SANDBOX_MACOS_HELPER_DAEMON_SMOKE=1 \
@@ -335,7 +344,7 @@ cd "${REPO_ROOT}"
 build_helper_if_needed
 sign_helper_if_requested
 require_helper_binary
-prepare_private_serial_log_dir
+prepare_runtime_paths
 run_helper_daemon_smoke
 start_helper_for_real_e2e
 wait_for_helper_socket

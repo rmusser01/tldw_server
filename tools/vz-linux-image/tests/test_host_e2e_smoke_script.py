@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import socket
 import subprocess
 import sys
@@ -105,6 +106,63 @@ def test_host_e2e_smoke_script_default_socket_uses_private_runtime_dir(tmp_path:
     assert "/helper.sock" in result.stdout
     assert "TLDW_SANDBOX_VZ_LINUX_SERIAL_LOG_DIR=" in result.stdout
     assert "/serial" in result.stdout
+
+
+def test_host_e2e_smoke_script_default_runtime_dir_is_private_for_real_run(tmp_path: Path) -> None:
+    bundle = tmp_path / "bundle"
+    bundle.mkdir()
+    (bundle / "kernel").write_bytes(b"kernel")
+    (bundle / "rootfs.img").write_bytes(b"rootfs")
+    tmp_dir = tmp_path / "tmp"
+    tmp_dir.mkdir()
+    fake_python = tmp_path / "fake-python"
+    fake_helper = tmp_path / "fake-helper"
+    fake_python.write_text(
+        "#!/usr/bin/env python3\n"
+        "import sys\n"
+        "sys.exit(0 if sys.argv[1:3] == ['-m', 'pytest'] else 2)\n",
+        encoding="utf-8",
+    )
+    fake_helper.write_text(
+        "#!/usr/bin/env python3\n"
+        "import signal\n"
+        "import sys\n"
+        "import time\n"
+        "signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))\n"
+        "while True:\n"
+        "    time.sleep(0.1)\n",
+        encoding="utf-8",
+    )
+    fake_python.chmod(0o755)
+    fake_helper.chmod(0o755)
+
+    result = _run_smoke_script(
+        "--bundle",
+        str(bundle),
+        "--helper",
+        str(fake_helper),
+        "--python",
+        str(fake_python),
+        "--skip-build",
+        "--skip-sign",
+        env_overrides={
+            "TMPDIR": str(tmp_dir),
+            "TLDW_HOST_E2E_SMOKE_SKIP_SOCKET_WAIT": "1",
+        },
+    )
+
+    assert result.returncode == 0, result.stderr
+    socket_match = re.search(
+        r"TLDW_SANDBOX_MACOS_HELPER_SOCKET=([^ ]+/helper\.sock)",
+        result.stdout,
+    )
+    assert socket_match is not None
+    runtime_dir = Path(socket_match.group(1)).parent
+    assert runtime_dir.exists()
+    assert runtime_dir.stat().st_mode & 0o077 == 0
+    serial_dir = runtime_dir / "serial"
+    assert serial_dir.exists()
+    assert serial_dir.stat().st_mode & 0o077 == 0
 
 
 def test_host_e2e_smoke_script_removes_stale_socket_before_helper_start(tmp_path: Path) -> None:
