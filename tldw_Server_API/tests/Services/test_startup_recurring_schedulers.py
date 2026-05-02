@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 import importlib
 import sys
 
 import pytest
-
+from fastapi import FastAPI
 
 pytestmark = pytest.mark.unit
 
@@ -12,6 +13,10 @@ pytestmark = pytest.mark.unit
 def _import_startup_recurring_schedulers():
     sys.modules.pop("tldw_Server_API.app.services.startup_recurring_schedulers", None)
     return importlib.import_module("tldw_Server_API.app.services.startup_recurring_schedulers")
+
+
+async def _wait_forever() -> None:
+    await asyncio.Event().wait()
 
 
 @pytest.mark.asyncio
@@ -126,3 +131,216 @@ async def test_start_companion_reflection_scheduler_starts_when_enabled(
     task = await startup_recurring._start_companion_reflection_scheduler()
 
     assert task == "companion-reflection-task"
+
+
+@pytest.mark.asyncio
+async def test_start_recurring_schedulers_registers_background_inventory_with_shutdown_callbacks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_recurring = _import_startup_recurring_schedulers()
+    from tldw_Server_API.app.services.lifecycle_workers import ShutdownPhase, WorkerRegistry
+
+    app = FastAPI()
+    worker_inventory = WorkerRegistry(app)
+    created_tasks: list[asyncio.Task[None]] = []
+    stopped: list[str] = []
+
+    def _make_task(name: str) -> asyncio.Task[None]:
+        task = asyncio.create_task(_wait_forever(), name=name)
+        created_tasks.append(task)
+        return task
+
+    async def _fake_authnz():
+        return True
+
+    async def _fake_workflows():
+        return _make_task("workflows_recurring_scheduler")
+
+    async def _fake_reading_digest(*, enabled: bool):
+        assert enabled is True
+        return _make_task("reading_digest_scheduler")
+
+    async def _fake_admin_backup():
+        return _make_task("admin_backup_scheduler")
+
+    async def _fake_companion_reflection(*, enabled: bool):
+        assert enabled is True
+        return _make_task("companion_reflection_scheduler")
+
+    async def _fake_reminders():
+        return _make_task("reminders_scheduler")
+
+    async def _fake_connectors_sync():
+        return _make_task("connectors_sync_scheduler")
+
+    def _fake_stop(label: str):
+        async def _stop(task: asyncio.Task[None]) -> None:
+            stopped.append(label)
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+        return _stop
+
+    monkeypatch.setattr(startup_recurring, "_start_authnz_scheduler", _fake_authnz)
+    monkeypatch.setattr(startup_recurring, "_start_workflows_scheduler_service", _fake_workflows)
+    monkeypatch.setattr(startup_recurring, "_start_reading_digest_scheduler_service", _fake_reading_digest)
+    monkeypatch.setattr(startup_recurring, "_start_admin_backup_scheduler_service", _fake_admin_backup)
+    monkeypatch.setattr(
+        startup_recurring,
+        "_start_companion_reflection_scheduler_service",
+        _fake_companion_reflection,
+    )
+    monkeypatch.setattr(startup_recurring, "_start_reminders_scheduler_service", _fake_reminders)
+    monkeypatch.setattr(startup_recurring, "_start_connectors_sync_scheduler_service", _fake_connectors_sync)
+    monkeypatch.setattr(startup_recurring, "_env_flag", lambda key, default: True)
+    monkeypatch.setattr(startup_recurring, "_stop_workflows_scheduler_service", _fake_stop("workflows"))
+    monkeypatch.setattr(
+        startup_recurring,
+        "_stop_reading_digest_scheduler_service",
+        _fake_stop("reading-digest"),
+    )
+    monkeypatch.setattr(startup_recurring, "_stop_admin_backup_scheduler_service", _fake_stop("admin-backup"))
+    monkeypatch.setattr(
+        startup_recurring,
+        "_stop_companion_reflection_scheduler_service",
+        _fake_stop("companion-reflection"),
+    )
+    monkeypatch.setattr(startup_recurring, "_stop_reminders_scheduler_service", _fake_stop("reminders"))
+    monkeypatch.setattr(startup_recurring, "_stop_connectors_sync_scheduler_service", _fake_stop("connectors-sync"))
+
+    try:
+        handles = await startup_recurring.start_recurring_schedulers(
+            test_mode=False,
+            worker_inventory=worker_inventory,
+        )
+
+        assert handles.authnz_scheduler_started is True
+        assert handles.workflows_sched_task in created_tasks
+        assert handles.reading_digest_sched_task in created_tasks
+        assert handles.admin_backup_sched_task in created_tasks
+        assert handles.companion_reflection_sched_task in created_tasks
+        assert handles.reminders_sched_task in created_tasks
+        assert handles.connectors_sync_sched_task in created_tasks
+        assert {
+            handle.name: handle.shutdown_phase
+            for handle in worker_inventory.handles
+        } == {
+            "workflows_sched_task": ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN,
+            "reading_digest_sched_task": ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN,
+            "admin_backup_sched_task": ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN,
+            "companion_reflection_sched_task": ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN,
+            "reminders_sched_task": ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN,
+            "connectors_sync_sched_task": ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN,
+        }
+        assert all(handle.stop_event is None for handle in worker_inventory.handles)
+        assert all(handle.shutdown_callback is not None for handle in worker_inventory.handles)
+        assert {handle.category for handle in worker_inventory.handles} == {"recurring-scheduler"}
+        assert app.state._tldw_shutdown_job_poller_inventory == []
+
+        for handle in worker_inventory.handles:
+            await handle.shutdown_callback()
+
+        assert stopped == [
+            "workflows",
+            "reading-digest",
+            "admin-backup",
+            "companion-reflection",
+            "reminders",
+            "connectors-sync",
+        ]
+    finally:
+        for task in created_tasks:
+            task.cancel()
+        await asyncio.gather(*created_tasks, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_register_recurring_scheduler_task_warns_on_incomplete_inventory_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_recurring = _import_startup_recurring_schedulers()
+    from tldw_Server_API.app.services.lifecycle_workers import WorkerRegistry
+
+    app = FastAPI()
+    worker_inventory = WorkerRegistry(app)
+    warnings: list[tuple[object, ...]] = []
+
+    async def _stop(task: asyncio.Task[None]) -> None:
+        task.cancel()
+
+    monkeypatch.setattr(
+        startup_recurring.logger,
+        "warning",
+        lambda *args, **kwargs: warnings.append(args),
+    )
+
+    task = asyncio.create_task(_wait_forever(), name="metadata-missing-scheduler")
+    try:
+        await startup_recurring._register_recurring_scheduler_task(
+            worker_inventory=worker_inventory,
+            task=task,
+            worker_name=None,
+            stopper=_stop,
+        )
+
+        assert worker_inventory.handles == []
+        assert any("registration skipped" in str(args[0]) for args in warnings)
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_register_recurring_scheduler_task_bounds_failed_registration_rollback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_recurring = _import_startup_recurring_schedulers()
+    warnings: list[tuple[object, ...]] = []
+
+    class _FailingInventory:
+        def register(self, worker: object) -> None:
+            raise RuntimeError("inventory unavailable")
+
+    allow_cancel = False
+
+    async def _stubborn_task() -> None:
+        nonlocal allow_cancel
+        while True:
+            try:
+                await asyncio.sleep(60)
+            except asyncio.CancelledError:
+                if allow_cancel:
+                    raise
+                continue
+
+    async def _stop(task: asyncio.Task[None]) -> None:
+        task.cancel()
+
+    monkeypatch.setattr(startup_recurring, "_SCHEDULER_ROLLBACK_TIMEOUT_SEC", 0.01)
+    monkeypatch.setattr(
+        startup_recurring.logger,
+        "warning",
+        lambda *args, **kwargs: warnings.append(args),
+    )
+
+    task = asyncio.create_task(_stubborn_task(), name="stubborn-rollback-scheduler")
+    try:
+        with pytest.raises(RuntimeError, match="inventory unavailable"):
+            await asyncio.wait_for(
+                startup_recurring._register_recurring_scheduler_task(
+                    worker_inventory=_FailingInventory(),
+                    task=task,
+                    worker_name="stubborn_sched_task",
+                    stopper=_stop,
+                ),
+                timeout=0.5,
+            )
+
+        assert any("startup rollback timed out" in str(args[0]) for args in warnings)
+    finally:
+        allow_cancel = True
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)

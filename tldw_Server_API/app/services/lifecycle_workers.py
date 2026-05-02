@@ -32,6 +32,7 @@ class ManagedWorker:
     name: str
     task: asyncio.Task[Any]
     stop_event: asyncio.Event | None = None
+    shutdown_callback: Callable[[], Awaitable[None]] | None = None
     timeout_sec: float = 5.0
     category: str | None = None
     shutdown_phase: ShutdownPhase = ShutdownPhase.JOB_POLLER_QUIESCE
@@ -173,6 +174,38 @@ async def stop_registered_workers(
 ) -> None:
     """Stop registered workers concurrently and publish stopped worker names."""
 
+    async def _request_worker_stop(handle: ManagedWorker) -> None:
+        if handle.stop_event is not None:
+            handle.stop_event.set()
+            return
+        if handle.shutdown_callback is not None:
+            try:
+                await asyncio.wait_for(handle.shutdown_callback(), timeout=handle.timeout_sec)
+                return
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "App Shutdown: Timed out waiting for {} {} shutdown callback after {}s; cancelling",
+                    log_label,
+                    handle.name,
+                    handle.timeout_sec,
+                )
+            except Exception as exc:  # noqa: BLE001 - shutdown hooks must not block teardown.
+                logger.warning(
+                    "App Shutdown: {} {} shutdown callback failed: {}",
+                    log_label,
+                    handle.name,
+                    exc,
+                )
+        try:
+            handle.task.cancel()
+        except Exception as exc:  # noqa: BLE001 - cancel hooks can raise arbitrary errors.
+            logger.warning(
+                "App Shutdown: {} {} cancel request failed: {}",
+                log_label,
+                handle.name,
+                exc,
+            )
+
     async def _await_worker_shutdown(handle: ManagedWorker) -> bool:
         try:
             await asyncio.wait_for(asyncio.shield(handle.task), timeout=handle.timeout_sec)
@@ -212,19 +245,10 @@ async def stop_registered_workers(
             )
         return bool(handle.task.done())
 
-    for handle in handles:
-        if handle.stop_event is not None:
-            handle.stop_event.set()
-        else:
-            try:
-                handle.task.cancel()
-            except Exception as exc:  # noqa: BLE001 - cancel hooks can raise arbitrary errors.
-                logger.warning(
-                    "App Shutdown: {} {} cancel request failed: {}",
-                    log_label,
-                    handle.name,
-                    exc,
-                )
+    await asyncio.gather(
+        *(_request_worker_stop(handle) for handle in handles),
+        return_exceptions=False,
+    )
 
     stopped_results = await asyncio.gather(
         *(_await_worker_shutdown(handle) for handle in handles),
