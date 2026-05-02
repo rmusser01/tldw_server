@@ -78,6 +78,16 @@ Current pagination-sensitive examples:
 - `GET /reading/export`: streamed file export. The `page` input selects which
   rows to include in the download; the response body is the exported file, not a
   JSON list envelope.
+- `GET /api/v1/admin/llm-usage/export.csv`,
+  `GET /api/v1/admin/usage/daily/export.csv`, and
+  `GET /api/v1/admin/usage/top/export.csv`: CSV downloads whose `limit` input
+  bounds exported rows rather than describing a JSON response-body page.
+- `GET /api/v1/admin/audit-log/export` and
+  `GET /api/v1/admin/users/export`: file-style export endpoints that can return
+  CSV or JSON content directly; keep selection inputs separate from canonical
+  list-envelope metadata.
+- `GET /api/v1/notes/export.csv`: CSV note export; keep `limit` and `offset`
+  as export-window selection inputs, not response-body pagination metadata.
 - `GET /watchlists/runs/export.csv`: CSV export; keep selection/filter inputs
   separate from response-body pagination metadata.
 
