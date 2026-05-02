@@ -122,6 +122,8 @@ class TestACPAdminSessionsList:
             "has_more": True,
             "next_offset": 3,
         }
+        assert body["has_more"] is True
+        assert body["next_offset"] == 3
 
 
 # ===========================================================================
