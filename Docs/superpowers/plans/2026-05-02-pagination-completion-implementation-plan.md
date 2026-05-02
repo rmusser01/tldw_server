@@ -611,7 +611,11 @@ git commit -m "Phase pagination-completion: migrate workflow cursor pagination"
 - Update: `Docs/Design/Pagination_Completion_Matrix.md`
 - Update: `Docs/Design/Pagination_Contract_Exemptions.md`
 
-- [ ] **Step 1: Pick the first custom family**
+**Status:** In progress. The watchlists tranche migrated bounded preview/test
+responses and classified operation-result, aggregate-count, file-export, and
+small catalog routes as non-pagination targets.
+
+- [x] **Step 1: Pick the first custom family**
 
 Recommended first custom-family candidates:
 
@@ -621,15 +625,36 @@ Recommended first custom-family candidates:
 
 Avoid starting with `mcp_hub_management.py` unless the inventory shows a very small covered route.
 
-- [ ] **Step 2: Decide migration vs exemption**
+- [x] **Step 2: Decide migration vs exemption**
 
 For each route in the family:
 
-- If response model is an object envelope, add canonical pagination.
+- If response model is a list/search/history/preview object envelope with
+  bounded `items` and existing pagination or limit inputs, add canonical
+  pagination without removing legacy fields.
+- If response model is an operation-result object envelope, detail response,
+  aggregate/count response, or bounded preview with no continuation semantics,
+  classify it explicitly rather than assuming pagination from field names like
+  `total`.
 - If response model is raw `list[...]`, record as raw-list exempt unless adding a versioned/sibling route.
 - If provider-compatible, record provider exemption.
 
-- [ ] **Step 3: Add route tests**
+Watchlists findings:
+
+- `/watchlists/jobs/{job_id}/preview`, `/watchlists/sources/{source_id}/test`,
+  and `/watchlists/sources/test` are bounded preview list envelopes. They now
+  preserve `items`, `total`, `ingestable`, and `filtered` while adding canonical
+  `OffsetPaginationMeta` with `offset=0` and `has_more=false`.
+- `/watchlists/sources/bulk`, `/watchlists/sources/check-now`, and
+  `/watchlists/sources/import` are operation-result envelopes, not pagination
+  targets.
+- `/watchlists/runs/export.csv` is a CSV export route.
+- `/watchlists/items/smart-counts`, `/watchlists/templates`,
+  `/watchlists/templates/{template_name}/versions`, and
+  `/watchlists/{watchlist_id}/clusters` have no pagination inputs and are
+  classified as aggregate/small-catalog non-pagination targets.
+
+- [x] **Step 3: Add route tests**
 
 Each migrated custom route needs tests for:
 
@@ -638,9 +663,20 @@ Each migrated custom route needs tests for:
 - page disjointness or cursor non-duplication
 - unknown/expensive total behavior if `total=None`
 
-- [ ] **Step 4: Verify**
+- [x] **Step 4: Verify**
 
 Run the family’s focused tests, Bandit on touched source, and `git diff --check`.
+
+Verified watchlists tranche:
+
+```bash
+python -m pytest tldw_Server_API/tests/Watchlists/test_preview_endpoint_more.py -k canonical_pagination -q
+python -m pytest tldw_Server_API/tests/Watchlists/test_preview_endpoint.py tldw_Server_API/tests/Watchlists/test_preview_endpoint_more.py -q
+python -m pytest tldw_Server_API/tests/Utils/test_pagination_contract.py -q
+python -m bandit -r tldw_Server_API/app/api/v1/endpoints/watchlists.py tldw_Server_API/app/api/v1/schemas/watchlists_schemas.py -f json -o /tmp/bandit_pagination_watchlists_preview.json
+```
+
+Bandit produced zero findings for the touched watchlists source scope.
 
 - [ ] **Step 5: Commit one family**
 

@@ -45,6 +45,38 @@ Current pagination-sensitive examples:
 - `GET /jobs/events/stream`: SSE event stream using `after_id`; keep pagination
   semantics in the stream cursor/header channel rather than adding a response
   envelope.
+- `GET /watchlists/runs/export.csv`: CSV export; keep selection/filter inputs
+  separate from response-body pagination metadata.
+
+### Operation Results and Aggregate Counts
+
+Object envelopes that report action results, imports, bulk-create outcomes, or
+aggregate counters are not list pagination targets just because they contain a
+field named `total`. Classify these separately unless they expose bounded
+`items` plus page/cursor/limit inputs.
+
+Route-level matrix status: `exempt-not-paginated`.
+
+Current examples:
+
+- `POST /watchlists/sources/bulk`: bulk-create operation result.
+- `POST /watchlists/sources/check-now`: ad hoc source-check operation result.
+- `POST /watchlists/sources/import`: OPML import operation result.
+- `GET /watchlists/items/smart-counts`: aggregate counts for UI filters.
+
+### Bounded Preview Routes
+
+Preview/test routes with legacy `items` and `total` fields may add canonical
+metadata when they already expose a bounded list input such as `limit`. If the
+route has no continuation input, the metadata should represent the single
+returned window (`offset=0`, `has_more=false`) rather than inventing a new page
+contract.
+
+Current examples:
+
+- `POST /watchlists/jobs/{job_id}/preview`
+- `POST /watchlists/sources/{source_id}/test`
+- `POST /watchlists/sources/test`
 
 ### Internal Admin and Event Routes With Unknown Totals
 
