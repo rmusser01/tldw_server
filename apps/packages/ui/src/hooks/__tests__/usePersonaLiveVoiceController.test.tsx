@@ -483,6 +483,59 @@ describe("usePersonaLiveVoiceController", () => {
     expect(result.current.wakeArmed).toBe(false)
   })
 
+  it("cleans up wake state when detector stop rejects during disarm", async () => {
+    const stopError = new Error("wake stop failed")
+    const detector: WakeDetector = {
+      isAvailable: vi.fn(async () => true),
+      start: vi.fn(async (nextConfig) => {
+        nextConfig.onStateChange?.("listening")
+      }),
+      stop: vi.fn(async () => {
+        throw stopError
+      })
+    }
+    const ws = {
+      readyState: WebSocket.OPEN,
+      send: vi.fn()
+    } as unknown as WebSocket
+
+    const { result } = renderHook(() =>
+      usePersonaLiveVoiceController({
+        ws,
+        connected: true,
+        sessionId: "sess-1",
+        personaId: "persona-1",
+        resolvedDefaults,
+        canUseServerStt: true,
+        wakeTriggerPhrases: ["hey helper"],
+        wakeDetectorFactory: () => detector
+      })
+    )
+
+    await act(async () => {
+      await result.current.toggleWakeArmed()
+    })
+    ;(ws as WebSocket & { send: ReturnType<typeof vi.fn> }).send.mockClear()
+
+    let disarmResult: unknown
+    await act(async () => {
+      disarmResult = await result.current.toggleWakeArmed()
+    })
+
+    expect(disarmResult).toBeUndefined()
+    await waitFor(() => {
+      expect(result.current.wakeArmed).toBe(false)
+    })
+    expect(result.current.wakeDetectorState).toBe("idle")
+    expect(getSentPayloads(ws as WebSocket & { send: ReturnType<typeof vi.fn> })).toEqual([
+      {
+        type: "wake_deactivation",
+        session_id: "sess-1",
+        reason: "disarmed"
+      }
+    ])
+  })
+
   it("sends wake deactivation on unmount when wake listening is armed", async () => {
     const wakeHarness = createWakeDetectorHarness()
     const ws = {

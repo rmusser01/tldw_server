@@ -507,6 +507,8 @@ export const usePersonaLiveVoiceController = ({
       sendWakeDeactivation(reason, targetSessionId)
       try {
         await detector?.stop()
+      } catch {
+        // Wake detector teardown is best-effort; state cleanup must still finish.
       } finally {
         setWakeDetectorState("idle")
         setWakeArmed(false)
