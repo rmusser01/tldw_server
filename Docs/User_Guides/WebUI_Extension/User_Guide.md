@@ -59,6 +59,7 @@ Top navigation groups features into tabs. Notable areas include:
   - Roleplay quickstart: `Docs/User_Guides/WebUI_Extension/Character_Roleplay_Quickstart.md`.
   - Core roleplay guide: `Docs/User_Guides/WebUI_Extension/Effective_Character_Roleplay_and_You.md`.
   - Advanced roleplay guide: `Docs/User_Guides/WebUI_Extension/Advanced_Character_Roleplay_Guide.md`.
+  - Persona Live wake phrases: `Docs/User_Guides/WebUI_Extension/Persona_Live_Wake_Phrases.md`.
 
 - Transcribe audio
   - Audio → Transcriptions: upload files for batch transcription.
