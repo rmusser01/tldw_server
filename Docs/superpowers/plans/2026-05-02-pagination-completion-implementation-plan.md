@@ -661,6 +661,10 @@ legacy `summary/results/page/page_size/total` envelope and adds canonical
 `GET /api/v1/admin/users/profile` preserves the legacy
 `profiles/total/page/limit/pages` envelope and adds canonical
 `PagePaginationMeta` built from `page`, `limit`, and the known profile total.
+Privilege detail and snapshot routes now preserve their legacy detail envelopes
+while adding canonical `PagePaginationMeta`: org/team/user detail responses use
+`page/page_size/total_items`, snapshot lists use `page/page_size/total_items`,
+and snapshot detail responses expose the metadata under `detail.pagination`.
 
 Verified:
 
@@ -674,6 +678,11 @@ python -m pytest tldw_Server_API/tests/Admin/test_admin_usage_service.py -k cano
 python -m pytest tldw_Server_API/tests/Prompt_Management_NEW/unit/test_prompts_endpoint_error_mapping.py -k canonical_page_pagination -q
 python -m pytest tldw_Server_API/tests/Evaluations/test_embeddings_abtest_results_api.py -k returns_rows -q
 python -m pytest tldw_Server_API/tests/Admin/test_admin_service_log_sanitizers.py -k canonical_page_pagination -q
+python -m pytest tldw_Server_API/tests/Privileges/test_privilege_endpoints.py -k "test_get_org_detail_pagination" -q
+python -m pytest tldw_Server_API/tests/Privileges/test_privilege_endpoints.py -k "test_team_detail_filters" -q
+python -m pytest tldw_Server_API/tests/Privileges/test_privilege_endpoints.py -k "test_user_detail_includes_canonical_page_pagination" -q
+python -m pytest tldw_Server_API/tests/Privileges/test_privilege_endpoints.py -k "test_snapshot_list_filters" -q
+python -m pytest tldw_Server_API/tests/Privileges/test_privilege_endpoints.py -k "test_get_snapshot_detail" -q
 ```
 
 ## Task 9: Classify and Migrate Custom Legacy Envelopes

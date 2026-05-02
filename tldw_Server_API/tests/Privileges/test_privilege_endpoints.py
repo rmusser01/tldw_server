@@ -313,6 +313,14 @@ def test_get_org_detail_pagination(privilege_test_client: TestClient):
     payload = response.json()
     assert payload["page"] == 1
     assert payload["page_size"] == 5
+    assert payload["pagination"] == {
+        "mode": "page",
+        "page": 1,
+        "per_page": 5,
+        "total": payload["total_items"],
+        "total_pages": (payload["total_items"] + 4) // 5,
+        "has_more": payload["total_items"] > 5,
+    }
     assert payload["items"], "Expected detail items to be present"
     statuses = {item["status"] for item in payload["items"]}
     assert statuses.issubset({"allowed", "blocked"})
@@ -350,8 +358,33 @@ def test_team_detail_filters(privilege_test_client: TestClient):
     assert response.status_code == 200
     payload = response.json()
     assert payload["total_items"] >= 1
+    assert payload["pagination"] == {
+        "mode": "page",
+        "page": 1,
+        "per_page": 5,
+        "total": payload["total_items"],
+        "total_pages": (payload["total_items"] + 4) // 5,
+        "has_more": payload["total_items"] > 5,
+    }
     for item in payload["items"]:
         assert "media" in item["endpoint"]
+
+
+def test_user_detail_includes_canonical_page_pagination(privilege_test_client: TestClient):
+    response = privilege_test_client.get(
+        "/api/v1/privileges/users/user-1",
+        params={"page": 1, "page_size": 5},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["pagination"] == {
+        "mode": "page",
+        "page": 1,
+        "per_page": 5,
+        "total": payload["total_items"],
+        "total_pages": (payload["total_items"] + 4) // 5,
+        "has_more": payload["total_items"] > 5,
+    }
 
 
 def test_team_detail_dependency_filter(privilege_test_client: TestClient):
@@ -380,6 +413,14 @@ def test_snapshot_list_filters(privilege_test_client: TestClient):
     assert response.status_code == 200
     payload = response.json()
     assert payload["total_items"] == 1
+    assert payload["pagination"] == {
+        "mode": "page",
+        "page": 1,
+        "per_page": 50,
+        "total": 1,
+        "total_pages": 1,
+        "has_more": False,
+    }
     assert payload["items"][0]["org_id"] == "acme"
     assert payload["items"][0]["target_scope"] == "org"
 
@@ -407,6 +448,14 @@ def test_get_snapshot_detail(privilege_test_client: TestClient):
     payload = response.json()
     assert payload["snapshot_id"] == "snap-2025-01-15-001"
     assert payload["detail"]["total_items"] >= 1
+    assert payload["detail"]["pagination"] == {
+        "mode": "page",
+        "page": 1,
+        "per_page": 500,
+        "total": payload["detail"]["total_items"],
+        "total_pages": 1,
+        "has_more": False,
+    }
     endpoints = {item["endpoint"] for item in payload["detail"]["items"]}
     assert "/api/v1/media/process" in endpoints
     assert payload["target_scope"] == "org"
