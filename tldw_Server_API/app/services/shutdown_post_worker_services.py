@@ -94,9 +94,15 @@ async def shutdown_post_worker_services(
 
     claims_shutdown_handles = await _shutdown_claims_maintenance_tasks(
         claims_task=_task_if_not_stopped("claims_rebuild", claims_task),
-        jobs_prune_task=jobs_prune_task,
-        files_export_gc_task=files_export_gc_task,
-        notifications_prune_task=notifications_prune_task,
+        jobs_prune_task=_task_if_not_stopped("jobs_prune_task", jobs_prune_task),
+        files_export_gc_task=_task_if_not_stopped(
+            "files_export_gc_task",
+            files_export_gc_task,
+        ),
+        notifications_prune_task=_task_if_not_stopped(
+            "notifications_prune_task",
+            notifications_prune_task,
+        ),
     )
     notifications_shutdown_handles = await _shutdown_notifications_compactor_websub_workers(
         jobs_notifications_bridge_task=jobs_notifications_bridge_task,
@@ -300,9 +306,15 @@ async def run_shutdown_post_worker_services(
         logger.debug(f"Post-worker services skipped: {exc}")
         return PostWorkerShutdownHandles(
             claims_task=_fallback_if_not_stopped("claims_rebuild", claims_task),
-            jobs_prune_task=jobs_prune_task,
-            files_export_gc_task=files_export_gc_task,
-            notifications_prune_task=notifications_prune_task,
+            jobs_prune_task=_fallback_if_not_stopped("jobs_prune_task", jobs_prune_task),
+            files_export_gc_task=_fallback_if_not_stopped(
+                "files_export_gc_task",
+                files_export_gc_task,
+            ),
+            notifications_prune_task=_fallback_if_not_stopped(
+                "notifications_prune_task",
+                notifications_prune_task,
+            ),
             jobs_notifications_bridge_task=jobs_notifications_bridge_task,
             embeddings_compactor_task=_fallback_if_not_stopped(
                 "embeddings_compactor_task",

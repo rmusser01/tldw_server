@@ -88,12 +88,9 @@ async def start_service_groups(
         run_pg_rls_auto_ensure=run_pg_rls_auto_ensure,
         worker_inventory=worker_inventory,
     )
-    if worker_inventory is None:
-        maintenance_scheduler_handles = await _start_maintenance_schedulers()
-    else:
-        maintenance_scheduler_handles = await _start_maintenance_schedulers(
-            worker_inventory=worker_inventory,
-        )
+    maintenance_scheduler_handles = await _start_maintenance_schedulers(
+        worker_inventory=worker_inventory,
+    )
     connectors_startup_handles = await _start_connectors_startup(
         app=app,
         owned_job_pollers=owned_job_pollers,
