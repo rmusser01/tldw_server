@@ -29,6 +29,7 @@ from tldw_Server_API.app.core.Metrics import increment_counter, observe_histogra
 from tldw_Server_API.app.core.testing import is_truthy
 
 from .image_store import ImageStoreValidationError, SandboxImageStore
+from .limits import build_limit_audit_metadata, limit_event_actions
 from .macos_diagnostics import collect_macos_diagnostics, probe_helper
 from .macos_virtualization.helper_client import (
     MacOSVirtualizationHelperClient,
@@ -799,6 +800,9 @@ class SandboxService:
         max_mem_mb = self.policy.cfg.max_mem_mb
         max_upload_mb = self.policy.cfg.max_upload_mb
         max_log_bytes = self.policy.cfg.max_log_bytes
+        vz_linux_max_log_bytes = min(max_log_bytes, VZLinuxRunner.max_helper_output_bytes)
+        max_artifact_file_bytes = self.policy.cfg.max_artifact_file_bytes
+        max_artifact_total_bytes = self.policy.cfg.max_artifact_total_bytes
         workspace_cap_mb = self.policy.cfg.workspace_cap_mb
         artifact_ttl_hours = self.policy.cfg.artifact_ttl_hours
         supported_spec_versions = list(self.policy.cfg.supported_spec_versions or ["1.0"])
@@ -879,6 +883,8 @@ class SandboxService:
                 "max_mem_mb": max_mem_mb,
                 "max_upload_mb": max_upload_mb,
                 "max_log_bytes": max_log_bytes,
+                "max_artifact_file_bytes": max_artifact_file_bytes,
+                "max_artifact_total_bytes": max_artifact_total_bytes,
                 "queue_max_length": queue_max_length,
                 "queue_ttl_sec": queue_ttl_sec,
                 "workspace_cap_mb": workspace_cap_mb,
@@ -909,6 +915,8 @@ class SandboxService:
                 "max_mem_mb": max_mem_mb,
                 "max_upload_mb": max_upload_mb,
                 "max_log_bytes": max_log_bytes,
+                "max_artifact_file_bytes": max_artifact_file_bytes,
+                "max_artifact_total_bytes": max_artifact_total_bytes,
                 "queue_max_length": queue_max_length,
                 "queue_ttl_sec": queue_ttl_sec,
                 "workspace_cap_mb": workspace_cap_mb,
@@ -946,6 +954,8 @@ class SandboxService:
                 "max_mem_mb": max_mem_mb,
                 "max_upload_mb": max_upload_mb,
                 "max_log_bytes": max_log_bytes,
+                "max_artifact_file_bytes": max_artifact_file_bytes,
+                "max_artifact_total_bytes": max_artifact_total_bytes,
                 "queue_max_length": queue_max_length,
                 "queue_ttl_sec": queue_ttl_sec,
                 "workspace_cap_mb": workspace_cap_mb,
@@ -966,7 +976,9 @@ class SandboxService:
                 "max_cpu": max_cpu,
                 "max_mem_mb": max_mem_mb,
                 "max_upload_mb": max_upload_mb,
-                "max_log_bytes": max_log_bytes,
+                "max_log_bytes": vz_linux_max_log_bytes,
+                "max_artifact_file_bytes": max_artifact_file_bytes,
+                "max_artifact_total_bytes": max_artifact_total_bytes,
                 "queue_max_length": queue_max_length,
                 "queue_ttl_sec": queue_ttl_sec,
                 "workspace_cap_mb": workspace_cap_mb,
@@ -985,6 +997,8 @@ class SandboxService:
                 "max_mem_mb": max_mem_mb,
                 "max_upload_mb": max_upload_mb,
                 "max_log_bytes": max_log_bytes,
+                "max_artifact_file_bytes": max_artifact_file_bytes,
+                "max_artifact_total_bytes": max_artifact_total_bytes,
                 "queue_max_length": queue_max_length,
                 "queue_ttl_sec": queue_ttl_sec,
                 "workspace_cap_mb": workspace_cap_mb,
@@ -1003,6 +1017,8 @@ class SandboxService:
                 "max_mem_mb": max_mem_mb,
                 "max_upload_mb": max_upload_mb,
                 "max_log_bytes": max_log_bytes,
+                "max_artifact_file_bytes": max_artifact_file_bytes,
+                "max_artifact_total_bytes": max_artifact_total_bytes,
                 "queue_max_length": queue_max_length,
                 "queue_ttl_sec": queue_ttl_sec,
                 "workspace_cap_mb": workspace_cap_mb,
@@ -1427,6 +1443,17 @@ class SandboxService:
                             reason_code = (status.message or None)
                     except _SANDBOX_SERVICE_NONCRITICAL_EXCEPTIONS:
                         reason_code = None
+                    limit_metadata = build_limit_audit_metadata(status.resource_usage)
+                    metadata = {
+                        "runtime": status.runtime.value if status.runtime else None,
+                        "base_image": status.base_image,
+                        "image_digest": status.image_digest,
+                        "policy_hash": status.policy_hash,
+                        "exit_code": status.exit_code,
+                        "spec_version": spec_version,
+                        "reason_code": reason_code,
+                    }
+                    metadata.update(limit_metadata)
                     await svc.log_event(
                         event_type=AuditEventType.API_RESPONSE,
                         category=AuditEventCategory.API_CALL,
@@ -1437,16 +1464,20 @@ class SandboxService:
                         action="run",
                         result=("success" if outcome == "success" else outcome),
                         duration_ms=dur_ms,
-                        metadata={
-                            "runtime": status.runtime.value if status.runtime else None,
-                            "base_image": status.base_image,
-                            "image_digest": status.image_digest,
-                            "policy_hash": status.policy_hash,
-                            "exit_code": status.exit_code,
-                            "spec_version": spec_version,
-                            "reason_code": reason_code,
-                        },
+                        metadata=metadata,
                     )
+                    for action in limit_event_actions(status.resource_usage):
+                        await svc.log_event(
+                            event_type=AuditEventType.API_RESPONSE,
+                            category=AuditEventCategory.API_CALL,
+                            severity=AuditSeverity.WARNING,
+                            context=ctx,
+                            resource_type="sandbox.run",
+                            resource_id=run_id,
+                            action=action,
+                            result="limited",
+                            metadata=limit_metadata,
+                        )
                 finally:
                     await svc.stop()
 

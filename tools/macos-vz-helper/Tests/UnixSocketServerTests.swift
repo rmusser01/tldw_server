@@ -165,6 +165,108 @@ import Testing
     }
 }
 
+@Test func unixSocketServerExecGuestAcceptsMaxOutputBytes() throws {
+    let registry = VMRegistry()
+    let manager = VZLinuxVMManager(
+        registry: registry,
+        bootDriver: RecordingBootDriver(),
+        guestBridge: StaticOutputGuestBridge(stdout: String(repeating: "o", count: 100), stderr: String(repeating: "e", count: 100))
+    )
+    let service = HelperService(
+        hostFacts: HostFacts(isMacOS: true, isAppleSilicon: true),
+        registry: registry,
+        vmManager: manager
+    )
+    let server = UnixSocketServer(
+        socketPath: "/tmp/macos-vz-helper.sock",
+        service: service
+    )
+
+    let createRequest = """
+    {"operation":"create_vm","protocol_version":"1","request":{"vm_name":"vm-exec-output-route","template":"/tmp/template.img","workspace_path":"/workspace"}}
+    """.data(using: .utf8)!
+    _ = try server.handleRequestData(createRequest)
+
+    let execRequest = """
+    {"operation":"exec_guest","protocol_version":"1","request":{"vm_id":"vm-exec-output-route","argv":["/bin/echo","ok"],"cwd":"/workspace","timeout_sec":15,"max_output_bytes":10}}
+    """.data(using: .utf8)!
+    let responseData = try server.handleRequestData(execRequest)
+    let json = try JSONSerialization.jsonObject(with: responseData) as? [String: Any]
+    let details = json?["details"] as? [String: Any]
+
+    let stdout = json?["stdout"] as? String ?? ""
+    let stderr = json?["stderr"] as? String ?? ""
+    #expect(Data(stdout.utf8).count + Data(stderr.utf8).count <= 10)
+    #expect(stdout.isEmpty == false)
+    #expect(stderr.isEmpty == false)
+    #expect(details?["output_limit_bytes"] as? String == "10")
+    #expect(details?["stdout_truncated"] as? String == "true")
+    #expect(details?["stderr_truncated"] as? String == "true")
+}
+
+@Test func unixSocketServerRejectsMalformedExecGuestMaxOutputBytes() throws {
+    let registry = VMRegistry()
+    let manager = VZLinuxVMManager(
+        registry: registry,
+        bootDriver: RecordingBootDriver(),
+        guestBridge: RecordingGuestBridge()
+    )
+    let service = HelperService(
+        hostFacts: HostFacts(isMacOS: true, isAppleSilicon: true),
+        registry: registry,
+        vmManager: manager
+    )
+    let server = UnixSocketServer(
+        socketPath: "/tmp/macos-vz-helper.sock",
+        service: service
+    )
+
+    let createRequest = """
+    {"operation":"create_vm","protocol_version":"1","request":{"vm_name":"vm-exec-output-shape","template":"/tmp/template.img","workspace_path":"/workspace"}}
+    """.data(using: .utf8)!
+    _ = try server.handleRequestData(createRequest)
+
+    let execRequest = """
+    {"operation":"exec_guest","protocol_version":"1","request":{"vm_id":"vm-exec-output-shape","argv":["/bin/echo","ok"],"cwd":"/workspace","timeout_sec":15,"max_output_bytes":"10"}}
+    """.data(using: .utf8)!
+    let responseData = try server.handleRequestData(execRequest)
+    let json = try JSONSerialization.jsonObject(with: responseData) as? [String: Any]
+
+    #expect(json?["error_code"] as? String == "invalid_request")
+}
+
+@Test func unixSocketServerRejectsInvalidExecGuestMaxOutputBytes() throws {
+    let registry = VMRegistry()
+    let manager = VZLinuxVMManager(
+        registry: registry,
+        bootDriver: RecordingBootDriver(),
+        guestBridge: RecordingGuestBridge()
+    )
+    let service = HelperService(
+        hostFacts: HostFacts(isMacOS: true, isAppleSilicon: true),
+        registry: registry,
+        vmManager: manager
+    )
+    let server = UnixSocketServer(
+        socketPath: "/tmp/macos-vz-helper.sock",
+        service: service
+    )
+
+    let createRequest = """
+    {"operation":"create_vm","protocol_version":"1","request":{"vm_name":"vm-exec-output-invalid","template":"/tmp/template.img","workspace_path":"/workspace"}}
+    """.data(using: .utf8)!
+    _ = try server.handleRequestData(createRequest)
+
+    let execRequest = """
+    {"operation":"exec_guest","protocol_version":"1","request":{"vm_id":"vm-exec-output-invalid","argv":["/bin/echo","ok"],"cwd":"/workspace","timeout_sec":15,"max_output_bytes":0}}
+    """.data(using: .utf8)!
+    let responseData = try server.handleRequestData(execRequest)
+    let json = try JSONSerialization.jsonObject(with: responseData) as? [String: Any]
+
+    #expect(json?["error_code"] as? String == "exec_output_limit_invalid")
+    #expect(json?["message"] as? String == "output_limit_out_of_range")
+}
+
 @Test func unixSocketServerForwardsCreateVMOwnershipMetadata() throws {
     let registry = VMRegistry()
     let manager = VZLinuxVMManager(

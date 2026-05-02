@@ -214,13 +214,18 @@ final class UnixSocketServer {
                     key: "timeout_sec",
                     defaultValue: 30
                 )
+                let maxOutputBytes = try optionalIntField(
+                    request.request,
+                    key: "max_output_bytes"
+                )
                 return try encoder.encode(
                     try service.execGuest(
                         vmID: vmID,
                         argv: argv,
                         cwd: cwd,
                         env: env,
-                        timeoutSeconds: timeoutSeconds
+                        timeoutSeconds: timeoutSeconds,
+                        maxOutputBytes: maxOutputBytes
                     )
                 )
             } catch {
@@ -625,6 +630,21 @@ final class UnixSocketServer {
         }
     }
 
+    private func optionalIntField(
+        _ request: [String: JSONValue],
+        key: String
+    ) throws -> Int? {
+        guard let value = request[key] else {
+            return nil
+        }
+        switch value {
+        case .int(let intValue):
+            return intValue
+        default:
+            throw UnixSocketServerError.invalidRequest
+        }
+    }
+
     private func errorCode(for error: Error) -> String {
         switch error {
         case UnixSocketServerError.invalidRequest, is DecodingError:
@@ -645,6 +665,8 @@ final class UnixSocketServer {
             return "exec_env_invalid"
         case HelperServiceError.invalidExecTimeout:
             return "exec_timeout_invalid"
+        case HelperServiceError.invalidExecOutputLimit:
+            return "exec_output_limit_invalid"
         case VZLinuxVMManagerError.bootNotImplemented:
             return "boot_not_implemented"
         case GuestBridgeError.guestReadinessNotImplemented:
@@ -682,7 +704,8 @@ final class UnixSocketServer {
         case HelperServiceError.invalidExecArgv(let reason),
              HelperServiceError.invalidExecCwd(let reason),
              HelperServiceError.invalidExecEnv(let reason),
-             HelperServiceError.invalidExecTimeout(let reason):
+             HelperServiceError.invalidExecTimeout(let reason),
+             HelperServiceError.invalidExecOutputLimit(let reason):
             return reason
         default:
             return String(describing: error)

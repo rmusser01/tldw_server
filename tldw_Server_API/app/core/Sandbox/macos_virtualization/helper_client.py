@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from tldw_Server_API.app.core.Sandbox.limits import cap_output_streams
 from tldw_Server_API.app.core.testing import is_truthy
 
 from .models import (
@@ -35,6 +36,7 @@ _MAX_EXEC_ARGV_BYTES = 32 * 1024
 _MAX_EXEC_ENV_COUNT = 128
 _MAX_EXEC_ENV_BYTES = 32 * 1024
 _MAX_EXEC_TIMEOUT_SEC = 3_600.0
+_MAX_EXEC_OUTPUT_BYTES = 256 * 1024 * 1024
 
 
 class MacOSVirtualizationHelperUnavailable(RuntimeError):
@@ -168,21 +170,34 @@ class MacOSVirtualizationHelperClient:
         }
 
     def exec_guest(self, *, vm_id: str, request: dict[str, Any]) -> HelperExecReply:
+        exec_request = dict(request)
+        if exec_request.get("max_output_bytes") is None:
+            exec_request.pop("max_output_bytes", None)
         if is_truthy(os.getenv("TEST_MODE")):
-            argv, _cwd, _env, _timeout_sec = self._validate_exec_guest_request(request)
+            argv, _cwd, _env, _timeout_sec, max_output_bytes = self._validate_exec_guest_request(exec_request)
             stdout = b""
             if argv[:2] == ["/bin/echo", "ok"]:
                 stdout = b"ok\n"
+            capped = cap_output_streams(stdout, b"", max_output_bytes=max_output_bytes)
+            details = {"vm_id": str(vm_id or "").strip() or None, "transport": "vsock"}
+            if max_output_bytes is not None:
+                details.update(
+                    {
+                        key: ("true" if value else "false") if key.endswith("_truncated") else str(value)
+                        for key, value in capped.counters.items()
+                    }
+                )
             return HelperExecReply(
                 exit_code=0,
-                stdout=stdout,
-                details={"vm_id": str(vm_id or "").strip() or None, "transport": "vsock"},
+                stdout=capped.stdout,
+                stderr=capped.stderr,
+                details=details,
             )
         payload = self._request(
             "exec_guest",
-            {"vm_id": vm_id, **dict(request)},
+            {"vm_id": vm_id, **exec_request},
             timeout_sec=self._operation_timeout_sec(
-                request,
+                exec_request,
                 default_request_timeout_sec=_DEFAULT_EXEC_TIMEOUT_SEC,
             ),
         )
@@ -349,7 +364,7 @@ class MacOSVirtualizationHelperClient:
     def _validate_exec_guest_request(
         cls,
         request: dict[str, Any],
-    ) -> tuple[list[str], str, dict[str, str], float]:
+    ) -> tuple[list[str], str, dict[str, str], float, int | None]:
         if not isinstance(request, dict):
             raise MacOSVirtualizationHelperFailure("invalid_request", "invalid_request")
 
@@ -377,11 +392,20 @@ class MacOSVirtualizationHelperClient:
             raise MacOSVirtualizationHelperFailure("invalid_request", "invalid_request")
         timeout_sec = float(raw_timeout_sec)
 
+        if "max_output_bytes" not in request:
+            max_output_bytes = None
+        else:
+            raw_max_output_bytes = request["max_output_bytes"]
+            if raw_max_output_bytes is None or isinstance(raw_max_output_bytes, bool) or not isinstance(raw_max_output_bytes, int):
+                raise MacOSVirtualizationHelperFailure("invalid_request", "invalid_request")
+            max_output_bytes = int(raw_max_output_bytes)
+
         cls._validate_exec_argv(argv)
         cls._validate_exec_cwd(cwd)
         cls._validate_exec_env(env)
         cls._validate_exec_timeout(timeout_sec)
-        return argv, cwd, env, timeout_sec
+        cls._validate_exec_output_limit(max_output_bytes)
+        return argv, cwd, env, timeout_sec, max_output_bytes
 
     @staticmethod
     def _validate_exec_argv(argv: list[str]) -> None:
@@ -432,6 +456,13 @@ class MacOSVirtualizationHelperClient:
     def _validate_exec_timeout(timeout_sec: float) -> None:
         if not math.isfinite(timeout_sec) or timeout_sec <= 0 or timeout_sec > _MAX_EXEC_TIMEOUT_SEC:
             raise MacOSVirtualizationHelperFailure("exec_timeout_invalid", "timeout_out_of_range")
+
+    @staticmethod
+    def _validate_exec_output_limit(max_output_bytes: int | None) -> None:
+        if max_output_bytes is None:
+            return
+        if max_output_bytes <= 0 or max_output_bytes > _MAX_EXEC_OUTPUT_BYTES:
+            raise MacOSVirtualizationHelperFailure("exec_output_limit_invalid", "output_limit_out_of_range")
 
     @staticmethod
     def _read_response(client: socket.socket) -> dict[str, Any]:

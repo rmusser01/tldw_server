@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import contextlib
-import fnmatch
 import os
 import shutil
 import tempfile
@@ -13,12 +12,14 @@ from typing import Any
 from loguru import logger
 
 from ..image_store import ImageStoreValidationError, SandboxImageStore
+from ..limits import collect_limited_artifacts
 from ..macos_virtualization.helper_client import (
     MacOSVirtualizationHelperClient,
     MacOSVirtualizationHelperProtocolError,
     MacOSVirtualizationHelperUnavailable,
 )
 from ..models import RunPhase, RunSpec, RunStatus, RuntimeType
+from ..policy import SandboxPolicyConfig
 from ..runtime_capabilities import RuntimePreflightResult
 from ..streams import get_hub
 from .vz_common import _VZ_NONCRITICAL_EXCEPTIONS, VZBaseRunner, vz_host_facts
@@ -31,11 +32,23 @@ _VZ_LINUX_RUNNER_NONCRITICAL_EXCEPTIONS = (
     ValueError,
     MacOSVirtualizationHelperUnavailable,
 )
+_OUTPUT_COUNTER_KEYS = frozenset(
+    {
+        "output_limit_bytes",
+        "stdout_bytes_original",
+        "stderr_bytes_original",
+        "stdout_bytes_returned",
+        "stderr_bytes_returned",
+        "stdout_truncated",
+        "stderr_truncated",
+    }
+)
 
 
 class VZLinuxRunner(VZBaseRunner):
     runtime_type = RuntimeType.vz_linux
     fake_exec_env_key = "TLDW_SANDBOX_VZ_LINUX_FAKE_EXEC"
+    max_helper_output_bytes = 256 * 1024 * 1024
     available_env_key = "TLDW_SANDBOX_VZ_LINUX_AVAILABLE"
     version_env_key = "TLDW_SANDBOX_VZ_LINUX_VERSION"
     template_ready_env_key = "TLDW_SANDBOX_VZ_LINUX_TEMPLATE_READY"
@@ -142,32 +155,95 @@ class VZLinuxRunner(VZBaseRunner):
 
     @staticmethod
     def _collect_artifacts(workspace: str, capture_patterns: list[str] | None) -> dict[str, bytes]:
-        if not capture_patterns:
-            return {}
+        return VZLinuxRunner._collect_limited_artifacts(
+            workspace,
+            capture_patterns,
+            max_file_bytes=VZLinuxRunner._max_artifact_file_bytes(),
+            max_total_bytes=VZLinuxRunner._max_artifact_total_bytes(),
+        )[0]
 
-        artifacts_map: dict[str, bytes] = {}
-        workspace_root = Path(workspace)
-        if workspace_root.is_symlink():
-            return {}
+    @staticmethod
+    def _policy_cfg() -> SandboxPolicyConfig:
         try:
-            for root, _dirs, files in os.walk(workspace):
-                root_path = Path(root)
-                if not VZLinuxRunner._path_within_root(workspace_root, root_path):
-                    continue
-                for file_name in files:
-                    full_path = root_path / file_name
-                    if full_path.is_symlink():
-                        continue
-                    if not VZLinuxRunner._path_within_root(workspace_root, full_path):
-                        continue
-                    full = os.path.join(root, file_name)
-                    rel = os.path.relpath(full, workspace)
-                    rel_posix = rel.replace(os.sep, "/")
-                    if any(fnmatch.fnmatchcase(rel_posix, pattern) for pattern in capture_patterns):
-                        artifacts_map[rel_posix] = full_path.read_bytes()
-        except _VZ_NONCRITICAL_EXCEPTIONS:
+            return SandboxPolicyConfig.from_settings()
+        except _VZ_LINUX_RUNNER_NONCRITICAL_EXCEPTIONS:
+            return SandboxPolicyConfig()
+
+    @staticmethod
+    def _positive_int(value: Any, default: int) -> int:
+        try:
+            parsed = int(value)
+        except _VZ_LINUX_RUNNER_NONCRITICAL_EXCEPTIONS:
+            return default
+        return parsed if parsed > 0 else default
+
+    @classmethod
+    def _max_log_bytes(cls) -> int:
+        cfg = cls._policy_cfg()
+        requested = cls._positive_int(getattr(cfg, "max_log_bytes", None), 10 * 1024 * 1024)
+        return min(requested, cls.max_helper_output_bytes)
+
+    @classmethod
+    def _max_artifact_file_bytes(cls) -> int:
+        cfg = cls._policy_cfg()
+        return cls._positive_int(getattr(cfg, "max_artifact_file_bytes", None), 64 * 1024 * 1024)
+
+    @classmethod
+    def _max_artifact_total_bytes(cls) -> int:
+        cfg = cls._policy_cfg()
+        return cls._positive_int(getattr(cfg, "max_artifact_total_bytes", None), 256 * 1024 * 1024)
+
+    @classmethod
+    def _collect_limited_artifacts(
+        cls,
+        workspace: str,
+        capture_patterns: list[str] | None,
+        *,
+        max_file_bytes: int,
+        max_total_bytes: int,
+    ) -> tuple[dict[str, bytes], dict[str, int]]:
+        try:
+            result = collect_limited_artifacts(
+                workspace,
+                capture_patterns,
+                max_file_bytes=max_file_bytes,
+                max_total_bytes=max_total_bytes,
+            )
+        except _VZ_LINUX_RUNNER_NONCRITICAL_EXCEPTIONS:
+            return {}, {}
+        return result.artifacts, result.counters
+
+    @staticmethod
+    def _parse_helper_output_counter(value: Any) -> int | None:
+        if isinstance(value, bool):
+            return int(value)
+        if isinstance(value, int):
+            return value if value >= 0 else None
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"true", "yes", "on"}:
+                return 1
+            if normalized in {"false", "no", "off", ""}:
+                return 0
+            try:
+                parsed = int(normalized)
+            except ValueError:
+                return None
+            return parsed if parsed >= 0 else None
+        return None
+
+    @classmethod
+    def _output_counters_from_details(cls, details: dict[str, Any] | None) -> dict[str, int]:
+        if not isinstance(details, dict):
             return {}
-        return artifacts_map
+        counters: dict[str, int] = {}
+        for key in _OUTPUT_COUNTER_KEYS:
+            if key not in details:
+                continue
+            value = cls._parse_helper_output_counter(details.get(key))
+            if value is not None:
+                counters[key] = value
+        return counters
 
     def _load_session_control(self, session_id: str | None) -> dict[str, Any] | None:
         sid = str(session_id or "").strip()
@@ -286,6 +362,11 @@ class VZLinuxRunner(VZBaseRunner):
         template_ref: str | None = None
         session_mode = bool(str(spec.session_id or "").strip())
         should_terminate_vm = True
+        max_log_bytes = self._max_log_bytes()
+        max_artifact_file_bytes = self._max_artifact_file_bytes()
+        max_artifact_total_bytes = self._max_artifact_total_bytes()
+        output_counters: dict[str, int] = {}
+        artifact_counters: dict[str, int] = {}
 
         with contextlib.suppress(_VZ_NONCRITICAL_EXCEPTIONS):
             hub.publish_event(
@@ -405,15 +486,17 @@ class VZLinuxRunner(VZBaseRunner):
                     "cwd": "/workspace",
                     "env": dict(spec.env or {}),
                     "timeout_sec": int(spec.timeout_sec or 300),
+                    "max_output_bytes": max_log_bytes,
                 },
             )
+            output_counters = self._output_counters_from_details(reply.details)
 
             stdout_data = bytes(reply.stdout or b"")
             stderr_data = bytes(reply.stderr or b"")
             if stdout_data:
-                hub.publish_stdout(run_id, stdout_data)
+                hub.publish_stdout(run_id, stdout_data, max_log_bytes=max_log_bytes)
             if stderr_data:
-                hub.publish_stderr(run_id, stderr_data)
+                hub.publish_stderr(run_id, stderr_data, max_log_bytes=max_log_bytes)
 
             exit_code = int(reply.exit_code)
             phase = RunPhase.completed if exit_code == 0 else RunPhase.failed
@@ -422,7 +505,12 @@ class VZLinuxRunner(VZBaseRunner):
                 if exit_code == 0
                 else f"vz_linux execution failed (exit={exit_code})"
             )
-            artifacts_map = self._collect_artifacts(workspace, spec.capture_patterns)
+            artifacts_map, artifact_counters = self._collect_limited_artifacts(
+                workspace,
+                spec.capture_patterns,
+                max_file_bytes=max_artifact_file_bytes,
+                max_total_bytes=max_artifact_total_bytes,
+            )
         except _VZ_LINUX_RUNNER_NONCRITICAL_EXCEPTIONS as exc:
             logger.error("vz_linux execution error for run {}: {}", run_id, exc)
             message = f"vz_linux execution error: {exc}"
@@ -453,6 +541,8 @@ class VZLinuxRunner(VZBaseRunner):
             "log_bytes": int(total_log_bytes),
             "artifact_bytes": int(artifact_bytes),
         }
+        usage.update(output_counters)
+        usage.update(artifact_counters)
 
         return RunStatus(
             id="",

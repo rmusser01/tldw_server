@@ -177,6 +177,111 @@ def test_fake_helper_rejects_invalid_exec_guest_contract(monkeypatch) -> None:
         assert exc_info.value.error_code == expected_code
 
 
+def test_fake_helper_exec_guest_caps_output_and_reports_details(monkeypatch) -> None:
+    monkeypatch.setenv("TEST_MODE", "1")
+
+    client = MacOSVirtualizationHelperClient()
+    reply = client.exec_guest(
+        vm_id="vm-test",
+        request={"argv": ["/bin/echo", "ok"], "cwd": "/workspace", "max_output_bytes": 2},
+    )
+
+    assert reply.exit_code == 0
+    assert reply.stdout == b"ok"
+    assert reply.details["output_limit_bytes"] == "2"
+    assert reply.details["stdout_bytes_original"] == "3"
+    assert reply.details["stdout_bytes_returned"] == "2"
+    assert reply.details["stdout_truncated"] == "true"
+
+
+def test_fake_helper_rejects_invalid_exec_guest_output_limit(monkeypatch) -> None:
+    monkeypatch.setenv("TEST_MODE", "1")
+
+    client = MacOSVirtualizationHelperClient()
+    with pytest.raises(MacOSVirtualizationHelperFailure) as exc_info:
+        client.exec_guest(
+            vm_id="vm-test",
+            request={"argv": ["/bin/echo"], "cwd": "/workspace", "max_output_bytes": 0},
+        )
+
+    assert exc_info.value.error_code == "exec_output_limit_invalid"
+    assert exc_info.value.message == "output_limit_out_of_range"
+
+
+def test_fake_helper_rejects_malformed_exec_guest_output_limit(monkeypatch) -> None:
+    monkeypatch.setenv("TEST_MODE", "1")
+
+    client = MacOSVirtualizationHelperClient()
+    with pytest.raises(MacOSVirtualizationHelperFailure) as exc_info:
+        client.exec_guest(
+            vm_id="vm-test",
+            request={"argv": ["/bin/echo"], "cwd": "/workspace", "max_output_bytes": "2"},
+        )
+
+    assert exc_info.value.error_code == "invalid_request"
+
+
+def test_helper_client_forwards_exec_guest_output_limit(monkeypatch) -> None:
+    monkeypatch.delenv("TEST_MODE", raising=False)
+    requests = _install_fake_helper_socket(
+        monkeypatch,
+        {
+            "exec_guest": {
+                "protocol_version": "1",
+                "helper_version": "0.1.0",
+                "exit_code": 0,
+                "stdout": "",
+                "stderr": "",
+                "details": {"transport": "vsock"},
+            }
+        },
+    )
+
+    MacOSVirtualizationHelperClient().exec_guest(
+        vm_id="vm-real",
+        request={"argv": ["/bin/echo", "ok"], "cwd": "/workspace", "max_output_bytes": 123},
+    )
+
+    assert requests[0]["operation"] == "exec_guest"
+    assert requests[0]["request"]["vm_id"] == "vm-real"
+    assert requests[0]["request"]["max_output_bytes"] == 123
+
+
+def test_helper_client_omits_null_exec_guest_output_limit(monkeypatch) -> None:
+    monkeypatch.delenv("TEST_MODE", raising=False)
+    requests = _install_fake_helper_socket(
+        monkeypatch,
+        {
+            "exec_guest": {
+                "protocol_version": "1",
+                "helper_version": "0.1.0",
+                "exit_code": 0,
+                "stdout": "",
+                "stderr": "",
+                "details": {"transport": "vsock"},
+            }
+        },
+    )
+
+    MacOSVirtualizationHelperClient().exec_guest(
+        vm_id="vm-real",
+        request={"argv": ["/bin/echo", "ok"], "cwd": "/workspace", "max_output_bytes": None},
+    )
+
+    assert requests[0]["operation"] == "exec_guest"
+    assert requests[0]["request"]["vm_id"] == "vm-real"
+    assert "max_output_bytes" not in requests[0]["request"]
+
+
+def test_helper_client_raw_validation_rejects_null_exec_guest_output_limit() -> None:
+    with pytest.raises(MacOSVirtualizationHelperFailure) as exc_info:
+        MacOSVirtualizationHelperClient._validate_exec_guest_request(
+            {"argv": ["/bin/echo", "ok"], "cwd": "/workspace", "max_output_bytes": None}
+        )
+
+    assert exc_info.value.error_code == "invalid_request"
+
+
 def test_helper_create_vm_fails_closed_without_test_mode(monkeypatch) -> None:
     monkeypatch.delenv("TEST_MODE", raising=False)
 

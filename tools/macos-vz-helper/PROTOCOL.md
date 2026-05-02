@@ -177,13 +177,15 @@ Request:
     "env": {
       "PATH": "/usr/local/bin:/usr/bin:/bin"
     },
-    "timeout_sec": 30
+    "timeout_sec": 30,
+    "max_output_bytes": 10485760
   }
 }
 ```
 
 `vm_id` and `argv` are required. `cwd` defaults to `/workspace`, `env` defaults
-to an empty object, and `timeout_sec` defaults to `30`.
+to an empty object, `timeout_sec` defaults to `30`, and `max_output_bytes` is
+optional.
 
 The helper enforces this request contract before forwarding execution to the
 guest agent:
@@ -197,11 +199,20 @@ guest agent:
   total text. Keys must be non-empty and cannot contain `=`, NUL, or control
   characters. Values cannot contain NUL.
 - `timeout_sec` must be finite, positive, and no greater than 3600 seconds.
+- `max_output_bytes`, when present, must be a JSON integer in the range
+  `1...268435456`. It caps the combined stdout/stderr bytes returned in the
+  helper response. When both streams exceed the cap and the cap is at least 2
+  bytes, each stream receives a non-empty fair share and unused stream budget may
+  be reused by the other stream.
 
 Malformed JSON shape or missing required fields returns `invalid_request`.
 Semantic contract denials return one of `exec_argv_invalid`, `exec_cwd_invalid`,
-`exec_env_invalid`, or `exec_timeout_invalid`; the `message` field contains the
-stable reason.
+`exec_env_invalid`, `exec_timeout_invalid`, or `exec_output_limit_invalid`; the
+`message` field contains the stable reason.
+
+`max_output_bytes` is a host response cap only. It does not stop guest-agent or
+bridge-side buffering, and it does not kill the guest process when the cap is
+reached.
 
 Response:
 
@@ -214,10 +225,20 @@ Response:
   "stderr": "",
   "details": {
     "transport": "vsock",
-    "vm_id": "run-123"
+    "vm_id": "run-123",
+    "output_limit_bytes": "10485760",
+    "stdout_bytes_original": "3",
+    "stderr_bytes_original": "0",
+    "stdout_bytes_returned": "3",
+    "stderr_bytes_returned": "0",
+    "stdout_truncated": "false",
+    "stderr_truncated": "false"
   }
 }
 ```
+
+Output limit detail values are encoded as strings to preserve the existing
+`details` shape.
 
 ### `validate_template`
 
