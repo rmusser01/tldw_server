@@ -6,7 +6,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Callable
 
-
 if TYPE_CHECKING:
     from tldw_Server_API.app.services.startup_recurring_schedulers import (
         RecurringSchedulerHandles,
@@ -168,7 +167,8 @@ async def finalize_startup_tail(
     startup_service_group_handles: Any,
     replace_owned_job_poller_inventory: Callable[..., None],
     test_mode: bool,
-) -> "RecurringSchedulerHandles":
+    worker_inventory: Any | None = None,
+) -> RecurringSchedulerHandles:
     replace_owned_job_poller_inventory(
         app,
         owned_job_pollers,
@@ -177,12 +177,17 @@ async def finalize_startup_tail(
             startup_service_group_handles=startup_service_group_handles,
         ),
     )
-    return await _start_recurring_schedulers(test_mode=test_mode)
+    if worker_inventory is None:
+        return await _start_recurring_schedulers(test_mode=test_mode)
+    return await _start_recurring_schedulers(
+        test_mode=test_mode,
+        worker_inventory=worker_inventory,
+    )
 
 
-async def _start_recurring_schedulers(*, test_mode: bool):
+async def _start_recurring_schedulers(**kwargs: Any) -> RecurringSchedulerHandles:
     from tldw_Server_API.app.services.startup_recurring_schedulers import (
         start_recurring_schedulers,
     )
 
-    return await start_recurring_schedulers(test_mode=test_mode)
+    return await start_recurring_schedulers(**kwargs)

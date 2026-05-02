@@ -6,7 +6,6 @@ from types import SimpleNamespace
 
 import pytest
 
-
 pytestmark = pytest.mark.unit
 
 
@@ -143,3 +142,95 @@ async def test_finalize_startup_tail_refreshes_inventory_and_starts_recurring_sc
     assert handles.authnz_scheduler_started is True
     assert handles.workflows_sched_task == "workflows-task"
     assert handles.connectors_sync_sched_task == "connectors-sync-scheduler-task"
+
+
+@pytest.mark.asyncio
+async def test_finalize_startup_tail_passes_worker_inventory_to_recurring_schedulers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_tail = _import_startup_tail_finalization()
+    worker_inventory = object()
+    observed: dict[str, object] = {}
+
+    def _fake_replace_owned_job_poller_inventory(*args, **kwargs):
+        return None
+
+    async def _fake_start_recurring_schedulers(**kwargs):
+        observed.update(kwargs)
+        return SimpleNamespace(
+            authnz_scheduler_started=False,
+            workflows_sched_task=None,
+            reading_digest_sched_task=None,
+            admin_backup_sched_task=None,
+            companion_reflection_sched_task=None,
+            reminders_sched_task=None,
+            connectors_sync_sched_task=None,
+        )
+
+    empty_worker_group_handles = SimpleNamespace(
+        core_jobs_task=None,
+        core_jobs_stop_event=None,
+        files_jobs_task=None,
+        files_jobs_stop_event=None,
+        data_tables_jobs_task=None,
+        data_tables_jobs_stop_event=None,
+        prompt_studio_jobs_task=None,
+        prompt_studio_jobs_stop_event=None,
+        study_pack_jobs_task=None,
+        study_pack_jobs_stop_event=None,
+        study_suggestions_jobs_task=None,
+        study_suggestions_jobs_stop_event=None,
+        privilege_snapshot_task=None,
+        privilege_snapshot_stop_event=None,
+        audio_jobs_task=None,
+        audio_jobs_stop_event=None,
+        audiobook_jobs_task=None,
+        audiobook_jobs_stop_event=None,
+        presentation_render_jobs_task=None,
+        presentation_render_jobs_stop_event=None,
+        media_ingest_jobs_task=None,
+        media_ingest_jobs_stop_event=None,
+        media_ingest_heavy_jobs_task=None,
+        media_ingest_heavy_jobs_stop_event=None,
+        reading_digest_jobs_task=None,
+        reading_digest_jobs_stop_event=None,
+        vn_asset_jobs_task=None,
+        vn_asset_jobs_stop_event=None,
+        vn_asset_generation_jobs_task=None,
+        vn_asset_generation_jobs_stop_event=None,
+        companion_reflection_jobs_task=None,
+        companion_reflection_jobs_stop_event=None,
+        reminder_jobs_task=None,
+        reminder_jobs_stop_event=None,
+        admin_backup_jobs_task=None,
+        admin_backup_jobs_stop_event=None,
+        admin_byok_validation_jobs_task=None,
+        admin_byok_validation_jobs_stop_event=None,
+        admin_maintenance_rotation_jobs_task=None,
+        admin_maintenance_rotation_jobs_stop_event=None,
+        recipe_run_jobs_task=None,
+        recipe_run_jobs_stop_event=None,
+        evals_abtest_jobs_task=None,
+        evals_abtest_jobs_stop_event=None,
+    )
+
+    monkeypatch.setattr(
+        startup_tail,
+        "_start_recurring_schedulers",
+        _fake_start_recurring_schedulers,
+    )
+
+    await startup_tail.finalize_startup_tail(
+        app=object(),
+        owned_job_pollers=[],
+        startup_worker_group_handles=empty_worker_group_handles,
+        startup_service_group_handles=SimpleNamespace(
+            connectors_jobs_task=None,
+            connectors_jobs_stop_event=None,
+        ),
+        replace_owned_job_poller_inventory=_fake_replace_owned_job_poller_inventory,
+        test_mode=True,
+        worker_inventory=worker_inventory,
+    )
+
+    assert observed == {"test_mode": True, "worker_inventory": worker_inventory}

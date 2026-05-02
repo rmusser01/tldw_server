@@ -366,6 +366,110 @@ async def test_stop_registered_workers_sets_events_and_waits_concurrently() -> N
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_stop_registered_workers_awaits_custom_shutdown_callback() -> None:
+    from tldw_Server_API.app.services.lifecycle_workers import (
+        ManagedWorker,
+        stop_registered_workers,
+    )
+
+    app = FastAPI()
+    shutdown_calls = 0
+
+    async def _worker() -> None:
+        await asyncio.Future()
+
+    task = asyncio.create_task(_worker(), name="callback-task")
+
+    async def _shutdown_callback() -> None:
+        nonlocal shutdown_calls
+        shutdown_calls += 1
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+    await asyncio.sleep(0)
+
+    await stop_registered_workers(
+        app,
+        [
+            ManagedWorker(
+                name="callback_worker",
+                task=task,
+                stop_event=None,
+                shutdown_callback=_shutdown_callback,
+                timeout_sec=1.0,
+            )
+        ],
+        stopped_names_attr="_tldw_stopped_worker_names",
+        log_label="test worker",
+    )
+
+    assert shutdown_calls == 1
+    assert task.cancelled() is True
+    assert app.state._tldw_stopped_worker_names == ["callback_worker"]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_stop_registered_workers_bounds_custom_shutdown_callback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.services import lifecycle_workers
+    from tldw_Server_API.app.services.lifecycle_workers import (
+        ManagedWorker,
+        stop_registered_workers,
+    )
+
+    app = FastAPI()
+    warnings: list[tuple[object, ...]] = []
+
+    async def _worker() -> None:
+        await asyncio.Future()
+
+    async def _shutdown_callback() -> None:
+        await asyncio.Future()
+
+    monkeypatch.setattr(
+        lifecycle_workers.logger,
+        "warning",
+        lambda *args, **kwargs: warnings.append(args),
+    )
+
+    task = asyncio.create_task(_worker(), name="hung-callback-task")
+    await asyncio.sleep(0)
+
+    try:
+        await asyncio.wait_for(
+            stop_registered_workers(
+                app,
+                [
+                    ManagedWorker(
+                        name="hung_callback_worker",
+                        task=task,
+                        stop_event=None,
+                        shutdown_callback=_shutdown_callback,
+                        timeout_sec=0.01,
+                    )
+                ],
+                stopped_names_attr="_tldw_stopped_worker_names",
+                log_label="test worker",
+            ),
+            timeout=0.5,
+        )
+    finally:
+        if not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+    assert any("shutdown callback" in str(args[0]) for args in warnings)
+    assert task.cancelled() is True
+    assert app.state._tldw_stopped_worker_names == ["hung_callback_worker"]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_stop_registered_workers_logs_stopped_names_publication_guard(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

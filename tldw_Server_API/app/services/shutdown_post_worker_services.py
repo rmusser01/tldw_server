@@ -125,12 +125,30 @@ async def shutdown_post_worker_services(
         guard_exceptions=guard_exceptions,
     )
     await _stop_recurring_schedulers(
-        workflows_sched_task=workflows_sched_task,
-        reading_digest_sched_task=reading_digest_sched_task,
-        admin_backup_sched_task=admin_backup_sched_task,
-        companion_reflection_sched_task=companion_reflection_sched_task,
-        reminders_sched_task=reminders_sched_task,
-        connectors_sync_sched_task=connectors_sync_sched_task,
+        workflows_sched_task=_task_if_not_stopped(
+            "workflows_sched_task",
+            workflows_sched_task,
+        ),
+        reading_digest_sched_task=_task_if_not_stopped(
+            "reading_digest_sched_task",
+            reading_digest_sched_task,
+        ),
+        admin_backup_sched_task=_task_if_not_stopped(
+            "admin_backup_sched_task",
+            admin_backup_sched_task,
+        ),
+        companion_reflection_sched_task=_task_if_not_stopped(
+            "companion_reflection_sched_task",
+            companion_reflection_sched_task,
+        ),
+        reminders_sched_task=_task_if_not_stopped(
+            "reminders_sched_task",
+            reminders_sched_task,
+        ),
+        connectors_sync_sched_task=_task_if_not_stopped(
+            "connectors_sync_sched_task",
+            connectors_sync_sched_task,
+        ),
     )
     runtime_monitor_shutdown_handles = await _shutdown_runtime_monitors(
         jobs_metrics_task=_task_if_not_stopped("jobs_metrics_task", jobs_metrics_task),

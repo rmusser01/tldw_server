@@ -91,6 +91,7 @@ async def initialize_startup_service_tail(
         startup_service_group_handles=startup_service_group_handles,
         replace_owned_job_poller_inventory=replace_owned_job_poller_inventory,
         test_mode=test_mode,
+        worker_inventory=worker_inventory,
     )
     await _report_startup_environment(
         app=app,
