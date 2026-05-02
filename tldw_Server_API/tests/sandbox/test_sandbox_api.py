@@ -38,6 +38,8 @@ def test_runtimes_discovery_shape(monkeypatch) -> None:
             "max_mem_mb",
             "max_upload_mb",
             "max_log_bytes",
+            "max_artifact_file_bytes",
+            "max_artifact_total_bytes",
             "workspace_cap_mb",
             "artifact_ttl_hours",
             "supported_spec_versions",

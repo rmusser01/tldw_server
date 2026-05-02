@@ -24,6 +24,8 @@ class SandboxRuntimeInfo(BaseModel):
     max_mem_mb: int | None = Field(default=None, description="Max memory (MB) per run")
     max_upload_mb: int | None = Field(default=None, description="Max inline/session upload size (MB)")
     max_log_bytes: int | None = Field(default=None, description="Max bytes streamed to logs per run")
+    max_artifact_file_bytes: int | None = Field(default=None, description="Max bytes captured for a single artifact file")
+    max_artifact_total_bytes: int | None = Field(default=None, description="Max total artifact bytes captured per run")
     queue_max_length: int | None = Field(default=None, description="Max queued runs before 429 is returned")
     queue_ttl_sec: int | None = Field(default=None, description="Maximum time a run may remain queued before being dropped")
     workspace_cap_mb: int | None = Field(default=None, description="Default workspace size cap (MB)")

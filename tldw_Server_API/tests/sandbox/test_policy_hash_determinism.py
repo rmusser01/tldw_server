@@ -5,6 +5,7 @@ from typing import Any, Dict
 
 from fastapi.testclient import TestClient
 from tldw_Server_API.app.core.config import clear_config_cache
+from tldw_Server_API.app.core.Sandbox.policy import SandboxPolicyConfig
 from tldw_Server_API.app.main import app
 
 
@@ -18,6 +19,8 @@ def _client(monkeypatch) -> TestClient:
     monkeypatch.setenv("SANDBOX_ARTIFACT_TTL_HOURS", "24")
     monkeypatch.setenv("SANDBOX_MAX_UPLOAD_MB", "64")
     monkeypatch.setenv("SANDBOX_MAX_LOG_BYTES", str(10 * 1024 * 1024))
+    monkeypatch.setenv("SANDBOX_MAX_ARTIFACT_FILE_BYTES", str(64 * 1024 * 1024))
+    monkeypatch.setenv("SANDBOX_MAX_ARTIFACT_TOTAL_BYTES", str(256 * 1024 * 1024))
     monkeypatch.setenv("SANDBOX_PIDS_LIMIT", "256")
     monkeypatch.setenv("SANDBOX_MAX_CPU", "4.0")
     monkeypatch.setenv("SANDBOX_MAX_MEM_MB", "8192")
@@ -48,3 +51,14 @@ def test_policy_hash_is_deterministic_within_process(monkeypatch) -> None:
         ph2 = r2.json().get("policy_hash")
         assert isinstance(ph1, str) and isinstance(ph2, str)
         assert ph1 == ph2
+
+
+def test_policy_reads_artifact_capture_byte_caps(monkeypatch) -> None:
+    monkeypatch.setenv("SANDBOX_MAX_ARTIFACT_FILE_BYTES", str(64 * 1024 * 1024))
+    monkeypatch.setenv("SANDBOX_MAX_ARTIFACT_TOTAL_BYTES", str(256 * 1024 * 1024))
+    clear_config_cache()
+
+    cfg = SandboxPolicyConfig.from_settings()
+
+    assert cfg.max_artifact_file_bytes == 64 * 1024 * 1024
+    assert cfg.max_artifact_total_bytes == 256 * 1024 * 1024

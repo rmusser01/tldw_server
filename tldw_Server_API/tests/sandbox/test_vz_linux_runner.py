@@ -693,3 +693,174 @@ def test_vz_linux_session_run_recreates_unhealthy_vm(monkeypatch, tmp_path) -> N
     assert deleted == ["sess-2"]
     assert stored and stored[0]["vm_id"] == "vm-new"
     assert stored[0]["template_id"] == "vz_linux:new-template"
+
+
+def test_vz_linux_start_run_passes_log_cap_to_helper(monkeypatch, tmp_path) -> None:
+    monkeypatch.delenv("TLDW_SANDBOX_VZ_LINUX_FAKE_EXEC", raising=False)
+    monkeypatch.setattr(
+        vz_linux_module.SandboxPolicyConfig,
+        "from_settings",
+        classmethod(lambda cls: cls(max_log_bytes=5)),
+    )
+    exec_requests: list[dict[str, object]] = []
+
+    class _FakeHelper:
+        def validate_template(self, request: dict[str, object]) -> dict[str, object]:
+            return {
+                "template_id": "vz_linux:validated-ubuntu",
+                "source": "ubuntu-24.04",
+                "ready": True,
+                "reasons": [],
+            }
+
+        def create_vm(self, request: dict[str, object]) -> HelperVMReply:
+            return HelperVMReply(vm_id="vm-output-cap", state="created")
+
+        def exec_guest(self, *, vm_id: str, request: dict[str, object]) -> HelperExecReply:
+            exec_requests.append({"vm_id": vm_id, **request})
+            return HelperExecReply(exit_code=0, stdout=b"ok\n")
+
+        def terminate_vm(self, vm_id: str) -> bool:
+            return True
+
+    monkeypatch.setattr(vz_linux_module.VZLinuxRunner, "helper_client_cls", _FakeHelper)
+
+    status = VZLinuxRunner().start_run(
+        run_id="vz-run-output-cap",
+        spec=RunSpec(
+            session_id=None,
+            runtime=RuntimeType.vz_linux,
+            base_image="ubuntu-24.04",
+            command=["/bin/echo", "ok"],
+            network_policy="deny_all",
+        ),
+        session_workspace=str(tmp_path),
+    )
+
+    assert status.phase == RunPhase.completed
+    assert exec_requests[0]["max_output_bytes"] == 5
+
+
+def test_vz_linux_start_run_records_output_limit_counters(monkeypatch, tmp_path) -> None:
+    monkeypatch.delenv("TLDW_SANDBOX_VZ_LINUX_FAKE_EXEC", raising=False)
+    monkeypatch.setattr(
+        vz_linux_module.SandboxPolicyConfig,
+        "from_settings",
+        classmethod(lambda cls: cls(max_log_bytes=5)),
+    )
+
+    class _FakeHelper:
+        def validate_template(self, request: dict[str, object]) -> dict[str, object]:
+            return {
+                "template_id": "vz_linux:validated-ubuntu",
+                "source": "ubuntu-24.04",
+                "ready": True,
+                "reasons": [],
+            }
+
+        def create_vm(self, request: dict[str, object]) -> HelperVMReply:
+            return HelperVMReply(vm_id="vm-output-counters", state="created")
+
+        def exec_guest(self, *, vm_id: str, request: dict[str, object]) -> HelperExecReply:
+            return HelperExecReply(
+                exit_code=0,
+                stdout=b"hello",
+                stderr=b"",
+                details={
+                    "output_limit_bytes": "5",
+                    "stdout_bytes_original": "11",
+                    "stderr_bytes_original": "0",
+                    "stdout_bytes_returned": "5",
+                    "stderr_bytes_returned": "0",
+                    "stdout_truncated": "true",
+                    "stderr_truncated": "false",
+                    "non_counter": "ignored",
+                },
+            )
+
+        def terminate_vm(self, vm_id: str) -> bool:
+            return True
+
+    monkeypatch.setattr(vz_linux_module.VZLinuxRunner, "helper_client_cls", _FakeHelper)
+
+    status = VZLinuxRunner().start_run(
+        run_id="vz-run-output-counters",
+        spec=RunSpec(
+            session_id=None,
+            runtime=RuntimeType.vz_linux,
+            base_image="ubuntu-24.04",
+            command=["/bin/echo", "ok"],
+            network_policy="deny_all",
+        ),
+        session_workspace=str(tmp_path),
+    )
+
+    assert status.phase == RunPhase.completed
+    assert status.resource_usage["output_limit_bytes"] == 5
+    assert status.resource_usage["stdout_bytes_original"] == 11
+    assert status.resource_usage["stdout_bytes_returned"] == 5
+    assert status.resource_usage["stdout_truncated"] == 1
+    assert status.resource_usage["stderr_truncated"] == 0
+    assert "non_counter" not in status.resource_usage
+
+
+def test_vz_linux_start_run_applies_artifact_capture_caps(monkeypatch, tmp_path) -> None:
+    monkeypatch.delenv("TLDW_SANDBOX_VZ_LINUX_FAKE_EXEC", raising=False)
+    monkeypatch.setattr(
+        vz_linux_module.SandboxPolicyConfig,
+        "from_settings",
+        classmethod(
+            lambda cls: cls(
+                max_artifact_file_bytes=5,
+                max_artifact_total_bytes=8,
+            )
+        ),
+    )
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    class _FakeHelper:
+        def validate_template(self, request: dict[str, object]) -> dict[str, object]:
+            return {
+                "template_id": "vz_linux:validated-ubuntu",
+                "source": "ubuntu-24.04",
+                "ready": True,
+                "reasons": [],
+            }
+
+        def create_vm(self, request: dict[str, object]) -> HelperVMReply:
+            return HelperVMReply(vm_id="vm-artifact-caps", state="created")
+
+        def exec_guest(self, *, vm_id: str, request: dict[str, object]) -> HelperExecReply:
+            (workspace / "small.txt").write_bytes(b"1234")
+            (workspace / "too-large.txt").write_bytes(b"123456")
+            (workspace / "would-exceed-total.txt").write_bytes(b"56789")
+            return HelperExecReply(exit_code=0, stdout=b"ok\n")
+
+        def terminate_vm(self, vm_id: str) -> bool:
+            return True
+
+    monkeypatch.setattr(vz_linux_module.VZLinuxRunner, "helper_client_cls", _FakeHelper)
+
+    status = VZLinuxRunner().start_run(
+        run_id="vz-run-artifact-caps",
+        spec=RunSpec(
+            session_id=None,
+            runtime=RuntimeType.vz_linux,
+            base_image="ubuntu-24.04",
+            command=["/bin/echo", "ok"],
+            network_policy="deny_all",
+            capture_patterns=["*.txt"],
+        ),
+        session_workspace=str(workspace),
+    )
+
+    assert status.phase == RunPhase.completed
+    assert status.artifacts == {"small.txt": b"1234"}
+    assert status.resource_usage["artifact_limit_file_bytes"] == 5
+    assert status.resource_usage["artifact_limit_total_bytes"] == 8
+    assert status.resource_usage["artifact_files_collected"] == 1
+    assert status.resource_usage["artifact_files_skipped"] == 2
+    assert status.resource_usage["artifact_skip_file_limit"] == 1
+    assert status.resource_usage["artifact_skip_total_limit"] == 1
+    assert status.resource_usage["artifact_bytes"] == 4

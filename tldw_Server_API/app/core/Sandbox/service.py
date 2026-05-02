@@ -799,6 +799,8 @@ class SandboxService:
         max_mem_mb = self.policy.cfg.max_mem_mb
         max_upload_mb = self.policy.cfg.max_upload_mb
         max_log_bytes = self.policy.cfg.max_log_bytes
+        max_artifact_file_bytes = self.policy.cfg.max_artifact_file_bytes
+        max_artifact_total_bytes = self.policy.cfg.max_artifact_total_bytes
         workspace_cap_mb = self.policy.cfg.workspace_cap_mb
         artifact_ttl_hours = self.policy.cfg.artifact_ttl_hours
         supported_spec_versions = list(self.policy.cfg.supported_spec_versions or ["1.0"])
@@ -879,6 +881,8 @@ class SandboxService:
                 "max_mem_mb": max_mem_mb,
                 "max_upload_mb": max_upload_mb,
                 "max_log_bytes": max_log_bytes,
+                "max_artifact_file_bytes": max_artifact_file_bytes,
+                "max_artifact_total_bytes": max_artifact_total_bytes,
                 "queue_max_length": queue_max_length,
                 "queue_ttl_sec": queue_ttl_sec,
                 "workspace_cap_mb": workspace_cap_mb,
@@ -909,6 +913,8 @@ class SandboxService:
                 "max_mem_mb": max_mem_mb,
                 "max_upload_mb": max_upload_mb,
                 "max_log_bytes": max_log_bytes,
+                "max_artifact_file_bytes": max_artifact_file_bytes,
+                "max_artifact_total_bytes": max_artifact_total_bytes,
                 "queue_max_length": queue_max_length,
                 "queue_ttl_sec": queue_ttl_sec,
                 "workspace_cap_mb": workspace_cap_mb,
@@ -946,6 +952,8 @@ class SandboxService:
                 "max_mem_mb": max_mem_mb,
                 "max_upload_mb": max_upload_mb,
                 "max_log_bytes": max_log_bytes,
+                "max_artifact_file_bytes": max_artifact_file_bytes,
+                "max_artifact_total_bytes": max_artifact_total_bytes,
                 "queue_max_length": queue_max_length,
                 "queue_ttl_sec": queue_ttl_sec,
                 "workspace_cap_mb": workspace_cap_mb,
@@ -967,6 +975,8 @@ class SandboxService:
                 "max_mem_mb": max_mem_mb,
                 "max_upload_mb": max_upload_mb,
                 "max_log_bytes": max_log_bytes,
+                "max_artifact_file_bytes": max_artifact_file_bytes,
+                "max_artifact_total_bytes": max_artifact_total_bytes,
                 "queue_max_length": queue_max_length,
                 "queue_ttl_sec": queue_ttl_sec,
                 "workspace_cap_mb": workspace_cap_mb,
@@ -985,6 +995,8 @@ class SandboxService:
                 "max_mem_mb": max_mem_mb,
                 "max_upload_mb": max_upload_mb,
                 "max_log_bytes": max_log_bytes,
+                "max_artifact_file_bytes": max_artifact_file_bytes,
+                "max_artifact_total_bytes": max_artifact_total_bytes,
                 "queue_max_length": queue_max_length,
                 "queue_ttl_sec": queue_ttl_sec,
                 "workspace_cap_mb": workspace_cap_mb,
@@ -1003,6 +1015,8 @@ class SandboxService:
                 "max_mem_mb": max_mem_mb,
                 "max_upload_mb": max_upload_mb,
                 "max_log_bytes": max_log_bytes,
+                "max_artifact_file_bytes": max_artifact_file_bytes,
+                "max_artifact_total_bytes": max_artifact_total_bytes,
                 "queue_max_length": queue_max_length,
                 "queue_ttl_sec": queue_ttl_sec,
                 "workspace_cap_mb": workspace_cap_mb,
