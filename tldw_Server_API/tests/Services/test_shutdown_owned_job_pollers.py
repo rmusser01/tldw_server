@@ -17,6 +17,120 @@ def _import_shutdown_owned_job_pollers():
     return importlib.import_module("tldw_Server_API.app.services.shutdown_owned_job_pollers")
 
 
+@pytest.mark.asyncio
+async def test_register_owned_job_poller_publishes_lifecycle_worker_inventory() -> None:
+    shutdown_pollers = _import_shutdown_owned_job_pollers()
+    from tldw_Server_API.app.services.lifecycle_workers import (
+        ManagedWorker,
+        ShutdownPhase,
+    )
+
+    app = FastAPI()
+    stop_event = asyncio.Event()
+    task = asyncio.create_task(stop_event.wait(), name="core-jobs-task")
+    handles: list[object] = []
+
+    try:
+        shutdown_pollers.register_owned_job_poller(
+            app,
+            handles,
+            name="core_jobs_task",
+            task=task,
+            stop_event=stop_event,
+            timeout_sec=3.0,
+        )
+
+        assert len(handles) == 1
+        handle = handles[0]
+        assert isinstance(handle, ManagedWorker)
+        assert handle.shutdown_phase is ShutdownPhase.JOB_POLLER_QUIESCE
+        assert getattr(app.state, "_tldw_shutdown_worker_inventory") == [
+            {
+                "name": "core_jobs_task",
+                "task_name": "core-jobs-task",
+                "has_stop_event": True,
+                "timeout_sec": 3.0,
+                "category": None,
+                "shutdown_phase": "job_poller_quiesce",
+            }
+        ]
+        assert getattr(app.state, "_tldw_shutdown_job_poller_inventory") == [
+            {
+                "name": "core_jobs_task",
+                "task_name": "core-jobs-task",
+                "has_stop_event": True,
+                "timeout_sec": 3.0,
+            }
+        ]
+    finally:
+        stop_event.set()
+        await asyncio.wait_for(task, timeout=1)
+
+
+def test_publish_shutdown_job_poller_inventory_surfaces_invalid_handle_shape() -> None:
+    shutdown_pollers = _import_shutdown_owned_job_pollers()
+    app = FastAPI()
+
+    with pytest.raises(AttributeError):
+        shutdown_pollers.publish_shutdown_job_poller_inventory(app, [object()])
+
+
+@pytest.mark.asyncio
+async def test_replace_owned_job_poller_inventory_preserves_background_workers() -> None:
+    shutdown_pollers = _import_shutdown_owned_job_pollers()
+    from tldw_Server_API.app.services.lifecycle_workers import (
+        ManagedWorker,
+        ShutdownPhase,
+    )
+
+    app = FastAPI()
+    background_stop_event = asyncio.Event()
+    poller_stop_event = asyncio.Event()
+    background_task = asyncio.create_task(
+        background_stop_event.wait(),
+        name="background-worker",
+    )
+    poller_task = asyncio.create_task(poller_stop_event.wait(), name="poller-worker")
+    handles: list[object] = [
+        ManagedWorker(
+            name="background_worker",
+            task=background_task,
+            stop_event=background_stop_event,
+            shutdown_phase=ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN,
+        )
+    ]
+
+    try:
+        shutdown_pollers.replace_owned_job_poller_inventory(
+            app,
+            handles,
+            registrations=[
+                ("poller_worker", poller_task, poller_stop_event, 3.0),
+            ],
+        )
+
+        assert {handle.name for handle in handles} == {
+            "background_worker",
+            "poller_worker",
+        }
+        assert {entry["name"] for entry in app.state._tldw_shutdown_worker_inventory} == {
+            "background_worker",
+            "poller_worker",
+        }
+        assert app.state._tldw_shutdown_job_poller_inventory == [
+            {
+                "name": "poller_worker",
+                "task_name": "poller-worker",
+                "has_stop_event": True,
+                "timeout_sec": 3.0,
+            }
+        ]
+    finally:
+        background_stop_event.set()
+        poller_stop_event.set()
+        await asyncio.wait_for(asyncio.gather(background_task, poller_task), timeout=1)
+
+
 def test_register_and_replace_owned_job_poller_inventory_refreshes_app_state() -> None:
     shutdown_pollers = _import_shutdown_owned_job_pollers()
     app = FastAPI()

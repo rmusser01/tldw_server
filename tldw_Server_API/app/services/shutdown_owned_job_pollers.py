@@ -6,13 +6,18 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from contextlib import contextmanager, suppress
-from dataclasses import dataclass
 from typing import Any
 
 from fastapi import FastAPI
 from loguru import logger
+
+from tldw_Server_API.app.services.lifecycle_workers import (
+    ManagedWorker,
+    ShutdownPhase,
+    publish_worker_inventory,
+)
 
 
 DEFAULT_GUARD_EXCEPTIONS = (
@@ -24,36 +29,19 @@ DEFAULT_GUARD_EXCEPTIONS = (
 )
 
 
-@dataclass
-class ManagedJobPoller:
-    """Shutdown-owned in-process job poller handle."""
-
-    name: str
-    task: asyncio.Task[Any]
-    stop_event: asyncio.Event | None = None
-    timeout_sec: float = 5.0
+ManagedJobPoller = ManagedWorker
 
 
 def publish_shutdown_job_poller_inventory(
     app: FastAPI,
-    handles: list[ManagedJobPoller],
-    *,
-    guard_exceptions: tuple[type[BaseException], ...] = DEFAULT_GUARD_EXCEPTIONS,
+    handles: Sequence[ManagedJobPoller],
 ) -> None:
-    """Expose shutdown-owned job poller metadata on app.state."""
-    inventory = [
-        {
-            "name": handle.name,
-            "task_name": handle.task.get_name(),
-            "has_stop_event": handle.stop_event is not None,
-            "timeout_sec": handle.timeout_sec,
-        }
-        for handle in handles
-    ]
-    try:
-        app.state._tldw_shutdown_job_poller_inventory = inventory
-    except guard_exceptions:
-        pass
+    """Expose shutdown-owned job poller metadata on app.state.
+
+    Invalid handle shapes are programmer errors and should surface before
+    inventory publication can leave stale diagnostics on app.state.
+    """
+    publish_worker_inventory(app, handles)
 
 
 def register_owned_job_poller(
@@ -70,14 +58,24 @@ def register_owned_job_poller(
     if task is None:
         return
     handles.append(
-        ManagedJobPoller(
+        ManagedWorker(
             name=name,
             task=task,
             stop_event=stop_event,
             timeout_sec=timeout_sec,
+            shutdown_phase=ShutdownPhase.JOB_POLLER_QUIESCE,
         )
     )
     publish_inventory(app, handles)
+
+
+def _is_job_poller_quiesce(handle: ManagedJobPoller) -> bool:
+    """Return whether a worker belongs to the job-poller quiesce phase.
+
+    ShutdownPhase is a str enum, so equality preserves compatibility with
+    legacy string phase values already stored on a handle.
+    """
+    return handle.shutdown_phase == ShutdownPhase.JOB_POLLER_QUIESCE
 
 
 def replace_owned_job_poller_inventory(
@@ -89,7 +87,11 @@ def replace_owned_job_poller_inventory(
     publish_inventory=publish_shutdown_job_poller_inventory,
 ) -> None:
     """Replace the managed job-poller inventory with the current owned poller set."""
-    handles.clear()
+    handles[:] = [
+        handle
+        for handle in handles
+        if not _is_job_poller_quiesce(handle)
+    ]
     publish_inventory(app, handles)
     for name, task, stop_event, timeout_sec in registrations:
         register_owned_job_poller_fn(
