@@ -730,6 +730,13 @@ Verified Prompt Studio optimization iterations tranche:
 python -m pytest tldw_Server_API/tests/prompt_studio/integration/test_api_endpoints.py -k "test_list_optimization_iterations_safely_defaults_missing_pagination" -q
 ```
 
+Classified remaining Prompt Studio page-family rows:
+
+- Project, prompt, optimization, and test-case list routes already expose
+  canonical page pagination.
+- Optimization and prompt history routes are bounded per-resource snapshots with
+  no pagination inputs.
+
 - [ ] **Step 5: Commit one family**
 
 Use a family-specific message, for example:

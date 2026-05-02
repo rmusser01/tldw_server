@@ -123,6 +123,11 @@ Current examples:
   subresource/catalog responses without pagination inputs.
 - `GET /api/v1/kanban/search/status`: status/capability response, not a search
   result page.
+- `GET /api/v1/prompt-studio/optimizations/history/{optimization_id}`:
+  bounded progress/history snapshot for one optimization with no continuation
+  input.
+- `GET /api/v1/prompt-studio/prompts/history/{prompt_id}`: bounded version
+  history snapshot for one prompt with no pagination inputs.
 
 ## Review Rules
 
