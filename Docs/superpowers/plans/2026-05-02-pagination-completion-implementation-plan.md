@@ -724,6 +724,12 @@ Verified Prompt Studio evaluation list tranche:
 python -m pytest tldw_Server_API/tests/prompt_studio/integration/test_api_endpoints.py -k "test_list_evaluations" -q
 ```
 
+Verified Prompt Studio optimization iterations tranche:
+
+```bash
+python -m pytest tldw_Server_API/tests/prompt_studio/integration/test_api_endpoints.py -k "test_list_optimization_iterations_safely_defaults_missing_pagination" -q
+```
+
 - [ ] **Step 5: Commit one family**
 
 Use a family-specific message, for example:

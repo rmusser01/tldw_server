@@ -44,9 +44,8 @@ from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 
 # Local imports
 from tldw_Server_API.app.api.v1.schemas.prompt_studio_base import (
-    ListResponse,
     PageListResponse,
-    PaginationMetadata,
+    PageStandardResponse,
     StandardResponse,
 )
 from tldw_Server_API.app.api.v1.schemas.prompt_studio_optimization import (
@@ -1341,7 +1340,7 @@ async def add_optimization_iteration(
 
 @router.get(
     "/iterations/{optimization_id}",
-    response_model=StandardResponse,
+    response_model=PageStandardResponse,
     openapi_extra={
         "responses": {
             "200": {
@@ -1376,7 +1375,7 @@ async def list_optimization_iterations(
     per_page: int = Query(50, ge=1, le=200),
     db: PromptStudioDatabase = Depends(get_prompt_studio_db),
     user_context: dict = Depends(get_prompt_studio_user)
-) -> ListResponse:
+) -> PageStandardResponse:
     """List persisted iterations for an optimization."""
     try:
         optimization = db.get_optimization(optimization_id)
@@ -1395,9 +1394,24 @@ async def list_optimization_iterations(
             per_page=per_page,
         )
 
-        metadata = PaginationMetadata(**result.get("pagination", {}))
+        metadata = resolve_page_pagination_metadata(
+            result.get("pagination"),
+            page=page,
+            per_page=per_page,
+            item_count=len(result.get("iterations", [])),
+        )
         # Back-compat: wrap iterations under data.{iterations} for tests expecting this shape
-        return StandardResponse(success=True, data={"iterations": result.get("iterations", [])}, metadata=metadata.model_dump())
+        return PageStandardResponse(
+            success=True,
+            data={"iterations": result.get("iterations", [])},
+            metadata=metadata,
+            pagination=build_page_pagination_meta(
+                page=metadata["page"],
+                per_page=metadata["per_page"],
+                total=metadata["total"],
+                total_pages=metadata["total_pages"],
+            ),
+        )
     except DatabaseError as exc:
         logger.error("Database error listing optimization iterations")
         raise map_db_error_to_http(exc, default_detail="Failed to list iterations") from exc

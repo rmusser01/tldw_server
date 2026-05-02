@@ -243,6 +243,45 @@ async def test_list_optimizations_safely_defaults_missing_pagination() -> None:
     assert response.pagination.page == 2
     assert response.pagination.has_more is False
 
+
+@pytest.mark.asyncio
+async def test_list_optimization_iterations_safely_defaults_missing_pagination() -> None:
+    """Optimization iteration listing preserves its wrapper and adds pagination."""
+    from tldw_Server_API.app.api.v1.endpoints.prompt_studio import prompt_studio_optimization
+
+    class _OptimizationIterationsDbWithoutPagination:
+        def get_optimization(self, optimization_id):
+            return {"id": optimization_id, "project_id": 123, "deleted": False}
+
+        def get_project(self, project_id):
+            return {"id": project_id, "user_id": "tester"}
+
+        def list_optimization_iterations(self, *_args, **_kwargs):
+            return {"iterations": []}
+
+    response = await prompt_studio_optimization.list_optimization_iterations(
+        optimization_id=456,
+        page=2,
+        per_page=10,
+        db=_OptimizationIterationsDbWithoutPagination(),
+        user_context={"user_id": "tester", "is_admin": False},
+    )
+
+    assert response.success is True
+    assert response.data == {"iterations": []}
+    assert response.metadata == {
+        "page": 2,
+        "per_page": 10,
+        "total": 0,
+        "total_pages": 0,
+    }
+    assert response.pagination.mode == "page"
+    assert response.pagination.page == 2
+    assert response.pagination.per_page == 10
+    assert response.pagination.total == 0
+    assert response.pagination.total_pages == 0
+    assert response.pagination.has_more is False
+
 ########################################################################################################################
 # Project Endpoints Tests
 
