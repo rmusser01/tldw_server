@@ -24,6 +24,14 @@ sibling versioned route with an object envelope.
 
 Route-level matrix status: `exempt-raw-list`.
 
+Current pagination-sensitive examples:
+
+- `GET /jobs/list`: raw `list[JobItem]`; keep the existing payload shape unless
+  a versioned/object-envelope route is added.
+- `GET /api/v1/workflows/runs/{run_id}/events`: raw `list[EventResponse]` with
+  `Next-Cursor` and `Link` headers; do not move cursor metadata into the body
+  without a versioned route.
+
 ### Streaming, File Export, and Download Routes
 
 Streaming responses, file exports, CSV downloads, and binary downloads are not
@@ -31,6 +39,12 @@ normal list envelopes. They should be recorded as not applicable unless a
 separate metadata side-channel already exists.
 
 Route-level matrix status: `exempt-not-paginated`.
+
+Current pagination-sensitive examples:
+
+- `GET /jobs/events/stream`: SSE event stream using `after_id`; keep pagination
+  semantics in the stream cursor/header channel rather than adding a response
+  envelope.
 
 ### Internal Admin and Event Routes With Unknown Totals
 

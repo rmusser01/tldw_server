@@ -525,7 +525,13 @@ git commit -m "Phase pagination-completion: migrate audio cursor pagination"
 - Test: workflow tests identified by inventory
 - Test: jobs admin tests identified by inventory
 
-- [ ] **Step 1: Identify cursor semantics**
+**Status:** Classified for the current branch. `GET /api/v1/workflows/runs`
+already returns canonical `OffsetPaginationMeta` or `CursorPaginationMeta`.
+`GET /jobs/list` and `GET /api/v1/workflows/runs/{run_id}/events` are raw-list
+payloads, and `GET /jobs/events/stream` is an SSE stream, so they are documented
+as exemptions rather than migrated in-place.
+
+- [x] **Step 1: Identify cursor semantics**
 
 Record for each route:
 
@@ -534,15 +540,35 @@ Record for each route:
 - invalid cursor behavior
 - whether existing `Link` headers are part of the contract
 
-- [ ] **Step 2: Add tests before route changes**
+Findings:
+
+- `/api/v1/workflows/runs`: supports offset and cursor; sort key is
+  token-carried `order_by` plus `run_id`; invalid cursors are ignored by
+  existing behavior; `Link` header is part of the compatibility surface.
+- `/api/v1/workflows/runs/{run_id}/events`: raw list body with `Next-Cursor` and
+  `Link` headers; body migration is deferred to a versioned/object-envelope
+  route.
+- `/jobs/list`: raw list body; body migration is deferred to a versioned/object
+  envelope route.
+- `/jobs/events/stream`: streaming route with `after_id`; not a canonical body
+  pagination target.
+
+- [x] **Step 2: Add tests before route changes**
 
 Add tests for stable ordering and no duplicate pages. Prefer overfetch assertions to count queries.
 
-- [ ] **Step 3: Migrate covered routes**
+Existing tests already cover `/api/v1/workflows/runs` cursor flow and workflow
+events header cursor flow. No route source was changed in this classification
+tranche.
+
+- [x] **Step 3: Migrate covered routes**
 
 Use `CursorPaginationMeta` for cursor routes and `OffsetPaginationMeta` for offset routes in mixed response models like `WorkflowRunListResponse`.
 
-- [ ] **Step 4: Verify**
+No route source migration was needed: the only covered object-envelope route in
+this family is already canonical.
+
+- [x] **Step 4: Verify**
 
 Run focused workflow/jobs tests and:
 
@@ -551,7 +577,22 @@ python -m bandit -r tldw_Server_API/app/api/v1/endpoints/workflows.py tldw_Serve
 git diff --check
 ```
 
-- [ ] **Step 5: Commit workflows/jobs cursor tranche**
+This tranche changed only docs/classification, so source Bandit was not
+applicable. Verified:
+
+```bash
+python -m pytest tldw_Server_API/tests/Jobs/test_jobs_list_sorting_sqlite.py tldw_Server_API/tests/Jobs/test_jobs_rbac_list_stale_sqlite.py -q
+python -m pytest tldw_Server_API/tests/Workflows/test_runs_cursor_pagination.py tldw_Server_API/tests/Workflows/test_events_cursor_pagination.py -q
+git diff --check
+```
+
+The jobs tests passed. In the combined workflows command,
+`test_runs_cursor_pagination.py` passed, then
+`test_events_cursor_pagination.py` timed out in TestClient lifecycle cleanup
+while joining the anyio portal after app startup/background-worker shutdown.
+No workflow route source was changed in this tranche.
+
+- [x] **Step 5: Commit workflows/jobs cursor tranche**
 
 ```bash
 git add \
