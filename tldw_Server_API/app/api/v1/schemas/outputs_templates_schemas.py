@@ -18,6 +18,14 @@ TemplateType = Literal[
 TemplateFormat = Literal["md", "html", "mp3"]
 
 
+def _default_offset_pagination_aliases(response):
+    if response.has_more is None:
+        response.has_more = response.pagination.has_more
+    if response.next_offset is None:
+        response.next_offset = response.pagination.next_offset
+    return response
+
+
 class OutputTemplateCreate(BaseModel):
     """Create an output template used for rendering collections (items or runs)."""
 
@@ -74,6 +82,12 @@ class OutputTemplateList(BaseModel):
     items: list[OutputTemplate]
     total: int
     pagination: OffsetPaginationMeta
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self) -> "OutputTemplateList":
+        return _default_offset_pagination_aliases(self)
 
 
 class TemplatePreviewRequest(BaseModel):

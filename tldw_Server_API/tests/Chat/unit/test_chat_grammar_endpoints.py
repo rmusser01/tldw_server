@@ -103,6 +103,8 @@ async def test_list_chat_grammars_returns_canonical_pagination(monkeypatch: pyte
     assert listing.pagination.offset == 0
     assert listing.pagination.has_more is False
     assert listing.pagination.next_offset is None
+    assert listing.has_more is False
+    assert listing.next_offset is None
 
 
 @pytest.mark.asyncio

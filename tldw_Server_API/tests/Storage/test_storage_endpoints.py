@@ -130,6 +130,8 @@ class TestListFilesEndpoint:
         assert response.pagination.limit == 3
         assert response.pagination.has_more is True
         assert response.pagination.next_offset == 5
+        assert response.has_more is True
+        assert response.next_offset == 5
 
 
 class TestTrashEndpoint:
@@ -185,6 +187,8 @@ class TestTrashEndpoint:
         assert response.pagination.limit == 2
         assert response.pagination.has_more is True
         assert response.pagination.next_offset == 3
+        assert response.has_more is True
+        assert response.next_offset == 3
 
 
 class TestDownloadFileEndpoint:
