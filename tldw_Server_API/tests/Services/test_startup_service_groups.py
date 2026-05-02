@@ -174,14 +174,14 @@ async def test_start_service_groups_runs_helpers_in_order_and_returns_handles(
 
 
 @pytest.mark.asyncio
-async def test_start_service_groups_keeps_no_arg_maintenance_compatibility(
+async def test_start_service_groups_passes_worker_inventory_to_maintenance_schedulers(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     startup_groups = _import_startup_service_groups()
-    calls: list[str] = []
+    worker_inventory = object()
+    maintenance_kwargs: dict[str, object] = {}
 
-    async def _record_runtime_monitors():
-        calls.append("runtime")
+    async def _record_runtime_monitors(*, worker_inventory: object) -> SimpleNamespace:
         return SimpleNamespace(
             jobs_metrics_stop_event=None,
             jobs_metrics_task=None,
@@ -189,8 +189,7 @@ async def test_start_service_groups_keeps_no_arg_maintenance_compatibility(
             loop_lag_task=None,
         )
 
-    async def _record_optional_workers():
-        calls.append("optional")
+    async def _record_optional_workers(*, worker_inventory: object) -> SimpleNamespace:
         return SimpleNamespace(
             jobs_metrics_reconcile_stop=None,
             jobs_metrics_reconcile_task=None,
@@ -210,12 +209,16 @@ async def test_start_service_groups_keeps_no_arg_maintenance_compatibility(
             jobs_integrity_task=None,
         )
 
-    async def _record_claims_rebuild_worker(app_settings):
-        calls.append("claims")
+    async def _record_claims_rebuild_worker(
+        _app_settings: object,
+        **_kwargs: object,
+    ) -> None:
         return None
 
-    async def _record_auxiliary_services(app_settings):
-        calls.append("auxiliary")
+    async def _record_auxiliary_services(
+        _app_settings: object,
+        **_kwargs: object,
+    ) -> SimpleNamespace:
         return SimpleNamespace(
             claims_alerts_task=None,
             claims_review_metrics_task=None,
@@ -223,16 +226,14 @@ async def test_start_service_groups_keeps_no_arg_maintenance_compatibility(
             llm_usage_task=None,
         )
 
-    async def _record_infra_services(*, run_pg_rls_auto_ensure, worker_inventory=None):
-        assert worker_inventory is None
-        calls.append("infra")
+    async def _record_infra_services(**_kwargs: object) -> SimpleNamespace:
         return SimpleNamespace(
             tts_history_cleanup_task=None,
             tts_history_cleanup_stop_event=None,
         )
 
-    async def _record_maintenance_schedulers():
-        calls.append("maintenance")
+    async def _record_maintenance_schedulers(**kwargs: object) -> SimpleNamespace:
+        maintenance_kwargs.update(kwargs)
         return SimpleNamespace(
             quality_eval_task=None,
             outputs_purge_task=None,
@@ -244,13 +245,7 @@ async def test_start_service_groups_keeps_no_arg_maintenance_compatibility(
             jobs_prune_task=None,
         )
 
-    async def _record_connectors_startup(
-        *,
-        app,
-        owned_job_pollers,
-        register_owned_job_poller,
-    ):
-        calls.append("connectors")
+    async def _record_connectors_startup(**_kwargs: object) -> SimpleNamespace:
         return SimpleNamespace(
             connectors_jobs_task=None,
             connectors_jobs_stop_event=None,
@@ -273,18 +268,11 @@ async def test_start_service_groups_keeps_no_arg_maintenance_compatibility(
         app_settings={},
         run_pg_rls_auto_ensure=object(),
         owned_job_pollers=[],
-        register_owned_job_poller=lambda *args, **kwargs: None,
+        register_owned_job_poller=object(),
+        worker_inventory=worker_inventory,
     )
 
-    assert calls == [
-        "runtime",
-        "optional",
-        "claims",
-        "auxiliary",
-        "infra",
-        "maintenance",
-        "connectors",
-    ]
+    assert maintenance_kwargs == {"worker_inventory": worker_inventory}
 
 
 @pytest.mark.asyncio

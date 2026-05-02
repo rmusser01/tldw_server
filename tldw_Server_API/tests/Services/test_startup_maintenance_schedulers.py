@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 import importlib
 import sys
 
 import pytest
+from fastapi import FastAPI
 
 pytestmark = pytest.mark.unit
 
@@ -13,6 +15,10 @@ def _import_startup_maintenance_schedulers():
     return importlib.import_module("tldw_Server_API.app.services.startup_maintenance_schedulers")
 
 
+async def _wait_forever() -> None:
+    await asyncio.Event().wait()
+
+
 @pytest.mark.asyncio
 async def test_start_maintenance_schedulers_combines_handles(
     monkeypatch: pytest.MonkeyPatch,
@@ -20,11 +26,13 @@ async def test_start_maintenance_schedulers_combines_handles(
     startup_maintenance = _import_startup_maintenance_schedulers()
     calls: list[str] = []
 
-    async def _fake_quality():
+    async def _fake_quality(*, worker_inventory=None):
+        assert worker_inventory is None
         calls.append("quality")
         return "quality-task"
 
-    async def _fake_outputs():
+    async def _fake_outputs(*, worker_inventory=None):
+        assert worker_inventory is None
         calls.append("outputs")
         return "outputs-task"
 
@@ -43,15 +51,18 @@ async def test_start_maintenance_schedulers_combines_handles(
         calls.append("kanban-purge")
         return "kanban-purge-task"
 
-    async def _fake_files_gc():
+    async def _fake_files_gc(*, worker_inventory=None):
+        assert worker_inventory is None
         calls.append("files-gc")
         return "files-gc-task"
 
-    async def _fake_notifications():
+    async def _fake_notifications(*, worker_inventory=None):
+        assert worker_inventory is None
         calls.append("notifications")
         return "notifications-task"
 
-    async def _fake_jobs_prune():
+    async def _fake_jobs_prune(*, worker_inventory=None):
+        assert worker_inventory is None
         calls.append("jobs-prune")
         return "jobs-prune-task"
 
@@ -94,11 +105,19 @@ async def test_start_maintenance_schedulers_passes_worker_inventory_to_registere
     worker_inventory = object()
     calls: list[tuple[str, object | None]] = []
 
-    async def _fake_quality() -> None:
-        return None
+    async def _fake_quality(
+        *,
+        worker_inventory: object | None = None,
+    ) -> str:
+        calls.append(("quality", worker_inventory))
+        return "quality-task"
 
-    async def _fake_outputs() -> None:
-        return None
+    async def _fake_outputs(
+        *,
+        worker_inventory: object | None = None,
+    ) -> str:
+        calls.append(("outputs", worker_inventory))
+        return "outputs-task"
 
     async def _fake_kanban_activity(
         *,
@@ -121,14 +140,26 @@ async def test_start_maintenance_schedulers_passes_worker_inventory_to_registere
         calls.append(("kanban-purge", worker_inventory))
         return "kanban-purge-task"
 
-    async def _fake_files_gc() -> None:
-        return None
+    async def _fake_files_gc(
+        *,
+        worker_inventory: object | None = None,
+    ) -> str:
+        calls.append(("files-gc", worker_inventory))
+        return "files-gc-task"
 
-    async def _fake_notifications() -> None:
-        return None
+    async def _fake_notifications(
+        *,
+        worker_inventory: object | None = None,
+    ) -> str:
+        calls.append(("notifications", worker_inventory))
+        return "notifications-task"
 
-    async def _fake_jobs_prune() -> None:
-        return None
+    async def _fake_jobs_prune(
+        *,
+        worker_inventory: object | None = None,
+    ) -> str:
+        calls.append(("jobs-prune", worker_inventory))
+        return "jobs-prune-task"
 
     monkeypatch.setattr(startup_maintenance, "_start_quality_eval_scheduler", _fake_quality)
     monkeypatch.setattr(startup_maintenance, "_start_outputs_purge_scheduler", _fake_outputs)
@@ -144,13 +175,23 @@ async def test_start_maintenance_schedulers_passes_worker_inventory_to_registere
     )
 
     assert calls == [
+        ("quality", worker_inventory),
+        ("outputs", worker_inventory),
         ("kanban-activity", worker_inventory),
         ("ingestion-sources", worker_inventory),
         ("kanban-purge", worker_inventory),
+        ("files-gc", worker_inventory),
+        ("notifications", worker_inventory),
+        ("jobs-prune", worker_inventory),
     ]
+    assert handles.quality_eval_task == "quality-task"
+    assert handles.outputs_purge_task == "outputs-task"
     assert handles.kanban_activity_cleanup_task == "kanban-activity-task"
     assert handles.ingestion_sources_cleanup_task == "ingestion-sources-task"
     assert handles.kanban_purge_task == "kanban-purge-task"
+    assert handles.files_export_gc_task == "files-gc-task"
+    assert handles.notifications_prune_task == "notifications-task"
+    assert handles.jobs_prune_task == "jobs-prune-task"
 
 
 @pytest.mark.asyncio
@@ -277,11 +318,12 @@ async def test_kanban_maintenance_schedulers_register_background_inventory(
 
 
 @pytest.mark.asyncio
-async def test_start_env_gated_task_returns_task_when_inventory_registration_fails(
+async def test_start_env_gated_task_rolls_back_when_inventory_registration_fails(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     startup_maintenance = _import_startup_maintenance_schedulers()
     task = object()
+    cancelled_tasks: list[object] = []
 
     class _FailingInventory:
         def register(self, worker):
@@ -290,7 +332,11 @@ async def test_start_env_gated_task_returns_task_when_inventory_registration_fai
     async def _fake_start():
         return task
 
+    async def _fake_cancel(seen_task):
+        cancelled_tasks.append(seen_task)
+
     monkeypatch.setattr(startup_maintenance, "_env_enabled", lambda key: True)
+    monkeypatch.setattr(startup_maintenance, "_cancel_unregistered_task", _fake_cancel)
 
     started_task = await startup_maintenance._start_env_gated_task(
         env_key="KANBAN_PURGE_ENABLED",
@@ -302,4 +348,132 @@ async def test_start_env_gated_task_returns_task_when_inventory_registration_fai
         worker_name="kanban_purge_scheduler",
     )
 
-    assert started_task is task
+    assert started_task is None
+    assert cancelled_tasks == [task]
+
+
+@pytest.mark.asyncio
+async def test_cancel_unregistered_task_bounds_rollback_wait(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_maintenance = _import_startup_maintenance_schedulers()
+    waits: list[tuple[object, float]] = []
+    warnings: list[tuple[str, tuple[object, ...]]] = []
+
+    class _Task:
+        def __init__(self) -> None:
+            self.cancelled = False
+
+        def cancel(self) -> None:
+            self.cancelled = True
+
+    async def _timeout_wait(task: object, *, timeout: float) -> None:
+        waits.append((task, timeout))
+        raise asyncio.TimeoutError
+
+    monkeypatch.setattr(startup_maintenance.asyncio, "wait_for", _timeout_wait)
+    monkeypatch.setattr(
+        startup_maintenance.logger,
+        "warning",
+        lambda message, *args: warnings.append((message, args)),
+    )
+
+    task = _Task()
+    await startup_maintenance._cancel_unregistered_task(task, timeout=0.25)
+
+    assert task.cancelled is True
+    assert waits == [(task, 0.25)]
+    assert warnings == [
+        (
+            "Maintenance scheduler did not cancel within {}s during startup rollback",
+            (0.25,),
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_start_remaining_maintenance_schedulers_registers_background_inventory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_maintenance = _import_startup_maintenance_schedulers()
+    from tldw_Server_API.app.services.lifecycle_workers import ShutdownPhase, WorkerRegistry
+
+    selected_envs = {
+        "RAG_QUALITY_EVAL_ENABLED",
+        "OUTPUTS_PURGE_ENABLED",
+        "FILES_EXPORT_GC_ENABLED",
+        "NOTIFICATIONS_PRUNE_ENABLED",
+        "JOBS_PRUNE_ENFORCE",
+    }
+    app = FastAPI()
+    worker_inventory = WorkerRegistry(app)
+    created_tasks: list[asyncio.Task[None]] = []
+
+    def _make_task(name: str) -> asyncio.Task[None]:
+        task = asyncio.create_task(_wait_forever(), name=name)
+        created_tasks.append(task)
+        return task
+
+    async def _fake_quality():
+        return _make_task("rag_quality_eval_scheduler")
+
+    async def _fake_outputs():
+        return _make_task("outputs_purge_scheduler")
+
+    async def _fake_files_gc():
+        return _make_task("file_artifacts_export_gc")
+
+    async def _fake_notifications():
+        return _make_task("notifications_prune_scheduler")
+
+    async def _fake_jobs_prune():
+        return _make_task("jobs_prune_scheduler")
+
+    monkeypatch.setattr(startup_maintenance, "_env_enabled", lambda key: key in selected_envs)
+    monkeypatch.setattr(startup_maintenance, "_start_quality_eval_scheduler_service", _fake_quality)
+    monkeypatch.setattr(startup_maintenance, "_start_outputs_purge_scheduler_service", _fake_outputs)
+    monkeypatch.setattr(startup_maintenance, "_start_file_artifacts_export_gc_scheduler_service", _fake_files_gc)
+    monkeypatch.setattr(startup_maintenance, "_start_notifications_prune_scheduler_service", _fake_notifications)
+    monkeypatch.setattr(startup_maintenance, "_start_jobs_prune_scheduler_service", _fake_jobs_prune)
+
+    try:
+        handles = await startup_maintenance.start_maintenance_schedulers(
+            worker_inventory=worker_inventory,
+        )
+
+        assert handles.quality_eval_task in created_tasks
+        assert handles.outputs_purge_task in created_tasks
+        assert handles.kanban_activity_cleanup_task is None
+        assert handles.ingestion_sources_cleanup_task is None
+        assert handles.kanban_purge_task is None
+        assert handles.files_export_gc_task in created_tasks
+        assert handles.notifications_prune_task in created_tasks
+        assert handles.jobs_prune_task in created_tasks
+
+        assert {
+            handle.name: handle.shutdown_phase
+            for handle in worker_inventory.handles
+        } == {
+            "quality_eval_task": ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN,
+            "outputs_purge_task": ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN,
+            "files_export_gc_task": ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN,
+            "notifications_prune_task": ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN,
+            "jobs_prune_task": ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN,
+        }
+        assert {handle.stop_event for handle in worker_inventory.handles} == {None}
+        assert {handle.category for handle in worker_inventory.handles} == {"maintenance"}
+        assert app.state._tldw_shutdown_job_poller_inventory == []
+        assert {
+            entry["name"]: entry["shutdown_phase"]
+            for entry in app.state._tldw_shutdown_worker_inventory
+        } == {
+            "quality_eval_task": "background_worker_shutdown",
+            "outputs_purge_task": "background_worker_shutdown",
+            "files_export_gc_task": "background_worker_shutdown",
+            "notifications_prune_task": "background_worker_shutdown",
+            "jobs_prune_task": "background_worker_shutdown",
+        }
+    finally:
+        for task in created_tasks:
+            task.cancel()
+        await asyncio.gather(*created_tasks, return_exceptions=True)
