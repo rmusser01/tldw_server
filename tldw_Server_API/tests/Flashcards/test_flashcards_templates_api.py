@@ -294,6 +294,8 @@ def test_flashcard_template_list_returns_items(client_with_flashcards_db: TestCl
         "has_more": False,
         "next_offset": None,
     }
+    assert payload["has_more"] is False
+    assert payload["next_offset"] is None
     assert payload["items"][0]["id"] == created_payload["id"]
     assert payload["items"][0]["name"] == "List template"
 

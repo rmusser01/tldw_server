@@ -26,6 +26,7 @@ from tldw_Server_API.app.api.v1.schemas.flashcards import (
     Flashcard,
     FlashcardAnalyticsSummaryResponse,
     FlashcardAssetMetadata,
+    FlashcardBulkCreateResponse,
     FlashcardBulkUpdateError,
     FlashcardBulkUpdateItem,
     FlashcardBulkUpdateResponse,
@@ -907,7 +908,7 @@ def create_flashcard(payload: FlashcardCreate, db: CharactersRAGDB = Depends(get
         raise map_db_error_to_http(exc, default_detail="Failed to create flashcard") from exc
 
 
-@router.post("/bulk", response_model=FlashcardListResponse)
+@router.post("/bulk", response_model=FlashcardBulkCreateResponse)
 def create_flashcards_bulk(payload: list[FlashcardCreate], db: CharactersRAGDB = Depends(get_chacha_db_for_user)):
     try:
         card_dicts = []

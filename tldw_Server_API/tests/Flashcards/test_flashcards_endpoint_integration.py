@@ -867,6 +867,8 @@ def test_flashcard_visibility_endpoints_respect_default_general_only_and_explici
         "has_more": False,
         "next_offset": None,
     }
+    assert default_payload["has_more"] is False
+    assert default_payload["next_offset"] is None
     assert any(item["uuid"] == general_card["uuid"] for item in default_items)
     assert all(item["deck_id"] != workspace_deck_id for item in default_items)
 
@@ -897,6 +899,8 @@ def test_flashcard_visibility_endpoints_respect_default_general_only_and_explici
         "has_more": True,
         "next_offset": 1,
     }
+    assert all_payload["has_more"] is True
+    assert all_payload["next_offset"] == 1
 
     all_list_page2 = client_with_flashcards_db.get(
         "/api/v1/flashcards",
@@ -916,6 +920,8 @@ def test_flashcard_visibility_endpoints_respect_default_general_only_and_explici
         "has_more": False,
         "next_offset": None,
     }
+    assert page2_payload["has_more"] is False
+    assert page2_payload["next_offset"] is None
     assert {
         all_payload["items"][0]["uuid"],
         page2_payload["items"][0]["uuid"],
