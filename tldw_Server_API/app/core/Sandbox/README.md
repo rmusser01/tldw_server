@@ -44,6 +44,10 @@ Trust-level rules:
   - canonical vs compatibility artifact paths
   - audit and provenance expectations
   - lifecycle and reconciliation rules
+- The full-module roadmap lives in
+  `Docs/superpowers/specs/2026-05-02-sandbox-module-roadmap-design.md`.
+  It sequences remaining work across API, orchestrator, runtimes, security,
+  admin, and CI without treating every runtime as equally mature.
 - macOS scaffolding currently includes:
   - a Unix-socket helper client plus protocol models in `macos_virtualization/`
   - frozen helper contract docs in `tools/macos-vz-helper/`

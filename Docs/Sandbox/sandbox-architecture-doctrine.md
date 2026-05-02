@@ -346,3 +346,8 @@ Future runtime-related plans should explicitly answer:
 - which guarantees are intentionally weaker than VM-grade isolation
 
 If a plan does not answer those questions, it is incomplete.
+
+The full-module roadmap that sequences these requirements across current and
+future runtime families is:
+
+- `Docs/superpowers/specs/2026-05-02-sandbox-module-roadmap-design.md`
