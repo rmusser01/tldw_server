@@ -42,6 +42,14 @@ The script should not hide failures. If helper build, signing, validation, VM bo
 
 Harden `tldw_Server_API/app/core/Sandbox/image_store.py` into a small filesystem-backed manifest store. The store should remain simple and local, not a full image registry.
 
+The Apple [`container`](https://github.com/apple/container) and
+[`containerization`](https://github.com/apple/containerization) projects are
+relevant prior art for this layer because they use OCI-compatible images for
+macOS-hosted Linux VM workloads. This design still keeps the near-term
+repo-owned bundle format, but future image-store changes should avoid
+assumptions that would block OCI manifests, layer digests, registry provenance,
+or a later `vz_oci_linux` runtime from reusing the same run/session/audit model.
+
 The store layout should be deterministic:
 
 ```text

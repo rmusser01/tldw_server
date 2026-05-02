@@ -19,6 +19,32 @@ This is not yet a guide for shipping the full macOS runtime roadmap. The current
 - The VM-oriented runtimes assume Apple `Virtualization.framework`
 - `vz_linux` and `vz_macos` preflights fail closed when the host is not macOS or not Apple silicon
 
+## Apple Container Prior Art
+
+Apple's [`container`](https://github.com/apple/container) CLI is relevant prior
+art for `vz_linux` because it runs Linux containers as lightweight per-workload
+VMs on Apple silicon and uses the same family of macOS building blocks this
+subsystem targets:
+`Virtualization.framework`, vmnet, `launchd`, helper services, unified logging,
+OCI-compatible images, and guest control over vsock.
+
+It is not an operator prerequisite for `tldw_server`. Operators should not need
+to install or run Apple's `container` CLI for the current `vz_linux` path.
+Near-term work should instead use it as a comparison point for:
+
+- helper lifecycle and service decomposition
+- image-store layout, digests, provenance, and future OCI compatibility
+- optimized Linux kernel/rootfs choices for faster VM startup
+- vmnet-backed networking only when a reviewed network policy needs it
+- guest init/agent readiness contracts over vsock
+
+Direct reuse of Apple's lower-level
+[`containerization`](https://github.com/apple/containerization) Swift package
+should be decided in a focused implementation plan, not introduced
+incidentally. Any adoption must preserve the repo-owned helper protocol, admin
+diagnostics, fail-closed policy admission, the intended macOS support window,
+and the separate `seatbelt` and `vz_macos` runtime tracks.
+
 ## Trust-Level Policy
 
 - `untrusted`:
