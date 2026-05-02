@@ -800,6 +800,7 @@ class SandboxService:
         max_mem_mb = self.policy.cfg.max_mem_mb
         max_upload_mb = self.policy.cfg.max_upload_mb
         max_log_bytes = self.policy.cfg.max_log_bytes
+        vz_linux_max_log_bytes = min(max_log_bytes, VZLinuxRunner.max_helper_output_bytes)
         max_artifact_file_bytes = self.policy.cfg.max_artifact_file_bytes
         max_artifact_total_bytes = self.policy.cfg.max_artifact_total_bytes
         workspace_cap_mb = self.policy.cfg.workspace_cap_mb
@@ -975,7 +976,7 @@ class SandboxService:
                 "max_cpu": max_cpu,
                 "max_mem_mb": max_mem_mb,
                 "max_upload_mb": max_upload_mb,
-                "max_log_bytes": max_log_bytes,
+                "max_log_bytes": vz_linux_max_log_bytes,
                 "max_artifact_file_bytes": max_artifact_file_bytes,
                 "max_artifact_total_bytes": max_artifact_total_bytes,
                 "queue_max_length": queue_max_length,

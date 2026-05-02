@@ -347,8 +347,8 @@ final class HelperService {
             return (stdout, stderr, [:])
         }
 
-        let stdoutOriginal = Data(stdout.utf8).count
-        let stderrOriginal = Data(stderr.utf8).count
+        let stdoutOriginal = stdout.utf8.count
+        let stderrOriginal = stderr.utf8.count
         if stdoutOriginal + stderrOriginal <= cap {
             return (
                 stdout,
@@ -368,10 +368,19 @@ final class HelperService {
             stderrBytes: stderrOriginal,
             cap: cap
         )
-        let returnedStdout = utf8Prefix(stdout, maxBytes: budgets.stdout)
-        let returnedStderr = utf8Prefix(stderr, maxBytes: budgets.stderr)
-        let stdoutReturned = Data(returnedStdout.utf8).count
-        let stderrReturned = Data(returnedStderr.utf8).count
+        let returned = cappedUTF8Output(
+            stdout: stdout,
+            stderr: stderr,
+            stdoutBytes: stdoutOriginal,
+            stderrBytes: stderrOriginal,
+            stdoutBudget: budgets.stdout,
+            stderrBudget: budgets.stderr,
+            cap: cap
+        )
+        let returnedStdout = returned.stdout
+        let returnedStderr = returned.stderr
+        let stdoutReturned = returned.stdoutBytes
+        let stderrReturned = returned.stderrBytes
         return (
             returnedStdout,
             returnedStderr,
@@ -415,17 +424,89 @@ final class HelperService {
         guard maxBytes > 0 else {
             return ""
         }
-        var used = 0
-        var result = ""
-        for character in value {
-            let byteCount = String(character).utf8.count
-            guard used + byteCount <= maxBytes else {
-                break
-            }
-            result.append(character)
-            used += byteCount
+        guard value.utf8.count > maxBytes else {
+            return value
         }
-        return result
+        var end = value.utf8.index(value.utf8.startIndex, offsetBy: maxBytes)
+        while end > value.utf8.startIndex {
+            if let stringEnd = String.Index(end, within: value) {
+                return String(value[..<stringEnd])
+            }
+            end = value.utf8.index(before: end)
+        }
+        return ""
+    }
+
+    private func cappedUTF8Output(
+        stdout: String,
+        stderr: String,
+        stdoutBytes: Int,
+        stderrBytes: Int,
+        stdoutBudget: Int,
+        stderrBudget: Int,
+        cap: Int
+    ) -> (stdout: String, stderr: String, stdoutBytes: Int, stderrBytes: Int) {
+        var candidates: [(stdout: Int, stderr: Int)] = [
+            (stdoutBudget, stderrBudget),
+            (min(stdoutBytes, cap), 0),
+            (0, min(stderrBytes, cap)),
+        ]
+
+        let initialStdout = utf8Prefix(stdout, maxBytes: stdoutBudget)
+        let initialStderr = utf8Prefix(stderr, maxBytes: stderrBudget)
+        let initialUsed = initialStdout.utf8.count + initialStderr.utf8.count
+        let unused = cap - initialUsed
+        if unused > 0 {
+            candidates.append((min(stdoutBytes, stdoutBudget + unused), stderrBudget))
+            candidates.append((stdoutBudget, min(stderrBytes, stderrBudget + unused)))
+        }
+
+        var best = (stdout: "", stderr: "", stdoutBytes: 0, stderrBytes: 0)
+        for candidate in candidates {
+            let candidateStdout = utf8Prefix(stdout, maxBytes: candidate.stdout)
+            let candidateStderr = utf8Prefix(stderr, maxBytes: candidate.stderr)
+            let candidateStdoutBytes = candidateStdout.utf8.count
+            let candidateStderrBytes = candidateStderr.utf8.count
+            let used = candidateStdoutBytes + candidateStderrBytes
+            guard used <= cap else {
+                continue
+            }
+            if isBetterOutputCandidate(
+                used: used,
+                stderrBytes: candidateStderrBytes,
+                stdoutBytes: candidateStdoutBytes,
+                best: best
+            ) {
+                best = (
+                    stdout: candidateStdout,
+                    stderr: candidateStderr,
+                    stdoutBytes: candidateStdoutBytes,
+                    stderrBytes: candidateStderrBytes
+                )
+            }
+        }
+        return best
+    }
+
+    private func isBetterOutputCandidate(
+        used: Int,
+        stderrBytes: Int,
+        stdoutBytes: Int,
+        best: (stdout: String, stderr: String, stdoutBytes: Int, stderrBytes: Int)
+    ) -> Bool {
+        let bestUsed = best.stdoutBytes + best.stderrBytes
+        if used != bestUsed {
+            return used > bestUsed
+        }
+        let bothStreams = stdoutBytes > 0 && stderrBytes > 0
+        let bestBothStreams = best.stdoutBytes > 0 && best.stderrBytes > 0
+        if bothStreams != bestBothStreams {
+            return bothStreams
+        }
+        if stderrBytes != best.stderrBytes {
+            return stderrBytes > best.stderrBytes
+        }
+        return stdoutBytes > best.stdoutBytes
     }
 
     private func outputLimitDetails(

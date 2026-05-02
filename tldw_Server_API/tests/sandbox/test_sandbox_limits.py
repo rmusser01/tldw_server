@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from pathlib import Path
+from types import SimpleNamespace
+
 from tldw_Server_API.app.core.Sandbox.limits import cap_output_streams, collect_limited_artifacts
 
 
@@ -45,6 +48,34 @@ def test_collect_limited_artifacts_skips_file_and_total_limit_excesses(tmp_path)
     assert result.counters["artifact_skip_file_limit"] == 1
     assert result.counters["artifact_skip_total_limit"] == 1
     assert result.counters["artifact_bytes_collected"] == 4
+
+
+def test_collect_limited_artifacts_bounds_read_after_stale_stat(monkeypatch, tmp_path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    artifact = workspace / "growing.txt"
+    artifact.write_bytes(b"123456")
+    original_stat = Path.stat
+
+    def _stale_stat(self: Path, *args, **kwargs):
+        if self == artifact and kwargs.get("follow_symlinks", True):
+            return SimpleNamespace(st_size=4)
+        return original_stat(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "stat", _stale_stat)
+
+    result = collect_limited_artifacts(
+        workspace,
+        ["*.txt"],
+        max_file_bytes=5,
+        max_total_bytes=10,
+    )
+
+    assert result.artifacts == {}
+    assert result.counters["artifact_files_collected"] == 0
+    assert result.counters["artifact_files_skipped"] == 1
+    assert result.counters["artifact_skip_file_limit"] == 1
+    assert result.counters["artifact_bytes_collected"] == 0
 
 
 def test_collect_limited_artifacts_keeps_matches_inside_workspace(tmp_path) -> None:

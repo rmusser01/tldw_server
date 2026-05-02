@@ -48,6 +48,7 @@ _OUTPUT_COUNTER_KEYS = frozenset(
 class VZLinuxRunner(VZBaseRunner):
     runtime_type = RuntimeType.vz_linux
     fake_exec_env_key = "TLDW_SANDBOX_VZ_LINUX_FAKE_EXEC"
+    max_helper_output_bytes = 256 * 1024 * 1024
     available_env_key = "TLDW_SANDBOX_VZ_LINUX_AVAILABLE"
     version_env_key = "TLDW_SANDBOX_VZ_LINUX_VERSION"
     template_ready_env_key = "TLDW_SANDBOX_VZ_LINUX_TEMPLATE_READY"
@@ -179,7 +180,8 @@ class VZLinuxRunner(VZBaseRunner):
     @classmethod
     def _max_log_bytes(cls) -> int:
         cfg = cls._policy_cfg()
-        return cls._positive_int(getattr(cfg, "max_log_bytes", None), 10 * 1024 * 1024)
+        requested = cls._positive_int(getattr(cfg, "max_log_bytes", None), 10 * 1024 * 1024)
+        return min(requested, cls.max_helper_output_bytes)
 
     @classmethod
     def _max_artifact_file_bytes(cls) -> int:

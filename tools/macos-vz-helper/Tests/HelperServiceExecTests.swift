@@ -155,6 +155,40 @@ final class StaticOutputGuestBridge: GuestBridging {
     #expect(response.details["stdout_truncated"] == "true")
 }
 
+@Test func helperServiceExecGuestRebalancesUtf8TrimmedBudget() throws {
+    let registry = VMRegistry()
+    let manager = VZLinuxVMManager(
+        registry: registry,
+        bootDriver: RecordingBootDriver(),
+        guestBridge: StaticOutputGuestBridge(stdout: "a", stderr: "é")
+    )
+    let service = HelperService(
+        hostFacts: HostFacts(isMacOS: true, isAppleSilicon: true),
+        registry: registry,
+        vmManager: manager
+    )
+
+    _ = try service.createVM(
+        vmID: "vm-exec-utf8-rebalance",
+        templatePath: "/tmp/template.img",
+        workspacePath: "/workspace",
+        readinessTimeoutSeconds: 5
+    )
+
+    let response = try service.execGuest(
+        vmID: "vm-exec-utf8-rebalance",
+        argv: ["/bin/echo", "ok"],
+        cwd: "/workspace",
+        env: [:],
+        timeoutSeconds: 15,
+        maxOutputBytes: 2
+    )
+
+    #expect(Data(response.stdout.utf8).count + Data(response.stderr.utf8).count == 2)
+    #expect(response.stderr == "é")
+    #expect(response.details["stderr_bytes_returned"] == "2")
+}
+
 @Test func helperServiceExecGuestRejectsInvalidOutputLimit() throws {
     let registry = VMRegistry()
     let manager = VZLinuxVMManager(

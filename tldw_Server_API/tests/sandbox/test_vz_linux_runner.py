@@ -15,7 +15,9 @@ from tldw_Server_API.app.core.Sandbox.macos_virtualization.models import (
     HelperVMStatusReply,
 )
 from tldw_Server_API.app.core.Sandbox.models import RunPhase, RunSpec, RuntimeType
+from tldw_Server_API.app.core.Sandbox.policy import SandboxPolicy, SandboxPolicyConfig
 from tldw_Server_API.app.core.Sandbox.runners.vz_linux_runner import VZLinuxRunner
+from tldw_Server_API.app.core.Sandbox.service import SandboxService
 from tldw_Server_API.app.core.Sandbox.streams import get_hub
 
 
@@ -739,6 +741,84 @@ def test_vz_linux_start_run_passes_log_cap_to_helper(monkeypatch, tmp_path) -> N
 
     assert status.phase == RunPhase.completed
     assert exec_requests[0]["max_output_bytes"] == 5
+
+
+def test_vz_linux_start_run_clamps_log_cap_to_helper_limit(monkeypatch, tmp_path) -> None:
+    monkeypatch.delenv("TLDW_SANDBOX_VZ_LINUX_FAKE_EXEC", raising=False)
+    monkeypatch.setattr(
+        vz_linux_module.SandboxPolicyConfig,
+        "from_settings",
+        classmethod(lambda cls: cls(max_log_bytes=VZLinuxRunner.max_helper_output_bytes + 1)),
+    )
+    exec_requests: list[dict[str, object]] = []
+
+    class _FakeHelper:
+        def validate_template(self, request: dict[str, object]) -> dict[str, object]:
+            return {
+                "template_id": "vz_linux:validated-ubuntu",
+                "source": "ubuntu-24.04",
+                "ready": True,
+                "reasons": [],
+            }
+
+        def create_vm(self, request: dict[str, object]) -> HelperVMReply:
+            return HelperVMReply(vm_id="vm-output-cap", state="created")
+
+        def exec_guest(self, *, vm_id: str, request: dict[str, object]) -> HelperExecReply:
+            exec_requests.append({"vm_id": vm_id, **request})
+            return HelperExecReply(exit_code=0, stdout=b"ok\n")
+
+        def terminate_vm(self, vm_id: str) -> bool:
+            return True
+
+    monkeypatch.setattr(vz_linux_module.VZLinuxRunner, "helper_client_cls", _FakeHelper)
+
+    status = VZLinuxRunner().start_run(
+        run_id="vz-run-output-cap-clamped",
+        spec=RunSpec(
+            session_id=None,
+            runtime=RuntimeType.vz_linux,
+            base_image="ubuntu-24.04",
+            command=["/bin/echo", "ok"],
+            network_policy="deny_all",
+        ),
+        session_workspace=str(tmp_path),
+    )
+
+    assert status.phase == RunPhase.completed
+    assert exec_requests[0]["max_output_bytes"] == VZLinuxRunner.max_helper_output_bytes
+
+
+def test_feature_discovery_advertises_vz_linux_helper_log_cap() -> None:
+    configured = VZLinuxRunner.max_helper_output_bytes + 1024
+    service = SandboxService(
+        policy=SandboxPolicy(SandboxPolicyConfig(max_log_bytes=configured)),
+    )
+
+    runtimes = {item["name"]: item for item in service.feature_discovery()}
+
+    assert runtimes["vz_linux"]["max_log_bytes"] == VZLinuxRunner.max_helper_output_bytes
+    assert runtimes["docker"]["max_log_bytes"] == configured
+
+
+def test_vz_linux_collect_artifacts_uses_policy_caps(monkeypatch, tmp_path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "too-large.txt").write_bytes(b"1234")
+    monkeypatch.setattr(
+        vz_linux_module.SandboxPolicyConfig,
+        "from_settings",
+        classmethod(
+            lambda cls: cls(
+                max_artifact_file_bytes=3,
+                max_artifact_total_bytes=10,
+            )
+        ),
+    )
+
+    artifacts = VZLinuxRunner._collect_artifacts(str(workspace), ["*.txt"])
+
+    assert artifacts == {}
 
 
 def test_vz_linux_start_run_records_output_limit_counters(monkeypatch, tmp_path) -> None:

@@ -1,3 +1,9 @@
+"""Shared output and artifact limit helpers for sandbox runtimes.
+
+This module keeps byte-cap behavior consistent across VM/helper integrations and
+derives path-minimized audit metadata from the counters those helpers return.
+"""
+
 from __future__ import annotations
 
 import fnmatch
@@ -9,6 +15,8 @@ from typing import Any, Mapping
 
 @dataclass(frozen=True, slots=True)
 class OutputLimitResult:
+    """Bounded stdout/stderr bytes plus integer counters describing truncation."""
+
     stdout: bytes
     stderr: bytes
     counters: dict[str, int] = field(default_factory=dict)
@@ -16,6 +24,8 @@ class OutputLimitResult:
 
 @dataclass(frozen=True, slots=True)
 class ArtifactLimitResult:
+    """Captured artifact bytes plus integer counters describing skipped files."""
+
     artifacts: dict[str, bytes]
     counters: dict[str, int] = field(default_factory=dict)
 
@@ -191,10 +201,24 @@ def collect_limited_artifacts(
                 if max_total > 0 and counters["artifact_bytes_collected"] + size > max_total:
                     _increment_artifact_skip(counters, "artifact_skip_total_limit")
                     continue
+                read_limit, read_limit_reason = _artifact_read_limit(
+                    max_file=max_file,
+                    max_total=max_total,
+                    bytes_collected=counters["artifact_bytes_collected"],
+                )
+                if read_limit is not None and read_limit < 0:
+                    _increment_artifact_skip(counters, "artifact_skip_total_limit")
+                    continue
                 try:
-                    data = full_path.read_bytes()
+                    data = _read_artifact_bytes(full_path, read_limit)
                 except OSError:
                     _increment_artifact_skip(counters, "artifact_skip_read_error")
+                    continue
+                if read_limit is not None and len(data) > read_limit:
+                    _increment_artifact_skip(
+                        counters,
+                        read_limit_reason or "artifact_skip_file_limit",
+                    )
                     continue
                 artifacts[rel_posix] = data
                 counters["artifact_files_collected"] += 1
@@ -251,6 +275,29 @@ def limit_event_actions(resource_usage: Mapping[str, object] | None) -> list[str
 def _increment_artifact_skip(counters: dict[str, int], reason_key: str) -> None:
     counters["artifact_files_skipped"] += 1
     counters[reason_key] += 1
+
+
+def _artifact_read_limit(*, max_file: int, max_total: int, bytes_collected: int) -> tuple[int | None, str | None]:
+    limit: int | None = None
+    reason: str | None = None
+    if max_file > 0:
+        limit = max_file
+        reason = "artifact_skip_file_limit"
+    if max_total > 0:
+        remaining = max_total - bytes_collected
+        if remaining < 0:
+            return -1, "artifact_skip_total_limit"
+        if limit is None or remaining < limit:
+            limit = remaining
+            reason = "artifact_skip_total_limit"
+    return limit, reason
+
+
+def _read_artifact_bytes(path: Path, read_limit: int | None) -> bytes:
+    if read_limit is None:
+        return path.read_bytes()
+    with path.open("rb") as handle:
+        return handle.read(read_limit + 1)
 
 
 def _counter_value(value: Any) -> int | None:

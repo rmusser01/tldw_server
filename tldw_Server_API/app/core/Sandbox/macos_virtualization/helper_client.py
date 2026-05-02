@@ -170,8 +170,11 @@ class MacOSVirtualizationHelperClient:
         }
 
     def exec_guest(self, *, vm_id: str, request: dict[str, Any]) -> HelperExecReply:
+        exec_request = dict(request)
+        if exec_request.get("max_output_bytes") is None:
+            exec_request.pop("max_output_bytes", None)
         if is_truthy(os.getenv("TEST_MODE")):
-            argv, _cwd, _env, _timeout_sec, max_output_bytes = self._validate_exec_guest_request(request)
+            argv, _cwd, _env, _timeout_sec, max_output_bytes = self._validate_exec_guest_request(exec_request)
             stdout = b""
             if argv[:2] == ["/bin/echo", "ok"]:
                 stdout = b"ok\n"
@@ -192,9 +195,9 @@ class MacOSVirtualizationHelperClient:
             )
         payload = self._request(
             "exec_guest",
-            {"vm_id": vm_id, **dict(request)},
+            {"vm_id": vm_id, **exec_request},
             timeout_sec=self._operation_timeout_sec(
-                request,
+                exec_request,
                 default_request_timeout_sec=_DEFAULT_EXEC_TIMEOUT_SEC,
             ),
         )

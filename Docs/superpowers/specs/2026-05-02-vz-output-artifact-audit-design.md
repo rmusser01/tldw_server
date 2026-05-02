@@ -55,7 +55,8 @@ limit math and metadata shapes for:
 Wire that module into `VZLinuxRunner` only. The runner will:
 
 - read `SANDBOX_MAX_LOG_BYTES`
-- pass that value to helper `exec_guest` as `max_output_bytes`
+- pass that value to helper `exec_guest` as `max_output_bytes`, clamped to the
+  helper protocol ceiling of 256 MiB
 - publish stdout/stderr with `max_log_bytes`
 - collect artifacts through the shared helper with explicit limits
 - put integer-only limit counters into `RunStatus.resource_usage`
@@ -90,8 +91,10 @@ buffers command output internally before the service-level cap is applied.
 Guest-protocol streaming or guest-side kill-on-cap remains a follow-up.
 
 `SANDBOX_MAX_LOG_BYTES` remains the WebSocket/log publication cap and becomes
-the default `vz_linux` helper-returned output cap. Documentation should state
-that this knob now bounds both surfaces for `vz_linux`.
+the default `vz_linux` helper-returned output cap. For `vz_linux`, runtime
+discovery advertises the effective helper cap when `SANDBOX_MAX_LOG_BYTES`
+exceeds the helper protocol ceiling. Documentation should state that this knob
+now bounds both surfaces for `vz_linux`, subject to that helper ceiling.
 
 ## Artifact Cap Semantics
 
