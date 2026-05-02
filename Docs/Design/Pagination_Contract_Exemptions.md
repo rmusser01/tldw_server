@@ -64,6 +64,8 @@ Current pagination-sensitive examples:
   `after_id`; keep continuation in the stream cursor channel.
 - `GET /api/v1/media/ingest/jobs/events/stream`: SSE event stream using
   `after_id`; keep continuation in the stream cursor channel.
+- `GET /api/v1/audio/jobs/{job_id}/progress/stream`: SSE event stream using
+  `after_id`; keep continuation in the stream cursor channel.
 - `GET /watchlists/runs/export.csv`: CSV export; keep selection/filter inputs
   separate from response-body pagination metadata.
 
@@ -90,6 +92,9 @@ Current examples:
 - `GET /api/v1/paper-search/biorxiv/reports/summary` and
   `GET /api/v1/paper-search/biorxiv/reports/usage`: aggregate provider
   reports, not paginated result sets.
+- `GET /api/v1/audio/jobs/admin/summary` and
+  `GET /api/v1/audio/jobs/admin/summary-by-owner`: aggregate job-count
+  summaries, not job list pages.
 
 ### Bounded Preview Routes
 
@@ -161,6 +166,11 @@ Current examples:
   `total_pages` is reading-position metadata, not collection pagination.
 - `GET /api/v1/media/keywords`: bounded keyword suggestion list with a limit
   cap but no continuation input.
+- `GET /api/v1/audio/history/{history_id}`: single TTS history detail response.
+- `GET /api/v1/audio/providers` and `GET /api/v1/audio/voices/catalog`:
+  provider capability/catalog responses without pagination inputs.
+- `GET /api/v1/audio/voices`: bounded custom voice catalog for a user with no
+  pagination inputs.
 
 ## Review Rules
 

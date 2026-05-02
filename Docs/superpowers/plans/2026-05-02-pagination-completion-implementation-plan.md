@@ -757,6 +757,15 @@ Classified Media page-family rows:
   unresolved Media candidate because it has a limit cap but no continuation
   input yet.
 
+Classified Audio cursor-family rows:
+
+- TTS history and audio admin job list already expose canonical cursor
+  pagination.
+- Audio job progress uses an SSE stream with `after_id`.
+- Audio job summaries are aggregate count responses.
+- TTS provider/voice catalogs and custom voices are bounded catalogs without
+  pagination inputs.
+
 - [ ] **Step 5: Commit one family**
 
 Use a family-specific message, for example:
