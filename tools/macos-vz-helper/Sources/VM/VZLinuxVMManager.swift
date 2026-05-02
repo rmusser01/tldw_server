@@ -78,7 +78,8 @@ final class VZLinuxVMManager {
         argv: [String],
         cwd: String,
         env: [String: String],
-        timeoutSeconds: TimeInterval
+        timeoutSeconds: TimeInterval,
+        maxOutputBytes: Int? = nil
     ) throws -> GuestExecResult {
         guard let record = registry.status(vmID: vmID), record.healthy else {
             throw GuestBridgeError.guestExecNotImplemented
@@ -88,7 +89,8 @@ final class VZLinuxVMManager {
             argv: argv,
             cwd: cwd,
             env: env,
-            timeoutSeconds: timeoutSeconds
+            timeoutSeconds: timeoutSeconds,
+            maxOutputBytes: maxOutputBytes
         )
     }
 }

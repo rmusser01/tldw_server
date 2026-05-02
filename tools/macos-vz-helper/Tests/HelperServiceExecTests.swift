@@ -3,7 +3,7 @@ import Testing
 @testable import MacOSVZHelperDaemon
 
 final class RecordingGuestBridge: GuestBridging {
-    private(set) var lastExec: (vmID: String, argv: [String], cwd: String, env: [String: String], timeout: TimeInterval)?
+    private(set) var lastExec: (vmID: String, argv: [String], cwd: String, env: [String: String], timeout: TimeInterval, maxOutputBytes: Int?)?
 
     func waitUntilReady(vmID: String, timeoutSeconds: TimeInterval) throws {}
 
@@ -12,20 +12,23 @@ final class RecordingGuestBridge: GuestBridging {
         argv: [String],
         cwd: String,
         env: [String: String],
-        timeoutSeconds: TimeInterval
+        timeoutSeconds: TimeInterval,
+        maxOutputBytes: Int?
     ) throws -> GuestExecResult {
-        lastExec = (vmID, argv, cwd, env, timeoutSeconds)
-        return GuestExecResult(exitCode: 0, stdout: "ok\n", stderr: "")
+        lastExec = (vmID, argv, cwd, env, timeoutSeconds, maxOutputBytes)
+        return GuestExecResult(exitCode: 0, stdout: "ok\n", stderr: "", details: [:])
     }
 }
 
 final class StaticOutputGuestBridge: GuestBridging {
     let stdout: String
     let stderr: String
+    let details: [String: String]
 
-    init(stdout: String, stderr: String) {
+    init(stdout: String, stderr: String, details: [String: String] = [:]) {
         self.stdout = stdout
         self.stderr = stderr
+        self.details = details
     }
 
     func waitUntilReady(vmID: String, timeoutSeconds: TimeInterval) throws {}
@@ -35,9 +38,10 @@ final class StaticOutputGuestBridge: GuestBridging {
         argv: [String],
         cwd: String,
         env: [String: String],
-        timeoutSeconds: TimeInterval
+        timeoutSeconds: TimeInterval,
+        maxOutputBytes: Int?
     ) throws -> GuestExecResult {
-        return GuestExecResult(exitCode: 0, stdout: stdout, stderr: stderr)
+        return GuestExecResult(exitCode: 0, stdout: stdout, stderr: stderr, details: details)
     }
 }
 
@@ -78,6 +82,40 @@ final class StaticOutputGuestBridge: GuestBridging {
     #expect(guestBridge.lastExec?.cwd == "/workspace")
     #expect(guestBridge.lastExec?.env == ["FOO": "1"])
     #expect(guestBridge.lastExec?.timeout == 15)
+    #expect(guestBridge.lastExec?.maxOutputBytes == nil)
+}
+
+@Test func helperServiceExecGuestPassesOutputCapToGuestBridge() throws {
+    let registry = VMRegistry()
+    let guestBridge = RecordingGuestBridge()
+    let manager = VZLinuxVMManager(
+        registry: registry,
+        bootDriver: RecordingBootDriver(),
+        guestBridge: guestBridge
+    )
+    let service = HelperService(
+        hostFacts: HostFacts(isMacOS: true, isAppleSilicon: true),
+        registry: registry,
+        vmManager: manager
+    )
+
+    _ = try service.createVM(
+        vmID: "vm-exec-cap-forward",
+        templatePath: "/tmp/template.img",
+        workspacePath: "/workspace",
+        readinessTimeoutSeconds: 5
+    )
+
+    _ = try service.execGuest(
+        vmID: "vm-exec-cap-forward",
+        argv: ["/bin/echo", "ok"],
+        cwd: "/workspace",
+        env: [:],
+        timeoutSeconds: 15,
+        maxOutputBytes: 10
+    )
+
+    #expect(guestBridge.lastExec?.maxOutputBytes == 10)
 }
 
 @Test func helperServiceExecGuestCapsReturnedOutputAndRecordsDetails() throws {
@@ -117,6 +155,50 @@ final class StaticOutputGuestBridge: GuestBridging {
     #expect(response.details["stderr_bytes_original"] == "100")
     #expect(response.details["stdout_truncated"] == "true")
     #expect(response.details["stderr_truncated"] == "true")
+}
+
+@Test func helperServiceExecGuestMergesGuestDetailsWithoutOverwritingHostCounters() throws {
+    let registry = VMRegistry()
+    let manager = VZLinuxVMManager(
+        registry: registry,
+        bootDriver: RecordingBootDriver(),
+        guestBridge: StaticOutputGuestBridge(
+            stdout: String(repeating: "o", count: 100),
+            stderr: "",
+            details: [
+                "guest_output_limit_exceeded": "true",
+                "guest_stdout_bytes_observed": "101",
+                "stdout_bytes_original": "wrong",
+            ]
+        )
+    )
+    let service = HelperService(
+        hostFacts: HostFacts(isMacOS: true, isAppleSilicon: true),
+        registry: registry,
+        vmManager: manager
+    )
+
+    _ = try service.createVM(
+        vmID: "vm-exec-guest-details",
+        templatePath: "/tmp/template.img",
+        workspacePath: "/workspace",
+        readinessTimeoutSeconds: 5
+    )
+
+    let response = try service.execGuest(
+        vmID: "vm-exec-guest-details",
+        argv: ["/bin/echo", "ok"],
+        cwd: "/workspace",
+        env: [:],
+        timeoutSeconds: 15,
+        maxOutputBytes: 10
+    )
+
+    #expect(response.details["guest_output_limit_exceeded"] == "true")
+    #expect(response.details["guest_stdout_bytes_observed"] == "101")
+    #expect(response.details["stdout_bytes_original"] == "100")
+    #expect(response.details["stdout_bytes_returned"] == "10")
+    #expect(response.details["stdout_truncated"] == "true")
 }
 
 @Test func helperServiceExecGuestCapsOutputAtUtf8Boundary() throws {
