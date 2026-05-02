@@ -4,6 +4,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from tldw_Server_API.app.api.v1.schemas.pagination import PagePaginationMeta
 from tldw_Server_API.app.core.Evaluations.run_state import normalize_run_status
 
 
@@ -140,6 +141,7 @@ class EmbeddingsABTestResultsResponse(BaseModel):
     page: int = 1
     page_size: int = 50
     total: int = 0
+    pagination: PagePaginationMeta
 
 
 class EmbeddingsABTestRunRequest(BaseModel):
