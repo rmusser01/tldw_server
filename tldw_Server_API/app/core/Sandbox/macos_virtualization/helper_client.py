@@ -119,7 +119,7 @@ class MacOSVirtualizationHelperClient:
                         "network_policy": network_policy,
                         "created_at": created_at,
                     },
-                    "details": {"runtime": runtime or None, "transport": "vsock", "network_policy": network_policy},
+                    "details": {"transport": "vsock", "network_policy": network_policy},
                 }
             )
         payload = self._request("create_vm", request, timeout_sec=self._operation_timeout_sec(request))
@@ -146,7 +146,7 @@ class MacOSVirtualizationHelperClient:
                 "reasons": reasons,
                 "execution_mode": "real" if available else "none",
                 "transport": "vsock" if available else None,
-                "details": {"network_policy": network_policy},
+                "details": {"runtime": "vz_linux", "network_policy": network_policy},
             }
         parsed = parse_helper_host_validation(self._request("validate_host", request))
         return {
@@ -306,11 +306,13 @@ class MacOSVirtualizationHelperClient:
 
     @staticmethod
     def _normalize_network_policy(value: Any) -> str:
+        """Normalize caller-provided network policy text for the deny-all helper contract."""
         normalized = str(value or "").strip().lower()
         return normalized or "deny_all"
 
     @staticmethod
     def _network_policy_error_code(network_policy: str) -> str:
+        """Return the stable helper error code for an unsupported normalized network policy."""
         return "strict_allowlist_not_supported" if network_policy == "allowlist" else "unsupported_network_policy"
 
     @staticmethod

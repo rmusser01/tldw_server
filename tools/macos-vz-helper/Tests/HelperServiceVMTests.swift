@@ -93,14 +93,19 @@ import Testing
         vmManager: manager
     )
 
-    #expect(throws: HelperServiceError.self) {
-        try service.createVM(
+    do {
+        _ = try service.createVM(
             vmID: "vm-allowlist",
             templatePath: "/tmp/template.img",
             workspacePath: "/tmp/workspace",
             readinessTimeoutSeconds: 5,
             networkPolicy: "allowlist"
         )
+        Issue.record("expected unsupported network policy")
+    } catch HelperServiceError.unsupportedNetworkPolicy(let policy) {
+        #expect(policy == "allowlist")
+    } catch {
+        Issue.record("expected unsupportedNetworkPolicy, got \(error)")
     }
     #expect(registry.status(vmID: "vm-allowlist") == nil)
 }

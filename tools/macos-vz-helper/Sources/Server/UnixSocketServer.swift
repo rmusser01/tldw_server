@@ -110,12 +110,20 @@ final class UnixSocketServer {
         case "ping":
             return try encoder.encode(service.ping())
         case "validate_host":
-            return try encoder.encode(
-                service.validateHost(
-                    runtime: request.request["runtime"]?.stringValue ?? "",
-                    networkPolicy: request.request["network_policy"]?.stringValue ?? ""
+            do {
+                return try encoder.encode(
+                    service.validateHost(
+                        runtime: request.request["runtime"]?.stringValue ?? "",
+                        networkPolicy: try optionalStringField(
+                            request.request,
+                            key: "network_policy",
+                            defaultValue: "deny_all"
+                        )
+                    )
                 )
-            )
+            } catch {
+                return encodeErrorResponse(for: error)
+            }
         case "validate_template", "register_template":
             return try encoder.encode(
                 service.validateTemplate(
@@ -124,24 +132,29 @@ final class UnixSocketServer {
                 )
             )
         case "create_vm":
-            let templatePath = request.request["template"]?.stringValue
-                ?? request.request["template_path"]?.stringValue
-                ?? ""
-            let workspacePath = request.request["workspace_path"]?.stringValue ?? ""
-            let metadata = VMOwnershipMetadata(
-                owner: request.request["owner"]?.stringValue ?? "unknown",
-                runtime: request.request["runtime"]?.stringValue ?? "vz_linux",
-                runID: request.request["run_id"]?.stringValue ?? "",
-                sessionID: request.request["session_id"]?.stringValue ?? "",
-                sessionMode: request.request["session_mode"]?.boolValue ?? false,
-                templateID: request.request["template_id"]?.stringValue ?? "",
-                templatePath: templatePath,
-                runManifestPath: request.request["run_manifest_path"]?.stringValue ?? "",
-                planningSource: request.request["planning_source"]?.stringValue ?? "",
-                workspacePath: workspacePath,
-                createdAt: ""
-            )
             do {
+                let networkPolicy = try optionalStringField(
+                    request.request,
+                    key: "network_policy",
+                    defaultValue: "deny_all"
+                )
+                let templatePath = request.request["template"]?.stringValue
+                    ?? request.request["template_path"]?.stringValue
+                    ?? ""
+                let workspacePath = request.request["workspace_path"]?.stringValue ?? ""
+                let metadata = VMOwnershipMetadata(
+                    owner: request.request["owner"]?.stringValue ?? "unknown",
+                    runtime: request.request["runtime"]?.stringValue ?? "vz_linux",
+                    runID: request.request["run_id"]?.stringValue ?? "",
+                    sessionID: request.request["session_id"]?.stringValue ?? "",
+                    sessionMode: request.request["session_mode"]?.boolValue ?? false,
+                    templateID: request.request["template_id"]?.stringValue ?? "",
+                    templatePath: templatePath,
+                    runManifestPath: request.request["run_manifest_path"]?.stringValue ?? "",
+                    planningSource: request.request["planning_source"]?.stringValue ?? "",
+                    workspacePath: workspacePath,
+                    createdAt: ""
+                )
                 return try encoder.encode(
                     try service.createVM(
                         vmID: request.request["vm_name"]?.stringValue ?? request.request["run_id"]?.stringValue ?? "",
@@ -149,7 +162,7 @@ final class UnixSocketServer {
                         workspacePath: workspacePath,
                         readinessTimeoutSeconds: TimeInterval(request.request["timeout_sec"]?.intValue ?? 30),
                         metadata: metadata,
-                        networkPolicy: request.request["network_policy"]?.stringValue ?? "deny_all"
+                        networkPolicy: networkPolicy
                     )
                 )
             } catch {
@@ -509,6 +522,20 @@ final class UnixSocketServer {
         return (try? encoder.encode(response)) ?? Data("{\"protocol_version\":\"1\",\"helper_version\":\"0.1.0\",\"error_code\":\"helper_internal_error\",\"message\":\"encoding failure\"}".utf8)
     }
 
+    private func optionalStringField(
+        _ request: [String: JSONValue],
+        key: String,
+        defaultValue: String
+    ) throws -> String {
+        guard let value = request[key] else {
+            return defaultValue
+        }
+        guard let stringValue = value.stringValue else {
+            throw UnixSocketServerError.invalidRequest
+        }
+        return stringValue
+    }
+
     private func errorCode(for error: Error) -> String {
         switch error {
         case UnixSocketServerError.invalidRequest, is DecodingError:
@@ -551,6 +578,10 @@ final class UnixSocketServer {
              UnixSocketServerError.socketCreateFailed(let code),
              UnixSocketServerError.writeFailed(let code):
             return "system_error_\(code)"
+        case UnixSocketServerError.invalidRequest, is DecodingError:
+            return "invalid_request"
+        case HelperServiceError.unsupportedNetworkPolicy(let policy):
+            return policy
         default:
             return String(describing: error)
         }

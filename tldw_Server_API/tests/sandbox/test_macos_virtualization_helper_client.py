@@ -142,7 +142,7 @@ def test_fake_helper_supports_vz_linux_vm_create_and_exec(monkeypatch) -> None:
     assert created.metadata.workspace_path == "/tmp/workspace"
     assert created.metadata.network_policy == "deny_all"
     assert created.metadata.created_at != ""
-    assert created.details["runtime"] == "vz_linux"
+    assert "runtime" not in created.details
     assert created.details["transport"] == "vsock"
     assert created.details["network_policy"] == "deny_all"
 
@@ -177,6 +177,7 @@ def test_fake_helper_validates_vz_linux_host_readiness(monkeypatch) -> None:
     assert result["available"] is True
     assert result["execution_mode"] == "real"
     assert result["reasons"] == []
+    assert result["details"] == {"runtime": "vz_linux", "network_policy": "deny_all"}
 
 
 def test_fake_helper_rejects_unsupported_vz_linux_network_policy(monkeypatch) -> None:

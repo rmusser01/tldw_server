@@ -124,7 +124,50 @@ import Testing
     let json = try JSONSerialization.jsonObject(with: responseData) as? [String: Any]
 
     #expect(json?["error_code"] as? String == "strict_allowlist_not_supported")
+    #expect(json?["message"] as? String == "allowlist")
     #expect(registry.status(vmID: "vm-allowlist") == nil)
+}
+
+@Test func unixSocketServerRejectsCreateVMNonStringNetworkPolicy() throws {
+    let registry = VMRegistry()
+    let manager = VZLinuxVMManager(
+        registry: registry,
+        bootDriver: RecordingBootDriver(),
+        guestBridge: ReadyGuestBridge()
+    )
+    let service = HelperService(
+        hostFacts: HostFacts(isMacOS: true, isAppleSilicon: true),
+        registry: registry,
+        vmManager: manager
+    )
+    let server = UnixSocketServer(
+        socketPath: "/tmp/macos-vz-helper.sock",
+        service: service
+    )
+
+    let createRequest = """
+    {"operation":"create_vm","protocol_version":"1","request":{"vm_name":"vm-malformed-policy","template":"/tmp/template.img","workspace_path":"/workspace","network_policy":["deny_all"]}}
+    """.data(using: .utf8)!
+    let responseData = try server.handleRequestData(createRequest)
+    let json = try JSONSerialization.jsonObject(with: responseData) as? [String: Any]
+
+    #expect(json?["error_code"] as? String == "invalid_request")
+    #expect(registry.status(vmID: "vm-malformed-policy") == nil)
+}
+
+@Test func unixSocketServerRejectsValidateHostNonStringNetworkPolicy() throws {
+    let server = UnixSocketServer(
+        socketPath: "/tmp/macos-vz-helper.sock",
+        service: HelperService(hostFacts: HostFacts(isMacOS: true, isAppleSilicon: true))
+    )
+
+    let validateRequest = """
+    {"operation":"validate_host","protocol_version":"1","request":{"runtime":"vz_linux","network_policy":{"mode":"deny_all"}}}
+    """.data(using: .utf8)!
+    let responseData = try server.handleRequestData(validateRequest)
+    let json = try JSONSerialization.jsonObject(with: responseData) as? [String: Any]
+
+    #expect(json?["error_code"] as? String == "invalid_request")
 }
 
 @Test func unixSocketServerServesPingOverRealSocket() throws {
