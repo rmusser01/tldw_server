@@ -5,7 +5,8 @@ from tldw_Server_API.app.api.v1.endpoints._pagination_utils import (
 )
 
 
-def test_build_offset_pagination_meta_computes_has_more_and_next_offset():
+def test_build_offset_pagination_meta_computes_has_more_and_next_offset() -> None:
+    """Offset metadata reports a next page when returned count does not exhaust total."""
     pagination = build_offset_pagination_meta(
         limit=25,
         offset=50,
@@ -21,7 +22,8 @@ def test_build_offset_pagination_meta_computes_has_more_and_next_offset():
     assert pagination.next_offset == 75
 
 
-def test_build_offset_pagination_meta_ends_without_next_offset():
+def test_build_offset_pagination_meta_ends_without_next_offset() -> None:
+    """Offset metadata omits next_offset when the requested page reaches the total."""
     pagination = build_offset_pagination_meta(
         limit=25,
         offset=100,
@@ -33,7 +35,8 @@ def test_build_offset_pagination_meta_ends_without_next_offset():
     assert pagination.next_offset is None
 
 
-def test_build_pagination_link_header_uses_offset_metadata():
+def test_build_pagination_link_header_uses_offset_metadata() -> None:
+    """Link header construction uses canonical offset pagination metadata."""
     pagination = build_offset_pagination_meta(
         limit=25,
         offset=50,
@@ -54,7 +57,8 @@ def test_build_pagination_link_header_uses_offset_metadata():
     )
 
 
-def test_build_link_header_offset_compatibility_signature_stays_stable():
+def test_build_link_header_offset_compatibility_signature_stays_stable() -> None:
+    """Legacy offset Link header callers keep the same output shape."""
     link_header = build_link_header(
         base_path="/api/v1/workflows/runs",
         common_params=[("status", "running")],

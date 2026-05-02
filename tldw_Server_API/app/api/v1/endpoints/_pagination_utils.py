@@ -1,12 +1,11 @@
-from __future__ import annotations
-
 """
 Reusable helpers for building RFC5988 Link headers for paginated endpoints.
 
-This module is intentionally lightweight and dependency-free, so it can be
-used across endpoints (e.g., runs, events, future artifacts listings).
+This module centralizes pagination metadata and Link header construction for
+API endpoints while keeping dependencies limited to shared pagination schemas.
 """
 
+from __future__ import annotations
 
 import urllib.parse as _u
 
