@@ -400,6 +400,8 @@ git commit -m "Phase pagination-completion: migrate research page pagination"
 - Test: `tldw_Server_API/tests/Media_Ingestion_Modification/test_media_versions.py`
 - Test: media listing/navigation tests identified by inventory
 
+**Tranche note after inventory review:** Media list, trash, and POST search already emit canonical page fields in their `pagination` payloads and have tests asserting `mode`, `per_page`, `total`, and `has_more`. The first remaining small media gap is `/media/metadata-search`, which preserves legacy `page`, `per_page`, `total`, and `total_pages` but needs canonical `mode` and `has_more`.
+
 - [ ] **Step 1: Confirm media test coverage from inventory**
 
 Use the matrix to identify exact tests for each media route before editing. If a route lacks coverage, add focused route tests first or defer it.
