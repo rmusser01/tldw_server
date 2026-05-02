@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, HttpUrl, validator
+from pydantic import BaseModel, HttpUrl, model_validator, validator
 
 from tldw_Server_API.app.api.v1.schemas._compat import Field
 from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
@@ -27,6 +27,14 @@ _READING_SAVED_SEARCH_ALLOWED_SORTS = {
     "title_desc",
     "relevance",
 }
+
+
+def _default_offset_pagination_aliases(response):
+    if response.has_more is None:
+        response.has_more = response.pagination.has_more
+    if response.next_offset is None:
+        response.next_offset = response.pagination.next_offset
+    return response
 
 
 def _normalize_nonempty_string(value: Any, *, field_name: str) -> str:
@@ -288,7 +296,13 @@ class ReadingImportJobsListResponse(BaseModel):
     total: int
     limit: int | None = None
     offset: int | None = None
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
     pagination: OffsetPaginationMeta
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self):
+        return _default_offset_pagination_aliases(self)
 
 
 class ReadingDigestSuggestionsConfig(BaseModel):

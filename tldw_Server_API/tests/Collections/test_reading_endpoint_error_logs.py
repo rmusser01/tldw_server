@@ -147,6 +147,8 @@ async def test_list_reading_import_jobs_includes_canonical_pagination():
     assert response.pagination.offset == 1
     assert response.pagination.has_more is True
     assert response.pagination.next_offset == 3
+    assert response.has_more is True
+    assert response.next_offset == 3
 
 
 @pytest.mark.asyncio
