@@ -22,6 +22,8 @@ private struct VSockPendingRequest {
     var result: Result<Data, Error>?
 }
 
+private let maxAbandonedExecRequestIDs = 128
+
 final class VSockSession {
     let vmID: String
     let connectionToken: String
@@ -33,6 +35,8 @@ final class VSockSession {
     private var ready = false
     private var readinessError: Error?
     private var pendingRequest: VSockPendingRequest?
+    private var abandonedRequestIDs: Set<String> = []
+    private var abandonedRequestIDOrder: [String] = []
     private var readinessWaiters: [DispatchSemaphore] = []
 
     init(
@@ -53,6 +57,8 @@ final class VSockSession {
         channel = newChannel
         ready = false
         readinessError = nil
+        abandonedRequestIDs.removeAll()
+        abandonedRequestIDOrder.removeAll()
         lock.unlock()
 
         previousChannel?.close()
@@ -124,7 +130,8 @@ final class VSockSession {
 
         let timedOut = waiter.wait(timeout: .now() + timeoutSeconds) == .timedOut
         if timedOut {
-            completePendingRequest(with: .failure(VSockSessionError.requestTimedOut(requestID)))
+            markPendingRequestTimedOut(requestID)
+            throw VSockSessionError.requestTimedOut(requestID)
         }
 
         let result = try lock.withLock { () throws -> Result<Data, Error> in
@@ -267,14 +274,22 @@ final class VSockSession {
         let requestID = try requireString("request_id", in: payload)
 
         var pending: VSockPendingRequest?
+        var shouldIgnoreLateResponse = false
         lock.lock()
         if let current = pendingRequest, current.requestID == requestID {
             var updated = current
             updated.result = .success(line)
             pendingRequest = updated
             pending = updated
+        } else if abandonedRequestIDs.remove(requestID) != nil {
+            abandonedRequestIDOrder.removeAll { $0 == requestID }
+            shouldIgnoreLateResponse = true
         }
         lock.unlock()
+
+        if shouldIgnoreLateResponse {
+            return
+        }
 
         guard let pending else {
             throw VSockSessionError.invalidMessage(requestID)
@@ -293,6 +308,25 @@ final class VSockSession {
         }
         lock.unlock()
         pending?.semaphore.signal()
+    }
+
+    private func markPendingRequestTimedOut(_ requestID: String) {
+        lock.lock()
+        if let current = pendingRequest, current.requestID == requestID {
+            pendingRequest = nil
+            rememberAbandonedRequestID(requestID)
+        }
+        lock.unlock()
+    }
+
+    private func rememberAbandonedRequestID(_ requestID: String) {
+        if abandonedRequestIDs.insert(requestID).inserted {
+            abandonedRequestIDOrder.append(requestID)
+        }
+        while abandonedRequestIDOrder.count > maxAbandonedExecRequestIDs {
+            let evictedRequestID = abandonedRequestIDOrder.removeFirst()
+            abandonedRequestIDs.remove(evictedRequestID)
+        }
     }
 
     private func validateControlMessage(_ payload: [String: Any], requireToken: Bool) throws {

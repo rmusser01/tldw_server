@@ -122,3 +122,61 @@ final class InMemoryVSockChannel: VSockChanneling {
     #expect(channel.writes.count == 3)
     #expect(channel.writes.last?["type"] as? String == "exec")
 }
+
+@Test func vsockSessionIgnoresLateResponseAfterExecTimeout() throws {
+    let manager = VSockSessionManager()
+    _ = manager.prepareSession(
+        vmID: "vm-timeout",
+        connectionToken: "token-timeout",
+        port: 1024,
+        workspaceRoot: "/workspace"
+    )
+    let channel = InMemoryVSockChannel()
+    var respondToExec = false
+    channel.onWrite = { payload in
+        guard payload["type"] as? String == "exec", respondToExec else {
+            return
+        }
+        let requestID = payload["request_id"] as? String ?? ""
+        channel.push(
+            json: #"{"protocol_version":"1","request_id":"\#(requestID)","exit_code":0,"stdout":"ok\n","stderr":""}"#
+        )
+    }
+
+    #expect(manager.accept(channel: channel, for: "vm-timeout") == true)
+    channel.push(
+        json: #"{"protocol_version":"1","request_id":"req-handshake","type":"handshake","vm_id":"vm-timeout","connection_token":"token-timeout"}"#
+    )
+    channel.push(
+        json: #"{"protocol_version":"1","request_id":"req-ready","type":"ready"}"#
+    )
+
+    let bridge = VSockBridge(transport: manager)
+    try bridge.waitUntilReady(vmID: "vm-timeout", timeoutSeconds: 0.1)
+
+    #expect(throws: VSockSessionError.self) {
+        _ = try bridge.exec(
+            vmID: "vm-timeout",
+            argv: ["/bin/sh", "-c", "sleep 2"],
+            cwd: "/workspace",
+            env: [:],
+            timeoutSeconds: 0.01
+        )
+    }
+    let timedOutRequestID = channel.writes.last?["request_id"] as? String ?? ""
+    channel.push(
+        json: #"{"protocol_version":"1","request_id":"\#(timedOutRequestID)","exit_code":0,"stdout":"late\n","stderr":""}"#
+    )
+
+    respondToExec = true
+    let result = try bridge.exec(
+        vmID: "vm-timeout",
+        argv: ["/bin/echo", "ok"],
+        cwd: "/workspace",
+        env: [:],
+        timeoutSeconds: 0.1
+    )
+
+    #expect(result.exitCode == 0)
+    #expect(result.stdout == "ok\n")
+}
