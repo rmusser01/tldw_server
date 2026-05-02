@@ -4,6 +4,7 @@ Maintenance-scheduler startup helpers extracted from the application lifespan.
 
 from __future__ import annotations
 
+import asyncio
 import os
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -12,7 +13,12 @@ from typing import Any
 from loguru import logger
 
 from tldw_Server_API.app.core.testing import is_truthy as _is_truthy
-from tldw_Server_API.app.services.lifecycle_workers import ManagedWorker, ShutdownPhase, WorkerInventory
+from tldw_Server_API.app.services.lifecycle_workers import (
+    ManagedWorker,
+    ShutdownPhase,
+    WorkerInventory,
+    start_stop_event_worker,
+)
 
 _STARTUP_GUARD_EXCEPTIONS = (
     AttributeError,
@@ -48,7 +54,9 @@ async def start_maintenance_schedulers(
         kanban_activity_cleanup_task=await _start_kanban_activity_cleanup_scheduler(
             worker_inventory=worker_inventory,
         ),
-        ingestion_sources_cleanup_task=await _start_ingestion_sources_cleanup_scheduler(),
+        ingestion_sources_cleanup_task=await _start_ingestion_sources_cleanup_scheduler(
+            worker_inventory=worker_inventory,
+        ),
         kanban_purge_task=await _start_kanban_purge_scheduler(
             worker_inventory=worker_inventory,
         ),
@@ -97,7 +105,15 @@ async def _start_kanban_activity_cleanup_scheduler(
     )
 
 
-async def _start_ingestion_sources_cleanup_scheduler() -> Any | None:
+async def _start_ingestion_sources_cleanup_scheduler(
+    *,
+    worker_inventory: WorkerInventory | None = None,
+) -> Any | None:
+    async def _start_service() -> Any | None:
+        if worker_inventory is None:
+            return await _start_ingestion_sources_cleanup_scheduler_service()
+        return await _start_ingestion_sources_cleanup_registered(worker_inventory)
+
     return await _start_env_gated_task(
         env_key="INGESTION_SOURCES_CLEANUP_ENABLED",
         disabled_message=(
@@ -106,7 +122,7 @@ async def _start_ingestion_sources_cleanup_scheduler() -> Any | None:
         ),
         started_message="Ingestion source archive cleanup scheduler started",
         failure_message="Failed to start ingestion source archive cleanup scheduler: {exc}",
-        starter=_start_ingestion_sources_cleanup_scheduler_service,
+        starter=_start_service,
     )
 
 
@@ -226,6 +242,28 @@ async def _start_ingestion_sources_cleanup_scheduler_service() -> Any | None:
     )
 
     return await start_ingestion_sources_cleanup_scheduler()
+
+
+async def _start_ingestion_sources_cleanup_registered(
+    worker_inventory: WorkerInventory,
+) -> Any | None:
+    task, _stop_event = await start_stop_event_worker(
+        worker_inventory,
+        name="ingestion_sources_cleanup",
+        task_name="ingestion_sources_cleanup_task",
+        coroutine_factory=_run_ingestion_sources_cleanup_loop,
+        category="maintenance",
+        shutdown_phase=ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN,
+    )
+    return task
+
+
+async def _run_ingestion_sources_cleanup_loop(stop_event: asyncio.Event) -> None:
+    from tldw_Server_API.app.services.ingestion_sources_cleanup_service import (
+        run_ingestion_sources_cleanup_loop,
+    )
+
+    await run_ingestion_sources_cleanup_loop(stop_event)
 
 
 async def _start_kanban_purge_scheduler_service() -> Any | None:

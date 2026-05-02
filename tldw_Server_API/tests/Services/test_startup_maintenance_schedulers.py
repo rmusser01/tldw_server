@@ -33,7 +33,8 @@ async def test_start_maintenance_schedulers_combines_handles(
         calls.append("kanban-activity")
         return "kanban-activity-task"
 
-    async def _fake_ingestion_sources():
+    async def _fake_ingestion_sources(*, worker_inventory=None):
+        assert worker_inventory is None
         calls.append("ingestion-sources")
         return "ingestion-sources-task"
 
@@ -86,37 +87,47 @@ async def test_start_maintenance_schedulers_combines_handles(
 
 
 @pytest.mark.asyncio
-async def test_start_maintenance_schedulers_passes_worker_inventory_to_kanban_helpers(
+async def test_start_maintenance_schedulers_passes_worker_inventory_to_registered_helpers(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     startup_maintenance = _import_startup_maintenance_schedulers()
     worker_inventory = object()
     calls: list[tuple[str, object | None]] = []
 
-    async def _fake_quality():
+    async def _fake_quality() -> None:
         return None
 
-    async def _fake_outputs():
+    async def _fake_outputs() -> None:
         return None
 
-    async def _fake_kanban_activity(*, worker_inventory=None):
+    async def _fake_kanban_activity(
+        *,
+        worker_inventory: object | None = None,
+    ) -> str:
         calls.append(("kanban-activity", worker_inventory))
         return "kanban-activity-task"
 
-    async def _fake_ingestion_sources():
-        return None
+    async def _fake_ingestion_sources(
+        *,
+        worker_inventory: object | None = None,
+    ) -> str:
+        calls.append(("ingestion-sources", worker_inventory))
+        return "ingestion-sources-task"
 
-    async def _fake_kanban_purge(*, worker_inventory=None):
+    async def _fake_kanban_purge(
+        *,
+        worker_inventory: object | None = None,
+    ) -> str:
         calls.append(("kanban-purge", worker_inventory))
         return "kanban-purge-task"
 
-    async def _fake_files_gc():
+    async def _fake_files_gc() -> None:
         return None
 
-    async def _fake_notifications():
+    async def _fake_notifications() -> None:
         return None
 
-    async def _fake_jobs_prune():
+    async def _fake_jobs_prune() -> None:
         return None
 
     monkeypatch.setattr(startup_maintenance, "_start_quality_eval_scheduler", _fake_quality)
@@ -134,10 +145,53 @@ async def test_start_maintenance_schedulers_passes_worker_inventory_to_kanban_he
 
     assert calls == [
         ("kanban-activity", worker_inventory),
+        ("ingestion-sources", worker_inventory),
         ("kanban-purge", worker_inventory),
     ]
     assert handles.kanban_activity_cleanup_task == "kanban-activity-task"
+    assert handles.ingestion_sources_cleanup_task == "ingestion-sources-task"
     assert handles.kanban_purge_task == "kanban-purge-task"
+
+
+@pytest.mark.asyncio
+async def test_ingestion_sources_cleanup_scheduler_registers_background_inventory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_maintenance = _import_startup_maintenance_schedulers()
+    worker_inventory = object()
+    task = object()
+    stop_event = object()
+    calls: list[dict[str, object]] = []
+
+    async def _fake_start_stop_event_worker(
+        inventory: object,
+        **kwargs: object,
+    ) -> tuple[object, object]:
+        calls.append({"inventory": inventory, **kwargs})
+        return task, stop_event
+
+    monkeypatch.setattr(startup_maintenance, "_env_enabled", lambda key: True)
+    monkeypatch.setattr(
+        startup_maintenance,
+        "start_stop_event_worker",
+        _fake_start_stop_event_worker,
+    )
+
+    returned_task = await startup_maintenance._start_ingestion_sources_cleanup_scheduler(
+        worker_inventory=worker_inventory,
+    )
+
+    assert returned_task is task
+    assert calls == [
+        {
+            "inventory": worker_inventory,
+            "name": "ingestion_sources_cleanup",
+            "task_name": "ingestion_sources_cleanup_task",
+            "coroutine_factory": startup_maintenance._run_ingestion_sources_cleanup_loop,
+            "category": "maintenance",
+            "shutdown_phase": startup_maintenance.ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN,
+        }
+    ]
 
 
 @pytest.mark.asyncio
