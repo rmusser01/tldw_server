@@ -122,9 +122,15 @@ This document defines the first guest protocol used between the Swift
   "env": {
     "EXAMPLE": "1"
   },
-  "timeout_sec": 30
+  "timeout_sec": 30,
+  "max_output_bytes": 1048576
 }
 ```
+
+`max_output_bytes` is optional. When present, it is a combined stdout/stderr
+byte cap. The guest agent terminates the process when observed output exceeds
+the cap, returns only a bounded UTF-8-safe prefix, and reports guest-prefixed
+detail metadata.
 
 ### Exec response
 
@@ -134,9 +140,21 @@ This document defines the first guest protocol used between the Swift
   "request_id": "req-1",
   "exit_code": 0,
   "stdout": "ok\n",
-  "stderr": ""
+  "stderr": "",
+  "details": {
+    "guest_output_limit_bytes": "1048576",
+    "guest_output_limit_exceeded": "false",
+    "guest_stdout_bytes_observed": "3",
+    "guest_stderr_bytes_observed": "0",
+    "guest_stdout_bytes_returned": "3",
+    "guest_stderr_bytes_returned": "0"
+  }
 }
 ```
+
+When output cap enforcement terminates the command, the response uses exit code
+`137` and sets `guest_output_limit_exceeded` to `"true"` with
+`guest_output_kill_reason` set to `"output_limit"`.
 
 ### Error response
 
