@@ -87,6 +87,8 @@ async def test_monitoring_alerts_include_backend_overlay_and_authoritative_actio
         assert payload["pagination"]["offset"] == 0
         assert payload["pagination"]["has_more"] is False
         assert payload["pagination"]["next_offset"] is None
+        assert payload["has_more"] is False
+        assert payload["next_offset"] is None
         items = payload["items"]
         assert len(items) == 1
         assert items[0]["alert_identity"] == f"alert:{alert_id}"
