@@ -1,11 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 import importlib
 import sys
-from types import SimpleNamespace
 
 import pytest
-
+from fastapi import FastAPI
 
 pytestmark = pytest.mark.unit
 
@@ -22,11 +22,13 @@ async def test_start_auxiliary_services_combines_handles_and_starts_personalizat
     startup_aux = _import_startup_auxiliary_services()
     calls: list[str] = []
 
-    async def _fake_claims_alerts():
+    async def _fake_claims_alerts(**kwargs: object) -> str:
+        assert kwargs == {"worker_inventory": None}
         calls.append("claims-alerts")
         return "claims-alerts-task"
 
-    async def _fake_claims_review():
+    async def _fake_claims_review(**kwargs: object) -> str:
+        assert kwargs == {"worker_inventory": None}
         calls.append("claims-review")
         return "claims-review-task"
 
@@ -75,10 +77,12 @@ async def test_start_auxiliary_services_passes_worker_inventory_to_usage_aggrega
     worker_inventory = object()
     seen_inventory: list[object] = []
 
-    async def _fake_claims_alerts():
+    async def _fake_claims_alerts(**kwargs: object) -> None:
+        assert kwargs == {"worker_inventory": worker_inventory}
         return None
 
-    async def _fake_claims_review():
+    async def _fake_claims_review(**kwargs: object) -> None:
+        assert kwargs == {"worker_inventory": worker_inventory}
         return None
 
     async def _fake_usage(**kwargs: object) -> str:
@@ -106,6 +110,189 @@ async def test_start_auxiliary_services_passes_worker_inventory_to_usage_aggrega
     assert seen_inventory == [worker_inventory, worker_inventory]
     assert handles.usage_task == "usage-task"
     assert handles.llm_usage_task == "llm-usage-task"
+
+
+@pytest.mark.asyncio
+async def test_start_auxiliary_services_registers_claims_schedulers_with_worker_inventory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_aux = _import_startup_auxiliary_services()
+    from tldw_Server_API.app.services.lifecycle_workers import (
+        ShutdownPhase,
+        WorkerRegistry,
+    )
+
+    app = FastAPI()
+    worker_inventory = WorkerRegistry(app)
+    created_tasks: list[asyncio.Task[None]] = []
+
+    async def _wait_forever() -> None:
+        await asyncio.Event().wait()
+
+    def _make_task(name: str) -> asyncio.Task[None]:
+        task = asyncio.create_task(_wait_forever(), name=name)
+        created_tasks.append(task)
+        return task
+
+    async def _fake_claims_alerts_service() -> asyncio.Task[None]:
+        return _make_task("claims_alerts_scheduler")
+
+    async def _fake_claims_review_service() -> asyncio.Task[None]:
+        return _make_task("claims_review_metrics_scheduler")
+
+    async def _fake_usage(**kwargs: object) -> None:
+        assert kwargs == {"worker_inventory": worker_inventory}
+
+    async def _fake_llm_usage(**kwargs: object) -> None:
+        assert kwargs == {"worker_inventory": worker_inventory}
+
+    async def _fake_personalization(_app_settings) -> None:
+        return None
+
+    monkeypatch.setattr(
+        startup_aux,
+        "_start_claims_alerts_scheduler_service",
+        _fake_claims_alerts_service,
+    )
+    monkeypatch.setattr(
+        startup_aux,
+        "_start_claims_review_metrics_scheduler_service",
+        _fake_claims_review_service,
+    )
+    monkeypatch.setattr(startup_aux, "_start_usage_aggregator", _fake_usage)
+    monkeypatch.setattr(startup_aux, "_start_llm_usage_aggregator", _fake_llm_usage)
+    monkeypatch.setattr(startup_aux, "_start_personalization_consolidation", _fake_personalization)
+
+    try:
+        handles = await startup_aux.start_auxiliary_services(
+            {},
+            worker_inventory=worker_inventory,
+        )
+
+        assert handles.claims_alerts_task is created_tasks[0]
+        assert handles.claims_review_metrics_task is created_tasks[1]
+        assert [handle.name for handle in worker_inventory.handles] == [
+            "claims_alerts_task",
+            "claims_review_metrics_task",
+        ]
+        assert [handle.task for handle in worker_inventory.handles] == created_tasks
+        assert [handle.stop_event for handle in worker_inventory.handles] == [None, None]
+        assert [handle.category for handle in worker_inventory.handles] == [
+            "auxiliary",
+            "auxiliary",
+        ]
+        assert [
+            handle.shutdown_phase for handle in worker_inventory.handles
+        ] == [
+            ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN,
+            ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN,
+        ]
+        assert app.state._tldw_shutdown_job_poller_inventory == []
+    finally:
+        for task in created_tasks:
+            task.cancel()
+        await asyncio.gather(*created_tasks, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_register_auxiliary_task_preserves_registration_error_when_rollback_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_aux = _import_startup_auxiliary_services()
+    task = object()
+
+    class _FailingInventory:
+        def register(self, worker: object) -> None:
+            raise AttributeError("registration failed")
+
+    async def _failing_cancel(_task: object) -> None:
+        raise LookupError("rollback failed")
+
+    monkeypatch.setattr(startup_aux, "_cancel_unregistered_task", _failing_cancel)
+
+    with pytest.raises(AttributeError, match="registration failed"):
+        await startup_aux._register_auxiliary_task(
+            worker_inventory=_FailingInventory(),
+            task=task,
+            worker_name="claims_alerts_task",
+        )
+
+
+@pytest.mark.asyncio
+async def test_start_auxiliary_services_rolls_back_claims_task_when_inventory_register_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_aux = _import_startup_auxiliary_services()
+    from tldw_Server_API.app.services.lifecycle_workers import WorkerRegistry
+
+    app = FastAPI()
+    worker_inventory = WorkerRegistry(app)
+    created_tasks: list[asyncio.Task[None]] = []
+
+    async def _wait_forever() -> None:
+        await asyncio.Event().wait()
+
+    def _make_task(name: str) -> asyncio.Task[None]:
+        task = asyncio.create_task(_wait_forever(), name=name)
+        created_tasks.append(task)
+        return task
+
+    async def _fake_claims_alerts_service() -> asyncio.Task[None]:
+        return _make_task("claims_alerts_scheduler")
+
+    def _failing_register(worker: object) -> None:
+        worker_inventory.handles.append(worker)
+        raise LookupError("registration failed")
+
+    monkeypatch.setattr(
+        startup_aux,
+        "_start_claims_alerts_scheduler_service",
+        _fake_claims_alerts_service,
+    )
+    monkeypatch.setattr(worker_inventory, "register", _failing_register)
+
+    try:
+        with pytest.raises(LookupError, match="registration failed"):
+            await startup_aux.start_auxiliary_services(
+                {},
+                worker_inventory=worker_inventory,
+            )
+
+        assert len(created_tasks) == 1
+        assert created_tasks[0].cancelled()
+        assert worker_inventory.handles == []
+    finally:
+        for task in created_tasks:
+            task.cancel()
+        await asyncio.gather(*created_tasks, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_cancel_unregistered_task_swallows_task_exception_during_rollback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_aux = _import_startup_auxiliary_services()
+    debug_messages: list[str] = []
+
+    async def _raises_on_cancel() -> None:
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError as exc:
+            raise LookupError("cleanup failed") from exc
+
+    monkeypatch.setattr(
+        startup_aux.logger,
+        "debug",
+        lambda message, *args: debug_messages.append(message.format(*args) if args else message),
+    )
+
+    task = asyncio.create_task(_raises_on_cancel(), name="claims_alerts_scheduler")
+    await asyncio.sleep(0)
+
+    await startup_aux._cancel_unregistered_task(task, timeout=0.25)
+
+    assert task.done()
+    assert debug_messages == ["Auxiliary scheduler raised during startup rollback: cleanup failed"]
 
 
 @pytest.mark.asyncio
