@@ -280,6 +280,16 @@ def test_acp_session_events_query_schema(client_user_only, stub_acp_store):
     assert payload["session_id"] == "session-123"
     assert payload["total"] == 2
     assert len(payload["events"]) == 2
+    assert payload["pagination"] == {
+        "mode": "offset",
+        "limit": 100,
+        "offset": 0,
+        "total": 2,
+        "has_more": False,
+        "next_offset": None,
+    }
+    assert payload["has_more"] is False
+    assert payload["next_offset"] is None
     assert payload["events"][0]["event_type"] == "message"
     assert payload["events"][0]["role"] == "user"
 

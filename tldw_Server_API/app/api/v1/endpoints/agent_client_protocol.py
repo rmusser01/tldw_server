@@ -2476,9 +2476,20 @@ async def acp_session_events(
         session_id=session_id,
         metadata={"limit": int(limit), "offset": int(offset)},
     )
+    pagination = build_offset_pagination_meta(
+        total=total,
+        limit=limit,
+        offset=offset,
+        count=len(sliced),
+    )
     return {
         "session_id": session_id,
         "total": total,
+        "limit": limit,
+        "offset": offset,
+        "pagination": pagination.model_dump(mode="json"),
+        "has_more": pagination.has_more,
+        "next_offset": pagination.next_offset,
         "events": sliced,
     }
 
