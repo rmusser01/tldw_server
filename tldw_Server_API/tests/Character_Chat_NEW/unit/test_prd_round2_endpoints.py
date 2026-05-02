@@ -493,6 +493,14 @@ class TestLorebookDiagnosticExport:
         assert asc_resp.status_code == 200
         asc_data = asc_resp.json()
         assert asc_data["total_turns_with_diagnostics"] == 2
+        assert asc_data["pagination"] == {
+            "mode": "page",
+            "page": 1,
+            "per_page": 1,
+            "total": 2,
+            "total_pages": 2,
+            "has_more": True,
+        }
         assert len(asc_data["turns"]) == 1
         assert asc_data["turns"][0]["message_id"] == first_message_id
 

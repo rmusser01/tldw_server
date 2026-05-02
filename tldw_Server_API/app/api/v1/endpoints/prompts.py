@@ -518,7 +518,13 @@ async def search_all_prompts(
             items=items,
             total_matches=total_matches,
             page=page,
-            per_page=results_per_page
+            per_page=results_per_page,
+            pagination=build_page_pagination_meta(
+                page=page,
+                per_page=results_per_page,
+                total=total_matches,
+                total_pages=(total_matches + results_per_page - 1) // results_per_page,
+            ),
         )
     except ValueError as e: # Bad page/per_page
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e

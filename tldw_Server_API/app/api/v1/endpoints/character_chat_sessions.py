@@ -77,6 +77,7 @@ from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import (
     DEFAULT_LLM_PROVIDER,
 )
 from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
+from tldw_Server_API.app.api.v1.utils.pagination import build_page_pagination_meta
 from tldw_Server_API.app.api.v1.utils.deprecation import build_deprecation_headers
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
@@ -6211,7 +6212,10 @@ async def export_chat_history(
 
             # Add pagination info to JSON export
             export_data["pagination"] = {
+                "mode": "page",
                 "page": page,
+                "per_page": page_size,
+                "total": total_messages,
                 "page_size": page_size,
                 "total_pages": total_pages,
                 "total_messages": total_messages,
@@ -6787,6 +6791,12 @@ async def export_lorebook_diagnostics(
         turns=page_items,
         page=page,
         size=size,
+        pagination=build_page_pagination_meta(
+            page=page,
+            per_page=size,
+            total=total,
+            total_pages=(total + size - 1) // size,
+        ),
     )
 
 

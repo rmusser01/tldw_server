@@ -85,6 +85,36 @@ class _BrokenSearchPromptsDb:
         raise DatabaseError("driver failed")
 
 
+class _SearchPromptsDb:
+    def search_prompts(self, **kwargs):
+        assert kwargs["page"] == 2
+        assert kwargs["results_per_page"] == 1
+        return (
+            [
+                {
+                    "id": 42,
+                    "uuid": "00000000-0000-0000-0000-000000000042",
+                    "name": "Prompt 42",
+                    "author": "tester",
+                    "details": None,
+                    "system_prompt": "system",
+                    "user_prompt": "user",
+                    "prompt_format": "legacy",
+                    "prompt_schema_version": None,
+                    "prompt_definition": None,
+                    "last_modified": datetime(2026, 5, 2, tzinfo=timezone.utc),
+                    "version": 1,
+                    "usage_count": 0,
+                    "last_used_at": None,
+                    "keywords": [],
+                    "deleted": False,
+                    "relevance_score": 0.5,
+                }
+            ],
+            3,
+        )
+
+
 class _CreateKeywordDb:
     def __init__(
         self,
@@ -281,6 +311,27 @@ class _RestorePromptVersionDb:
 
     def restore_prompt_version(self, *_args, **_kwargs):
         raise self._exc
+
+
+@pytest.mark.asyncio
+async def test_search_all_prompts_includes_canonical_page_pagination():
+    response = await search_all_prompts(
+        search_query="alpha",
+        search_fields=None,
+        page=2,
+        results_per_page=1,
+        include_deleted=False,
+        db=_SearchPromptsDb(),
+    )
+
+    assert response.pagination.model_dump(mode="json") == {
+        "mode": "page",
+        "page": 2,
+        "per_page": 1,
+        "total": 3,
+        "total_pages": 3,
+        "has_more": True,
+    }
 
 
 @pytest.mark.asyncio

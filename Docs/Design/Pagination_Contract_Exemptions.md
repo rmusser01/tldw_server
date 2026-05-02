@@ -75,6 +75,9 @@ Current pagination-sensitive examples:
   `after_id`; keep continuation in the stream cursor channel.
 - `GET /api/v1/notifications/stream`: SSE event stream using `after` and
   `Last-Event-ID`; keep continuation in the stream cursor channel.
+- `GET /reading/export`: streamed file export. The `page` input selects which
+  rows to include in the download; the response body is the exported file, not a
+  JSON list envelope.
 - `GET /watchlists/runs/export.csv`: CSV export; keep selection/filter inputs
   separate from response-body pagination metadata.
 

@@ -119,6 +119,7 @@ class PromptSearchResponse(BaseModel):
     total_matches: int
     page: int
     per_page: int
+    pagination: PagePaginationMeta
 
 
 class PromptVersionResponse(BaseModel):
