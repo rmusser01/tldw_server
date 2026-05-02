@@ -357,6 +357,92 @@ describe("usePersonaLiveVoiceController", () => {
     expect(hookMocks.micStart).not.toHaveBeenCalled()
   })
 
+  it("surfaces a profile-specific wake rejection reason from the server", async () => {
+    const wakeHarness = createWakeDetectorHarness()
+    const ws = {
+      readyState: WebSocket.OPEN,
+      send: vi.fn()
+    } as unknown as WebSocket
+
+    const { result } = renderHook(() =>
+      usePersonaLiveVoiceController({
+        ws,
+        connected: true,
+        sessionId: "sess-1",
+        personaId: "persona-1",
+        resolvedDefaults,
+        canUseServerStt: true,
+        wakeTriggerPhrases: ["hey helper"],
+        wakeDetectorFactory: () => wakeHarness.detector
+      })
+    )
+
+    await act(async () => {
+      await result.current.toggleWakeArmed()
+    })
+
+    act(() => {
+      wakeHarness.fireWake("runtime only")
+    })
+
+    act(() => {
+      result.current.handlePayload({
+        event: "notice",
+        reason_code: "WAKE_ACTIVATION_REJECTED",
+        wake_rejection_reason: "not_saved_in_profile",
+        message: "Wake activation was rejected for this persona session."
+      })
+    })
+
+    await waitFor(() => {
+      expect(result.current.wakeWarning).toMatch(/saved trigger phrase/i)
+    })
+    expect(result.current.wakeArmed).toBe(true)
+  })
+
+  it("surfaces a runtime wake configuration rejection reason from the server", async () => {
+    const wakeHarness = createWakeDetectorHarness()
+    const ws = {
+      readyState: WebSocket.OPEN,
+      send: vi.fn()
+    } as unknown as WebSocket
+
+    const { result } = renderHook(() =>
+      usePersonaLiveVoiceController({
+        ws,
+        connected: true,
+        sessionId: "sess-1",
+        personaId: "persona-1",
+        resolvedDefaults,
+        canUseServerStt: true,
+        wakeTriggerPhrases: ["hey helper"],
+        wakeDetectorFactory: () => wakeHarness.detector
+      })
+    )
+
+    await act(async () => {
+      await result.current.toggleWakeArmed()
+    })
+
+    act(() => {
+      wakeHarness.fireWake("hey helper")
+    })
+
+    act(() => {
+      result.current.handlePayload({
+        event: "notice",
+        reason_code: "WAKE_ACTIVATION_REJECTED",
+        wake_rejection_reason: "missing_from_runtime_config",
+        message: "Wake activation was rejected for this persona session."
+      })
+    })
+
+    await waitFor(() => {
+      expect(result.current.wakeWarning).toMatch(/live voice configuration/i)
+    })
+    expect(result.current.wakeArmed).toBe(true)
+  })
+
   it("sends wake deactivation when wake listening is disarmed", async () => {
     const wakeHarness = createWakeDetectorHarness()
     const ws = {

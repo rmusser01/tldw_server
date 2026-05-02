@@ -101,6 +101,32 @@ const formatActiveToolStatus = (tool: unknown, why: unknown): string => {
   return `Running ${toolName}: ${whyText}`
 }
 
+const formatWakeActivationRejectedMessage = (
+  payload: PersonaLiveVoicePayload
+): string => {
+  const reason = String(payload?.wake_rejection_reason || "").trim()
+  if (reason === "not_saved_in_profile") {
+    return (
+      "Wake phrase was heard, but it is not a saved trigger phrase for this " +
+      "persona. Add it to the selected persona's trigger phrases, then arm " +
+      "wake listening again."
+    )
+  }
+  if (reason === "missing_from_runtime_config") {
+    return (
+      "Wake phrase was heard, but the live voice configuration did not load " +
+      "that saved trigger phrase. Reconnect Persona Live or save voice defaults again."
+    )
+  }
+  if (reason === "phrase_not_configured") {
+    return (
+      "Wake phrase was heard, but it is not configured for this Persona Live " +
+      "session. Check the selected persona's saved trigger phrases."
+    )
+  }
+  return String(payload?.message || "Wake activation was rejected.")
+}
+
 export const usePersonaLiveVoiceController = ({
   ws,
   connected,
@@ -670,7 +696,9 @@ export const usePersonaLiveVoiceController = ({
     ws
   ])
 
-  const startWakeListening = React.useCallback(async () => {
+  const startWakeListening = React.useCallback(async (
+    options: { preserveWarning?: boolean } = {}
+  ) => {
     const phrases = (wakeTriggerPhrases || [])
       .map((phrase) => String(phrase || "").trim())
       .filter(Boolean)
@@ -685,7 +713,9 @@ export const usePersonaLiveVoiceController = ({
     wakeArmedRef.current = true
     wakeActiveRef.current = false
     setWakeArmed(true)
-    setWakeWarning(null)
+    if (!options.preserveWarning) {
+      setWakeWarning(null)
+    }
     setWakeDetectorState("starting")
 
     const detector = wakeDetectorFactory?.() || new BrowserTranscriptWakeDetector()
@@ -1164,9 +1194,9 @@ export const usePersonaLiveVoiceController = ({
         }
         if (reasonCode === "WAKE_ACTIVATION_REJECTED") {
           wakeActiveRef.current = false
-          setWakeWarning(String(payload?.message || "Wake activation was rejected."))
+          setWakeWarning(formatWakeActivationRejectedMessage(payload))
           if (wakeArmedRef.current) {
-            void startWakeListening()
+            void startWakeListening({ preserveWarning: true })
           }
           return
         }
