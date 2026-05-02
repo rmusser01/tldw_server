@@ -1,8 +1,10 @@
 package guest
 
 import (
+	"context"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 )
 
@@ -115,5 +117,43 @@ func TestGuestServerExecOutputCapKeepsUTF8Valid(t *testing.T) {
 	}
 	if strings.Contains(output, "\uFFFD") {
 		t.Fatalf("expected truncation without replacement characters, got %q", output)
+	}
+}
+
+func TestBoundedExecOutputTimeoutWinsOverPostTimeoutDrain(t *testing.T) {
+	timeoutCtx, timeoutCancel := context.WithTimeout(context.Background(), time.Nanosecond)
+	defer timeoutCancel()
+	<-timeoutCtx.Done()
+
+	cancelCalled := false
+	limiter := &boundedExecOutput{
+		limit:        4,
+		cancelReason: outputLimitReasonNone,
+		timeoutCtx:   timeoutCtx,
+		cancel: func() {
+			cancelCalled = true
+		},
+		kill: func() {
+			t.Fatal("post-timeout drain should not invoke output-limit kill")
+		},
+	}
+
+	limiter.write(outputStreamStdout, []byte("exceeds-cap"))
+	stdout, stderr, details, reason := limiter.response()
+
+	if cancelCalled {
+		t.Fatal("post-timeout drain should not invoke output-limit cancel")
+	}
+	if reason != outputLimitReasonTimeout {
+		t.Fatalf("expected timeout reason to win, got %q", reason)
+	}
+	if details["guest_output_kill_reason"] != string(outputLimitReasonTimeout) {
+		t.Fatalf("expected timeout kill reason detail, got %#v", details)
+	}
+	if details["guest_output_limit_exceeded"] != "true" {
+		t.Fatalf("expected exceeded detail to remain true after drain, got %#v", details)
+	}
+	if len([]byte(stdout))+len([]byte(stderr)) > 4 {
+		t.Fatalf("returned output exceeds cap: stdout=%q stderr=%q", stdout, stderr)
 	}
 }
