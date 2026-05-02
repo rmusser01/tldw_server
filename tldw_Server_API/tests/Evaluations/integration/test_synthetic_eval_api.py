@@ -88,6 +88,8 @@ async def test_synthetic_queue_filters_by_recipe_kind(async_api_client, auth_hea
         "has_more": False,
         "next_offset": None,
     }
+    assert body["has_more"] is False
+    assert body["next_offset"] is None
     assert all(item["recipe_kind"] == "rag_answer_quality" for item in body["data"])
 
 
@@ -173,6 +175,8 @@ async def test_synthetic_queue_filters_by_generation_batch_id(async_api_client, 
         "has_more": False,
         "next_offset": None,
     }
+    assert body["has_more"] is False
+    assert body["next_offset"] is None
     assert all(
         item["sample_metadata"]["generation_batch_id"] == generation_batch_id
         for item in body["data"]
