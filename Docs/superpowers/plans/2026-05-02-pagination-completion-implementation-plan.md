@@ -449,7 +449,11 @@ git commit -m "Phase pagination-completion: migrate media page pagination"
 - Test: `tldw_Server_API/tests/TTS_NEW/unit/test_tts_history_endpoints.py`
 - Test: audio jobs tests identified by inventory
 
-- [ ] **Step 1: Add cursor metadata tests**
+**Status:** Complete for the current tranche. `audio_history.py` and `audio_schemas.py`
+were already canonical, so this tranche only changed `audio_jobs.py` after adding
+direct async coverage for the admin list cursor contract.
+
+- [x] **Step 1: Add cursor metadata tests**
 
 Assert:
 
@@ -465,15 +469,21 @@ Run:
 python -m pytest tldw_Server_API/tests/TTS_NEW/unit/test_tts_history_endpoints.py -q
 ```
 
-- [ ] **Step 2: Migrate audio history using `build_cursor_pagination_meta`**
+- [x] **Step 2: Migrate audio history using `build_cursor_pagination_meta`**
 
 Keep the existing cursor encoder/decoder and safe fallback behavior from #1159. Only change response metadata construction.
 
-- [ ] **Step 3: Add audio jobs only if covered**
+No change was needed in this branch: audio history already returns
+`CursorPaginationMeta` via `build_cursor_pagination_meta`.
+
+- [x] **Step 3: Add audio jobs only if covered**
 
 If audio jobs lacks direct tests, add route tests before changing payloads.
 
-- [ ] **Step 4: Verify**
+Added direct async tests for admin list overfetch/trim, invalid cursors, and
+accepting a returned cursor before changing `audio_jobs.py`.
+
+- [x] **Step 4: Verify**
 
 Run:
 
@@ -483,7 +493,18 @@ python -m bandit -r tldw_Server_API/app/api/v1/endpoints/audio tldw_Server_API/a
 git diff --check
 ```
 
-- [ ] **Step 5: Commit audio cursor tranche**
+For this small tranche, Bandit was intentionally run on touched source scope:
+
+```bash
+python -m pytest tldw_Server_API/tests/AudioJobs/test_audio_jobs_admin_sanitization.py -q
+python -m pytest tldw_Server_API/tests/Utils/test_pagination_contract.py -q
+python -m pytest tldw_Server_API/tests/TTS_NEW/unit/test_tts_history_endpoints.py -q
+python -m py_compile tldw_Server_API/app/api/v1/endpoints/audio/audio_jobs.py
+python -m bandit -r tldw_Server_API/app/api/v1/endpoints/audio/audio_jobs.py -f json -o /tmp/bandit_pagination_audio_jobs.json
+git diff --check
+```
+
+- [x] **Step 5: Commit audio cursor tranche**
 
 ```bash
 git add \

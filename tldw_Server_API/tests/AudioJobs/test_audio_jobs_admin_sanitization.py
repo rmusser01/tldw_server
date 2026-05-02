@@ -34,6 +34,110 @@ class _FailingJobManager:
         raise RuntimeError("audio jobs backend exploded at /private/audio-jobs.db")
 
 
+class _PagingJobManager:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+
+    def list_jobs(self, **kwargs: Any) -> list[dict[str, Any]]:
+        self.calls.append(kwargs)
+        return [
+            {
+                "id": 3,
+                "uuid": "job-3",
+                "job_type": "transcribe",
+                "status": "queued",
+                "priority": 5,
+                "retry_count": 0,
+                "max_retries": 3,
+                "owner_user_id": "owner-1",
+                "available_at": None,
+                "started_at": None,
+                "leased_until": None,
+                "created_at": "2026-05-02 13:00:00",
+                "updated_at": None,
+                "completed_at": None,
+            },
+            {
+                "id": 2,
+                "uuid": "job-2",
+                "job_type": "transcribe",
+                "status": "queued",
+                "priority": 5,
+                "retry_count": 0,
+                "max_retries": 3,
+                "owner_user_id": "owner-1",
+                "available_at": None,
+                "started_at": None,
+                "leased_until": None,
+                "created_at": "2026-05-02 12:00:00",
+                "updated_at": None,
+                "completed_at": None,
+            },
+            {
+                "id": 1,
+                "uuid": "job-1",
+                "job_type": "transcribe",
+                "status": "queued",
+                "priority": 5,
+                "retry_count": 0,
+                "max_retries": 3,
+                "owner_user_id": "owner-1",
+                "available_at": None,
+                "started_at": None,
+                "leased_until": None,
+                "created_at": "2026-05-02 11:00:00",
+                "updated_at": None,
+                "completed_at": None,
+            },
+        ]
+
+
+@pytest.mark.asyncio
+async def test_audio_jobs_admin_list_includes_cursor_pagination() -> None:
+    jm = _PagingJobManager()
+
+    response = await audio_jobs.list_audio_jobs_admin(jm=jm, limit=2)
+
+    assert len(response.jobs) == 2
+    assert response.limit == 2
+    assert response.next_cursor
+    assert response.pagination.mode == "cursor"
+    assert response.pagination.limit == 2
+    assert response.pagination.cursor is None
+    assert response.pagination.next_cursor == response.next_cursor
+    assert response.pagination.has_more is True
+    assert jm.calls[0]["limit"] == 3
+
+
+@pytest.mark.asyncio
+async def test_audio_jobs_admin_list_rejects_invalid_cursor() -> None:
+    with pytest.raises(HTTPException) as exc_info:
+        await audio_jobs.list_audio_jobs_admin(
+            jm=_PagingJobManager(),
+            limit=2,
+            cursor="not-a-valid-cursor",
+        )
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail == "Invalid cursor"
+
+
+@pytest.mark.asyncio
+async def test_audio_jobs_admin_list_accepts_returned_cursor() -> None:
+    jm = _PagingJobManager()
+    first_page = await audio_jobs.list_audio_jobs_admin(jm=jm, limit=2)
+
+    second_page = await audio_jobs.list_audio_jobs_admin(
+        jm=jm,
+        limit=2,
+        cursor=first_page.next_cursor,
+    )
+
+    assert second_page.pagination.cursor == first_page.next_cursor
+    assert jm.calls[1]["created_before"].isoformat() == "2026-05-02T12:00:00"
+    assert jm.calls[1]["before_id"] == 2
+
+
 @pytest.mark.parametrize(
     ("handler_factory", "expected_detail", "expected_log"),
     [
