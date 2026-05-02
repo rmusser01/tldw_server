@@ -10,6 +10,7 @@
   - `vz_linux`
   - `vz_macos`
   - `seatbelt`
+  - `worktree`
 - Capabilities:
   - Create and destroy sessions
   - Queue runs with TTL and capacity limits
@@ -25,12 +26,14 @@
 - `vz_linux`: Apple `Virtualization.framework` Linux guest runtime on prepared Apple silicon macOS hosts, with real helper-backed boot, guest command execution, and session VM reuse when helper/template readiness passes.
 - `vz_macos`: Apple `Virtualization.framework` macOS guest scaffold on Apple silicon macOS hosts.
 - `seatbelt`: host-local process isolation runtime for conservative trusted macOS workflows, compatibility-gated by deprecated `sandbox-exec`.
+- `worktree`: host-local VCS-level isolation runtime for trusted and standard workflows, backed by temporary git worktrees and Linux `unshare` readiness checks where applicable.
 
 Trust-level rules:
 
 - `untrusted` requires a VM runtime.
 - `seatbelt` is rejected for `untrusted`.
 - `seatbelt` defaults to `trusted` only; `standard` requires `TLDW_SANDBOX_SEATBELT_STANDARD_ENABLED=1`.
+- `worktree` supports `trusted` and `standard`, not `untrusted`.
 - `vz_linux` and `vz_macos` advertise `trusted`, `standard`, and `untrusted`.
 
 ## Technical Notes
@@ -63,7 +66,7 @@ Current limitations:
 - `vz_macos` real `Virtualization.framework` execution is not implemented yet.
 - `vz_linux` requires helper/template readiness and reports `execution_mode=real` when the helper-backed boot and guest execution path is available.
 - `vz_macos` still requires helper/template readiness plus `*_FAKE_EXEC=1`; otherwise discovery reports `real_execution_not_implemented`.
-- Strict allowlist networking is not implemented for `vz_linux`, `vz_macos`, or `seatbelt`.
+- Strict allowlist networking is not implemented for `vz_linux`, `vz_macos`, `seatbelt`, or `worktree`.
 - `vz_linux` VM creation is fail-closed at both Python admission and helper
   protocol layers: only `network_policy=deny_all` is accepted, and the helper
   records the accepted policy in VM metadata/status details. The current

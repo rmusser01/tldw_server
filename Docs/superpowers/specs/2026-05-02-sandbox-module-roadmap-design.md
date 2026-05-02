@@ -19,8 +19,8 @@ security-reviewable subsystem.
 
 The roadmap uses `vz_linux` as the strongest current VM-backed proving ground,
 then extracts stable contracts across Docker, Firecracker, Lima, `vz_macos`,
-and `seatbelt`. It should guide future plans without forcing every runtime to
-move at the same maturity level.
+`seatbelt`, and `worktree`. It should guide future plans without forcing every
+runtime to move at the same maturity level.
 
 ## Current Baseline
 
@@ -30,7 +30,8 @@ The sandbox module already has substantial production-shaped pieces:
   runtime discovery.
 - Orchestrator support for sessions, idempotency, queueing, artifact storage,
   and status persistence.
-- Runtimes for Docker, Firecracker, Lima, `vz_linux`, `vz_macos`, and `seatbelt`.
+- Runtimes for Docker, Firecracker, Lima, `vz_linux`, `vz_macos`, `seatbelt`,
+  and `worktree`.
 - Docker hardening defaults, limited interactivity, WebSocket resume, signed
   URLs, artifact quotas, and resource usage reporting.
 - Firecracker and Lima runtime surfaces with varying levels of real execution,
@@ -137,6 +138,21 @@ Roadmap stance:
 - align audit, cleanup, and diagnostics with shared runtime contracts where
   applicable
 
+### `worktree`
+
+Role: host-local VCS workspace isolation for trusted and standard workflows.
+
+Roadmap stance:
+
+- keep weaker guarantee claims explicit
+- never treat as VM-grade or acceptable for `untrusted`
+- preserve explicit repository allowlisting, sensitive environment stripping,
+  and Linux `unshare` readiness checks
+- align cancellation, cleanup, artifacts, audit, and diagnostics with other
+  host-local runtime contracts where applicable
+- do not make it a long-lived session reuse path until health and recovery
+  semantics are concrete
+
 ## Phased Roadmap
 
 ### Phase 0: Baseline Inventory
@@ -147,7 +163,7 @@ risks, and tests.
 Deliverables:
 
 - runtime capability matrix covering Docker, Firecracker, Lima, `vz_linux`,
-  `vz_macos`, and `seatbelt`
+  `vz_macos`, `seatbelt`, and `worktree`
 - current support states for trust levels, network policies, interactivity,
   session reuse, artifacts, cancellation, recovery, host readiness, and CI
 - docs/code drift report for Sandbox README, API quick guide, operator notes,
@@ -235,7 +251,7 @@ Deliverables:
 - cleanup/recovery contract tests for cancel, timeout, failed start, stuck run,
   and orphaned resources
 - artifact quota and log cap tests across Docker, Firecracker, Lima, `vz_linux`,
-  and `seatbelt` where applicable
+  `vz_macos`, `seatbelt`, and `worktree` where applicable
 - persistent store reconciliation rules for sessions/runs that outlive worker
   processes
 - operator repair surfaces generalized only where the ownership model is
@@ -258,8 +274,8 @@ Deliverables:
 
 - admin runtime dashboard/API model for readiness, warnings, repair plans, image
   store health, queue pressure, and CI status
-- documented operator playbooks for Docker, Firecracker, Lima, and macOS VZ
-  hosts
+- documented operator playbooks for Docker, Firecracker, Lima, host-local
+  runtimes, and macOS VZ hosts
 - startup warning and diagnostics summaries that distinguish blocking from
   non-blocking conditions
 - clear guidance for host-gated smoke, expected skips, and failure triage
@@ -307,7 +323,8 @@ gate before broader lifecycle, reliability, or security hardening expands.
 
    Add a repo-level matrix documenting each runtime's support state for trust
    levels, network policies, interactivity, sessions, artifacts, recovery, and
-   CI. Cross-check with `/api/v1/sandbox/runtimes`.
+   CI. Include `worktree` explicitly and cross-check with
+   `/api/v1/sandbox/runtimes`.
 
 3. **`vz_linux` helper lifecycle compatibility**
 
@@ -339,7 +356,8 @@ gate before broader lifecycle, reliability, or security hardening expands.
 8. **Public docs reconciliation**
 
    Align API docs, Sandbox README, Product PRD, and operator notes so they do
-   not overstate support for Firecracker, Lima, `vz_macos`, or `seatbelt`.
+   not overstate support for Firecracker, Lima, `vz_macos`, `seatbelt`, or
+   `worktree`.
 
 ## Design Risks And Mitigations
 
@@ -350,6 +368,11 @@ gate before broader lifecycle, reliability, or security hardening expands.
 
 - Risk: parity language could imply every runtime must implement every feature.
   Mitigation: parity means consistent reporting, not identical support.
+
+- Risk: host-local convenience runtimes could be mistaken for untrusted-code
+  isolation.
+  Mitigation: `seatbelt` and `worktree` stay explicitly weaker than VM-backed
+  runtimes and must not satisfy `untrusted`.
 
 - Risk: direct Apple `containerization` reuse could increase dependency and
   macOS version risk before the current helper path is stable.
@@ -372,6 +395,7 @@ gate before broader lifecycle, reliability, or security hardening expands.
 - Do not replace the current helper with Apple `container`.
 - Do not require Apple `container` for operators.
 - Do not make `seatbelt` VM-grade.
+- Do not make `worktree` VM-grade.
 - Do not attach networking for `deny_all`.
 - Do not implement `vz_macos` real execution until the shared contracts are
   stable enough to reuse.
