@@ -8,7 +8,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-
+from fastapi import FastAPI
 
 pytestmark = pytest.mark.unit
 
@@ -40,7 +40,12 @@ async def test_start_cleanup_workers_combines_all_handles(
         calls.append("chatbooks")
         return ("chatbooks-task", "chatbooks-stop")
 
-    async def _fake_storage(*, test_mode: bool) -> str:
+    async def _fake_storage(
+        *,
+        test_mode: bool,
+        worker_inventory: object | None = None,
+    ) -> str:
+        assert worker_inventory is None
         calls.append("storage")
         assert test_mode is True
         return "storage-service"
@@ -82,8 +87,13 @@ async def test_start_cleanup_workers_passes_worker_inventory_to_registered_clean
         calls.append(("chatbooks", worker_inventory))
         return ("chatbooks-task", "chatbooks-stop")
 
-    async def _fake_storage(*, test_mode: bool) -> None:
+    async def _fake_storage(
+        *,
+        test_mode: bool,
+        worker_inventory: object | None = None,
+    ) -> None:
         assert test_mode is True
+        calls.append(("storage", worker_inventory))
         return None
 
     monkeypatch.setattr(startup_cleanup, "_start_ephemeral_cleanup_worker", _fake_ephemeral)
@@ -96,7 +106,11 @@ async def test_start_cleanup_workers_passes_worker_inventory_to_registered_clean
         worker_inventory=worker_inventory,
     )
 
-    assert calls == [("ephemeral", worker_inventory), ("chatbooks", worker_inventory)]
+    assert calls == [
+        ("ephemeral", worker_inventory),
+        ("chatbooks", worker_inventory),
+        ("storage", worker_inventory),
+    ]
     assert handles.cleanup_task == "ephemeral-task"
     assert handles.chatbooks_cleanup_task == "chatbooks-task"
     assert handles.chatbooks_cleanup_stop_event == "chatbooks-stop"
@@ -211,6 +225,72 @@ async def test_start_storage_cleanup_worker_starts_enabled_service(
 
     assert service is not None
     assert started == ["start"]
+
+
+@pytest.mark.asyncio
+async def test_start_storage_cleanup_worker_registers_background_inventory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_cleanup = _import_startup_cleanup_workers()
+    from tldw_Server_API.app.services.worker_registry import WorkerRegistry
+
+    class _FakeService:
+        def __init__(self) -> None:
+            self.stop_event = asyncio.Event()
+            self.task: asyncio.Task[None] | None = None
+            self.stop_calls = 0
+
+        async def _run(self) -> None:
+            await self.stop_event.wait()
+
+        async def start(self) -> None:
+            self.task = asyncio.create_task(self._run(), name="storage_cleanup_service")
+
+        async def stop(self) -> None:
+            self.stop_calls += 1
+            self.stop_event.set()
+            if self.task is not None:
+                await asyncio.wait_for(self.task, timeout=1)
+
+    app = FastAPI()
+    worker_inventory = WorkerRegistry(app)
+    service = _FakeService()
+    monkeypatch.setenv("STORAGE_CLEANUP_ENABLED", "true")
+    monkeypatch.setattr(startup_cleanup, "_get_storage_cleanup_service", lambda: service)
+
+    try:
+        returned_service = await startup_cleanup._start_storage_cleanup_worker(
+            test_mode=False,
+            worker_inventory=worker_inventory,
+        )
+
+        assert returned_service is service
+        assert service.task is not None
+        assert len(worker_inventory.handles) == 1
+        handle = worker_inventory.handles[0]
+        assert handle.name == "storage_cleanup_service"
+        assert handle.task is service.task
+        assert handle.stop_event is None
+        assert handle.shutdown_callback is not None
+        assert handle.category == "cleanup"
+        assert handle.shutdown_phase is startup_cleanup.ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN
+        assert app.state._tldw_shutdown_worker_inventory == [
+            {
+                "name": "storage_cleanup_service",
+                "task_name": "storage_cleanup_service",
+                "has_stop_event": False,
+                "timeout_sec": 5.0,
+                "category": "cleanup",
+                "shutdown_phase": "background_worker_shutdown",
+            }
+        ]
+        assert app.state._tldw_shutdown_job_poller_inventory == []
+
+        await handle.shutdown_callback()
+        assert service.stop_calls == 1
+    finally:
+        if service.task is not None and not service.task.done():
+            await service.stop()
 
 
 @pytest.mark.asyncio

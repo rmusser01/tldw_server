@@ -7,12 +7,14 @@ from __future__ import annotations
 import asyncio
 import inspect
 import os
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Mapping
+from typing import Any
 
 from loguru import logger
 
 from tldw_Server_API.app.services.worker_registry import (
+    ManagedWorker,
     ShutdownPhase,
     start_stop_event_worker,
 )
@@ -69,7 +71,10 @@ async def _start_secondary_cleanup_workers(
     chatbooks_cleanup_task, chatbooks_cleanup_stop_event = await _start_chatbooks_cleanup_worker(
         worker_inventory=worker_inventory,
     )
-    storage_cleanup_service = await _start_storage_cleanup_worker(test_mode=test_mode)
+    storage_cleanup_service = await _start_storage_cleanup_worker(
+        test_mode=test_mode,
+        worker_inventory=worker_inventory,
+    )
     return CleanupWorkerHandles(
         chatbooks_cleanup_task=chatbooks_cleanup_task,
         chatbooks_cleanup_stop_event=chatbooks_cleanup_stop_event,
@@ -198,7 +203,11 @@ async def _start_chatbooks_cleanup_worker(
         return None, None
 
 
-async def _start_storage_cleanup_worker(*, test_mode: bool) -> Any | None:
+async def _start_storage_cleanup_worker(
+    *,
+    test_mode: bool,
+    worker_inventory: Any | None = None,
+) -> Any | None:
     """Start the storage cleanup worker when enabled by the current mode/env."""
     try:
         storage_cleanup_default = "false" if test_mode else "true"
@@ -212,6 +221,11 @@ async def _start_storage_cleanup_worker(*, test_mode: bool) -> Any | None:
         if storage_cleanup_enabled:
             storage_cleanup_service = _get_storage_cleanup_service()
             await storage_cleanup_service.start()
+            if worker_inventory is not None:
+                await _register_storage_cleanup_service(
+                    worker_inventory=worker_inventory,
+                    storage_cleanup_service=storage_cleanup_service,
+                )
             logger.info("Storage cleanup worker started")
             return storage_cleanup_service
         logger.info("Storage cleanup worker disabled by settings")
@@ -219,6 +233,45 @@ async def _start_storage_cleanup_worker(*, test_mode: bool) -> Any | None:
     except _STARTUP_GUARD_EXCEPTIONS as exc:
         logger.warning(f"Failed to start storage cleanup worker: {exc}")
         return None
+
+
+async def _register_storage_cleanup_service(
+    *,
+    worker_inventory: Any,
+    storage_cleanup_service: Any,
+) -> None:
+    task = _get_storage_cleanup_task(storage_cleanup_service)
+    if task is None:
+        logger.warning("Storage cleanup worker started without a task handle; lifecycle inventory skipped")
+        return
+    try:
+        worker_inventory.register(
+            ManagedWorker(
+                name="storage_cleanup_service",
+                task=task,
+                stop_event=None,
+                shutdown_callback=storage_cleanup_service.stop,
+                category="cleanup",
+                shutdown_phase=ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN,
+            )
+        )
+    except _STARTUP_GUARD_EXCEPTIONS:
+        await _stop_started_storage_cleanup_service(storage_cleanup_service)
+        raise
+
+
+def _get_storage_cleanup_task(storage_cleanup_service: Any) -> Any | None:
+    task = getattr(storage_cleanup_service, "task", None)
+    if task is not None:
+        return task
+    return getattr(storage_cleanup_service, "_task", None)
+
+
+async def _stop_started_storage_cleanup_service(storage_cleanup_service: Any) -> None:
+    try:
+        await storage_cleanup_service.stop()
+    except _STARTUP_GUARD_EXCEPTIONS as exc:
+        logger.debug(f"Storage cleanup startup rollback stop failed: {exc}")
 
 
 async def _maybe_await(value: Any) -> Any:

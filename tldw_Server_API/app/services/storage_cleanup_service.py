@@ -378,7 +378,8 @@ class StorageCleanupService:
                 stop_event=self._stop_event,
                 interval_seconds=self.interval,
                 temp_retention_hours=self.temp_retention_hours,
-            )
+            ),
+            name="storage_cleanup_service",
         )
         logger.info(f"StorageCleanupService started (interval: {self.interval}s)")
 
