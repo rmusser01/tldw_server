@@ -311,6 +311,8 @@ class TestListSkills:
             "has_more": True,
             "next_offset": 2,
         }
+        assert data["has_more"] is True
+        assert data["next_offset"] == 2
 
         # Page 2
         r = client.get(f"{SKILLS_PREFIX}/?limit=2&offset=2")
@@ -325,6 +327,8 @@ class TestListSkills:
             "has_more": False,
             "next_offset": None,
         }
+        assert data["has_more"] is False
+        assert data["next_offset"] is None
 
 
 class TestCreateAndGetSkill:
