@@ -575,6 +575,53 @@ describe("usePersonaLiveVoiceController", () => {
     })
   })
 
+  it("stops armed wake listening when Persona Live disconnects", async () => {
+    const wakeHarness = createWakeDetectorHarness()
+    const ws = {
+      readyState: WebSocket.OPEN,
+      send: vi.fn()
+    } as unknown as WebSocket
+
+    const { result, rerender } = renderHook(
+      ({ connected }: { connected: boolean }) =>
+        usePersonaLiveVoiceController({
+          ws,
+          connected,
+          sessionId: "sess-1",
+          personaId: "persona-1",
+          resolvedDefaults,
+          canUseServerStt: true,
+          wakeTriggerPhrases: ["hey helper"],
+          wakeDetectorFactory: () => wakeHarness.detector
+        }),
+      {
+        initialProps: { connected: true }
+      }
+    )
+
+    await act(async () => {
+      await result.current.toggleWakeArmed()
+    })
+    ;(ws as WebSocket & { send: ReturnType<typeof vi.fn> }).send.mockClear()
+    vi.mocked(wakeHarness.detector.stop).mockClear()
+
+    rerender({ connected: false })
+
+    await waitFor(() => {
+      expect(result.current.wakeArmed).toBe(false)
+    })
+    expect(wakeHarness.detector.stop).toHaveBeenCalledTimes(1)
+    expect(getSentPayloads(ws as WebSocket & { send: ReturnType<typeof vi.fn> })).toEqual(
+      expect.arrayContaining([
+        {
+          type: "wake_deactivation",
+          session_id: "sess-1",
+          reason: "session_close"
+        }
+      ])
+    )
+  })
+
   it("cancels stale wake starts when disarmed before availability resolves", async () => {
     let resolveAvailable: ((available: boolean) => void) | null = null
     const detector: WakeDetector = {
