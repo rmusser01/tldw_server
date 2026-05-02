@@ -391,12 +391,31 @@ class SandboxAdminMacOSImageStoreItem(BaseModel):
     matched_reconciliation_reason: str | None = None
 
 
+class SandboxAdminMacOSImageStoreTemplate(BaseModel):
+    template_id: str
+    runtime: str
+    template_name: str
+    artifact_format: str
+    source_path: str | None = None
+    artifact_count: int = 0
+    artifact_size_bytes: int = 0
+    oci_image_ref: str | None = None
+    oci_platform: str | None = None
+    oci_manifest_digest: str | None = None
+    oci_config_digest: str | None = None
+    oci_layer_digests: list[str] = Field(default_factory=list)
+    registry: str | None = None
+    imported_at: str | None = None
+    provenance: dict[str, object] = Field(default_factory=dict)
+
+
 class SandboxAdminMacOSImageStoreDiagnostics(BaseModel):
     configured: bool
     root_path: str | None = None
     registered_templates: int = 0
     run_manifests: int = 0
     gc_candidates: int = 0
+    templates: list[SandboxAdminMacOSImageStoreTemplate] = Field(default_factory=list)
     items: list[SandboxAdminMacOSImageStoreItem] = Field(default_factory=list)
     reasons: list[str] = Field(default_factory=list)
 

@@ -244,6 +244,28 @@ def probe_reconciliation(orchestrator: Any | None = None) -> dict[str, object]:
     return collect_vz_reconciliation(orchestrator)
 
 
+def _image_store_template_item(record: Any) -> dict[str, object]:
+    """Return read-only admin diagnostics for one registered image-store template."""
+
+    return {
+        "template_id": record.template_id,
+        "runtime": record.runtime,
+        "template_name": record.template_name,
+        "artifact_format": record.artifact_format,
+        "source_path": record.source_path,
+        "artifact_count": len(record.artifacts),
+        "artifact_size_bytes": sum(int(artifact.size_bytes) for artifact in record.artifacts),
+        "oci_image_ref": record.oci_image_ref,
+        "oci_platform": record.oci_platform,
+        "oci_manifest_digest": record.oci_manifest_digest,
+        "oci_config_digest": record.oci_config_digest,
+        "oci_layer_digests": list(record.oci_layer_digests),
+        "registry": record.registry,
+        "imported_at": record.imported_at,
+        "provenance": dict(record.provenance),
+    }
+
+
 def probe_image_store(reconciliation: dict[str, object] | None = None) -> dict[str, object]:
     """Report read-only image-store state plus correlation to reconciliation items."""
 
@@ -255,6 +277,7 @@ def probe_image_store(reconciliation: dict[str, object] | None = None) -> dict[s
             "registered_templates": 0,
             "run_manifests": 0,
             "gc_candidates": 0,
+            "templates": [],
             "items": [],
             "reasons": [],
         }
@@ -268,6 +291,7 @@ def probe_image_store(reconciliation: dict[str, object] | None = None) -> dict[s
                 "registered_templates": 0,
                 "run_manifests": 0,
                 "gc_candidates": 0,
+                "templates": [],
                 "items": [],
                 "reasons": ["image_store_root_missing"],
             }
@@ -278,6 +302,7 @@ def probe_image_store(reconciliation: dict[str, object] | None = None) -> dict[s
                 "registered_templates": 0,
                 "run_manifests": 0,
                 "gc_candidates": 0,
+                "templates": [],
                 "items": [],
                 "reasons": ["image_store_root_not_directory"],
             }
@@ -289,6 +314,7 @@ def probe_image_store(reconciliation: dict[str, object] | None = None) -> dict[s
             "registered_templates": 0,
             "run_manifests": 0,
             "gc_candidates": 0,
+            "templates": [],
             "items": [],
             "reasons": [f"image_store_unavailable: {exc}"],
         }
@@ -303,8 +329,10 @@ def probe_image_store(reconciliation: dict[str, object] | None = None) -> dict[s
     }
     active_run_ids.discard("")
 
+    template_records = store.list_templates()
     manifests = store.list_run_clone_manifests()
     gc_plan = store.plan_garbage_collection(active_run_ids=active_run_ids)
+    templates = [_image_store_template_item(record) for record in template_records]
     gc_by_run_id = {candidate.run_id: candidate for candidate in gc_plan.run_candidates}
     unmatched_gc_run_ids = set(gc_by_run_id)
 
@@ -376,9 +404,10 @@ def probe_image_store(reconciliation: dict[str, object] | None = None) -> dict[s
     return {
         "configured": True,
         "root_path": root_text,
-        "registered_templates": len(store.list_templates()),
+        "registered_templates": len(template_records),
         "run_manifests": len(manifests),
         "gc_candidates": len(gc_plan.run_candidates),
+        "templates": templates,
         "items": sorted(items, key=lambda item: str(item.get("run_id") or "")),
         "reasons": [],
     }
