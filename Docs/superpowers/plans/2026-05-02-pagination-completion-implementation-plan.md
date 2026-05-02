@@ -1,6 +1,6 @@
 # Pagination Completion Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Use superpowers:subagent-driven-development only when the user explicitly authorizes parallel agents. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Complete API v1 pagination normalization by classifying all list/search endpoints and migrating remaining page, cursor, and custom-envelope families without breaking existing payloads.
 
@@ -10,6 +10,13 @@
 
 ---
 
+## Execution Constraints
+
+- Start each implementation tranche from the latest `origin/dev`. If the planning or implementation branch is behind, rebase or recreate the tranche branch before editing source files.
+- Activate the project virtual environment before every Python, pytest, or Bandit command. Commands below assume an activated shell; in nested `.worktrees/*` checkouts, use the repository-root venv if the worktree does not have its own `.venv`.
+- Stage exact touched files only. Do not use wildcard or whole-directory `git add` commands unless the tranche intentionally owns every changed file in that directory.
+- Keep behavior-changing route migrations out of the inventory/helper PRs. The first source-changing PR should still be helper-only.
+
 ## File Structure
 
 Planning and inventory artifacts:
@@ -17,7 +24,7 @@ Planning and inventory artifacts:
 - Create: `tools/pagination_inventory.py`
 - Create: `Docs/Design/Pagination_Completion_Matrix.md`
 - Create: `Docs/Design/Pagination_Contract_Exemptions.md`
-- Modify: `docs/superpowers/specs/2026-05-02-pagination-completion-design.md` only if the design changes.
+- Modify: `Docs/superpowers/specs/2026-05-02-pagination-completion-design.md` only if the design changes.
 
 Shared backend helpers:
 
@@ -90,6 +97,8 @@ Create `tools/pagination_inventory.py` to scan:
 - `tldw_Server_API/app/api/v1/endpoints/**/*.py`
 - `tldw_Server_API/app/api/v1/schemas/**/*.py`
 
+Prefer AST/static analysis plus optional OpenAPI/app-route introspection. If importing the FastAPI app is too side-effect-prone, the script should still emit the static inventory and mark route method/path as `unknown` rather than guessing.
+
 The script should emit a Markdown table with:
 
 - method/path when detectable
@@ -106,6 +115,7 @@ The script should emit a Markdown table with:
 Run:
 
 ```bash
+source .venv/bin/activate
 python tools/pagination_inventory.py > Docs/Design/Pagination_Completion_Matrix.md
 ```
 
@@ -245,7 +255,11 @@ Expected: behavior unchanged.
 - [ ] **Step 4: Commit duplicate-helper tranche**
 
 ```bash
-git add tldw_Server_API/app/api/v1/schemas/*_schemas.py tldw_Server_API/app/api/v1/schemas/prompt_schemas.py
+git add \
+  tldw_Server_API/app/api/v1/schemas/chat_grammar_schemas.py \
+  tldw_Server_API/app/api/v1/schemas/outputs_templates_schemas.py \
+  tldw_Server_API/app/api/v1/schemas/storage_schemas.py \
+  tldw_Server_API/app/api/v1/schemas/prompt_schemas.py
 git commit -m "Phase pagination-completion: reuse offset alias helper"
 ```
 
@@ -304,7 +318,13 @@ git diff --check
 - [ ] **Step 4: Commit Prompt Studio page tranche**
 
 ```bash
-git add tldw_Server_API/app/api/v1/endpoints/prompt_studio tldw_Server_API/app/api/v1/schemas/prompt_studio_base.py tldw_Server_API/tests/prompt_studio/integration/test_api_endpoints.py
+git add \
+  tldw_Server_API/app/api/v1/schemas/prompt_studio_base.py \
+  tldw_Server_API/app/api/v1/endpoints/prompt_studio/prompt_studio_prompts.py \
+  tldw_Server_API/app/api/v1/endpoints/prompt_studio/prompt_studio_projects.py \
+  tldw_Server_API/app/api/v1/endpoints/prompt_studio/prompt_studio_test_cases.py \
+  tldw_Server_API/app/api/v1/endpoints/prompt_studio/prompt_studio_optimization.py \
+  tldw_Server_API/tests/prompt_studio/integration/test_api_endpoints.py
 git commit -m "Phase pagination-completion: migrate prompt studio page pagination"
 ```
 
@@ -401,7 +421,10 @@ git diff --check
 - [ ] **Step 5: Commit media page tranche**
 
 ```bash
-git add tldw_Server_API/app/api/v1/endpoints/media tldw_Server_API/app/api/v1/schemas/media_response_models.py tldw_Server_API/app/api/v1/schemas/document_outline.py tldw_Server_API/app/api/v1/schemas/reading_progress.py tldw_Server_API/tests/Media* tldw_Server_API/tests/**/test_*media*.py
+git add \
+  <exact touched media endpoint files> \
+  <exact touched media schema files> \
+  <exact touched media test files>
 git commit -m "Phase pagination-completion: migrate media page pagination"
 ```
 
@@ -451,7 +474,12 @@ git diff --check
 - [ ] **Step 5: Commit audio cursor tranche**
 
 ```bash
-git add tldw_Server_API/app/api/v1/endpoints/audio tldw_Server_API/app/api/v1/schemas/audio_schemas.py tldw_Server_API/tests/TTS_NEW/unit/test_tts_history_endpoints.py
+git add \
+  tldw_Server_API/app/api/v1/schemas/audio_schemas.py \
+  tldw_Server_API/app/api/v1/endpoints/audio/audio_history.py \
+  tldw_Server_API/app/api/v1/endpoints/audio/audio_jobs.py \
+  tldw_Server_API/tests/TTS_NEW/unit/test_tts_history_endpoints.py \
+  <exact touched audio jobs test files>
 git commit -m "Phase pagination-completion: migrate audio cursor pagination"
 ```
 
@@ -493,7 +521,12 @@ git diff --check
 - [ ] **Step 5: Commit workflows/jobs cursor tranche**
 
 ```bash
-git add tldw_Server_API/app/api/v1/endpoints/workflows.py tldw_Server_API/app/api/v1/endpoints/jobs_admin.py tldw_Server_API/app/api/v1/schemas/workflows.py tldw_Server_API/tests
+git add \
+  tldw_Server_API/app/api/v1/endpoints/workflows.py \
+  tldw_Server_API/app/api/v1/endpoints/jobs_admin.py \
+  tldw_Server_API/app/api/v1/schemas/workflows.py \
+  <exact touched workflow test files> \
+  <exact touched jobs-admin test files>
 git commit -m "Phase pagination-completion: migrate workflow cursor pagination"
 ```
 
@@ -557,7 +590,7 @@ Repeat Task 9 for each custom family.
 Test behavior:
 
 - Load the FastAPI app OpenAPI schema.
-- Find `GET` routes with names or response models containing `List`, `Search`, `History`, `Runs`, `Jobs`, `Events`, or `Collections`.
+- Find candidate list/search routes from the inventory matrix and cross-check against OpenAPI route metadata. Use route-name heuristics such as `List`, `Search`, `History`, `Runs`, `Jobs`, `Events`, or `Collections` only as a fallback and as a drift detector.
 - For each route, assert one of:
   - response schema includes canonical `pagination`
   - route is in the explicit exemption document/list
@@ -667,7 +700,7 @@ If OpenAPI/type generation is part of the touched client path, also run the repo
 - [ ] **Step 5: Commit frontend typing closeout**
 
 ```bash
-git add apps/packages/ui/src/services
+git add <exact touched frontend service files> <exact touched frontend test files>
 git commit -m "Phase pagination-completion: add frontend pagination metadata typing"
 ```
 

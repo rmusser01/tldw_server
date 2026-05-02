@@ -138,6 +138,8 @@ Create and maintain one route matrix that records:
 
 The matrix is the program control surface. It prevents repeated rediscovery and gives reviewers a concrete definition of “done.”
 
+The inventory should distinguish confirmed route metadata from inferred metadata. If a route path, method, response model, or pagination family is inferred from static analysis rather than OpenAPI/app route metadata, mark that field as `unknown` or `needs-confirmation` instead of guessing.
+
 ### Shared Helpers
 
 Keep helper ownership split:
@@ -178,6 +180,7 @@ Acceptance criteria:
 - Matrix lists all known list/search endpoints and response models.
 - Each endpoint has a family, migration status, and exemption/defer reason if not in scope.
 - The matrix identifies the first page, cursor, and custom-envelope candidates.
+- Unknown or inferred route metadata is explicitly marked for follow-up.
 
 ### Stage 1 — Shared Helper Consolidation
 
@@ -262,6 +265,9 @@ Acceptance criteria:
 
 - Risk: The matrix drifts from code.
   - Mitigation: Add a lightweight route/OpenAPI contract test in Stage 5.
+
+- Risk: A tranche starts from stale `dev` and reintroduces conflicts or already-fixed pagination behavior.
+  - Mitigation: Rebase or recreate each implementation tranche from latest `origin/dev` before source edits.
 
 - Risk: PRs become too large.
   - Mitigation: Split by model family and then by route family; every PR should have focused tests and a small migration list.
