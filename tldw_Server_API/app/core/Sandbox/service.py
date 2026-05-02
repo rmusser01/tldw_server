@@ -29,6 +29,7 @@ from tldw_Server_API.app.core.Metrics import increment_counter, observe_histogra
 from tldw_Server_API.app.core.testing import is_truthy
 
 from .image_store import ImageStoreValidationError, SandboxImageStore
+from .limits import build_limit_audit_metadata, limit_event_actions
 from .macos_diagnostics import collect_macos_diagnostics, probe_helper
 from .macos_virtualization.helper_client import (
     MacOSVirtualizationHelperClient,
@@ -1441,6 +1442,17 @@ class SandboxService:
                             reason_code = (status.message or None)
                     except _SANDBOX_SERVICE_NONCRITICAL_EXCEPTIONS:
                         reason_code = None
+                    limit_metadata = build_limit_audit_metadata(status.resource_usage)
+                    metadata = {
+                        "runtime": status.runtime.value if status.runtime else None,
+                        "base_image": status.base_image,
+                        "image_digest": status.image_digest,
+                        "policy_hash": status.policy_hash,
+                        "exit_code": status.exit_code,
+                        "spec_version": spec_version,
+                        "reason_code": reason_code,
+                    }
+                    metadata.update(limit_metadata)
                     await svc.log_event(
                         event_type=AuditEventType.API_RESPONSE,
                         category=AuditEventCategory.API_CALL,
@@ -1451,16 +1463,20 @@ class SandboxService:
                         action="run",
                         result=("success" if outcome == "success" else outcome),
                         duration_ms=dur_ms,
-                        metadata={
-                            "runtime": status.runtime.value if status.runtime else None,
-                            "base_image": status.base_image,
-                            "image_digest": status.image_digest,
-                            "policy_hash": status.policy_hash,
-                            "exit_code": status.exit_code,
-                            "spec_version": spec_version,
-                            "reason_code": reason_code,
-                        },
+                        metadata=metadata,
                     )
+                    for action in limit_event_actions(status.resource_usage):
+                        await svc.log_event(
+                            event_type=AuditEventType.API_RESPONSE,
+                            category=AuditEventCategory.API_CALL,
+                            severity=AuditSeverity.WARNING,
+                            context=ctx,
+                            resource_type="sandbox.run",
+                            resource_id=run_id,
+                            action=action,
+                            result="limited",
+                            metadata=limit_metadata,
+                        )
                 finally:
                     await svc.stop()
 

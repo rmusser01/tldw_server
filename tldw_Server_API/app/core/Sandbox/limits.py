@@ -4,6 +4,7 @@ import fnmatch
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any, Mapping
 
 
 @dataclass(frozen=True, slots=True)
@@ -17,6 +18,36 @@ class OutputLimitResult:
 class ArtifactLimitResult:
     artifacts: dict[str, bytes]
     counters: dict[str, int] = field(default_factory=dict)
+
+
+_OUTPUT_LIMIT_COUNTER_KEYS = (
+    "output_limit_bytes",
+    "stdout_bytes_original",
+    "stderr_bytes_original",
+    "stdout_bytes_returned",
+    "stderr_bytes_returned",
+    "stdout_truncated",
+    "stderr_truncated",
+)
+_ARTIFACT_LIMIT_COUNTER_KEYS = (
+    "artifact_limit_file_bytes",
+    "artifact_limit_total_bytes",
+    "artifact_files_collected",
+    "artifact_files_skipped",
+    "artifact_bytes_collected",
+    "artifact_skip_file_limit",
+    "artifact_skip_total_limit",
+    "artifact_skip_symlink",
+    "artifact_skip_invalid",
+    "artifact_skip_read_error",
+)
+_ARTIFACT_SKIP_REASON_KEYS = (
+    ("artifact_skip_file_limit", "file_limit"),
+    ("artifact_skip_total_limit", "total_limit"),
+    ("artifact_skip_symlink", "symlink"),
+    ("artifact_skip_invalid", "invalid"),
+    ("artifact_skip_read_error", "read_error"),
+)
 
 
 def cap_output_streams(
@@ -175,9 +206,70 @@ def collect_limited_artifacts(
     return ArtifactLimitResult(artifacts=artifacts, counters=counters)
 
 
+def build_limit_audit_metadata(resource_usage: Mapping[str, object] | None) -> dict[str, object]:
+    """Derive aggregate audit metadata from integer run counters without paths."""
+    if not isinstance(resource_usage, Mapping):
+        return {}
+
+    metadata: dict[str, object] = {}
+    for key in _OUTPUT_LIMIT_COUNTER_KEYS + _ARTIFACT_LIMIT_COUNTER_KEYS:
+        value = _counter_value(resource_usage.get(key))
+        if value is not None:
+            metadata[key] = value
+
+    stdout_truncated = int(metadata.get("stdout_truncated", 0) or 0)
+    stderr_truncated = int(metadata.get("stderr_truncated", 0) or 0)
+    output_truncated = stdout_truncated > 0 or stderr_truncated > 0
+    if output_truncated or any(key in metadata for key in _OUTPUT_LIMIT_COUNTER_KEYS):
+        metadata["output_truncated"] = output_truncated
+
+    skip_reasons = [
+        reason
+        for key, reason in _ARTIFACT_SKIP_REASON_KEYS
+        if int(metadata.get(key, 0) or 0) > 0
+    ]
+    artifact_files_skipped = int(metadata.get("artifact_files_skipped", 0) or 0)
+    artifacts_limited = artifact_files_skipped > 0 or bool(skip_reasons)
+    if artifacts_limited or any(key in metadata for key in _ARTIFACT_LIMIT_COUNTER_KEYS):
+        metadata["artifacts_limited"] = artifacts_limited
+        metadata["artifact_skip_reasons"] = skip_reasons
+
+    return metadata
+
+
+def limit_event_actions(resource_usage: Mapping[str, object] | None) -> list[str]:
+    """Return aggregate audit action names for limit outcomes that affected a run."""
+    metadata = build_limit_audit_metadata(resource_usage)
+    actions: list[str] = []
+    if bool(metadata.get("output_truncated")):
+        actions.append("output_truncated")
+    if bool(metadata.get("artifacts_limited")):
+        actions.append("artifacts_limited")
+    return actions
+
+
 def _increment_artifact_skip(counters: dict[str, int], reason_key: str) -> None:
     counters["artifact_files_skipped"] += 1
     counters[reason_key] += 1
+
+
+def _counter_value(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value if value >= 0 else None
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "yes", "on"}:
+            return 1
+        if normalized in {"false", "no", "off", ""}:
+            return 0
+        try:
+            parsed = int(normalized)
+        except ValueError:
+            return None
+        return parsed if parsed >= 0 else None
+    return None
 
 
 def _path_within_root(root: Path, path: Path) -> bool:
