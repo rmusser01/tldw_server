@@ -400,17 +400,21 @@ git commit -m "Phase pagination-completion: migrate research page pagination"
 - Test: `tldw_Server_API/tests/Media_Ingestion_Modification/test_media_versions.py`
 - Test: media listing/navigation tests identified by inventory
 
-**Tranche note after inventory review:** Media list, trash, and POST search already emit canonical page fields in their `pagination` payloads and have tests asserting `mode`, `per_page`, `total`, and `has_more`. The first remaining small media gap is `/media/metadata-search`, which preserves legacy `page`, `per_page`, `total`, and `total_pages` but needs canonical `mode` and `has_more`.
+**Status:** Complete for the page-media family. Media list, trash, metadata
+search, POST search, document references, and ingest job list now expose
+canonical pagination metadata where the response is a list envelope. Document
+artifact/progress routes and ingest event streams are explicitly classified as
+not response-body pagination targets.
 
-- [ ] **Step 1: Confirm media test coverage from inventory**
+- [x] **Step 1: Confirm media test coverage from inventory**
 
 Use the matrix to identify exact tests for each media route before editing. If a route lacks coverage, add focused route tests first or defer it.
 
-- [ ] **Step 2: Add canonical page assertions**
+- [x] **Step 2: Add canonical page assertions**
 
 For covered media page responses, assert nested `PagePaginationMeta` and legacy fields.
 
-- [ ] **Step 3: Migrate one media subfamily at a time**
+- [x] **Step 3: Migrate one media subfamily at a time**
 
 Recommended order:
 
@@ -421,7 +425,7 @@ Recommended order:
 
 Do not combine all media files into one PR unless the diff remains small.
 
-- [ ] **Step 4: Verify**
+- [x] **Step 4: Verify**
 
 Run focused media tests found in Step 1, then:
 
@@ -430,7 +434,14 @@ python -m bandit -r tldw_Server_API/app/api/v1/endpoints/media tldw_Server_API/a
 git diff --check
 ```
 
-- [ ] **Step 5: Commit media page tranche**
+Verified media ingest job pagination tranche:
+
+```bash
+python -m pytest tldw_Server_API/tests/MediaIngestion_NEW/integration/test_media_ingest_jobs.py -k canonical_offset_pagination -q
+python -m pytest tldw_Server_API/tests/MediaIngestion_NEW/integration/test_media_ingest_jobs.py -q
+```
+
+- [x] **Step 5: Commit media page tranche**
 
 ```bash
 git add \
@@ -765,10 +776,10 @@ Classified Media page-family rows:
   canonical page pagination.
 - Document annotation/figure/outline and reading-progress routes are bounded
   detail/artifact responses where totals are resource metadata.
+- Media ingest job list uses canonical offset pagination while preserving the
+  existing batch list envelope.
 - Media ingest job events use an SSE stream with `after_id`.
-- Media keywords is a bounded suggestion list; the ingest job list remains the
-  unresolved Media candidate because it has a limit cap but no continuation
-  input yet.
+- Media keywords is a bounded suggestion list.
 
 Classified Audio cursor-family rows:
 

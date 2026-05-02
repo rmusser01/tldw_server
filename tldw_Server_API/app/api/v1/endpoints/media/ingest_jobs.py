@@ -18,13 +18,14 @@ from loguru import logger
 from pydantic import BaseModel, Field
 from starlette.responses import JSONResponse
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, get_auth_principal, get_request_user, rbac_rate_limit, RequirePermission, User
-
 from tldw_Server_API.app.api.v1.API_Deps.billing_deps import require_within_limit
 from tldw_Server_API.app.api.v1.API_Deps.storage_quota_guard import guard_storage_quota
 from tldw_Server_API.app.core.Billing.enforcement import LimitCategory
 from tldw_Server_API.app.api.v1.API_Deps.media_add_deps import get_add_media_form
 from tldw_Server_API.app.api.v1.API_Deps.validations_deps import file_validator_instance
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.schemas.media_request_models import AddMediaForm
+from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
 from tldw_Server_API.app.core.AuthNZ.permissions import MEDIA_CREATE
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.Ingestion_Media_Processing.input_sourcing import (
@@ -122,6 +123,11 @@ class CancelMediaIngestBatchResponse(BaseModel):
 class MediaIngestJobListResponse(BaseModel):
     batch_id: str
     jobs: list[MediaIngestJobStatus]
+    limit: int
+    offset: int
+    has_more: bool
+    next_offset: int | None
+    pagination: OffsetPaginationMeta
 
 
 def _cleanup_dir(path_str: str) -> None:
@@ -593,46 +599,41 @@ async def get_media_ingest_job(
 async def list_media_ingest_jobs(
     batch_id: str = Query(..., min_length=1, description="Batch identifier from submit response"),
     limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
     current_user: User = Depends(get_request_user),
     principal: AuthPrincipal = Depends(get_auth_principal),
     _: None = Depends(check_rate_limit),
     jm: JobManager = Depends(get_job_manager),
 ) -> MediaIngestJobListResponse:
     owner_filter = None if _principal_has_admin_claims(principal) else str(current_user.id)
-    indexed_jobs = jm.list_jobs(
-        domain="media_ingest",
-        owner_user_id=owner_filter,
-        batch_group=batch_id,
-        limit=limit,
-        sort_by="created_at",
-        sort_order="desc",
-    )
-    indexed_statuses = [_job_to_status(job) for job in indexed_jobs[:limit]]
-    if len(indexed_statuses) >= limit:
-        return MediaIngestJobListResponse(batch_id=batch_id, jobs=indexed_statuses[:limit])
-
-    # Backward compatibility: legacy rows may only have payload.batch_id.
-    legacy_jobs = _collect_jobs_for_batch(
+    # Backward compatibility: legacy rows may only have payload.batch_id, so the
+    # shared batch collector remains the source of truth for both storage forms.
+    window_end = offset + limit
+    collected_jobs = _collect_jobs_for_batch(
         jm=jm,
         batch_id=batch_id,
         owner_filter=owner_filter,
-        limit=limit,
+        limit=window_end + 1,
     )
-    merged: list[MediaIngestJobStatus] = list(indexed_statuses)
-    seen_ids = {int(item.id) for item in merged}
-    for job in legacy_jobs:
-        raw_job_id = job.get("id")
-        if raw_job_id is None:
-            continue
-        job_id = int(raw_job_id)
-        if job_id in seen_ids:
-            continue
-        merged.append(_job_to_status(job))
-        seen_ids.add(job_id)
-        if len(merged) >= limit:
-            break
+    page_jobs = collected_jobs[offset:window_end]
+    statuses = [_job_to_status(job) for job in page_jobs]
+    has_more = len(collected_jobs) > window_end
+    pagination = build_offset_pagination_meta(
+        limit=limit,
+        offset=offset,
+        count=len(statuses),
+        has_more=has_more,
+    )
 
-    return MediaIngestJobListResponse(batch_id=batch_id, jobs=merged[:limit])
+    return MediaIngestJobListResponse(
+        batch_id=batch_id,
+        jobs=statuses,
+        limit=limit,
+        offset=offset,
+        has_more=pagination.has_more,
+        next_offset=pagination.next_offset,
+        pagination=pagination,
+    )
 
 
 @router.get(
