@@ -185,6 +185,8 @@ async def test_list_reading_digest_outputs_includes_canonical_pagination():
     assert response.pagination.offset == 0
     assert response.pagination.has_more is False
     assert response.pagination.next_offset is None
+    assert response.has_more is False
+    assert response.next_offset is None
 
 
 @pytest.mark.asyncio

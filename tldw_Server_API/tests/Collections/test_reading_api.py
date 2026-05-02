@@ -91,6 +91,8 @@ def test_reading_save_get_search_delete(reading_app):
             "has_more": False,
             "next_offset": None,
         }
+        assert listed_payload["has_more"] is False
+        assert listed_payload["next_offset"] is None
 
         r = client.delete(f"/api/v1/reading/items/{item_id}")
         assert r.status_code == 200, r.text
@@ -214,6 +216,8 @@ def test_saved_search_endpoints_crud(reading_app):
             "has_more": False,
             "next_offset": None,
         }
+        assert body["has_more"] is False
+        assert body["next_offset"] is None
 
         r = client.patch(
             f"/api/v1/reading/saved-searches/{search_id}",
@@ -234,6 +238,8 @@ def test_saved_search_endpoints_crud(reading_app):
             "total": 0,
             "limit": 10,
             "offset": 0,
+            "has_more": False,
+            "next_offset": None,
             "pagination": {
                 "mode": "offset",
                 "total": 0,
