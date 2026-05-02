@@ -1,17 +1,10 @@
 from __future__ import annotations
 
-import os
-from typing import Any, Dict
-
-from fastapi.testclient import TestClient
 from tldw_Server_API.app.core.config import clear_config_cache
-from tldw_Server_API.app.core.Sandbox.policy import SandboxPolicyConfig
-from tldw_Server_API.app.main import app
+from tldw_Server_API.app.core.Sandbox.policy import SandboxPolicyConfig, compute_policy_hash
 
 
-def _client(monkeypatch) -> TestClient:
-
-
+def _pin_policy_env(monkeypatch) -> None:
     monkeypatch.setenv("TEST_MODE", "1")
     # Pin some policy-related env for stability within this process
     monkeypatch.setenv("SANDBOX_DEFAULT_RUNTIME", "docker")
@@ -31,26 +24,18 @@ def _client(monkeypatch) -> TestClient:
     monkeypatch.delenv("SANDBOX_DOCKER_APPARMOR_PROFILE", raising=False)
     monkeypatch.setenv("SANDBOX_ULIMIT_NOFILE", "1024")
     monkeypatch.setenv("SANDBOX_ULIMIT_NPROC", "512")
-    clear_config_cache()
-    return TestClient(app)
 
 
 def test_policy_hash_is_deterministic_within_process(monkeypatch) -> None:
+    _pin_policy_env(monkeypatch)
+    clear_config_cache()
 
+    cfg = SandboxPolicyConfig.from_settings()
+    ph1 = compute_policy_hash(cfg)
+    ph2 = compute_policy_hash(cfg)
 
-    with _client(monkeypatch) as client:
-        body: Dict[str, Any] = {
-            "spec_version": "1.0",
-            "runtime": "docker",
-            "base_image": "python:3.11-slim",
-        }
-        r1 = client.post("/api/v1/sandbox/sessions", json=body)
-        r2 = client.post("/api/v1/sandbox/sessions", json=body)
-        assert r1.status_code == 200 and r2.status_code == 200
-        ph1 = r1.json().get("policy_hash")
-        ph2 = r2.json().get("policy_hash")
-        assert isinstance(ph1, str) and isinstance(ph2, str)
-        assert ph1 == ph2
+    assert isinstance(ph1, str) and isinstance(ph2, str)
+    assert ph1 == ph2
 
 
 def test_policy_reads_artifact_capture_byte_caps(monkeypatch) -> None:

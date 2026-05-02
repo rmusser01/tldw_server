@@ -64,6 +64,16 @@ Current limitations:
   protocol layers: only `network_policy=deny_all` is accepted, and the helper
   records the accepted policy in VM metadata/status details. The current
   Virtualization.framework configuration does not attach a network device.
+- `vz_linux` passes `SANDBOX_MAX_LOG_BYTES` to helper `exec_guest` as
+  `max_output_bytes` and also uses the same cap when publishing stdout/stderr
+  frames. This bounds helper-returned output and WebSocket log publication, but
+  it is not a guest-agent kill-on-cap mechanism; guest-side streaming and
+  early termination remain follow-up work.
+- `vz_linux` artifact capture is bounded by `SANDBOX_MAX_ARTIFACT_FILE_BYTES`
+  and `SANDBOX_MAX_ARTIFACT_TOTAL_BYTES`. Oversized or over-budget artifacts
+  are skipped without failing an otherwise successful run, and aggregate skip
+  counters are recorded in `resource_usage` and audit metadata without raw
+  artifact paths.
 - `seatbelt` discovery may be `available=True` while `strict_deny_all_supported=False`; deny-all is a best-effort host policy claim, not a VM-grade guarantee.
 - `seatbelt` control files and isolated `HOME`/temp dirs live outside the writable workspace and are removed after each run.
 - `seatbelt` real execution still depends on deprecated `sandbox-exec` and may be blocked by an enclosing sandbox even on macOS hosts.
@@ -152,6 +162,10 @@ Selected configuration knobs:
   - `SANDBOX_QUEUE_MAX_LENGTH`
   - `SANDBOX_QUEUE_TTL_SEC`
   - `SANDBOX_IDEMPOTENCY_TTL_SEC`
+- Output and artifacts:
+  - `SANDBOX_MAX_LOG_BYTES`
+  - `SANDBOX_MAX_ARTIFACT_FILE_BYTES`
+  - `SANDBOX_MAX_ARTIFACT_TOTAL_BYTES`
 - macOS scaffolding:
   - `TLDW_SANDBOX_MACOS_HELPER_SOCKET`
   - `TLDW_SANDBOX_MACOS_HELPER_READY`

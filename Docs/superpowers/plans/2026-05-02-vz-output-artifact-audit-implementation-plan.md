@@ -72,7 +72,7 @@
 - Create: `tldw_Server_API/app/core/Sandbox/limits.py`
 - Create: `tldw_Server_API/tests/sandbox/test_sandbox_limits.py`
 
-- [ ] **Step 1: Write failing tests for fair output cap math**
+- [x] **Step 1: Write failing tests for fair output cap math**
 
 Add tests that describe the desired helper-independent math:
 
@@ -100,13 +100,13 @@ def test_cap_output_streams_reuses_unused_stream_budget() -> None:
     assert len(result.stdout) + len(result.stderr) == 10
 ```
 
-- [ ] **Step 2: Run the new test and verify RED**
+- [x] **Step 2: Run the new test and verify RED**
 
 Run: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest -q tldw_Server_API/tests/sandbox/test_sandbox_limits.py::test_cap_output_streams_preserves_stderr_when_both_streams_are_large`
 
 Expected: FAIL with `ModuleNotFoundError` or missing `cap_output_streams`.
 
-- [ ] **Step 3: Implement `cap_output_streams` minimally**
+- [x] **Step 3: Implement `cap_output_streams` minimally**
 
 Create `limits.py` with dataclasses and fair-cap behavior:
 
@@ -193,13 +193,13 @@ def cap_output_streams(stdout: bytes, stderr: bytes, *, max_output_bytes: int | 
     )
 ```
 
-- [ ] **Step 4: Run the output helper tests and verify GREEN**
+- [x] **Step 4: Run the output helper tests and verify GREEN**
 
 Run: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest -q tldw_Server_API/tests/sandbox/test_sandbox_limits.py`
 
 Expected: PASS for current tests.
 
-- [ ] **Step 5: Write failing tests for artifact skip behavior**
+- [x] **Step 5: Write failing tests for artifact skip behavior**
 
 Add tests that create a workspace containing:
 
@@ -226,13 +226,13 @@ assert result.counters["artifact_skip_total_limit"] == 1
 assert result.counters["artifact_bytes_collected"] == 4
 ```
 
-- [ ] **Step 6: Run the artifact tests and verify RED**
+- [x] **Step 6: Run the artifact tests and verify RED**
 
 Run: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest -q tldw_Server_API/tests/sandbox/test_sandbox_limits.py`
 
 Expected: FAIL with missing `collect_limited_artifacts`.
 
-- [ ] **Step 7: Implement `collect_limited_artifacts`**
+- [x] **Step 7: Implement `collect_limited_artifacts`**
 
 Add:
 
@@ -247,13 +247,13 @@ Add:
 
 Use defaults supplied by caller; do not read app settings inside this helper.
 
-- [ ] **Step 8: Run helper tests and verify GREEN**
+- [x] **Step 8: Run helper tests and verify GREEN**
 
 Run: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest -q tldw_Server_API/tests/sandbox/test_sandbox_limits.py`
 
 Expected: PASS.
 
-- [ ] **Step 9: Commit Task 1**
+- [x] **Step 9: Commit Task 1**
 
 ```bash
 git add tldw_Server_API/app/core/Sandbox/limits.py tldw_Server_API/tests/sandbox/test_sandbox_limits.py
@@ -270,7 +270,7 @@ git commit -m "feat(sandbox): add shared output artifact limits"
 - Modify: `tools/macos-vz-helper/Tests/UnixSocketServerTests.swift`
 - Modify: `tools/macos-vz-helper/PROTOCOL.md`
 
-- [ ] **Step 1: Write failing service-level cap tests**
+- [x] **Step 1: Write failing service-level cap tests**
 
 In `HelperServiceExecTests.swift`, add a guest bridge that returns large stdout
 and stderr. Assert:
@@ -282,13 +282,13 @@ and stderr. Assert:
 - response details include string counters
 - invalid cap throws `HelperServiceError.invalidExecOutputLimit("output_limit_out_of_range")`
 
-- [ ] **Step 2: Run service tests and verify RED**
+- [x] **Step 2: Run service tests and verify RED**
 
 Run: `swift test --package-path tools/macos-vz-helper --filter HelperServiceExecTests`
 
 Expected: FAIL because `execGuest` does not accept `maxOutputBytes` and no error case exists.
 
-- [ ] **Step 3: Implement service contract**
+- [x] **Step 3: Implement service contract**
 
 In `HelperServiceError`, add:
 
@@ -338,7 +338,7 @@ Record details as strings:
 ]
 ```
 
-- [ ] **Step 4: Wire socket parsing**
+- [x] **Step 4: Wire socket parsing**
 
 In `UnixSocketServer.swift`:
 
@@ -349,7 +349,7 @@ In `UnixSocketServer.swift`:
 - map `HelperServiceError.invalidExecOutputLimit` to `exec_output_limit_invalid`
 - return associated reason as message
 
-- [ ] **Step 5: Add socket tests**
+- [x] **Step 5: Add socket tests**
 
 In `UnixSocketServerTests.swift`, add:
 
@@ -357,7 +357,7 @@ In `UnixSocketServerTests.swift`, add:
 - `max_output_bytes: "10"` returns `invalid_request`
 - `max_output_bytes: 0` returns `exec_output_limit_invalid`
 
-- [ ] **Step 6: Run Swift tests and verify GREEN**
+- [x] **Step 6: Run Swift tests and verify GREEN**
 
 Run:
 
@@ -368,7 +368,7 @@ swift test --package-path tools/macos-vz-helper --filter UnixSocketServerTests
 
 Expected: PASS.
 
-- [ ] **Step 7: Update protocol docs**
+- [x] **Step 7: Update protocol docs**
 
 In `tools/macos-vz-helper/PROTOCOL.md`, update `exec_guest` request and
 response details:
@@ -378,7 +378,7 @@ response details:
 - invalid shape/semantic error codes
 - note that this is a host response cap, not guest-agent kill-on-cap
 
-- [ ] **Step 8: Commit Task 2**
+- [x] **Step 8: Commit Task 2**
 
 ```bash
 git add tools/macos-vz-helper/Sources/Server/HelperService.swift tools/macos-vz-helper/Sources/Server/UnixSocketServer.swift tools/macos-vz-helper/Sources/Protocol/Response.swift tools/macos-vz-helper/Tests/HelperServiceExecTests.swift tools/macos-vz-helper/Tests/UnixSocketServerTests.swift tools/macos-vz-helper/PROTOCOL.md
@@ -398,7 +398,7 @@ git commit -m "feat(sandbox): cap vz helper exec output"
 - Modify: `tldw_Server_API/app/core/Sandbox/runners/vz_linux_runner.py`
 - Modify: `tldw_Server_API/tests/sandbox/test_vz_linux_runner.py`
 
-- [ ] **Step 1: Write failing Python helper-client tests**
+- [x] **Step 1: Write failing Python helper-client tests**
 
 Add tests that:
 
@@ -410,7 +410,7 @@ Run: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytes
 
 Expected: FAIL before implementation.
 
-- [ ] **Step 2: Implement helper-client validation and fake details**
+- [x] **Step 2: Implement helper-client validation and fake details**
 
 In `helper_client.py`:
 
@@ -420,13 +420,13 @@ In `helper_client.py`:
 - use `cap_output_streams` in TEST_MODE fake replies
 - include helper-style detail counters as strings
 
-- [ ] **Step 3: Run helper-client tests and verify GREEN**
+- [x] **Step 3: Run helper-client tests and verify GREEN**
 
 Run: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest -q tldw_Server_API/tests/sandbox/test_macos_virtualization_helper_client.py`
 
 Expected: PASS.
 
-- [ ] **Step 4: Write failing policy and runtime-discovery tests**
+- [x] **Step 4: Write failing policy and runtime-discovery tests**
 
 In `test_policy_hash_determinism.py`, pin:
 
@@ -454,7 +454,7 @@ Run: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytes
 
 Expected: FAIL because the schema/discovery/policy fields do not exist yet.
 
-- [ ] **Step 5: Implement policy-backed artifact cap settings**
+- [x] **Step 5: Implement policy-backed artifact cap settings**
 
 In `policy.py`:
 
@@ -468,13 +468,13 @@ In `sandbox_schemas.py`, add optional integer fields to the runtime discovery sc
 
 In `SandboxService.feature_discovery`, include both fields for each advertised runtime.
 
-- [ ] **Step 6: Run policy and runtime-discovery tests and verify GREEN**
+- [x] **Step 6: Run policy and runtime-discovery tests and verify GREEN**
 
 Run: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest -q tldw_Server_API/tests/sandbox/test_sandbox_api.py::test_runtimes_discovery_shape tldw_Server_API/tests/sandbox/test_policy_hash_determinism.py`
 
 Expected: PASS.
 
-- [ ] **Step 7: Write failing VZ runner tests**
+- [x] **Step 7: Write failing VZ runner tests**
 
 In `test_vz_linux_runner.py`, add tests that:
 
@@ -494,7 +494,7 @@ assert status.resource_usage["artifact_files_skipped"] == 1
 assert status.phase == RunPhase.completed
 ```
 
-- [ ] **Step 8: Implement VZ runner wiring**
+- [x] **Step 8: Implement VZ runner wiring**
 
 In `vz_linux_runner.py`:
 
@@ -510,7 +510,7 @@ In `vz_linux_runner.py`:
 - merge output/artifact counters into integer-only `usage`
 - keep existing `log_bytes` and `artifact_bytes` keys stable
 
-- [ ] **Step 9: Run VZ runner tests and verify GREEN**
+- [x] **Step 9: Run VZ runner tests and verify GREEN**
 
 Run:
 
@@ -525,7 +525,7 @@ Run:
 
 Expected: PASS.
 
-- [ ] **Step 10: Commit Task 3**
+- [x] **Step 10: Commit Task 3**
 
 ```bash
 git add tldw_Server_API/app/core/Sandbox/macos_virtualization/helper_client.py tldw_Server_API/tests/sandbox/test_macos_virtualization_helper_client.py tldw_Server_API/app/core/Sandbox/policy.py tldw_Server_API/app/api/v1/schemas/sandbox_schemas.py tldw_Server_API/app/core/Sandbox/service.py tldw_Server_API/tests/sandbox/test_policy_hash_determinism.py tldw_Server_API/tests/sandbox/test_sandbox_api.py tldw_Server_API/app/core/Sandbox/runners/vz_linux_runner.py tldw_Server_API/tests/sandbox/test_vz_linux_runner.py
@@ -539,7 +539,7 @@ git commit -m "feat(sandbox): wire vz output artifact limits"
 - Modify: `tldw_Server_API/app/core/Sandbox/service.py`
 - Add or modify: `tldw_Server_API/tests/sandbox/test_sandbox_run_limit_audit.py`
 
-- [ ] **Step 1: Write failing audit metadata helper tests**
+- [x] **Step 1: Write failing audit metadata helper tests**
 
 In `test_sandbox_limits.py` or a new audit test file, verify:
 
@@ -560,7 +560,7 @@ assert "artifact_paths" not in metadata
 
 Expected: FAIL before helper exists.
 
-- [ ] **Step 2: Implement audit metadata derivation**
+- [x] **Step 2: Implement audit metadata derivation**
 
 In `limits.py`, add:
 
@@ -569,13 +569,13 @@ In `limits.py`, add:
 
 Keep input tolerant and output path-minimized.
 
-- [ ] **Step 3: Run helper audit tests and verify GREEN**
+- [x] **Step 3: Run helper audit tests and verify GREEN**
 
 Run: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest -q tldw_Server_API/tests/sandbox/test_sandbox_limits.py`
 
 Expected: PASS.
 
-- [ ] **Step 4: Write failing `SandboxService` audit tests**
+- [x] **Step 4: Write failing `SandboxService` audit tests**
 
 Use monkeypatching to replace `UnifiedAuditService` with a fake collector. Call
 `SandboxService._audit_run_completion(...)` with a `RunStatus` containing
@@ -587,7 +587,7 @@ resource counters. Assert three events:
 
 Assert metadata does not include artifact path names.
 
-- [ ] **Step 5: Implement service audit emission**
+- [x] **Step 5: Implement service audit emission**
 
 In `_audit_run_completion`:
 
@@ -606,13 +606,13 @@ In `_audit_run_completion`:
 
 Do not add new audit enum values in this slice.
 
-- [ ] **Step 6: Run service audit tests and verify GREEN**
+- [x] **Step 6: Run service audit tests and verify GREEN**
 
 Run: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest -q tldw_Server_API/tests/sandbox/test_sandbox_run_limit_audit.py tldw_Server_API/tests/sandbox/test_sandbox_limits.py`
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit Task 4**
+- [x] **Step 7: Commit Task 4**
 
 ```bash
 git add tldw_Server_API/app/core/Sandbox/limits.py tldw_Server_API/app/core/Sandbox/service.py tldw_Server_API/tests/sandbox/test_sandbox_limits.py tldw_Server_API/tests/sandbox/test_sandbox_run_limit_audit.py
@@ -625,7 +625,7 @@ git commit -m "feat(sandbox): audit vz limit outcomes"
 - Modify: `tldw_Server_API/app/core/Sandbox/README.md`
 - Modify: `Docs/superpowers/specs/2026-05-02-vz-output-artifact-audit-design.md` only if implementation needs a justified design clarification.
 
-- [ ] **Step 1: Update sandbox docs**
+- [x] **Step 1: Update sandbox docs**
 
 Document:
 
@@ -633,7 +633,7 @@ Document:
 - `SANDBOX_MAX_ARTIFACT_FILE_BYTES` and `SANDBOX_MAX_ARTIFACT_TOTAL_BYTES` bound `vz_linux` artifact capture.
 - helper-side cap is not guest-agent kill-on-cap.
 
-- [ ] **Step 2: Run focused Swift verification**
+- [x] **Step 2: Run focused Swift verification**
 
 Run:
 
@@ -645,7 +645,7 @@ swift test --package-path tools/macos-vz-helper
 
 Expected: PASS.
 
-- [ ] **Step 3: Run focused Python verification**
+- [x] **Step 3: Run focused Python verification**
 
 Run:
 
@@ -663,7 +663,7 @@ Run:
 
 Expected: PASS, with any known host-gated skip preserved.
 
-- [ ] **Step 4: Run syntax and security checks**
+- [x] **Step 4: Run syntax and security checks**
 
 Run:
 
@@ -694,14 +694,14 @@ Expected:
 - Bandit has no new findings in touched files.
 - `git diff --check` exits 0.
 
-- [ ] **Step 5: Commit docs and final verification notes**
+- [x] **Step 5: Commit docs and final verification notes**
 
 ```bash
 git add tldw_Server_API/app/core/Sandbox/README.md Docs/superpowers/plans/2026-05-02-vz-output-artifact-audit-implementation-plan.md
 git commit -m "docs(sandbox): document vz output artifact limits"
 ```
 
-- [ ] **Step 6: Prepare PR summary**
+- [x] **Step 6: Prepare PR summary**
 
 PR body should include:
 
