@@ -36,11 +36,16 @@ from tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps import (
     require_project_access,
     require_project_write_access,
 )
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import (
+    build_page_pagination_meta,
+    resolve_page_pagination_metadata,
+)
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 
 # Local imports
 from tldw_Server_API.app.api.v1.schemas.prompt_studio_base import (
     ListResponse,
+    PageListResponse,
     PaginationMetadata,
     StandardResponse,
 )
@@ -830,7 +835,7 @@ async def create_optimization(
 
 @router.get(
     "/list/{project_id}",
-    response_model=ListResponse,
+    response_model=PageListResponse,
     openapi_extra={
         "responses": {
             "200": {
@@ -867,7 +872,7 @@ async def list_optimizations(
     status_filter: Optional[str] = Query(None, alias="status", description="Filter by status"),
     _: bool = Depends(require_project_access),
     db: PromptStudioDatabase = Depends(get_prompt_studio_db)
-) -> ListResponse:
+) -> PageListResponse:
     """
     List optimizations for a project.
 
@@ -893,9 +898,24 @@ async def list_optimizations(
             OptimizationResponse(**record)
             for record in result.get("optimizations", [])
         ]
-        metadata = PaginationMetadata(**result.get("pagination", {}))
+        metadata = resolve_page_pagination_metadata(
+            result.get("pagination"),
+            page=page,
+            per_page=per_page,
+            item_count=len(optimizations),
+        )
 
-        return ListResponse(success=True, data=optimizations, metadata=metadata)
+        return PageListResponse(
+            success=True,
+            data=optimizations,
+            metadata=metadata,
+            pagination=build_page_pagination_meta(
+                page=metadata["page"],
+                per_page=metadata["per_page"],
+                total=metadata["total"],
+                total_pages=metadata["total_pages"],
+            ),
+        )
 
     except DatabaseError as exc:
         logger.error("Database error listing optimizations")

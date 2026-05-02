@@ -90,7 +90,7 @@ Frontend files, only when a frontend client consumes a migrated route:
 - Create: `Docs/Design/Pagination_Completion_Matrix.md`
 - Create: `Docs/Design/Pagination_Contract_Exemptions.md`
 
-- [ ] **Step 1: Write the inventory script**
+- [x] **Step 1: Write the inventory script**
 
 Create `tools/pagination_inventory.py` to scan:
 
@@ -110,7 +110,7 @@ The script should emit a Markdown table with:
 - recommended tranche
 - test file candidates
 
-- [ ] **Step 2: Run the inventory script**
+- [x] **Step 2: Run the inventory script**
 
 Run:
 
@@ -121,7 +121,7 @@ python tools/pagination_inventory.py > Docs/Design/Pagination_Completion_Matrix.
 
 Expected: the matrix contains known families such as `prompt_studio`, `paper_search`, `audio_history`, `workflows`, `watchlists`, `kanban`, and raw list endpoints like character list/search routes.
 
-- [ ] **Step 3: Create the first exemption document**
+- [x] **Step 3: Create the first exemption document**
 
 Create `Docs/Design/Pagination_Contract_Exemptions.md` with these initial categories:
 
@@ -130,7 +130,7 @@ Create `Docs/Design/Pagination_Contract_Exemptions.md` with these initial catego
 - Streaming/file-export routes: not paginated or not applicable.
 - Internal admin/event routes where count is unavailable: allow `total=None`.
 
-- [ ] **Step 4: Verify the inventory does not change behavior**
+- [x] **Step 4: Verify the inventory does not change behavior**
 
 Run:
 
@@ -141,7 +141,7 @@ git status --short --branch
 
 Expected: only docs and the inventory script changed.
 
-- [ ] **Step 5: Commit the inventory PR**
+- [x] **Step 5: Commit the inventory PR**
 
 ```bash
 git add tools/pagination_inventory.py Docs/Design/Pagination_Completion_Matrix.md Docs/Design/Pagination_Contract_Exemptions.md
@@ -156,7 +156,7 @@ git commit -m "Phase pagination-completion: add pagination inventory matrix"
 - Modify: `tldw_Server_API/app/api/v1/endpoints/_pagination_utils.py`
 - Test: `tldw_Server_API/tests/Utils/test_pagination_contract.py`
 
-- [ ] **Step 1: Add failing alias-helper tests**
+- [x] **Step 1: Add failing alias-helper tests**
 
 Extend `test_pagination_contract.py` with test-only response models that prove:
 
@@ -174,7 +174,7 @@ python -m pytest tldw_Server_API/tests/Utils/test_pagination_contract.py -q
 
 Expected: new tests fail because page/cursor/default strict helpers do not exist yet.
 
-- [ ] **Step 2: Implement schema-level helpers**
+- [x] **Step 2: Implement schema-level helpers**
 
 In `schemas/pagination.py`, add helpers along these lines:
 
@@ -187,11 +187,11 @@ def default_cursor_pagination_aliases(response: Any) -> Any: ...
 
 Keep helpers generic and Pydantic-model-friendly. Do not import endpoint modules.
 
-- [ ] **Step 3: Keep metadata builders stable**
+- [x] **Step 3: Keep metadata builders stable**
 
 In `utils/pagination.py`, preserve current builder behavior and add tests before any behavior change. Do not change `build_offset_pagination_meta`, `build_page_pagination_meta`, or `build_cursor_pagination_meta` semantics without a failing test.
 
-- [ ] **Step 4: Rerun focused tests**
+- [x] **Step 4: Rerun focused tests**
 
 Run:
 
@@ -203,7 +203,7 @@ git diff --check
 
 Expected: tests pass, Bandit has zero findings.
 
-- [ ] **Step 5: Commit helper consolidation**
+- [x] **Step 5: Commit helper consolidation**
 
 ```bash
 git add tldw_Server_API/app/api/v1/schemas/pagination.py tldw_Server_API/app/api/v1/utils/pagination.py tldw_Server_API/app/api/v1/endpoints/_pagination_utils.py tldw_Server_API/tests/Utils/test_pagination_contract.py
@@ -216,7 +216,7 @@ git commit -m "Phase pagination-completion: consolidate pagination helpers"
 - Modify schema files that define local `_default_offset_pagination_aliases`
 - Test: touched route-family tests plus `tldw_Server_API/tests/Utils/test_pagination_contract.py`
 
-- [ ] **Step 1: Pick a small duplicate-helper tranche**
+- [x] **Step 1: Pick a small duplicate-helper tranche**
 
 Start with low-risk schema-only replacements:
 
@@ -225,7 +225,7 @@ Start with low-risk schema-only replacements:
 - `tldw_Server_API/app/api/v1/schemas/storage_schemas.py`
 - `tldw_Server_API/app/api/v1/schemas/prompt_schemas.py`
 
-- [ ] **Step 2: Replace local helpers with shared imports**
+- [x] **Step 2: Replace local helpers with shared imports**
 
 For each file:
 
@@ -238,7 +238,7 @@ from tldw_Server_API.app.api.v1.schemas.pagination import (
 
 Then change validators to call `default_offset_pagination_aliases(self)`.
 
-- [ ] **Step 3: Run focused tests**
+- [x] **Step 3: Run focused tests**
 
 Run:
 
@@ -252,7 +252,7 @@ git diff --check
 
 Expected: behavior unchanged.
 
-- [ ] **Step 4: Commit duplicate-helper tranche**
+- [x] **Step 4: Commit duplicate-helper tranche**
 
 ```bash
 git add \
@@ -273,7 +273,14 @@ git commit -m "Phase pagination-completion: reuse offset alias helper"
 - Modify: `tldw_Server_API/app/api/v1/endpoints/prompt_studio/prompt_studio_optimization.py`
 - Test: `tldw_Server_API/tests/prompt_studio/integration/test_api_endpoints.py`
 
-- [ ] **Step 1: Add focused failing tests**
+**Tranche boundary after plan review:** Do not rework Prompt Studio routes that already return canonical `PageListResponse` unless a new test exposes a bug. In the first tranche, target only covered gaps:
+
+- `prompt_studio_projects.py`: preserve `response_model=None` and the legacy top-level `projects` alias unless a route-specific schema explicitly includes it.
+- `prompt_studio_optimization.py:list_optimizations`: additive `pagination` is safe because the route already returns a list envelope.
+
+Defer `list_optimization_iterations` to custom-envelope handling unless the tranche adds a route-specific response schema that preserves `data={"iterations": ...}` and adds canonical `pagination` without filtering existing fields.
+
+- [x] **Step 1: Add focused failing tests**
 
 Add tests for each selected Prompt Studio list endpoint proving:
 
@@ -281,6 +288,7 @@ Add tests for each selected Prompt Studio list endpoint proving:
 - canonical `pagination.mode == "page"`
 - `page`, `per_page`, `total`, `total_pages`, and `has_more` are correct
 - missing/partial backend pagination does not raise `KeyError`
+- legacy route-specific aliases, such as top-level `projects`, are not removed
 
 Run:
 
@@ -290,7 +298,7 @@ python -m pytest tldw_Server_API/tests/prompt_studio/integration/test_api_endpoi
 
 Expected: newly added canonical assertions fail for endpoints not yet migrated.
 
-- [ ] **Step 2: Use shared page builder**
+- [x] **Step 2: Use shared page builder**
 
 In each endpoint, build `PagePaginationMeta` with:
 
@@ -305,15 +313,17 @@ pagination=build_page_pagination_meta(
 
 Resolve missing backend metadata defensively before constructing responses.
 
-- [ ] **Step 3: Rerun Prompt Studio tests and Bandit**
+- [x] **Step 3: Rerun Prompt Studio tests and Bandit**
 
 Run:
 
 ```bash
-python -m pytest tldw_Server_API/tests/prompt_studio/integration/test_api_endpoints.py -q
+python -m pytest tldw_Server_API/tests/Utils/test_pagination_contract.py tldw_Server_API/tests/prompt_studio/integration/test_api_endpoints.py -k "pagination_contract or list_projects_safely_defaults_missing_pagination or list_optimizations_safely_defaults_missing_pagination or list_prompts_safely_defaults_missing_pagination" -q
 python -m bandit -r tldw_Server_API/app/api/v1/endpoints/prompt_studio tldw_Server_API/app/api/v1/schemas/prompt_studio_base.py -f json -o /tmp/bandit_pagination_prompt_studio.json
 git diff --check
 ```
+
+If the full Prompt Studio integration file times out in the app/TestClient lifespan harness, record that as baseline harness debt and keep the tranche scoped to direct covered endpoint tests. Do not broaden this pagination tranche into startup/shutdown lifecycle fixes.
 
 - [ ] **Step 4: Commit Prompt Studio page tranche**
 

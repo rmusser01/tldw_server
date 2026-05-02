@@ -8,6 +8,8 @@ API endpoints while keeping dependencies limited to shared pagination schemas.
 from __future__ import annotations
 
 import urllib.parse as _u
+from collections.abc import Mapping
+from typing import Any
 
 from tldw_Server_API.app.api.v1.schemas.pagination import (
     CursorPaginationMeta,
@@ -128,10 +130,36 @@ def build_pagination_link_header(
     )
 
 
+def resolve_page_pagination_metadata(
+    pagination_data: Mapping[str, Any] | None,
+    *,
+    page: int,
+    per_page: int,
+    item_count: int,
+) -> dict[str, int]:
+    """Normalize page pagination data from storage, defaulting missing totals safely."""
+    pagination = pagination_data or {}
+    page_value = int(pagination.get("page") or page)
+    per_page_value = int(pagination.get("per_page") or pagination.get("limit") or per_page)
+    total_value = int(pagination.get("total") if pagination.get("total") is not None else item_count)
+    total_pages_value = pagination.get("total_pages")
+    if total_pages_value is None:
+        total_pages_value = (total_value + per_page_value - 1) // per_page_value if total_value else 0
+    total_pages_value = int(total_pages_value)
+
+    return {
+        "page": page_value,
+        "per_page": per_page_value,
+        "total": total_value,
+        "total_pages": total_pages_value,
+    }
+
+
 __all__ = [
     "build_cursor_pagination_meta",
     "build_link_header",
     "build_page_pagination_meta",
     "build_offset_pagination_meta",
     "build_pagination_link_header",
+    "resolve_page_pagination_metadata",
 ]

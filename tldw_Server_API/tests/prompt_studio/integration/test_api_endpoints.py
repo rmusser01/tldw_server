@@ -181,6 +181,68 @@ async def test_list_prompts_safely_defaults_missing_pagination() -> None:
     assert response.pagination.page == 2
     assert response.pagination.has_more is False
 
+
+@pytest.mark.asyncio
+async def test_list_projects_safely_defaults_missing_pagination() -> None:
+    """Project listing preserves legacy aliases when storage omits pagination metadata."""
+    from tldw_Server_API.app.api.v1.endpoints.prompt_studio import prompt_studio_projects
+
+    class _ProjectDbWithoutPagination:
+        def list_projects(self, *_args, **_kwargs):
+            return {"projects": []}
+
+    response = await prompt_studio_projects.list_projects(
+        page=2,
+        per_page=10,
+        status_filter=None,
+        include_deleted=False,
+        search=None,
+        user_context={"user_id": "test-user", "is_admin": False},
+        db=_ProjectDbWithoutPagination(),
+    )
+
+    assert response["metadata"] == {
+        "page": 2,
+        "per_page": 10,
+        "total": 0,
+        "total_pages": 0,
+    }
+    assert response["pagination"] == {
+        "mode": "page",
+        "page": 2,
+        "per_page": 10,
+        "total": 0,
+        "total_pages": 0,
+        "has_more": False,
+    }
+    assert response["projects"] == []
+
+
+@pytest.mark.asyncio
+async def test_list_optimizations_safely_defaults_missing_pagination() -> None:
+    """Optimization listing adds canonical pagination when storage omits metadata."""
+    from tldw_Server_API.app.api.v1.endpoints.prompt_studio import prompt_studio_optimization
+
+    class _OptimizationDbWithoutPagination:
+        def list_optimizations(self, *_args, **_kwargs):
+            return {"optimizations": []}
+
+    response = await prompt_studio_optimization.list_optimizations(
+        project_id=123,
+        page=2,
+        per_page=10,
+        status_filter=None,
+        _=True,
+        db=_OptimizationDbWithoutPagination(),
+    )
+
+    assert response.metadata.page == 2
+    assert response.metadata.per_page == 10
+    assert response.metadata.total == 0
+    assert response.pagination.mode == "page"
+    assert response.pagination.page == 2
+    assert response.pagination.has_more is False
+
 ########################################################################################################################
 # Project Endpoints Tests
 

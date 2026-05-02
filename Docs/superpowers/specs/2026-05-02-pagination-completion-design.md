@@ -196,7 +196,7 @@ Acceptance criteria:
 
 Migrate page-family endpoints in small PRs:
 
-- Prompt Studio page lists first.
+- Prompt Studio page-list gaps first, without churning routes that already return `PageListResponse`.
 - Paper/research page searches next.
 - Media/navigation/version-style page lists after coverage is clear.
 - Privileges/collections feeds as a final page tranche.
@@ -206,6 +206,7 @@ Acceptance criteria:
 - Page-family responses preserve legacy fields.
 - Nested `pagination.mode == "page"` is present where response models are not raw/provider exempt.
 - Tests cover `has_more`, `total_pages`, and legacy aliases.
+- Route-specific compatibility aliases, such as top-level `projects`, remain present unless a versioning decision explicitly removes them.
 
 ### Stage 3 — Cursor Migration
 
@@ -262,6 +263,9 @@ Acceptance criteria:
 
 - Risk: Raw list endpoints become breaking changes.
   - Mitigation: Exempt raw-list routes until API versioning or add a sibling versioned route.
+
+- Risk: Tightening FastAPI `response_model` filters out legacy compatibility fields.
+  - Mitigation: Preserve existing response-model behavior unless a route-specific schema carries those fields explicitly.
 
 - Risk: The matrix drifts from code.
   - Mitigation: Add a lightweight route/OpenAPI contract test in Stage 5.

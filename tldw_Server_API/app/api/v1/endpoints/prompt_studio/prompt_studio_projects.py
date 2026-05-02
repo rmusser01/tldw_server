@@ -39,7 +39,10 @@ from tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps import (
     require_project_access,
     require_project_write_access,
 )
-from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_page_pagination_meta
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import (
+    build_page_pagination_meta,
+    resolve_page_pagination_metadata,
+)
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 
 # Local imports
@@ -296,19 +299,25 @@ async def list_projects(
         )
 
         # Convert to response models
-        projects = [ProjectListItem(**p) for p in result["projects"]]
+        projects = [ProjectListItem(**p) for p in result.get("projects", [])]
+        metadata = resolve_page_pagination_metadata(
+            result.get("pagination"),
+            page=page,
+            per_page=per_page,
+            item_count=len(projects),
+        )
 
         # Include both 'metadata' and 'pagination' for compatibility
         return {
             "success": True,
             "data": projects,
-            "metadata": result["pagination"],
+            "metadata": metadata,
             "pagination": model_dump_compat(
                 build_page_pagination_meta(
-                    page=result["pagination"]["page"],
-                    per_page=result["pagination"]["per_page"],
-                    total=result["pagination"]["total"],
-                    total_pages=result["pagination"]["total_pages"],
+                    page=metadata["page"],
+                    per_page=metadata["per_page"],
+                    total=metadata["total"],
+                    total_pages=metadata["total_pages"],
                 )
             ),
             "projects": [p.model_dump() if hasattr(p, 'model_dump') else dict(p) for p in projects]
