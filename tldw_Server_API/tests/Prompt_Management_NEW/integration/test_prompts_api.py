@@ -489,6 +489,8 @@ class TestCollectionEndpoints:
             "total": 0,
             "limit": 200,
             "offset": 0,
+            "has_more": False,
+            "next_offset": None,
             "pagination": {
                 "mode": "offset",
                 "total": 0,
@@ -593,6 +595,8 @@ class TestCollectionEndpoints:
         assert payload["pagination"]["offset"] == 0
         assert payload["pagination"]["has_more"] is False
         assert payload["pagination"]["next_offset"] is None
+        assert payload["has_more"] is False
+        assert payload["next_offset"] is None
 
     @pytest.mark.integration
     def test_update_collection_endpoint(self, test_client, auth_headers):

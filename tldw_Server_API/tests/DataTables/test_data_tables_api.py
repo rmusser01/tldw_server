@@ -438,6 +438,8 @@ def test_list_update_delete_data_table(tmp_path, data_tables_app_factory):
         assert resp.status_code == 200, resp.text
         payload = resp.json()
         assert payload["count"] >= 1
+        assert payload["has_more"] is False
+        assert payload["next_offset"] is None
         assert payload["pagination"] == {
             "mode": "offset",
             "limit": 50,
@@ -453,6 +455,8 @@ def test_list_update_delete_data_table(tmp_path, data_tables_app_factory):
         detail_payload = detail.json()
         assert detail_payload["rows_limit"] == 1
         assert detail_payload["rows_offset"] == 0
+        assert detail_payload["has_more"] is False
+        assert detail_payload["next_offset"] is None
         assert detail_payload["pagination"] == {
             "mode": "offset",
             "limit": 1,
@@ -518,6 +522,8 @@ def test_get_data_table_without_rows_preserves_pagination_window(tmp_path, data_
             "has_more": True,
             "next_offset": 1,
         }
+        assert detail_payload["has_more"] is True
+        assert detail_payload["next_offset"] == 1
 
 
 def test_list_data_tables_maps_database_error(tmp_path, data_tables_app_factory, monkeypatch):

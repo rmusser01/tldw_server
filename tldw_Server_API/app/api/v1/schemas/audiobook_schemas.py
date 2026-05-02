@@ -21,6 +21,14 @@ AudiobookArtifactScope = Literal["chapter", "merged"]
 AlignmentEngine = Literal["kokoro"]
 
 
+def _default_offset_pagination_aliases(response):
+    if response.has_more is None:
+        response.has_more = response.pagination.has_more
+    if response.next_offset is None:
+        response.next_offset = response.pagination.next_offset
+    return response
+
+
 class SourceRef(BaseModel):
     """Reference to an input source for audiobook processing."""
 
@@ -617,7 +625,13 @@ class VoiceProfileListResponse(BaseModel):
     total: int = Field(..., description="Total voice profiles matching the query")
     limit: int = Field(..., description="Applied page size")
     offset: int = Field(..., description="Applied offset")
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
     pagination: OffsetPaginationMeta = Field(..., description="Canonical pagination metadata")
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self) -> VoiceProfileListResponse:
+        return _default_offset_pagination_aliases(self)
 
 
 class VoiceProfileDeleteResponse(BaseModel):

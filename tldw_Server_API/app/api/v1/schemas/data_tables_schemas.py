@@ -22,6 +22,14 @@ DataTableRowData = dict[str, Any] | list[Any]
 DATA_TABLES_MAX_ROWS_LIMIT = int(os.getenv("DATA_TABLES_MAX_ROWS", "2000") or "2000")
 
 
+def _default_offset_pagination_aliases(response):
+    if response.has_more is None:
+        response.has_more = response.pagination.has_more
+    if response.next_offset is None:
+        response.next_offset = response.pagination.next_offset
+    return response
+
+
 class DataTableColumnHint(BaseModel):
     """Optional schema hint supplied during generation."""
 
@@ -175,7 +183,14 @@ class DataTablesListResponse(BaseModel):
     limit: int
     offset: int
     total: int | None = None
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
     pagination: OffsetPaginationMeta
+
+    if model_validator is not None:
+        @model_validator(mode="after")
+        def _default_pagination_aliases(self) -> DataTablesListResponse:
+            return _default_offset_pagination_aliases(self)
 
 
 class DataTableDetailResponse(BaseModel):
@@ -187,7 +202,14 @@ class DataTableDetailResponse(BaseModel):
     sources: list[DataTableSource]
     rows_limit: int
     rows_offset: int
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
     pagination: OffsetPaginationMeta
+
+    if model_validator is not None:
+        @model_validator(mode="after")
+        def _default_pagination_aliases(self) -> DataTableDetailResponse:
+            return _default_offset_pagination_aliases(self)
 
 
 class DataTableContentUpdateRequest(BaseModel):

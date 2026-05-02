@@ -49,6 +49,8 @@ def test_voice_profile_crud(client_voice_profiles):
     assert payload["total"] == 1
     assert payload["limit"] == 100
     assert payload["offset"] == 0
+    assert payload["has_more"] is False
+    assert payload["next_offset"] is None
     assert payload["pagination"] == {
         "mode": "offset",
         "total": 1,
@@ -71,6 +73,8 @@ def test_voice_profile_crud(client_voice_profiles):
         "total": 0,
         "limit": 100,
         "offset": 0,
+        "has_more": False,
+        "next_offset": None,
         "pagination": {
             "mode": "offset",
             "total": 0,
