@@ -4073,6 +4073,135 @@ describe("SidepanelPersona", () => {
     expect(screen.getByTestId("live-wake-behavior")).toHaveTextContent("Continuous")
   })
 
+  it("stops wake listening when leaving the Live tab", async () => {
+    const originalSpeechRecognition = (window as any).SpeechRecognition
+    class MockSpeechRecognition {
+      continuous = false
+      interimResults = false
+      lang = ""
+      onresult: ((event: any) => void) | null = null
+      onerror: ((event: any) => void) | null = null
+      onend: (() => void) | null = null
+      start = vi.fn()
+      stop = vi.fn()
+    }
+    ;(window as any).SpeechRecognition = MockSpeechRecognition
+
+    try {
+      mocks.location.search = "?persona_id=research_assistant&tab=live"
+      mocks.getConfig.mockResolvedValue({
+        serverUrl: "http://127.0.0.1:8000",
+        authMode: "single-user",
+        apiKey: "persona-key"
+      })
+      mocks.capabilitiesState.capabilities = {
+        hasPersona: true,
+        hasPersonalization: true,
+        hasAudio: true
+      } as any
+      mocks.fetchWithAuth.mockImplementation((path: string) => {
+        if (path.includes("/persona/catalog")) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => [{ id: "research_assistant", name: "Research Assistant" }]
+          })
+        }
+        if (path.includes("/persona/profiles/research_assistant/voice-analytics")) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              persona_id: "research_assistant",
+              summary: { total_runs: 0, matched_runs: 0, fallback_runs: 0 }
+            })
+          })
+        }
+        if (path.includes("/persona/profiles/research_assistant/state")) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              persona_id: "research_assistant",
+              soul_md: null,
+              identity_md: null,
+              heartbeat_md: null
+            })
+          })
+        }
+        if (path.includes("/persona/profiles/research_assistant")) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              id: "research_assistant",
+              use_persona_state_context_default: true,
+              voice_defaults: {
+                voice_chat_trigger_phrases: ["saved wake phrase"],
+                wake_behavior: "continuous"
+              }
+            })
+          })
+        }
+        if (path.includes("/persona/sessions/sess-tab-switch")) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({ preferences: {} })
+          })
+        }
+        if (path === "/api/v1/persona/session") {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({ session_id: "sess-tab-switch" })
+          })
+        }
+        if (path.includes("/persona/sessions")) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => []
+          })
+        }
+        return Promise.resolve({
+          ok: false,
+          error: `unhandled path: ${path}`,
+          json: async () => ({})
+        })
+      })
+
+      render(<SidepanelPersona />)
+
+      await waitForLiveSessionPanel()
+      fireEvent.click(screen.getByRole("button", { name: "Connect" }))
+      await waitFor(() => {
+        expect(MockWebSocket.instances).toHaveLength(1)
+      })
+      const ws = MockWebSocket.instances[0]
+      ws.emitOpen()
+      await waitFor(() => {
+        expect(
+          getSentPayloads(ws).some((payload) => payload.type === "voice_config")
+        ).toBe(true)
+      })
+
+      fireEvent.click(screen.getByTestId("live-wake-toggle"))
+      await waitFor(() => {
+        expect(screen.getByTestId("live-wake-state")).toHaveTextContent("listening")
+      })
+      ws.send.mockClear()
+
+      fireEvent.click(screen.getByRole("tab", { name: "Profiles" }))
+
+      await waitFor(() => {
+        expect(getSentPayloads(ws)).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              type: "wake_deactivation",
+              reason: "tab_switch"
+            })
+          ])
+        )
+      })
+    } finally {
+      ;(window as any).SpeechRecognition = originalSpeechRecognition
+    }
+  })
+
   it("hydrates persisted session preferences when connecting to a resumed session", async () => {
     mocks.getConfig.mockResolvedValue({
       serverUrl: "http://127.0.0.1:8000",

@@ -29,6 +29,7 @@ type PersonaWakeStopReason =
   | "route_leave"
   | "stop_live_voice"
   | "persona_switch"
+  | "tab_switch"
 
 type UsePersonaLiveVoiceControllerArgs = {
   ws: WebSocket | null
@@ -167,11 +168,13 @@ export const usePersonaLiveVoiceController = ({
   const wakeDetectorRef = React.useRef<WakeDetector | null>(null)
   const wakeArmedRef = React.useRef(false)
   const wakeActiveRef = React.useRef(false)
+  const wakeStartTokenRef = React.useRef(0)
   const stopWakeListeningRef = React.useRef<
-    (reason?: PersonaWakeStopReason) => Promise<void>
+    (reason?: PersonaWakeStopReason, targetSessionId?: string) => Promise<void>
   >(async () => undefined)
   const restartWakeListeningRef = React.useRef<(() => void) | null>(null)
   const personaSessionKeyRef = React.useRef(`${personaId}:${sessionId}`)
+  const personaSessionIdRef = React.useRef(sessionId)
 
   const activeProvider = React.useMemo(
     () => normalizeTtsProvider(resolvedDefaults.ttsProvider),
@@ -348,10 +351,10 @@ export const usePersonaLiveVoiceController = ({
   )
 
   const sendWakeActivation = React.useCallback(
-    (event: WakeDetectedEvent) => {
+    (event: WakeDetectedEvent): boolean => {
       if (!connected || !sessionId || !ws || ws.readyState !== WebSocket.OPEN) {
         setWakeWarning("Wake phrase heard, but Persona Live is not connected.")
-        return
+        return false
       }
 
       try {
@@ -361,25 +364,27 @@ export const usePersonaLiveVoiceController = ({
             session_id: sessionId,
             matched_phrase: event.canonicalPhrase,
             detector_kind: event.detectorKind,
-            wake_behavior: sessionWakeBehavior,
             detected_at_ms: event.detectedAtMs
           })
         )
+        return true
       } catch {
         setWakeWarning("Wake phrase heard, but activation could not be sent.")
+        return false
       }
     },
-    [connected, sessionId, sessionWakeBehavior, ws]
+    [connected, sessionId, ws]
   )
 
   const sendWakeDeactivation = React.useCallback(
-    (reason: PersonaWakeStopReason) => {
-      if (!sessionId || !ws || ws.readyState !== WebSocket.OPEN) return
+    (reason: PersonaWakeStopReason, targetSessionId = sessionId) => {
+      const normalizedSessionId = String(targetSessionId || "").trim()
+      if (!normalizedSessionId || !ws || ws.readyState !== WebSocket.OPEN) return
       try {
         ws.send(
           JSON.stringify({
             type: "wake_deactivation",
-            session_id: sessionId,
+            session_id: normalizedSessionId,
             reason
           })
         )
@@ -451,7 +456,12 @@ export const usePersonaLiveVoiceController = ({
   ])
 
   const suspendWakeDetectorForLiveCapture = React.useCallback(async () => {
-    if (!wakeArmedRef.current || !wakeDetectorRef.current) return
+    if (!wakeArmedRef.current) return
+    wakeStartTokenRef.current += 1
+    if (!wakeDetectorRef.current) {
+      setWakeDetectorState("idle")
+      return
+    }
     try {
       await wakeDetectorRef.current.stop()
     } finally {
@@ -461,12 +471,16 @@ export const usePersonaLiveVoiceController = ({
   }, [])
 
   const stopWakeListening = React.useCallback(
-    async (reason: PersonaWakeStopReason = "disarmed") => {
+    async (
+      reason: PersonaWakeStopReason = "disarmed",
+      targetSessionId?: string
+    ) => {
+      wakeStartTokenRef.current += 1
       wakeArmedRef.current = false
       wakeActiveRef.current = false
       const detector = wakeDetectorRef.current
       wakeDetectorRef.current = null
-      sendWakeDeactivation(reason)
+      sendWakeDeactivation(reason, targetSessionId)
       try {
         await detector?.stop()
       } finally {
@@ -558,11 +572,14 @@ export const usePersonaLiveVoiceController = ({
 
   React.useEffect(() => {
     const nextKey = `${personaId}:${sessionId}`
-    if (personaSessionKeyRef.current === nextKey) return
-    personaSessionKeyRef.current = nextKey
+    const previousKey = personaSessionKeyRef.current
+    const previousSessionId = personaSessionIdRef.current
+    if (previousKey === nextKey) return
     if (wakeArmedRef.current) {
-      void stopWakeListeningRef.current("persona_switch")
+      void stopWakeListeningRef.current("persona_switch", previousSessionId)
     }
+    personaSessionKeyRef.current = nextKey
+    personaSessionIdRef.current = sessionId
   }, [personaId, sessionId])
 
   React.useEffect(() => {
@@ -662,20 +679,37 @@ export const usePersonaLiveVoiceController = ({
       return
     }
 
+    const startToken = wakeStartTokenRef.current + 1
+    wakeStartTokenRef.current = startToken
+    const isCurrentStart = () => wakeStartTokenRef.current === startToken
+    wakeArmedRef.current = true
+    wakeActiveRef.current = false
+    setWakeArmed(true)
+    setWakeWarning(null)
+    setWakeDetectorState("starting")
+
     const detector = wakeDetectorFactory?.() || new BrowserTranscriptWakeDetector()
     const available = await detector.isAvailable()
+    if (!isCurrentStart()) {
+      await detector.stop()
+      return
+    }
     if (!available) {
+      wakeArmedRef.current = false
+      wakeActiveRef.current = false
+      setWakeArmed(false)
       setWakeDetectorState("unavailable")
       setWakeWarning("Wake listening is unavailable in this browser context.")
       return
     }
 
     await wakeDetectorRef.current?.stop()
+    if (!isCurrentStart()) {
+      await detector.stop()
+      return
+    }
     wakeDetectorRef.current = detector
     wakeActiveRef.current = false
-    wakeArmedRef.current = true
-    setWakeArmed(true)
-    setWakeWarning(null)
 
     try {
       await detector.start({
@@ -684,17 +718,29 @@ export const usePersonaLiveVoiceController = ({
         onStateChange: setWakeDetectorState,
         onError: (error) => setWakeWarning(error.message),
         onWake: (event) => {
+          if (!isCurrentStart() || wakeDetectorRef.current !== detector) return
           if (wakeActiveRef.current) return
           wakeActiveRef.current = true
+          const activationSent = sendWakeActivation(event)
+          if (!activationSent) {
+            wakeActiveRef.current = false
+            return
+          }
           wakeDetectorRef.current = null
           void detector.stop()
-          sendWakeActivation(event)
           if (sessionWakeBehavior !== "push_to_talk_after_wake") {
             void startListening()
           }
         }
       })
+      if (!isCurrentStart()) {
+        if (wakeDetectorRef.current === detector) {
+          wakeDetectorRef.current = null
+        }
+        await detector.stop()
+      }
     } catch (error) {
+      if (!isCurrentStart()) return
       wakeArmedRef.current = false
       wakeActiveRef.current = false
       wakeDetectorRef.current = null
@@ -963,7 +1009,8 @@ export const usePersonaLiveVoiceController = ({
           voice: {
             trigger_phrases: resolvedDefaults.voiceChatTriggerPhrases,
             auto_resume: sessionAutoResume,
-            barge_in: sessionBargeIn
+            barge_in: sessionBargeIn,
+            wake_behavior: sessionWakeBehavior
           },
           stt: {
             language: resolvedDefaults.sttLanguage,
@@ -997,6 +1044,7 @@ export const usePersonaLiveVoiceController = ({
     minUtteranceSecs,
     sessionAutoResume,
     sessionBargeIn,
+    sessionWakeBehavior,
     sessionId,
     ws
   ])

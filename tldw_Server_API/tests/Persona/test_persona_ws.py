@@ -2541,19 +2541,60 @@ def test_persona_wake_activation_rejects_phrase_missing_from_runtime_config(
     )
 
 
-def test_persona_wake_activation_rejects_invalid_wake_behavior(
+def test_persona_wake_activation_ignores_client_supplied_wake_behavior(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
-    _assert_wake_activation_rejected_keeps_trigger_gate(
-        tmp_path=tmp_path,
-        monkeypatch=monkeypatch,
-        session_id="sess_wake_reject_behavior",
-        saved_phrases=["hey helper"],
-        runtime_phrases=["hey helper"],
-        matched_phrase="hey helper",
-        wake_behavior="always_on_background",
+    _install_wake_voice_fakes(monkeypatch, "summarize the current note")
+    _seed_persona_session(
+        tmp_path,
+        monkeypatch,
+        user_id="1",
+        session_id="sess_wake_server_behavior",
+        mode="session_scoped",
+        voice_defaults={
+            "voice_chat_trigger_phrases": ["hey helper"],
+            "wake_behavior": "one_shot",
+        },
     )
+
+    with TestClient(fastapi_app) as c:
+        with c.websocket_connect("/api/v1/persona/stream") as ws:
+            _ = json.loads(ws.receive_text())
+            ws.send_text(
+                json.dumps(
+                    {
+                        "type": "voice_config",
+                        "session_id": "sess_wake_server_behavior",
+                        "voice": {
+                            "trigger_phrases": ["hey helper"],
+                            "wake_behavior": "one_shot",
+                        },
+                    }
+                )
+            )
+            _ = _recv_until(
+                ws,
+                lambda d: d.get("event") == "notice"
+                and d.get("reason_code") == "VOICE_CONFIG_UPDATED",
+            )
+            ws.send_text(
+                json.dumps(
+                    {
+                        "type": "wake_activation",
+                        "session_id": "sess_wake_server_behavior",
+                        "matched_phrase": "hey helper",
+                        "detector_kind": "browser_transcript",
+                        "wake_behavior": "continuous",
+                    }
+                )
+            )
+            accepted = _recv_until(
+                ws,
+                lambda d: d.get("event") == "notice"
+                and d.get("reason_code") == "WAKE_ACTIVATION_ACCEPTED",
+            )
+            assert accepted.get("wake_behavior") == "one_shot"
 
 
 def test_persona_wake_deactivation_restores_trigger_gating(
@@ -2584,7 +2625,10 @@ def test_persona_wake_deactivation_restores_trigger_gating(
                     {
                         "type": "voice_config",
                         "session_id": "sess_wake_deactivated",
-                        "voice": {"trigger_phrases": ["hey helper"]},
+                        "voice": {
+                            "trigger_phrases": ["hey helper"],
+                            "wake_behavior": "continuous",
+                        },
                         "stt": {"model": "whisper-1", "language": "en-US"},
                     }
                 )

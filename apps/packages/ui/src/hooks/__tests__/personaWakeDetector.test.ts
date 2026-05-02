@@ -134,6 +134,33 @@ describe("personaWakeDetector", () => {
     await detector.stop()
   })
 
+  it("does not restart browser recognition after fatal recognition errors", async () => {
+    const recognition = installMockRecognition()
+    const onError = vi.fn()
+    const onStateChange = vi.fn()
+    const detector = new BrowserTranscriptWakeDetector()
+
+    await detector.start({
+      phrases: ["Hey Helper"],
+      onWake: vi.fn(),
+      onError,
+      onStateChange
+    })
+
+    recognition.current.onerror?.({
+      error: "not-allowed",
+      message: "permission denied"
+    })
+
+    expect(onStateChange).toHaveBeenLastCalledWith("error")
+    expect(onError).toHaveBeenCalledWith({
+      code: "not-allowed",
+      message: "permission denied"
+    })
+    expect(recognition.current.onend).toBeNull()
+    expect(recognition.current.start).toHaveBeenCalledTimes(1)
+  })
+
   it("does not start recognition when no wake phrases are configured", async () => {
     const recognition = installMockRecognition()
     const onStateChange = vi.fn()

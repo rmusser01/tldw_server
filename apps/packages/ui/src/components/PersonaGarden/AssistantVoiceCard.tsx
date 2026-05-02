@@ -91,8 +91,8 @@ export const AssistantVoiceCard: React.FC<AssistantVoiceCardProps> = ({
   wakeArmed = false,
   wakeDetectorState = "idle",
   wakeWarning = null,
-  wakeTriggerPhrases = [],
-  sessionWakeBehavior = "one_shot",
+  wakeTriggerPhrases,
+  sessionWakeBehavior,
   autoCommitEnabled = true,
   vadPreset = "balanced",
   vadThreshold = 0.5,
@@ -120,12 +120,16 @@ export const AssistantVoiceCard: React.FC<AssistantVoiceCardProps> = ({
   onReconnectPersonaSession
 }) => {
   const sessionControlsDisabled = !connected
+  const effectiveWakeTriggerPhrases =
+    wakeTriggerPhrases ?? resolvedDefaults.voiceChatTriggerPhrases
+  const effectiveSessionWakeBehavior =
+    sessionWakeBehavior ?? resolvedDefaults.wakeBehavior
   const normalizedWakeTriggerPhrases = React.useMemo(
     () =>
-      (wakeTriggerPhrases || [])
+      (effectiveWakeTriggerPhrases || [])
         .map((phrase) => String(phrase || "").trim())
         .filter(Boolean),
-    [wakeTriggerPhrases]
+    [effectiveWakeTriggerPhrases]
   )
   const turnDetectionDisabled = sessionControlsDisabled || manualModeRequired
   const turnDetectionHelperText = !connected
@@ -254,7 +258,7 @@ export const AssistantVoiceCard: React.FC<AssistantVoiceCardProps> = ({
             <Select
               data-testid="live-wake-behavior"
               size="small"
-              value={sessionWakeBehavior}
+              value={effectiveSessionWakeBehavior}
               disabled={sessionControlsDisabled}
               onChange={onSessionWakeBehaviorChange}
               options={[

@@ -906,6 +906,16 @@ const SidepanelPersona = ({
     }
     openSettings()
   }
+  const handlePersonaTabChange = React.useCallback(
+    (key: string) => {
+      const nextTab = key as PersonaGardenTabKey
+      if (activeTabRef.current === "live" && nextTab !== "live") {
+        void liveVoiceController.stopWakeListening("tab_switch")
+      }
+      setActiveTab(nextTab)
+    },
+    [liveVoiceController]
+  )
 
   // ── JSX: live session controls ──
   const liveSessionControls = (
@@ -2076,7 +2086,7 @@ const SidepanelPersona = ({
           ) : (
             <PersonaGardenTabs
               activeKey={activeTab}
-              onChange={(key) => setActiveTab(key as PersonaGardenTabKey)}
+              onChange={handlePersonaTabChange}
               items={tabItems}
             />
           )}

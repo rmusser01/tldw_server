@@ -106,6 +106,14 @@ const normalizeWakePhrases = (phrases: string[]): string[] =>
     .map((phrase) => String(phrase || "").trim())
     .filter(Boolean)
 
+const FATAL_SPEECH_RECOGNITION_ERRORS = new Set([
+  "audio-capture",
+  "bad-grammar",
+  "language-not-supported",
+  "not-allowed",
+  "service-not-allowed"
+])
+
 export class BrowserTranscriptWakeDetector implements WakeDetector {
   private recognition: SpeechRecognitionLike | null = null
   private active = false
@@ -139,7 +147,7 @@ export class BrowserTranscriptWakeDetector implements WakeDetector {
     recognition.interimResults = true
     recognition.lang = config.locale || "en-US"
     recognition.onresult = (event) => {
-      if (!this.active) return
+      if (!this.active || this.recognition !== recognition) return
       const transcript = buildTranscript(event)
       const canonicalPhrase = findCanonicalWakePhrase(transcript, phrases)
       if (!canonicalPhrase) return
@@ -152,14 +160,24 @@ export class BrowserTranscriptWakeDetector implements WakeDetector {
       })
     }
     recognition.onerror = (event) => {
+      if (!this.active || this.recognition !== recognition) return
+      const code = String(event?.error || "")
+      const fatal = FATAL_SPEECH_RECOGNITION_ERRORS.has(code)
+      if (fatal) {
+        this.active = false
+        this.recognition = null
+      }
       config.onStateChange?.("error")
       config.onError?.({
-        code: String(event?.error || ""),
+        code,
         message: String(event?.message || event?.error || "Wake detector error")
       })
+      if (fatal) {
+        this.clearRecognitionHandlers(recognition)
+      }
     }
     recognition.onend = () => {
-      if (this.active) {
+      if (this.active && this.recognition === recognition) {
         config.onStateChange?.("idle")
         try {
           recognition.start()

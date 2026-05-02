@@ -210,6 +210,7 @@ _PERSONA_WAKE_DEACTIVATION_REASONS = {
     "disarmed",
     "stop_live_voice",
     "persona_switch",
+    "tab_switch",
     "route_leave",
     "session_close",
 }
@@ -6954,6 +6955,11 @@ async def persona_stream(
                 "trigger_phrases": normalized_trigger_phrases,
                 "auto_resume": _coerce_bool(voice_payload.get("auto_resume"), default=False),
                 "barge_in": _coerce_bool(voice_payload.get("barge_in"), default=False),
+                "wake_behavior": _bounded_label(
+                    voice_payload.get("wake_behavior"),
+                    allowed=_PERSONA_WAKE_BEHAVIORS,
+                    fallback="one_shot",
+                ),
                 "stt_language": str(stt_payload.get("language") or "").strip() or None,
                 "stt_model": str(stt_payload.get("model") or "").strip() or None,
                 "enable_vad": _coerce_bool(stt_payload.get("enable_vad"), default=True),
@@ -7062,7 +7068,6 @@ async def persona_stream(
                         reason_code="SESSION_ID_REQUIRED",
                     )
                     continue
-                wake_behavior = str(msg.get("wake_behavior") or "one_shot").strip()
                 matched_phrase = str(msg.get("matched_phrase") or "").strip()
                 detector_kind = _bounded_label(
                     msg.get("detector_kind"),
@@ -7080,13 +7085,16 @@ async def persona_stream(
                     if isinstance(voice_runtime, dict)
                     else []
                 )
+                wake_behavior = _bounded_label(
+                    voice_runtime.get("wake_behavior")
+                    if isinstance(voice_runtime, dict)
+                    else None,
+                    allowed=_PERSONA_WAKE_BEHAVIORS,
+                    fallback="one_shot",
+                )
                 saved_match = _match_persona_wake_phrase(matched_phrase, saved_phrases)
                 runtime_match = _match_persona_wake_phrase(matched_phrase, runtime_phrases)
-                if (
-                    wake_behavior not in _PERSONA_WAKE_BEHAVIORS
-                    or not saved_match
-                    or not runtime_match
-                ):
+                if not saved_match or not runtime_match:
                     await _emit_notice(
                         session_id=session_id,
                         level="warning",
