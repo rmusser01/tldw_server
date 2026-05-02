@@ -109,6 +109,8 @@ async def test_character_chat_flow_sessions_messages_worldbooks():
                 "has_more": False,
                 "next_offset": None,
             }
+            assert msgs["has_more"] is False
+            assert msgs["next_offset"] is None
 
             # 6) Delete the message (optimistic lock)
             r = await client.delete(
@@ -286,6 +288,8 @@ async def test_message_placeholders_and_length_guard(monkeypatch):
                 "has_more": False,
                 "next_offset": None,
             }
+            assert body["has_more"] is False
+            assert body["next_offset"] is None
 
             # Completions-formatted messages should replace placeholders in system context
             r = await client.get(
