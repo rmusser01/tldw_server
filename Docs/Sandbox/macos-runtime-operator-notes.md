@@ -45,6 +45,10 @@ incidentally. Any adoption must preserve the repo-owned helper protocol, admin
 diagnostics, fail-closed policy admission, the intended macOS support window,
 and the separate `seatbelt` and `vz_macos` runtime tracks.
 
+See `Docs/Design/2026-05-02-apple-containerization-evaluation.md` for the
+current adopt/defer/reject evaluation before changing image-store, helper,
+networking, or guest-agent implementation.
+
 ## Trust-Level Policy
 
 - `untrusted`:
