@@ -55,7 +55,7 @@ async def start_service_groups(
     *,
     app: Any,
     app_settings: Any,
-    run_pg_rls_auto_ensure: Callable[[], Any],
+    run_pg_rls_auto_ensure: Callable[[Any], Any],
     owned_job_pollers: list[Any],
     register_owned_job_poller: Callable[..., None],
     worker_inventory: Any | None = None,
@@ -75,6 +75,7 @@ async def start_service_groups(
     auxiliary_startup_handles = await _start_auxiliary_services(app_settings)
     infra_startup_handles = await _start_infra_services(
         run_pg_rls_auto_ensure=run_pg_rls_auto_ensure,
+        worker_inventory=worker_inventory,
     )
     maintenance_scheduler_handles = await _start_maintenance_schedulers()
     connectors_startup_handles = await _start_connectors_startup(
