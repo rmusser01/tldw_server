@@ -30,6 +30,7 @@ type PersonaWakeStopReason =
   | "stop_live_voice"
   | "persona_switch"
   | "tab_switch"
+  | "session_close"
 
 type UsePersonaLiveVoiceControllerArgs = {
   ws: WebSocket | null
@@ -506,6 +507,8 @@ export const usePersonaLiveVoiceController = ({
       sendWakeDeactivation(reason, targetSessionId)
       try {
         await detector?.stop()
+      } catch {
+        // Wake detector teardown is best-effort; state cleanup must still finish.
       } finally {
         setWakeDetectorState("idle")
         setWakeArmed(false)
@@ -944,6 +947,9 @@ export const usePersonaLiveVoiceController = ({
 
   React.useEffect(() => {
     if (!connected) {
+      if (wakeArmedRef.current || wakeDetectorRef.current) {
+        void stopWakeListeningRef.current("session_close")
+      }
       setSessionWakeBehavior(resolvedDefaults.wakeBehavior)
       setAutoCommitEnabled(resolvedDefaults.autoCommitEnabled)
       setVadThreshold(resolvedDefaults.vadThreshold)
