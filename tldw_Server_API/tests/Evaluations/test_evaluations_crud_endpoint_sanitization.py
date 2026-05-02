@@ -191,6 +191,37 @@ class _RunRecordDebugService:
         return _run_row()
 
 
+class _ListingEvaluationService:
+    async def list_evaluations(self, **kwargs: object) -> tuple[list[dict[str, object]], bool]:
+        assert kwargs["limit"] == 2
+        assert kwargs["after"] == "eval-cursor"
+        assert kwargs["eval_type"] == "model_graded"
+        assert kwargs["created_by"] == "tenant-user"
+        return (
+            [
+                _evaluation_row("eval-2"),
+                _evaluation_row("eval-1"),
+            ],
+            True,
+        )
+
+
+class _ListingRunService:
+    async def list_runs(self, **kwargs: object) -> tuple[list[dict[str, object]], bool]:
+        assert kwargs["eval_id"] == "eval-1"
+        assert kwargs["status"] == "pending"
+        assert kwargs["limit"] == 2
+        assert kwargs["after"] == "run-cursor"
+        assert kwargs["created_by"] == "tenant-user"
+        return (
+            [
+                _run_row("run-2"),
+                _run_row("run-1"),
+            ],
+            True,
+        )
+
+
 def _user() -> User:
     return User(id="tenant-user", username="tenant", email=None, is_active=True)
 
@@ -343,6 +374,28 @@ async def test_list_evaluations_sanitizes_backend_fallback_log(monkeypatch: pyte
     _assert_sanitized_log(logger_stub, "Failed to list evaluations")
 
 
+async def test_list_evaluations_includes_canonical_cursor_pagination(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_service(monkeypatch, _ListingEvaluationService())
+
+    response = await evaluations_crud.list_evaluations(
+        limit=2,
+        after="eval-cursor",
+        eval_type="model_graded",
+        current_user=_user(),
+    )
+
+    payload = response.model_dump(mode="json")
+    assert payload["last_id"] == "eval-1"
+    assert payload["next_cursor"] == "eval-1"
+    assert payload["pagination"] == {
+        "mode": "cursor",
+        "limit": 2,
+        "cursor": "eval-cursor",
+        "next_cursor": "eval-1",
+        "has_more": True,
+    }
+
+
 async def test_get_evaluation_sanitizes_backend_fallback_log(monkeypatch: pytest.MonkeyPatch) -> None:
     logger_stub = _patch_failing_service(monkeypatch)
 
@@ -476,6 +529,29 @@ async def test_list_runs_sanitizes_backend_fallback_log(monkeypatch: pytest.Monk
         "Failed to list runs: An error occurred during listing runs",
     )
     _assert_sanitized_log(logger_stub, "Failed to list runs")
+
+
+async def test_list_runs_includes_canonical_cursor_pagination(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_service(monkeypatch, _ListingRunService())
+
+    response = await evaluations_crud.list_runs(
+        eval_id="eval-1",
+        limit=2,
+        after="run-cursor",
+        run_status="pending",
+        current_user=_user(),
+    )
+
+    payload = response.model_dump(mode="json")
+    assert payload["last_id"] == "run-1"
+    assert payload["next_cursor"] == "run-1"
+    assert payload["pagination"] == {
+        "mode": "cursor",
+        "limit": 2,
+        "cursor": "run-cursor",
+        "next_cursor": "run-1",
+        "has_more": True,
+    }
 
 
 async def test_get_run_sanitizes_backend_fallback_log(monkeypatch: pytest.MonkeyPatch) -> None:

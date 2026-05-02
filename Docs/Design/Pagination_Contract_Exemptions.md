@@ -73,6 +73,8 @@ Current pagination-sensitive examples:
   `after_id`; keep continuation in the stream cursor channel.
 - `GET /api/v1/audio/jobs/{job_id}/progress/stream`: SSE event stream using
   `after_id`; keep continuation in the stream cursor channel.
+- `GET /api/v1/notifications/stream`: SSE event stream using `after` and
+  `Last-Event-ID`; keep continuation in the stream cursor channel.
 - `GET /watchlists/runs/export.csv`: CSV export; keep selection/filter inputs
   separate from response-body pagination metadata.
 
@@ -180,6 +182,9 @@ Current examples:
   provider capability/catalog responses without pagination inputs.
 - `GET /api/v1/audio/voices`: bounded custom voice catalog for a user with no
   pagination inputs.
+- `GET /api/v1/connectors/sources/{source_id}/sync`: sync-state detail
+  response; `cursor` is provider sync checkpoint state, not response
+  pagination.
 
 ## Review Rules
 

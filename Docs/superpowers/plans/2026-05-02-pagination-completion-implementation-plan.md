@@ -628,6 +628,25 @@ git add \
 git commit -m "Phase pagination-completion: migrate workflow cursor pagination"
 ```
 
+### Additional Generic Cursor-Family Closeout
+
+**Status:** Complete for the remaining generic cursor-family rows.
+`GET /api/v1/connectors/providers/{provider}/sources/browse` now preserves
+`items` and `next_cursor` while adding `limit`, `cursor`, `has_more`, and
+canonical `CursorPaginationMeta`. Evaluation CRUD list endpoints now preserve
+the OpenAI-style `object/data/has_more/first_id/last_id` envelope while adding
+canonical cursor metadata derived from `after`, `limit`, and `last_id`.
+`GET /api/v1/connectors/sources/{source_id}/sync` is classified as sync-state
+detail because its `cursor` is a provider checkpoint, and
+`GET /api/v1/notifications/stream` is classified as an SSE stream route.
+
+Verified:
+
+```bash
+python -m pytest tldw_Server_API/tests/External_Sources/test_connectors_endpoints_api.py -k canonical_cursor_pagination -q
+python -m pytest tldw_Server_API/tests/Evaluations/test_evaluations_crud_endpoint_sanitization.py -k canonical_cursor_pagination -q
+```
+
 ## Task 9: Classify and Migrate Custom Legacy Envelopes
 
 **Files:**

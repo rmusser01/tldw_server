@@ -28,6 +28,7 @@ from tldw_Server_API.app.api.v1.schemas.evaluation_schemas_unified import (
     RunResponse,
     UpdateEvaluationRequest,
 )
+from tldw_Server_API.app.api.v1.utils.pagination import build_cursor_pagination_meta
 from tldw_Server_API.app.core.AuthNZ.permissions import EVALS_MANAGE, EVALS_READ
 from tldw_Server_API.app.core.Evaluations.audit_adapter import MandatoryAuditWriteError
 from tldw_Server_API.app.core.Evaluations.unified_evaluation_service import (
@@ -150,12 +151,22 @@ async def list_evaluations(
         )
         first_id = evaluations[0]["id"] if evaluations else None
         last_id = evaluations[-1]["id"] if evaluations else None
+        next_cursor = last_id if has_more else None
         return EvaluationListResponse(
             object="list",
             data=[EvaluationResponse(**eval) for eval in evaluations],
+            limit=limit,
+            cursor=after,
+            next_cursor=next_cursor,
             has_more=has_more,
             first_id=first_id,
             last_id=last_id,
+            pagination=build_cursor_pagination_meta(
+                limit=limit,
+                cursor=after,
+                next_cursor=next_cursor,
+                has_more=has_more,
+            ),
         )
     except _EVALS_CRUD_NONCRITICAL_EXCEPTIONS as e:
         logger.error("Failed to list evaluations")
@@ -372,7 +383,23 @@ async def list_runs(
         )
         first_id = runs[0]["id"] if runs else None
         last_id = runs[-1]["id"] if runs else None
-        return RunListResponse(object="list", data=[RunResponse(**run) for run in runs], has_more=has_more, first_id=first_id, last_id=last_id)
+        next_cursor = last_id if has_more else None
+        return RunListResponse(
+            object="list",
+            data=[RunResponse(**run) for run in runs],
+            limit=limit,
+            cursor=after,
+            next_cursor=next_cursor,
+            has_more=has_more,
+            first_id=first_id,
+            last_id=last_id,
+            pagination=build_cursor_pagination_meta(
+                limit=limit,
+                cursor=after,
+                next_cursor=next_cursor,
+                has_more=has_more,
+            ),
+        )
     except _EVALS_CRUD_NONCRITICAL_EXCEPTIONS as e:
         logger.error("Failed to list runs")
         raise create_error_response(

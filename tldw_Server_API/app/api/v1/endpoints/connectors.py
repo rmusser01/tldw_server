@@ -19,10 +19,10 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     get_db_transaction,
     get_org_policy_from_principal,
 )
-from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.api.v1.schemas.connectors import (
     AuthorizeURLResponse,
     ConnectorAccount,
+    ConnectorBrowseResponse,
     ConnectorPolicy,
     ConnectorProvider,
     ConnectorSource,
@@ -35,6 +35,8 @@ from tldw_Server_API.app.api.v1.schemas.connectors import (
     ImportJob,
     SyncOptions,
 )
+from tldw_Server_API.app.api.v1.utils.pagination import build_cursor_pagination_meta
+from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.permissions import SYSTEM_CONFIGURE
 from tldw_Server_API.app.core.External_Sources import (
     get_connector_by_name,
@@ -672,7 +674,7 @@ async def remove_account(
     return {"ok": True}
 
 
-@router.get("/providers/{provider}/sources/browse")
+@router.get("/providers/{provider}/sources/browse", response_model=ConnectorBrowseResponse)
 async def browse_provider_sources(
     provider: str,
     account_id: int = Query(..., ge=1),
@@ -681,7 +683,7 @@ async def browse_provider_sources(
     cursor: str | None = None,
     db=Depends(get_db_transaction),
     principal: AuthPrincipal = Depends(get_auth_principal),
-) -> dict[str, Any]:
+) -> ConnectorBrowseResponse:
     provider = _ensure_connector_provider_enabled(provider)
     user_id = _get_user_id(principal)
     tokens = await get_account_tokens(db, user_id, account_id)
@@ -714,7 +716,18 @@ async def browse_provider_sources(
     except Exception as e:
         logger.error("Connector browse failed")
         raise HTTPException(status_code=502, detail="Browse failed") from e
-    return {"items": items, "next_cursor": next_cursor}
+    return ConnectorBrowseResponse(
+        items=items,
+        limit=page_size,
+        cursor=cursor,
+        next_cursor=next_cursor,
+        has_more=bool(next_cursor),
+        pagination=build_cursor_pagination_meta(
+            limit=page_size,
+            cursor=cursor,
+            next_cursor=next_cursor,
+        ),
+    )
 
 
 @router.post("/sources", response_model=ConnectorSource)

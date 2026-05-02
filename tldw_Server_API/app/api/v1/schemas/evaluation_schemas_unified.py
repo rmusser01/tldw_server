@@ -14,7 +14,11 @@ from typing import Any, Literal, Optional, Union
 from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator, model_validator
 
-from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
+from tldw_Server_API.app.api.v1.schemas.pagination import (
+    CursorPaginationMeta,
+    OffsetPaginationMeta,
+    default_cursor_pagination_aliases,
+)
 from tldw_Server_API.app.core.Evaluations.run_state import normalize_run_status
 
 try:
@@ -425,11 +429,31 @@ class ListResponse(BaseModel):
 class EvaluationListResponse(ListResponse):
     """Evaluation list response"""
     data: list[EvaluationResponse]
+    limit: int | None = Field(default=None, ge=1)
+    cursor: Optional[str] = None
+    next_cursor: Optional[str] = None
+    pagination: CursorPaginationMeta | None = None
+
+    @model_validator(mode="after")
+    def _default_cursor_aliases(self) -> "EvaluationListResponse":
+        if self.pagination is not None:
+            return default_cursor_pagination_aliases(self)
+        return self
 
 
 class RunListResponse(ListResponse):
     """Run list response"""
     data: list[RunResponse]
+    limit: int | None = Field(default=None, ge=1)
+    cursor: Optional[str] = None
+    next_cursor: Optional[str] = None
+    pagination: CursorPaginationMeta | None = None
+
+    @model_validator(mode="after")
+    def _default_cursor_aliases(self) -> "RunListResponse":
+        if self.pagination is not None:
+            return default_cursor_pagination_aliases(self)
+        return self
 
 
 class DatasetListResponse(ListResponse):
