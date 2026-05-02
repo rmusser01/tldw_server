@@ -157,8 +157,8 @@ class VZLinuxRunner(VZBaseRunner):
         return VZLinuxRunner._collect_limited_artifacts(
             workspace,
             capture_patterns,
-            max_file_bytes=64 * 1024 * 1024,
-            max_total_bytes=256 * 1024 * 1024,
+            max_file_bytes=VZLinuxRunner._max_artifact_file_bytes(),
+            max_total_bytes=VZLinuxRunner._max_artifact_total_bytes(),
         )[0]
 
     @staticmethod
