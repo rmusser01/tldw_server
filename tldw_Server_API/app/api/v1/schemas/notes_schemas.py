@@ -469,6 +469,7 @@ class NotesExportResponse(BaseModel):
     total: int | None = None
     limit: int | None = None
     offset: int | None = None
+    pagination: OffsetPaginationMeta | None = None
     exported_at: str
 
 

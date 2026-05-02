@@ -1494,6 +1494,12 @@ async def export_notes(
             "total": total,
             "limit": limit,
             "offset": offset,
+            "pagination": build_offset_pagination_meta(
+                limit=limit,
+                offset=offset,
+                total=total,
+                count=len(notes_data),
+            ),
             "exported_at": __import__("datetime").datetime.utcnow().isoformat()
         }
     except _NOTES_NONCRITICAL_EXCEPTIONS as e:

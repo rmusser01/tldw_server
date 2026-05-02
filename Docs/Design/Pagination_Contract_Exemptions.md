@@ -117,6 +117,9 @@ Current examples:
 - `GET /api/v1/audio/jobs/admin/summary` and
   `GET /api/v1/audio/jobs/admin/summary-by-owner`: aggregate job-count
   summaries, not job list pages.
+- `POST /api/v1/notes/export`: explicit note-ID selection export with no
+  continuation inputs; do not invent a response-body page contract for the
+  selected set.
 
 ### Bounded Preview Routes
 
