@@ -41,9 +41,16 @@ Current pagination-sensitive examples:
 
 - `GET /jobs/list`: raw `list[JobItem]`; keep the existing payload shape unless
   a versioned/object-envelope route is added.
+- `GET /jobs/sla/policies` and `GET /jobs/sla/breaches`: raw admin snapshot
+  lists without continuation inputs; adding body pagination would require a
+  versioned/object-envelope route.
 - `GET /api/v1/workflows/runs/{run_id}/events`: raw `list[EventResponse]` with
   `Next-Cursor` and `Link` headers; do not move cursor metadata into the body
   without a versioned route.
+- `GET /api/v1/workflows/step-types`,
+  `GET /api/v1/workflows/templates`, and
+  `GET /api/v1/workflows/templates/tags`: bounded workflow catalog/introspection
+  lists returned as raw arrays.
 
 ### Streaming, File Export, and Download Routes
 
@@ -133,6 +140,8 @@ Current examples:
 - `GET /chatbooks/export/jobs/{job_id}` and
   `GET /chatbooks/import/jobs/{job_id}`: job detail responses; `total_items`
   is progress metadata, not a collection total.
+- `GET /jobs/archive/meta`: archive metadata detail for one job id.
+- `GET /jobs/queue/status`: queue control status for one domain/queue pair.
 - `GET /sandbox/runs/{run_id}/artifacts` and
   `GET /sandbox/sessions/{session_id}/snapshots`: bounded subresource lists
   without pagination inputs.

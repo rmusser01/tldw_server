@@ -2650,7 +2650,9 @@ async def list_webhook_dlq(
     Access is gated via claim-first dependencies (admin role +
     WORKFLOWS_RUNS_CONTROL) to align with other admin surfaces.
     """
-    rows = db.list_webhook_dlq_all(limit=limit, offset=offset)
+    rows = db.list_webhook_dlq_all(limit=limit + 1, offset=offset)
+    has_more = len(rows) > limit
+    rows = rows[:limit]
     out = []
     for r in rows:
         try:
@@ -2668,7 +2670,19 @@ async def list_webhook_dlq(
             "created_at": r.get("created_at"),
             "body": body,
         })
-    return {"items": out, "limit": limit, "offset": offset, "count": len(out)}
+    pagination = build_offset_pagination_meta(
+        limit=limit,
+        offset=offset,
+        count=len(out),
+        has_more=has_more,
+    )
+    return {
+        "items": out,
+        "limit": limit,
+        "offset": offset,
+        "count": len(out),
+        "pagination": pagination,
+    }
 
 
 @router.post(

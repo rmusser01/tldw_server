@@ -525,11 +525,13 @@ git commit -m "Phase pagination-completion: migrate audio cursor pagination"
 - Test: workflow tests identified by inventory
 - Test: jobs admin tests identified by inventory
 
-**Status:** Classified for the current branch. `GET /api/v1/workflows/runs`
+**Status:** Migrated the remaining covered Workflows object-envelope route and
+classified the non-envelope Workflows/Jobs rows. `GET /api/v1/workflows/runs`
 already returns canonical `OffsetPaginationMeta` or `CursorPaginationMeta`.
-`GET /jobs/list` and `GET /api/v1/workflows/runs/{run_id}/events` are raw-list
-payloads, and `GET /jobs/events/stream` is an SSE stream, so they are documented
-as exemptions rather than migrated in-place.
+`GET /api/v1/workflows/webhooks/dlq` now preserves the legacy
+`items/count/limit/offset` envelope while adding canonical offset `pagination`.
+Raw-array and status/detail/streaming routes are documented as exemptions rather
+than migrated in-place.
 
 - [x] **Step 1: Identify cursor semantics**
 
@@ -548,25 +550,34 @@ Findings:
 - `/api/v1/workflows/runs/{run_id}/events`: raw list body with `Next-Cursor` and
   `Link` headers; body migration is deferred to a versioned/object-envelope
   route.
+- `/api/v1/workflows/webhooks/dlq`: object envelope with `limit` and `offset`;
+  overfetches one extra row to populate `has_more` and `next_offset` without a
+  count query.
 - `/jobs/list`: raw list body; body migration is deferred to a versioned/object
   envelope route.
 - `/jobs/events/stream`: streaming route with `after_id`; not a canonical body
   pagination target.
+- `/jobs/archive/meta` and `/jobs/queue/status`: detail/status responses, not
+  collection pages.
+- `/jobs/sla/policies`, `/jobs/sla/breaches`, `/api/v1/workflows/step-types`,
+  `/api/v1/workflows/templates`, and `/api/v1/workflows/templates/tags`: raw
+  array/snapshot/catalog routes that need versioning before body-envelope
+  pagination.
 
 - [x] **Step 2: Add tests before route changes**
 
 Add tests for stable ordering and no duplicate pages. Prefer overfetch assertions to count queries.
 
 Existing tests already cover `/api/v1/workflows/runs` cursor flow and workflow
-events header cursor flow. No route source was changed in this classification
-tranche.
+events header cursor flow. Added direct auth/unit route coverage for DLQ offset
+metadata and verified the red failure on missing `pagination`.
 
 - [x] **Step 3: Migrate covered routes**
 
 Use `CursorPaginationMeta` for cursor routes and `OffsetPaginationMeta` for offset routes in mixed response models like `WorkflowRunListResponse`.
 
-No route source migration was needed: the only covered object-envelope route in
-this family is already canonical.
+`/api/v1/workflows/webhooks/dlq` now uses `build_offset_pagination_meta` and
+preserves existing legacy fields.
 
 - [x] **Step 4: Verify**
 
@@ -577,20 +588,22 @@ python -m bandit -r tldw_Server_API/app/api/v1/endpoints/workflows.py tldw_Serve
 git diff --check
 ```
 
-This tranche changed only docs/classification, so source Bandit was not
-applicable. Verified:
+Verified:
 
 ```bash
-python -m pytest tldw_Server_API/tests/Jobs/test_jobs_list_sorting_sqlite.py tldw_Server_API/tests/Jobs/test_jobs_rbac_list_stale_sqlite.py -q
-python -m pytest tldw_Server_API/tests/Workflows/test_runs_cursor_pagination.py tldw_Server_API/tests/Workflows/test_events_cursor_pagination.py -q
+python -m pytest tldw_Server_API/tests/AuthNZ_Unit/test_workflows_webhook_dlq_permissions_claims.py -k canonical_offset_pagination -q
+python -m pytest tldw_Server_API/tests/AuthNZ_Unit/test_workflows_webhook_dlq_permissions_claims.py -q
+python -m pytest tldw_Server_API/tests/Workflows/test_webhook_admin_endpoints.py -k "dlq_list_and_replay_simulated or dlq_replay_appends_delivery_event or dlq_replay_deletes_successful_delivery_when_evidence_append_fails" -q
+python -m pytest tldw_Server_API/tests/Utils/test_pagination_contract.py -q
+python -m py_compile tldw_Server_API/app/api/v1/endpoints/workflows.py
+python -m bandit -r tldw_Server_API/app/api/v1/endpoints/workflows.py -f json -o /tmp/bandit_pagination_workflows_dlq.json
+rg -n "cursor-workflows-jobs.*(migration-candidate|needs-confirmation)|migration-candidate.*cursor-workflows-jobs|needs-confirmation.*cursor-workflows-jobs" Docs/Design/Pagination_Completion_Matrix.md
 git diff --check
 ```
 
-The jobs tests passed. In the combined workflows command,
-`test_runs_cursor_pagination.py` passed, then
-`test_events_cursor_pagination.py` timed out in TestClient lifecycle cleanup
-while joining the anyio portal after app startup/background-worker shutdown.
-No workflow route source was changed in this tranche.
+The final matrix grep returned no matches, confirming no unresolved
+`cursor-workflows-jobs` rows remain. Bandit produced zero findings for
+`workflows.py`.
 
 - [x] **Step 5: Commit workflows/jobs cursor tranche**
 
