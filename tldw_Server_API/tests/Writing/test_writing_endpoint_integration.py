@@ -90,6 +90,8 @@ def test_writing_sessions_crud_and_clone(client_with_writing_db: TestClient):
         "has_more": False,
         "next_offset": None,
     }
+    assert listed["has_more"] is False
+    assert listed["next_offset"] is None
     assert any(item["id"] == session_id for item in listed["sessions"])
 
     get_resp = client.get(f"/api/v1/writing/sessions/{session_id}")
@@ -156,6 +158,8 @@ def test_writing_templates_and_themes_crud(client_with_writing_db: TestClient):
         "has_more": False,
         "next_offset": None,
     }
+    assert templates_payload["has_more"] is False
+    assert templates_payload["next_offset"] is None
 
     upd_tmpl = client.patch(
         "/api/v1/writing/templates/Template A",
@@ -194,6 +198,8 @@ def test_writing_templates_and_themes_crud(client_with_writing_db: TestClient):
         "has_more": False,
         "next_offset": None,
     }
+    assert themes_payload["has_more"] is False
+    assert themes_payload["next_offset"] is None
 
     upd_theme = client.patch(
         "/api/v1/writing/themes/Theme A",
