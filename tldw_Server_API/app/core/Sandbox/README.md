@@ -117,7 +117,10 @@ Current limitations:
   planning manifests under `<root>/runs/<run_id>/manifest.json`, and exposes
   dry-run run-directory GC planning with candidate reasons that distinguish
   planning-only manifests, fully materialized inactive runs, and legacy run
-  directories without a persisted manifest.
+  directories without a persisted manifest. Template manifests are OCI-aware
+  metadata scaffolding: current canonical bundles remain
+  `artifact_format=tldw_bundle`, while optional OCI fields can describe a
+  future source image without changing helper boot.
 - When `TLDW_SANDBOX_IMAGE_STORE_ROOT` is configured, `vz_linux` can also
   resolve `spec.base_image` as a registered image-store `template_id` instead
   of a raw path, provided the template record has a stored `source_path`.

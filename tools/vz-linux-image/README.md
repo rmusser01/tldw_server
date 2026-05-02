@@ -258,4 +258,11 @@ The store writes:
 
 The manifest records `kernel`, `rootfs.img`, optional `initrd`, artifact sizes,
 SHA-256 hashes, labels, source path, registration time, and `build-info.json`
-provenance when present. The helper still owns bootability validation.
+provenance when present. Canonical bundle registration writes
+`artifact_format="tldw_bundle"`.
+
+The manifest also has optional OCI/source provenance fields such as
+`oci_image_ref`, `oci_platform`, manifest/config/layer digests, `registry`, and
+`imported_at`. These fields are metadata scaffolding only; the helper still
+boots the repo-owned bundle path and remains the source of truth for
+bootability.
