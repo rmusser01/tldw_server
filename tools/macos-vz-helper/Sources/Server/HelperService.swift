@@ -7,9 +7,21 @@ struct HostFacts {
 
 enum HelperServiceError: Error {
     case unsupportedNetworkPolicy(String)
+    case invalidExecArgv(String)
+    case invalidExecCwd(String)
+    case invalidExecEnv(String)
+    case invalidExecTimeout(String)
 }
 
 final class HelperService {
+    private static let execWorkspaceRoot = "/workspace"
+    private static let execWorkspaceRootPrefix = execWorkspaceRoot + "/"
+    private static let maxExecArgvCount = 128
+    private static let maxExecArgvBytes = 32 * 1024
+    private static let maxExecEnvCount = 128
+    private static let maxExecEnvBytes = 32 * 1024
+    private static let maxExecTimeoutSeconds: TimeInterval = 3_600
+
     private let protocolVersion = "1"
     private let helperVersion = "0.1.0"
     private let hostFacts: HostFacts
@@ -157,6 +169,12 @@ final class HelperService {
         env: [String: String],
         timeoutSeconds: TimeInterval
     ) throws -> HelperExecResponse {
+        try validateExecGuestContract(
+            argv: argv,
+            cwd: cwd,
+            env: env,
+            timeoutSeconds: timeoutSeconds
+        )
         let result = try vmManager.execGuest(
             vmID: vmID,
             argv: argv,
@@ -218,5 +236,91 @@ final class HelperService {
             "transport": "vsock",
             "network_policy": record.metadata.networkPolicy.isEmpty ? "deny_all" : record.metadata.networkPolicy,
         ]
+    }
+
+    private func validateExecGuestContract(
+        argv: [String],
+        cwd: String,
+        env: [String: String],
+        timeoutSeconds: TimeInterval
+    ) throws {
+        try validateExecArgv(argv)
+        try validateExecCwd(cwd)
+        try validateExecEnv(env)
+        try validateExecTimeout(timeoutSeconds)
+    }
+
+    private func validateExecArgv(_ argv: [String]) throws {
+        guard !argv.isEmpty else {
+            throw HelperServiceError.invalidExecArgv("argv_required")
+        }
+        guard argv.count <= Self.maxExecArgvCount else {
+            throw HelperServiceError.invalidExecArgv("argv_too_large")
+        }
+        var totalBytes = 0
+        for argument in argv {
+            guard !argument.isEmpty else {
+                throw HelperServiceError.invalidExecArgv("argv_empty_argument")
+            }
+            guard !containsNUL(argument) else {
+                throw HelperServiceError.invalidExecArgv("argv_invalid")
+            }
+            totalBytes += argument.utf8.count
+            guard totalBytes <= Self.maxExecArgvBytes else {
+                throw HelperServiceError.invalidExecArgv("argv_too_large")
+            }
+        }
+    }
+
+    private func validateExecCwd(_ cwd: String) throws {
+        guard !cwd.isEmpty,
+              !containsNUL(cwd),
+              cwd == Self.execWorkspaceRoot || cwd.hasPrefix(Self.execWorkspaceRootPrefix) else {
+            throw HelperServiceError.invalidExecCwd("cwd_outside_workspace")
+        }
+        let components = cwd.split(separator: "/", omittingEmptySubsequences: true)
+        guard !components.contains("..") else {
+            throw HelperServiceError.invalidExecCwd("cwd_outside_workspace")
+        }
+    }
+
+    private func validateExecEnv(_ env: [String: String]) throws {
+        guard env.count <= Self.maxExecEnvCount else {
+            throw HelperServiceError.invalidExecEnv("env_too_large")
+        }
+        var totalBytes = 0
+        for (key, value) in env {
+            guard !key.isEmpty,
+                  !key.contains("="),
+                  !containsNUL(key),
+                  !containsControlCharacter(key) else {
+                throw HelperServiceError.invalidExecEnv("env_key_invalid")
+            }
+            guard !containsNUL(value) else {
+                throw HelperServiceError.invalidExecEnv("env_value_invalid")
+            }
+            totalBytes += key.utf8.count + value.utf8.count
+            guard totalBytes <= Self.maxExecEnvBytes else {
+                throw HelperServiceError.invalidExecEnv("env_too_large")
+            }
+        }
+    }
+
+    private func validateExecTimeout(_ timeoutSeconds: TimeInterval) throws {
+        guard timeoutSeconds.isFinite,
+              timeoutSeconds > 0,
+              timeoutSeconds <= Self.maxExecTimeoutSeconds else {
+            throw HelperServiceError.invalidExecTimeout("timeout_out_of_range")
+        }
+    }
+
+    private func containsNUL(_ value: String) -> Bool {
+        value.unicodeScalars.contains { $0.value == 0 }
+    }
+
+    private func containsControlCharacter(_ value: String) -> Bool {
+        value.unicodeScalars.contains { scalar in
+            scalar.value < 0x20 || scalar.value == 0x7F
+        }
     }
 }
