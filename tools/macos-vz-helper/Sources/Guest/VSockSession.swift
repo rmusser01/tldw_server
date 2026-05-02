@@ -57,8 +57,6 @@ final class VSockSession {
         channel = newChannel
         ready = false
         readinessError = nil
-        abandonedRequestIDs.removeAll()
-        abandonedRequestIDOrder.removeAll()
         lock.unlock()
 
         previousChannel?.close()
@@ -282,7 +280,9 @@ final class VSockSession {
             pendingRequest = updated
             pending = updated
         } else if abandonedRequestIDs.remove(requestID) != nil {
-            abandonedRequestIDOrder.removeAll { $0 == requestID }
+            if let index = abandonedRequestIDOrder.firstIndex(of: requestID) {
+                abandonedRequestIDOrder.remove(at: index)
+            }
             shouldIgnoreLateResponse = true
         }
         lock.unlock()

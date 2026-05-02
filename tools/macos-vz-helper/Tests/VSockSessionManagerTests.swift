@@ -180,3 +180,70 @@ final class InMemoryVSockChannel: VSockChanneling {
     #expect(result.exitCode == 0)
     #expect(result.stdout == "ok\n")
 }
+
+@Test func vsockSessionIgnoresLateResponseAfterReconnectFollowingExecTimeout() throws {
+    let manager = VSockSessionManager()
+    _ = manager.prepareSession(
+        vmID: "vm-timeout-reconnect",
+        connectionToken: "token-timeout-reconnect",
+        port: 1024,
+        workspaceRoot: "/workspace"
+    )
+    let firstChannel = InMemoryVSockChannel()
+
+    #expect(manager.accept(channel: firstChannel, for: "vm-timeout-reconnect") == true)
+    firstChannel.push(
+        json: #"{"protocol_version":"1","request_id":"req-handshake-1","type":"handshake","vm_id":"vm-timeout-reconnect","connection_token":"token-timeout-reconnect"}"#
+    )
+    firstChannel.push(
+        json: #"{"protocol_version":"1","request_id":"req-ready-1","type":"ready"}"#
+    )
+
+    let bridge = VSockBridge(transport: manager)
+    try bridge.waitUntilReady(vmID: "vm-timeout-reconnect", timeoutSeconds: 0.1)
+
+    #expect(throws: VSockSessionError.self) {
+        _ = try bridge.exec(
+            vmID: "vm-timeout-reconnect",
+            argv: ["/bin/sh", "-c", "sleep 2"],
+            cwd: "/workspace",
+            env: [:],
+            timeoutSeconds: 0.01
+        )
+    }
+    let timedOutRequestID = firstChannel.writes.last?["request_id"] as? String ?? ""
+
+    let secondChannel = InMemoryVSockChannel()
+    secondChannel.onWrite = { payload in
+        guard payload["type"] as? String == "exec" else {
+            return
+        }
+        let requestID = payload["request_id"] as? String ?? ""
+        secondChannel.push(
+            json: #"{"protocol_version":"1","request_id":"\#(requestID)","exit_code":0,"stdout":"ok\n","stderr":""}"#
+        )
+    }
+    #expect(manager.accept(channel: secondChannel, for: "vm-timeout-reconnect") == true)
+    secondChannel.push(
+        json: #"{"protocol_version":"1","request_id":"req-handshake-2","type":"handshake","vm_id":"vm-timeout-reconnect","connection_token":"token-timeout-reconnect"}"#
+    )
+    secondChannel.push(
+        json: #"{"protocol_version":"1","request_id":"req-ready-2","type":"ready"}"#
+    )
+    try bridge.waitUntilReady(vmID: "vm-timeout-reconnect", timeoutSeconds: 0.1)
+
+    firstChannel.push(
+        json: #"{"protocol_version":"1","request_id":"\#(timedOutRequestID)","exit_code":0,"stdout":"late\n","stderr":""}"#
+    )
+
+    let result = try bridge.exec(
+        vmID: "vm-timeout-reconnect",
+        argv: ["/bin/echo", "ok"],
+        cwd: "/workspace",
+        env: [:],
+        timeoutSeconds: 0.1
+    )
+
+    #expect(result.exitCode == 0)
+    #expect(result.stdout == "ok\n")
+}

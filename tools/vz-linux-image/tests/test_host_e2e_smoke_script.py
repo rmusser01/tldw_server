@@ -152,7 +152,10 @@ def test_host_e2e_smoke_script_default_runtime_dir_is_private_for_real_run(tmp_p
     )
 
     assert result.returncode == 0, result.stderr
-    socket_match = re.search(r"TLDW_SANDBOX_MACOS_HELPER_SOCKET=([^ ]+/helper\.sock)", result.stdout)
+    socket_match = re.search(
+        r"TLDW_SANDBOX_MACOS_HELPER_SOCKET=([^ ]+/helper\.sock)",
+        result.stdout,
+    )
     assert socket_match is not None
     runtime_dir = Path(socket_match.group(1)).parent
     assert runtime_dir.exists()
