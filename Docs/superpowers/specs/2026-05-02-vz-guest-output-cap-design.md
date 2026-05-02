@@ -56,10 +56,11 @@ validates `exec_guest.max_output_bytes`; after validation, it should pass the
 same value into `VZLinuxVMManager.execGuest`, `GuestBridging.exec`, and the
 encoded `GuestExecRequest`.
 
-The Go guest agent should add `MaxOutputBytes int` to `ExecRequest` and replace
-the current `cmd.Run()` plus unbounded stdout/stderr buffers with explicit
-`StdoutPipe` / `StderrPipe` readers and a combined bounded capture mechanism.
-The bounded capture should:
+The Go guest agent should add `MaxOutputBytes *int` to `ExecRequest` and
+replace the current `cmd.Run()` plus unbounded stdout/stderr buffers with
+explicit `StdoutPipe` / `StderrPipe` readers and a combined bounded capture
+mechanism. A pointer is required so the guest can distinguish an omitted cap
+from an explicit invalid `0`. The bounded capture should:
 
 - keep at most `max_output_bytes` returned bytes across stdout and stderr
 - track observed byte counts separately for stdout and stderr
@@ -75,8 +76,8 @@ The guest response should remain a single final response. It should add optional
 detail fields, not a stream frame protocol. If the cap is exceeded, the guest
 agent should return a normal exec response with a stable non-zero exit code when
 the process is terminated by the cap, plus metadata indicating
-`output_limit_exceeded=true`. The host should avoid turning this into a helper
-transport failure; it is a command result constrained by policy.
+`guest_output_limit_exceeded=true`. The host should avoid turning this into a
+helper transport failure; it is a command result constrained by policy.
 
 Swift helper response capping remains active. If a rebuilt guest agent enforces
 the cap, Swift details should report both guest-observed metadata and any
@@ -148,9 +149,11 @@ metadata remains the authoritative reason for the termination.
 
 ## Output Semantics
 
-When no `max_output_bytes` is provided, the guest agent keeps existing behavior
-except that implementation may still use a bounded helper internally if it
-preserves current default limits.
+When no `max_output_bytes` is provided, the guest agent keeps existing exec
+behavior and does not add a new implicit guest kill-on-cap default. This avoids
+changing lower-level guest protocol semantics for callers that do not send the
+field. The `vz_linux` Python runner is expected to send the sandbox log cap for
+normal sandbox execution.
 
 When a cap is provided:
 
@@ -201,7 +204,7 @@ rebuilt images containing the updated `tldw-agent-guest` binary.
 
 ### Go guest agent
 
-- Add `MaxOutputBytes int` and optional `Details map[string]string` to guest
+- Add `MaxOutputBytes *int` and optional `Details map[string]string` to guest
   exec request/response types.
 - Validate direct guest requests defensively with the same effective ceiling as
   the host helper, currently 256 MiB.
@@ -224,6 +227,8 @@ rebuilt images containing the updated `tldw-agent-guest` binary.
 - Encode `max_output_bytes` in `GuestExecRequest` when provided.
 - Decode optional guest response details and merge only string-valued,
   guest-prefixed keys into helper response details.
+- Decode guest details defensively so missing, malformed, or non-string detail
+  values do not fail an otherwise valid exec response.
 - Preserve host-side output counter keys for Swift-received and Swift-returned
   byte counts; do not overwrite them with guest-observed counters.
 - Keep existing helper-side `capExecOutput` behavior as fallback.
@@ -282,6 +287,8 @@ Swift helper tests:
 
 - `VSockBridge` encodes `max_output_bytes` into guest exec requests.
 - `VSockBridge` decodes optional guest details.
+- `VSockBridge` ignores non-string or malformed guest details without failing
+  the exec response.
 - `HelperService.execGuest` passes the cap to the bridge/manager.
 - `HelperService.execGuest` merges guest-prefixed metadata and still applies
   host cap without overwriting host output counters.
