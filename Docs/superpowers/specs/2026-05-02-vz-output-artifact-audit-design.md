@@ -58,20 +58,27 @@ Wire that module into `VZLinuxRunner` only. The runner will:
 - pass that value to helper `exec_guest` as `max_output_bytes`
 - publish stdout/stderr with `max_log_bytes`
 - collect artifacts through the shared helper with explicit limits
-- put limit metadata into `RunStatus.resource_usage`
+- put integer-only limit counters into `RunStatus.resource_usage`
+- let `SandboxService` derive richer audit metadata from those counters
 
 The native Swift helper will extend the `exec_guest` protocol with an optional
 `max_output_bytes` request field. It will validate the value and cap returned
 stdout/stderr before JSON encoding the host response. The helper response should
 include details indicating stdout/stderr byte counts and truncation flags.
+Because the current Swift helper response models use `details: [String: String]`,
+byte counts and booleans in helper details must be encoded as strings and parsed
+defensively by Python.
 
 ## Output Cap Semantics
 
 `max_output_bytes` is a combined stdout+stderr cap with per-stream metadata.
 The helper should preserve deterministic behavior:
 
-- stdout is capped first up to the remaining combined budget
-- stderr is capped second with the remaining budget
+- when both streams exceed the cap, each stream receives a fair minimum share so
+  noisy stdout cannot completely hide stderr diagnostics
+- unused budget from one stream may be used by the other stream
+- the sum of returned stdout and stderr bytes must not exceed
+  `max_output_bytes`
 - response details include original and returned byte counts for each stream
 - response details include whether each stream was truncated
 - invalid `max_output_bytes` shape returns `invalid_request`
@@ -125,6 +132,29 @@ Reuse the existing sandbox run completion audit path and add compact metadata:
 - `artifact_bytes_collected`
 - `artifact_skip_reasons`
 
+`RunStatus.resource_usage` must remain compatible with the current public and
+admin schemas, which type it as `dict[str, int]`. Store only integer counters
+there, for example:
+
+- `output_limit_bytes`
+- `stdout_bytes_returned`
+- `stderr_bytes_returned`
+- `stdout_bytes_original`
+- `stderr_bytes_original`
+- `stdout_truncated`
+- `stderr_truncated`
+- `artifact_limit_file_bytes`
+- `artifact_limit_total_bytes`
+- `artifact_files_collected`
+- `artifact_files_skipped`
+- `artifact_bytes_collected`
+- `artifact_skip_file_limit`
+- `artifact_skip_total_limit`
+
+`SandboxService` should convert those integer counters into boolean flags and
+reason-code lists for audit metadata. This avoids breaking the run status API
+while still making audit records readable.
+
 Add separate aggregated audit events only when limits affect the run:
 
 - one `sandbox.run.output_truncated` style event when stdout/stderr was capped
@@ -135,6 +165,9 @@ These events must be per-run aggregates, not per-stream or per-file spam.
 `SandboxService` should emit these from `RunStatus.resource_usage` metadata
 alongside the existing completion audit path, so runtime runners do not open
 their own audit clients.
+Implementation should use the existing audit enum values, for example
+`AuditEventType.API_RESPONSE` with actions `output_truncated` and
+`artifacts_limited`, instead of adding new audit enum values in this slice.
 
 ## Error Handling
 
