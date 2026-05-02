@@ -99,6 +99,29 @@ final class RecordingGuestTransport: GuestTransporting {
     #expect(result.details["host_key"] == nil)
 }
 
+@Test func vsockBridgeRejectsNegativeMaxOutputBytesBeforeEncoding() throws {
+    let transport = RecordingGuestTransport()
+    let bridge = VSockBridge(transport: transport)
+
+    do {
+        _ = try bridge.exec(
+            vmID: "vm-negative-cap",
+            argv: ["/bin/echo", "ok"],
+            cwd: "/workspace",
+            env: [:],
+            timeoutSeconds: 15,
+            maxOutputBytes: -1
+        )
+        Issue.record("expected negative maxOutputBytes to be rejected")
+    } catch GuestBridgeError.guestProtocolError(let reason) {
+        #expect(reason == "invalid_max_output_bytes")
+    } catch {
+        Issue.record("expected guestProtocolError, got \(error)")
+    }
+
+    #expect(transport.execPayload == nil)
+}
+
 @Test func vsockBridgeTreatsMissingExecStreamsAsEmptyStrings() throws {
     let transport = RecordingGuestTransport()
     transport.execResponseFactory = { payload in

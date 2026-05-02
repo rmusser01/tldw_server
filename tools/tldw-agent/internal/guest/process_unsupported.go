@@ -6,8 +6,9 @@ import "os/exec"
 
 func configureCommandProcessGroup(_ *exec.Cmd) {}
 
-func terminateCommandProcess(cmd *exec.Cmd) {
+func terminateCommandProcess(cmd *exec.Cmd) bool {
 	if cmd != nil && cmd.Process != nil {
-		_ = cmd.Process.Kill()
+		return cmd.Process.Kill() == nil
 	}
+	return false
 }

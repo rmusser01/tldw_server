@@ -248,6 +248,9 @@ Response:
 Output limit detail values are encoded as strings to preserve the existing
 `details` shape. Guest-side counters use `guest_` prefixes and host-side
 response-cap counters keep the existing unprefixed keys.
+Guest-prefixed counters are conditional: older guest agents may omit `guest_*`
+metadata and rely only on host-side fallback counters. Clients must fall back to
+the unprefixed keys when `guest_*` keys are absent during mixed-version rollouts.
 
 ### `validate_template`
 

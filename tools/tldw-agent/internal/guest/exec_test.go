@@ -133,16 +133,20 @@ func TestBoundedExecOutputTimeoutWinsOverPostTimeoutDrain(t *testing.T) {
 		cancel: func() {
 			cancelCalled = true
 		},
-		kill: func() {
+		kill: func() bool {
 			t.Fatal("post-timeout drain should not invoke output-limit kill")
+			return false
 		},
 	}
 
 	limiter.write(outputStreamStdout, []byte("exceeds-cap"))
-	stdout, stderr, details, reason := limiter.response()
+	stdout, stderr, details, reason, killConfirmed := limiter.response()
 
 	if cancelCalled {
 		t.Fatal("post-timeout drain should not invoke output-limit cancel")
+	}
+	if killConfirmed {
+		t.Fatal("post-timeout drain should not record output-limit kill")
 	}
 	if reason != outputLimitReasonTimeout {
 		t.Fatalf("expected timeout reason to win, got %q", reason)
@@ -155,5 +159,32 @@ func TestBoundedExecOutputTimeoutWinsOverPostTimeoutDrain(t *testing.T) {
 	}
 	if len([]byte(stdout))+len([]byte(stderr)) > 4 {
 		t.Fatalf("returned output exceeds cap: stdout=%q stderr=%q", stdout, stderr)
+	}
+}
+
+func TestLimitedExecResponsePreservesCompletedExitCodeWhenOutputExceeded(t *testing.T) {
+	resp, execErr := buildLimitedExecResponse(
+		ExecRequest{ProtocolVersion: ProtocolVersion, RequestID: "req-completed"},
+		"xxxx",
+		"",
+		map[string]string{
+			"guest_output_limit_exceeded": "true",
+			"guest_output_kill_reason":    string(outputLimitReasonOutput),
+		},
+		outputLimitReasonOutput,
+		false,
+		context.Canceled,
+	)
+	if execErr != nil {
+		t.Fatalf("unexpected error response: %#v", execErr)
+	}
+	if resp.ExitCode != 0 {
+		t.Fatalf("expected completed command exit code 0, got %d", resp.ExitCode)
+	}
+	if resp.Details["guest_output_limit_exceeded"] != "true" {
+		t.Fatalf("expected output limit metadata, got %#v", resp.Details)
+	}
+	if _, ok := resp.Details["guest_output_kill_reason"]; ok {
+		t.Fatalf("expected kill reason to be omitted when no process kill is proven, got %#v", resp.Details)
 	}
 }

@@ -34,17 +34,18 @@ const (
 )
 
 type boundedExecOutput struct {
-	mu           sync.Mutex
-	limit        int
-	stdout       []byte
-	stderr       []byte
-	stdoutSeen   int
-	stderrSeen   int
-	exceeded     bool
-	cancelReason outputLimitReason
-	timeoutCtx   context.Context
-	cancel       context.CancelFunc
-	kill         func()
+	mu            sync.Mutex
+	limit         int
+	stdout        []byte
+	stderr        []byte
+	stdoutSeen    int
+	stderrSeen    int
+	exceeded      bool
+	killConfirmed bool
+	cancelReason  outputLimitReason
+	timeoutCtx    context.Context
+	cancel        context.CancelFunc
+	kill          func() bool
 }
 
 type boundedStreamWriter struct {
@@ -164,8 +165,8 @@ func runExecWithOutputLimit(
 		timeoutCtx:   timeoutCtx,
 		cancel:       outputCancel,
 	}
-	limiter.kill = func() {
-		terminateCommandProcess(cmd)
+	limiter.kill = func() bool {
+		return terminateCommandProcess(cmd)
 	}
 
 	stdoutPipe, err := cmd.StdoutPipe()
@@ -202,7 +203,19 @@ func runExecWithOutputLimit(
 	wg.Wait()
 
 	limiter.recordTimeoutIfDeadlineExceeded()
-	stdout, stderr, details, reason := limiter.response()
+	stdout, stderr, details, reason, killConfirmed := limiter.response()
+	return buildLimitedExecResponse(req, stdout, stderr, details, reason, killConfirmed, waitErr)
+}
+
+func buildLimitedExecResponse(
+	req ExecRequest,
+	stdout string,
+	stderr string,
+	details map[string]string,
+	reason outputLimitReason,
+	killConfirmed bool,
+	waitErr error,
+) (*ExecResponse, *ErrorResponse) {
 	if reason == outputLimitReasonTimeout {
 		return nil, &ErrorResponse{
 			ProtocolVersion: ProtocolVersion,
@@ -211,25 +224,27 @@ func runExecWithOutputLimit(
 			Message:         "guest exec timed out",
 		}
 	}
+
 	if reason == outputLimitReasonOutput {
-		return &ExecResponse{
-			ProtocolVersion: ProtocolVersion,
-			RequestID:       req.RequestID,
-			ExitCode:        outputLimitExitCode,
-			Stdout:          stdout,
-			Stderr:          stderr,
-			Details:         details,
-		}, nil
+		if killConfirmed || waitErrIndicatesForcedTermination(waitErr) {
+			return &ExecResponse{
+				ProtocolVersion: ProtocolVersion,
+				RequestID:       req.RequestID,
+				ExitCode:        outputLimitExitCode,
+				Stdout:          stdout,
+				Stderr:          stderr,
+				Details:         details,
+			}, nil
+		}
+		delete(details, "guest_output_kill_reason")
+		if errors.Is(waitErr, context.Canceled) {
+			waitErr = nil
+		}
 	}
 
-	exitCode := 0
-	if waitErr != nil {
-		var exitErr *exec.ExitError
-		if errors.As(waitErr, &exitErr) {
-			exitCode = exitErr.ExitCode()
-		} else {
-			return nil, execFailedResponse(req.RequestID, waitErr)
-		}
+	exitCode, execErr := exitCodeFromWaitErr(req.RequestID, waitErr)
+	if execErr != nil {
+		return nil, execErr
 	}
 
 	return &ExecResponse{
@@ -240,6 +255,22 @@ func runExecWithOutputLimit(
 		Stderr:          stderr,
 		Details:         details,
 	}, nil
+}
+
+func exitCodeFromWaitErr(requestID string, waitErr error) (int, *ErrorResponse) {
+	if waitErr == nil {
+		return 0, nil
+	}
+	var exitErr *exec.ExitError
+	if errors.As(waitErr, &exitErr) {
+		return exitErr.ExitCode(), nil
+	}
+	return 0, execFailedResponse(requestID, waitErr)
+}
+
+func waitErrIndicatesForcedTermination(waitErr error) bool {
+	var exitErr *exec.ExitError
+	return errors.As(waitErr, &exitErr) && exitErr.ExitCode() < 0
 }
 
 func execFailedResponse(requestID string, err error) *ErrorResponse {
@@ -303,11 +334,15 @@ func (b *boundedExecOutput) write(stream outputStream, chunk []byte) {
 	b.mu.Unlock()
 
 	if shouldCancel {
+		killConfirmed := false
+		if kill != nil {
+			killConfirmed = kill()
+		}
 		if cancel != nil {
 			cancel()
 		}
-		if kill != nil {
-			kill()
+		if killConfirmed {
+			b.recordKillConfirmed()
 		}
 	}
 }
@@ -323,11 +358,17 @@ func (b *boundedExecOutput) recordTimeoutIfDeadlineExceeded() {
 	b.mu.Unlock()
 }
 
+func (b *boundedExecOutput) recordKillConfirmed() {
+	b.mu.Lock()
+	b.killConfirmed = true
+	b.mu.Unlock()
+}
+
 func (b *boundedExecOutput) timeoutDeadlineExceeded() bool {
 	return b.timeoutCtx != nil && errors.Is(b.timeoutCtx.Err(), context.DeadlineExceeded)
 }
 
-func (b *boundedExecOutput) response() (string, string, map[string]string, outputLimitReason) {
+func (b *boundedExecOutput) response() (string, string, map[string]string, outputLimitReason, bool) {
 	b.mu.Lock()
 	stdoutBytes := append([]byte(nil), b.stdout...)
 	stderrBytes := append([]byte(nil), b.stderr...)
@@ -335,6 +376,7 @@ func (b *boundedExecOutput) response() (string, string, map[string]string, outpu
 	stderrSeen := b.stderrSeen
 	exceeded := b.exceeded
 	reason := b.cancelReason
+	killConfirmed := b.killConfirmed
 	limit := b.limit
 	b.mu.Unlock()
 
@@ -355,7 +397,7 @@ func (b *boundedExecOutput) response() (string, string, map[string]string, outpu
 	if reason != outputLimitReasonNone {
 		details["guest_output_kill_reason"] = string(reason)
 	}
-	return stdout, stderr, details, reason
+	return stdout, stderr, details, reason, killConfirmed
 }
 
 func sanitizeUTF8WithinLimit(value []byte, maxBytes int) string {

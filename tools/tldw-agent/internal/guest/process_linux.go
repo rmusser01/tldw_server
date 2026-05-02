@@ -11,13 +11,17 @@ func configureCommandProcessGroup(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 }
 
-func terminateCommandProcess(cmd *exec.Cmd) {
+func terminateCommandProcess(cmd *exec.Cmd) bool {
 	if cmd == nil || cmd.Process == nil {
-		return
+		return false
 	}
+	terminated := false
 	pid := cmd.Process.Pid
 	if pid > 0 {
-		_ = syscall.Kill(-pid, syscall.SIGKILL)
+		terminated = syscall.Kill(-pid, syscall.SIGKILL) == nil
 	}
-	_ = cmd.Process.Kill()
+	if cmd.Process.Kill() == nil {
+		terminated = true
+	}
+	return terminated
 }

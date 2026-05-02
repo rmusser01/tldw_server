@@ -173,6 +173,9 @@ final class VSockBridge: GuestBridging {
         timeoutSeconds: TimeInterval,
         maxOutputBytes: Int? = nil
     ) throws -> GuestExecResult {
+        if let maxOutputBytes, maxOutputBytes < 0 {
+            throw GuestBridgeError.guestProtocolError("invalid_max_output_bytes")
+        }
         let requestID = UUID().uuidString
         let requestData = try encoder.encode(
             GuestExecRequest(
