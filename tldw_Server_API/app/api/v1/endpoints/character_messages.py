@@ -1026,6 +1026,7 @@ async def search_messages(
     chat_id: str = Path(..., description="Chat session ID"),
     query: str = Query(..., description="Search query", min_length=1, max_length=MAX_SEARCH_QUERY_LENGTH),
     limit: int = Query(50, ge=1, le=200, description="Maximum results"),
+    offset: int = Query(0, ge=0, description="Offset for search pagination"),
     scope_type: Literal["global", "workspace"] | None = Query(None, description="Conversation scope type"),
     workspace_id: str | None = Query(None, description="Workspace ID when scope_type='workspace'"),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
@@ -1038,6 +1039,7 @@ async def search_messages(
         chat_id: Chat session ID
         query: Search query string
         limit: Maximum number of results
+        offset: Offset for search pagination
         db: Database instance
         current_user: Authenticated user
 
@@ -1068,22 +1070,26 @@ async def search_messages(
             query,
             character_name_for_placeholders=character_name,
             user_name_for_placeholders=user_name,
-            limit=limit,
+            limit=limit + 1,
+            offset=offset,
         )
 
         if not results:
             results = []
+        has_more = len(results) > limit
+        page_results = results[:limit]
 
         return MessageListResponse(
-            messages=[_convert_db_message_to_response(msg) for msg in results],
-            total=len(results),
+            messages=[_convert_db_message_to_response(msg) for msg in page_results],
+            total=len(page_results),
             limit=limit,
-            offset=0,
+            offset=offset,
             pagination=build_offset_pagination_meta(
-                total=len(results),
+                total=None,
                 limit=limit,
-                offset=0,
-                count=len(results),
+                offset=offset,
+                count=len(page_results),
+                has_more=has_more,
             ),
         )
 

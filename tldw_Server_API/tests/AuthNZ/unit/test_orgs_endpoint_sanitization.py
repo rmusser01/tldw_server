@@ -315,21 +315,16 @@ async def test_list_my_orgs_includes_canonical_pagination(monkeypatch):
         def __init__(self, db_pool) -> None:  # noqa: ARG002
             pass
 
-        async def list_org_memberships_for_user(self, user_id):
+        async def list_organizations_for_user(self, user_id, **kwargs):
             assert user_id == 7
-            return [{"org_id": 11}, {"org_id": 22}]
-
-        async def list_organizations(self, **kwargs):
             assert kwargs["with_total"] is True
-            assert kwargs["limit"] == 1000
+            assert kwargs["limit"] == 1
             assert kwargs["offset"] == 0
             return (
                 [
                     {"id": 11, "name": "Alpha", "slug": "alpha", "owner_user_id": 7},
-                    {"id": 22, "name": "Beta", "slug": "beta", "owner_user_id": 8},
-                    {"id": 33, "name": "Gamma", "slug": "gamma", "owner_user_id": 9},
                 ],
-                3,
+                2,
             )
 
     async def _fake_get_db_pool():

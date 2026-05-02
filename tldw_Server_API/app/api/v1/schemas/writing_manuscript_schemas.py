@@ -78,8 +78,8 @@ class ManuscriptProjectResponse(BaseModel):
 class ManuscriptProjectListResponse(BaseModel):
     projects: list[ManuscriptProjectResponse]
     total: int
-    limit: int
-    offset: int
+    limit: int = Field(..., ge=1)
+    offset: int = Field(..., ge=0)
     has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
     next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
     pagination: OffsetPaginationMeta

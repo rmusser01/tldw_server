@@ -114,11 +114,13 @@ def client_module(db_instance_session):
     app.dependency_overrides[get_media_db_for_user] = override_get_media_db_for_user
     app.dependency_overrides[get_request_user] = _override_user
 
-    client = TestClient(fastapi_app_instance)
+    client = None
     try:
+        client = TestClient(fastapi_app_instance)
         yield client
     finally:
-        client.close()
+        if client is not None:
+            client.close()
 
         # Restore original overrides AFTER client is closed
         app.dependency_overrides = original_overrides

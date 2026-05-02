@@ -32,8 +32,18 @@ _READING_SAVED_SEARCH_ALLOWED_SORTS = {
 def _default_offset_pagination_aliases(response):
     if response.has_more is None:
         response.has_more = response.pagination.has_more
+    elif response.has_more != response.pagination.has_more:
+        raise ValueError(
+            f"has_more alias mismatch: has_more={response.has_more} "
+            f"pagination.has_more={response.pagination.has_more}"
+        )
     if response.next_offset is None:
         response.next_offset = response.pagination.next_offset
+    elif response.next_offset != response.pagination.next_offset:
+        raise ValueError(
+            f"next_offset alias mismatch: next_offset={response.next_offset} "
+            f"pagination.next_offset={response.pagination.next_offset}"
+        )
     return response
 
 

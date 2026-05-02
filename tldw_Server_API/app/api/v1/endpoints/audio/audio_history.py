@@ -237,10 +237,17 @@ async def list_tts_history(
         last_row = rows[-1]
         try:
             next_cursor = _encode_cursor(last_row.get("created_at"), int(last_row.get("id")))
-        except _TTS_HISTORY_NONCRITICAL_EXCEPTIONS:
-            logger.debug("TTS history: failed to build next cursor")
-            next_cursor = None
-            has_more = False
+        except _TTS_HISTORY_NONCRITICAL_EXCEPTIONS as exc:
+            logger.error(
+                "TTS history: failed to build next cursor for id={} created_at={}",
+                last_row.get("id"),
+                last_row.get("created_at"),
+                exc_info=True,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to list TTS history",
+            ) from exc
 
     total = None
     if include_total:

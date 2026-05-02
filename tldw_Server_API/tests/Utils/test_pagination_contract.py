@@ -1,8 +1,21 @@
+import pytest
+from pydantic import ValidationError
+
 from tldw_Server_API.app.api.v1.endpoints._pagination_utils import (
     build_link_header,
     build_offset_pagination_meta,
+    build_page_pagination_meta,
     build_pagination_link_header,
 )
+from tldw_Server_API.app.api.v1.schemas.admin_schemas import WebhookListResponse
+from tldw_Server_API.app.api.v1.schemas.character_schemas import CharacterListQueryResponse
+from tldw_Server_API.app.api.v1.schemas.pagination import (
+    CursorPaginationMeta,
+    OffsetPaginationMeta,
+    PagePaginationMeta,
+)
+from tldw_Server_API.app.api.v1.schemas.reading_schemas import ReadingItemsListResponse
+from tldw_Server_API.app.api.v1.schemas.writing_manuscript_schemas import ManuscriptProjectListResponse
 
 
 def test_build_offset_pagination_meta_computes_has_more_and_next_offset() -> None:
@@ -33,6 +46,85 @@ def test_build_offset_pagination_meta_ends_without_next_offset() -> None:
 
     assert pagination.has_more is False
     assert pagination.next_offset is None
+
+
+def test_build_page_pagination_meta_derives_has_more_from_total() -> None:
+    """Page metadata uses total and per_page when total_pages is not provided."""
+    pagination = build_page_pagination_meta(page=2, per_page=10, total=25)
+
+    assert pagination.has_more is True
+    assert pagination.total_pages is None
+
+
+def test_pagination_meta_modes_are_fixed_discriminators() -> None:
+    """Pagination mode fields reject contradictory discriminator values."""
+    with pytest.raises(ValidationError):
+        OffsetPaginationMeta(mode="cursor", limit=10, offset=0, total=20, has_more=True, next_offset=10)
+    with pytest.raises(ValidationError):
+        CursorPaginationMeta(mode="offset", limit=10, cursor=None, next_cursor=None, has_more=False)
+    with pytest.raises(ValidationError):
+        PagePaginationMeta(mode="offset", page=1, per_page=10, total=20, total_pages=2, has_more=True)
+
+
+def test_character_list_backfills_has_more_alias_when_omitted() -> None:
+    """Character list responses derive omitted top-level aliases from canonical metadata."""
+    response = CharacterListQueryResponse(
+        items=[],
+        total=2,
+        page=1,
+        page_size=1,
+        pagination=build_offset_pagination_meta(limit=1, offset=0, total=2, count=1),
+    )
+
+    assert response.has_more is True
+    assert response.next_offset == 1
+
+
+def test_reading_list_rejects_contradictory_pagination_aliases() -> None:
+    """Reading responses reject drift between legacy aliases and canonical metadata."""
+    pagination = build_offset_pagination_meta(limit=1, offset=0, total=2, count=1)
+
+    with pytest.raises(ValidationError, match="has_more alias mismatch"):
+        ReadingItemsListResponse(
+            items=[],
+            total=2,
+            page=1,
+            size=1,
+            has_more=False,
+            pagination=pagination,
+        )
+
+    with pytest.raises(ValidationError, match="next_offset alias mismatch"):
+        ReadingItemsListResponse(
+            items=[],
+            total=2,
+            page=1,
+            size=1,
+            next_offset=99,
+            pagination=pagination,
+        )
+
+
+def test_manuscript_project_list_rejects_negative_pagination_aliases() -> None:
+    """Manuscript list responses constrain newly restored offset fields."""
+    pagination = build_offset_pagination_meta(limit=10, offset=0, total=0, count=0)
+
+    with pytest.raises(ValidationError):
+        ManuscriptProjectListResponse(projects=[], total=0, limit=0, offset=0, pagination=pagination)
+    with pytest.raises(ValidationError):
+        ManuscriptProjectListResponse(projects=[], total=0, limit=10, offset=-1, pagination=pagination)
+
+
+def test_webhook_list_backfills_legacy_limit_offset_aliases() -> None:
+    """Webhook list responses preserve legacy top-level limit and offset fields."""
+    pagination = build_offset_pagination_meta(limit=25, offset=50, total=100, count=25)
+
+    response = WebhookListResponse(items=[], total=100, pagination=pagination)
+
+    assert response.limit == 25
+    assert response.offset == 50
+    assert response.has_more is True
+    assert response.next_offset == 75
 
 
 def test_build_pagination_link_header_uses_offset_metadata() -> None:

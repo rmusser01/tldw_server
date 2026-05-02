@@ -12,7 +12,11 @@ import urllib.parse as _u
 from tldw_Server_API.app.api.v1.schemas.pagination import (
     CursorPaginationMeta,
     OffsetPaginationMeta,
-    PagePaginationMeta,
+)
+from tldw_Server_API.app.api.v1.utils.pagination import (
+    build_cursor_pagination_meta,
+    build_offset_pagination_meta,
+    build_page_pagination_meta,
 )
 
 
@@ -94,75 +98,6 @@ def build_link_header(
                 links.append(f"<{hrefl}>; rel=\"last\"")
 
     return ", ".join(links) if links else None
-
-
-def build_offset_pagination_meta(
-    *,
-    limit: int,
-    offset: int,
-    total: int | None = None,
-    count: int | None = None,
-    has_more: bool | None = None,
-) -> OffsetPaginationMeta:
-    """Build canonical offset pagination metadata from route-local values."""
-    normalized_count = max(count or 0, 0)
-
-    if has_more is None:
-        if total is not None:
-            has_more = offset + normalized_count < total
-        else:
-            has_more = normalized_count >= limit
-
-    next_offset = offset + limit if has_more else None
-
-    return OffsetPaginationMeta(
-        limit=limit,
-        offset=offset,
-        total=total,
-        has_more=has_more,
-        next_offset=next_offset,
-    )
-
-
-def build_cursor_pagination_meta(
-    *,
-    limit: int,
-    cursor: str | None = None,
-    next_cursor: str | None = None,
-    has_more: bool | None = None,
-) -> CursorPaginationMeta:
-    """Build canonical cursor pagination metadata from route-local values."""
-    normalized_has_more = bool(next_cursor) if has_more is None else bool(has_more)
-    return CursorPaginationMeta(
-        limit=limit,
-        cursor=cursor,
-        next_cursor=next_cursor,
-        has_more=normalized_has_more,
-    )
-
-
-def build_page_pagination_meta(
-    *,
-    page: int,
-    per_page: int,
-    total: int | None = None,
-    total_pages: int | None = None,
-    has_more: bool | None = None,
-) -> PagePaginationMeta:
-    """Build canonical page-based pagination metadata from route-local values."""
-    normalized_total_pages = int(total_pages) if total_pages is not None else None
-    normalized_has_more = (
-        bool(normalized_total_pages and int(page) < normalized_total_pages)
-        if has_more is None
-        else bool(has_more)
-    )
-    return PagePaginationMeta(
-        page=int(page),
-        per_page=int(per_page),
-        total=int(total) if total is not None else None,
-        total_pages=normalized_total_pages,
-        has_more=normalized_has_more,
-    )
 
 
 def build_pagination_link_header(

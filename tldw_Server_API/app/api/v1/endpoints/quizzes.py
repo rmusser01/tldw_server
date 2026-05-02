@@ -333,7 +333,6 @@ def delete_quiz(
 @router.get(
     "/{quiz_id:int}/questions",
     response_model=QuestionListResponse,
-    response_model_exclude_none=True,
 )
 def list_questions(
     quiz_id: int,
@@ -466,7 +465,7 @@ def submit_attempt(
         raise map_db_error_to_http(exc, default_detail="Failed to submit attempt") from exc
 
 
-@router.get("/attempts", response_model=AttemptListResponse, response_model_exclude_none=True)
+@router.get("/attempts", response_model=AttemptListResponse)
 def list_attempts(
     quiz_id: Optional[int] = None,
     limit: int = Query(50, ge=1, le=200),

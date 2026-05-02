@@ -8,15 +8,10 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
-
-
-def _default_offset_pagination_aliases(response):
-    if response.has_more is None:
-        response.has_more = response.pagination.has_more
-    if response.next_offset is None:
-        response.next_offset = response.pagination.next_offset
-    return response
+from tldw_Server_API.app.api.v1.schemas.pagination import (
+    OffsetPaginationMeta,
+    default_offset_pagination_aliases,
+)
 
 
 class SyntheticEvalProvenance(str, Enum):
@@ -182,7 +177,7 @@ class SyntheticEvalQueueResponse(BaseModel):
 
     @model_validator(mode="after")
     def _default_pagination_aliases(self):
-        return _default_offset_pagination_aliases(self)
+        return default_offset_pagination_aliases(self)
 
 
 class SyntheticEvalReviewRequest(BaseModel):

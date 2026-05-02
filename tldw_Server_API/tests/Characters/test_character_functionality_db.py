@@ -1338,6 +1338,11 @@ class TestMessageCRUD:
 
         results_all_keyword = db.search_messages_by_content("keyword")
         assert len(results_all_keyword) >= 2  # At least the two we added
+        first_page = db.search_messages_by_content("keyword", limit=1, offset=0)
+        second_page = db.search_messages_by_content("keyword", limit=1, offset=1)
+        assert first_page
+        assert second_page
+        assert first_page[0]["id"] != second_page[0]["id"]
 
 
 class TestKeywordAndCollectionCRUD:

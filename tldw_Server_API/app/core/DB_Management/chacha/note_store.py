@@ -256,10 +256,33 @@ class NoteStore:
                 raise CharactersRAGDBError(f"Failed to read note studio document for note ID '{normalized_note_id}'.")
             return document
 
-        if conn is None:
-            with self._db.transaction() as transaction_conn:
-                return _execute(transaction_conn)
-        return _execute(conn)
+        try:
+            if conn is None:
+                with self._db.transaction() as transaction_conn:
+                    return _execute(transaction_conn)
+            return _execute(conn)
+        except sqlite3.IntegrityError as e:
+            msg = str(e).lower()
+            if "foreign key" in msg:
+                raise ConflictError("Note not found.", entity="notes", entity_id=normalized_note_id) from e  # noqa: TRY003
+            if "unique constraint" in msg:
+                raise ConflictError(  # noqa: TRY003
+                    f"Note studio document for note ID '{normalized_note_id}' already exists.",
+                    entity="note_studio_documents",
+                    entity_id=normalized_note_id,
+                ) from e
+            raise CharactersRAGDBError(f"Database integrity error writing note studio document: {e}") from e  # noqa: TRY003
+        except BackendDatabaseError as e:
+            msg = str(e).lower()
+            if "foreign key" in msg:
+                raise ConflictError("Note not found.", entity="notes", entity_id=normalized_note_id) from e  # noqa: TRY003
+            if "duplicate key" in msg or "unique constraint" in msg:
+                raise ConflictError(  # noqa: TRY003
+                    f"Note studio document for note ID '{normalized_note_id}' already exists.",
+                    entity="note_studio_documents",
+                    entity_id=normalized_note_id,
+                ) from e
+            raise CharactersRAGDBError(f"Backend error writing note studio document: {e}") from e  # noqa: TRY003
 
     def create_note_studio_document(
         self,

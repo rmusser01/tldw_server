@@ -546,16 +546,30 @@ async def list_prompts(
             include_deleted=include_deleted,
         )
         prompts = [PromptResponse(**prompt) for prompt in result.get("prompts", [])]
+        pagination_data = result.get("pagination") or {}
+        page_value = int(pagination_data.get("page") or page)
+        per_page_value = int(pagination_data.get("per_page") or pagination_data.get("limit") or per_page)
+        total_value = int(pagination_data.get("total") if pagination_data.get("total") is not None else len(prompts))
+        total_pages_value = pagination_data.get("total_pages")
+        if total_pages_value is None:
+            total_pages_value = (total_value + per_page_value - 1) // per_page_value if total_value else 0
+        total_pages_value = int(total_pages_value)
+        metadata = {
+            "page": page_value,
+            "per_page": per_page_value,
+            "total": total_value,
+            "total_pages": total_pages_value,
+        }
 
         return PageListResponse(
             success=True,
             data=prompts,
-            metadata=result.get("pagination", {}),
+            metadata=metadata,
             pagination=build_page_pagination_meta(
-                page=result["pagination"]["page"],
-                per_page=result["pagination"]["per_page"],
-                total=result["pagination"]["total"],
-                total_pages=result["pagination"]["total_pages"],
+                page=page_value,
+                per_page=per_page_value,
+                total=total_value,
+                total_pages=total_pages_value,
             ),
         )
 

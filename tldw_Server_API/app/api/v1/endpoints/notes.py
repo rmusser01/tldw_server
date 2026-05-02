@@ -1898,19 +1898,24 @@ async def list_keyword_collections_endpoint(
             )
 
         collections_data = db.list_keyword_collections(limit=limit, offset=offset)
-        total = db.count_keyword_collections()
+        total = None
+        try:
+            total = db.count_keyword_collections()
+        except _NOTES_NONCRITICAL_EXCEPTIONS as count_exc:
+            logger.warning("Counting keyword collections failed: {}", count_exc)
         if include_keywords:
             collections_data = [
                 _attach_collection_keywords_inline(db, dict(row))
                 for row in collections_data
             ]
+        response_total = total if total is not None else offset + len(collections_data)
 
         return {
             "collections": collections_data,
             "count": len(collections_data),
             "limit": limit,
             "offset": offset,
-            "total": total,
+            "total": response_total,
             "pagination": build_offset_pagination_meta(
                 total=total,
                 limit=limit,
@@ -2537,7 +2542,11 @@ async def list_moodboards_endpoint(
                 headers={"Retry-After": str(meta.get("retry_after", 60))},
             )
         rows = await _run_db_call(db.list_moodboards, limit=limit, offset=offset, include_deleted=include_deleted)
-        total = await _run_db_call(db.count_moodboards, include_deleted=include_deleted)
+        total = None
+        try:
+            total = await _run_db_call(db.count_moodboards, include_deleted=include_deleted)
+        except _NOTES_NONCRITICAL_EXCEPTIONS as count_exc:
+            logger.warning("Counting moodboards failed: {}", count_exc)
         payload = [_normalize_moodboard_payload(row) for row in rows]
         return MoodboardListResponse(
             items=payload,

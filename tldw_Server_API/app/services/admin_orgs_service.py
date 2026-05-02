@@ -6,7 +6,7 @@ from typing import Any
 from fastapi import HTTPException, status
 from loguru import logger
 
-from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
+from tldw_Server_API.app.api.v1.utils.pagination import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.schemas.org_team_schemas import (
     OrganizationCreateRequest,
     OrganizationResponse,

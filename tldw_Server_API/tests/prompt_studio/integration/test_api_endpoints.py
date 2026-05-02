@@ -156,6 +156,31 @@ def mock_user():
         "permissions": ["read", "write", "delete"]
     }
 
+
+@pytest.mark.asyncio
+async def test_list_prompts_safely_defaults_missing_pagination() -> None:
+    """Prompt listing does not 500 when storage omits pagination metadata."""
+    from tldw_Server_API.app.api.v1.endpoints.prompt_studio import prompt_studio_prompts
+
+    class _PromptDbWithoutPagination:
+        def list_prompts(self, *_args, **_kwargs):
+            return {"prompts": []}
+
+    response = await prompt_studio_prompts.list_prompts(
+        project_id=123,
+        page=2,
+        per_page=10,
+        include_deleted=False,
+        _=True,
+        db=_PromptDbWithoutPagination(),
+    )
+
+    assert response.metadata.page == 2
+    assert response.metadata.per_page == 10
+    assert response.metadata.total == 0
+    assert response.pagination.page == 2
+    assert response.pagination.has_more is False
+
 ########################################################################################################################
 # Project Endpoints Tests
 

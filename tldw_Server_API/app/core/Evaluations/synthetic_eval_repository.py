@@ -49,6 +49,35 @@ def _is_synthetic_origin(provenance: str | SyntheticEvalProvenance) -> bool:
     return value.startswith("synthetic_")
 
 
+def _draft_sample_filter_clause(
+    *,
+    recipe_kind: str | None = None,
+    review_state: str | SyntheticEvalReviewState | None = None,
+    source_kind: str | None = None,
+    generation_batch_id: str | None = None,
+) -> tuple[str, list[Any]]:
+    query = " WHERE 1=1"
+    params: list[Any] = []
+    if recipe_kind:
+        query += " AND recipe_kind = ?"
+        params.append(recipe_kind)
+    if review_state:
+        normalized_state = (
+            review_state.value
+            if isinstance(review_state, SyntheticEvalReviewState)
+            else str(review_state)
+        )
+        query += " AND review_state = ?"
+        params.append(normalized_state)
+    if source_kind:
+        query += " AND source_kind = ?"
+        params.append(source_kind)
+    if generation_batch_id:
+        query += " AND CAST(sample_metadata_json AS TEXT) LIKE ?"
+        params.append(f'%\"generation_batch_id\":{_json_dumps(generation_batch_id)}%')
+    return query, params
+
+
 class SyntheticEvalRepository:
     """Persistence helper for synthetic evaluation draft samples."""
 
@@ -148,26 +177,23 @@ class SyntheticEvalRepository:
         review_state: str | SyntheticEvalReviewState | None = None,
         source_kind: str | None = None,
         generation_batch_id: str | None = None,
+        limit: int | None = None,
+        offset: int = 0,
     ) -> list[dict[str, Any]]:
-        """Return all matching synthetic draft samples before pagination."""
+        """Return matching synthetic draft samples."""
 
-        query = "SELECT * FROM synthetic_eval_draft_samples WHERE 1=1"
-        params: list[Any] = []
-        if recipe_kind:
-            query += " AND recipe_kind = ?"
-            params.append(recipe_kind)
-        if review_state:
-            normalized_state = (
-                review_state.value
-                if isinstance(review_state, SyntheticEvalReviewState)
-                else str(review_state)
-            )
-            query += " AND review_state = ?"
-            params.append(normalized_state)
-        if source_kind:
-            query += " AND source_kind = ?"
-            params.append(source_kind)
+        where_clause, params = _draft_sample_filter_clause(
+            recipe_kind=recipe_kind,
+            review_state=review_state,
+            source_kind=source_kind,
+            generation_batch_id=generation_batch_id,
+        )
+        # where_clause is assembled from fixed predicates and bound parameters.
+        query = "SELECT * FROM synthetic_eval_draft_samples" + where_clause  # nosec B608
         query += " ORDER BY created_at DESC, sample_id DESC"
+        if limit is not None:
+            query += " LIMIT ? OFFSET ?"
+            params.extend([max(1, int(limit)), max(0, int(offset))])
 
         with self._db.get_connection() as conn:
             cursor = conn.cursor()
@@ -181,13 +207,6 @@ class SyntheticEvalRepository:
             payload["sample_metadata"] = _json_load(payload.pop("sample_metadata_json", None)) or {}
             payload.pop("review_summary_json", None)
             results.append(payload)
-
-        if generation_batch_id:
-            results = [
-                sample
-                for sample in results
-                if str((sample.get("sample_metadata") or {}).get("generation_batch_id") or "") == generation_batch_id
-            ]
 
         return results
 
@@ -208,11 +227,9 @@ class SyntheticEvalRepository:
             review_state=review_state,
             source_kind=source_kind,
             generation_batch_id=generation_batch_id,
+            limit=limit,
+            offset=offset,
         )
-
-        start = max(0, int(offset))
-        end = start + max(1, int(limit))
-        results = results[start:end]
         return results
 
     def count_draft_samples(
@@ -225,14 +242,27 @@ class SyntheticEvalRepository:
     ) -> int:
         """Count matching synthetic draft samples before pagination."""
 
-        return len(
-            self._filtered_draft_samples(
-                recipe_kind=recipe_kind,
-                review_state=review_state,
-                source_kind=source_kind,
-                generation_batch_id=generation_batch_id,
-            )
+        where_clause, params = _draft_sample_filter_clause(
+            recipe_kind=recipe_kind,
+            review_state=review_state,
+            source_kind=source_kind,
+            generation_batch_id=generation_batch_id,
         )
+        # where_clause is assembled from fixed predicates and bound parameters.
+        query = "SELECT COUNT(*) AS total FROM synthetic_eval_draft_samples" + where_clause  # nosec B608
+
+        with self._db.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(query, params)
+            row = cursor.fetchone()
+        if not row:
+            return 0
+        try:
+            row_dict = _row_to_dict(row)
+        except TypeError:
+            row_dict = {}
+        value = row_dict.get("total") if row_dict else row[0]
+        return int(value or 0)
 
     def get_draft_samples(self, sample_ids: list[str]) -> list[dict[str, Any]]:
         """Fetch multiple draft samples in caller-provided order."""

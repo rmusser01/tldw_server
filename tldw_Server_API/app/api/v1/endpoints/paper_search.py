@@ -5204,7 +5204,8 @@ async def vixra_search(
         if err:
             _handle_provider_error(err)
         items = items or []
-        total_pages = 1 if items else 0
+        total_count = int(total or 0)
+        total_pages = math.ceil(total_count / results_per_page) if total_count else 0
         return GenericPageSearchResponse(
             query_echo={"term": term},
             items=[GenericPaper(**it) for it in items],

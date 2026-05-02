@@ -196,6 +196,8 @@ class CharacterListQueryResponse(BaseModel):
 
     @model_validator(mode="after")
     def default_pagination_aliases(self) -> "CharacterListQueryResponse":
+        if "has_more" not in self.__pydantic_fields_set__:
+            self.has_more = self.pagination.has_more
         if self.next_offset is None:
             self.next_offset = self.pagination.next_offset
         return self

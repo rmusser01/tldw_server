@@ -17,6 +17,10 @@ from tldw_Server_API.app.core.Security.egress import evaluate_url_policy
 
 
 def _default_offset_pagination_aliases(response):
+    if hasattr(response, "limit") and response.limit is None:
+        response.limit = response.pagination.limit
+    if hasattr(response, "offset") and response.offset is None:
+        response.offset = response.pagination.offset
     if response.has_more is None:
         response.has_more = response.pagination.has_more
     if response.next_offset is None:
@@ -1530,6 +1534,8 @@ class WebhookListResponse(BaseModel):
     """Response for webhook listing."""
     items: list[WebhookItem]
     total: int
+    limit: int | None = Field(default=None, ge=1, description="Alias for pagination.limit")
+    offset: int | None = Field(default=None, ge=0, description="Alias for pagination.offset")
     pagination: OffsetPaginationMeta
     has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
     next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")

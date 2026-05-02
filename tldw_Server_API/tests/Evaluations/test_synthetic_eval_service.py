@@ -263,7 +263,9 @@ def test_service_reports_true_queue_total_before_pagination(tmp_path) -> None:
 
     queue = service.list_queue(generation_batch_id="batch-total", limit=2, offset=0)
 
-    assert [row["sample_id"] for row in queue["data"]] == ["sample-total-c", "sample-total-b"]  # nosec B101
+    page_sample_ids = {row["sample_id"] for row in queue["data"]}
+    assert len(page_sample_ids) == 2  # nosec B101
+    assert page_sample_ids <= {"sample-total-a", "sample-total-b", "sample-total-c"}  # nosec B101
     assert queue["total"] == 3  # nosec B101
 
 

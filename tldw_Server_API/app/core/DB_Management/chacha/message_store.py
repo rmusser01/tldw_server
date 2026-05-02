@@ -674,7 +674,13 @@ class MessageStore:
     # Full-text search
     # ------------------------------------------------------------------
 
-    def search_messages_by_content(self, content_query: str, conversation_id: str | None = None, limit: int = 10) -> list[dict[str, Any]]:
+    def search_messages_by_content(
+        self,
+        content_query: str,
+        conversation_id: str | None = None,
+        limit: int = 10,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
         """
         Searches messages by content using FTS.
 
@@ -686,6 +692,7 @@ class MessageStore:
             content_query: The search term for content. Supports FTS query syntax.
             conversation_id: Optional conversation UUID to filter results.
             limit: Maximum number of results. Defaults to 10.
+            offset: Number of matching rows to skip. Defaults to 0.
 
         Returns:
             A list of matching message dictionaries. Can be empty.
@@ -712,8 +719,8 @@ class MessageStore:
                 params_list.append(conversation_id)
 
             base_query.append("ORDER BY rank DESC, m.last_modified DESC")
-            base_query.append("LIMIT ?")
-            params_list.append(limit)
+            base_query.append("LIMIT ? OFFSET ?")
+            params_list.extend([limit, offset])
 
             try:
                 cursor = self._db.execute_query("\n".join(base_query), tuple(params_list))
@@ -736,8 +743,8 @@ class MessageStore:
             base_query += " AND m.conversation_id = ?"
             params_list.append(conversation_id)
 
-        base_query += " ORDER BY bm25(messages_fts) ASC, m.last_modified DESC LIMIT ?"
-        params_list.append(limit)
+        base_query += " ORDER BY bm25(messages_fts) ASC, m.last_modified DESC LIMIT ? OFFSET ?"
+        params_list.extend([limit, offset])
 
         try:
             cursor = self._db.execute_query(base_query, tuple(params_list))

@@ -1436,8 +1436,9 @@ async def get_document_references(
             cached_refs = payload.get("references") or []
             cached_count = int(payload.get("returned_count") or len(cached_refs))
             cached_limit = int(payload.get("limit") or cached_count or 1)
+            raw_total_available = payload.get("total_available")
             payload["pagination"] = build_offset_pagination_meta(
-                total=int(payload.get("total_available") or 0),
+                total=int(raw_total_available if raw_total_available is not None else cached_count or 0),
                 limit=max(1, cached_limit),
                 offset=int(payload.get("offset") or 0),
                 count=cached_count,

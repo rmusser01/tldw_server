@@ -71,6 +71,19 @@ _COLLECTIONS_NONCRITICAL_EXCEPTIONS = (
 )
 
 
+def _count_row_total(row: Any) -> int:
+    if not row:
+        return 0
+    if isinstance(row, dict):
+        value = row.get("total")
+    else:
+        try:
+            value = row["total"]
+        except (IndexError, KeyError, TypeError):
+            value = row[0]
+    return int(value if value is not None else 0)
+
+
 def _utcnow_iso() -> str:
     return datetime.utcnow().replace(tzinfo=timezone.utc).isoformat()
 
@@ -3809,7 +3822,7 @@ class CollectionsDatabase:
             "SELECT COUNT(*) AS total FROM audiobook_projects WHERE user_id = ?",
             (self.user_id,),
         ).first
-        return int(row["total"] if row and row["total"] is not None else 0)
+        return _count_row_total(row)
 
     def update_audiobook_project_status(
         self,
@@ -3987,7 +4000,7 @@ class CollectionsDatabase:
             "SELECT COUNT(*) AS total FROM audiobook_voice_profiles WHERE user_id = ?",
             (self.user_id,),
         ).first
-        return int(row["total"] if row and row["total"] is not None else 0)
+        return _count_row_total(row)
 
     def delete_voice_profile(self, profile_id: str) -> None:
         q = "DELETE FROM audiobook_voice_profiles WHERE profile_id = ? AND user_id = ?"

@@ -377,6 +377,9 @@ def test_keyword_collections_list_includes_canonical_pagination(client_with_note
     payload2 = page2.json()
     assert len(payload1["collections"]) == 1
     assert len(payload2["collections"]) == 1
+    page1_ids = {collection["id"] for collection in payload1["collections"]}
+    page2_ids = {collection["id"] for collection in payload2["collections"]}
+    assert page1_ids.isdisjoint(page2_ids)
     assert payload1["total"] == 2
     assert payload1["count"] == 1
     assert payload1["limit"] == 1

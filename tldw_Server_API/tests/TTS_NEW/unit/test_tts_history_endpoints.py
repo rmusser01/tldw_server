@@ -209,19 +209,15 @@ def test_history_next_cursor_failure_log_is_sanitized(test_client, auth_headers,
     dep_keys = _set_media_db_override(fastapi_app, db)
     try:
         resp = test_client.get("/api/v1/audio/history?limit=1", headers=auth_headers)
-        assert resp.status_code == status.HTTP_200_OK
-        payload = resp.json()
-        assert payload["next_cursor"] is None
-        assert payload["pagination"] == {
-            "mode": "cursor",
-            "limit": 1,
-            "cursor": None,
-            "next_cursor": None,
-            "has_more": False,
-        }
-        fake_logger.debug.assert_called_once_with(
-            "TTS history: failed to build next cursor"
-        )
+        assert resp.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+        assert resp.json()["detail"] == "Failed to list TTS history"
+        fake_logger.error.assert_called_once()
+        error_args, error_kwargs = fake_logger.error.call_args
+        assert error_args[0] == "TTS history: failed to build next cursor for id={} created_at={}"
+        assert error_args[1] == 2
+        assert error_args[2]
+        assert error_kwargs == {"exc_info": True}
+        assert "/private/tts-cursor" not in repr(fake_logger.error.call_args)
     finally:
         _clear_media_db_override(fastapi_app, dep_keys)
         db.close_connection()

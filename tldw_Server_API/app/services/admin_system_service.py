@@ -8,7 +8,7 @@ from typing import Any, Literal
 from fastapi import HTTPException
 from loguru import logger
 
-from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
+from tldw_Server_API.app.api.v1.utils.pagination import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.schemas.admin_schemas import (
     ActivitySummaryResponse,
     AuditLogResponse,
@@ -848,11 +848,12 @@ async def get_error_breakdown(
                 org_condition = f" AND om.org_id IN ({placeholders})"
                 org_params = list(org_ids)
 
+        # Clauses are server-defined fragments; org values remain bound parameters.
         query = (
-            f"SELECT a.action, COUNT(*) as cnt, MAX(a.created_at) as last_at"
-            f" FROM audit_log a{join_clause}"
-            f" WHERE {time_clause} AND {error_actions_clause}{org_condition}"
-            f" GROUP BY a.action ORDER BY cnt DESC LIMIT 50"
+            f"SELECT a.action, COUNT(*) as cnt, MAX(a.created_at) as last_at"  # nosec B608
+            f" FROM audit_log a{join_clause}"  # nosec B608
+            f" WHERE {time_clause} AND {error_actions_clause}{org_condition}"  # nosec B608
+            f" GROUP BY a.action ORDER BY cnt DESC LIMIT 50"  # nosec B608
         )
         params = time_params + org_params
 

@@ -36,6 +36,9 @@ async def test_paper_search_arxiv_success(monkeypatch, paper_search_app):
         assert r.status_code == 200
         data = r.json()
         assert data["total_results"] == 2
+        assert data["page"] == 1
+        assert data["results_per_page"] == 2
+        assert data["total_pages"] == 1
         assert len(data["items"]) == 2
         assert data["pagination"] == {
             "mode": "page",
@@ -79,6 +82,9 @@ async def test_paper_search_biorxiv_success(monkeypatch, paper_search_app):
         assert r.status_code == 200
         data = r.json()
         assert data["total_results"] == 1
+        assert data["page"] == 1
+        assert data["results_per_page"] == 1
+        assert data["total_pages"] == 1
         assert len(data["items"]) == 1
         assert data["pagination"] == {
             "mode": "page",
@@ -122,6 +128,10 @@ async def test_paper_search_semantic_scholar_success(monkeypatch, paper_search_a
         assert r.status_code == 200
         data = r.json()
         assert data["total_results"] == 1
+        assert data["page"] == 1
+        assert data["limit"] == 2
+        assert data["offset"] == 0
+        assert data["total_pages"] == 1
         assert len(data["items"]) == 1
         assert data["pagination"] == {
             "mode": "page",
@@ -184,6 +194,9 @@ async def test_paper_search_pubmed_success(monkeypatch, paper_search_app):
         assert r.status_code == 200
         data = r.json()
         assert data["total_results"] == 1
+        assert data["page"] == 1
+        assert data["results_per_page"] == 1
+        assert data["total_pages"] == 1
         assert len(data["items"]) == 1
         assert data["pagination"] == {
             "mode": "page",
@@ -229,7 +242,7 @@ async def test_figshare_search_success(monkeypatch, paper_search_app):
                 "provider": "figshare",
             }
         ]
-        return items, 1, None
+        return items, 21, None
 
     from tldw_Server_API.app.core.Third_Party import Figshare as _Figshare
     monkeypatch.setattr(_Figshare, "search_articles", _fake_figshare)
@@ -241,15 +254,18 @@ async def test_figshare_search_success(monkeypatch, paper_search_app):
         )
         assert r.status_code == 200
         data = r.json()
-        assert data["total_results"] == 1
+        assert data["total_results"] == 21
+        assert data["page"] == 1
+        assert data["results_per_page"] == 10
+        assert data["total_pages"] == 3
         assert len(data["items"]) == 1
         assert data["pagination"] == {
             "mode": "page",
             "page": 1,
             "per_page": 10,
-            "total": 1,
-            "total_pages": 1,
-            "has_more": False,
+            "total": 21,
+            "total_pages": 3,
+            "has_more": True,
         }
 
 

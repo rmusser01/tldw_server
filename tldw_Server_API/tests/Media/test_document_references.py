@@ -308,6 +308,14 @@ async def test_references_endpoint_cache_hit(mock_user, mock_db):
     assert response.status_code == 200
     data = response.json()
     assert data["references"][0]["title"] == "Cached Title"
+    assert data["pagination"] == {
+        "mode": "offset",
+        "limit": 1,
+        "offset": 0,
+        "total": 1,
+        "has_more": False,
+        "next_offset": None,
+    }
 
     app.dependency_overrides.clear()
 

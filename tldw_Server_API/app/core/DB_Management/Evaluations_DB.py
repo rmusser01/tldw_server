@@ -2140,7 +2140,7 @@ class EvaluationsDatabase:
         with self.get_connection() as conn:
             cursor = conn.cursor()
 
-            query = "SELECT COUNT(*) FROM datasets WHERE 1=1"
+            query = "SELECT COUNT(*) AS total FROM datasets WHERE 1=1"
             params: list[Any] = []
 
             if after:
@@ -2150,7 +2150,10 @@ class EvaluationsDatabase:
             query, params = self._append_user_filter(query, params, "created_by", created_by)
             cursor.execute(query, params)
             row = cursor.fetchone()
-            return int(row[0] or 0) if row else 0
+            if not row:
+                return 0
+            value = row.get("total") if isinstance(row, dict) else row[0]
+            return int(value or 0)
 
     def delete_dataset(self, dataset_id: str, *, created_by: Optional[str] = None) -> bool:
         """Delete dataset"""
