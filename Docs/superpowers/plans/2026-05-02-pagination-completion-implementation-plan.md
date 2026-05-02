@@ -628,7 +628,7 @@ git add \
 git commit -m "Phase pagination-completion: migrate workflow cursor pagination"
 ```
 
-### Additional Generic Cursor-Family Closeout
+### Additional Generic Cursor/Page-Family Closeout
 
 **Status:** Complete for the remaining generic cursor-family rows.
 `GET /api/v1/connectors/providers/{provider}/sources/browse` now preserves
@@ -640,11 +640,16 @@ canonical cursor metadata derived from `after`, `limit`, and `last_id`.
 detail because its `cursor` is a provider checkpoint, and
 `GET /api/v1/notifications/stream` is classified as an SSE stream route.
 
+`GET /api/v1/items` is also migrated as a small covered page-family tranche:
+it preserves the legacy `items/total/page/size` envelope and adds canonical
+`PagePaginationMeta` built from the existing `page`, `size`, and known total.
+
 Verified:
 
 ```bash
 python -m pytest tldw_Server_API/tests/External_Sources/test_connectors_endpoints_api.py -k canonical_cursor_pagination -q
 python -m pytest tldw_Server_API/tests/Evaluations/test_evaluations_crud_endpoint_sanitization.py -k canonical_cursor_pagination -q
+python -m pytest tldw_Server_API/tests/Items/test_items_endpoint_sanitizers.py -k canonical_page_pagination -q
 ```
 
 ## Task 9: Classify and Migrate Custom Legacy Envelopes

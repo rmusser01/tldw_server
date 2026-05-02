@@ -15,7 +15,9 @@ from tldw_Server_API.app.api.v1.schemas.items_schemas import (
     ItemsBulkResult,
     ItemsListResponse,
 )
+from tldw_Server_API.app.api.v1.schemas.pagination import PagePaginationMeta
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
+from tldw_Server_API.app.api.v1.utils.pagination import build_page_pagination_meta
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, User
 from tldw_Server_API.app.core.DB_Management.Collections_DB import ContentItemRow
 from tldw_Server_API.app.core.DB_Management.media_db.api import search_media
@@ -49,6 +51,16 @@ _ITEMS_NONCRITICAL_EXCEPTIONS = (
     ValueError,
     json.JSONDecodeError,
 )
+
+
+def _items_pagination(*, total: int, page: int, size: int) -> PagePaginationMeta:
+    total_pages = (total + size - 1) // size if total > 0 else 0
+    return build_page_pagination_meta(
+        page=page,
+        per_page=size,
+        total=total,
+        total_pages=total_pages,
+    )
 
 
 def _domain_from_url(url: str | None) -> str:
@@ -135,10 +147,17 @@ async def list_items(
             total=coll_total,
             page=page,
             size=size,
+            pagination=_items_pagination(total=coll_total, page=page, size=size),
         )
 
     if origin or (status_filter and len(status_filter) > 0) or favorite is not None:
-        return ItemsListResponse(items=[], total=0, page=page, size=size)
+        return ItemsListResponse(
+            items=[],
+            total=0,
+            page=page,
+            size=size,
+            pagination=_items_pagination(total=0, page=page, size=size),
+        )
 
     # Legacy fallback to Media DB when collections layer has no data
     try:
@@ -170,7 +189,13 @@ async def list_items(
         if item is not None:
             items.append(item)
 
-    return ItemsListResponse(items=items, total=total, page=page, size=size)
+    return ItemsListResponse(
+        items=items,
+        total=total,
+        page=page,
+        size=size,
+        pagination=_items_pagination(total=total, page=page, size=size),
+    )
 
 
 @router.get("/{item_id}", response_model=Item, summary="Get unified item by ID")
