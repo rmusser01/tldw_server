@@ -273,6 +273,15 @@ def test_helper_client_omits_null_exec_guest_output_limit(monkeypatch) -> None:
     assert "max_output_bytes" not in requests[0]["request"]
 
 
+def test_helper_client_raw_validation_rejects_null_exec_guest_output_limit() -> None:
+    with pytest.raises(MacOSVirtualizationHelperFailure) as exc_info:
+        MacOSVirtualizationHelperClient._validate_exec_guest_request(
+            {"argv": ["/bin/echo", "ok"], "cwd": "/workspace", "max_output_bytes": None}
+        )
+
+    assert exc_info.value.error_code == "invalid_request"
+
+
 def test_helper_create_vm_fails_closed_without_test_mode(monkeypatch) -> None:
     monkeypatch.delenv("TEST_MODE", raising=False)
 

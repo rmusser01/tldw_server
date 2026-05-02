@@ -392,11 +392,11 @@ class MacOSVirtualizationHelperClient:
             raise MacOSVirtualizationHelperFailure("invalid_request", "invalid_request")
         timeout_sec = float(raw_timeout_sec)
 
-        raw_max_output_bytes = request.get("max_output_bytes")
-        if raw_max_output_bytes is None:
+        if "max_output_bytes" not in request:
             max_output_bytes = None
         else:
-            if isinstance(raw_max_output_bytes, bool) or not isinstance(raw_max_output_bytes, int):
+            raw_max_output_bytes = request["max_output_bytes"]
+            if raw_max_output_bytes is None or isinstance(raw_max_output_bytes, bool) or not isinstance(raw_max_output_bytes, int):
                 raise MacOSVirtualizationHelperFailure("invalid_request", "invalid_request")
             max_output_bytes = int(raw_max_output_bytes)
 
