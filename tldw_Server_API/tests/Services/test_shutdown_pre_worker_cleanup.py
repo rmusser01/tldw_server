@@ -253,7 +253,7 @@ async def test_shutdown_pre_worker_cleanup_skips_stopped_background_chatbooks(
 
 
 @pytest.mark.asyncio
-async def test_shutdown_pre_worker_cleanup_skips_background_stopped_storage_cleanup(
+async def test_shutdown_pre_worker_cleanup_resets_singletons_for_background_stopped_storage_cleanup(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     shutdown_cleanup = _import_shutdown_pre_worker_cleanup()
@@ -285,7 +285,7 @@ async def test_shutdown_pre_worker_cleanup_skips_background_stopped_storage_clea
     )
 
     assert storage_cleanup_service.stopped is False
-    assert reset_calls == ["auth"]
+    assert reset_calls == ["cleanup", "storage", "auth"]
     assert handles.storage_cleanup_service is storage_cleanup_service
 
 

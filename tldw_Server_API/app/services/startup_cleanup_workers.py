@@ -240,6 +240,7 @@ async def _register_storage_cleanup_service(
     worker_inventory: Any,
     storage_cleanup_service: Any,
 ) -> None:
+    """Register a started storage cleanup service with lifecycle inventory."""
     task = _get_storage_cleanup_task(storage_cleanup_service)
     if task is None:
         logger.warning("Storage cleanup worker started without a task handle; lifecycle inventory skipped")
@@ -261,6 +262,7 @@ async def _register_storage_cleanup_service(
 
 
 def _get_storage_cleanup_task(storage_cleanup_service: Any) -> Any | None:
+    """Return the public or legacy background task handle from the cleanup service."""
     task = getattr(storage_cleanup_service, "task", None)
     if task is not None:
         return task
@@ -268,6 +270,7 @@ def _get_storage_cleanup_task(storage_cleanup_service: Any) -> Any | None:
 
 
 async def _stop_started_storage_cleanup_service(storage_cleanup_service: Any) -> None:
+    """Best-effort rollback for a service that started but failed inventory registration."""
     try:
         await storage_cleanup_service.stop()
     except _STARTUP_GUARD_EXCEPTIONS as exc:
