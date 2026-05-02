@@ -4,6 +4,7 @@ let guestProtocolVersion = "1"
 
 protocol GuestReadinessBridging {
     func waitUntilReady(vmID: String, timeoutSeconds: TimeInterval) throws
+    func guestInfo(vmID: String) -> GuestAgentInfo?
 }
 
 struct GuestExecResult {
@@ -140,6 +141,7 @@ private struct GuestErrorResponse: Decodable {
 protocol GuestTransporting {
     func waitUntilGuestReady(vmID: String, timeoutSeconds: TimeInterval) throws
     func sendExecRequest(vmID: String, requestData: Data, timeoutSeconds: TimeInterval) throws -> Data
+    func guestInfo(vmID: String) -> GuestAgentInfo?
 }
 
 private final class UnimplementedGuestTransport: GuestTransporting {
@@ -149,6 +151,10 @@ private final class UnimplementedGuestTransport: GuestTransporting {
 
     func sendExecRequest(vmID: String, requestData: Data, timeoutSeconds: TimeInterval) throws -> Data {
         throw GuestBridgeError.guestExecNotImplemented
+    }
+
+    func guestInfo(vmID: String) -> GuestAgentInfo? {
+        nil
     }
 }
 
@@ -163,6 +169,10 @@ final class VSockBridge: GuestBridging {
 
     func waitUntilReady(vmID: String, timeoutSeconds: TimeInterval) throws {
         try transport.waitUntilGuestReady(vmID: vmID, timeoutSeconds: timeoutSeconds)
+    }
+
+    func guestInfo(vmID: String) -> GuestAgentInfo? {
+        transport.guestInfo(vmID: vmID)
     }
 
     func exec(

@@ -21,7 +21,17 @@ final class RecordingBootDriver: VZBootDriving {
 }
 
 final class ReadyGuestBridge: GuestBridging {
+    private let info: GuestAgentInfo?
+
+    init(info: GuestAgentInfo? = nil) {
+        self.info = info
+    }
+
     func waitUntilReady(vmID: String, timeoutSeconds: TimeInterval) throws {}
+
+    func guestInfo(vmID: String) -> GuestAgentInfo? {
+        info
+    }
 
     func exec(
         vmID: String,
@@ -44,6 +54,10 @@ final class FailingGuestBridge: GuestBridging {
 
     func waitUntilReady(vmID: String, timeoutSeconds: TimeInterval) throws {
         throw error
+    }
+
+    func guestInfo(vmID: String) -> GuestAgentInfo? {
+        nil
     }
 
     func exec(

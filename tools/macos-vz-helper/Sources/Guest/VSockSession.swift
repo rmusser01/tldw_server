@@ -23,6 +23,8 @@ private struct VSockPendingRequest {
 }
 
 private let maxAbandonedExecRequestIDs = 128
+private let maxGuestCapabilityCount = 128
+private let maxGuestCapabilityBytes = 256
 
 final class VSockSession {
     let vmID: String
@@ -38,6 +40,7 @@ final class VSockSession {
     private var abandonedRequestIDs: Set<String> = []
     private var abandonedRequestIDOrder: [String] = []
     private var readinessWaiters: [DispatchSemaphore] = []
+    private var guestInfo: GuestAgentInfo?
 
     init(
         vmID: String,
@@ -152,6 +155,12 @@ final class VSockSession {
         }
     }
 
+    func currentGuestInfo() -> GuestAgentInfo? {
+        lock.withLock {
+            guestInfo
+        }
+    }
+
     private func currentReadinessResult() -> Result<Void, Error>? {
         lock.withLock {
             if ready {
@@ -215,6 +224,7 @@ final class VSockSession {
 
     private func handleHandshake(_ payload: [String: Any]) throws {
         try validateControlMessage(payload, requireToken: true)
+        let parsedGuestInfo = parseGuestInfo(from: payload)
         try writeJSONObject([
             "protocol_version": guestProtocolVersion,
             "request_id": try requireString("request_id", in: payload),
@@ -222,6 +232,40 @@ final class VSockSession {
             "status": "accepted",
             "vm_id": vmID,
         ])
+        lock.withLock {
+            guestInfo = parsedGuestInfo
+        }
+    }
+
+    private func parseGuestInfo(from payload: [String: Any]) -> GuestAgentInfo {
+        let capabilities = parseGuestCapabilities(from: payload)
+        return GuestAgentInfo(
+            guestVersion: optionalString("guest_version", in: payload),
+            workspaceRoot: optionalString("workspace_root", in: payload),
+            capabilities: capabilities.values,
+            capabilitiesKnown: capabilities.known
+        )
+    }
+
+    private func parseGuestCapabilities(from payload: [String: Any]) -> (known: Bool, values: [String]) {
+        guard let rawCapabilities = payload["capabilities"] else {
+            return (false, [])
+        }
+        guard let values = rawCapabilities as? [Any], values.count <= maxGuestCapabilityCount else {
+            return (false, [])
+        }
+
+        var capabilities = Set<String>()
+        capabilities.reserveCapacity(values.count)
+        for value in values {
+            guard let capability = value as? String,
+                  !capability.isEmpty,
+                  capability.utf8.count <= maxGuestCapabilityBytes else {
+                return (false, [])
+            }
+            capabilities.insert(capability)
+        }
+        return (true, capabilities.sorted())
     }
 
     private func handleReconnect(_ payload: [String: Any]) throws {
@@ -375,6 +419,13 @@ final class VSockSession {
     private func requireString(_ key: String, in object: [String: Any]) throws -> String {
         guard let value = object[key] as? String, !value.isEmpty else {
             throw VSockSessionError.invalidMessage(key)
+        }
+        return value
+    }
+
+    private func optionalString(_ key: String, in object: [String: Any]) -> String? {
+        guard let value = object[key] as? String, !value.isEmpty else {
+            return nil
         }
         return value
     }

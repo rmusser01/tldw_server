@@ -5,6 +5,7 @@ import (
 	"context"
 	"io"
 	"net"
+	"reflect"
 	"testing"
 )
 
@@ -64,6 +65,11 @@ func TestGuestVSockClientSendsHandshakeAndReady(t *testing.T) {
 		}
 		if handshake.ConnectionToken != "token-handshake" {
 			done <- errUnexpectedValue("connection_token", handshake.ConnectionToken)
+			return
+		}
+		expectedCapabilities := []string{"exec", "output_cap_v1"}
+		if !reflect.DeepEqual(handshake.Capabilities, expectedCapabilities) {
+			done <- errUnexpectedValue("capabilities", handshake.Capabilities)
 			return
 		}
 		if err := writeJSONLine(helperConn, HandshakeAck{

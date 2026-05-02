@@ -26,9 +26,15 @@ This document defines the first guest protocol used between the Swift
   "vm_id": "vm-1",
   "connection_token": "token-1",
   "guest_version": "1.0.0",
-  "workspace_root": "/workspace"
+  "workspace_root": "/workspace",
+  "capabilities": ["exec", "output_cap_v1"]
 }
 ```
+
+`guest_version`, `workspace_root`, and `capabilities` are optional readiness
+metadata. New guests should send a stable, sorted capability list; hosts must
+accept older guests that omit it and treat capabilities as unknown rather than
+failing the handshake.
 
 ### Handshake ack
 

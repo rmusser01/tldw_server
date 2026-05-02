@@ -249,10 +249,23 @@ final class HelperService {
     }
 
     private func vmDetails(for record: VMRecord) -> [String: String] {
-        [
+        var details = [
             "transport": "vsock",
             "network_policy": record.metadata.networkPolicy.isEmpty ? "deny_all" : record.metadata.networkPolicy,
         ]
+        if let guestInfo = record.guestInfo {
+            details["guest_capabilities_known"] = guestInfo.capabilitiesKnown ? "true" : "false"
+            if let guestVersion = guestInfo.guestVersion {
+                details["guest_version"] = guestVersion
+            }
+            if let workspaceRoot = guestInfo.workspaceRoot {
+                details["guest_workspace_root"] = workspaceRoot
+            }
+            if guestInfo.capabilitiesKnown {
+                details["guest_capabilities"] = guestInfo.capabilities.joined(separator: ",")
+            }
+        }
+        return details
     }
 
     private func validateExecGuestContract(

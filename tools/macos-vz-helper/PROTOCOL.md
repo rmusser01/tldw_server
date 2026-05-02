@@ -92,7 +92,11 @@ Every failure response should include:
   },
   "details": {
     "transport": "vsock",
-    "network_policy": "deny_all"
+    "network_policy": "deny_all",
+    "guest_version": "1.0.0",
+    "guest_workspace_root": "/workspace",
+    "guest_capabilities_known": "true",
+    "guest_capabilities": "exec,output_cap_v1"
   }
 }
 ```
@@ -157,7 +161,11 @@ Response:
   },
   "details": {
     "transport": "vsock",
-    "network_policy": "deny_all"
+    "network_policy": "deny_all",
+    "guest_version": "1.0.0",
+    "guest_workspace_root": "/workspace",
+    "guest_capabilities_known": "true",
+    "guest_capabilities": "exec,output_cap_v1"
   }
 }
 ```
@@ -296,7 +304,11 @@ the unprefixed keys when `guest_*` keys are absent during mixed-version rollouts
       },
       "details": {
         "transport": "vsock",
-        "network_policy": "deny_all"
+        "network_policy": "deny_all",
+        "guest_version": "1.0.0",
+        "guest_workspace_root": "/workspace",
+        "guest_capabilities_known": "true",
+        "guest_capabilities": "exec,output_cap_v1"
       }
     }
   ]
@@ -315,6 +327,11 @@ the unprefixed keys when `guest_*` keys are absent during mixed-version rollouts
 - `vz_linux` helper VM creation accepts only `network_policy=deny_all` until a
   separately verified allowlist implementation exists. The accepted policy is
   echoed in VM metadata and status details.
+- `vz_linux` guest-agent readiness metadata is additive in protocol version `1`.
+  `guest_version`, `guest_workspace_root`, `guest_capabilities_known`, and
+  `guest_capabilities` are diagnostic details only. Older guests may omit
+  capabilities, in which case helpers report `guest_capabilities_known=false`
+  instead of failing VM readiness.
 - Template validation must report `boot_mode` and `validation_strength` when the
   helper can resolve the template successfully.
 - Python remains the source of truth for sandbox sessions; the helper only reports
