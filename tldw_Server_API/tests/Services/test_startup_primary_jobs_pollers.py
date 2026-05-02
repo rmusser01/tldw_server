@@ -72,11 +72,11 @@ async def test_start_primary_jobs_pollers_passes_inventory_to_core_worker(
     worker_inventory = object()
     captured_kwargs: dict[str, object] = {}
 
-    async def _record_core(**kwargs):
+    async def _record_core(**kwargs: object) -> tuple[str, str]:
         captured_kwargs.update(kwargs)
         return ("core-stop", "core-task")
 
-    async def _record_worker(**kwargs):
+    async def _record_worker(**kwargs: object) -> tuple[None, None]:
         del kwargs
         return (None, None)
 

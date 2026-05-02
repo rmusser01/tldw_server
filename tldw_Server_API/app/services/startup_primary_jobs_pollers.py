@@ -11,7 +11,7 @@ from typing import Any, Callable
 
 from loguru import logger
 
-from tldw_Server_API.app.services.lifecycle_workers import ShutdownPhase
+from tldw_Server_API.app.services.lifecycle_workers import ShutdownPhase, WorkerRegistry
 
 _STARTUP_GUARD_EXCEPTIONS = (
     AttributeError,
@@ -45,7 +45,7 @@ async def start_primary_jobs_pollers(
     register_owned_job_poller: Callable[..., None],
     should_start_worker: Callable[[str, str], bool],
     sidecar_mode: bool,
-    worker_inventory: Any | None = None,
+    worker_inventory: WorkerRegistry | None = None,
 ) -> PrimaryJobsPollerHandles:
     """Start the first owned jobs pollers and return their handles."""
 
@@ -100,7 +100,7 @@ async def _start_core_jobs_worker(
     owned_job_pollers: list[Any],
     register_owned_job_poller: Callable[..., None],
     sidecar_mode: bool,
-    worker_inventory: Any | None = None,
+    worker_inventory: WorkerRegistry | None = None,
 ) -> tuple[Any | None, Any | None]:
     try:
         backend = (os.getenv("CHATBOOKS_JOBS_BACKEND") or os.getenv("TLDW_JOBS_BACKEND") or "").lower()
