@@ -78,6 +78,10 @@ intended macOS support window, accounts for upstream source-stability risk, and
 reduces custom code without weakening diagnostics, audit, or security
 reviewability.
 
+The current evaluation record is:
+
+- `Docs/Design/2026-05-02-apple-containerization-evaluation.md`
+
 ## Non-Negotiable Boundaries
 
 ### Trusted Control Plane vs Untrusted Compute
