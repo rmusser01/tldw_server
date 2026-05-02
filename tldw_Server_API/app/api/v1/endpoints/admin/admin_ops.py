@@ -1523,7 +1523,21 @@ async def list_email_deliveries(
         items, total = await asyncio.to_thread(svc_list_email_deliveries, limit=limit, offset=offset, status=status)
     except _OPS_NONCRITICAL_EXCEPTIONS as exc:
         _raise_internal_admin_error("Failed to list email deliveries", exc)
-    return {"items": items, "total": total, "limit": limit, "offset": offset}
+    pagination = build_offset_pagination_meta(
+        total=total,
+        limit=limit,
+        offset=offset,
+        count=len(items),
+    )
+    return {
+        "items": items,
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "pagination": pagination.model_dump(mode="json"),
+        "has_more": pagination.has_more,
+        "next_offset": pagination.next_offset,
+    }
 
 
 # ──────────────────────────────────────────────────────────────────────────────
