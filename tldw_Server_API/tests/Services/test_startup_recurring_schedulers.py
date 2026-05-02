@@ -26,7 +26,7 @@ async def test_start_recurring_schedulers_combines_handles(
     startup_recurring = _import_startup_recurring_schedulers()
     calls: list[str] = []
 
-    async def _fake_authnz(*, worker_inventory: object | None = None):
+    async def _fake_authnz(*, worker_inventory: object | None = None) -> bool:
         assert worker_inventory is None
         calls.append("authnz")
         return True

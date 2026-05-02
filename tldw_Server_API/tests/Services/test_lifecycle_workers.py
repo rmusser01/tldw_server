@@ -487,6 +487,48 @@ async def test_stop_registered_workers_awaits_callback_only_worker() -> None:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_stop_registered_workers_handles_cancelled_shutdown_callback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.services import lifecycle_workers
+    from tldw_Server_API.app.services.lifecycle_workers import (
+        ManagedWorker,
+        stop_registered_workers,
+    )
+
+    app = FastAPI()
+    warnings: list[tuple[object, ...]] = []
+
+    async def _shutdown_callback() -> None:
+        raise asyncio.CancelledError()
+
+    monkeypatch.setattr(
+        lifecycle_workers.logger,
+        "warning",
+        lambda *args, **kwargs: warnings.append(args),
+    )
+
+    await stop_registered_workers(
+        app,
+        [
+            ManagedWorker(
+                name="cancelled_callback_worker",
+                task=None,
+                stop_event=None,
+                shutdown_callback=_shutdown_callback,
+                timeout_sec=1.0,
+            )
+        ],
+        stopped_names_attr="_tldw_stopped_worker_names",
+        log_label="test worker",
+    )
+
+    assert any("shutdown callback was cancelled" in str(args[0]) for args in warnings)
+    assert app.state._tldw_stopped_worker_names == []
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_stop_registered_workers_bounds_custom_shutdown_callback(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

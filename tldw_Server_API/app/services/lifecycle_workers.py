@@ -193,6 +193,15 @@ async def stop_registered_workers(
                     handle.name,
                     handle.timeout_sec,
                 )
+            except asyncio.CancelledError:
+                current_task = asyncio.current_task()
+                if current_task is not None and current_task.cancelling():
+                    raise
+                logger.warning(
+                    "App Shutdown: {} {} shutdown callback was cancelled",
+                    log_label,
+                    handle.name,
+                )
             except Exception as exc:  # noqa: BLE001 - shutdown hooks must not block teardown.
                 logger.warning(
                     "App Shutdown: {} {} shutdown callback failed: {}",
