@@ -87,11 +87,15 @@ import Testing
         workspacePath: "/tmp/workspace",
         readinessTimeoutSeconds: 5
     )
+    let status = service.getVMStatus(vmID: "vm-old-guest-details")
+    let listed = service.listVMs().vms.first
 
-    #expect(response.details["guest_version"] == "0.9.0")
-    #expect(response.details["guest_workspace_root"] == "/workspace")
-    #expect(response.details["guest_capabilities_known"] == "false")
-    #expect(response.details["guest_capabilities"] == nil)
+    for details in [response.details, status?.details, listed?.details] {
+        #expect(details?["guest_version"] == "0.9.0")
+        #expect(details?["guest_workspace_root"] == "/workspace")
+        #expect(details?["guest_capabilities_known"] == "false")
+        #expect(details?["guest_capabilities"] == nil)
+    }
 }
 
 @Test func helperServiceClearsStaleGuestDetailsWhenVMIDIsReusedWithoutInfo() throws {

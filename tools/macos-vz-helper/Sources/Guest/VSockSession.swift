@@ -23,6 +23,8 @@ private struct VSockPendingRequest {
 }
 
 private let maxAbandonedExecRequestIDs = 128
+private let maxGuestCapabilityCount = 128
+private let maxGuestCapabilityBytes = 256
 
 final class VSockSession {
     let vmID: String
@@ -249,13 +251,16 @@ final class VSockSession {
         guard let rawCapabilities = payload["capabilities"] else {
             return (false, [])
         }
-        guard let values = rawCapabilities as? [Any] else {
+        guard let values = rawCapabilities as? [Any], values.count <= maxGuestCapabilityCount else {
             return (false, [])
         }
 
         var capabilities = Set<String>()
+        capabilities.reserveCapacity(values.count)
         for value in values {
-            guard let capability = value as? String, !capability.isEmpty else {
+            guard let capability = value as? String,
+                  !capability.isEmpty,
+                  capability.utf8.count <= maxGuestCapabilityBytes else {
                 return (false, [])
             }
             capabilities.insert(capability)

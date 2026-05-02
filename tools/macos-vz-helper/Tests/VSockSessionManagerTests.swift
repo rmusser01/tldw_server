@@ -140,6 +140,60 @@ final class InMemoryVSockChannel: VSockChanneling {
     #expect(info?.capabilities == [String]())
 }
 
+@Test func vsockSessionManagerTreatsTooManyCapabilitiesAsUnknown() throws {
+    let manager = VSockSessionManager()
+    _ = manager.prepareSession(
+        vmID: "vm-too-many-capabilities",
+        connectionToken: "token-too-many-capabilities",
+        port: 1024,
+        workspaceRoot: "/workspace"
+    )
+    let channel = InMemoryVSockChannel()
+    let capabilities = (0..<129).map { #""cap-\#($0)""# }.joined(separator: ",")
+
+    #expect(manager.accept(channel: channel, for: "vm-too-many-capabilities") == true)
+
+    channel.push(
+        json: #"{"protocol_version":"1","request_id":"req-handshake","type":"handshake","vm_id":"vm-too-many-capabilities","connection_token":"token-too-many-capabilities","guest_version":"1.0.0","workspace_root":"/workspace","capabilities":[\#(capabilities)]}"#
+    )
+    channel.push(
+        json: #"{"protocol_version":"1","request_id":"req-ready","type":"ready"}"#
+    )
+
+    try manager.waitUntilGuestReady(vmID: "vm-too-many-capabilities", timeoutSeconds: 0.1)
+
+    let info = manager.guestInfo(vmID: "vm-too-many-capabilities")
+    #expect(info?.capabilitiesKnown == false)
+    #expect(info?.capabilities == [String]())
+}
+
+@Test func vsockSessionManagerTreatsOversizedCapabilitiesAsUnknown() throws {
+    let manager = VSockSessionManager()
+    _ = manager.prepareSession(
+        vmID: "vm-oversized-capabilities",
+        connectionToken: "token-oversized-capabilities",
+        port: 1024,
+        workspaceRoot: "/workspace"
+    )
+    let channel = InMemoryVSockChannel()
+    let capability = String(repeating: "x", count: 257)
+
+    #expect(manager.accept(channel: channel, for: "vm-oversized-capabilities") == true)
+
+    channel.push(
+        json: #"{"protocol_version":"1","request_id":"req-handshake","type":"handshake","vm_id":"vm-oversized-capabilities","connection_token":"token-oversized-capabilities","guest_version":"1.0.0","workspace_root":"/workspace","capabilities":["\#(capability)"]}"#
+    )
+    channel.push(
+        json: #"{"protocol_version":"1","request_id":"req-ready","type":"ready"}"#
+    )
+
+    try manager.waitUntilGuestReady(vmID: "vm-oversized-capabilities", timeoutSeconds: 0.1)
+
+    let info = manager.guestInfo(vmID: "vm-oversized-capabilities")
+    #expect(info?.capabilitiesKnown == false)
+    #expect(info?.capabilities == [String]())
+}
+
 @Test func vsockSessionManagerRejectsWrongConnectionToken() throws {
     let manager = VSockSessionManager()
     _ = manager.prepareSession(
