@@ -96,6 +96,17 @@ promote them into migration scope without route tests.
 
 Route-level matrix status: `needs-confirmation` or `exempt-not-paginated`.
 
+Current examples:
+
+- `GET /chatbooks/export/jobs/{job_id}` and
+  `GET /chatbooks/import/jobs/{job_id}`: job detail responses; `total_items`
+  is progress metadata, not a collection total.
+- `GET /sandbox/runs/{run_id}/artifacts` and
+  `GET /sandbox/sessions/{session_id}/snapshots`: bounded subresource lists
+  without pagination inputs.
+- `GET /sandbox/runs/{run_id}/{rest:path}`: path guard/fallback route, not a
+  collection response.
+
 ## Review Rules
 
 - Exemptions must be explicit and narrow; avoid wildcard exemptions in tests.

@@ -613,7 +613,10 @@ git commit -m "Phase pagination-completion: migrate workflow cursor pagination"
 
 **Status:** In progress. The watchlists tranche migrated bounded preview/test
 responses and classified operation-result, aggregate-count, file-export, and
-small catalog routes as non-pagination targets.
+small catalog routes as non-pagination targets. Sandbox and chatbooks custom
+families have also been classified: their true list endpoints are already
+canonical, while artifact/snapshot subresources and job detail responses are
+explicitly exempt.
 
 - [x] **Step 1: Pick the first custom family**
 
@@ -653,6 +656,12 @@ Watchlists findings:
   `/watchlists/templates/{template_name}/versions`, and
   `/watchlists/{watchlist_id}/clusters` have no pagination inputs and are
   classified as aggregate/small-catalog non-pagination targets.
+- Chatbook export/import job list routes already expose canonical offset
+  metadata; single job routes are detail responses where `total_items` tracks
+  job progress.
+- Sandbox admin runs, usage, and idempotency routes already expose canonical
+  offset metadata; artifacts, snapshots, and fallback guard routes have no
+  pagination inputs and stay exempt.
 
 - [x] **Step 3: Add route tests**
 
