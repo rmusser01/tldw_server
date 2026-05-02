@@ -957,6 +957,8 @@ def test_audiobook_project_pagination(
     assert page1_payload["total"] == 2
     assert page1_payload["limit"] == 1
     assert page1_payload["offset"] == 0
+    assert page1_payload["has_more"] is True
+    assert page1_payload["next_offset"] == 1
     assert page1_payload["pagination"] == {
         "mode": "offset",
         "total": 2,
@@ -968,6 +970,8 @@ def test_audiobook_project_pagination(
     assert page2_payload["total"] == 2
     assert page2_payload["limit"] == 1
     assert page2_payload["offset"] == 1
+    assert page2_payload["has_more"] is False
+    assert page2_payload["next_offset"] is None
     assert page2_payload["pagination"] == {
         "mode": "offset",
         "total": 2,
