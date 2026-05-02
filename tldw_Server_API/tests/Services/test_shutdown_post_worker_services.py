@@ -258,6 +258,63 @@ async def test_shutdown_post_worker_services_skips_loop_lag_after_background_pha
 
 
 @pytest.mark.asyncio
+async def test_run_shutdown_post_worker_services_fallback_skips_stopped_loop_lag(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.services import shutdown_post_worker_services as shutdown_services
+
+    async def _raise_shutdown_error(**kwargs: object) -> None:
+        raise RuntimeError("shutdown failed")
+
+    monkeypatch.setattr(shutdown_services, "shutdown_post_worker_services", _raise_shutdown_error)
+
+    handles = await shutdown_services.run_shutdown_post_worker_services(
+        claims_task=None,
+        jobs_prune_task=None,
+        files_export_gc_task=None,
+        notifications_prune_task=None,
+        jobs_notifications_bridge_task=None,
+        embeddings_compactor_task=None,
+        embeddings_compactor_stop_event=None,
+        websub_renewal_task=None,
+        coordinated_legacy_component_names=set(),
+        usage_task=None,
+        llm_usage_task=None,
+        workflows_sched_task=None,
+        reading_digest_sched_task=None,
+        admin_backup_sched_task=None,
+        companion_reflection_sched_task=None,
+        reminders_sched_task=None,
+        connectors_sync_sched_task=None,
+        jobs_metrics_task="jobs-metrics-input",
+        jobs_metrics_stop_event=None,
+        loop_lag_task="loop-lag-input",
+        loop_lag_stop_event=None,
+        jobs_metrics_reconcile_task=None,
+        jobs_metrics_reconcile_stop=None,
+        jobs_crypto_rotate_task=None,
+        jobs_crypto_rotate_stop_event=None,
+        jobs_integrity_task=None,
+        jobs_integrity_stop_event=None,
+        jobs_webhooks_task=None,
+        jobs_webhooks_stop_event=None,
+        meetings_webhook_dlq_task=None,
+        meetings_webhook_dlq_stop_event=None,
+        workflows_dlq_task=None,
+        workflows_dlq_stop_event=None,
+        workflows_gc_task=None,
+        workflows_gc_stop_event=None,
+        workflows_maint_task=None,
+        workflows_maint_stop_event=None,
+        stopped_background_worker_names={"loop_lag_task"},
+        guard_exceptions=(RuntimeError,),
+    )
+
+    assert handles.jobs_metrics_task == "jobs-metrics-input"
+    assert handles.loop_lag_task is None
+
+
+@pytest.mark.asyncio
 async def test_shutdown_post_worker_services_skips_jobs_webhooks_after_background_phase(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

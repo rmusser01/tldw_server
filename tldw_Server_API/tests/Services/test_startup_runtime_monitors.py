@@ -24,7 +24,7 @@ async def test_start_runtime_monitors_combines_handles_in_order(
         calls.append("jobs-metrics")
         return ("jobs-metrics-stop", "jobs-metrics-task")
 
-    async def _record_loop_lag():
+    async def _record_loop_lag(*, worker_inventory: object | None = None) -> tuple[str, str]:
         calls.append("loop-lag")
         return ("loop-lag-stop", "loop-lag-task")
 
@@ -48,11 +48,11 @@ async def test_start_runtime_monitors_passes_inventory_to_registered_monitors(
     worker_inventory = object()
     calls: list[str] = []
 
-    async def _record_jobs_metrics(*, worker_inventory: object):
+    async def _record_jobs_metrics(*, worker_inventory: object) -> tuple[object, str]:
         calls.append("jobs-metrics")
         return (worker_inventory, "jobs-metrics-task")
 
-    async def _record_loop_lag(*, worker_inventory: object):
+    async def _record_loop_lag(*, worker_inventory: object) -> tuple[object, str]:
         calls.append("loop-lag")
         return (worker_inventory, "loop-lag-task")
 

@@ -45,12 +45,9 @@ async def start_runtime_monitors(
         jobs_metrics_stop_event, jobs_metrics_task = await _start_jobs_metrics_gauge_worker(
             worker_inventory=worker_inventory,
         )
-    if worker_inventory is None:
-        loop_lag_stop_event, loop_lag_task = await _start_loop_lag_watchdog()
-    else:
-        loop_lag_stop_event, loop_lag_task = await _start_loop_lag_watchdog(
-            worker_inventory=worker_inventory,
-        )
+    loop_lag_stop_event, loop_lag_task = await _start_loop_lag_watchdog(
+        worker_inventory=worker_inventory,
+    )
     return RuntimeMonitorHandles(
         jobs_metrics_stop_event=jobs_metrics_stop_event,
         jobs_metrics_task=jobs_metrics_task,
@@ -105,6 +102,13 @@ async def _start_loop_lag_watchdog(
     *,
     worker_inventory: Any | None = None,
 ) -> tuple[Any | None, Any | None]:
+    """Start the event-loop lag watchdog directly or through worker inventory.
+
+    The monitor is skipped when EVENT_LOOP_LAG_WATCHDOG_ENABLED is disabled.
+    When a worker inventory is supplied, the watchdog is registered as a
+    background-phase custom worker so WorkerRegistry owns shutdown; otherwise
+    this helper preserves the legacy explicit stop-event/task handles.
+    """
     try:
         if not _env_flag_enabled("EVENT_LOOP_LAG_WATCHDOG_ENABLED"):
             logger.info("Event loop lag watchdog disabled by flag")
