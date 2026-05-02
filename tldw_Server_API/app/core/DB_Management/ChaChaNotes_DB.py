@@ -16021,6 +16021,25 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         rows = cursor.fetchall()
         return [self._deserialize_moodboard_row(row) for row in rows if row]
 
+    def count_moodboards(
+        self,
+        include_deleted: bool = False,
+        only_deleted: bool = False,
+    ) -> int:
+        where_clause = ""
+        params: list[Any] = []
+        if only_deleted:
+            where_clause = " WHERE deleted = ?"
+            params.append(True if self.backend_type == BackendType.POSTGRESQL else 1)
+        elif not include_deleted:
+            where_clause = " WHERE deleted = ?"
+            params.append(False if self.backend_type == BackendType.POSTGRESQL else 0)
+
+        query = f"SELECT COUNT(*) AS total FROM moodboards{where_clause}"  # nosec B608
+        cursor = self.execute_query(query, tuple(params))
+        row = cursor.fetchone()
+        return int(row["total"]) if row and row["total"] is not None else 0
+
     def update_moodboard(self, moodboard_id: int, update_data: dict[str, Any], expected_version: int) -> bool | None:
         if not update_data:
             raise InputError("No data provided for moodboard update.")  # noqa: TRY003
@@ -23827,6 +23846,9 @@ for _message_store_method in (
 for _note_store_method in (
     "add_note",
     "get_note_by_id",
+    "get_note_studio_document",
+    "create_note_studio_document",
+    "upsert_note_studio_document",
     "list_notes",
     "list_deleted_notes",
     "get_notes_batch",
@@ -23872,6 +23894,7 @@ for _keyword_store_method in (
     "get_keyword_collection_by_id",
     "get_keyword_collection_by_name",
     "list_keyword_collections",
+    "count_keyword_collections",
     "update_keyword_collection",
     "soft_delete_keyword_collection",
     "search_keyword_collections",

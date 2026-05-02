@@ -4,6 +4,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, model_validator
 
+from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
 from tldw_Server_API.app.api.v1.schemas.study_packs import (
     FlashcardCitationResponse,
     FlashcardDeepDiveTarget,
@@ -17,6 +18,14 @@ DeckVisibility = Literal["private", "team", "org", "public"]
 DeckShareRole = Literal["owner", "editor", "viewer"]
 FlashcardTemplateModelType = Literal["basic", "basic_reverse", "cloze"]
 FlashcardTemplateFieldTarget = Literal["front_template", "back_template", "notes_template", "extra_template"]
+
+
+def _default_offset_pagination_aliases(response):
+    if response.has_more is None:
+        response.has_more = response.pagination.has_more
+    if response.next_offset is None:
+        response.next_offset = response.pagination.next_offset
+    return response
 
 
 def _strip_required_string(value: Any) -> Any:
@@ -276,6 +285,13 @@ class FlashcardTemplateListResponse(BaseModel):
     items: list[FlashcardTemplate]
     count: int
     total: int | None = None
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+    pagination: OffsetPaginationMeta
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self):
+        return _default_offset_pagination_aliases(self)
 
 
 class FlashcardReviewIntervalPreviews(BaseModel):
@@ -358,6 +374,18 @@ class FlashcardListResponse(BaseModel):
     items: list[Flashcard]
     count: int
     total: int | None = None
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+    pagination: OffsetPaginationMeta
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self):
+        return _default_offset_pagination_aliases(self)
+
+
+class FlashcardBulkCreateResponse(BaseModel):
+    items: list[Flashcard]
+    count: int
 
 
 class FlashcardReviewRequest(BaseModel):

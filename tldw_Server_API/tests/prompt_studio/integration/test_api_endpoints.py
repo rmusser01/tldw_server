@@ -156,6 +156,31 @@ def mock_user():
         "permissions": ["read", "write", "delete"]
     }
 
+
+@pytest.mark.asyncio
+async def test_list_prompts_safely_defaults_missing_pagination() -> None:
+    """Prompt listing does not 500 when storage omits pagination metadata."""
+    from tldw_Server_API.app.api.v1.endpoints.prompt_studio import prompt_studio_prompts
+
+    class _PromptDbWithoutPagination:
+        def list_prompts(self, *_args, **_kwargs):
+            return {"prompts": []}
+
+    response = await prompt_studio_prompts.list_prompts(
+        project_id=123,
+        page=2,
+        per_page=10,
+        include_deleted=False,
+        _=True,
+        db=_PromptDbWithoutPagination(),
+    )
+
+    assert response.metadata.page == 2
+    assert response.metadata.per_page == 10
+    assert response.metadata.total == 0
+    assert response.pagination.page == 2
+    assert response.pagination.has_more is False
+
 ########################################################################################################################
 # Project Endpoints Tests
 
@@ -210,6 +235,20 @@ class TestProjectEndpoints:
         assert "data" in data
         assert "metadata" in data
         assert isinstance(data["data"], list)
+        assert data["metadata"] == {
+            "page": 1,
+            "per_page": 20,
+            "total": 1,
+            "total_pages": 1,
+        }
+        assert data["pagination"] == {
+            "mode": "page",
+            "page": 1,
+            "per_page": 20,
+            "total": 1,
+            "total_pages": 1,
+            "has_more": False,
+        }
 
     def test_get_project(self, client, test_db):
 
@@ -393,6 +432,14 @@ class TestPromptEndpoints:
             assert data["success"] is True
             assert isinstance(data["data"], list)
             assert "metadata" in data
+            assert data["pagination"]["mode"] == "page"
+            assert data["pagination"]["page"] == 1
+            assert data["pagination"]["per_page"] == 20
+            assert data["pagination"]["total"] >= len(data["data"])
+            assert data["pagination"]["total_pages"] >= 0
+            assert data["pagination"]["has_more"] == (
+                data["pagination"]["page"] < data["pagination"]["total_pages"]
+            )
 
     def test_execute_prompt(self, client, auth_headers, mock_user):
 
@@ -954,6 +1001,46 @@ class TestTestCaseEndpoints:
             data = response.json()
             assert data["name"] == "Test Case 1"
             assert data["project_id"] == project_id
+
+    def test_list_test_cases(self, client, auth_headers, mock_user, project_id):
+
+        """Test listing test cases for a project."""
+        if not project_id:
+            pytest.skip("Project creation failed")
+
+        with patch('tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps.get_current_active_user', return_value=mock_user):
+            create_response = client.post(
+                "/api/v1/prompt-studio/test-cases",
+                json={
+                    "project_id": project_id,
+                    "name": "Listed Test Case",
+                    "description": "A listed test case",
+                    "inputs": {"input": "test data"},
+                    "expected_outputs": {"output": "expected result"},
+                    "is_golden": False,
+                    "tags": ["integration"],
+                },
+                headers=auth_headers,
+            )
+            assert create_response.status_code in [200, 201]
+
+            response = client.get(
+                f"/api/v1/prompt-studio/test-cases/list/{project_id}?page=1&per_page=20",
+                headers=auth_headers,
+            )
+
+            assert response.status_code == 200
+            data = response.json()
+            assert data["success"] is True
+            assert isinstance(data["data"], list)
+            assert data["pagination"] == {
+                "mode": "page",
+                "page": 1,
+                "per_page": 20,
+                "total": 1,
+                "total_pages": 1,
+                "has_more": False,
+            }
 
     def test_run_test_cases(self, client, auth_headers, mock_user):
 

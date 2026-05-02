@@ -18,6 +18,7 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.api.v1.schemas.character_memory_schemas import (
     CharacterMemoryArchiveRequest,
@@ -185,7 +186,18 @@ async def list_character_memories(
     except (InputError, CharactersRAGDBError) as exc:
         raise map_db_error_to_http(exc, default_detail="Failed to list character memories") from exc
     memories = [_row_to_response(r, character_id) for r in rows]
-    return CharacterMemoryListResponse(memories=memories, total=total_count)
+    return CharacterMemoryListResponse(
+        memories=memories,
+        total=total_count,
+        limit=limit,
+        offset=offset,
+        pagination=build_offset_pagination_meta(
+            total=total_count,
+            limit=limit,
+            offset=offset,
+            count=len(memories),
+        ),
+    )
 
 
 @router.post(

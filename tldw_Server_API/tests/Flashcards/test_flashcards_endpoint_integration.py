@@ -1006,8 +1006,20 @@ def test_flashcard_visibility_endpoints_respect_default_general_only_and_explici
 
     default_list = client_with_flashcards_db.get("/api/v1/flashcards", headers=AUTH_HEADERS)
     assert default_list.status_code == 200
-    default_items = default_list.json()["items"]
-    assert default_list.json()["total"] == 1
+    default_payload = default_list.json()
+    default_items = default_payload["items"]
+    assert default_payload["total"] == 1
+    assert default_payload["count"] == 1
+    assert default_payload["pagination"] == {
+        "mode": "offset",
+        "total": 1,
+        "limit": 100,
+        "offset": 0,
+        "has_more": False,
+        "next_offset": None,
+    }
+    assert default_payload["has_more"] is False
+    assert default_payload["next_offset"] is None
     assert any(item["uuid"] == general_card["uuid"] for item in default_items)
     assert all(item["deck_id"] != workspace_deck_id for item in default_items)
 
@@ -1022,12 +1034,49 @@ def test_flashcard_visibility_endpoints_respect_default_general_only_and_explici
 
     all_list = client_with_flashcards_db.get(
         "/api/v1/flashcards",
-        params={"include_workspace_items": True},
+        params={"include_workspace_items": True, "limit": 1, "offset": 0},
         headers=AUTH_HEADERS,
     )
     assert all_list.status_code == 200
-    assert all_list.json()["total"] == 2
-    assert {item["uuid"] for item in all_list.json()["items"]} == {general_card["uuid"], workspace_card["uuid"]}
+    all_payload = all_list.json()
+    assert all_payload["total"] == 2
+    assert all_payload["count"] == 1
+    assert len(all_payload["items"]) == 1
+    assert all_payload["pagination"] == {
+        "mode": "offset",
+        "total": 2,
+        "limit": 1,
+        "offset": 0,
+        "has_more": True,
+        "next_offset": 1,
+    }
+    assert all_payload["has_more"] is True
+    assert all_payload["next_offset"] == 1
+
+    all_list_page2 = client_with_flashcards_db.get(
+        "/api/v1/flashcards",
+        params={"include_workspace_items": True, "limit": 1, "offset": 1},
+        headers=AUTH_HEADERS,
+    )
+    assert all_list_page2.status_code == 200
+    page2_payload = all_list_page2.json()
+    assert page2_payload["total"] == 2
+    assert page2_payload["count"] == 1
+    assert len(page2_payload["items"]) == 1
+    assert page2_payload["pagination"] == {
+        "mode": "offset",
+        "total": 2,
+        "limit": 1,
+        "offset": 1,
+        "has_more": False,
+        "next_offset": None,
+    }
+    assert page2_payload["has_more"] is False
+    assert page2_payload["next_offset"] is None
+    assert {
+        all_payload["items"][0]["uuid"],
+        page2_payload["items"][0]["uuid"],
+    } == {general_card["uuid"], workspace_card["uuid"]}
 
     deck_list = client_with_flashcards_db.get(
         "/api/v1/flashcards",

@@ -31,6 +31,7 @@ from loguru import logger
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, RequireRole, User
 
 from tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps import get_audit_service_for_user
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.schemas.sandbox_schemas import (
     SandboxAdminMacOSDiagnosticsResponse,
     SandboxAdminMacOSImageStoreCleanupRequest,
@@ -2360,7 +2361,20 @@ async def admin_list_runs(
             )
         )
     has_more = (offset + len(items)) < int(total)
-    return SandboxAdminRunListResponse(total=int(total), limit=int(limit), offset=int(offset), has_more=bool(has_more), items=items)
+    total_count = int(total)
+    return SandboxAdminRunListResponse(
+        total=total_count,
+        limit=int(limit),
+        offset=int(offset),
+        has_more=bool(has_more),
+        pagination=build_offset_pagination_meta(
+            total=total_count,
+            limit=int(limit),
+            offset=int(offset),
+            count=len(items),
+        ),
+        items=items,
+    )
 
 
 @router.get(
@@ -2503,7 +2517,20 @@ async def admin_list_idempotency(
             )
         )
     has_more = (offset + len(items)) < int(total)
-    return SandboxAdminIdempotencyListResponse(total=int(total), limit=int(limit), offset=int(offset), has_more=bool(has_more), items=items)
+    total_count = int(total)
+    return SandboxAdminIdempotencyListResponse(
+        total=total_count,
+        limit=int(limit),
+        offset=int(offset),
+        has_more=bool(has_more),
+        pagination=build_offset_pagination_meta(
+            total=total_count,
+            limit=int(limit),
+            offset=int(offset),
+            count=len(items),
+        ),
+        items=items,
+    )
 
 
 @router.get(
@@ -2537,4 +2564,17 @@ async def admin_usage(
             )
         )
     has_more = (offset + len(items)) < int(total)
-    return SandboxAdminUsageResponse(total=int(total), limit=int(limit), offset=int(offset), has_more=bool(has_more), items=items)
+    total_count = int(total)
+    return SandboxAdminUsageResponse(
+        total=total_count,
+        limit=int(limit),
+        offset=int(offset),
+        has_more=bool(has_more),
+        pagination=build_offset_pagination_meta(
+            total=total_count,
+            limit=int(limit),
+            offset=int(offset),
+            count=len(items),
+        ),
+        items=items,
+    )

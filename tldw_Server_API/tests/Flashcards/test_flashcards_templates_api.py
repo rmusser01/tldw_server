@@ -286,6 +286,16 @@ def test_flashcard_template_list_returns_items(client_with_flashcards_db: TestCl
     payload = response.json()
     assert payload["count"] == 1
     assert payload["total"] == 1
+    assert payload["pagination"] == {
+        "mode": "offset",
+        "total": 1,
+        "limit": 100,
+        "offset": 0,
+        "has_more": False,
+        "next_offset": None,
+    }
+    assert payload["has_more"] is False
+    assert payload["next_offset"] is None
     assert payload["items"][0]["id"] == created_payload["id"]
     assert payload["items"][0]["name"] == "List template"
 

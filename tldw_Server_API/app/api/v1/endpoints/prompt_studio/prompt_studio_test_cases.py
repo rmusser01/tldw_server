@@ -35,10 +35,15 @@ from tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps import (
     require_project_access,
     require_project_write_access,
 )
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_page_pagination_meta
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 
 # Local imports
-from tldw_Server_API.app.api.v1.schemas.prompt_studio_base import ListResponse, StandardResponse
+from tldw_Server_API.app.api.v1.schemas.prompt_studio_base import (
+    ListResponse,
+    PageListResponse,
+    StandardResponse,
+)
 from tldw_Server_API.app.api.v1.schemas.prompt_studio_test import (
     RunTestCasesSimpleRequest,
     TestCaseBulkCreate,
@@ -318,7 +323,7 @@ async def create_bulk_test_cases(
 
 @router.get(
     "/list/{project_id}",
-    response_model=ListResponse,
+    response_model=PageListResponse,
     openapi_extra={
         "responses": {
             "200": {
@@ -358,7 +363,7 @@ async def list_test_cases(
     signature_id: Optional[int] = Query(None, description="Filter by signature"),
     _: bool = Depends(require_project_access),
     db: PromptStudioDatabase = Depends(get_prompt_studio_db)
-) -> ListResponse:
+) -> PageListResponse:
     """
     List test cases in a project.
 
@@ -395,10 +400,16 @@ async def list_test_cases(
             return_pagination=True
         )
 
-        return ListResponse(
+        return PageListResponse(
             success=True,
             data=[TestCaseResponse(**tc) for tc in result["test_cases"]],
-            metadata=result["pagination"]
+            metadata=result["pagination"],
+            pagination=build_page_pagination_meta(
+                page=result["pagination"]["page"],
+                per_page=result["pagination"]["per_page"],
+                total=result["pagination"]["total"],
+                total_pages=result["pagination"]["total_pages"],
+            ),
         )
 
     except DatabaseError as e:

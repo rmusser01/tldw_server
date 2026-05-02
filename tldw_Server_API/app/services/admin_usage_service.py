@@ -5,6 +5,7 @@ from typing import Any
 from fastapi import HTTPException
 from loguru import logger
 
+from tldw_Server_API.app.api.v1.utils.pagination import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.schemas.admin_schemas import (
     LLMTopSpenderRow,
     LLMTopSpendersResponse,
@@ -863,7 +864,19 @@ async def get_llm_usage(
             org_ids=org_ids,
         )
         items = [LLMUsageLogRow(**r) for r in rows]
-        return LLMUsageLogResponse(items=items, total=int(total or 0), page=page, limit=limit)
+        total_count = int(total or 0)
+        return LLMUsageLogResponse(
+            items=items,
+            total=total_count,
+            page=page,
+            limit=limit,
+            pagination=build_offset_pagination_meta(
+                total=total_count,
+                limit=limit,
+                offset=(page - 1) * limit,
+                count=len(items),
+            ),
+        )
     except _ADMIN_USAGE_NONCRITICAL_EXCEPTIONS:
         logger.exception("Failed to query llm_usage_log")
         raise HTTPException(status_code=500, detail="Failed to load LLM usage data") from None

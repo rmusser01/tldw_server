@@ -935,6 +935,13 @@ async def test_process_text_uses_dictionary_default_token_budget_and_records_act
     )
     assert activity.dictionary_id == dictionary_id
     assert activity.total >= 1
+    assert activity.pagination.total == activity.total
+    assert activity.pagination.limit == 10
+    assert activity.pagination.offset == 0
+    assert activity.pagination.has_more is False
+    assert activity.pagination.next_offset is None
+    assert activity.has_more is False
+    assert activity.next_offset is None
     assert len(activity.events) >= 1
 
     event = activity.events[0]
@@ -1270,6 +1277,13 @@ async def test_dictionary_version_history_endpoints_list_and_read_snapshots(
     )
     assert versions_response.dictionary_id == dictionary_id
     assert versions_response.total >= 3
+    assert versions_response.pagination.total == versions_response.total
+    assert versions_response.pagination.limit == 20
+    assert versions_response.pagination.offset == 0
+    assert versions_response.pagination.has_more is False
+    assert versions_response.pagination.next_offset is None
+    assert versions_response.has_more is False
+    assert versions_response.next_offset is None
     assert len(versions_response.versions) >= 3
     latest_revision = versions_response.versions[0].revision
     assert latest_revision >= 1

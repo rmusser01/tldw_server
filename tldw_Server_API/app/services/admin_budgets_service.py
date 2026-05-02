@@ -7,6 +7,7 @@ from typing import Any
 from fastapi import HTTPException
 from loguru import logger
 
+from tldw_Server_API.app.api.v1.utils.pagination import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.schemas.admin_schemas import (
     OrgBudgetItem,
     OrgBudgetListResponse,
@@ -376,6 +377,12 @@ async def list_budgets(
             total=total,
             page=page,
             limit=limit,
+            pagination=build_offset_pagination_meta(
+                total=total,
+                limit=limit,
+                offset=(page - 1) * limit,
+                count=len(items),
+            ),
         )
     except Exception as exc:
         logger.error("Failed to list org budgets")

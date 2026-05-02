@@ -81,7 +81,15 @@ async def test_monitoring_alerts_include_backend_overlay_and_authoritative_actio
     with TestClient(app, headers=headers) as client:
         list_resp = client.get("/api/v1/monitoring/alerts")
         assert list_resp.status_code == 200, list_resp.text
-        items = list_resp.json()["items"]
+        payload = list_resp.json()
+        assert payload["pagination"]["total"] is None
+        assert payload["pagination"]["limit"] == 100
+        assert payload["pagination"]["offset"] == 0
+        assert payload["pagination"]["has_more"] is False
+        assert payload["pagination"]["next_offset"] is None
+        assert payload["has_more"] is False
+        assert payload["next_offset"] is None
+        items = payload["items"]
         assert len(items) == 1
         assert items[0]["alert_identity"] == f"alert:{alert_id}"
         assert items[0]["assigned_to_user_id"] == 1

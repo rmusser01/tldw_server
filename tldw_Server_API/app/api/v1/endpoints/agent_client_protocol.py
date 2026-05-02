@@ -19,6 +19,7 @@ from loguru import logger
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, TokenScopeGuard, User
 
 from tldw_Server_API.app.api.v1.endpoints._in_memory_limits import SlidingWindowLimiter
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.schemas.agent_client_protocol import (
     ACPAgentInfo,
     ACPAgentListResponse,
@@ -2353,7 +2354,16 @@ async def acp_list_sessions(
         ))
         for rec in records
     ]
-    return ACPSessionListResponse(sessions=sessions, total=total)
+    return ACPSessionListResponse(
+        sessions=sessions,
+        total=total,
+        pagination=build_offset_pagination_meta(
+            total=total,
+            offset=offset,
+            limit=limit,
+            count=len(sessions),
+        ),
+    )
 
 
 @router.get(

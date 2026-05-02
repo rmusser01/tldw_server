@@ -6,6 +6,7 @@ from loguru import logger
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.jobs_deps import get_job_manager
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.api.v1.schemas.quizzes import (
     AttemptListResponse,
@@ -164,13 +165,25 @@ def list_quizzes(
 ):
     """List quizzes with pagination and optional filters."""
     try:
-        return db.list_quizzes(
+        payload = db.list_quizzes(
             q=q,
             media_id=media_id,
             workspace_id=workspace_id,
             include_workspace_items=include_workspace_items,
             limit=limit,
             offset=offset,
+        )
+        items = list(payload.get("items") or [])
+        total = int(payload.get("count") or 0)
+        return QuizListResponse(
+            items=items,
+            count=total,
+            pagination=build_offset_pagination_meta(
+                total=total,
+                offset=offset,
+                limit=limit,
+                count=len(items),
+            ),
         )
     except (InputError, CharactersRAGDBError) as exc:
         raise map_db_error_to_http(exc, default_detail="Failed to list quizzes") from exc
@@ -320,7 +333,6 @@ def delete_quiz(
 @router.get(
     "/{quiz_id:int}/questions",
     response_model=QuestionListResponse,
-    response_model_exclude_none=True,
 )
 def list_questions(
     quiz_id: int,
@@ -332,7 +344,19 @@ def list_questions(
 ):
     """List all questions for a quiz (use include_answers=true for Manage/Edit flows)."""
     try:
-        return db.list_questions(quiz_id, q=q, include_answers=include_answers, limit=limit, offset=offset)
+        payload = db.list_questions(quiz_id, q=q, include_answers=include_answers, limit=limit, offset=offset)
+        items = list(payload.get("items") or [])
+        total = int(payload.get("count") or 0)
+        return QuestionListResponse(
+            items=items,
+            count=total,
+            pagination=build_offset_pagination_meta(
+                total=total,
+                offset=offset,
+                limit=limit,
+                count=len(items),
+            ),
+        )
     except (InputError, CharactersRAGDBError) as exc:
         raise map_db_error_to_http(exc, default_detail="Failed to list questions") from exc
 
@@ -441,7 +465,7 @@ def submit_attempt(
         raise map_db_error_to_http(exc, default_detail="Failed to submit attempt") from exc
 
 
-@router.get("/attempts", response_model=AttemptListResponse, response_model_exclude_none=True)
+@router.get("/attempts", response_model=AttemptListResponse)
 def list_attempts(
     quiz_id: Optional[int] = None,
     limit: int = Query(50, ge=1, le=200),
@@ -450,7 +474,19 @@ def list_attempts(
 ):
     """List quiz attempts."""
     try:
-        return db.list_attempts(quiz_id=quiz_id, limit=limit, offset=offset)
+        payload = db.list_attempts(quiz_id=quiz_id, limit=limit, offset=offset)
+        items = list(payload.get("items") or [])
+        total = int(payload.get("count") or 0)
+        return AttemptListResponse(
+            items=items,
+            count=total,
+            pagination=build_offset_pagination_meta(
+                total=total,
+                offset=offset,
+                limit=limit,
+                count=len(items),
+            ),
+        )
     except (InputError, CharactersRAGDBError) as exc:
         raise map_db_error_to_http(exc, default_detail="Failed to list attempts") from exc
 

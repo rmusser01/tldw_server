@@ -13,6 +13,7 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     get_password_service_dep,
     get_registration_service_dep,
 )
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.schemas.admin_schemas import (
     AdminMfaRequirementRequest,
     AdminMfaRequirementResponse,
@@ -158,6 +159,12 @@ async def list_users(
             page=page,
             limit=limit,
             pages=(total + limit - 1) // limit if limit else 0,
+            pagination=build_offset_pagination_meta(
+                total=total,
+                limit=limit,
+                offset=(page - 1) * limit,
+                count=len(users),
+            ),
         )
     except HTTPException as e:
         try:

@@ -1,14 +1,23 @@
-from __future__ import annotations
-
 """
 Reusable helpers for building RFC5988 Link headers for paginated endpoints.
 
-This module is intentionally lightweight and dependency-free, so it can be
-used across endpoints (e.g., runs, events, future artifacts listings).
+This module centralizes pagination metadata and Link header construction for
+API endpoints while keeping dependencies limited to shared pagination schemas.
 """
 
+from __future__ import annotations
 
 import urllib.parse as _u
+
+from tldw_Server_API.app.api.v1.schemas.pagination import (
+    CursorPaginationMeta,
+    OffsetPaginationMeta,
+)
+from tldw_Server_API.app.api.v1.utils.pagination import (
+    build_cursor_pagination_meta,
+    build_offset_pagination_meta,
+    build_page_pagination_meta,
+)
 
 
 def build_link_header(
@@ -91,4 +100,38 @@ def build_link_header(
     return ", ".join(links) if links else None
 
 
-__all__ = ["build_link_header"]
+def build_pagination_link_header(
+    base_path: str,
+    common_params: list[tuple[str, str]] | None = None,
+    *,
+    pagination: OffsetPaginationMeta | CursorPaginationMeta,
+    cursor_param: str = "cursor",
+    include_first_last: bool = True,
+) -> str | None:
+    """Build an RFC5988 Link header from canonical pagination metadata."""
+    if isinstance(pagination, OffsetPaginationMeta):
+        return build_link_header(
+            base_path=base_path,
+            common_params=common_params,
+            limit=pagination.limit,
+            offset=pagination.offset,
+            has_more=pagination.has_more,
+            include_first_last=include_first_last,
+        )
+
+    return build_link_header(
+        base_path=base_path,
+        common_params=common_params,
+        next_cursor=pagination.next_cursor,
+        limit=pagination.limit,
+        cursor_param=cursor_param,
+    )
+
+
+__all__ = [
+    "build_cursor_pagination_meta",
+    "build_link_header",
+    "build_page_pagination_meta",
+    "build_offset_pagination_meta",
+    "build_pagination_link_header",
+]

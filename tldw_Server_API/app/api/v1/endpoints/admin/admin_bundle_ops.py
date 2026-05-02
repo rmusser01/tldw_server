@@ -12,6 +12,9 @@ from fastapi.responses import FileResponse
 from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import (
+    build_offset_pagination_meta,
+)
 from tldw_Server_API.app.api.v1.schemas.bundle_schemas import (
     BundleCreateRequest,
     BundleCreateResponse,
@@ -249,6 +252,12 @@ async def list_bundles(
             total=total,
             limit=limit,
             offset=offset,
+            pagination=build_offset_pagination_meta(
+                total=total,
+                limit=limit,
+                offset=offset,
+                count=len(items),
+            ),
         )
     except BundleError as exc:
         raise _handle_bundle_error(exc) from exc

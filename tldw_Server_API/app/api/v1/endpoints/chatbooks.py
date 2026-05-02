@@ -34,6 +34,7 @@ from ....core.Chatbooks.exceptions import JobError
 from ....core.Chatbooks.quota_manager import QuotaManager
 from ....core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from ....core.DB_Management.db_path_utils import DatabasePaths
+from ._pagination_utils import build_offset_pagination_meta
 from ..API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user as get_chacha_db
 from ..schemas.chatbook_schemas import (
     CancelJobResponse,
@@ -940,7 +941,16 @@ async def list_export_jobs(
                 )
             )
 
-        return ListExportJobsResponse(jobs=job_responses, total=total)
+        return ListExportJobsResponse(
+            jobs=job_responses,
+            total=total,
+            pagination=build_offset_pagination_meta(
+                total=total,
+                limit=limit,
+                offset=offset,
+                count=len(job_responses),
+            ),
+        )
 
     except HTTPException:
         raise
@@ -1055,7 +1065,16 @@ async def list_import_jobs(
                 )
             )
 
-        return ListImportJobsResponse(jobs=job_responses, total=total)
+        return ListImportJobsResponse(
+            jobs=job_responses,
+            total=total,
+            pagination=build_offset_pagination_meta(
+                total=total,
+                limit=limit,
+                offset=offset,
+                count=len(job_responses),
+            ),
+        )
 
     except _CHATBOOKS_NONCRITICAL_EXCEPTIONS:
         logger.error("Failed to list chatbook import jobs")

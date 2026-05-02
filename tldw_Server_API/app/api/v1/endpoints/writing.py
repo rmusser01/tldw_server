@@ -16,6 +16,7 @@ from loguru import logger
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_rate_limiter_dep, get_request_user, RateLimiter, rbac_rate_limit, User
 
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.endpoints.llm_providers import get_configured_providers_async
 from tldw_Server_API.app.api.v1.schemas.writing_schemas import (
     WritingCapabilitiesResponse,
@@ -1018,7 +1019,18 @@ async def list_writing_sessions(
         sessions = db.list_writing_sessions(limit=limit, offset=offset)
         total = db.count_writing_sessions()
         items = [WritingSessionListItem(**item) for item in sessions]
-        return WritingSessionListResponse(sessions=items, total=total)
+        return WritingSessionListResponse(
+            sessions=items,
+            total=total,
+            limit=limit,
+            offset=offset,
+            pagination=build_offset_pagination_meta(
+                total=total,
+                limit=limit,
+                offset=offset,
+                count=len(items),
+            ),
+        )
     except _WRITING_NONCRITICAL_EXCEPTIONS as exc:
         _handle_db_errors(exc, "writing sessions")
 
@@ -1197,6 +1209,14 @@ async def list_writing_templates(
         return WritingTemplateListResponse(
             templates=[WritingTemplateResponse(**tmpl) for tmpl in templates],
             total=total,
+            limit=limit,
+            offset=offset,
+            pagination=build_offset_pagination_meta(
+                total=total,
+                limit=limit,
+                offset=offset,
+                count=len(templates),
+            ),
         )
     except _WRITING_NONCRITICAL_EXCEPTIONS as exc:
         _handle_db_errors(exc, "writing templates")
@@ -1355,6 +1375,14 @@ async def list_writing_themes(
         return WritingThemeListResponse(
             themes=[WritingThemeResponse(**theme) for theme in themes],
             total=total,
+            limit=limit,
+            offset=offset,
+            pagination=build_offset_pagination_meta(
+                total=total,
+                limit=limit,
+                offset=offset,
+                count=len(themes),
+            ),
         )
     except _WRITING_NONCRITICAL_EXCEPTIONS as exc:
         _handle_db_errors(exc, "writing themes")

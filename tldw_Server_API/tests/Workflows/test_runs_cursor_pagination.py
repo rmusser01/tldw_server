@@ -6,7 +6,9 @@ from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.main import app
 from tldw_Server_API.app.core.DB_Management.Workflows_DB import WorkflowsDatabase
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
 from tldw_Server_API.app.api.v1.endpoints import workflows as wf_mod
+from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 
 
@@ -15,13 +17,32 @@ def client(tmp_path, auth_headers):
     db = WorkflowsDatabase(str(tmp_path / "wf.db"))
 
     async def override_user():
-        return User(id=1, username="tester", email="t@e.com", is_active=True, is_admin=True)
+        return User(
+            id=1,
+            username="tester",
+            email="t@e.com",
+            is_active=True,
+            is_admin=True,
+            roles=["admin"],
+            permissions=["*"],
+        )
+
+    async def override_principal():
+        return AuthPrincipal(
+            kind="user",
+            user_id=1,
+            username="tester",
+            roles=["admin"],
+            permissions=["*"],
+            is_admin=True,
+        )
 
     def override_db():
 
         return db
 
     app.dependency_overrides[get_request_user] = override_user
+    app.dependency_overrides[get_auth_principal] = override_principal
     app.dependency_overrides[wf_mod._get_db] = override_db
 
     with TestClient(app, headers=auth_headers) as c:
@@ -78,6 +99,13 @@ def test_runs_cursor_pagination_flow(client: TestClient):
     p1 = r1.json()
     assert isinstance(p1.get("runs"), list)
     assert len(p1["runs"]) <= 2
+    assert p1["pagination"]["mode"] == "offset"
+    assert p1["pagination"]["limit"] == 2
+    assert p1["pagination"]["offset"] == 0
+    assert p1["pagination"]["has_more"] is True
+    assert p1["pagination"]["next_offset"] == 2
+    assert p1["has_more"] is True
+    assert p1["next_offset"] == 2
     next_cursor = p1.get("next_cursor")
     assert isinstance(next_cursor, str) and next_cursor, "expected next_cursor token"
 

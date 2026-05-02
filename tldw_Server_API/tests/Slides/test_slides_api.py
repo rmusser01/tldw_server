@@ -948,6 +948,14 @@ def test_slides_styles_list_returns_builtin_and_user_styles(slides_client):
     assert payload["total_count"] >= len(styles)
     assert payload["limit"] == 50
     assert payload["offset"] == 0
+    assert payload["pagination"]["mode"] == "offset"
+    assert payload["pagination"]["limit"] == 50
+    assert payload["pagination"]["offset"] == 0
+    assert payload["pagination"]["total"] == payload["total_count"]
+    assert payload["pagination"]["has_more"] is False
+    assert payload["pagination"]["next_offset"] is None
+    assert payload["has_more"] is False
+    assert payload["next_offset"] is None
 
 
 def test_slides_builtin_style_detail_exposes_catalog_metadata_and_compact_defaults(slides_client):
@@ -1031,6 +1039,60 @@ def test_slides_styles_list_supports_pagination(slides_client):
     assert payload["offset"] == builtin_count
     assert len(payload["styles"]) == 1
     assert payload["styles"][0]["scope"] == "user"
+    assert payload["pagination"] == {
+        "mode": "offset",
+        "limit": 1,
+        "offset": builtin_count,
+        "total": payload["total_count"],
+        "has_more": False,
+        "next_offset": None,
+    }
+    assert payload["has_more"] is False
+    assert payload["next_offset"] is None
+
+
+def test_slides_presentations_list_and_search_include_pagination_metadata(slides_client):
+    first_resp = slides_client.post(
+        "/api/v1/slides/presentations",
+        json={"title": "Alpha Deck", "slides": []},
+    )
+    assert first_resp.status_code == 201, first_resp.text
+
+    second_resp = slides_client.post(
+        "/api/v1/slides/presentations",
+        json={"title": "Beta Deck", "slides": []},
+    )
+    assert second_resp.status_code == 201, second_resp.text
+
+    list_resp = slides_client.get("/api/v1/slides/presentations?limit=1&offset=0")
+    assert list_resp.status_code == 200, list_resp.text
+    list_payload = list_resp.json()
+    assert len(list_payload["presentations"]) == 1
+    assert list_payload["pagination"] == {
+        "mode": "offset",
+        "limit": 1,
+        "offset": 0,
+        "total": 2,
+        "has_more": True,
+        "next_offset": 1,
+    }
+    assert list_payload["has_more"] is True
+    assert list_payload["next_offset"] == 1
+
+    search_resp = slides_client.get("/api/v1/slides/presentations/search?q=Deck&limit=1&offset=1")
+    assert search_resp.status_code == 200, search_resp.text
+    search_payload = search_resp.json()
+    assert len(search_payload["presentations"]) == 1
+    assert search_payload["pagination"] == {
+        "mode": "offset",
+        "limit": 1,
+        "offset": 1,
+        "total": 2,
+        "has_more": False,
+        "next_offset": None,
+    }
+    assert search_payload["has_more"] is False
+    assert search_payload["next_offset"] is None
 
 
 def test_slides_styles_crud_for_user_styles(slides_client):
@@ -1901,6 +1963,16 @@ def test_slides_versions_and_restore(slides_client):
     versions_data = versions_resp.json()
     assert versions_data["total"] == 2
     assert versions_data["versions"][0]["version"] == 2
+    assert versions_data["pagination"] == {
+        "mode": "offset",
+        "limit": 50,
+        "offset": 0,
+        "total": 2,
+        "has_more": False,
+        "next_offset": None,
+    }
+    assert versions_data["has_more"] is False
+    assert versions_data["next_offset"] is None
 
     version_resp = slides_client.get(f"/api/v1/slides/presentations/{presentation_id}/versions/1")
     assert version_resp.status_code == 200

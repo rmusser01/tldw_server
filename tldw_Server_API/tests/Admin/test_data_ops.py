@@ -168,7 +168,13 @@ async def test_admin_data_ops_backups_and_exports(tmp_path):
 
         list_resp = client.get("/api/v1/admin/backups", params={"dataset": "authnz"})
         assert list_resp.status_code == 200, list_resp.text
-        listed = list_resp.json()["items"]
+        payload = list_resp.json()
+        assert payload["pagination"]["total"] >= 1
+        assert payload["pagination"]["limit"] == 100
+        assert payload["pagination"]["offset"] == 0
+        assert payload["has_more"] == payload["pagination"]["has_more"]
+        assert payload["next_offset"] == payload["pagination"]["next_offset"]
+        listed = payload["items"]
         assert any(item["id"] == backup_id for item in listed)
 
         restore_resp = client.post(
@@ -307,5 +313,9 @@ async def test_admin_data_ops_per_user_backup_success(tmp_path):
 
         list_resp = client.get("/api/v1/admin/backups", params={"dataset": "media", "user_id": user_id})
         assert list_resp.status_code == 200, list_resp.text
-        listed = list_resp.json()["items"]
+        payload = list_resp.json()
+        assert payload["pagination"]["total"] >= 1
+        assert payload["pagination"]["limit"] == 100
+        assert payload["pagination"]["offset"] == 0
+        listed = payload["items"]
         assert any(item["id"] == backup_id for item in listed)

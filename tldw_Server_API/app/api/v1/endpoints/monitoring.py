@@ -16,6 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import RequirePermission, get_auth_principal
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.schemas.monitoring_schemas import (
     AlertItem,
     AlertsListResponse,
@@ -366,7 +367,16 @@ async def list_alerts(
             overlay_by_identity.get(alert_identity),
         )
         items.append(AlertItem(**merged_row))
-    return AlertsListResponse(items=items)
+    return AlertsListResponse(
+        items=items,
+        total=None,
+        pagination=build_offset_pagination_meta(
+            limit=limit,
+            offset=offset,
+            total=None,
+            count=len(items),
+        ),
+    )
 
 
 @router.post(

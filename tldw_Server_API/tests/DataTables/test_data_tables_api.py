@@ -96,6 +96,14 @@ def test_generate_and_get_data_table(tmp_path, data_tables_app_factory):
         detail_payload = detail.json()
         assert detail_payload["table"]["uuid"] == table_uuid
         assert detail_payload["sources"]
+        assert detail_payload["pagination"] == {
+            "mode": "offset",
+            "limit": 200,
+            "offset": 0,
+            "total": 0,
+            "has_more": False,
+            "next_offset": None,
+        }
 
 
 def test_mark_data_table_generate_failed_sanitizes_update_failure_log(monkeypatch):
@@ -430,8 +438,34 @@ def test_list_update_delete_data_table(tmp_path, data_tables_app_factory):
         assert resp.status_code == 200, resp.text
         payload = resp.json()
         assert payload["count"] >= 1
+        assert payload["has_more"] is False
+        assert payload["next_offset"] is None
+        assert payload["pagination"] == {
+            "mode": "offset",
+            "limit": 50,
+            "offset": 0,
+            "total": payload["total"],
+            "has_more": False,
+            "next_offset": None,
+        }
 
         table_uuid = table.get("uuid")
+        detail = client.get(f"/api/v1/data-tables/{table_uuid}?rows_limit=1&rows_offset=0")
+        assert detail.status_code == 200, detail.text
+        detail_payload = detail.json()
+        assert detail_payload["rows_limit"] == 1
+        assert detail_payload["rows_offset"] == 0
+        assert detail_payload["has_more"] is False
+        assert detail_payload["next_offset"] is None
+        assert detail_payload["pagination"] == {
+            "mode": "offset",
+            "limit": 1,
+            "offset": 0,
+            "total": 1,
+            "has_more": False,
+            "next_offset": None,
+        }
+
         patch = client.patch(
             f"/api/v1/data-tables/{table_uuid}",
             json={"name": "Renamed Table"},
@@ -442,6 +476,54 @@ def test_list_update_delete_data_table(tmp_path, data_tables_app_factory):
         delete = client.delete(f"/api/v1/data-tables/{table_uuid}")
         assert delete.status_code == 200, delete.text
         assert delete.json()["success"] is True
+
+
+def test_get_data_table_without_rows_preserves_pagination_window(tmp_path, data_tables_app_factory) -> None:
+    db_path = tmp_path / "media.db"
+    seed_db = MediaDatabase(db_path=str(db_path), client_id="test_client")
+    table = seed_db.create_data_table(
+        name="Seed Table",
+        prompt="Seed prompt",
+        description="Seed",
+        status="ready",
+        row_count=2,
+    )
+    table_id = int(table.get("id"))
+    seed_db.insert_data_table_columns(
+        table_id,
+        [{"name": "Name", "type": "text", "position": 0}],
+    )
+    columns = seed_db.list_data_table_columns(table_id)
+    column_id = columns[0].get("column_id")
+    seed_db.insert_data_table_rows(
+        table_id,
+        [
+            {"row_index": 0, "row_json": {column_id: "Alpha"}},
+            {"row_index": 1, "row_json": {column_id: "Beta"}},
+        ],
+    )
+    seed_db.close_connection()
+
+    app, _ = data_tables_app_factory(db_path)
+    with TestClient(app) as client:
+        table_uuid = table.get("uuid")
+        detail = client.get(
+            f"/api/v1/data-tables/{table_uuid}"
+            "?include_rows=false&include_sources=false&rows_limit=1&rows_offset=0"
+        )
+        assert detail.status_code == 200, detail.text
+        detail_payload = detail.json()
+        assert detail_payload["rows"] == []
+        assert detail_payload["pagination"] == {
+            "mode": "offset",
+            "limit": 1,
+            "offset": 0,
+            "total": 2,
+            "has_more": True,
+            "next_offset": 1,
+        }
+        assert detail_payload["has_more"] is True
+        assert detail_payload["next_offset"] == 1
 
 
 def test_list_data_tables_maps_database_error(tmp_path, data_tables_app_factory, monkeypatch):

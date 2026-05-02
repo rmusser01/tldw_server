@@ -20,6 +20,7 @@ from uuid import uuid4
 from fastapi import HTTPException, status
 from loguru import logger
 
+from tldw_Server_API.app.api.v1.utils.pagination import build_offset_pagination_meta
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool, get_db_pool
 from tldw_Server_API.app.core.AuthNZ.permissions import (
     CLAIMS_ADMIN,
@@ -3474,6 +3475,12 @@ def list_claims_analytics_exports(
         "total": int(total),
         "limit": int(limit),
         "offset": int(offset),
+        "pagination": build_offset_pagination_meta(
+            total=int(total),
+            limit=int(limit),
+            offset=int(offset),
+            count=len(exports),
+        ),
     }
 
 

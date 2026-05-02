@@ -10,8 +10,10 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, status
 from loguru import logger
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
+from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 from tldw_Server_API.app.core.AuthNZ.repos.storage_quotas_repo import (
     AuthnzStorageQuotasRepo,
@@ -74,6 +76,17 @@ class StorageQuotaSummaryResponse(BaseModel):
 
     total_quotas: int
     items: list[dict[str, Any]]
+    pagination: OffsetPaginationMeta
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self):
+        if self.has_more is None:
+            self.has_more = self.pagination.has_more
+        if self.next_offset is None:
+            self.next_offset = self.pagination.next_offset
+        return self
 
 
 # ---------------------------------------------------------------------------
@@ -220,6 +233,7 @@ async def get_storage_quota_summary(
         return StorageQuotaSummaryResponse(
             total_quotas=len(items),
             items=items,
+            pagination=build_offset_pagination_meta(limit=limit, offset=offset, count=len(items)),
         )
     except _NONCRITICAL_EXCEPTIONS as exc:
         logger.warning("Failed to get storage quota summary")

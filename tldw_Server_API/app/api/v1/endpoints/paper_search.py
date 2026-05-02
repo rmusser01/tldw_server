@@ -28,6 +28,7 @@ import contextlib
 
 from tldw_Server_API.app.api.v1.API_Deps.backpressure import guard_backpressure_and_quota
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_page_pagination_meta
 from tldw_Server_API.app.api.v1.schemas.paper_search_schemas import (
     BioRxivFunderPaper,
     BioRxivFunderSearchRequestForm,
@@ -298,6 +299,12 @@ async def paper_search_arxiv(
         page=search_params.page,
         results_per_page=search_params.results_per_page,
         total_pages=total_pages,
+        pagination=build_page_pagination_meta(
+            page=search_params.page,
+            per_page=search_params.results_per_page,
+            total=total_results_from_api,
+            total_pages=total_pages,
+        ),
     )
 
 
@@ -355,7 +362,13 @@ async def paper_search_biorxiv(
         total_results=total_results,
         page=search_params.page,
         results_per_page=search_params.results_per_page,
-    total_pages=total_pages,
+        total_pages=total_pages,
+        pagination=build_page_pagination_meta(
+            page=search_params.page,
+            per_page=search_params.results_per_page,
+            total=total_results,
+            total_pages=total_pages,
+        ),
     )
 
 
@@ -1684,6 +1697,12 @@ async def paper_search_semantic_scholar(
         next_offset=next_offset_api,
         page=search_params.page,
         total_pages=total_pages,
+        pagination=build_page_pagination_meta(
+            page=search_params.page,
+            per_page=search_params.results_per_page,
+            total=total_results_api,
+            total_pages=total_pages,
+        ),
     )
 
 
@@ -1751,6 +1770,12 @@ async def paper_search_biorxiv_pubs(
         page=search_params.page,
         results_per_page=search_params.results_per_page,
         total_pages=total_pages,
+        pagination=build_page_pagination_meta(
+            page=search_params.page,
+            per_page=search_params.results_per_page,
+            total=total_results,
+            total_pages=total_pages,
+        ),
     )
 
 
@@ -1814,6 +1839,12 @@ async def paper_search_pubmed(
         page=search_params.page,
         results_per_page=search_params.results_per_page,
         total_pages=total_pages,
+        pagination=build_page_pagination_meta(
+            page=search_params.page,
+            per_page=search_params.results_per_page,
+            total=total_results,
+            total_pages=total_pages,
+        ),
     )
 
 
@@ -1902,6 +1933,12 @@ async def paper_search_biorxiv_publisher(
             page=search_params.page,
             results_per_page=search_params.results_per_page,
             total_pages=total_pages,
+            pagination=build_page_pagination_meta(
+                page=search_params.page,
+                per_page=search_params.results_per_page,
+                total=total,
+                total_pages=total_pages,
+            ),
         )
     except HTTPException:
         raise
@@ -1954,6 +1991,12 @@ async def paper_search_biorxiv_pub(
             page=search_params.page,
             results_per_page=search_params.results_per_page,
             total_pages=total_pages,
+            pagination=build_page_pagination_meta(
+                page=search_params.page,
+                per_page=search_params.results_per_page,
+                total=total,
+                total_pages=total_pages,
+            ),
         )
     except HTTPException:
         raise
@@ -2012,6 +2055,12 @@ async def paper_search_biorxiv_funder(
             page=search_params.page,
             results_per_page=search_params.results_per_page,
             total_pages=total_pages,
+            pagination=build_page_pagination_meta(
+                page=search_params.page,
+                per_page=search_params.results_per_page,
+                total=total,
+                total_pages=total_pages,
+            ),
         )
     except HTTPException:
         raise
@@ -2257,6 +2306,7 @@ from tldw_Server_API.app.api.v1.schemas.paper_search_schemas import (  # noqa: E
     ChemRxivSearchRequestForm,
     DOIRequestForm,
     GenericPaper,
+    GenericPageSearchResponse,
     GenericSearchResponse,
     IacrConferenceResponse,
     IEEESearchRequestForm,
@@ -2409,7 +2459,7 @@ async def repec_citations(handle: str = Query(..., min_length=8)):
 
 @router.get(
     "/ieee",
-    response_model=GenericSearchResponse,
+    response_model=GenericPageSearchResponse,
     summary="Search IEEE Xplore (scaffold)",
     tags=["paper-search"],
 )
@@ -2435,7 +2485,7 @@ async def paper_search_ieee(search_params: IEEESearchRequestForm = Depends()):
         total_pages = math.ceil(total / search_params.results_per_page) if search_params.results_per_page > 0 else 0
         if total == 0:
             total_pages = 0
-        return GenericSearchResponse(
+        return GenericPageSearchResponse(
             query_echo={
                 "q": search_params.q,
                 "from_year": search_params.from_year,
@@ -2448,6 +2498,12 @@ async def paper_search_ieee(search_params: IEEESearchRequestForm = Depends()):
             page=search_params.page,
             results_per_page=search_params.results_per_page,
             total_pages=total_pages,
+            pagination=build_page_pagination_meta(
+                page=search_params.page,
+                per_page=search_params.results_per_page,
+                total=total,
+                total_pages=total_pages,
+            ),
         )
     except HTTPException:
         raise
@@ -2502,7 +2558,7 @@ async def paper_search_ieee_by_id(article_number: str = Query(...)):
 
 @router.get(
     "/springer",
-    response_model=GenericSearchResponse,
+    response_model=GenericPageSearchResponse,
     summary="Search Springer Nature (scaffold)",
     tags=["paper-search"],
 )
@@ -2527,7 +2583,7 @@ async def paper_search_springer(search_params: SimpleVenueSearchForm = Depends()
         total_pages = math.ceil(total / search_params.results_per_page) if search_params.results_per_page > 0 else 0
         if total == 0:
             total_pages = 0
-        return GenericSearchResponse(
+        return GenericPageSearchResponse(
             query_echo={
                 "q": search_params.q,
                 "journal": search_params.venue,
@@ -2539,6 +2595,12 @@ async def paper_search_springer(search_params: SimpleVenueSearchForm = Depends()
             page=search_params.page,
             results_per_page=search_params.results_per_page,
             total_pages=total_pages,
+            pagination=build_page_pagination_meta(
+                page=search_params.page,
+                per_page=search_params.results_per_page,
+                total=total,
+                total_pages=total_pages,
+            ),
         )
     except HTTPException:
         raise
@@ -2571,7 +2633,7 @@ async def paper_search_springer_by_doi(params: DOIRequestForm = Depends()):
 
 @router.get(
     "/scopus",
-    response_model=GenericSearchResponse,
+    response_model=GenericPageSearchResponse,
     summary="Search Elsevier Scopus (scaffold)",
     tags=["paper-search"],
 )
@@ -2603,7 +2665,7 @@ async def paper_search_scopus(
         total_pages = math.ceil(total / results_per_page) if results_per_page > 0 else 0
         if total == 0:
             total_pages = 0
-        return GenericSearchResponse(
+        return GenericPageSearchResponse(
             query_echo={
                 "q": q,
                 "from_year": from_year,
@@ -2615,6 +2677,12 @@ async def paper_search_scopus(
             page=page,
             results_per_page=results_per_page,
             total_pages=total_pages,
+            pagination=build_page_pagination_meta(
+                page=page,
+                per_page=results_per_page,
+                total=total,
+                total_pages=total_pages,
+            ),
         )
     except HTTPException:
         raise
@@ -2647,7 +2715,7 @@ async def paper_search_scopus_by_doi(params: DOIRequestForm = Depends()):
 
 @router.get(
     "/acm",
-    response_model=GenericSearchResponse,
+    response_model=GenericPageSearchResponse,
     summary="Search ACM Digital Library via aggregators (scaffold)",
     tags=["paper-search"],
 )
@@ -2674,7 +2742,7 @@ async def paper_search_acm(search_params: SimpleVenueSearchForm = Depends()):
         total_pages = math.ceil(total / search_params.results_per_page) if search_params.results_per_page > 0 else 0
         if total == 0:
             total_pages = 0
-        return GenericSearchResponse(
+        return GenericPageSearchResponse(
             query_echo={
                 "q": search_params.q,
                 "venue": search_params.venue or "ACM",
@@ -2686,6 +2754,12 @@ async def paper_search_acm(search_params: SimpleVenueSearchForm = Depends()):
             page=search_params.page,
             results_per_page=search_params.results_per_page,
             total_pages=total_pages,
+            pagination=build_page_pagination_meta(
+                page=search_params.page,
+                per_page=search_params.results_per_page,
+                total=total,
+                total_pages=total_pages,
+            ),
         )
     except HTTPException:
         raise
@@ -2718,7 +2792,7 @@ async def paper_search_acm_by_doi(params: DOIRequestForm = Depends()):
 
 @router.get(
     "/wiley",
-    response_model=GenericSearchResponse,
+    response_model=GenericPageSearchResponse,
     summary="Search Wiley via aggregators (scaffold)",
     tags=["paper-search"],
 )
@@ -2744,7 +2818,7 @@ async def paper_search_wiley(search_params: SimpleVenueSearchForm = Depends()):
         total_pages = math.ceil(total / search_params.results_per_page) if search_params.results_per_page > 0 else 0
         if total == 0:
             total_pages = 0
-        return GenericSearchResponse(
+        return GenericPageSearchResponse(
             query_echo={
                 "q": search_params.q,
                 "venue": search_params.venue or "Wiley",
@@ -2756,6 +2830,12 @@ async def paper_search_wiley(search_params: SimpleVenueSearchForm = Depends()):
             page=search_params.page,
             results_per_page=search_params.results_per_page,
             total_pages=total_pages,
+            pagination=build_page_pagination_meta(
+                page=search_params.page,
+                per_page=search_params.results_per_page,
+                total=total,
+                total_pages=total_pages,
+            ),
         )
     except HTTPException:
         raise
@@ -3389,7 +3469,7 @@ async def ingest_batch(
 
 @router.get(
     "/chemrxiv/items",
-    response_model=GenericSearchResponse,
+    response_model=GenericPageSearchResponse,
     summary="Search ChemRxiv items",
     tags=["paper-search"],
 )
@@ -3416,7 +3496,7 @@ async def chemrxiv_items(search: ChemRxivSearchRequestForm = Depends()):
             raise HTTPException(status_code=500, detail="ChemRxiv search failed to return data.")  # noqa: TRY301
         page = (search.skip // max(1, search.limit)) + 1
         total_pages = math.ceil(total / search.limit) if search.limit > 0 else 0
-        return GenericSearchResponse(
+        return GenericPageSearchResponse(
             query_echo={
                 "term": search.term,
                 "skip": search.skip,
@@ -3429,6 +3509,12 @@ async def chemrxiv_items(search: ChemRxivSearchRequestForm = Depends()):
             page=page,
             results_per_page=search.limit,
             total_pages=total_pages,
+            pagination=build_page_pagination_meta(
+                page=page,
+                per_page=search.limit,
+                total=total,
+                total_pages=total_pages,
+            ),
         )
     except HTTPException:
         raise
@@ -3597,7 +3683,7 @@ async def iacr_conf_raw(
 
 @router.get(
     "/earthrxiv",
-    response_model=GenericSearchResponse,
+    response_model=GenericPageSearchResponse,
     summary="Search EarthArXiv (OSF) preprints",
     tags=["paper-search"],
 )
@@ -3615,13 +3701,19 @@ async def earthrxiv_search(
         if items is None:
             raise HTTPException(status_code=500, detail="EarthArXiv search failed to return data.")  # noqa: TRY301
         total_pages = math.ceil(total / results_per_page) if results_per_page > 0 else 0
-        return GenericSearchResponse(
+        return GenericPageSearchResponse(
             query_echo={"term": term, "from_date": from_date},
             items=[GenericPaper(**it) for it in items],
             total_results=total,
             page=page,
             results_per_page=results_per_page,
             total_pages=total_pages,
+            pagination=build_page_pagination_meta(
+                page=page,
+                per_page=results_per_page,
+                total=total,
+                total_pages=total_pages,
+            ),
         )
     except HTTPException:
         raise
@@ -3678,7 +3770,7 @@ async def earthrxiv_by_doi(doi: str = Query(..., min_length=3)):
 
 @router.get(
     "/osf",
-    response_model=GenericSearchResponse,
+    response_model=GenericPageSearchResponse,
     summary="Search OSF preprints (all providers or a specific provider)",
     tags=["paper-search"],
 )
@@ -3699,7 +3791,7 @@ async def osf_search(search: OSFSearchRequestForm = Depends()):
         if items is None:
             raise HTTPException(status_code=500, detail="OSF search failed to return data.")  # noqa: TRY301
         total_pages = math.ceil(total / search.results_per_page) if search.results_per_page > 0 else 0
-        return GenericSearchResponse(
+        return GenericPageSearchResponse(
             query_echo={
                 "term": search.term,
                 "provider": search.provider,
@@ -3710,6 +3802,12 @@ async def osf_search(search: OSFSearchRequestForm = Depends()):
             page=search.page,
             results_per_page=search.results_per_page,
             total_pages=total_pages,
+            pagination=build_page_pagination_meta(
+                page=search.page,
+                per_page=search.results_per_page,
+                total=total,
+                total_pages=total_pages,
+            ),
         )
     except HTTPException:
         raise
@@ -3966,7 +4064,7 @@ async def osf_raw_by_id(osf_id: str = Query(..., min_length=3)):
 
 @router.get(
     "/zenodo",
-    response_model=GenericSearchResponse,
+    response_model=GenericPageSearchResponse,
     summary="Search Zenodo published records",
     tags=["paper-search"],
 )
@@ -3986,13 +4084,19 @@ async def zenodo_search(
         if items is None:
             raise HTTPException(status_code=500, detail="Zenodo search failed to return data.")  # noqa: TRY301
         total_pages = math.ceil(total / results_per_page) if results_per_page > 0 else 0
-        return GenericSearchResponse(
+        return GenericPageSearchResponse(
             query_echo={"q": q, "type": type, "subtype": subtype, "communities": communities},
             items=[GenericPaper(**it) for it in items],
             total_results=total,
             page=page,
             results_per_page=results_per_page,
             total_pages=total_pages,
+            pagination=build_page_pagination_meta(
+                page=page,
+                per_page=results_per_page,
+                total=total,
+                total_pages=total_pages,
+            ),
         )
     except HTTPException:
         raise
@@ -4247,7 +4351,7 @@ async def zenodo_ingest(
 
 @router.get(
     "/figshare",
-    response_model=GenericSearchResponse,
+    response_model=GenericPageSearchResponse,
     summary="Search Figshare records",
     tags=["paper-search"],
 )
@@ -4267,13 +4371,19 @@ async def figshare_search(
         if items is None:
             raise HTTPException(status_code=500, detail="Figshare search failed to return data.")  # noqa: TRY301
         total_pages = math.ceil(total / results_per_page) if results_per_page > 0 else 0
-        return GenericSearchResponse(
+        return GenericPageSearchResponse(
             query_echo={"q": q, "search_for": search_for, "order": order, "order_direction": order_direction},
             items=[GenericPaper(**it) for it in items],
             total_results=total,
             page=page,
             results_per_page=results_per_page,
             total_pages=total_pages,
+            pagination=build_page_pagination_meta(
+                page=page,
+                per_page=results_per_page,
+                total=total,
+                total_pages=total_pages,
+            ),
         )
     except HTTPException:
         raise
@@ -4671,7 +4781,7 @@ async def figshare_ingest_by_doi(
 
 @router.get(
     "/hal",
-    response_model=GenericSearchResponse,
+    response_model=GenericPageSearchResponse,
     summary="Search HAL (Solr-like)",
     tags=["paper-search"],
 )
@@ -4694,13 +4804,19 @@ async def hal_search(
         if items is None:
             raise HTTPException(status_code=500, detail="HAL search failed to return data.")  # noqa: TRY301
         total_pages = math.ceil(total / results_per_page) if results_per_page > 0 else 0
-        return GenericSearchResponse(
+        return GenericPageSearchResponse(
             query_echo={"q": q, "fl": fl, "fq": fqs, "sort": sort, "scope": scope},
             items=[GenericPaper(**it) for it in items],
             total_results=total,
             page=page,
             results_per_page=results_per_page,
             total_pages=total_pages,
+            pagination=build_page_pagination_meta(
+                page=page,
+                per_page=results_per_page,
+                total=total,
+                total_pages=total_pages,
+            ),
         )
     except HTTPException:
         raise
@@ -5073,7 +5189,7 @@ async def vixra_ingest(
 
 @router.get(
     "/vixra/search",
-    response_model=GenericSearchResponse,
+    response_model=GenericPageSearchResponse,
     summary="Best-effort viXra search (HTML scrape)",
     tags=["paper-search"],
 )
@@ -5088,14 +5204,21 @@ async def vixra_search(
         if err:
             _handle_provider_error(err)
         items = items or []
-        total_pages = 1 if items else 0
-        return GenericSearchResponse(
+        total_count = int(total or 0)
+        total_pages = math.ceil(total_count / results_per_page) if total_count else 0
+        return GenericPageSearchResponse(
             query_echo={"term": term},
             items=[GenericPaper(**it) for it in items],
             total_results=total,
             page=page,
             results_per_page=results_per_page,
             total_pages=total_pages,
+            pagination=build_page_pagination_meta(
+                page=page,
+                per_page=results_per_page,
+                total=total,
+                total_pages=total_pages,
+            ),
         )
     except HTTPException:
         raise

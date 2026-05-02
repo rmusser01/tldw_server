@@ -10,7 +10,9 @@ from datetime import datetime
 from typing import Literal
 
 # 3rd-party Libraries
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
 
 #
 # Local Imports
@@ -21,6 +23,14 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 # Skill name validation: lowercase letters, numbers, and hyphens only
 SKILL_NAME_PATTERN = re.compile(r'^[a-z][a-z0-9-]{0,63}$')
+
+
+def _default_offset_pagination_aliases(response):
+    if response.has_more is None:
+        response.has_more = response.pagination.has_more
+    if response.next_offset is None:
+        response.next_offset = response.pagination.next_offset
+    return response
 SUPPORTING_FILE_NAME_PATTERN = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9._-]{0,99}$')
 
 # Aggregate limits for supporting files
@@ -192,8 +202,15 @@ class SkillsListResponse(BaseModel):
     total: int = Field(..., description="Total number of skills")
     limit: int = Field(..., description="Pagination limit")
     offset: int = Field(..., description="Pagination offset")
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+    pagination: OffsetPaginationMeta = Field(..., description="Canonical pagination metadata")
 
     model_config = ConfigDict(from_attributes=True)
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self):
+        return _default_offset_pagination_aliases(self)
 
 
 class SkillExecuteRequest(BaseModel):

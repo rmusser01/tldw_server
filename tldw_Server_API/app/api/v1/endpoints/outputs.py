@@ -14,6 +14,7 @@ from starlette.responses import FileResponse
 
 from tldw_Server_API.app.api.v1.API_Deps.Collections_DB_Deps import get_collections_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.endpoints.outputs_templates import (
     _build_items_context_from_media_ids,
     _select_media_ids_for_run,
@@ -146,7 +147,18 @@ async def list_outputs(
                 workspace_tag=r.workspace_tag,
             )
         )
-    return OutputListResponse(items=items, total=total, page=page, size=limit)
+    return OutputListResponse(
+        items=items,
+        total=total,
+        page=page,
+        size=limit,
+        pagination=build_offset_pagination_meta(
+            total=total,
+            offset=offset,
+            limit=limit,
+            count=len(items),
+        ),
+    )
 
 
 @router.get("/deleted", response_model=OutputListResponse, summary="List only soft-deleted outputs")
@@ -189,7 +201,18 @@ async def list_deleted_outputs(
                 workspace_tag=r.workspace_tag,
             )
         )
-    return OutputListResponse(items=items, total=total, page=page, size=limit)
+    return OutputListResponse(
+        items=items,
+        total=total,
+        page=page,
+        size=limit,
+        pagination=build_offset_pagination_meta(
+            total=total,
+            offset=offset,
+            limit=limit,
+            count=len(items),
+        ),
+    )
 
 
 @router.post("", response_model=OutputArtifact, summary="Generate and persist a rendered output artifact")

@@ -13,6 +13,7 @@ from starlette import status
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, get_request_user, TokenScopeGuard, User
 
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_cursor_pagination_meta
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.api.v1.schemas.audio_schemas import (
     TTSHistoryDetailResponse,
@@ -236,9 +237,17 @@ async def list_tts_history(
         last_row = rows[-1]
         try:
             next_cursor = _encode_cursor(last_row.get("created_at"), int(last_row.get("id")))
-        except _TTS_HISTORY_NONCRITICAL_EXCEPTIONS:
-            logger.debug("TTS history: failed to build next cursor")
-            next_cursor = None
+        except _TTS_HISTORY_NONCRITICAL_EXCEPTIONS as exc:
+            logger.error(
+                "TTS history: failed to build next cursor for id={} created_at={}",
+                last_row.get("id"),
+                last_row.get("created_at"),
+                exc_info=True,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to list TTS history",
+            ) from exc
 
     total = None
     if include_total:
@@ -276,6 +285,12 @@ async def list_tts_history(
         limit=limit,
         offset=offset,
         next_cursor=next_cursor,
+        pagination=build_cursor_pagination_meta(
+            limit=limit,
+            cursor=cursor,
+            next_cursor=next_cursor,
+            has_more=has_more,
+        ),
     )
 
 

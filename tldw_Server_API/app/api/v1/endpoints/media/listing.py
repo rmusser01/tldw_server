@@ -20,10 +20,12 @@ from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import (
     get_media_db_for_user,
     try_get_media_db_for_user,
 )
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_page_pagination_meta
 from tldw_Server_API.app.api.v1.schemas.media_request_models import SearchRequest
 from tldw_Server_API.app.api.v1.schemas.media_response_models import (
     MediaListItem,
     MediaListResponse,
+    PaginationInfo,
 )
 from tldw_Server_API.app.api.v1.utils.cache import generate_etag, is_not_modified
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
@@ -309,14 +311,20 @@ async def list_media_endpoint(
                 base_payload["keywords"] = keywords_map.get(mid, [])
             items.append(base_payload)
 
+        pagination_info = PaginationInfo(
+            results_per_page=int(results_per_page),
+            total_items=int(total_items),
+            **build_page_pagination_meta(
+                page=int(current_page),
+                per_page=int(results_per_page),
+                total=int(total_items),
+                total_pages=int(total_pages),
+            ).model_dump(),
+        )
+
         payload: dict[str, Any] = {
             "items": items,
-            "pagination": {
-                "page": int(current_page),
-                "results_per_page": int(results_per_page),
-                "total_pages": int(total_pages),
-                "total_items": int(total_items),
-            },
+            "pagination": pagination_info.model_dump(),
         }
 
         if include_keywords and keywords_available is not None:
@@ -470,14 +478,20 @@ async def list_media_trash_endpoint(
                 base_payload["keywords"] = keywords_map.get(mid, [])
             items.append(base_payload)
 
+        pagination_info = PaginationInfo(
+            results_per_page=int(results_per_page),
+            total_items=int(total_items),
+            **build_page_pagination_meta(
+                page=int(current_page),
+                per_page=int(results_per_page),
+                total=int(total_items),
+                total_pages=int(total_pages),
+            ).model_dump(),
+        )
+
         payload: dict[str, Any] = {
             "items": items,
-            "pagination": {
-                "page": int(current_page),
-                "results_per_page": int(results_per_page),
-                "total_pages": int(total_pages),
-                "total_items": int(total_items),
-            },
+            "pagination": pagination_info.model_dump(),
         }
 
         if include_keywords and keywords_available is not None:
@@ -1009,15 +1023,15 @@ async def search_media_items(
 
         total_pages = ceil(total_items / results_per_page) if results_per_page > 0 and total_items > 0 else 0
 
-        from tldw_Server_API.app.api.v1.schemas.media_response_models import (
-            PaginationInfo,
-        )
-
         pagination_info = PaginationInfo(
-            page=page,
             results_per_page=results_per_page,
-            total_pages=total_pages,
             total_items=total_items,
+            **build_page_pagination_meta(
+                page=page,
+                per_page=results_per_page,
+                total=total_items,
+                total_pages=total_pages,
+            ).model_dump(),
         )
 
         try:

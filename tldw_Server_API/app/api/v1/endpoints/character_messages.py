@@ -13,6 +13,7 @@ from pydantic import ValidationError
 
 # Database and authentication dependencies
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 
 # Schemas
@@ -659,7 +660,13 @@ async def get_chat_messages(
                 messages=built_messages,
                 total=total_count,
                 limit=limit,
-                offset=offset
+                offset=offset,
+                pagination=build_offset_pagination_meta(
+                    total=total_count,
+                    limit=limit,
+                    offset=offset,
+                    count=len(built_messages),
+                ),
             )
 
             # Add character context as additional field
@@ -722,7 +729,13 @@ async def get_chat_messages(
             messages=built_messages,
             total=total_count,
             limit=limit,
-            offset=offset
+            offset=offset,
+            pagination=build_offset_pagination_meta(
+                total=total_count,
+                limit=limit,
+                offset=offset,
+                count=len(built_messages),
+            ),
         )
 
     except HTTPException:
@@ -1013,6 +1026,7 @@ async def search_messages(
     chat_id: str = Path(..., description="Chat session ID"),
     query: str = Query(..., description="Search query", min_length=1, max_length=MAX_SEARCH_QUERY_LENGTH),
     limit: int = Query(50, ge=1, le=200, description="Maximum results"),
+    offset: int = Query(0, ge=0, description="Offset for search pagination"),
     scope_type: Literal["global", "workspace"] | None = Query(None, description="Conversation scope type"),
     workspace_id: str | None = Query(None, description="Workspace ID when scope_type='workspace'"),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
@@ -1025,6 +1039,7 @@ async def search_messages(
         chat_id: Chat session ID
         query: Search query string
         limit: Maximum number of results
+        offset: Offset for search pagination
         db: Database instance
         current_user: Authenticated user
 
@@ -1055,17 +1070,27 @@ async def search_messages(
             query,
             character_name_for_placeholders=character_name,
             user_name_for_placeholders=user_name,
-            limit=limit,
+            limit=limit + 1,
+            offset=offset,
         )
 
         if not results:
             results = []
+        has_more = len(results) > limit
+        page_results = results[:limit]
 
         return MessageListResponse(
-            messages=[_convert_db_message_to_response(msg) for msg in results],
-            total=len(results),
+            messages=[_convert_db_message_to_response(msg) for msg in page_results],
+            total=len(page_results),
             limit=limit,
-            offset=0
+            offset=offset,
+            pagination=build_offset_pagination_meta(
+                total=None,
+                limit=limit,
+                offset=offset,
+                count=len(page_results),
+                has_more=has_more,
+            ),
         )
 
     except HTTPException:

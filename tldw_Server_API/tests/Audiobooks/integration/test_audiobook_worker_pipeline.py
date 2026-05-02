@@ -947,11 +947,39 @@ def test_audiobook_project_pagination(
     assert page1.status_code == 200
     page2 = client_user_only.get("/api/v1/audiobooks/projects?limit=1&offset=1")
     assert page2.status_code == 200
-    projects_page1 = page1.json()["projects"]
-    projects_page2 = page2.json()["projects"]
+    page1_payload = page1.json()
+    page2_payload = page2.json()
+    projects_page1 = page1_payload["projects"]
+    projects_page2 = page2_payload["projects"]
     assert len(projects_page1) == 1
     assert len(projects_page2) == 1
     assert projects_page1[0]["project_id"] != projects_page2[0]["project_id"]
+    assert page1_payload["total"] == 2
+    assert page1_payload["limit"] == 1
+    assert page1_payload["offset"] == 0
+    assert page1_payload["has_more"] is True
+    assert page1_payload["next_offset"] == 1
+    assert page1_payload["pagination"] == {
+        "mode": "offset",
+        "total": 2,
+        "limit": 1,
+        "offset": 0,
+        "has_more": True,
+        "next_offset": 1,
+    }
+    assert page2_payload["total"] == 2
+    assert page2_payload["limit"] == 1
+    assert page2_payload["offset"] == 1
+    assert page2_payload["has_more"] is False
+    assert page2_payload["next_offset"] is None
+    assert page2_payload["pagination"] == {
+        "mode": "offset",
+        "total": 2,
+        "limit": 1,
+        "offset": 1,
+        "has_more": False,
+        "next_offset": None,
+    }
 
     project_id = project_ids[0]
     art_page1 = client_user_only.get(

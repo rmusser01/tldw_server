@@ -11,6 +11,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import (
+    build_offset_pagination_meta,
+)
 from tldw_Server_API.app.api.v1.schemas.admin_schemas import (
     FeatureFlagItem,
     FeatureFlagsResponse,
@@ -409,6 +412,12 @@ async def list_maintenance_rotation_runs(
         total=payload["total"],
         limit=payload["limit"],
         offset=payload["offset"],
+        pagination=build_offset_pagination_meta(
+            total=payload["total"],
+            limit=payload["limit"],
+            offset=payload["offset"],
+            count=len(payload["items"]),
+        ),
     )
 
 
@@ -562,6 +571,12 @@ async def list_incidents(
         total=total,
         limit=limit,
         offset=offset,
+        pagination=build_offset_pagination_meta(
+            total=total,
+            limit=limit,
+            offset=offset,
+            count=len(items),
+        ),
     )
 
 
@@ -884,9 +899,16 @@ async def list_webhooks(
     """List all configured webhooks (secrets redacted)."""
     _require_platform_admin(principal)
     items = svc_list_webhooks()
+    limit = len(items)
     return WebhookListResponse(
         items=[WebhookItem(**item) for item in items],
         total=len(items),
+        pagination=build_offset_pagination_meta(
+            total=len(items),
+            limit=limit,
+            offset=0,
+            count=len(items),
+        ),
     )
 
 

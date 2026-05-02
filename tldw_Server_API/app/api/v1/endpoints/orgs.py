@@ -13,6 +13,7 @@ from loguru import logger
 from tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps import (
     get_or_create_audit_service_for_user_id,
 )
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     get_auth_principal,
     get_db_transaction,
@@ -105,37 +106,25 @@ async def list_my_orgs(
     db_pool = await get_db_pool()
     repo = AuthnzOrgsTeamsRepo(db_pool=db_pool)
 
-    # Get user's org memberships
-    memberships = await repo.list_org_memberships_for_user(principal.user_id)
-    org_ids = [m["org_id"] for m in memberships]
-
-    if not org_ids:
-        return OrganizationListResponse(
-            items=[],
-            total=0,
-            limit=limit,
-            offset=offset,
-            has_more=False,
-        )
-
-    # Fetch org details
-    all_orgs, _ = await repo.list_organizations(with_total=True, limit=1000, offset=0)
-
-    # Filter to user's orgs and add role info
-    user_orgs = []
-    for org in all_orgs:
-        if org["id"] in org_ids:
-            user_orgs.append(org)
-
-    # Apply pagination
-    paginated = user_orgs[offset : offset + limit]
+    paginated, total = await repo.list_organizations_for_user(
+        principal.user_id,
+        limit=limit,
+        offset=offset,
+        with_total=True,
+    )
 
     return OrganizationListResponse(
         items=[OrganizationResponse(**org) for org in paginated],
-        total=len(user_orgs),
+        total=total,
         limit=limit,
         offset=offset,
-        has_more=offset + limit < len(user_orgs),
+        has_more=offset + len(paginated) < total,
+        pagination=build_offset_pagination_meta(
+            limit=limit,
+            offset=offset,
+            total=total,
+            count=len(paginated),
+        ),
     )
 
 
@@ -805,6 +794,14 @@ async def list_invites(
     return OrgInviteListResponse(
         items=[OrgInviteResponse(**inv) for inv in invites],
         total=total,
+        limit=limit,
+        offset=offset,
+        pagination=build_offset_pagination_meta(
+            limit=limit,
+            offset=offset,
+            total=total,
+            count=len(invites),
+        ),
     )
 
 

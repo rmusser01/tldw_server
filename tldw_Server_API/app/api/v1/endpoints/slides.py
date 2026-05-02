@@ -24,6 +24,7 @@ from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_
 from tldw_Server_API.app.api.v1.API_Deps.Collections_DB_Deps import get_collections_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.Slides_DB_Deps import get_slides_db_for_user
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import DEFAULT_LLM_PROVIDER
 from tldw_Server_API.app.api.v1.schemas.slides_schemas import (
     ExportFormat,
@@ -1220,6 +1221,12 @@ async def list_presentations(
         total=total,
         limit=limit,
         offset=offset,
+        pagination=build_offset_pagination_meta(
+            limit=limit,
+            offset=offset,
+            total=total,
+            count=len(rows),
+        ),
     )
 
 
@@ -1242,6 +1249,12 @@ async def search_presentations(
         total=total,
         limit=limit,
         offset=offset,
+        pagination=build_offset_pagination_meta(
+            limit=limit,
+            offset=offset,
+            total=total,
+            count=len(rows),
+        ),
     )
 
 
@@ -1609,7 +1622,18 @@ async def list_visual_styles(
         ),
         *(_visual_style_response_from_row(row) for row in user_rows),
     ]
-    return VisualStyleListResponse(styles=styles, total_count=total_count, limit=limit, offset=offset)
+    return VisualStyleListResponse(
+        styles=styles,
+        total_count=total_count,
+        limit=limit,
+        offset=offset,
+        pagination=build_offset_pagination_meta(
+            limit=limit,
+            offset=offset,
+            total=total_count,
+            count=len(styles),
+        ),
+    )
 
 
 @router.get(
@@ -1796,7 +1820,18 @@ async def list_presentation_versions(
                 payload=payload,
             )
         )
-    return PresentationVersionListResponse(versions=versions, total=total, limit=limit, offset=offset)
+    return PresentationVersionListResponse(
+        versions=versions,
+        total=total,
+        limit=limit,
+        offset=offset,
+        pagination=build_offset_pagination_meta(
+            limit=limit,
+            offset=offset,
+            total=total,
+            count=len(versions),
+        ),
+    )
 
 
 @router.get(

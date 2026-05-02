@@ -1,7 +1,7 @@
 # Startup Warning Framework Design
 
-**Date:** 2026-04-30  
-**Status:** Draft for review  
+**Date:** 2026-04-30
+**Status:** Draft for review
 **Scope:** `tldw_Server_API/app/services/`, admin API schemas/endpoints, sandbox diagnostics integration, and startup/lifespan wiring
 
 ## Summary

@@ -10,8 +10,16 @@ try:
 except ImportError:  # pragma: no cover - pydantic v1 fallback
     from pydantic import root_validator as model_validator  # type: ignore
 
+from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
+
 RuntimeType = Literal["docker", "firecracker", "lima", "vz_linux", "vz_macos", "seatbelt"]
 TrustLevelType = Literal["trusted", "standard", "untrusted"]
+
+
+def _default_offset_pagination_aliases(response):
+    if response.next_offset is None:
+        response.next_offset = response.pagination.next_offset
+    return response
 
 
 class SandboxRuntimeInfo(BaseModel):
@@ -231,7 +239,13 @@ class SandboxAdminRunListResponse(BaseModel):
     limit: int
     offset: int
     has_more: bool
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+    pagination: OffsetPaginationMeta
     items: list[SandboxAdminRunSummary]
+
+    @model_validator(mode="after")
+    def default_pagination_aliases(self) -> "SandboxAdminRunListResponse":
+        return _default_offset_pagination_aliases(self)
 
 
 class SandboxAdminRunDetails(SandboxAdminRunSummary):
@@ -253,7 +267,13 @@ class SandboxAdminIdempotencyListResponse(BaseModel):
     limit: int
     offset: int
     has_more: bool
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+    pagination: OffsetPaginationMeta
     items: list[SandboxAdminIdempotencyItem]
+
+    @model_validator(mode="after")
+    def default_pagination_aliases(self) -> "SandboxAdminIdempotencyListResponse":
+        return _default_offset_pagination_aliases(self)
 
 
 # Admin: Usage aggregates
@@ -269,7 +289,13 @@ class SandboxAdminUsageResponse(BaseModel):
     limit: int
     offset: int
     has_more: bool
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+    pagination: OffsetPaginationMeta
     items: list[SandboxAdminUsageItem]
+
+    @model_validator(mode="after")
+    def default_pagination_aliases(self) -> "SandboxAdminUsageResponse":
+        return _default_offset_pagination_aliases(self)
 
 
 class SandboxAdminMacOSHostDiagnostics(BaseModel):
