@@ -172,6 +172,8 @@ async def test_admin_data_ops_backups_and_exports(tmp_path):
         assert payload["pagination"]["total"] >= 1
         assert payload["pagination"]["limit"] == 100
         assert payload["pagination"]["offset"] == 0
+        assert payload["has_more"] == payload["pagination"]["has_more"]
+        assert payload["next_offset"] == payload["pagination"]["next_offset"]
         listed = payload["items"]
         assert any(item["id"] == backup_id for item in listed)
 

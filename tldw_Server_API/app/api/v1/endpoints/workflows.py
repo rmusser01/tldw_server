@@ -33,6 +33,10 @@ from pydantic import BaseModel, Field, ValidationError
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, RequirePermission, RequireRole, resolve_user_id_for_request, TokenScopeGuard, User
 
 from tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps import get_audit_service_for_user
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import (
+    build_cursor_pagination_meta,
+    build_offset_pagination_meta,
+)
 from tldw_Server_API.app.api.v1.schemas.workflows import (
     AdhocRunRequest,
     EventResponse,
@@ -2236,8 +2240,27 @@ async def list_runs(
         except _WORKFLOWS_NONCRITICAL_EXCEPTIONS as e:
             logger.debug(f"Workflows runs: failed to set Link headers: {e}")
 
+    pagination = (
+        build_cursor_pagination_meta(
+            limit=limit,
+            cursor=cursor,
+            next_cursor=next_cursor,
+            has_more=has_more,
+        )
+        if cursor_ts is not None
+        else build_offset_pagination_meta(
+            limit=limit,
+            offset=offset,
+            count=len(items),
+            has_more=has_more,
+        )
+    )
+
     return WorkflowRunListResponse(
         runs=items,
+        limit=limit,
+        offset=None if cursor_ts is not None else offset,
+        pagination=pagination,
         next_offset=(offset + limit) if (has_more and cursor_ts is None) else None,
         next_cursor=next_cursor,
     )

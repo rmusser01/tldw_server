@@ -269,6 +269,34 @@ class TestCheckStorageQuota:
         instance.check_quota_status.assert_called_once_with(team_id=10)
 
 
+class TestAdminStorageQuotaSummaryPagination:
+    @pytest.mark.asyncio
+    async def test_get_storage_quota_summary_returns_canonical_pagination(self, monkeypatch):
+        repo = MagicMock()
+        repo.list_all_quotas = AsyncMock(
+            return_value=[
+                {"id": 1, "quota_mb": 1000},
+                {"id": 2, "quota_mb": 2000},
+            ]
+        )
+        monkeypatch.setattr(quotas_module, "_get_repo", AsyncMock(return_value=repo))
+
+        result = await quotas_module.get_storage_quota_summary(offset=10, limit=2)
+
+        assert result.total_quotas == 2
+        assert result.pagination.model_dump(mode="json") == {
+            "mode": "offset",
+            "limit": 2,
+            "offset": 10,
+            "total": None,
+            "has_more": True,
+            "next_offset": 12,
+        }
+        assert result.has_more is True
+        assert result.next_offset == 12
+        repo.list_all_quotas.assert_awaited_once_with(offset=10, limit=2)
+
+
 class TestAdminStorageQuotaEndpointErrorMapping:
     @pytest.mark.asyncio
     async def test_get_user_storage_quota_sanitizes_generic_failure(self, monkeypatch):

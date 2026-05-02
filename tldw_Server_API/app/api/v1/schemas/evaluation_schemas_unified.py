@@ -23,6 +23,14 @@ except Exception:
     bleach = None
 
 
+def _default_offset_pagination_aliases(response):
+    if response.has_more is None:
+        response.has_more = response.pagination.has_more
+    if response.next_offset is None:
+        response.next_offset = response.pagination.next_offset
+    return response
+
+
 # ============= Utility Functions =============
 
 def sanitize_html_text(value: Optional[str]) -> Optional[str]:
@@ -428,6 +436,12 @@ class DatasetListResponse(ListResponse):
     """Dataset list response"""
     data: list[DatasetResponse]
     pagination: OffsetPaginationMeta
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self):
+        return _default_offset_pagination_aliases(self)
 
 
 # ============= tldw-Specific Evaluation Schemas =============

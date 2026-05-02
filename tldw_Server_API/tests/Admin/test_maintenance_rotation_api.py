@@ -158,6 +158,8 @@ async def test_maintenance_rotation_create_list_and_detail_roundtrip(monkeypatch
             assert listed["pagination"]["limit"] == 25
             assert listed["pagination"]["offset"] == 0
             assert listed["pagination"]["has_more"] is False
+            assert listed["has_more"] is False
+            assert listed["next_offset"] is None
             assert listed["items"][0]["id"] == "run-1"
 
             detail_resp = client.get("/api/v1/admin/maintenance/rotation-runs/run-1")

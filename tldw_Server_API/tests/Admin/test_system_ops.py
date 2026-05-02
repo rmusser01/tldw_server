@@ -50,6 +50,8 @@ async def test_admin_system_ops_endpoints(monkeypatch, tmp_path):
             assert payload["pagination"]["limit"] == 100
             assert payload["pagination"]["offset"] == 0
             assert payload["pagination"]["total"] >= 1
+            assert payload["has_more"] == payload["pagination"]["has_more"]
+            assert payload["next_offset"] == payload["pagination"]["next_offset"]
             assert any("System ops log test entry" in (item.get("message") or "") for item in payload["items"])
         else:
             # Some deployments do not mount system logs endpoints.
@@ -79,6 +81,8 @@ async def test_admin_system_ops_endpoints(monkeypatch, tmp_path):
             assert audit_payload["pagination"]["limit"] == 100
             assert audit_payload["pagination"]["offset"] == 0
             assert audit_payload["pagination"]["total"] == audit_payload["total"]
+            assert audit_payload["has_more"] == audit_payload["pagination"]["has_more"]
+            assert audit_payload["next_offset"] == audit_payload["pagination"]["next_offset"]
         else:
             assert audit_log_resp.status_code == 404, audit_log_resp.text
 
@@ -183,6 +187,8 @@ async def test_admin_system_ops_endpoints(monkeypatch, tmp_path):
         assert payload["pagination"]["total"] >= 1
         assert payload["pagination"]["limit"] == 50
         assert payload["pagination"]["offset"] == 0
+        assert payload["has_more"] == payload["pagination"]["has_more"]
+        assert payload["next_offset"] == payload["pagination"]["next_offset"]
 
         delete_resp = client.delete(f"/api/v1/admin/incidents/{incident_id}")
         assert delete_resp.status_code == 200, delete_resp.text
@@ -204,6 +210,8 @@ async def test_admin_system_ops_endpoints(monkeypatch, tmp_path):
         assert webhook_payload["pagination"]["total"] >= 1
         assert webhook_payload["pagination"]["offset"] == 0
         assert webhook_payload["pagination"]["limit"] >= 1
+        assert webhook_payload["has_more"] == webhook_payload["pagination"]["has_more"]
+        assert webhook_payload["next_offset"] == webhook_payload["pagination"]["next_offset"]
         assert any(item["url"] == "https://example.com/webhook" for item in webhook_payload["items"])
 
         # Reset maintenance state for subsequent tests

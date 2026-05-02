@@ -255,6 +255,8 @@ def test_list_webhooks_route_includes_canonical_pagination(monkeypatch: pytest.M
         "has_more": True,
         "next_offset": 3,
     }
+    assert payload["has_more"] is True
+    assert payload["next_offset"] == 3
     assert fake_service.list_webhooks_args == {"limit": 2, "offset": 1, "active_only": False}
 
 
@@ -277,6 +279,8 @@ def test_list_webhook_deliveries_route_includes_canonical_pagination(monkeypatch
         "has_more": True,
         "next_offset": 3,
     }
+    assert payload["has_more"] is True
+    assert payload["next_offset"] == 3
     assert fake_service.get_webhook_id == 1
     assert fake_service.list_delivery_args == {"webhook_id": 1, "limit": 2, "offset": 1}
 

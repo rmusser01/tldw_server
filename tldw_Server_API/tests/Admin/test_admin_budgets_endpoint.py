@@ -104,3 +104,5 @@ async def test_admin_list_budgets_returns_canonical_pagination(
     assert payload["pagination"]["offset"] == 10
     assert payload["pagination"]["has_more"] is True
     assert payload["pagination"]["next_offset"] == 20
+    assert payload["has_more"] is True
+    assert payload["next_offset"] == 20

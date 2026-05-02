@@ -10,10 +10,18 @@ from typing import Any, Literal
 from urllib.parse import urlsplit
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, NonNegativeInt, SecretStr, field_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, NonNegativeInt, SecretStr, field_validator, model_validator
 
 from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
 from tldw_Server_API.app.core.Security.egress import evaluate_url_policy
+
+
+def _default_offset_pagination_aliases(response):
+    if response.has_more is None:
+        response.has_more = response.pagination.has_more
+    if response.next_offset is None:
+        response.next_offset = response.pagination.next_offset
+    return response
 
 
 def _blank_string_to_none(value: Any) -> Any:
@@ -201,6 +209,12 @@ class UserListResponse(BaseModel):
     limit: int
     pages: int
     pagination: OffsetPaginationMeta
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self):
+        return _default_offset_pagination_aliases(self)
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -557,6 +571,12 @@ class AuditLogResponse(BaseModel):
     limit: int
     offset: int
     pagination: OffsetPaginationMeta
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self):
+        return _default_offset_pagination_aliases(self)
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -642,6 +662,12 @@ class BackupListResponse(BaseModel):
     limit: int
     offset: int
     pagination: OffsetPaginationMeta
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self):
+        return _default_offset_pagination_aliases(self)
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -697,6 +723,12 @@ class BackupScheduleListResponse(BaseModel):
     limit: int
     offset: int
     pagination: OffsetPaginationMeta
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self):
+        return _default_offset_pagination_aliases(self)
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -785,6 +817,12 @@ class MaintenanceRotationRunListResponse(BaseModel):
     limit: int
     offset: int
     pagination: OffsetPaginationMeta
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self):
+        return _default_offset_pagination_aliases(self)
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -1028,6 +1066,12 @@ class DataSubjectRequestListResponse(BaseModel):
     limit: int
     offset: int
     pagination: OffsetPaginationMeta
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self):
+        return _default_offset_pagination_aliases(self)
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -1191,6 +1235,12 @@ class SystemLogsResponse(BaseModel):
     limit: int
     offset: int
     pagination: OffsetPaginationMeta
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self):
+        return _default_offset_pagination_aliases(self)
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -1361,6 +1411,12 @@ class IncidentListResponse(BaseModel):
     limit: int
     offset: int
     pagination: OffsetPaginationMeta
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self):
+        return _default_offset_pagination_aliases(self)
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -1475,6 +1531,12 @@ class WebhookListResponse(BaseModel):
     items: list[WebhookItem]
     total: int
     pagination: OffsetPaginationMeta
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self):
+        return _default_offset_pagination_aliases(self)
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -1765,6 +1827,12 @@ class OrgBudgetListResponse(BaseModel):
     page: int
     limit: int
     pagination: OffsetPaginationMeta
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self):
+        return _default_offset_pagination_aliases(self)
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -1813,6 +1881,12 @@ class LLMUsageLogResponse(BaseModel):
     page: int
     limit: int
     pagination: OffsetPaginationMeta
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self):
+        return _default_offset_pagination_aliases(self)
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -2576,6 +2650,12 @@ class AdminWebhookListResponse(BaseModel):
     limit: int
     offset: int
     pagination: OffsetPaginationMeta
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self):
+        return _default_offset_pagination_aliases(self)
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -2613,6 +2693,12 @@ class AdminWebhookDeliveryLogListResponse(BaseModel):
     limit: int
     offset: int
     pagination: OffsetPaginationMeta
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self):
+        return _default_offset_pagination_aliases(self)
 
     model_config = ConfigDict(from_attributes=True)
 

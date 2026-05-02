@@ -76,6 +76,8 @@ async def test_backup_schedule_roundtrip_crud(tmp_path) -> None:
         assert payload["pagination"]["total"] == 1
         assert payload["pagination"]["limit"] == 100
         assert payload["pagination"]["offset"] == 0
+        assert payload["has_more"] == payload["pagination"]["has_more"]
+        assert payload["next_offset"] == payload["pagination"]["next_offset"]
         assert payload["items"][0]["id"] == schedule_id
 
         update_resp = client.patch(

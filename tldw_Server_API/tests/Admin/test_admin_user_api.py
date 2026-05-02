@@ -85,3 +85,5 @@ async def test_list_users_forwards_admin_capable_filter(monkeypatch, tmp_path):
     assert payload["pagination"]["limit"] == 25
     assert payload["pagination"]["offset"] == 0
     assert payload["pagination"]["has_more"] is False
+    assert payload["has_more"] is False
+    assert payload["next_offset"] is None

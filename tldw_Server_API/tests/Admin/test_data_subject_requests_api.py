@@ -9,6 +9,8 @@ import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
+from tldw_Server_API.app.api.v1.schemas.admin_schemas import DataSubjectRequestListResponse
+from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
 from tldw_Server_API.app.main import app
 
 
@@ -333,6 +335,36 @@ async def test_list_returns_newest_first_with_limit_offset(monkeypatch, tmp_path
         "dsr-client-2",
         "dsr-client-1",
     ]
+
+
+def test_data_subject_request_list_response_defaults_pagination_aliases():
+    response = DataSubjectRequestListResponse(
+        items=[
+            {
+                "id": 1,
+                "client_request_id": "dsr-client-1",
+                "requester_identifier": "subject@example.com",
+                "request_type": "access",
+                "status": "pending",
+                "selected_categories": ["authnz"],
+                "preview_summary": [],
+                "requested_at": "2026-03-10T12:00:00Z",
+            }
+        ],
+        total=3,
+        limit=2,
+        offset=1,
+        pagination=OffsetPaginationMeta(
+            total=3,
+            limit=2,
+            offset=1,
+            has_more=False,
+            next_offset=None,
+        ),
+    )
+
+    assert response.has_more is False
+    assert response.next_offset is None
 
 
 @pytest.mark.asyncio
