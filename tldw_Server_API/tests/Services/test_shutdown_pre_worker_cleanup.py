@@ -7,7 +7,6 @@ from typing import Any
 
 import pytest
 
-
 pytestmark = pytest.mark.unit
 
 
@@ -251,6 +250,43 @@ async def test_shutdown_pre_worker_cleanup_skips_stopped_background_chatbooks(
 
     assert stop_event.is_set is False
     assert chatbooks_task.cancelled is False
+
+
+@pytest.mark.asyncio
+async def test_shutdown_pre_worker_cleanup_resets_singletons_for_background_stopped_storage_cleanup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    shutdown_cleanup = _import_shutdown_pre_worker_cleanup()
+    storage_cleanup_service = _FakeStorageCleanupService()
+    reset_calls: list[str] = []
+
+    async def _record_cleanup() -> None:
+        reset_calls.append("cleanup")
+
+    async def _record_storage() -> None:
+        reset_calls.append("storage")
+
+    async def _record_auth() -> None:
+        reset_calls.append("auth")
+
+    monkeypatch.setattr(shutdown_cleanup, "_reset_cleanup_service", _record_cleanup)
+    monkeypatch.setattr(shutdown_cleanup, "_reset_storage_service", _record_storage)
+    monkeypatch.setattr(shutdown_cleanup, "_reset_authnz_rate_limiter", _record_auth)
+
+    handles = await shutdown_cleanup.shutdown_pre_worker_cleanup(
+        app=SimpleNamespace(state=SimpleNamespace()),
+        cleanup_task=None,
+        chatbooks_cleanup_task=None,
+        chatbooks_cleanup_stop_event=None,
+        storage_cleanup_service=storage_cleanup_service,
+        coordinated_legacy_component_names=set(),
+        guard_exceptions=(RuntimeError,),
+        stopped_background_worker_names={"storage_cleanup_service"},
+    )
+
+    assert storage_cleanup_service.stopped is False
+    assert reset_calls == ["cleanup", "storage", "auth"]
+    assert handles.storage_cleanup_service is storage_cleanup_service
 
 
 @pytest.mark.asyncio

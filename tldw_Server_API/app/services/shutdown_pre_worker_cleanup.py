@@ -121,7 +121,12 @@ async def _shutdown_pre_worker_cleanup(
             chatbooks_cleanup_stop_event.set()
         if chatbooks_cleanup_task:
             chatbooks_cleanup_task.cancel()
-    if storage_cleanup_service and "storage_cleanup_service" not in coordinated_legacy_component_names:
+    storage_cleanup_stopped_by_background = "storage_cleanup_service" in stopped_background_worker_names
+    if (
+        storage_cleanup_service
+        and "storage_cleanup_service" not in coordinated_legacy_component_names
+        and not storage_cleanup_stopped_by_background
+    ):
         try:
             await storage_cleanup_service.stop()
             logger.info("Storage cleanup worker stopped")

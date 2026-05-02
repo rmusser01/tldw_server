@@ -5,6 +5,7 @@ Focus on expired-file cleanup:
 - Usage decrement via unregister_generated_file
 - Safe path resolution prevents traversal deletes
 """
+import asyncio
 import contextlib
 from pathlib import Path
 from unittest.mock import AsyncMock
@@ -206,3 +207,27 @@ def test_mark_tts_history_artifact_deleted_uses_managed_media_database(
             },
         ),
     ]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_storage_cleanup_service_names_background_task(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _fake_cleanup_loop(
+        *,
+        stop_event: asyncio.Event,
+        interval_seconds: int | None,
+        temp_retention_hours: int,
+    ) -> None:
+        await stop_event.wait()
+
+    monkeypatch.setattr(cleanup, "run_storage_cleanup_loop", _fake_cleanup_loop)
+    service = cleanup.StorageCleanupService(interval_seconds=1)
+
+    await service.start()
+    try:
+        assert service._task is not None
+        assert service._task.get_name() == "storage_cleanup_service"
+    finally:
+        await service.stop()
