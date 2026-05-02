@@ -101,30 +101,27 @@ const formatActiveToolStatus = (tool: unknown, why: unknown): string => {
   return `Running ${toolName}: ${whyText}`
 }
 
+const WAKE_REJECTION_MESSAGES: Record<string, string> = {
+  not_saved_in_profile:
+    "Wake phrase was heard, but it is not a saved trigger phrase for this " +
+    "persona. Add it to the selected persona's trigger phrases, then arm " +
+    "wake listening again.",
+  missing_from_runtime_config:
+    "Wake phrase was heard, but the live voice configuration did not load " +
+    "that saved trigger phrase. Reconnect Persona Live or save voice defaults again.",
+  phrase_not_configured:
+    "Wake phrase was heard, but it is not configured for this Persona Live " +
+    "session. Check the selected persona's saved trigger phrases."
+}
+
 const formatWakeActivationRejectedMessage = (
   payload: PersonaLiveVoicePayload
 ): string => {
   const reason = String(payload?.wake_rejection_reason || "").trim()
-  if (reason === "not_saved_in_profile") {
-    return (
-      "Wake phrase was heard, but it is not a saved trigger phrase for this " +
-      "persona. Add it to the selected persona's trigger phrases, then arm " +
-      "wake listening again."
-    )
-  }
-  if (reason === "missing_from_runtime_config") {
-    return (
-      "Wake phrase was heard, but the live voice configuration did not load " +
-      "that saved trigger phrase. Reconnect Persona Live or save voice defaults again."
-    )
-  }
-  if (reason === "phrase_not_configured") {
-    return (
-      "Wake phrase was heard, but it is not configured for this Persona Live " +
-      "session. Check the selected persona's saved trigger phrases."
-    )
-  }
-  return String(payload?.message || "Wake activation was rejected.")
+  return (
+    WAKE_REJECTION_MESSAGES[reason] ||
+    String(payload?.message || "Wake activation was rejected.")
+  )
 }
 
 export const usePersonaLiveVoiceController = ({

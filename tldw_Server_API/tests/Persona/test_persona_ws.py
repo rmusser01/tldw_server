@@ -2444,6 +2444,7 @@ def _assert_wake_activation_rejected_keeps_trigger_gate(
     expected_rejection_reason: str,
     wake_behavior: str = "one_shot",
 ) -> None:
+    """Assert rejected wake phrases keep trigger gating and emit the expected reason."""
     _install_wake_voice_fakes(monkeypatch, "summarize the current note")
     _seed_persona_session(
         tmp_path,
