@@ -66,6 +66,13 @@ _WORKTREE_NONCRITICAL_EXCEPTIONS = (
     subprocess.SubprocessError,
 )
 
+_WORKTREE_CLEANUP_EXCEPTIONS = (
+    FileNotFoundError,
+    PermissionError,
+    OSError,
+    subprocess.SubprocessError,
+)
+
 
 # ---------------------------------------------------------------------------
 # Availability helpers (module-level, mirrors docker_available pattern)
@@ -253,14 +260,14 @@ class WorktreeRunner:
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
-        except _WORKTREE_NONCRITICAL_EXCEPTIONS:
+        except _WORKTREE_CLEANUP_EXCEPTIONS:
             logger.warning(
                 "git worktree remove failed for {}, cleaning up manually",
                 worktree_path,
             )
             shutil.rmtree(worktree_path, ignore_errors=True)
             # Prune stale worktree references
-            with contextlib.suppress(_WORKTREE_NONCRITICAL_EXCEPTIONS):
+            with contextlib.suppress(_WORKTREE_CLEANUP_EXCEPTIONS):
                 subprocess.check_call(
                     ["git", "worktree", "prune"],
                     cwd=repo_path,

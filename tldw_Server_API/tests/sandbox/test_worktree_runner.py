@@ -108,6 +108,26 @@ def test_destroy_worktree_falls_back_when_repo_path_is_missing(tmp_path: Path) -
         pytest.fail("destroy_worktree should remove the worktree directory")
 
 
+def test_destroy_worktree_reraises_unexpected_exceptions(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Programming defects during cleanup should not be hidden."""
+    wt = tmp_path / "detached-worktree"
+    repo = tmp_path / "repo"
+    wt.mkdir()
+    repo.mkdir()
+
+    def _raise_type_error(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        raise TypeError("programming defect")
+
+    monkeypatch.setattr(subprocess, "check_call", _raise_type_error)
+
+    with pytest.raises(TypeError, match="programming defect"):
+        WorktreeRunner.destroy_worktree(str(wt), str(repo))
+
+
 def test_create_session_invalid_repo(tmp_path: Path) -> None:
     """Non-git directory raises RuntimeError."""
     non_git = tmp_path / "not_a_repo"
