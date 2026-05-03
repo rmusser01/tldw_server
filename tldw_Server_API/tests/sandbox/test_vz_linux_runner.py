@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import tldw_Server_API.app.core.Sandbox.runners.vz_common as vz_common
 import tldw_Server_API.app.core.Sandbox.runners.vz_linux_runner as vz_linux_module
@@ -390,6 +391,61 @@ def test_vz_linux_raw_template_path_ignores_unavailable_image_store(monkeypatch,
 
     assert status.phase == RunPhase.completed
     assert calls[0] == ("validate_template", {"runtime": "vz_linux", "template": "/tmp/raw-vz-bundle"})
+
+
+def test_vz_linux_exec_failure_terminates_vm_and_removes_created_workspace(
+    monkeypatch,
+) -> None:
+    monkeypatch.delenv("TLDW_SANDBOX_VZ_LINUX_FAKE_EXEC", raising=False)
+    calls: list[tuple[str, object]] = []
+    workspaces: list[Path] = []
+
+    class _FakeHelper:
+        def validate_template(self, request: dict[str, object]) -> dict[str, object]:
+            calls.append(("validate_template", dict(request)))
+            return {
+                "template_id": "vz_linux:test-template",
+                "source": "/tmp/raw-vz-bundle",
+                "ready": True,
+                "reasons": [],
+            }
+
+        def create_vm(self, request: dict[str, object]) -> HelperVMReply:
+            calls.append(("create_vm", dict(request)))
+            workspaces.append(Path(str(request["workspace_path"])))
+            return HelperVMReply(vm_id="vm-exec-fails", state="created", details={})
+
+        def exec_guest(self, *, vm_id: str, request: dict[str, object]) -> HelperExecReply:
+            calls.append(("exec_guest", {"vm_id": vm_id, **request}))
+            raise RuntimeError("guest_exec_failed")
+
+        def terminate_vm(self, vm_id: str) -> bool:
+            calls.append(("terminate_vm", vm_id))
+            return True
+
+    monkeypatch.setattr(vz_linux_module.VZLinuxRunner, "helper_client_cls", _FakeHelper)
+
+    rid = "vz-run-exec-fails-cleanup"
+    status = VZLinuxRunner().start_run(
+        run_id=rid,
+        spec=RunSpec(
+            session_id=None,
+            runtime=RuntimeType.vz_linux,
+            base_image="/tmp/raw-vz-bundle",
+            command=["/bin/echo", "ok"],
+            network_policy="deny_all",
+        ),
+        session_workspace=None,
+    )
+
+    assert status.phase == RunPhase.failed
+    assert "guest_exec_failed" in status.message
+    assert ("terminate_vm", "vm-exec-fails") in calls
+    assert workspaces
+    assert not workspaces[0].exists()
+    with VZLinuxRunner._active_lock:  # type: ignore[attr-defined]
+        assert rid not in VZLinuxRunner._active_vm  # type: ignore[attr-defined]
+        assert rid not in VZLinuxRunner._active_run_dir  # type: ignore[attr-defined]
 
 
 def test_vz_linux_start_run_fails_when_image_store_template_id_has_no_source_path(
