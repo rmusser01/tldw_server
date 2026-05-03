@@ -348,60 +348,68 @@ class LimaRunner:
 
         # Create temp directory for this run
         run_dir = tempfile.mkdtemp(prefix="tldw_lima_")
-        workspace = os.path.join(run_dir, "workspace")
-        os.makedirs(workspace, exist_ok=True)
-
-        # Copy session workspace files
-        if session_workspace and os.path.isdir(session_workspace):
-            self._copy_tree(session_workspace, workspace)
-
-        # Write inline files
-        for (path, data) in (spec.files_inline or []):
-            safe_path = path.lstrip("/\\").replace("..", "_")
-            full = os.path.join(workspace, safe_path)
-            os.makedirs(os.path.dirname(full), exist_ok=True)
-            with open(full, "wb") as f:
-                f.write(data)
-
-        # Write entry script
-        self._write_entry_script(workspace, list(spec.command or []))
-
-        # Write environment file
-        self._write_env_file(workspace, spec.env or {})
-
-        # Generate Lima config
-        cpu = int(spec.cpu) if spec.cpu else 2
-        memory_mb = int(spec.memory_mb) if spec.memory_mb else 2048
-        net_policy = (spec.network_policy or "deny_all").lower()
-        if net_policy == "allowlist":
-            raise RuntimeError("strict_allowlist_not_supported")
-
-        lima_config = _generate_lima_config(
-            workspace_host_path=workspace,
-            cpu=cpu,
-            memory_mb=memory_mb,
-            env=spec.env or {},
-            network_policy=net_policy,
-        )
-
-        # Write Lima config to YAML file
-        config_path = os.path.join(run_dir, "lima.yaml")
         try:
-            import yaml
-            with open(config_path, "w") as f:
-                yaml.safe_dump(lima_config, f)
-        except ImportError:
-            # Fallback to JSON-like YAML if pyyaml not available
-            with open(config_path, "w") as f:
-                json.dump(lima_config, f, indent=2)
+            workspace = os.path.join(run_dir, "workspace")
+            os.makedirs(workspace, exist_ok=True)
 
-        # Generate unique VM name
-        vm_name = f"tldw-sbx-{run_id[:12]}"
+            # Copy session workspace files
+            if session_workspace and os.path.isdir(session_workspace):
+                self._copy_tree(session_workspace, workspace)
 
-        # Register VM for cancellation
-        with LimaRunner._active_lock:
-            LimaRunner._active_vm[run_id] = vm_name
-            LimaRunner._active_run_dir[run_id] = run_dir
+            # Write inline files
+            for (path, data) in (spec.files_inline or []):
+                safe_path = path.lstrip("/\\").replace("..", "_")
+                full = os.path.join(workspace, safe_path)
+                os.makedirs(os.path.dirname(full), exist_ok=True)
+                with open(full, "wb") as f:
+                    f.write(data)
+
+            # Write entry script
+            self._write_entry_script(workspace, list(spec.command or []))
+
+            # Write environment file
+            self._write_env_file(workspace, spec.env or {})
+
+            # Generate Lima config
+            cpu = int(spec.cpu) if spec.cpu else 2
+            memory_mb = int(spec.memory_mb) if spec.memory_mb else 2048
+            net_policy = (spec.network_policy or "deny_all").lower()
+            if net_policy == "allowlist":
+                raise RuntimeError("strict_allowlist_not_supported")
+
+            lima_config = _generate_lima_config(
+                workspace_host_path=workspace,
+                cpu=cpu,
+                memory_mb=memory_mb,
+                env=spec.env or {},
+                network_policy=net_policy,
+            )
+
+            # Write Lima config to YAML file
+            config_path = os.path.join(run_dir, "lima.yaml")
+            try:
+                import yaml
+                with open(config_path, "w") as f:
+                    yaml.safe_dump(lima_config, f)
+            except ImportError:
+                # Fallback to JSON-like YAML if pyyaml not available
+                with open(config_path, "w") as f:
+                    json.dump(lima_config, f, indent=2)
+
+            # Generate unique VM name
+            vm_name = f"tldw-sbx-{run_id[:12]}"
+
+            # Register VM for cancellation
+            with LimaRunner._active_lock:
+                LimaRunner._active_vm[run_id] = vm_name
+                LimaRunner._active_run_dir[run_id] = run_dir
+        except Exception:
+            with contextlib.suppress(_LIMA_RUNNER_NONCRITICAL_EXCEPTIONS):
+                shutil.rmtree(run_dir, ignore_errors=True)
+            with LimaRunner._active_lock:
+                LimaRunner._active_vm.pop(run_id, None)
+                LimaRunner._active_run_dir.pop(run_id, None)
+            raise
 
         exit_code: int | None = None
         image_digest: str | None = None

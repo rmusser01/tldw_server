@@ -271,175 +271,182 @@ class FirecrackerRunner:
             image_digest = None
 
         run_dir = tempfile.mkdtemp(prefix="tldw_fc_")
-        workspace = os.path.join(run_dir, "workspace")
-        os.makedirs(workspace, exist_ok=True)
-        if session_workspace and os.path.isdir(session_workspace):
-            _copy_tree(session_workspace, workspace)
-        # Inline files
-        for (path, data) in (spec.files_inline or []):
-            safe_path = path.lstrip("/\\").replace("..", "_")
-            full = os.path.join(workspace, safe_path)
-            os.makedirs(os.path.dirname(full), exist_ok=True)
-            with open(full, "wb") as f:
-                f.write(data)
-
-        _write_env_file(workspace, spec.env or {})
-        _write_entry_script(workspace, list(spec.command or []))
-
-        api_sock = os.path.join(run_dir, "fc.sock")
-        fc_proc = subprocess.Popen([
-            _fc_bin(),
-            "--api-sock",
-            api_sock,
-        ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, cwd=run_dir)
-
-        # Wait for socket
-        deadline = time.time() + 3.0
-        while not os.path.exists(api_sock) and time.time() < deadline:
-            time.sleep(0.05)
-        if not os.path.exists(api_sock):
-            fc_proc.terminate()
-            raise RuntimeError("Firecracker API socket not available")
-
-        # Configure VM
-        vcpu = int(max(1, int(spec.cpu) if spec.cpu else 1))
-        mem_mb = int(spec.memory_mb or int(os.getenv("SANDBOX_MAX_MEM_MB", "512")))
-        _fc_api_request(api_sock, "PUT", "/machine-config", {
-            "vcpu_count": vcpu,
-            "mem_size_mib": mem_mb,
-            "ht_enabled": False,
-        })
-        boot_args = os.getenv("SANDBOX_FC_BOOT_ARGS") or "console=ttyS0 reboot=k panic=1 pci=off"
-        boot_args = f"{boot_args} init=/workspace/entry.sh"
-        _fc_api_request(api_sock, "PUT", "/boot-source", {
-            "kernel_image_path": kernel_path,
-            "boot_args": boot_args,
-        })
-        _fc_api_request(api_sock, "PUT", "/drives/rootfs", {
-            "drive_id": "rootfs",
-            "path_on_host": rootfs_path,
-            "is_root_device": True,
-            "is_read_only": True,
-        })
-
+        fc_proc = None
         virtiofs_proc = None
-        if _virtiofs_enabled():
-            vfs_sock = os.path.join(run_dir, "virtiofs.sock")
-            virtiofs_proc = subprocess.Popen([
-                _virtiofsd_bin(),
-                "--socket-path", vfs_sock,
-                "-o", f"source={workspace}",
-            ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            _fc_api_request(api_sock, "PUT", "/fs", {
-                "mount_tag": "workspace",
-                "socket": vfs_sock,
-            })
-        else:
-            raise RuntimeError("Firecracker virtiofs disabled; no workspace mount available")
-
-        _fc_api_request(api_sock, "PUT", "/actions", {"action_type": "InstanceStart"})
-
-        # Tail logs (best-effort) until status appears
-        stop_flag = {"stop": False}
-        log_path = os.path.join(workspace, "run.log")
         tail_thread = None
+        stop_flag = {"stop": False}
         try:
-            import threading
-            tail_thread = threading.Thread(target=_tail_log, args=(run_id, log_path, stop_flag), daemon=True)
-            tail_thread.start()
-        except _FIRECRACKER_RUNNER_NONCRITICAL_EXCEPTIONS:
-            tail_thread = None
+            workspace = os.path.join(run_dir, "workspace")
+            os.makedirs(workspace, exist_ok=True)
+            if session_workspace and os.path.isdir(session_workspace):
+                _copy_tree(session_workspace, workspace)
+            # Inline files
+            for (path, data) in (spec.files_inline or []):
+                safe_path = path.lstrip("/\\").replace("..", "_")
+                full = os.path.join(workspace, safe_path)
+                os.makedirs(os.path.dirname(full), exist_ok=True)
+                with open(full, "wb") as f:
+                    f.write(data)
 
-        timeout_sec = int(spec.timeout_sec or 300)
-        status_path = os.path.join(workspace, ".sandbox_status.json")
-        deadline = time.time() + timeout_sec
-        exit_code = None
-        reason = None
-        while time.time() < deadline:
-            if os.path.exists(status_path):
-                try:
-                    with open(status_path, encoding="utf-8") as rf:
-                        payload = json.load(rf)
-                    exit_code = payload.get("exit_code")
-                    reason = payload.get("reason")
-                    payload.get("duration_ms")
-                except _FIRECRACKER_RUNNER_NONCRITICAL_EXCEPTIONS:
-                    pass
-                break
-            time.sleep(0.1)
+            _write_env_file(workspace, spec.env or {})
+            _write_entry_script(workspace, list(spec.command or []))
 
-        if exit_code is None:
-            # Timeout: kill VM
-            reason = "execution_timeout"
+            api_sock = os.path.join(run_dir, "fc.sock")
+            fc_proc = subprocess.Popen([
+                _fc_bin(),
+                "--api-sock",
+                api_sock,
+            ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, cwd=run_dir)
+
+            # Wait for socket
+            deadline = time.time() + 3.0
+            while not os.path.exists(api_sock) and time.time() < deadline:
+                time.sleep(0.05)
+            if not os.path.exists(api_sock):
+                raise RuntimeError("Firecracker API socket not available")
+
+            # Configure VM
+            vcpu = int(max(1, int(spec.cpu) if spec.cpu else 1))
+            mem_mb = int(spec.memory_mb or int(os.getenv("SANDBOX_MAX_MEM_MB", "512")))
+            _fc_api_request(api_sock, "PUT", "/machine-config", {
+                "vcpu_count": vcpu,
+                "mem_size_mib": mem_mb,
+                "ht_enabled": False,
+            })
+            boot_args = os.getenv("SANDBOX_FC_BOOT_ARGS") or "console=ttyS0 reboot=k panic=1 pci=off"
+            boot_args = f"{boot_args} init=/workspace/entry.sh"
+            _fc_api_request(api_sock, "PUT", "/boot-source", {
+                "kernel_image_path": kernel_path,
+                "boot_args": boot_args,
+            })
+            _fc_api_request(api_sock, "PUT", "/drives/rootfs", {
+                "drive_id": "rootfs",
+                "path_on_host": rootfs_path,
+                "is_root_device": True,
+                "is_read_only": True,
+            })
+
+            if _virtiofs_enabled():
+                vfs_sock = os.path.join(run_dir, "virtiofs.sock")
+                virtiofs_proc = subprocess.Popen([
+                    _virtiofsd_bin(),
+                    "--socket-path", vfs_sock,
+                    "-o", f"source={workspace}",
+                ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                _fc_api_request(api_sock, "PUT", "/fs", {
+                    "mount_tag": "workspace",
+                    "socket": vfs_sock,
+                })
+            else:
+                raise RuntimeError("Firecracker virtiofs disabled; no workspace mount available")
+
+            _fc_api_request(api_sock, "PUT", "/actions", {"action_type": "InstanceStart"})
+
+            # Tail logs (best-effort) until status appears
+            log_path = os.path.join(workspace, "run.log")
+            try:
+                import threading
+                tail_thread = threading.Thread(
+                    target=_tail_log,
+                    args=(run_id, log_path, stop_flag),
+                    daemon=True,
+                )
+                tail_thread.start()
+            except _FIRECRACKER_RUNNER_NONCRITICAL_EXCEPTIONS:
+                tail_thread = None
+
+            timeout_sec = int(spec.timeout_sec or 300)
+            status_path = os.path.join(workspace, ".sandbox_status.json")
+            deadline = time.time() + timeout_sec
+            exit_code = None
+            reason = None
+            while time.time() < deadline:
+                if os.path.exists(status_path):
+                    try:
+                        with open(status_path, encoding="utf-8") as rf:
+                            payload = json.load(rf)
+                        exit_code = payload.get("exit_code")
+                        reason = payload.get("reason")
+                        payload.get("duration_ms")
+                    except _FIRECRACKER_RUNNER_NONCRITICAL_EXCEPTIONS:
+                        pass
+                    break
+                time.sleep(0.1)
+
+            if exit_code is None:
+                # Timeout: kill VM
+                reason = "execution_timeout"
+                with contextlib.suppress(_FIRECRACKER_RUNNER_NONCRITICAL_EXCEPTIONS):
+                    fc_proc.terminate()
+                phase = RunPhase.timed_out
+            else:
+                phase = RunPhase.completed if int(exit_code or 0) == 0 else RunPhase.failed
+
+            stop_flag["stop"] = True
+            if tail_thread is not None:
+                with contextlib.suppress(_FIRECRACKER_RUNNER_NONCRITICAL_EXCEPTIONS):
+                    tail_thread.join(timeout=1)
+
             with contextlib.suppress(_FIRECRACKER_RUNNER_NONCRITICAL_EXCEPTIONS):
-                fc_proc.terminate()
-            phase = RunPhase.timed_out
-        else:
-            phase = RunPhase.completed if int(exit_code or 0) == 0 else RunPhase.failed
+                hub.publish_event(run_id, "end", {"exit_code": exit_code})
 
-        stop_flag["stop"] = True
-        if tail_thread is not None:
-            with contextlib.suppress(_FIRECRACKER_RUNNER_NONCRITICAL_EXCEPTIONS):
-                tail_thread.join(timeout=1)
+            finished = datetime.utcnow()
+            # Collect artifacts
+            artifacts_map: dict[str, bytes] = {}
+            try:
+                if spec.capture_patterns:
+                    for root, _dirs, files in os.walk(workspace):
+                        for fn in files:
+                            rel = os.path.relpath(os.path.join(root, fn), workspace)
+                            rel_posix = rel.replace(os.sep, "/")
+                            if any(fnmatch.fnmatchcase(rel_posix, pat) for pat in (spec.capture_patterns or [])):
+                                try:
+                                    with open(os.path.join(root, fn), "rb") as rf:
+                                        artifacts_map[rel_posix] = rf.read()
+                                except _FIRECRACKER_RUNNER_NONCRITICAL_EXCEPTIONS:
+                                    pass
+            except _FIRECRACKER_RUNNER_NONCRITICAL_EXCEPTIONS:
+                artifacts_map = {}
 
-        with contextlib.suppress(_FIRECRACKER_RUNNER_NONCRITICAL_EXCEPTIONS):
-            hub.publish_event(run_id, "end", {"exit_code": exit_code})
+            # Usage
+            try:
+                log_bytes_total = int(hub.get_log_bytes(run_id))
+            except _FIRECRACKER_RUNNER_NONCRITICAL_EXCEPTIONS:
+                log_bytes_total = 0
+            art_bytes = sum(len(v) for v in artifacts_map.values()) if artifacts_map else 0
+            usage: dict[str, int] = {
+                "cpu_time_sec": 0,
+                "wall_time_sec": int(max(0.0, (finished - started).total_seconds())),
+                "peak_rss_mb": 0,
+                "log_bytes": int(log_bytes_total),
+                "artifact_bytes": int(art_bytes),
+            }
 
-        finished = datetime.utcnow()
-        # Collect artifacts
-        artifacts_map: dict[str, bytes] = {}
-        try:
-            if spec.capture_patterns:
-                for root, _dirs, files in os.walk(workspace):
-                    for fn in files:
-                        rel = os.path.relpath(os.path.join(root, fn), workspace)
-                        rel_posix = rel.replace(os.sep, "/")
-                        if any(fnmatch.fnmatchcase(rel_posix, pat) for pat in (spec.capture_patterns or [])):
-                            try:
-                                with open(os.path.join(root, fn), "rb") as rf:
-                                    artifacts_map[rel_posix] = rf.read()
-                            except _FIRECRACKER_RUNNER_NONCRITICAL_EXCEPTIONS:
-                                pass
-        except _FIRECRACKER_RUNNER_NONCRITICAL_EXCEPTIONS:
-            artifacts_map = {}
-
-        # Usage
-        try:
-            log_bytes_total = int(hub.get_log_bytes(run_id))
-        except _FIRECRACKER_RUNNER_NONCRITICAL_EXCEPTIONS:
-            log_bytes_total = 0
-        art_bytes = sum(len(v) for v in artifacts_map.values()) if artifacts_map else 0
-        usage: dict[str, int] = {
-            "cpu_time_sec": 0,
-            "wall_time_sec": int(max(0.0, (finished - started).total_seconds())),
-            "peak_rss_mb": 0,
-            "log_bytes": int(log_bytes_total),
-            "artifact_bytes": int(art_bytes),
-        }
-
-        # Cleanup
-        try:
+            return RunStatus(
+                id="",
+                phase=phase,
+                started_at=started,
+                finished_at=finished,
+                exit_code=exit_code,
+                message=(reason or "Firecracker execution"),
+                image_digest=image_digest,
+                runtime_version=firecracker_version(),
+                resource_usage=usage,
+                artifacts=(artifacts_map or None),
+            )
+        finally:
+            stop_flag["stop"] = True
+            if tail_thread is not None:
+                with contextlib.suppress(_FIRECRACKER_RUNNER_NONCRITICAL_EXCEPTIONS):
+                    tail_thread.join(timeout=1)
             if virtiofs_proc is not None:
-                virtiofs_proc.terminate()
-        except _FIRECRACKER_RUNNER_NONCRITICAL_EXCEPTIONS:
-            pass
-        with contextlib.suppress(_FIRECRACKER_RUNNER_NONCRITICAL_EXCEPTIONS):
-            fc_proc.terminate()
-        with contextlib.suppress(_FIRECRACKER_RUNNER_NONCRITICAL_EXCEPTIONS):
-            shutil.rmtree(run_dir, ignore_errors=True)
-
-        return RunStatus(
-            id="",
-            phase=phase,
-            started_at=started,
-            finished_at=finished,
-            exit_code=exit_code,
-            message=(reason or "Firecracker execution"),
-            image_digest=image_digest,
-            runtime_version=firecracker_version(),
-            resource_usage=usage,
-            artifacts=(artifacts_map or None),
-        )
+                with contextlib.suppress(_FIRECRACKER_RUNNER_NONCRITICAL_EXCEPTIONS):
+                    virtiofs_proc.terminate()
+            if fc_proc is not None:
+                with contextlib.suppress(_FIRECRACKER_RUNNER_NONCRITICAL_EXCEPTIONS):
+                    fc_proc.terminate()
+            with contextlib.suppress(_FIRECRACKER_RUNNER_NONCRITICAL_EXCEPTIONS):
+                shutil.rmtree(run_dir, ignore_errors=True)
 
     def _run_fake(self, run_id: str, spec: RunSpec) -> RunStatus:
         """Execute a run in a Firecracker microVM (scaffolded)."""
