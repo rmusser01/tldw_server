@@ -257,6 +257,32 @@ class AuthnzGeneratedFilesRepo:
             logger.error(f"AuthnzGeneratedFilesRepo.get_file_by_id failed: {exc}")
             raise
 
+    async def get_files_by_ids(self, file_ids: list[int]) -> list[dict[str, Any]]:
+        """Fetch generated file records for a bounded list of IDs."""
+        if not file_ids:
+            return []
+
+        try:
+            async with self.db_pool.acquire() as conn:
+                if self._is_postgres():
+                    rows = await conn.fetch(
+                        "SELECT * FROM generated_files WHERE id = ANY($1)",
+                        file_ids,
+                    )
+                    return [self._normalize_record(row) for row in rows]
+
+                placeholders = ",".join("?" for _ in file_ids)
+                id_list_clause = f"({placeholders})"
+                select_sql_template = "SELECT * FROM generated_files WHERE id IN {id_list_clause}"
+                select_sql = select_sql_template.format_map(locals())  # nosec B608
+                cursor = await conn.execute(select_sql, tuple(file_ids))
+                rows = await cursor.fetchall()
+                cols = [desc[0] for desc in cursor.description] if cursor.description else []
+                return [self._normalize_record(dict(zip(cols, row))) for row in rows]
+        except Exception as exc:
+            logger.error(f"AuthnzGeneratedFilesRepo.get_files_by_ids failed: {exc}")
+            raise
+
     async def get_file_by_uuid(self, file_uuid: str) -> dict[str, Any] | None:
         """Fetch a file record by UUID."""
         try:
@@ -947,4 +973,33 @@ class AuthnzGeneratedFilesRepo:
                     return [self._normalize_record(dict(zip(cols, row))) for row in rows]
         except Exception as exc:
             logger.error(f"AuthnzGeneratedFilesRepo.list_least_accessed failed: {exc}")
+            raise
+
+    async def count_least_accessed(self, user_id: int) -> int:
+        """Count current cleanup candidates for least-accessed pagination metadata."""
+        try:
+            async with self.db_pool.acquire() as conn:
+                if self._is_postgres():
+                    return int(
+                        await conn.fetchval(
+                            """
+                            SELECT COUNT(*) FROM generated_files
+                            WHERE user_id = $1 AND is_deleted = FALSE
+                            """,
+                            user_id,
+                        )
+                        or 0
+                    )
+
+                cursor = await conn.execute(
+                    """
+                    SELECT COUNT(*) FROM generated_files
+                    WHERE user_id = ? AND is_deleted = 0
+                    """,
+                    (user_id,),
+                )
+                row = await cursor.fetchone()
+                return int(row[0] if row else 0)
+        except Exception as exc:
+            logger.error(f"AuthnzGeneratedFilesRepo.count_least_accessed failed: {exc}")
             raise

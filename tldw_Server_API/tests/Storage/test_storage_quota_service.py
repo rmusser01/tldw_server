@@ -294,6 +294,78 @@ class TestUnregisterGeneratedFile:
         assert result is True
         assert not file_path.exists()
 
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_bulk_unregister_uses_repo_bulk_soft_delete_and_aggregates_usage(self):
+        """Bulk unregister soft-deletes through the repo and aggregates usage updates."""
+        service = StorageQuotaService(db_pool=MagicMock())
+        service._initialized = True
+
+        file_records = [
+            {
+                "id": 1,
+                "user_id": 1,
+                "org_id": 7,
+                "team_id": 9,
+                "is_deleted": False,
+                "file_size_bytes": 1024,
+            },
+            {
+                "id": 2,
+                "user_id": 1,
+                "org_id": 7,
+                "team_id": 9,
+                "is_deleted": False,
+                "file_size_bytes": 2048,
+            },
+        ]
+        mock_repo = AsyncMock()
+        mock_repo.bulk_soft_delete = AsyncMock(return_value=2)
+        service.get_generated_files_repo = AsyncMock(return_value=mock_repo)
+        service.update_usage = AsyncMock()
+        service.update_org_usage = AsyncMock()
+        service.update_team_usage = AsyncMock()
+
+        result = await service.unregister_generated_files(file_records, hard_delete=False)
+
+        assert result == 2
+        mock_repo.bulk_soft_delete.assert_awaited_once_with([1, 2])
+        service.update_usage.assert_awaited_once_with(1, 3072, operation="remove")
+        service.update_org_usage.assert_awaited_once_with(7, -3072)
+        service.update_team_usage.assert_awaited_once_with(9, -3072)
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_restore_generated_file_updates_usage_in_service_layer(self):
+        """Restore orchestration updates file state and usage counters in the service."""
+        service = StorageQuotaService(db_pool=MagicMock())
+        service._initialized = True
+
+        deleted_record = {
+            "id": 3,
+            "user_id": 1,
+            "org_id": 7,
+            "team_id": 9,
+            "is_deleted": True,
+            "file_size_bytes": 4096,
+        }
+        restored_record = deleted_record | {"is_deleted": False}
+        mock_repo = AsyncMock()
+        mock_repo.restore_file = AsyncMock(return_value=True)
+        mock_repo.get_file_by_id = AsyncMock(return_value=restored_record)
+        service.get_generated_files_repo = AsyncMock(return_value=mock_repo)
+        service.update_usage = AsyncMock()
+        service.update_org_usage = AsyncMock()
+        service.update_team_usage = AsyncMock()
+
+        result = await service.restore_generated_file(3, file_record=deleted_record)
+
+        assert result == restored_record
+        mock_repo.restore_file.assert_awaited_once_with(3)
+        service.update_usage.assert_awaited_once_with(1, 4096, operation="add")
+        service.update_org_usage.assert_awaited_once_with(7, 4096)
+        service.update_team_usage.assert_awaited_once_with(9, 4096)
+
 
 class TestGetAllUsersStorage:
     """Tests for get_all_users_storage method."""

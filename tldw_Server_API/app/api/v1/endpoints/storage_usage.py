@@ -11,11 +11,12 @@ from tldw_Server_API.app.api.v1.schemas.storage_schemas import (
     StorageUsageResponse,
     UsageBreakdownResponse,
 )
+from tldw_Server_API.app.services.storage_quota_service import StorageQuotaService
 
 router = APIRouter()
 
 
-async def _get_storage_service():
+async def _get_storage_service() -> StorageQuotaService:
     """Resolve the storage service through storage.py for legacy monkeypatch seams."""
     from tldw_Server_API.app.api.v1.endpoints import storage as storage_endpoint
 
@@ -25,9 +26,9 @@ async def _get_storage_service():
 @router.get("/usage", response_model=StorageUsageResponse)
 async def get_storage_usage(
     user: User = Depends(get_request_user),
-):
+    service: StorageQuotaService = Depends(_get_storage_service),
+) -> StorageUsageResponse:
     """Get storage usage summary for the current user."""
-    service = await _get_storage_service()
     usage_data = await service.get_user_generated_files_usage(user.id)
 
     # Build category usage
@@ -48,7 +49,9 @@ async def get_storage_usage(
     )
 
     quota_mb = usage_data.get("quota_mb", 0)
-    quota_used_mb = usage_data.get("quota_used_mb", 0.0)
+    quota_used_mb = usage_data.get("quota_used_mb")
+    if quota_used_mb is None:
+        quota_used_mb = usage_data.get("total_mb", 0.0)
     available_mb = max(0, quota_mb - quota_used_mb) if quota_mb else None
 
     # Calculate limit status
@@ -64,7 +67,7 @@ async def get_storage_usage(
     return StorageUsageResponse(
         usage=usage,
         quota_mb=quota_mb if quota_mb else None,
-        quota_used_mb=quota_used_mb if quota_used_mb else None,
+        quota_used_mb=quota_used_mb,
         available_mb=available_mb,
         usage_percentage=round(usage_pct, 1),
         at_soft_limit=at_soft_limit,
@@ -76,10 +79,9 @@ async def get_storage_usage(
 @router.get("/usage/breakdown", response_model=UsageBreakdownResponse)
 async def get_usage_breakdown(
     user: User = Depends(get_request_user),
-):
+    service: StorageQuotaService = Depends(_get_storage_service),
+) -> UsageBreakdownResponse:
     """Get detailed storage usage breakdown."""
-    service = await _get_storage_service()
-
     usage_data = await service.get_user_generated_files_usage(user.id)
     folders = await service.get_user_folders(user.id)
 
@@ -94,6 +96,9 @@ async def get_usage_breakdown(
 
     quota_mb = usage_data.get("quota_mb", 0) or 0
     total_mb = usage_data.get("total_mb", 0.0)
+    quota_used_mb = usage_data.get("quota_used_mb")
+    if quota_used_mb is None:
+        quota_used_mb = total_mb
 
     return UsageBreakdownResponse(
         user_id=user.id,
@@ -110,6 +115,6 @@ async def get_usage_breakdown(
         total_bytes=usage_data.get("total_bytes", 0),
         total_mb=total_mb,
         quota_mb=quota_mb,
-        available_mb=max(0, quota_mb - total_mb),
-        usage_percentage=round((total_mb / quota_mb * 100) if quota_mb else 0, 1),
+        available_mb=max(0, quota_mb - quota_used_mb),
+        usage_percentage=round((quota_used_mb / quota_mb * 100) if quota_mb else 0, 1),
     )
