@@ -3922,9 +3922,13 @@ def list_claims_by_media(
             total = int(row[0]) if row else 0
         except _CLAIMS_NONCRITICAL_EXCEPTIONS:
             total = offset + len(claims)
-        next_off: int | None = None
-        if offset + len(claims) < total:
-            next_off = offset + len(claims)
+        pagination = build_offset_pagination_meta(
+            limit=int(limit),
+            offset=int(offset),
+            total=int(total),
+            count=len(claims),
+        )
+        next_off = pagination.next_offset
         next_link: str | None = None
         if next_off is not None:
             if request and absolute_links:
@@ -3941,6 +3945,7 @@ def list_claims_by_media(
         return {
             "items": claims,
             "next_offset": next_off,
+            "pagination": pagination,
             "total": total,
             "total_pages": total_pages,
             "next_link": next_link,
