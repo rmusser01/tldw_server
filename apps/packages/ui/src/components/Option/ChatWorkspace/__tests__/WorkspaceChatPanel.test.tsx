@@ -125,6 +125,32 @@ describe("WorkspaceChatPanel", () => {
     expect(onClearStagedSources).not.toHaveBeenCalled()
   })
 
+  it.each([
+    { label: "skipped", result: { status: "skipped", reason: "empty" } },
+    { label: "undefined", result: undefined }
+  ])("preserves draft and staged context when submit returns $label", async ({ result }) => {
+    chatHookState.onSubmit.mockResolvedValueOnce(result)
+    const onClearStagedSources = vi.fn()
+
+    render(
+      <WorkspaceChatPanel
+        stagedSources={staged}
+        onClearStagedSources={onClearStagedSources}
+        backendAvailable
+        workspaceId="workspace-1"
+      />
+    )
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Chat workspace message" }), {
+      target: { value: "Keep this draft" }
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Send with staged context" }))
+
+    await screen.findByText("Send failed")
+    expect(screen.getByRole("textbox", { name: "Chat workspace message" })).toHaveValue("Keep this draft")
+    expect(onClearStagedSources).not.toHaveBeenCalled()
+  })
+
   it("also preserves draft and staged context when submit rejects unexpectedly", async () => {
     chatHookState.onSubmit.mockRejectedValueOnce(new Error("network"))
     const onClearStagedSources = vi.fn()
@@ -164,6 +190,7 @@ describe("WorkspaceChatPanel", () => {
     expect(screen.getByText("Streaming")).toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: "Stop generating" }))
     expect(chatHookState.stopStreamingRequest).toHaveBeenCalledTimes(1)
+    expect(chatHookState.stopStreamingRequest).toHaveBeenCalledWith()
   })
 
   it("uses workspace chat scope and reports runtime state", () => {

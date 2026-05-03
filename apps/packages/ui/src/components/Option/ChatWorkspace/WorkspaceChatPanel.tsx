@@ -220,7 +220,7 @@ export const WorkspaceChatPanel = ({
               <button
                 type="button"
                 className="inline-flex min-h-[32px] items-center rounded-md border border-border px-3 py-1.5 text-sm font-medium text-text transition-colors hover:bg-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
-                onClick={stopStreamingRequest}
+                onClick={() => stopStreamingRequest()}
                 aria-label="Stop generating"
               >
                 Stop generating
