@@ -8,6 +8,26 @@ Auth: Standard tldw AuthNZ
 - Single user: `X-API-KEY: <key>`
 - Multi user (JWT): `Authorization: Bearer <token>`
 
+## Runtime support contract
+
+Runtime discovery and runtime preflight are authoritative for the current host.
+Use GET `/api/v1/sandbox/runtimes` to discover what this deployment can admit
+before choosing a runtime. The current support inventory is maintained in
+`Docs/Sandbox/sandbox-runtime-capability-inventory.md`; the isolation and policy
+contract is maintained in `Docs/Sandbox/sandbox-security-policy-matrix.md`.
+
+Current runtime identities are `docker`, `firecracker`, `lima`, `vz_linux`,
+`vz_macos`, `seatbelt`, and `worktree`. Availability does not imply a security
+guarantee:
+- `seatbelt` is host-local. `seatbelt` is not `untrusted`-eligible.
+- `worktree` is host-local. `worktree` is not `untrusted`-eligible.
+- `vz_macos` real execution is not implemented; it is a scaffold/preflight
+  identity until the real runner lands.
+- `firecracker`, `lima`, and `vz_linux` are host-gated VM-grade paths and must
+  pass their own prerequisites before use.
+- `untrusted` workloads require a VM-grade runtime that preflight admits. Do not
+  substitute `seatbelt` or `worktree` when a VM-grade runtime is requested.
+
 ## Firecracker host prep
 
 If you plan to use the Firecracker runtime, follow the host prerequisites and
@@ -15,7 +35,8 @@ smoke-test steps in `Docs/Deployment/Operations/Firecracker_Host_Checklist.md`.
 
 ## Lima runtime (macOS/Linux VMs)
 
-Lima provides full VM isolation via Virtualization.framework (macOS) or QEMU (Linux).
+Lima is a VM runtime identity backed by Virtualization.framework on macOS or
+QEMU on Linux when host prerequisites and enforcement preflight pass.
 
 ### Requirements
 - Install Lima: `brew install lima` (macOS) or via package manager
@@ -33,13 +54,16 @@ Lima provides full VM isolation via Virtualization.framework (macOS) or QEMU (Li
 ```
 
 ### Notes
-- VMs use Virtualization.framework on macOS (faster) or QEMU on Linux
-- Network isolation: deny_all by default (no internet access)
+- VMs use Virtualization.framework on macOS or QEMU on Linux
+- Network isolation: `deny_all` only when the Lima enforcer preflight proves
+  strict enforcement for this host
 - Workspace mounted at `/workspace` inside VM
 - Slower startup than containers (~10-30s vs ~1s for Docker)
-- Recommended for macOS development or when maximum isolation is required
-- Runtime parity: REST, MCP `sandbox.run`, and ACP all accept `docker|firecracker|lima`
-- Strict fail-closed mode: Lima accepts only `deny_all|allowlist` network policies; unsupported requirements are rejected
+- Recommended for macOS development when VM-grade Linux isolation is available
+- Runtime parity: REST, MCP `sandbox.run`, and ACP use the current runtime enum;
+  clients should confirm host support through runtime discovery before dispatch
+- Strict fail-closed mode: Lima accepts `deny_all` only when enforcement is
+  ready; `allowlist` execution is not supported today
 - Platform constraint: Windows/WSL strict Lima enforcement is not supported yet and fails closed
 
 ## Trust-Level Tiers
@@ -56,7 +80,7 @@ Risk-based isolation profiles auto-apply resource limits based on code trustwort
 ```json
 {
   "spec_version": "1.0",
-  "runtime": "docker",
+  "runtime": "firecracker",
   "base_image": "python:3.11-slim",
   "trust_level": "untrusted"
 }
@@ -66,20 +90,27 @@ Risk-based isolation profiles auto-apply resource limits based on code trustwort
 ```json
 {
   "spec_version": "1.0",
-  "runtime": "docker",
+  "runtime": "firecracker",
   "base_image": "python:3.11-slim",
   "command": ["python", "user_script.py"],
   "trust_level": "untrusted"
 }
 ```
 
-When `untrusted` is specified, the run is automatically constrained to:
+The examples use `firecracker` as a VM-grade runtime placeholder. Replace it
+with a VM-grade runtime available on your host, such as `lima` or `vz_linux`
+when their preflight checks pass.
+
+When `untrusted` is specified and admitted, the run is automatically constrained to:
 - Max 1 CPU
 - Max 1GB memory
 - Max 60s execution timeout
 - Network deny_all (no egress)
 - Max 64 PIDs
 - Restricted file descriptors (256)
+
+`seatbelt` and `worktree` are host-local runtimes and are rejected for
+`untrusted` workloads.
 
 ## Feature discovery
 GET `/api/v1/sandbox/runtimes`
