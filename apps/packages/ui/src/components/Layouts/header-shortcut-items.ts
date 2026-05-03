@@ -29,6 +29,7 @@ import {
   Scissors,
   Server,
   ShieldCheck,
+  SquareTerminal,
   SquarePen,
   StickyNote,
   UserCircle2,
@@ -42,7 +43,11 @@ import type { HeaderShortcutId } from "@/services/settings/ui-settings"
 import { HEADER_SHORTCUT_IDS } from "@/services/settings/ui-settings"
 export { HEADER_SHORTCUT_IDS }
 import type { UserPersona } from "@/types/connection"
-import { DOCUMENT_WORKSPACE_PATH, REPO2TXT_PATH } from "@/routes/route-paths"
+import {
+  CHAT_WORKSPACE_PATH,
+  DOCUMENT_WORKSPACE_PATH,
+  REPO2TXT_PATH
+} from "@/routes/route-paths"
 import { isHostedTldwDeployment } from "@/services/tldw/deployment-mode"
 
 export type HeaderShortcutItem = {
@@ -80,12 +85,22 @@ const BASE_HEADER_SHORTCUT_GROUPS: HeaderShortcutGroup[] = [
         shortcutIndex: 1
       },
       {
+        id: "chat-workspace",
+        to: CHAT_WORKSPACE_PATH,
+        icon: SquareTerminal,
+        labelKey: "option:header.chatWorkspace",
+        labelDefault: "Chat Workspace",
+        shortcutIndex: 2,
+        descriptionKey: "option:header.chatWorkspaceDesc",
+        descriptionDefault: "Terminal-literal workspace for chat sessions"
+      },
+      {
         id: "prompts",
         to: "/prompts",
         icon: NotebookPen,
         labelKey: "option:header.modePromptsPlayground",
         labelDefault: "Prompts",
-        shortcutIndex: 2
+        shortcutIndex: 3
       },
       {
         id: "characters",
@@ -137,7 +152,6 @@ const BASE_HEADER_SHORTCUT_GROUPS: HeaderShortcutGroup[] = [
         icon: NotebookPen,
         labelKey: "option:header.modePromptStudio",
         labelDefault: "Prompt Studio",
-        shortcutIndex: 3,
         descriptionKey: "option:header.modePromptStudioDesc",
         descriptionDefault: "Design, test, and optimize prompts across models"
       },

@@ -344,6 +344,7 @@ export const SIDEBAR_SHORTCUT_MAX_COUNT = 14
 
 export const HEADER_SHORTCUT_IDS = [
   "chat",
+  "chat-workspace",
   "prompts",
   "prompt-studio",
   "characters",
@@ -457,6 +458,7 @@ const LEGACY_DEFAULT_SIDEBAR_SHORTCUT_SELECTION: SidebarShortcutId[] = [
 export const DEFAULT_SIDEBAR_SHORTCUT_SELECTION: SidebarShortcutId[] = [
   "quick-ingest",
   "chat",
+  "chat-workspace",
   "prompts",
   "characters",
   "deep-research",
