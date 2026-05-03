@@ -86,6 +86,10 @@ The current cross-runtime support inventory is:
 
 - `Docs/Sandbox/sandbox-runtime-capability-inventory.md`
 
+The current cross-runtime security policy matrix is:
+
+- `Docs/Sandbox/sandbox-security-policy-matrix.md`
+
 ## Non-Negotiable Boundaries
 
 ### Trusted Control Plane vs Untrusted Compute

@@ -51,6 +51,10 @@ TRUST_PROFILES: dict[TrustLevel, dict] = {
     },
 }
 
+_HOST_LOCAL_RUNTIMES: frozenset[RuntimeType] = frozenset(
+    {RuntimeType.seatbelt, RuntimeType.worktree}
+)
+
 
 @dataclass
 class SandboxPolicyConfig:
@@ -200,7 +204,7 @@ class SandboxPolicy:
         *,
         runtime_preflights: Mapping[RuntimeType, RuntimePreflightResult] | None = None,
     ) -> None:
-        if runtime == RuntimeType.seatbelt and trust == TrustLevel.untrusted:
+        if runtime in _HOST_LOCAL_RUNTIMES and trust == TrustLevel.untrusted:
             raise SandboxPolicy.PolicyUnsupported(
                 runtime,
                 requirement="untrusted_requires_vm_runtime",

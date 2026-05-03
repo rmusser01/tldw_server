@@ -55,6 +55,10 @@ Trust-level rules:
   `Docs/Sandbox/sandbox-runtime-capability-inventory.md`. It classifies each
   runtime's current trust, network, lifecycle, recovery, diagnostics, and CI
   support states without treating host availability as a security guarantee.
+- The sandbox security policy matrix lives in
+  `Docs/Sandbox/sandbox-security-policy-matrix.md`. It records the trust,
+  network, workspace, user, artifact, helper/request allowlisting, and audit
+  contracts that policy admission and future runtime work should preserve.
 - macOS scaffolding currently includes:
   - a Unix-socket helper client plus protocol models in `macos_virtualization/`
   - frozen helper contract docs in `tools/macos-vz-helper/`
