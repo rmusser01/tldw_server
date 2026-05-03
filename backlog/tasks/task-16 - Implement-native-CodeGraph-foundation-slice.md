@@ -4,7 +4,7 @@ title: Implement native CodeGraph foundation slice
 status: Done
 assignee: []
 created_date: '2026-05-03 21:16'
-updated_date: '2026-05-03 21:51'
+updated_date: '2026-05-03 22:01'
 labels:
   - codegraph
   - mcp
@@ -59,6 +59,8 @@ Implemented Stage 1 foundation in the codegraph worktree: CodeGraph settings/dep
 Verified parser dependency matrix in /private/tmp/codegraph-matrix-venv: tree-sitter 0.25.2, tree-sitter-python 0.25.0, tree-sitter-javascript 0.25.0, and tree-sitter-typescript 0.23.2 parsed Python, JavaScript, TypeScript, and TSX smoke snippets.
 
 Verification: pytest tldw_Server_API/tests/CodeGraph tldw_Server_API/app/core/MCP_unified/tests/test_codegraph_module.py -q => 24 passed; pytest test_filesystem_module.py test_dynamic_module_catalog.py -q => 16 passed; Bandit touched CodeGraph scope => 0 results; git diff --check => clean.
+
+PR opened against dev: https://github.com/rmusser01/tldw_server/pull/1244
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
