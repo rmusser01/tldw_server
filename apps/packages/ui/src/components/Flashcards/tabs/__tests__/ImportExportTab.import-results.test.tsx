@@ -845,7 +845,7 @@ describe("ImportExportTab import result details", () => {
 
     expect(screen.getByTestId("flashcards-transfer-summary")).toBeInTheDocument()
     expect(screen.getByTestId("flashcards-transfer-summary-formats")).toHaveTextContent(
-      "Import: CSV, TSV, JSON, JSONL, Structured Q&A, APKG · Author: Generate, Image Occlusion · Export: TSV, CSV, APKG"
+      "Import: CSV, TSV, JSON, JSONL, Structured Q&A, APKG · Author: Generate, Image Occlusion · Export: TSV, CSV, JSON, APKG"
     )
     expect(screen.getByTestId("flashcards-transfer-summary-limits")).toHaveTextContent(
       "500 cards · 1048576 bytes"
