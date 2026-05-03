@@ -26,6 +26,7 @@ const HIGH_RISK_ROUTES: HighRiskRoute[] = [
     requiresSeededAuth: false
   },
   { path: "/chat", name: "Chat" },
+  { path: "/chat-workspace", name: "Chat Workspace" },
   {
     path: "/persona",
     name: "Persona",

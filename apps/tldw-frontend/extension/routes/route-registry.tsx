@@ -31,7 +31,8 @@ import {
   Library,
   ListTodo,
   PenLine,
-  ShieldCheck
+  ShieldCheck,
+  SquareTerminal
 } from "lucide-react"
 import { Navigate } from "react-router-dom"
 import { ALL_TARGETS, type PlatformTarget } from "@/config/platform"
@@ -197,6 +198,7 @@ const OptionGuardianSettings = createSettingsRoute(
 const OptionWorkspacePlayground = lazy(
   () => import("./option-workspace-playground")
 )
+const OptionChatWorkspace = lazy(() => import("./option-chat-workspace"))
 const OptionAdminSources = lazy(() => import("./option-admin-sources"))
 
 const ERROR_BOUNDARY_TEST_ENABLED = process.env.NODE_ENV !== "production"
@@ -484,6 +486,17 @@ export const ROUTE_DEFINITIONS: RouteDefinition[] = [
       icon: FlaskConical,
       order: 0,
       beta: true
+    }
+  },
+  {
+    kind: "options",
+    path: "/chat-workspace",
+    element: <OptionChatWorkspace />,
+    nav: {
+      group: "workspace",
+      labelToken: "option:header.chatWorkspace",
+      icon: SquareTerminal,
+      order: 1
     }
   },
   {

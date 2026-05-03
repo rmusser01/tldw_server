@@ -35,6 +35,13 @@ import {
   normalizeImageGenerationVariantBundle,
   type ImageGenerationEventSyncPolicy
 } from "@/utils/image-generation-chat"
+import {
+  chatSubmitFailed,
+  chatSubmitSkipped,
+  chatSubmitSubmitted,
+  type ChatSubmitResult
+} from "@/hooks/chat/chat-action-utils"
+import { isAbortLikeError } from "@/hooks/chat/abort-turn-cleanup"
 
 const STREAMING_UPDATE_INTERVAL_MS = 80
 let didLogPipelineSetHistoryMissing = false
@@ -148,7 +155,7 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
   history: ChatHistory,
   signal: AbortSignal,
   params: TParams
-) => {
+): Promise<ChatSubmitResult> => {
   const {
     selectedModel,
     toolChoice,
@@ -471,7 +478,7 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
         conversationId: preflight.conversationId,
         imageEventSyncPolicy
       })
-      return
+      return chatSubmitSubmitted()
     }
 
     const promptData = await mode.preparePrompt(context)
@@ -651,12 +658,17 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
       conversationId: modelClient.conversationId,
       imageEventSyncPolicy
     })
+    return chatSubmitSubmitted()
   } catch (e) {
     cancelStreamingUpdate()
     signal.removeEventListener("abort", abortCancelStreamingUpdate)
-    const assistantContent = buildAssistantErrorContent(fullText, e)
-    const interruptionReason =
-      e instanceof Error && e.message.trim().length > 0
+    const isAbort = signal.aborted || isAbortLikeError(e)
+    const assistantContent = isAbort
+      ? fullText
+      : buildAssistantErrorContent(fullText, e)
+    const interruptionReason = isAbort
+      ? "Request cancelled"
+      : e instanceof Error && e.message.trim().length > 0
         ? e.message
         : "Something went wrong."
     setMessagesWithTransition((prev) =>
@@ -703,9 +715,14 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
       prompt_id: promptId
     })
 
+    if (isAbort) {
+      return chatSubmitSkipped(interruptionReason)
+    }
+
     if (!errorSave) {
       throw e
     }
+    return chatSubmitFailed(interruptionReason)
   } finally {
     signal.removeEventListener("abort", abortCancelStreamingUpdate)
     setIsProcessing(false)

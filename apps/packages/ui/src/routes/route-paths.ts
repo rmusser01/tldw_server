@@ -4,6 +4,7 @@ import {
 } from "@/utils/settings-return"
 
 export const CHAT_PATH = "/chat"
+export const CHAT_WORKSPACE_PATH = "/chat-workspace"
 export const RESEARCH_PATH = "/research"
 export const WORKSPACE_PLAYGROUND_PATH = "/workspace-playground"
 export const DOCUMENT_WORKSPACE_PATH = "/document-workspace"
@@ -18,6 +19,7 @@ export const SOURCES_DETAIL_PATH = "/sources/:sourceId"
 export const ADMIN_SOURCES_PATH = "/admin/sources"
 
 export const VIEWPORT_CONSTRAINED_PATHS = [
+  CHAT_WORKSPACE_PATH,
   DOCUMENT_WORKSPACE_PATH,
   WORKSPACE_PLAYGROUND_PATH,
   "/media-multi",

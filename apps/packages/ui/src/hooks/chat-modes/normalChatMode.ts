@@ -29,6 +29,7 @@ import {
   type ChatModeDefinition
 } from "./chatModePipeline"
 import { appendSystemPromptSuffix } from "@/utils/output-formatting-guide"
+import type { ChatSubmitResult } from "@/hooks/chat/chat-action-utils"
 
 interface WebSearchPayload {
   query: string
@@ -553,12 +554,12 @@ export const normalChatMode = async (
   history: ChatHistory,
   signal: AbortSignal,
   params: NormalChatModeParams
-) => {
+): Promise<ChatSubmitResult> => {
   console.log("Using normalChatMode")
   const resolvedImage =
     image.length > 0 ? `data:image/jpeg;base64,${image.split(",")[1]}` : ""
 
-  await runChatPipeline(
+  return runChatPipeline(
     normalChatModeDefinition,
     message,
     resolvedImage,

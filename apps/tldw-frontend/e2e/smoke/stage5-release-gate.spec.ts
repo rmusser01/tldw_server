@@ -85,6 +85,7 @@ type CriticalRoute = {
 
 const CRITICAL_ROUTES: CriticalRoute[] = [
   { path: "/chat", name: "Chat" },
+  { path: "/chat-workspace", name: "Chat Workspace" },
   { path: "/settings", name: "Settings" },
   { path: "/chat/settings", name: "Chat Settings", expectedPath: "/settings/chat" },
   { path: "/settings/chatbooks", name: "Chatbooks Settings" },
