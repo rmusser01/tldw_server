@@ -19,6 +19,7 @@ from datetime import datetime, timezone
 
 from tldw_Server_API.app.api.v1.endpoints import storage as storage_endpoints
 from tldw_Server_API.app.api.v1.endpoints import storage_admin_quotas
+from tldw_Server_API.app.api.v1.endpoints import storage_download
 from tldw_Server_API.app.api.v1.schemas.storage_schemas import SetQuotaRequest
 from tldw_Server_API.app.core.AuthNZ.exceptions import StorageError
 
@@ -418,6 +419,15 @@ class TestDownloadFileEndpoint:
     """Tests for GET /storage/files/{file_id}/download endpoint."""
 
     @pytest.mark.unit
+    def test_download_file_handler_reexport_from_storage_after_sidecar_split(self):
+        """Download handler remains import-compatible after sidecar extraction."""
+        storage_download = import_module(
+            "tldw_Server_API.app.api.v1.endpoints.storage_download"
+        )
+
+        assert storage_endpoints.download_file is storage_download.download_file
+
+    @pytest.mark.unit
     @pytest.mark.asyncio
     async def test_path_traversal_blocked_double_dots(
         self,
@@ -442,8 +452,8 @@ class TestDownloadFileEndpoint:
         mock_storage_service.get_generated_files_repo = AsyncMock(return_value=mock_files_repo)
 
         monkeypatch.setattr(
-            storage_endpoint,
-            "_get_service",
+            storage_download,
+            "_get_storage_service",
             AsyncMock(return_value=mock_storage_service),
         )
         monkeypatch.setattr(
@@ -490,8 +500,8 @@ class TestDownloadFileEndpointIntegration:
         mock_storage_service.get_generated_files_repo = AsyncMock(return_value=mock_files_repo)
 
         monkeypatch.setattr(
-            storage_endpoint,
-            "_get_service",
+            storage_download,
+            "_get_storage_service",
             AsyncMock(return_value=mock_storage_service),
         )
         monkeypatch.setattr(
@@ -530,8 +540,8 @@ class TestDownloadFileEndpointIntegration:
         mock_storage_service.get_generated_files_repo = AsyncMock(return_value=mock_files_repo)
 
         monkeypatch.setattr(
-            storage_endpoint,
-            "_get_service",
+            storage_download,
+            "_get_storage_service",
             AsyncMock(return_value=mock_storage_service),
         )
         monkeypatch.setattr(
@@ -544,6 +554,82 @@ class TestDownloadFileEndpointIntegration:
         with TestClient(app) as client:
             resp = client.get("/api/v1/storage/files/2/download")
             assert resp.status_code == 403
+
+    @pytest.mark.unit
+    def test_download_file_rejects_directory_storage_path(
+        self,
+        temp_user_outputs_dir,
+        mock_storage_service,
+        mock_user,
+        mock_files_repo,
+        monkeypatch,
+    ):
+        """Directory storage paths are rejected before FileResponse handling."""
+        from tldw_Server_API.app.api.v1.endpoints import storage as storage_endpoint
+
+        rel_path = "tts_audio/not-a-file"
+        (temp_user_outputs_dir / rel_path).mkdir(parents=True)
+
+        file_record = {
+            "id": 4,
+            "user_id": mock_user.id,
+            "storage_path": rel_path,
+            "file_category": "tts_audio",
+            "is_deleted": False,
+        }
+
+        mock_files_repo.get_file_by_id = AsyncMock(return_value=file_record)
+        mock_storage_service.get_generated_files_repo = AsyncMock(return_value=mock_files_repo)
+
+        monkeypatch.setattr(
+            storage_download,
+            "_get_storage_service",
+            AsyncMock(return_value=mock_storage_service),
+        )
+        monkeypatch.setattr(
+            storage_endpoint.DatabasePaths,
+            "get_user_outputs_dir",
+            lambda user_id: temp_user_outputs_dir,
+        )
+
+        app = _storage_download_test_app(mock_user)
+        with TestClient(app, raise_server_exceptions=False) as client:
+            resp = client.get("/api/v1/storage/files/4/download")
+            assert resp.status_code == 404
+
+    @pytest.mark.unit
+    @pytest.mark.parametrize("storage_path", [None, ""])
+    def test_download_file_rejects_invalid_storage_path_shape(
+        self,
+        storage_path,
+        temp_user_outputs_dir,
+        mock_storage_service,
+        mock_user,
+        mock_files_repo,
+        monkeypatch,
+    ):
+        """Invalid stored path values are rejected before path resolution."""
+        file_record = {
+            "id": 5,
+            "user_id": mock_user.id,
+            "storage_path": storage_path,
+            "file_category": "tts_audio",
+            "is_deleted": False,
+        }
+
+        mock_files_repo.get_file_by_id = AsyncMock(return_value=file_record)
+        mock_storage_service.get_generated_files_repo = AsyncMock(return_value=mock_files_repo)
+
+        monkeypatch.setattr(
+            storage_download,
+            "_get_storage_service",
+            AsyncMock(return_value=mock_storage_service),
+        )
+
+        app = _storage_download_test_app(mock_user)
+        with TestClient(app, raise_server_exceptions=False) as client:
+            resp = client.get("/api/v1/storage/files/5/download")
+            assert resp.status_code == 404
 
     @pytest.mark.unit
     def test_download_file_uses_voices_dir_for_voice_clones(
@@ -575,8 +661,8 @@ class TestDownloadFileEndpointIntegration:
         mock_storage_service.get_generated_files_repo = AsyncMock(return_value=mock_files_repo)
 
         monkeypatch.setattr(
-            storage_endpoint,
-            "_get_service",
+            storage_download,
+            "_get_storage_service",
             AsyncMock(return_value=mock_storage_service),
         )
         monkeypatch.setattr(
@@ -622,8 +708,8 @@ class TestDownloadFileEndpointIntegration:
         mock_storage_service.get_generated_files_repo = AsyncMock(return_value=mock_files_repo)
 
         monkeypatch.setattr(
-            storage_endpoint,
-            "_get_service",
+            storage_download,
+            "_get_storage_service",
             AsyncMock(return_value=mock_storage_service),
         )
 
