@@ -96,9 +96,10 @@ from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import (
     API_KEYS as SCHEMAS_API_KEYS,
 )
 from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import (
-    DEFAULT_LLM_PROVIDER,
     ChatCompletionRequest,
+    ChatCompletionResponse,
     ChatCompletionSystemMessageParam,
+    DEFAULT_LLM_PROVIDER,
     RagContext,
     get_api_keys,  # noqa: F401 - legacy tests patch this endpoint symbol
 )
@@ -2225,6 +2226,7 @@ async def _persist_system_message_if_needed(
 
 @router.post(
     "/completions",
+    response_model=ChatCompletionResponse,
     summary="Create chat completion (OpenAI-compatible)",
     description=(
         "Generates an assistant response using the configured LLM provider. "
