@@ -11,6 +11,7 @@ from typing import Any
 
 from loguru import logger
 
+from tldw_Server_API.app.api.v1.utils.pagination import build_page_pagination_meta
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool, get_db_pool
 from tldw_Server_API.app.core.AuthNZ.privilege_catalog import PrivilegeCatalog, ScopeEntry, load_catalog
 from tldw_Server_API.app.core.AuthNZ.settings import is_single_user_profile_mode
@@ -1067,12 +1068,19 @@ class PrivilegeMapService:
             raise PaginationLimitExceeded("Requested pagination exceeds allowed result window.")
         end = min(start + page_size, len(items))
         paginated = items[start:end]
+        total_pages = (total_items + page_size - 1) // page_size
         return {
             "catalog_version": self.catalog.version,
             "generated_at": datetime.now(timezone.utc),
             "page": page,
             "page_size": page_size,
             "total_items": total_items,
+            "pagination": build_page_pagination_meta(
+                page=page,
+                per_page=page_size,
+                total=total_items,
+                total_pages=total_pages,
+            ),
             "items": paginated,
         }
 

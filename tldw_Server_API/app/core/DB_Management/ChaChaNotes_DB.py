@@ -23902,11 +23902,13 @@ for _keyword_store_method in (
     "unlink_conversation_from_keyword",
     "get_keywords_for_conversation",
     "get_keywords_for_conversations",
+    "count_conversation_keyword_links",
     "get_conversations_for_keyword",
     "link_collection_to_keyword",
     "unlink_collection_from_keyword",
     "unlink_collection_to_keyword",
     "get_keywords_for_collection",
+    "count_collection_keyword_links",
     "get_collections_for_keyword",
     "get_notes_for_keyword",
 ):

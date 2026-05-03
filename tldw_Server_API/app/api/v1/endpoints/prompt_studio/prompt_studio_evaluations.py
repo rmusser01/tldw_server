@@ -26,6 +26,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, R
 from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps import get_prompt_studio_db, get_prompt_studio_user
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.api.v1.schemas.prompt_studio_schemas import (
     EvaluationCreate,
@@ -382,7 +383,7 @@ async def list_evaluations(
     offset: int = Query(0, ge=0),
     db: PromptStudioDatabase = Depends(get_prompt_studio_db),
     user_context: dict = Depends(get_prompt_studio_user),
-) -> list[EvaluationResponse]:
+) -> EvaluationList:
     """
     List evaluations for a project.
 
@@ -401,8 +402,10 @@ async def list_evaluations(
         # Use EvaluationManager to list evaluations
         eval_manager = EvaluationManager(db)
 
-        # Calculate page from offset
+        # Convert the public offset contract onto the manager's page API without
+        # returning rows before the requested offset.
         page = (offset // limit) + 1 if limit > 0 else 1
+        start_in_page = offset % limit if limit > 0 else 0
 
         result = eval_manager.list_evaluations(
             project_id=project_id,
@@ -410,10 +413,20 @@ async def list_evaluations(
             page=page,
             per_page=limit
         )
+        evaluation_rows = list(result.get("evaluations", []))
+        if start_in_page and len(evaluation_rows) < start_in_page + limit:
+            next_result = eval_manager.list_evaluations(
+                project_id=project_id,
+                prompt_id=prompt_id,
+                page=page + 1,
+                per_page=limit,
+            )
+            evaluation_rows.extend(next_result.get("evaluations", []))
+        evaluation_rows = evaluation_rows[start_in_page:start_in_page + limit]
 
         # Convert to response format
         evaluations = []
-        for eval_data in result.get("evaluations", []):
+        for eval_data in evaluation_rows:
             evaluations.append(EvaluationResponse(
                 id=eval_data["id"],
                 uuid=eval_data.get("uuid", ""),
@@ -424,14 +437,22 @@ async def list_evaluations(
                 status=eval_data.get("status", "pending"),
                 created_at=eval_data.get("created_at", ""),
                 completed_at=eval_data.get("completed_at"),
-                metrics=eval_data.get("aggregate_metrics")
+                metrics=eval_data.get("aggregate_metrics") or {},
             ))
 
+        pagination_data = result.get("pagination") if isinstance(result.get("pagination"), dict) else {}
+        total = int(pagination_data.get("total", result.get("total", len(evaluations))))
         return {
             "evaluations": evaluations,
-            "total": int(result.get("total", len(evaluations))),
+            "total": total,
             "limit": limit,
             "offset": offset,
+            "pagination": build_offset_pagination_meta(
+                total=total,
+                limit=limit,
+                offset=offset,
+                count=len(evaluations),
+            ),
         }
 
     except DatabaseError as e:

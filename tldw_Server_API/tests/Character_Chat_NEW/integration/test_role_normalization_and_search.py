@@ -144,6 +144,16 @@ async def test_get_messages_format_for_completions_roles_and_search_placeholders
             )
             assert r.status_code == 200
             data = r.json()
+            assert data["pagination"] == {
+                "mode": "offset",
+                "limit": 50,
+                "offset": 0,
+                "total": 3,
+                "has_more": False,
+                "next_offset": None,
+            }
+            assert data["has_more"] is False
+            assert data["next_offset"] is None
             roles = [m["role"] for m in data["messages"]]
             assert "system" in roles
             assert set(roles).issubset({"user", "assistant", "system", "tool"})

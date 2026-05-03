@@ -9,17 +9,9 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
+from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta, default_offset_pagination_aliases
 
 ChatGrammarValidationStatus = Literal["unchecked", "valid", "invalid"]
-
-
-def _default_offset_pagination_aliases(response):
-    if response.has_more is None:
-        response.has_more = response.pagination.has_more
-    if response.next_offset is None:
-        response.next_offset = response.pagination.next_offset
-    return response
 
 
 class ChatGrammarBase(BaseModel):
@@ -92,4 +84,4 @@ class ChatGrammarListResponse(BaseModel):
 
     @model_validator(mode="after")
     def _default_pagination_aliases(self) -> "ChatGrammarListResponse":
-        return _default_offset_pagination_aliases(self)
+        return default_offset_pagination_aliases(self)

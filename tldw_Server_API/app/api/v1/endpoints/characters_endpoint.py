@@ -1399,9 +1399,16 @@ async def search_character_exemplars_endpoint(
             character_id=character_id,
             search_request=search_request,
         )
+        pagination = build_offset_pagination_meta(
+            limit=search_request.limit,
+            offset=search_request.offset,
+            total=total,
+            count=len(results),
+        )
         return CharacterExemplarSearchResponse(
             items=[_convert_db_exemplar_to_response_model(item) for item in results],
             total=total,
+            pagination=pagination,
         )
     except InputError as e:
         raise map_db_error_to_http(e) from e

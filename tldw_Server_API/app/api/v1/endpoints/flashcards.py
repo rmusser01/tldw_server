@@ -119,6 +119,7 @@ from tldw_Server_API.app.core.Utils.image_validation import (
 from tldw_Server_API.app.core.Workflows.adapters.content import run_flashcard_generate_adapter
 
 router = APIRouter(prefix="/flashcards", tags=["flashcards"])
+MAX_STUDY_PACK_JOBS_OFFSET = 10_000
 _FLASHCARDS_INT_PARSE_EXCEPTIONS: tuple[type[BaseException], ...] = (
     TypeError,
     ValueError,
@@ -2018,17 +2019,19 @@ def create_study_pack_job(
 def list_study_pack_jobs(
     status: Optional[str] = Query(None),
     limit: int = Query(100, ge=1, le=1000),
+    offset: int = Query(0, ge=0, le=MAX_STUDY_PACK_JOBS_OFFSET),
     current_user: User = Depends(get_request_user),
     principal: AuthPrincipal = Depends(get_auth_principal),
     jm: JobManager = Depends(get_job_manager),
 ) -> StudyPackJobListResponse:
+    fetch_limit = limit + offset
     jobs = jm.list_jobs(
         domain=STUDY_PACKS_DOMAIN,
         queue=study_pack_jobs_queue(),
         status=status,
         owner_user_id=str(current_user.id),
         job_type=STUDY_PACKS_JOB_TYPE,
-        limit=limit,
+        limit=fetch_limit,
         sort_by="created_at",
         sort_order="desc",
     )
@@ -2036,6 +2039,7 @@ def list_study_pack_jobs(
     for job in jobs:
         _ensure_study_pack_job_access(job, current_user=current_user, principal=principal)
         visible_jobs.append(_serialize_study_pack_job(job))
+    paged_jobs = visible_jobs[offset:offset + limit]
     total = jm.count_jobs(
         domain=STUDY_PACKS_DOMAIN,
         queue=study_pack_jobs_queue(),
@@ -2043,7 +2047,13 @@ def list_study_pack_jobs(
         owner_user_id=str(current_user.id),
         job_type=STUDY_PACKS_JOB_TYPE,
     )
-    return StudyPackJobListResponse(jobs=visible_jobs, total=total)
+    pagination = build_offset_pagination_meta(
+        limit=limit,
+        offset=offset,
+        total=total,
+        count=len(paged_jobs),
+    )
+    return StudyPackJobListResponse(jobs=paged_jobs, total=total, pagination=pagination)
 
 
 @router.get("/study-packs/jobs/{job_id}", response_model=StudyPackJobStatusResponse)

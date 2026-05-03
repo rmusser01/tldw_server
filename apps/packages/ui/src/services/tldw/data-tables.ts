@@ -6,6 +6,7 @@ import type {
   DataTableSourceType,
   DataTableSummary
 } from "@/types/data-tables"
+import type { OffsetPaginationMeta } from "@/services/response-envelope"
 
 export type ApiDataTableSource = {
   source_type: string
@@ -66,14 +67,7 @@ export type ApiDataTablesListResponse = {
   total?: number
   limit?: number
   offset?: number
-  pagination?: {
-    mode?: string
-    limit?: number
-    offset?: number
-    total?: number | null
-    has_more?: boolean
-    next_offset?: number | null
-  }
+  pagination?: Partial<OffsetPaginationMeta>
 }
 
 export type ApiDataTableGenerateResponse = {

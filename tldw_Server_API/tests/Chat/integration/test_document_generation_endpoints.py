@@ -4,6 +4,7 @@ from fastapi import status
 
 from tldw_Server_API.app.api.v1.API_Deps.chat_documents_deps import get_document_generator_service
 from tldw_Server_API.app.api.v1.endpoints import chat as chat_router
+from tldw_Server_API.app.core.Chat.document_generator import DocumentType
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDBError, InputError
 from tldw_Server_API.tests._plugins.chat_fixtures import get_auth_headers
 
@@ -86,7 +87,7 @@ def test_document_generate_streams_as_sse(authenticated_client, auth_token):
             )
             return doc_id
 
-        def get_generated_documents(self, conversation_id=None, document_type=None, limit=50):
+        def get_generated_documents(self, conversation_id=None, document_type=None, limit=50, offset=0):
 
             docs = list(StreamingStubService.stored_docs)
             if conversation_id is not None:
@@ -95,7 +96,7 @@ def test_document_generate_streams_as_sse(authenticated_client, auth_token):
                 dtype = document_type.value if hasattr(document_type, "value") else document_type
                 docs = [doc for doc in docs if doc["document_type"] == dtype]
             docs.sort(key=lambda item: item["id"], reverse=True)
-            return docs[:limit]
+            return docs[offset:offset + limit]
 
     authenticated_client.app.dependency_overrides[get_document_generator_service] = lambda: StreamingStubService
     StreamingStubService.stored_docs = []
@@ -212,6 +213,100 @@ def test_document_list_maps_database_error_from_service(authenticated_client):
 
     assert response.status_code == 500, response.text
     assert response.json() == {"detail": "Failed to list generated documents"}
+    response.close()
+
+
+def test_document_list_includes_canonical_pagination(authenticated_client) -> None:
+    """Generated document listing preserves total while exposing canonical offset pagination."""
+    calls = {"list": [], "count": []}
+
+    class PaginatedStubService:
+        def __init__(self, db):
+            self._db = db
+
+        def get_generated_documents(self, conversation_id=None, document_type=None, limit=50, offset=0):
+            calls["list"].append(
+                {
+                    "conversation_id": conversation_id,
+                    "document_type": document_type,
+                    "limit": limit,
+                    "offset": offset,
+                }
+            )
+            docs = [
+                {
+                    "id": 12,
+                    "conversation_id": conversation_id,
+                    "document_type": "summary",
+                    "title": "Newest Doc",
+                    "content": "newer",
+                    "provider": "openai",
+                    "model": "gpt-4o-mini",
+                    "generation_time_ms": 10,
+                    "token_count": 3,
+                    "created_at": datetime.datetime.utcnow(),
+                    "metadata": {},
+                },
+                {
+                    "id": 11,
+                    "conversation_id": conversation_id,
+                    "document_type": "summary",
+                    "title": "Older Doc",
+                    "content": "older",
+                    "provider": "openai",
+                    "model": "gpt-4o-mini",
+                    "generation_time_ms": 12,
+                    "token_count": 4,
+                    "created_at": datetime.datetime.utcnow(),
+                    "metadata": {},
+                },
+            ]
+            return docs[offset:offset + limit]
+
+        def count_generated_documents(self, conversation_id=None, document_type=None):
+            calls["count"].append(
+                {
+                    "conversation_id": conversation_id,
+                    "document_type": document_type,
+                }
+            )
+            return 4
+
+    authenticated_client.app.dependency_overrides[get_document_generator_service] = lambda: PaginatedStubService
+
+    response = authenticated_client.get(
+        "/api/v1/chat/documents",
+        params={"conversation_id": "chat-42", "document_type": "summary", "limit": 1, "offset": 1},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert [doc["id"] for doc in payload["documents"]] == [11]
+    assert payload["total"] == 4
+    assert payload["conversation_id"] == "chat-42"
+    assert payload["document_type"] == "summary"
+    assert payload["pagination"] == {
+        "mode": "offset",
+        "limit": 1,
+        "offset": 1,
+        "total": 4,
+        "has_more": True,
+        "next_offset": 2,
+    }
+    assert calls["list"] == [
+        {
+            "conversation_id": "chat-42",
+            "document_type": DocumentType.SUMMARY,
+            "limit": 1,
+            "offset": 1,
+        }
+    ]
+    assert calls["count"] == [
+        {
+            "conversation_id": "chat-42",
+            "document_type": DocumentType.SUMMARY,
+        }
+    ]
     response.close()
 
 
@@ -466,7 +561,7 @@ def test_document_generate_uses_configured_api_key(monkeypatch, authenticated_cl
             captured["provider"] = kwargs.get("provider")
             return "Generated content"
 
-        def get_generated_documents(self, conversation_id=None, document_type=None, limit=50):
+        def get_generated_documents(self, conversation_id=None, document_type=None, limit=50, offset=0):
 
             return [
                 {

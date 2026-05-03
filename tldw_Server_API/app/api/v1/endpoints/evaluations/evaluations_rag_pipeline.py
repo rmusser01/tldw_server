@@ -14,6 +14,7 @@ from tldw_Server_API.app.api.v1.endpoints.evaluations.evaluations_auth import (
     get_eval_request_user,
     sanitize_error_message,
 )
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.schemas.evaluation_schemas_unified import (
     PipelineCleanupResponse,
     PipelinePresetCreate,
@@ -129,7 +130,14 @@ async def list_pipeline_presets(
                 created_at=to_ts(r.get("created_at")),
                 updated_at=to_ts(r.get("updated_at")),
             ))
-        return PipelinePresetListResponse(items=resp_items, total=total)
+        pagination = build_offset_pagination_meta(total=total, limit=limit, offset=offset, count=len(resp_items))
+        return PipelinePresetListResponse(
+            items=resp_items,
+            total=total,
+            limit=limit,
+            offset=offset,
+            pagination=pagination,
+        )
     except _PIPELINE_ENDPOINT_EXCEPTIONS as e:
         logger.error("Failed to list presets")
         raise create_error_response(

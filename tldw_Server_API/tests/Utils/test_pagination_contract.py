@@ -1,11 +1,12 @@
 import pytest
-from pydantic import ValidationError
+from pydantic import BaseModel, Field, ValidationError, model_validator
 
 from tldw_Server_API.app.api.v1.endpoints._pagination_utils import (
     build_link_header,
     build_offset_pagination_meta,
     build_page_pagination_meta,
     build_pagination_link_header,
+    resolve_page_pagination_metadata,
 )
 from tldw_Server_API.app.api.v1.schemas.admin_schemas import WebhookListResponse
 from tldw_Server_API.app.api.v1.schemas.character_schemas import CharacterListQueryResponse
@@ -14,8 +15,85 @@ from tldw_Server_API.app.api.v1.schemas.pagination import (
     OffsetPaginationMeta,
     PagePaginationMeta,
 )
+from tldw_Server_API.app.api.v1.schemas import pagination as pagination_schemas
 from tldw_Server_API.app.api.v1.schemas.reading_schemas import ReadingItemsListResponse
 from tldw_Server_API.app.api.v1.schemas.writing_manuscript_schemas import ManuscriptProjectListResponse
+
+
+class OffsetAliasResponse(BaseModel):
+    """Test-only response proving default offset alias behavior."""
+
+    items: list[int]
+    limit: int | None = Field(default=None, ge=1)
+    offset: int | None = Field(default=None, ge=0)
+    total: int | None = Field(default=None, ge=0)
+    has_more: bool | None = None
+    next_offset: int | None = Field(default=None, ge=0)
+    pagination: OffsetPaginationMeta
+
+    @model_validator(mode="after")
+    def default_aliases(self) -> "OffsetAliasResponse":
+        return pagination_schemas.default_offset_pagination_aliases(self)
+
+
+class StrictOffsetAliasResponse(OffsetAliasResponse):
+    """Test-only response proving strict offset alias validation behavior."""
+
+    @model_validator(mode="after")
+    def validate_aliases(self) -> "StrictOffsetAliasResponse":
+        return pagination_schemas.validate_offset_pagination_aliases(self)
+
+
+class PageAliasResponse(BaseModel):
+    """Test-only response proving default page alias behavior."""
+
+    items: list[int]
+    page: int | None = Field(default=None, ge=1)
+    per_page: int | None = Field(default=None, ge=1)
+    total: int | None = Field(default=None, ge=0)
+    total_pages: int | None = Field(default=None, ge=0)
+    has_more: bool | None = None
+    pagination: PagePaginationMeta
+
+    @model_validator(mode="after")
+    def default_aliases(self) -> "PageAliasResponse":
+        return pagination_schemas.default_page_pagination_aliases(self)
+
+
+class CursorAliasResponse(BaseModel):
+    """Test-only response proving default cursor alias behavior."""
+
+    items: list[int]
+    limit: int | None = Field(default=None, ge=1)
+    cursor: str | None = None
+    next_cursor: str | None = None
+    has_more: bool | None = None
+    pagination: CursorPaginationMeta
+
+    @model_validator(mode="after")
+    def default_aliases(self) -> "CursorAliasResponse":
+        return pagination_schemas.default_cursor_pagination_aliases(self)
+
+
+class OptionalPaginationAliasResponse(BaseModel):
+    """Test-only response proving alias helpers tolerate missing metadata."""
+
+    items: list[int]
+    has_more: bool | None = None
+    next_offset: int | None = Field(default=None, ge=0)
+    pagination: OffsetPaginationMeta | None = None
+
+    @model_validator(mode="after")
+    def default_aliases(self) -> "OptionalPaginationAliasResponse":
+        return pagination_schemas.default_offset_pagination_aliases(self)
+
+
+class StrictOptionalPaginationAliasResponse(OptionalPaginationAliasResponse):
+    """Test-only response proving strict helper also tolerates missing metadata."""
+
+    @model_validator(mode="after")
+    def validate_aliases(self) -> "StrictOptionalPaginationAliasResponse":
+        return pagination_schemas.validate_offset_pagination_aliases(self)
 
 
 def test_build_offset_pagination_meta_computes_has_more_and_next_offset() -> None:
@@ -54,6 +132,28 @@ def test_build_page_pagination_meta_derives_has_more_from_total() -> None:
 
     assert pagination.has_more is True
     assert pagination.total_pages is None
+
+
+def test_resolve_page_pagination_metadata_safely_defaults_bad_numbers() -> None:
+    """Page pagination normalization does not raise on malformed storage metadata."""
+    metadata = resolve_page_pagination_metadata(
+        {
+            "page": "not-a-number",
+            "per_page": "0",
+            "total": "-5",
+            "total_pages": "also-bad",
+        },
+        page=2,
+        per_page=10,
+        item_count=7,
+    )
+
+    assert metadata == {
+        "page": 2,
+        "per_page": 1,
+        "total": 0,
+        "total_pages": 0,
+    }
 
 
 def test_pagination_meta_modes_are_fixed_discriminators() -> None:
@@ -125,6 +225,80 @@ def test_webhook_list_backfills_legacy_limit_offset_aliases() -> None:
     assert response.offset == 50
     assert response.has_more is True
     assert response.next_offset == 75
+
+
+def test_shared_offset_alias_helper_defaults_all_present_alias_fields() -> None:
+    """Shared offset helper backfills every legacy alias field declared by a response."""
+    pagination = OffsetPaginationMeta(limit=10, offset=20, total=35, has_more=True, next_offset=30)
+
+    response = OffsetAliasResponse(items=[], pagination=pagination)
+
+    assert response.limit == 10
+    assert response.offset == 20
+    assert response.total == 35
+    assert response.has_more is True
+    assert response.next_offset == 30
+
+
+def test_shared_offset_alias_validator_accepts_matching_explicit_aliases() -> None:
+    """Strict offset helper accepts aliases that already agree with canonical metadata."""
+    pagination = OffsetPaginationMeta(limit=10, offset=20, total=35, has_more=True, next_offset=30)
+
+    response = StrictOffsetAliasResponse(
+        items=[],
+        limit=10,
+        offset=20,
+        total=35,
+        has_more=True,
+        next_offset=30,
+        pagination=pagination,
+    )
+
+    assert response.pagination == pagination
+
+
+def test_shared_offset_alias_validator_rejects_contradictory_aliases() -> None:
+    """Strict offset helper rejects drift between legacy aliases and canonical metadata."""
+    pagination = OffsetPaginationMeta(limit=10, offset=20, total=35, has_more=True, next_offset=30)
+
+    with pytest.raises(ValidationError, match="limit alias mismatch"):
+        StrictOffsetAliasResponse(items=[], limit=5, pagination=pagination)
+
+
+def test_shared_alias_helpers_skip_missing_canonical_pagination() -> None:
+    """Shared alias helpers remain compatibility-safe when metadata is absent."""
+    defaulted = OptionalPaginationAliasResponse(items=[])
+    strict = StrictOptionalPaginationAliasResponse(items=[])
+
+    assert defaulted.has_more is None
+    assert defaulted.next_offset is None
+    assert strict.has_more is None
+    assert strict.next_offset is None
+
+
+def test_shared_page_alias_helper_defaults_all_present_alias_fields() -> None:
+    """Shared page helper backfills every legacy page alias field declared by a response."""
+    pagination = PagePaginationMeta(page=2, per_page=25, total=80, total_pages=4, has_more=True)
+
+    response = PageAliasResponse(items=[], pagination=pagination)
+
+    assert response.page == 2
+    assert response.per_page == 25
+    assert response.total == 80
+    assert response.total_pages == 4
+    assert response.has_more is True
+
+
+def test_shared_cursor_alias_helper_defaults_all_present_alias_fields() -> None:
+    """Shared cursor helper backfills every legacy cursor alias field declared by a response."""
+    pagination = CursorPaginationMeta(limit=25, cursor="input-token", next_cursor="next-token", has_more=True)
+
+    response = CursorAliasResponse(items=[], pagination=pagination)
+
+    assert response.limit == 25
+    assert response.cursor == "input-token"
+    assert response.next_cursor == "next-token"
+    assert response.has_more is True
 
 
 def test_build_pagination_link_header_uses_offset_metadata() -> None:

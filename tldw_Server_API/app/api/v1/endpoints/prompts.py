@@ -16,6 +16,7 @@ from pydantic import ValidationError
 
 from tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps import get_prompts_db_for_user
 from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
+from tldw_Server_API.app.api.v1.utils.pagination import build_page_pagination_meta
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.api.v1.schemas import prompt_schemas as schemas
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings as get_auth_settings
@@ -517,7 +518,13 @@ async def search_all_prompts(
             items=items,
             total_matches=total_matches,
             page=page,
-            per_page=results_per_page
+            per_page=results_per_page,
+            pagination=build_page_pagination_meta(
+                page=page,
+                per_page=results_per_page,
+                total=total_matches,
+                total_pages=(total_matches + results_per_page - 1) // results_per_page,
+            ),
         )
     except ValueError as e: # Bad page/per_page
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
@@ -1240,7 +1247,13 @@ async def list_all_prompts(
             items=brief_items,
             total_pages=total_pages,
             current_page=current_page,
-            total_items=total_items
+            total_items=total_items,
+            pagination=build_page_pagination_meta(
+                page=current_page,
+                per_page=per_page,
+                total=total_items,
+                total_pages=total_pages,
+            ),
         )
     except ValueError as e: # For bad page/per_page from DB layer
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e

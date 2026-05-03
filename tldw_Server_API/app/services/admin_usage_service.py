@@ -5,7 +5,8 @@ from typing import Any
 from fastapi import HTTPException
 from loguru import logger
 
-from tldw_Server_API.app.api.v1.utils.pagination import build_offset_pagination_meta
+from tldw_Server_API.app.api.v1.schemas.pagination import PagePaginationMeta
+from tldw_Server_API.app.api.v1.utils.pagination import build_offset_pagination_meta, build_page_pagination_meta
 from tldw_Server_API.app.api.v1.schemas.admin_schemas import (
     LLMTopSpenderRow,
     LLMTopSpendersResponse,
@@ -42,6 +43,16 @@ _ADMIN_USAGE_NONCRITICAL_EXCEPTIONS = (
     UnicodeDecodeError,
     ValueError,
 )
+
+
+def _usage_page_pagination(*, total: int, page: int, limit: int) -> PagePaginationMeta:
+    total_pages = (total + limit - 1) // limit if total > 0 else 0
+    return build_page_pagination_meta(
+        page=page,
+        per_page=limit,
+        total=total,
+        total_pages=total_pages,
+    )
 
 
 def _is_db_pool_object(db: Any) -> bool:
@@ -707,7 +718,14 @@ async def get_usage_daily(
             limit=limit,
         )
         items = [UsageDailyRow(**r) for r in rows]
-        return UsageDailyResponse(items=items, total=int(total or 0), page=page, limit=limit)
+        normalized_total = int(total or 0)
+        return UsageDailyResponse(
+            items=items,
+            total=normalized_total,
+            page=page,
+            limit=limit,
+            pagination=_usage_page_pagination(total=normalized_total, page=page, limit=limit),
+        )
     except _ADMIN_USAGE_NONCRITICAL_EXCEPTIONS:
         logger.exception("Failed to query usage_daily")
         raise HTTPException(status_code=500, detail="Failed to load usage daily data") from None

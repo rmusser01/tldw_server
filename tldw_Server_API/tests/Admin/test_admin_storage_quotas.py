@@ -284,6 +284,8 @@ class TestAdminStorageQuotaSummaryPagination:
         result = await quotas_module.get_storage_quota_summary(offset=10, limit=2)
 
         assert result.total_quotas == 2
+        assert result.limit == 2
+        assert result.offset == 10
         assert result.pagination.model_dump(mode="json") == {
             "mode": "offset",
             "limit": 2,

@@ -12,7 +12,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, NonNegativeInt, SecretStr, field_validator, model_validator
 
-from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
+from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta, PagePaginationMeta
 from tldw_Server_API.app.core.Security.egress import evaluate_url_policy
 
 
@@ -1502,6 +1502,41 @@ class IncidentNotifyResponse(BaseModel):
 
 #######################################################################################################################
 #
+# Email Delivery Schemas
+
+
+class EmailDeliveryItem(BaseModel):
+    """A single email delivery log entry."""
+    id: str
+    recipient: str = ""
+    subject: str = ""
+    template: str | None = None
+    status: str = ""
+    error: str | None = None
+    sent_at: str | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class EmailDeliveryListResponse(BaseModel):
+    """Response for email delivery log listing."""
+    items: list[EmailDeliveryItem]
+    total: int
+    limit: int
+    offset: int
+    pagination: OffsetPaginationMeta
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self):
+        return _default_offset_pagination_aliases(self)
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+#######################################################################################################################
+#
 # Webhook Schemas
 
 
@@ -1584,6 +1619,15 @@ class WebhookDeliveryListResponse(BaseModel):
     """Response for webhook delivery listing."""
     items: list[WebhookDeliveryItem]
     total: int
+    limit: int
+    offset: int
+    pagination: OffsetPaginationMeta
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self):
+        return _default_offset_pagination_aliases(self)
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -1633,6 +1677,7 @@ class UsageDailyResponse(BaseModel):
     total: int
     page: int
     limit: int
+    pagination: PagePaginationMeta
 
     model_config = ConfigDict(from_attributes=True)
 

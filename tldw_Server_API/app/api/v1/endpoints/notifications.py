@@ -13,6 +13,7 @@ from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps.Collections_DB_Deps import get_collections_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import RequirePermission, rbac_rate_limit
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.schemas.reminders_schemas import (
     NotificationCancelSnoozeResponse,
     NotificationDismissResponse,
@@ -171,9 +172,10 @@ async def list_notifications(
         rows, snooze_matches, total = service.list_snoozed_notifications(limit=limit, offset=offset)
     else:
         rows = db.list_user_notifications(include_archived=include_archived, limit=limit, offset=offset)
-        total = len(rows)
+        total = db.count_user_notifications(include_archived=include_archived)
         if include_archived and rows:
             snooze_matches = service.list_notification_snoozes(notifications=rows)
+    pagination = build_offset_pagination_meta(total=total, limit=limit, offset=offset, count=len(rows))
     return NotificationsListResponse(
         items=[
             _notification_to_response(
@@ -183,6 +185,9 @@ async def list_notifications(
             for row in rows
         ],
         total=total,
+        limit=limit,
+        offset=offset,
+        pagination=pagination,
     )
 
 

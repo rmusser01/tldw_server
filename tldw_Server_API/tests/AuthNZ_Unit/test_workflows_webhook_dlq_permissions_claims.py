@@ -135,6 +135,58 @@ async def test_workflows_webhook_dlq_allowed_for_admin_role(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_workflows_webhook_dlq_returns_canonical_offset_pagination() -> None:
+    principal = _make_principal(
+        roles=["admin"],
+        permissions=["workflows.runs.control"],
+        is_admin=True,
+    )
+    dlq_rows: List[Dict[str, Any]] = [
+        {
+            "id": 1,
+            "tenant_id": "default",
+            "run_id": "run-1",
+            "url": "https://example.com/hook-1",
+            "attempts": 0,
+            "next_attempt_at": None,
+            "last_error": None,
+            "created_at": "2024-01-01T00:00:00Z",
+            "body_json": "{}",
+        },
+        {
+            "id": 2,
+            "tenant_id": "default",
+            "run_id": "run-2",
+            "url": "https://example.com/hook-2",
+            "attempts": 1,
+            "next_attempt_at": None,
+            "last_error": "retry",
+            "created_at": "2024-01-02T00:00:00Z",
+            "body_json": "{}",
+        },
+    ]
+    app = _build_app_with_overrides(principal, dlq_rows)
+
+    with TestClient(app) as client:
+        resp = client.get("/api/v1/workflows/webhooks/dlq?limit=1&offset=0")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["count"] == 1
+    assert body["limit"] == 1
+    assert body["offset"] == 0
+    assert [item["id"] for item in body["items"]] == [1]
+    assert body["pagination"] == {
+        "mode": "offset",
+        "limit": 1,
+        "offset": 0,
+        "total": None,
+        "has_more": True,
+        "next_offset": 1,
+    }
+
+
+@pytest.mark.asyncio
 async def test_workflows_webhook_dlq_forbidden_when_principal_lacks_control_permission_but_user_has():
     """
     PermissionChecker sees workflows.runs.control on the User object, but the

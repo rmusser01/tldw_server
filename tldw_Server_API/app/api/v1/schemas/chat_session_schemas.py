@@ -7,7 +7,7 @@ from datetime import datetime
 from typing import Any, Literal, Optional, Union
 
 from pydantic import BaseModel, Field, field_validator, model_validator
-from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
+from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta, PagePaginationMeta
 from tldw_Server_API.app.core.LLM_Calls.routing.models import RoutingOverride
 
 ALLOWED_CONVERSATION_STATES = ("in-progress", "resolved", "backlog", "non-viable")
@@ -772,6 +772,7 @@ class LorebookDiagnosticExportResponse(BaseModel):
     turns: list[DiagnosticTurnEntry] = Field(default_factory=list)
     page: int = 1
     size: int = 50
+    pagination: PagePaginationMeta
 
 
 # ========================================================================

@@ -122,3 +122,25 @@ class ShareAuditService:
             limit=limit,
             offset=offset,
         )
+
+    async def count(
+        self,
+        *,
+        owner_user_id: int | None = None,
+        resource_type: str | None = None,
+        resource_id: str | None = None,
+    ) -> int:
+        """Return the full count for the same filters accepted by query()."""
+        if self._repo is not None and self._writer is None:
+            return await self._repo.count_audit_events(
+                owner_user_id=owner_user_id,
+                resource_type=resource_type,
+                resource_id=resource_id,
+            )
+
+        writer = await self._ensure_writer()
+        return await writer.count_events(
+            owner_user_id=owner_user_id,
+            resource_type=resource_type,
+            resource_id=resource_id,
+        )

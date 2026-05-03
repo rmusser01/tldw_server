@@ -33,10 +33,23 @@ from tldw_Server_API.app.core.Evaluations.unified_evaluation_service import (
 )
 from tldw_Server_API.app.core.Evaluations.evaluation_manager import EvaluationManager
 from tldw_Server_API.app.core.Evaluations.eval_runner import EvaluationRunner
+from tldw_Server_API.app.api.v1.schemas.evaluation_schemas_unified import EvaluationListResponse, RunListResponse
+from tldw_Server_API.app.api.v1.schemas.pagination import CursorPaginationMeta
 
 # Use configuration from test_config
 DEFAULT_API_KEY = test_config.TEST_API_KEY
 TEST_SK_KEY = test_config.TEST_SK_KEY
+
+
+def test_cursor_list_responses_backfill_has_more_from_pagination() -> None:
+    """Evaluation cursor list aliases should reflect canonical pagination metadata."""
+    pagination = CursorPaginationMeta(limit=10, cursor=None, next_cursor="next", has_more=True)
+
+    evaluations = EvaluationListResponse(data=[], pagination=pagination)
+    runs = RunListResponse(data=[], pagination=pagination)
+
+    assert evaluations.has_more is True
+    assert runs.has_more is True
 
 
 @pytest.fixture(scope="function")
@@ -650,6 +663,16 @@ class TestDatasetManagement:
         assert data["sample_count"] == len(sample_dataset_request["samples"])
         assert len(data["samples"]) == 1
         assert data["samples"][0]["input"]["question"] == "What is ML?"
+        assert data["pagination"] == {
+            "mode": "offset",
+            "limit": 1,
+            "offset": 1,
+            "total": len(sample_dataset_request["samples"]),
+            "has_more": False,
+            "next_offset": None,
+        }
+        assert data["has_more"] is False
+        assert data["next_offset"] is None
 
     def test_list_datasets(self, client, auth_headers, sample_dataset_request):
 

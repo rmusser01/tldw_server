@@ -16,6 +16,7 @@ from starlette.responses import StreamingResponse
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.chat_documents_deps import get_document_generator_service
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.api.v1.schemas.document_generator_schemas import (
     AsyncGenerationResponse,
@@ -51,6 +52,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGD
 from tldw_Server_API.app.core.testing import env_flag_enabled, is_test_mode
 
 router = APIRouter()
+MAX_GENERATED_DOCUMENTS_OFFSET = 10_000
 
 _CHAT_DOCS_NONCRITICAL_EXCEPTIONS = (
     asyncio.CancelledError,
@@ -540,6 +542,12 @@ async def list_generated_documents(
     conversation_id: str | None = Query(None, min_length=1, description="Filter by conversation ID"),
     document_type: DocType | None = Query(None, description="Filter by document type"),
     limit: int = Query(50, ge=1, le=200, description="Maximum number of documents"),
+    offset: int = Query(
+        0,
+        ge=0,
+        le=MAX_GENERATED_DOCUMENTS_OFFSET,
+        description="Zero-based pagination offset",
+    ),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
     service_cls: type[DocumentGeneratorService] = Depends(get_document_generator_service),
 ) -> DocumentListResponse:
@@ -549,17 +557,31 @@ async def list_generated_documents(
 
         doc_type = DocumentType(document_type.value) if document_type else None
 
-        documents = service.get_generated_documents(
+        paged_documents = service.get_generated_documents(
             conversation_id=conversation_id,
             document_type=doc_type,
             limit=limit,
+            offset=offset,
         )
 
-        doc_responses = [GeneratedDocument(**doc) for doc in documents]
+        count_documents = getattr(service, "count_generated_documents", None)
+        if callable(count_documents):
+            total = count_documents(conversation_id=conversation_id, document_type=doc_type)
+        else:
+            total = offset + len(paged_documents)
+
+        doc_responses = [GeneratedDocument(**doc) for doc in paged_documents]
+        pagination = build_offset_pagination_meta(
+            limit=limit,
+            offset=offset,
+            total=total,
+            count=len(doc_responses),
+        )
 
         return DocumentListResponse(
             documents=doc_responses,
-            total=len(doc_responses),
+            total=total,
+            pagination=pagination,
             conversation_id=conversation_id,
             document_type=document_type,
         )

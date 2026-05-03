@@ -845,6 +845,14 @@ def test_export_notes_route_not_shadowed(client: TestClient):
     data = response.json()
     assert data["count"] == 1
     assert data["notes"][0]["id"] == note_id_val
+    assert data["pagination"] == {
+        "mode": "offset",
+        "limit": 1000,
+        "offset": 0,
+        "total": 1,
+        "has_more": False,
+        "next_offset": None,
+    }
     mock_chacha_db_instance.list_notes.assert_called_once_with(limit=1000, offset=0)
 
 

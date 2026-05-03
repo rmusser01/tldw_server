@@ -13,7 +13,10 @@ from loguru import logger
 from pydantic import BaseModel, Field, model_validator
 
 from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
-from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
+from tldw_Server_API.app.api.v1.schemas.pagination import (
+    OffsetPaginationMeta,
+    default_offset_pagination_aliases,
+)
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 from tldw_Server_API.app.core.AuthNZ.repos.storage_quotas_repo import (
     AuthnzStorageQuotasRepo,
@@ -76,17 +79,15 @@ class StorageQuotaSummaryResponse(BaseModel):
 
     total_quotas: int
     items: list[dict[str, Any]]
+    limit: int | None = Field(default=None, ge=1, description="Alias for pagination.limit")
+    offset: int | None = Field(default=None, ge=0, description="Alias for pagination.offset")
     pagination: OffsetPaginationMeta
     has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
     next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
 
     @model_validator(mode="after")
     def _default_pagination_aliases(self):
-        if self.has_more is None:
-            self.has_more = self.pagination.has_more
-        if self.next_offset is None:
-            self.next_offset = self.pagination.next_offset
-        return self
+        return default_offset_pagination_aliases(self)
 
 
 # ---------------------------------------------------------------------------

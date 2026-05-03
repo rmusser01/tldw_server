@@ -14,7 +14,11 @@ from typing import Any, Literal, Optional, Union
 from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator, model_validator
 
-from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
+from tldw_Server_API.app.api.v1.schemas.pagination import (
+    CursorPaginationMeta,
+    OffsetPaginationMeta,
+    default_cursor_pagination_aliases,
+)
 from tldw_Server_API.app.core.Evaluations.run_state import normalize_run_status
 
 try:
@@ -385,6 +389,18 @@ class DatasetResponse(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
 
+class DatasetDetailResponse(DatasetResponse):
+    """Dataset detail response with sample pagination metadata."""
+
+    pagination: OffsetPaginationMeta
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self) -> "DatasetDetailResponse":
+        return _default_offset_pagination_aliases(self)
+
+
 # ============= OCR Evaluation Schemas =============
 
 class OCREvaluationItem(BaseModel):
@@ -425,11 +441,33 @@ class ListResponse(BaseModel):
 class EvaluationListResponse(ListResponse):
     """Evaluation list response"""
     data: list[EvaluationResponse]
+    limit: int | None = Field(default=None, ge=1)
+    cursor: Optional[str] = None
+    next_cursor: Optional[str] = None
+    has_more: bool | None = Field(default=None)
+    pagination: CursorPaginationMeta | None = None
+
+    @model_validator(mode="after")
+    def _default_cursor_aliases(self) -> "EvaluationListResponse":
+        if self.pagination is not None:
+            return default_cursor_pagination_aliases(self)
+        return self
 
 
 class RunListResponse(ListResponse):
     """Run list response"""
     data: list[RunResponse]
+    limit: int | None = Field(default=None, ge=1)
+    cursor: Optional[str] = None
+    next_cursor: Optional[str] = None
+    has_more: bool | None = Field(default=None)
+    pagination: CursorPaginationMeta | None = None
+
+    @model_validator(mode="after")
+    def _default_cursor_aliases(self) -> "RunListResponse":
+        if self.pagination is not None:
+            return default_cursor_pagination_aliases(self)
+        return self
 
 
 class DatasetListResponse(ListResponse):
@@ -708,7 +746,16 @@ class PipelinePresetResponse(BaseModel):
 
 class PipelinePresetListResponse(BaseModel):
     items: list[PipelinePresetResponse]
-    total: int
+    total: int = Field(..., ge=0)
+    limit: int = Field(..., ge=1)
+    offset: int = Field(..., ge=0)
+    pagination: OffsetPaginationMeta
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self):
+        return _default_offset_pagination_aliases(self)
 
 
 class PipelineCleanupResponse(BaseModel):

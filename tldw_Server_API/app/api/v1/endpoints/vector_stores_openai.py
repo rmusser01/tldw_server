@@ -18,6 +18,7 @@ from fastapi.responses import JSONResponse
 from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal, get_request_user, rbac_rate_limit, RequirePermission, RequireRole, resolve_user_id_for_request, User
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.core.AuthNZ.permissions import SYSTEM_CONFIGURE
@@ -1220,10 +1221,13 @@ async def list_vectors(
                 items.sort(key=lambda x: (x.metadata or {}).get(key, ''), reverse=reverse)
         except _VECTORSTORE_NONCRITICAL_EXCEPTIONS as e:
             logger.error(f"Vector listing failed: {e}")
-    next_offset = None
     returned = len(items)
-    if returned == limit and (offset + returned) < total:
-        next_offset = offset + returned
+    pagination = build_offset_pagination_meta(
+        limit=limit,
+        offset=offset,
+        total=total,
+        count=returned,
+    ).model_dump(mode="json")
 
     serialized_items: list[dict[str, Any]] = []
     for item in items:
@@ -1241,12 +1245,9 @@ async def list_vectors(
 
     return {
         "data": serialized_items,
-        "pagination": {
-            "limit": limit,
-            "offset": offset,
-            "next_offset": next_offset,
-            "total": total
-        }
+        "pagination": pagination,
+        "has_more": pagination["has_more"],
+        "next_offset": pagination["next_offset"],
     }
 
 
@@ -1523,8 +1524,23 @@ async def list_vector_batches(
                 detail="Admin privileges required",
             )
         requested_user_id = str(user_id)
-    rows = db_list_batches(user_id=requested_user_id, status=status, limit=limit, offset=offset)
-    return { 'data': rows, 'pagination': { 'limit': limit, 'offset': offset, 'count': len(rows) } }
+    fetched = db_list_batches(user_id=requested_user_id, status=status, limit=limit + 1, offset=offset)
+    rows = fetched[:limit]
+    has_more = len(fetched) > limit
+    pagination = build_offset_pagination_meta(
+        total=None,
+        limit=limit,
+        offset=offset,
+        count=len(rows),
+        has_more=has_more,
+    ).model_dump(mode="json")
+    pagination["count"] = len(rows)
+    return {
+        'data': rows,
+        'pagination': pagination,
+        'has_more': pagination["has_more"],
+        'next_offset': pagination["next_offset"],
+    }
 
 
 class CreateFromMediaRequest(BaseModel):

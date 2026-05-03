@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+from datetime import datetime, timezone
 from typing import Any
 
 import pytest
@@ -85,6 +86,92 @@ def _create_board_list_card(client: TestClient) -> tuple[int, int, int]:
     card_id = card_resp.json()["id"]
 
     return board_id, list_id, card_id
+
+
+def _workflow_event(index: int, *, card_id: int) -> dict[str, Any]:
+    return {
+        "id": index + 1,
+        "card_id": card_id,
+        "event_type": "state_changed",
+        "from_status_key": "todo",
+        "to_status_key": "done",
+        "actor": "tester",
+        "reason": None,
+        "idempotency_key": f"event-{index}",
+        "correlation_id": f"corr-{index}",
+        "before_snapshot": None,
+        "after_snapshot": None,
+        "created_at": datetime.now(timezone.utc),
+    }
+
+
+def _stale_claim(index: int) -> dict[str, Any]:
+    return {
+        "card_id": index + 1,
+        "board_id": 100 + index,
+        "list_id": 200 + index,
+        "title": f"Stale card {index}",
+        "workflow_status_key": "todo",
+        "lease_owner": "stale-worker",
+        "lease_expires_at": datetime.now(timezone.utc),
+        "version": 3,
+        "updated_at": datetime.now(timezone.utc),
+    }
+
+
+class _FakeWorkflowPaginationDB:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict[str, Any]]] = []
+
+    def list_card_workflow_events(self, *, card_id: int, limit: int, offset: int) -> list[dict[str, Any]]:
+        self.calls.append(("events", {"card_id": card_id, "limit": limit, "offset": offset}))
+        return [_workflow_event(index, card_id=card_id) for index in range(limit)]
+
+    def list_stale_workflow_claims(
+        self,
+        *,
+        board_id: int | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        self.calls.append(("stale_claims", {"board_id": board_id, "limit": limit, "offset": offset}))
+        return [_stale_claim(index) for index in range(limit)]
+
+
+async def test_workflow_events_response_includes_canonical_pagination() -> None:
+    """Workflow event list overfetches and returns canonical offset metadata."""
+    db = _FakeWorkflowPaginationDB()
+
+    response = await kanban_workflow.list_card_workflow_events(card_id=7, limit=2, offset=4, db=db)  # type: ignore[arg-type]
+
+    assert db.calls == [("events", {"card_id": 7, "limit": 3, "offset": 4})]
+    assert len(response.events) == 2
+    assert response.pagination.model_dump(mode="json") == {
+        "mode": "offset",
+        "limit": 2,
+        "offset": 4,
+        "total": None,
+        "has_more": True,
+        "next_offset": 6,
+    }
+
+
+async def test_stale_workflow_claims_response_includes_canonical_pagination() -> None:
+    """Stale-claim recovery list accepts offset and returns canonical metadata."""
+    db = _FakeWorkflowPaginationDB()
+
+    response = await kanban_workflow.list_stale_workflow_claims(board_id=42, limit=2, offset=5, db=db)  # type: ignore[arg-type]
+
+    assert db.calls == [("stale_claims", {"board_id": 42, "limit": 3, "offset": 5})]
+    assert len(response.stale_claims) == 2
+    assert response.pagination.model_dump(mode="json") == {
+        "mode": "offset",
+        "limit": 2,
+        "offset": 5,
+        "total": None,
+        "has_more": True,
+        "next_offset": 7,
+    }
 
 
 def test_transition_endpoint_enforces_policy_and_returns_structured_error(workflow_client_with_kanban_db):

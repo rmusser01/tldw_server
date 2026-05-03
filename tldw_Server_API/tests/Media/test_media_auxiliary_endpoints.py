@@ -151,6 +151,20 @@ class _SearchByMetadataFailingDb(_FakeMediaAuxDb):
         raise _database_failure()
 
 
+class _SearchByMetadataDb(_FakeMediaAuxDb):
+    def search_by_safe_metadata(self, **_kwargs):
+        return (
+            [
+                {
+                    "id": 7,
+                    "title": "Metadata Search Result",
+                    "safe_metadata": '{"doi":"10.1000/example"}',
+                }
+            ],
+            25,
+        )
+
+
 class _FailingReadingProgressDb(_FakeMediaAuxDb):
     def __init__(self, operation_exc: Exception):
         super().__init__()
@@ -353,6 +367,26 @@ def test_metadata_search_sanitizes_outer_failure_log(monkeypatch):
     assert response.status_code == 500, response.text  # nosec B101
     assert response.json() == {"detail": "Error performing metadata search"}  # nosec B101
     _assert_sanitized_error_log(logger_stub, "Metadata search error")
+
+
+def test_metadata_search_includes_canonical_page_pagination():
+    with _build_media_auxiliary_client(_SearchByMetadataDb()) as (client, _db):
+        response = client.get(
+            "/api/v1/media/metadata-search",
+            params={"field": "title", "value": "Metadata", "page": 2, "per_page": 10},
+        )
+
+    assert response.status_code == 200, response.text  # nosec B101
+    payload = response.json()
+    assert payload["results"][0]["safe_metadata"] == {"doi": "10.1000/example"}  # nosec B101
+    assert payload["pagination"] == {  # nosec B101
+        "mode": "page",
+        "page": 2,
+        "per_page": 10,
+        "total": 25,
+        "total_pages": 3,
+        "has_more": True,
+    }
 
 
 def test_identifier_lookup_sanitizes_outer_failure_log(monkeypatch):

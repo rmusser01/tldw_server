@@ -152,8 +152,9 @@ def test_list_vectors_pagination_next_offset_chroma_fallback(monkeypatch, disabl
 
 
 @pytest.mark.unit
-def test_list_vectors_pagination_next_offset_adapter_path(monkeypatch, disable_heavy_startup, admin_user):
-     # Adapter with list_vectors_paginated sets total explicitly
+def test_list_vectors_pagination_next_offset_adapter_path(monkeypatch, disable_heavy_startup, admin_user) -> None:
+    """Adapter pagination should include canonical offset metadata."""
+    # Adapter with list_vectors_paginated sets total explicitly
     from tldw_Server_API.app.api.v1.endpoints import vector_stores_openai as vs_mod
 
     async def _fake_get_adapter_for_user(user, dim):  # noqa: ANN001
@@ -167,12 +168,16 @@ def test_list_vectors_pagination_next_offset_adapter_path(monkeypatch, disable_h
     r1 = client.get("/api/v1/vector_stores/store-abc/vectors", params={"limit": 2, "offset": 0})
     assert r1.status_code == 200
     p1 = r1.json().get("pagination", {})
+    assert p1.get("mode") == "offset"
+    assert p1.get("has_more") is True
     assert p1.get("next_offset") == 2
 
     # offset 3, limit 2 → returned 2, offset+returned == total → next_offset None
     r2 = client.get("/api/v1/vector_stores/store-abc/vectors", params={"limit": 2, "offset": 3})
     assert r2.status_code == 200
     p2 = r2.json().get("pagination", {})
+    assert p2.get("mode") == "offset"
+    assert p2.get("has_more") is False
     assert p2.get("next_offset") is None
 
 

@@ -19,6 +19,7 @@ from tldw_Server_API.app.api.v1.endpoints.evaluations.evaluations_auth import (
     get_eval_request_user,
     verify_api_key,
 )
+from tldw_Server_API.app.api.v1.utils.pagination import build_page_pagination_meta
 from tldw_Server_API.app.api.v1.schemas.embeddings_abtest_schemas import (
     ArmSummary,
     EmbeddingsABTestCreateRequest,
@@ -457,6 +458,12 @@ async def get_embeddings_abtest_results(
         page=page,
         page_size=page_size,
         total=total,
+        pagination=build_page_pagination_meta(
+            page=page,
+            per_page=page_size,
+            total=total,
+            total_pages=(total + page_size - 1) // page_size,
+        ),
     )
 
 

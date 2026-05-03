@@ -8,6 +8,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta, PagePaginationMeta
+
 
 class OptInRequest(BaseModel):
     enabled: bool = Field(..., description="Enable/disable personalization for the user")
@@ -103,6 +105,7 @@ class MemoryListResponse(BaseModel):
     total: int
     page: int = 1
     size: int = 50
+    pagination: PagePaginationMeta
 
 
 class PurgeResponse(BaseModel):
@@ -128,6 +131,7 @@ class ExplanationEntry(BaseModel):
 class ExplanationListResponse(BaseModel):
     items: list[ExplanationEntry]
     total: int
+    pagination: OffsetPaginationMeta
 
 
 class DetailResponse(BaseModel):

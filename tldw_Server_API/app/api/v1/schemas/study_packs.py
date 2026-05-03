@@ -5,6 +5,8 @@ from typing import Any, Literal, Optional
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 
+from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
+
 
 StudyPackSourceType = Literal["note", "media", "message"]
 StudyPackStatus = Literal["active", "superseded"]
@@ -114,6 +116,7 @@ class StudyPackJobListResponse(BaseModel):
 
     jobs: list[StudyPackJobSummaryResponse] = Field(default_factory=list)
     total: int = Field(default=0, ge=0)
+    pagination: OffsetPaginationMeta
 
 
 class FlashcardCitationResponse(BaseModel):

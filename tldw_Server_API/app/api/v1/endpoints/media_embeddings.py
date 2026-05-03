@@ -10,11 +10,12 @@ import json
 import os
 from typing import Annotated, Any, Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi import status as http_status
 from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, rbac_rate_limit, resolve_user_id_for_request, User
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 
 
 # Local imports
@@ -34,6 +35,7 @@ router = APIRouter(prefix="/media", tags=["media-embeddings"])
 DEFAULT_EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 DEFAULT_EMBEDDING_PROVIDER = "huggingface"
 FALLBACK_EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
+MAX_MEDIA_EMBEDDING_JOBS_OFFSET = 10_000
 
 _MEDIA_EMBEDDINGS_PARSE_EXCEPTIONS = (TypeError, ValueError, UnicodeError, json.JSONDecodeError)
 _MEDIA_EMBEDDINGS_NONCRITICAL_EXCEPTIONS = (
@@ -1019,13 +1021,28 @@ async def get_media_embedding_job(
 async def list_media_embedding_jobs(
     current_user: Annotated[User, Depends(get_request_user)],
     status: Optional[str] = None,
-    limit: int = 50,
-    offset: int = 0,
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0, le=MAX_MEDIA_EMBEDDING_JOBS_OFFSET),
 ):
     user_id = resolve_user_id_for_request(
         current_user,
         error_status=http_status.HTTP_400_BAD_REQUEST,
     )
     adapter = EmbeddingsJobsAdapter()
-    rows = adapter.list_jobs(user_id=user_id, status=status, limit=limit, offset=offset)
-    return {"data": rows, "pagination": {"limit": limit, "offset": offset, "count": len(rows)}}
+    fetched = adapter.list_jobs(user_id=user_id, status=status, limit=limit + 1, offset=offset)
+    rows = fetched[:limit]
+    has_more = len(fetched) > limit
+    pagination = build_offset_pagination_meta(
+        total=None,
+        limit=limit,
+        offset=offset,
+        count=len(rows),
+        has_more=has_more,
+    ).model_dump(mode="json")
+    pagination["count"] = len(rows)
+    return {
+        "data": rows,
+        "pagination": pagination,
+        "has_more": pagination["has_more"],
+        "next_offset": pagination["next_offset"],
+    }

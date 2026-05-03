@@ -1057,15 +1057,18 @@ def list_webhook_deliveries(
     *,
     webhook_id: str,
     limit: int = 50,
-) -> list[dict[str, Any]]:
+    offset: int = 0,
+) -> tuple[list[dict[str, Any]], int]:
     """Return delivery records for a webhook, newest first."""
     limit = max(1, min(limit, _WEBHOOK_DELIVERIES_CAP))
+    offset = max(0, int(offset))
     with _locked_store() as store:
         deliveries = store.get("webhook_deliveries", [])
         wh_deliveries = [d for d in deliveries if d.get("webhook_id") == webhook_id]
     # Sort newest first
     wh_deliveries.sort(key=lambda d: d.get("attempted_at") or "", reverse=True)
-    return wh_deliveries[:limit]
+    total = len(wh_deliveries)
+    return wh_deliveries[offset: offset + limit], total
 
 
 def _create_webhook_http_client(*, timeout: float):

@@ -15,6 +15,8 @@ from tldw_Server_API.app.api.v1.endpoints._pagination_utils import (
     build_offset_pagination_meta,
 )
 from tldw_Server_API.app.api.v1.schemas.admin_schemas import (
+    EmailDeliveryItem,
+    EmailDeliveryListResponse,
     FeatureFlagItem,
     FeatureFlagsResponse,
     FeatureFlagUpsertRequest,
@@ -1012,14 +1014,27 @@ async def delete_webhook(
 async def list_webhook_deliveries(
     webhook_id: str,
     limit: int = Query(default=50, ge=1, le=1000),
+    offset: int = Query(default=0, ge=0),
     principal: AuthPrincipal = Depends(get_auth_principal),
 ) -> WebhookDeliveryListResponse:
     """List delivery history for a webhook, newest first."""
     _require_platform_admin(principal)
-    items = svc_list_webhook_deliveries(webhook_id=webhook_id, limit=limit)
+    items, total = svc_list_webhook_deliveries(
+        webhook_id=webhook_id,
+        limit=limit,
+        offset=offset,
+    )
     return WebhookDeliveryListResponse(
         items=[WebhookDeliveryItem(**item) for item in items],
-        total=len(items),
+        total=total,
+        limit=limit,
+        offset=offset,
+        pagination=build_offset_pagination_meta(
+            total=total,
+            limit=limit,
+            offset=offset,
+            count=len(items),
+        ),
     )
 
 
@@ -1510,20 +1525,32 @@ async def get_dependency_uptime(
 # ──────────────────────────────────────────────────────────────────────────────
 
 
-@router.get("/email/deliveries")
+@router.get("/email/deliveries", response_model=EmailDeliveryListResponse)
 async def list_email_deliveries(
     limit: int = Query(default=50, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
     status: str | None = Query(default=None),
     principal: AuthPrincipal = Depends(get_auth_principal),
-) -> dict[str, Any]:
+) -> EmailDeliveryListResponse:
     """List email delivery log entries with optional status filter and pagination."""
     _require_platform_admin(principal)
     try:
         items, total = await asyncio.to_thread(svc_list_email_deliveries, limit=limit, offset=offset, status=status)
     except _OPS_NONCRITICAL_EXCEPTIONS as exc:
         _raise_internal_admin_error("Failed to list email deliveries", exc)
-    return {"items": items, "total": total, "limit": limit, "offset": offset}
+    pagination = build_offset_pagination_meta(
+        total=total,
+        limit=limit,
+        offset=offset,
+        count=len(items),
+    )
+    return EmailDeliveryListResponse(
+        items=[EmailDeliveryItem(**item) for item in items],
+        total=total,
+        limit=limit,
+        offset=offset,
+        pagination=pagination,
+    )
 
 
 # ──────────────────────────────────────────────────────────────────────────────

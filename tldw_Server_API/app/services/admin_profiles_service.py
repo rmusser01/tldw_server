@@ -26,6 +26,7 @@ from tldw_Server_API.app.api.v1.schemas.user_profile_schemas import (
     UserProfileUpdateRequest,
     UserProfileUpdateResponse,
 )
+from tldw_Server_API.app.api.v1.utils.pagination import build_page_pagination_meta
 from tldw_Server_API.app.api.v1.utils.profile_errors import classify_profile_update_skips
 from tldw_Server_API.app.core.AuthNZ.api_key_manager import get_api_key_manager
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
@@ -566,6 +567,12 @@ async def list_user_profiles(
         page=page,
         limit=limit,
         pages=pages,
+        pagination=build_page_pagination_meta(
+            page=page,
+            per_page=limit,
+            total=total,
+            total_pages=pages,
+        ),
     )
 
     try:
