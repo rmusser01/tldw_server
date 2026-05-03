@@ -1,0 +1,38 @@
+export type WorkspaceStatusStripProps = {
+  backendAvailable: boolean
+  streaming: boolean
+  stagedSourceCount: number
+}
+
+const statusPillClass =
+  "inline-flex min-h-[24px] items-center rounded-md border border-border bg-surface px-2 text-xs font-medium text-text"
+
+export const WorkspaceStatusStrip = ({
+  backendAvailable,
+  streaming,
+  stagedSourceCount
+}: WorkspaceStatusStripProps) => {
+  return (
+    <footer
+      aria-label="Chat workspace status"
+      className="flex min-w-0 flex-wrap items-center justify-between gap-2 border-t border-border bg-surface px-3 py-2 text-xs text-text-muted"
+    >
+      <div className="flex min-w-0 flex-wrap items-center gap-2">
+        {backendAvailable && !streaming ? (
+          <span className={statusPillClass}>Ready</span>
+        ) : null}
+        {streaming ? <span className={statusPillClass}>Streaming</span> : null}
+        {!backendAvailable ? (
+          <span className={statusPillClass}>Server unavailable</span>
+        ) : null}
+        {stagedSourceCount > 0 ? (
+          <span className={statusPillClass}>Context staged</span>
+        ) : null}
+      </div>
+      <div className="flex min-w-0 flex-wrap items-center gap-2">
+        <span>Ctrl+K command</span>
+        <span>Ctrl+Enter send</span>
+      </div>
+    </footer>
+  )
+}

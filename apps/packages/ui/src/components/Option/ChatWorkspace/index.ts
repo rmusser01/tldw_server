@@ -1,3 +1,5 @@
 export { ChatWorkspacePage } from "./ChatWorkspacePage"
 export { ContextStagingCard } from "./ContextStagingCard"
+export { InspectorRail } from "./InspectorRail"
+export { WorkspaceStatusStrip } from "./WorkspaceStatusStrip"
 export type { StagedWorkspaceSource } from "./types"
