@@ -34,6 +34,7 @@ from tldw_Server_API.app.core.Audit.unified_audit_service import (
     AuditEventType,
     MandatoryAuditWriteError,
 )
+from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.Character_Chat.Character_Chat_Lib_facade import replace_placeholders
 from tldw_Server_API.app.core.Character_Chat.modules.character_utils import (
     map_sender_to_role,
@@ -41,6 +42,7 @@ from tldw_Server_API.app.core.Character_Chat.modules.character_utils import (
 )
 from tldw_Server_API.app.core.Chat.Chat_Deps import (
     ChatAPIError,
+    ChatAuthorizationError,
     ChatBadRequestError,
     ChatConfigurationError,
     ChatProviderError,
@@ -52,6 +54,7 @@ from tldw_Server_API.app.core.Chat.chat_helpers import (
     get_or_create_character_context,
     get_or_create_conversation,
 )
+from tldw_Server_API.app.core.Chat.chat_loop_engine import is_chat_loop_mode_enabled
 from tldw_Server_API.app.core.Chat.message_utils import should_persist_message_role
 from tldw_Server_API.app.core.Chat.prompt_template_manager import (
     DEFAULT_RAW_PASSTHROUGH_TEMPLATE,
@@ -61,6 +64,10 @@ from tldw_Server_API.app.core.Chat.prompt_template_manager import (
 from tldw_Server_API.app.core.Chat.request_queue import (
     RequestPriority,
     get_request_queue,
+)
+from tldw_Server_API.app.core.Chat.run_first_presentation import (
+    present_chat_tools,
+    tool_names_from_definitions,
 )
 from tldw_Server_API.app.core.Chat.streaming_utils import (
     CHAT_STREAM_INCLUDE_METADATA,
@@ -72,16 +79,11 @@ from tldw_Server_API.app.core.Chat.streaming_utils import (
 from tldw_Server_API.app.core.Chat.streaming_utils import (
     STREAMING_IDLE_TIMEOUT as CHAT_IDLE_TIMEOUT,
 )
-from tldw_Server_API.app.core.Chat.chat_loop_engine import is_chat_loop_mode_enabled
-from tldw_Server_API.app.core.Chat.run_first_presentation import (
-    present_chat_tools,
-    tool_names_from_definitions,
-)
 from tldw_Server_API.app.core.Chat.tool_auto_exec import execute_assistant_tool_calls
-from tldw_Server_API.app.core.config import load_comprehensive_config
 from tldw_Server_API.app.core.config import (
-    resolve_chat_run_first_provider_allowlist,
+    load_comprehensive_config,
     resolve_chat_run_first_presentation_variant,
+    resolve_chat_run_first_provider_allowlist,
     resolve_chat_run_first_rollout_mode,
     resolve_run_first_cohort_label,
 )
@@ -91,17 +93,18 @@ from tldw_Server_API.app.core.custom_openai_providers import (
     iter_custom_openai_provider_numbers,
 )
 from tldw_Server_API.app.core.LLM_Calls import adapter_registry as _adapter_registry
-from tldw_Server_API.app.core.LLM_Calls.openrouter_model_inventory import (
-    clear_openrouter_model_cache as _clear_openrouter_model_cache_shared,
-    discover_openrouter_models as _discover_openrouter_models_shared,
-)
 from tldw_Server_API.app.core.LLM_Calls.llamacpp_request_extensions import (
     resolve_llamacpp_request_extensions,
     resolve_llamacpp_runtime_caps,
 )
+from tldw_Server_API.app.core.LLM_Calls.openrouter_model_inventory import (
+    clear_openrouter_model_cache as _clear_openrouter_model_cache_shared,
+)
+from tldw_Server_API.app.core.LLM_Calls.openrouter_model_inventory import (
+    discover_openrouter_models as _discover_openrouter_models_shared,
+)
+from tldw_Server_API.app.core.LLM_Calls.routing.models import RoutingDecision
 from tldw_Server_API.app.core.LLM_Calls.streaming import wrap_sync_stream
-from tldw_Server_API.app.core.VLLM_Management import infer_chat_request_capabilities
-from tldw_Server_API.app.core.VLLM_Management.resolver import resolve_vllm_instance_for_request
 from tldw_Server_API.app.core.LLM_Calls.structured_generation import (
     StructuredGenerationCapabilityError,
     StructuredGenerationError,
@@ -111,11 +114,12 @@ from tldw_Server_API.app.core.LLM_Calls.structured_generation import (
     negotiate_structured_response_mode,
     parse_and_validate_structured_output,
 )
-from tldw_Server_API.app.core.LLM_Calls.routing.models import RoutingDecision
 from tldw_Server_API.app.core.Moderation.moderation_service import get_moderation_service
 from tldw_Server_API.app.core.Monitoring.topic_monitoring_service import get_topic_monitoring_service
 from tldw_Server_API.app.core.testing import (
     is_test_mode as _shared_is_test_mode,
+)
+from tldw_Server_API.app.core.testing import (
     is_truthy as _shared_is_truthy,
 )
 from tldw_Server_API.app.core.Usage.pricing_catalog import (
@@ -124,6 +128,9 @@ from tldw_Server_API.app.core.Usage.pricing_catalog import (
 )
 from tldw_Server_API.app.core.Usage.usage_tracker import log_llm_usage
 from tldw_Server_API.app.core.Utils.cpu_bound_handler import process_large_json_async
+from tldw_Server_API.app.core.VLLM_Management import infer_chat_request_capabilities
+from tldw_Server_API.app.core.VLLM_Management.authz import can_select_managed_vllm_instance
+from tldw_Server_API.app.core.VLLM_Management.resolver import resolve_vllm_instance_for_request
 
 _CHAT_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
     ChatAPIError,
@@ -1933,6 +1940,7 @@ def build_call_params_from_request(
     app_config: dict[str, Any] | None = None,
     grammar_record: Mapping[str, Any] | None = None,
     resolved_model: str | None = None,
+    principal: AuthPrincipal | None = None,
 ) -> dict[str, Any]:
     """Construct the cleaned argument dictionary for chat_api_call.
 
@@ -2061,6 +2069,11 @@ def build_call_params_from_request(
         call_params["app_config"] = app_config
 
     provider_instance_id = getattr(request_data, "provider_instance_id", None)
+    if provider_instance_id and not can_select_managed_vllm_instance(principal):
+        raise ChatAuthorizationError(
+            provider=target_api_provider,
+            message="provider_instance_id requires an admin or single-user principal",
+        )
     if provider_instance_id or target_api_provider == "vllm":
         required_capabilities = infer_chat_request_capabilities(getattr(request_data, "messages", None))
         try:

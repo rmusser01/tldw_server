@@ -75,11 +75,6 @@ from tldw_Server_API.app.core.config import settings
 
 # Audit logging: unify later via unified audit DI; legacy import removed (unused here)
 from tldw_Server_API.app.core.Embeddings.ChromaDB_Library import ChromaDBManager
-
-# Circuit Breaker
-from tldw_Server_API.app.core.Infrastructure.circuit_breaker import CircuitBreaker
-from tldw_Server_API.app.core.Infrastructure.circuit_breaker import CircuitBreakerOpenError as CircuitBreakerError
-from tldw_Server_API.app.core.Infrastructure.circuit_breaker import registry as circuit_breaker_registry
 from tldw_Server_API.app.core.Embeddings.dlq_crypto import decrypt_payload_if_present
 from tldw_Server_API.app.core.Embeddings.messages import validate_schema
 from tldw_Server_API.app.core.Embeddings.request_batching import (
@@ -98,6 +93,11 @@ from tldw_Server_API.app.core.http_client import (
 from tldw_Server_API.app.core.http_client import (
     create_async_client as _create_async_client,
 )
+
+# Circuit Breaker
+from tldw_Server_API.app.core.Infrastructure.circuit_breaker import CircuitBreaker
+from tldw_Server_API.app.core.Infrastructure.circuit_breaker import CircuitBreakerOpenError as CircuitBreakerError
+from tldw_Server_API.app.core.Infrastructure.circuit_breaker import registry as circuit_breaker_registry
 from tldw_Server_API.app.core.Infrastructure.redis_factory import (
     create_async_redis_client,
     ensure_async_client_closed,
@@ -112,6 +112,7 @@ from tldw_Server_API.app.core.Usage.usage_tracker import (
     backfill_legacy_tokens_to_ledger,
     log_llm_usage,
 )
+from tldw_Server_API.app.core.VLLM_Management.authz import can_select_managed_vllm_instance
 from tldw_Server_API.app.core.VLLM_Management.resolver import resolve_vllm_instance_for_request
 
 # Exception buckets to replace broad Exception catches while preserving behavior.
@@ -764,11 +765,17 @@ def _resolve_managed_vllm_embeddings_route(
     explicit_provider: str | None = None,
     provider_instance_id: str | None,
     model: str | None,
+    principal: AuthPrincipal | None = None,
 ) -> tuple[object | None, str, str | None]:
     resolved_provider = (provider or "").strip().lower()
     explicit_provider_key = (explicit_provider or "").strip().lower()
     target_provider = resolved_provider
     if provider_instance_id:
+        if not can_select_managed_vllm_instance(principal):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="provider_instance_id requires an admin or single-user principal",
+            )
         if explicit_provider_key and explicit_provider_key != "vllm":
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -2329,6 +2336,7 @@ async def create_embedding_endpoint(
             explicit_provider=embedding_request.provider,
             provider_instance_id=embedding_request.provider_instance_id,
             model=model,
+            principal=_resolve_auth_principal_from_request(request),
         )
         response_provider = "vllm" if managed_vllm_route is not None else provider
         managed_vllm_api_url = managed_vllm_route.base_url if managed_vllm_route is not None else None
@@ -2995,6 +3003,7 @@ async def create_embeddings_batch_endpoint(
         explicit_provider=payload.provider,
         provider_instance_id=payload.provider_instance_id,
         model=model,
+        principal=_resolve_auth_principal_from_request(request),
     )
     response_provider = "vllm" if managed_vllm_route is not None else provider
 

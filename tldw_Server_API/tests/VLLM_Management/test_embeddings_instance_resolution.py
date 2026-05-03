@@ -8,6 +8,7 @@ from tldw_Server_API.app.api.v1.endpoints.embeddings_v5_production_enhanced impo
     EmbeddingsBatchRequest,
     create_embeddings_batch_endpoint,
 )
+from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
 from tldw_Server_API.app.core.VLLM_Management.models import VLLMInstanceCreate
 from tldw_Server_API.app.core.VLLM_Management.sqlite_repo import SqliteVLLMInstanceRepository
 
@@ -84,6 +85,21 @@ async def test_embeddings_batch_endpoint_routes_managed_instance_without_provide
         provider_instance_id=instance.instance_id,
     )
     request = Request({"type": "http", "method": "POST", "path": "/api/v1/embeddings/batch", "headers": []})
+    request.state.auth = AuthContext(
+        principal=AuthPrincipal(
+            kind="user",
+            user_id=1,
+            api_key_id=None,
+            subject=None,
+            token_type="access",
+            jti=None,
+            roles=["admin"],
+            permissions=[],
+            is_admin=True,
+            org_ids=[],
+            team_ids=[],
+        )
+    )
     response = Response()
     current_user = SimpleNamespace(id=1)
 

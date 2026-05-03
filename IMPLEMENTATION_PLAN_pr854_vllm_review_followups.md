@@ -14,4 +14,10 @@
 **Goal**: Reassess the remaining open review findings after Stage 2 and decide which are already stale versus which need a second implementation slice.
 **Success Criteria**: Remaining findings are documented as fixed, stale, or deferred to a clearly bounded next slice with evidence from current code/tests.
 **Tests**: Focused verification only for any still-valid follow-up changes.
-**Status**: In Progress
+**Status**: Complete
+
+## Stage 4: Managed Route Authorization
+**Goal**: Close the explicit `provider_instance_id` selection gap for chat and embeddings without broadening this PR into per-instance ACL design.
+**Success Criteria**: Non-admin/non-single-user callers cannot select arbitrary managed instances; existing default managed routing still works.
+**Tests**: `test_vllm_instance_routing.py` coverage for chat and embeddings explicit-selection authorization paths.
+**Status**: Complete
