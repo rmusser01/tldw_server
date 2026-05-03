@@ -15,6 +15,8 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+from loguru import logger
+
 from tldw_Server_API.app.core.testing import is_truthy
 from ..models import RunPhase, RunSpec, RunStatus
 from ..streams import get_hub
@@ -208,6 +210,21 @@ def _copy_tree(src: str, dst: str) -> None:
                 shutil.copy2(s, t)
 
 
+def _terminate_process(proc: subprocess.Popen | None, name: str) -> None:
+    if proc is None:
+        return
+    try:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            logger.warning(f"Firecracker cleanup timed out waiting for {name}; killing process")
+            proc.kill()
+            proc.wait(timeout=5)
+    except _FIRECRACKER_RUNNER_NONCRITICAL_EXCEPTIONS as e:
+        logger.warning(f"Firecracker cleanup failed for {name}: {e}")
+
+
 def _tail_log(run_id: str, log_path: str, stop_flag: dict[str, bool]) -> None:
     hub = get_hub()
     max_log = None
@@ -368,8 +385,11 @@ class FirecrackerRunner:
                         exit_code = payload.get("exit_code")
                         reason = payload.get("reason")
                         payload.get("duration_ms")
-                    except _FIRECRACKER_RUNNER_NONCRITICAL_EXCEPTIONS:
-                        pass
+                    except _FIRECRACKER_RUNNER_NONCRITICAL_EXCEPTIONS as e:
+                        logger.warning(
+                            f"Firecracker status parse failed for run_id={run_id} "
+                            f"status_path={status_path}: {e}"
+                        )
                     break
                 time.sleep(0.1)
 
@@ -439,12 +459,8 @@ class FirecrackerRunner:
             if tail_thread is not None:
                 with contextlib.suppress(_FIRECRACKER_RUNNER_NONCRITICAL_EXCEPTIONS):
                     tail_thread.join(timeout=1)
-            if virtiofs_proc is not None:
-                with contextlib.suppress(_FIRECRACKER_RUNNER_NONCRITICAL_EXCEPTIONS):
-                    virtiofs_proc.terminate()
-            if fc_proc is not None:
-                with contextlib.suppress(_FIRECRACKER_RUNNER_NONCRITICAL_EXCEPTIONS):
-                    fc_proc.terminate()
+            _terminate_process(virtiofs_proc, "virtiofsd")
+            _terminate_process(fc_proc, "firecracker")
             with contextlib.suppress(_FIRECRACKER_RUNNER_NONCRITICAL_EXCEPTIONS):
                 shutil.rmtree(run_dir, ignore_errors=True)
 

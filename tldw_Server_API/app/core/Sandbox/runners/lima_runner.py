@@ -403,7 +403,8 @@ class LimaRunner:
             with LimaRunner._active_lock:
                 LimaRunner._active_vm[run_id] = vm_name
                 LimaRunner._active_run_dir[run_id] = run_dir
-        except Exception:
+        except BaseException:
+            # Re-raise after cleanup so interrupts do not leak setup directories.
             with contextlib.suppress(_LIMA_RUNNER_NONCRITICAL_EXCEPTIONS):
                 shutil.rmtree(run_dir, ignore_errors=True)
             with LimaRunner._active_lock:
