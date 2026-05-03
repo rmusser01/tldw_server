@@ -98,6 +98,25 @@ def _sample_diagnostics_payload() -> dict:
             "registered_templates": 0,
             "run_manifests": 0,
             "gc_candidates": 0,
+            "templates": [
+                {
+                    "template_id": "vz_linux:sample",
+                    "runtime": "vz_linux",
+                    "template_name": "sample",
+                    "artifact_format": "tldw_bundle",
+                    "source_path": "/tmp/vz-linux-bundle",
+                    "artifact_count": 2,
+                    "artifact_size_bytes": 1024,
+                    "oci_image_ref": None,
+                    "oci_platform": None,
+                    "oci_manifest_digest": None,
+                    "oci_config_digest": None,
+                    "oci_layer_digests": [],
+                    "registry": None,
+                    "imported_at": None,
+                    "provenance": {"suite": "bookworm"},
+                }
+            ],
             "items": [],
             "reasons": [],
         },
@@ -348,6 +367,9 @@ def test_admin_schema_accepts_macos_diagnostics_payload() -> None:
     assert model.reconciliation.healthy_session_ids == ["sess-live"]
     assert model.reconciliation.owned_orphaned_vm_ids == []
     assert model.reconciliation.items
+    assert model.image_store is not None
+    assert model.image_store.templates[0].artifact_format == "tldw_bundle"
+    assert model.image_store.templates[0].provenance == {"suite": "bookworm"}
 
 
 def test_admin_schema_accepts_startup_warning_summary() -> None:
@@ -641,6 +663,12 @@ def test_collect_macos_diagnostics_reports_image_store_correlation(monkeypatch, 
     assert image_store["registered_templates"] == 1
     assert image_store["run_manifests"] == 3
     assert image_store["gc_candidates"] == 3
+    templates = {template["template_id"]: template for template in image_store["templates"]}
+    assert templates[template_id]["artifact_format"] == "tldw_bundle"
+    assert templates[template_id]["runtime"] == "vz_linux"
+    assert templates[template_id]["template_name"] == "debian-bookworm-arm64"
+    assert templates[template_id]["artifact_count"] == 2
+    assert templates[template_id]["artifact_size_bytes"] == len(b"kernel") + len(b"rootfs")
     items_by_run = {item["run_id"]: item for item in image_store["items"]}
     assert items_by_run["run-live"]["matched_vm_id"] == "vm-live"
     assert items_by_run["run-live"]["matched_reconciliation_status"] == "healthy"
@@ -666,3 +694,38 @@ def test_probe_image_store_does_not_create_missing_root(monkeypatch, tmp_path) -
     assert data["items"] == []
     assert "image_store_root_missing" in data["reasons"]
     assert not store_root.exists()
+
+
+def test_probe_image_store_reports_oci_template_metadata(monkeypatch, tmp_path) -> None:
+    store_root = tmp_path / "image-store"
+    disk = tmp_path / "rootfs.img"
+    disk.write_bytes(b"rootfs")
+    store = SandboxImageStore(root_path=store_root)
+    template_id = store.register_template(
+        runtime="vz_linux",
+        template_name="oci-backed",
+        disk_paths=[str(disk)],
+        artifact_format="oci_image",
+        oci_image_ref="registry.example/tldw/sandbox:bookworm",
+        oci_platform="linux/arm64",
+        oci_manifest_digest="sha256:" + "a" * 64,
+        oci_config_digest="sha256:" + "b" * 64,
+        oci_layer_digests=["sha256:" + "c" * 64],
+        registry="registry.example",
+        imported_at="2026-05-02T00:00:00+00:00",
+        provenance={"suite": "bookworm"},
+    )
+    monkeypatch.setenv("TLDW_SANDBOX_IMAGE_STORE_ROOT", str(store_root))
+
+    data = diagnostics_module.probe_image_store()
+
+    templates = {template["template_id"]: template for template in data["templates"]}
+    assert templates[template_id]["artifact_format"] == "oci_image"
+    assert templates[template_id]["oci_image_ref"] == "registry.example/tldw/sandbox:bookworm"
+    assert templates[template_id]["oci_platform"] == "linux/arm64"
+    assert templates[template_id]["oci_manifest_digest"] == "sha256:" + "a" * 64
+    assert templates[template_id]["oci_config_digest"] == "sha256:" + "b" * 64
+    assert templates[template_id]["oci_layer_digests"] == ["sha256:" + "c" * 64]
+    assert templates[template_id]["registry"] == "registry.example"
+    assert templates[template_id]["imported_at"] == "2026-05-02T00:00:00+00:00"
+    assert templates[template_id]["provenance"] == {"suite": "bookworm"}

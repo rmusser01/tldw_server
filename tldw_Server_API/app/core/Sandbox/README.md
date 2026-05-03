@@ -10,6 +10,7 @@
   - `vz_linux`
   - `vz_macos`
   - `seatbelt`
+  - `worktree`
 - Capabilities:
   - Create and destroy sessions
   - Queue runs with TTL and capacity limits
@@ -25,12 +26,14 @@
 - `vz_linux`: Apple `Virtualization.framework` Linux guest runtime on prepared Apple silicon macOS hosts, with real helper-backed boot, guest command execution, and session VM reuse when helper/template readiness passes.
 - `vz_macos`: Apple `Virtualization.framework` macOS guest scaffold on Apple silicon macOS hosts.
 - `seatbelt`: host-local process isolation runtime for conservative trusted macOS workflows, compatibility-gated by deprecated `sandbox-exec`.
+- `worktree`: host-local VCS-level isolation runtime for trusted and standard workflows, backed by temporary git worktrees and Linux `unshare` readiness checks where applicable.
 
 Trust-level rules:
 
 - `untrusted` requires a VM runtime.
 - `seatbelt` is rejected for `untrusted`.
 - `seatbelt` defaults to `trusted` only; `standard` requires `TLDW_SANDBOX_SEATBELT_STANDARD_ENABLED=1`.
+- `worktree` supports `trusted` and `standard`, not `untrusted`.
 - `vz_linux` and `vz_macos` advertise `trusted`, `standard`, and `untrusted`.
 
 ## Technical Notes
@@ -44,6 +47,10 @@ Trust-level rules:
   - canonical vs compatibility artifact paths
   - audit and provenance expectations
   - lifecycle and reconciliation rules
+- The full-module roadmap lives in
+  `Docs/superpowers/specs/2026-05-02-sandbox-module-roadmap-design.md`.
+  It sequences remaining work across API, orchestrator, runtimes, security,
+  admin, and CI without treating every runtime as equally mature.
 - macOS scaffolding currently includes:
   - a Unix-socket helper client plus protocol models in `macos_virtualization/`
   - frozen helper contract docs in `tools/macos-vz-helper/`
@@ -59,7 +66,7 @@ Current limitations:
 - `vz_macos` real `Virtualization.framework` execution is not implemented yet.
 - `vz_linux` requires helper/template readiness and reports `execution_mode=real` when the helper-backed boot and guest execution path is available.
 - `vz_macos` still requires helper/template readiness plus `*_FAKE_EXEC=1`; otherwise discovery reports `real_execution_not_implemented`.
-- Strict allowlist networking is not implemented for `vz_linux`, `vz_macos`, or `seatbelt`.
+- Strict allowlist networking is not implemented for `vz_linux`, `vz_macos`, `seatbelt`, or `worktree`.
 - `vz_linux` VM creation is fail-closed at both Python admission and helper
   protocol layers: only `network_policy=deny_all` is accepted, and the helper
   records the accepted policy in VM metadata/status details. The current
@@ -110,7 +117,10 @@ Current limitations:
   planning manifests under `<root>/runs/<run_id>/manifest.json`, and exposes
   dry-run run-directory GC planning with candidate reasons that distinguish
   planning-only manifests, fully materialized inactive runs, and legacy run
-  directories without a persisted manifest.
+  directories without a persisted manifest. Template manifests are OCI-aware
+  metadata scaffolding: current canonical bundles remain
+  `artifact_format=tldw_bundle`, while optional OCI fields can describe a
+  future source image without changing helper boot.
 - When `TLDW_SANDBOX_IMAGE_STORE_ROOT` is configured, `vz_linux` can also
   resolve `spec.base_image` as a registered image-store `template_id` instead
   of a raw path, provided the template record has a stored `source_path`.

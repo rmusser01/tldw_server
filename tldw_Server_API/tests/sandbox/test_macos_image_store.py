@@ -55,6 +55,45 @@ def test_image_store_persists_template_manifest_and_reloads(tmp_path: Path) -> N
     assert record.artifacts[0].size_bytes == len(b"rootfs-image")
 
 
+def test_image_store_reloads_legacy_manifest_without_artifact_format(tmp_path: Path) -> None:
+    disk = tmp_path / "rootfs.img"
+    disk.write_bytes(b"rootfs")
+    store_root = tmp_path / "store"
+    manifest_path = store_root / "templates" / "vz_linux" / "legacy" / "manifest.json"
+    manifest_path.parent.mkdir(parents=True)
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "template_id": "vz_linux:legacy",
+                "runtime": "vz_linux",
+                "template_name": "legacy",
+                "source_path": None,
+                "registered_at": "2026-04-01T00:00:00+00:00",
+                "disk_paths": [str(disk)],
+                "artifacts": [
+                    {
+                        "name": disk.name,
+                        "path": str(disk),
+                        "size_bytes": len(b"rootfs"),
+                        "sha256": "d5d75963e365d7b3e74c0e75bc7b5900921c97b6185cd139ab62fc29f6b81b71",
+                    }
+                ],
+                "labels": {},
+                "provenance": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    record = SandboxImageStore(root_path=store_root).get_template("vz_linux:legacy")
+
+    assert record is not None
+    assert record.artifact_format == "unknown"
+    assert record.oci_image_ref is None
+    assert record.oci_layer_digests == []
+
+
 def test_image_store_rejects_missing_template_artifacts(tmp_path: Path) -> None:
     store = SandboxImageStore(root_path=tmp_path / "store")
 
@@ -121,6 +160,104 @@ def test_image_store_registers_bundle_with_build_provenance(tmp_path: Path) -> N
     assert record.source_path == str(bundle)
     assert record.provenance == {"suite": "bookworm", "architecture": "arm64"}
     assert {artifact.name for artifact in record.artifacts} == {"kernel", "rootfs.img", "initrd"}
+
+
+def test_image_store_registers_bundle_with_tldw_bundle_artifact_format(tmp_path: Path) -> None:
+    bundle = tmp_path / "bundle"
+    bundle.mkdir()
+    (bundle / "kernel").write_bytes(b"kernel")
+    (bundle / "rootfs.img").write_bytes(b"rootfs")
+    (bundle / "manifest.json").write_text(
+        json.dumps({"schema_version": 1, "boot_mode": "linux_direct"}),
+        encoding="utf-8",
+    )
+    store_root = tmp_path / "store"
+    store = SandboxImageStore(root_path=store_root)
+
+    template_id = store.register_bundle(
+        runtime="vz_linux",
+        template_name="debian-bookworm-arm64",
+        bundle_path=bundle,
+    )
+
+    manifest_path = store_root / "templates" / "vz_linux" / "debian-bookworm-arm64" / "manifest.json"
+    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert payload["artifact_format"] == "tldw_bundle"
+
+    reloaded = SandboxImageStore(root_path=store_root).get_template(template_id)
+    assert reloaded is not None
+    assert reloaded.artifact_format == "tldw_bundle"
+    assert reloaded.oci_image_ref is None
+    assert reloaded.oci_layer_digests == []
+
+
+def test_image_store_persists_optional_oci_metadata(tmp_path: Path) -> None:
+    disk = tmp_path / "rootfs.img"
+    disk.write_bytes(b"rootfs")
+    store_root = tmp_path / "store"
+    store = SandboxImageStore(root_path=store_root)
+
+    template_id = store.register_template(
+        runtime="vz_linux",
+        template_name="oci-backed",
+        disk_paths=[str(disk)],
+        artifact_format="oci_image",
+        oci_image_ref="registry.example/tldw/sandbox:bookworm",
+        oci_platform="linux/arm64",
+        oci_manifest_digest="sha256:" + "a" * 64,
+        oci_config_digest="sha256:" + "b" * 64,
+        oci_layer_digests=["sha256:" + "c" * 64],
+        registry="registry.example",
+        imported_at="2026-05-02T00:00:00+00:00",
+    )
+
+    manifest_path = store_root / "templates" / "vz_linux" / "oci-backed" / "manifest.json"
+    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert payload["artifact_format"] == "oci_image"
+    assert payload["oci_image_ref"] == "registry.example/tldw/sandbox:bookworm"
+    assert payload["oci_platform"] == "linux/arm64"
+    assert payload["oci_layer_digests"] == ["sha256:" + "c" * 64]
+
+    reloaded = SandboxImageStore(root_path=store_root).get_template(template_id)
+    assert reloaded is not None
+    assert reloaded.artifact_format == "oci_image"
+    assert reloaded.oci_image_ref == "registry.example/tldw/sandbox:bookworm"
+    assert reloaded.oci_platform == "linux/arm64"
+    assert reloaded.oci_manifest_digest == "sha256:" + "a" * 64
+    assert reloaded.oci_config_digest == "sha256:" + "b" * 64
+    assert reloaded.oci_layer_digests == ["sha256:" + "c" * 64]
+    assert reloaded.registry == "registry.example"
+    assert reloaded.imported_at == "2026-05-02T00:00:00+00:00"
+
+
+def test_image_store_rejects_unknown_artifact_format(tmp_path: Path) -> None:
+    disk = tmp_path / "rootfs.img"
+    disk.write_bytes(b"rootfs")
+    store = SandboxImageStore(root_path=tmp_path / "store")
+
+    with pytest.raises(ImageStoreValidationError, match="artifact_format_invalid"):
+        store.register_template(
+            runtime="vz_linux",
+            template_name="bad-format",
+            disk_paths=[str(disk)],
+            artifact_format="tarball",
+        )
+
+
+def test_image_store_rejects_invalid_oci_layer_digests(tmp_path: Path) -> None:
+    disk = tmp_path / "rootfs.img"
+    disk.write_bytes(b"rootfs")
+    store = SandboxImageStore(root_path=tmp_path / "store")
+
+    invalid_values = [[""], [123]]
+    for index, oci_layer_digests in enumerate(invalid_values):
+        with pytest.raises(ImageStoreValidationError, match="oci_layer_digests_invalid"):
+            store.register_template(
+                runtime="vz_linux",
+                template_name=f"bad-oci-{index}",
+                disk_paths=[str(disk)],
+                oci_layer_digests=oci_layer_digests,
+            )
 
 
 def test_image_store_lists_templates_and_plans_run_gc(tmp_path: Path) -> None:
