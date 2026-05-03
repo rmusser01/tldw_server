@@ -1,11 +1,11 @@
 ---
 id: TASK-4
 title: 'Address PR #1238 review comments on absolute documentation links'
-status: In Progress
+status: Done
 assignee:
   - codex
 created_date: '2026-05-03 18:23'
-updated_date: '2026-05-03 18:24'
+updated_date: '2026-05-03 18:29'
 labels:
   - docs
   - pr-review
@@ -29,10 +29,10 @@ Fix the actionable review feedback on PR #1238 by replacing local absolute Markd
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [x] #1 Changed documentation no longer contains Markdown links to local /Users/.../.worktrees paths.
+- [x] #1 Changed documentation no longer contains Markdown links to local absolute workspace paths.
 - [x] #2 All referenced in-repository files use correct relative links from their Markdown file location.
-- [x] #3 Focused validation confirms no absolute local workspace paths remain in the PR documentation changes.
-- [ ] #4 PR branch is committed and pushed after verification.
+- [x] #3 Focused validation confirms no absolute local workspace path strings remain in the PR documentation changes.
+- [x] #4 PR branch is committed and pushed after verification.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -48,17 +48,27 @@ Fix the actionable review feedback on PR #1238 by replacing local absolute Markd
 
 <!-- SECTION:NOTES:BEGIN -->
 Validated link remediation before commit:
-- rg over the six PR documentation files found no /Users/, .worktrees, or Documents/GitHub references.
+- rg over the six PR documentation files found no local absolute workspace path references.
 - test -f checks confirmed each replacement relative target exists from its source document.
 - git diff --check passed for the current edits.
+
+Committed and pushed 4caf51e64c to origin/codex/phase4-5-api-versioning-policy. Bandit was not run because the touched repo files are Markdown documentation and a Backlog task record only. GitHub checks are still pending after the push.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Changed the reviewed Markdown links in Docs/API/Pagination.md and Docs/superpowers/specs/2026-05-03-api-versioning-policy-design.md from local absolute worktree targets to repository-relative links so the documentation renders correctly for GitHub and other contributors. Added the Backlog task record to the PR branch for traceability.
+
+Verification: rg scan over the six PR docs found no local absolute workspace path references; test -f confirmed the replacement link targets exist from their source documents; git diff --check and git diff --cached --check passed. Bandit skipped because this was documentation-only. Pushed commit 4caf51e64c to the PR branch; GitHub checks were still pending at final review.
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
