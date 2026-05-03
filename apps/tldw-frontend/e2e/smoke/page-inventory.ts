@@ -101,6 +101,7 @@ export const PAGES: PageEntry[] = [
   { path: "/content-review", name: "Content Review", category: "workspace" },
   { path: "/claims-review", name: "Claims Review", category: "workspace" },
   { path: "/watchlists", name: "Watchlists", category: "workspace" },
+  { path: "/chat-workspace", name: "Chat Workspace", category: "workspace" },
   {
     path: "/chatbooks",
     name: "Chatbooks",

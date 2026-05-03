@@ -14,9 +14,10 @@ const mockState = vi.hoisted(() => ({
 }))
 
 const mockUseSetting = vi.hoisted(() => vi.fn())
+const mockT = vi.hoisted(() => (key: string, fallback?: string) => fallback ?? key)
 
 const ALL_SHORTCUT_IDS = [
-  "chat", "prompts", "prompt-studio", "characters",
+  "chat", "chat-workspace", "prompts", "prompt-studio", "characters",
   "chat-dictionaries", "world-books", "deep-research", "workspace-playground",
   "knowledge-qa", "media", "document-workspace",
   "repo2txt",
@@ -37,7 +38,7 @@ const ALL_SHORTCUT_IDS = [
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
-    t: (key: string, fallback?: string) => fallback ?? key,
+    t: mockT,
     i18n: { language: "en" }
   })
 }))
