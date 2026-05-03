@@ -195,6 +195,44 @@ def test_claims_cluster_links_and_search():
             assert digest["has_more"] is True
             assert digest["next_offset"] == 2
 
+            r_claims_legacy = client.get("/api/v1/claims?limit=1&offset=0")
+            assert r_claims_legacy.status_code == 200, r_claims_legacy.text
+            assert isinstance(r_claims_legacy.json(), list)
+
+            r_claims = client.get("/api/v1/claims?limit=2&offset=0&envelope=true")
+            assert r_claims.status_code == 200, r_claims.text
+            claims_page = r_claims.json()
+            assert len(claims_page["items"]) == 2
+            assert claims_page["pagination"] == {
+                "mode": "offset",
+                "limit": 2,
+                "offset": 0,
+                "total": None,
+                "has_more": True,
+                "next_offset": 2,
+            }
+            assert claims_page["has_more"] is True
+            assert claims_page["next_offset"] == 2
+
+            r_clusters_legacy = client.get("/api/v1/claims/clusters?limit=1&offset=0")
+            assert r_clusters_legacy.status_code == 200, r_clusters_legacy.text
+            assert isinstance(r_clusters_legacy.json(), list)
+
+            r_clusters = client.get("/api/v1/claims/clusters?limit=1&offset=0&envelope=true")
+            assert r_clusters.status_code == 200, r_clusters.text
+            clusters_page = r_clusters.json()
+            assert len(clusters_page["items"]) == 1
+            assert clusters_page["pagination"] == {
+                "mode": "offset",
+                "limit": 1,
+                "offset": 0,
+                "total": None,
+                "has_more": True,
+                "next_offset": 1,
+            }
+            assert clusters_page["has_more"] is True
+            assert clusters_page["next_offset"] == 1
+
             r_search = client.get("/api/v1/claims/search?q=claim&group_by_cluster=true&limit=10")
             assert r_search.status_code == 200, r_search.text
             data = r_search.json()

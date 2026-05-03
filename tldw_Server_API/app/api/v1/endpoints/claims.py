@@ -60,10 +60,11 @@ def list_all_claims(
     limit: int = Query(100, ge=1, le=1000),
     offset: int = Query(0, ge=0, le=100000),
     include_deleted: bool = Query(False),
+    envelope: bool = Query(False),
     user_id: Optional[int] = None,
     current_user: User = Depends(get_request_user),
     db: Any = Depends(get_media_db_for_user),
-) -> list[dict[str, Any]]:
+) -> Any:
     """List claims across accessible media for the current user."""
     return claims_service.list_all_claims(
         media_id=media_id,
@@ -74,6 +75,7 @@ def list_all_claims(
         limit=limit,
         offset=offset,
         include_deleted=include_deleted,
+        envelope=envelope,
         user_id=user_id,
         current_user=current_user,
         db=db,
@@ -621,11 +623,12 @@ def list_claim_clusters(
     keyword: Optional[str] = None,
     min_size: Optional[int] = Query(None, ge=1),
     watchlisted: Optional[bool] = None,
+    envelope: bool = Query(False),
     user_id: Optional[int] = None,
     principal: AuthPrincipal = Depends(get_auth_principal),
     current_user: User = Depends(get_request_user),
     db: Any = Depends(get_media_db_for_user),
-) -> list[dict[str, Any]]:
+) -> Any:
     """List cluster summaries, optionally filtered by timeframe or keyword."""
     return claims_service.list_claim_clusters(
         limit=limit,
@@ -634,6 +637,7 @@ def list_claim_clusters(
         keyword=keyword,
         min_size=min_size,
         watchlisted=watchlisted,
+        envelope=envelope,
         user_id=user_id,
         principal=principal,
         current_user=current_user,

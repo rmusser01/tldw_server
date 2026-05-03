@@ -1876,10 +1876,11 @@ def list_all_claims(
     limit: int,
     offset: int,
     include_deleted: bool,
+    envelope: bool,
     user_id: int | None,
     current_user: User,
     db: MediaDatabase,
-) -> list[dict[str, Any]]:
+) -> Any:
     with _resolve_media_db(
         db=db,
         current_user=current_user,
@@ -1887,6 +1888,8 @@ def list_all_claims(
         admin_required=True,
         owner_filter=True,
     ) as (target_db, owner_filter):
+        normalized_limit = max(1, int(limit))
+        normalized_offset = max(0, int(offset))
         claims = target_db.list_claims(
             media_id=media_id,
             owner_user_id=owner_filter,
@@ -1894,11 +1897,27 @@ def list_all_claims(
             reviewer_id=reviewer_id,
             review_group=review_group,
             claim_cluster_id=claim_cluster_id,
-            limit=limit,
-            offset=offset,
+            limit=normalized_limit + 1 if envelope else limit,
+            offset=normalized_offset if envelope else offset,
             include_deleted=include_deleted,
         )
-        return [_normalize_claim_row(dict(row)) for row in claims]
+        normalized = [_normalize_claim_row(dict(row)) for row in claims]
+        if not envelope:
+            return normalized
+        items = normalized[:normalized_limit]
+        pagination = build_offset_pagination_meta(
+            limit=normalized_limit,
+            offset=normalized_offset,
+            total=None,
+            count=len(items),
+            has_more=len(normalized) > normalized_limit,
+        )
+        return {
+            "items": items,
+            "has_more": pagination.has_more,
+            "next_offset": pagination.next_offset,
+            "pagination": pagination,
+        }
 
 
 def search_claims(
@@ -3562,21 +3581,24 @@ def list_claim_clusters(
     keyword: str | None,
     min_size: int | None,
     watchlisted: bool | None,
+    envelope: bool,
     user_id: int | None,
     principal: AuthPrincipal,
     current_user: User,
     db: MediaDatabase,
-) -> list[dict[str, Any]]:
+) -> Any:
     _ensure_claims_review(principal)
     target_user_id = str(current_user.id)
     if user_id is not None:
         if not _principal_has_platform_admin_claims(principal):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized")
         target_user_id = str(int(user_id))
+    normalized_limit = max(1, int(limit))
+    normalized_offset = max(0, int(offset))
     clusters = db.list_claim_clusters(
         target_user_id,
-        limit=limit,
-        offset=offset,
+        limit=normalized_limit + 1 if envelope else limit,
+        offset=normalized_offset if envelope else offset,
         updated_since=updated_since,
         keyword=keyword,
         min_size=min_size,
@@ -3594,7 +3616,22 @@ def list_claim_clusters(
         clusters = [
             c for c in clusters if (int(c.get("watchlist_count") or 0) > 0) == bool(watchlisted)
         ]
-    return clusters
+    if not envelope:
+        return clusters
+    items = clusters[:normalized_limit]
+    pagination = build_offset_pagination_meta(
+        limit=normalized_limit,
+        offset=normalized_offset,
+        total=None,
+        count=len(items),
+        has_more=len(clusters) > normalized_limit,
+    )
+    return {
+        "items": items,
+        "has_more": pagination.has_more,
+        "next_offset": pagination.next_offset,
+        "pagination": pagination,
+    }
 
 
 def rebuild_claim_clusters(
