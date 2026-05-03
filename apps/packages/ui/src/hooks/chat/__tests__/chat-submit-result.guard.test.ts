@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs"
-import { resolve } from "node:path"
+import { dirname, resolve } from "node:path"
+import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "vitest"
 
 import {
@@ -11,8 +12,9 @@ import {
   throwIfChatSubmitUnsuccessful
 } from "../chat-action-utils"
 
+const srcDir = resolve(dirname(fileURLToPath(import.meta.url)), "../../..")
 const readUiSource = (path: string) =>
-  readFileSync(resolve(process.cwd(), "../packages/ui/src", path), "utf8")
+  readFileSync(resolve(srcDir, path), "utf8")
 
 describe("chat submit result contract", () => {
   it("provides explicit submit result helpers", () => {
