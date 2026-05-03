@@ -1996,6 +1996,7 @@ def _ensure_openapi_operation_tags_declared(openapi_schema: dict[str, Any]) -> N
 
 # Add global security schemes, servers, and branding to the generated OpenAPI schema
 def custom_openapi():
+    # All schema normalization below is covered by FastAPI's OpenAPI schema cache.
     if app.openapi_schema:
         return app.openapi_schema
 

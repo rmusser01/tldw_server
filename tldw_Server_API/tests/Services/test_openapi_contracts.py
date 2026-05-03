@@ -327,6 +327,32 @@ def test_openapi_declares_all_operation_tags(openapi_spec: dict[str, Any]) -> No
 
 
 @pytest.mark.integration
+def test_custom_openapi_reuses_cached_schema_for_tag_declarations(monkeypatch) -> None:
+    """Operation tag declaration normalization should run only on the first schema build."""
+    from tldw_Server_API.app import main as main_module
+
+    helper_calls = 0
+    original_schema = main_module.app.openapi_schema
+    original_helper = main_module._ensure_openapi_operation_tags_declared
+
+    def counting_helper(openapi_schema: dict[str, Any]) -> None:
+        nonlocal helper_calls
+        helper_calls += 1
+        original_helper(openapi_schema)
+
+    monkeypatch.setattr(main_module, "_ensure_openapi_operation_tags_declared", counting_helper)
+    main_module.app.openapi_schema = None
+    try:
+        first_schema = main_module.app.openapi()
+        second_schema = main_module.app.openapi()
+    finally:
+        main_module.app.openapi_schema = original_schema
+
+    assert second_schema is first_schema
+    assert helper_calls == 1
+
+
+@pytest.mark.integration
 def test_openapi_path_parameters_match_route_templates(openapi_spec: dict[str, Any]) -> None:
     """Path placeholders and OpenAPI path parameters must stay in sync for generated clients."""
     missing_parameters: list[str] = []
