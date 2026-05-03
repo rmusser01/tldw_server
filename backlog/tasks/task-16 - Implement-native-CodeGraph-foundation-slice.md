@@ -4,7 +4,7 @@ title: Implement native CodeGraph foundation slice
 status: In Progress
 assignee: []
 created_date: '2026-05-03 21:16'
-updated_date: '2026-05-03 21:20'
+updated_date: '2026-05-03 21:28'
 labels:
   - codegraph
   - mcp
@@ -51,6 +51,8 @@ Created implementation plan at Docs/superpowers/plans/2026-05-03-native-codegrap
 Plan includes TDD red/green steps, exact files, focused pytest commands, Bandit command, git diff --check, dependency-matrix gate before pyproject optional extra, and commit checkpoints.
 
 Subagent plan review was not run because the active tool policy allows subagents only when the user explicitly asks for subagent/parallel agent work; plan includes a local checklist review note instead.
+
+Addressed plan review findings before implementation: status is now specified as inspect-only/read-only when no DB exists; indexer tests now cover foreground byte and wall-clock bounds; MCP module implementation must offload blocking index/sync/files work through asyncio.to_thread; planned-language files must be skipped instead of persisted; repository tests must seed and clean future graph rows to verify stale-edge cleanup behavior.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

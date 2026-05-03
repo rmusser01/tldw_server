@@ -345,6 +345,10 @@ def test_registry_maps_extensions_without_claiming_symbol_extraction() -> None:
     assert registry.language_for_path("src/main.cc").stage == "planned"
 ```
 
+Planned-language mapping is metadata only. Stage 1 indexer tests must verify
+that planned languages are not persisted as indexed files until real extractors
+exist.
+
 - [ ] **Step 5: Verify RED, implement, verify GREEN**
 
 Run:
@@ -545,7 +549,54 @@ def test_repository_upserts_files_and_records_runs(tmp_path: Path) -> None:
     assert repo.last_index_run().status == "complete"
 ```
 
-- [ ] **Step 5: Verify RED, implement, verify GREEN**
+- [ ] **Step 5: Write failing stale graph cleanup test**
+
+Manually seed future graph rows to make cleanup behavior testable before real
+extractors exist:
+
+```python
+def test_repository_replacing_file_removes_owned_graph_rows_and_dangling_edges(tmp_path: Path) -> None:
+    repo = CodeGraphRepository(tmp_path / "codegraph.db")
+    repo.initialize()
+    repo.upsert_file(
+        path="app/main.py",
+        language="python",
+        size=12,
+        content_hash="old",
+        modified_at=1.0,
+        status="indexed",
+        errors=[],
+    )
+    repo.seed_graph_rows_for_test(
+        nodes=[
+            {"id": "node_old", "identity_key": "old", "kind": "function", "name": "old", "file_path": "app/main.py"},
+            {"id": "node_other", "identity_key": "other", "kind": "function", "name": "other", "file_path": "app/other.py"},
+        ],
+        edges=[
+            {"id": "edge_owned", "source": "node_old", "target": "node_other", "kind": "calls", "file_path": "app/main.py"},
+            {"id": "edge_dangling", "source": "node_other", "target": "node_old", "kind": "calls", "file_path": "app/other.py"},
+        ],
+        unresolved_refs=[
+            {"from_node_id": "node_old", "reference_name": "missing", "reference_kind": "call", "file_path": "app/main.py"},
+        ],
+    )
+
+    repo.prepare_file_replacement("app/main.py")
+
+    assert repo.counts()["nodes"] == 1
+    assert repo.counts()["edges"] == 0
+    assert repo.counts()["unresolved_refs"] == 0
+```
+
+Implementation requirements:
+
+- Add a production cleanup method such as `prepare_file_replacement(path: str)`.
+- Delete nodes and unresolved references owned by the file path.
+- Delete edges owned by the file path.
+- Delete edges whose `source` or `target` no longer exists after node cleanup.
+- Keep the test-only seeding helper private or clearly named for tests.
+
+- [ ] **Step 6: Verify RED, implement, verify GREEN**
 
 Run:
 
@@ -555,7 +606,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/CodeGraph/te
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit checkpoint**
+- [ ] **Step 7: Commit checkpoint**
 
 ```bash
 git add tldw_Server_API/app/core/CodeGraph/schema.sql \
@@ -628,7 +679,13 @@ Behavior:
 - Reject symlink targets escaping the workspace.
 - Skip default excluded directories.
 - Match files by language registry extension.
+- Persist only languages whose registry stage is `foundation`; skip planned
+  languages with a clear `planned_language_skipped` counter.
 - Skip files over `max_file_size_bytes`.
+- Enforce total candidate bytes with `foreground_max_bytes`.
+- Enforce wall-clock bounds with `max_index_seconds`; inject a monotonic clock
+  into `CodeGraphIndexer` tests so timeout behavior is deterministic and does
+  not sleep.
 - Skip files containing NUL bytes in the first small read.
 - Compute SHA-256 content hash from bytes.
 - Persist `files` rows only.
@@ -637,9 +694,14 @@ Behavior:
   - `files_indexed`
   - `files_skipped`
   - `files_too_large`
+  - `planned_language_skipped`
   - `unsupported_language`
   - `errors`
-- If candidate file count exceeds bounded limit, return status `index_too_large_for_foreground` and do not partially index.
+- If candidate file count or total bytes exceeds bounded limits, return status
+  `index_too_large_for_foreground` and do not partially index.
+- If the monotonic clock exceeds `max_index_seconds`, stop before starting the
+  next file and return status `index_timed_out_for_foreground` with counters
+  showing any completed file work.
 
 - [ ] **Step 4: Write failing bounds and sync tests**
 
@@ -663,6 +725,77 @@ def test_indexer_rejects_over_limit_foreground_workspace(tmp_path: Path) -> None
     )
 
     assert result.status == "index_too_large_for_foreground"
+    assert repo.counts()["files"] == 0
+
+
+def test_indexer_rejects_over_total_byte_budget_without_partial_index(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "small.py").write_text("x = 1\n", encoding="utf-8")
+    (workspace / "large.py").write_text("x = '" + ("a" * 64) + "'\n", encoding="utf-8")
+    repo = CodeGraphRepository(tmp_path / "codegraph.db")
+    indexer = CodeGraphIndexer(
+        settings=CodeGraphSettings.from_mapping({"foreground_max_bytes": 16}),
+        registry=CodeGraphLanguageRegistry(),
+    )
+
+    result = indexer.index_workspace(
+        workspace_root=workspace,
+        workspace_key="ws_test",
+        repository=repo,
+        force=True,
+        languages=None,
+        max_files=10,
+    )
+
+    assert result.status == "index_too_large_for_foreground"
+    assert repo.counts()["files"] == 0
+
+
+def test_indexer_stops_when_foreground_time_budget_expires(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "a.py").write_text("x = 1\n", encoding="utf-8")
+    (workspace / "b.py").write_text("y = 2\n", encoding="utf-8")
+    repo = CodeGraphRepository(tmp_path / "codegraph.db")
+    ticks = iter([0.0, 0.0, 10.0])
+    indexer = CodeGraphIndexer(
+        settings=CodeGraphSettings.from_mapping({"max_index_seconds": 1}),
+        registry=CodeGraphLanguageRegistry(),
+        monotonic=lambda: next(ticks),
+    )
+
+    result = indexer.index_workspace(
+        workspace_root=workspace,
+        workspace_key="ws_test",
+        repository=repo,
+        force=True,
+        languages=None,
+        max_files=10,
+    )
+
+    assert result.status == "index_timed_out_for_foreground"
+    assert result.counters["files_indexed"] == 1
+
+
+def test_indexer_skips_planned_language_files_until_extractors_exist(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "main.cc").write_text("int main() { return 0; }\n", encoding="utf-8")
+    repo = CodeGraphRepository(tmp_path / "codegraph.db")
+    indexer = CodeGraphIndexer(settings=CodeGraphSettings.from_mapping({}), registry=CodeGraphLanguageRegistry())
+
+    result = indexer.index_workspace(
+        workspace_root=workspace,
+        workspace_key="ws_test",
+        repository=repo,
+        force=True,
+        languages=None,
+        max_files=10,
+    )
+
+    assert result.status == "complete"
+    assert result.counters["planned_language_skipped"] == 1
     assert repo.counts()["files"] == 0
 
 
@@ -745,6 +878,10 @@ Follow `FilesystemModule` patterns:
 
 - Constructor accepts `ModuleConfig` and optional workspace root resolver for tests.
 - `check_health()` returns dependency and repository readiness checks without requiring optional Tree-sitter dependencies.
+- `execute_tool()` must offload blocking filesystem and SQLite work through
+  `asyncio.to_thread` for `codegraph.index`, `codegraph.sync`, and
+  `codegraph.files`. If `codegraph.status` inspects an existing DB, perform the
+  DB read through `asyncio.to_thread` as well.
 - `get_tools()` returns four tool definitions with:
   - `uses_filesystem: True`
   - `path_boundable: True`
@@ -762,12 +899,13 @@ Use fake workspace resolver as in filesystem tests:
 
 ```python
 @pytest.mark.asyncio
-async def test_codegraph_status_initializes_index_under_configured_base(tmp_path) -> None:
+async def test_codegraph_status_is_read_only_when_index_is_absent(tmp_path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
+    index_base = tmp_path / "indexes"
     resolver = FakeWorkspaceRootResolver({"workspace_root": str(workspace), "workspace_id": "ws-1"})
     module = CodeGraphModule(
-        ModuleConfig(name="CodeGraph", settings={"index_base_dir": str(tmp_path / "indexes")}),
+        ModuleConfig(name="CodeGraph", settings={"index_base_dir": str(index_base)}),
         workspace_root_resolver=resolver,
     )
     context = RequestContext(request_id="req", session_id="sess-1", user_id="7", metadata={"workspace_id": "ws-1"})
@@ -775,8 +913,11 @@ async def test_codegraph_status_initializes_index_under_configured_base(tmp_path
     status = await module.execute_tool("codegraph.status", {}, context=context)
 
     assert status["workspace_key"].startswith("ws_")
+    assert status["index_present"] is False
     assert status["counts"]["files"] == 0
+    assert status["last_index_run"] is None
     assert str(workspace) not in status["index_db_path"]
+    assert index_base.exists() is False
 
 
 @pytest.mark.asyncio
@@ -796,6 +937,32 @@ async def test_codegraph_index_and_files_roundtrip(tmp_path) -> None:
 
     assert result["status"] == "complete"
     assert files["files"][0]["path"] == "app.py"
+
+
+@pytest.mark.asyncio
+async def test_codegraph_index_sync_and_files_offload_blocking_work(tmp_path, monkeypatch) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "app.py").write_text("x = 1\n", encoding="utf-8")
+    resolver = FakeWorkspaceRootResolver({"workspace_root": str(workspace), "workspace_id": "ws-1"})
+    module = CodeGraphModule(
+        ModuleConfig(name="CodeGraph", settings={"index_base_dir": str(tmp_path / "indexes")}),
+        workspace_root_resolver=resolver,
+    )
+    context = RequestContext(request_id="req", session_id="sess-1", user_id="7", metadata={"workspace_id": "ws-1"})
+    offloaded = []
+
+    async def fake_to_thread(func, *args, **kwargs):
+        offloaded.append(getattr(func, "__name__", repr(func)))
+        return func(*args, **kwargs)
+
+    monkeypatch.setattr("asyncio.to_thread", fake_to_thread)
+
+    await module.execute_tool("codegraph.index", {"mode": "foreground", "max_files": 10}, context=context)
+    await module.execute_tool("codegraph.files", {"limit": 10}, context=context)
+    await module.execute_tool("codegraph.sync", {"mode": "foreground", "max_files": 10}, context=context)
+
+    assert len(offloaded) >= 3
 ```
 
 - [ ] **Step 5: Verify RED, implement, verify GREEN**
