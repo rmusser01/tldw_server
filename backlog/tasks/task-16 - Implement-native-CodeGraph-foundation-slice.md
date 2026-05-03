@@ -1,10 +1,10 @@
 ---
 id: TASK-16
 title: Implement native CodeGraph foundation slice
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-05-03 21:16'
-updated_date: '2026-05-03 21:28'
+updated_date: '2026-05-03 21:51'
 labels:
   - codegraph
   - mcp
@@ -53,14 +53,26 @@ Plan includes TDD red/green steps, exact files, focused pytest commands, Bandit 
 Subagent plan review was not run because the active tool policy allows subagents only when the user explicitly asks for subagent/parallel agent work; plan includes a local checklist review note instead.
 
 Addressed plan review findings before implementation: status is now specified as inspect-only/read-only when no DB exists; indexer tests now cover foreground byte and wall-clock bounds; MCP module implementation must offload blocking index/sync/files work through asyncio.to_thread; planned-language files must be skipped instead of persisted; repository tests must seed and clean future graph rows to verify stale-edge cleanup behavior.
+
+Implemented Stage 1 foundation in the codegraph worktree: CodeGraph settings/dependency probe/language registry/workspace resolver/schema/repository/indexer plus Unified MCP CodeGraphModule with status/index/sync/files.
+
+Verified parser dependency matrix in /private/tmp/codegraph-matrix-venv: tree-sitter 0.25.2, tree-sitter-python 0.25.0, tree-sitter-javascript 0.25.0, and tree-sitter-typescript 0.23.2 parsed Python, JavaScript, TypeScript, and TSX smoke snippets.
+
+Verification: pytest tldw_Server_API/tests/CodeGraph tldw_Server_API/app/core/MCP_unified/tests/test_codegraph_module.py -q => 24 passed; pytest test_filesystem_module.py test_dynamic_module_catalog.py -q => 16 passed; Bandit touched CodeGraph scope => 0 results; git diff --check => clean.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Implemented the native CodeGraph Stage 1 foundation: bounded foreground file-inventory indexing/sync, stable SQLite repository/schema, trusted workspace/index-path resolution, foundation/planned language registry, read-only status/files behavior, and a disabled Unified MCP CodeGraph module entry. Added focused tests for config, dependencies, registry, repository cleanup, bounded index limits, MCP metadata/offloading/protocol validation, and default disabled catalog registration. Deep symbol extraction, graph query tools, Jobs integration, file watching, and non-foundation language extractors remain intentionally deferred.
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
