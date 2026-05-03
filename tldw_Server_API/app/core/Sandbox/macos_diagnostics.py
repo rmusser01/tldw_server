@@ -22,6 +22,18 @@ from .vz_reconciliation import collect_vz_reconciliation
 
 _VZ_LINUX_TEMPLATE_MISSING_REASON = "vz_linux_template_missing"
 _VZ_MACOS_TEMPLATE_MISSING_REASON = "macos_template_missing"
+_HELPER_LOG_DIR_ENV = "TLDW_SANDBOX_MACOS_HELPER_LOG_DIR"
+_VZ_LINUX_SERIAL_LOG_DIR_ENV = "TLDW_SANDBOX_VZ_LINUX_SERIAL_LOG_DIR"
+_VZ_LINUX_RESOURCE_DETAIL_KEYS = (
+    "cpu_time_sec",
+    "wall_time_sec",
+    "peak_rss_mb",
+    "memory_rss_mb",
+    "disk_read_bytes",
+    "disk_write_bytes",
+    "network_rx_bytes",
+    "network_tx_bytes",
+)
 
 
 def _truthy(value: str | None) -> bool:
@@ -60,6 +72,100 @@ def _remediation_for_reasons(reasons: list[str]) -> str | None:
     if "seatbelt_unavailable" in reasons:
         return "Enable the seatbelt runtime on supported macOS hosts."
     return "Review runtime preflight reasons and host readiness."
+
+
+def _path_from_text(value: str | None) -> Path | None:
+    raw = str(value or "").strip()
+    if not raw or "\x00" in raw:
+        return None
+    try:
+        return Path(raw).expanduser()
+    except (OSError, ValueError):
+        return None
+
+
+def _file_pointer(path: Path | None) -> dict[str, object]:
+    if path is None:
+        return {"path": None, "exists": False, "size_bytes": None}
+    path_text = str(path)
+    try:
+        if not path.is_file():
+            return {"path": path_text, "exists": False, "size_bytes": None}
+        return {"path": path_text, "exists": True, "size_bytes": int(path.stat().st_size)}
+    except (OSError, ValueError):
+        return {"path": path_text, "exists": False, "size_bytes": None}
+
+
+def _sanitize_serial_log_component(value: str) -> str:
+    sanitized = "".join(
+        char if (char.isalnum() or char in "._-") else "_"
+        for char in str(value or "")
+    )
+    return sanitized or "vm"
+
+
+def _serial_log_pointer(vm_id: str, serial_log_dir: Path | None) -> dict[str, object]:
+    if serial_log_dir is None:
+        return _file_pointer(None)
+    return _file_pointer(serial_log_dir / f"{_sanitize_serial_log_component(vm_id)}.serial.log")
+
+
+def _detail_text(details: dict[str, object], key: str) -> str | None:
+    value = details.get(key)
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _detail_bool(details: dict[str, object], key: str) -> bool | None:
+    value = details.get(key)
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off", ""}:
+            return False
+    return None
+
+
+def _detail_csv(details: dict[str, object], key: str) -> list[str]:
+    value = details.get(key)
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    if isinstance(value, str):
+        return [item.strip() for item in value.split(",") if item.strip()]
+    return []
+
+
+def _detail_int(details: dict[str, object], key: str) -> int | None:
+    value = details.get(key)
+    if isinstance(value, bool):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _guest_observability(details: dict[str, object]) -> dict[str, object]:
+    return {
+        "version": _detail_text(details, "guest_version"),
+        "workspace_root": _detail_text(details, "guest_workspace_root"),
+        "capabilities_known": _detail_bool(details, "guest_capabilities_known"),
+        "capabilities": _detail_csv(details, "guest_capabilities"),
+    }
+
+
+def _resource_snapshot(details: dict[str, object]) -> dict[str, int]:
+    snapshot: dict[str, int] = {}
+    for key in _VZ_LINUX_RESOURCE_DETAIL_KEYS:
+        value = _detail_int(details, key)
+        if value is not None:
+            snapshot[key] = value
+    return snapshot
 
 
 def probe_host() -> dict[str, object]:
@@ -244,6 +350,73 @@ def probe_reconciliation(orchestrator: Any | None = None) -> dict[str, object]:
     return collect_vz_reconciliation(orchestrator)
 
 
+def probe_vz_linux_observability() -> dict[str, object]:
+    """Report read-only helper log pointers and live VM diagnostics."""
+
+    serial_log_dir = _path_from_text(os.getenv(_VZ_LINUX_SERIAL_LOG_DIR_ENV))
+    helper_log_source = "env"
+    helper_log_dir = _path_from_text(os.getenv(_HELPER_LOG_DIR_ENV))
+    if helper_log_dir is None and serial_log_dir is not None and serial_log_dir.name == "serial":
+        helper_log_dir = serial_log_dir.parent
+        helper_log_source = "inferred_from_serial_log_dir"
+    elif helper_log_dir is None:
+        helper_log_dir = Path.home() / "Library" / "Logs" / "tldw" / "macos-vz-helper"
+        helper_log_source = "default"
+
+    helper_logs = {
+        "stdout": _file_pointer(helper_log_dir / "helper.stdout.log"),
+        "stderr": _file_pointer(helper_log_dir / "helper.stderr.log"),
+    }
+    report: dict[str, object] = {
+        "configured": bool(serial_log_dir is not None or helper_log_dir is not None),
+        "serial_log_dir": str(serial_log_dir) if serial_log_dir is not None else None,
+        "helper_log_dir": str(helper_log_dir) if helper_log_dir is not None else None,
+        "helper_log_dir_source": helper_log_source,
+        "helper_logs": helper_logs,
+        "live_vms": 0,
+        "vms": [],
+        "reasons": [],
+    }
+
+    try:
+        live = MacOSVirtualizationHelperClient().list_vms()
+    except MacOSVirtualizationHelperUnavailable:
+        report["reasons"] = ["macos_virtualization_helper_unavailable"]
+        return report
+    except MacOSVirtualizationHelperProtocolError:
+        report["reasons"] = ["macos_virtualization_helper_protocol_mismatch"]
+        return report
+    except Exception:
+        report["reasons"] = ["vz_linux_observability_unavailable"]
+        return report
+
+    vm_items: list[dict[str, object]] = []
+    for vm in list(getattr(live, "vms", None) or []):
+        vm_id = str(getattr(vm, "vm_id", "") or "").strip()
+        if not vm_id:
+            continue
+        metadata = getattr(vm, "metadata", None)
+        details_raw = getattr(vm, "details", None)
+        details = dict(details_raw) if isinstance(details_raw, dict) else {}
+        vm_items.append(
+            {
+                "vm_id": vm_id,
+                "state": str(getattr(vm, "state", "") or "").strip() or None,
+                "healthy": bool(getattr(vm, "healthy", False)),
+                "run_id": str(getattr(metadata, "run_id", "") or "").strip() or None,
+                "session_id": str(getattr(metadata, "session_id", "") or "").strip() or None,
+                "session_mode": bool(getattr(metadata, "session_mode", False)),
+                "serial_log": _serial_log_pointer(vm_id, serial_log_dir),
+                "guest": _guest_observability(details),
+                "resource_snapshot": _resource_snapshot(details),
+            }
+        )
+
+    report["vms"] = sorted(vm_items, key=lambda item: str(item.get("vm_id") or ""))
+    report["live_vms"] = len(vm_items)
+    return report
+
+
 def _image_store_template_item(record: Any) -> dict[str, object]:
     """Return read-only admin diagnostics for one registered image-store template."""
 
@@ -425,6 +598,7 @@ def collect_macos_diagnostics(orchestrator: Any | None = None) -> dict[str, Any]
     runtimes = probe_runtime_statuses(runtime_preflights=runtime_preflights)
     reconciliation = probe_reconciliation(orchestrator)
     image_store = probe_image_store(reconciliation)
+    observability = probe_vz_linux_observability()
     return {
         "host": host,
         "helper": helper,
@@ -432,4 +606,5 @@ def collect_macos_diagnostics(orchestrator: Any | None = None) -> dict[str, Any]
         "runtimes": runtimes,
         "reconciliation": reconciliation,
         "image_store": image_store,
+        "observability": observability,
     }

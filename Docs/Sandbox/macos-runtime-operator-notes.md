@@ -244,6 +244,9 @@ It is admin-only and returns:
 - reconciliation data comparing persisted VZ session rows with live helper VM state
 - image-store correlation showing persisted run manifests, dry-run GC candidate
   classification, and any matching reconciliation/helper VM records
+- read-only observability for `vz_linux` helper stdout/stderr log pointers,
+  per-VM serial log pointers, guest readiness metadata, and helper-provided
+  resource counters when available
 - an additive image-store cleanup plan endpoint and a default-dry-run cleanup
   mutation endpoint for explicit operator action
 - additive `startup_warning_summary` showing whether current-process startup
@@ -259,6 +262,8 @@ is not cluster-wide or persisted across restarts.
 Use the admin endpoint when you are validating host setup or trying to explain why a
 runtime is unavailable. Use `/api/v1/sandbox/runtimes` for client-facing discovery;
 that payload stays summarized and does not expose helper/template internals.
+The diagnostics observability block reports log paths, existence, and byte
+sizes only; it does not read or return log contents.
 
 ACP sandbox session creation now performs runtime preflight validation before calling the sandbox service, and converts failures into `ACPResponseError` instead of leaking raw sandbox exceptions.
 

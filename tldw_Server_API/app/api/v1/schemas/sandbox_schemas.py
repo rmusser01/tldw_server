@@ -428,6 +428,47 @@ class SandboxAdminMacOSImageStoreDiagnostics(BaseModel):
     reasons: list[str] = Field(default_factory=list)
 
 
+class SandboxAdminMacOSLogPointer(BaseModel):
+    path: str | None = None
+    exists: bool = False
+    size_bytes: int | None = None
+
+
+class SandboxAdminMacOSHelperLogPointers(BaseModel):
+    stdout: SandboxAdminMacOSLogPointer
+    stderr: SandboxAdminMacOSLogPointer
+
+
+class SandboxAdminMacOSGuestObservability(BaseModel):
+    version: str | None = None
+    workspace_root: str | None = None
+    capabilities_known: bool | None = None
+    capabilities: list[str] = Field(default_factory=list)
+
+
+class SandboxAdminMacOSVMObservability(BaseModel):
+    vm_id: str
+    state: str | None = None
+    healthy: bool
+    run_id: str | None = None
+    session_id: str | None = None
+    session_mode: bool = False
+    serial_log: SandboxAdminMacOSLogPointer
+    guest: SandboxAdminMacOSGuestObservability
+    resource_snapshot: dict[str, int] = Field(default_factory=dict)
+
+
+class SandboxAdminMacOSObservabilityDiagnostics(BaseModel):
+    configured: bool
+    serial_log_dir: str | None = None
+    helper_log_dir: str | None = None
+    helper_log_dir_source: str | None = None
+    helper_logs: SandboxAdminMacOSHelperLogPointers
+    live_vms: int = 0
+    vms: list[SandboxAdminMacOSVMObservability] = Field(default_factory=list)
+    reasons: list[str] = Field(default_factory=list)
+
+
 class SandboxAdminStartupWarningSummary(BaseModel):
     """Compact startup warning summary projected into sandbox diagnostics."""
 
@@ -445,6 +486,7 @@ class SandboxAdminMacOSDiagnosticsResponse(BaseModel):
     runtimes: dict[str, SandboxAdminMacOSRuntimeDiagnostics] = Field(default_factory=dict)
     reconciliation: SandboxAdminMacOSReconciliationDiagnostics | None = None
     image_store: SandboxAdminMacOSImageStoreDiagnostics | None = None
+    observability: SandboxAdminMacOSObservabilityDiagnostics | None = None
     startup_warning_summary: SandboxAdminStartupWarningSummary | None = None
 
 

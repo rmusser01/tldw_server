@@ -102,6 +102,10 @@ Current limitations:
 - `vz_linux` admin diagnostics now also project an additive
   `startup_warning_summary` field from the app-owned startup warning registry;
   low-level diagnostics collection remains app-agnostic.
+- `vz_linux` admin diagnostics include a read-only `observability` block with
+  helper stdout/stderr log pointers, per-VM serial log pointers, guest readiness
+  details, and helper-provided resource counters when available. Diagnostics
+  report file existence and byte sizes only; they do not read log contents.
 - `vz_linux` repair is explicit and admin-only through `POST /api/v1/sandbox/admin/macos-reconciliation/repair`; diagnostics do not mutate state.
 - `vz_linux` repair defaults to dry-run, skips active sessions, can delete stale or unhealthy inactive persisted session-control rows when requested, and can terminate orphan helper VMs only when `terminate_orphaned_vms=true` is explicitly requested, helper metadata proves `owner=tldw` and `runtime=vz_linux`, and the ownership record remains eligibility-complete. Eligibility-complete means `run_id` and `created_at` are present, and `session_id` is also present when `session_mode=true`.
 - `vz_linux` orphan VM diagnostics split live unreferenced helper VMs into `owned_orphaned_vm`, `unknown_orphaned_vm`, and `foreign_orphaned_vm`. Only ownership-eligible `owned_orphaned_vm` records can be terminated automatically; unknown, foreign, and legacy generic orphan records are reported but skipped by automated repair.
@@ -163,8 +167,9 @@ operator troubleshooting and exposes helper/template readiness details that are 
 included in the public discovery payload, plus reconciliation data for persisted
 `vz_linux` session-control rows versus live helper VM state, and image-store
 correlation for persisted run manifests and dry-run GC candidates. It is
-read-only and now includes a compact `startup_warning_summary` field projected from the
-current-process startup warning registry.
+read-only and now includes helper/serial log observability plus a compact
+`startup_warning_summary` field projected from the current-process startup
+warning registry.
 `/api/v1/admin/startup-warnings` is the generic admin-only companion surface for
 the same startup records and returns full current-process warning items plus
 grouped counts.
@@ -189,6 +194,7 @@ Selected configuration knobs:
   - `SANDBOX_MAX_ARTIFACT_TOTAL_BYTES`
 - macOS scaffolding:
   - `TLDW_SANDBOX_MACOS_HELPER_SOCKET`
+  - `TLDW_SANDBOX_MACOS_HELPER_LOG_DIR`
   - `TLDW_SANDBOX_MACOS_HELPER_READY`
   - `TLDW_SANDBOX_MACOS_HELPER_PATH`
   - `TLDW_SANDBOX_IMAGE_STORE_ROOT`
