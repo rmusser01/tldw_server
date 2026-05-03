@@ -2,7 +2,8 @@
 
 ## Backend Baseline
 
-- Base at measurement time: `4f2dda1ab2 docs: add sandbox security policy matrix (#1218)`.
+- Base at initial measurement time: `4f2dda1ab2 docs: add sandbox security policy matrix (#1218)`.
+- Post-rebase verification base: `1016a3b056 refactor(flashcards): split import/export tab panels (#1217)`.
 - Python: `Python 3.11.13` from the repo-root virtual environment.
 - Command:
 
@@ -18,6 +19,7 @@ PYTHONPATH=. PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 TEST_MODE=true DISABLE_HEAVY_START
 - Result: `215 passed, 8 warnings in 66.42s`.
 - Coverage XML summary: `lines-valid=592952`, `lines-covered=37753`, `line-rate=0.06367`.
 - Terminal total: `6%`.
+- Post-rebase ratchet check with `--cov-fail-under=5`: `215 passed, 8 warnings in 64.91s`; `Required test coverage of 5% reached. Total coverage: 6.37%`.
 - Generated artifacts: `.coverage` and `coverage.xml` are produced locally and ignored by git.
 
 ## First Ratchet
@@ -50,7 +52,6 @@ No frontend coverage floor should be set from this run. Frontend coverage needs 
 
 ## Follow-Up
 
-- Re-run the backend coverage-required command after this branch is rebased onto the latest `dev`.
 - Keep frontend coverage separate from backend coverage.
 - Do not use the failed frontend full-suite coverage attempt as a numeric baseline.
 - Consider adding a package-level UI coverage script only after the high-churn shared UI test failures are addressed or sharded.
