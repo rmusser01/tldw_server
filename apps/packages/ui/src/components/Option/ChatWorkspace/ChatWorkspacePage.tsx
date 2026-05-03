@@ -11,9 +11,10 @@ import type {
   ChatWorkspaceRuntimeState,
   StagedWorkspaceSource
 } from "./types"
+import { normalizeWorkspaceId } from "./workspaceIdentity"
 
 type WorkspaceContextState = {
-  workspaceId: string
+  workspaceId: string | null
   browsedSourceId: string | null
   stagedSources: StagedWorkspaceSource[]
 }
@@ -28,7 +29,7 @@ const createInitialRuntimeState = (
 })
 
 export const ChatWorkspacePage = () => {
-  const workspaceId = useWorkspaceStore((state) => state.workspaceId)
+  const rawWorkspaceId = useWorkspaceStore((state) => state.workspaceId)
   const workspaceName = useWorkspaceStore((state) => state.workspaceName)
   const sources = useWorkspaceStore((state) => state.sources)
   const setRouteContext = useChatSurfaceCoordinatorStore(
@@ -38,6 +39,11 @@ export const ChatWorkspacePage = () => {
   const backendAvailable =
     connectionState.isConnected &&
     connectionState.phase === ConnectionPhase.CONNECTED
+  const workspaceId = React.useMemo(
+    () => normalizeWorkspaceId(rawWorkspaceId),
+    [rawWorkspaceId]
+  )
+  const workspaceReady = workspaceId !== null
 
   const [workspaceContext, setWorkspaceContext] =
     React.useState<WorkspaceContextState>(() => ({
@@ -134,7 +140,7 @@ export const ChatWorkspacePage = () => {
         selectedModelLabel={runtimeState.selectedModelLabel}
         selectedPersonaLabel={runtimeState.selectedPersonaLabel}
         backendAvailable={backendAvailable}
-        chatBackendAvailable={backendAvailable}
+        chatBackendAvailable={backendAvailable && workspaceReady}
         streaming={runtimeState.streaming}
         onBrowseSource={handleBrowseSource}
         onStageSources={handleStageSources}

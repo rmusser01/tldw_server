@@ -26,7 +26,14 @@ vi.mock("@/hooks/useMessageOption", () => ({
 }))
 
 vi.mock("@/components/Common/Playground/Message", () => ({
-  PlaygroundMessage: (props: { message: string }) => <article>{props.message}</article>
+  PlaygroundMessage: (props: { conversationInstanceId: string; message: string }) => (
+    <article
+      data-testid="workspace-panel-message"
+      data-conversation-instance-id={props.conversationInstanceId}
+    >
+      {props.message}
+    </article>
+  )
 }))
 
 const staged: StagedWorkspaceSource[] = [
@@ -66,6 +73,7 @@ const stagedWithMixedAvailability: StagedWorkspaceSource[] = [
 describe("WorkspaceChatPanel", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    chatHookState.value.messages = []
     chatHookState.value.streaming = false
     chatHookState.value.isLoading = false
     chatHookState.value.isProcessing = false
@@ -318,6 +326,52 @@ describe("WorkspaceChatPanel", () => {
 
     expect(chatHookState.onSubmit).not.toHaveBeenCalled()
     expect(onClearStagedSources).not.toHaveBeenCalled()
+  })
+
+  it("treats an empty workspace id as loading and does not submit under a global scope", () => {
+    chatHookState.value.messages = [
+      {
+        id: "message-1",
+        role: "assistant",
+        message: "Hydrating"
+      }
+    ]
+    const onClearStagedSources = vi.fn()
+    const onRuntimeStateChange = vi.fn()
+
+    render(
+      <WorkspaceChatPanel
+        stagedSources={staged}
+        onClearStagedSources={onClearStagedSources}
+        backendAvailable
+        workspaceId=""
+        onRuntimeStateChange={onRuntimeStateChange}
+      />
+    )
+
+    expect(chatHookState.useMessageOption).toHaveBeenCalledWith({
+      scope: { type: "global" }
+    })
+    expect(screen.getByTestId("workspace-panel-message")).toHaveAttribute(
+      "data-conversation-instance-id",
+      "workspace-chat"
+    )
+
+    const composer = screen.getByRole("textbox", { name: "Chat workspace message" })
+    fireEvent.change(composer, { target: { value: "Do not send during hydration" } })
+
+    const sendButton = screen.getByRole("button", { name: "Send message" })
+    expect(sendButton).toBeDisabled()
+    fireEvent.click(sendButton)
+    expect(screen.getByRole("button", { name: "Send with staged context" }))
+      .toBeDisabled()
+    fireEvent.click(screen.getByRole("button", { name: "Send with staged context" }))
+    expect(chatHookState.onSubmit).not.toHaveBeenCalled()
+    expect(onClearStagedSources).not.toHaveBeenCalled()
+    expect(onRuntimeStateChange).toHaveBeenCalledWith(
+      expect.objectContaining({ backendAvailable: false })
+    )
+    expect(screen.getByText("Loading workspace context")).toBeInTheDocument()
   })
 
   it("preserves draft and staged context when submit returns a failed result", async () => {

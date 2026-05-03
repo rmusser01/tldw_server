@@ -3,6 +3,7 @@ import type { StagedWorkspaceSource } from "./types"
 export type ContextStagingCardProps = {
   sources: StagedWorkspaceSource[]
   isSending?: boolean
+  canSend?: boolean
   onClear: () => void
   onInsert: () => void
   onSend: () => void
@@ -17,12 +18,13 @@ const primaryButtonClass =
 export const ContextStagingCard = ({
   sources,
   isSending = false,
+  canSend = true,
   onClear,
   onInsert,
   onSend
 }: ContextStagingCardProps) => {
   const hasSources = sources.length > 0
-  const sendDisabled = isSending || !hasSources
+  const sendDisabled = isSending || !canSend || !hasSources
 
   return (
     <section

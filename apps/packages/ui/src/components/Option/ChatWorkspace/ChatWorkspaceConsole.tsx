@@ -8,6 +8,7 @@ import type {
   ChatWorkspaceRuntimeState,
   StagedWorkspaceSource
 } from "./types"
+import { normalizeWorkspaceId } from "./workspaceIdentity"
 
 export type ChatWorkspaceConsoleProps = {
   workspaceId?: string | null
@@ -42,6 +43,7 @@ export const ChatWorkspaceConsole = ({
   onClearStagedSources,
   onRuntimeStateChange
 }: ChatWorkspaceConsoleProps) => {
+  const normalizedWorkspaceId = normalizeWorkspaceId(workspaceId)
   const stagedSourceIds = stagedSources.map((source) => source.sourceId)
   const inspectorSources = stagedSources.map((source) => ({
     sourceId: source.sourceId,
@@ -68,8 +70,8 @@ export const ChatWorkspaceConsole = ({
         <main className="order-1 flex min-h-[520px] min-w-0 flex-col overflow-hidden bg-background lg:order-2 lg:min-h-0">
           <div className="min-h-0 flex-1 overflow-hidden">
             <WorkspaceChatPanel
-              key={workspaceId ?? "global"}
-              workspaceId={workspaceId}
+              key={normalizedWorkspaceId ?? "global"}
+              workspaceId={normalizedWorkspaceId}
               workspaceName={workspaceName}
               stagedSources={stagedSources}
               onClearStagedSources={onClearStagedSources}

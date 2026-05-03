@@ -19,6 +19,7 @@ import type {
   ChatWorkspaceRuntimeState,
   StagedWorkspaceSource
 } from "./types"
+import { normalizeWorkspaceId } from "./workspaceIdentity"
 
 export type WorkspaceChatPanelProps = {
   workspaceId?: string | null
@@ -60,13 +61,19 @@ export const WorkspaceChatPanel = ({
 }: WorkspaceChatPanelProps) => {
   const [draft, setDraft] = React.useState("")
   const [sendError, setSendError] = React.useState<string | null>(null)
+  const normalizedWorkspaceId = React.useMemo(
+    () => normalizeWorkspaceId(workspaceId),
+    [workspaceId]
+  )
+  const workspaceReady = normalizedWorkspaceId !== null
+  const chatBackendAvailable = backendAvailable && workspaceReady
 
   const scope = React.useMemo<ChatScope>(
     () =>
-      workspaceId
-        ? { type: "workspace", workspaceId }
+      normalizedWorkspaceId
+        ? { type: "workspace", workspaceId: normalizedWorkspaceId }
         : { type: "global" },
-    [workspaceId]
+    [normalizedWorkspaceId]
   )
 
   const {
@@ -83,16 +90,22 @@ export const WorkspaceChatPanel = ({
   React.useEffect(() => {
     setDraft("")
     setSendError(null)
-  }, [workspaceId])
+  }, [normalizedWorkspaceId])
 
   React.useEffect(() => {
     onRuntimeStateChange?.({
-      backendAvailable,
+      backendAvailable: chatBackendAvailable,
       streaming,
       selectedModelLabel: selectedModel || "No model selected",
       selectedPersonaLabel: selectedAssistant?.name ?? null
     })
-  }, [backendAvailable, onRuntimeStateChange, selectedAssistant?.name, selectedModel, streaming])
+  }, [
+    chatBackendAvailable,
+    onRuntimeStateChange,
+    selectedAssistant?.name,
+    selectedModel,
+    streaming
+  ])
 
   const isSending = streaming || isLoading || isProcessing
   const hasStagedContext = stagedSources.length > 0
@@ -110,8 +123,10 @@ export const WorkspaceChatPanel = ({
   )
   const trimmedDraft = draft.trim()
   const sendDisabled =
-    !backendAvailable || isSending || (!trimmedDraft && !hasStagedContext)
-  const conversationInstanceId = workspaceId ?? "workspace-chat"
+    !chatBackendAvailable ||
+    isSending ||
+    (!trimmedDraft && !hasStagedContext)
+  const conversationInstanceId = normalizedWorkspaceId ?? "workspace-chat"
 
   const insertStagedSummary = React.useCallback(() => {
     const insertText = formatStagedSourceInsertText(stagedSources)
@@ -127,7 +142,7 @@ export const WorkspaceChatPanel = ({
 
   const submitMessage = React.useCallback(async () => {
     if (sendDisabled) return
-    if (!backendAvailable) return
+    if (!chatBackendAvailable) return
 
     setSendError(null)
     const fallbackContext = formatStagedSourceInsertText(stagedSources).trim()
@@ -164,7 +179,7 @@ export const WorkspaceChatPanel = ({
       setSendError("Send failed")
     }
   }, [
-    backendAvailable,
+    chatBackendAvailable,
     hasReadyMedia,
     hasUncarriedStagedContext,
     onClearStagedSources,
@@ -250,6 +265,7 @@ export const WorkspaceChatPanel = ({
           <ContextStagingCard
             sources={stagedSources}
             isSending={isSending}
+            canSend={chatBackendAvailable}
             onClear={onClearStagedSources}
             onInsert={insertStagedSummary}
             onSend={submitMessage}
@@ -275,6 +291,16 @@ export const WorkspaceChatPanel = ({
         {sendError ? (
           <p className="text-sm font-medium text-danger" role="alert">
             {sendError}
+          </p>
+        ) : null}
+
+        {!workspaceReady ? (
+          <p
+            className="text-sm text-text-muted"
+            role="status"
+            aria-live="polite"
+          >
+            Loading workspace context
           </p>
         ) : null}
 

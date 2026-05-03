@@ -79,7 +79,11 @@ vi.mock("../WorkspaceChatPanel", () => ({
     }, [onRuntimeStateChange])
 
     return (
-      <section data-testid="workspace-chat-panel">
+      <section
+        data-testid="workspace-chat-panel"
+        data-workspace-id={workspaceId ?? "null"}
+        data-backend-available={String(backendAvailable)}
+      >
         staged:{stagedSources.length}; workspace:{workspaceId}; mounted:
         {mountedWorkspaceId}; backend:{String(backendAvailable)}
       </section>
@@ -196,6 +200,20 @@ describe("ChatWorkspacePage", () => {
         "Server unavailable"
       )
     ).toBeInTheDocument()
+  })
+
+  it("normalizes an empty workspace id while the workspace store hydrates", () => {
+    workspaceState.value = {
+      workspaceId: "   ",
+      workspaceName: "",
+      sources: []
+    }
+
+    render(<ChatWorkspacePage />)
+
+    const panel = screen.getByTestId("workspace-chat-panel")
+    expect(panel).toHaveAttribute("data-workspace-id", "null")
+    expect(panel).toHaveAttribute("data-backend-available", "false")
   })
 
   it("clears browsed and staged sources when the workspace changes", () => {
