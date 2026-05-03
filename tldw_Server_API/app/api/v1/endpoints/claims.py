@@ -341,11 +341,12 @@ def get_review_queue(
     limit: int = Query(100, ge=1, le=1000),
     offset: int = Query(0, ge=0, le=100000),
     include_deleted: bool = Query(False),
+    envelope: bool = Query(False),
     user_id: Optional[int] = None,
     principal: AuthPrincipal = Depends(get_auth_principal),
     current_user: User = Depends(get_request_user),
     db: Any = Depends(get_media_db_for_user),
-) -> list[dict[str, Any]]:
+) -> Any:
     """Return claims queued for review."""
     return claims_service.get_review_queue(
         status_filter=status_filter,
@@ -356,6 +357,7 @@ def get_review_queue(
         limit=limit,
         offset=offset,
         include_deleted=include_deleted,
+        envelope=envelope,
         user_id=user_id,
         principal=principal,
         current_user=current_user,

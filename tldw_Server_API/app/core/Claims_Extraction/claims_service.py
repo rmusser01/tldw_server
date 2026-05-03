@@ -2678,11 +2678,12 @@ def get_review_queue(
     limit: int,
     offset: int,
     include_deleted: bool,
+    envelope: bool,
     user_id: int | None,
     principal: AuthPrincipal,
     current_user: User,
     db: MediaDatabase,
-) -> list[dict[str, Any]]:
+) -> Any:
     _ensure_claims_review(principal)
     with _resolve_media_db(
         db=db,
@@ -2702,6 +2703,8 @@ def get_review_queue(
             if reviewer_id is None and review_group is None:
                 reviewer_id = int(principal.user_id or 0)
 
+        normalized_limit = max(1, int(limit))
+        normalized_offset = max(0, int(offset))
         rows = target_db.list_review_queue(
             status=status_filter,
             reviewer_id=reviewer_id,
@@ -2709,12 +2712,29 @@ def get_review_queue(
             media_id=media_id,
             extractor=extractor,
             owner_user_id=owner_filter,
-            limit=limit,
-            offset=offset,
+            limit=normalized_limit + 1 if envelope else limit,
+            offset=normalized_offset if envelope else offset,
             include_deleted=include_deleted,
         )
-        record_claims_review_metrics(queue_size=len(rows))
-        return [_normalize_claim_row(dict(r)) for r in rows]
+        normalized = [_normalize_claim_row(dict(r)) for r in rows]
+        if not envelope:
+            record_claims_review_metrics(queue_size=len(normalized))
+            return normalized
+        items = normalized[:normalized_limit]
+        record_claims_review_metrics(queue_size=len(items))
+        pagination = build_offset_pagination_meta(
+            limit=normalized_limit,
+            offset=normalized_offset,
+            total=None,
+            count=len(items),
+            has_more=len(normalized) > normalized_limit,
+        )
+        return {
+            "items": items,
+            "has_more": pagination.has_more,
+            "next_offset": pagination.next_offset,
+            "pagination": pagination,
+        }
 
 
 async def review_claim(
