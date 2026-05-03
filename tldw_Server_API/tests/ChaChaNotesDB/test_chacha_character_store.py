@@ -3,10 +3,12 @@
 import ast
 import inspect
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
+    BackendType,
     CharactersRAGDB,
     InputError,
     ConflictError,
@@ -34,6 +36,16 @@ _DELEGATED_CHARACTER_METHODS = {
     "_check_json_support",
     "_search_cards_by_tags_json",
     "_search_cards_by_tags_fallback",
+    "_estimate_text_token_count",
+    "_normalize_exemplar_enum",
+    "_normalize_exemplar_string_list",
+    "_normalize_character_exemplar_row",
+    "add_character_exemplar",
+    "get_character_exemplar_by_id",
+    "list_character_exemplars",
+    "update_character_exemplar",
+    "soft_delete_character_exemplar",
+    "search_character_exemplars",
 }
 
 
@@ -70,7 +82,7 @@ def test_character_store_owns_delegated_methods_without_monolith_duplicates(db, 
 
     captured: dict[str, object] = {}
 
-    def _fake_add_character_card(card_data):
+    def _fake_add_character_card(card_data: dict[str, Any]) -> int:
         captured["card_data"] = card_data
         return 987
 
@@ -78,6 +90,17 @@ def test_character_store_owns_delegated_methods_without_monolith_duplicates(db, 
 
     assert db.add_character_card({"name": "Delegated Character"}) == 987
     assert captured["card_data"] == {"name": "Delegated Character"}
+
+    def _fake_add_character_exemplar(character_id: int, exemplar_data: dict[str, Any]) -> dict[str, str]:
+        captured["character_id"] = character_id
+        captured["exemplar_data"] = exemplar_data
+        return {"id": "exemplar-from-store"}
+
+    monkeypatch.setattr(db.character_store, "add_character_exemplar", _fake_add_character_exemplar)
+
+    assert db.add_character_exemplar(123, {"text": "Delegated exemplar"}) == {"id": "exemplar-from-store"}
+    assert captured["character_id"] == 123
+    assert captured["exemplar_data"] == {"text": "Delegated exemplar"}
 
 
 class TestCharacterStoreAdd:
@@ -239,3 +262,117 @@ class TestCharacterStoreSearch:
         renamed = store.get_character_card_by_id(card_id)
         assert renamed is not None
         assert renamed["tags"] == ["new-tag"]
+
+
+class _FakeCursor:
+    def __init__(self, rows: list[object] | None = None) -> None:
+        self._rows = rows or []
+
+    def fetchone(self) -> object | None:
+        return self._rows[0] if self._rows else None
+
+    def fetchall(self) -> list[object]:
+        return list(self._rows)
+
+
+def test_get_character_exemplar_by_id_uses_backend_safe_deleted_value(store, monkeypatch):
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(
+        type(store._db),
+        "backend_type",
+        property(lambda self: BackendType.POSTGRESQL),
+    )
+
+    def _fake_execute_query(query: str, params: tuple[object, ...]) -> _FakeCursor:
+        captured["query"] = query
+        captured["params"] = params
+        return _FakeCursor()
+
+    monkeypatch.setattr(store._db, "execute_query", _fake_execute_query)
+
+    assert store.get_character_exemplar_by_id(11, "ex-1") is None
+    assert "is_deleted = ?" in captured["query"]
+    assert captured["params"] == ("ex-1", 11, False)
+
+
+def test_list_character_exemplars_uses_backend_safe_deleted_value(store, monkeypatch):
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(
+        type(store._db),
+        "backend_type",
+        property(lambda self: BackendType.POSTGRESQL),
+    )
+
+    def _fake_execute_query(query: str, params: tuple[object, ...]) -> _FakeCursor:
+        captured["query"] = query
+        captured["params"] = params
+        return _FakeCursor()
+
+    monkeypatch.setattr(store._db, "execute_query", _fake_execute_query)
+
+    assert store.list_character_exemplars(22, limit=5, offset=3) == []
+    assert "WHERE character_id = ? AND is_deleted = ?" in captured["query"]
+    assert captured["params"] == (22, False, 5, 3)
+
+
+def test_character_store_does_not_proxy_arbitrary_parent_db_attributes(store):
+    assert hasattr(store._db, "execute_query")
+    with pytest.raises(AttributeError):
+        getattr(store, "execute_query")
+
+
+def test_character_exemplar_sql_does_not_use_format_map():
+    source_path = Path(inspect.getsourcefile(CharacterStore) or "")
+    exemplar_source = source_path.read_text().split("    # --- Character Exemplar Methods ---", 1)[1]
+    assert ".format_map(" not in exemplar_source
+
+
+def test_exemplar_normalization_helpers_are_shared_by_stores(store, db, monkeypatch):
+    from tldw_Server_API.app.core.DB_Management.chacha import exemplar_normalization
+
+    calls: list[tuple[str, str]] = []
+
+    def _fake_normalize_exemplar_enum(
+        value: object,
+        *,
+        allowed: tuple[str, ...],
+        field_name: str,
+        default: str,
+    ) -> str:
+        calls.append(("enum", field_name))
+        return f"shared-{field_name}"
+
+    def _fake_normalize_exemplar_string_list(value: object, field_name: str) -> list[str]:
+        calls.append(("list", field_name))
+        return [f"shared-{field_name}"]
+
+    monkeypatch.setattr(exemplar_normalization, "normalize_exemplar_enum", _fake_normalize_exemplar_enum)
+    monkeypatch.setattr(
+        exemplar_normalization,
+        "normalize_exemplar_string_list",
+        _fake_normalize_exemplar_string_list,
+    )
+
+    assert store._normalize_exemplar_enum(
+        "OTHER",
+        allowed=("other",),
+        field_name="source_type",
+        default="other",
+    ) == "shared-source_type"
+    assert db.persona_state_store._normalize_exemplar_enum(
+        "STYLE",
+        allowed=("style",),
+        field_name="kind",
+        default="style",
+    ) == "shared-kind"
+    assert store._normalize_exemplar_string_list("rhetorical", "rhetorical") == ["shared-rhetorical"]
+    assert db.persona_state_store._normalize_exemplar_string_list(
+        "scenario",
+        "scenario_tags",
+    ) == ["shared-scenario_tags"]
+    assert calls == [
+        ("enum", "source_type"),
+        ("enum", "kind"),
+        ("list", "rhetorical"),
+        ("list", "scenario_tags"),
+    ]

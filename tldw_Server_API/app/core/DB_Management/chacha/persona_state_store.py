@@ -15,6 +15,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
 from tldw_Server_API.app.core.DB_Management.backends.base import (
     DatabaseError as BackendDatabaseError,
 )
+from tldw_Server_API.app.core.DB_Management.chacha import exemplar_normalization
 from tldw_Server_API.app.core.Persona.buddy import resolve_persona_buddy_profile
 
 if TYPE_CHECKING:
@@ -1022,6 +1023,39 @@ class PersonaStateStore:
             return None
         normalized = tone.strip().lower()
         return normalized or None
+
+    def _normalize_exemplar_enum(
+        self,
+        value: Any,
+        *,
+        allowed: tuple[str, ...],
+        field_name: str,
+        default: str,
+    ) -> str:
+        """Normalize and validate enum-like persona exemplar fields."""
+        return exemplar_normalization.normalize_exemplar_enum(
+            value,
+            allowed=allowed,
+            field_name=field_name,
+            default=default,
+        )
+
+    def _normalize_exemplar_string_list(self, value: Any, field_name: str) -> list[str]:
+        """Normalize list-like persona exemplar metadata to a string list."""
+        return exemplar_normalization.normalize_exemplar_string_list(value, field_name)
+
+    def _normalize_persona_exemplar_tags(self, value: Any, field_name: str) -> list[str]:
+        """Normalize free-form persona exemplar tags to lowercase unique strings."""
+        raw_values = self._normalize_exemplar_string_list(value, field_name)
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for item in raw_values:
+            text = str(item).strip().lower()
+            if not text or text in seen:
+                continue
+            seen.add(text)
+            normalized.append(text)
+        return normalized
 
     def create_persona_exemplar(self, exemplar_data: dict[str, Any]) -> str:
         persona_id = str(exemplar_data.get("persona_id") or "").strip()
