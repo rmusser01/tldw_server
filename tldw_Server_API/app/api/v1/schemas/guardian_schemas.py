@@ -123,7 +123,20 @@ class SupervisionAuditResponse(BaseModel):
 
 class SupervisionAuditList(BaseModel):
     items: list[SupervisionAuditResponse]
-    total: int
+    total: int = Field(..., ge=0)
+    limit: int = Field(..., ge=1)
+    offset: int = Field(..., ge=0)
+    pagination: OffsetPaginationMeta
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self) -> "SupervisionAuditList":
+        return default_offset_pagination_aliases(self)
+
+    @model_validator(mode="after")
+    def _validate_pagination_aliases(self) -> "SupervisionAuditList":
+        return validate_offset_pagination_aliases(self)
 
 
 # ── Governance Policy Schemas ────────────────────────────────
