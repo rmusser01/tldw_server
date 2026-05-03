@@ -155,6 +155,19 @@ def test_post_worker_shutdown_contract_omits_registry_owned_scheduler_handles() 
     assert not hasattr(shutdown_services, "_shutdown_claims_maintenance_tasks")
 
 
+def test_base_shutdown_kwargs_match_post_worker_shutdown_signatures() -> None:
+    from tldw_Server_API.app.services import shutdown_post_worker_services as shutdown_services
+
+    helper_keys = set(_base_shutdown_kwargs())
+
+    assert helper_keys.issubset(
+        inspect.signature(shutdown_services.shutdown_post_worker_services).parameters
+    )
+    assert helper_keys.issubset(
+        inspect.signature(shutdown_services.run_shutdown_post_worker_services).parameters
+    )
+
+
 @pytest.mark.asyncio
 async def test_shutdown_post_worker_services_runs_helpers_in_order_and_returns_handles(
     monkeypatch: pytest.MonkeyPatch,

@@ -42,8 +42,11 @@ async def test_shutdown_telemetry_services_handles_import_exception(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     shutdown_telemetry = _import_shutdown_telemetry_services()
+    called = False
 
     def _failing_shutdown_telemetry() -> None:
+        nonlocal called
+        called = True
         raise LookupError("boom")
 
     monkeypatch.setattr(
@@ -55,3 +58,5 @@ async def test_shutdown_telemetry_services_handles_import_exception(
     await shutdown_telemetry.shutdown_telemetry_services(
         import_exceptions=(LookupError,),
     )
+
+    assert called is True

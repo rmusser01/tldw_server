@@ -52,27 +52,22 @@ async def start_service_groups(
 ) -> StartupServiceGroupHandles:
     """Start the runtime/optional/auxiliary/infra service tail in the legacy order."""
     if worker_inventory is None:
-        runtime_monitor_handles = await _start_runtime_monitors()
-        optional_worker_handles = await _start_optional_workers()
-    else:
-        runtime_monitor_handles = await _start_runtime_monitors(
-            worker_inventory=worker_inventory,
-        )
-        optional_worker_handles = await _start_optional_workers(
-            worker_inventory=worker_inventory,
-        )
-    if worker_inventory is None:
-        await _start_claims_rebuild_worker(app_settings)
-        auxiliary_startup_handles = await _start_auxiliary_services(app_settings)
-    else:
-        await _start_claims_rebuild_worker(
-            app_settings,
-            worker_inventory=worker_inventory,
-        )
-        auxiliary_startup_handles = await _start_auxiliary_services(
-            app_settings,
-            worker_inventory=worker_inventory,
-        )
+        raise RuntimeError("worker_inventory is required to start service groups")
+
+    runtime_monitor_handles = await _start_runtime_monitors(
+        worker_inventory=worker_inventory,
+    )
+    optional_worker_handles = await _start_optional_workers(
+        worker_inventory=worker_inventory,
+    )
+    await _start_claims_rebuild_worker(
+        app_settings,
+        worker_inventory=worker_inventory,
+    )
+    auxiliary_startup_handles = await _start_auxiliary_services(
+        app_settings,
+        worker_inventory=worker_inventory,
+    )
     infra_startup_handles = await _start_infra_services(
         run_pg_rls_auto_ensure=run_pg_rls_auto_ensure,
         worker_inventory=worker_inventory,
