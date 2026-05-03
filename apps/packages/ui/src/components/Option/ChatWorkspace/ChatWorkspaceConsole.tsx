@@ -69,6 +69,7 @@ export const ChatWorkspaceConsole = ({
         <main className="order-1 flex min-h-[520px] min-w-0 flex-col overflow-hidden bg-background lg:order-2 lg:min-h-0">
           <div className="min-h-0 flex-1 overflow-hidden">
             <WorkspaceChatPanel
+              key={workspaceId ?? "global"}
               workspaceId={workspaceId}
               workspaceName={workspaceName}
               stagedSources={stagedSources}

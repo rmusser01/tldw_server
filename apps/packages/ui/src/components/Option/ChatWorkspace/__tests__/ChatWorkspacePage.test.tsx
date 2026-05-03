@@ -61,6 +61,8 @@ vi.mock("../WorkspaceChatPanel", () => ({
     onClearStagedSources: () => void
     onRuntimeStateChange?: (state: unknown) => void
   }) => {
+    const [mountedWorkspaceId] = React.useState(workspaceId)
+
     if (workspaceId) {
       chatPanelClearHandlers.set(workspaceId, onClearStagedSources)
     }
@@ -76,7 +78,8 @@ vi.mock("../WorkspaceChatPanel", () => ({
 
     return (
       <section data-testid="workspace-chat-panel">
-        staged:{stagedSources.length}; workspace:{workspaceId}
+        staged:{stagedSources.length}; workspace:{workspaceId}; mounted:
+        {mountedWorkspaceId}
       </section>
     )
   }
@@ -224,6 +227,34 @@ describe("ChatWorkspacePage", () => {
       "workspace:workspace-2"
     )
     expect(screen.queryByText("Context staged")).not.toBeInTheDocument()
+  })
+
+  it("remounts the chat panel when the workspace changes", () => {
+    const { rerender } = render(<ChatWorkspacePage />)
+
+    expect(screen.getByTestId("workspace-chat-panel")).toHaveTextContent(
+      "mounted:workspace-1"
+    )
+
+    workspaceState.value = {
+      workspaceId: "workspace-2",
+      workspaceName: "Second workspace",
+      sources: [
+        {
+          id: "source-2",
+          mediaId: 202,
+          title: "Second Notes",
+          type: "document",
+          status: "ready",
+          addedAt: new Date("2026-05-03T00:00:00Z")
+        }
+      ]
+    }
+    rerender(<ChatWorkspacePage />)
+
+    expect(screen.getByTestId("workspace-chat-panel")).toHaveTextContent(
+      "mounted:workspace-2"
+    )
   })
 
   it("ignores stale clear callbacks from a previous workspace", () => {
