@@ -19,6 +19,7 @@ from datetime import datetime, timezone
 
 from tldw_Server_API.app.api.v1.endpoints import storage as storage_endpoints
 from tldw_Server_API.app.api.v1.endpoints import storage_admin_quotas
+from tldw_Server_API.app.api.v1.endpoints import storage_download
 from tldw_Server_API.app.api.v1.schemas.storage_schemas import SetQuotaRequest
 from tldw_Server_API.app.core.AuthNZ.exceptions import StorageError
 
@@ -418,6 +419,15 @@ class TestDownloadFileEndpoint:
     """Tests for GET /storage/files/{file_id}/download endpoint."""
 
     @pytest.mark.unit
+    def test_download_file_handler_reexport_from_storage_after_sidecar_split(self):
+        """Download handler remains import-compatible after sidecar extraction."""
+        storage_download = import_module(
+            "tldw_Server_API.app.api.v1.endpoints.storage_download"
+        )
+
+        assert storage_endpoints.download_file is storage_download.download_file
+
+    @pytest.mark.unit
     @pytest.mark.asyncio
     async def test_path_traversal_blocked_double_dots(
         self,
@@ -442,8 +452,8 @@ class TestDownloadFileEndpoint:
         mock_storage_service.get_generated_files_repo = AsyncMock(return_value=mock_files_repo)
 
         monkeypatch.setattr(
-            storage_endpoint,
-            "_get_service",
+            storage_download,
+            "_get_storage_service",
             AsyncMock(return_value=mock_storage_service),
         )
         monkeypatch.setattr(
@@ -490,8 +500,8 @@ class TestDownloadFileEndpointIntegration:
         mock_storage_service.get_generated_files_repo = AsyncMock(return_value=mock_files_repo)
 
         monkeypatch.setattr(
-            storage_endpoint,
-            "_get_service",
+            storage_download,
+            "_get_storage_service",
             AsyncMock(return_value=mock_storage_service),
         )
         monkeypatch.setattr(
@@ -530,8 +540,8 @@ class TestDownloadFileEndpointIntegration:
         mock_storage_service.get_generated_files_repo = AsyncMock(return_value=mock_files_repo)
 
         monkeypatch.setattr(
-            storage_endpoint,
-            "_get_service",
+            storage_download,
+            "_get_storage_service",
             AsyncMock(return_value=mock_storage_service),
         )
         monkeypatch.setattr(
@@ -575,8 +585,8 @@ class TestDownloadFileEndpointIntegration:
         mock_storage_service.get_generated_files_repo = AsyncMock(return_value=mock_files_repo)
 
         monkeypatch.setattr(
-            storage_endpoint,
-            "_get_service",
+            storage_download,
+            "_get_storage_service",
             AsyncMock(return_value=mock_storage_service),
         )
         monkeypatch.setattr(
@@ -622,8 +632,8 @@ class TestDownloadFileEndpointIntegration:
         mock_storage_service.get_generated_files_repo = AsyncMock(return_value=mock_files_repo)
 
         monkeypatch.setattr(
-            storage_endpoint,
-            "_get_service",
+            storage_download,
+            "_get_storage_service",
             AsyncMock(return_value=mock_storage_service),
         )
 

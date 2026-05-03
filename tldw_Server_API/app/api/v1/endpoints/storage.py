@@ -9,19 +9,16 @@ Provides endpoints for:
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import FileResponse
+from fastapi import APIRouter
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user  # noqa: F401
 from tldw_Server_API.app.api.v1.endpoints import (
     storage_admin_quotas,
+    storage_download,
     storage_trash,
     storage_usage,
     storage_user_files,
     storage_user_folders,
-)
-from tldw_Server_API.app.api.v1.endpoints.storage_helpers import (
-    _resolve_storage_base_dir,
 )
 from tldw_Server_API.app.api.v1.endpoints.storage_admin_quotas import (  # noqa: F401
     get_org_quota,
@@ -30,6 +27,9 @@ from tldw_Server_API.app.api.v1.endpoints.storage_admin_quotas import (  # noqa:
     set_org_quota,
     set_team_quota,
     set_user_quota,
+)
+from tldw_Server_API.app.api.v1.endpoints.storage_download import (  # noqa: F401
+    download_file,
 )
 # Re-export moved handlers so direct imports/tests against storage.py keep working.
 from tldw_Server_API.app.api.v1.endpoints.storage_user_files import (  # noqa: F401
@@ -78,54 +78,4 @@ router.include_router(storage_user_folders.router)
 router.include_router(storage_usage.router)
 router.include_router(storage_trash.router)
 router.include_router(storage_admin_quotas.router)
-
-
-@router.get("/files/{file_id}/download")
-async def download_file(
-    file_id: int,
-    user: User = Depends(get_request_user),
-):
-    """Download a generated file."""
-    service = await _get_service()
-    files_repo = await service.get_generated_files_repo()
-
-    file_record = await files_repo.get_file_by_id(file_id)
-    if not file_record:
-        raise HTTPException(status_code=404, detail="File not found")
-
-    # Verify ownership
-    if file_record.get("user_id") != user.id:
-        raise HTTPException(status_code=403, detail="Access denied")
-
-    if file_record.get("is_deleted"):
-        raise HTTPException(status_code=410, detail="File has been deleted")
-
-    # Resolve file path
-    storage_path = file_record.get("storage_path", "")
-    base_dir = _resolve_storage_base_dir(user.id, file_record)
-    full_path = base_dir / storage_path
-
-    # Path traversal protection: ensure resolved path is within user's directory
-    try:
-        resolved_path = full_path.resolve()
-        if not resolved_path.is_relative_to(base_dir.resolve()):
-            raise HTTPException(status_code=403, detail="Invalid file path")
-        full_path = resolved_path
-    except ValueError:
-        raise HTTPException(status_code=403, detail="Invalid file path") from None
-
-    if not full_path.exists():
-        raise HTTPException(status_code=404, detail="File not found on disk")
-
-    # Update accessed_at
-    await files_repo.update_accessed_at(file_id)
-
-    # Return file
-    filename = file_record.get("original_filename") or file_record.get("filename", "download")
-    mime_type = file_record.get("mime_type") or "application/octet-stream"
-
-    return FileResponse(
-        path=str(full_path),
-        filename=filename,
-        media_type=mime_type,
-    )
+router.include_router(storage_download.router)

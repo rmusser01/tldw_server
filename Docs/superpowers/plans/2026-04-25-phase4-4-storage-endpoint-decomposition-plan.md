@@ -215,7 +215,7 @@ Notes:
 **Goal:** Avoid mixing special route behavior into the first decomposition PR.
 **Success Criteria:** Download and admin route movement have their own accepted plan before any move.
 **Tests:** Download path traversal tests and admin claim tests.
-**Status:** In Progress
+**Status:** Complete
 
 Download route requirements:
 
@@ -238,7 +238,13 @@ Notes:
 - Re-exported admin quota handlers and `require_storage_admin` from `storage.py` for direct import compatibility.
 - Added direct compatibility coverage for storage/admin sidecar re-exports.
 - Focused storage/admin suite passed after admin route movement: `57 passed, 6 warnings`.
-- Download route remains in `storage.py` and should move in a separate tranche focused on `FileResponse` and path traversal behavior.
+- Download route was split into `storage_download.py` as a separate `FileResponse` tranche.
+- Download tests now patch the sidecar service dependency directly, avoiding a circular import back into `storage.py`.
+- Re-exported `download_file` from `storage.py` for direct import compatibility.
+- Added direct compatibility coverage for the storage/download sidecar re-export.
+- Focused storage/admin suite passed after download route movement: `58 passed, 6 warnings`.
+- OpenAPI verifier passed from `apps/extension`.
+- Touched-scope Bandit passed with zero findings.
 
 ## Verification
 
@@ -264,7 +270,7 @@ Touched-scope Bandit:
 
 ```bash
 source .venv/bin/activate
-python3 -m bandit -r tldw_Server_API/app/api/v1/endpoints/storage.py tldw_Server_API/app/api/v1/endpoints/storage_admin_quotas.py tldw_Server_API/app/api/v1/endpoints/storage_helpers.py tldw_Server_API/app/api/v1/endpoints/storage_user_files.py tldw_Server_API/app/api/v1/endpoints/storage_user_folders.py tldw_Server_API/app/api/v1/endpoints/storage_usage.py tldw_Server_API/app/api/v1/endpoints/storage_trash.py -f json -o /tmp/bandit_phase4_4_storage_endpoint.json
+python3 -m bandit -r tldw_Server_API/app/api/v1/endpoints/storage.py tldw_Server_API/app/api/v1/endpoints/storage_admin_quotas.py tldw_Server_API/app/api/v1/endpoints/storage_download.py tldw_Server_API/app/api/v1/endpoints/storage_helpers.py tldw_Server_API/app/api/v1/endpoints/storage_user_files.py tldw_Server_API/app/api/v1/endpoints/storage_user_folders.py tldw_Server_API/app/api/v1/endpoints/storage_usage.py tldw_Server_API/app/api/v1/endpoints/storage_trash.py -f json -o /tmp/bandit_phase4_4_storage_endpoint.json
 ```
 
 ## Out Of Scope
@@ -284,4 +290,6 @@ python3 -m bandit -r tldw_Server_API/app/api/v1/endpoints/storage.py tldw_Server
 - [x] Stage 1 focused tests pass before route movement.
 - [x] OpenAPI path set is captured before route movement.
 - [x] File download and admin quota routes remain excluded from the first route split.
+- [x] Admin quota routes are extracted in their own conservative tranche.
+- [x] File download route is extracted in its own conservative tranche.
 - [x] Bandit is run on touched source before PR handoff.
