@@ -77,6 +77,9 @@ async def start_worker_groups(
     worker_inventory: Any | None = None,
 ) -> StartupWorkerGroupHandles:
     """Start the startup worker/poller groups in the legacy order."""
+    if worker_inventory is None:
+        raise RuntimeError("worker_inventory is required to start worker groups")
+
     await _start_cleanup_workers(
         app_settings=app_settings,
         test_mode=test_mode,

@@ -16,6 +16,130 @@ def _import_startup_worker_groups():
 
 
 @pytest.mark.asyncio
+async def test_start_worker_groups_requires_worker_inventory_before_starting_legacy_workers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_groups = _import_startup_worker_groups()
+    calls: list[str] = []
+
+    async def _record_cleanup_workers(**_kwargs: object) -> SimpleNamespace:
+        calls.append("cleanup")
+        return SimpleNamespace()
+
+    async def _record_primary_jobs_pollers(**_kwargs: object) -> SimpleNamespace:
+        calls.append("primary")
+        return SimpleNamespace(
+            core_jobs_stop_event=None,
+            core_jobs_task=None,
+            files_jobs_stop_event=None,
+            files_jobs_task=None,
+            data_tables_jobs_stop_event=None,
+            data_tables_jobs_task=None,
+            prompt_studio_jobs_stop_event=None,
+            prompt_studio_jobs_task=None,
+        )
+
+    async def _record_study_privilege_jobs_pollers(**_kwargs: object) -> SimpleNamespace:
+        calls.append("study")
+        return SimpleNamespace(
+            study_pack_jobs_stop_event=None,
+            study_pack_jobs_task=None,
+            study_suggestions_jobs_stop_event=None,
+            study_suggestions_jobs_task=None,
+            privilege_snapshot_stop_event=None,
+            privilege_snapshot_task=None,
+        )
+
+    async def _record_compactor_websub_workers(**_kwargs: object) -> SimpleNamespace:
+        calls.append("compactor")
+        return SimpleNamespace()
+
+    async def _record_content_jobs_pollers(**_kwargs: object) -> SimpleNamespace:
+        calls.append("content")
+        return SimpleNamespace(
+            audio_jobs_stop_event=None,
+            audio_jobs_task=None,
+            audiobook_jobs_stop_event=None,
+            audiobook_jobs_task=None,
+            presentation_render_jobs_stop_event=None,
+            presentation_render_jobs_task=None,
+            media_ingest_jobs_stop_event=None,
+            media_ingest_jobs_task=None,
+            media_ingest_heavy_jobs_stop_event=None,
+            media_ingest_heavy_jobs_task=None,
+            reading_digest_jobs_stop_event=None,
+            reading_digest_jobs_task=None,
+            vn_asset_jobs_stop_event=None,
+            vn_asset_jobs_task=None,
+            vn_asset_generation_jobs_stop_event=None,
+            vn_asset_generation_jobs_task=None,
+            companion_reflection_jobs_stop_event=None,
+            companion_reflection_jobs_task=None,
+        )
+
+    async def _record_sidecar_owned_jobs_pollers(**_kwargs: object) -> SimpleNamespace:
+        calls.append("sidecar")
+        return SimpleNamespace(
+            reminder_jobs_stop_event=None,
+            reminder_jobs_task=None,
+            admin_backup_jobs_stop_event=None,
+            admin_backup_jobs_task=None,
+            admin_byok_validation_jobs_stop_event=None,
+            admin_byok_validation_jobs_task=None,
+            admin_maintenance_rotation_jobs_stop_event=None,
+            admin_maintenance_rotation_jobs_task=None,
+            recipe_run_jobs_stop_event=None,
+            recipe_run_jobs_task=None,
+        )
+
+    async def _record_notifications_abtest_workers(**_kwargs: object) -> SimpleNamespace:
+        calls.append("notifications")
+        return SimpleNamespace(
+            jobs_notifications_bridge_task=None,
+            evals_abtest_jobs_stop_event=None,
+            evals_abtest_jobs_task=None,
+        )
+
+    monkeypatch.setattr(startup_groups, "_start_cleanup_workers", _record_cleanup_workers)
+    monkeypatch.setattr(startup_groups, "_start_primary_jobs_pollers", _record_primary_jobs_pollers)
+    monkeypatch.setattr(
+        startup_groups,
+        "_start_study_privilege_jobs_pollers",
+        _record_study_privilege_jobs_pollers,
+    )
+    monkeypatch.setattr(
+        startup_groups,
+        "_start_compactor_websub_workers",
+        _record_compactor_websub_workers,
+    )
+    monkeypatch.setattr(startup_groups, "_start_content_jobs_pollers", _record_content_jobs_pollers)
+    monkeypatch.setattr(
+        startup_groups,
+        "_start_sidecar_owned_jobs_pollers",
+        _record_sidecar_owned_jobs_pollers,
+    )
+    monkeypatch.setattr(
+        startup_groups,
+        "_start_notifications_abtest_workers",
+        _record_notifications_abtest_workers,
+    )
+
+    with pytest.raises(RuntimeError, match="worker_inventory is required"):
+        await startup_groups.start_worker_groups(
+            app=object(),
+            app_settings={"SINGLE_USER_FIXED_ID": "7"},
+            test_mode=True,
+            route_enabled=lambda *_args, **_kwargs: False,
+            startup_guard_exceptions=(RuntimeError,),
+            owned_job_pollers=[],
+            register_owned_job_poller=object(),
+            worker_inventory=None,
+        )
+
+    assert calls == []
+
+
+@pytest.mark.asyncio
 async def test_start_worker_groups_runs_helpers_in_order_and_returns_handles(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
