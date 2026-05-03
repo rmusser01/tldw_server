@@ -32,6 +32,12 @@ def test_settings_clamp_unsafe_integer_limits() -> None:
     assert settings.foreground_max_files == 1
 
 
+def test_settings_use_default_index_base_dir_when_config_value_is_blank() -> None:
+    settings = CodeGraphSettings.from_mapping({"index_base_dir": "  "})
+
+    assert settings.index_base_dir == CodeGraphSettings().index_base_dir
+
+
 def test_dependency_probe_reports_missing_without_importing_tree_sitter(monkeypatch) -> None:
     monkeypatch.setattr("importlib.util.find_spec", lambda name: None)
 

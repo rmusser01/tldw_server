@@ -20,6 +20,13 @@ def test_edge_id_changes_when_target_changes() -> None:
     assert first != second
 
 
+def test_node_id_uses_unambiguous_identity_encoding() -> None:
+    first = make_node_id("ws", "python:extra", "app/main.py", "function", "main", 10)
+    second = make_node_id("ws:python", "extra", "app/main.py", "function", "main", 10)
+
+    assert first != second
+
+
 def test_registry_reports_foundation_languages_and_planned_languages() -> None:
     registry = CodeGraphLanguageRegistry(
         dependency_health=DependencyHealth(available=False, missing=("tree_sitter",), present=())

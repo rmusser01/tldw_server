@@ -112,6 +112,7 @@ async def test_codegraph_index_and_files_roundtrip(tmp_path: Path) -> None:
     workspace_root = tmp_path / "workspace"
     workspace_root.mkdir()
     (workspace_root / "app.py").write_text("x = 1\n", encoding="utf-8")
+    (workspace_root / "ui.ts").write_text("export const x = 1;\n", encoding="utf-8")
     module = _module(tmp_path, workspace_root)
 
     index_result = await module.execute_tool(
@@ -120,10 +121,16 @@ async def test_codegraph_index_and_files_roundtrip(tmp_path: Path) -> None:
         context=_context(),
     )
     files_result = await module.execute_tool("codegraph.files", {"limit": 10}, context=_context())
+    filtered_result = await module.execute_tool(
+        "codegraph.files",
+        {"limit": 10, "pattern": "*.py"},
+        context=_context(),
+    )
 
     assert index_result["status"] == "complete"  # nosec B101
-    assert index_result["counters"]["files_indexed"] == 1  # nosec B101
-    assert [item["path"] for item in files_result["files"]] == ["app.py"]  # nosec B101
+    assert index_result["counters"]["files_indexed"] == 2  # nosec B101
+    assert [item["path"] for item in files_result["files"]] == ["app.py", "ui.ts"]  # nosec B101
+    assert [item["path"] for item in filtered_result["files"]] == ["app.py"]  # nosec B101
 
 
 @pytest.mark.asyncio

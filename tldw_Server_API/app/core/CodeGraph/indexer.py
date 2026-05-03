@@ -7,6 +7,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
+from loguru import logger
+
 from .config import CodeGraphSettings
 from .language_registry import CodeGraphLanguageRegistry
 from .repository import CodeGraphRepository
@@ -27,6 +29,12 @@ class _Candidate:
     stage: str
     size: int
     modified_at: float
+
+
+@dataclass(frozen=True)
+class _DiscoveryResult:
+    candidates: list[_Candidate]
+    status: str | None = None
 
 
 class CodeGraphIndexer:
@@ -98,11 +106,26 @@ class CodeGraphIndexer:
         run_id = repository.record_index_run_start(workspace_key=workspace_key, mode=mode)
         counters = _empty_counters()
         errors: list[str] = []
+        limit = max(1, int(max_files or self._settings.foreground_max_files))
 
         try:
-            candidates = self._discover_candidates(workspace_root, languages=languages, counters=counters)
+            discovery = self._discover_candidates(
+                workspace_root,
+                languages=languages,
+                counters=counters,
+                max_files=limit,
+            )
+            if discovery.status is not None:
+                repository.finish_index_run(
+                    run_id,
+                    status=discovery.status,
+                    counters=counters,
+                    error_summary=errors,
+                )
+                return IndexingResult(status=discovery.status, counters=counters, errors=tuple(errors))
+
+            candidates = discovery.candidates
             foundation_candidates = [candidate for candidate in candidates if candidate.stage == "foundation"]
-            limit = max(1, int(max_files or self._settings.foreground_max_files))
             total_bytes = sum(candidate.size for candidate in foundation_candidates)
 
             if len(foundation_candidates) > limit or total_bytes > self._settings.foreground_max_bytes:
@@ -116,6 +139,7 @@ class CodeGraphIndexer:
                 return IndexingResult(status=status, counters=counters, errors=tuple(errors))
 
             indexed_paths: set[str] = set()
+            discovered_paths = {candidate.relative_path for candidate in foundation_candidates}
             start = self._monotonic()
             status = "complete"
 
@@ -145,8 +169,8 @@ class CodeGraphIndexer:
                 indexed_paths.add(candidate.relative_path)
                 counters["files_indexed"] += 1
 
-            if status == "complete":
-                repository.delete_missing_files(indexed_paths)
+            if status == "complete" and not languages:
+                repository.delete_missing_files(discovered_paths or indexed_paths)
 
             repository.finish_index_run(
                 run_id,
@@ -172,10 +196,14 @@ class CodeGraphIndexer:
         *,
         languages: list[str] | tuple[str, ...] | None,
         counters: dict[str, int],
-    ) -> list[_Candidate]:
+        max_files: int,
+    ) -> _DiscoveryResult:
         root = workspace_root.expanduser().resolve(strict=False)
         selected_languages = set(languages or [])
         candidates: list[_Candidate] = []
+        foundation_count = 0
+        foundation_bytes = 0
+        started_at = self._monotonic()
 
         for current_root, dir_names, file_names in os.walk(root):
             current_path = Path(current_root)
@@ -186,6 +214,9 @@ class CodeGraphIndexer:
             ]
 
             for file_name in sorted(file_names):
+                if self._monotonic() - started_at > self._settings.max_index_seconds:
+                    return _DiscoveryResult(candidates=candidates, status="index_timed_out_for_foreground")
+
                 file_path = current_path / file_name
                 language = self._registry.language_for_path(file_path)
                 if language is None:
@@ -202,6 +233,7 @@ class CodeGraphIndexer:
                         continue
                     stat_result = resolved.stat()
                 except OSError as exc:
+                    logger.debug(f"CodeGraph skipped unreadable path during discovery: {file_path} ({exc})")
                     counters["errors"] += 1
                     continue
 
@@ -210,17 +242,22 @@ class CodeGraphIndexer:
                 if language.stage == "planned":
                     counters["planned_language_skipped"] += 1
                     counters["files_skipped"] += 1
-                candidates.append(
-                    _Candidate(
-                        path=resolved,
-                        relative_path=relative_path,
-                        language_id=language.language_id,
-                        stage=language.stage,
-                        size=int(stat_result.st_size),
-                        modified_at=float(stat_result.st_mtime),
-                    )
+                candidate = _Candidate(
+                    path=resolved,
+                    relative_path=relative_path,
+                    language_id=language.language_id,
+                    stage=language.stage,
+                    size=int(stat_result.st_size),
+                    modified_at=float(stat_result.st_mtime),
                 )
-        return candidates
+                candidates.append(candidate)
+
+                if candidate.stage == "foundation":
+                    foundation_count += 1
+                    foundation_bytes += candidate.size
+                    if foundation_count > max_files or foundation_bytes > self._settings.foreground_max_bytes:
+                        return _DiscoveryResult(candidates=candidates, status="index_too_large_for_foreground")
+        return _DiscoveryResult(candidates=candidates)
 
     @staticmethod
     def _hash_file(path: Path) -> str:

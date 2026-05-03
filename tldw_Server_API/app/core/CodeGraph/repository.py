@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+from contextlib import closing, contextmanager
 import json
 import sqlite3
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+from loguru import logger
 
 from tldw_Server_API.app.core.DB_Management.sqlite_policy import configure_sqlite_connection
 
@@ -21,12 +24,13 @@ class CodeGraphRepository:
     def initialize(self) -> None:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         schema = Path(__file__).with_name("schema.sql").read_text(encoding="utf-8")
-        with self._connect() as conn:
+        with self._connection() as conn:
             conn.executescript(schema)
+            _create_optional_fts(conn)
             conn.commit()
 
     def counts(self) -> dict[str, int]:
-        with self._connect() as conn:
+        with self._connection() as conn:
             return {
                 "files": self._count(conn, "files"),
                 "nodes": self._count(conn, "nodes"),
@@ -36,7 +40,7 @@ class CodeGraphRepository:
 
     def record_index_run_start(self, *, workspace_key: str, mode: str) -> str:
         run_id = f"run_{uuid.uuid4().hex}"
-        with self._connect() as conn:
+        with self._connection() as conn:
             conn.execute(
                 """
                 INSERT INTO index_runs(run_id, workspace_key, started_at, mode, status, counters, error_summary)
@@ -63,7 +67,7 @@ class CodeGraphRepository:
         counters: dict[str, int],
         error_summary: list[str] | tuple[str, ...],
     ) -> None:
-        with self._connect() as conn:
+        with self._connection() as conn:
             conn.execute(
                 """
                 UPDATE index_runs
@@ -94,7 +98,7 @@ class CodeGraphRepository:
     ) -> None:
         if Path(path).is_absolute():
             raise ValueError("file path must be workspace-relative")
-        with self._connect() as conn:
+        with self._connection() as conn:
             conn.execute(
                 """
                 INSERT INTO files(path, language, size, content_hash, modified_at, indexed_at, node_count, status, errors)
@@ -123,24 +127,36 @@ class CodeGraphRepository:
             )
             conn.commit()
 
-    def list_files(self, *, limit: int = 100, path_prefix: str | None = None) -> list[IndexedFile]:
+    def list_files(
+        self,
+        *,
+        limit: int = 100,
+        path_prefix: str | None = None,
+        path_pattern: str | None = None,
+    ) -> list[IndexedFile]:
         sql = """
             SELECT path, language, size, content_hash, modified_at, indexed_at, node_count, status, errors
             FROM files
         """
         params: list[Any] = []
+        filters: list[str] = []
         if path_prefix:
-            sql += " WHERE path LIKE ?"
+            filters.append("path LIKE ?")
             params.append(f"{path_prefix}%")
+        if path_pattern:
+            filters.append("path GLOB ?")
+            params.append(path_pattern)
+        if filters:
+            sql += " WHERE " + " AND ".join(filters)
         sql += " ORDER BY path LIMIT ?"
         params.append(max(1, int(limit)))
 
-        with self._connect() as conn:
+        with self._connection() as conn:
             rows = conn.execute(sql, params).fetchall()
         return [_indexed_file_from_row(row) for row in rows]
 
     def last_index_run(self) -> IndexRunSummary | None:
-        with self._connect() as conn:
+        with self._connection() as conn:
             row = conn.execute(
                 """
                 SELECT run_id, workspace_key, mode, status, counters, error_summary, started_at, finished_at
@@ -154,18 +170,20 @@ class CodeGraphRepository:
     def delete_missing_files(self, current_paths: set[str]) -> int:
         existing = {item.path for item in self.list_files(limit=1_000_000)}
         removed = sorted(existing - set(current_paths))
-        for path in removed:
-            self.delete_file(path)
+        if not removed:
+            return 0
+        with self._connection() as conn:
+            _delete_file_rows(conn, removed)
+            conn.commit()
         return len(removed)
 
     def delete_file(self, path: str) -> None:
-        with self._connect() as conn:
-            self._prepare_file_replacement(conn, path)
-            conn.execute("DELETE FROM files WHERE path = ?", (path,))
+        with self._connection() as conn:
+            _delete_file_rows(conn, [path])
             conn.commit()
 
     def prepare_file_replacement(self, path: str) -> None:
-        with self._connect() as conn:
+        with self._connection() as conn:
             self._prepare_file_replacement(conn, path)
             conn.commit()
 
@@ -176,7 +194,7 @@ class CodeGraphRepository:
         edges: list[dict[str, Any]],
         unresolved_refs: list[dict[str, Any]],
     ) -> None:
-        with self._connect() as conn:
+        with self._connection() as conn:
             for node in nodes:
                 conn.execute(
                     """
@@ -228,6 +246,11 @@ class CodeGraphRepository:
                 )
             conn.commit()
 
+    @contextmanager
+    def _connection(self):  # type: ignore[no-untyped-def]
+        with closing(self._connect()) as conn:
+            yield conn
+
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
@@ -250,13 +273,47 @@ class CodeGraphRepository:
         conn.execute("DELETE FROM unresolved_refs WHERE file_path = ?", (path,))
         conn.execute("DELETE FROM edges WHERE file_path = ?", (path,))
         conn.execute("DELETE FROM nodes WHERE file_path = ?", (path,))
+        _delete_dangling_edges(conn)
+
+
+def _delete_file_rows(conn: sqlite3.Connection, paths: list[str]) -> None:
+    params = [(path,) for path in paths]
+    conn.executemany("DELETE FROM unresolved_refs WHERE file_path = ?", params)
+    conn.executemany("DELETE FROM edges WHERE file_path = ?", params)
+    conn.executemany("DELETE FROM nodes WHERE file_path = ?", params)
+    conn.executemany("DELETE FROM files WHERE path = ?", params)
+    _delete_dangling_edges(conn)
+
+
+def _delete_dangling_edges(conn: sqlite3.Connection) -> None:
+    conn.execute(  # nosec B608 - static cleanup query with no user-controlled input
+        """
+        DELETE FROM edges
+        WHERE source NOT IN (SELECT id FROM nodes)
+           OR (target IS NOT NULL AND target NOT IN (SELECT id FROM nodes))
+        """
+    )
+
+
+def _create_optional_fts(conn: sqlite3.Connection) -> None:
+    try:
         conn.execute(
             """
-            DELETE FROM edges
-            WHERE source NOT IN (SELECT id FROM nodes)
-               OR (target IS NOT NULL AND target NOT IN (SELECT id FROM nodes))
+            CREATE VIRTUAL TABLE IF NOT EXISTS nodes_fts USING fts5(
+                name,
+                qualified_name,
+                signature,
+                docstring,
+                metadata,
+                content='nodes',
+                content_rowid='rowid'
+            )
             """
         )
+    except sqlite3.OperationalError as exc:
+        if "fts5" not in str(exc).lower():
+            raise
+        logger.warning("CodeGraph FTS5 unavailable; continuing without nodes_fts support")
 
 
 def _utc_now() -> str:

@@ -8,7 +8,6 @@ extraction and graph queries are intentionally deferred.
 from __future__ import annotations
 
 import asyncio
-import fnmatch
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
@@ -21,10 +20,7 @@ from tldw_Server_API.app.core.CodeGraph.indexer import CodeGraphIndexer
 from tldw_Server_API.app.core.CodeGraph.language_registry import CodeGraphLanguageRegistry
 from tldw_Server_API.app.core.CodeGraph.models import IndexedFile, IndexRunSummary, WorkspaceResolution
 from tldw_Server_API.app.core.CodeGraph.repository import CodeGraphRepository
-from tldw_Server_API.app.core.CodeGraph.workspace import CodeGraphWorkspaceResolver
-from tldw_Server_API.app.services.mcp_hub_workspace_root_resolver import (
-    McpHubWorkspaceRootResolver,
-)
+from tldw_Server_API.app.core.CodeGraph.workspace import CodeGraphWorkspaceResolver, WorkspaceRootResolver
 
 from ..base import BaseModule, ModuleConfig, create_tool_definition
 
@@ -39,7 +35,7 @@ class CodeGraphModule(BaseModule):
     def __init__(
         self,
         config: ModuleConfig,
-        workspace_root_resolver: McpHubWorkspaceRootResolver | Any | None = None,
+        workspace_root_resolver: WorkspaceRootResolver | None = None,
     ) -> None:
         super().__init__(config)
         self._settings = CodeGraphSettings.from_mapping(config.settings)
@@ -314,9 +310,11 @@ class CodeGraphModule(BaseModule):
         repository = CodeGraphRepository(resolution.index_db_path)
         effective_limit = max(1, int(limit or 100))
         path_prefix = _normalize_path_prefix(path)
-        rows = repository.list_files(limit=effective_limit + 1, path_prefix=path_prefix)
-        if pattern:
-            rows = [row for row in rows if fnmatch.fnmatch(row.path, pattern)]
+        rows = repository.list_files(
+            limit=effective_limit + 1,
+            path_prefix=path_prefix,
+            path_pattern=pattern,
+        )
 
         truncated = len(rows) > effective_limit
         visible_rows = rows[:effective_limit]

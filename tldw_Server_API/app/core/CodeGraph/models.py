@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -19,15 +20,16 @@ def make_node_id(
     qualified_name: str,
     start_line: int,
 ) -> str:
-    identity = ":".join(
-        (
+    identity = json.dumps(
+        [
             workspace_key,
             language,
             file_path,
             kind,
             qualified_name,
-            str(int(start_line)),
-        )
+            int(start_line),
+        ],
+        separators=(",", ":"),
     )
     return stable_hash_id("node", identity)
 
@@ -40,15 +42,16 @@ def make_edge_id(
     line: int,
     column: int,
 ) -> str:
-    identity = ":".join(
-        (
+    identity = json.dumps(
+        [
             source_node_id,
             edge_kind,
             target_or_ref,
             file_path,
-            str(int(line)),
-            str(int(column)),
-        )
+            int(line),
+            int(column),
+        ],
+        separators=(",", ":"),
     )
     return stable_hash_id("edge", identity)
 

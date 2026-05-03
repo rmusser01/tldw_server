@@ -49,3 +49,25 @@ async def test_workspace_key_is_stable_and_index_path_is_not_inside_workspace(tm
     assert first.index_db_path == index_base / first.workspace_key / "codegraph.db"
     assert workspace.resolve() not in first.index_db_path.resolve(strict=False).parents
     assert resolver._workspace_root_resolver.calls[0]["workspace_id"] == "ws-1"
+
+
+@pytest.mark.asyncio
+async def test_workspace_resolver_uses_selected_scope_id_when_primary_scope_id_is_none(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    root_resolver = FakeRootResolver(workspace)
+    resolver = CodeGraphWorkspaceResolver(root_resolver, CodeGraphSettings.from_mapping({}))
+    context = RequestContext(
+        request_id="req",
+        session_id="sess-1",
+        user_id="7",
+        metadata={
+            "workspace_id": "ws-1",
+            "owner_scope_id": None,
+            "selected_workspace_scope_id": "shared-scope-7",
+        },
+    )
+
+    await resolver.resolve(context)
+
+    assert root_resolver.calls[0]["owner_scope_id"] == "shared-scope-7"

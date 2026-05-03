@@ -41,7 +41,7 @@ class CodeGraphSettings:
         defaults = cls()
 
         return cls(
-            index_base_dir=Path(str(raw.get("index_base_dir", defaults.index_base_dir))).expanduser(),
+            index_base_dir=_path_or_default(raw.get("index_base_dir"), defaults.index_base_dir),
             max_file_size_bytes=_positive_int(
                 raw.get("max_file_size_bytes"),
                 defaults.max_file_size_bytes,
@@ -88,6 +88,15 @@ def _positive_float(value: Any, default: float) -> float:
     except (TypeError, ValueError):
         return default
     return max(0.001, parsed)
+
+
+def _path_or_default(value: Any, default: Path) -> Path:
+    if value is None:
+        return default
+    text = str(value).strip()
+    if not text:
+        return default
+    return Path(text).expanduser()
 
 
 def _coerce_exclude_dirs(value: Any, default: tuple[str, ...]) -> tuple[str, ...]:

@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
 
-from tldw_Server_API.app.core.CodeGraph.repository import CodeGraphRepository
+import pytest
+
+from tldw_Server_API.app.core.CodeGraph.repository import CodeGraphRepository, _create_optional_fts
 
 
 def test_repository_initializes_schema_and_counts_empty_graph(tmp_path: Path) -> None:
@@ -35,7 +38,18 @@ def test_repository_upserts_files_and_records_runs(tmp_path: Path) -> None:
 
     assert repo.counts()["files"] == 1
     assert repo.list_files(limit=10)[0].path == "app/main.py"
-    assert repo.last_index_run().status == "complete"
+    last_run = repo.last_index_run()
+
+    assert last_run is not None
+    assert last_run.status == "complete"
+
+
+def test_create_optional_fts_ignores_missing_fts5() -> None:
+    class _FakeConnection:
+        def execute(self, _sql: str) -> None:
+            raise sqlite3.OperationalError("no such module: fts5")
+
+    _create_optional_fts(_FakeConnection())
 
 
 def test_repository_replacing_file_removes_owned_graph_rows_and_dangling_edges(tmp_path: Path) -> None:

@@ -88,13 +88,3 @@ CREATE TABLE IF NOT EXISTS project_metadata (
     value TEXT NOT NULL,
     updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
-
-CREATE VIRTUAL TABLE IF NOT EXISTS nodes_fts USING fts5(
-    name,
-    qualified_name,
-    signature,
-    docstring,
-    metadata,
-    content='nodes',
-    content_rowid='rowid'
-);

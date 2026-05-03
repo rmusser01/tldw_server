@@ -2,19 +2,22 @@ from __future__ import annotations
 
 import hashlib
 from pathlib import Path
-from typing import Any
-
-from tldw_Server_API.app.services.mcp_hub_workspace_root_resolver import (
-    McpHubWorkspaceRootResolver,
-)
+from typing import Any, Protocol
 
 from .config import CodeGraphSettings
 from .models import WorkspaceResolution
 
 
+class WorkspaceRootResolver(Protocol):
+    async def resolve_for_context(self, **kwargs: Any) -> dict[str, Any]:
+        ...
+
+
 def _first_nonempty(*values: Any) -> str | None:
     for value in values:
-        text = str(value or "").strip()
+        if value is None:
+            continue
+        text = str(value).strip()
         if text:
             return text
     return None
@@ -25,10 +28,17 @@ class CodeGraphWorkspaceResolver:
 
     def __init__(
         self,
-        workspace_root_resolver: McpHubWorkspaceRootResolver | Any | None = None,
+        workspace_root_resolver: WorkspaceRootResolver | None = None,
         settings: CodeGraphSettings | None = None,
     ) -> None:
-        self._workspace_root_resolver = workspace_root_resolver or McpHubWorkspaceRootResolver()
+        if workspace_root_resolver is None:
+            from tldw_Server_API.app.services.mcp_hub_workspace_root_resolver import (
+                McpHubWorkspaceRootResolver,
+            )
+
+            self._workspace_root_resolver: WorkspaceRootResolver = McpHubWorkspaceRootResolver()
+        else:
+            self._workspace_root_resolver = workspace_root_resolver
         self._settings = settings or CodeGraphSettings.from_mapping({})
 
     async def resolve(self, context: Any | None) -> WorkspaceResolution:
@@ -59,7 +69,10 @@ class CodeGraphWorkspaceResolver:
                 metadata_map.get("owner_scope_type"),
                 metadata_map.get("selected_workspace_scope_type"),
             ),
-            owner_scope_id=metadata_map.get("owner_scope_id", metadata_map.get("selected_workspace_scope_id")),
+            owner_scope_id=_first_nonempty(
+                metadata_map.get("owner_scope_id"),
+                metadata_map.get("selected_workspace_scope_id"),
+            ),
         )
         workspace_root_raw = str(resolution.get("workspace_root") or "").strip()
         if not workspace_root_raw:
