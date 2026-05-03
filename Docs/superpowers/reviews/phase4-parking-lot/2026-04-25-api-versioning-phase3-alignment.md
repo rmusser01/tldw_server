@@ -63,7 +63,7 @@ Safe in `v1` when compatible:
 Recommendation:
 
 - Keep legacy pagination fields during `v1`.
-- Put canonical pagination metadata in `meta.pagination` only when Phase 3.1 envelope opt-in is active, or in an additive nested field after route-family approval.
+- Put canonical pagination metadata in `metadata.pagination` when Phase 3.1 envelope opt-in is active, or in an additive nested `pagination` field for legacy-shaped `v1` responses after route-family approval.
 - Reserve legacy alias removal for `v2`.
 
 ### Phase 3.4 Auth Dependencies
@@ -92,6 +92,7 @@ For Phase 3:
 
 - `v1` remains legacy-default.
 - Standard envelope and canonical pagination metadata are opt-in.
+- Header opt-in inside `v1` is transitional and does not replace path-based major versioning.
 - Exemptions remain explicit:
   - streaming
   - file downloads
@@ -100,6 +101,7 @@ For Phase 3:
   - WebSocket messages
 - OpenAI-compatible and provider-compatible payloads unless route-specific approval exists
 - Deprecation headers are not emitted for legacy response shapes during the first pilot.
+- Shared client/service layers may own opt-in and unwrap behavior, while UI/domain consumers remain legacy-shaped by default.
 
 Draft maintainer decision packet:
 
