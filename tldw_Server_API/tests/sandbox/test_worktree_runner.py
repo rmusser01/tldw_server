@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import signal
 import subprocess
 import sys
@@ -94,6 +95,17 @@ def test_destroy_session_removes_worktree(test_repo: str) -> None:
     assert os.path.isdir(wt)
     WorktreeRunner.destroy_worktree(wt, test_repo)
     assert not os.path.isdir(wt)
+
+
+def test_destroy_worktree_falls_back_when_repo_path_is_missing(tmp_path: Path) -> None:
+    """Manual cleanup should still run if git cannot use the original repo path."""
+    wt = tmp_path / "detached-worktree"
+    wt.mkdir()
+
+    WorktreeRunner.destroy_worktree(str(wt), str(tmp_path / "missing-repo"))
+
+    if wt.exists():
+        pytest.fail("destroy_worktree should remove the worktree directory")
 
 
 def test_create_session_invalid_repo(tmp_path: Path) -> None:
@@ -254,6 +266,55 @@ def test_run_without_session_workspace() -> None:
     result = r.start_run("test-run-003", spec, session_workspace=None)
     assert result.phase == RunPhase.completed
     assert result.exit_code == 0
+
+
+def test_start_run_failure_after_worktree_create_destroys_worktree(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Failures after worktree creation must not leak detached worktrees."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    created_worktree = tmp_path / "created-worktree"
+    destroy_calls: list[tuple[str, str]] = []
+
+    def _create_worktree(repo_path: str, branch: str = "HEAD") -> str:
+        if repo_path != str(repo):
+            pytest.fail(f"unexpected repo path: {repo_path}")
+        if branch != "HEAD":
+            pytest.fail(f"unexpected branch: {branch}")
+        created_worktree.mkdir()
+        return str(created_worktree)
+
+    def _destroy_worktree(worktree_path: str, repo_path: str) -> None:
+        destroy_calls.append((worktree_path, repo_path))
+        shutil.rmtree(worktree_path)
+
+    monkeypatch.setattr(WorktreeRunner, "_is_git_repo", staticmethod(lambda path: path == str(repo)))
+    monkeypatch.setattr(WorktreeRunner, "create_worktree", staticmethod(_create_worktree))
+    monkeypatch.setattr(WorktreeRunner, "destroy_worktree", staticmethod(_destroy_worktree))
+
+    result = WorktreeRunner(allowed_repo_dirs=[str(tmp_path)]).start_run(
+        "run-worktree-invalid-inline",
+        RunSpec(
+            session_id=None,
+            runtime=RuntimeType.worktree,
+            base_image=None,
+            command=["/bin/echo", "unused"],
+            timeout_sec=10,
+            files_inline=[("../escape.txt", b"not allowed")],
+        ),
+        session_workspace=str(repo),
+    )
+
+    if result.phase != RunPhase.failed:
+        pytest.fail(f"expected failed run, got {result.phase}")
+    if "invalid inline file path" not in (result.message or ""):
+        pytest.fail(f"unexpected failure message: {result.message}")
+    if destroy_calls != [(str(created_worktree), str(repo))]:
+        pytest.fail(f"unexpected destroy calls: {destroy_calls}")
+    if created_worktree.exists():
+        pytest.fail("created worktree should have been removed")
 
 
 # ---------------------------------------------------------------------------

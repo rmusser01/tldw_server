@@ -253,7 +253,7 @@ class WorktreeRunner:
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
-        except subprocess.CalledProcessError:
+        except _WORKTREE_NONCRITICAL_EXCEPTIONS:
             logger.warning(
                 "git worktree remove failed for {}, cleaning up manually",
                 worktree_path,
@@ -481,6 +481,8 @@ class WorktreeRunner:
         phase = RunPhase.failed
         proc: subprocess.Popen[bytes] | None = None
         run_dir: str | None = None
+        repo_path_for_cleanup: str | None = None
+        worktree_path: str | None = None
 
         with contextlib.suppress(_WORKTREE_NONCRITICAL_EXCEPTIONS):
             hub.publish_event(
@@ -536,6 +538,7 @@ class WorktreeRunner:
             # Validate repo_path is under an allowed directory
             self._validate_repo_path(repo_path)
 
+            repo_path_for_cleanup = repo_path
             worktree_path = self.create_worktree(repo_path, branch="HEAD")
 
             # Copy session_workspace files into the worktree if they came from
@@ -619,10 +622,6 @@ class WorktreeRunner:
                 artifacts_map = {}
                 message = "canceled_by_user"
 
-            # Tear down the worktree
-            with contextlib.suppress(_WORKTREE_NONCRITICAL_EXCEPTIONS):
-                self.destroy_worktree(worktree_path, repo_path)
-
         except _WORKTREE_NONCRITICAL_EXCEPTIONS as exc:
             logger.error("Worktree execution error for run {}: {}", run_id, exc)
             message = f"worktree execution error: {exc}"
@@ -631,6 +630,9 @@ class WorktreeRunner:
                 message = "canceled_by_user"
         finally:
             finished = datetime.now(timezone.utc)
+            if worktree_path and repo_path_for_cleanup:
+                with contextlib.suppress(_WORKTREE_NONCRITICAL_EXCEPTIONS):
+                    self.destroy_worktree(worktree_path, repo_path_for_cleanup)
             run_dir_to_remove = self._clear_active_run(run_id)
             if run_dir_to_remove:
                 run_dir = run_dir_to_remove
