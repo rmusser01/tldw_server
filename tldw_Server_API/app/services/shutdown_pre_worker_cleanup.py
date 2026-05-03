@@ -39,11 +39,21 @@ async def shutdown_pre_worker_cleanup(
         cleanup_task,
         stopped_background_worker_names,
     )
+    chatbooks_cleanup_task_for_shutdown = _unless_background_stopped(
+        "chatbooks_cleanup",
+        chatbooks_cleanup_task,
+        stopped_background_worker_names,
+    )
+    chatbooks_cleanup_stop_event_for_shutdown = _unless_background_stopped(
+        "chatbooks_cleanup",
+        chatbooks_cleanup_stop_event,
+        stopped_background_worker_names,
+    )
     await _shutdown_pre_worker_cleanup(
         app=app,
         cleanup_task=cleanup_task_for_shutdown,
-        chatbooks_cleanup_task=chatbooks_cleanup_task,
-        chatbooks_cleanup_stop_event=chatbooks_cleanup_stop_event,
+        chatbooks_cleanup_task=chatbooks_cleanup_task_for_shutdown,
+        chatbooks_cleanup_stop_event=chatbooks_cleanup_stop_event_for_shutdown,
         storage_cleanup_service=storage_cleanup_service,
         coordinated_legacy_component_names=coordinated_legacy_component_names,
         guard_exceptions=guard_exceptions,
@@ -51,8 +61,8 @@ async def shutdown_pre_worker_cleanup(
     )
     return PreWorkerCleanupHandles(
         cleanup_task=cleanup_task_for_shutdown,
-        chatbooks_cleanup_task=chatbooks_cleanup_task,
-        chatbooks_cleanup_stop_event=chatbooks_cleanup_stop_event,
+        chatbooks_cleanup_task=chatbooks_cleanup_task_for_shutdown,
+        chatbooks_cleanup_stop_event=chatbooks_cleanup_stop_event_for_shutdown,
         storage_cleanup_service=storage_cleanup_service,
     )
 
@@ -89,8 +99,16 @@ async def run_shutdown_pre_worker_cleanup(
                 cleanup_task,
                 stopped_background_worker_names,
             ),
-            chatbooks_cleanup_task=chatbooks_cleanup_task,
-            chatbooks_cleanup_stop_event=chatbooks_cleanup_stop_event,
+            chatbooks_cleanup_task=_unless_background_stopped(
+                "chatbooks_cleanup",
+                chatbooks_cleanup_task,
+                stopped_background_worker_names,
+            ),
+            chatbooks_cleanup_stop_event=_unless_background_stopped(
+                "chatbooks_cleanup",
+                chatbooks_cleanup_stop_event,
+                stopped_background_worker_names,
+            ),
             storage_cleanup_service=storage_cleanup_service,
         )
 
