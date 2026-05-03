@@ -105,7 +105,10 @@ async def shutdown_post_worker_services(
         ),
     )
     notifications_shutdown_handles = await _shutdown_notifications_compactor_websub_workers(
-        jobs_notifications_bridge_task=jobs_notifications_bridge_task,
+        jobs_notifications_bridge_task=_task_if_not_stopped(
+            "jobs_notifications_bridge_task",
+            jobs_notifications_bridge_task,
+        ),
         embeddings_compactor_task=_task_if_not_stopped(
             "embeddings_compactor_task",
             embeddings_compactor_task,

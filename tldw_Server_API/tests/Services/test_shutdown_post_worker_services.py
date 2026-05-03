@@ -577,7 +577,7 @@ async def test_shutdown_post_worker_services_skips_auxiliary_optional_workers_af
 
 
 @pytest.mark.asyncio
-async def test_shutdown_post_worker_services_skips_compactor_and_websub_after_background_phase(
+async def test_shutdown_post_worker_services_skips_notifications_compactor_and_websub_after_background_phase(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from tldw_Server_API.app.services import shutdown_post_worker_services as shutdown_services
@@ -689,16 +689,17 @@ async def test_shutdown_post_worker_services_skips_compactor_and_websub_after_ba
         workflows_maint_stop_event=None,
         guard_exceptions=(RuntimeError,),
         stopped_background_worker_names={
+            "jobs_notifications_bridge_task",
             "embeddings_compactor_task",
             "websub_renewal_task",
         },
     )
 
-    assert notification_kwargs["jobs_notifications_bridge_task"] == "bridge-task"
+    assert notification_kwargs["jobs_notifications_bridge_task"] is None
     assert notification_kwargs["embeddings_compactor_task"] is None
     assert notification_kwargs["embeddings_compactor_stop_event"] is None
     assert notification_kwargs["websub_renewal_task"] is None
-    assert handles.jobs_notifications_bridge_task == "bridge-task"
+    assert handles.jobs_notifications_bridge_task is None
     assert handles.embeddings_compactor_task is None
     assert handles.embeddings_compactor_stop_event is None
     assert handles.websub_renewal_task is None
