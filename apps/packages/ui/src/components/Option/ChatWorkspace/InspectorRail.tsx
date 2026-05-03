@@ -1,7 +1,13 @@
+export type InspectorRailStagedSource = {
+  sourceId: string
+  title: string
+}
+
 export type InspectorRailProps = {
   scopeLabel: string
   stagedSourceCount: number
   stagedSourceTitles: string[]
+  stagedSources?: InspectorRailStagedSource[]
   selectedModelLabel: string
   selectedPersonaLabel: string | null
   backendAvailable: boolean
@@ -25,12 +31,19 @@ export const InspectorRail = ({
   scopeLabel,
   stagedSourceCount,
   stagedSourceTitles,
+  stagedSources,
   selectedModelLabel,
   selectedPersonaLabel,
   backendAvailable,
   streaming
 }: InspectorRailProps) => {
   const runtimeLabel = getRuntimeLabel(backendAvailable, streaming)
+  const stagedSourceRows =
+    stagedSources ??
+    stagedSourceTitles.map((title, index) => ({
+      sourceId: `title-${index}`,
+      title
+    }))
 
   return (
     <aside
@@ -47,11 +60,14 @@ export const InspectorRail = ({
         <p className={valueClass}>
           {stagedSourceCount} source{stagedSourceCount === 1 ? "" : "s"} staged
         </p>
-        {stagedSourceTitles.length > 0 ? (
+        {stagedSourceRows.length > 0 ? (
           <ul className="mt-2 space-y-1">
-            {stagedSourceTitles.map((title) => (
-              <li key={title} className="min-w-0 break-words text-xs text-text">
-                {title}
+            {stagedSourceRows.map((source) => (
+              <li
+                key={source.sourceId}
+                className="min-w-0 break-words text-xs text-text"
+              >
+                {source.title}
               </li>
             ))}
           </ul>

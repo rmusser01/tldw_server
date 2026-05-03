@@ -39,4 +39,24 @@ describe("InspectorRail", () => {
     expect(screen.getByText("No active task")).toBeInTheDocument()
     expect(screen.getByText("Server unavailable")).toBeInTheDocument()
   })
+
+  it("uses stable source metadata for duplicate staged source titles", () => {
+    render(
+      <InspectorRail
+        scopeLabel="Default workspace"
+        stagedSourceCount={2}
+        stagedSourceTitles={[]}
+        stagedSources={[
+          { sourceId: "source-1", title: "Meeting Notes" },
+          { sourceId: "source-2", title: "Meeting Notes" }
+        ]}
+        selectedModelLabel="gpt-test"
+        selectedPersonaLabel={null}
+        backendAvailable
+        streaming={false}
+      />
+    )
+
+    expect(screen.getAllByText("Meeting Notes")).toHaveLength(2)
+  })
 })

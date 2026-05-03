@@ -12,19 +12,19 @@ export const WorkspaceStatusStrip = ({
   streaming,
   stagedSourceCount
 }: WorkspaceStatusStripProps) => {
+  const runtimeLabel = !backendAvailable
+    ? "Server unavailable"
+    : streaming
+      ? "Streaming"
+      : "Ready"
+
   return (
     <footer
       aria-label="Chat workspace status"
       className="flex min-w-0 flex-wrap items-center justify-between gap-2 border-t border-border bg-surface px-3 py-2 text-xs text-text-muted"
     >
       <div className="flex min-w-0 flex-wrap items-center gap-2">
-        {backendAvailable && !streaming ? (
-          <span className={statusPillClass}>Ready</span>
-        ) : null}
-        {streaming ? <span className={statusPillClass}>Streaming</span> : null}
-        {!backendAvailable ? (
-          <span className={statusPillClass}>Server unavailable</span>
-        ) : null}
+        <span className={statusPillClass}>{runtimeLabel}</span>
         {stagedSourceCount > 0 ? (
           <span className={statusPillClass}>Context staged</span>
         ) : null}

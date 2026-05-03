@@ -11,11 +11,19 @@ describe("WorkspaceStatusStrip", () => {
     expect(screen.getByText("Ctrl+Enter send")).toBeInTheDocument()
   })
 
-  it("renders streaming, staged context, and backend unavailable states", () => {
-    render(<WorkspaceStatusStrip backendAvailable={false} streaming stagedSourceCount={3} />)
+  it("renders streaming and staged context states", () => {
+    render(<WorkspaceStatusStrip backendAvailable streaming stagedSourceCount={3} />)
 
     expect(screen.getByText("Streaming")).toBeInTheDocument()
     expect(screen.getByText("Context staged")).toBeInTheDocument()
+    expect(screen.queryByText("Server unavailable")).not.toBeInTheDocument()
+  })
+
+  it("gives backend unavailable precedence over stale streaming state", () => {
+    render(<WorkspaceStatusStrip backendAvailable={false} streaming stagedSourceCount={3} />)
+
+    expect(screen.getByText("Context staged")).toBeInTheDocument()
     expect(screen.getByText("Server unavailable")).toBeInTheDocument()
+    expect(screen.queryByText("Streaming")).not.toBeInTheDocument()
   })
 })
