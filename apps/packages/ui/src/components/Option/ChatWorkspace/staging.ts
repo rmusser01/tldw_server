@@ -33,13 +33,28 @@ export const stageWorkspaceSources = (
   return Array.from(byId.values())
 }
 
+const formatSourceTitleForInsert = (title: string): string => {
+  const firstLine = title.split(/\r?\n/)[0] ?? ""
+  const collapsed = firstLine
+    .replace(/[`*_#[\]()>|{}]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+
+  if (collapsed.length <= 96) {
+    return collapsed || "Untitled source"
+  }
+
+  return `${collapsed.slice(0, 93).trimEnd()}...`
+}
+
 export const formatStagedSourceInsertText = (
   sources: StagedWorkspaceSource[]
 ): string => {
   if (sources.length === 0) return ""
   const lines = sources.map((source, index) => {
     const state = source.availability === "ready" ? "" : ` (${source.availability})`
-    return `${index + 1}. ${source.title} [${source.type}]${state}`
+    const title = formatSourceTitleForInsert(source.title)
+    return `${index + 1}. ${title} [${source.type}, scope: ${source.scopeLabel}]${state}`
   })
   return `Context sources:\n${lines.join("\n")}\n\n`
 }
