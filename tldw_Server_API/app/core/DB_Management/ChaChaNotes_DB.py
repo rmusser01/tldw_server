@@ -14257,19 +14257,6 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 normalized.append(text)
         return normalized
 
-    def _normalize_persona_exemplar_tags(self, value: Any, field_name: str) -> list[str]:
-        """Normalize free-form persona exemplar tags to lowercase unique strings."""
-        raw_values = self._normalize_exemplar_string_list(value, field_name)
-        normalized: list[str] = []
-        seen: set[str] = set()
-        for item in raw_values:
-            text = str(item).strip().lower()
-            if not text or text in seen:
-                continue
-            seen.add(text)
-            normalized.append(text)
-        return normalized
-
     def _normalize_character_exemplar_row(self, row: sqlite3.Row | dict[str, Any] | None) -> dict[str, Any] | None:
         """Deserialize exemplar JSON fields and normalize bool-like values."""
         if not row:

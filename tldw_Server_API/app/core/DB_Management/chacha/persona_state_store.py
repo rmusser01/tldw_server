@@ -1023,6 +1023,71 @@ class PersonaStateStore:
         normalized = tone.strip().lower()
         return normalized or None
 
+    def _normalize_exemplar_enum(
+        self,
+        value: Any,
+        *,
+        allowed: tuple[str, ...],
+        field_name: str,
+        default: str,
+    ) -> str:
+        """Normalize and validate enum-like persona exemplar fields."""
+        if value is None:
+            return default
+        if not isinstance(value, str):
+            raise InputError(f"Field '{field_name}' must be a string.")  # noqa: TRY003
+        normalized = value.strip().lower()
+        if not normalized:
+            return default
+        if normalized not in allowed:
+            raise InputError(  # noqa: TRY003
+                f"Invalid value '{value}' for field '{field_name}'. Allowed: {', '.join(allowed)}"
+            )
+        return normalized
+
+    def _normalize_exemplar_string_list(self, value: Any, field_name: str) -> list[str]:
+        """Normalize list-like persona exemplar metadata to a string list."""
+        if value is None:
+            return []
+
+        parsed = value
+        if isinstance(value, str):
+            stripped = value.strip()
+            if not stripped:
+                return []
+            try:
+                parsed = json.loads(stripped)
+            except json.JSONDecodeError:
+                parsed = [stripped]
+
+        if isinstance(parsed, set):
+            parsed = list(parsed)
+
+        if not isinstance(parsed, list):
+            raise InputError(f"Field '{field_name}' must be a list of strings.")  # noqa: TRY003
+
+        normalized: list[str] = []
+        for item in parsed:
+            if item is None:
+                continue
+            text = str(item).strip()
+            if text:
+                normalized.append(text)
+        return normalized
+
+    def _normalize_persona_exemplar_tags(self, value: Any, field_name: str) -> list[str]:
+        """Normalize free-form persona exemplar tags to lowercase unique strings."""
+        raw_values = self._normalize_exemplar_string_list(value, field_name)
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for item in raw_values:
+            text = str(item).strip().lower()
+            if not text or text in seen:
+                continue
+            seen.add(text)
+            normalized.append(text)
+        return normalized
+
     def create_persona_exemplar(self, exemplar_data: dict[str, Any]) -> str:
         persona_id = str(exemplar_data.get("persona_id") or "").strip()
         user_id = str(exemplar_data.get("user_id") or "").strip()

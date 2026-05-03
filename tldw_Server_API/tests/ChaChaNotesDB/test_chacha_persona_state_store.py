@@ -34,6 +34,7 @@ _DELEGATED_PERSONA_STATE_METHODS = {
     "_persona_exemplar_row_to_dict",
     "_require_active_persona_profile_owner",
     "_normalize_persona_exemplar_tone",
+    "_normalize_persona_exemplar_tags",
     "create_persona_exemplar",
     "get_persona_exemplar",
     "list_persona_exemplars",
@@ -409,6 +410,42 @@ def test_persona_exemplar_roundtrip(store):
     )
     assert deleted is not None
     assert deleted["deleted"] is True
+
+
+def test_persona_exemplar_facade_normalizes_without_monolith_helper_fallback(db, monkeypatch):
+    persona_id = db.create_persona_profile({"user_id": "user-1", "name": "Facade Persona"})
+
+    def _fail_on_monolith_helper(*_args, **_kwargs):
+        raise AssertionError("persona exemplar normalization used a monolith fallback")
+
+    monkeypatch.setattr(db, "_normalize_exemplar_enum", _fail_on_monolith_helper)
+    monkeypatch.setattr(db, "_normalize_exemplar_string_list", _fail_on_monolith_helper)
+    monkeypatch.setattr(db, "_normalize_persona_exemplar_tags", _fail_on_monolith_helper, raising=False)
+
+    exemplar_id = db.create_persona_exemplar(
+        {
+            "persona_id": persona_id,
+            "user_id": "user-1",
+            "kind": "STYLE",
+            "content": "Prefer grounded synthesis.",
+            "tone": "Analytical",
+            "scenario_tags": ["Research", "research"],
+            "capability_tags": "[\"Summaries\", \"summaries\"]",
+            "source_type": "MANUAL",
+        }
+    )
+
+    exemplar = db.get_persona_exemplar(
+        exemplar_id=exemplar_id,
+        persona_id=persona_id,
+        user_id="user-1",
+    )
+    assert exemplar is not None
+    assert exemplar["kind"] == "style"
+    assert exemplar["tone"] == "analytical"
+    assert exemplar["scenario_tags"] == ["research"]
+    assert exemplar["capability_tags"] == ["summaries"]
+    assert exemplar["source_type"] == "manual"
 
 
 def test_persona_setup_and_live_voice_analytics_roundtrip(store):
