@@ -414,7 +414,19 @@ def share_session_to_webhook(
     )
 
 
-@router.get("/sessions/{session_id}/events", dependencies=[Depends(check_rate_limit)])
+@router.get(
+    "/sessions/{session_id}/events",
+    response_class=StreamingResponse,
+    responses={
+        200: {
+            "description": "Meeting session event stream.",
+            "content": {
+                "text/event-stream": {},
+            },
+        },
+    },
+    dependencies=[Depends(check_rate_limit)],
+)
 async def stream_session_events(
     session_id: str,
     meetings_db: MeetingsDatabase = Depends(get_meetings_db_for_user),

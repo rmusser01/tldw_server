@@ -6,7 +6,7 @@ import re
 from datetime import datetime
 from pathlib import Path as PathlibPath
 
-from fastapi import APIRouter, Body, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException, Response
 from fastapi import Path as FastAPIPath
 from loguru import logger
 from pydantic import BaseModel
@@ -520,7 +520,22 @@ async def get_output(
     )
 
 
-@router.get("/{output_id}/download", summary="Download output artifact")
+@router.get(
+    "/{output_id}/download",
+    summary="Download output artifact",
+    response_class=FileResponse,
+    responses={
+        200: {
+            "description": "Output artifact file",
+            "content": {
+                "application/octet-stream": {},
+                "audio/mpeg": {},
+                "text/html; charset=utf-8": {},
+                "text/markdown; charset=utf-8": {},
+            },
+        },
+    },
+)
 async def download_output(
     output_id: int = FastAPIPath(..., ge=1),
     current_user: User = Depends(get_request_user),
@@ -560,7 +575,22 @@ async def download_output(
     )
 
 
-@router.get("/download/by-name", summary="Download output artifact by title")
+@router.get(
+    "/download/by-name",
+    summary="Download output artifact by title",
+    response_class=FileResponse,
+    responses={
+        200: {
+            "description": "Output artifact file",
+            "content": {
+                "application/octet-stream": {},
+                "audio/mpeg": {},
+                "text/html; charset=utf-8": {},
+                "text/markdown; charset=utf-8": {},
+            },
+        },
+    },
+)
 async def download_output_by_name(
     title: str,
     format: str | None = None,
@@ -599,7 +629,16 @@ async def download_output_by_name(
     )
 
 
-@router.head("/{output_id}/download", summary="Check output artifact availability")
+@router.head(
+    "/{output_id}/download",
+    summary="Check output artifact availability",
+    response_class=Response,
+    responses={
+        200: {
+            "description": "Output artifact headers only; no response body.",
+        },
+    },
+)
 async def head_download_output(
     output_id: int = FastAPIPath(..., ge=1),
     current_user: User = Depends(get_request_user),
@@ -631,7 +670,6 @@ async def head_download_output(
         "mp3": "audio/mpeg",
     }
     mt = media_types.get(row.format.lower(), "application/octet-stream")
-    from fastapi import Response
     headers = {"Content-Type": mt, "Content-Length": str(path.stat().st_size)}
     return Response(status_code=200, headers=headers)
 

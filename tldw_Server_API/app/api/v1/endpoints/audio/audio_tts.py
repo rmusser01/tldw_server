@@ -259,12 +259,22 @@ async def get_tts_service() -> TTSServiceV2:
 @router.post(
     "/speech",
     summary="Generates audio from text input.",
+    response_class=Response,
     dependencies=[
         Depends(check_rate_limit),
         Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="audio.speech", count_as="call")),
     ],
     responses={
         200: {
+            "description": "Generated speech audio bytes or stream",
+            "content": {
+                "audio/aac": {},
+                "audio/flac": {},
+                "audio/L16; rate=24000; channels=1": {},
+                "audio/mpeg": {},
+                "audio/opus": {},
+                "audio/wav": {},
+            },
             "headers": {
                 "X-Audio-Sample-Rate": {
                     "description": "Resolved PCM sample rate in Hz (present when response_format=pcm).",

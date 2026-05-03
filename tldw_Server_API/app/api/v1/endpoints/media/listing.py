@@ -48,6 +48,11 @@ from .....core.DB_Management.media_db.legacy_maintenance import (
 )
 
 router = APIRouter(tags=["Media Management"])
+_NOT_MODIFIED_OPENAPI_RESPONSE = {
+    status.HTTP_304_NOT_MODIFIED: {
+        "description": "Media listing not modified (ETag match).",
+    },
+}
 
 _MEDIA_LISTING_COERCE_EXCEPTIONS = (
     AttributeError,
@@ -166,6 +171,7 @@ def _should_delegate_media_search_to_email(
 @router.get(
     "/",
     summary="List Media (slash)",
+    responses=_NOT_MODIFIED_OPENAPI_RESPONSE,
 )
 async def list_media_endpoint(
     request: Request,
@@ -353,6 +359,7 @@ async def list_media_endpoint(
 @router.get(
     "/trash",
     summary="List trashed media items",
+    responses=_NOT_MODIFIED_OPENAPI_RESPONSE,
 )
 async def list_media_trash_endpoint(
     request: Request,
@@ -591,6 +598,7 @@ async def empty_media_trash_endpoint(
 @router.get(
     "/metadata-search",
     summary="Search media by safe metadata",
+    responses=_NOT_MODIFIED_OPENAPI_RESPONSE,
 )
 async def search_by_metadata(
     request: Request,
@@ -840,6 +848,7 @@ async def _validate_identifier_query(
     "/by-identifier",
     summary="Find media by standard identifier (DOI/PMID/PMCID/arXiv/S2)",
     dependencies=[Depends(_validate_identifier_query)],
+    responses=_NOT_MODIFIED_OPENAPI_RESPONSE,
 )
 async def get_by_identifier(
     request: Request,
@@ -941,6 +950,7 @@ async def get_by_identifier(
     status_code=status.HTTP_200_OK,
     summary="Search Media Items",
     response_model=MediaListResponse,
+    responses=_NOT_MODIFIED_OPENAPI_RESPONSE,
 )
 async def search_media_items(
     request: Request,

@@ -1564,7 +1564,19 @@ async def list_sources(
 
 
 # OPML import/export placed before /sources/{source_id} to avoid route conflicts
-@router.get("/sources/export", summary="Export sources to OPML")
+@router.get(
+    "/sources/export",
+    response_class=Response,
+    responses={
+        200: {
+            "description": "Watchlist sources exported as OPML XML.",
+            "content": {
+                "application/xml": {},
+            },
+        },
+    },
+    summary="Export sources to OPML",
+)
 async def export_sources_opml(
     tag: list[str] | None = Query(None, description="Filter by tag(s)"),
     group: list[int] | None = Query(None, description="Filter by group id(s) (OR semantics)"),
@@ -3704,7 +3716,19 @@ async def list_runs_global(
     )
 
 
-@router.get("/runs/export.csv", response_class=PlainTextResponse, summary="Export runs as CSV (global or by job)")
+@router.get(
+    "/runs/export.csv",
+    response_class=PlainTextResponse,
+    responses={
+        200: {
+            "description": "Watchlist runs exported as CSV.",
+            "content": {
+                "text/csv; charset=utf-8": {},
+            },
+        },
+    },
+    summary="Export runs as CSV (global or by job)",
+)
 async def export_runs_csv(
     scope: str = Query("global", pattern="^(global|job)$"),
     job_id: int | None = Query(None, ge=1),
@@ -4451,7 +4475,19 @@ async def get_run_audio(
 # --------------------
 
 
-@router.get("/runs/{run_id}/tallies.csv", response_class=PlainTextResponse, summary="Export filter tallies for a run as CSV")
+@router.get(
+    "/runs/{run_id}/tallies.csv",
+    response_class=PlainTextResponse,
+    responses={
+        200: {
+            "description": "Watchlist run filter tallies exported as CSV.",
+            "content": {
+                "text/csv; charset=utf-8": {},
+            },
+        },
+    },
+    summary="Export filter tallies for a run as CSV",
+)
 async def export_run_tallies_csv(
     run_id: int = Path(..., ge=1),
     target_user_id: int | None = Query(
@@ -5528,7 +5564,21 @@ async def get_output(
     return output
 
 
-@router.get("/outputs/{output_id}/download", summary="Download rendered output")
+@router.get(
+    "/outputs/{output_id}/download",
+    response_class=Response,
+    responses={
+        200: {
+            "description": "Rendered watchlist output download.",
+            "content": {
+                "audio/mpeg": {},
+                "text/html": {},
+                "text/markdown": {},
+            },
+        },
+    },
+    summary="Download rendered output",
+)
 async def download_output(
     output_id: int = Path(..., ge=1),
     current_user: User = Depends(get_request_user),

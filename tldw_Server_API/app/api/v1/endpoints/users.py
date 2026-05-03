@@ -346,7 +346,15 @@ router = APIRouter(prefix="/users", tags=["users"], responses={404: {"descriptio
 # User Profile Endpoints
 
 
-@router.get("/profile/catalog", response_model=UserProfileCatalogResponse)
+@router.get(
+    "/profile/catalog",
+    response_model=UserProfileCatalogResponse,
+    responses={
+        status.HTTP_304_NOT_MODIFIED: {
+            "description": "User profile catalog not modified (ETag match).",
+        },
+    },
+)
 async def get_user_profile_catalog(
     principal: AuthPrincipal = Depends(get_auth_principal),
     if_none_match: Optional[str] = Header(None),

@@ -3007,8 +3007,21 @@ def _encode_png_with_chara_metadata(
     return png_header + ihdr + text_chunk + idat + iend
 
 
-@router.get("/{character_id:int}/export", response_model=None,
-            summary="Export character in various formats", tags=["characters"])
+@router.get(
+    "/{character_id:int}/export",
+    response_model=None,
+    responses={
+        200: {
+            "description": "Character export as JSON card data or PNG character card.",
+            "content": {
+                "application/json": {},
+                "image/png": {},
+            },
+        },
+    },
+    summary="Export character in various formats",
+    tags=["characters"],
+)
 async def export_character(
     character_id: int = FastAPIPath(..., description="Character ID to export", gt=0),
     format: str = Query("v3", description="Export format (v3, v2, json, png)"),

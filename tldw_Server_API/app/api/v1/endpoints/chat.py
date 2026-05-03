@@ -2238,6 +2238,13 @@ async def _persist_system_message_if_needed(
     ),
     tags=["chat"],
     responses={
+        status.HTTP_200_OK: {
+            "description": "OpenAI-compatible chat completion JSON response or SSE stream.",
+            "content": {
+                "application/json": {},
+                "text/event-stream": {},
+            },
+        },
         status.HTTP_400_BAD_REQUEST: {"description": "Invalid request (e.g., empty messages, text too long, bad parameters)."},
         status.HTTP_401_UNAUTHORIZED: {"description": "Invalid authentication token."},
         status.HTTP_404_NOT_FOUND: {"description": "Resource not found (e.g., character)."},

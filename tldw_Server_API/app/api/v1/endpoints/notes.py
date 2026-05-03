@@ -1509,6 +1509,12 @@ async def export_notes(
 @router.get(
     "/export.csv",
     response_class=StreamingResponse,
+    responses={
+        200: {
+            "description": "Notes CSV export download.",
+            "content": {"text/csv; charset=utf-8": {}},
+        },
+    },
     summary="Export notes as CSV",
     tags=["notes"]
 )
@@ -1610,6 +1616,12 @@ async def export_notes_post(
 @router.post(
     "/export.csv",
     response_class=StreamingResponse,
+    responses={
+        200: {
+            "description": "Selected notes CSV export download.",
+            "content": {"text/csv; charset=utf-8": {}},
+        },
+    },
     summary="Export selected notes as CSV",
     tags=["notes"]
 )
@@ -3170,6 +3182,12 @@ async def list_note_attachments(
 @router.get(
     "/{note_id}/attachments/{file_name}",
     response_class=FileResponse,
+    responses={
+        200: {
+            "description": "Raw note attachment file.",
+            "content": {"application/octet-stream": {}},
+        },
+    },
     summary="Download an attachment for a note",
     tags=["notes"],
 )

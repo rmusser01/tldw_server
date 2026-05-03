@@ -12,6 +12,7 @@ import time
 from typing import Annotated, Any, Optional, Union
 
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, Request, Response, UploadFile, status
+from fastapi.responses import StreamingResponse
 from fastapi.routing import APIRoute
 from loguru import logger
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal, rbac_rate_limit, RequireRole, User
@@ -411,7 +412,18 @@ from tldw_Server_API.app.core.Evaluations.run_state import (
 )
 
 
-@router.get("/embeddings/abtest/{test_id}/events")
+@router.get(
+    "/embeddings/abtest/{test_id}/events",
+    response_class=StreamingResponse,
+    responses={
+        200: {
+            "description": "Server-sent events for A/B test progress.",
+            "content": {
+                "text/event-stream": {},
+            },
+        },
+    },
+)
 async def stream_embeddings_abtest_events(
     test_id: str,
     user_ctx: str = Depends(verify_api_key),
@@ -421,8 +433,6 @@ async def stream_embeddings_abtest_events(
     """SSE stream of progress and updates for an A/B test, using SSEStream for heartbeats and metrics."""
     import asyncio as _aio
     import json as _json
-
-    from fastapi.responses import StreamingResponse
 
     from tldw_Server_API.app.core.Streaming.streams import SSEStream
 
@@ -534,6 +544,15 @@ async def delete_embeddings_abtest(
 
 @router.get(
     "/embeddings/abtest/{test_id}/export",
+    responses={
+        200: {
+            "description": "A/B test export as JSON or CSV.",
+            "content": {
+                "application/json": {},
+                "text/csv": {},
+            },
+        },
+    },
     dependencies=[
         Depends(RequireRole("admin")),
         Depends(rbac_rate_limit("evals.abtest.export")),
@@ -723,7 +742,19 @@ async def health_check():
         )
 
 
-@router.get("/metrics", dependencies=[Depends(require_eval_permissions(EVALS_READ))])
+@router.get(
+    "/metrics",
+    responses={
+        200: {
+            "description": "Evaluation metrics as JSON or Prometheus text.",
+            "content": {
+                "application/json": {},
+                "text/plain; version=0.0.4; charset=utf-8": {},
+            },
+        },
+    },
+    dependencies=[Depends(require_eval_permissions(EVALS_READ))],
+)
 async def get_metrics(
     request: Request,
     user_id: str = Depends(verify_api_key),

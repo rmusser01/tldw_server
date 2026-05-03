@@ -1152,6 +1152,17 @@ async def authorize_openai_oauth(
     "/keys/openai/oauth/callback",
     response_model=OpenAIOAuthCallbackResponse,
     status_code=status.HTTP_200_OK,
+    responses={
+        status.HTTP_303_SEE_OTHER: {
+            "description": "Redirect to the stored OAuth return path when redirect=true.",
+            "headers": {
+                "Location": {
+                    "description": "Stored OAuth return path.",
+                    "schema": {"type": "string"},
+                },
+            },
+        },
+    },
 )
 async def callback_openai_oauth(
     request: Request,

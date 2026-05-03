@@ -4628,6 +4628,13 @@ async def _sse_orchestrator_stream(client: aioredis.Redis):
 @router.get(
     "/embeddings/orchestrator/events",
     summary="SSE: embeddings orchestrator live summary (admin only)",
+    response_class=StreamingResponse,
+    responses={
+        200: {
+            "description": "Embeddings orchestrator event stream.",
+            "content": {"text/event-stream": {}},
+        },
+    },
     dependencies=[Depends(RequirePermission(EMBEDDINGS_ADMIN))],
 )
 async def orchestrator_events(_current_user: User = Depends(get_request_user)):

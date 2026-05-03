@@ -18,7 +18,18 @@ async def _get_storage_service() -> StorageQuotaService:
     return await get_storage_service()
 
 
-@router.get("/files/{file_id}/download")
+@router.get(
+    "/files/{file_id}/download",
+    response_class=FileResponse,
+    responses={
+        200: {
+            "description": "Generated file download.",
+            "content": {
+                "application/octet-stream": {},
+            },
+        },
+    },
+)
 async def download_file(
     file_id: int,
     user: User = Depends(get_request_user),

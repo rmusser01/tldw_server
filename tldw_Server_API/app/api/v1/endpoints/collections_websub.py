@@ -222,7 +222,19 @@ async def websub_status(
 callback_router = APIRouter(prefix="/websub/callback", tags=["collections-websub"])
 
 
-@callback_router.get("/{user_id}/{callback_token}", summary="WebSub hub verification challenge")
+@callback_router.get(
+    "/{user_id}/{callback_token}",
+    response_class=Response,
+    responses={
+        200: {
+            "description": "Plaintext WebSub hub challenge response.",
+            "content": {
+                "text/plain": {},
+            },
+        },
+    },
+    summary="WebSub hub verification challenge",
+)
 async def websub_verify_callback(
     user_id: int = Path(..., ge=1),
     callback_token: str = Path(...),
@@ -263,7 +275,16 @@ async def websub_verify_callback(
     return Response(content=hub_challenge, media_type="text/plain", status_code=200)
 
 
-@callback_router.post("/{user_id}/{callback_token}", summary="WebSub push notification")
+@callback_router.post(
+    "/{user_id}/{callback_token}",
+    summary="WebSub push notification",
+    response_class=Response,
+    responses={
+        200: {
+            "description": "WebSub hub acknowledgement; no response body.",
+        },
+    },
+)
 async def websub_push_callback(
     request: Request,
     background_tasks: BackgroundTasks,

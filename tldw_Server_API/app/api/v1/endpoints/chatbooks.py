@@ -1133,7 +1133,16 @@ async def get_import_job(
         ) from None
 
 
-@router.get("/download/{job_id}")
+@router.get(
+    "/download/{job_id}",
+    response_class=FileResponse,
+    responses={
+        200: {
+            "description": "Exported chatbook zip file",
+            "content": {"application/zip": {}},
+        },
+    },
+)
 async def download_chatbook(
     job_id: str,
     request: Request,

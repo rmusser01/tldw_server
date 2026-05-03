@@ -96,6 +96,18 @@ _AUDIO_TRANSCRIPTIONS_NONCRITICAL_EXCEPTIONS = (
     UnicodeDecodeError,
     ValueError,
 )
+_OPENAI_AUDIO_TRANSCRIPT_RESPONSE_CONTENT = {
+    "application/json": {},
+    "text/plain": {},
+    "text/vtt": {},
+}
+_OPENAI_AUDIO_TRANSCRIPT_RESPONSES = {
+    status.HTTP_200_OK: {
+        "description": "OpenAI-compatible transcript response in JSON, plain text, SRT, or VTT format.",
+        "content": _OPENAI_AUDIO_TRANSCRIPT_RESPONSE_CONTENT,
+    },
+    status.HTTP_402_PAYMENT_REQUIRED: {"description": "Billing limit exceeded. Upgrade plan to continue."},
+}
 
 _AUDIO_UPLOAD_SUFFIX_BY_CONTENT_TYPE: dict[str, str] = {
     "audio/wav": ".wav",
@@ -429,9 +441,7 @@ def _dictation_error_detail(
 @router.post(
     "/transcriptions",
     summary="Transcribes audio into text (OpenAI Compatible)",
-    responses={
-        status.HTTP_402_PAYMENT_REQUIRED: {"description": "Billing limit exceeded. Upgrade plan to continue."},
-    },
+    responses=_OPENAI_AUDIO_TRANSCRIPT_RESPONSES,
     dependencies=[
         Depends(check_rate_limit),
         Depends(
@@ -1333,9 +1343,7 @@ async def create_transcription(
 @router.post(
     "/translations",
     summary="Translates audio into English (OpenAI Compatible)",
-    responses={
-        status.HTTP_402_PAYMENT_REQUIRED: {"description": "Billing limit exceeded. Upgrade plan to continue."},
-    },
+    responses=_OPENAI_AUDIO_TRANSCRIPT_RESPONSES,
     dependencies=[
         Depends(check_rate_limit),
         Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="audio.translations", count_as="call")),

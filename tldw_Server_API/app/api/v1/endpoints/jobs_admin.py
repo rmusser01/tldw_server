@@ -978,7 +978,18 @@ async def list_job_events(
             conn.close()
 
 
-@router.get("/jobs/events/stream")
+@router.get(
+    "/jobs/events/stream",
+    response_class=StreamingResponse,
+    responses={
+        200: {
+            "description": "Server-sent events stream of job outbox events.",
+            "content": {
+                "text/event-stream": {},
+            },
+        },
+    },
+)
 async def stream_job_events(
     after_id: int = 0,
     domain: str | None = None,

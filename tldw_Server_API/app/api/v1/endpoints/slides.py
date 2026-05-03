@@ -2251,6 +2251,18 @@ async def generate_from_rag(
 
 @router.get(
     "/presentations/{presentation_id}/export",
+    response_class=Response,
+    responses={
+        200: {
+            "description": "Presentation export download.",
+            "content": {
+                "application/json": {},
+                "application/pdf": {},
+                "application/zip": {},
+                "text/markdown": {},
+            },
+        },
+    },
     summary="Export presentation",
     dependencies=[Depends(RequirePermission(MEDIA_READ)), Depends(rbac_rate_limit("slides.export"))],
 )

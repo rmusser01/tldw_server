@@ -45,6 +45,7 @@ _EXPORT_MIME_TYPES = {
     "jpg": "image/jpeg",
     "webp": "image/webp",
 }
+_EXPORT_RESPONSE_CONTENT = {content_type: {} for content_type in sorted(set(_EXPORT_MIME_TYPES.values()))}
 
 def _file_artifacts_http_exception(exc: FileArtifactsError) -> HTTPException:
     detail = exc.detail if exc.detail is not None else exc.code
@@ -186,6 +187,13 @@ async def get_file_artifact(
 @router.get(
     "/{file_id}/export",
     summary="Download a file artifact export",
+    response_class=FileResponse,
+    responses={
+        200: {
+            "description": "Raw file artifact export",
+            "content": _EXPORT_RESPONSE_CONTENT,
+        },
+    },
 )
 async def export_file_artifact(
     file_id: int,
