@@ -192,10 +192,10 @@ def test_append_imported_router_spec_propagates_unexpected_import_error(
     assert specs == []
 
 
-def test_append_imported_router_spec_missing_attr_skips_at_registration(
+def test_append_imported_router_spec_skips_static_missing_attr(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Verify missing router attributes are skipped through lazy registration."""
+    """Verify static modules missing router attrs are skipped before registration."""
     from tldw_Server_API.app.api.v1.router_groups.conditional import (
         ImportedRouterSpec,
         append_imported_router_spec,
@@ -215,11 +215,7 @@ def test_append_imported_router_spec_missing_attr_skips_at_registration(
         ),
     )
 
-    app = FastAPI()
-
-    assert len(specs) == 1
-    assert register_router_specs(app, specs) == 0
-    assert "/api/v1/missing-router-attr" not in {route.path for route in app.routes}
+    assert specs == []
 
 
 def test_register_router_specs_respects_route_policy(monkeypatch: pytest.MonkeyPatch) -> None:

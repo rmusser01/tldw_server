@@ -30,18 +30,26 @@ def append_imported_router_spec(
     """Append an optional imported router spec, preserving existing skip logging."""
     try:
         module = importlib.import_module(definition.import_path)
-    except ImportError as e:
+        module_attrs = vars(module)
+        if definition.attr_name in module_attrs:
+            router = module_attrs[definition.attr_name]
+
+            def _router_factory():
+                return router
+        elif "__getattr__" in module_attrs:
+            def _router_factory():
+                try:
+                    return getattr(module, definition.attr_name)
+                except AttributeError as e:
+                    context = f" {definition.skip_context}" if definition.skip_context else ""
+                    logger.debug(f"Skipping {definition.log_name} router{context}: {e}")
+                    raise
+        else:
+            raise AttributeError(definition.attr_name)
+    except (ImportError, AttributeError) as e:
         context = f" {definition.skip_context}" if definition.skip_context else ""
         logger.debug(f"Skipping {definition.log_name} router{context}: {e}")
         return
-
-    def _router_factory():
-        try:
-            return getattr(module, definition.attr_name)
-        except AttributeError as e:
-            context = f" {definition.skip_context}" if definition.skip_context else ""
-            logger.debug(f"Skipping {definition.log_name} router{context}: {e}")
-            raise
 
     specs.append(
         RouterSpec(

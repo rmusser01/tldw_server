@@ -5,7 +5,7 @@ status: Done
 assignee:
   - codex
 created_date: '2026-05-03 21:35'
-updated_date: '2026-05-03 21:39'
+updated_date: '2026-05-03 21:43'
 labels:
   - phase-2
   - router-groups
@@ -49,12 +49,24 @@ Full focused suite: python -m pytest tldw_Server_API/tests/Services/test_router_
 Bandit: python -m bandit -r tldw_Server_API/app/api/v1/router_groups/conditional.py -f json -o /tmp/bandit_pr1242_review_comments.json reported 0 results and 0 errors.
 
 git diff --check passed.
+
+Additional CodeRabbit follow-up: unresolved but outdated inline thread still applies to static modules missing the router attr. Plan is to change the helper to skip static missing attrs at append time while preserving lazy lookup for modules that define module-level __getattr__.
+
+CodeRabbit static attr RED: test_append_imported_router_spec_skips_static_missing_attr failed because a static module without the requested router attr still appended a RouterSpec.
+
+CodeRabbit static attr GREEN/focused: python -m pytest tldw_Server_API/tests/Services/test_router_groups_contract.py -k "append_imported_router_spec" -q passed 5 selected tests after the helper checks static module attrs before appending.
+
+Final full focused suite rerun: python -m pytest tldw_Server_API/tests/Services/test_router_groups_contract.py -q passed 37 tests.
+
+Final Bandit rerun: python -m bandit -r tldw_Server_API/app/api/v1/router_groups/conditional.py -f json -o /tmp/bandit_pr1242_review_comments.json reported 0 results and 0 errors.
+
+Final git diff --check passed.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Addressed PR #1242 review feedback by replacing the broad helper-level exception catch with explicit optional import handling. ImportError and ModuleNotFoundError still skip unavailable optional routers, AttributeError from lazy router lookup is logged and re-raised into the existing registration skip path, and unrelated import-time runtime failures now propagate. Added docstrings and regression coverage for optional import misses, unexpected import failures, and lazy missing-attribute registration behavior.
+Addressed PR #1242 review feedback by replacing the broad helper-level exception catch with explicit optional import handling. ImportError and ModuleNotFoundError skip unavailable optional modules; static modules missing the requested router attr are skipped before appending; modules with module-level __getattr__ keep lazy attr lookup; and unrelated import-time runtime failures now propagate. Added docstrings and regression coverage for optional import misses, unexpected import failures, static missing attrs, and dynamic lazy attr lookup.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
