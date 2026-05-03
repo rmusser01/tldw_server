@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest"
 
-import { extractFallbackFieldNamesFromSource } from "../../scripts/verify-openapi-client-paths.mjs"
+import {
+  extractFallbackFieldNamesFromFallbackSource,
+  extractFallbackFieldNamesFromSource,
+} from "../../scripts/verify-openapi-client-paths.mjs"
 
 describe("extractFallbackFieldNamesFromSource", () => {
   it("parses typed fallback declarations without treating annotation brackets as the array", () => {
@@ -15,6 +18,23 @@ describe("extractFallbackFieldNamesFromSource", () => {
     `
 
     expect(extractFallbackFieldNamesFromSource(src)).toEqual([
+      "typed-field",
+      "second-field",
+    ])
+  })
+
+  it("exercises the fallback-only parser for typed fallback declarations", () => {
+    const src = `
+      export const MEDIA_ADD_SCHEMA_FALLBACK: Array<{
+        name: string
+        enum?: unknown[]
+      }> = [
+        { name: "typed-field" },
+        { name: 'second-field' }
+      ]
+    `
+
+    expect(extractFallbackFieldNamesFromFallbackSource(src)).toEqual([
       "typed-field",
       "second-field",
     ])

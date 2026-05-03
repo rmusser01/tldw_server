@@ -465,10 +465,7 @@ function extractClientPaths() {
   return [...new Set(paths)]
 }
 
-export function extractFallbackFieldNamesFromSource(src) {
-  const astNames = extractFallbackFieldNamesFromTypeScript(src)
-  if (astNames.length > 0) return astNames
-
+export function extractFallbackFieldNamesFromFallbackSource(src) {
   const marker = /\bexport\s+const\s+MEDIA_ADD_SCHEMA_FALLBACK\b/m
   const match = marker.exec(src)
   if (!match) return []
@@ -490,6 +487,13 @@ export function extractFallbackFieldNamesFromSource(src) {
   }
 
   return names
+}
+
+export function extractFallbackFieldNamesFromSource(src) {
+  const astNames = extractFallbackFieldNamesFromTypeScript(src)
+  if (astNames.length > 0) return astNames
+
+  return extractFallbackFieldNamesFromFallbackSource(src)
 }
 
 function extractFallbackFieldNames() {

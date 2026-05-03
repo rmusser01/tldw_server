@@ -751,6 +751,63 @@ class ResearchChatContext(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class ChatCompletionResponseChoice(BaseModel):
+    """One non-streaming chat completion choice in the OpenAI-compatible response."""
+
+    index: Optional[int] = Field(default=None, description="Zero-based choice index.")
+    message: Optional[dict[str, Any]] = Field(
+        default=None,
+        description="Assistant message payload returned by the selected provider.",
+    )
+    finish_reason: Optional[str] = Field(
+        default=None,
+        description="Provider-reported completion stop reason.",
+    )
+    logprobs: Optional[Any] = Field(
+        default=None,
+        description="Provider-specific log probability payload when requested.",
+    )
+
+    model_config = ConfigDict(extra="allow")
+
+
+class ChatCompletionUsage(BaseModel):
+    """Token usage summary for a non-streaming chat completion response."""
+
+    prompt_tokens: Optional[int] = Field(default=None, ge=0)
+    completion_tokens: Optional[int] = Field(default=None, ge=0)
+    total_tokens: Optional[int] = Field(default=None, ge=0)
+
+    model_config = ConfigDict(extra="allow")
+
+
+class ChatCompletionResponse(BaseModel):
+    """Document the non-streaming OpenAI-compatible chat completion response shape."""
+
+    id: Optional[str] = Field(default=None, description="Provider completion identifier.")
+    object: Optional[str] = Field(default=None, description="OpenAI-compatible object type.")
+    created: Optional[int] = Field(default=None, description="Unix timestamp for response creation.")
+    model: Optional[str] = Field(default=None, description="Model used for generation.")
+    choices: list[ChatCompletionResponseChoice] = Field(
+        default_factory=list,
+        description="Completion choices returned by the selected provider.",
+    )
+    usage: Optional[ChatCompletionUsage] = Field(
+        default=None,
+        description="Token usage reported by the selected provider.",
+    )
+    tldw_conversation_id: Optional[str] = Field(
+        default=None,
+        description="Conversation identifier persisted by tldw_server when chat history is enabled.",
+    )
+    meta: Optional[dict[str, Any]] = Field(
+        default=None,
+        description="tldw_server metadata such as persona diagnostics.",
+    )
+
+    model_config = ConfigDict(extra="allow")
+
+
 # --- Main Request Model ---
 class ChatCompletionRequest(BaseModel):
     """
