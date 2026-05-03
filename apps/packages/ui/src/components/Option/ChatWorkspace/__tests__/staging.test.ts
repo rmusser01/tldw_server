@@ -19,13 +19,30 @@ const source = (overrides: Partial<WorkspaceSource> = {}): WorkspaceSource => ({
 
 describe("chat workspace staging", () => {
   it("builds explicit staged source metadata from a workspace source", () => {
-    expect(buildStagedSourceFromWorkspaceSource(source(), "Default workspace")).toMatchObject({
+    expect(
+      buildStagedSourceFromWorkspaceSource(source(), "Default workspace")
+    ).toMatchObject({
       sourceId: "source-1",
       mediaId: 101,
       title: "Operator Notes",
       type: "document",
       scopeLabel: "Default workspace",
       availability: "ready"
+    })
+
+    expect(
+      buildStagedSourceFromWorkspaceSource(
+        source({
+          mediaId: 0,
+          status: "error",
+          statusMessage: "Indexing failed"
+        }),
+        "Default workspace"
+      )
+    ).toMatchObject({
+      mediaId: null,
+      availability: "error",
+      statusMessage: "Indexing failed"
     })
   })
 
@@ -41,17 +58,40 @@ describe("chat workspace staging", () => {
   })
 
   it("formats insert text and leaves sending to the user", () => {
-    const staged = [buildStagedSourceFromWorkspaceSource(source(), "Default workspace")]
+    const staged = [
+      buildStagedSourceFromWorkspaceSource(source(), "Default workspace")
+    ]
+    expect(formatStagedSourceInsertText([])).toBe("")
     expect(formatStagedSourceInsertText(staged)).toContain("Context sources")
     expect(formatStagedSourceInsertText(staged)).toContain("Operator Notes")
   })
 
   it("returns only ready positive media ids for structured RAG", () => {
     const ready = buildStagedSourceFromWorkspaceSource(source(), "A")
+    const duplicateReady = buildStagedSourceFromWorkspaceSource(
+      source({ id: "source-duplicate", mediaId: 101 }),
+      "A"
+    )
+    const zeroReady = buildStagedSourceFromWorkspaceSource(
+      source({ id: "source-zero", mediaId: 0 }),
+      "A"
+    )
+    const fractionalReady = buildStagedSourceFromWorkspaceSource(
+      source({ id: "source-fractional", mediaId: 101.5 }),
+      "A"
+    )
     const error = buildStagedSourceFromWorkspaceSource(
       source({ id: "source-2", mediaId: 202, status: "error" }),
       "A"
     )
-    expect(getReadyStagedMediaIds([ready, error])).toEqual([101])
+    expect(
+      getReadyStagedMediaIds([
+        ready,
+        duplicateReady,
+        zeroReady,
+        fractionalReady,
+        error
+      ])
+    ).toEqual([101])
   })
 })
