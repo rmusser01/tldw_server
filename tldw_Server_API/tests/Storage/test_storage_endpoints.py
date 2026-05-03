@@ -18,6 +18,7 @@ from unittest.mock import AsyncMock
 from datetime import datetime, timezone
 
 from tldw_Server_API.app.api.v1.endpoints import storage as storage_endpoints
+from tldw_Server_API.app.api.v1.endpoints import storage_admin_quotas
 from tldw_Server_API.app.api.v1.schemas.storage_schemas import SetQuotaRequest
 from tldw_Server_API.app.core.AuthNZ.exceptions import StorageError
 
@@ -929,7 +930,7 @@ class TestAdminQuotaEndpoints:
         async def _get_broken_service():
             return _BrokenStorageService()
 
-        monkeypatch.setattr(storage_endpoints, "_get_service", _get_broken_service)
+        monkeypatch.setattr(storage_admin_quotas, "_get_storage_service", _get_broken_service)
 
         with pytest.raises(HTTPException) as exc_info:
             await storage_endpoints.set_user_quota(

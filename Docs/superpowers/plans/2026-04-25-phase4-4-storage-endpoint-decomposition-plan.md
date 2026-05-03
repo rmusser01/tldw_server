@@ -234,7 +234,7 @@ Admin quota route requirements:
 Notes:
 
 - Admin quota routes were split into `storage_admin_quotas.py` as a conservative JSON-only tranche.
-- Preserved the `storage._get_service` monkeypatch seam through dynamic sidecar service resolution.
+- Admin quota tests now patch the sidecar service dependency directly, avoiding a circular import back into `storage.py`.
 - Re-exported admin quota handlers and `require_storage_admin` from `storage.py` for direct import compatibility.
 - Added direct compatibility coverage for storage/admin sidecar re-exports.
 - Focused storage/admin suite passed after admin route movement: `57 passed, 6 warnings`.

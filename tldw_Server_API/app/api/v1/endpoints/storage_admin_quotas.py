@@ -10,23 +10,20 @@ from tldw_Server_API.app.api.v1.endpoints.storage_helpers import (
 )
 from tldw_Server_API.app.api.v1.schemas.storage_schemas import (
     OrgQuotaResponse,
-    QuotaStatus,
     SetQuotaRequest,
     SetQuotaResponse,
     TeamQuotaResponse,
 )
 from tldw_Server_API.app.core.AuthNZ.exceptions import StorageError, UserNotFoundError
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
-from tldw_Server_API.app.services.storage_quota_service import StorageQuotaService
+from tldw_Server_API.app.services.storage_quota_service import StorageQuotaService, get_storage_service
 
 router = APIRouter()
 
 
 async def _get_storage_service() -> StorageQuotaService:
-    """Resolve the storage service through storage.py for legacy monkeypatch seams."""
-    from tldw_Server_API.app.api.v1.endpoints import storage as storage_endpoint
-
-    return await storage_endpoint._get_service()
+    """Get initialized storage quota service."""
+    return await get_storage_service()
 
 
 async def require_storage_admin(principal: AuthPrincipal = Depends(get_auth_principal)) -> AuthPrincipal:
@@ -50,17 +47,18 @@ async def set_user_quota(
 
     try:
         result = await service.set_user_quota(user_id, request.quota_mb)
+        status_data = {
+            "quota_mb": result.get("storage_quota_mb"),
+            "used_mb": result.get("storage_used_mb", 0.0),
+            "remaining_mb": result.get("available_mb", 0.0),
+            "usage_pct": result.get("usage_percentage", 0.0),
+            "at_soft_limit": result.get("usage_percentage", 0) >= request.soft_limit_pct,
+            "at_hard_limit": result.get("usage_percentage", 0) >= request.hard_limit_pct,
+            "has_quota": True,
+        }
         return SetQuotaResponse(
             success=True,
-            quota=QuotaStatus(
-                quota_mb=result.get("storage_quota_mb"),
-                used_mb=result.get("storage_used_mb", 0.0),
-                remaining_mb=result.get("available_mb", 0.0),
-                usage_pct=result.get("usage_percentage", 0.0),
-                at_soft_limit=result.get("usage_percentage", 0) >= request.soft_limit_pct,
-                at_hard_limit=result.get("usage_percentage", 0) >= request.hard_limit_pct,
-                has_quota=True,
-            ),
+            quota=_to_quota_status(status_data),
         )
     except UserNotFoundError:
         raise HTTPException(status_code=404, detail="User not found") from None
