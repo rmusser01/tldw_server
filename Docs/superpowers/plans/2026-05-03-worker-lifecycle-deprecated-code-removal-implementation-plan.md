@@ -622,7 +622,7 @@ git commit -m "refactor: prune legacy lifecycle handle plumbing"
 - Modify: `Docs/superpowers/plans/2026-05-03-worker-lifecycle-deprecated-code-removal-implementation-plan.md` only for checklist status if this plan is used as execution tracker
 - GitHub issue: `https://github.com/rmusser01/tldw_server/issues/1114`
 
-- [ ] **Step 1: Run focused lifecycle tests**
+- [x] **Step 1: Run focused lifecycle tests**
 
 Run:
 
@@ -645,7 +645,7 @@ python -m pytest \
 
 Expected: pass.
 
-- [ ] **Step 2: Run lint and security checks on touched Python files**
+- [x] **Step 2: Run lint and security checks on touched Python files**
 
 Run:
 
@@ -661,7 +661,7 @@ Expected:
 - Bandit JSON has no new findings in touched production files.
 - `git diff --check` passes.
 
-- [ ] **Step 3: Update issue #1114 with final migration/deprecation table**
+- [x] **Step 3: Update issue #1114 with final migration/deprecation table**
 
 Use the ownership matrix to post a concise closeout comment:
 
@@ -678,7 +678,7 @@ The comment should include:
 - retained compatibility state, if any
 - follow-up issue link, if any
 
-- [ ] **Step 4: Commit final docs or closeout updates**
+- [x] **Step 4: Commit final docs or closeout updates**
 
 If any docs or plan checklist statuses changed:
 
