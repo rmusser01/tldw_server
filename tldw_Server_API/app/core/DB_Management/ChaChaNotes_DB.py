@@ -16852,9 +16852,17 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if target_deck_id is not None and parent_id == target_deck_id:
             raise InputError("Deck cannot be its own parent")  # noqa: TRY003
 
+        if self.backend_type == BackendType.POSTGRESQL:
+            parent_lookup_query = (
+                "SELECT id, parent_deck_id FROM decks WHERE id = ? AND deleted = 0 FOR UPDATE"
+            )
+            ancestor_lookup_query = "SELECT parent_deck_id FROM decks WHERE id = ? FOR UPDATE"
+        else:
+            parent_lookup_query = "SELECT id, parent_deck_id FROM decks WHERE id = ? AND deleted = 0"
+            ancestor_lookup_query = "SELECT parent_deck_id FROM decks WHERE id = ?"
         parent_row = self._coerce_mapping_row(
             conn.execute(
-                "SELECT id, parent_deck_id FROM decks WHERE id = ? AND deleted = 0",
+                parent_lookup_query,
                 (parent_id,),
             ).fetchone()
         )
@@ -16872,7 +16880,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             seen.add(current_parent_id)
             row = self._coerce_mapping_row(
                 conn.execute(
-                    "SELECT parent_deck_id FROM decks WHERE id = ?",
+                    ancestor_lookup_query,
                     (current_parent_id,),
                 ).fetchone()
             )
