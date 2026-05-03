@@ -728,6 +728,15 @@ async def get_data_table(
 @router.get(
     "/{table_uuid}/export",
     response_model=DataTableExportResponse,
+    responses={
+        200: {
+            "description": "Data table export metadata or direct download content.",
+            "content": {
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {},
+                "text/csv": {},
+            },
+        },
+    },
     summary="Export a data table",
     dependencies=[
         Depends(RequirePermission(MEDIA_READ)),

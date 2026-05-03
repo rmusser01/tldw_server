@@ -642,6 +642,13 @@ async def list_media_ingest_jobs(
     summary="Stream media ingest job events (SSE)",
     tags=["Media Ingestion Jobs"],
     dependencies=[Depends(check_rate_limit)],
+    response_class=StreamingResponse,
+    responses={
+        status.HTTP_200_OK: {
+            "description": "Server-sent events stream of media ingest job updates",
+            "content": {"text/event-stream": {}},
+        },
+    },
 )
 async def stream_media_ingest_job_events(
     request: Request,

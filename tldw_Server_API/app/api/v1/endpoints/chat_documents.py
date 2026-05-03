@@ -77,6 +77,22 @@ _CHAT_DOCS_NONCRITICAL_EXCEPTIONS = (
 @router.post(
     "/documents/generate",
     response_model=Union[GenerateDocumentResponse, AsyncGenerationResponse],
+    responses={
+        200: {
+            "description": "Generated document result, async job metadata, or SSE stream.",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "oneOf": [
+                            {"$ref": "#/components/schemas/GenerateDocumentResponse"},
+                            {"$ref": "#/components/schemas/AsyncGenerationResponse"},
+                        ]
+                    }
+                },
+                "text/event-stream": {},
+            },
+        },
+    },
     summary="Generate a document from conversation",
     description="Generate a document using conversation content and a template. May return async job metadata.",
     tags=["chat-documents"],

@@ -4628,6 +4628,13 @@ async def _sse_orchestrator_stream(client: aioredis.Redis):
 @router.get(
     "/embeddings/orchestrator/events",
     summary="SSE: embeddings orchestrator live summary (admin only)",
+    response_class=StreamingResponse,
+    responses={
+        200: {
+            "description": "Embeddings orchestrator event stream.",
+            "content": {"text/event-stream": {}},
+        },
+    },
     dependencies=[Depends(RequirePermission(EMBEDDINGS_ADMIN))],
 )
 async def orchestrator_events(_current_user: User = Depends(get_request_user)):
@@ -4696,8 +4703,10 @@ async def orchestrator_events(_current_user: User = Depends(get_request_user)):
                         await asyncio.gather(producer, return_exceptions=True)
                 raise
             else:
-                # Normal shutdown: ensure producer completes without forced cancel
+                # Normal shutdown: the producer loop is long-running, so cancel before awaiting it.
                 if not producer.done():
+                    with suppress(_EMBEDDINGS_NONCRITICAL_EXCEPTIONS):
+                        producer.cancel()
                     with suppress(_EMBEDDINGS_NONCRITICAL_EXCEPTIONS):
                         await asyncio.gather(producer, return_exceptions=True)
         finally:

@@ -281,6 +281,13 @@ async def delete_voice(
 @router.post(
     "/voices/{voice_id}/preview",
     summary="Generate voice preview",
+    response_class=StreamingResponse,
+    responses={
+        status.HTTP_200_OK: {
+            "description": "MP3 audio stream for a custom voice preview",
+            "content": {"audio/mpeg": {}},
+        },
+    },
     dependencies=[
         Depends(check_rate_limit),
         Depends(

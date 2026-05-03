@@ -94,6 +94,32 @@ from tldw_Server_API.app.core.Utils.pydantic_compat import model_dump_compat
 
 router = APIRouter()
 
+
+def _raw_passthrough_responses(*media_types: str) -> dict[int, dict[str, Any]]:
+    return {
+        200: {
+            "description": "Raw upstream provider response.",
+            "content": {media_type: {} for media_type in media_types},
+        },
+    }
+
+
+_RAW_JSON_XML_HTML_RESPONSES = _raw_passthrough_responses("application/json", "application/xml", "text/html")
+_RAW_JSON_CSV_RESPONSES = _raw_passthrough_responses("application/json", "text/csv")
+_RAW_JSON_XML_RESPONSES = _raw_passthrough_responses("application/json", "application/xml")
+_RAW_XML_RESPONSES = _raw_passthrough_responses("application/xml")
+_RAW_JSON_RESPONSES = _raw_passthrough_responses("application/json")
+_RAW_PDF_RESPONSES = _raw_passthrough_responses("application/pdf")
+_RAW_HAL_RESPONSES = _raw_passthrough_responses(
+    "application/json",
+    "application/xml",
+    "application/octet-stream",
+    "text/csv",
+    "text/plain",
+    "application/atom+xml",
+    "application/rss+xml",
+)
+
 _PROVIDER_TIMEOUT_DETAIL = "Upstream provider request timed out"
 _PROVIDER_ERROR_DETAIL = "Upstream provider request failed"
 _PROVIDER_UNEXPECTED_DETAIL = "Unexpected provider error"
@@ -415,6 +441,8 @@ async def paper_search_medrxiv_by_doi(
 @router.get(
     "/medrxiv/raw/details",
     summary="Raw passthrough for MedRxiv details endpoint (json|xml|html)",
+    response_class=Response,
+    responses=_RAW_JSON_XML_HTML_RESPONSES,
     tags=["paper-search"],
 )
 async def medrxiv_raw_details(
@@ -451,6 +479,8 @@ async def medrxiv_raw_details(
 @router.get(
     "/medrxiv/raw/pubs",
     summary="Raw passthrough for MedRxiv pubs endpoint (json|csv)",
+    response_class=Response,
+    responses=_RAW_JSON_CSV_RESPONSES,
     tags=["paper-search"],
 )
 async def medrxiv_raw_pubs(
@@ -485,6 +515,8 @@ async def medrxiv_raw_pubs(
 @router.get(
     "/medrxiv/raw/pub",
     summary="Raw passthrough for MedRxiv pub endpoint (json|csv)",
+    response_class=Response,
+    responses=_RAW_JSON_CSV_RESPONSES,
     tags=["paper-search"],
 )
 async def medrxiv_raw_pub(
@@ -753,6 +785,8 @@ from fastapi.responses import Response, StreamingResponse  # noqa: E402, F811
 @router.get(
     "/pmc-oa/fetch-pdf",
     summary="Fetch PMC PDF by PMCID and return as attachment",
+    response_class=StreamingResponse,
+    responses=_RAW_PDF_RESPONSES,
     tags=["paper-search"],
 )
 async def pmc_oa_fetch_pdf(pmcid: str = Query(..., description="PMCID numeric or with 'PMC' prefix")):
@@ -2128,6 +2162,8 @@ async def paper_search_biorxiv_usage(
 @router.get(
     "/biorxiv/raw/details",
     summary="Raw passthrough for BioRxiv details endpoint (supports json/xml/html)",
+    response_class=Response,
+    responses=_RAW_JSON_XML_HTML_RESPONSES,
     tags=["paper-search"],
 )
 async def biorxiv_raw_details(
@@ -2165,6 +2201,8 @@ async def biorxiv_raw_details(
 @router.get(
     "/biorxiv/raw/pubs",
     summary="Raw passthrough for BioRxiv pubs endpoint (supports json/csv)",
+    response_class=Response,
+    responses=_RAW_JSON_CSV_RESPONSES,
     tags=["paper-search"],
 )
 async def biorxiv_raw_pubs(
@@ -2200,6 +2238,8 @@ async def biorxiv_raw_pubs(
 @router.get(
     "/biorxiv/raw/pub",
     summary="Raw passthrough for BioRxiv pub endpoint (supports json/csv)",
+    response_class=Response,
+    responses=_RAW_JSON_CSV_RESPONSES,
     tags=["paper-search"],
 )
 async def biorxiv_raw_pub(
@@ -2231,6 +2271,8 @@ async def biorxiv_raw_pub(
 @router.get(
     "/biorxiv/raw/funder",
     summary="Raw passthrough for BioRxiv funder endpoint (supports json/xml)",
+    response_class=Response,
+    responses=_RAW_JSON_XML_RESPONSES,
     tags=["paper-search"],
 )
 async def biorxiv_raw_funder(
@@ -2268,6 +2310,8 @@ async def biorxiv_raw_funder(
 @router.get(
     "/biorxiv/raw/reports/summary",
     summary="Raw passthrough for BioRxiv summary (supports json/csv)",
+    response_class=Response,
+    responses=_RAW_JSON_CSV_RESPONSES,
     tags=["paper-search"],
 )
 async def biorxiv_raw_summary(
@@ -2286,6 +2330,8 @@ async def biorxiv_raw_summary(
 @router.get(
     "/biorxiv/raw/reports/usage",
     summary="Raw passthrough for BioRxiv usage (supports json/csv)",
+    response_class=Response,
+    responses=_RAW_JSON_CSV_RESPONSES,
     tags=["paper-search"],
 )
 async def biorxiv_raw_usage(
@@ -3609,6 +3655,8 @@ async def chemrxiv_version():
 @router.get(
     "/chemrxiv/oai",
     summary="ChemRxiv OAI-PMH passthrough (XML)",
+    response_class=Response,
+    responses=_RAW_XML_RESPONSES,
     tags=["paper-search"],
 )
 async def chemrxiv_oai(
@@ -3666,6 +3714,8 @@ async def iacr_conf(
 @router.get(
     "/iacr/conf/raw",
     summary="IACR conference metadata raw (download)",
+    response_class=Response,
+    responses=_RAW_JSON_RESPONSES,
     tags=["paper-search"],
 )
 async def iacr_conf_raw(
@@ -4015,6 +4065,8 @@ async def osf_ingest(
 @router.get(
     "/osf/raw",
     summary="Raw passthrough for OSF preprints list (JSON)",
+    response_class=Response,
+    responses=_RAW_JSON_RESPONSES,
     tags=["paper-search"],
 )
 async def osf_raw(
@@ -4047,6 +4099,8 @@ async def osf_raw(
 @router.get(
     "/osf/raw/by-id",
     summary="Raw passthrough for a single OSF preprint (JSON)",
+    response_class=Response,
+    responses=_RAW_JSON_RESPONSES,
     tags=["paper-search"],
 )
 async def osf_raw_by_id(osf_id: str = Query(..., min_length=3)):
@@ -4152,6 +4206,8 @@ async def zenodo_by_doi(doi: str = Query(..., min_length=3)):
 @router.get(
     "/zenodo/oai",
     summary="Zenodo OAI-PMH passthrough (XML)",
+    response_class=Response,
+    responses=_RAW_XML_RESPONSES,
     tags=["paper-search"],
 )
 async def zenodo_oai(
@@ -4439,6 +4495,8 @@ async def figshare_by_doi(doi: str = Query(..., min_length=3)):
 @router.get(
     "/figshare/oai",
     summary="Figshare OAI-PMH passthrough (XML)",
+    response_class=Response,
+    responses=_RAW_XML_RESPONSES,
     tags=["paper-search"],
 )
 async def figshare_oai(
@@ -4828,6 +4886,8 @@ async def hal_search(
 @router.get(
     "/hal/raw",
     summary="HAL raw passthrough (wt=json|xml|xml-tei|csv|bibtex|endnote|atom|rss)",
+    response_class=Response,
+    responses=_RAW_HAL_RESPONSES,
     tags=["paper-search"],
 )
 async def hal_raw(

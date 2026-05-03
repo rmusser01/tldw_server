@@ -1728,7 +1728,14 @@ async def resume_batch_endpoint(
         Depends(check_rate_limit),
         Depends(RequirePermission(MEDIA_READ)),
         Depends(require_within_limit(LimitCategory.RAG_QUERIES_DAY, 1)),
-    ]
+    ],
+    response_class=StreamingResponse,
+    responses={
+        200: {
+            "description": "NDJSON stream of unified RAG search events",
+            "content": {"application/x-ndjson": {}},
+        },
+    },
 )
 async def unified_search_stream_endpoint(
     request_raw: Request,

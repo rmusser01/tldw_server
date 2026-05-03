@@ -119,9 +119,17 @@ async def build_prometheus_metrics_response() -> Response:
 
 # Note: Avoid path conflict with the JSON metrics in main.py (`/api/v1/metrics`).
 # Expose text format under `/api/v1/metrics/text`.
-@router.get("/metrics/text",
-            summary="Get metrics in Prometheus text format",
-            response_class=Response)
+@router.get(
+    "/metrics/text",
+    summary="Get metrics in Prometheus text format",
+    response_class=Response,
+    responses={
+        status.HTTP_200_OK: {
+            "description": "Prometheus text-format metrics",
+            "content": {"text/plain; version=0.0.4": {}},
+        },
+    },
+)
 async def get_prometheus_metrics() -> Response:
     """
     Export all metrics in Prometheus text format.

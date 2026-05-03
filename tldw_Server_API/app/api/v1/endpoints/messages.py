@@ -612,6 +612,15 @@ async def _handle_count_tokens(
     "/messages",
     summary="Anthropic-compatible Messages API",
     dependencies=[Depends(check_rate_limit)],
+    responses={
+        status.HTTP_200_OK: {
+            "description": "Anthropic-compatible messages JSON response or SSE stream.",
+            "content": {
+                "application/json": {},
+                "text/event-stream": {},
+            },
+        },
+    },
 )
 async def create_messages(
     request: Request,
@@ -634,6 +643,15 @@ async def create_messages(
     "/v1/messages",
     summary="Anthropic-compatible Messages API",
     dependencies=[Depends(check_rate_limit)],
+    responses={
+        status.HTTP_200_OK: {
+            "description": "Anthropic-compatible messages JSON response or SSE stream.",
+            "content": {
+                "application/json": {},
+                "text/event-stream": {},
+            },
+        },
+    },
 )
 async def create_messages_public(
     request: Request,

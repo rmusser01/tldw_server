@@ -2501,6 +2501,13 @@ async def acp_session_events(
 
 @router.get(
     "/sessions/{session_id}/events/stream",
+    response_class=StreamingResponse,
+    responses={
+        200: {
+            "description": "ACP session event stream.",
+            "content": {"text/event-stream": {}},
+        },
+    },
     dependencies=[Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="acp.sessions.read"))],
 )
 async def acp_session_events_stream(

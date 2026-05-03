@@ -930,7 +930,18 @@ async def upload_flashcard_asset(
     )
 
 
-@router.get("/assets/{asset_uuid}/content")
+@router.get(
+    "/assets/{asset_uuid}/content",
+    response_class=Response,
+    responses={
+        200: {
+            "description": "Flashcard asset content.",
+            "content": {
+                "application/octet-stream": {},
+            },
+        },
+    },
+)
 def get_flashcard_asset_content(
     asset_uuid: str,
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
@@ -2318,7 +2329,21 @@ async def generate_flashcards(payload: FlashcardGenerateRequest):
         raise HTTPException(status_code=500, detail="Failed to generate flashcards") from e
 
 
-@router.get("/export")
+@router.get(
+    "/export",
+    response_class=StreamingResponse,
+    responses={
+        200: {
+            "description": "Flashcard export download.",
+            "content": {
+                "application/apkg": {},
+                "application/json; charset=utf-8": {},
+                "text/csv; charset=utf-8": {},
+                "text/tab-separated-values; charset=utf-8": {},
+            },
+        },
+    },
+)
 def export_flashcards(
     deck_id: Optional[int] = None,
     workspace_id: Optional[str] = None,

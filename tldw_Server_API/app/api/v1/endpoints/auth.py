@@ -375,6 +375,17 @@ async def _issue_multi_user_tokens(
 @router.get(
     "/federation/{provider_slug}/login",
     dependencies=[Depends(check_auth_rate_limit)],
+    responses={
+        status.HTTP_307_TEMPORARY_REDIRECT: {
+            "description": "Redirect to the identity provider authorization URL.",
+            "headers": {
+                "Location": {
+                    "description": "Identity provider authorization URL.",
+                    "schema": {"type": "string"},
+                },
+            },
+        },
+    },
 )
 async def federation_login(
     provider_slug: str,

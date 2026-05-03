@@ -4580,6 +4580,12 @@ async def prompt_assembly_preview(
         "Streaming: when stream=true, response is sent as SSE and assistant content is NOT persisted,"
         " even if save_to_db=true. Use non-streaming to persist, or persist manually after streaming."
     ),
+    responses={
+        200: {
+            "description": "Character chat completion response or SSE stream.",
+            "content": {"text/event-stream": {}},
+        },
+    },
     tags=["Chat Sessions"],
 )
 async def character_chat_completion(

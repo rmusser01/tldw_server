@@ -403,7 +403,20 @@ async def import_skill_from_file(
         ) from e
 
 
-@router.get("/{skill_name}/export")
+@router.get(
+    "/{skill_name}/export",
+    response_class=Response,
+    responses={
+        status.HTTP_200_OK: {
+            "description": "Skill zip archive",
+            "content": {
+                "application/zip": {
+                    "schema": {"type": "string", "format": "binary"},
+                },
+            },
+        },
+    },
+)
 async def export_skill(
     skill_name: str,
     service: SkillsService = Depends(get_skills_service),

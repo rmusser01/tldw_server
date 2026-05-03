@@ -54,6 +54,11 @@ def _is_test_mode() -> bool:
     "/{media_id:int}",
     status_code=status.HTTP_200_OK,
     summary="Get Media Item Details",
+    responses={
+        status.HTTP_304_NOT_MODIFIED: {
+            "description": "Media item not modified (ETag match).",
+        },
+    },
 )
 async def get_media_item(
     request: Request,

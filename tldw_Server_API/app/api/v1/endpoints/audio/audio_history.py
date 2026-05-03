@@ -393,6 +393,8 @@ async def update_tts_history_entry(
 @router.delete(
     "/history/{history_id}",
     summary="Delete a TTS history entry (soft delete).",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_class=Response,
     dependencies=[
         Depends(check_rate_limit),
         Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="audio.history", count_as="call")),

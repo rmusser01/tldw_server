@@ -1970,8 +1970,35 @@ async def _guard_sandbox_artifact_path(request: Request, call_next):
     return await call_next(request)
 
 
+_OPENAPI_HTTP_METHODS = {"get", "post", "put", "patch", "delete", "options", "head", "trace"}
+
+
+def _ensure_openapi_operation_tags_declared(openapi_schema: dict[str, Any]) -> None:
+    tags = openapi_schema.setdefault("tags", [])
+    declared_tags = {
+        tag["name"]
+        for tag in tags
+        if isinstance(tag, dict) and isinstance(tag.get("name"), str)
+    }
+    operation_tags: set[str] = set()
+
+    for operations in openapi_schema.get("paths", {}).values():
+        if not isinstance(operations, dict):
+            continue
+        for method, operation in operations.items():
+            if method.lower() not in _OPENAPI_HTTP_METHODS or not isinstance(operation, dict):
+                continue
+            op_tags = operation.get("tags", [])
+            if isinstance(op_tags, (list, tuple, set)):
+                operation_tags.update(tag for tag in op_tags if isinstance(tag, str))
+
+    for missing_tag in sorted(operation_tags - declared_tags):
+        tags.append({"name": missing_tag})
+
+
 # Add global security schemes, servers, and branding to the generated OpenAPI schema
 def custom_openapi():
+    # All schema normalization below is covered by FastAPI's OpenAPI schema cache.
     if app.openapi_schema:
         return app.openapi_schema
 
@@ -1982,6 +2009,7 @@ def custom_openapi():
         routes=app.routes,
         tags=OPENAPI_TAGS,
     )
+    _ensure_openapi_operation_tags_declared(openapi_schema)
 
     # Servers for common deployments
     openapi_schema["servers"] = [
@@ -2458,7 +2486,21 @@ async def favicon():
     return FileResponse(FAVICON_PATH, media_type="image/x-icon")
 
 
-@app.get("/", openapi_extra={"security": []})
+@app.get(
+    "/",
+    openapi_extra={"security": []},
+    responses={
+        _starlette_status.HTTP_307_TEMPORARY_REDIRECT: {
+            "description": "Redirect to the first-time setup page when setup is required.",
+            "headers": {
+                "Location": {
+                    "description": "Setup page URL.",
+                    "schema": {"type": "string"},
+                },
+            },
+        },
+    },
+)
 async def root():
     try:
         if needs_setup():
@@ -2705,19 +2747,25 @@ async def readiness_alias(request: Request) -> JSONResponse:
     return await readiness_check(request)
 
 
+def _add_public_control_plane_route(path: str, endpoint: Any) -> None:
+    route_kwargs = {"tags": ["health"], "openapi_extra": {"security": []}}
+    app.add_api_route(path, endpoint, methods=["GET"], **route_kwargs)
+    app.add_api_route(path, endpoint, methods=["HEAD"], **route_kwargs)
+
+
 # Register control-plane health endpoints (works in both minimal and full modes)
 try:
     if route_enabled("health"):
-        app.add_api_route("/health", health_check, methods=["GET", "HEAD"], openapi_extra={"security": []})
-        app.add_api_route("/ready", readiness_check, methods=["GET", "HEAD"], openapi_extra={"security": []})
-        app.add_api_route("/health/ready", readiness_alias, methods=["GET", "HEAD"], openapi_extra={"security": []})
+        _add_public_control_plane_route("/health", health_check)
+        _add_public_control_plane_route("/ready", readiness_check)
+        _add_public_control_plane_route("/health/ready", readiness_alias)
     else:
         logger.info("Route disabled by policy: health (/health, /ready, /health/ready)")
 except _STARTUP_GUARD_EXCEPTIONS as _health_rt_err:
     logger.warning(f"Route gating error for health; including by default. Error: {_health_rt_err}")
-    app.add_api_route("/health", health_check, methods=["GET", "HEAD"], openapi_extra={"security": []})
-    app.add_api_route("/ready", readiness_check, methods=["GET", "HEAD"], openapi_extra={"security": []})
-    app.add_api_route("/health/ready", readiness_alias, methods=["GET", "HEAD"], openapi_extra={"security": []})
+    _add_public_control_plane_route("/health", health_check)
+    _add_public_control_plane_route("/ready", readiness_check)
+    _add_public_control_plane_route("/health/ready", readiness_alias)
 
 # Import-time CI/startup guard: fail immediately if the route table contains duplicates.
 _fail_on_duplicate_route_method_pairs(app, context="module import")
