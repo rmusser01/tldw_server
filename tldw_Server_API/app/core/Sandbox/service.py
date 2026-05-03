@@ -857,6 +857,7 @@ class SandboxService:
         vz_linux_preflight = runtime_preflights.get(RuntimeType.vz_linux)
         vz_macos_preflight = runtime_preflights.get(RuntimeType.vz_macos)
         seatbelt_preflight = runtime_preflights.get(RuntimeType.seatbelt)
+        worktree_preflight = runtime_preflights.get(RuntimeType.worktree)
         lima_enforcement_ready = dict((lima_preflight.enforcement_ready if lima_preflight else {}) or {})
         # Allowlist enforcement is not implemented for Lima runtime execution.
         lima_enforcement_ready["allowlist"] = False
@@ -1029,6 +1030,30 @@ class SandboxService:
                 "store_mode": store_mode,
                 "notes": "Host-local seatbelt process isolation for trusted macOS workflows with best-effort deny-all networking; not VM-grade isolation",
                 **_preflight_fields(seatbelt_preflight),
+            },
+            {
+                "name": "worktree",
+                "default_images": ["host-local"],
+                "max_cpu": max_cpu,
+                "max_mem_mb": max_mem_mb,
+                "max_upload_mb": max_upload_mb,
+                "max_log_bytes": max_log_bytes,
+                "max_artifact_file_bytes": max_artifact_file_bytes,
+                "max_artifact_total_bytes": max_artifact_total_bytes,
+                "queue_max_length": queue_max_length,
+                "queue_ttl_sec": queue_ttl_sec,
+                "workspace_cap_mb": workspace_cap_mb,
+                "artifact_ttl_hours": artifact_ttl_hours,
+                "supported_spec_versions": supported_spec_versions,
+                "interactive_supported": False,
+                "egress_allowlist_supported": False,
+                "store_mode": store_mode,
+                "notes": (
+                    "Host-local git worktree isolation for trusted and standard "
+                    "workflows; not VM-grade isolation and not suitable for "
+                    "untrusted workloads"
+                ),
+                **_preflight_fields(worktree_preflight),
             },
         ]
 

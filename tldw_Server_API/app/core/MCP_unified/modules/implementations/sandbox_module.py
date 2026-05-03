@@ -44,13 +44,21 @@ class SandboxModule(BaseModule):
         return [
             {
                 "name": "sandbox.run",
-                "description": "Execute a run in the code sandbox (Docker/Firecracker/Lima).",
+                "description": "Execute a run in the code sandbox.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
                         "runtime": {
                             "type": "string",
-                            "enum": ["docker", "firecracker", "lima", "vz_linux", "vz_macos", "seatbelt"],
+                            "enum": [
+                                "docker",
+                                "firecracker",
+                                "lima",
+                                "vz_linux",
+                                "vz_macos",
+                                "seatbelt",
+                                "worktree",
+                            ],
                         },
                         "session_id": {"type": "string"},
                         "base_image": {"type": "string"},

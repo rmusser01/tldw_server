@@ -20,6 +20,19 @@ def test_run_schema_accepts_vz_linux_runtime() -> None:
     assert model.runtime == "vz_linux"
 
 
+def test_run_schema_accepts_worktree_runtime() -> None:
+    body = {
+        "spec_version": "1.0",
+        "runtime": "worktree",
+        "base_image": "host-local",
+        "command": ["echo", "ok"],
+    }
+
+    model = SandboxRunCreateRequest.model_validate(body)
+
+    assert model.runtime == "worktree"
+
+
 @pytest.mark.asyncio
 async def test_mcp_tool_schema_lists_new_macos_runtimes() -> None:
     module = SandboxModule(ModuleConfig(name="sandbox"))
@@ -34,4 +47,5 @@ async def test_mcp_tool_schema_lists_new_macos_runtimes() -> None:
         "vz_linux",
         "vz_macos",
         "seatbelt",
+        "worktree",
     ]

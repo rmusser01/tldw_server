@@ -12,7 +12,15 @@ except ImportError:  # pragma: no cover - pydantic v1 fallback
 
 from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
 
-RuntimeType = Literal["docker", "firecracker", "lima", "vz_linux", "vz_macos", "seatbelt"]
+RuntimeType = Literal[
+    "docker",
+    "firecracker",
+    "lima",
+    "vz_linux",
+    "vz_macos",
+    "seatbelt",
+    "worktree",
+]
 TrustLevelType = Literal["trusted", "standard", "untrusted"]
 
 
