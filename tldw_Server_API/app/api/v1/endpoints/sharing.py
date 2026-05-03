@@ -17,6 +17,7 @@ from typing import Any
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
 from loguru import logger
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, rbac_rate_limit, User
+from tldw_Server_API.app.api.v1.utils.pagination import build_offset_pagination_meta
 
 from ..schemas.sharing_schemas import (
     AdminShareListResponse,
@@ -933,7 +934,20 @@ async def admin_list_shares(
 ):
     repo = _get_repo()
     shares = await repo.list_all_shares(limit=limit, offset=offset, include_revoked=include_revoked)
-    return AdminShareListResponse(shares=[ShareResponse(**s) for s in shares], total=len(shares))
+    total = await repo.count_all_shares(include_revoked=include_revoked)
+    pagination = build_offset_pagination_meta(
+        limit=limit,
+        offset=offset,
+        total=total,
+        count=len(shares),
+    )
+    return AdminShareListResponse(
+        shares=[ShareResponse(**s) for s in shares],
+        total=total,
+        offset=offset,
+        limit=limit,
+        pagination=pagination,
+    )
 
 
 @router.patch(
@@ -978,7 +992,21 @@ async def admin_audit_log(
         limit=limit,
         offset=offset,
     )
+    total = await audit.count(
+        owner_user_id=owner_user_id,
+        resource_type=resource_type,
+        resource_id=resource_id,
+    )
+    pagination = build_offset_pagination_meta(
+        limit=limit,
+        offset=offset,
+        total=total,
+        count=len(events),
+    )
     return AuditLogResponse(
         events=[AuditEventResponse(**e) for e in events],
-        total=len(events),
+        total=total,
+        offset=offset,
+        limit=limit,
+        pagination=pagination,
     )

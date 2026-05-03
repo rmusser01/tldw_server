@@ -198,6 +198,126 @@ async def test_shared_with_me_workspace_name_population_log_is_sanitized(
     fake_logger.debug.assert_called_once_with("Shared workspace name population skipped")
 
 
+@pytest.mark.asyncio
+async def test_admin_list_shares_includes_canonical_offset_pagination(monkeypatch):
+    """Admin share listing should expose full totals and canonical offset metadata."""
+    from tldw_Server_API.app.api.v1.endpoints import sharing
+
+    class _FakeRepo:
+        async def list_all_shares(self, *, limit: int, offset: int, include_revoked: bool):
+            assert limit == 1
+            assert offset == 1
+            assert include_revoked is False
+            return [
+                {
+                    "id": 2,
+                    "workspace_id": "ws-2",
+                    "owner_user_id": 1,
+                    "share_scope_type": "team",
+                    "share_scope_id": 20,
+                    "access_level": "view_chat",
+                    "allow_clone": True,
+                    "created_by": 1,
+                    "created_at": "2026-01-01T00:00:00Z",
+                    "updated_at": "2026-01-01T00:00:00Z",
+                    "revoked_at": None,
+                    "is_revoked": False,
+                }
+            ]
+
+        async def count_all_shares(self, *, include_revoked: bool):
+            assert include_revoked is False
+            return 3
+
+    monkeypatch.setattr(sharing, "_get_repo", lambda: _FakeRepo())
+
+    response = await sharing.admin_list_shares(
+        limit=1,
+        offset=1,
+        include_revoked=False,
+        user=SimpleNamespace(id=1),
+    )
+
+    assert response.total == 3
+    assert response.limit == 1
+    assert response.offset == 1
+    assert response.has_more is True
+    assert response.next_offset == 2
+    assert response.pagination.total == 3
+    assert response.pagination.has_more is True
+    assert response.pagination.next_offset == 2
+
+
+@pytest.mark.asyncio
+async def test_admin_audit_log_includes_canonical_offset_pagination(monkeypatch):
+    """Admin audit listing should expose full totals and canonical offset metadata."""
+    from tldw_Server_API.app.api.v1.endpoints import sharing
+
+    class _FakeAuditService:
+        async def query(
+            self,
+            *,
+            owner_user_id: int | None,
+            resource_type: str | None,
+            resource_id: str | None,
+            limit: int,
+            offset: int,
+        ):
+            assert owner_user_id == 1
+            assert resource_type == "workspace"
+            assert resource_id is None
+            assert limit == 1
+            assert offset == 1
+            return [
+                {
+                    "id": 2,
+                    "event_type": "share.created",
+                    "actor_user_id": 1,
+                    "resource_type": "workspace",
+                    "resource_id": "ws-2",
+                    "owner_user_id": 1,
+                    "share_id": 2,
+                    "token_id": None,
+                    "metadata": {},
+                    "ip_address": None,
+                    "user_agent": None,
+                    "created_at": "2026-01-01T00:00:00Z",
+                }
+            ]
+
+        async def count(
+            self,
+            *,
+            owner_user_id: int | None,
+            resource_type: str | None,
+            resource_id: str | None,
+        ):
+            assert owner_user_id == 1
+            assert resource_type == "workspace"
+            assert resource_id is None
+            return 3
+
+    monkeypatch.setattr(sharing, "_get_audit_service", lambda: _FakeAuditService())
+
+    response = await sharing.admin_audit_log(
+        owner_user_id=1,
+        resource_type="workspace",
+        resource_id=None,
+        limit=1,
+        offset=1,
+        user=SimpleNamespace(id=1),
+    )
+
+    assert response.total == 3
+    assert response.limit == 1
+    assert response.offset == 1
+    assert response.has_more is True
+    assert response.next_offset == 2
+    assert response.pagination.total == 3
+    assert response.pagination.has_more is True
+    assert response.pagination.next_offset == 2
+
+
 @pytest.fixture
 def mock_repo(repo, tmp_path):
     """Patch repo and security helpers while keeping the real audit service wiring."""

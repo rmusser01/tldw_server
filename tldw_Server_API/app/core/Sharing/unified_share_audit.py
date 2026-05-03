@@ -571,6 +571,45 @@ class UnifiedShareAuditWriter:
                 projected.append(result)
         return projected
 
+    async def count_events(
+        self,
+        *,
+        owner_user_id: int | None = None,
+        resource_type: str | None = None,
+        resource_id: str | None = None,
+    ) -> int:
+        """Count sharing audit rows matching the query_events filters."""
+        await self.initialize()
+        conditions = [_SHARE_EVENT_FILTER_SQL]
+        params: list[Any] = []
+        if owner_user_id is not None:
+            conditions.append(
+                "(tenant_user_id = ? OR json_extract(metadata, '$.owner_user_id') = ?)"
+            )
+            owner_str = str(owner_user_id)
+            params.extend([owner_str, owner_user_id])
+        if resource_type is not None:
+            conditions.append("resource_type = ?")
+            params.append(resource_type)
+        if resource_id is not None:
+            conditions.append("resource_id = ?")
+            params.append(resource_id)
+
+        where_clause = " AND ".join(conditions)
+        query = (
+            "SELECT COUNT(*) AS cnt FROM audit_events WHERE "
+            + where_clause  # nosec B608
+        )
+
+        db = await self._open_db()
+        try:
+            async with db.execute(query, params) as cur:
+                row = await cur.fetchone()
+        finally:
+            await db.close()
+
+        return int(row["cnt"]) if row is not None else 0
+
     def _project_row(self, row: dict[str, Any]) -> dict[str, Any] | None:
         metadata = _load_metadata(row.get("metadata"))
         compatibility_id = _coerce_int(
