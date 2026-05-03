@@ -4,7 +4,7 @@ title: Phase 2.2 router conditional cleanup A
 status: Done
 assignee: []
 created_date: '2026-05-03 19:00'
-updated_date: '2026-05-03 19:03'
+updated_date: '2026-05-03 20:09'
 labels:
   - phase-2
   - issue-1116
@@ -48,6 +48,8 @@ Verification completed:
 - Full/adjacent: router_groups_contract 33 passed; main_router_contract 6 passed; openapi_phase4_contract 5 passed.
 - Bandit router group scope: 0 findings in /tmp/bandit_phase2_2_router_conditionals_a.json.
 - git diff --check passed.
+
+PR opened: https://github.com/rmusser01/tldw_server/pull/1242
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
