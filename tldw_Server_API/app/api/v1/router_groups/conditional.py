@@ -58,5 +58,6 @@ def append_imported_router_spec(
             tags=definition.tags,
             route_key=definition.route_key,
             default_stable=definition.default_stable,
+            name=definition.log_name,
         )
     )
