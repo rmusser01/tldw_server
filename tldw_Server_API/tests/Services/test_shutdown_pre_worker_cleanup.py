@@ -85,6 +85,56 @@ async def test_shutdown_pre_worker_cleanup_returns_handles(
 
 
 @pytest.mark.asyncio
+async def test_shutdown_pre_worker_cleanup_drops_registry_stopped_chatbooks_handles(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Suppress legacy chatbooks handles after the registry owns shutdown."""
+    shutdown_cleanup = _import_shutdown_pre_worker_cleanup()
+    calls: list[dict[str, object]] = []
+
+    async def _record_shutdown(**kwargs: object) -> None:
+        calls.append(kwargs)
+
+    monkeypatch.setattr(shutdown_cleanup, "_shutdown_pre_worker_cleanup", _record_shutdown)
+
+    handles = await shutdown_cleanup.shutdown_pre_worker_cleanup(
+        app="app",
+        cleanup_task="cleanup-task",
+        chatbooks_cleanup_task="chatbooks-task",
+        chatbooks_cleanup_stop_event="chatbooks-stop",
+        storage_cleanup_service="storage-service",
+        coordinated_legacy_component_names=set(),
+        stopped_background_worker_names={"chatbooks_cleanup"},
+        guard_exceptions=(RuntimeError,),
+    )
+
+    assert len(calls) == 1
+    assert calls[0]["chatbooks_cleanup_task"] is None
+    assert calls[0]["chatbooks_cleanup_stop_event"] is None
+    assert handles.chatbooks_cleanup_task is None
+    assert handles.chatbooks_cleanup_stop_event is None
+    assert handles.cleanup_task == "cleanup-task"
+    assert handles.storage_cleanup_service == "storage-service"
+
+
+def test_filtered_pre_worker_handles_suppresses_registry_stopped_handles() -> None:
+    """Centralize background-stopped handle filtering for every caller."""
+    shutdown_cleanup = _import_shutdown_pre_worker_cleanup()
+    handles = shutdown_cleanup._filtered_pre_worker_handles(
+        cleanup_task="cleanup-task",
+        chatbooks_cleanup_task="chatbooks-task",
+        chatbooks_cleanup_stop_event="chatbooks-stop",
+        storage_cleanup_service="storage-service",
+        stopped_background_worker_names={"ephemeral_cleanup_task", "chatbooks_cleanup"},
+    )
+
+    assert handles.cleanup_task is None
+    assert handles.chatbooks_cleanup_task is None
+    assert handles.chatbooks_cleanup_stop_event is None
+    assert handles.storage_cleanup_service == "storage-service"
+
+
+@pytest.mark.asyncio
 async def test_shutdown_pre_worker_cleanup_cancels_deferred_and_cleanup_tasks_and_resets(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

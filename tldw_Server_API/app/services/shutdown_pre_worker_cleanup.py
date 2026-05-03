@@ -34,27 +34,24 @@ async def shutdown_pre_worker_cleanup(
 ) -> PreWorkerCleanupHandles:
     """Run the cleanup/reset shutdown slice that precedes the worker helpers."""
     stopped_background_worker_names = stopped_background_worker_names or set()
-    cleanup_task_for_shutdown = _unless_background_stopped(
-        "ephemeral_cleanup_task",
-        cleanup_task,
-        stopped_background_worker_names,
-    )
-    await _shutdown_pre_worker_cleanup(
-        app=app,
-        cleanup_task=cleanup_task_for_shutdown,
+    handles = _filtered_pre_worker_handles(
+        cleanup_task=cleanup_task,
         chatbooks_cleanup_task=chatbooks_cleanup_task,
         chatbooks_cleanup_stop_event=chatbooks_cleanup_stop_event,
         storage_cleanup_service=storage_cleanup_service,
+        stopped_background_worker_names=stopped_background_worker_names,
+    )
+    await _shutdown_pre_worker_cleanup(
+        app=app,
+        cleanup_task=handles.cleanup_task,
+        chatbooks_cleanup_task=handles.chatbooks_cleanup_task,
+        chatbooks_cleanup_stop_event=handles.chatbooks_cleanup_stop_event,
+        storage_cleanup_service=handles.storage_cleanup_service,
         coordinated_legacy_component_names=coordinated_legacy_component_names,
         guard_exceptions=guard_exceptions,
         stopped_background_worker_names=stopped_background_worker_names,
     )
-    return PreWorkerCleanupHandles(
-        cleanup_task=cleanup_task_for_shutdown,
-        chatbooks_cleanup_task=chatbooks_cleanup_task,
-        chatbooks_cleanup_stop_event=chatbooks_cleanup_stop_event,
-        storage_cleanup_service=storage_cleanup_service,
-    )
+    return handles
 
 
 async def run_shutdown_pre_worker_cleanup(
@@ -83,15 +80,12 @@ async def run_shutdown_pre_worker_cleanup(
         )
     except guard_exceptions as exc:
         logger.debug(f"Pre-worker cleanup skipped: {exc}")
-        return PreWorkerCleanupHandles(
-            cleanup_task=_unless_background_stopped(
-                "ephemeral_cleanup_task",
-                cleanup_task,
-                stopped_background_worker_names,
-            ),
+        return _filtered_pre_worker_handles(
+            cleanup_task=cleanup_task,
             chatbooks_cleanup_task=chatbooks_cleanup_task,
             chatbooks_cleanup_stop_event=chatbooks_cleanup_stop_event,
             storage_cleanup_service=storage_cleanup_service,
+            stopped_background_worker_names=stopped_background_worker_names,
         )
 
 
@@ -150,6 +144,35 @@ def _unless_background_stopped(
     if name in stopped_background_worker_names:
         return None
     return value
+
+
+def _filtered_pre_worker_handles(
+    *,
+    cleanup_task: Any | None,
+    chatbooks_cleanup_task: Any | None,
+    chatbooks_cleanup_stop_event: Any | None,
+    storage_cleanup_service: Any | None,
+    stopped_background_worker_names: set[str],
+) -> PreWorkerCleanupHandles:
+    """Return legacy handles still owned by pre-worker cleanup."""
+    return PreWorkerCleanupHandles(
+        cleanup_task=_unless_background_stopped(
+            "ephemeral_cleanup_task",
+            cleanup_task,
+            stopped_background_worker_names,
+        ),
+        chatbooks_cleanup_task=_unless_background_stopped(
+            "chatbooks_cleanup",
+            chatbooks_cleanup_task,
+            stopped_background_worker_names,
+        ),
+        chatbooks_cleanup_stop_event=_unless_background_stopped(
+            "chatbooks_cleanup",
+            chatbooks_cleanup_stop_event,
+            stopped_background_worker_names,
+        ),
+        storage_cleanup_service=storage_cleanup_service,
+    )
 
 
 async def _cancel_deferred_startup_task(
