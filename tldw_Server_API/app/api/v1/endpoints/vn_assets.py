@@ -338,6 +338,9 @@ async def review_item(
         200: {
             "description": "VN asset item content.",
             "content": {
+                "image/jpeg": {},
+                "image/png": {},
+                "image/webp": {},
                 "application/octet-stream": {},
             },
         },

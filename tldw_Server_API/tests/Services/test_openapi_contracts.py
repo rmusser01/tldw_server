@@ -28,7 +28,7 @@ STREAMING_RESPONSE_EXEMPTIONS = {
 AUDIO_SPEECH_CONTENT_TYPES = {
     "audio/aac",
     "audio/flac",
-    "audio/L16; rate=24000; channels=1",
+    "audio/L16",
     "audio/mpeg",
     "audio/opus",
     "audio/wav",
@@ -350,6 +350,31 @@ def test_custom_openapi_reuses_cached_schema_for_tag_declarations(monkeypatch) -
 
     assert second_schema is first_schema
     assert helper_calls == 1
+
+
+@pytest.mark.integration
+def test_openapi_operation_tag_declaration_ignores_malformed_tag_values() -> None:
+    """Malformed scalar tag values must not be expanded into one-character top-level tags."""
+    from tldw_Server_API.app import main as main_module
+
+    openapi_schema: dict[str, Any] = {
+        "tags": [],
+        "paths": {
+            "/valid": {"get": {"tags": ["media"]}},
+            "/malformed": {"get": {"tags": "health"}},
+        },
+    }
+
+    main_module._ensure_openapi_operation_tags_declared(openapi_schema)
+
+    declared_tags = {
+        tag["name"]
+        for tag in openapi_schema["tags"]
+        if isinstance(tag, dict) and isinstance(tag.get("name"), str)
+    }
+    assert "media" in declared_tags
+    assert "health" not in declared_tags
+    assert not set("health") & declared_tags
 
 
 @pytest.mark.integration
@@ -944,7 +969,7 @@ def test_vn_asset_content_openapi_documents_file_response() -> None:
     app.include_router(vn_assets_router, prefix="/api/v1")
     operation = app.openapi()["paths"][VN_ASSET_CONTENT_PATH]["get"]
 
-    _assert_file_response_content(operation, {"application/octet-stream"})
+    _assert_file_response_content(operation, {"application/octet-stream", "image/jpeg", "image/png", "image/webp"})
 
 
 @pytest.mark.integration
@@ -1155,7 +1180,15 @@ def test_paper_search_raw_passthrough_openapi_documents_raw_content_types() -> N
     _assert_raw_response_content(paths[PAPER_SEARCH_PMC_OA_PDF_PATH]["get"], {"application/pdf"})
     _assert_raw_response_content(
         paths[PAPER_SEARCH_HAL_RAW_PATH]["get"],
-        {"application/json", "application/xml", "application/octet-stream", "text/csv", "text/plain"},
+        {
+            "application/atom+xml",
+            "application/json",
+            "application/octet-stream",
+            "application/rss+xml",
+            "application/xml",
+            "text/csv",
+            "text/plain",
+        },
     )
 
 
@@ -1197,3 +1230,12 @@ def test_control_plane_head_routes_are_registered(client_user_only, path: str) -
 
     assert response.status_code in {200, 503}
     assert response.text == ""
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("path", ["/health", "/ready", "/health/ready"])
+def test_control_plane_routes_keep_health_openapi_tag(openapi_spec: dict[str, Any], path: str) -> None:
+    """Control-plane probe routes should remain grouped under the health tag."""
+    for method in ("get", "head"):
+        operation = openapi_spec["paths"][path][method]
+        assert "health" in operation.get("tags", [])

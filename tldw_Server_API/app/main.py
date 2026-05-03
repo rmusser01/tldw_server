@@ -1988,7 +1988,9 @@ def _ensure_openapi_operation_tags_declared(openapi_schema: dict[str, Any]) -> N
         for method, operation in operations.items():
             if method.lower() not in _OPENAPI_HTTP_METHODS or not isinstance(operation, dict):
                 continue
-            operation_tags.update(tag for tag in operation.get("tags", []) if isinstance(tag, str))
+            op_tags = operation.get("tags", [])
+            if isinstance(op_tags, (list, tuple, set)):
+                operation_tags.update(tag for tag in op_tags if isinstance(tag, str))
 
     for missing_tag in sorted(operation_tags - declared_tags):
         tags.append({"name": missing_tag})
@@ -2746,8 +2748,9 @@ async def readiness_alias(request: Request) -> JSONResponse:
 
 
 def _add_public_control_plane_route(path: str, endpoint: Any) -> None:
-    app.add_api_route(path, endpoint, methods=["GET"], openapi_extra={"security": []})
-    app.add_api_route(path, endpoint, methods=["HEAD"], openapi_extra={"security": []})
+    route_kwargs = {"tags": ["health"], "openapi_extra": {"security": []}}
+    app.add_api_route(path, endpoint, methods=["GET"], **route_kwargs)
+    app.add_api_route(path, endpoint, methods=["HEAD"], **route_kwargs)
 
 
 # Register control-plane health endpoints (works in both minimal and full modes)

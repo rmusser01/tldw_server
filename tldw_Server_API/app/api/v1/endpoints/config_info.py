@@ -365,6 +365,12 @@ async def get_jobs_config_info():
     "/config/quickstart",
     response_class=HTMLResponse,
     responses={
+        status.HTTP_200_OK: {
+            "description": "Fallback quickstart HTML page when redirect resolution fails.",
+            "content": {
+                "text/html": {},
+            },
+        },
         status.HTTP_307_TEMPORARY_REDIRECT: {
             "description": "Redirect to the configured quickstart destination.",
             "headers": {

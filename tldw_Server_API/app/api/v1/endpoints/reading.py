@@ -1044,7 +1044,7 @@ async def summarize_reading_item(
             "content": {
                 "audio/aac": {},
                 "audio/flac": {},
-                "audio/L16; rate=24000; channels=1": {},
+                "audio/L16": {},
                 "audio/mpeg": {},
                 "audio/opus": {},
                 "audio/wav": {},

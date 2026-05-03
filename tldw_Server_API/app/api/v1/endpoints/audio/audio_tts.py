@@ -270,7 +270,7 @@ async def get_tts_service() -> TTSServiceV2:
             "content": {
                 "audio/aac": {},
                 "audio/flac": {},
-                "audio/L16; rate=24000; channels=1": {},
+                "audio/L16": {},
                 "audio/mpeg": {},
                 "audio/opus": {},
                 "audio/wav": {},

@@ -116,6 +116,8 @@ _RAW_HAL_RESPONSES = _raw_passthrough_responses(
     "application/octet-stream",
     "text/csv",
     "text/plain",
+    "application/atom+xml",
+    "application/rss+xml",
 )
 
 _PROVIDER_TIMEOUT_DETAIL = "Upstream provider request timed out"

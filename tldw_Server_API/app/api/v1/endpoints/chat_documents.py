@@ -80,7 +80,17 @@ _CHAT_DOCS_NONCRITICAL_EXCEPTIONS = (
     responses={
         200: {
             "description": "Generated document result, async job metadata, or SSE stream.",
-            "content": {"text/event-stream": {}},
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "oneOf": [
+                            {"$ref": "#/components/schemas/GenerateDocumentResponse"},
+                            {"$ref": "#/components/schemas/AsyncGenerationResponse"},
+                        ]
+                    }
+                },
+                "text/event-stream": {},
+            },
         },
     },
     summary="Generate a document from conversation",
