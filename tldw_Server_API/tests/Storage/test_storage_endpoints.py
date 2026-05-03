@@ -9,6 +9,8 @@ Tests cover:
 - Admin quota management
 - Soft/hard limit warnings in usage responses
 """
+from importlib import import_module
+
 import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
@@ -880,6 +882,20 @@ class TestSoftDeleteRestoreCycle:
 
 class TestAdminQuotaEndpoints:
     """Tests for admin quota management endpoints."""
+
+    @pytest.mark.unit
+    def test_admin_quota_handlers_reexport_from_storage_after_sidecar_split(self):
+        """Admin quota handlers remain import-compatible after sidecar extraction."""
+        storage_admin_quotas = import_module(
+            "tldw_Server_API.app.api.v1.endpoints.storage_admin_quotas"
+        )
+
+        assert storage_endpoints.require_storage_admin is storage_admin_quotas.require_storage_admin
+        assert storage_endpoints.set_user_quota is storage_admin_quotas.set_user_quota
+        assert storage_endpoints.set_team_quota is storage_admin_quotas.set_team_quota
+        assert storage_endpoints.set_org_quota is storage_admin_quotas.set_org_quota
+        assert storage_endpoints.get_team_quota is storage_admin_quotas.get_team_quota
+        assert storage_endpoints.get_org_quota is storage_admin_quotas.get_org_quota
 
     @pytest.mark.unit
     def test_set_quota_requires_admin(self, mock_user):
