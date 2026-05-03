@@ -134,6 +134,101 @@ class TestListFilesEndpoint:
         assert response.next_offset == 5
 
 
+class TestUsageEndpoint:
+    """Tests for storage usage route behavior."""
+
+    @pytest.mark.unit
+    def test_usage_route_returns_quota_warning_state(
+        self,
+        mock_storage_service,
+        mock_user,
+        monkeypatch,
+    ):
+        """Usage route returns quota status and category usage."""
+        mock_storage_service.get_user_generated_files_usage = AsyncMock(
+            return_value={
+                "total_bytes": 850 * 1024 * 1024,
+                "total_mb": 850.0,
+                "by_category": {
+                    "tts_audio": {
+                        "file_count": 2,
+                        "total_bytes": 850 * 1024 * 1024,
+                    }
+                },
+                "trash_bytes": 0,
+                "trash_mb": 0.0,
+                "quota_mb": 1000,
+                "quota_used_mb": 850.0,
+            }
+        )
+        monkeypatch.setattr(
+            storage_endpoints,
+            "_get_service",
+            AsyncMock(return_value=mock_storage_service),
+        )
+
+        app = _storage_download_test_app(mock_user)
+        with TestClient(app) as client:
+            response = client.get("/api/v1/storage/usage")
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["quota_mb"] == 1000
+        assert payload["usage_percentage"] == 85.0
+        assert payload["at_soft_limit"] is True
+        assert payload["at_hard_limit"] is False
+        assert payload["warning"] == "Approaching storage limit (80%+)"
+        assert payload["usage"]["by_category"]["tts_audio"]["file_count"] == 2
+
+    @pytest.mark.unit
+    def test_usage_breakdown_route_returns_folder_totals(
+        self,
+        mock_storage_service,
+        mock_user,
+        monkeypatch,
+    ):
+        """Usage breakdown route returns category and folder totals."""
+        mock_storage_service.get_user_generated_files_usage = AsyncMock(
+            return_value={
+                "total_bytes": 200 * 1024 * 1024,
+                "total_mb": 200.0,
+                "by_category": {
+                    "tts_audio": {
+                        "file_count": 1,
+                        "total_bytes": 200 * 1024 * 1024,
+                    }
+                },
+                "quota_mb": 1000,
+            }
+        )
+        mock_storage_service.get_user_folders = AsyncMock(
+            return_value=[
+                {
+                    "folder_tag": "archive",
+                    "file_count": 1,
+                    "total_bytes": 200 * 1024 * 1024,
+                }
+            ]
+        )
+        monkeypatch.setattr(
+            storage_endpoints,
+            "_get_service",
+            AsyncMock(return_value=mock_storage_service),
+        )
+
+        app = _storage_download_test_app(mock_user)
+        with TestClient(app) as client:
+            response = client.get("/api/v1/storage/usage/breakdown")
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["user_id"] == mock_user.id
+        assert payload["total_mb"] == 200.0
+        assert payload["available_mb"] == 800.0
+        assert payload["by_category"]["tts_audio"]["file_count"] == 1
+        assert payload["by_folder"][0]["folder_tag"] == "archive"
+
+
 class TestTrashEndpoint:
     """Tests for GET /storage/trash endpoint."""
 
@@ -189,6 +284,55 @@ class TestTrashEndpoint:
         assert response.pagination.next_offset == 3
         assert response.has_more is True
         assert response.next_offset == 3
+
+    @pytest.mark.unit
+    def test_trash_route_returns_canonical_pagination(
+        self,
+        mock_storage_service,
+        mock_user,
+        mock_files_repo,
+        monkeypatch,
+    ):
+        """Trash route returns paginated deleted files."""
+        mock_files_repo.list_trashed_files = AsyncMock(
+            return_value=(
+                [
+                    {
+                        "id": 9,
+                        "uuid": "uuid-9",
+                        "user_id": mock_user.id,
+                        "filename": "deleted.wav",
+                        "storage_path": "tts_audio/deleted.wav",
+                        "file_category": "tts_audio",
+                        "source_feature": "tts",
+                        "file_size_bytes": 2048,
+                        "is_deleted": True,
+                        "is_transient": False,
+                        "tags": [],
+                        "created_at": datetime.now(timezone.utc),
+                        "updated_at": datetime.now(timezone.utc),
+                        "deleted_at": datetime.now(timezone.utc),
+                    }
+                ],
+                4,
+            )
+        )
+        mock_storage_service.get_generated_files_repo = AsyncMock(return_value=mock_files_repo)
+        monkeypatch.setattr(
+            storage_endpoints,
+            "_get_service",
+            AsyncMock(return_value=mock_storage_service),
+        )
+
+        app = _storage_download_test_app(mock_user)
+        with TestClient(app) as client:
+            response = client.get("/api/v1/storage/trash?offset=1&limit=2")
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["total"] == 4
+        assert payload["pagination"]["has_more"] is True
+        assert payload["pagination"]["next_offset"] == 3
 
 
 class TestDownloadFileEndpoint:
@@ -481,6 +625,71 @@ class TestSoftDeleteRestoreCycle:
         assert len(update_calls) == 1
         assert update_calls[0][2] == "add"
 
+    @pytest.mark.unit
+    def test_restore_route_readds_to_usage(
+        self,
+        mock_storage_service,
+        mock_user,
+        mock_files_repo,
+        sample_deleted_file_record,
+        monkeypatch,
+    ):
+        """Restore route restores deleted files and re-adds usage."""
+        restored_record = sample_deleted_file_record.copy()
+        restored_record["is_deleted"] = False
+        restored_record["deleted_at"] = None
+        mock_files_repo.get_file_by_id = AsyncMock(
+            side_effect=[sample_deleted_file_record, restored_record]
+        )
+        mock_files_repo.restore_file = AsyncMock(return_value=True)
+        mock_storage_service.get_generated_files_repo = AsyncMock(return_value=mock_files_repo)
+        monkeypatch.setattr(
+            storage_endpoints,
+            "_get_service",
+            AsyncMock(return_value=mock_storage_service),
+        )
+
+        app = _storage_download_test_app(mock_user)
+        with TestClient(app) as client:
+            response = client.post("/api/v1/storage/trash/restore/1")
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["success"] is True
+        assert payload["file"]["is_deleted"] is False
+        mock_storage_service.update_usage.assert_awaited_once_with(
+            mock_user.id,
+            sample_deleted_file_record["file_size_bytes"],
+            operation="add",
+        )
+
+    @pytest.mark.unit
+    def test_permanent_delete_route_removes_deleted_file(
+        self,
+        mock_storage_service,
+        mock_user,
+        mock_files_repo,
+        sample_deleted_file_record,
+        monkeypatch,
+    ):
+        """Permanent delete route hard-deletes files already in trash."""
+        mock_files_repo.get_file_by_id = AsyncMock(return_value=sample_deleted_file_record)
+        mock_files_repo.hard_delete_file = AsyncMock(return_value=True)
+        mock_storage_service.get_generated_files_repo = AsyncMock(return_value=mock_files_repo)
+        monkeypatch.setattr(
+            storage_endpoints,
+            "_get_service",
+            AsyncMock(return_value=mock_storage_service),
+        )
+
+        app = _storage_download_test_app(mock_user)
+        with TestClient(app) as client:
+            response = client.delete("/api/v1/storage/trash/1")
+
+        assert response.status_code == 200
+        assert response.json() == {"success": True, "file_id": 1}
+        mock_files_repo.hard_delete_file.assert_awaited_once_with(1)
+
 
 class TestAdminQuotaEndpoints:
     """Tests for admin quota management endpoints."""
@@ -622,3 +831,48 @@ class TestLeastAccessedEndpoint:
 
         assert len(result) == 2
         assert result[0]["id"] == 1  # Oldest first
+
+    @pytest.mark.unit
+    def test_least_accessed_route_is_not_captured_by_file_id_route(
+        self,
+        mock_storage_service,
+        mock_user,
+        mock_files_repo,
+        monkeypatch,
+    ):
+        """The static least-accessed route returns cleanup candidates."""
+        file_record = {
+            "id": 1,
+            "uuid": "uuid-1",
+            "user_id": mock_user.id,
+            "filename": "old.wav",
+            "original_filename": "old.wav",
+            "mime_type": "audio/wav",
+            "storage_path": "tts_audio/old.wav",
+            "file_category": "tts_audio",
+            "source_feature": "tts",
+            "file_size_bytes": 1024,
+            "is_deleted": False,
+            "is_transient": False,
+            "tags": [],
+            "created_at": datetime(2020, 1, 1, tzinfo=timezone.utc),
+            "updated_at": datetime(2020, 1, 1, tzinfo=timezone.utc),
+            "accessed_at": datetime(2020, 1, 1, tzinfo=timezone.utc),
+        }
+        mock_files_repo.list_least_accessed = AsyncMock(return_value=[file_record])
+        mock_storage_service.get_generated_files_repo = AsyncMock(return_value=mock_files_repo)
+        monkeypatch.setattr(
+            storage_endpoints,
+            "_get_service",
+            AsyncMock(return_value=mock_storage_service),
+        )
+
+        app = _storage_download_test_app(mock_user)
+        with TestClient(app) as client:
+            response = client.get("/api/v1/storage/files/least-accessed")
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["total"] == 1
+        assert payload["files"][0]["id"] == 1
+        assert payload["pagination"]["total"] == 1
