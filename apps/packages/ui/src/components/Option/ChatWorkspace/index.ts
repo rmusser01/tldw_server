@@ -1,3 +1,4 @@
+export { ChatWorkspaceConsole } from "./ChatWorkspaceConsole"
 export { ChatWorkspacePage } from "./ChatWorkspacePage"
 export { ContextStagingCard } from "./ContextStagingCard"
 export { InspectorRail } from "./InspectorRail"
