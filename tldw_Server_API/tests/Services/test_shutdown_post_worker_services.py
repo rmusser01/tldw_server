@@ -12,16 +12,7 @@ pytestmark = pytest.mark.unit
 
 def _base_shutdown_kwargs(**overrides: object) -> dict[str, object]:
     kwargs: dict[str, object] = {
-        "jobs_prune_task": None,
-        "files_export_gc_task": None,
-        "notifications_prune_task": None,
         "jobs_notifications_bridge_task": None,
-        "workflows_sched_task": None,
-        "reading_digest_sched_task": None,
-        "admin_backup_sched_task": None,
-        "companion_reflection_sched_task": None,
-        "reminders_sched_task": None,
-        "connectors_sync_sched_task": None,
         "jobs_metrics_task": None,
         "jobs_metrics_stop_event": None,
         "loop_lag_task": None,
@@ -60,22 +51,11 @@ def _patch_post_worker_helpers(
         if calls is not None:
             calls.append((name, kwargs))
 
-    async def _claims(**kwargs: object) -> SimpleNamespace:
-        _record("claims", kwargs)
-        return SimpleNamespace(
-            jobs_prune_task=kwargs["jobs_prune_task"],
-            files_export_gc_task=kwargs["files_export_gc_task"],
-            notifications_prune_task=kwargs["notifications_prune_task"],
-        )
-
     async def _notifications(**kwargs: object) -> SimpleNamespace:
         _record("notifications", kwargs)
         return SimpleNamespace(
             jobs_notifications_bridge_task=kwargs["jobs_notifications_bridge_task"],
         )
-
-    async def _recurring(**kwargs: object) -> None:
-        _record("recurring", kwargs)
 
     async def _runtime(**kwargs: object) -> SimpleNamespace:
         _record("runtime", kwargs)
@@ -106,13 +86,11 @@ def _patch_post_worker_helpers(
             workflows_maint_task=kwargs["workflows_maint_task"],
         )
 
-    monkeypatch.setattr(shutdown_services, "_shutdown_claims_maintenance_tasks", _claims)
     monkeypatch.setattr(
         shutdown_services,
         "_shutdown_notifications_compactor_websub_workers",
         _notifications,
     )
-    monkeypatch.setattr(shutdown_services, "_stop_recurring_schedulers", _recurring)
     monkeypatch.setattr(shutdown_services, "_shutdown_runtime_monitors", _runtime)
     monkeypatch.setattr(shutdown_services, "_shutdown_jobs_metrics_reconcile", _reconcile)
     monkeypatch.setattr(
@@ -149,6 +127,34 @@ def test_post_worker_shutdown_contract_omits_registry_owned_custom_worker_handle
     assert not hasattr(shutdown_services, "_stop_usage_aggregators")
 
 
+def test_post_worker_shutdown_contract_omits_registry_owned_scheduler_handles() -> None:
+    from tldw_Server_API.app.services import shutdown_post_worker_services as shutdown_services
+
+    obsolete_fields = {
+        "jobs_prune_task",
+        "files_export_gc_task",
+        "notifications_prune_task",
+        "workflows_sched_task",
+        "reading_digest_sched_task",
+        "admin_backup_sched_task",
+        "companion_reflection_sched_task",
+        "reminders_sched_task",
+        "connectors_sync_sched_task",
+    }
+
+    assert obsolete_fields.isdisjoint(
+        inspect.signature(shutdown_services.shutdown_post_worker_services).parameters
+    )
+    assert obsolete_fields.isdisjoint(
+        inspect.signature(shutdown_services.run_shutdown_post_worker_services).parameters
+    )
+    assert obsolete_fields.isdisjoint(
+        {field.name for field in fields(shutdown_services.PostWorkerShutdownHandles)}
+    )
+    assert not hasattr(shutdown_services, "_stop_recurring_schedulers")
+    assert not hasattr(shutdown_services, "_shutdown_claims_maintenance_tasks")
+
+
 @pytest.mark.asyncio
 async def test_shutdown_post_worker_services_runs_helpers_in_order_and_returns_handles(
     monkeypatch: pytest.MonkeyPatch,
@@ -160,16 +166,7 @@ async def test_shutdown_post_worker_services_runs_helpers_in_order_and_returns_h
 
     handles = await shutdown_services.shutdown_post_worker_services(
         **_base_shutdown_kwargs(
-            jobs_prune_task="jobs-prune-task",
-            files_export_gc_task="files-gc-task",
-            notifications_prune_task="notifications-prune-task",
             jobs_notifications_bridge_task="bridge-task",
-            workflows_sched_task="workflows-sched-task",
-            reading_digest_sched_task="reading-digest-sched-task",
-            admin_backup_sched_task="admin-backup-sched-task",
-            companion_reflection_sched_task="companion-reflection-sched-task",
-            reminders_sched_task="reminders-sched-task",
-            connectors_sync_sched_task="connectors-sync-sched-task",
             jobs_metrics_task="jobs-metrics-task",
             jobs_metrics_stop_event="jobs-metrics-stop",
             loop_lag_task="loop-lag-task",
@@ -195,24 +192,17 @@ async def test_shutdown_post_worker_services_runs_helpers_in_order_and_returns_h
     )
 
     assert [name for name, _ in calls] == [
-        "claims",
         "notifications",
-        "recurring",
         "runtime",
         "reconcile",
         "personalization",
         "optional",
     ]
-    assert calls[0][1]["jobs_prune_task"] == "jobs-prune-task"
-    assert calls[1][1]["jobs_notifications_bridge_task"] == "bridge-task"
-    assert calls[2][1]["workflows_sched_task"] == "workflows-sched-task"
-    assert calls[3][1]["jobs_metrics_task"] == "jobs-metrics-task"
-    assert calls[4][1]["jobs_metrics_reconcile_task"] == "jobs-metrics-reconcile-task"
-    assert calls[5][1]["guard_exceptions"] == (RuntimeError,)
-    assert calls[6][1]["jobs_crypto_rotate_task"] == "crypto-task"
-    assert handles.jobs_prune_task == "jobs-prune-task"
-    assert handles.files_export_gc_task == "files-gc-task"
-    assert handles.notifications_prune_task == "notifications-prune-task"
+    assert calls[0][1]["jobs_notifications_bridge_task"] == "bridge-task"
+    assert calls[1][1]["jobs_metrics_task"] == "jobs-metrics-task"
+    assert calls[2][1]["jobs_metrics_reconcile_task"] == "jobs-metrics-reconcile-task"
+    assert calls[3][1]["guard_exceptions"] == (RuntimeError,)
+    assert calls[4][1]["jobs_crypto_rotate_task"] == "crypto-task"
     assert handles.jobs_notifications_bridge_task == "bridge-task"
     assert handles.jobs_metrics_task == "jobs-metrics-task"
     assert handles.loop_lag_task == "loop-lag-task"
@@ -325,72 +315,6 @@ async def test_shutdown_post_worker_services_skips_bridge_after_background_phase
 
 
 @pytest.mark.asyncio
-async def test_shutdown_post_worker_services_skips_maintenance_tasks_after_background_phase(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from tldw_Server_API.app.services import shutdown_post_worker_services as shutdown_services
-
-    recorded = _patch_post_worker_helpers(monkeypatch, shutdown_services)
-
-    handles = await shutdown_services.shutdown_post_worker_services(
-        **_base_shutdown_kwargs(
-            jobs_prune_task="jobs-prune-task",
-            files_export_gc_task="files-gc-task",
-            notifications_prune_task="notifications-prune-task",
-            stopped_background_worker_names={
-                "jobs_prune_task",
-                "files_export_gc_task",
-                "notifications_prune_task",
-            },
-        )
-    )
-
-    assert recorded["claims"]["jobs_prune_task"] is None
-    assert recorded["claims"]["files_export_gc_task"] is None
-    assert recorded["claims"]["notifications_prune_task"] is None
-    assert handles.jobs_prune_task is None
-    assert handles.files_export_gc_task is None
-    assert handles.notifications_prune_task is None
-
-
-@pytest.mark.asyncio
-async def test_shutdown_post_worker_services_skips_recurring_schedulers_after_background_phase(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from tldw_Server_API.app.services import shutdown_post_worker_services as shutdown_services
-
-    recorded = _patch_post_worker_helpers(monkeypatch, shutdown_services)
-
-    await shutdown_services.shutdown_post_worker_services(
-        **_base_shutdown_kwargs(
-            workflows_sched_task="workflows-sched-task",
-            reading_digest_sched_task="reading-digest-sched-task",
-            admin_backup_sched_task="admin-backup-sched-task",
-            companion_reflection_sched_task="companion-reflection-sched-task",
-            reminders_sched_task="reminders-sched-task",
-            connectors_sync_sched_task="connectors-sync-sched-task",
-            stopped_background_worker_names={
-                "workflows_sched_task",
-                "reading_digest_sched_task",
-                "admin_backup_sched_task",
-                "companion_reflection_sched_task",
-                "reminders_sched_task",
-                "connectors_sync_sched_task",
-            },
-        )
-    )
-
-    assert recorded["recurring"] == {
-        "workflows_sched_task": None,
-        "reading_digest_sched_task": None,
-        "admin_backup_sched_task": None,
-        "companion_reflection_sched_task": None,
-        "reminders_sched_task": None,
-        "connectors_sync_sched_task": None,
-    }
-
-
-@pytest.mark.asyncio
 async def test_run_shutdown_post_worker_services_delegates_and_returns_handles(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -401,9 +325,6 @@ async def test_run_shutdown_post_worker_services_delegates_and_returns_handles(
     async def _fake_shutdown_post_worker_services(**kwargs):
         recorded_kwargs.update(kwargs)
         return shutdown_services.PostWorkerShutdownHandles(
-            jobs_prune_task="prune-result",
-            files_export_gc_task="files-result",
-            notifications_prune_task="notifications-result",
             jobs_notifications_bridge_task="bridge-result",
             jobs_metrics_task="metrics-result",
             loop_lag_task="loop-lag-result",
@@ -426,20 +347,15 @@ async def test_run_shutdown_post_worker_services_delegates_and_returns_handles(
 
     handles = await shutdown_services.run_shutdown_post_worker_services(
         **_base_shutdown_kwargs(
-            jobs_prune_task="prune-input",
             jobs_notifications_bridge_task="bridge-input",
             jobs_metrics_reconcile_task="reconcile-input",
             workflows_maint_task="maint-input",
         )
     )
 
-    assert recorded_kwargs["jobs_prune_task"] == "prune-input"
     assert recorded_kwargs["jobs_notifications_bridge_task"] == "bridge-input"
     assert recorded_kwargs["jobs_metrics_reconcile_task"] == "reconcile-input"
     assert recorded_kwargs["workflows_maint_task"] == "maint-input"
-    assert handles.jobs_prune_task == "prune-result"
-    assert handles.files_export_gc_task == "files-result"
-    assert handles.notifications_prune_task == "notifications-result"
     assert handles.jobs_notifications_bridge_task == "bridge-result"
     assert handles.jobs_metrics_task == "metrics-result"
     assert handles.loop_lag_task == "loop-lag-result"
@@ -475,9 +391,6 @@ async def test_run_shutdown_post_worker_services_guard_failure_suppresses_stoppe
 
     handles = await shutdown_services.run_shutdown_post_worker_services(
         **_base_shutdown_kwargs(
-            jobs_prune_task="prune-input",
-            files_export_gc_task="files-input",
-            notifications_prune_task="notifications-input",
             jobs_notifications_bridge_task="bridge-input",
             jobs_metrics_task="metrics-input",
             loop_lag_task="loop-lag-input",
@@ -491,9 +404,6 @@ async def test_run_shutdown_post_worker_services_guard_failure_suppresses_stoppe
             workflows_gc_task="gc-input",
             workflows_maint_task="maint-input",
             stopped_background_worker_names={
-                "jobs_prune_task",
-                "files_export_gc_task",
-                "notifications_prune_task",
                 "jobs_notifications_bridge_task",
                 "jobs_metrics_task",
                 "jobs_metrics_reconcile_task",
@@ -508,9 +418,6 @@ async def test_run_shutdown_post_worker_services_guard_failure_suppresses_stoppe
     )
 
     assert log_messages == ["Post-worker services skipped: post-worker boom"]
-    assert handles.jobs_prune_task is None
-    assert handles.files_export_gc_task is None
-    assert handles.notifications_prune_task is None
     assert handles.jobs_notifications_bridge_task is None
     assert handles.jobs_metrics_task is None
     assert handles.loop_lag_task == "loop-lag-input"

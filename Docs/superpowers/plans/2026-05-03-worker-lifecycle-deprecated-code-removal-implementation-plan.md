@@ -456,7 +456,7 @@ git commit -m "refactor: remove legacy custom worker stops"
 - Modify: `tldw_Server_API/tests/Services/test_shutdown_telemetry_services.py`
 - Modify: `tldw_Server_API/tests/Services/test_worker_lifecycle_ownership_matrix.py`
 
-- [ ] **Step 1: Add scheduler rows to the ownership matrix**
+- [x] **Step 1: Add scheduler rows to the ownership matrix**
 
 Rows should cover:
 
@@ -469,7 +469,7 @@ Rows should cover:
 - `connectors_sync_sched_task`
 - maintenance scheduler task names currently registered in `startup_maintenance_schedulers.py`
 
-- [ ] **Step 2: Write failing tests for duplicate scheduler stop removal**
+- [x] **Step 2: Write failing tests for duplicate scheduler stop removal**
 
 In `test_shutdown_recurring_schedulers.py` and related shutdown tests, prove registry callback-owned schedulers are not sent through duplicate direct-stop helpers after `background_worker_shutdown` has already stopped them.
 
@@ -485,7 +485,7 @@ await run_shutdown_post_worker_services(
 assert stop_calls == []
 ```
 
-- [ ] **Step 3: Decide whether `register_scheduler(...)` is needed**
+- [x] **Step 3: Decide whether `register_scheduler(...)` is needed**
 
 Before implementation, inspect duplication in recurring and maintenance scheduler registration.
 
@@ -495,7 +495,7 @@ Use this decision rule:
 - If at least three registrations repeat the same task/callback/rollback pattern, add a small helper in `lifecycle_workers.py` or a scheduler startup helper module.
 - Do not add a new registry class.
 
-- [ ] **Step 4: Remove duplicate scheduler direct-stop plumbing**
+- [x] **Step 4: Remove duplicate scheduler direct-stop plumbing**
 
 For callback-owned recurring schedulers, prefer registry callback ownership. Remove or bypass direct stop calls in:
 
@@ -505,7 +505,7 @@ For callback-owned recurring schedulers, prefer registry callback ownership. Rem
 
 Keep final cleanup behavior that is not a scheduler task stop.
 
-- [ ] **Step 5: Run scheduler tests**
+- [x] **Step 5: Run scheduler tests**
 
 Run:
 
@@ -522,7 +522,7 @@ python -m pytest \
 
 Expected: pass.
 
-- [ ] **Step 6: Commit Task 4**
+- [x] **Step 6: Commit Task 4**
 
 ```bash
 git add tldw_Server_API/app/services/startup_recurring_schedulers.py \

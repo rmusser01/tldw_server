@@ -129,19 +129,6 @@ def _transition_stop(app: Any, context: LegacyShutdownContext) -> StopCallable:
     return _stop
 
 
-def _authnz_enabled(context: LegacyShutdownContext) -> bool:
-    return bool(context.authnz_scheduler_started)
-
-
-def _authnz_stop(_: Any, __: LegacyShutdownContext) -> StopCallable:
-    async def _stop() -> None:
-        from tldw_Server_API.app.core.AuthNZ.scheduler import stop_authnz_scheduler
-
-        await stop_authnz_scheduler()
-
-    return _stop
-
-
 _LEGACY_SHUTDOWN_SPECS: tuple[_LegacyShutdownSpec, ...] = (
     _LegacyShutdownSpec(
         name="lifecycle_gate",
@@ -150,14 +137,6 @@ _LEGACY_SHUTDOWN_SPECS: tuple[_LegacyShutdownSpec, ...] = (
         default_timeout_ms=1000,
         enabled=_transition_enabled,
         stop=_transition_stop,
-    ),
-    _LegacyShutdownSpec(
-        name="authnz_scheduler",
-        phase=ShutdownPhase.FINALIZERS,
-        policy=ShutdownPolicy.PROD_DRAIN,
-        default_timeout_ms=5000,
-        enabled=_authnz_enabled,
-        stop=_authnz_stop,
     ),
 )
 

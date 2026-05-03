@@ -65,14 +65,9 @@ def test_build_legacy_shutdown_plan_includes_known_legacy_components() -> None:
         ),
     )
 
-    assert [component.name for component in plan] == [
-        "lifecycle_gate",
-        "authnz_scheduler",
-    ]
+    assert [component.name for component in plan] == ["lifecycle_gate"]
     assert plan[0].phase == ShutdownPhase.TRANSITION
     assert plan[0].policy == ShutdownPolicy.DEV_FAST
-    assert plan[1].phase == ShutdownPhase.FINALIZERS
-    assert plan[1].policy == ShutdownPolicy.PROD_DRAIN
 
 
 def test_build_legacy_shutdown_plan_records_visibility_on_app_state() -> None:
@@ -147,10 +142,7 @@ def test_shutdown_legacy_adapters_import_is_lazy_for_optional_stop_helpers(
         ),
     )
 
-    assert [component.name for component in plan] == [
-        "lifecycle_gate",
-        "authnz_scheduler",
-    ]
+    assert [component.name for component in plan] == ["lifecycle_gate"]
 
 
 def test_get_legacy_shutdown_suppressed_component_names_uses_summary_results() -> None:
@@ -212,17 +204,6 @@ def test_get_legacy_shutdown_suppressed_component_names_uses_summary_results() -
                 finished_at=0.0,
                 duration_ms=0,
                 timeout_ms=0,
-            ),
-            "authnz_scheduler": ShutdownComponentSummary(
-                name="authnz_scheduler",
-                phase=ShutdownPhase.FINALIZERS,
-                policy=ShutdownPolicy.PROD_DRAIN,
-                result="failed",
-                started_at=0.0,
-                finished_at=0.0,
-                duration_ms=0,
-                timeout_ms=0,
-                error="boom",
             ),
         },
     )

@@ -258,6 +258,15 @@ async def test_run_lifespan_shutdown_sequence_runs_wrappers_in_order_and_updates
     assert "websub_renewal_task" not in calls[9][1]
     assert "usage_task" not in calls[9][1]
     assert "llm_usage_task" not in calls[9][1]
+    assert "jobs_prune_task" not in calls[9][1]
+    assert "files_export_gc_task" not in calls[9][1]
+    assert "notifications_prune_task" not in calls[9][1]
+    assert "workflows_sched_task" not in calls[9][1]
+    assert "reading_digest_sched_task" not in calls[9][1]
+    assert "admin_backup_sched_task" not in calls[9][1]
+    assert "companion_reflection_sched_task" not in calls[9][1]
+    assert "reminders_sched_task" not in calls[9][1]
+    assert "connectors_sync_sched_task" not in calls[9][1]
     assert calls[10][1]["authnz_scheduler_started"] is True
     assert calls[10][1]["stopped_background_worker_names"] == {
         "authnz_scheduler",

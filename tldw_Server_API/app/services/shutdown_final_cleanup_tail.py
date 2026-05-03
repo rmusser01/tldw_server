@@ -17,7 +17,6 @@ async def shutdown_final_cleanup_tail(
     *,
     app: Any,
     authnz_scheduler_started: bool,
-    coordinated_legacy_component_names: set[str],
     stopped_background_worker_names: set[str] | None = None,
     db_pool: Any | None,
     session_manager: Any | None,
@@ -30,16 +29,13 @@ async def shutdown_final_cleanup_tail(
     timed_shutdown_segment: Callable[[Any, str], AbstractContextManager[Any]],
 ) -> CleanupTimedShutdownHandles:
     """Run the remaining final cleanup tail in the legacy shutdown order."""
-    authnz_scheduler_started = await _maybe_stop_authnz_scheduler(
+    authnz_scheduler_started = _authnz_scheduler_started_after_background_shutdown(
         authnz_scheduler_started=authnz_scheduler_started,
-        coordinated_legacy_component_names=coordinated_legacy_component_names,
         stopped_background_worker_names=stopped_background_worker_names,
-        guard_exceptions=startup_guard_exceptions,
     )
     cleanup_timed_shutdown_handles = await _shutdown_cleanup_timed_segments(
         app=app,
         authnz_scheduler_started=authnz_scheduler_started,
-        coordinated_legacy_component_names=coordinated_legacy_component_names,
         db_pool=db_pool,
         session_manager=session_manager,
         heavy_startup_handles=heavy_startup_handles,
@@ -57,12 +53,15 @@ async def shutdown_final_cleanup_tail(
     return cleanup_timed_shutdown_handles
 
 
-async def _maybe_stop_authnz_scheduler(**kwargs) -> bool:
-    from tldw_Server_API.app.services.shutdown_authnz_scheduler import (
-        maybe_stop_authnz_scheduler,
-    )
-
-    return await maybe_stop_authnz_scheduler(**kwargs)
+def _authnz_scheduler_started_after_background_shutdown(
+    *,
+    authnz_scheduler_started: bool,
+    stopped_background_worker_names: set[str] | None,
+) -> bool:
+    stopped_background_worker_names = stopped_background_worker_names or set()
+    if "authnz_scheduler" in stopped_background_worker_names:
+        return False
+    return authnz_scheduler_started
 
 
 async def _shutdown_cleanup_timed_segments(**kwargs) -> CleanupTimedShutdownHandles:

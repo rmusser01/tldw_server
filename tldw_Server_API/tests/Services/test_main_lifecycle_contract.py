@@ -209,8 +209,7 @@ def test_lifespan_startup_delegates_owned_job_pollers(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from tldw_Server_API.app import main as main_module
-    from tldw_Server_API.app.services import startup_service_tail
-    from tldw_Server_API.app.services import startup_worker_groups
+    from tldw_Server_API.app.services import startup_service_tail, startup_worker_groups
 
     app = main_module.app
     worker_group_calls: list[dict[str, object]] = []
@@ -386,8 +385,7 @@ def test_lifespan_shutdown_stops_recipe_run_and_evals_abtest_workers(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from tldw_Server_API.app import main as main_module
-    from tldw_Server_API.app.services import startup_notifications_abtest_workers
-    from tldw_Server_API.app.services import startup_sidecar_owned_jobs_pollers
+    from tldw_Server_API.app.services import startup_notifications_abtest_workers, startup_sidecar_owned_jobs_pollers
 
     app = main_module.app
     observed: dict[str, object] = {
@@ -446,8 +444,7 @@ def test_lifespan_shutdown_cancels_claims_and_maintenance_tasks(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from tldw_Server_API.app import main as main_module
-    from tldw_Server_API.app.services import startup_claims_rebuild
-    from tldw_Server_API.app.services import startup_maintenance_schedulers
+    from tldw_Server_API.app.services import startup_claims_rebuild, startup_maintenance_schedulers
 
     app = main_module.app
     observed = {
@@ -574,8 +571,7 @@ def test_lifespan_shutdown_stops_reading_study_companion_workers(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from tldw_Server_API.app import main as main_module
-    from tldw_Server_API.app.services import startup_content_jobs_pollers
-    from tldw_Server_API.app.services import startup_study_privilege_jobs_pollers
+    from tldw_Server_API.app.services import startup_content_jobs_pollers, startup_study_privilege_jobs_pollers
 
     app = main_module.app
     observed = {
@@ -746,9 +742,7 @@ def test_lifespan_startup_delegates_worker_bootstrap(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from tldw_Server_API.app import main as main_module
-    from tldw_Server_API.app.services import startup_service_tail
-    from tldw_Server_API.app.services import startup_worker_bootstrap
-    from tldw_Server_API.app.services import startup_worker_groups
+    from tldw_Server_API.app.services import startup_service_tail, startup_worker_bootstrap, startup_worker_groups
 
     app = main_module.app
     recorded_calls: list[dict[str, object]] = []
@@ -791,8 +785,7 @@ def test_lifespan_startup_delegates_pre_core_helper(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from tldw_Server_API.app import main as main_module
-    from tldw_Server_API.app.services import startup_core_initialization
-    from tldw_Server_API.app.services import startup_pre_core
+    from tldw_Server_API.app.services import startup_core_initialization, startup_pre_core
 
     app = main_module.app
     pre_core_calls: list[dict[str, object]] = []
@@ -980,8 +973,7 @@ def test_lifespan_startup_delegates_heavy_startup_policy(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from tldw_Server_API.app import main as main_module
-    from tldw_Server_API.app.services import startup_heavy_init
-    from tldw_Server_API.app.services import startup_heavy_policy
+    from tldw_Server_API.app.services import startup_heavy_init, startup_heavy_policy
 
     app = main_module.app
     policy_calls: list[dict[str, object]] = []
@@ -1405,8 +1397,7 @@ def test_lifespan_shutdown_delegates_transition_handoff(
 ) -> None:
     from tldw_Server_API.app import main as main_module
     from tldw_Server_API.app.services import shutdown_transition_handoff as transition_handoff
-    from tldw_Server_API.app.services import startup_auxiliary_services
-    from tldw_Server_API.app.services import startup_cleanup_workers
+    from tldw_Server_API.app.services import startup_auxiliary_services, startup_cleanup_workers
 
     app = main_module.app
     recorded_calls: list[dict[str, object]] = []
@@ -1603,7 +1594,9 @@ def test_lifespan_shutdown_delegates_primary_late_stop_workers(
 
     app = main_module.app
     recorded_calls: list[dict[str, object]] = []
-    should_run_late_stop = lambda task_name, task: bool(task) and task_name != "core_jobs_task"
+
+    def should_run_late_stop(task_name, task):
+        return bool(task) and task_name != "core_jobs_task"
 
     async def _fake_shutdown_transition_handoff(**kwargs):
         kwargs["apply_shutdown_transition_gate"](kwargs["app"], kwargs["readiness_state"])
@@ -1691,7 +1684,9 @@ def test_lifespan_shutdown_delegates_grouped_late_stop_workers(
 
     app = main_module.app
     recorded_calls: list[dict[str, object]] = []
-    should_run_late_stop = lambda task_name, task: bool(task) and task_name != "core_jobs_task"
+
+    def should_run_late_stop(task_name, task):
+        return bool(task) and task_name != "core_jobs_task"
 
     async def _fake_shutdown_transition_handoff(**kwargs):
         kwargs["apply_shutdown_transition_gate"](kwargs["app"], kwargs["readiness_state"])
@@ -1813,7 +1808,9 @@ def test_lifespan_shutdown_delegates_post_worker_services(
 
     app = main_module.app
     recorded_calls: list[dict[str, object]] = []
-    should_run_late_stop = lambda task_name, task: bool(task) and task_name != "core_jobs_task"
+
+    def should_run_late_stop(task_name, task):
+        return bool(task) and task_name != "core_jobs_task"
 
     async def _fake_shutdown_transition_handoff(**kwargs):
         kwargs["apply_shutdown_transition_gate"](kwargs["app"], kwargs["readiness_state"])
@@ -1878,9 +1875,6 @@ def test_lifespan_shutdown_delegates_post_worker_services(
     async def _fake_run_shutdown_post_worker_services(**kwargs):
         recorded_calls.append(kwargs)
         return post_worker_services.PostWorkerShutdownHandles(
-            jobs_prune_task=kwargs["jobs_prune_task"],
-            files_export_gc_task=kwargs["files_export_gc_task"],
-            notifications_prune_task=kwargs["notifications_prune_task"],
             jobs_notifications_bridge_task=kwargs["jobs_notifications_bridge_task"],
             jobs_metrics_task=kwargs["jobs_metrics_task"],
             loop_lag_task=kwargs["loop_lag_task"],
@@ -1938,9 +1932,16 @@ def test_lifespan_shutdown_delegates_post_worker_services(
     assert "websub_renewal_task" not in recorded_calls[0]
     assert "usage_task" not in recorded_calls[0]
     assert "llm_usage_task" not in recorded_calls[0]
-    assert "jobs_prune_task" in recorded_calls[0]
+    assert "jobs_prune_task" not in recorded_calls[0]
+    assert "files_export_gc_task" not in recorded_calls[0]
+    assert "notifications_prune_task" not in recorded_calls[0]
     assert "jobs_notifications_bridge_task" in recorded_calls[0]
-    assert "workflows_sched_task" in recorded_calls[0]
+    assert "workflows_sched_task" not in recorded_calls[0]
+    assert "reading_digest_sched_task" not in recorded_calls[0]
+    assert "admin_backup_sched_task" not in recorded_calls[0]
+    assert "companion_reflection_sched_task" not in recorded_calls[0]
+    assert "reminders_sched_task" not in recorded_calls[0]
+    assert "connectors_sync_sched_task" not in recorded_calls[0]
     assert "jobs_metrics_task" in recorded_calls[0]
     assert "jobs_metrics_reconcile_task" in recorded_calls[0]
     assert "jobs_crypto_rotate_task" in recorded_calls[0]
@@ -1974,7 +1975,7 @@ def test_lifespan_shutdown_delegates_final_cleanup_tail(
     assert len(recorded_calls) == 1
     assert recorded_calls[0]["app"] is app
     assert isinstance(recorded_calls[0]["authnz_scheduler_started"], bool)
-    assert isinstance(recorded_calls[0]["coordinated_legacy_component_names"], set)
+    assert "coordinated_legacy_component_names" not in recorded_calls[0]
     assert recorded_calls[0]["in_pytest_for_db_pool_shutdown"] is True
     assert recorded_calls[0]["in_pytest_for_tts_shutdown"] is True
     assert recorded_calls[0]["timed_shutdown_segment"] is main_module._timed_shutdown_segment
@@ -2380,7 +2381,7 @@ def test_shutdown_migrated_legacy_slice_uses_prod_drain_profile(
 
     class _SpyShutdownCoordinator:
         created_profiles: list[str] = []
-        instances: list["_SpyShutdownCoordinator"] = []
+        instances: list[_SpyShutdownCoordinator] = []
 
         def __init__(self, profile: str = "dev_fast", **_kwargs) -> None:
             self.profile = profile
