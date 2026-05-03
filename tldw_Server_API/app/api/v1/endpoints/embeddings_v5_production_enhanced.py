@@ -4703,8 +4703,10 @@ async def orchestrator_events(_current_user: User = Depends(get_request_user)):
                         await asyncio.gather(producer, return_exceptions=True)
                 raise
             else:
-                # Normal shutdown: ensure producer completes without forced cancel
+                # Normal shutdown: the producer loop is long-running, so cancel before awaiting it.
                 if not producer.done():
+                    with suppress(_EMBEDDINGS_NONCRITICAL_EXCEPTIONS):
+                        producer.cancel()
                     with suppress(_EMBEDDINGS_NONCRITICAL_EXCEPTIONS):
                         await asyncio.gather(producer, return_exceptions=True)
         finally:
