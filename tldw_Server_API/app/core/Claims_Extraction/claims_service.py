@@ -3288,8 +3288,26 @@ def list_claims_review_metrics(
             limit=limit,
             offset=offset,
         )
+        total = target_db.count_claims_review_extractor_metrics_daily(
+            user_id=target_user_id,
+            start_date=start_date,
+            end_date=end_date,
+            extractor=extractor,
+            extractor_version=extractor_version,
+        )
     normalized = [_normalize_review_extractor_metrics_row(row) for row in rows]
-    return {"items": normalized, "total": len(normalized)}
+    return {
+        "items": normalized,
+        "total": int(total),
+        "limit": int(limit),
+        "offset": int(offset),
+        "pagination": build_offset_pagination_meta(
+            total=int(total),
+            limit=int(limit),
+            offset=int(offset),
+            count=len(normalized),
+        ),
+    }
 
 
 def export_claims_analytics(
