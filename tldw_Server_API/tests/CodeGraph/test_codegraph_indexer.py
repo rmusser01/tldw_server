@@ -1,0 +1,145 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+from tldw_Server_API.app.core.CodeGraph.config import CodeGraphSettings
+from tldw_Server_API.app.core.CodeGraph.indexer import CodeGraphIndexer
+from tldw_Server_API.app.core.CodeGraph.language_registry import CodeGraphLanguageRegistry
+from tldw_Server_API.app.core.CodeGraph.repository import CodeGraphRepository
+
+
+def test_indexer_indexes_supported_file_inventory_and_skips_excluded_dirs(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "app.py").write_text("print('hi')\n", encoding="utf-8")
+    node_modules = workspace / "node_modules"
+    node_modules.mkdir()
+    (node_modules / "ignored.ts").write_text("export const ignored = true\n", encoding="utf-8")
+
+    repo = CodeGraphRepository(tmp_path / "index" / "codegraph.db")
+    indexer = CodeGraphIndexer(
+        settings=CodeGraphSettings.from_mapping({"index_base_dir": str(tmp_path / "index")}),
+        registry=CodeGraphLanguageRegistry(),
+    )
+
+    result = indexer.index_workspace(
+        workspace_root=workspace,
+        workspace_key="ws_test",
+        repository=repo,
+        force=True,
+        languages=None,
+        max_files=10,
+    )
+
+    assert result.status == "complete"
+    assert result.counters["files_indexed"] == 1
+    assert repo.list_files(limit=10)[0].path == "app.py"
+
+
+def test_indexer_rejects_over_limit_foreground_workspace(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    for index in range(3):
+        (workspace / f"file_{index}.py").write_text("x = 1\n", encoding="utf-8")
+
+    repo = CodeGraphRepository(tmp_path / "codegraph.db")
+    indexer = CodeGraphIndexer(settings=CodeGraphSettings.from_mapping({}), registry=CodeGraphLanguageRegistry())
+
+    result = indexer.index_workspace(
+        workspace_root=workspace,
+        workspace_key="ws_test",
+        repository=repo,
+        force=True,
+        languages=None,
+        max_files=2,
+    )
+
+    assert result.status == "index_too_large_for_foreground"
+    assert repo.counts()["files"] == 0
+
+
+def test_indexer_rejects_over_total_byte_budget_without_partial_index(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "small.py").write_text("x = 1\n", encoding="utf-8")
+    (workspace / "large.py").write_text("x = '" + ("a" * 64) + "'\n", encoding="utf-8")
+    repo = CodeGraphRepository(tmp_path / "codegraph.db")
+    indexer = CodeGraphIndexer(
+        settings=CodeGraphSettings.from_mapping({"foreground_max_bytes": 16}),
+        registry=CodeGraphLanguageRegistry(),
+    )
+
+    result = indexer.index_workspace(
+        workspace_root=workspace,
+        workspace_key="ws_test",
+        repository=repo,
+        force=True,
+        languages=None,
+        max_files=10,
+    )
+
+    assert result.status == "index_too_large_for_foreground"
+    assert repo.counts()["files"] == 0
+
+
+def test_indexer_stops_when_foreground_time_budget_expires(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "a.py").write_text("x = 1\n", encoding="utf-8")
+    (workspace / "b.py").write_text("y = 2\n", encoding="utf-8")
+    repo = CodeGraphRepository(tmp_path / "codegraph.db")
+    ticks = iter([0.0, 0.0, 10.0])
+    indexer = CodeGraphIndexer(
+        settings=CodeGraphSettings.from_mapping({"max_index_seconds": 1}),
+        registry=CodeGraphLanguageRegistry(),
+        monotonic=lambda: next(ticks),
+    )
+
+    result = indexer.index_workspace(
+        workspace_root=workspace,
+        workspace_key="ws_test",
+        repository=repo,
+        force=True,
+        languages=None,
+        max_files=10,
+    )
+
+    assert result.status == "index_timed_out_for_foreground"
+    assert result.counters["files_indexed"] == 1
+
+
+def test_indexer_skips_planned_language_files_until_extractors_exist(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "main.cc").write_text("int main() { return 0; }\n", encoding="utf-8")
+    repo = CodeGraphRepository(tmp_path / "codegraph.db")
+    indexer = CodeGraphIndexer(settings=CodeGraphSettings.from_mapping({}), registry=CodeGraphLanguageRegistry())
+
+    result = indexer.index_workspace(
+        workspace_root=workspace,
+        workspace_key="ws_test",
+        repository=repo,
+        force=True,
+        languages=None,
+        max_files=10,
+    )
+
+    assert result.status == "complete"
+    assert result.counters["planned_language_skipped"] == 1
+    assert repo.counts()["files"] == 0
+
+
+def test_sync_removes_deleted_files(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    source = workspace / "app.py"
+    source.write_text("x = 1\n", encoding="utf-8")
+    repo = CodeGraphRepository(tmp_path / "codegraph.db")
+    indexer = CodeGraphIndexer(settings=CodeGraphSettings.from_mapping({}), registry=CodeGraphLanguageRegistry())
+
+    indexer.index_workspace(workspace, "ws_test", repo, force=True, languages=None, max_files=10)
+    source.unlink()
+    result = indexer.sync_workspace(workspace, "ws_test", repo, languages=None, max_files=10)
+
+    assert result.status == "complete"
+    assert repo.counts()["files"] == 0
