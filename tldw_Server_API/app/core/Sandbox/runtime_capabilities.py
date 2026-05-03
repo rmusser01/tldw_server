@@ -12,6 +12,23 @@ RuntimeImplementationState = Literal[
     "host_gated",
     "not_applicable",
 ]
+RuntimeReasonCode = Literal[
+    "runtime_unavailable",
+    "unsupported_os",
+    "unsupported_arch",
+    "helper_unavailable",
+    "helper_protocol_mismatch",
+    "helper_missing",
+    "template_missing",
+    "template_unconfigured",
+    "network_policy_unsupported",
+    "trust_policy_denied",
+    "host_prerequisite_missing",
+    "host_permission_denied",
+    "feature_not_implemented",
+    "image_store_unavailable",
+    "unknown",
+]
 
 RUNTIME_IMPLEMENTATION_STATES: Mapping[RuntimeType, RuntimeImplementationState] = {
     RuntimeType.docker: "supported",
@@ -23,10 +40,74 @@ RUNTIME_IMPLEMENTATION_STATES: Mapping[RuntimeType, RuntimeImplementationState] 
     RuntimeType.worktree: "supported",
 }
 
+_RUNTIME_REASON_CODE_MAP: Mapping[str, RuntimeReasonCode] = {
+    "/dev/kvm_missing": "host_prerequisite_missing",
+    "apple_silicon_required": "unsupported_arch",
+    "docker_unavailable": "runtime_unavailable",
+    "firecracker_binary_missing": "host_prerequisite_missing",
+    "firecracker_unavailable": "runtime_unavailable",
+    "git_too_old_or_missing": "host_prerequisite_missing",
+    "image_store_root_missing": "image_store_unavailable",
+    "image_store_root_not_directory": "image_store_unavailable",
+    "limactl_missing": "host_prerequisite_missing",
+    "macos_helper_missing": "helper_missing",
+    "macos_helper_not_executable": "helper_missing",
+    "macos_helper_path_missing": "helper_missing",
+    "macos_helper_path_unconfigured": "helper_missing",
+    "macos_required": "unsupported_os",
+    "macos_template_missing": "template_missing",
+    "macos_virtualization_helper_protocol_mismatch": "helper_protocol_mismatch",
+    "macos_virtualization_helper_unavailable": "helper_unavailable",
+    "permission_denied_host_enforcement": "host_permission_denied",
+    "real_execution_not_implemented": "feature_not_implemented",
+    "sandbox_exec_missing": "host_prerequisite_missing",
+    "seatbelt_standard_disabled": "trust_policy_denied",
+    "seatbelt_unavailable": "runtime_unavailable",
+    "strict_allowlist_not_supported": "network_policy_unsupported",
+    "strict_deny_all_not_supported": "network_policy_unsupported",
+    "template_missing": "template_missing",
+    "template_unconfigured": "template_unconfigured",
+    "trust_level_not_supported": "trust_policy_denied",
+    "trust_level_requires_vm_runtime": "trust_policy_denied",
+    "unshare_required_on_linux": "host_prerequisite_missing",
+    "unsupported_network_policy": "network_policy_unsupported",
+    "unsupported_platform": "unsupported_os",
+    "virtiofsd_missing": "host_prerequisite_missing",
+    "vz_linux_template_missing": "template_missing",
+    "vz_linux_unavailable": "runtime_unavailable",
+    "vz_macos_unavailable": "runtime_unavailable",
+    "worktree_unavailable": "runtime_unavailable",
+}
+
 
 def runtime_implementation_state(runtime: RuntimeType) -> RuntimeImplementationState:
     """Return the roadmap maturity label for a runtime, independent of host availability."""
     return RUNTIME_IMPLEMENTATION_STATES.get(runtime, "unsupported")
+
+
+def normalize_runtime_reason(reason: str) -> RuntimeReasonCode:
+    """Return a stable client-facing code for a raw runtime preflight reason."""
+
+    normalized = str(reason or "").strip()
+    if not normalized:
+        return "unknown"
+    if normalized.startswith("image_store_unavailable"):
+        return "image_store_unavailable"
+    return _RUNTIME_REASON_CODE_MAP.get(normalized, "unknown")
+
+
+def normalize_runtime_reasons(reasons: list[str] | tuple[str, ...]) -> list[RuntimeReasonCode]:
+    """Normalize raw runtime reasons while preserving first-seen order."""
+
+    normalized: list[RuntimeReasonCode] = []
+    seen: set[RuntimeReasonCode] = set()
+    for reason in reasons:
+        code = normalize_runtime_reason(reason)
+        if code in seen:
+            continue
+        seen.add(code)
+        normalized.append(code)
+    return normalized
 
 
 @dataclass

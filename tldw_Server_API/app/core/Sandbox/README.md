@@ -175,6 +175,9 @@ Each runtime entry includes `available` for current host truth and
 `implementation_state` for roadmap maturity (`supported`, `unsupported`,
 `scaffold`, `host_gated`, or `not_applicable`), so clients do not infer security
 or maturity guarantees from availability alone.
+Runtime entries also preserve raw preflight `reasons` for operator diagnostics
+and expose additive `normalized_reasons` for stable client grouping across
+runtime-specific failures.
 `/api/v1/sandbox/admin/macos-diagnostics` is an admin-only diagnostics surface for
 operator troubleshooting and exposes helper/template readiness details that are not
 included in the public discovery payload, plus reconciliation data for persisted
