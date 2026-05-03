@@ -688,7 +688,7 @@ git add Docs/superpowers/specs/2026-05-03-worker-lifecycle-deprecated-code-remov
 git commit -m "docs: close worker lifecycle cleanup plan"
 ```
 
-- [ ] **Step 5: Open or update PR**
+- [x] **Step 5: Open or update PR**
 
 ```bash
 git push -u origin codex/worker-lifecycle-cleanup-1114
