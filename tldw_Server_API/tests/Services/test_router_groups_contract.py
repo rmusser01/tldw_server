@@ -53,6 +53,41 @@ def _first_router_path(router: APIRouter | Callable[[], APIRouter]) -> str:
     raise AssertionError("router had no path-bearing routes")
 
 
+def test_append_imported_router_spec_preserves_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.api.v1.router_groups.conditional import (
+        ImportedRouterSpec,
+        append_imported_router_spec,
+    )
+
+    specs: list[RouterSpec] = []
+    _install_fake_router_module(
+        monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.acp_schedules",
+        path="/acp/schedules",
+    )
+
+    append_imported_router_spec(
+        specs,
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.acp_schedules",
+            log_name="acp_schedules",
+            prefix="/api/v1",
+            tags=("acp-schedules",),
+            route_key="acp",
+            default_stable=False,
+        ),
+    )
+
+    assert len(specs) == 1
+    assert _first_router_path(specs[0].router) == "/acp/schedules"
+    assert specs[0].prefix == "/api/v1"
+    assert specs[0].tags == ("acp-schedules",)
+    assert specs[0].route_key == "acp"
+    assert specs[0].default_stable is False
+
+
 def test_register_router_specs_respects_route_policy(monkeypatch: pytest.MonkeyPatch) -> None:
     app = FastAPI()
     router = APIRouter()

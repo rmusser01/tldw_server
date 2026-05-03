@@ -5,6 +5,10 @@ from typing import Iterable
 
 from loguru import logger
 
+from tldw_Server_API.app.api.v1.router_groups.conditional import (
+    ImportedRouterSpec,
+    append_imported_router_spec,
+)
 from tldw_Server_API.app.api.v1.router_groups.spec import RouterSpec
 
 API_V1_PREFIX = "/api/v1"
@@ -68,18 +72,17 @@ def iter_admin_router_specs() -> Iterable[RouterSpec]:
         logger.debug(f"Skipping self_monitoring router: {e}")
 
     # Sandbox admin/ops endpoints.
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.sandbox import router as sandbox_router
-
-        specs.append(RouterSpec(
-            router=sandbox_router,
+    append_imported_router_spec(
+        specs,
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.sandbox",
+            log_name="sandbox",
             prefix=f"{API_V1_PREFIX}",
             tags=("sandbox",),
             route_key="sandbox",
             default_stable=False,
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping sandbox router: {e}")
+        ),
+    )
 
     # Billing endpoints
     try:
