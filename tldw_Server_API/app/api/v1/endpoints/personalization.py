@@ -28,7 +28,10 @@ from tldw_Server_API.app.api.v1.schemas.personalization import (
     PreferencesUpdate,
     PurgeResponse,
 )
-from tldw_Server_API.app.api.v1.utils.pagination import build_page_pagination_meta
+from tldw_Server_API.app.api.v1.utils.pagination import (
+    build_offset_pagination_meta,
+    build_page_pagination_meta,
+)
 from tldw_Server_API.app.core.DB_Management.Personalization_DB import PersonalizationDB, SemanticMemory
 from tldw_Server_API.app.core.feature_flags import is_personalization_enabled
 
@@ -302,6 +305,18 @@ async def import_memories(
 
 
 @router.get("/explanations", response_model=ExplanationListResponse, tags=["personalization"], status_code=status.HTTP_200_OK)
-async def list_explanations(limit: int = Query(10, ge=1, le=100)) -> ExplanationListResponse:
+async def list_explanations(
+    limit: int = Query(10, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+) -> ExplanationListResponse:
     """Return recent personalization explanations (scaffold: returns empty)."""
-    return ExplanationListResponse(items=[], total=0)
+    return ExplanationListResponse(
+        items=[],
+        total=0,
+        pagination=build_offset_pagination_meta(
+            limit=limit,
+            offset=offset,
+            total=0,
+            count=0,
+        ),
+    )

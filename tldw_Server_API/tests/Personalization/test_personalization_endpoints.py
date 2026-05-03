@@ -167,6 +167,30 @@ def test_profile_roundtrip(client_with_personalization_db: TestClient):
     assert prof3["alpha"] > 0.0
 
 
+def test_explanations_response_includes_canonical_pagination(
+    client_with_personalization_db: TestClient,
+) -> None:
+    """Explanation listing returns canonical offset pagination for the scaffolded collection."""
+    response = client_with_personalization_db.get(
+        "/api/v1/personalization/explanations",
+        params={"limit": 7, "offset": 3},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "items": [],
+        "total": 0,
+        "pagination": {
+            "mode": "offset",
+            "limit": 7,
+            "offset": 3,
+            "total": 0,
+            "has_more": False,
+            "next_offset": None,
+        },
+    }
+
+
 def test_memories_crud(client_with_personalization_db: TestClient):
     c = client_with_personalization_db
     # Add - no id field required (MemoryCreate schema)

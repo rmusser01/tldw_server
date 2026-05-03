@@ -8,7 +8,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from tldw_Server_API.app.api.v1.schemas.pagination import PagePaginationMeta
+from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta, PagePaginationMeta
 
 
 class OptInRequest(BaseModel):
@@ -131,6 +131,7 @@ class ExplanationEntry(BaseModel):
 class ExplanationListResponse(BaseModel):
     items: list[ExplanationEntry]
     total: int
+    pagination: OffsetPaginationMeta
 
 
 class DetailResponse(BaseModel):
