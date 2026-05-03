@@ -35,6 +35,7 @@ AUDIO_SPEECH_CONTENT_TYPES = {
 }
 AUDIO_TRANSCRIPTION_CONTENT_TYPES = {
     "application/json",
+    "application/x-subrip",
     "text/plain",
     "text/vtt",
 }

@@ -98,6 +98,7 @@ _AUDIO_TRANSCRIPTIONS_NONCRITICAL_EXCEPTIONS = (
 )
 _OPENAI_AUDIO_TRANSCRIPT_RESPONSE_CONTENT = {
     "application/json": {},
+    "application/x-subrip": {},
     "text/plain": {},
     "text/vtt": {},
 }
@@ -1169,7 +1170,7 @@ async def create_transcription(
             else:
                 srt_content = f"1\n00:00:00,000 --> 00:00:10,000\n{transcribed_text}\n"
             _emit_success_metrics(redaction_outcome=redaction_outcome)
-            return Response(content=srt_content, media_type="text/plain")
+            return Response(content=srt_content, media_type="application/x-subrip")
 
         if response_format == "vtt":
             _raise_on_transcription_error(transcribed_text)
