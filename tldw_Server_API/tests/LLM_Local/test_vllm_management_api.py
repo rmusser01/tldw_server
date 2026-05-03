@@ -117,11 +117,59 @@ def test_admin_responses_redact_managed_vllm_secrets(tmp_path):
         detail_response.json(),
         list_response.json()["instances"][0],
     ):
-        instance = body["instance"] if "instance" in body else body
+        instance = body.get("instance", body)
         assert instance["launch_spec"]["api_key"] == "[REDACTED]"
         assert instance["transport_config"]["auth"]["secret_ref"] == "[REDACTED]"
         assert instance["transport_config"]["auth"]["private_key_path"] == "[REDACTED]"
         assert instance["transport_config"]["probe_headers"]["X-Probe-Token"] == "[REDACTED]"
+
+
+@pytest.mark.unit
+def test_admin_responses_redact_last_error_details(tmp_path):
+    repo = SqliteVLLMInstanceRepository(db_path=tmp_path / "vllm_instances.db")
+    instance = repo.create_instance(
+        vm.VLLMInstanceCreateRequest(
+            name="failed-box",
+            execution_mode="local",
+            launch_spec={"model": "Qwen/Qwen2.5-7B-Instruct", "port": 8050},
+        ).to_domain()
+    )
+    repo.update_instance_runtime(
+        instance.instance_id,
+        {
+            "desired_state": "running",
+            "observed_state": "failed",
+            "last_error": "ssh failed for /tmp/id_ed25519",
+        },
+    )
+    app = _make_app(repo)
+
+    with TestClient(app) as client:
+        detail_response = client.get(f"/api/v1/llm/providers/vllm/instances/{instance.instance_id}")
+        list_response = client.get("/api/v1/llm/providers/vllm/instances")
+
+    assert detail_response.status_code == 200, detail_response.text
+    assert list_response.status_code == 200, list_response.text
+    assert detail_response.json()["instance"]["last_error"] == "[REDACTED]"
+    assert list_response.json()["instances"][0]["last_error"] == "[REDACTED]"
+
+
+@pytest.mark.unit
+def test_create_instance_rejects_unimplemented_agent_mode(tmp_path):
+    repo = SqliteVLLMInstanceRepository(db_path=tmp_path / "vllm_instances.db")
+    app = _make_app(repo)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/llm/providers/vllm/instances",
+            json={
+                "name": "agent-box",
+                "execution_mode": "agent",
+                "launch_spec": {"model": "Qwen/Qwen2.5-7B-Instruct"},
+            },
+        )
+
+    assert response.status_code == 422, response.text
 
 
 @pytest.mark.unit

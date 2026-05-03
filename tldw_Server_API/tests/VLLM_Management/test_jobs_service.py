@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from types import SimpleNamespace
 
 import pytest
 from fastapi import FastAPI
@@ -14,6 +13,7 @@ from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPri
 from tldw_Server_API.app.core.VLLM_Management.executors.base import LifecycleResult, ProbeResult
 from tldw_Server_API.app.core.VLLM_Management.service import (
     VLLMManagementService,
+    _probe_http_endpoint,
     build_default_executor_map,
     build_probe_headers,
 )
@@ -273,6 +273,28 @@ def test_default_probe_uses_configured_auth_headers(monkeypatch):
         "X-api-key": "Token managed-secret",
     }
     assert captured["timeout"] == 3
+
+
+@pytest.mark.unit
+def test_probe_http_endpoint_rejects_link_local_metadata_targets(monkeypatch):
+    called = False
+
+    def fake_urlopen(request, timeout=0):  # noqa: ANN001
+        nonlocal called
+        called = True
+        raise AssertionError("urlopen should not run for blocked probe targets")
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.VLLM_Management.service.urlopen",
+        fake_urlopen,
+    )
+
+    probe = _probe_http_endpoint("http://169.254.169.254/v1")
+
+    assert probe.reachable is False
+    assert probe.status == "unhealthy"
+    assert "blocked" in str(probe.detail or "").lower()
+    assert called is False
 
 
 @pytest.mark.unit

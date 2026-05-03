@@ -1,5 +1,7 @@
 from types import SimpleNamespace
 
+import pytest
+
 from tldw_Server_API.app.core.VLLM_Management.executors.ssh import SSHVLLMExecutor
 from tldw_Server_API.app.core.VLLM_Management.models import VLLMInstanceRecord
 from tldw_Server_API.app.core.VLLM_Management.service import ShellSSHRunner
@@ -124,3 +126,43 @@ def test_shell_ssh_runner_resolves_identity_file_from_secret_ref(monkeypatch):
         "mlops@gpu-c.internal",
         "/usr/local/bin/tldw-vllm-launcher start",
     ]
+
+
+def test_shell_ssh_runner_rejects_ssh_option_injection_host():
+    runner = ShellSSHRunner()
+
+    with pytest.raises(ValueError, match="Invalid SSH host"):
+        runner.run(
+            ["/usr/local/bin/tldw-vllm-launcher", "start"],
+            host="-oProxyCommand=sh",
+            port=22,
+            user="mlops",
+            auth=None,
+        )
+
+
+def test_shell_ssh_runner_redacts_identity_path_from_failure_detail(monkeypatch):
+    def fake_run(argv, **kwargs):  # noqa: ANN001, ANN003
+        return SimpleNamespace(
+            returncode=255,
+            stdout="",
+            stderr="Load key \"/tmp/id_ed25519\": invalid format",
+        )
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.VLLM_Management.service.subprocess.run",
+        fake_run,
+    )
+
+    runner = ShellSSHRunner()
+    with pytest.raises(RuntimeError) as exc_info:
+        runner.run(
+            ["/usr/local/bin/tldw-vllm-launcher", "start"],
+            host="gpu-d.internal",
+            port=22,
+            user="mlops",
+            auth={"identity_file": "/tmp/id_ed25519"},
+        )
+
+    assert "/tmp/id_ed25519" not in str(exc_info.value)
+    assert "[REDACTED]" in str(exc_info.value)

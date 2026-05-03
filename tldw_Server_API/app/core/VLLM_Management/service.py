@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import os
+import re
 import shlex
 import subprocess  # nosec B404 - required for explicit argv-based SSH launcher execution
 from datetime import datetime, timezone
 from typing import Any
 from urllib.error import HTTPError, URLError
+from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
 from loguru import logger
@@ -16,9 +19,7 @@ from loguru import logger
 from tldw_Server_API.app.core.VLLM_Management import (
     derive_effective_capabilities,
     get_default_vllm_instance_repository,
-    normalize_capabilities,
 )
-from tldw_Server_API.app.core.VLLM_Management.executors.agent import AgentVLLMExecutor
 from tldw_Server_API.app.core.VLLM_Management.executors.base import ProbeResult, VLLMExecutor
 from tldw_Server_API.app.core.VLLM_Management.executors.local import LocalVLLMExecutor
 from tldw_Server_API.app.core.VLLM_Management.executors.ssh import SSHVLLMExecutor
@@ -33,6 +34,44 @@ VLLM_JOB_TYPE_BY_ACTION = {
     "probe": "vllm_instance_probe",
 }
 DEFAULT_STARTUP_TIMEOUT_SECONDS = 300
+_SSH_SAFE_TOKEN_RE = re.compile(r"^[A-Za-z0-9._:@+-]+$")
+_REDACTED = "[REDACTED]"
+
+
+def _validate_ssh_token(value: str, *, field_name: str) -> str:
+    normalized = str(value or "").strip()
+    if not normalized or normalized.startswith("-") or not _SSH_SAFE_TOKEN_RE.fullmatch(normalized):
+        raise ValueError(f"Invalid SSH {field_name}")
+    return normalized
+
+
+def _redact_sensitive_detail(detail: str, *, secrets: list[str]) -> str:
+    redacted = str(detail or "")
+    for secret in secrets:
+        normalized = str(secret or "").strip()
+        if normalized:
+            redacted = redacted.replace(normalized, _REDACTED)
+    return redacted
+
+
+def _validate_probe_target(base_url: str) -> str:
+    parsed = urlparse(str(base_url or "").strip())
+    if parsed.scheme not in {"http", "https"}:
+        raise ValueError("Probe target blocked: managed vLLM probes only support http/https")
+    if parsed.username or parsed.password:
+        raise ValueError("Probe target blocked: credentials are not allowed in managed vLLM probe URLs")
+    hostname = parsed.hostname
+    if not hostname:
+        raise ValueError("Probe target blocked: managed vLLM probe URL must include a host")
+    try:
+        ip = ipaddress.ip_address(hostname)
+    except ValueError:
+        return parsed.geturl()
+    if ip.is_link_local or ip.is_multicast or ip.is_reserved or ip.is_unspecified:
+        raise ValueError("Probe target blocked: managed vLLM probe host is not allowed")
+    if not (ip.is_private or ip.is_loopback):
+        raise ValueError("Probe target blocked: managed vLLM probe host must be private or loopback")
+    return parsed.geturl()
 
 
 class ShellSSHRunner:
@@ -57,8 +96,11 @@ class ShellSSHRunner:
             "-o",
             f"ConnectTimeout={self._connect_timeout_seconds}",
         ]
+        validated_host = _validate_ssh_token(host, field_name="host")
+        validated_user = _validate_ssh_token(user, field_name="user") if user else None
         auth = dict(auth or {})
         identity_file = auth.get("identity_file") or auth.get("private_key_path")
+        redaction_targets: list[str] = []
         if not identity_file:
             secret_ref = str(auth.get("secret_ref") or "").strip()
             if secret_ref:
@@ -66,10 +108,12 @@ class ShellSSHRunner:
                 if resolved_identity:
                     identity_file = resolved_identity
         if identity_file:
-            argv.extend(["-i", str(identity_file)])
+            identity_file = str(identity_file)
+            argv.extend(["-i", identity_file])
+            redaction_targets.append(identity_file)
         if auth.get("strict_host_key_checking") is False:
             argv.extend(["-o", "StrictHostKeyChecking=no"])
-        target = f"{user}@{host}" if user else str(host)
+        target = f"{validated_user}@{validated_host}" if validated_user else validated_host
         remote_command = " ".join(shlex.quote(str(part)) for part in command)
         argv.extend([target, remote_command])
         completed = subprocess.run(  # nosec B603 - argv is built from validated structured fields; shell is disabled
@@ -80,6 +124,7 @@ class ShellSSHRunner:
         )
         if completed.returncode != 0:
             detail = (completed.stderr or completed.stdout or "").strip() or "ssh command failed"
+            detail = _redact_sensitive_detail(detail, secrets=redaction_targets)
             raise RuntimeError(detail)
         stdout = (completed.stdout or "").strip()
         if not stdout:
@@ -123,12 +168,16 @@ def build_probe_headers(instance: Any) -> dict[str, str]:
 
 
 def _probe_http_endpoint(base_url: str, *, headers: dict[str, str] | None = None) -> ProbeResult:
-    models_url = f"{base_url.rstrip('/')}/models"
+    try:
+        validated_base_url = _validate_probe_target(base_url)
+    except ValueError as exc:
+        return ProbeResult(status="unhealthy", reachable=False, base_url=base_url, detail=str(exc))
+    models_url = f"{validated_base_url.rstrip('/')}/models"
     try:
         request = Request(models_url, headers=dict(headers or {}), method="GET")
-        with urlopen(request, timeout=3) as response:  # nosec B310 - trusted operator-configured target
+        with urlopen(request, timeout=3) as response:  # nosec B310 - validated managed probe target
             _ = response.read()
-        return ProbeResult(status="healthy", reachable=True, base_url=base_url)
+        return ProbeResult(status="healthy", reachable=True, base_url=validated_base_url)
     except HTTPError as exc:
         return ProbeResult(status="unhealthy", reachable=False, base_url=base_url, detail=str(exc))
     except URLError as exc:
@@ -159,7 +208,6 @@ def build_default_executor_map() -> dict[str, VLLMExecutor]:
     return {
         "local": local_executor,
         "ssh": ssh_executor,
-        "agent": AgentVLLMExecutor(),
     }
 
 

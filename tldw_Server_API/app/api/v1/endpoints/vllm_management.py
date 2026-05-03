@@ -1,9 +1,14 @@
+"""Admin endpoints for managed vLLM instance lifecycle and routing."""
+
 from __future__ import annotations
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from typing import Any
 
-from tldw_Server_API.app.api.v1.API_Deps.jobs_deps import get_job_manager
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from fastapi.concurrency import run_in_threadpool
+
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, require_roles
+from tldw_Server_API.app.api.v1.API_Deps.jobs_deps import get_job_manager
 from tldw_Server_API.app.api.v1.schemas.vllm_management import (
     VLLMDefaultRouteRequest,
     VLLMDefaultRouteResponse,
@@ -43,7 +48,7 @@ def _resolve_vllm_repository() -> VLLMInstanceRepository:
 
 def _resolve_vllm_management_service(
     repository: VLLMInstanceRepository = Depends(_resolve_vllm_repository),
-    job_manager=Depends(get_job_manager),
+    job_manager: Any = Depends(get_job_manager),
 ) -> VLLMManagementService:
     return VLLMManagementService(repository=repository, job_manager=job_manager)
 
@@ -79,7 +84,7 @@ def _redact_mapping(value: object, *, redact_all_values: bool = False) -> object
                 redacted[key] = _REDACTED
                 continue
             if key in _REDACT_ALL_VALUE_KEYS and isinstance(nested_value, dict):
-                redacted[key] = {str(nested_key): _REDACTED for nested_key in nested_value.keys()}
+                redacted[key] = {str(nested_key): _REDACTED for nested_key in nested_value}
                 continue
             if key in {"command", "launcher_command"} and isinstance(nested_value, list):
                 redacted[key] = _redact_command_argv(nested_value)
@@ -97,6 +102,8 @@ def _serialize_instance(record: object) -> VLLMInstanceRecordResponse:
     data["transport_config"] = _redact_mapping(data.get("transport_config") or {})
     data["launch_spec"] = _redact_mapping(data.get("launch_spec") or {})
     data["executor_handle"] = _redact_mapping(data.get("executor_handle") or {})
+    if data.get("last_error") is not None:
+        data["last_error"] = _REDACTED
     return VLLMInstanceRecordResponse.model_validate(data)
 
 
@@ -125,8 +132,13 @@ async def create_vllm_instance(
     payload: VLLMInstanceCreateRequest,
     repository: VLLMInstanceRepository = Depends(_resolve_vllm_repository),
 ) -> VLLMInstanceEnvelope:
-    record = repository.create_instance(payload.to_domain())
-    _sync_default_route(repository=repository, instance_id=record.instance_id, routing_policy=payload.routing_policy)
+    record = await run_in_threadpool(repository.create_instance, payload.to_domain())
+    await run_in_threadpool(
+        _sync_default_route,
+        repository=repository,
+        instance_id=record.instance_id,
+        routing_policy=payload.routing_policy,
+    )
     return VLLMInstanceEnvelope(instance=_serialize_instance(record))
 
 
@@ -138,9 +150,9 @@ async def create_vllm_instance(
 async def list_vllm_instances(
     repository: VLLMInstanceRepository = Depends(_resolve_vllm_repository),
 ) -> VLLMInstanceListResponse:
-    records = [_serialize_instance(record) for record in repository.list_instances()]
+    records = [_serialize_instance(record) for record in await run_in_threadpool(repository.list_instances)]
     return VLLMInstanceListResponse(
-        default_instance_id=repository.get_default_instance_id(),
+        default_instance_id=await run_in_threadpool(repository.get_default_instance_id),
         instances=records,
     )
 
@@ -154,7 +166,7 @@ async def get_vllm_instance(
     instance_id: str,
     repository: VLLMInstanceRepository = Depends(_resolve_vllm_repository),
 ) -> VLLMInstanceEnvelope:
-    record = repository.get_instance(instance_id)
+    record = await run_in_threadpool(repository.get_instance, instance_id)
     if record is None:
         raise HTTPException(status_code=404, detail=f"Managed vLLM instance '{instance_id}' was not found")
     return VLLMInstanceEnvelope(instance=_serialize_instance(record))
@@ -172,10 +184,11 @@ async def update_vllm_instance(
 ) -> VLLMInstanceEnvelope:
     patch = payload.to_patch()
     try:
-        record = repository.update_instance(instance_id, patch)
+        record = await run_in_threadpool(repository.update_instance, instance_id, patch)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    _sync_default_route(
+    await run_in_threadpool(
+        _sync_default_route,
         repository=repository,
         instance_id=instance_id,
         routing_policy=patch.get("routing_policy") if isinstance(patch.get("routing_policy"), dict) else None,
@@ -193,7 +206,7 @@ async def delete_vllm_instance(
     force: bool = Query(default=False),
     repository: VLLMInstanceRepository = Depends(_resolve_vllm_repository),
 ) -> VLLMDeleteResponse:
-    record = repository.get_instance(instance_id)
+    record = await run_in_threadpool(repository.get_instance, instance_id)
     if record is None:
         raise HTTPException(status_code=404, detail=f"Managed vLLM instance '{instance_id}' was not found")
     if not force and (record.desired_state != "stopped" or record.observed_state != "stopped"):
@@ -201,7 +214,7 @@ async def delete_vllm_instance(
             status_code=409,
             detail="Managed vLLM instance must be stopped before deletion unless force=true",
         )
-    deleted = repository.delete_instance(instance_id)
+    deleted = await run_in_threadpool(repository.delete_instance, instance_id)
     return VLLMDeleteResponse(deleted=deleted, instance_id=instance_id)
 
 
@@ -215,10 +228,10 @@ async def set_default_vllm_instance(
     repository: VLLMInstanceRepository = Depends(_resolve_vllm_repository),
 ) -> VLLMDefaultRouteResponse:
     try:
-        repository.set_default_instance(payload.instance_id)
+        await run_in_threadpool(repository.set_default_instance, payload.instance_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    return VLLMDefaultRouteResponse(default_instance_id=repository.get_default_instance_id())
+    return VLLMDefaultRouteResponse(default_instance_id=await run_in_threadpool(repository.get_default_instance_id))
 
 
 def _job_response(*, action: str, instance_id: str, job: dict[str, object]) -> VLLMInstanceJobResponse:

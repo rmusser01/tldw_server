@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import os
 import signal
-import subprocess
+import subprocess  # nosec B404 - explicit argv-based process lifecycle management helper
 import time
 from dataclasses import dataclass
 from pathlib import Path
 
 from loguru import logger
+
+_REDACTED = "[REDACTED]"
+_SENSITIVE_VALUE_FLAGS = {"--api-key"}
 
 
 @dataclass
@@ -19,6 +22,21 @@ class SubprocessTask:
     pid: int | None = None
     pgid: int | None = None
     started_at: float = 0.0
+
+
+def _redact_command_for_logging(cmd: list[str]) -> str:
+    redacted: list[str] = []
+    redact_next = False
+    for token in cmd:
+        token_str = str(token)
+        if redact_next:
+            redacted.append(_REDACTED)
+            redact_next = False
+            continue
+        redacted.append(token_str)
+        if token_str in _SENSITIVE_VALUE_FLAGS:
+            redact_next = True
+    return " ".join(redacted)
 
 
 def start_process(cmd: list[str], workdir: str | Path, log_dir: str | Path) -> SubprocessTask:
@@ -44,11 +62,11 @@ def start_process(cmd: list[str], workdir: str | Path, log_dir: str | Path) -> S
         kwargs["start_new_session"] = True  # type: ignore[assignment]
     else:
         # Windows new process group
-        import subprocess as sp
+        import subprocess as sp  # nosec B404 - Windows creation flag lookup for the same argv-based helper
         creationflags = getattr(sp, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
         kwargs["creationflags"] = creationflags  # type: ignore[assignment]
 
-    proc = subprocess.Popen(cmd, **kwargs)
+    proc = subprocess.Popen(cmd, **kwargs)  # nosec B603 - caller passes structured argv; shell is disabled
     pgid = None
     if os.name == "posix":
         try:
@@ -65,7 +83,7 @@ def start_process(cmd: list[str], workdir: str | Path, log_dir: str | Path) -> S
         pgid=pgid,
         started_at=time.time(),
     )
-    logger.info(f"Started subprocess pid={task.pid} pgid={task.pgid} cmd={' '.join(cmd)}")
+    logger.info(f"Started subprocess pid={task.pid} pgid={task.pgid} cmd={_redact_command_for_logging(cmd)}")
     return task
 
 

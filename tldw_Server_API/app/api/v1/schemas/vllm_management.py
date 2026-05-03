@@ -9,7 +9,7 @@ from tldw_Server_API.app.core.VLLM_Management.models import VLLMInstanceCreate
 
 class VLLMInstanceCreateRequest(BaseModel):
     name: str = Field(..., min_length=1, description="Display name for the managed vLLM instance")
-    execution_mode: Literal["local", "ssh", "agent"] = Field(..., description="Where the managed runtime executes")
+    execution_mode: Literal["local", "ssh"] = Field(..., description="Where the managed runtime executes")
     transport_config: dict[str, Any] = Field(default_factory=dict)
     launch_spec: dict[str, Any] = Field(default_factory=dict)
     routing_policy: dict[str, Any] = Field(default_factory=dict)
@@ -28,7 +28,7 @@ class VLLMInstanceCreateRequest(BaseModel):
 
 class VLLMInstanceUpdateRequest(BaseModel):
     name: str | None = None
-    execution_mode: Literal["local", "ssh", "agent"] | None = None
+    execution_mode: Literal["local", "ssh"] | None = None
     transport_config: dict[str, Any] | None = None
     launch_spec: dict[str, Any] | None = None
     routing_policy: dict[str, Any] | None = None
