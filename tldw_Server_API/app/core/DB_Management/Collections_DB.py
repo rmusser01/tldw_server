@@ -4724,6 +4724,19 @@ class CollectionsDatabase:
         rows = self.backend.execute(q, tuple(params)).rows
         return [self._notification_row_from_db(row) for row in rows]
 
+    def count_user_notifications(self, *, include_archived: bool = False) -> int:
+        params: list[Any] = [self.user_id]
+        where = "user_id = ?"
+        if not include_archived:
+            where += " AND archived_at IS NULL AND dismissed_at IS NULL"
+        row = self.backend.execute(
+            f"SELECT COUNT(*) AS cnt FROM user_notifications WHERE {where}",  # nosec B608
+            tuple(params),
+        ).fetchone()
+        if row is None:
+            return 0
+        return int(row["cnt"] if isinstance(row, dict) else row[0])
+
     def list_user_dismissed_notifications(
         self,
         *,
