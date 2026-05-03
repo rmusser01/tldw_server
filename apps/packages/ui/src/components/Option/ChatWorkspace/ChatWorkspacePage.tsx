@@ -51,14 +51,6 @@ export const ChatWorkspacePage = () => {
     })
   }, [setRouteContext])
 
-  React.useEffect(() => {
-    setRuntimeState((current) =>
-      current.backendAvailable === backendAvailable
-        ? current
-        : { ...current, backendAvailable }
-    )
-  }, [backendAvailable])
-
   const stagedSourceIds = React.useMemo(
     () => stagedSources.map((source) => source.sourceId),
     [stagedSources]
@@ -100,7 +92,7 @@ export const ChatWorkspacePage = () => {
         stagedSourceIds={stagedSourceIds}
         selectedModelLabel={runtimeState.selectedModelLabel}
         selectedPersonaLabel={runtimeState.selectedPersonaLabel}
-        backendAvailable={backendAvailable}
+        backendAvailable={runtimeState.backendAvailable}
         streaming={runtimeState.streaming}
         onBrowseSource={handleBrowseSource}
         onStageSources={handleStageSources}

@@ -51,7 +51,7 @@ export const ChatWorkspaceConsole = ({
   return (
     <div
       data-testid="chat-workspace-console"
-      className="grid h-full min-h-0 w-full grid-cols-1 overflow-y-auto border border-border bg-background text-text lg:grid-cols-[minmax(260px,320px)_minmax(0,1fr)_minmax(280px,340px)] lg:overflow-hidden"
+      className="grid h-full min-h-0 w-full grid-cols-1 overflow-hidden border border-border bg-background text-text lg:grid-cols-[minmax(260px,320px)_minmax(0,1fr)_minmax(280px,340px)]"
     >
       <div className="order-2 min-h-0 overflow-y-auto border-t border-border bg-surface2/30 p-2 lg:order-1 lg:border-r lg:border-t-0">
         <WorkspaceRail

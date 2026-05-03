@@ -5,6 +5,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { ChatWorkspacePage } from "../ChatWorkspacePage"
 
 const setRouteContext = vi.fn()
+const chatPanelRuntimeState = vi.hoisted(() => ({
+  backendAvailable: true
+}))
 
 vi.mock("@/store/chat-surface-coordinator", () => ({
   useChatSurfaceCoordinatorStore: (selector: any) =>
@@ -49,7 +52,7 @@ vi.mock("../WorkspaceChatPanel", () => ({
   }) => {
     React.useEffect(() => {
       onRuntimeStateChange?.({
-        backendAvailable: true,
+        backendAvailable: chatPanelRuntimeState.backendAvailable,
         streaming: true,
         selectedModelLabel: "gpt-test",
         selectedPersonaLabel: "Analyst"
@@ -67,6 +70,7 @@ vi.mock("../WorkspaceChatPanel", () => ({
 describe("ChatWorkspacePage", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    chatPanelRuntimeState.backendAvailable = true
   })
 
   it("sets chat surface route context and renders the console regions", () => {
@@ -112,6 +116,23 @@ describe("ChatWorkspacePage", () => {
     ).toBeInTheDocument()
     expect(
       within(screen.getByLabelText("Chat workspace status")).getByText("Streaming")
+    ).toBeInTheDocument()
+  })
+
+  it("renders backend availability from chat runtime state", async () => {
+    chatPanelRuntimeState.backendAvailable = false
+
+    render(<ChatWorkspacePage />)
+
+    expect(
+      await within(
+        screen.getByRole("complementary", { name: /workspace inspector/i })
+      ).findByText("Server unavailable")
+    ).toBeInTheDocument()
+    expect(
+      within(screen.getByLabelText("Chat workspace status")).getByText(
+        "Server unavailable"
+      )
     ).toBeInTheDocument()
   })
 })
