@@ -13,7 +13,7 @@ export type WorkspaceRailProps = {
 const panelClass = "rounded-md border border-border bg-surface px-3 py-2"
 const headingClass = "text-[11px] font-semibold text-text-muted"
 const buttonClass =
-  "inline-flex min-h-[28px] items-center justify-center rounded-md border border-border px-2.5 py-1 text-xs font-medium text-text transition-colors hover:bg-surface2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-not-allowed disabled:opacity-50"
+  "inline-flex min-h-[28px] min-w-0 items-center justify-center break-words rounded-md border border-border px-2.5 py-1 text-xs font-medium text-text transition-colors hover:bg-surface2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-not-allowed disabled:opacity-50"
 
 const getSourceStatus = (source: WorkspaceSource) => source.status || "ready"
 
@@ -40,6 +40,13 @@ export const WorkspaceRail = ({
         : sources,
     [normalizedFilter, sources]
   )
+  const titleCounts = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const source of visibleSources) {
+      counts.set(source.title, (counts.get(source.title) ?? 0) + 1)
+    }
+    return counts
+  }, [visibleSources])
 
   return (
     <aside
@@ -90,6 +97,8 @@ export const WorkspaceRail = ({
               const isReady = status === "ready"
               const isStaged = stagedSourceIdSet.has(source.id)
               const isBrowsed = browsedSourceId === source.id
+              const hasDuplicateTitle = (titleCounts.get(source.title) ?? 0) > 1
+              const actionNameSuffix = hasDuplicateTitle ? ` ${source.id}` : ""
 
               return (
                 <li
@@ -123,6 +132,7 @@ export const WorkspaceRail = ({
                       <button
                         type="button"
                         className={buttonClass}
+                        aria-label={`Browse ${source.title}${actionNameSuffix}`}
                         onClick={() => onBrowseSource(source.id)}
                       >
                         Browse {source.title}
@@ -130,6 +140,7 @@ export const WorkspaceRail = ({
                       <button
                         type="button"
                         className={buttonClass}
+                        aria-label={`Stage ${source.title}${actionNameSuffix} for chat`}
                         disabled={!isReady}
                         onClick={() => {
                           if (isReady) {

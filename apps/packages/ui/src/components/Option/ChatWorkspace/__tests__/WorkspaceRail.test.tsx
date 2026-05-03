@@ -147,4 +147,70 @@ describe("WorkspaceRail", () => {
 
     expect(onStageSources).not.toHaveBeenCalled()
   })
+
+  it("disambiguates duplicate source title action names", () => {
+    const duplicateSources: WorkspaceSource[] = [
+      {
+        ...sources[0],
+        id: "source-a",
+        mediaId: 401,
+        title: "Meeting Notes"
+      },
+      {
+        ...sources[1],
+        id: "source-b",
+        mediaId: 402,
+        title: "Meeting Notes"
+      }
+    ]
+
+    render(
+      <WorkspaceRail
+        workspaceName="Default workspace"
+        sources={duplicateSources}
+        browsedSourceId={null}
+        stagedSourceIds={[]}
+        onBrowseSource={vi.fn()}
+        onStageSources={vi.fn()}
+      />
+    )
+
+    expect(
+      screen.getByRole("button", {
+        name: "Browse Meeting Notes source-a"
+      })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", {
+        name: "Stage Meeting Notes source-b for chat"
+      })
+    ).toBeInTheDocument()
+  })
+
+  it("wraps long source titles inside action buttons", () => {
+    const longTitle = "x".repeat(160)
+
+    render(
+      <WorkspaceRail
+        workspaceName="Default workspace"
+        sources={[{ ...sources[0], title: longTitle }]}
+        browsedSourceId={null}
+        stagedSourceIds={[]}
+        onBrowseSource={vi.fn()}
+        onStageSources={vi.fn()}
+      />
+    )
+
+    const browseButton = screen.getByRole("button", {
+      name: `Browse ${longTitle}`
+    })
+    const stageButton = screen.getByRole("button", {
+      name: `Stage ${longTitle} for chat`
+    })
+
+    expect(browseButton).toHaveClass("min-w-0")
+    expect(browseButton).toHaveClass("break-words")
+    expect(stageButton).toHaveClass("min-w-0")
+    expect(stageButton).toHaveClass("break-words")
+  })
 })
