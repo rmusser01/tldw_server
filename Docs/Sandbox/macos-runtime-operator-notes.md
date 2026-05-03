@@ -337,6 +337,28 @@ Current diagnostics are mixed-mode:
 - `vz_linux` reports `execution_mode=real` only when the helper-backed path is reachable and the template validates
 - `vz_macos` reports `execution_mode=fake` only when `TLDW_SANDBOX_VZ_MACOS_FAKE_EXEC=1`
 
+## Cleanup Contract Coverage
+
+Portable unit coverage asserts cleanup bookkeeping and temporary-directory
+removal without requiring Docker, `sandbox-exec`, or a real VM host. The
+hostless cleanup contract currently covers:
+
+- Docker container lifecycle paths that create a container and then complete,
+  hit startup timeout, or hit execution timeout; these must remove the container
+  and clear active cancellation/egress bookkeeping.
+- `seatbelt` and `worktree` cancellation paths; these must terminate the active
+  process group, clear active process/run-directory bookkeeping, and remove the
+  per-run directory.
+- `vz_linux` helper-execution failure after VM creation; this must terminate
+  the helper VM, clear active VM/run-directory bookkeeping, and remove the
+  auto-created workspace.
+
+Real Virtualization.framework cleanup remains host-gated. The portable tests do
+not prove that a prepared Apple silicon host releases every VM process,
+virtiofs resource, serial log handle, or helper-side run clone. Operators should
+use the real host smoke below for VM process lifecycle coverage, including
+ephemeral VM teardown and same-session VM reuse.
+
 ## Real Host E2E Smoke
 
 The preferred operator entrypoint for proving real `vz_linux` execution on a

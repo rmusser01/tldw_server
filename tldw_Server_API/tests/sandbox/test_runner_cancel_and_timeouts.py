@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-import os
 import signal
 import types
-from typing import Any, Dict, List, Tuple
+from typing import Any, List
 
 import pytest
 
@@ -13,7 +12,7 @@ from tldw_Server_API.app.core.Sandbox.runners.seatbelt_runner import SeatbeltRun
 from tldw_Server_API.app.core.Sandbox.streams import get_hub
 
 
-def _spec(cmd: List[str]) -> RunSpec:
+def _spec(cmd: List[str], *, network_policy: str = "deny_all") -> RunSpec:
     return RunSpec(
         session_id=None,
         runtime=RuntimeType.docker,
@@ -22,7 +21,63 @@ def _spec(cmd: List[str]) -> RunSpec:
         env={},
         timeout_sec=5,
         startup_timeout_sec=1,
-        network_policy="deny_all",
+        network_policy=network_policy,
+    )
+
+
+class _EmptyPipe:
+    def readline(self) -> bytes:
+        return b""
+
+    def peek(self) -> bytes:
+        return b""
+
+
+class _DockerLogsPopen:
+    stdout = _EmptyPipe()
+    stderr = _EmptyPipe()
+
+    def poll(self) -> int:
+        return 0
+
+
+def _clear_docker_tracking(run_id: str) -> None:
+    with DockerRunner._active_lock:  # type: ignore[attr-defined]
+        DockerRunner._active_cid.pop(run_id, None)  # type: ignore[attr-defined]
+    with DockerRunner._egress_lock:  # type: ignore[attr-defined]
+        DockerRunner._egress_net.pop(run_id, None)  # type: ignore[attr-defined]
+        DockerRunner._egress_label.pop(run_id, None)  # type: ignore[attr-defined]
+
+
+def _assert_docker_tracking_cleared(run_id: str) -> None:
+    with DockerRunner._active_lock:  # type: ignore[attr-defined]
+        assert run_id not in DockerRunner._active_cid  # type: ignore[attr-defined]
+    with DockerRunner._egress_lock:  # type: ignore[attr-defined]
+        assert run_id not in DockerRunner._egress_net  # type: ignore[attr-defined]
+        assert run_id not in DockerRunner._egress_label  # type: ignore[attr-defined]
+
+
+def _docker_tracking_present(run_id: str) -> bool:
+    with DockerRunner._active_lock:  # type: ignore[attr-defined]
+        active_present = run_id in DockerRunner._active_cid  # type: ignore[attr-defined]
+    with DockerRunner._egress_lock:  # type: ignore[attr-defined]
+        egress_present = (
+            run_id in DockerRunner._egress_net  # type: ignore[attr-defined]
+            or run_id in DockerRunner._egress_label  # type: ignore[attr-defined]
+        )
+    return active_present or egress_present
+
+
+def _stub_docker_resource_probes(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(DockerRunner, "_docker_version", staticmethod(lambda: "test-docker"))
+    monkeypatch.setattr(DockerRunner, "_resolve_cgroup_cpu_file_by_cid", staticmethod(lambda cid: None))
+    monkeypatch.setattr(DockerRunner, "_read_cgroup_cpu_time_sec_by_cid", staticmethod(lambda cid: None))
+    monkeypatch.setattr(DockerRunner, "_read_cgroup_mem_peak_mb_by_cid", staticmethod(lambda cid: None))
+    monkeypatch.setattr(DockerRunner, "_get_mem_usage_mb", staticmethod(lambda cid: 0))
+    monkeypatch.setattr(DockerRunner, "_get_cpu_time_sec", staticmethod(lambda cid, started, finished: 0))
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Sandbox.runners.docker_runner.delete_rules_by_label",
+        lambda label: None,
     )
 
 
@@ -68,6 +123,53 @@ def test_runner_cancel_term_grace_no_duplicate_end(monkeypatch: pytest.MonkeyPat
 
 
 @pytest.mark.unit
+def test_runner_completed_run_clears_active_container_and_egress_maps(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TLDW_SANDBOX_DOCKER_FAKE_EXEC", "0")
+    monkeypatch.setattr("tldw_Server_API.app.core.Sandbox.runners.docker_runner.docker_available", lambda: True)
+    _stub_docker_resource_probes(monkeypatch)
+
+    rid = "run_docker_complete_cleanup"
+    cid = "cid-complete"
+    _clear_docker_tracking(rid)
+
+    def _check_output(args: List[str], text: bool = False, timeout: int | None = None, **kwargs: Any):
+        if args[:2] == ["docker", "create"]:
+            return cid
+        if args[:3] == ["docker", "image", "inspect"]:
+            return "sha256:test-image"
+        return ""
+
+    check_calls: list[list[str]] = []
+
+    def _check_call(args: List[str], timeout: int | None = None, **kwargs: Any):
+        check_calls.append(list(args))
+        return 0
+
+    def _run(args: List[str], capture_output: bool = False, text: bool = False, timeout: int | None = None, **kwargs: Any):
+        if args[:2] == ["docker", "wait"]:
+            return types.SimpleNamespace(returncode=0, stdout="0")
+        return types.SimpleNamespace(returncode=0, stdout="")
+
+    monkeypatch.setattr("subprocess.check_output", _check_output)
+    monkeypatch.setattr("subprocess.check_call", _check_call)
+    monkeypatch.setattr("subprocess.run", _run)
+    monkeypatch.setattr("subprocess.Popen", lambda *args, **kwargs: _DockerLogsPopen())
+
+    try:
+        rs = DockerRunner().start_run(rid, _spec(["python", "-c", "print('x')"]))
+    finally:
+        # Keep this test isolated even while RED exposes a cleanup leak.
+        leaked_before_cleanup = _docker_tracking_present(rid)
+        _clear_docker_tracking(rid)
+
+    assert rs.phase.value == "completed"
+    assert rs.exit_code == 0
+    assert ["docker", "rm", "-f", cid] in check_calls
+    assert not leaked_before_cleanup
+    _assert_docker_tracking_cleared(rid)
+
+
+@pytest.mark.unit
 def test_runner_startup_timeout_on_create(monkeypatch: pytest.MonkeyPatch) -> None:
     # Make docker available and non-fake
     monkeypatch.setenv("TLDW_SANDBOX_DOCKER_FAKE_EXEC", "0")
@@ -93,12 +195,50 @@ def test_runner_startup_timeout_on_create(monkeypatch: pytest.MonkeyPatch) -> No
 
 
 @pytest.mark.unit
+def test_runner_startup_timeout_on_create_removes_precreated_egress_network(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("TLDW_SANDBOX_DOCKER_FAKE_EXEC", "0")
+    monkeypatch.setenv("SANDBOX_EGRESS_ENFORCEMENT", "true")
+    monkeypatch.setenv("SANDBOX_EGRESS_GRANULAR_ENFORCEMENT", "true")
+    monkeypatch.setattr("tldw_Server_API.app.core.Sandbox.runners.docker_runner.docker_available", lambda: True)
+    _stub_docker_resource_probes(monkeypatch)
+
+    import subprocess
+
+    rid = "run_create_timeout_cleanup"
+    run_calls: list[list[str]] = []
+
+    def _run(args: List[str], check: bool = False, **kwargs: Any):
+        run_calls.append(list(args))
+        return types.SimpleNamespace(returncode=0, stdout="")
+
+    def _raise_timeout(*args: Any, **kwargs: Any):  # type: ignore[no-untyped-def]
+        raise subprocess.TimeoutExpired(cmd=args[0] if args else "docker create", timeout=1)
+
+    monkeypatch.setattr("subprocess.run", _run)
+    monkeypatch.setattr("subprocess.check_output", _raise_timeout)
+
+    rs = DockerRunner().start_run(
+        rid,
+        _spec(["python", "-c", "print('x')"], network_policy="allowlist"),
+    )
+
+    assert rs.phase.value == "timed_out"
+    assert rs.message == "startup_timeout"
+    assert ["docker", "network", "rm", f"tldw_sbx_{rid[:12]}"] in run_calls
+    _assert_docker_tracking_cleared(rid)
+
+
+@pytest.mark.unit
 def test_runner_execution_timeout_on_wait(monkeypatch: pytest.MonkeyPatch) -> None:
     # Make docker available and non-fake
     monkeypatch.setenv("TLDW_SANDBOX_DOCKER_FAKE_EXEC", "0")
     monkeypatch.setattr("tldw_Server_API.app.core.Sandbox.runners.docker_runner.docker_available", lambda: True)
 
     # Simulate docker create returns a CID, cp/start succeed, wait times out
+    _stub_docker_resource_probes(monkeypatch)
+
     def _check_output(args: List[str], text: bool = False, timeout: int | None = None):
         if args and args[0] == "docker" and args[1] not in ("image",):
             # docker create returns a CID once
@@ -130,6 +270,61 @@ def test_runner_execution_timeout_on_wait(monkeypatch: pytest.MonkeyPatch) -> No
     assert (rs.message or "") == "execution_timeout"
     frames = list(hub._buffers.get(rid, []))  # type: ignore[attr-defined]
     assert any(f.get("type") == "event" and f.get("event") == "end" and f.get("data", {}).get("reason") == "execution_timeout" for f in frames)
+    leaked_before_cleanup = _docker_tracking_present(rid)
+    _clear_docker_tracking(rid)
+    assert not leaked_before_cleanup
+    _assert_docker_tracking_cleared(rid)
+
+
+@pytest.mark.unit
+def test_runner_startup_timeout_after_container_create_clears_tracking(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TLDW_SANDBOX_DOCKER_FAKE_EXEC", "0")
+    monkeypatch.setenv("SANDBOX_EGRESS_ENFORCEMENT", "true")
+    monkeypatch.setenv("SANDBOX_EGRESS_GRANULAR_ENFORCEMENT", "true")
+    monkeypatch.setattr("tldw_Server_API.app.core.Sandbox.runners.docker_runner.docker_available", lambda: True)
+    _stub_docker_resource_probes(monkeypatch)
+
+    import subprocess
+
+    rid = "run_docker_start_timeout_cleanup"
+    cid = "cid-start-timeout"
+    _clear_docker_tracking(rid)
+
+    def _check_output(args: List[str], text: bool = False, timeout: int | None = None):
+        if args[:2] == ["docker", "create"]:
+            return cid
+        return ""
+
+    check_calls: list[list[str]] = []
+
+    def _check_call(args: List[str], timeout: int | None = None):
+        check_calls.append(list(args))
+        if args[:2] == ["docker", "start"]:
+            raise subprocess.TimeoutExpired(cmd=args, timeout=timeout or 1)
+        return 0
+
+    run_calls: list[list[str]] = []
+
+    def _run(args: List[str], check: bool = False, **kwargs: Any):
+        run_calls.append(list(args))
+        return types.SimpleNamespace(returncode=0, stdout="")
+
+    monkeypatch.setattr("subprocess.check_output", _check_output)
+    monkeypatch.setattr("subprocess.check_call", _check_call)
+    monkeypatch.setattr("subprocess.run", _run)
+
+    rs = DockerRunner().start_run(
+        rid,
+        _spec(["python", "-c", "print('x')"], network_policy="allowlist"),
+    )
+    assert rs.phase.value == "timed_out"
+    assert rs.message == "startup_timeout"
+    assert ["docker", "rm", "-f", cid] in check_calls
+    assert ["docker", "network", "rm", f"tldw_sbx_{rid[:12]}"] in run_calls
+    leaked_before_cleanup = _docker_tracking_present(rid)
+    _clear_docker_tracking(rid)
+    assert not leaked_before_cleanup
+    _assert_docker_tracking_cleared(rid)
 
 
 @pytest.mark.unit

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import signal
 import subprocess
 import sys
 from pathlib import Path
@@ -295,6 +296,46 @@ def test_build_command_wraps_with_unshare_on_linux() -> None:
 def test_cancel_run_returns_false_when_no_proc() -> None:
     """cancel_run returns False when no process is tracked."""
     assert WorktreeRunner.cancel_run("nonexistent-run") is False
+
+
+def test_cancel_run_kills_active_process_group_and_removes_run_dir(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """cancel_run cleans both process tracking and the per-run directory."""
+    rid = "run-worktree-cancel-cleanup"
+    run_dir = tmp_path / "worktree-run-dir"
+    run_dir.mkdir()
+
+    class _FakeProc:
+        pid = 4321
+
+        def wait(self, timeout: int | None = None) -> int:
+            del timeout
+            return 0
+
+    with WorktreeRunner._active_lock:  # type: ignore[attr-defined]
+        WorktreeRunner._active_proc[rid] = _FakeProc()  # type: ignore[attr-defined]
+        WorktreeRunner._active_run_dir[rid] = str(run_dir)  # type: ignore[attr-defined]
+
+    killpg_calls: list[tuple[int, int]] = []
+    monkeypatch.setattr("os.killpg", lambda pid, sig: killpg_calls.append((pid, sig)))
+    monkeypatch.setattr(WorktreeRunner, "_cancel_grace_seconds", classmethod(lambda cls: 0))
+
+    try:
+        ok = WorktreeRunner.cancel_run(rid)
+    finally:
+        with WorktreeRunner._active_lock:  # type: ignore[attr-defined]
+            WorktreeRunner._active_proc.pop(rid, None)  # type: ignore[attr-defined]
+            WorktreeRunner._active_run_dir.pop(rid, None)  # type: ignore[attr-defined]
+            WorktreeRunner._cancelled_runs.discard(rid)  # type: ignore[attr-defined]
+
+    assert ok is True
+    assert killpg_calls == [(4321, signal.SIGTERM)]
+    assert not run_dir.exists()
+    with WorktreeRunner._active_lock:  # type: ignore[attr-defined]
+        assert rid not in WorktreeRunner._active_proc  # type: ignore[attr-defined]
+        assert rid not in WorktreeRunner._active_run_dir  # type: ignore[attr-defined]
 
 
 # ---------------------------------------------------------------------------
