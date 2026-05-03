@@ -130,6 +130,14 @@ Goal: establish a test-backed inventory of what `WorkerRegistry` owns today.
 
 Work:
 
+- create a canonical ownership matrix for every #1114 worker with these columns:
+  - issue checklist name
+  - `ManagedWorker.name`
+  - task name
+  - runtime-state field
+  - stopped-name key
+  - legacy helper or direct-stop path
+  - final target state
 - create or update tests that enumerate full worker inventory from startup helpers
 - assert each worker's `name`, `category`, and `shutdown_phase`
 - assert background-phase workers do not appear in `_tldw_shutdown_job_poller_inventory`
@@ -145,6 +153,7 @@ Primary files:
 
 Success criteria:
 
+- every worker targeted for deletion has a row in the ownership matrix before code is removed
 - registry-owned workers have explicit shutdown ownership in tests
 - duplicate-stop candidates are listed in the test or design follow-up notes
 - no production code deletion happens until these assertions are in place
@@ -155,6 +164,7 @@ Goal: delete the oldest compatibility code for workers that now fit the registry
 
 Initial deletion candidates:
 
+- `ephemeral_cleanup_task`
 - `chatbooks_cleanup`
 - `storage_cleanup_service`
 - `claims_rebuild`
@@ -168,12 +178,18 @@ Work:
 - stop passing obsolete task/stop-event handles into legacy shutdown helpers where registry ownership is sufficient
 - remove or shrink direct-stop branches in `shutdown_pre_worker_cleanup.py`, `shutdown_post_worker_services.py`, `shutdown_usage_aggregators.py`, and related helper modules
 - keep service-specific shutdown calls only when the service has state outside the registered task
+- preserve non-stop finalizers and singleton resets even when direct worker stops are removed
 - update `LifespanWorkerRuntimeState` only after downstream shutdown helpers no longer need a handle
+
+Important boundary:
+
+Removing a deprecated direct stop does not mean deleting all code in the same helper. For example, `storage_cleanup_service` worker stop ownership can move fully to `WorkerRegistry`, while storage cleanup singleton resets and AuthNZ limiter resets still need an explicit finalizer path unless a separate test proves they are obsolete.
 
 Success criteria:
 
 - each targeted worker is stopped through `background_worker_shutdown`
 - direct legacy shutdown helpers no longer stop targeted workers
+- non-stop finalizers still run when required
 - tests prove no double stop and no lost shutdown
 - deleted code exceeds added code for the phase
 
@@ -187,6 +203,7 @@ Work:
 - keep current direct `ManagedWorker` registrations if duplication is low
 - add a minimal `register_scheduler(...)` helper only if it removes repeated task/callback/rollback code across scheduler modules
 - do not create a separate registry object unless a scheduler-specific inventory or shutdown phase is needed
+- retire duplicate scheduler stop-helper plumbing when a scheduler is proven to be registry callback-owned
 
 Candidate scheduler groups:
 
@@ -197,6 +214,7 @@ Candidate scheduler groups:
 Success criteria:
 
 - scheduler shutdown ownership is explicit and tested
+- callback-owned schedulers no longer flow through duplicate direct-stop helpers
 - no new abstraction exists unless it removes duplicated code
 - scheduler tests cover startup rollback and shutdown callback behavior
 
