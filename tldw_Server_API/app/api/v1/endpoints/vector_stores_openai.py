@@ -1221,10 +1221,13 @@ async def list_vectors(
                 items.sort(key=lambda x: (x.metadata or {}).get(key, ''), reverse=reverse)
         except _VECTORSTORE_NONCRITICAL_EXCEPTIONS as e:
             logger.error(f"Vector listing failed: {e}")
-    next_offset = None
     returned = len(items)
-    if returned == limit and (offset + returned) < total:
-        next_offset = offset + returned
+    pagination = build_offset_pagination_meta(
+        limit=limit,
+        offset=offset,
+        total=total,
+        count=returned,
+    ).model_dump(mode="json")
 
     serialized_items: list[dict[str, Any]] = []
     for item in items:
@@ -1242,12 +1245,9 @@ async def list_vectors(
 
     return {
         "data": serialized_items,
-        "pagination": {
-            "limit": limit,
-            "offset": offset,
-            "next_offset": next_offset,
-            "total": total
-        }
+        "pagination": pagination,
+        "has_more": pagination["has_more"],
+        "next_offset": pagination["next_offset"],
     }
 
 
