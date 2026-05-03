@@ -5,6 +5,11 @@ canonical pagination envelope without a separate versioning or contract
 decision. The generated matrix in `Docs/Design/Pagination_Completion_Matrix.md`
 is the route-level inventory; this document owns the policy categories.
 
+As of the pagination-completion closeout, the matrix should have no
+`migration-candidate` or `needs-confirmation` rows. Remaining noncanonical
+routes should be explicitly classified as `exempt-provider`,
+`exempt-raw-list`, or `exempt-not-paginated`.
+
 ## Exemption Categories
 
 ### Provider-Compatible Routes
@@ -141,17 +146,22 @@ Admin/event routes may use canonical metadata with `total=None` when computing a
 total would be expensive, provider-owned, or semantically unavailable. Prefer
 cursor tokens or overfetch-derived `has_more` over new count queries.
 
-Route-level matrix status: `migration-candidate` with count strategy
-`overfetch-or-token` or `needs-confirmation`.
+Route-level matrix status: `canonical-present-or-custom-pagination` when the
+route owns a list envelope and exposes canonical metadata with an unknown total;
+otherwise use the narrow `exempt-not-paginated` classification that matches the
+route's stream, operation-result, aggregate, or detail semantics.
 
 ### Detail and Nested Subresource Routes
 
 Parameterized detail routes under plural resources are not pagination targets
 unless they expose list/search/history/job/event semantics directly. The
-inventory script should mark uncertain cases as `needs-confirmation`; do not
-promote them into migration scope without route tests.
+inventory script may surface uncertain cases during future scans, but closeout
+requires converting those rows to a canonical route or a narrow exemption before
+merge. Do not promote detail routes into migration scope without route tests.
 
-Route-level matrix status: `needs-confirmation` or `exempt-not-paginated`.
+Route-level matrix status: `exempt-not-paginated` unless the route is a raw list
+that requires `exempt-raw-list` or a provider-shaped response that requires
+`exempt-provider`.
 
 Current examples:
 

@@ -864,7 +864,7 @@ Repeat Task 9 for each custom family.
 - Update: `Docs/Design/Pagination_Completion_Matrix.md`
 - Update: `Docs/Design/Pagination_Contract_Exemptions.md`
 
-- [ ] **Step 1: Write the failing OpenAPI guard test**
+- [x] **Step 1: Write the failing OpenAPI guard test**
 
 Test behavior:
 
@@ -883,7 +883,7 @@ python -m pytest tldw_Server_API/tests/Utils/test_pagination_openapi_contract.py
 
 Expected: fail until exemptions are encoded.
 
-- [ ] **Step 2: Encode exemptions**
+- [x] **Step 2: Encode exemptions**
 
 Prefer a simple Python fixture or YAML/Markdown-derived list with fields:
 
@@ -894,7 +894,7 @@ Prefer a simple Python fixture or YAML/Markdown-derived list with fields:
 
 Do not hide broad wildcard exemptions in code.
 
-- [ ] **Step 3: Rerun guardrails**
+- [x] **Step 3: Rerun guardrails**
 
 Run:
 
@@ -904,11 +904,19 @@ python -m pytest tldw_Server_API/tests/Utils/test_pagination_contract.py -q
 git diff --check
 ```
 
-- [ ] **Step 4: Commit OpenAPI guardrails**
+- [x] **Step 4: Commit OpenAPI guardrails**
 
 ```bash
 git add tldw_Server_API/tests/Utils/test_pagination_openapi_contract.py Docs/Design/Pagination_Completion_Matrix.md Docs/Design/Pagination_Contract_Exemptions.md
 git commit -m "Phase pagination-completion: add pagination contract guardrails"
+```
+
+Committed as `941bef041c`. Verified:
+
+```bash
+LOGURU_LEVEL=ERROR ../../.venv/bin/python -m pytest tldw_Server_API/tests/Utils/test_pagination_openapi_contract.py -q --tb=short
+../../.venv/bin/python -m pytest tldw_Server_API/tests/Utils/test_pagination_contract.py -q
+git diff --check
 ```
 
 ## Task 11: Frontend Pagination Typing Closeout
@@ -918,7 +926,7 @@ git commit -m "Phase pagination-completion: add pagination contract guardrails"
 - Modify route-specific frontend services only when they consume migrated routes.
 - Test: route-specific Vitest files.
 
-- [ ] **Step 1: Add shared pagination types**
+- [x] **Step 1: Add shared pagination types**
 
 Add or extend frontend types for:
 
@@ -950,7 +958,7 @@ type CursorPaginationMeta = {
 };
 ```
 
-- [ ] **Step 2: Add unwrap/parser tests**
+- [x] **Step 2: Add unwrap/parser tests**
 
 Use fixtures for legacy-only, canonical-only, and combined legacy+canonical responses.
 
@@ -961,11 +969,11 @@ cd apps/packages/ui
 bunx vitest run <pagination helper test file>
 ```
 
-- [ ] **Step 3: Update route-specific clients**
+- [x] **Step 3: Update route-specific clients**
 
 Only update services whose backend routes were migrated in the same or prior PR.
 
-- [ ] **Step 4: Verify frontend scope**
+- [x] **Step 4: Verify frontend scope**
 
 Run:
 
@@ -976,12 +984,23 @@ bunx vitest run <touched test files>
 
 If OpenAPI/type generation is part of the touched client path, also run the repo’s documented OpenAPI verification command.
 
-- [ ] **Step 5: Commit frontend typing closeout**
+- [x] **Step 5: Commit frontend typing closeout**
 
 ```bash
 git add <exact touched frontend service files> <exact touched frontend test files>
 git commit -m "Phase pagination-completion: add frontend pagination metadata typing"
 ```
+
+Committed as `7cc3f309a6`. Verified:
+
+```bash
+cd apps/packages/ui
+bun run test src/services/__tests__/response-envelope.test.ts src/services/__tests__/data-tables-pagination.test.ts
+../../node_modules/.bun/typescript@5.9.3/node_modules/typescript/bin/tsc --noEmit --project tsconfig.json --pretty false
+```
+
+The full UI typecheck still fails on the existing baseline, but the expected
+missing `response-envelope` pagination type exports are no longer present.
 
 ## Task 12: Final Documentation and Tracker Update
 
@@ -990,7 +1009,7 @@ git commit -m "Phase pagination-completion: add frontend pagination metadata typ
 - Update: `Docs/Design/Pagination_Completion_Matrix.md`
 - Update: GitHub issue #1116 or successor tracker
 
-- [ ] **Step 1: Write API pagination docs**
+- [x] **Step 1: Write API pagination docs**
 
 Document:
 
@@ -1001,7 +1020,7 @@ Document:
 - `total=None`
 - provider/raw-list exemptions
 
-- [ ] **Step 2: Verify docs links and markdown**
+- [x] **Step 2: Verify docs links and markdown**
 
 Run:
 
@@ -1010,7 +1029,7 @@ git diff --check
 rg -n "PaginationMeta|OffsetPaginationMeta|PagePaginationMeta|CursorPaginationMeta" Docs/API Docs/Design
 ```
 
-- [ ] **Step 3: Update tracker**
+- [x] **Step 3: Update tracker**
 
 Use `gh issue edit` or issue comment to record:
 
@@ -1018,11 +1037,21 @@ Use `gh issue edit` or issue comment to record:
 - remaining explicit exemptions
 - any versioning-blocked raw-list routes
 
-- [ ] **Step 4: Commit docs closeout**
+- [x] **Step 4: Commit docs closeout**
 
 ```bash
 git add Docs/API/Pagination.md Docs/Design/Pagination_Completion_Matrix.md Docs/Design/Pagination_Contract_Exemptions.md
 git commit -m "Phase pagination-completion: document pagination contract"
+```
+
+Tracker updated:
+https://github.com/rmusser01/tldw_server/issues/1116#issuecomment-4365254732
+
+Verified:
+
+```bash
+git diff --check
+rg -n "PaginationMeta|OffsetPaginationMeta|PagePaginationMeta|CursorPaginationMeta" Docs/API Docs/Design
 ```
 
 ## Final Verification Before Each PR
