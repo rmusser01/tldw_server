@@ -1,3 +1,5 @@
+"""Tests for storage endpoint helper conversions and compatibility seams."""
+
 from __future__ import annotations
 
 from datetime import datetime, timezone

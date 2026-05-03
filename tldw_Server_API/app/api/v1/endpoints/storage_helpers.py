@@ -26,7 +26,7 @@ def _principal_is_storage_admin(principal: AuthPrincipal) -> bool:
     return bool(permissions & {"*", "system.configure"})
 
 
-def _parse_datetime(value) -> datetime | None:
+def _parse_datetime(value: object) -> datetime | None:
     """Parse datetime from API/database values."""
     if value is None:
         return None
@@ -38,7 +38,7 @@ def _parse_datetime(value) -> datetime | None:
             if dt.tzinfo is None:
                 dt = dt.replace(tzinfo=timezone.utc)
             return dt
-        except Exception:
+        except ValueError:
             return None
     return None
 
