@@ -650,6 +650,16 @@ class TestDatasetManagement:
         assert data["sample_count"] == len(sample_dataset_request["samples"])
         assert len(data["samples"]) == 1
         assert data["samples"][0]["input"]["question"] == "What is ML?"
+        assert data["pagination"] == {
+            "mode": "offset",
+            "limit": 1,
+            "offset": 1,
+            "total": len(sample_dataset_request["samples"]),
+            "has_more": False,
+            "next_offset": None,
+        }
+        assert data["has_more"] is False
+        assert data["next_offset"] is None
 
     def test_list_datasets(self, client, auth_headers, sample_dataset_request):
 

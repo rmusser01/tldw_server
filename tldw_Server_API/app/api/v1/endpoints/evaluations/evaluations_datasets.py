@@ -19,6 +19,7 @@ from tldw_Server_API.app.api.v1.endpoints.evaluations.evaluations_auth import (
 )
 from tldw_Server_API.app.api.v1.schemas.evaluation_schemas_unified import (
     CreateDatasetRequest,
+    DatasetDetailResponse,
     DatasetListResponse,
     DatasetResponse,
 )
@@ -162,7 +163,7 @@ async def list_datasets(
 
 @datasets_router.get(
     "/datasets/{dataset_id}",
-    response_model=DatasetResponse,
+    response_model=DatasetDetailResponse,
     dependencies=[Depends(require_eval_permissions(EVALS_READ))],
 )
 async def get_dataset(
@@ -189,7 +190,22 @@ async def get_dataset(
                 error_type="not_found_error",
                 status_code=status.HTTP_404_NOT_FOUND,
             )
-        return DatasetResponse(**_normalize_dataset_payload(row))
+        normalized = _normalize_dataset_payload(row)
+        sample_count = int(normalized.get("sample_count") or 0)
+        samples = normalized.get("samples") if include_samples else None
+        returned_count = len(samples) if isinstance(samples, list) else 0
+        effective_limit = int(limit) if limit is not None else max(returned_count, 1)
+        has_more = bool(include_samples and offset + returned_count < sample_count)
+        return DatasetDetailResponse(
+            **normalized,
+            pagination=build_offset_pagination_meta(
+                total=sample_count,
+                limit=effective_limit,
+                offset=offset,
+                count=returned_count,
+                has_more=has_more,
+            ),
+        )
     except HTTPException:
         raise
     except _UNIFIED_EVAL_NONCRITICAL_EXCEPTIONS as e:

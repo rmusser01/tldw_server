@@ -389,6 +389,18 @@ class DatasetResponse(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
 
+class DatasetDetailResponse(DatasetResponse):
+    """Dataset detail response with sample pagination metadata."""
+
+    pagination: OffsetPaginationMeta
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self) -> "DatasetDetailResponse":
+        return _default_offset_pagination_aliases(self)
+
+
 # ============= OCR Evaluation Schemas =============
 
 class OCREvaluationItem(BaseModel):
