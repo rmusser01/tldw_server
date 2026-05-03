@@ -254,7 +254,9 @@ def _image_store_template_item(record: Any) -> dict[str, object]:
         "artifact_format": record.artifact_format,
         "source_path": record.source_path,
         "artifact_count": len(record.artifacts),
-        "artifact_size_bytes": sum(int(artifact.size_bytes) for artifact in record.artifacts),
+        "artifact_size_bytes": sum(
+            int(artifact.size_bytes) for artifact in record.artifacts
+        ),
         "oci_image_ref": record.oci_image_ref,
         "oci_platform": record.oci_platform,
         "oci_manifest_digest": record.oci_manifest_digest,

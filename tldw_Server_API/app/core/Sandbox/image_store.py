@@ -12,7 +12,9 @@ from pathlib import Path
 from typing import Any
 
 MANIFEST_SCHEMA_VERSION = 1
-_ALLOWED_ARTIFACT_FORMATS = frozenset({"tldw_bundle", "raw_artifacts", "oci_image", "unknown"})
+_ALLOWED_ARTIFACT_FORMATS = frozenset(
+    {"tldw_bundle", "raw_artifacts", "oci_image", "unknown"}
+)
 _MAX_METADATA_TEXT_BYTES = 2048
 _MAX_OCI_LAYER_DIGESTS = 128
 
@@ -733,6 +735,8 @@ class SandboxImageStore:
             raise ImageStoreValidationError("oci_layer_digests_invalid")
         normalized: list[str] = []
         for value in values:
+            if not isinstance(value, str):
+                raise ImageStoreValidationError("oci_layer_digests_invalid")
             item = self._normalize_optional_metadata_text(value, "oci_layer_digest")
             if item is None:
                 raise ImageStoreValidationError("oci_layer_digests_invalid")

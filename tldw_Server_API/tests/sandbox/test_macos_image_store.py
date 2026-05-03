@@ -249,13 +249,15 @@ def test_image_store_rejects_invalid_oci_layer_digests(tmp_path: Path) -> None:
     disk.write_bytes(b"rootfs")
     store = SandboxImageStore(root_path=tmp_path / "store")
 
-    with pytest.raises(ImageStoreValidationError, match="oci_layer_digests_invalid"):
-        store.register_template(
-            runtime="vz_linux",
-            template_name="bad-oci",
-            disk_paths=[str(disk)],
-            oci_layer_digests=[""],
-        )
+    invalid_values = [[""], [123]]
+    for index, oci_layer_digests in enumerate(invalid_values):
+        with pytest.raises(ImageStoreValidationError, match="oci_layer_digests_invalid"):
+            store.register_template(
+                runtime="vz_linux",
+                template_name=f"bad-oci-{index}",
+                disk_paths=[str(disk)],
+                oci_layer_digests=oci_layer_digests,
+            )
 
 
 def test_image_store_lists_templates_and_plans_run_gc(tmp_path: Path) -> None:
