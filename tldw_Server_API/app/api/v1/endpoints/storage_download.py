@@ -8,12 +8,12 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user
 from tldw_Server_API.app.api.v1.endpoints.storage_helpers import (
     _resolve_storage_base_dir,
 )
-from tldw_Server_API.app.services.storage_quota_service import get_storage_service
+from tldw_Server_API.app.services.storage_quota_service import StorageQuotaService, get_storage_service
 
 router = APIRouter()
 
 
-async def _get_storage_service():
+async def _get_storage_service() -> StorageQuotaService:
     """Get initialized storage quota service."""
     return await get_storage_service()
 
@@ -22,7 +22,7 @@ async def _get_storage_service():
 async def download_file(
     file_id: int,
     user: User = Depends(get_request_user),
-):
+) -> FileResponse:
     """Download a generated file."""
     service = await _get_storage_service()
     files_repo = await service.get_generated_files_repo()
