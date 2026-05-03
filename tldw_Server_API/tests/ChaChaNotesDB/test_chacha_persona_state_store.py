@@ -103,7 +103,7 @@ def test_persona_state_store_owns_delegated_methods_without_monolith_duplicates(
 
     captured: dict[str, object] = {}
 
-    def _fake_create_persona_profile(profile_data):
+    def _fake_create_persona_profile(profile_data: dict[str, object]) -> str:
         captured["profile_data"] = profile_data
         return "persona-from-store"
 
@@ -415,7 +415,7 @@ def test_persona_exemplar_roundtrip(store):
 def test_persona_exemplar_facade_normalizes_without_monolith_helper_fallback(db, monkeypatch):
     persona_id = db.create_persona_profile({"user_id": "user-1", "name": "Facade Persona"})
 
-    def _fail_on_monolith_helper(*_args, **_kwargs):
+    def _fail_on_monolith_helper(*_args: object, **_kwargs: object) -> None:
         raise AssertionError("persona exemplar normalization used a monolith fallback")
 
     monkeypatch.setattr(db, "_normalize_exemplar_enum", _fail_on_monolith_helper)

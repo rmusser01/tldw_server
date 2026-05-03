@@ -26,6 +26,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
 from tldw_Server_API.app.core.DB_Management.backends.base import (
     DatabaseError as BackendDatabaseError,
 )
+from tldw_Server_API.app.core.DB_Management.chacha import exemplar_normalization
 
 if TYPE_CHECKING:
     from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
@@ -43,9 +44,6 @@ class CharacterStore:
 
     def __init__(self, db: CharactersRAGDB) -> None:
         self._db = db
-
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self._db, name)
 
     def _deleted_literal(self, deleted: bool) -> str:
         """Return a backend-safe SQL literal for soft-delete predicates."""
@@ -1522,54 +1520,22 @@ class CharacterStore:
         default: str,
     ) -> str:
         """Normalize and validate enum-like exemplar fields."""
-        if value is None:
-            return default
-        if not isinstance(value, str):
-            raise InputError(f"Field '{field_name}' must be a string.")  # noqa: TRY003
-        normalized = value.strip().lower()
-        if not normalized:
-            return default
-        if normalized not in allowed:
-            raise InputError(  # noqa: TRY003
-                f"Invalid value '{value}' for field '{field_name}'. Allowed: {', '.join(allowed)}"
-            )
-        return normalized
+        return exemplar_normalization.normalize_exemplar_enum(
+            value,
+            allowed=allowed,
+            field_name=field_name,
+            default=default,
+        )
 
     def _normalize_exemplar_string_list(self, value: Any, field_name: str) -> list[str]:
         """Normalize list-like exemplar metadata to a string list."""
-        if value is None:
-            return []
-
-        parsed = value
-        if isinstance(value, str):
-            stripped = value.strip()
-            if not stripped:
-                return []
-            try:
-                parsed = json.loads(stripped)
-            except json.JSONDecodeError:
-                parsed = [stripped]
-
-        if isinstance(parsed, set):
-            parsed = list(parsed)
-
-        if not isinstance(parsed, list):
-            raise InputError(f"Field '{field_name}' must be a list of strings.")  # noqa: TRY003
-
-        normalized: list[str] = []
-        for item in parsed:
-            if item is None:
-                continue
-            text = str(item).strip()
-            if text:
-                normalized.append(text)
-        return normalized
+        return exemplar_normalization.normalize_exemplar_string_list(value, field_name)
 
     def _normalize_character_exemplar_row(self, row: sqlite3.Row | dict[str, Any] | None) -> dict[str, Any] | None:
         """Deserialize exemplar JSON fields and normalize bool-like values."""
         if not row:
             return None
-        item = self._deserialize_row_fields(row, self._CHARACTER_EXEMPLAR_JSON_FIELDS)
+        item = self._db._deserialize_row_fields(row, self._db._CHARACTER_EXEMPLAR_JSON_FIELDS)
         if not item:
             return None
         if 'rights_public_figure' in item:
@@ -1583,31 +1549,31 @@ class CharacterStore:
         if not self.get_character_card_by_id(character_id):
             raise InputError(f"Character ID {character_id} not found.")  # noqa: TRY003
 
-        text = self._normalize_nullable_text(exemplar_data.get('text'))
+        text = self._db._normalize_nullable_text(exemplar_data.get('text'))
         if not text:
             raise InputError("Exemplar text is required.")  # noqa: TRY003
 
         source_type = self._normalize_exemplar_enum(
             exemplar_data.get('source_type'),
-            allowed=self._ALLOWED_EXEMPLAR_SOURCE_TYPES,
+            allowed=self._db._ALLOWED_EXEMPLAR_SOURCE_TYPES,
             field_name='source_type',
             default='other',
         )
         novelty_hint = self._normalize_exemplar_enum(
             exemplar_data.get('novelty_hint'),
-            allowed=self._ALLOWED_EXEMPLAR_NOVELTY_HINTS,
+            allowed=self._db._ALLOWED_EXEMPLAR_NOVELTY_HINTS,
             field_name='novelty_hint',
             default='unknown',
         )
         emotion = self._normalize_exemplar_enum(
             exemplar_data.get('emotion'),
-            allowed=self._ALLOWED_EXEMPLAR_EMOTIONS,
+            allowed=self._db._ALLOWED_EXEMPLAR_EMOTIONS,
             field_name='emotion',
             default='other',
         )
         scenario = self._normalize_exemplar_enum(
             exemplar_data.get('scenario'),
-            allowed=self._ALLOWED_EXEMPLAR_SCENARIOS,
+            allowed=self._db._ALLOWED_EXEMPLAR_SCENARIOS,
             field_name='scenario',
             default='other',
         )
@@ -1627,8 +1593,8 @@ class CharacterStore:
             if length_tokens < 1:
                 raise InputError("length_tokens must be >= 1.")  # noqa: TRY003
 
-        exemplar_id = self._normalize_nullable_text(exemplar_data.get('id')) or self._generate_uuid()
-        now = self._get_current_utc_timestamp_iso()
+        exemplar_id = self._db._normalize_nullable_text(exemplar_data.get('id')) or self._db._generate_uuid()
+        now = self._db._get_current_utc_timestamp_iso()
 
         query = """
             INSERT INTO character_exemplars (
@@ -1638,29 +1604,28 @@ class CharacterStore:
                 created_at, updated_at, is_deleted
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
-        if self.backend_type == BackendType.POSTGRESQL:
-            is_deleted = False
+        if self._db.backend_type == BackendType.POSTGRESQL:
             rights_public_figure = bool(exemplar_data.get('rights_public_figure', True))
         else:
-            is_deleted = 0
             rights_public_figure = 1 if exemplar_data.get('rights_public_figure', True) else 0
+        is_deleted = self._deleted_value(False)
 
         params = (
             exemplar_id,
             character_id,
             text,
             source_type,
-            self._normalize_nullable_text(exemplar_data.get('source_url_or_id')),
-            self._normalize_nullable_text(exemplar_data.get('source_date')),
+            self._db._normalize_nullable_text(exemplar_data.get('source_url_or_id')),
+            self._db._normalize_nullable_text(exemplar_data.get('source_date')),
             novelty_hint,
             emotion,
             scenario,
-            self._ensure_json_string(rhetorical) or "[]",
-            self._normalize_nullable_text(exemplar_data.get('register')),
-            self._ensure_json_string(safety_allowed) or "[]",
-            self._ensure_json_string(safety_blocked) or "[]",
+            self._db._ensure_json_string(rhetorical) or "[]",
+            self._db._normalize_nullable_text(exemplar_data.get('register')),
+            self._db._ensure_json_string(safety_allowed) or "[]",
+            self._db._ensure_json_string(safety_blocked) or "[]",
             rights_public_figure,
-            self._normalize_nullable_text(exemplar_data.get('rights_notes')),
+            self._db._normalize_nullable_text(exemplar_data.get('rights_notes')),
             length_tokens,
             now,
             now,
@@ -1668,8 +1633,8 @@ class CharacterStore:
         )
 
         try:
-            with self.transaction() as conn:
-                prepared_query, prepared_params = self._prepare_backend_statement(query, params)
+            with self._db.transaction() as conn:
+                prepared_query, prepared_params = self._db._prepare_backend_statement(query, params)
                 conn.execute(prepared_query, prepared_params)
         except sqlite3.IntegrityError as exc:
             msg = str(exc).lower()
@@ -1681,7 +1646,7 @@ class CharacterStore:
                 ) from exc
             raise CharactersRAGDBError(f"Database integrity error adding character exemplar: {exc}") from exc  # noqa: TRY003
         except BackendDatabaseError as exc:
-            if self._is_unique_violation(exc):
+            if self._db._is_unique_violation(exc):
                 raise ConflictError(  # noqa: TRY003
                     f"Character exemplar with ID '{exemplar_id}' already exists.",
                     entity="character_exemplars",
@@ -1702,15 +1667,18 @@ class CharacterStore:
         include_deleted: bool = False,
     ) -> dict[str, Any] | None:
         """Fetch a character exemplar by ID."""
-        deleted_clause = "" if include_deleted else f"AND is_deleted = {self._deleted_literal(False)}"
         query = """
             SELECT *
             FROM character_exemplars
-            WHERE id = ? AND character_id = ? {deleted_clause}
-            LIMIT 1
-        """.format_map(locals())  # nosec B608
+            WHERE id = ? AND character_id = ?
+        """
+        params: list[Any] = [exemplar_id, character_id]
+        if not include_deleted:
+            query += " AND is_deleted = ?"
+            params.append(self._deleted_value(False))
+        query += " LIMIT 1"
         try:
-            cursor = self.execute_query(query, (exemplar_id, character_id))
+            cursor = self._db.execute_query(query, tuple(params))
             row = cursor.fetchone()
             return self._normalize_character_exemplar_row(row)
         except CharactersRAGDBError:
@@ -1726,7 +1694,7 @@ class CharacterStore:
             LIMIT ? OFFSET ?
         """
         try:
-            cursor = self.execute_query(
+            cursor = self._db.execute_query(
                 query,
                 (character_id, self._deleted_value(False), limit, offset),
             )
@@ -1753,7 +1721,7 @@ class CharacterStore:
         params: list[Any] = []
 
         if 'text' in update_data:
-            text = self._normalize_nullable_text(update_data.get('text'))
+            text = self._db._normalize_nullable_text(update_data.get('text'))
             if not text:
                 raise InputError("Exemplar text cannot be empty.")  # noqa: TRY003
             set_clauses.append("text = ?")
@@ -1765,7 +1733,7 @@ class CharacterStore:
         if 'source_type' in update_data:
             source_type = self._normalize_exemplar_enum(
                 update_data.get('source_type'),
-                allowed=self._ALLOWED_EXEMPLAR_SOURCE_TYPES,
+                allowed=self._db._ALLOWED_EXEMPLAR_SOURCE_TYPES,
                 field_name='source_type',
                 default='other',
             )
@@ -1774,16 +1742,16 @@ class CharacterStore:
 
         if 'source_url_or_id' in update_data:
             set_clauses.append("source_url_or_id = ?")
-            params.append(self._normalize_nullable_text(update_data.get('source_url_or_id')))
+            params.append(self._db._normalize_nullable_text(update_data.get('source_url_or_id')))
 
         if 'source_date' in update_data:
             set_clauses.append("source_date = ?")
-            params.append(self._normalize_nullable_text(update_data.get('source_date')))
+            params.append(self._db._normalize_nullable_text(update_data.get('source_date')))
 
         if 'novelty_hint' in update_data:
             novelty_hint = self._normalize_exemplar_enum(
                 update_data.get('novelty_hint'),
-                allowed=self._ALLOWED_EXEMPLAR_NOVELTY_HINTS,
+                allowed=self._db._ALLOWED_EXEMPLAR_NOVELTY_HINTS,
                 field_name='novelty_hint',
                 default='unknown',
             )
@@ -1793,7 +1761,7 @@ class CharacterStore:
         if 'emotion' in update_data:
             emotion = self._normalize_exemplar_enum(
                 update_data.get('emotion'),
-                allowed=self._ALLOWED_EXEMPLAR_EMOTIONS,
+                allowed=self._db._ALLOWED_EXEMPLAR_EMOTIONS,
                 field_name='emotion',
                 default='other',
             )
@@ -1803,7 +1771,7 @@ class CharacterStore:
         if 'scenario' in update_data:
             scenario = self._normalize_exemplar_enum(
                 update_data.get('scenario'),
-                allowed=self._ALLOWED_EXEMPLAR_SCENARIOS,
+                allowed=self._db._ALLOWED_EXEMPLAR_SCENARIOS,
                 field_name='scenario',
                 default='other',
             )
@@ -1813,32 +1781,32 @@ class CharacterStore:
         if 'rhetorical' in update_data:
             rhetorical = self._normalize_exemplar_string_list(update_data.get('rhetorical'), 'rhetorical')
             set_clauses.append("rhetorical = ?")
-            params.append(self._ensure_json_string(rhetorical) or "[]")
+            params.append(self._db._ensure_json_string(rhetorical) or "[]")
 
         if 'register' in update_data:
             set_clauses.append("register = ?")
-            params.append(self._normalize_nullable_text(update_data.get('register')))
+            params.append(self._db._normalize_nullable_text(update_data.get('register')))
 
         if 'safety_allowed' in update_data:
             safety_allowed = self._normalize_exemplar_string_list(update_data.get('safety_allowed'), 'safety_allowed')
             set_clauses.append("safety_allowed = ?")
-            params.append(self._ensure_json_string(safety_allowed) or "[]")
+            params.append(self._db._ensure_json_string(safety_allowed) or "[]")
 
         if 'safety_blocked' in update_data:
             safety_blocked = self._normalize_exemplar_string_list(update_data.get('safety_blocked'), 'safety_blocked')
             set_clauses.append("safety_blocked = ?")
-            params.append(self._ensure_json_string(safety_blocked) or "[]")
+            params.append(self._db._ensure_json_string(safety_blocked) or "[]")
 
         if 'rights_public_figure' in update_data:
             set_clauses.append("rights_public_figure = ?")
-            if self.backend_type == BackendType.POSTGRESQL:
+            if self._db.backend_type == BackendType.POSTGRESQL:
                 params.append(bool(update_data.get('rights_public_figure')))
             else:
                 params.append(1 if update_data.get('rights_public_figure') else 0)
 
         if 'rights_notes' in update_data:
             set_clauses.append("rights_notes = ?")
-            params.append(self._normalize_nullable_text(update_data.get('rights_notes')))
+            params.append(self._db._normalize_nullable_text(update_data.get('rights_notes')))
 
         if 'length_tokens' in update_data:
             try:
@@ -1854,24 +1822,25 @@ class CharacterStore:
             return existing
 
         set_clauses.append("updated_at = ?")
-        params.append(self._get_current_utc_timestamp_iso())
+        params.append(self._db._get_current_utc_timestamp_iso())
 
         set_clause_sql = ", ".join(set_clauses)
-        query = """
-            UPDATE character_exemplars
-            SET {set_clause_sql}
-            WHERE id = ? AND character_id = ? AND is_deleted = ?
-        """.format_map(locals())  # nosec B608
+        query = (
+            "UPDATE character_exemplars "
+            + "SET "
+            + set_clause_sql
+            + " WHERE id = ? AND character_id = ? AND is_deleted = ?"
+        )  # nosec B608
         params.extend(
             [
                 exemplar_id,
                 character_id,
-                False if self.backend_type == BackendType.POSTGRESQL else 0,
+                self._deleted_value(False),
             ]
         )
         try:
-            with self.transaction() as conn:
-                prepared_query, prepared_params = self._prepare_backend_statement(query, tuple(params))
+            with self._db.transaction() as conn:
+                prepared_query, prepared_params = self._db._prepare_backend_statement(query, tuple(params))
                 cursor = conn.cursor()
                 cursor.execute(prepared_query, prepared_params)
                 if cursor.rowcount == 0:
@@ -1888,17 +1857,13 @@ class CharacterStore:
             SET is_deleted = ?, updated_at = ?
             WHERE id = ? AND character_id = ? AND is_deleted = ?
         """
-        now = self._get_current_utc_timestamp_iso()
-        if self.backend_type == BackendType.POSTGRESQL:
-            set_deleted = True
-            active_flag = False
-        else:
-            set_deleted = 1
-            active_flag = 0
+        now = self._db._get_current_utc_timestamp_iso()
+        set_deleted = self._deleted_value(True)
+        active_flag = self._deleted_value(False)
 
         try:
-            with self.transaction() as conn:
-                prepared_query, prepared_params = self._prepare_backend_statement(
+            with self._db.transaction() as conn:
+                prepared_query, prepared_params = self._db._prepare_backend_statement(
                     query,
                     (set_deleted, now, exemplar_id, character_id, active_flag),
                 )
@@ -1907,7 +1872,7 @@ class CharacterStore:
                 if cursor.rowcount > 0:
                     return True
 
-                check_query, check_params = self._prepare_backend_statement(
+                check_query, check_params = self._db._prepare_backend_statement(
                     "SELECT is_deleted FROM character_exemplars WHERE id = ? AND character_id = ?",
                     (exemplar_id, character_id),
                 )
@@ -1932,7 +1897,7 @@ class CharacterStore:
         if emotion is not None:
             emotion_filter = self._normalize_exemplar_enum(
                 emotion,
-                allowed=self._ALLOWED_EXEMPLAR_EMOTIONS,
+                allowed=self._db._ALLOWED_EXEMPLAR_EMOTIONS,
                 field_name='emotion',
                 default='other',
             )
@@ -1941,7 +1906,7 @@ class CharacterStore:
         if scenario is not None:
             scenario_filter = self._normalize_exemplar_enum(
                 scenario,
-                allowed=self._ALLOWED_EXEMPLAR_SCENARIOS,
+                allowed=self._db._ALLOWED_EXEMPLAR_SCENARIOS,
                 field_name='scenario',
                 default='other',
             )
@@ -1952,39 +1917,42 @@ class CharacterStore:
             if isinstance(item, str) and item.strip()
         }
 
-        params: list[Any] = [character_id, False if self.backend_type == BackendType.POSTGRESQL else 0]
-        filter_clauses = ["ce.character_id = ?", "ce.is_deleted = ?"]
-
-        if emotion_filter is not None:
-            filter_clauses.append("ce.emotion = ?")
-            params.append(emotion_filter)
-        if scenario_filter is not None:
-            filter_clauses.append("ce.scenario = ?")
-            params.append(scenario_filter)
-
-        where_sql = " AND ".join(filter_clauses)
+        filter_params: list[Any] = [
+            character_id,
+            self._deleted_value(False),
+            emotion_filter,
+            emotion_filter,
+            scenario_filter,
+            scenario_filter,
+        ]
         normalized_query = (query or "").strip()
 
-        if normalized_query and self.backend_type == BackendType.POSTGRESQL:
+        if normalized_query and self._db.backend_type == BackendType.POSTGRESQL:
             tsquery = FTSQueryTranslator.normalize_query(normalized_query, 'postgresql')
             if tsquery:
                 sql = """
                     SELECT ce.*, ts_rank(ce.character_exemplars_fts_tsv, to_tsquery('english', ?)) AS rank
                     FROM character_exemplars ce
-                    WHERE {where_sql}
+                    WHERE ce.character_id = ?
+                      AND ce.is_deleted = ?
+                      AND (? IS NULL OR ce.emotion = ?)
+                      AND (? IS NULL OR ce.scenario = ?)
                       AND ce.character_exemplars_fts_tsv @@ to_tsquery('english', ?)
                     ORDER BY rank DESC, ce.updated_at DESC
-                """.format_map(locals())  # nosec B608
-                query_params = [tsquery] + params + [tsquery]
+                """
+                query_params = [tsquery] + filter_params + [tsquery]
             else:
                 sql = """
                     SELECT ce.*
                     FROM character_exemplars ce
-                    WHERE {where_sql}
+                    WHERE ce.character_id = ?
+                      AND ce.is_deleted = ?
+                      AND (? IS NULL OR ce.emotion = ?)
+                      AND (? IS NULL OR ce.scenario = ?)
                       AND ce.text ILIKE ?
                     ORDER BY ce.updated_at DESC
-                """.format_map(locals())  # nosec B608
-                query_params = params + [f"%{normalized_query}%"]
+                """
+                query_params = filter_params + [f"%{normalized_query}%"]
         elif normalized_query:
             safe_literal = normalized_query.replace('"', '""')
             safe_fts = f'"{safe_literal}"'
@@ -1993,21 +1961,27 @@ class CharacterStore:
                 FROM character_exemplars_fts
                 JOIN character_exemplars ce ON character_exemplars_fts.rowid = ce.rowid
                 WHERE character_exemplars_fts MATCH ?
-                  AND {where_sql}
+                  AND ce.character_id = ?
+                  AND ce.is_deleted = ?
+                  AND (? IS NULL OR ce.emotion = ?)
+                  AND (? IS NULL OR ce.scenario = ?)
                 ORDER BY bm25_score, ce.updated_at DESC
-            """.format_map(locals())  # nosec B608
-            query_params = [safe_fts] + params
+            """
+            query_params = [safe_fts] + filter_params
         else:
             sql = """
                 SELECT ce.*
                 FROM character_exemplars ce
-                WHERE {where_sql}
+                WHERE ce.character_id = ?
+                  AND ce.is_deleted = ?
+                  AND (? IS NULL OR ce.emotion = ?)
+                  AND (? IS NULL OR ce.scenario = ?)
                 ORDER BY ce.updated_at DESC
-            """.format_map(locals())  # nosec B608
-            query_params = params
+            """
+            query_params = filter_params
 
         try:
-            cursor = self.execute_query(sql, tuple(query_params))
+            cursor = self._db.execute_query(sql, tuple(query_params))
             rows = cursor.fetchall()
         except CharactersRAGDBError as exc:
             logger.error(
