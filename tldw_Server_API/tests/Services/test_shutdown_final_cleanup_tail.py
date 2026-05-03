@@ -18,7 +18,7 @@ async def test_shutdown_final_cleanup_tail_runs_helpers_in_order_and_returns_han
 
     async def _record_cleanup(**kwargs):
         calls.append(("cleanup", kwargs))
-        return SimpleNamespace(authnz_scheduler_started="cleanup-result")
+        return SimpleNamespace()
 
     async def _record_post_runtime(**kwargs):
         calls.append(("post_runtime", kwargs))
@@ -28,8 +28,6 @@ async def test_shutdown_final_cleanup_tail_runs_helpers_in_order_and_returns_han
 
     handles = await shutdown_tail.shutdown_final_cleanup_tail(
         app="app",
-        authnz_scheduler_started=True,
-        stopped_background_worker_names={"authnz_scheduler"},
         db_pool="db-pool",
         session_manager="session-manager",
         heavy_startup_handles="heavy-startup",
@@ -42,7 +40,6 @@ async def test_shutdown_final_cleanup_tail_runs_helpers_in_order_and_returns_han
     )
 
     assert [name for name, _ in calls] == ["cleanup", "post_runtime"]
-    assert calls[0][1]["authnz_scheduler_started"] is False
     assert calls[0][1]["db_pool"] == "db-pool"
     assert calls[0][1]["session_manager"] == "session-manager"
     assert calls[0][1]["heavy_startup_handles"] == "heavy-startup"
@@ -50,5 +47,5 @@ async def test_shutdown_final_cleanup_tail_runs_helpers_in_order_and_returns_han
     assert calls[1][1]["test_db_instance_ref"] == "test-db-ref"
     assert calls[1][1]["startup_guard_exceptions"] == (RuntimeError,)
     assert calls[1][1]["import_exceptions"] == (ImportError,)
-    assert handles.authnz_scheduler_started == "cleanup-result"
+    assert handles == SimpleNamespace()
     assert not hasattr(shutdown_tail, "_maybe_stop_authnz_scheduler")

@@ -38,12 +38,7 @@ async def test_start_worker_groups_runs_helpers_in_order_and_returns_handles(
         assert test_mode is True
         assert worker_inventory is worker_inventory_ref
         calls.append("cleanup")
-        return SimpleNamespace(
-            cleanup_task="cleanup-task",
-            chatbooks_cleanup_task="chatbooks-task",
-            chatbooks_cleanup_stop_event="chatbooks-stop",
-            storage_cleanup_service="storage-service",
-        )
+        return SimpleNamespace()
 
     async def _record_primary_jobs_pollers(
         *,
@@ -96,11 +91,7 @@ async def test_start_worker_groups_runs_helpers_in_order_and_returns_handles(
         assert should_start_worker("AUDIO_JOBS_WORKER_ENABLED", "audio-jobs") is True
         assert worker_inventory is worker_inventory_ref
         calls.append("compactor")
-        return SimpleNamespace(
-            embeddings_compactor_stop_event="embeddings-stop",
-            embeddings_compactor_task="embeddings-task",
-            websub_renewal_task="websub-task",
-        )
+        return SimpleNamespace()
 
     async def _record_content_jobs_pollers(
         *,
@@ -230,11 +221,11 @@ async def test_start_worker_groups_runs_helpers_in_order_and_returns_handles(
         "notifications",
     ]
     assert route_enabled_calls == []
-    assert handles.cleanup_task == "cleanup-task"
-    assert handles.chatbooks_cleanup_task == "chatbooks-task"
+    assert not hasattr(handles, "cleanup_task")
+    assert not hasattr(handles, "chatbooks_cleanup_task")
     assert handles.core_jobs_task == "core-task"
     assert handles.study_pack_jobs_task == "study-pack-task"
-    assert handles.embeddings_compactor_task == "embeddings-task"
+    assert not hasattr(handles, "embeddings_compactor_task")
     assert handles.audio_jobs_task == "audio-task"
     assert handles.vn_asset_jobs_task == "vn-asset-task"
     assert handles.vn_asset_generation_jobs_task == "vn-generation-task"

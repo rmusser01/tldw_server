@@ -546,7 +546,7 @@ git commit -m "refactor: consolidate scheduler shutdown ownership"
 - Modify: behavior tests that asserted implementation detail handles
 - Modify: `tldw_Server_API/tests/Services/test_worker_lifecycle_ownership_matrix.py`
 
-- [ ] **Step 1: Audit remaining runtime-state fields**
+- [x] **Step 1: Audit remaining runtime-state fields**
 
 Run:
 
@@ -562,7 +562,7 @@ Mark each field as:
 - diagnostics only
 - removable
 
-- [ ] **Step 2: Write tests that assert behavior instead of handle plumbing**
+- [x] **Step 2: Write tests that assert behavior instead of handle plumbing**
 
 Where tests currently assert specific handle pass-through, replace with:
 
@@ -571,7 +571,7 @@ Where tests currently assert specific handle pass-through, replace with:
 - finalizer still ran
 - direct-stop helper was not called
 
-- [ ] **Step 3: Remove removable fields and dataclass members**
+- [x] **Step 3: Remove removable fields and dataclass members**
 
 Remove fields only when Step 1 marks them removable and tests no longer depend on them.
 
@@ -582,7 +582,7 @@ Likely targets after Tasks 2-4:
 - recurring scheduler direct-stop handles
 - maintenance scheduler direct-stop handles
 
-- [ ] **Step 4: Preserve documented diagnostics**
+- [x] **Step 4: Preserve documented diagnostics**
 
 Keep:
 
@@ -591,7 +591,7 @@ Keep:
 
 Do not remove stopped-name state until all duplicate fallback logic has been removed or a test proves it is only diagnostic.
 
-- [ ] **Step 5: Run lifecycle service test set**
+- [x] **Step 5: Run lifecycle service test set**
 
 Run:
 
@@ -607,7 +607,7 @@ python -m pytest \
 
 Expected: pass.
 
-- [ ] **Step 6: Commit Task 5**
+- [x] **Step 6: Commit Task 5**
 
 ```bash
 git add tldw_Server_API/app/services tldw_Server_API/tests/Services

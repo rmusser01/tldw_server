@@ -18,10 +18,6 @@ _TRUTHY_ENV_VALUES = {"true", "1", "yes", "y", "on"}
 class StartupWorkerGroupHandles:
     """Combined startup handles produced by the worker-group startup burst."""
 
-    cleanup_task: Any | None = None
-    chatbooks_cleanup_task: Any | None = None
-    chatbooks_cleanup_stop_event: Any | None = None
-    storage_cleanup_service: Any | None = None
     core_jobs_stop_event: Any | None = None
     core_jobs_task: Any | None = None
     files_jobs_stop_event: Any | None = None
@@ -36,9 +32,6 @@ class StartupWorkerGroupHandles:
     study_suggestions_jobs_task: Any | None = None
     privilege_snapshot_stop_event: Any | None = None
     privilege_snapshot_task: Any | None = None
-    embeddings_compactor_stop_event: Any | None = None
-    embeddings_compactor_task: Any | None = None
-    websub_renewal_task: Any | None = None
     audio_jobs_stop_event: Any | None = None
     audio_jobs_task: Any | None = None
     audiobook_jobs_stop_event: Any | None = None
@@ -84,7 +77,7 @@ async def start_worker_groups(
     worker_inventory: Any | None = None,
 ) -> StartupWorkerGroupHandles:
     """Start the startup worker/poller groups in the legacy order."""
-    cleanup_worker_handles = await _start_cleanup_workers(
+    await _start_cleanup_workers(
         app_settings=app_settings,
         test_mode=test_mode,
         worker_inventory=worker_inventory,
@@ -129,7 +122,7 @@ async def start_worker_groups(
         should_start_worker=_should_start_worker,
         worker_inventory=worker_inventory,
     )
-    compactor_websub_startup_handles = await _start_compactor_websub_workers(
+    await _start_compactor_websub_workers(
         should_start_worker=_should_start_worker,
         worker_inventory=worker_inventory,
     )
@@ -155,10 +148,6 @@ async def start_worker_groups(
         worker_inventory=worker_inventory,
     )
     return StartupWorkerGroupHandles(
-        cleanup_task=cleanup_worker_handles.cleanup_task,
-        chatbooks_cleanup_task=cleanup_worker_handles.chatbooks_cleanup_task,
-        chatbooks_cleanup_stop_event=cleanup_worker_handles.chatbooks_cleanup_stop_event,
-        storage_cleanup_service=cleanup_worker_handles.storage_cleanup_service,
         core_jobs_stop_event=primary_jobs_poller_handles.core_jobs_stop_event,
         core_jobs_task=primary_jobs_poller_handles.core_jobs_task,
         files_jobs_stop_event=primary_jobs_poller_handles.files_jobs_stop_event,
@@ -173,9 +162,6 @@ async def start_worker_groups(
         study_suggestions_jobs_task=study_privilege_jobs_poller_handles.study_suggestions_jobs_task,
         privilege_snapshot_stop_event=study_privilege_jobs_poller_handles.privilege_snapshot_stop_event,
         privilege_snapshot_task=study_privilege_jobs_poller_handles.privilege_snapshot_task,
-        embeddings_compactor_stop_event=(compactor_websub_startup_handles.embeddings_compactor_stop_event),
-        embeddings_compactor_task=compactor_websub_startup_handles.embeddings_compactor_task,
-        websub_renewal_task=compactor_websub_startup_handles.websub_renewal_task,
         audio_jobs_stop_event=content_jobs_poller_handles.audio_jobs_stop_event,
         audio_jobs_task=content_jobs_poller_handles.audio_jobs_task,
         audiobook_jobs_stop_event=content_jobs_poller_handles.audiobook_jobs_stop_event,

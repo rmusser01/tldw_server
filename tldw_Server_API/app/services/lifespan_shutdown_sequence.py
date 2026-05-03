@@ -54,7 +54,6 @@ async def run_lifespan_shutdown_sequence(
         transition_handoff_handles = await shutdown_transition_handoff(
             app=app,
             readiness_state=readiness_state,
-            authnz_scheduler_started=worker_runtime.authnz_scheduler_started,
             build_legacy_shutdown_context=build_legacy_shutdown_context,
             apply_shutdown_transition_gate=apply_shutdown_transition_gate,
             startup_guard_exceptions=startup_guard_exceptions,
@@ -207,8 +206,6 @@ async def run_lifespan_shutdown_sequence(
 
     cleanup_timed_shutdown_handles = await shutdown_final_cleanup_tail(
         app=app,
-        authnz_scheduler_started=worker_runtime.authnz_scheduler_started,
-        stopped_background_worker_names=stopped_background_worker_names,
         db_pool=db_pool,
         session_manager=session_manager,
         heavy_startup_handles=heavy_startup_handles,

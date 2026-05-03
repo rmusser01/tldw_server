@@ -60,9 +60,7 @@ def test_build_legacy_shutdown_plan_includes_known_legacy_components() -> None:
     app = _App()
     plan = build_legacy_shutdown_plan(
         app,
-        LegacyShutdownContext(
-            authnz_scheduler_started=True,
-        ),
+        LegacyShutdownContext(),
     )
 
     assert [component.name for component in plan] == ["lifecycle_gate"]
@@ -137,9 +135,7 @@ def test_shutdown_legacy_adapters_import_is_lazy_for_optional_stop_helpers(
 
     plan = module.build_legacy_shutdown_plan(
         _App(),
-        LegacyShutdownContext(
-            authnz_scheduler_started=True,
-        ),
+        LegacyShutdownContext(),
     )
 
     assert [component.name for component in plan] == ["lifecycle_gate"]

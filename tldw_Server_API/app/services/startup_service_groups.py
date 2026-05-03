@@ -33,21 +33,10 @@ class StartupServiceGroupHandles:
     workflows_maint_task: Any | None = None
     jobs_integrity_stop_event: Any | None = None
     jobs_integrity_task: Any | None = None
-    claims_task: Any | None = None
     claims_alerts_task: Any | None = None
     claims_review_metrics_task: Any | None = None
-    usage_task: Any | None = None
-    llm_usage_task: Any | None = None
     tts_history_cleanup_task: Any | None = None
     tts_history_cleanup_stop_event: Any | None = None
-    quality_eval_task: Any | None = None
-    outputs_purge_task: Any | None = None
-    kanban_activity_cleanup_task: Any | None = None
-    ingestion_sources_cleanup_task: Any | None = None
-    kanban_purge_task: Any | None = None
-    files_export_gc_task: Any | None = None
-    notifications_prune_task: Any | None = None
-    jobs_prune_task: Any | None = None
     connectors_jobs_task: Any | None = None
     connectors_jobs_stop_event: Any | None = None
 
@@ -73,10 +62,10 @@ async def start_service_groups(
             worker_inventory=worker_inventory,
         )
     if worker_inventory is None:
-        claims_task = await _start_claims_rebuild_worker(app_settings)
+        await _start_claims_rebuild_worker(app_settings)
         auxiliary_startup_handles = await _start_auxiliary_services(app_settings)
     else:
-        claims_task = await _start_claims_rebuild_worker(
+        await _start_claims_rebuild_worker(
             app_settings,
             worker_inventory=worker_inventory,
         )
@@ -88,7 +77,7 @@ async def start_service_groups(
         run_pg_rls_auto_ensure=run_pg_rls_auto_ensure,
         worker_inventory=worker_inventory,
     )
-    maintenance_scheduler_handles = await _start_maintenance_schedulers(
+    await _start_maintenance_schedulers(
         worker_inventory=worker_inventory,
     )
     connectors_startup_handles = await _start_connectors_startup(
@@ -117,21 +106,10 @@ async def start_service_groups(
         workflows_maint_task=optional_worker_handles.workflows_maint_task,
         jobs_integrity_stop_event=optional_worker_handles.jobs_integrity_stop_event,
         jobs_integrity_task=optional_worker_handles.jobs_integrity_task,
-        claims_task=claims_task,
         claims_alerts_task=auxiliary_startup_handles.claims_alerts_task,
         claims_review_metrics_task=auxiliary_startup_handles.claims_review_metrics_task,
-        usage_task=auxiliary_startup_handles.usage_task,
-        llm_usage_task=auxiliary_startup_handles.llm_usage_task,
         tts_history_cleanup_task=infra_startup_handles.tts_history_cleanup_task,
         tts_history_cleanup_stop_event=infra_startup_handles.tts_history_cleanup_stop_event,
-        quality_eval_task=maintenance_scheduler_handles.quality_eval_task,
-        outputs_purge_task=maintenance_scheduler_handles.outputs_purge_task,
-        kanban_activity_cleanup_task=maintenance_scheduler_handles.kanban_activity_cleanup_task,
-        ingestion_sources_cleanup_task=maintenance_scheduler_handles.ingestion_sources_cleanup_task,
-        kanban_purge_task=maintenance_scheduler_handles.kanban_purge_task,
-        files_export_gc_task=maintenance_scheduler_handles.files_export_gc_task,
-        notifications_prune_task=maintenance_scheduler_handles.notifications_prune_task,
-        jobs_prune_task=maintenance_scheduler_handles.jobs_prune_task,
         connectors_jobs_task=connectors_startup_handles.connectors_jobs_task,
         connectors_jobs_stop_event=connectors_startup_handles.connectors_jobs_stop_event,
     )

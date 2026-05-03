@@ -93,14 +93,13 @@ def test_build_legacy_shutdown_context_uses_explicit_fields() -> None:
 
     context = _build_legacy_shutdown_context(
         readiness_state=readiness_state,
-        authnz_scheduler_started=True,
     )
 
     assert isinstance(context, LegacyShutdownContext)
     assert context.readiness_state is readiness_state
     assert not hasattr(context, "usage_task")
     assert not hasattr(context, "llm_usage_task")
-    assert context.authnz_scheduler_started is True
+    assert not hasattr(context, "authnz_scheduler_started")
 
 
 def test_main_source_does_not_define_legacy_display_startup_info_helper() -> None:
@@ -445,6 +444,7 @@ def test_lifespan_shutdown_cancels_claims_and_maintenance_tasks(
 ) -> None:
     from tldw_Server_API.app import main as main_module
     from tldw_Server_API.app.services import startup_claims_rebuild, startup_maintenance_schedulers
+    from tldw_Server_API.app.services.lifecycle_workers import ManagedWorker, ShutdownPhase
 
     app = main_module.app
     observed = {
@@ -462,17 +462,46 @@ def test_lifespan_shutdown_cancels_claims_and_maintenance_tasks(
             raise
 
     async def _fake_start_claims_rebuild_worker(_app_settings, **kwargs):
-        assert kwargs["worker_inventory"] is not None
-        return asyncio.create_task(_wait_forever("claims_cancelled"), name="claims_task")
+        worker_inventory = kwargs["worker_inventory"]
+        assert worker_inventory is not None
+        task = asyncio.create_task(_wait_forever("claims_cancelled"), name="claims_task")
+        worker_inventory.register(
+            ManagedWorker(
+                name="claims_rebuild",
+                task=task,
+                timeout_sec=0.1,
+                category="claims",
+                shutdown_phase=ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN,
+            )
+        )
+        return task
 
-    async def _fake_start_maintenance_schedulers():
+    async def _fake_start_maintenance_schedulers(*, worker_inventory=None):
+        assert worker_inventory is not None
+        files_gc_task = asyncio.create_task(_wait_forever("files_gc_cancelled"), name="files_gc_task")
+        notifications_prune_task = asyncio.create_task(
+            _wait_forever("notifications_prune_cancelled"),
+            name="notifications_prune_task",
+        )
+        jobs_prune_task = asyncio.create_task(_wait_forever("jobs_prune_cancelled"), name="jobs_prune_task")
+        for worker_name, task in (
+            ("files_export_gc_task", files_gc_task),
+            ("notifications_prune_task", notifications_prune_task),
+            ("jobs_prune_task", jobs_prune_task),
+        ):
+            worker_inventory.register(
+                ManagedWorker(
+                    name=worker_name,
+                    task=task,
+                    timeout_sec=0.1,
+                    category="maintenance",
+                    shutdown_phase=ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN,
+                )
+            )
         return startup_maintenance_schedulers.MaintenanceSchedulerHandles(
-            files_export_gc_task=asyncio.create_task(_wait_forever("files_gc_cancelled"), name="files_gc_task"),
-            notifications_prune_task=asyncio.create_task(
-                _wait_forever("notifications_prune_cancelled"),
-                name="notifications_prune_task",
-            ),
-            jobs_prune_task=asyncio.create_task(_wait_forever("jobs_prune_cancelled"), name="jobs_prune_task"),
+            files_export_gc_task=files_gc_task,
+            notifications_prune_task=notifications_prune_task,
+            jobs_prune_task=jobs_prune_task,
         )
 
     monkeypatch.setattr(
@@ -1449,7 +1478,7 @@ def test_lifespan_shutdown_delegates_transition_handoff(
     assert recorded_calls[0]["readiness_state"] is main_module.READINESS_STATE
     assert "usage_task" not in recorded_calls[0]
     assert "llm_usage_task" not in recorded_calls[0]
-    assert isinstance(recorded_calls[0]["authnz_scheduler_started"], bool)
+    assert "authnz_scheduler_started" not in recorded_calls[0]
     assert recorded_calls[0]["build_legacy_shutdown_context"] is main_module._build_legacy_shutdown_context
     assert recorded_calls[0]["apply_shutdown_transition_gate"] is main_module._apply_shutdown_transition_gate
     assert recorded_calls[0]["startup_guard_exceptions"] == main_module._STARTUP_GUARD_EXCEPTIONS
@@ -1974,7 +2003,8 @@ def test_lifespan_shutdown_delegates_final_cleanup_tail(
 
     assert len(recorded_calls) == 1
     assert recorded_calls[0]["app"] is app
-    assert isinstance(recorded_calls[0]["authnz_scheduler_started"], bool)
+    assert "authnz_scheduler_started" not in recorded_calls[0]
+    assert "stopped_background_worker_names" not in recorded_calls[0]
     assert "coordinated_legacy_component_names" not in recorded_calls[0]
     assert recorded_calls[0]["in_pytest_for_db_pool_shutdown"] is True
     assert recorded_calls[0]["in_pytest_for_tts_shutdown"] is True
@@ -2499,7 +2529,7 @@ def test_shutdown_migrated_legacy_slice_uses_prod_drain_profile(
     assert getattr(captured_contexts[0], "readiness_state", None) is not None
     assert not hasattr(captured_contexts[0], "usage_task")
     assert not hasattr(captured_contexts[0], "llm_usage_task")
-    assert hasattr(captured_contexts[0], "authnz_scheduler_started")
+    assert not hasattr(captured_contexts[0], "authnz_scheduler_started")
     assert [component.name for component in _SpyShutdownCoordinator.instances[0].registered] == [
         "lifecycle_gate",
     ]

@@ -16,8 +16,6 @@ from tldw_Server_API.app.services.shutdown_cleanup_timed_segments import (
 async def shutdown_final_cleanup_tail(
     *,
     app: Any,
-    authnz_scheduler_started: bool,
-    stopped_background_worker_names: set[str] | None = None,
     db_pool: Any | None,
     session_manager: Any | None,
     heavy_startup_handles: Any | None,
@@ -29,13 +27,8 @@ async def shutdown_final_cleanup_tail(
     timed_shutdown_segment: Callable[[Any, str], AbstractContextManager[Any]],
 ) -> CleanupTimedShutdownHandles:
     """Run the remaining final cleanup tail in the legacy shutdown order."""
-    authnz_scheduler_started = _authnz_scheduler_started_after_background_shutdown(
-        authnz_scheduler_started=authnz_scheduler_started,
-        stopped_background_worker_names=stopped_background_worker_names,
-    )
     cleanup_timed_shutdown_handles = await _shutdown_cleanup_timed_segments(
         app=app,
-        authnz_scheduler_started=authnz_scheduler_started,
         db_pool=db_pool,
         session_manager=session_manager,
         heavy_startup_handles=heavy_startup_handles,
@@ -51,17 +44,6 @@ async def shutdown_final_cleanup_tail(
         import_exceptions=import_exceptions,
     )
     return cleanup_timed_shutdown_handles
-
-
-def _authnz_scheduler_started_after_background_shutdown(
-    *,
-    authnz_scheduler_started: bool,
-    stopped_background_worker_names: set[str] | None,
-) -> bool:
-    stopped_background_worker_names = stopped_background_worker_names or set()
-    if "authnz_scheduler" in stopped_background_worker_names:
-        return False
-    return authnz_scheduler_started
 
 
 async def _shutdown_cleanup_timed_segments(**kwargs) -> CleanupTimedShutdownHandles:

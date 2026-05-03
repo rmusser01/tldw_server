@@ -16,13 +16,10 @@ from loguru import logger
 class CleanupTimedShutdownHandles:
     """Updated handles produced by the cleanup/timed-segment shutdown tail."""
 
-    authnz_scheduler_started: bool
-
 
 async def shutdown_cleanup_timed_segments(
     *,
     app: Any,
-    authnz_scheduler_started: bool,
     db_pool: Any | None,
     session_manager: Any | None,
     heavy_startup_handles: Any | None,
@@ -73,9 +70,7 @@ async def shutdown_cleanup_timed_segments(
             import_exceptions=import_exceptions,
         )
 
-    return CleanupTimedShutdownHandles(
-        authnz_scheduler_started=authnz_scheduler_started,
-    )
+    return CleanupTimedShutdownHandles()
 
 
 async def _shutdown_auth_db_pool(**kwargs) -> None:

@@ -30,7 +30,6 @@ async def test_run_lifespan_shutdown_sequence_runs_wrappers_in_order_and_updates
 
     app = FastAPI()
     worker_runtime = LifespanWorkerRuntimeState(
-        authnz_scheduler_started=True,
         owned_job_pollers=["poller-a"],
         core_jobs_task="core-start",
         core_jobs_stop_event="core-stop-start",
@@ -47,16 +46,7 @@ async def test_run_lifespan_shutdown_sequence_runs_wrappers_in_order_and_updates
         recipe_run_jobs_stop_event="recipe-stop-start",
         evals_abtest_jobs_task="abtest-start",
         evals_abtest_jobs_stop_event="abtest-stop-start",
-        jobs_prune_task="jobs-prune-start",
-        files_export_gc_task="files-gc-start",
-        notifications_prune_task="notifications-start",
         jobs_notifications_bridge_task="bridge-start",
-        workflows_sched_task="workflows-sched-start",
-        reading_digest_sched_task="reading-sched-start",
-        admin_backup_sched_task="admin-backup-sched-start",
-        companion_reflection_sched_task="companion-sched-start",
-        reminders_sched_task="reminders-sched-start",
-        connectors_sync_sched_task="connectors-sched-start",
         jobs_metrics_task="metrics-start",
         jobs_metrics_stop_event="metrics-stop-start",
         loop_lag_task="loop-lag-start",
@@ -146,16 +136,11 @@ async def test_run_lifespan_shutdown_sequence_runs_wrappers_in_order_and_updates
         calls.append(("post", kwargs))
         return SimpleNamespace(
             jobs_metrics_task="metrics-after",
-            files_export_gc_task="files-gc-after",
-            notifications_prune_task="notifications-after",
         )
 
     async def _fake_final_cleanup(**kwargs):
         calls.append(("final", kwargs))
-        return SimpleNamespace(
-            authnz_scheduler_started=False,
-            files_export_gc_task="files-gc-final",
-        )
+        return SimpleNamespace()
 
     monkeypatch.setattr(
         shutdown_transition_handoff,
@@ -267,12 +252,8 @@ async def test_run_lifespan_shutdown_sequence_runs_wrappers_in_order_and_updates
     assert "companion_reflection_sched_task" not in calls[9][1]
     assert "reminders_sched_task" not in calls[9][1]
     assert "connectors_sync_sched_task" not in calls[9][1]
-    assert calls[10][1]["authnz_scheduler_started"] is True
-    assert calls[10][1]["stopped_background_worker_names"] == {
-        "authnz_scheduler",
-        "chatbooks_cleanup",
-        "ephemeral_cleanup_task",
-    }
+    assert "authnz_scheduler_started" not in calls[10][1]
+    assert "stopped_background_worker_names" not in calls[10][1]
     assert calls[10][1]["db_pool"] == "db-pool"
     assert calls[10][1]["session_manager"] == "session-manager"
     assert calls[10][1]["heavy_startup_handles"] == "heavy-handles"
@@ -287,13 +268,13 @@ async def test_run_lifespan_shutdown_sequence_runs_wrappers_in_order_and_updates
     assert not hasattr(worker_runtime, "websub_renewal_task")
     assert not hasattr(worker_runtime, "usage_task")
     assert not hasattr(worker_runtime, "llm_usage_task")
+    assert not hasattr(worker_runtime, "authnz_scheduler_started")
+    assert not hasattr(worker_runtime, "files_export_gc_task")
+    assert not hasattr(worker_runtime, "notifications_prune_task")
     assert worker_runtime.core_jobs_task == "core-after"
     assert worker_runtime.prompt_studio_jobs_stop_event == "prompt-stop-after"
     assert worker_runtime.media_ingest_jobs_task == "media-after"
     assert worker_runtime.reminder_jobs_task == "reminder-after"
     assert worker_runtime.jobs_metrics_task == "metrics-after"
-    assert worker_runtime.notifications_prune_task == "notifications-after"
-    assert worker_runtime.files_export_gc_task == "files-gc-final"
-    assert worker_runtime.authnz_scheduler_started is False
     assert app.state._tldw_shutdown_timing_segments == []
     assert recorded_totals == [250]

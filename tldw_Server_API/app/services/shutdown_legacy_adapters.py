@@ -20,7 +20,6 @@ StopCallable = Callable[[], Awaitable[None] | None]
 @dataclass(frozen=True, slots=True)
 class LegacyShutdownContext:
     readiness_state: MutableMapping[str, Any] | None = None
-    authnz_scheduler_started: bool = False
 
 
 @dataclass(frozen=True, slots=True)

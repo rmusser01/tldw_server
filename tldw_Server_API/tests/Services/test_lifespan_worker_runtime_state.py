@@ -20,14 +20,11 @@ def test_apply_startup_worker_bootstrap_handles_copies_known_fields() -> None:
         app_settings="settings",
         owned_job_pollers=["poller-a", "poller-b"],
         startup_worker_group_handles=StartupWorkerGroupHandles(
-            cleanup_task="cleanup-task",
             core_jobs_task="core-jobs-task",
             audio_jobs_stop_event="audio-stop",
         ),
         startup_service_tail_handles=StartupServiceTailHandles(
             jobs_metrics_task="jobs-metrics-task",
-            claims_task="claims-task",
-            authnz_scheduler_started=True,
         ),
     )
 
@@ -39,7 +36,7 @@ def test_apply_startup_worker_bootstrap_handles_copies_known_fields() -> None:
     assert runtime.audio_jobs_stop_event == "audio-stop"
     assert runtime.jobs_metrics_task == "jobs-metrics-task"
     assert not hasattr(runtime, "claims_task")
-    assert runtime.authnz_scheduler_started is True
+    assert not hasattr(runtime, "authnz_scheduler_started")
 
 
 def test_shutdown_apply_methods_copy_known_fields() -> None:
@@ -80,13 +77,10 @@ def test_shutdown_apply_methods_copy_known_fields() -> None:
     runtime.apply_post_worker_shutdown_handles(
         PostWorkerShutdownHandles(
             jobs_notifications_bridge_task="notifications-bridge-task",
-            files_export_gc_task="files-gc-task",
             workflows_gc_task="workflows-gc-task",
         )
     )
-    runtime.apply_final_cleanup_handles(
-        CleanupTimedShutdownHandles(authnz_scheduler_started=False)
-    )
+    runtime.apply_final_cleanup_handles(CleanupTimedShutdownHandles())
 
     assert not hasattr(runtime, "cleanup_task")
     assert not hasattr(runtime, "chatbooks_cleanup_task")
@@ -96,6 +90,32 @@ def test_shutdown_apply_methods_copy_known_fields() -> None:
     assert runtime.media_ingest_jobs_task == "media-task"
     assert runtime.reminder_jobs_task == "reminder-task"
     assert runtime.jobs_notifications_bridge_task == "notifications-bridge-task"
-    assert runtime.files_export_gc_task == "files-gc-task"
     assert runtime.workflows_gc_task == "workflows-gc-task"
-    assert runtime.authnz_scheduler_started is False
+    assert not hasattr(runtime, "authnz_scheduler_started")
+
+
+def test_runtime_state_omits_registry_owned_scheduler_and_maintenance_handles() -> None:
+    from tldw_Server_API.app.services.lifespan_worker_runtime_state import (
+        LifespanWorkerRuntimeState,
+    )
+
+    runtime = LifespanWorkerRuntimeState()
+    removed_fields = {
+        "authnz_scheduler_started",
+        "workflows_sched_task",
+        "reading_digest_sched_task",
+        "admin_backup_sched_task",
+        "companion_reflection_sched_task",
+        "reminders_sched_task",
+        "connectors_sync_sched_task",
+        "quality_eval_task",
+        "outputs_purge_task",
+        "kanban_activity_cleanup_task",
+        "ingestion_sources_cleanup_task",
+        "kanban_purge_task",
+        "files_export_gc_task",
+        "notifications_prune_task",
+        "jobs_prune_task",
+    }
+
+    assert all(not hasattr(runtime, field_name) for field_name in removed_fields)

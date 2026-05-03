@@ -83,23 +83,8 @@ class LifespanWorkerRuntimeState:
     claims_review_metrics_task: Any | None = None
     tts_history_cleanup_task: Any | None = None
     tts_history_cleanup_stop_event: Any | None = None
-    quality_eval_task: Any | None = None
-    outputs_purge_task: Any | None = None
-    kanban_activity_cleanup_task: Any | None = None
-    ingestion_sources_cleanup_task: Any | None = None
-    kanban_purge_task: Any | None = None
-    files_export_gc_task: Any | None = None
-    notifications_prune_task: Any | None = None
-    jobs_prune_task: Any | None = None
     connectors_jobs_task: Any | None = None
     connectors_jobs_stop_event: Any | None = None
-    authnz_scheduler_started: bool = False
-    workflows_sched_task: Any | None = None
-    reading_digest_sched_task: Any | None = None
-    admin_backup_sched_task: Any | None = None
-    companion_reflection_sched_task: Any | None = None
-    reminders_sched_task: Any | None = None
-    connectors_sync_sched_task: Any | None = None
 
     def apply_startup_worker_bootstrap_handles(self, handles: Any) -> None:
         self.worker_inventory = getattr(handles, "worker_inventory", None)
