@@ -1251,6 +1251,7 @@ async def test_run_shutdown_post_worker_services_guard_failure_suppresses_stoppe
             "jobs_prune_task",
             "files_export_gc_task",
             "notifications_prune_task",
+            "jobs_notifications_bridge_task",
             "embeddings_compactor_task",
             "usage_aggregator",
             "llm_usage_aggregator",
@@ -1271,7 +1272,7 @@ async def test_run_shutdown_post_worker_services_guard_failure_suppresses_stoppe
     assert handles.jobs_prune_task is None
     assert handles.files_export_gc_task is None
     assert handles.notifications_prune_task is None
-    assert handles.jobs_notifications_bridge_task == "bridge-input"
+    assert handles.jobs_notifications_bridge_task is None
     assert handles.embeddings_compactor_task is None
     assert handles.embeddings_compactor_stop_event is None
     assert handles.websub_renewal_task is None

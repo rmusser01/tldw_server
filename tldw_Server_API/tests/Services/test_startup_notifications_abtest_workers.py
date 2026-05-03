@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import importlib
 import sys
 from types import SimpleNamespace
@@ -141,6 +142,39 @@ async def test_start_jobs_notifications_bridge_worker_cancels_task_when_inventor
 
     assert returned_task is None
     assert task.cancelled is True
+
+
+def test_safe_cancel_task_tolerates_cancelled_error_without_current_task_cancelling(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_workers = _import_startup_notifications_abtest_workers()
+
+    class _FakeTask:
+        def cancel(self) -> None:
+            raise asyncio.CancelledError()
+
+    monkeypatch.setattr(startup_workers.asyncio, "current_task", lambda: object())
+
+    startup_workers._safe_cancel_task(_FakeTask())
+
+
+def test_safe_cancel_task_preserves_current_task_cancellation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_workers = _import_startup_notifications_abtest_workers()
+
+    class _FakeTask:
+        def cancel(self) -> None:
+            raise asyncio.CancelledError()
+
+    class _CancellingCurrentTask:
+        def cancelling(self) -> int:
+            return 1
+
+    monkeypatch.setattr(startup_workers.asyncio, "current_task", lambda: _CancellingCurrentTask())
+
+    with pytest.raises(asyncio.CancelledError):
+        startup_workers._safe_cancel_task(_FakeTask())
 
 
 @pytest.mark.asyncio

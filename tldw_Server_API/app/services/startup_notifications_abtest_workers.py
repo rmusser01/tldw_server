@@ -86,7 +86,8 @@ def _safe_cancel_task(task: Any | None) -> None:
         cancel()
     except asyncio.CancelledError:
         current_task = asyncio.current_task()
-        if current_task is not None and current_task.cancelling():
+        current_task_cancelling = getattr(current_task, "cancelling", None)
+        if callable(current_task_cancelling) and current_task_cancelling():
             raise
         logger.debug("Lifecycle worker task cancel raised CancelledError during startup rollback")
     except _STARTUP_GUARD_EXCEPTIONS as exc:
