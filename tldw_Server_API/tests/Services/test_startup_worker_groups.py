@@ -170,8 +170,11 @@ async def test_start_worker_groups_runs_helpers_in_order_and_returns_handles(
         owned_job_pollers,
         register_owned_job_poller,
         sidecar_mode,
+        worker_inventory,
     ):
+        del app, owned_job_pollers, register_owned_job_poller
         assert sidecar_mode is False
+        assert worker_inventory is worker_inventory_ref
         calls.append("notifications")
         return SimpleNamespace(
             jobs_notifications_bridge_task="bridge-task",
