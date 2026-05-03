@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import importlib
 import sys
+from collections.abc import Callable
 
 import pytest
-
 
 pytestmark = pytest.mark.unit
 
@@ -46,6 +46,11 @@ async def test_start_content_jobs_pollers_combines_handles_in_order(
         calls.append("reading-digest")
         return ("reading-stop", "reading-task")
 
+    async def _record_vn_asset(**kwargs):
+        del kwargs
+        calls.append("vn-asset")
+        return ("vn-asset-stop", "vn-asset-task", "vn-generation-stop", "vn-generation-task")
+
     async def _record_companion(**kwargs):
         del kwargs
         calls.append("companion")
@@ -56,6 +61,7 @@ async def test_start_content_jobs_pollers_combines_handles_in_order(
     monkeypatch.setattr(startup_pollers, "_start_presentation_render_jobs_worker", _record_presentation)
     monkeypatch.setattr(startup_pollers, "_start_media_ingest_jobs_workers", _record_media_ingest)
     monkeypatch.setattr(startup_pollers, "_start_reading_digest_jobs_worker", _record_reading_digest)
+    monkeypatch.setattr(startup_pollers, "_start_vn_asset_jobs_workers", _record_vn_asset)
     monkeypatch.setattr(startup_pollers, "_start_companion_reflection_jobs_worker", _record_companion)
 
     handles = await startup_pollers.start_content_jobs_pollers(
@@ -65,7 +71,15 @@ async def test_start_content_jobs_pollers_combines_handles_in_order(
         should_start_worker=lambda *args, **kwargs: False,
     )
 
-    assert calls == ["audio", "audiobook", "presentation", "media-ingest", "reading-digest", "companion"]
+    assert calls == [
+        "audio",
+        "audiobook",
+        "presentation",
+        "media-ingest",
+        "reading-digest",
+        "vn-asset",
+        "companion",
+    ]
     assert handles.audio_jobs_stop_event == "audio-stop"
     assert handles.audio_jobs_task == "audio-task"
     assert handles.audiobook_jobs_stop_event == "audiobook-stop"
@@ -78,8 +92,322 @@ async def test_start_content_jobs_pollers_combines_handles_in_order(
     assert handles.media_ingest_heavy_jobs_task == "media-heavy-task"
     assert handles.reading_digest_jobs_stop_event == "reading-stop"
     assert handles.reading_digest_jobs_task == "reading-task"
+    assert handles.vn_asset_jobs_stop_event == "vn-asset-stop"
+    assert handles.vn_asset_jobs_task == "vn-asset-task"
+    assert handles.vn_asset_generation_jobs_stop_event == "vn-generation-stop"
+    assert handles.vn_asset_generation_jobs_task == "vn-generation-task"
     assert handles.companion_reflection_jobs_stop_event == "companion-stop"
     assert handles.companion_reflection_jobs_task == "companion-task"
+
+
+@pytest.mark.asyncio
+async def test_start_content_jobs_pollers_passes_inventory_to_workers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_pollers = _import_startup_content_jobs_pollers()
+    worker_inventory = object()
+    captured_kwargs_by_worker: dict[str, dict[str, object]] = {}
+
+    def _record_worker(label: str, handles: tuple[object, ...]) -> Callable[..., object]:
+        """Build a starter stub that captures kwargs for one content worker group."""
+
+        async def _record(**kwargs: object) -> tuple[object, ...]:
+            """Capture worker startup kwargs and return deterministic handles."""
+
+            captured_kwargs_by_worker[label] = kwargs
+            return handles
+
+        return _record
+
+    monkeypatch.setattr(
+        startup_pollers,
+        "_start_audio_jobs_worker",
+        _record_worker("audio", ("audio-stop", "audio-task")),
+    )
+    monkeypatch.setattr(
+        startup_pollers,
+        "_start_audiobook_jobs_worker",
+        _record_worker("audiobook", ("audiobook-stop", "audiobook-task")),
+    )
+    monkeypatch.setattr(
+        startup_pollers,
+        "_start_presentation_render_jobs_worker",
+        _record_worker("presentation", ("presentation-stop", "presentation-task")),
+    )
+    monkeypatch.setattr(
+        startup_pollers,
+        "_start_media_ingest_jobs_workers",
+        _record_worker("media-ingest", ("media-stop", "media-task", "media-heavy-stop", "media-heavy-task")),
+    )
+    monkeypatch.setattr(
+        startup_pollers,
+        "_start_reading_digest_jobs_worker",
+        _record_worker("reading-digest", ("reading-stop", "reading-task")),
+    )
+    monkeypatch.setattr(
+        startup_pollers,
+        "_start_vn_asset_jobs_workers",
+        _record_worker("vn-asset", ("vn-asset-stop", "vn-asset-task", "vn-generation-stop", "vn-generation-task")),
+    )
+    monkeypatch.setattr(
+        startup_pollers,
+        "_start_companion_reflection_jobs_worker",
+        _record_worker("companion", ("companion-stop", "companion-task")),
+    )
+
+    await startup_pollers.start_content_jobs_pollers(
+        app="app",
+        owned_job_pollers=[],
+        register_owned_job_poller=lambda *args, **kwargs: None,
+        should_start_worker=lambda *args, **kwargs: False,
+        worker_inventory=worker_inventory,
+    )
+
+    assert {
+        worker: kwargs["worker_inventory"]
+        for worker, kwargs in captured_kwargs_by_worker.items()
+    } == {
+        "audio": worker_inventory,
+        "audiobook": worker_inventory,
+        "presentation": worker_inventory,
+        "media-ingest": worker_inventory,
+        "reading-digest": worker_inventory,
+        "vn-asset": worker_inventory,
+        "companion": worker_inventory,
+    }
+
+
+@pytest.mark.parametrize(
+    (
+        "starter_name",
+        "flag_name",
+        "route_name",
+        "registered_name",
+        "factory_name",
+    ),
+    [
+        (
+            "_start_audio_jobs_worker",
+            "AUDIO_JOBS_WORKER_ENABLED",
+            "audio-jobs",
+            "audio_jobs_task",
+            "_run_audio_jobs_worker_service",
+        ),
+        (
+            "_start_audiobook_jobs_worker",
+            "AUDIOBOOK_JOBS_WORKER_ENABLED",
+            "audiobooks",
+            "audiobook_jobs_task",
+            "_run_audiobook_jobs_worker_service",
+        ),
+        (
+            "_start_presentation_render_jobs_worker",
+            "PRESENTATION_RENDER_JOBS_WORKER_ENABLED",
+            "slides",
+            "presentation_render_jobs_task",
+            "_run_presentation_render_jobs_worker_service",
+        ),
+        (
+            "_start_reading_digest_jobs_worker",
+            "READING_DIGEST_JOBS_WORKER_ENABLED",
+            "reading",
+            "reading_digest_jobs_task",
+            "_run_reading_digest_jobs_worker_service",
+        ),
+        (
+            "_start_companion_reflection_jobs_worker",
+            "COMPANION_REFLECTION_JOBS_WORKER_ENABLED",
+            "companion",
+            "companion_reflection_jobs_task",
+            "_run_companion_reflection_jobs_worker_service",
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_content_jobs_worker_registers_with_worker_inventory_when_enabled(
+    monkeypatch: pytest.MonkeyPatch,
+    starter_name: str,
+    flag_name: str,
+    route_name: str,
+    registered_name: str,
+    factory_name: str,
+) -> None:
+    startup_pollers = _import_startup_content_jobs_pollers()
+    registrations: list[dict[str, object]] = []
+
+    class _FakeWorkerInventory:
+        """Test double that records custom worker registration calls."""
+
+        async def register_custom(self, **kwargs: object) -> tuple[str, str]:
+            """Capture registration kwargs and return deterministic handles."""
+
+            registrations.append(kwargs)
+            return f"{registered_name}-task", f"{registered_name}-stop"
+
+    monkeypatch.setattr(
+        startup_pollers,
+        "_make_event",
+        lambda: (_ for _ in ()).throw(AssertionError("legacy event path should not run")),
+    )
+    monkeypatch.setattr(
+        startup_pollers,
+        "_create_task",
+        lambda coro: (_ for _ in ()).throw(AssertionError("legacy task path should not run")),
+    )
+
+    def _register_owned_job_poller(*args: object, **kwargs: object) -> None:
+        raise AssertionError("legacy poller registration should not run")
+
+    stop_event, task = await getattr(startup_pollers, starter_name)(
+        app="app",
+        owned_job_pollers=[],
+        register_owned_job_poller=_register_owned_job_poller,
+        should_start_worker=lambda flag, route, **kwargs: (flag, route, kwargs) == (flag_name, route_name, {}),
+        worker_inventory=_FakeWorkerInventory(),
+    )
+
+    assert stop_event == f"{registered_name}-stop"
+    assert task == f"{registered_name}-task"
+    assert registrations == [
+        {
+            "name": registered_name,
+            "task_name": registered_name,
+            "coroutine_factory": getattr(startup_pollers, factory_name),
+            "timeout_sec": 5.0,
+            "category": "jobs",
+            "shutdown_phase": startup_pollers.ShutdownPhase.JOB_POLLER_QUIESCE,
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_media_ingest_jobs_workers_register_with_worker_inventory_when_enabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_pollers = _import_startup_content_jobs_pollers()
+    registrations: list[dict[str, object]] = []
+
+    class _FakeWorkerInventory:
+        """Test double that records custom worker registration calls."""
+
+        async def register_custom(self, **kwargs: object) -> tuple[str, str]:
+            """Capture registration kwargs and return deterministic handles."""
+
+            registrations.append(kwargs)
+            name = str(kwargs["name"])
+            return f"{name}-task", f"{name}-stop"
+
+    monkeypatch.setattr(
+        startup_pollers,
+        "_make_event",
+        lambda: (_ for _ in ()).throw(AssertionError("legacy event path should not run")),
+    )
+    monkeypatch.setattr(
+        startup_pollers,
+        "_create_task",
+        lambda coro: (_ for _ in ()).throw(AssertionError("legacy task path should not run")),
+    )
+
+    def _register_owned_job_poller(*args: object, **kwargs: object) -> None:
+        raise AssertionError("legacy poller registration should not run")
+
+    handles = await startup_pollers._start_media_ingest_jobs_workers(
+        app="app",
+        owned_job_pollers=[],
+        register_owned_job_poller=_register_owned_job_poller,
+        should_start_worker=lambda *args, **kwargs: True,
+        worker_inventory=_FakeWorkerInventory(),
+    )
+
+    assert handles == (
+        "media_ingest_jobs_task-stop",
+        "media_ingest_jobs_task-task",
+        "media_ingest_heavy_jobs_task-stop",
+        "media_ingest_heavy_jobs_task-task",
+    )
+    assert registrations == [
+        {
+            "name": "media_ingest_jobs_task",
+            "task_name": "media_ingest_jobs_task",
+            "coroutine_factory": startup_pollers._run_media_ingest_jobs_worker_service,
+            "timeout_sec": 5.0,
+            "category": "jobs",
+            "shutdown_phase": startup_pollers.ShutdownPhase.JOB_POLLER_QUIESCE,
+        },
+        {
+            "name": "media_ingest_heavy_jobs_task",
+            "task_name": "media_ingest_heavy_jobs_task",
+            "coroutine_factory": startup_pollers._run_media_ingest_heavy_jobs_worker_service,
+            "timeout_sec": 5.0,
+            "category": "jobs",
+            "shutdown_phase": startup_pollers.ShutdownPhase.JOB_POLLER_QUIESCE,
+        },
+    ]
+
+
+@pytest.mark.asyncio
+async def test_vn_asset_jobs_workers_register_with_worker_inventory_when_enabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_pollers = _import_startup_content_jobs_pollers()
+    registrations: list[dict[str, object]] = []
+
+    class _FakeWorkerInventory:
+        """Test double that records custom worker registration calls."""
+
+        async def register_custom(self, **kwargs: object) -> tuple[str, str]:
+            """Capture registration kwargs and return deterministic handles."""
+
+            registrations.append(kwargs)
+            name = str(kwargs["name"])
+            return f"{name}-task", f"{name}-stop"
+
+    monkeypatch.setattr(
+        startup_pollers,
+        "_make_event",
+        lambda: (_ for _ in ()).throw(AssertionError("legacy event path should not run")),
+    )
+    monkeypatch.setattr(
+        startup_pollers,
+        "_create_task",
+        lambda coro: (_ for _ in ()).throw(AssertionError("legacy task path should not run")),
+    )
+
+    def _register_owned_job_poller(*args: object, **kwargs: object) -> None:
+        raise AssertionError("legacy poller registration should not run")
+
+    handles = await startup_pollers._start_vn_asset_jobs_workers(
+        app="app",
+        owned_job_pollers=[],
+        register_owned_job_poller=_register_owned_job_poller,
+        should_start_worker=lambda *args, **kwargs: True,
+        worker_inventory=_FakeWorkerInventory(),
+    )
+
+    assert handles == (
+        "vn_asset_jobs_task-stop",
+        "vn_asset_jobs_task-task",
+        "vn_asset_generation_jobs_task-stop",
+        "vn_asset_generation_jobs_task-task",
+    )
+    assert registrations == [
+        {
+            "name": "vn_asset_jobs_task",
+            "task_name": "vn_asset_jobs_task",
+            "coroutine_factory": startup_pollers._run_vn_asset_jobs_worker_service,
+            "timeout_sec": 5.0,
+            "category": "jobs",
+            "shutdown_phase": startup_pollers.ShutdownPhase.JOB_POLLER_QUIESCE,
+        },
+        {
+            "name": "vn_asset_generation_jobs_task",
+            "task_name": "vn_asset_generation_jobs_task",
+            "coroutine_factory": startup_pollers._run_vn_asset_generation_jobs_worker_service,
+            "timeout_sec": 5.0,
+            "category": "jobs",
+            "shutdown_phase": startup_pollers.ShutdownPhase.JOB_POLLER_QUIESCE,
+        },
+    ]
 
 
 @pytest.mark.asyncio

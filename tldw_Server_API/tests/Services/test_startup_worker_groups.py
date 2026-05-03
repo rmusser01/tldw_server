@@ -108,7 +108,9 @@ async def test_start_worker_groups_runs_helpers_in_order_and_returns_handles(
         owned_job_pollers,
         register_owned_job_poller,
         should_start_worker,
+        worker_inventory,
     ):
+        assert worker_inventory is worker_inventory_ref
         assert should_start_worker("READING_DIGEST_JOBS_WORKER_ENABLED", "collections-websub") is False
         calls.append("content")
         return SimpleNamespace(

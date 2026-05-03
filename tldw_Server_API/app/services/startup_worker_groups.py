@@ -138,6 +138,7 @@ async def start_worker_groups(
         owned_job_pollers=owned_job_pollers,
         register_owned_job_poller=register_owned_job_poller,
         should_start_worker=_should_start_worker,
+        worker_inventory=worker_inventory,
     )
     sidecar_owned_jobs_poller_handles = await _start_sidecar_owned_jobs_pollers(
         app=app,
