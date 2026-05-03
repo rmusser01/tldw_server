@@ -99,8 +99,7 @@ const BASE_HEADER_SHORTCUT_GROUPS: HeaderShortcutGroup[] = [
         to: "/prompts",
         icon: NotebookPen,
         labelKey: "option:header.modePromptsPlayground",
-        labelDefault: "Prompts",
-        shortcutIndex: 3
+        labelDefault: "Prompts"
       },
       {
         id: "characters",
@@ -152,6 +151,7 @@ const BASE_HEADER_SHORTCUT_GROUPS: HeaderShortcutGroup[] = [
         icon: NotebookPen,
         labelKey: "option:header.modePromptStudio",
         labelDefault: "Prompt Studio",
+        shortcutIndex: 3,
         descriptionKey: "option:header.modePromptStudioDesc",
         descriptionDefault: "Design, test, and optimize prompts across models"
       },

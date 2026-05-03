@@ -45,6 +45,33 @@ const extensionWrapperSource = loadSource(
   "apps/tldw-frontend/extension/routes/option-chat-workspace.tsx"
 )
 
+const getHeaderShortcutAssignments = () => {
+  const itemBlocks = Array.from(
+    headerShortcutItemsSource.matchAll(/\n\s{6}\{\n[\s\S]*?\n\s{6}\}/g)
+  ).map(([block]) => block)
+
+  return itemBlocks
+    .map((block) => {
+      const id = block.match(/id:\s*"([^"]+)"/)?.[1]
+      const shortcutIndex = block.match(/shortcutIndex:\s*(\d+)/)?.[1]
+
+      if (!id || !shortcutIndex) return null
+
+      return {
+        id,
+        shortcutIndex: Number(shortcutIndex)
+      }
+    })
+    .filter(
+      (assignment): assignment is { id: string; shortcutIndex: number } =>
+        assignment !== null
+    )
+}
+
+const getHeaderShortcutIndex = (id: string) =>
+  getHeaderShortcutAssignments().find((assignment) => assignment.id === id)
+    ?.shortcutIndex
+
 describe("chat workspace route registry parity", () => {
   it("registers the shared chat workspace route using the shared path constant", () => {
     expect(sharedRouteRegistrySource).toContain("CHAT_WORKSPACE_PATH")
@@ -95,5 +122,17 @@ describe("chat workspace route registry parity", () => {
     expect(headerShortcutItemsSource).toContain(
       'descriptionKey: "option:header.chatWorkspaceDesc"'
     )
+  })
+
+  it("preserves explicit numeric header shortcuts without duplicates", () => {
+    const assignments = getHeaderShortcutAssignments()
+    const assignedIndexes = assignments.map(
+      (assignment) => assignment.shortcutIndex
+    )
+
+    expect(getHeaderShortcutIndex("chat")).toBe(1)
+    expect(getHeaderShortcutIndex("chat-workspace")).toBe(2)
+    expect(getHeaderShortcutIndex("prompt-studio")).toBe(3)
+    expect(new Set(assignedIndexes).size).toBe(assignedIndexes.length)
   })
 })
