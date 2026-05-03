@@ -4,7 +4,12 @@ import {
   isApiResponseEnvelope,
   unwrapApiResponseData,
   unwrapApiResponseEnvelope,
-  type ApiResponseEnvelope
+  type ApiPaginatedPayload,
+  type ApiPaginationMeta,
+  type ApiResponseEnvelope,
+  type CursorPaginationMeta,
+  type OffsetPaginationMeta,
+  type PagePaginationMeta
 } from "@/services/response-envelope"
 
 describe("response envelope helpers", () => {
@@ -91,5 +96,38 @@ describe("response envelope helpers", () => {
 
     expect(isApiResponseEnvelope(payload)).toBe(false)
     expect(unwrapApiResponseData(payload)).toBe(payload)
+  })
+
+  it("types canonical pagination metadata without changing payload shapes", () => {
+    type TableListPayload = ApiPaginatedPayload<{
+      tables: { id: string }[]
+      total: number
+    }, OffsetPaginationMeta>
+
+    const payload: TableListPayload = {
+      tables: [{ id: "table-1" }],
+      total: 1,
+      pagination: {
+        mode: "offset",
+        limit: 25,
+        offset: 0,
+        total: 1,
+        has_more: false,
+        next_offset: null
+      }
+    }
+    const envelope: ApiResponseEnvelope<TableListPayload> = {
+      success: true,
+      data: payload
+    }
+
+    const unwrapped = unwrapApiResponseEnvelope(envelope)
+
+    expect(unwrapped?.pagination).toEqual(payload.pagination)
+    expectTypeOf(payload.pagination).toEqualTypeOf<OffsetPaginationMeta>()
+    expectTypeOf(unwrapped).toEqualTypeOf<TableListPayload | null>()
+    expectTypeOf<ApiPaginationMeta>().toEqualTypeOf<
+      OffsetPaginationMeta | PagePaginationMeta | CursorPaginationMeta
+    >()
   })
 })

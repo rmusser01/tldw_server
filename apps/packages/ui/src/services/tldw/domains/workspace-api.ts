@@ -2,6 +2,7 @@ import { bgRequest } from "@/services/background-proxy"
 import { buildQuery } from "../client-utils"
 import { appendPathQuery } from "../path-utils"
 import type { AllowedPath } from "@/services/tldw/openapi-guard"
+import type { OffsetPaginationMeta } from "@/services/response-envelope"
 
 /**
  * Minimal interface for the TldwApiClient methods referenced via `this`.
@@ -12,15 +13,6 @@ export interface TldwApiClientCore {
   resolveApiPath(key: string, candidates: string[]): Promise<AllowedPath>
   fillPathParams(template: AllowedPath, values: string | string[]): AllowedPath
   buildQuery(params?: Record<string, any>): string
-}
-
-type OffsetPaginationMeta = {
-  mode: "offset"
-  limit: number
-  offset: number
-  total?: number | null
-  has_more: boolean
-  next_offset?: number | null
 }
 
 type SkillSummary = {
