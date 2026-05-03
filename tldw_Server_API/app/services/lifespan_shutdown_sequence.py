@@ -46,8 +46,6 @@ async def run_lifespan_shutdown_sequence(
         pass
 
     legacy_shutdown_plan: list[Any] = []
-    coordinated_legacy_component_names: set[str] = set()
-
     with timed_shutdown_segment(app, "transition_handoff"):
         from tldw_Server_API.app.services.shutdown_transition_handoff import (
             shutdown_transition_handoff,
@@ -56,12 +54,6 @@ async def run_lifespan_shutdown_sequence(
         transition_handoff_handles = await shutdown_transition_handoff(
             app=app,
             readiness_state=readiness_state,
-            usage_task=worker_runtime.usage_task,
-            llm_usage_task=worker_runtime.llm_usage_task,
-            authnz_scheduler_started=worker_runtime.authnz_scheduler_started,
-            chatbooks_cleanup_task=worker_runtime.chatbooks_cleanup_task,
-            chatbooks_cleanup_stop_event=worker_runtime.chatbooks_cleanup_stop_event,
-            storage_cleanup_service=worker_runtime.storage_cleanup_service,
             build_legacy_shutdown_context=build_legacy_shutdown_context,
             apply_shutdown_transition_gate=apply_shutdown_transition_gate,
             startup_guard_exceptions=startup_guard_exceptions,
@@ -98,7 +90,7 @@ async def run_lifespan_shutdown_sequence(
         run_shutdown_coordinated_legacy_components,
     )
 
-    coordinated_legacy_shutdown_handles = await run_shutdown_coordinated_legacy_components(
+    await run_shutdown_coordinated_legacy_components(
         app=app,
         legacy_shutdown_plan=legacy_shutdown_plan,
         run_coordinated_shutdown=run_coordinated_shutdown,
@@ -106,7 +98,6 @@ async def run_lifespan_shutdown_sequence(
         import_exceptions=import_exceptions,
         stopped_background_worker_names=stopped_background_worker_names,
     )
-    coordinated_legacy_component_names = coordinated_legacy_shutdown_handles.coordinated_legacy_component_names
 
     from tldw_Server_API.app.services.shutdown_pre_worker_cleanup import (
         run_shutdown_pre_worker_cleanup,
@@ -114,13 +105,7 @@ async def run_lifespan_shutdown_sequence(
 
     pre_worker_cleanup_handles = await run_shutdown_pre_worker_cleanup(
         app=app,
-        cleanup_task=worker_runtime.cleanup_task,
-        chatbooks_cleanup_task=worker_runtime.chatbooks_cleanup_task,
-        chatbooks_cleanup_stop_event=worker_runtime.chatbooks_cleanup_stop_event,
-        storage_cleanup_service=worker_runtime.storage_cleanup_service,
-        coordinated_legacy_component_names=coordinated_legacy_component_names,
         guard_exceptions=startup_guard_exceptions,
-        stopped_background_worker_names=stopped_background_worker_names,
     )
     worker_runtime.apply_pre_worker_cleanup_handles(pre_worker_cleanup_handles)
 
@@ -187,23 +172,7 @@ async def run_lifespan_shutdown_sequence(
     )
 
     post_worker_shutdown_handles = await run_shutdown_post_worker_services(
-        claims_task=worker_runtime.claims_task,
-        jobs_prune_task=worker_runtime.jobs_prune_task,
-        files_export_gc_task=worker_runtime.files_export_gc_task,
-        notifications_prune_task=worker_runtime.notifications_prune_task,
         jobs_notifications_bridge_task=worker_runtime.jobs_notifications_bridge_task,
-        embeddings_compactor_task=worker_runtime.embeddings_compactor_task,
-        embeddings_compactor_stop_event=worker_runtime.embeddings_compactor_stop_event,
-        websub_renewal_task=worker_runtime.websub_renewal_task,
-        coordinated_legacy_component_names=coordinated_legacy_component_names,
-        usage_task=worker_runtime.usage_task,
-        llm_usage_task=worker_runtime.llm_usage_task,
-        workflows_sched_task=worker_runtime.workflows_sched_task,
-        reading_digest_sched_task=worker_runtime.reading_digest_sched_task,
-        admin_backup_sched_task=worker_runtime.admin_backup_sched_task,
-        companion_reflection_sched_task=worker_runtime.companion_reflection_sched_task,
-        reminders_sched_task=worker_runtime.reminders_sched_task,
-        connectors_sync_sched_task=worker_runtime.connectors_sync_sched_task,
         jobs_metrics_task=worker_runtime.jobs_metrics_task,
         jobs_metrics_stop_event=worker_runtime.jobs_metrics_stop_event,
         loop_lag_task=worker_runtime.loop_lag_task,
@@ -237,9 +206,6 @@ async def run_lifespan_shutdown_sequence(
 
     cleanup_timed_shutdown_handles = await shutdown_final_cleanup_tail(
         app=app,
-        authnz_scheduler_started=worker_runtime.authnz_scheduler_started,
-        coordinated_legacy_component_names=coordinated_legacy_component_names,
-        stopped_background_worker_names=stopped_background_worker_names,
         db_pool=db_pool,
         session_manager=session_manager,
         heavy_startup_handles=heavy_startup_handles,

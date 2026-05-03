@@ -7,7 +7,6 @@ from types import SimpleNamespace
 
 import pytest
 
-
 pytestmark = pytest.mark.unit
 
 
@@ -65,17 +64,9 @@ async def test_shutdown_cleanup_timed_segments_runs_steps_in_order(
         assert guard_exceptions == (RuntimeError,)
         calls.append("cpu-pools")
 
-    async def _record_telemetry_services(
-        *,
-        authnz_scheduler_started,
-        coordinated_legacy_component_names,
-        import_exceptions,
-    ) -> bool:
-        assert authnz_scheduler_started is True
-        assert coordinated_legacy_component_names == {"usage_aggregator"}
+    async def _record_telemetry_services(*, import_exceptions) -> None:
         assert import_exceptions == (LookupError,)
         calls.append("telemetry")
-        return False
 
     @contextmanager
     def _fake_timed_shutdown_segment(seen_app, segment_name):
@@ -101,8 +92,6 @@ async def test_shutdown_cleanup_timed_segments_runs_steps_in_order(
 
     handles = await cleanup_tail.shutdown_cleanup_timed_segments(
         app=app,
-        authnz_scheduler_started=True,
-        coordinated_legacy_component_names={"usage_aggregator"},
         db_pool="db-pool",
         session_manager="session-manager",
         heavy_startup_handles="heavy-handles",
@@ -113,7 +102,7 @@ async def test_shutdown_cleanup_timed_segments_runs_steps_in_order(
         timed_shutdown_segment=_fake_timed_shutdown_segment,
     )
 
-    assert handles.authnz_scheduler_started is False
+    assert handles == cleanup_tail.CleanupTimedShutdownHandles()
     assert logged_messages == [
         "App Shutdown: Cleaning up resources...",
         "App Shutdown: Audit services cleanup handled by dependency injection",

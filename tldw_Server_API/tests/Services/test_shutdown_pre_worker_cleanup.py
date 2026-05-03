@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import inspect
 import sys
 from types import SimpleNamespace
 from typing import Any
@@ -26,30 +27,8 @@ class _FakeTask:
         self.cancelled = True
 
 
-class _FakeStopEvent:
-    def __init__(self, *, exc: BaseException | None = None) -> None:
-        self.is_set = False
-        self._exc = exc
-
-    def set(self) -> None:
-        if self._exc is not None:
-            raise self._exc
-        self.is_set = True
-
-
-class _FakeStorageCleanupService:
-    def __init__(self, *, exc: BaseException | None = None) -> None:
-        self.stopped = False
-        self._exc = exc
-
-    async def stop(self) -> None:
-        if self._exc is not None:
-            raise self._exc
-        self.stopped = True
-
-
 @pytest.mark.asyncio
-async def test_shutdown_pre_worker_cleanup_returns_handles(
+async def test_shutdown_pre_worker_cleanup_returns_empty_handles(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     shutdown_cleanup = _import_shutdown_pre_worker_cleanup()
@@ -62,85 +41,44 @@ async def test_shutdown_pre_worker_cleanup_returns_handles(
 
     handles = await shutdown_cleanup.shutdown_pre_worker_cleanup(
         app="app",
-        cleanup_task="cleanup-task",
-        chatbooks_cleanup_task="chatbooks-task",
-        chatbooks_cleanup_stop_event="chatbooks-stop",
-        storage_cleanup_service="storage-service",
-        coordinated_legacy_component_names={"chatbooks_cleanup"},
         guard_exceptions=(RuntimeError,),
     )
 
     assert len(calls) == 1
-    assert calls[0]["app"] == "app"
-    assert calls[0]["cleanup_task"] == "cleanup-task"
-    assert calls[0]["chatbooks_cleanup_task"] == "chatbooks-task"
-    assert calls[0]["chatbooks_cleanup_stop_event"] == "chatbooks-stop"
-    assert calls[0]["storage_cleanup_service"] == "storage-service"
-    assert calls[0]["coordinated_legacy_component_names"] == {"chatbooks_cleanup"}
-    assert calls[0]["guard_exceptions"] == (RuntimeError,)
-    assert handles.cleanup_task == "cleanup-task"
-    assert handles.chatbooks_cleanup_task == "chatbooks-task"
-    assert handles.chatbooks_cleanup_stop_event == "chatbooks-stop"
-    assert handles.storage_cleanup_service == "storage-service"
+    assert calls[0] == {
+        "app": "app",
+        "guard_exceptions": (RuntimeError,),
+    }
+    assert vars(handles) == {}
+
+
+def test_shutdown_pre_worker_cleanup_no_longer_accepts_registry_owned_worker_handles() -> None:
+    shutdown_cleanup = _import_shutdown_pre_worker_cleanup()
+
+    obsolete_parameters = {
+        "cleanup_task",
+        "chatbooks_cleanup_task",
+        "chatbooks_cleanup_stop_event",
+        "storage_cleanup_service",
+        "coordinated_legacy_component_names",
+        "stopped_background_worker_names",
+    }
+
+    for helper_name in (
+        "shutdown_pre_worker_cleanup",
+        "run_shutdown_pre_worker_cleanup",
+        "_shutdown_pre_worker_cleanup",
+    ):
+        parameters = set(inspect.signature(getattr(shutdown_cleanup, helper_name)).parameters)
+        assert parameters.isdisjoint(obsolete_parameters)
 
 
 @pytest.mark.asyncio
-async def test_shutdown_pre_worker_cleanup_drops_registry_stopped_chatbooks_handles(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Suppress legacy chatbooks handles after the registry owns shutdown."""
-    shutdown_cleanup = _import_shutdown_pre_worker_cleanup()
-    calls: list[dict[str, object]] = []
-
-    async def _record_shutdown(**kwargs: object) -> None:
-        calls.append(kwargs)
-
-    monkeypatch.setattr(shutdown_cleanup, "_shutdown_pre_worker_cleanup", _record_shutdown)
-
-    handles = await shutdown_cleanup.shutdown_pre_worker_cleanup(
-        app="app",
-        cleanup_task="cleanup-task",
-        chatbooks_cleanup_task="chatbooks-task",
-        chatbooks_cleanup_stop_event="chatbooks-stop",
-        storage_cleanup_service="storage-service",
-        coordinated_legacy_component_names=set(),
-        stopped_background_worker_names={"chatbooks_cleanup"},
-        guard_exceptions=(RuntimeError,),
-    )
-
-    assert len(calls) == 1
-    assert calls[0]["chatbooks_cleanup_task"] is None
-    assert calls[0]["chatbooks_cleanup_stop_event"] is None
-    assert handles.chatbooks_cleanup_task is None
-    assert handles.chatbooks_cleanup_stop_event is None
-    assert handles.cleanup_task == "cleanup-task"
-    assert handles.storage_cleanup_service == "storage-service"
-
-
-def test_filtered_pre_worker_handles_suppresses_registry_stopped_handles() -> None:
-    """Centralize background-stopped handle filtering for every caller."""
-    shutdown_cleanup = _import_shutdown_pre_worker_cleanup()
-    handles = shutdown_cleanup._filtered_pre_worker_handles(
-        cleanup_task="cleanup-task",
-        chatbooks_cleanup_task="chatbooks-task",
-        chatbooks_cleanup_stop_event="chatbooks-stop",
-        storage_cleanup_service="storage-service",
-        stopped_background_worker_names={"ephemeral_cleanup_task", "chatbooks_cleanup"},
-    )
-
-    assert handles.cleanup_task is None
-    assert handles.chatbooks_cleanup_task is None
-    assert handles.chatbooks_cleanup_stop_event is None
-    assert handles.storage_cleanup_service == "storage-service"
-
-
-@pytest.mark.asyncio
-async def test_shutdown_pre_worker_cleanup_cancels_deferred_and_cleanup_tasks_and_resets(
+async def test_shutdown_pre_worker_cleanup_cancels_deferred_startup_and_runs_finalizers(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     shutdown_cleanup = _import_shutdown_pre_worker_cleanup()
     deferred_task = _FakeTask()
-    cleanup_task = _FakeTask()
     app = SimpleNamespace(state=SimpleNamespace(bg_tasks={"deferred_startup": deferred_task}))
     reset_calls: list[str] = []
 
@@ -159,88 +97,18 @@ async def test_shutdown_pre_worker_cleanup_cancels_deferred_and_cleanup_tasks_an
 
     await shutdown_cleanup._shutdown_pre_worker_cleanup(
         app=app,
-        cleanup_task=cleanup_task,
-        chatbooks_cleanup_task=None,
-        chatbooks_cleanup_stop_event=None,
-        storage_cleanup_service=None,
-        coordinated_legacy_component_names=set(),
         guard_exceptions=(RuntimeError,),
     )
 
     assert deferred_task.cancelled is True
-    assert cleanup_task.cancelled is True
     assert reset_calls == ["cleanup", "storage", "auth"]
 
 
 @pytest.mark.asyncio
-async def test_shutdown_pre_worker_cleanup_skips_background_stopped_ephemeral_cleanup(
+async def test_shutdown_pre_worker_cleanup_does_not_direct_stop_registry_owned_cleanup_workers(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     shutdown_cleanup = _import_shutdown_pre_worker_cleanup()
-    cleanup_task = _FakeTask()
-    app = SimpleNamespace(state=SimpleNamespace(bg_tasks={}))
-
-    async def _noop() -> None:
-        return None
-
-    monkeypatch.setattr(shutdown_cleanup, "_reset_cleanup_service", _noop)
-    monkeypatch.setattr(shutdown_cleanup, "_reset_storage_service", _noop)
-    monkeypatch.setattr(shutdown_cleanup, "_reset_authnz_rate_limiter", _noop)
-
-    handles = await shutdown_cleanup.shutdown_pre_worker_cleanup(
-        app=app,
-        cleanup_task=cleanup_task,
-        chatbooks_cleanup_task=None,
-        chatbooks_cleanup_stop_event=None,
-        storage_cleanup_service=None,
-        coordinated_legacy_component_names=set(),
-        guard_exceptions=(RuntimeError,),
-        stopped_background_worker_names={"ephemeral_cleanup_task"},
-    )
-
-    assert cleanup_task.cancelled is False
-    assert handles.cleanup_task is None
-
-
-@pytest.mark.asyncio
-async def test_shutdown_pre_worker_cleanup_stops_chatbooks_and_storage_when_not_coordinated(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    shutdown_cleanup = _import_shutdown_pre_worker_cleanup()
-    stop_event = _FakeStopEvent()
-    chatbooks_task = _FakeTask()
-    storage_cleanup_service = _FakeStorageCleanupService()
-
-    async def _noop() -> None:
-        return None
-
-    monkeypatch.setattr(shutdown_cleanup, "_reset_cleanup_service", _noop)
-    monkeypatch.setattr(shutdown_cleanup, "_reset_storage_service", _noop)
-    monkeypatch.setattr(shutdown_cleanup, "_reset_authnz_rate_limiter", _noop)
-
-    await shutdown_cleanup._shutdown_pre_worker_cleanup(
-        app=SimpleNamespace(state=SimpleNamespace()),
-        cleanup_task=None,
-        chatbooks_cleanup_task=chatbooks_task,
-        chatbooks_cleanup_stop_event=stop_event,
-        storage_cleanup_service=storage_cleanup_service,
-        coordinated_legacy_component_names=set(),
-        guard_exceptions=(RuntimeError,),
-    )
-
-    assert stop_event.is_set is True
-    assert chatbooks_task.cancelled is True
-    assert storage_cleanup_service.stopped is True
-
-
-@pytest.mark.asyncio
-async def test_shutdown_pre_worker_cleanup_skips_coordinated_chatbooks_and_storage(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    shutdown_cleanup = _import_shutdown_pre_worker_cleanup()
-    stop_event = _FakeStopEvent()
-    chatbooks_task = _FakeTask()
-    storage_cleanup_service = _FakeStorageCleanupService()
     reset_calls: list[str] = []
 
     async def _record_cleanup() -> None:
@@ -258,85 +126,10 @@ async def test_shutdown_pre_worker_cleanup_skips_coordinated_chatbooks_and_stora
 
     await shutdown_cleanup._shutdown_pre_worker_cleanup(
         app=SimpleNamespace(state=SimpleNamespace()),
-        cleanup_task=None,
-        chatbooks_cleanup_task=chatbooks_task,
-        chatbooks_cleanup_stop_event=stop_event,
-        storage_cleanup_service=storage_cleanup_service,
-        coordinated_legacy_component_names={"chatbooks_cleanup", "storage_cleanup_service"},
         guard_exceptions=(RuntimeError,),
     )
 
-    assert stop_event.is_set is False
-    assert chatbooks_task.cancelled is False
-    assert storage_cleanup_service.stopped is False
-    assert reset_calls == ["auth"]
-
-
-@pytest.mark.asyncio
-async def test_shutdown_pre_worker_cleanup_skips_stopped_background_chatbooks(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    shutdown_cleanup = _import_shutdown_pre_worker_cleanup()
-    stop_event = _FakeStopEvent()
-    chatbooks_task = _FakeTask()
-
-    async def _noop() -> None:
-        return None
-
-    monkeypatch.setattr(shutdown_cleanup, "_reset_cleanup_service", _noop)
-    monkeypatch.setattr(shutdown_cleanup, "_reset_storage_service", _noop)
-    monkeypatch.setattr(shutdown_cleanup, "_reset_authnz_rate_limiter", _noop)
-
-    await shutdown_cleanup._shutdown_pre_worker_cleanup(
-        app=SimpleNamespace(state=SimpleNamespace()),
-        cleanup_task=None,
-        chatbooks_cleanup_task=chatbooks_task,
-        chatbooks_cleanup_stop_event=stop_event,
-        storage_cleanup_service=None,
-        coordinated_legacy_component_names=set(),
-        stopped_background_worker_names={"chatbooks_cleanup"},
-        guard_exceptions=(RuntimeError,),
-    )
-
-    assert stop_event.is_set is False
-    assert chatbooks_task.cancelled is False
-
-
-@pytest.mark.asyncio
-async def test_shutdown_pre_worker_cleanup_resets_singletons_for_background_stopped_storage_cleanup(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    shutdown_cleanup = _import_shutdown_pre_worker_cleanup()
-    storage_cleanup_service = _FakeStorageCleanupService()
-    reset_calls: list[str] = []
-
-    async def _record_cleanup() -> None:
-        reset_calls.append("cleanup")
-
-    async def _record_storage() -> None:
-        reset_calls.append("storage")
-
-    async def _record_auth() -> None:
-        reset_calls.append("auth")
-
-    monkeypatch.setattr(shutdown_cleanup, "_reset_cleanup_service", _record_cleanup)
-    monkeypatch.setattr(shutdown_cleanup, "_reset_storage_service", _record_storage)
-    monkeypatch.setattr(shutdown_cleanup, "_reset_authnz_rate_limiter", _record_auth)
-
-    handles = await shutdown_cleanup.shutdown_pre_worker_cleanup(
-        app=SimpleNamespace(state=SimpleNamespace()),
-        cleanup_task=None,
-        chatbooks_cleanup_task=None,
-        chatbooks_cleanup_stop_event=None,
-        storage_cleanup_service=storage_cleanup_service,
-        coordinated_legacy_component_names=set(),
-        guard_exceptions=(RuntimeError,),
-        stopped_background_worker_names={"storage_cleanup_service"},
-    )
-
-    assert storage_cleanup_service.stopped is False
     assert reset_calls == ["cleanup", "storage", "auth"]
-    assert handles.storage_cleanup_service is storage_cleanup_service
 
 
 @pytest.mark.asyncio
@@ -345,7 +138,6 @@ async def test_shutdown_pre_worker_cleanup_swallows_guard_exceptions_from_local_
 ) -> None:
     shutdown_cleanup = _import_shutdown_pre_worker_cleanup()
     deferred_task = _FakeTask(exc=RuntimeError("deferred boom"))
-    storage_cleanup_service = _FakeStorageCleanupService(exc=RuntimeError("storage boom"))
     app = SimpleNamespace(state=SimpleNamespace(bg_tasks={"deferred_startup": deferred_task}))
     reset_calls: list[str] = []
 
@@ -365,43 +157,11 @@ async def test_shutdown_pre_worker_cleanup_swallows_guard_exceptions_from_local_
 
     await shutdown_cleanup._shutdown_pre_worker_cleanup(
         app=app,
-        cleanup_task=None,
-        chatbooks_cleanup_task=None,
-        chatbooks_cleanup_stop_event=None,
-        storage_cleanup_service=storage_cleanup_service,
-        coordinated_legacy_component_names=set(),
         guard_exceptions=(RuntimeError,),
     )
 
     assert deferred_task.cancelled is False
-    assert storage_cleanup_service.stopped is False
     assert reset_calls == ["cleanup", "auth"]
-
-
-@pytest.mark.asyncio
-async def test_shutdown_pre_worker_cleanup_propagates_cleanup_task_cancel_failure(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    shutdown_cleanup = _import_shutdown_pre_worker_cleanup()
-    cleanup_task = _FakeTask(exc=RuntimeError("cleanup boom"))
-
-    async def _noop() -> None:
-        return None
-
-    monkeypatch.setattr(shutdown_cleanup, "_reset_cleanup_service", _noop)
-    monkeypatch.setattr(shutdown_cleanup, "_reset_storage_service", _noop)
-    monkeypatch.setattr(shutdown_cleanup, "_reset_authnz_rate_limiter", _noop)
-
-    with pytest.raises(RuntimeError, match="cleanup boom"):
-        await shutdown_cleanup._shutdown_pre_worker_cleanup(
-            app=SimpleNamespace(state=SimpleNamespace()),
-            cleanup_task=cleanup_task,
-            chatbooks_cleanup_task=None,
-            chatbooks_cleanup_stop_event=None,
-            storage_cleanup_service=None,
-            coordinated_legacy_component_names=set(),
-            guard_exceptions=(RuntimeError,),
-        )
 
 
 @pytest.mark.asyncio
@@ -410,17 +170,8 @@ async def test_run_shutdown_pre_worker_cleanup_delegates_and_returns_handles(
 ) -> None:
     shutdown_cleanup = _import_shutdown_pre_worker_cleanup()
     app = SimpleNamespace()
-    cleanup_task = object()
-    chatbooks_cleanup_task = object()
-    chatbooks_cleanup_stop_event = object()
-    storage_cleanup_service = object()
     recorded_calls: list[dict[str, object]] = []
-    expected_handles = shutdown_cleanup.PreWorkerCleanupHandles(
-        cleanup_task=cleanup_task,
-        chatbooks_cleanup_task=chatbooks_cleanup_task,
-        chatbooks_cleanup_stop_event=chatbooks_cleanup_stop_event,
-        storage_cleanup_service=storage_cleanup_service,
-    )
+    expected_handles = shutdown_cleanup.PreWorkerCleanupHandles()
 
     async def _fake_shutdown_pre_worker_cleanup(**kwargs: object) -> Any:
         recorded_calls.append(kwargs)
@@ -434,35 +185,22 @@ async def test_run_shutdown_pre_worker_cleanup_delegates_and_returns_handles(
 
     handles = await shutdown_cleanup.run_shutdown_pre_worker_cleanup(
         app=app,
-        cleanup_task=cleanup_task,
-        chatbooks_cleanup_task=chatbooks_cleanup_task,
-        chatbooks_cleanup_stop_event=chatbooks_cleanup_stop_event,
-        storage_cleanup_service=storage_cleanup_service,
-        coordinated_legacy_component_names={"usage_aggregator"},
-        stopped_background_worker_names={"ephemeral_cleanup_task"},
         guard_exceptions=(RuntimeError,),
     )
 
     assert handles is expected_handles
     assert len(recorded_calls) == 1
-    assert recorded_calls[0]["app"] is app
-    assert recorded_calls[0]["cleanup_task"] is cleanup_task
-    assert recorded_calls[0]["chatbooks_cleanup_task"] is chatbooks_cleanup_task
-    assert recorded_calls[0]["chatbooks_cleanup_stop_event"] is chatbooks_cleanup_stop_event
-    assert recorded_calls[0]["storage_cleanup_service"] is storage_cleanup_service
-    assert recorded_calls[0]["coordinated_legacy_component_names"] == {"usage_aggregator"}
-    assert recorded_calls[0]["stopped_background_worker_names"] == {"ephemeral_cleanup_task"}
+    assert recorded_calls[0] == {
+        "app": app,
+        "guard_exceptions": (RuntimeError,),
+    }
 
 
 @pytest.mark.asyncio
-async def test_run_shutdown_pre_worker_cleanup_logs_and_returns_original_handles_on_guard_failure(
+async def test_run_shutdown_pre_worker_cleanup_logs_and_returns_empty_handles_on_guard_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     shutdown_cleanup = _import_shutdown_pre_worker_cleanup()
-    cleanup_task = object()
-    chatbooks_cleanup_task = object()
-    chatbooks_cleanup_stop_event = object()
-    storage_cleanup_service = object()
     debug_messages: list[str] = []
 
     async def _raise_guard_failure(**_kwargs: object) -> None:
@@ -481,17 +219,8 @@ async def test_run_shutdown_pre_worker_cleanup_logs_and_returns_original_handles
 
     handles = await shutdown_cleanup.run_shutdown_pre_worker_cleanup(
         app=SimpleNamespace(),
-        cleanup_task=cleanup_task,
-        chatbooks_cleanup_task=chatbooks_cleanup_task,
-        chatbooks_cleanup_stop_event=chatbooks_cleanup_stop_event,
-        storage_cleanup_service=storage_cleanup_service,
-        coordinated_legacy_component_names=set(),
-        stopped_background_worker_names={"ephemeral_cleanup_task"},
         guard_exceptions=(RuntimeError,),
     )
 
-    assert handles.cleanup_task is None
-    assert handles.chatbooks_cleanup_task is chatbooks_cleanup_task
-    assert handles.chatbooks_cleanup_stop_event is chatbooks_cleanup_stop_event
-    assert handles.storage_cleanup_service is storage_cleanup_service
+    assert vars(handles) == {}
     assert any("Pre-worker cleanup skipped" in message for message in debug_messages)
