@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 import pytest
 
 from tldw_Server_API.app.api.v1.endpoints import notes as notes_endpoint
@@ -43,6 +45,46 @@ class _KeywordLinkDB:
                 ]
             )
         raise AssertionError(f"Unexpected SQL: {sql}")
+
+
+class _NotesForKeywordDB:
+    client_id = "test-client"
+
+    def get_keyword_by_id(self, keyword_id: int) -> dict[str, object]:
+        assert keyword_id == 7
+        return {"id": 7, "keyword": "research"}
+
+    def get_notes_for_keyword(self, keyword_id: int, limit: int, offset: int) -> list[dict[str, object]]:
+        assert keyword_id == 7
+        assert limit == 2
+        assert offset == 0
+        now = datetime(2024, 1, 1, tzinfo=timezone.utc)
+        return [
+            {
+                "id": "note-a",
+                "title": "A",
+                "content": "Alpha",
+                "created_at": now,
+                "last_modified": now,
+                "version": 1,
+                "client_id": "test-client",
+                "deleted": False,
+            },
+            {
+                "id": "note-b",
+                "title": "B",
+                "content": "Beta",
+                "created_at": now,
+                "last_modified": now,
+                "version": 1,
+                "client_id": "test-client",
+                "deleted": False,
+            },
+        ]
+
+    def get_note_counts_for_keywords(self, keyword_ids: list[int]) -> dict[int, int]:
+        assert keyword_ids == [7]
+        return {7: 3}
 
 
 @pytest.mark.asyncio
@@ -100,3 +142,30 @@ async def test_conversation_keyword_links_include_canonical_offset_pagination() 
     }
     assert response["has_more"] is True
     assert response["next_offset"] == 2
+
+
+@pytest.mark.asyncio
+async def test_notes_for_keyword_include_canonical_offset_pagination() -> None:
+    """Notes-for-keyword lists should expose canonical offset metadata."""
+    response = await notes_endpoint.get_notes_for_keyword_endpoint(
+        keyword_id=7,
+        db=_NotesForKeywordDB(),
+        limit=2,
+        offset=0,
+        rate_limiter=_RateLimiter(),
+        current_user=_User(),
+        _=None,
+    )
+
+    assert response.keyword_id == 7
+    assert [note.id for note in response.notes] == ["note-a", "note-b"]
+    assert response.pagination.model_dump(mode="json") == {
+        "mode": "offset",
+        "limit": 2,
+        "offset": 0,
+        "total": 3,
+        "has_more": True,
+        "next_offset": 2,
+    }
+    assert response.has_more is True
+    assert response.next_offset == 2

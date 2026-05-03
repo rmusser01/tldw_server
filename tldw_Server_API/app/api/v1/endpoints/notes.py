@@ -4361,7 +4361,23 @@ async def get_notes_for_keyword_endpoint(
                                 detail=f"Keyword with ID '{keyword_id}' not found.")
 
         notes_list = db.get_notes_for_keyword(keyword_id=keyword_id, limit=limit, offset=offset)
-        return NotesForKeywordResponse(keyword_id=keyword_id, notes=notes_list)
+        note_counts = db.get_note_counts_for_keywords([keyword_id])
+        total = int(note_counts.get(int(keyword_id), len(notes_list)))
+        pagination = build_offset_pagination_meta(
+            limit=limit,
+            offset=offset,
+            total=total,
+            count=len(notes_list),
+        )
+        return NotesForKeywordResponse(
+            keyword_id=keyword_id,
+            notes=notes_list,
+            count=len(notes_list),
+            limit=limit,
+            offset=offset,
+            total=total,
+            pagination=pagination,
+        )
     except HTTPException:
         raise
     except _NOTES_NONCRITICAL_EXCEPTIONS as e:
