@@ -5,7 +5,7 @@ status: Done
 assignee:
   - Codex
 created_date: '2026-05-03 20:35'
-updated_date: '2026-05-03 20:38'
+updated_date: '2026-05-03 20:48'
 labels:
   - mcp
   - codegraph
@@ -44,6 +44,8 @@ Create a design spec for a native Python CodeGraph-style Unified MCP module in t
 3. Specify the first implementation slice as deep Python plus JavaScript/TypeScript extraction, with adapter-ready placeholders for C, C++, C#, Java, and Kotlin.
 4. Define the MCP tool catalog, indexing/sync lifecycle, workspace safety rules, output limits, testing strategy, and staged rollout.
 5. Save the design under Docs/superpowers/specs, update TASK-14 with the spec path and verification notes, then commit the design/task record if the worktree allows clean staging.
+
+Review remediation pass: update the committed design spec to resolve four accepted review findings before implementation planning. Scope: make v1 indexing default to bounded foreground with Jobs deferred; add TS path alias resolution to JS/TS scope; define stable node IDs plus stale-edge cleanup; require tested dependency pins/compatibility matrix before adding .[codegraph].
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
@@ -52,12 +54,14 @@ Create a design spec for a native Python CodeGraph-style Unified MCP module in t
 Wrote design spec at Docs/superpowers/specs/2026-05-03-native-codegraph-mcp-module-design.md. Verification: rg confirmed requested language scope, optional .[codegraph] dependency model, workspace safety, SQLite/FTS storage, MCP tools, indexing/sync, and TASK-14 references are present; git diff --check passed for the design doc and task file. Bandit is not applicable because this task only created documentation and Backlog task metadata.
 
 No implementation code was changed. Automated test suites were not run because the touched files are a design spec and Backlog task metadata only. No known blockers. Follow-up implementation should start from this spec and create separate Backlog tasks for reviewable implementation slices.
+
+Applied review remediation to Docs/superpowers/specs/2026-05-03-native-codegraph-mcp-module-design.md. Changes: v1 indexing/sync now use bounded foreground mode with Jobs deferred; JS/TS scope now includes trusted-workspace tsconfig/jsconfig path aliases; schema and lifecycle now specify deterministic node/edge IDs plus stale-edge cleanup; dependency section now requires a tested Tree-sitter parser matrix and bounded compatible ranges rather than broad lower bounds. Verification: git diff --check passed for the spec and task file; rg confirmed no remaining Jobs-vs-foreground open question and confirmed the new path-alias, deterministic identity, and parser-matrix requirements. Bandit remains not applicable because this is documentation/task metadata only.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Added the native CodeGraph MCP design spec at Docs/superpowers/specs/2026-05-03-native-codegraph-mcp-module-design.md and tracked it in TASK-14. The design chooses a native Python service exposed through Unified MCP, packaged behind .[codegraph], with first-slice depth for Python plus JavaScript/TypeScript and adapter-ready planning for C, C++, C#, Java, and Kotlin. It covers SQLite/FTS storage, trusted workspace-root safety, parser adapter contracts, MCP tool definitions, indexing/sync lifecycle, optional dependency behavior, testing strategy, rollout stages, risks, and open implementation questions. Verification was documentation-focused: rg checks confirmed the approved scope appears in the spec and git diff --check passed. Bandit and automated test suites were skipped as not applicable to documentation-only changes.
+Updated the native CodeGraph MCP design spec to address the four accepted review findings before implementation planning. The spec now resolves the indexing mode decision by making v1 bounded foreground-only and deferring Jobs integration to a later slice; adds TypeScript/JavaScript path-alias resolution for tsconfig/jsconfig aliases used by the frontend; defines deterministic node and edge IDs plus stale-edge cleanup rules for incremental sync; and turns .[codegraph] dependency pinning into a tested parser-matrix gate with bounded candidate ranges. Verification was documentation-focused: git diff --check passed and targeted rg checks confirmed the resolved decisions are present. Automated tests and Bandit were skipped as not applicable to documentation-only changes.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

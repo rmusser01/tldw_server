@@ -182,6 +182,9 @@ query logic directly in `execute_tool`.
 - Stores files, nodes, edges, unresolved references, index runs, and metadata.
 - Provides FTS-backed symbol search.
 - Uses tldw SQLite tuning helpers where appropriate.
+- Generates deterministic node IDs from stable workspace-relative identity
+  fields so incremental sync can update graph rows without breaking cross-file
+  edges.
 
 `CodeGraphIndexer`
 
@@ -233,10 +236,10 @@ CodeGraph while staying tldw-owned:
   - path, language, size, content_hash, modified_at, indexed_at, node_count,
     errors
 - `nodes`
-  - id, kind, name, qualified_name, file_path, language, start_line, end_line,
+  - id, identity_key, kind, name, qualified_name, file_path, language, start_line, end_line,
     start_column, end_column, signature, docstring, visibility, flags, metadata
 - `edges`
-  - source, target, kind, file_path, line, column, metadata, provenance
+  - id, source, target, kind, file_path, line, column, metadata, provenance
 - `unresolved_refs`
   - from_node_id, reference_name, reference_kind, file_path, line, column,
     candidates, language
@@ -251,6 +254,43 @@ CodeGraph while staying tldw-owned:
 
 The repository should expose migration functions instead of relying on ad hoc
 table creation inside query code.
+
+### Stable Identity And Cleanup
+
+Node identity must be deterministic across re-indexes. The first implementation
+should derive `nodes.id` from a normalized identity key instead of database
+autoincrement state.
+
+Suggested identity key:
+
+```text
+<workspace_key>:<language>:<file_path>:<kind>:<qualified_name>:<start_line>
+```
+
+If an extractor can provide a stronger language-native identity, such as a
+qualified symbol path plus container hierarchy, it may use that as long as the
+identity remains deterministic for unchanged source. The repository should store
+the pre-hash identity string in `identity_key` for debugging and migration.
+
+Edges should also have deterministic IDs derived from:
+
+```text
+<source_node_id>:<edge_kind>:<target_or_unresolved_ref>:<file_path>:<line>:<column>
+```
+
+Incremental sync must clean graph state file-by-file:
+
+1. Mark the file as `indexing`.
+2. Delete old nodes, edges, and unresolved references owned by that file.
+3. Insert the new file record, nodes, direct edges, and unresolved refs.
+4. Re-run resolution for references from the changed file and references in
+   other files that previously targeted nodes from the changed file.
+5. Remove or downgrade cross-file edges whose target node no longer exists.
+6. Mark the file as `indexed` or `error`.
+
+Query code should never return dangling edges. If cleanup discovers an edge
+whose endpoint is missing, it should either delete the edge or surface it as an
+unresolved reference during the next resolution pass.
 
 ### Node Kinds
 
@@ -378,14 +418,24 @@ Support:
 - direct calls by identifier or member expression
 - TypeScript interfaces, type aliases, enums, and class heritage where the
   grammar exposes them reliably
+- `tsconfig.json` and `jsconfig.json` path aliases for workspace packages and
+  frontend aliases such as `@/*`, `~/*`, `@web/*`, and `@tldw/ui/*`
 
 Resolution should be conservative:
 
 - resolve same-file calls by name.
 - resolve relative imports to indexed files for common extensions.
+- resolve configured TypeScript/JavaScript path aliases when the config file is
+  inside the trusted workspace root and the target path resolves under the same
+  root.
 - record unresolved package imports instead of trying to inspect
   `node_modules`.
 - do not require the TypeScript compiler or project type checking in v1.
+
+The path-alias resolver should parse `compilerOptions.baseUrl` and
+`compilerOptions.paths` from the nearest applicable `tsconfig.json` or
+`jsconfig.json`. It should ignore aliases whose target escapes the trusted
+workspace root and should record unresolved aliases with a clear reason.
 
 ### Planned Extractors
 
@@ -434,12 +484,19 @@ Arguments:
 
 - `force`: boolean, default false
 - `languages`: optional list of language IDs
-- `mode`: `job` or `foreground`, default `job`
+- `mode`: `foreground` in v1; `job` is reserved for the later Jobs-backed slice
 - `max_files`: optional bounded test/development limit
 
-Defaulting to `job` follows the repo's Jobs-vs-Scheduler guidance for
-user-visible long-running work. A foreground mode is useful for tests and small
-workspaces but should be guarded by time/file limits.
+V1 should use bounded foreground indexing only. This keeps the first
+implementation reviewable and avoids coupling the core graph/indexer work to
+Jobs worker registration and status APIs. Foreground indexing must enforce
+strict file, byte, and wall-clock limits. If the workspace exceeds those limits,
+`codegraph.index` should return `index_too_large_for_foreground` with the
+estimated file count and guidance to enable the later Jobs-backed slice.
+
+The Jobs-backed implementation should be a follow-up slice. Once it exists,
+`mode` can accept `job`, and full workspace indexing can default to Jobs because
+indexing is user-visible, cancellable, and potentially long-running work.
 
 ### `codegraph.sync`
 
@@ -448,11 +505,11 @@ Management/write tool. Incrementally updates changed and removed files.
 Arguments:
 
 - `languages`: optional list
-- `mode`: `job` or `foreground`, default `foreground` for bounded changes
+- `mode`: `foreground` in v1; `job` is reserved for the later Jobs-backed slice
 - `max_files`: optional limit
 
-If the change set is too large, the tool should return a job handoff rather
-than blocking a tool call for a long index.
+If the change set is too large for bounded foreground execution, the tool should
+return `sync_too_large_for_foreground` rather than blocking a tool call.
 
 ### `codegraph.files`
 
@@ -558,16 +615,23 @@ Add an optional extra in `pyproject.toml`:
 ```toml
 [project.optional-dependencies]
 codegraph = [
-  "tree-sitter>=0.25",
-  "tree-sitter-python>=0.23",
-  "tree-sitter-javascript>=0.23",
-  "tree-sitter-typescript>=0.23",
+  # Exact compatible ranges must be verified during implementation.
+  # Do not land broad lower bounds without a tested parser matrix.
+  "tree-sitter>=0.25,<0.26",
+  "tree-sitter-python>=0.25,<0.26",
+  "tree-sitter-javascript>=0.25,<0.26",
+  "tree-sitter-typescript>=0.23,<0.24",
 ]
 ```
 
-Exact versions should be verified during implementation against current package
-availability and Python 3.10+ support. Planned-language parser packages should
-be added only when those extractors are implemented.
+Implementation must verify and document a compatible parser matrix before
+landing `.[codegraph]`. The matrix should include Python versions supported by
+this repo, wheel availability on Linux/macOS/Windows where practical, and a
+minimal parse smoke test for Python, JavaScript, TypeScript, and TSX. If the
+candidate ranges above are not compatible with current package availability,
+the implementation should adjust them and record the tested set in the task
+notes or developer documentation. Planned-language parser packages should be
+added only when those extractors are implemented.
 
 Module config should live in `mcp_modules.yaml`:
 
@@ -599,10 +663,13 @@ present.
 4. Hash candidate files.
 5. Delete records for removed files.
 6. Parse changed or forced files through registered extractors.
-7. Persist file records, nodes, edges, unresolved references, and errors in one
+7. Delete stale graph rows for changed/removed files using the stable identity
+   cleanup rules.
+8. Persist file records, nodes, edges, unresolved references, and errors in one
    file-scoped transaction where practical.
-8. Run a resolution pass over unresolved references.
-9. Update FTS tables and index run metadata.
+9. Run a resolution pass over unresolved references and stale cross-file edge
+   targets.
+10. Update FTS tables and index run metadata.
 
 ### Incremental Sync
 
@@ -627,7 +694,9 @@ Resolution order:
 3. Relative import/export target.
 4. Python package/module path under workspace.
 5. JS/TS relative module path under workspace.
-6. Ambiguous candidate set recorded in `unresolved_refs`.
+6. JS/TS path alias target under workspace using `tsconfig.json` or
+   `jsconfig.json`.
+7. Ambiguous candidate set recorded in `unresolved_refs`.
 
 External package imports should be represented as unresolved or external
 references, not indexed by walking dependency folders.
@@ -682,6 +751,8 @@ JavaScript/TypeScript:
 - TS interfaces, types, enums
 - JSX/TSX component detection where supported
 - relative import resolution
+- `tsconfig.json` and `jsconfig.json` path alias resolution, including aliases
+  used by `apps/tldw-frontend`
 
 Planned languages:
 
@@ -701,11 +772,15 @@ Planned languages:
 ### Integration Tests
 
 - create a temp workspace with Python and TS files
+- include a frontend-like `tsconfig.json` fixture with relative imports and path
+  aliases
 - index foreground with a low file limit
 - assert search, node, callers, callees, impact, files, and context work through
   `MCPProtocol` or module execution
 - verify index storage is written under a temp tldw index base, not the source
   workspace
+- re-index a modified file and assert stable node IDs do not leave stale or
+  dangling edges
 
 ### Security Validation
 
@@ -717,13 +792,17 @@ CodeGraph and MCP module paths before completion.
 ### Stage 1: Native Graph Foundation
 
 Goal: Add optional package dependencies, schema, repository, workspace resolver,
-language registry, and module health/status without real extraction depth.
+language registry, bounded foreground indexing mode, and module health/status
+without real extraction depth.
 
 Success criteria:
 
 - `codegraph.status` reports dependency and language availability.
 - Databases are created under the configured tldw index base.
 - Missing optional dependencies degrade cleanly.
+- `codegraph.index` and `codegraph.sync` run only in bounded foreground mode
+  and reject over-limit workspaces with clear errors.
+- The tested parser dependency matrix is recorded before adding `.[codegraph]`.
 
 ### Stage 2: Python Extractor And Search
 
@@ -739,12 +818,13 @@ Success criteria:
 ### Stage 3: JavaScript/TypeScript Extractors
 
 Goal: Add JS/TS/TSX extraction, import/export capture, and relative import
-resolution.
+resolution, including TypeScript/JavaScript path aliases.
 
 Success criteria:
 
 - Frontend-like fixture project indexes successfully.
-- TS symbols, components, imports, exports, and call references are searchable.
+- TS symbols, components, imports, exports, path-alias references, and call
+  references are searchable.
 
 ### Stage 4: Context And Impact Tools
 
@@ -793,8 +873,10 @@ Large workspaces may take too long for a normal tool call.
 
 Mitigation:
 
-- Default full indexing to Jobs.
-- Keep foreground mode bounded and primarily for tests/small repos.
+- Default full indexing to Jobs after the Jobs-backed follow-up slice exists.
+- Keep v1 foreground mode bounded and primarily for tests/small repos.
+- Defer Jobs integration to its own slice so worker registration, status,
+  cancellation, and quotas are reviewed separately from extraction correctness.
 - Record index run status and expose it through `codegraph.status`.
 
 ### Risk: Workspace data leakage
@@ -820,15 +902,22 @@ Mitigation:
 
 ## Open Questions For Implementation
 
-- Should index runs use the existing Jobs API directly in the first
-  implementation slice, or should foreground-only indexing land first with a
-  small hard cap?
 - Should `codegraph.context` return pure JSON, markdown text, or both?
 - Should the module expose resources for indexed files/nodes, or keep v1 tool
   only?
 - Should workspace keys include only resolved root path plus user/workspace
   metadata, or also a config hash so exclude/language changes create distinct
   indexes?
+
+## Follow-Up Implementation Decisions Already Resolved
+
+- V1 indexing and sync use bounded foreground execution only. Jobs integration
+  is a later slice.
+- JS/TS import resolution includes trusted-workspace `tsconfig.json` and
+  `jsconfig.json` path aliases.
+- Node and edge identity must be deterministic across re-indexes.
+- The implementation must land a tested Tree-sitter dependency matrix, not
+  broad unverified lower bounds.
 
 ## Success Criteria
 
