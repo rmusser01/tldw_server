@@ -9,6 +9,8 @@ Tests cover:
 - Admin quota management
 - Soft/hard limit warnings in usage responses
 """
+from importlib import import_module
+
 import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
@@ -16,6 +18,7 @@ from unittest.mock import AsyncMock
 from datetime import datetime, timezone
 
 from tldw_Server_API.app.api.v1.endpoints import storage as storage_endpoints
+from tldw_Server_API.app.api.v1.endpoints import storage_admin_quotas
 from tldw_Server_API.app.api.v1.schemas.storage_schemas import SetQuotaRequest
 from tldw_Server_API.app.core.AuthNZ.exceptions import StorageError
 
@@ -882,6 +885,20 @@ class TestAdminQuotaEndpoints:
     """Tests for admin quota management endpoints."""
 
     @pytest.mark.unit
+    def test_admin_quota_handlers_reexport_from_storage_after_sidecar_split(self):
+        """Admin quota handlers remain import-compatible after sidecar extraction."""
+        storage_admin_quotas = import_module(
+            "tldw_Server_API.app.api.v1.endpoints.storage_admin_quotas"
+        )
+
+        assert storage_endpoints.require_storage_admin is storage_admin_quotas.require_storage_admin
+        assert storage_endpoints.set_user_quota is storage_admin_quotas.set_user_quota
+        assert storage_endpoints.set_team_quota is storage_admin_quotas.set_team_quota
+        assert storage_endpoints.set_org_quota is storage_admin_quotas.set_org_quota
+        assert storage_endpoints.get_team_quota is storage_admin_quotas.get_team_quota
+        assert storage_endpoints.get_org_quota is storage_admin_quotas.get_org_quota
+
+    @pytest.mark.unit
     def test_set_quota_requires_admin(self, mock_user):
         """Test that non-admin users cannot set quotas."""
         assert not mock_user.is_superuser
@@ -913,7 +930,7 @@ class TestAdminQuotaEndpoints:
         async def _get_broken_service():
             return _BrokenStorageService()
 
-        monkeypatch.setattr(storage_endpoints, "_get_service", _get_broken_service)
+        monkeypatch.setattr(storage_admin_quotas, "_get_storage_service", _get_broken_service)
 
         with pytest.raises(HTTPException) as exc_info:
             await storage_endpoints.set_user_quota(

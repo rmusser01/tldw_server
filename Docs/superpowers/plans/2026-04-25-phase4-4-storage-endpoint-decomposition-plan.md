@@ -215,7 +215,7 @@ Notes:
 **Goal:** Avoid mixing special route behavior into the first decomposition PR.
 **Success Criteria:** Download and admin route movement have their own accepted plan before any move.
 **Tests:** Download path traversal tests and admin claim tests.
-**Status:** Not Started
+**Status:** In Progress
 
 Download route requirements:
 
@@ -230,6 +230,15 @@ Admin quota route requirements:
 - Preserve legacy `is_admin` compatibility.
 - Preserve 401 behavior when principal dependency is unavailable in tests.
 - Preserve 403 detail for non-admin principals.
+
+Notes:
+
+- Admin quota routes were split into `storage_admin_quotas.py` as a conservative JSON-only tranche.
+- Admin quota tests now patch the sidecar service dependency directly, avoiding a circular import back into `storage.py`.
+- Re-exported admin quota handlers and `require_storage_admin` from `storage.py` for direct import compatibility.
+- Added direct compatibility coverage for storage/admin sidecar re-exports.
+- Focused storage/admin suite passed after admin route movement: `57 passed, 6 warnings`.
+- Download route remains in `storage.py` and should move in a separate tranche focused on `FileResponse` and path traversal behavior.
 
 ## Verification
 
@@ -255,7 +264,7 @@ Touched-scope Bandit:
 
 ```bash
 source .venv/bin/activate
-python3 -m bandit -r tldw_Server_API/app/api/v1/endpoints/storage.py tldw_Server_API/app/api/v1/endpoints/storage_helpers.py tldw_Server_API/app/api/v1/endpoints/storage_user_files.py tldw_Server_API/app/api/v1/endpoints/storage_user_folders.py tldw_Server_API/app/api/v1/endpoints/storage_usage.py tldw_Server_API/app/api/v1/endpoints/storage_trash.py -f json -o /tmp/bandit_phase4_4_storage_endpoint.json
+python3 -m bandit -r tldw_Server_API/app/api/v1/endpoints/storage.py tldw_Server_API/app/api/v1/endpoints/storage_admin_quotas.py tldw_Server_API/app/api/v1/endpoints/storage_helpers.py tldw_Server_API/app/api/v1/endpoints/storage_user_files.py tldw_Server_API/app/api/v1/endpoints/storage_user_folders.py tldw_Server_API/app/api/v1/endpoints/storage_usage.py tldw_Server_API/app/api/v1/endpoints/storage_trash.py -f json -o /tmp/bandit_phase4_4_storage_endpoint.json
 ```
 
 ## Out Of Scope

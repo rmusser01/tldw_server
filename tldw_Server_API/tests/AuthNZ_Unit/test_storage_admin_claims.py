@@ -9,6 +9,7 @@ from starlette.requests import Request
 
 from tldw_Server_API.app.api.v1.API_Deps import auth_deps
 from tldw_Server_API.app.api.v1.endpoints import storage as storage_mod
+from tldw_Server_API.app.api.v1.endpoints import storage_admin_quotas
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
 
 
@@ -130,7 +131,7 @@ async def test_storage_admin_quota_endpoints_403_for_non_admin_principal(
     async def _fake_get_service() -> _FakeStorageService:
         return _FakeStorageService()
 
-    monkeypatch.setattr(storage_mod, "_get_service", _fake_get_service)
+    monkeypatch.setattr(storage_admin_quotas, "_get_storage_service", _fake_get_service)
     with TestClient(app) as client:
         resp = client.request(method.upper(), path, json=payload)
     assert resp.status_code == 403
@@ -144,7 +145,7 @@ async def test_storage_admin_quota_endpoints_200_for_admin_role_claim(monkeypatc
     async def _fake_get_service() -> _FakeStorageService:
         return _FakeStorageService()
 
-    monkeypatch.setattr(storage_mod, "_get_service", _fake_get_service)
+    monkeypatch.setattr(storage_admin_quotas, "_get_storage_service", _fake_get_service)
 
     with TestClient(app) as client:
         user_put = client.put(
@@ -177,7 +178,7 @@ async def test_storage_admin_quota_endpoints_200_for_is_admin_claim(monkeypatch:
     async def _fake_get_service() -> _FakeStorageService:
         return _FakeStorageService()
 
-    monkeypatch.setattr(storage_mod, "_get_service", _fake_get_service)
+    monkeypatch.setattr(storage_admin_quotas, "_get_storage_service", _fake_get_service)
 
     with TestClient(app) as client:
         resp = client.get("/api/v1/storage/admin/quotas/team/3")
