@@ -1918,15 +1918,25 @@ def search_claims(
         admin_required=True,
         owner_filter=True,
     ) as (target_db, owner_filter):
-        fetch_limit = max(1, int(limit) + int(offset))
+        normalized_limit = max(1, int(limit))
+        normalized_offset = max(0, int(offset))
+        window_end = normalized_offset + normalized_limit
+        fetch_limit = window_end + 1
         rows = target_db.search_claims(
             query,
             limit=fetch_limit,
             owner_user_id=owner_filter,
         )
         normalized = [_normalize_search_row(dict(r)) for r in rows]
-        total = len(normalized)
-        sliced = normalized[offset: offset + limit]
+        total = min(len(normalized), window_end)
+        sliced = normalized[normalized_offset:window_end]
+        pagination = build_offset_pagination_meta(
+            limit=normalized_limit,
+            offset=normalized_offset,
+            total=None,
+            count=len(sliced),
+            has_more=len(normalized) > window_end,
+        )
         if not group_by_cluster:
             return {
                 "query": query,
@@ -1935,6 +1945,7 @@ def search_claims(
                 "results": sliced,
                 "clusters": None,
                 "orphaned": None,
+                "pagination": pagination,
             }
 
         clusters: list[dict[str, Any]] = []
@@ -1981,6 +1992,7 @@ def search_claims(
             "results": [],
             "clusters": clusters,
             "orphaned": orphaned,
+            "pagination": pagination,
         }
 
 

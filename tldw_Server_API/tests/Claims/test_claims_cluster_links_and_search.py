@@ -153,6 +153,22 @@ def test_claims_cluster_links_and_search():
 
     try:
         with TestClient(fastapi_app) as client:
+            r_page = client.get("/api/v1/claims/search?q=claim&limit=2&offset=0")
+            assert r_page.status_code == 200, r_page.text
+            page_data = r_page.json()
+            assert len(page_data["results"]) == 2
+            assert page_data["total"] == 2
+            assert page_data["pagination"] == {
+                "mode": "offset",
+                "limit": 2,
+                "offset": 0,
+                "total": None,
+                "has_more": True,
+                "next_offset": 2,
+            }
+            assert page_data["has_more"] is True
+            assert page_data["next_offset"] == 2
+
             r_search = client.get("/api/v1/claims/search?q=claim&group_by_cluster=true&limit=10")
             assert r_search.status_code == 200, r_search.text
             data = r_search.json()

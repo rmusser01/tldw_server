@@ -176,6 +176,13 @@ class ClaimsSearchResponse(BaseModel):
     results: list[ClaimsSearchResult] = Field(default_factory=list)
     clusters: list[ClaimsSearchClusterResult] | None = None
     orphaned: list[ClaimsSearchResult] | None = None
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+    pagination: OffsetPaginationMeta
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self):
+        return _default_offset_pagination_aliases(self)
 
 
 class ClaimsClusterLinkCreate(BaseModel):
