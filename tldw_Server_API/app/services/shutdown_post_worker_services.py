@@ -14,16 +14,10 @@ from loguru import logger
 class PostWorkerShutdownHandles:
     """Updated handles produced by the post-worker shutdown tail."""
 
-    claims_task: Any | None = None
     jobs_prune_task: Any | None = None
     files_export_gc_task: Any | None = None
     notifications_prune_task: Any | None = None
     jobs_notifications_bridge_task: Any | None = None
-    embeddings_compactor_task: Any | None = None
-    embeddings_compactor_stop_event: Any | None = None
-    websub_renewal_task: Any | None = None
-    usage_task: Any | None = None
-    llm_usage_task: Any | None = None
     jobs_metrics_task: Any | None = None
     loop_lag_task: Any | None = None
     jobs_metrics_reconcile_task: Any | None = None
@@ -39,17 +33,10 @@ class PostWorkerShutdownHandles:
 
 async def shutdown_post_worker_services(
     *,
-    claims_task: Any | None,
     jobs_prune_task: Any | None,
     files_export_gc_task: Any | None,
     notifications_prune_task: Any | None,
     jobs_notifications_bridge_task: Any | None,
-    embeddings_compactor_task: Any | None,
-    embeddings_compactor_stop_event: Any | None,
-    websub_renewal_task: Any | None,
-    coordinated_legacy_component_names: set[str],
-    usage_task: Any | None,
-    llm_usage_task: Any | None,
     workflows_sched_task: Any | None,
     reading_digest_sched_task: Any | None,
     admin_backup_sched_task: Any | None,
@@ -93,7 +80,6 @@ async def shutdown_post_worker_services(
         return stop_event
 
     claims_shutdown_handles = await _shutdown_claims_maintenance_tasks(
-        claims_task=_task_if_not_stopped("claims_rebuild", claims_task),
         jobs_prune_task=_task_if_not_stopped("jobs_prune_task", jobs_prune_task),
         files_export_gc_task=_task_if_not_stopped(
             "files_export_gc_task",
@@ -109,22 +95,6 @@ async def shutdown_post_worker_services(
             "jobs_notifications_bridge_task",
             jobs_notifications_bridge_task,
         ),
-        embeddings_compactor_task=_task_if_not_stopped(
-            "embeddings_compactor_task",
-            embeddings_compactor_task,
-        ),
-        embeddings_compactor_stop_event=_stop_event_if_not_stopped(
-            "embeddings_compactor_task",
-            embeddings_compactor_stop_event,
-        ),
-        websub_renewal_task=_task_if_not_stopped("websub_renewal_task", websub_renewal_task),
-        guard_exceptions=guard_exceptions,
-    )
-    usage_shutdown_handles = await _stop_usage_aggregators(
-        coordinated_legacy_component_names=coordinated_legacy_component_names,
-        stopped_background_worker_names=stopped_background_worker_names,
-        usage_task=usage_task,
-        llm_usage_task=llm_usage_task,
         guard_exceptions=guard_exceptions,
     )
     await _stop_recurring_schedulers(
@@ -225,16 +195,10 @@ async def shutdown_post_worker_services(
         guard_exceptions=guard_exceptions,
     )
     return PostWorkerShutdownHandles(
-        claims_task=claims_shutdown_handles.claims_task,
         jobs_prune_task=claims_shutdown_handles.jobs_prune_task,
         files_export_gc_task=claims_shutdown_handles.files_export_gc_task,
         notifications_prune_task=claims_shutdown_handles.notifications_prune_task,
         jobs_notifications_bridge_task=notifications_shutdown_handles.jobs_notifications_bridge_task,
-        embeddings_compactor_task=notifications_shutdown_handles.embeddings_compactor_task,
-        embeddings_compactor_stop_event=notifications_shutdown_handles.embeddings_compactor_stop_event,
-        websub_renewal_task=notifications_shutdown_handles.websub_renewal_task,
-        usage_task=usage_shutdown_handles.usage_task,
-        llm_usage_task=usage_shutdown_handles.llm_usage_task,
         jobs_metrics_task=runtime_monitor_shutdown_handles.jobs_metrics_task,
         loop_lag_task=runtime_monitor_shutdown_handles.loop_lag_task,
         jobs_metrics_reconcile_task=jobs_metrics_reconcile_shutdown_handles.jobs_metrics_reconcile_task,
@@ -251,17 +215,10 @@ async def shutdown_post_worker_services(
 
 async def run_shutdown_post_worker_services(
     *,
-    claims_task: Any | None,
     jobs_prune_task: Any | None,
     files_export_gc_task: Any | None,
     notifications_prune_task: Any | None,
     jobs_notifications_bridge_task: Any | None,
-    embeddings_compactor_task: Any | None,
-    embeddings_compactor_stop_event: Any | None,
-    websub_renewal_task: Any | None,
-    coordinated_legacy_component_names: set[str],
-    usage_task: Any | None,
-    llm_usage_task: Any | None,
     workflows_sched_task: Any | None,
     reading_digest_sched_task: Any | None,
     admin_backup_sched_task: Any | None,
@@ -301,17 +258,10 @@ async def run_shutdown_post_worker_services(
 
     try:
         return await shutdown_post_worker_services(
-            claims_task=claims_task,
             jobs_prune_task=jobs_prune_task,
             files_export_gc_task=files_export_gc_task,
             notifications_prune_task=notifications_prune_task,
             jobs_notifications_bridge_task=jobs_notifications_bridge_task,
-            embeddings_compactor_task=embeddings_compactor_task,
-            embeddings_compactor_stop_event=embeddings_compactor_stop_event,
-            websub_renewal_task=websub_renewal_task,
-            coordinated_legacy_component_names=coordinated_legacy_component_names,
-            usage_task=usage_task,
-            llm_usage_task=llm_usage_task,
             workflows_sched_task=workflows_sched_task,
             reading_digest_sched_task=reading_digest_sched_task,
             admin_backup_sched_task=admin_backup_sched_task,
@@ -344,7 +294,6 @@ async def run_shutdown_post_worker_services(
     except guard_exceptions as exc:
         logger.debug(f"Post-worker services skipped: {exc}")
         return PostWorkerShutdownHandles(
-            claims_task=_fallback_if_not_stopped("claims_rebuild", claims_task),
             jobs_prune_task=_fallback_if_not_stopped("jobs_prune_task", jobs_prune_task),
             files_export_gc_task=_fallback_if_not_stopped(
                 "files_export_gc_task",
@@ -358,17 +307,6 @@ async def run_shutdown_post_worker_services(
                 "jobs_notifications_bridge_task",
                 jobs_notifications_bridge_task,
             ),
-            embeddings_compactor_task=_fallback_if_not_stopped(
-                "embeddings_compactor_task",
-                embeddings_compactor_task,
-            ),
-            embeddings_compactor_stop_event=_fallback_if_not_stopped(
-                "embeddings_compactor_task",
-                embeddings_compactor_stop_event,
-            ),
-            websub_renewal_task=_fallback_if_not_stopped("websub_renewal_task", websub_renewal_task),
-            usage_task=_fallback_if_not_stopped("usage_aggregator", usage_task),
-            llm_usage_task=_fallback_if_not_stopped("llm_usage_aggregator", llm_usage_task),
             jobs_metrics_task=_fallback_if_not_stopped("jobs_metrics_task", jobs_metrics_task),
             loop_lag_task=_fallback_if_not_stopped("loop_lag_task", loop_lag_task),
             jobs_metrics_reconcile_task=_fallback_if_not_stopped(
@@ -415,12 +353,6 @@ async def _shutdown_notifications_compactor_websub_workers(**kwargs):
     )
 
     return await shutdown_notifications_compactor_websub_workers(**kwargs)
-
-
-async def _stop_usage_aggregators(**kwargs):
-    from tldw_Server_API.app.services.shutdown_usage_aggregators import stop_usage_aggregators
-
-    return await stop_usage_aggregators(**kwargs)
 
 
 async def _stop_recurring_schedulers(**kwargs):

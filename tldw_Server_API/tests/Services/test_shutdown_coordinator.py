@@ -4,8 +4,9 @@ import asyncio
 import importlib
 import sys
 import types
+from collections.abc import Awaitable
 from dataclasses import dataclass
-from typing import Awaitable, Callable
+from typing import Callable
 
 import pytest
 
@@ -15,7 +16,6 @@ from tldw_Server_API.app.services.shutdown_models import (
     ShutdownPhase,
     ShutdownPolicy,
 )
-
 
 pytestmark = pytest.mark.unit
 
@@ -61,22 +61,18 @@ def test_build_legacy_shutdown_plan_includes_known_legacy_components() -> None:
     plan = build_legacy_shutdown_plan(
         app,
         LegacyShutdownContext(
-            usage_task=object(),
             authnz_scheduler_started=True,
         ),
     )
 
     assert [component.name for component in plan] == [
         "lifecycle_gate",
-        "usage_aggregator",
         "authnz_scheduler",
     ]
     assert plan[0].phase == ShutdownPhase.TRANSITION
     assert plan[0].policy == ShutdownPolicy.DEV_FAST
-    assert plan[1].phase == ShutdownPhase.RESOURCES
-    assert plan[1].policy == ShutdownPolicy.BEST_EFFORT
-    assert plan[2].phase == ShutdownPhase.FINALIZERS
-    assert plan[2].policy == ShutdownPolicy.PROD_DRAIN
+    assert plan[1].phase == ShutdownPhase.FINALIZERS
+    assert plan[1].policy == ShutdownPolicy.PROD_DRAIN
 
 
 def test_build_legacy_shutdown_plan_records_visibility_on_app_state() -> None:
@@ -104,7 +100,7 @@ def test_build_legacy_shutdown_plan_records_visibility_on_app_state() -> None:
     assert plan[0].name == "lifecycle_gate"
 
 
-def test_build_legacy_shutdown_plan_keeps_only_active_legacy_stop_components() -> None:
+def test_build_legacy_shutdown_plan_omits_removed_usage_stop_components() -> None:
     from tldw_Server_API.app.services.shutdown_legacy_adapters import (
         LegacyShutdownContext,
         build_legacy_shutdown_plan,
@@ -115,22 +111,11 @@ def test_build_legacy_shutdown_plan_keeps_only_active_legacy_stop_components() -
 
     plan = build_legacy_shutdown_plan(
         _App(),
-        LegacyShutdownContext(
-            usage_task=object(),
-            llm_usage_task=object(),
-        ),
+        LegacyShutdownContext(),
     )
 
-    assert [component.name for component in plan] == [
-        "lifecycle_gate",
-        "usage_aggregator",
-        "llm_usage_aggregator",
-    ]
-    assert [component.phase for component in plan] == [
-        ShutdownPhase.TRANSITION,
-        ShutdownPhase.RESOURCES,
-        ShutdownPhase.RESOURCES,
-    ]
+    assert [component.name for component in plan] == ["lifecycle_gate"]
+    assert [component.phase for component in plan] == [ShutdownPhase.TRANSITION]
 
 
 def test_shutdown_legacy_adapters_import_is_lazy_for_optional_stop_helpers(
@@ -142,16 +127,6 @@ def test_shutdown_legacy_adapters_import_is_lazy_for_optional_stop_helpers(
         sys.modules,
         "tldw_Server_API.app.core.AuthNZ.scheduler",
         types.ModuleType("tldw_Server_API.app.core.AuthNZ.scheduler"),
-    )
-    monkeypatch.setitem(
-        sys.modules,
-        "tldw_Server_API.app.services.usage_aggregator",
-        types.ModuleType("tldw_Server_API.app.services.usage_aggregator"),
-    )
-    monkeypatch.setitem(
-        sys.modules,
-        "tldw_Server_API.app.services.llm_usage_aggregator",
-        types.ModuleType("tldw_Server_API.app.services.llm_usage_aggregator"),
     )
     monkeypatch.setitem(
         sys.modules,
@@ -168,16 +143,12 @@ def test_shutdown_legacy_adapters_import_is_lazy_for_optional_stop_helpers(
     plan = module.build_legacy_shutdown_plan(
         _App(),
         LegacyShutdownContext(
-            usage_task=object(),
-            llm_usage_task=object(),
             authnz_scheduler_started=True,
         ),
     )
 
     assert [component.name for component in plan] == [
         "lifecycle_gate",
-        "usage_aggregator",
-        "llm_usage_aggregator",
         "authnz_scheduler",
     ]
 
@@ -260,7 +231,7 @@ def test_get_legacy_shutdown_suppressed_component_names_uses_summary_results() -
 
 
 @pytest.mark.asyncio
-async def test_register_legacy_shutdown_components_registers_active_legacy_stop_components() -> None:
+async def test_register_legacy_shutdown_components_default_omits_removed_usage_components() -> None:
     from tldw_Server_API.app.services.shutdown_legacy_adapters import (
         register_legacy_shutdown_components,
     )
@@ -292,22 +263,12 @@ async def test_register_legacy_shutdown_components_registers_active_legacy_stop_
 
     summary = await coordinator.shutdown()
 
-    assert [component.name for component in registered] == [
-        "usage_aggregator",
-        "llm_usage_aggregator",
-    ]
-    assert [component.phase for component in registered] == [
-        ShutdownPhase.RESOURCES,
-        ShutdownPhase.RESOURCES,
-    ]
+    assert registered == []
     assert plan[-1].phase == ShutdownPhase.FINALIZERS
-    assert sorted(events) == ["llm", "usage"]
+    assert events == []
     assert summary.phases[ShutdownPhase.PRODUCERS].component_names == []
     assert summary.phases[ShutdownPhase.WORKERS].component_names == []
-    assert summary.phases[ShutdownPhase.RESOURCES].component_names == [
-        "usage_aggregator",
-        "llm_usage_aggregator",
-    ]
+    assert summary.phases[ShutdownPhase.RESOURCES].component_names == []
     assert summary.phases[ShutdownPhase.FINALIZERS].component_names == []
 
 

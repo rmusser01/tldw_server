@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import importlib
+import inspect
 import sys
+from dataclasses import fields
 
 import pytest
-
 
 pytestmark = pytest.mark.unit
 
@@ -22,12 +23,16 @@ class _FakeTask:
         self.cancelled = True
 
 
-class _FakeStopEvent:
-    def __init__(self) -> None:
-        self.is_set = False
+def test_shutdown_claims_maintenance_tasks_no_longer_owns_claims_rebuild_stop() -> None:
+    shutdown_tasks = _import_shutdown_claims_maintenance_tasks()
 
-    def set(self) -> None:
-        self.is_set = True
+    assert "claims_task" not in inspect.signature(
+        shutdown_tasks.shutdown_claims_maintenance_tasks
+    ).parameters
+    assert "claims_task" not in {
+        field.name for field in fields(shutdown_tasks.ClaimsMaintenanceShutdownHandles)
+    }
+    assert not hasattr(shutdown_tasks, "_shutdown_claims_task")
 
 
 @pytest.mark.asyncio
@@ -36,10 +41,6 @@ async def test_shutdown_claims_maintenance_tasks_runs_helpers_in_order(
 ) -> None:
     shutdown_tasks = _import_shutdown_claims_maintenance_tasks()
     calls: list[str] = []
-
-    async def _record_claims(**kwargs):
-        del kwargs
-        calls.append("claims")
 
     async def _record_jobs_prune(**kwargs):
         del kwargs
@@ -53,46 +54,20 @@ async def test_shutdown_claims_maintenance_tasks_runs_helpers_in_order(
         del kwargs
         calls.append("notifications-prune")
 
-    monkeypatch.setattr(shutdown_tasks, "_shutdown_claims_task", _record_claims)
     monkeypatch.setattr(shutdown_tasks, "_shutdown_jobs_prune_task", _record_jobs_prune)
     monkeypatch.setattr(shutdown_tasks, "_shutdown_files_export_gc_task", _record_files_gc)
     monkeypatch.setattr(shutdown_tasks, "_shutdown_notifications_prune_task", _record_notifications_prune)
 
     handles = await shutdown_tasks.shutdown_claims_maintenance_tasks(
-        claims_task="claims-task",
         jobs_prune_task="jobs-prune-task",
         files_export_gc_task="files-gc-task",
         notifications_prune_task="notifications-prune-task",
     )
 
-    assert calls == ["claims", "jobs-prune", "files-gc", "notifications-prune"]
-    assert handles.claims_task == "claims-task"
+    assert calls == ["jobs-prune", "files-gc", "notifications-prune"]
     assert handles.jobs_prune_task == "jobs-prune-task"
     assert handles.files_export_gc_task == "files-gc-task"
     assert handles.notifications_prune_task == "notifications-prune-task"
-
-
-@pytest.mark.asyncio
-async def test_shutdown_claims_task_cancels_task() -> None:
-    shutdown_tasks = _import_shutdown_claims_maintenance_tasks()
-    task = _FakeTask()
-
-    await shutdown_tasks._shutdown_claims_task(task=task)
-
-    assert task.cancelled is True
-
-
-@pytest.mark.asyncio
-async def test_shutdown_claims_task_sets_attached_stop_event_before_cancel() -> None:
-    shutdown_tasks = _import_shutdown_claims_maintenance_tasks()
-    task = _FakeTask()
-    stop_event = _FakeStopEvent()
-    task._tldw_claims_rebuild_stop_event = stop_event
-
-    await shutdown_tasks._shutdown_claims_task(task=task)
-
-    assert stop_event.is_set is True
-    assert task.cancelled is True
 
 
 @pytest.mark.asyncio

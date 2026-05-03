@@ -15,7 +15,6 @@ from tldw_Server_API.app.services.shutdown_models import (
     ShutdownSummary,
 )
 
-
 pytestmark = pytest.mark.unit
 
 
@@ -148,8 +147,6 @@ async def test_shutdown_transition_handoff_returns_plan_and_skips_direct_drain_w
     handles = await shutdown_handoff.shutdown_transition_handoff(
         app=app,
         readiness_state="ready-state",
-        usage_task="usage-task",
-        llm_usage_task="llm-usage-task",
         authnz_scheduler_started=True,
         build_legacy_shutdown_context=_fake_build_context,
         apply_shutdown_transition_gate=_fake_apply_transition_gate,
@@ -159,8 +156,8 @@ async def test_shutdown_transition_handoff_returns_plan_and_skips_direct_drain_w
 
     assert len(build_context_calls) == 1
     assert build_context_calls[0]["readiness_state"] == "ready-state"
-    assert build_context_calls[0]["usage_task"] == "usage-task"
-    assert build_context_calls[0]["llm_usage_task"] == "llm-usage-task"
+    assert "usage_task" not in build_context_calls[0]
+    assert "llm_usage_task" not in build_context_calls[0]
     assert build_context_calls[0]["authnz_scheduler_started"] is True
     assert created_profiles == ["dev_fast"]
     assert [component.name for component in coordinator.registered] == ["lifecycle_gate"]
@@ -212,8 +209,6 @@ async def test_shutdown_transition_handoff_applies_direct_drain_when_transition_
     handles = await shutdown_handoff.shutdown_transition_handoff(
         app=app,
         readiness_state="ready-state",
-        usage_task=None,
-        llm_usage_task=None,
         authnz_scheduler_started=False,
         build_legacy_shutdown_context=lambda **kwargs: kwargs,
         apply_shutdown_transition_gate=lambda app_obj, readiness_state: apply_calls.append((app_obj, readiness_state)),
@@ -248,8 +243,6 @@ async def test_shutdown_transition_handoff_applies_direct_drain_when_plan_build_
     handles = await shutdown_handoff.shutdown_transition_handoff(
         app=app,
         readiness_state="ready-state",
-        usage_task=None,
-        llm_usage_task=None,
         authnz_scheduler_started=False,
         build_legacy_shutdown_context=lambda **kwargs: kwargs,
         apply_shutdown_transition_gate=lambda app_obj, readiness_state: apply_calls.append((app_obj, readiness_state)),
@@ -291,8 +284,6 @@ async def test_shutdown_transition_handoff_applies_direct_drain_without_running_
     handles = await shutdown_handoff.shutdown_transition_handoff(
         app=app,
         readiness_state="ready-state",
-        usage_task=None,
-        llm_usage_task=None,
         authnz_scheduler_started=False,
         build_legacy_shutdown_context=lambda **kwargs: kwargs,
         apply_shutdown_transition_gate=lambda app_obj, readiness_state: apply_calls.append((app_obj, readiness_state)),

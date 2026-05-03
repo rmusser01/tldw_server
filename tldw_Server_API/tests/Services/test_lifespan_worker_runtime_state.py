@@ -38,7 +38,7 @@ def test_apply_startup_worker_bootstrap_handles_copies_known_fields() -> None:
     assert runtime.core_jobs_task == "core-jobs-task"
     assert runtime.audio_jobs_stop_event == "audio-stop"
     assert runtime.jobs_metrics_task == "jobs-metrics-task"
-    assert runtime.claims_task == "claims-task"
+    assert not hasattr(runtime, "claims_task")
     assert runtime.authnz_scheduler_started is True
 
 

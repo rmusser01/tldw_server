@@ -90,20 +90,16 @@ def test_build_legacy_shutdown_context_uses_explicit_fields() -> None:
     from tldw_Server_API.app.services.shutdown_legacy_adapters import LegacyShutdownContext
 
     readiness_state = {"ready": True}
-    usage_task = object()
-    llm_usage_task = object()
 
     context = _build_legacy_shutdown_context(
         readiness_state=readiness_state,
-        usage_task=usage_task,
-        llm_usage_task=llm_usage_task,
         authnz_scheduler_started=True,
     )
 
     assert isinstance(context, LegacyShutdownContext)
     assert context.readiness_state is readiness_state
-    assert context.usage_task is usage_task
-    assert context.llm_usage_task is llm_usage_task
+    assert not hasattr(context, "usage_task")
+    assert not hasattr(context, "llm_usage_task")
     assert context.authnz_scheduler_started is True
 
 
@@ -1413,17 +1409,12 @@ def test_lifespan_shutdown_delegates_transition_handoff(
     from tldw_Server_API.app.services import startup_cleanup_workers
 
     app = main_module.app
-    fake_usage_task = object()
-    fake_llm_usage_task = object()
     recorded_calls: list[dict[str, object]] = []
 
     async def _fake_start_auxiliary_services(_app_settings, **kwargs):
         del _app_settings
         assert kwargs["worker_inventory"] is not None
-        return startup_auxiliary_services.AuxiliaryStartupHandles(
-            usage_task=fake_usage_task,
-            llm_usage_task=fake_llm_usage_task,
-        )
+        return startup_auxiliary_services.AuxiliaryStartupHandles()
 
     async def _fake_start_cleanup_workers(
         app_settings: object,
@@ -1465,8 +1456,8 @@ def test_lifespan_shutdown_delegates_transition_handoff(
     assert len(recorded_calls) == 1
     assert recorded_calls[0]["app"] is app
     assert recorded_calls[0]["readiness_state"] is main_module.READINESS_STATE
-    assert recorded_calls[0]["usage_task"] is fake_usage_task
-    assert recorded_calls[0]["llm_usage_task"] is fake_llm_usage_task
+    assert "usage_task" not in recorded_calls[0]
+    assert "llm_usage_task" not in recorded_calls[0]
     assert isinstance(recorded_calls[0]["authnz_scheduler_started"], bool)
     assert recorded_calls[0]["build_legacy_shutdown_context"] is main_module._build_legacy_shutdown_context
     assert recorded_calls[0]["apply_shutdown_transition_gate"] is main_module._apply_shutdown_transition_gate
@@ -1887,16 +1878,10 @@ def test_lifespan_shutdown_delegates_post_worker_services(
     async def _fake_run_shutdown_post_worker_services(**kwargs):
         recorded_calls.append(kwargs)
         return post_worker_services.PostWorkerShutdownHandles(
-            claims_task=kwargs["claims_task"],
             jobs_prune_task=kwargs["jobs_prune_task"],
             files_export_gc_task=kwargs["files_export_gc_task"],
             notifications_prune_task=kwargs["notifications_prune_task"],
             jobs_notifications_bridge_task=kwargs["jobs_notifications_bridge_task"],
-            embeddings_compactor_task=kwargs["embeddings_compactor_task"],
-            embeddings_compactor_stop_event=kwargs["embeddings_compactor_stop_event"],
-            websub_renewal_task=kwargs["websub_renewal_task"],
-            usage_task=kwargs["usage_task"],
-            llm_usage_task=kwargs["llm_usage_task"],
             jobs_metrics_task=kwargs["jobs_metrics_task"],
             loop_lag_task=kwargs["loop_lag_task"],
             jobs_metrics_reconcile_task=kwargs["jobs_metrics_reconcile_task"],
@@ -1946,12 +1931,15 @@ def test_lifespan_shutdown_delegates_post_worker_services(
 
     assert len(recorded_calls) == 1
     assert recorded_calls[0]["guard_exceptions"] == main_module._STARTUP_GUARD_EXCEPTIONS
-    assert isinstance(recorded_calls[0]["coordinated_legacy_component_names"], set)
-    assert "claims_task" in recorded_calls[0]
+    assert "coordinated_legacy_component_names" not in recorded_calls[0]
+    assert "claims_task" not in recorded_calls[0]
+    assert "embeddings_compactor_task" not in recorded_calls[0]
+    assert "embeddings_compactor_stop_event" not in recorded_calls[0]
+    assert "websub_renewal_task" not in recorded_calls[0]
+    assert "usage_task" not in recorded_calls[0]
+    assert "llm_usage_task" not in recorded_calls[0]
     assert "jobs_prune_task" in recorded_calls[0]
     assert "jobs_notifications_bridge_task" in recorded_calls[0]
-    assert "usage_task" in recorded_calls[0]
-    assert "llm_usage_task" in recorded_calls[0]
     assert "workflows_sched_task" in recorded_calls[0]
     assert "jobs_metrics_task" in recorded_calls[0]
     assert "jobs_metrics_reconcile_task" in recorded_calls[0]
@@ -2500,7 +2488,7 @@ def test_shutdown_migrated_legacy_slice_uses_prod_drain_profile(
     if hasattr(app.state, "_tldw_lifecycle_state"):
         delattr(app.state, "_tldw_lifecycle_state")
 
-    expected_migrated_names = ["usage_aggregator"]
+    expected_migrated_names: list[str] = []
 
     with TestClient(app) as client:
         assert client.get("/health").status_code == 200
@@ -2508,8 +2496,8 @@ def test_shutdown_migrated_legacy_slice_uses_prod_drain_profile(
     assert _SpyShutdownCoordinator.created_profiles == ["dev_fast", "prod_drain"]
     assert len(captured_contexts) == 1
     assert getattr(captured_contexts[0], "readiness_state", None) is not None
-    assert hasattr(captured_contexts[0], "usage_task")
-    assert hasattr(captured_contexts[0], "llm_usage_task")
+    assert not hasattr(captured_contexts[0], "usage_task")
+    assert not hasattr(captured_contexts[0], "llm_usage_task")
     assert hasattr(captured_contexts[0], "authnz_scheduler_started")
     assert [component.name for component in _SpyShutdownCoordinator.instances[0].registered] == [
         "lifecycle_gate",
@@ -2518,157 +2506,6 @@ def test_shutdown_migrated_legacy_slice_uses_prod_drain_profile(
     migrated_registered_names = [component.name for component in _SpyShutdownCoordinator.instances[1].registered]
     assert migrated_registered_names == expected_migrated_names + expected_transport_names
     assert "lifecycle_gate" not in migrated_registered_names
-
-
-@pytest.mark.integration
-def test_shutdown_skipped_best_effort_component_falls_back_to_direct_stop(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    import sys
-    import types
-
-    from tldw_Server_API.app.services import shutdown_coordinator as shutdown_coordinator_module
-    from tldw_Server_API.app.services import shutdown_legacy_adapters
-    from tldw_Server_API.app.services.shutdown_models import (
-        ShutdownComponent,
-        ShutdownComponentSummary,
-        ShutdownPhase,
-        ShutdownPhaseSummary,
-        ShutdownPolicy,
-        ShutdownSummary,
-    )
-
-    class _DummyUsageTask:
-        def __init__(self) -> None:
-            self.cancel_calls = 0
-            self.stop_calls = 0
-            self._stopped = False
-
-        def cancel(self) -> None:
-            self.cancel_calls += 1
-
-    usage_task_holder: dict[str, _DummyUsageTask] = {}
-
-    async def _fake_start_usage_aggregator(**kwargs) -> _DummyUsageTask:
-        assert kwargs["worker_inventory"] is not None
-        task = _DummyUsageTask()
-        usage_task_holder["task"] = task
-        return task
-
-    async def _fake_stop_usage_aggregator(task: _DummyUsageTask | None) -> None:
-        if task is None:
-            return
-        if not task._stopped:
-            task._stopped = True
-            task.stop_calls += 1
-        task.cancel()
-
-    class _SpyShutdownCoordinator:
-        def __init__(self, profile: str = "dev_fast", **_kwargs) -> None:
-            self.profile = profile
-            self.registered: list[ShutdownComponent] = []
-
-        def register(self, component: ShutdownComponent) -> ShutdownComponent:
-            self.registered.append(component)
-            return component
-
-        async def shutdown(self) -> ShutdownSummary:
-            phase_names: dict[ShutdownPhase, list[str]] = {}
-            component_summaries: dict[str, ShutdownComponentSummary] = {}
-
-            for component in self.registered:
-                phase_names.setdefault(component.phase, []).append(component.name)
-                result = "skipped" if component.name == "usage_aggregator" else "stopped"
-                component_summaries[component.name] = ShutdownComponentSummary(
-                    name=component.name,
-                    phase=component.phase,
-                    policy=component.policy,
-                    result=result,
-                    started_at=0.0,
-                    finished_at=0.0,
-                    duration_ms=0,
-                    timeout_ms=0,
-                )
-
-            phase_summaries = {
-                phase: ShutdownPhaseSummary(
-                    phase=phase,
-                    started_at=0.0,
-                    finished_at=0.0,
-                    duration_ms=0,
-                    budget_ms=0,
-                    component_names=component_names,
-                )
-                for phase, component_names in phase_names.items()
-            }
-            return ShutdownSummary(
-                profile=self.profile,
-                started_at=0.0,
-                finished_at=0.0,
-                deadline_at=0.0,
-                hard_cutoff_at=0.0,
-                wall_time_ms=0,
-                soft_overrun_used_ms=0,
-                components=component_summaries,
-                phases=phase_summaries,
-            )
-
-    def _fake_build_legacy_shutdown_plan(_app, _context):
-        return [
-            ShutdownComponent(
-                name="lifecycle_gate",
-                phase=ShutdownPhase.TRANSITION,
-                policy=ShutdownPolicy.DEV_FAST,
-                default_timeout_ms=1000,
-                stop=lambda: None,
-            ),
-            ShutdownComponent(
-                name="usage_aggregator",
-                phase=ShutdownPhase.RESOURCES,
-                policy=ShutdownPolicy.BEST_EFFORT,
-                default_timeout_ms=1000,
-                stop=lambda: None,
-            ),
-        ]
-
-    fake_shutdown_legacy_adapters = types.ModuleType("tldw_Server_API.app.services.shutdown_legacy_adapters")
-    fake_shutdown_legacy_adapters.LegacyShutdownContext = shutdown_legacy_adapters.LegacyShutdownContext
-    fake_shutdown_legacy_adapters.build_legacy_shutdown_plan = _fake_build_legacy_shutdown_plan
-    fake_shutdown_legacy_adapters.register_legacy_shutdown_components = (
-        shutdown_legacy_adapters.register_legacy_shutdown_components
-    )
-    fake_shutdown_legacy_adapters.get_legacy_shutdown_suppressed_component_names = (
-        shutdown_legacy_adapters.get_legacy_shutdown_suppressed_component_names
-    )
-    monkeypatch.setitem(sys.modules, fake_shutdown_legacy_adapters.__name__, fake_shutdown_legacy_adapters)
-
-    fake_usage_aggregator = types.ModuleType("tldw_Server_API.app.services.usage_aggregator")
-    fake_usage_aggregator.start_usage_aggregator = _fake_start_usage_aggregator
-    fake_usage_aggregator.stop_usage_aggregator = _fake_stop_usage_aggregator
-    monkeypatch.setitem(sys.modules, fake_usage_aggregator.__name__, fake_usage_aggregator)
-
-    monkeypatch.setenv("DISABLE_LLM_USAGE_AGGREGATOR", "1")
-    monkeypatch.setattr(shutdown_coordinator_module, "ShutdownCoordinator", _SpyShutdownCoordinator)
-
-    from tldw_Server_API.app.main import app
-
-    for attr_name in (
-        "_tldw_lifecycle_events",
-        "_tldw_lifecycle_state",
-        "_tldw_shutdown_legacy_coordinator_summary",
-        "_tldw_shutdown_legacy_coordinator_component_names",
-        "_tldw_shutdown_legacy_coordinator_phase_groups",
-    ):
-        if hasattr(app.state, attr_name):
-            delattr(app.state, attr_name)
-
-    with TestClient(app) as client:
-        assert client.get("/health").status_code == 200
-
-    usage_task = usage_task_holder["task"]
-    assert usage_task.stop_calls == 1
-    assert usage_task.cancel_calls >= 1
-    assert app.state._tldw_shutdown_legacy_coordinator_summary.components["usage_aggregator"].result == "skipped"
 
 
 @pytest.mark.integration

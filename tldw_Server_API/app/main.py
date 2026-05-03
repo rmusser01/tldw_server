@@ -153,8 +153,6 @@ def _apply_shutdown_transition_gate(app: FastAPI, readiness_state: Any | None) -
 def _build_legacy_shutdown_context(
     *,
     readiness_state: Any | None,
-    usage_task: Any = None,
-    llm_usage_task: Any = None,
     authnz_scheduler_started: bool = False,
 ) -> "LegacyShutdownContext":
     """Collect the explicit shutdown dependencies used by legacy adapters."""
@@ -162,8 +160,6 @@ def _build_legacy_shutdown_context(
 
     return LegacyShutdownContext(
         readiness_state=readiness_state,
-        usage_task=usage_task,
-        llm_usage_task=llm_usage_task,
         authnz_scheduler_started=authnz_scheduler_started,
     )
 

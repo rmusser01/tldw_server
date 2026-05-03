@@ -20,8 +20,6 @@ StopCallable = Callable[[], Awaitable[None] | None]
 @dataclass(frozen=True, slots=True)
 class LegacyShutdownContext:
     readiness_state: MutableMapping[str, Any] | None = None
-    usage_task: Any = None
-    llm_usage_task: Any = None
     authnz_scheduler_started: bool = False
 
 
@@ -64,10 +62,7 @@ def register_legacy_shutdown_components(
     coordinator: Any,
     plan: list[ShutdownComponent],
     *,
-    component_names: tuple[str, ...] = (
-        "usage_aggregator",
-        "llm_usage_aggregator",
-    ),
+    component_names: tuple[str, ...] = (),
     phase_overrides: Mapping[str, ShutdownPhase | str] | None = None,
 ) -> list[ShutdownComponent]:
     """Register the selected legacy shutdown components with a coordinator."""
@@ -134,38 +129,6 @@ def _transition_stop(app: Any, context: LegacyShutdownContext) -> StopCallable:
     return _stop
 
 
-def _usage_enabled(context: LegacyShutdownContext) -> bool:
-    return context.usage_task is not None
-
-
-def _usage_stop(_: Any, context: LegacyShutdownContext) -> StopCallable:
-    usage_task = context.usage_task
-
-    async def _stop() -> None:
-        if usage_task is not None:
-            from tldw_Server_API.app.services.usage_aggregator import stop_usage_aggregator
-
-            await stop_usage_aggregator(usage_task)
-
-    return _stop
-
-
-def _llm_usage_enabled(context: LegacyShutdownContext) -> bool:
-    return context.llm_usage_task is not None
-
-
-def _llm_usage_stop(_: Any, context: LegacyShutdownContext) -> StopCallable:
-    llm_usage_task = context.llm_usage_task
-
-    async def _stop() -> None:
-        if llm_usage_task is not None:
-            from tldw_Server_API.app.services.llm_usage_aggregator import stop_llm_usage_aggregator
-
-            await stop_llm_usage_aggregator(llm_usage_task)
-
-    return _stop
-
-
 def _authnz_enabled(context: LegacyShutdownContext) -> bool:
     return bool(context.authnz_scheduler_started)
 
@@ -187,22 +150,6 @@ _LEGACY_SHUTDOWN_SPECS: tuple[_LegacyShutdownSpec, ...] = (
         default_timeout_ms=1000,
         enabled=_transition_enabled,
         stop=_transition_stop,
-    ),
-    _LegacyShutdownSpec(
-        name="usage_aggregator",
-        phase=ShutdownPhase.RESOURCES,
-        policy=ShutdownPolicy.BEST_EFFORT,
-        default_timeout_ms=1000,
-        enabled=_usage_enabled,
-        stop=_usage_stop,
-    ),
-    _LegacyShutdownSpec(
-        name="llm_usage_aggregator",
-        phase=ShutdownPhase.RESOURCES,
-        policy=ShutdownPolicy.BEST_EFFORT,
-        default_timeout_ms=1000,
-        enabled=_llm_usage_enabled,
-        stop=_llm_usage_stop,
     ),
     _LegacyShutdownSpec(
         name="authnz_scheduler",

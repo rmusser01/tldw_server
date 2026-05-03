@@ -16,17 +16,11 @@ class NotificationsCompactorWebsubShutdownHandles:
     """Updated late-worker handles after shutdown processing."""
 
     jobs_notifications_bridge_task: Any | None = None
-    embeddings_compactor_task: Any | None = None
-    embeddings_compactor_stop_event: Any | None = None
-    websub_renewal_task: Any | None = None
 
 
 async def shutdown_notifications_compactor_websub_workers(
     *,
     jobs_notifications_bridge_task: Any | None,
-    embeddings_compactor_task: Any | None,
-    embeddings_compactor_stop_event: Any | None,
-    websub_renewal_task: Any | None,
     guard_exceptions: tuple[type[BaseException], ...],
 ) -> NotificationsCompactorWebsubShutdownHandles:
     """Stop late notifications/compactor/WebSub workers while preserving legacy semantics."""
@@ -34,17 +28,8 @@ async def shutdown_notifications_compactor_websub_workers(
         task=jobs_notifications_bridge_task,
         guard_exceptions=guard_exceptions,
     )
-    await _shutdown_embeddings_vector_compactor_worker(
-        task=embeddings_compactor_task,
-        stop_event=embeddings_compactor_stop_event,
-        guard_exceptions=guard_exceptions,
-    )
-    await _shutdown_websub_renewal_worker(task=websub_renewal_task)
     return NotificationsCompactorWebsubShutdownHandles(
         jobs_notifications_bridge_task=jobs_notifications_bridge_task,
-        embeddings_compactor_task=embeddings_compactor_task,
-        embeddings_compactor_stop_event=embeddings_compactor_stop_event,
-        websub_renewal_task=websub_renewal_task,
     )
 
 
@@ -63,35 +48,6 @@ async def _shutdown_jobs_notifications_bridge_worker(
         pass
     except (asyncio.TimeoutError,) + guard_exceptions:
         await _cancel_and_wait_for_task(task, guard_exceptions=guard_exceptions)
-
-
-async def _shutdown_embeddings_vector_compactor_worker(
-    *,
-    task: Any | None,
-    stop_event: Any | None,
-    guard_exceptions: tuple[type[BaseException], ...],
-) -> None:
-    if not task:
-        return
-    fallback_exceptions = (asyncio.TimeoutError,) + guard_exceptions
-    try:
-        if stop_event is not None:
-            stop_event.set()
-            await _wait_for_task(task, timeout=5.0)
-            logger.info("Embeddings Vector Compactor stopped via stop_event")
-        else:
-            await _cancel_and_wait_for_task(task, guard_exceptions=guard_exceptions)
-    except asyncio.CancelledError:
-        logger.info("Embeddings Vector Compactor was already cancelled")
-    except fallback_exceptions:
-        await _cancel_and_wait_for_task(task, guard_exceptions=guard_exceptions)
-
-
-async def _shutdown_websub_renewal_worker(*, task: Any | None) -> None:
-    if not task:
-        return
-    task.cancel()
-    logger.info("WebSub renewal worker cancelled")
 
 
 async def _wait_for_task(task: Any, *, timeout: float) -> Any:

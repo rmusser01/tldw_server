@@ -56,8 +56,6 @@ async def run_lifespan_shutdown_sequence(
         transition_handoff_handles = await shutdown_transition_handoff(
             app=app,
             readiness_state=readiness_state,
-            usage_task=worker_runtime.usage_task,
-            llm_usage_task=worker_runtime.llm_usage_task,
             authnz_scheduler_started=worker_runtime.authnz_scheduler_started,
             build_legacy_shutdown_context=build_legacy_shutdown_context,
             apply_shutdown_transition_gate=apply_shutdown_transition_gate,
@@ -178,17 +176,10 @@ async def run_lifespan_shutdown_sequence(
     )
 
     post_worker_shutdown_handles = await run_shutdown_post_worker_services(
-        claims_task=worker_runtime.claims_task,
         jobs_prune_task=worker_runtime.jobs_prune_task,
         files_export_gc_task=worker_runtime.files_export_gc_task,
         notifications_prune_task=worker_runtime.notifications_prune_task,
         jobs_notifications_bridge_task=worker_runtime.jobs_notifications_bridge_task,
-        embeddings_compactor_task=worker_runtime.embeddings_compactor_task,
-        embeddings_compactor_stop_event=worker_runtime.embeddings_compactor_stop_event,
-        websub_renewal_task=worker_runtime.websub_renewal_task,
-        coordinated_legacy_component_names=coordinated_legacy_component_names,
-        usage_task=worker_runtime.usage_task,
-        llm_usage_task=worker_runtime.llm_usage_task,
         workflows_sched_task=worker_runtime.workflows_sched_task,
         reading_digest_sched_task=worker_runtime.reading_digest_sched_task,
         admin_backup_sched_task=worker_runtime.admin_backup_sched_task,

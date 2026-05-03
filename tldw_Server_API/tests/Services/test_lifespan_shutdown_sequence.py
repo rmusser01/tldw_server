@@ -30,8 +30,6 @@ async def test_run_lifespan_shutdown_sequence_runs_wrappers_in_order_and_updates
 
     app = FastAPI()
     worker_runtime = LifespanWorkerRuntimeState(
-        usage_task="usage-start",
-        llm_usage_task="llm-start",
         authnz_scheduler_started=True,
         owned_job_pollers=["poller-a"],
         core_jobs_task="core-start",
@@ -49,14 +47,10 @@ async def test_run_lifespan_shutdown_sequence_runs_wrappers_in_order_and_updates
         recipe_run_jobs_stop_event="recipe-stop-start",
         evals_abtest_jobs_task="abtest-start",
         evals_abtest_jobs_stop_event="abtest-stop-start",
-        claims_task="claims-start",
         jobs_prune_task="jobs-prune-start",
         files_export_gc_task="files-gc-start",
         notifications_prune_task="notifications-start",
         jobs_notifications_bridge_task="bridge-start",
-        embeddings_compactor_task="compactor-start",
-        embeddings_compactor_stop_event="compactor-stop-start",
-        websub_renewal_task="websub-start",
         workflows_sched_task="workflows-sched-start",
         reading_digest_sched_task="reading-sched-start",
         admin_backup_sched_task="admin-backup-sched-start",
@@ -151,7 +145,6 @@ async def test_run_lifespan_shutdown_sequence_runs_wrappers_in_order_and_updates
     async def _fake_post_worker_services(**kwargs):
         calls.append(("post", kwargs))
         return SimpleNamespace(
-            claims_task="claims-after",
             jobs_metrics_task="metrics-after",
             files_export_gc_task="files-gc-after",
             notifications_prune_task="notifications-after",
@@ -243,7 +236,8 @@ async def test_run_lifespan_shutdown_sequence_runs_wrappers_in_order_and_updates
         "final",
     ]
     assert calls[0][1]["segment_name"] == "transition_handoff"
-    assert calls[1][1]["usage_task"] == "usage-start"
+    assert "usage_task" not in calls[1][1]
+    assert "llm_usage_task" not in calls[1][1]
     assert "chatbooks_cleanup_task" not in calls[1][1]
     assert "chatbooks_cleanup_stop_event" not in calls[1][1]
     assert "storage_cleanup_service" not in calls[1][1]
@@ -258,7 +252,12 @@ async def test_run_lifespan_shutdown_sequence_runs_wrappers_in_order_and_updates
     assert "storage_cleanup_service" not in calls[6][1]
     assert calls[7][1]["should_run_late_stop"] is True
     assert calls[8][1]["should_run_late_stop"] is True
-    assert calls[9][1]["claims_task"] == "claims-start"
+    assert "claims_task" not in calls[9][1]
+    assert "embeddings_compactor_task" not in calls[9][1]
+    assert "embeddings_compactor_stop_event" not in calls[9][1]
+    assert "websub_renewal_task" not in calls[9][1]
+    assert "usage_task" not in calls[9][1]
+    assert "llm_usage_task" not in calls[9][1]
     assert calls[10][1]["authnz_scheduler_started"] is True
     assert calls[10][1]["stopped_background_worker_names"] == {
         "authnz_scheduler",
@@ -273,11 +272,16 @@ async def test_run_lifespan_shutdown_sequence_runs_wrappers_in_order_and_updates
     assert not hasattr(worker_runtime, "cleanup_task")
     assert not hasattr(worker_runtime, "chatbooks_cleanup_task")
     assert not hasattr(worker_runtime, "storage_cleanup_service")
+    assert not hasattr(worker_runtime, "claims_task")
+    assert not hasattr(worker_runtime, "embeddings_compactor_task")
+    assert not hasattr(worker_runtime, "embeddings_compactor_stop_event")
+    assert not hasattr(worker_runtime, "websub_renewal_task")
+    assert not hasattr(worker_runtime, "usage_task")
+    assert not hasattr(worker_runtime, "llm_usage_task")
     assert worker_runtime.core_jobs_task == "core-after"
     assert worker_runtime.prompt_studio_jobs_stop_event == "prompt-stop-after"
     assert worker_runtime.media_ingest_jobs_task == "media-after"
     assert worker_runtime.reminder_jobs_task == "reminder-after"
-    assert worker_runtime.claims_task == "claims-after"
     assert worker_runtime.jobs_metrics_task == "metrics-after"
     assert worker_runtime.notifications_prune_task == "notifications-after"
     assert worker_runtime.files_export_gc_task == "files-gc-final"

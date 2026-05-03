@@ -56,7 +56,7 @@ WORKER_OWNERSHIP_MATRIX = (
         issue_name="Claims rebuild",
         managed_name="claims_rebuild",
         task_name="claims_task",
-        runtime_field="claims_task",
+        runtime_field=None,
         stopped_name_key="claims_rebuild",
         legacy_helper="shutdown_claims_maintenance_tasks",
         category="claims",
@@ -67,7 +67,7 @@ WORKER_OWNERSHIP_MATRIX = (
         issue_name="Embeddings compactor",
         managed_name="embeddings_compactor_task",
         task_name="embeddings_compactor_task",
-        runtime_field="embeddings_compactor_task",
+        runtime_field=None,
         stopped_name_key="embeddings_compactor_task",
         legacy_helper="shutdown_notifications_compactor_websub_workers",
         category="embeddings",
@@ -78,7 +78,7 @@ WORKER_OWNERSHIP_MATRIX = (
         issue_name="WebSub renewal",
         managed_name="websub_renewal_task",
         task_name="websub_renewal_task",
-        runtime_field="websub_renewal_task",
+        runtime_field=None,
         stopped_name_key="websub_renewal_task",
         legacy_helper="shutdown_notifications_compactor_websub_workers",
         category="collections-websub",
@@ -89,7 +89,7 @@ WORKER_OWNERSHIP_MATRIX = (
         issue_name="Usage aggregator",
         managed_name="usage_aggregator",
         task_name="usage_aggregator",
-        runtime_field="usage_task",
+        runtime_field=None,
         stopped_name_key="usage_aggregator",
         legacy_helper="shutdown_usage_aggregators",
         category="usage",
@@ -100,7 +100,7 @@ WORKER_OWNERSHIP_MATRIX = (
         issue_name="LLM usage aggregator",
         managed_name="llm_usage_aggregator",
         task_name="llm_usage_aggregator",
-        runtime_field="llm_usage_task",
+        runtime_field=None,
         stopped_name_key="llm_usage_aggregator",
         legacy_helper="shutdown_usage_aggregators",
         category="usage",
@@ -144,18 +144,28 @@ def test_worker_ownership_matrix_rows_have_operational_ownership_fields() -> Non
 
 @pytest.mark.unit
 def test_cleanup_rows_no_longer_advertise_runtime_shutdown_fields() -> None:
-    cleanup_worker_names = {
+    removed_direct_stop_worker_names = {
         "ephemeral_cleanup_task",
         "chatbooks_cleanup",
         "storage_cleanup_service",
+        "claims_rebuild",
+        "embeddings_compactor_task",
+        "websub_renewal_task",
+        "usage_aggregator",
+        "llm_usage_aggregator",
     }
 
     assert {
         row.managed_name: row.runtime_field
         for row in WORKER_OWNERSHIP_MATRIX
-        if row.managed_name in cleanup_worker_names
+        if row.managed_name in removed_direct_stop_worker_names
     } == {
         "ephemeral_cleanup_task": None,
         "chatbooks_cleanup": None,
         "storage_cleanup_service": None,
+        "claims_rebuild": None,
+        "embeddings_compactor_task": None,
+        "websub_renewal_task": None,
+        "usage_aggregator": None,
+        "llm_usage_aggregator": None,
     }

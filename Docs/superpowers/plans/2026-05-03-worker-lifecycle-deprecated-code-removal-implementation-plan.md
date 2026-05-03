@@ -349,7 +349,7 @@ git commit -m "refactor: remove legacy cleanup worker stops"
 - Modify: `tldw_Server_API/tests/Services/test_startup_auxiliary_services.py`
 - Modify: `tldw_Server_API/tests/Services/test_worker_lifecycle_ownership_matrix.py`
 
-- [ ] **Step 1: Write failing tests for claims/compactor/WebSub/usage direct-stop removal**
+- [x] **Step 1: Write failing tests for claims/compactor/WebSub/usage direct-stop removal**
 
 Add tests that pass these workers as already stopped through background registry:
 
@@ -370,7 +370,7 @@ assert handles.usage_task is None
 assert handles.llm_usage_task is None
 ```
 
-- [ ] **Step 2: Run targeted shutdown tests and verify failures**
+- [x] **Step 2: Run targeted shutdown tests and verify failures**
 
 Run:
 
@@ -385,7 +385,7 @@ python -m pytest \
 
 Expected before implementation: failures for legacy direct-stop behavior that still runs without registry ownership suppression.
 
-- [ ] **Step 3: Remove direct-stop calls for registry-owned custom background workers**
+- [x] **Step 3: Remove direct-stop calls for registry-owned custom background workers**
 
 Implementation targets:
 
@@ -396,7 +396,7 @@ Implementation targets:
 
 Keep unrelated shutdown behavior for workers not yet proven registry-owned.
 
-- [ ] **Step 4: Remove obsolete runtime fields in a second pass**
+- [x] **Step 4: Remove obsolete runtime fields in a second pass**
 
 After helper signatures no longer use the handles, remove corresponding `LifespanWorkerRuntimeState` fields and startup-tail handle pass-through only when `rg` proves they are no longer read by active shutdown:
 
@@ -407,7 +407,7 @@ rg -n "claims_task|embeddings_compactor_task|websub_renewal_task|usage_task|llm_
 
 Do not remove fields still needed for startup tests, diagnostics, or issue closeout until the consuming test is updated to behavior-based assertions.
 
-- [ ] **Step 5: Run custom-worker focused tests**
+- [x] **Step 5: Run custom-worker focused tests**
 
 Run:
 
@@ -426,7 +426,7 @@ python -m pytest \
 
 Expected: pass.
 
-- [ ] **Step 6: Commit Task 3**
+- [x] **Step 6: Commit Task 3**
 
 ```bash
 git add tldw_Server_API/app/services/shutdown_post_worker_services.py \

@@ -28,9 +28,6 @@ class LifespanWorkerRuntimeState:
     study_suggestions_jobs_task: Any | None = None
     privilege_snapshot_stop_event: Any | None = None
     privilege_snapshot_task: Any | None = None
-    embeddings_compactor_stop_event: Any | None = None
-    embeddings_compactor_task: Any | None = None
-    websub_renewal_task: Any | None = None
     audio_jobs_stop_event: Any | None = None
     audio_jobs_task: Any | None = None
     audiobook_jobs_stop_event: Any | None = None
@@ -82,11 +79,8 @@ class LifespanWorkerRuntimeState:
     workflows_maint_task: Any | None = None
     jobs_integrity_stop_event: Any | None = None
     jobs_integrity_task: Any | None = None
-    claims_task: Any | None = None
     claims_alerts_task: Any | None = None
     claims_review_metrics_task: Any | None = None
-    usage_task: Any | None = None
-    llm_usage_task: Any | None = None
     tts_history_cleanup_task: Any | None = None
     tts_history_cleanup_stop_event: Any | None = None
     quality_eval_task: Any | None = None

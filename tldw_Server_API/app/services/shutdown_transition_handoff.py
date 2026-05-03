@@ -22,8 +22,6 @@ async def shutdown_transition_handoff(
     *,
     app: Any,
     readiness_state: Any | None,
-    usage_task: Any | None,
-    llm_usage_task: Any | None,
     authnz_scheduler_started: bool,
     build_legacy_shutdown_context: Callable[..., Any],
     apply_shutdown_transition_gate: Callable[[Any, Any | None], None],
@@ -37,8 +35,6 @@ async def shutdown_transition_handoff(
     try:
         shutdown_context = build_legacy_shutdown_context(
             readiness_state=readiness_state,
-            usage_task=usage_task,
-            llm_usage_task=llm_usage_task,
             authnz_scheduler_started=authnz_scheduler_started,
         )
         legacy_shutdown_plan = _build_legacy_shutdown_plan(app, shutdown_context)

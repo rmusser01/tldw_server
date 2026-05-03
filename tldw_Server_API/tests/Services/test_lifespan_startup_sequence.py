@@ -107,7 +107,7 @@ async def test_run_lifespan_startup_sequence_runs_helpers_in_order_and_updates_r
     assert worker_runtime.core_jobs_task == "core-task"
     assert worker_runtime.audio_jobs_stop_event == "audio-stop"
     assert worker_runtime.jobs_metrics_task == "jobs-metrics-task"
-    assert worker_runtime.claims_task == "claims-task"
+    assert not hasattr(worker_runtime, "claims_task")
     assert worker_runtime.authnz_scheduler_started is True
 
 
