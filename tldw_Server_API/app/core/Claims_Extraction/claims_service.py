@@ -2088,6 +2088,8 @@ def claim_notifications_digest(
         owner_filter=False,
     ) as (target_db, _owner_filter):
         target_user = str(user_id) if user_id is not None else str(current_user.id)
+        normalized_limit = max(1, int(limit))
+        normalized_offset = max(0, int(offset))
         rows = target_db.list_claim_notifications(
             user_id=target_user,
             kind=kind,
@@ -2096,14 +2098,15 @@ def claim_notifications_digest(
             resource_type=str(resource_type) if resource_type else None,
             resource_id=str(resource_id) if resource_id else None,
             delivered=delivered,
-            limit=limit,
-            offset=offset,
+            limit=normalized_limit + 1,
+            offset=normalized_offset,
         )
         filtered = _filter_notifications_for_principal(principal, rows)
+        has_more = len(filtered) > normalized_limit
         counts_by_kind: dict[str, int] = {}
         counts_by_target_user: dict[str, int] = {}
         counts_by_review_group: dict[str, int] = {}
-        normalized = [_normalize_notification_row(row) for row in filtered]
+        normalized = [_normalize_notification_row(row) for row in filtered[:normalized_limit]]
         for row in normalized:
             kind_val = str(row.get("kind") or "unknown")
             counts_by_kind[kind_val] = counts_by_kind.get(kind_val, 0) + 1
@@ -2123,6 +2126,13 @@ def claim_notifications_digest(
             "counts_by_kind": counts_by_kind,
             "counts_by_target_user": counts_by_target_user,
             "counts_by_review_group": counts_by_review_group,
+            "pagination": build_offset_pagination_meta(
+                limit=normalized_limit,
+                offset=normalized_offset,
+                total=None,
+                count=len(normalized),
+                has_more=has_more,
+            ),
         }
         if include_items:
             payload["notifications"] = normalized

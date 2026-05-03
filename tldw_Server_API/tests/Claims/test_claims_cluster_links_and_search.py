@@ -1,4 +1,5 @@
 import hashlib
+import json
 import os
 import tempfile
 from typing import AsyncGenerator, Tuple
@@ -85,6 +86,16 @@ def _seed_cluster_search_db() -> Tuple[str, int, int]:
         claim_id=claim_ids["Beta claim"],
         similarity_score=1.0,
     )
+    for index in range(3):
+        db.insert_claim_notification(
+            user_id="1",
+            kind="review_update",
+            target_user_id="1",
+            target_review_group=None,
+            resource_type="claim",
+            resource_id=str(index + 1),
+            payload_json=json.dumps({"index": index}),
+        )
     db.close_connection()
     return db_path, cluster_a_id, cluster_b_id
 
@@ -168,6 +179,21 @@ def test_claims_cluster_links_and_search():
             }
             assert page_data["has_more"] is True
             assert page_data["next_offset"] == 2
+
+            r_digest = client.get("/api/v1/claims/notifications/digest?limit=2&offset=0")
+            assert r_digest.status_code == 200, r_digest.text
+            digest = r_digest.json()
+            assert digest["total"] == 2
+            assert digest["pagination"] == {
+                "mode": "offset",
+                "limit": 2,
+                "offset": 0,
+                "total": None,
+                "has_more": True,
+                "next_offset": 2,
+            }
+            assert digest["has_more"] is True
+            assert digest["next_offset"] == 2
 
             r_search = client.get("/api/v1/claims/search?q=claim&group_by_cluster=true&limit=10")
             assert r_search.status_code == 200, r_search.text

@@ -324,6 +324,13 @@ class ClaimNotificationsDigestResponse(BaseModel):
     counts_by_target_user: dict[str, int] = Field(default_factory=dict)
     counts_by_review_group: dict[str, int] = Field(default_factory=dict)
     notifications: list[ClaimNotificationResponse] | None = None
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+    pagination: OffsetPaginationMeta
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self):
+        return _default_offset_pagination_aliases(self)
 
 
 class ClaimReviewRequest(BaseModel):
