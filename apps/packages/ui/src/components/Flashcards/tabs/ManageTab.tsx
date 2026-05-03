@@ -61,7 +61,10 @@ import { FLASHCARDS_DRAWER_WIDTH_PX } from "../constants"
 import { formatCardType } from "../utils/model-type-labels"
 import { FlashcardQueueStateBadge } from "../utils/queue-state-badges"
 import { getFlashcardSourceMeta } from "../utils/source-reference"
-import { formatDeckDisplayName } from "../utils/deck-display"
+import {
+  formatDeckHierarchyLabel,
+  getDeckDescendantIds
+} from "../utils/deck-display"
 import {
   formatFlashcardsUiErrorMessage,
   mapFlashcardsUiError
@@ -331,10 +334,24 @@ export const ManageTab: React.FC<ManageTabProps> = ({
       if (deckId == null) {
         return t("option:flashcards.noDeck", { defaultValue: "No deck" })
       }
-      return formatDeckDisplayName(deckMap.get(deckId), `Deck ${deckId}`)
+      return formatDeckHierarchyLabel(deckMap.get(deckId), deckMap, `Deck ${deckId}`)
     },
     [deckMap, t]
   )
+  const deckParentOptions = React.useMemo(() => {
+    if (!selectedDeck) {
+      return []
+    }
+    const decks = decksQuery.data || []
+    const blockedDeckIds = getDeckDescendantIds(decks, selectedDeck.id)
+    blockedDeckIds.add(selectedDeck.id)
+    return decks
+      .filter((deck) => !blockedDeckIds.has(deck.id))
+      .map((deck) => ({
+        label: formatDeckHierarchyLabel(deck, deckMap, `Deck ${deck.id}`),
+        value: deck.id
+      }))
+  }, [deckMap, decksQuery.data, selectedDeck])
   const workspaceFilterOptions = React.useMemo(() => {
     const workspaceIds = new Set<string>()
     ;(decksQuery.data || []).forEach((deck) => {
@@ -676,7 +693,8 @@ export const ManageTab: React.FC<ManageTabProps> = ({
   const openDeckScopeEditor = () => {
     if (!selectedDeck) return
     deckScopeForm.setFieldsValue({
-      workspaceId: selectedDeck.workspace_id ?? ""
+      workspaceId: selectedDeck.workspace_id ?? "",
+      parentDeckId: selectedDeck.parent_deck_id ?? undefined
     })
     setDeckScopeOpen(true)
   }
@@ -698,10 +716,12 @@ export const ManageTab: React.FC<ManageTabProps> = ({
     try {
       const values = await deckScopeForm.validateFields()
       const workspaceId = typeof values.workspaceId === "string" ? values.workspaceId.trim() : ""
+      const parentDeckId = typeof values.parentDeckId === "number" ? values.parentDeckId : null
       await updateDeckMutation.mutateAsync({
         deckId: selectedDeck.id,
         update: {
           workspace_id: workspaceId.length > 0 ? workspaceId : null,
+          parent_deck_id: parentDeckId,
           expected_version: selectedDeck.version
         }
       })
@@ -1638,7 +1658,7 @@ export const ManageTab: React.FC<ManageTabProps> = ({
               className="min-w-44"
               data-testid="flashcards-manage-deck-select"
               options={(decksQuery.data || []).map((d) => ({
-                label: formatDeckDisplayName(d, `Deck ${d.id}`),
+                label: formatDeckHierarchyLabel(d, deckMap, `Deck ${d.id}`),
                 value: d.id
               }))}
             />
@@ -2460,6 +2480,18 @@ export const ManageTab: React.FC<ManageTabProps> = ({
               })}
             />
           </Form.Item>
+          <Form.Item
+            name="parentDeckId"
+            label={t("option:flashcards.parentDeck", { defaultValue: "Parent deck" })}
+          >
+            <Select<number>
+              allowClear
+              placeholder={t("option:flashcards.topLevelDeck", {
+                defaultValue: "Top-level deck"
+              })}
+              options={deckParentOptions}
+            />
+          </Form.Item>
         </Form>
       </Modal>
 
@@ -2508,7 +2540,7 @@ export const ManageTab: React.FC<ManageTabProps> = ({
           value={moveDeckId ?? undefined}
           onChange={(v) => setMoveDeckId(v ?? null)}
           options={(decksQuery.data || []).map((d) => ({
-            label: d.name,
+            label: formatDeckHierarchyLabel(d, deckMap, `Deck ${d.id}`),
             value: d.id
           }))}
         />

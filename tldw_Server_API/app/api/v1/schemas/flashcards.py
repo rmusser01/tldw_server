@@ -110,6 +110,7 @@ class DeckCreate(BaseModel):
     name: str = Field(..., description="Deck name (unique)")
     description: Optional[str] = Field(None, description="Deck description")
     workspace_id: Optional[str] = Field(None, description="Canonical owning workspace ID; null means general scope")
+    parent_deck_id: Optional[int] = Field(None, ge=1, description="Parent deck ID for nested deck hierarchies")
     visibility: DeckVisibility = "private"
     review_prompt_side: DeckReviewPromptSide = "front"
     scheduler_type: DeckSchedulerType = "sm2_plus"
@@ -128,6 +129,7 @@ class DeckUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     workspace_id: Optional[str] = None
+    parent_deck_id: Optional[int] = Field(None, ge=1)
     visibility: Optional[DeckVisibility] = None
     review_prompt_side: Optional[DeckReviewPromptSide] = None
     scheduler_type: Optional[DeckSchedulerType] = None
@@ -156,6 +158,7 @@ class Deck(BaseModel):
     name: str
     description: Optional[str] = None
     workspace_id: Optional[str] = None
+    parent_deck_id: Optional[int] = None
     visibility: DeckVisibility = "private"
     review_prompt_side: DeckReviewPromptSide = "front"
     created_at: Optional[str] = None

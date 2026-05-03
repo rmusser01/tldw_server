@@ -198,6 +198,7 @@ export type Deck = {
   name: string
   description?: string | null
   workspace_id?: string | null
+  parent_deck_id?: number | null
   review_prompt_side: DeckReviewPromptSide
   deleted: boolean
   client_id: string
@@ -306,6 +307,7 @@ export type DeckUpdate = {
   name?: string | null
   description?: string | null
   workspace_id?: string | null
+  parent_deck_id?: number | null
   review_prompt_side?: DeckReviewPromptSide
   scheduler_type?: DeckSchedulerType | null
   scheduler_settings?: DeckSchedulerSettingsEnvelopeUpdate | null
@@ -316,6 +318,7 @@ export type DeckCreateInput = {
   name: string
   description?: string | null
   workspace_id?: string | null
+  parent_deck_id?: number | null
   review_prompt_side?: DeckReviewPromptSide
   scheduler_type?: DeckSchedulerType | null
   scheduler_settings?: DeckSchedulerSettingsEnvelope | null
