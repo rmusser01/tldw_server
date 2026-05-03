@@ -70,11 +70,11 @@ Special behavior:
 **Goal:** Record current behavior before moving routes.
 **Success Criteria:** Focused storage tests pass on the accepted base, and OpenAPI path set is captured.
 **Tests:** Focused storage endpoint/admin tests and OpenAPI path guard.
-**Status:** Not Started
+**Status:** Complete With Caveat
 
-- [ ] Create a clean worktree from the accepted base.
-- [ ] Confirm no active dirty work exists in `storage.py`.
-- [ ] Run focused backend tests:
+- [x] Create a clean worktree from the accepted base.
+- [x] Confirm no active dirty work exists in `storage.py`.
+- [x] Run focused backend tests:
 
 ```bash
 source .venv/bin/activate
@@ -85,22 +85,28 @@ python3 -m pytest \
   -v
 ```
 
-- [ ] Run OpenAPI guard from the UI package if dependencies are installed:
+- [x] Run OpenAPI guard from the UI package if dependencies are installed:
 
 ```bash
 cd apps/packages/ui
 bun run verify:openapi
 ```
 
-- [ ] Record whether `/api/v1/storage/*` paths are currently part of any client guard.
-- [ ] Do not edit runtime code in this stage.
+- [x] Record whether `/api/v1/storage/*` paths are currently part of any client guard.
+- [x] Do not edit runtime code in this stage.
+
+Notes:
+
+- Focused storage/admin baseline passed: `43 passed, 6 warnings`.
+- `bun run verify:openapi` currently fails on `origin/dev` before storage route movement with `No MEDIA_ADD_SCHEMA_FALLBACK entries were parsed from fallback-schemas.ts`. Root cause is the guard's fallback parser matching `MEDIA_ADD_SCHEMA_FALLBACK_VERSION` before the actual fallback array. Route movement is deferred until the Phase 4.6 guardrail fix is merged or rebased into this branch.
+- The failing guard had already checked 256 client paths and did not identify storage-route drift before the fallback parser failure.
 
 ## Stage 2: Extract Storage Endpoint Helpers
 
 **Goal:** Move pure helpers out of `storage.py` before moving any routes.
 **Success Criteria:** `storage.py` still exposes the same router and helper behavior; focused tests pass.
 **Tests:** Focused storage endpoint/admin tests.
-**Status:** Not Started
+**Status:** Complete
 
 Candidate helper module:
 
@@ -120,6 +126,13 @@ Implementation constraints:
 - Keep compatibility imports in `storage.py` if tests patch helper names directly.
 - Do not move routes in this stage.
 - Do not alter datetime parsing fallback behavior.
+
+Notes:
+
+- Extracted `_principal_is_storage_admin`, `_to_generated_file`, `_resolve_storage_base_dir`, `_parse_datetime`, and `_to_quota_status` to `storage_helpers.py`.
+- Added direct helper coverage in `test_storage_helpers.py` for admin claim compatibility, datetime parsing, generated-file conversion, base directory selection, and quota conversion.
+- Preserved the `storage.DatabasePaths` monkeypatch seam for existing download tests while keeping route behavior unchanged.
+- Focused helper/storage/admin suite passed: `53 passed, 6 warnings`.
 
 ## Stage 3: Extract User-Owned JSON File And Folder Routes
 
@@ -239,9 +252,9 @@ python3 -m bandit -r tldw_Server_API/app/api/v1/endpoints/storage.py tldw_Server
 
 ## Handoff Checklist
 
-- [ ] Maintainers accept `storage.py` user-owned JSON routes as the first Phase 4.4 endpoint target.
-- [ ] Clean worktree from accepted base exists.
-- [ ] Stage 1 focused tests pass before route movement.
+- [x] Maintainers accept `storage.py` user-owned JSON routes as the first Phase 4.4 endpoint target.
+- [x] Clean worktree from accepted base exists.
+- [x] Stage 1 focused tests pass before route movement.
 - [ ] OpenAPI path set is captured before route movement.
-- [ ] File download and admin quota routes remain excluded from the first route split.
-- [ ] Bandit is run on touched source before PR handoff.
+- [x] File download and admin quota routes remain excluded from the first route split.
+- [x] Bandit is run on touched source before PR handoff.

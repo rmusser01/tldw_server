@@ -9,14 +9,17 @@ Provides endpoints for:
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from pathlib import Path as PathlibPath
-
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal, get_request_user, User
 
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_auth_principal, get_request_user
 from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
+from tldw_Server_API.app.api.v1.endpoints.storage_helpers import (
+    _principal_is_storage_admin,
+    _resolve_storage_base_dir,
+    _to_generated_file,
+    _to_quota_status,
+)
 from tldw_Server_API.app.api.v1.schemas.storage_schemas import (
     BulkDeleteRequest,
     BulkDeleteResponse,
@@ -27,7 +30,6 @@ from tldw_Server_API.app.api.v1.schemas.storage_schemas import (
     FolderCreateRequest,
     FolderInfo,
     FolderListResponse,
-    GeneratedFile,
     GeneratedFileResponse,
     GeneratedFilesListResponse,
     GeneratedFileUpdate,
@@ -48,12 +50,15 @@ from tldw_Server_API.app.core.AuthNZ.exceptions import (
     StorageError,
     UserNotFoundError,
 )
-from tldw_Server_API.app.core.AuthNZ.repos.generated_files_repo import FILE_CATEGORY_VOICE_CLONE
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
-from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths as _DatabasePaths
 from tldw_Server_API.app.services.storage_quota_service import get_storage_service
 
 router = APIRouter(prefix="/storage", tags=["storage"])
+
+# Compatibility seam for existing download tests that monkeypatch
+# storage.DatabasePaths; storage_helpers imports the same class object.
+DatabasePaths = _DatabasePaths
 
 
 # =========================================================================
@@ -65,25 +70,6 @@ async def _get_service():
     return await get_storage_service()
 
 
-def _principal_is_storage_admin(principal: AuthPrincipal) -> bool:
-    """Storage admin compatibility check.
-
-    Storage admin endpoints intentionally preserve legacy `is_admin` support in
-    addition to claim-first admin role/permission checks.
-    """
-    roles = {str(role).strip().lower() for role in (principal.roles or []) if str(role).strip()}
-    permissions = {
-        str(permission).strip().lower()
-        for permission in (principal.permissions or [])
-        if str(permission).strip()
-    }
-    if bool(getattr(principal, "is_admin", False)):
-        return True
-    if "admin" in roles:
-        return True
-    return bool(permissions & {"*", "system.configure"})
-
-
 async def require_storage_admin(principal: AuthPrincipal = Depends(get_auth_principal)) -> AuthPrincipal:
     """Authorize storage admin endpoints with legacy `is_admin` compatibility."""
     if _principal_is_storage_admin(principal):
@@ -91,73 +77,6 @@ async def require_storage_admin(principal: AuthPrincipal = Depends(get_auth_prin
     raise HTTPException(
         status_code=403,
         detail="Access denied. Required role(s): admin",
-    )
-
-
-def _to_generated_file(record: dict) -> GeneratedFile:
-    """Convert database record to GeneratedFile schema."""
-    return GeneratedFile(
-        id=record.get("id", 0),
-        uuid=record.get("uuid", ""),
-        user_id=record.get("user_id", 0),
-        org_id=record.get("org_id"),
-        team_id=record.get("team_id"),
-        filename=record.get("filename", ""),
-        original_filename=record.get("original_filename"),
-        storage_path=record.get("storage_path", ""),
-        mime_type=record.get("mime_type"),
-        file_size_bytes=record.get("file_size_bytes", 0),
-        checksum=record.get("checksum"),
-        file_category=record.get("file_category", "image"),
-        source_feature=record.get("source_feature", "export"),
-        source_ref=record.get("source_ref"),
-        folder_tag=record.get("folder_tag"),
-        tags=record.get("tags", []),
-        is_transient=record.get("is_transient", False),
-        expires_at=_parse_datetime(record.get("expires_at")),
-        retention_policy=record.get("retention_policy", "user_default"),
-        is_deleted=record.get("is_deleted", False),
-        deleted_at=_parse_datetime(record.get("deleted_at")),
-        created_at=_parse_datetime(record.get("created_at")) or datetime.now(timezone.utc),
-        updated_at=_parse_datetime(record.get("updated_at")) or datetime.now(timezone.utc),
-        accessed_at=_parse_datetime(record.get("accessed_at")),
-    )
-
-
-def _resolve_storage_base_dir(user_id: int, record: dict) -> PathlibPath:
-    """Resolve the base directory for a stored file based on category."""
-    if record.get("file_category") == FILE_CATEGORY_VOICE_CLONE:
-        return DatabasePaths.get_user_voices_dir(user_id)
-    return DatabasePaths.get_user_outputs_dir(user_id)
-
-
-def _parse_datetime(value) -> datetime | None:
-    """Parse datetime from various formats."""
-    if value is None:
-        return None
-    if isinstance(value, datetime):
-        return value
-    if isinstance(value, str):
-        try:
-            dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
-            if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=timezone.utc)
-            return dt
-        except Exception:
-            return None
-    return None
-
-
-def _to_quota_status(data: dict) -> QuotaStatus:
-    """Convert quota data to QuotaStatus schema."""
-    return QuotaStatus(
-        quota_mb=data.get("quota_mb"),
-        used_mb=data.get("used_mb", 0.0),
-        remaining_mb=data.get("remaining_mb"),
-        usage_pct=data.get("usage_pct", 0.0),
-        at_soft_limit=data.get("at_soft_limit", False),
-        at_hard_limit=data.get("at_hard_limit", False),
-        has_quota=data.get("has_quota", False),
     )
 
 
