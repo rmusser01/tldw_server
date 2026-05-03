@@ -70,7 +70,7 @@ Primary test files:
 - Modify: `tldw_Server_API/tests/Services/test_lifecycle_workers.py`
 - Modify: startup helper tests for any matrix entry whose inventory coverage is missing
 
-- [ ] **Step 1: Write the ownership matrix test file**
+- [x] **Step 1: Write the ownership matrix test file**
 
 Create a test-owned matrix. Keep it in tests so implementation and closeout can import or inspect one canonical source without adding production surface.
 
@@ -132,7 +132,7 @@ def test_worker_ownership_matrix_has_unique_managed_names() -> None:
 
 Start with the first three rows, then add rows for `claims_rebuild`, `embeddings_compactor_task`, `websub_renewal_task`, `usage_aggregator`, `llm_usage_aggregator`, recurring schedulers, and maintenance schedulers before deleting code for each group.
 
-- [ ] **Step 2: Run the new matrix test**
+- [x] **Step 2: Run the new matrix test**
 
 Run:
 
@@ -142,7 +142,7 @@ python -m pytest tldw_Server_API/tests/Services/test_worker_lifecycle_ownership_
 
 Expected: pass after the matrix file is created.
 
-- [ ] **Step 3: Add registry stop contract coverage if missing**
+- [x] **Step 3: Add registry stop contract coverage if missing**
 
 In `test_lifecycle_workers.py`, verify these cases already exist or add them:
 
@@ -153,7 +153,7 @@ In `test_lifecycle_workers.py`, verify these cases already exist or add them:
 
 Use existing tests where possible instead of duplicating.
 
-- [ ] **Step 4: Add startup inventory assertions for the Phase 2 deletion candidates**
+- [x] **Step 4: Add startup inventory assertions for the Phase 2 deletion candidates**
 
 Update focused startup helper tests so each Phase 2 worker proves its managed name and phase:
 
@@ -170,7 +170,7 @@ assert handle.shutdown_phase is ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN
 assert app.state._tldw_shutdown_job_poller_inventory == []
 ```
 
-- [ ] **Step 5: Run Phase 1 focused tests**
+- [x] **Step 5: Run Phase 1 focused tests**
 
 Run:
 
@@ -186,7 +186,7 @@ python -m pytest \
 
 Expected: pass.
 
-- [ ] **Step 6: Commit Task 1**
+- [x] **Step 6: Commit Task 1**
 
 ```bash
 git add tldw_Server_API/tests/Services/test_worker_lifecycle_ownership_matrix.py \
