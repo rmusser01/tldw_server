@@ -27,6 +27,8 @@ export type ChatModeOverrides = {
   useOCR?: boolean;
   webSearch?: boolean;
   imageEventSyncPolicy?: ImageGenerationEventSyncPolicy;
+  ragMediaIds?: number[] | null;
+  selectedKnowledge?: unknown;
 } & Record<string, unknown>;
 
 export type SaveMessagePayload = Omit<SaveMessageData, "setHistoryId"> & {
@@ -58,9 +60,69 @@ export type TldwChatMeta =
   | null
   | undefined;
 
+export type ChatSubmitResult =
+  | { status: "submitted" }
+  | { status: "failed"; errorMessage: string }
+  | { status: "skipped"; reason: string };
+
+export const chatSubmitSubmitted = (): ChatSubmitResult => ({
+  status: "submitted",
+});
+
+export const chatSubmitFailed = (errorMessage: string): ChatSubmitResult => ({
+  status: "failed",
+  errorMessage,
+});
+
+export const chatSubmitSkipped = (reason: string): ChatSubmitResult => ({
+  status: "skipped",
+  reason,
+});
+
+export const isChatSubmitSuccess = (result: ChatSubmitResult) =>
+  result.status === "submitted";
+
 // ---------------------------------------------------------------------------
 // Pure utility functions
 // ---------------------------------------------------------------------------
+
+const normalizeRagMediaIds = (value: unknown): number[] | null => {
+  if (!Array.isArray(value)) return null;
+  return value.filter(
+    (mediaId): mediaId is number =>
+      typeof mediaId === "number" && Number.isFinite(mediaId),
+  );
+};
+
+export const resolveTurnRagMediaIds = ({
+  requestOverrides,
+  ragMediaIds,
+}: {
+  requestOverrides?: Pick<ChatModeOverrides, "ragMediaIds"> | null;
+  ragMediaIds: number[] | null;
+}): number[] | null => {
+  const hasExplicitOverride =
+    requestOverrides != null &&
+    Object.prototype.hasOwnProperty.call(requestOverrides, "ragMediaIds");
+
+  if (hasExplicitOverride) {
+    return normalizeRagMediaIds(requestOverrides?.ragMediaIds);
+  }
+
+  return normalizeRagMediaIds(ragMediaIds);
+};
+
+export const shouldUseRagForTurn = ({
+  selectedKnowledge,
+  fileRetrievalEnabled,
+  ragMediaIds,
+}: {
+  selectedKnowledge: unknown;
+  fileRetrievalEnabled: boolean;
+  ragMediaIds: number[] | null;
+}) =>
+  Boolean(selectedKnowledge) ||
+  (fileRetrievalEnabled && Array.isArray(ragMediaIds) && ragMediaIds.length > 0);
 
 export const attemptCharacterStreamRecoveryPersist = async ({
   chatId,

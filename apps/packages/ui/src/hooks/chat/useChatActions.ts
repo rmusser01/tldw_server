@@ -93,6 +93,14 @@ import {
 import { resolveSavedDegradedCharacterPersist } from "@/hooks/chat/characterPersistOutcome"
 import { ensurePersonaServerChat } from "@/hooks/chat/personaServerChat"
 import {
+  chatSubmitFailed,
+  chatSubmitSkipped,
+  chatSubmitSubmitted,
+  resolveTurnRagMediaIds,
+  shouldUseRagForTurn,
+  type ChatSubmitResult
+} from "@/hooks/chat/chat-action-utils"
+import {
   isPersonaAssistantSelection,
   type AssistantSelection
 } from "@/types/assistant-selection"
@@ -139,10 +147,15 @@ type ChatModeOverrides = {
   webSearch?: boolean
   imageEventSyncPolicy?: ImageGenerationEventSyncPolicy
   researchContext?: ChatResearchContext
+  ragMediaIds?: number[] | null
+  selectedKnowledge?: Knowledge | null
 } & Record<string, unknown>
 
 const loadActorSettings = () => import("@/services/actor-settings")
 const STREAMING_UPDATE_INTERVAL_MS = 80
+const toChatSubmitResult = (
+  result: ChatSubmitResult | void | undefined
+): ChatSubmitResult => result ?? chatSubmitSubmitted()
 
 type SaveMessagePayload = Omit<SaveMessageData, "setHistoryId"> & {
   setHistoryId?: SaveMessageData["setHistoryId"]
@@ -2125,7 +2138,7 @@ export const useChatActions = ({
     continueOutputTarget?: "chat" | "composer_input"
     serverChatIdOverride?: string | null
     researchContext?: ChatResearchContext
-  }) => {
+  }): Promise<ChatSubmitResult> => {
     const effectiveSelectedModel = getEffectiveSelectedModel(
       requestOverrides?.selectedModel
     )
@@ -2170,8 +2183,19 @@ export const useChatActions = ({
       }
     }
 
+    const turnRagMediaIds = resolveTurnRagMediaIds({
+      requestOverrides,
+      ragMediaIds
+    })
+    const turnSelectedKnowledge = Object.prototype.hasOwnProperty.call(
+      requestOverrides ?? {},
+      "selectedKnowledge"
+    )
+      ? requestOverrides?.selectedKnowledge
+      : selectedKnowledge
     const chatModeParams = await buildChatModeParams({
       ...(requestOverrides ?? {}),
+      ragMediaIds: turnRagMediaIds,
       selectedModel: effectiveSelectedModel,
       messageSteering: messageSteeringForTurn,
       userMessageType,
@@ -2224,7 +2248,7 @@ export const useChatActions = ({
         }))
 
         markSteeringApplied()
-        await continueChatMode(
+        const continueResult = await continueChatMode(
           continueMessages,
           continueHistory,
           signal,
@@ -2285,7 +2309,7 @@ export const useChatActions = ({
           }
         }
 
-        return
+        return toChatSubmitResult(continueResult)
       }
 
       const hasExplicitImageBackend = trimmedImageBackendOverride.length > 0
@@ -2312,7 +2336,7 @@ export const useChatActions = ({
             ? trimmedImageBackendOverride
             : undefined
         }
-        await normalChatMode(
+        const imageResult = await normalChatMode(
           message,
           image,
           isRegenerate,
@@ -2321,12 +2345,12 @@ export const useChatActions = ({
           signal,
           enhancedChatModeParams
         )
-        return
+        return toChatSubmitResult(imageResult)
       }
       // console.log("contextFiles", contextFiles)
       if (contextFiles.length > 0) {
         markSteeringApplied()
-        await documentChatMode(
+        const documentResult = await documentChatMode(
           message,
           image,
           isRegenerate,
@@ -2337,7 +2361,7 @@ export const useChatActions = ({
           chatModeParamsWithRegen
         )
         // setFileRetrievalEnabled(false)
-        return
+        return toChatSubmitResult(documentResult)
       }
 
       if (docs?.length > 0 || documentContext?.length > 0) {
@@ -2349,7 +2373,7 @@ export const useChatActions = ({
           )
         }
         markSteeringApplied()
-        await tabChatMode(
+        const tabResult = await tabChatMode(
           message,
           image,
           processingTabs,
@@ -2359,17 +2383,17 @@ export const useChatActions = ({
           signal,
           chatModeParamsWithRegen
         )
-        return
+        return toChatSubmitResult(tabResult)
       }
 
-      const hasScopedRagMediaIds =
-        Array.isArray(ragMediaIds) && ragMediaIds.length > 0
-      const shouldUseRag =
-        Boolean(selectedKnowledge) ||
-        (fileRetrievalEnabled && hasScopedRagMediaIds)
+      const shouldUseRag = shouldUseRagForTurn({
+        selectedKnowledge: turnSelectedKnowledge,
+        fileRetrievalEnabled,
+        ragMediaIds: turnRagMediaIds
+      })
       if (shouldUseRag) {
         markSteeringApplied()
-        await ragMode(
+        const ragResult = await ragMode(
           message,
           image,
           isRegenerate,
@@ -2378,6 +2402,7 @@ export const useChatActions = ({
           signal,
           chatModeParamsWithRegen
         )
+        return toChatSubmitResult(ragResult)
       } else {
         // Include uploaded files info even in normal mode
         const enhancedChatModeParams = {
@@ -2399,7 +2424,7 @@ export const useChatActions = ({
               setIsProcessing(false)
               setStreaming(false)
               setAbortController(null)
-              return
+              return chatSubmitSkipped("No model selected for character chat")
             }
             markSteeringApplied()
             await characterChatMode({
@@ -2415,7 +2440,7 @@ export const useChatActions = ({
               messageSteering: messageSteeringForTurn,
               serverChatIdOverride
             })
-            return
+            return chatSubmitSubmitted()
           }
 
           if (isPersonaAssistantSelection(selectedAssistant)) {
@@ -2428,7 +2453,7 @@ export const useChatActions = ({
               setIsProcessing(false)
               setStreaming(false)
               setAbortController(null)
-              return
+              return chatSubmitSkipped("No model selected for persona chat")
             }
 
             const personaServerChat = await ensurePersonaServerChatWithState({
@@ -2443,7 +2468,7 @@ export const useChatActions = ({
                   : undefined
             }
             markSteeringApplied()
-            await normalChatMode(
+            const personaResult = await normalChatMode(
               message,
               image,
               isRegenerate,
@@ -2462,13 +2487,13 @@ export const useChatActions = ({
                   })
               }
             )
-            return
+            return toChatSubmitResult(personaResult)
           }
         }
 
         if (!compareModeActive) {
           markSteeringApplied()
-          await normalChatMode(
+          const normalResult = await normalChatMode(
             message,
             image,
             isRegenerate,
@@ -2477,6 +2502,7 @@ export const useChatActions = ({
             signal,
             enhancedChatModeParams
           )
+          return toChatSubmitResult(normalResult)
         } else {
           const maxModels =
             typeof compareMaxModels === "number" && compareMaxModels > 0
@@ -2644,6 +2670,7 @@ export const useChatActions = ({
           setIsProcessing(false)
           setStreaming(false)
           setAbortController(null)
+          return chatSubmitSubmitted()
         }
       }
     } catch (e) {
@@ -2655,6 +2682,7 @@ export const useChatActions = ({
       })
       setIsProcessing(false)
       setStreaming(false)
+      return chatSubmitFailed(errorMessage)
     } finally {
       if (replyActive && capturedReplyTargetId != null) {
         const currentReplyTarget = useStoreMessageOption.getState().replyTarget
@@ -2769,11 +2797,14 @@ export const useChatActions = ({
         return
       }
 
-      const hasScopedRagMediaIds =
-        Array.isArray(ragMediaIds) && ragMediaIds.length > 0
-      const shouldUseRag =
-        Boolean(selectedKnowledge) ||
-        (fileRetrievalEnabled && hasScopedRagMediaIds)
+      const shouldUseRag = shouldUseRagForTurn({
+        selectedKnowledge,
+        fileRetrievalEnabled,
+        ragMediaIds: resolveTurnRagMediaIds({
+          requestOverrides: null,
+          ragMediaIds
+        })
+      })
       if (shouldUseRag) {
         await ragMode(
           trimmed,

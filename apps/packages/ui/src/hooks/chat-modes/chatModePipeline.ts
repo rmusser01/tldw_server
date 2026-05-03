@@ -35,6 +35,11 @@ import {
   normalizeImageGenerationVariantBundle,
   type ImageGenerationEventSyncPolicy
 } from "@/utils/image-generation-chat"
+import {
+  chatSubmitFailed,
+  chatSubmitSubmitted,
+  type ChatSubmitResult
+} from "@/hooks/chat/chat-action-utils"
 
 const STREAMING_UPDATE_INTERVAL_MS = 80
 let didLogPipelineSetHistoryMissing = false
@@ -148,7 +153,7 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
   history: ChatHistory,
   signal: AbortSignal,
   params: TParams
-) => {
+): Promise<ChatSubmitResult> => {
   const {
     selectedModel,
     toolChoice,
@@ -471,7 +476,7 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
         conversationId: preflight.conversationId,
         imageEventSyncPolicy
       })
-      return
+      return chatSubmitSubmitted()
     }
 
     const promptData = await mode.preparePrompt(context)
@@ -651,6 +656,7 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
       conversationId: modelClient.conversationId,
       imageEventSyncPolicy
     })
+    return chatSubmitSubmitted()
   } catch (e) {
     cancelStreamingUpdate()
     signal.removeEventListener("abort", abortCancelStreamingUpdate)
@@ -706,6 +712,7 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
     if (!errorSave) {
       throw e
     }
+    return chatSubmitFailed(interruptionReason)
   } finally {
     signal.removeEventListener("abort", abortCancelStreamingUpdate)
     setIsProcessing(false)
