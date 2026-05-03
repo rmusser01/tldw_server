@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib
 import sys
+from collections.abc import Callable
 from types import SimpleNamespace
 
 import pytest
@@ -70,11 +71,16 @@ async def test_start_worker_groups_runs_helpers_in_order_and_returns_handles(
 
     async def _record_study_privilege_jobs_pollers(
         *,
-        app,
-        owned_job_pollers,
-        register_owned_job_poller,
-        should_start_worker,
-    ):
+        app: object,
+        owned_job_pollers: list[object],
+        register_owned_job_poller: object,
+        should_start_worker: Callable[..., bool],
+        worker_inventory: object | None,
+    ) -> SimpleNamespace:
+        """Record the study/privilege startup group call."""
+
+        del app, owned_job_pollers, register_owned_job_poller
+        assert worker_inventory is worker_inventory_ref
         assert should_start_worker("STUDY_PACK_JOBS_WORKER_ENABLED", "flashcards") is False
         calls.append("study")
         return SimpleNamespace(

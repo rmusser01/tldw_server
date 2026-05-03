@@ -127,6 +127,7 @@ async def start_worker_groups(
         owned_job_pollers=owned_job_pollers,
         register_owned_job_poller=register_owned_job_poller,
         should_start_worker=_should_start_worker,
+        worker_inventory=worker_inventory,
     )
     compactor_websub_startup_handles = await _start_compactor_websub_workers(
         should_start_worker=_should_start_worker,
