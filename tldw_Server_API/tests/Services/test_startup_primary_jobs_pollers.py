@@ -22,21 +22,29 @@ async def test_start_primary_jobs_pollers_combines_handles_in_order(
     calls: list[str] = []
 
     async def _record_core(**kwargs: object) -> tuple[str, str]:
+        """Record that the core worker starter ran."""
+
         del kwargs
         calls.append("core")
         return ("core-stop", "core-task")
 
     async def _record_files(**kwargs: object) -> tuple[str, str]:
+        """Record that the files worker starter ran."""
+
         del kwargs
         calls.append("files")
         return ("files-stop", "files-task")
 
     async def _record_data_tables(**kwargs: object) -> tuple[str, str]:
+        """Record that the data tables worker starter ran."""
+
         del kwargs
         calls.append("data-tables")
         return ("data-tables-stop", "data-tables-task")
 
     async def _record_prompt_studio(**kwargs: object) -> tuple[str, str]:
+        """Record that the Prompt Studio worker starter ran."""
+
         del kwargs
         calls.append("prompt-studio")
         return ("prompt-studio-stop", "prompt-studio-task")
@@ -74,7 +82,11 @@ async def test_start_primary_jobs_pollers_passes_inventory_to_workers(
     captured_kwargs_by_worker: dict[str, dict[str, object]] = {}
 
     def _record_worker(label: str) -> Callable[..., object]:
+        """Build a starter stub that captures kwargs for one worker label."""
+
         async def _record(**kwargs: object) -> tuple[str, str]:
+            """Capture worker startup kwargs and return deterministic handles."""
+
             captured_kwargs_by_worker[label] = kwargs
             return (f"{label}-stop", f"{label}-task")
 
@@ -220,7 +232,11 @@ async def test_primary_jobs_worker_registers_with_worker_inventory_when_enabled(
     registrations: list[dict[str, object]] = []
 
     class _FakeWorkerInventory:
+        """Test double that records custom worker registration calls."""
+
         async def register_custom(self, **kwargs: object) -> tuple[str, str]:
+            """Capture registration kwargs and return deterministic handles."""
+
             registrations.append(kwargs)
             return f"{registered_name}-task", f"{registered_name}-stop"
 

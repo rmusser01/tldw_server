@@ -151,6 +151,8 @@ async def _start_files_jobs_worker(
     should_start_worker: Callable[[str, str], bool],
     worker_inventory: WorkerRegistry | None = None,
 ) -> tuple[Any | None, Any | None]:
+    """Start the File Artifacts jobs poller and return its shutdown handles."""
+
     try:
         enabled = should_start_worker("FILES_JOBS_WORKER_ENABLED", "files")
         if not enabled:
@@ -193,6 +195,8 @@ async def _start_data_tables_jobs_worker(
     should_start_worker: Callable[[str, str], bool],
     worker_inventory: WorkerRegistry | None = None,
 ) -> tuple[Any | None, Any | None]:
+    """Start the Data Tables jobs poller and return its shutdown handles."""
+
     try:
         enabled = should_start_worker("DATA_TABLES_JOBS_WORKER_ENABLED", "data-tables")
         if not enabled:
@@ -235,6 +239,8 @@ async def _start_prompt_studio_jobs_worker(
     should_start_worker: Callable[[str, str], bool],
     worker_inventory: WorkerRegistry | None = None,
 ) -> tuple[Any | None, Any | None]:
+    """Start the Prompt Studio jobs poller and return its shutdown handles."""
+
     try:
         enabled = should_start_worker("PROMPT_STUDIO_JOBS_WORKER_ENABLED", "prompt-studio")
         if not enabled:
