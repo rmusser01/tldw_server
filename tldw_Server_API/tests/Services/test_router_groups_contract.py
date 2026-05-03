@@ -218,6 +218,82 @@ def test_append_imported_router_spec_skips_static_missing_attr(
     assert specs == []
 
 
+def test_iter_core_router_specs_defers_chat_router_attr_lookup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify covered core chat specs keep router attr lookup lazy."""
+    chat_module_name = "tldw_Server_API.app.api.v1.endpoints.chat"
+    chat_loop_module_name = "tldw_Server_API.app.api.v1.endpoints.chat_loop"
+    access_count = {
+        "chat.router": 0,
+        "chat.conversations_alias_router": 0,
+        "chat_loop.router": 0,
+    }
+
+    chat_router = APIRouter()
+    conversations_router = APIRouter()
+    chat_loop_router = APIRouter()
+
+    @chat_router.get("/chat/completions")
+    def _chat_completions() -> dict[str, str]:
+        return {"status": "ok"}
+
+    @conversations_router.get("/conversations")
+    def _conversations() -> dict[str, str]:
+        return {"status": "ok"}
+
+    @chat_loop_router.get("/chat/loop/start")
+    def _chat_loop_start() -> dict[str, str]:
+        return {"status": "ok"}
+
+    chat_module = ModuleType(chat_module_name)
+
+    def _chat_getattr(name: str) -> APIRouter:
+        if name == "router":
+            access_count["chat.router"] += 1
+            return chat_router
+        if name == "conversations_alias_router":
+            access_count["chat.conversations_alias_router"] += 1
+            return conversations_router
+        raise AttributeError(name)
+
+    chat_module.__getattr__ = _chat_getattr  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, chat_module_name, chat_module)
+
+    chat_loop_module = ModuleType(chat_loop_module_name)
+
+    def _chat_loop_getattr(name: str) -> APIRouter:
+        if name == "router":
+            access_count["chat_loop.router"] += 1
+            return chat_loop_router
+        raise AttributeError(name)
+
+    chat_loop_module.__getattr__ = _chat_loop_getattr  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, chat_loop_module_name, chat_loop_module)
+
+    specs = list(iter_core_router_specs())
+    assert access_count == {
+        "chat.router": 0,
+        "chat.conversations_alias_router": 0,
+        "chat_loop.router": 0,
+    }
+
+    by_meta = {
+        (spec.prefix, spec.tags): spec
+        for spec in specs
+        if spec.route_key == "chat"
+    }
+
+    assert _first_router_path(by_meta[("/api/v1/chat", ())].router) == "/chat/completions"
+    assert _first_router_path(by_meta[("/api/v1", ())].router) == "/chat/loop/start"
+    assert _first_router_path(by_meta[("/api/v1/chats", ("chat",))].router) == "/conversations"
+    assert access_count == {
+        "chat.router": 1,
+        "chat.conversations_alias_router": 1,
+        "chat_loop.router": 1,
+    }
+
+
 def test_register_router_specs_respects_route_policy(monkeypatch: pytest.MonkeyPatch) -> None:
     app = FastAPI()
     router = APIRouter()
