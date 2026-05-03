@@ -88,13 +88,20 @@ export const WorkspaceChatPanel = ({
     })
   }, [backendAvailable, onRuntimeStateChange, selectedAssistant?.name, selectedModel, streaming])
 
-  const isSending = isLoading || isProcessing
+  const isSending = streaming || isLoading || isProcessing
   const hasStagedContext = stagedSources.length > 0
   const readyMediaIds = React.useMemo(
     () => getReadyStagedMediaIds(stagedSources),
     [stagedSources]
   )
   const hasReadyMedia = readyMediaIds.length > 0
+  const hasUncarriedStagedContext = stagedSources.some(
+    (source) =>
+      source.availability !== "ready" ||
+      typeof source.mediaId !== "number" ||
+      !Number.isInteger(source.mediaId) ||
+      source.mediaId <= 0
+  )
   const trimmedDraft = draft.trim()
   const sendDisabled = isSending || (!trimmedDraft && !hasStagedContext)
   const conversationInstanceId = workspaceId ?? "workspace-chat"
@@ -117,7 +124,7 @@ export const WorkspaceChatPanel = ({
     setSendError(null)
     const fallbackContext = formatStagedSourceInsertText(stagedSources).trim()
     const sendMessage =
-      trimmedDraft && hasStagedContext && !hasReadyMedia && fallbackContext
+      trimmedDraft && hasStagedContext && hasUncarriedStagedContext && fallbackContext
         ? `${trimmedDraft}\n\n${fallbackContext}`
         : trimmedDraft || fallbackContext
 
@@ -144,6 +151,7 @@ export const WorkspaceChatPanel = ({
     }
   }, [
     hasReadyMedia,
+    hasUncarriedStagedContext,
     onClearStagedSources,
     onSubmit,
     readyMediaIds,

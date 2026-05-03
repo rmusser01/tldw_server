@@ -51,6 +51,18 @@ const stagedWithoutReadyMedia: StagedWorkspaceSource[] = [
   }
 ]
 
+const stagedWithMixedAvailability: StagedWorkspaceSource[] = [
+  staged[0],
+  {
+    sourceId: "source-processing",
+    mediaId: 202,
+    title: "Indexing Notes",
+    type: "document",
+    scopeLabel: "Default workspace",
+    availability: "processing"
+  }
+]
+
 describe("WorkspaceChatPanel", () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -140,6 +152,89 @@ describe("WorkspaceChatPanel", () => {
       expect.stringContaining("Indexing Notes")
     )
     expect(onClearStagedSources).toHaveBeenCalledTimes(1)
+  })
+
+  it("includes staged source summary when mixed staged sources cannot all be sent as ready media ids", async () => {
+    const onClearStagedSources = vi.fn()
+
+    render(
+      <WorkspaceChatPanel
+        stagedSources={stagedWithMixedAvailability}
+        onClearStagedSources={onClearStagedSources}
+        backendAvailable
+        workspaceId="workspace-1"
+      />
+    )
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Chat workspace message" }), {
+      target: { value: "Draft instruction" }
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Send with staged context" }))
+
+    await waitFor(() => expect(chatHookState.onSubmit).toHaveBeenCalledTimes(1))
+    expect(chatHookState.onSubmit.mock.calls[0][0]).toMatchObject({
+      requestOverrides: expect.objectContaining({
+        ragMediaIds: [101],
+        fileRetrievalEnabled: true,
+        chatMode: "rag"
+      })
+    })
+    expect(chatHookState.onSubmit.mock.calls[0][0].message).toEqual(
+      expect.stringContaining("Draft instruction")
+    )
+    expect(chatHookState.onSubmit.mock.calls[0][0].message).toEqual(
+      expect.stringContaining("Indexing Notes")
+    )
+    expect(onClearStagedSources).toHaveBeenCalledTimes(1)
+  })
+
+  it("sends staged-only context when the composer is empty", async () => {
+    const onClearStagedSources = vi.fn()
+
+    render(
+      <WorkspaceChatPanel
+        stagedSources={staged}
+        onClearStagedSources={onClearStagedSources}
+        backendAvailable
+        workspaceId="workspace-1"
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Send with staged context" }))
+
+    await waitFor(() => expect(chatHookState.onSubmit).toHaveBeenCalledTimes(1))
+    expect(chatHookState.onSubmit.mock.calls[0][0]).toMatchObject({
+      message: expect.stringContaining("Operator Notes"),
+      requestOverrides: expect.objectContaining({
+        ragMediaIds: [101],
+        fileRetrievalEnabled: true,
+        chatMode: "rag"
+      })
+    })
+    expect(onClearStagedSources).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not submit while a stream is active", () => {
+    chatHookState.value.streaming = true
+    const onClearStagedSources = vi.fn()
+
+    render(
+      <WorkspaceChatPanel
+        stagedSources={[]}
+        onClearStagedSources={onClearStagedSources}
+        backendAvailable
+        workspaceId="workspace-1"
+      />
+    )
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Chat workspace message" }), {
+      target: { value: "Do not send yet" }
+    })
+
+    const sendButton = screen.getByRole("button", { name: "Send message" })
+    expect(sendButton).toBeDisabled()
+    fireEvent.click(sendButton)
+    expect(chatHookState.onSubmit).not.toHaveBeenCalled()
   })
 
   it("preserves draft and staged context when submit returns a failed result", async () => {
