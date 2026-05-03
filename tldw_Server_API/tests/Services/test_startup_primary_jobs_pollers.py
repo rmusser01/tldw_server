@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib
 import sys
+from collections.abc import Callable
 
 import pytest
 
@@ -20,22 +21,22 @@ async def test_start_primary_jobs_pollers_combines_handles_in_order(
     startup_pollers = _import_startup_primary_jobs_pollers()
     calls: list[str] = []
 
-    async def _record_core(**kwargs):
+    async def _record_core(**kwargs: object) -> tuple[str, str]:
         del kwargs
         calls.append("core")
         return ("core-stop", "core-task")
 
-    async def _record_files(**kwargs):
+    async def _record_files(**kwargs: object) -> tuple[str, str]:
         del kwargs
         calls.append("files")
         return ("files-stop", "files-task")
 
-    async def _record_data_tables(**kwargs):
+    async def _record_data_tables(**kwargs: object) -> tuple[str, str]:
         del kwargs
         calls.append("data-tables")
         return ("data-tables-stop", "data-tables-task")
 
-    async def _record_prompt_studio(**kwargs):
+    async def _record_prompt_studio(**kwargs: object) -> tuple[str, str]:
         del kwargs
         calls.append("prompt-studio")
         return ("prompt-studio-stop", "prompt-studio-task")
@@ -65,25 +66,24 @@ async def test_start_primary_jobs_pollers_combines_handles_in_order(
 
 
 @pytest.mark.asyncio
-async def test_start_primary_jobs_pollers_passes_inventory_to_core_worker(
+async def test_start_primary_jobs_pollers_passes_inventory_to_workers(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     startup_pollers = _import_startup_primary_jobs_pollers()
     worker_inventory = object()
-    captured_kwargs: dict[str, object] = {}
+    captured_kwargs_by_worker: dict[str, dict[str, object]] = {}
 
-    async def _record_core(**kwargs: object) -> tuple[str, str]:
-        captured_kwargs.update(kwargs)
-        return ("core-stop", "core-task")
+    def _record_worker(label: str) -> Callable[..., object]:
+        async def _record(**kwargs: object) -> tuple[str, str]:
+            captured_kwargs_by_worker[label] = kwargs
+            return (f"{label}-stop", f"{label}-task")
 
-    async def _record_worker(**kwargs: object) -> tuple[None, None]:
-        del kwargs
-        return (None, None)
+        return _record
 
-    monkeypatch.setattr(startup_pollers, "_start_core_jobs_worker", _record_core)
-    monkeypatch.setattr(startup_pollers, "_start_files_jobs_worker", _record_worker)
-    monkeypatch.setattr(startup_pollers, "_start_data_tables_jobs_worker", _record_worker)
-    monkeypatch.setattr(startup_pollers, "_start_prompt_studio_jobs_worker", _record_worker)
+    monkeypatch.setattr(startup_pollers, "_start_core_jobs_worker", _record_worker("core"))
+    monkeypatch.setattr(startup_pollers, "_start_files_jobs_worker", _record_worker("files"))
+    monkeypatch.setattr(startup_pollers, "_start_data_tables_jobs_worker", _record_worker("data-tables"))
+    monkeypatch.setattr(startup_pollers, "_start_prompt_studio_jobs_worker", _record_worker("prompt-studio"))
 
     await startup_pollers.start_primary_jobs_pollers(
         app="app",
@@ -94,7 +94,15 @@ async def test_start_primary_jobs_pollers_passes_inventory_to_core_worker(
         worker_inventory=worker_inventory,
     )
 
-    assert captured_kwargs["worker_inventory"] is worker_inventory
+    assert {
+        worker: kwargs["worker_inventory"]
+        for worker, kwargs in captured_kwargs_by_worker.items()
+    } == {
+        "core": worker_inventory,
+        "files": worker_inventory,
+        "data-tables": worker_inventory,
+        "prompt-studio": worker_inventory,
+    }
 
 
 @pytest.mark.asyncio
@@ -160,6 +168,91 @@ async def test_start_core_jobs_worker_registers_with_worker_inventory_when_enabl
             "name": "core_jobs_task",
             "task_name": "core_jobs_task",
             "coroutine_factory": startup_pollers._run_chatbooks_core_jobs_worker_service,
+            "timeout_sec": 5.0,
+            "category": "jobs",
+            "shutdown_phase": startup_pollers.ShutdownPhase.JOB_POLLER_QUIESCE,
+        }
+    ]
+
+
+@pytest.mark.parametrize(
+    (
+        "starter_name",
+        "flag_name",
+        "route_name",
+        "registered_name",
+        "factory_name",
+    ),
+    [
+        (
+            "_start_files_jobs_worker",
+            "FILES_JOBS_WORKER_ENABLED",
+            "files",
+            "files_jobs_task",
+            "_run_file_artifacts_jobs_worker_service",
+        ),
+        (
+            "_start_data_tables_jobs_worker",
+            "DATA_TABLES_JOBS_WORKER_ENABLED",
+            "data-tables",
+            "data_tables_jobs_task",
+            "_run_data_tables_jobs_worker_service",
+        ),
+        (
+            "_start_prompt_studio_jobs_worker",
+            "PROMPT_STUDIO_JOBS_WORKER_ENABLED",
+            "prompt-studio",
+            "prompt_studio_jobs_task",
+            "_run_prompt_studio_jobs_worker_service",
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_primary_jobs_worker_registers_with_worker_inventory_when_enabled(
+    monkeypatch: pytest.MonkeyPatch,
+    starter_name: str,
+    flag_name: str,
+    route_name: str,
+    registered_name: str,
+    factory_name: str,
+) -> None:
+    startup_pollers = _import_startup_primary_jobs_pollers()
+    registrations: list[dict[str, object]] = []
+
+    class _FakeWorkerInventory:
+        async def register_custom(self, **kwargs: object) -> tuple[str, str]:
+            registrations.append(kwargs)
+            return f"{registered_name}-task", f"{registered_name}-stop"
+
+    monkeypatch.setattr(
+        startup_pollers,
+        "_make_event",
+        lambda: (_ for _ in ()).throw(AssertionError("legacy event path should not run")),
+    )
+    monkeypatch.setattr(
+        startup_pollers,
+        "_create_task",
+        lambda coro: (_ for _ in ()).throw(AssertionError("legacy task path should not run")),
+    )
+
+    def _register_owned_job_poller(*args: object, **kwargs: object) -> None:
+        raise AssertionError("legacy poller registration should not run")
+
+    stop_event, task = await getattr(startup_pollers, starter_name)(
+        app="app",
+        owned_job_pollers=[],
+        register_owned_job_poller=_register_owned_job_poller,
+        should_start_worker=lambda flag, route: (flag, route) == (flag_name, route_name),
+        worker_inventory=_FakeWorkerInventory(),
+    )
+
+    assert stop_event == f"{registered_name}-stop"
+    assert task == f"{registered_name}-task"
+    assert registrations == [
+        {
+            "name": registered_name,
+            "task_name": registered_name,
+            "coroutine_factory": getattr(startup_pollers, factory_name),
             "timeout_sec": 5.0,
             "category": "jobs",
             "shutdown_phase": startup_pollers.ShutdownPhase.JOB_POLLER_QUIESCE,

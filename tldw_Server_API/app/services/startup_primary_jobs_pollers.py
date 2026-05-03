@@ -61,18 +61,21 @@ async def start_primary_jobs_pollers(
         owned_job_pollers=owned_job_pollers,
         register_owned_job_poller=register_owned_job_poller,
         should_start_worker=should_start_worker,
+        worker_inventory=worker_inventory,
     )
     data_tables_jobs_stop_event, data_tables_jobs_task = await _start_data_tables_jobs_worker(
         app=app,
         owned_job_pollers=owned_job_pollers,
         register_owned_job_poller=register_owned_job_poller,
         should_start_worker=should_start_worker,
+        worker_inventory=worker_inventory,
     )
     prompt_studio_jobs_stop_event, prompt_studio_jobs_task = await _start_prompt_studio_jobs_worker(
         app=app,
         owned_job_pollers=owned_job_pollers,
         register_owned_job_poller=register_owned_job_poller,
         should_start_worker=should_start_worker,
+        worker_inventory=worker_inventory,
     )
     return PrimaryJobsPollerHandles(
         core_jobs_stop_event=core_jobs_stop_event,
@@ -146,12 +149,25 @@ async def _start_files_jobs_worker(
     owned_job_pollers: list[Any],
     register_owned_job_poller: Callable[..., None],
     should_start_worker: Callable[[str, str], bool],
+    worker_inventory: WorkerRegistry | None = None,
 ) -> tuple[Any | None, Any | None]:
     try:
         enabled = should_start_worker("FILES_JOBS_WORKER_ENABLED", "files")
         if not enabled:
             logger.info("File Artifacts Jobs worker disabled by flag (FILES_JOBS_WORKER_ENABLED)")
             return None, None
+
+        if worker_inventory is not None:
+            task, stop_event = await worker_inventory.register_custom(
+                name="files_jobs_task",
+                task_name="files_jobs_task",
+                coroutine_factory=_run_file_artifacts_jobs_worker_service,
+                timeout_sec=5.0,
+                category="jobs",
+                shutdown_phase=ShutdownPhase.JOB_POLLER_QUIESCE,
+            )
+            logger.info("File Artifacts Jobs worker started with explicit stop_event signal")
+            return stop_event, task
 
         stop_event = _make_event()
         task = _create_task(_run_file_artifacts_jobs_worker_service(stop_event))
@@ -175,12 +191,25 @@ async def _start_data_tables_jobs_worker(
     owned_job_pollers: list[Any],
     register_owned_job_poller: Callable[..., None],
     should_start_worker: Callable[[str, str], bool],
+    worker_inventory: WorkerRegistry | None = None,
 ) -> tuple[Any | None, Any | None]:
     try:
         enabled = should_start_worker("DATA_TABLES_JOBS_WORKER_ENABLED", "data-tables")
         if not enabled:
             logger.info("Data Tables Jobs worker disabled by flag (DATA_TABLES_JOBS_WORKER_ENABLED)")
             return None, None
+
+        if worker_inventory is not None:
+            task, stop_event = await worker_inventory.register_custom(
+                name="data_tables_jobs_task",
+                task_name="data_tables_jobs_task",
+                coroutine_factory=_run_data_tables_jobs_worker_service,
+                timeout_sec=5.0,
+                category="jobs",
+                shutdown_phase=ShutdownPhase.JOB_POLLER_QUIESCE,
+            )
+            logger.info("Data Tables Jobs worker started with explicit stop_event signal")
+            return stop_event, task
 
         stop_event = _make_event()
         task = _create_task(_run_data_tables_jobs_worker_service(stop_event))
@@ -204,12 +233,25 @@ async def _start_prompt_studio_jobs_worker(
     owned_job_pollers: list[Any],
     register_owned_job_poller: Callable[..., None],
     should_start_worker: Callable[[str, str], bool],
+    worker_inventory: WorkerRegistry | None = None,
 ) -> tuple[Any | None, Any | None]:
     try:
         enabled = should_start_worker("PROMPT_STUDIO_JOBS_WORKER_ENABLED", "prompt-studio")
         if not enabled:
             logger.info("Prompt Studio Jobs worker disabled by flag (PROMPT_STUDIO_JOBS_WORKER_ENABLED)")
             return None, None
+
+        if worker_inventory is not None:
+            task, stop_event = await worker_inventory.register_custom(
+                name="prompt_studio_jobs_task",
+                task_name="prompt_studio_jobs_task",
+                coroutine_factory=_run_prompt_studio_jobs_worker_service,
+                timeout_sec=5.0,
+                category="jobs",
+                shutdown_phase=ShutdownPhase.JOB_POLLER_QUIESCE,
+            )
+            logger.info("Prompt Studio Jobs worker started with explicit stop_event signal")
+            return stop_event, task
 
         stop_event = _make_event()
         task = _create_task(_run_prompt_studio_jobs_worker_service(stop_event))
