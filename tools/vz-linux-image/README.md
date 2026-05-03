@@ -231,6 +231,11 @@ repository variable
 set `TLDW_SANDBOX_VZ_LINUX_BUNDLE_PATH` or pass the manual `bundle_path` input
 to point at the canonical bundle on the runner.
 
+See `Docs/Sandbox/vz-linux-host-gated-ci-acceptance-policy.md` for the
+workflow acceptance policy, including manual/nightly gates, expected skips,
+artifact upload expectations, branch allowlisting, and blocking regression
+criteria.
+
 ## Image Store Registration
 
 Canonical bundles can be registered in the sandbox image store for durable local

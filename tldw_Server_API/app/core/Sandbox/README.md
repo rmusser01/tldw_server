@@ -149,6 +149,11 @@ Current limitations:
   `TLDW_SANDBOX_MACOS_HELPER_SOCKET=<socket>`, `SANDBOX_ENABLE_EXECUTION=1`,
   and `SANDBOX_BACKGROUND_EXECUTION=0`.
 - Real helper-daemon smoke coverage is opt-in through `tldw_Server_API/tests/sandbox/test_macos_virtualization_helper_daemon_host_gated.py` and requires `TLDW_SANDBOX_MACOS_HELPER_DAEMON_SMOKE=1`.
+- The host-gated CI acceptance policy for real `vz_linux` smoke lives in
+  `Docs/Sandbox/vz-linux-host-gated-ci-acceptance-policy.md`. It defines
+  manual/nightly gates, expected skips, artifact upload expectations, branch
+  allowlisting, and blocking regression criteria for prepared Apple silicon
+  runners.
 
 ## Operations And Development
 
