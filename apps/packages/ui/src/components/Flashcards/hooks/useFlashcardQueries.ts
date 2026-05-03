@@ -33,6 +33,7 @@ import {
   exportFlashcardsFile,
   getFlashcardsImportLimits,
   type Deck,
+  type DeckCreateInput,
   type DeckUpdate,
   type Flashcard,
   type FlashcardTemplateCreate,
@@ -687,17 +688,32 @@ export function useCreateDeckMutation() {
     mutationFn: (params: {
       name: string
       description?: string
+      parent_deck_id?: number | null
       review_prompt_side?: Deck["review_prompt_side"]
       scheduler_type?: Deck["scheduler_type"]
       scheduler_settings?: Deck["scheduler_settings"]
-    }) =>
-      createDeck({
-        name: params.name.trim(),
-        description: params.description?.trim() || undefined,
-        review_prompt_side: params.review_prompt_side,
-        scheduler_type: params.scheduler_type,
-        scheduler_settings: params.scheduler_settings
-      }),
+    }) => {
+      const input: DeckCreateInput = {
+        name: params.name.trim()
+      }
+      const description = params.description?.trim()
+      if (description) {
+        input.description = description
+      }
+      if (params.parent_deck_id !== undefined) {
+        input.parent_deck_id = params.parent_deck_id
+      }
+      if (params.review_prompt_side !== undefined) {
+        input.review_prompt_side = params.review_prompt_side
+      }
+      if (params.scheduler_type !== undefined) {
+        input.scheduler_type = params.scheduler_type
+      }
+      if (params.scheduler_settings !== undefined) {
+        input.scheduler_settings = params.scheduler_settings
+      }
+      return createDeck(input)
+    },
     onSuccess: () => {
       invalidateFlashcardsQueries(qc)
     },

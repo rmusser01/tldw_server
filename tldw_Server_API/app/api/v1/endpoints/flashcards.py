@@ -685,12 +685,14 @@ def create_deck(payload: DeckCreate, db: CharactersRAGDB = Depends(get_chacha_db
         _ensure_workspace_exists(db, payload.workspace_id)
         visibility = payload.visibility if "visibility" in payload.model_fields_set else None
         review_prompt_side = payload.review_prompt_side if "review_prompt_side" in payload.model_fields_set else None
+        parent_deck_id = payload.parent_deck_id if "parent_deck_id" in payload.model_fields_set else ...
         deck_id = db.add_deck(
             payload.name,
             payload.description,
             payload.scheduler_settings.model_dump() if payload.scheduler_settings else None,
             scheduler_type=payload.scheduler_type,
             workspace_id=payload.workspace_id,
+            parent_deck_id=parent_deck_id,
             visibility=visibility,
             review_prompt_side=review_prompt_side,
         )
@@ -704,6 +706,7 @@ def create_deck(payload: DeckCreate, db: CharactersRAGDB = Depends(get_chacha_db
             "name": payload.name,
             "description": payload.description,
             "workspace_id": payload.workspace_id,
+            "parent_deck_id": None if parent_deck_id is ... else parent_deck_id,
             "visibility": visibility or "private",
             "review_prompt_side": payload.review_prompt_side,
             "created_at": None,
@@ -761,6 +764,7 @@ def update_deck(
     review_prompt_side = data.pop("review_prompt_side", None)
     visibility = data.pop("visibility", None)
     workspace_id = data.pop("workspace_id", ...)
+    parent_deck_id = data.pop("parent_deck_id", ...)
     try:
         if workspace_id is not ...:
             _ensure_workspace_exists(db, workspace_id)
@@ -773,6 +777,7 @@ def update_deck(
             scheduler_settings=scheduler_settings,
             scheduler_type=scheduler_type,
             workspace_id=workspace_id,
+            parent_deck_id=parent_deck_id,
             expected_version=expected_version,
         )
         if not ok:

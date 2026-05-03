@@ -1469,6 +1469,7 @@ CREATE TABLE IF NOT EXISTS decks(
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
   name          TEXT UNIQUE NOT NULL,
   description   TEXT,
+  parent_deck_id INTEGER REFERENCES decks(id) ON DELETE SET NULL,
   workspace_id  TEXT REFERENCES workspaces(id) ON DELETE SET NULL,
   review_prompt_side TEXT NOT NULL DEFAULT 'front',
   created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -1480,6 +1481,7 @@ CREATE TABLE IF NOT EXISTS decks(
 CREATE INDEX IF NOT EXISTS idx_decks_deleted ON decks(deleted);
 CREATE INDEX IF NOT EXISTS idx_decks_last_modified ON decks(last_modified);
 CREATE INDEX IF NOT EXISTS idx_decks_workspace_id ON decks(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_decks_parent_deck_id ON decks(parent_deck_id);
 
 /* Flashcards table - with integer id for FTS external-content */
 CREATE TABLE IF NOT EXISTS flashcards(
@@ -9493,6 +9495,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                   INSERT INTO sync_log(entity,entity_id,operation,timestamp,client_id,version,payload)
                   VALUES('decks',CAST(NEW.id AS TEXT),'create',NEW.last_modified,NEW.client_id,NEW.version,
                          json_object('id',NEW.id,'name',NEW.name,'description',NEW.description,
+                                     'parent_deck_id',NEW.parent_deck_id,
                                      'visibility',NEW.visibility,
                                      'review_prompt_side',NEW.review_prompt_side,
                                      'scheduler_type',NEW.scheduler_type,
@@ -9506,6 +9509,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 WHEN OLD.deleted = NEW.deleted AND (
                      OLD.name IS NOT NEW.name OR
                      OLD.description IS NOT NEW.description OR
+                     OLD.parent_deck_id IS NOT NEW.parent_deck_id OR
                      OLD.visibility IS NOT NEW.visibility OR
                      OLD.review_prompt_side IS NOT NEW.review_prompt_side OR
                      OLD.scheduler_type IS NOT NEW.scheduler_type OR
@@ -9516,6 +9520,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                   INSERT INTO sync_log(entity,entity_id,operation,timestamp,client_id,version,payload)
                   VALUES('decks',CAST(NEW.id AS TEXT),'update',NEW.last_modified,NEW.client_id,NEW.version,
                          json_object('id',NEW.id,'name',NEW.name,'description',NEW.description,
+                                     'parent_deck_id',NEW.parent_deck_id,
                                      'visibility',NEW.visibility,
                                      'review_prompt_side',NEW.review_prompt_side,
                                      'scheduler_type',NEW.scheduler_type,
@@ -9541,6 +9546,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                   INSERT INTO sync_log(entity,entity_id,operation,timestamp,client_id,version,payload)
                   VALUES('decks',CAST(NEW.id AS TEXT),'update',NEW.last_modified,NEW.client_id,NEW.version,
                          json_object('id',NEW.id,'name',NEW.name,'description',NEW.description,
+                                     'parent_deck_id',NEW.parent_deck_id,
                                      'visibility',NEW.visibility,
                                      'review_prompt_side',NEW.review_prompt_side,
                                      'scheduler_type',NEW.scheduler_type,
@@ -9755,6 +9761,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         try:
             if decks_exists:
                 deck_cols = {str(row[1]): row for row in conn.execute("PRAGMA table_info('decks')").fetchall()}
+                if "parent_deck_id" not in deck_cols:
+                    conn.execute(
+                        "ALTER TABLE decks ADD COLUMN parent_deck_id INTEGER REFERENCES decks(id) ON DELETE SET NULL"
+                    )
                 if "scheduler_settings_json" not in deck_cols:
                     conn.execute(
                         f"ALTER TABLE decks ADD COLUMN scheduler_settings_json TEXT NOT NULL DEFAULT '{default_settings_json}'"
@@ -9795,6 +9805,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     """
                 )
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_decks_visibility ON decks(visibility)")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_decks_parent_deck_id ON decks(parent_deck_id)")
         except sqlite3.Error as exc:
             raise SchemaError(f"Failed ensuring decks review-orientation schema: {exc}") from exc  # noqa: TRY003
 
@@ -10135,6 +10146,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         default_settings_json = scheduler_settings_to_json(None)
         try:
             self.backend.execute(
+                "ALTER TABLE decks ADD COLUMN IF NOT EXISTS parent_deck_id BIGINT REFERENCES decks(id) ON DELETE SET NULL",
+                connection=conn,
+            )
+            self.backend.execute(
                 "ALTER TABLE decks ADD COLUMN IF NOT EXISTS scheduler_settings_json TEXT NOT NULL DEFAULT '{}'",
                 connection=conn,
             )
@@ -10169,6 +10184,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             )
             self.backend.execute(
                 "CREATE INDEX IF NOT EXISTS idx_decks_visibility ON decks(visibility)",
+                connection=conn,
+            )
+            self.backend.execute(
+                "CREATE INDEX IF NOT EXISTS idx_decks_parent_deck_id ON decks(parent_deck_id)",
                 connection=conn,
             )
             self.backend.execute(
@@ -16804,6 +16823,66 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
     # ==========================
     # Flashcards & Decks (V5)
     # ==========================
+    @staticmethod
+    def _normalize_deck_parent_id(parent_deck_id: Any) -> int | None:
+        if parent_deck_id is None:
+            return None
+        if isinstance(parent_deck_id, bool):
+            raise InputError("parent_deck_id must be a positive integer")  # noqa: TRY003
+        try:
+            normalized = int(parent_deck_id)
+        except (TypeError, ValueError) as exc:
+            raise InputError("parent_deck_id must be a positive integer") from exc  # noqa: TRY003
+        if normalized <= 0:
+            raise InputError("parent_deck_id must be a positive integer")  # noqa: TRY003
+        return normalized
+
+    def _validate_deck_parent_locked(
+        self,
+        conn: Any,
+        *,
+        deck_id: int | None,
+        parent_deck_id: Any,
+    ) -> int | None:
+        parent_id = self._normalize_deck_parent_id(parent_deck_id)
+        if parent_id is None:
+            return None
+
+        target_deck_id = int(deck_id) if deck_id is not None else None
+        if target_deck_id is not None and parent_id == target_deck_id:
+            raise InputError("Deck cannot be its own parent")  # noqa: TRY003
+
+        parent_row = self._coerce_mapping_row(
+            conn.execute(
+                "SELECT id, parent_deck_id FROM decks WHERE id = ? AND deleted = 0",
+                (parent_id,),
+            ).fetchone()
+        )
+        if not parent_row:
+            raise InputError("Parent deck not found")  # noqa: TRY003
+
+        if target_deck_id is None:
+            return parent_id
+
+        seen: set[int] = set()
+        current_parent_id: int | None = parent_id
+        while current_parent_id is not None:
+            if current_parent_id == target_deck_id or current_parent_id in seen:
+                raise InputError("Deck parent would create a cycle")  # noqa: TRY003
+            seen.add(current_parent_id)
+            row = self._coerce_mapping_row(
+                conn.execute(
+                    "SELECT parent_deck_id FROM decks WHERE id = ?",
+                    (current_parent_id,),
+                ).fetchone()
+            )
+            if not row:
+                return parent_id
+            raw_parent_id = row.get("parent_deck_id")
+            current_parent_id = None if raw_parent_id is None else self._normalize_deck_parent_id(raw_parent_id)
+
+        return parent_id
+
     def add_deck(
         self,
         name: str,
@@ -16812,6 +16891,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         *,
         scheduler_type: str = "sm2_plus",
         workspace_id: str | None = None,
+        parent_deck_id: Any = ...,
         visibility: str | None = None,
         review_prompt_side: str | None = None,
     ) -> int:
@@ -16829,6 +16909,15 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         scheduler_settings_json = scheduler_settings_to_json(scheduler_settings)
         try:
             with self.transaction() as conn:
+                parent_for_insert = (
+                    None
+                    if parent_deck_id is ...
+                    else self._validate_deck_parent_locked(
+                        conn,
+                        deck_id=None,
+                        parent_deck_id=parent_deck_id,
+                    )
+                )
                 # Undelete if a deck with the same name exists but is deleted
                 deleted_row = conn.execute(
                     "SELECT id, version FROM decks WHERE name = ? AND deleted = 1",
@@ -16836,33 +16925,45 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 ).fetchone()
                 if deleted_row:
                     deck_id, current_version = int(deleted_row[0]), int(deleted_row[1])
+                    if parent_deck_id is not ...:
+                        self._validate_deck_parent_locked(
+                            conn,
+                            deck_id=deck_id,
+                            parent_deck_id=parent_for_insert,
+                        )
                     next_version = current_version + 1
                     deleted_value = False if self.backend_type == BackendType.POSTGRESQL else 0
+                    set_parts = [
+                        "deleted = ?",
+                        "last_modified = ?",
+                        "version = ?",
+                        "client_id = ?",
+                        "description = COALESCE(?, description)",
+                        "workspace_id = ?",
+                        "visibility = COALESCE(?, visibility)",
+                        "review_prompt_side = COALESCE(?, review_prompt_side)",
+                        "scheduler_type = COALESCE(?, scheduler_type)",
+                        "scheduler_settings_json = COALESCE(?, scheduler_settings_json)",
+                    ]
+                    params: list[Any] = [
+                        deleted_value,
+                        now,
+                        next_version,
+                        self.client_id,
+                        description,
+                        workspace_id,
+                        normalized_visibility,
+                        normalized_prompt_side,
+                        scheduler_type,
+                        scheduler_settings_json,
+                    ]
+                    if parent_deck_id is not ...:
+                        set_parts.append("parent_deck_id = ?")
+                        params.append(parent_for_insert)
+                    params.extend([deck_id, current_version])
                     rc = conn.execute(
-                        (
-                            "UPDATE decks SET deleted = ?, last_modified = ?, version = ?, client_id = ?, "
-                            "description = COALESCE(?, description), "
-                            "workspace_id = ?, "
-                            "visibility = COALESCE(?, visibility), "
-                            "review_prompt_side = COALESCE(?, review_prompt_side), "
-                            "scheduler_type = COALESCE(?, scheduler_type), "
-                            "scheduler_settings_json = COALESCE(?, scheduler_settings_json) "
-                            "WHERE id = ? AND version = ?"
-                        ),
-                        (
-                            deleted_value,
-                            now,
-                            next_version,
-                            self.client_id,
-                            description,
-                            workspace_id,
-                            normalized_visibility,
-                            normalized_prompt_side,
-                            scheduler_type,
-                            scheduler_settings_json,
-                            deck_id,
-                            current_version,
-                        ),
+                        f"UPDATE decks SET {', '.join(set_parts)} WHERE id = ? AND version = ?",  # nosec B608
+                        tuple(params),
                     ).rowcount
                     if rc == 0:
                         raise ConflictError(  # noqa: TRY003
@@ -16873,12 +16974,13 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     return deck_id
                 insert_sql = (
                     "INSERT INTO decks("
-                    "name, description, workspace_id, visibility, review_prompt_side, scheduler_settings_json, scheduler_type, created_at, last_modified, client_id, version, deleted"
-                    ") VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                    "name, description, parent_deck_id, workspace_id, visibility, review_prompt_side, scheduler_settings_json, scheduler_type, created_at, last_modified, client_id, version, deleted"
+                    ") VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
                 )
                 params = (
                     name,
                     description,
+                    parent_for_insert,
                     workspace_id,
                     visibility_for_insert,
                     prompt_side_for_insert,
@@ -16924,7 +17026,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
     ) -> list[dict[str, Any]]:
         if shared_with_user_id is not None:
             query = (
-                "SELECT d.id, d.name, d.description, d.workspace_id, d.visibility, d.review_prompt_side, "
+                "SELECT d.id, d.name, d.description, d.parent_deck_id, d.workspace_id, d.visibility, d.review_prompt_side, "
                 "d.scheduler_settings_json, d.scheduler_type, d.created_at, d.last_modified, "
                 "d.deleted, d.client_id, d.version FROM decks d "
                 "JOIN deck_shares ds ON ds.deck_id = d.id "
@@ -16948,7 +17050,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 raise
 
         select_sql = (
-            "SELECT id, name, description, workspace_id, visibility, review_prompt_side, scheduler_settings_json, scheduler_type, created_at, last_modified, "
+            "SELECT id, name, description, parent_deck_id, workspace_id, visibility, review_prompt_side, scheduler_settings_json, scheduler_type, created_at, last_modified, "
             "deleted, client_id, version FROM decks "
         )
         if include_deleted:
@@ -16980,7 +17082,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
     def get_deck(self, deck_id: int) -> dict[str, Any] | None:
         """Fetch a single deck row by id."""
         query = (
-            "SELECT id, name, description, workspace_id, visibility, review_prompt_side, scheduler_settings_json, scheduler_type, created_at, last_modified, deleted, client_id, version "
+            "SELECT id, name, description, parent_deck_id, workspace_id, visibility, review_prompt_side, scheduler_settings_json, scheduler_type, created_at, last_modified, deleted, client_id, version "
             "FROM decks WHERE id = ?"
         )
         try:
@@ -16994,13 +17096,13 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         """Fetch one deck row by name using the repository-wide unique-name invariant."""
         if include_deleted:
             query = (
-                "SELECT id, name, description, workspace_id, review_prompt_side, scheduler_settings_json, scheduler_type, created_at, "
+                "SELECT id, name, description, parent_deck_id, workspace_id, review_prompt_side, scheduler_settings_json, scheduler_type, created_at, "
                 "last_modified, deleted, client_id, version, visibility FROM decks WHERE name = ? "
                 "ORDER BY id LIMIT 1"
             )
         else:
             query = (
-                "SELECT id, name, description, workspace_id, review_prompt_side, scheduler_settings_json, scheduler_type, created_at, "
+                "SELECT id, name, description, parent_deck_id, workspace_id, review_prompt_side, scheduler_settings_json, scheduler_type, created_at, "
                 "last_modified, deleted, client_id, version, visibility FROM decks WHERE name = ? AND deleted = 0 "
                 "ORDER BY id LIMIT 1"
             )
@@ -17142,6 +17244,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         scheduler_settings: Mapping[str, Any] | str | None = None,
         scheduler_type: str | None = None,
         workspace_id: Any = ...,
+        parent_deck_id: Any = ...,
         expected_version: int | None = None,
     ) -> bool:
         """Update mutable deck fields with optimistic locking."""
@@ -17168,6 +17271,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if workspace_id is not ...:
             set_parts.append("workspace_id = ?")
             params.append(workspace_id)
+        if parent_deck_id is not ...:
+            set_parts.append("parent_deck_id = ?")
+            params.append(self._normalize_deck_parent_id(parent_deck_id))
         if not set_parts:
             if expected_version is None:
                 return True
@@ -17193,6 +17299,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 current_version = int(row[0])
                 if expected_version is not None and current_version != expected_version:
                     raise ConflictError("Version mismatch updating deck", entity="decks", identifier=deck_id)  # noqa: TRY003
+                if parent_deck_id is not ...:
+                    params[set_parts.index("parent_deck_id = ?")] = self._validate_deck_parent_locked(
+                        conn,
+                        deck_id=int(deck_id),
+                        parent_deck_id=parent_deck_id,
+                    )
 
                 params_final = params + [deck_id]
                 query = f"UPDATE decks SET {', '.join(set_parts)} WHERE id = ? AND deleted = 0"  # nosec B608
@@ -17203,6 +17315,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 raise ConflictError("Deck name already exists", entity="decks", identifier=name or deck_id) from exc  # noqa: TRY003
             raise CharactersRAGDBError(f"Failed to update deck: {exc}") from exc  # noqa: TRY003
         except sqlite3.Error as exc:
+            raise CharactersRAGDBError(f"Failed to update deck: {exc}") from exc  # noqa: TRY003
+        except BackendDatabaseError as exc:
+            if self._is_unique_violation(exc):
+                raise ConflictError("Deck name already exists", entity="decks", identifier=name or deck_id) from exc  # noqa: TRY003
             raise CharactersRAGDBError(f"Failed to update deck: {exc}") from exc  # noqa: TRY003
 
     def _flashcard_template_default_placeholders(self, raw_definitions: Any) -> list[dict[str, Any]]:

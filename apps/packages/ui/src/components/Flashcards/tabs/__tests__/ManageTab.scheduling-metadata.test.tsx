@@ -591,6 +591,7 @@ describe("ManageTab scheduling metadata visibility", () => {
         deckId: 1,
         update: {
           workspace_id: "workspace-77",
+          parent_deck_id: null,
           expected_version: 1
         }
       })
