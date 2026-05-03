@@ -53,6 +53,171 @@ def _first_router_path(router: APIRouter | Callable[[], APIRouter]) -> str:
     raise AssertionError("router had no path-bearing routes")
 
 
+def test_append_imported_router_spec_preserves_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify imported router specs retain the metadata used for registration."""
+    from tldw_Server_API.app.api.v1.router_groups.conditional import (
+        ImportedRouterSpec,
+        append_imported_router_spec,
+    )
+
+    specs: list[RouterSpec] = []
+    _install_fake_router_module(
+        monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.acp_schedules",
+        path="/acp/schedules",
+    )
+
+    append_imported_router_spec(
+        specs,
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.acp_schedules",
+            log_name="acp_schedules",
+            prefix="/api/v1",
+            tags=("acp-schedules",),
+            route_key="acp",
+            default_stable=False,
+        ),
+    )
+
+    assert len(specs) == 1
+    assert _first_router_path(specs[0].router) == "/acp/schedules"
+    assert specs[0].prefix == "/api/v1"
+    assert specs[0].tags == ("acp-schedules",)
+    assert specs[0].route_key == "acp"
+    assert specs[0].default_stable is False
+
+
+def test_append_imported_router_spec_defers_router_attr_lookup_until_resolution(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify router attribute lookup stays lazy until RouterSpec resolution."""
+    from tldw_Server_API.app.api.v1.router_groups.conditional import (
+        ImportedRouterSpec,
+        append_imported_router_spec,
+    )
+
+    module_name = "tldw_Server_API.app.api.v1.endpoints.lazy_router"
+    access_count = {"router": 0}
+    fake_module = ModuleType(module_name)
+    router = APIRouter()
+
+    @router.get("/lazy/router")
+    def _lazy_router() -> dict[str, str]:
+        return {"status": "ok"}
+
+    def _module_getattr(name: str) -> APIRouter:
+        if name != "router":
+            raise AttributeError(name)
+        access_count["router"] += 1
+        return router
+
+    fake_module.__getattr__ = _module_getattr  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, module_name, fake_module)
+
+    specs: list[RouterSpec] = []
+    append_imported_router_spec(
+        specs,
+        ImportedRouterSpec(
+            import_path=module_name,
+            log_name="lazy-router",
+            prefix="/api/v1",
+            tags=("lazy-router",),
+        ),
+    )
+
+    assert len(specs) == 1
+    assert access_count["router"] == 0
+    assert _first_router_path(specs[0].router) == "/lazy/router"
+    assert access_count["router"] == 1
+
+
+def test_append_imported_router_spec_skips_optional_import_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify unavailable optional router modules are skipped during import."""
+    from tldw_Server_API.app.api.v1.router_groups.conditional import (
+        ImportedRouterSpec,
+        append_imported_router_spec,
+    )
+
+    def _raise_import_error(_import_path: str) -> ModuleType:
+        raise ModuleNotFoundError("optional router is unavailable")
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.router_groups.conditional.importlib.import_module",
+        _raise_import_error,
+    )
+    specs: list[RouterSpec] = []
+
+    append_imported_router_spec(
+        specs,
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.optional_missing",
+            log_name="optional-missing",
+        ),
+    )
+
+    assert specs == []
+
+
+def test_append_imported_router_spec_propagates_unexpected_import_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify unexpected import-time failures are not hidden as optional routers."""
+    from tldw_Server_API.app.api.v1.router_groups.conditional import (
+        ImportedRouterSpec,
+        append_imported_router_spec,
+    )
+
+    def _raise_runtime_error(_import_path: str) -> ModuleType:
+        raise RuntimeError("router module crashed during import")
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.router_groups.conditional.importlib.import_module",
+        _raise_runtime_error,
+    )
+    specs: list[RouterSpec] = []
+
+    with pytest.raises(RuntimeError, match="router module crashed"):
+        append_imported_router_spec(
+            specs,
+            ImportedRouterSpec(
+                import_path="tldw_Server_API.app.api.v1.endpoints.crashing_router",
+                log_name="crashing-router",
+            ),
+        )
+
+    assert specs == []
+
+
+def test_append_imported_router_spec_skips_static_missing_attr(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify static modules missing router attrs are skipped before registration."""
+    from tldw_Server_API.app.api.v1.router_groups.conditional import (
+        ImportedRouterSpec,
+        append_imported_router_spec,
+    )
+
+    module_name = "tldw_Server_API.app.api.v1.endpoints.missing_router_attr"
+    monkeypatch.setitem(sys.modules, module_name, ModuleType(module_name))
+    specs: list[RouterSpec] = []
+
+    append_imported_router_spec(
+        specs,
+        ImportedRouterSpec(
+            import_path=module_name,
+            log_name="missing-router-attr",
+            prefix="/api/v1",
+            tags=("missing-router-attr",),
+        ),
+    )
+
+    assert specs == []
+
+
 def test_register_router_specs_respects_route_policy(monkeypatch: pytest.MonkeyPatch) -> None:
     app = FastAPI()
     router = APIRouter()
