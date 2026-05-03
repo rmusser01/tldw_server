@@ -96,8 +96,13 @@ def normalize_runtime_reason(reason: str) -> RuntimeReasonCode:
     return _RUNTIME_REASON_CODE_MAP.get(normalized, "unknown")
 
 
-def normalize_runtime_reasons(reasons: list[str] | tuple[str, ...]) -> list[RuntimeReasonCode]:
+def normalize_runtime_reasons(
+    reasons: list[str] | tuple[str, ...] | None,
+) -> list[RuntimeReasonCode]:
     """Normalize raw runtime reasons while preserving first-seen order."""
+
+    if reasons is None:
+        return []
 
     normalized: list[RuntimeReasonCode] = []
     seen: set[RuntimeReasonCode] = set()

@@ -78,6 +78,12 @@ def test_runtime_reason_normalization_maps_raw_runtime_reasons() -> None:
     ]
 
 
+def test_runtime_reason_normalization_treats_none_as_empty() -> None:
+    """Defensively handle absent reason lists from discovery callers."""
+
+    assert normalize_runtime_reasons(None) == []  # type: ignore[arg-type]
+
+
 def test_feature_discovery_preserves_raw_reasons_and_adds_normalized_codes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
