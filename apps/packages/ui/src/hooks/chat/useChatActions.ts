@@ -93,9 +93,10 @@ import {
 import { resolveSavedDegradedCharacterPersist } from "@/hooks/chat/characterPersistOutcome"
 import { ensurePersonaServerChat } from "@/hooks/chat/personaServerChat"
 import {
+  aggregateChatSubmitResults,
   chatSubmitFailed,
   chatSubmitSkipped,
-  chatSubmitSubmitted,
+  normalizeChatSubmitResult,
   resolveTurnRagMediaIds,
   shouldUseRagForTurn,
   type ChatSubmitResult
@@ -153,9 +154,7 @@ type ChatModeOverrides = {
 
 const loadActorSettings = () => import("@/services/actor-settings")
 const STREAMING_UPDATE_INTERVAL_MS = 80
-const toChatSubmitResult = (
-  result: ChatSubmitResult | void | undefined
-): ChatSubmitResult => result ?? chatSubmitSubmitted()
+const toChatSubmitResult = normalizeChatSubmitResult
 
 type SaveMessagePayload = Omit<SaveMessageData, "setHistoryId"> & {
   setHistoryId?: SaveMessageData["setHistoryId"]
@@ -1023,7 +1022,7 @@ export const useChatActions = ({
       impersonateUser: boolean
       forceNarrate: boolean
     }
-  }) => {
+  }): Promise<ChatSubmitResult> => {
     const activeCharacter = character ?? selectedCharacter
     if (!activeCharacter?.id) {
       throw new Error("No character selected")
@@ -1172,7 +1171,7 @@ export const useChatActions = ({
         })
         setIsProcessing(false)
         setStreaming(false)
-        return
+        return chatSubmitSkipped("No model selected for character chat")
       }
 
       const hasImageInput =
@@ -1187,7 +1186,7 @@ export const useChatActions = ({
         })
         setIsProcessing(false)
         setStreaming(false)
-        return
+        return chatSubmitSkipped("Empty character chat message")
       }
 
       await tldwClient.initialize().catch(() => null)
@@ -1806,6 +1805,7 @@ export const useChatActions = ({
 
       setIsProcessing(false)
       setStreaming(false)
+      return toChatSubmitResult()
     } catch (e) {
       if (
         discardAbortedTurnIfRequested({
@@ -1819,7 +1819,7 @@ export const useChatActions = ({
       ) {
         setIsProcessing(false)
         setStreaming(false)
-        return
+        return chatSubmitSkipped("Character chat turn aborted")
       }
 
       cancelStreamingUpdate()
@@ -1893,6 +1893,7 @@ export const useChatActions = ({
       }
       setIsProcessing(false)
       setStreaming(false)
+      return chatSubmitFailed(interruptionReason)
     } finally {
       discardCurrentTurnOnAbortRef.current = false
       cancelStreamingUpdate()
@@ -2427,7 +2428,7 @@ export const useChatActions = ({
               return chatSubmitSkipped("No model selected for character chat")
             }
             markSteeringApplied()
-            await characterChatMode({
+            const characterResult = await characterChatMode({
               message,
               image,
               isRegenerate,
@@ -2440,7 +2441,7 @@ export const useChatActions = ({
               messageSteering: messageSteeringForTurn,
               serverChatIdOverride
             })
-            return chatSubmitSubmitted()
+            return toChatSubmitResult(characterResult)
           }
 
           if (isPersonaAssistantSelection(selectedAssistant)) {
@@ -2634,25 +2635,29 @@ export const useChatActions = ({
             uploadedFiles: uploadedFiles
           }
 
-          const comparePromises = models.map((modelId) => {
+          const comparePromises = models.map(async (modelId) => {
             const historyForModel = buildHistoryForModel(baseMessages, modelId)
-            return normalChatMode(
-              message,
-              image,
-              true,
-              baseMessages,
-              baseHistory,
-              signal,
-              {
-                ...compareEnhancedParams,
-                selectedModel: modelId,
-                clusterId,
-                assistantMessageType: "compare:reply",
-                modelIdOverride: modelId,
-                assistantParentMessageId: compareUserMessageId,
-                historyForModel
-              }
-            ).catch((e) => {
+            try {
+              return toChatSubmitResult(
+                await normalChatMode(
+                  message,
+                  image,
+                  true,
+                  baseMessages,
+                  baseHistory,
+                  signal,
+                  {
+                    ...compareEnhancedParams,
+                    selectedModel: modelId,
+                    clusterId,
+                    assistantMessageType: "compare:reply",
+                    modelIdOverride: modelId,
+                    assistantParentMessageId: compareUserMessageId,
+                    historyForModel
+                  }
+                )
+              )
+            } catch (e) {
               const errorMessage =
                 e instanceof Error
                   ? e.message
@@ -2661,16 +2666,17 @@ export const useChatActions = ({
                 message: t("error"),
                 description: errorMessage
               })
-            })
+              return chatSubmitFailed(errorMessage)
+            }
           })
 
           markSteeringApplied()
-          await Promise.allSettled(comparePromises)
+          const compareResults = await Promise.all(comparePromises)
           refreshHistoryFromMessages()
           setIsProcessing(false)
           setStreaming(false)
           setAbortController(null)
-          return chatSubmitSubmitted()
+          return aggregateChatSubmitResults(compareResults)
         }
       }
     } catch (e) {

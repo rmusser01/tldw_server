@@ -3,10 +3,12 @@ import { resolve } from "node:path"
 import { describe, expect, it } from "vitest"
 
 import {
+  aggregateChatSubmitResults,
   chatSubmitFailed,
   chatSubmitSkipped,
   chatSubmitSubmitted,
-  isChatSubmitSuccess
+  isChatSubmitSuccess,
+  throwIfChatSubmitUnsuccessful
 } from "../chat-action-utils"
 
 const readUiSource = (path: string) =>
@@ -26,6 +28,38 @@ describe("chat submit result contract", () => {
     expect(isChatSubmitSuccess(chatSubmitSubmitted())).toBe(true)
     expect(isChatSubmitSuccess(chatSubmitFailed("boom"))).toBe(false)
     expect(isChatSubmitSuccess(chatSubmitSkipped("empty"))).toBe(false)
+  })
+
+  it("aggregates compare branch results without masking total failure", () => {
+    expect(
+      aggregateChatSubmitResults([
+        chatSubmitFailed("model-a failed"),
+        chatSubmitFailed("model-b failed")
+      ])
+    ).toEqual(chatSubmitFailed("model-a failed"))
+    expect(
+      aggregateChatSubmitResults([
+        chatSubmitFailed("model-a failed"),
+        chatSubmitSubmitted()
+      ])
+    ).toEqual(chatSubmitSubmitted())
+    expect(aggregateChatSubmitResults([chatSubmitSkipped("offline")])).toEqual(
+      chatSubmitSkipped("offline")
+    )
+    expect(aggregateChatSubmitResults([])).toEqual(
+      chatSubmitSkipped("No chat submissions completed")
+    )
+  })
+
+  it("turns unsuccessful submit results into queue-blocking errors", () => {
+    expect(() => throwIfChatSubmitUnsuccessful(chatSubmitSubmitted())).not.toThrow()
+    expect(() => throwIfChatSubmitUnsuccessful()).not.toThrow()
+    expect(() =>
+      throwIfChatSubmitUnsuccessful(chatSubmitFailed("provider failed"))
+    ).toThrow("provider failed")
+    expect(() =>
+      throwIfChatSubmitUnsuccessful(chatSubmitSkipped("not ready"))
+    ).toThrow("not ready")
   })
 
   it("requires the shared pipeline to return submitted or failed results", () => {
@@ -58,6 +92,8 @@ describe("chat submit result contract", () => {
     expect(source).toMatch(/Promise<ChatSubmitResult>/)
     expect(source).toContain("resolveTurnRagMediaIds")
     expect(source).toContain("shouldUseRagForTurn")
+    expect(source).toContain("const characterResult = await characterChatMode")
+    expect(source).toContain("aggregateChatSubmitResults(compareResults)")
     expect(source).toContain("return chatSubmitFailed(errorMessage)")
     expect(source).toContain("return chatSubmitSkipped(")
   })
