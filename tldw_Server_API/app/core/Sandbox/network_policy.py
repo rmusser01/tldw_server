@@ -20,6 +20,7 @@ _SANDBOX_NET_POLICY_NONCRITICAL_EXCEPTIONS = (
     ValueError,
     subprocess.SubprocessError,
 )
+_IPTABLES_CLEANUP_TIMEOUT_SEC = 5
 
 
 def _truthy(v: str | None) -> bool:
@@ -281,7 +282,11 @@ def delete_rules_by_label(label: str) -> None:
     """
     # Try deletion by line numbers (descending)
     try:
-        out = subprocess.check_output(["iptables", "-L", "DOCKER-USER", "--line-numbers", "-n", "-v"], text=True)
+        out = subprocess.check_output(
+            ["iptables", "-L", "DOCKER-USER", "--line-numbers", "-n", "-v"],
+            text=True,
+            timeout=_IPTABLES_CLEANUP_TIMEOUT_SEC,
+        )
         lines = out.splitlines()
         # Skip header lines, find those with the comment
         numbered: list[int] = []
@@ -294,19 +299,31 @@ def delete_rules_by_label(label: str) -> None:
                     continue
         for num in sorted(numbered, reverse=True):
             with contextlib.suppress(_SANDBOX_NET_POLICY_NONCRITICAL_EXCEPTIONS):
-                subprocess.run(["iptables", "-D", "DOCKER-USER", str(num)], check=False)
+                subprocess.run(
+                    ["iptables", "-D", "DOCKER-USER", str(num)],
+                    check=False,
+                    timeout=_IPTABLES_CLEANUP_TIMEOUT_SEC,
+                )
         return
     except _SANDBOX_NET_POLICY_NONCRITICAL_EXCEPTIONS as e:
         logger.debug("network policy: delete_rules_by_label line-number path failed for {}: {}", label, e)
     # Fallback: translate `iptables -S` specs into deletions
     try:
-        out2 = subprocess.check_output(["iptables", "-S", "DOCKER-USER"], text=True)
+        out2 = subprocess.check_output(
+            ["iptables", "-S", "DOCKER-USER"],
+            text=True,
+            timeout=_IPTABLES_CLEANUP_TIMEOUT_SEC,
+        )
         for line in out2.splitlines():
             if label in line:
                 parts = line.strip().split()
                 if parts and parts[0] in {"-A", "-I"}:
                     parts[0] = "-D"
                     with contextlib.suppress(_SANDBOX_NET_POLICY_NONCRITICAL_EXCEPTIONS):
-                        subprocess.run(["iptables"] + parts, check=False)
+                        subprocess.run(
+                            ["iptables"] + parts,
+                            check=False,
+                            timeout=_IPTABLES_CLEANUP_TIMEOUT_SEC,
+                        )
     except _SANDBOX_NET_POLICY_NONCRITICAL_EXCEPTIONS as e:
         logger.debug("network policy: delete_rules_by_label -S fallback failed for {}: {}", label, e)

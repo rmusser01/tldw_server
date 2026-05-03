@@ -93,27 +93,55 @@ class DockerRunner:
     _egress_label: dict[str, str] = {}
 
     @staticmethod
-    def _cleanup_egress_resources(net: str | None, label: str) -> None:
-        try:
+    def _cleanup_egress_resources(
+        net: str | None,
+        label: str,
+        *,
+        cleanup_rules: bool = True,
+    ) -> None:
+        """Best-effort cleanup for Docker egress state owned by one run.
+
+        `net` is the optional per-run Docker network. `label` identifies
+        iptables rules that may have been installed after container start.
+        Early startup failures pass `cleanup_rules=False` because no iptables
+        rules have been applied yet and cleanup must return promptly.
+        """
+        if cleanup_rules:
             try:
                 delete_rules_by_label(label)
-            except _DOCKER_RUNNER_NONCRITICAL_EXCEPTIONS:
-                pass
-            if net:
-                with contextlib.suppress(_DOCKER_RUNNER_NONCRITICAL_EXCEPTIONS):
-                    subprocess.run(["docker", "network", "rm", net], check=False)
-        except _DOCKER_RUNNER_NONCRITICAL_EXCEPTIONS:
-            pass
+            except _DOCKER_RUNNER_NONCRITICAL_EXCEPTIONS as exc:
+                logger.debug(
+                    "docker egress rule cleanup failed label={} error={}",
+                    label,
+                    exc,
+                )
+        if net:
+            try:
+                subprocess.run(["docker", "network", "rm", net], check=False, timeout=5)
+            except _DOCKER_RUNNER_NONCRITICAL_EXCEPTIONS as exc:
+                logger.debug(
+                    "docker egress network cleanup failed net={} label={} error={}",
+                    net,
+                    label,
+                    exc,
+                )
 
     @classmethod
-    def _cleanup_tracked_egress_resources(cls, run_id: str) -> None:
+    def _cleanup_tracked_egress_resources(
+        cls,
+        run_id: str,
+        *,
+        cleanup_rules: bool = True,
+    ) -> None:
+        """Read tracked egress metadata for a run and clean owned resources."""
         with cls._egress_lock:
             net = cls._egress_net.get(run_id)
             label = cls._egress_label.get(run_id, f"tldw-run-{run_id[:12]}")
-        cls._cleanup_egress_resources(net, label)
+        cls._cleanup_egress_resources(net, label, cleanup_rules=cleanup_rules)
 
     @classmethod
     def _clear_run_tracking(cls, run_id: str) -> None:
+        """Remove active container and egress bookkeeping for a finished run."""
         with cls._active_lock:
             cls._active_cid.pop(run_id, None)
         with cls._egress_lock:
@@ -439,8 +467,12 @@ class DockerRunner:
             remaining = max(1, int((deadline - datetime.utcnow()).total_seconds()))
             cid = subprocess.check_output(cmd, text=True, timeout=remaining).strip()
         except FileNotFoundError:
+            self._cleanup_egress_resources(egress_net_name, egress_label, cleanup_rules=False)
+            self._clear_run_tracking(run_id)
             raise RuntimeError("docker binary not found in PATH") from None
         except subprocess.TimeoutExpired:
+            self._cleanup_egress_resources(egress_net_name, egress_label, cleanup_rules=False)
+            self._clear_run_tracking(run_id)
             finished = datetime.utcnow()
             hub.publish_event(run_id, "end", {"exit_code": None, "reason": "startup_timeout"})
             # Usage (no logs/artifacts expected yet)
@@ -468,9 +500,13 @@ class DockerRunner:
                     logger.warning(f"docker create failed with security options; retrying without them: {e}")
                     cmd_wo_sec = [c for c in cmd if c not in security_opts]
                     cid = subprocess.check_output(cmd_wo_sec, text=True).strip()
-                except subprocess.CalledProcessError as e2:
+                except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e2:
+                    self._cleanup_egress_resources(egress_net_name, egress_label, cleanup_rules=False)
+                    self._clear_run_tracking(run_id)
                     raise RuntimeError(f"docker create failed (without security opts): {e2}") from e2
             else:
+                self._cleanup_egress_resources(egress_net_name, egress_label, cleanup_rules=False)
+                self._clear_run_tracking(run_id)
                 raise RuntimeError(f"docker create failed: {e}") from e
 
         # Register container for cancellation
@@ -508,7 +544,7 @@ class DockerRunner:
             # Cleanup container
             with contextlib.suppress(_DOCKER_RUNNER_NONCRITICAL_EXCEPTIONS):
                 subprocess.check_call(["docker", "rm", "-f", cid])
-            self._cleanup_tracked_egress_resources(run_id)
+            self._cleanup_tracked_egress_resources(run_id, cleanup_rules=False)
             self._clear_run_tracking(run_id)
             finished = datetime.utcnow()
             hub.publish_event(run_id, "end", {"exit_code": None, "reason": "startup_timeout"})
@@ -537,7 +573,7 @@ class DockerRunner:
             # Cleanup container
             with contextlib.suppress(_DOCKER_RUNNER_NONCRITICAL_EXCEPTIONS):
                 subprocess.check_call(["docker", "rm", "-f", cid])
-            self._cleanup_tracked_egress_resources(run_id)
+            self._cleanup_tracked_egress_resources(run_id, cleanup_rules=False)
             self._clear_run_tracking(run_id)
             raise RuntimeError(f"docker cp failed: {e}") from e
 
@@ -563,7 +599,7 @@ class DockerRunner:
             # Remove after collecting stats
             with contextlib.suppress(_DOCKER_RUNNER_NONCRITICAL_EXCEPTIONS):
                 subprocess.check_call(["docker", "rm", "-f", cid])
-            self._cleanup_tracked_egress_resources(run_id)
+            self._cleanup_tracked_egress_resources(run_id, cleanup_rules=False)
             self._clear_run_tracking(run_id)
             return RunStatus(
                 id="",
@@ -577,7 +613,7 @@ class DockerRunner:
         except subprocess.CalledProcessError as e:
             with contextlib.suppress(_DOCKER_RUNNER_NONCRITICAL_EXCEPTIONS):
                 subprocess.check_call(["docker", "rm", "-f", cid])
-            self._cleanup_tracked_egress_resources(run_id)
+            self._cleanup_tracked_egress_resources(run_id, cleanup_rules=False)
             self._clear_run_tracking(run_id)
             raise RuntimeError(f"docker start failed: {e}") from e
 

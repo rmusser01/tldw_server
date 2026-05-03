@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 
 import tldw_Server_API.app.core.Sandbox.runners.vz_common as vz_common
@@ -426,26 +427,33 @@ def test_vz_linux_exec_failure_terminates_vm_and_removes_created_workspace(
     monkeypatch.setattr(vz_linux_module.VZLinuxRunner, "helper_client_cls", _FakeHelper)
 
     rid = "vz-run-exec-fails-cleanup"
-    status = VZLinuxRunner().start_run(
-        run_id=rid,
-        spec=RunSpec(
-            session_id=None,
-            runtime=RuntimeType.vz_linux,
-            base_image="/tmp/raw-vz-bundle",
-            command=["/bin/echo", "ok"],
-            network_policy="deny_all",
-        ),
-        session_workspace=None,
-    )
+    try:
+        status = VZLinuxRunner().start_run(
+            run_id=rid,
+            spec=RunSpec(
+                session_id=None,
+                runtime=RuntimeType.vz_linux,
+                base_image="/tmp/raw-vz-bundle",
+                command=["/bin/echo", "ok"],
+                network_policy="deny_all",
+            ),
+            session_workspace=None,
+        )
 
-    assert status.phase == RunPhase.failed
-    assert "guest_exec_failed" in status.message
-    assert ("terminate_vm", "vm-exec-fails") in calls
-    assert workspaces
-    assert not workspaces[0].exists()
-    with VZLinuxRunner._active_lock:  # type: ignore[attr-defined]
-        assert rid not in VZLinuxRunner._active_vm  # type: ignore[attr-defined]
-        assert rid not in VZLinuxRunner._active_run_dir  # type: ignore[attr-defined]
+        assert status.phase == RunPhase.failed
+        assert "guest_exec_failed" in status.message
+        assert ("terminate_vm", "vm-exec-fails") in calls
+        assert workspaces
+        assert not workspaces[0].exists()
+        with VZLinuxRunner._active_lock:  # type: ignore[attr-defined]
+            assert rid not in VZLinuxRunner._active_vm  # type: ignore[attr-defined]
+            assert rid not in VZLinuxRunner._active_run_dir  # type: ignore[attr-defined]
+    finally:
+        with VZLinuxRunner._active_lock:  # type: ignore[attr-defined]
+            VZLinuxRunner._active_vm.pop(rid, None)  # type: ignore[attr-defined]
+            VZLinuxRunner._active_run_dir.pop(rid, None)  # type: ignore[attr-defined]
+        if workspaces and workspaces[0].exists():
+            shutil.rmtree(workspaces[0], ignore_errors=True)
 
 
 def test_vz_linux_start_run_fails_when_image_store_template_id_has_no_source_path(

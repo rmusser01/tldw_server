@@ -75,6 +75,10 @@ def _stub_docker_resource_probes(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(DockerRunner, "_read_cgroup_mem_peak_mb_by_cid", staticmethod(lambda cid: None))
     monkeypatch.setattr(DockerRunner, "_get_mem_usage_mb", staticmethod(lambda cid: 0))
     monkeypatch.setattr(DockerRunner, "_get_cpu_time_sec", staticmethod(lambda cid, started, finished: 0))
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Sandbox.runners.docker_runner.delete_rules_by_label",
+        lambda label: None,
+    )
 
 
 @pytest.mark.unit
@@ -188,6 +192,42 @@ def test_runner_startup_timeout_on_create(monkeypatch: pytest.MonkeyPatch) -> No
     # Ensure WS end has reason=startup_timeout
     frames = list(hub._buffers.get(rid, []))  # type: ignore[attr-defined]
     assert any(f.get("type") == "event" and f.get("event") == "end" and f.get("data", {}).get("reason") == "startup_timeout" for f in frames)
+
+
+@pytest.mark.unit
+def test_runner_startup_timeout_on_create_removes_precreated_egress_network(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("TLDW_SANDBOX_DOCKER_FAKE_EXEC", "0")
+    monkeypatch.setenv("SANDBOX_EGRESS_ENFORCEMENT", "true")
+    monkeypatch.setenv("SANDBOX_EGRESS_GRANULAR_ENFORCEMENT", "true")
+    monkeypatch.setattr("tldw_Server_API.app.core.Sandbox.runners.docker_runner.docker_available", lambda: True)
+    _stub_docker_resource_probes(monkeypatch)
+
+    import subprocess
+
+    rid = "run_create_timeout_cleanup"
+    run_calls: list[list[str]] = []
+
+    def _run(args: List[str], check: bool = False, **kwargs: Any):
+        run_calls.append(list(args))
+        return types.SimpleNamespace(returncode=0, stdout="")
+
+    def _raise_timeout(*args: Any, **kwargs: Any):  # type: ignore[no-untyped-def]
+        raise subprocess.TimeoutExpired(cmd=args[0] if args else "docker create", timeout=1)
+
+    monkeypatch.setattr("subprocess.run", _run)
+    monkeypatch.setattr("subprocess.check_output", _raise_timeout)
+
+    rs = DockerRunner().start_run(
+        rid,
+        _spec(["python", "-c", "print('x')"], network_policy="allowlist"),
+    )
+
+    assert rs.phase.value == "timed_out"
+    assert rs.message == "startup_timeout"
+    assert ["docker", "network", "rm", f"tldw_sbx_{rid[:12]}"] in run_calls
+    _assert_docker_tracking_cleared(rid)
 
 
 @pytest.mark.unit

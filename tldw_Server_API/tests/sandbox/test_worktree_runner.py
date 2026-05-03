@@ -326,6 +326,8 @@ def test_cancel_run_kills_active_process_group_and_removes_run_dir(
         ok = WorktreeRunner.cancel_run(rid)
     finally:
         with WorktreeRunner._active_lock:  # type: ignore[attr-defined]
+            WorktreeRunner._active_proc.pop(rid, None)  # type: ignore[attr-defined]
+            WorktreeRunner._active_run_dir.pop(rid, None)  # type: ignore[attr-defined]
             WorktreeRunner._cancelled_runs.discard(rid)  # type: ignore[attr-defined]
 
     assert ok is True
