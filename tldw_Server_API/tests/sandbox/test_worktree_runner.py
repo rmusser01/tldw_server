@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import os
+import shutil
+import signal
 import subprocess
 import sys
 from pathlib import Path
@@ -93,6 +95,37 @@ def test_destroy_session_removes_worktree(test_repo: str) -> None:
     assert os.path.isdir(wt)
     WorktreeRunner.destroy_worktree(wt, test_repo)
     assert not os.path.isdir(wt)
+
+
+def test_destroy_worktree_falls_back_when_repo_path_is_missing(tmp_path: Path) -> None:
+    """Manual cleanup should still run if git cannot use the original repo path."""
+    wt = tmp_path / "detached-worktree"
+    wt.mkdir()
+
+    WorktreeRunner.destroy_worktree(str(wt), str(tmp_path / "missing-repo"))
+
+    if wt.exists():
+        pytest.fail("destroy_worktree should remove the worktree directory")
+
+
+def test_destroy_worktree_reraises_unexpected_exceptions(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Programming defects during cleanup should not be hidden."""
+    wt = tmp_path / "detached-worktree"
+    repo = tmp_path / "repo"
+    wt.mkdir()
+    repo.mkdir()
+
+    def _raise_type_error(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        raise TypeError("programming defect")
+
+    monkeypatch.setattr(subprocess, "check_call", _raise_type_error)
+
+    with pytest.raises(TypeError, match="programming defect"):
+        WorktreeRunner.destroy_worktree(str(wt), str(repo))
 
 
 def test_create_session_invalid_repo(tmp_path: Path) -> None:
@@ -255,6 +288,55 @@ def test_run_without_session_workspace() -> None:
     assert result.exit_code == 0
 
 
+def test_start_run_failure_after_worktree_create_destroys_worktree(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Failures after worktree creation must not leak detached worktrees."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    created_worktree = tmp_path / "created-worktree"
+    destroy_calls: list[tuple[str, str]] = []
+
+    def _create_worktree(repo_path: str, branch: str = "HEAD") -> str:
+        if repo_path != str(repo):
+            pytest.fail(f"unexpected repo path: {repo_path}")
+        if branch != "HEAD":
+            pytest.fail(f"unexpected branch: {branch}")
+        created_worktree.mkdir()
+        return str(created_worktree)
+
+    def _destroy_worktree(worktree_path: str, repo_path: str) -> None:
+        destroy_calls.append((worktree_path, repo_path))
+        shutil.rmtree(worktree_path)
+
+    monkeypatch.setattr(WorktreeRunner, "_is_git_repo", staticmethod(lambda path: path == str(repo)))
+    monkeypatch.setattr(WorktreeRunner, "create_worktree", staticmethod(_create_worktree))
+    monkeypatch.setattr(WorktreeRunner, "destroy_worktree", staticmethod(_destroy_worktree))
+
+    result = WorktreeRunner(allowed_repo_dirs=[str(tmp_path)]).start_run(
+        "run-worktree-invalid-inline",
+        RunSpec(
+            session_id=None,
+            runtime=RuntimeType.worktree,
+            base_image=None,
+            command=["/bin/echo", "unused"],
+            timeout_sec=10,
+            files_inline=[("../escape.txt", b"not allowed")],
+        ),
+        session_workspace=str(repo),
+    )
+
+    if result.phase != RunPhase.failed:
+        pytest.fail(f"expected failed run, got {result.phase}")
+    if "invalid inline file path" not in (result.message or ""):
+        pytest.fail(f"unexpected failure message: {result.message}")
+    if destroy_calls != [(str(created_worktree), str(repo))]:
+        pytest.fail(f"unexpected destroy calls: {destroy_calls}")
+    if created_worktree.exists():
+        pytest.fail("created worktree should have been removed")
+
+
 # ---------------------------------------------------------------------------
 # Linux unshare refusal
 # ---------------------------------------------------------------------------
@@ -295,6 +377,46 @@ def test_build_command_wraps_with_unshare_on_linux() -> None:
 def test_cancel_run_returns_false_when_no_proc() -> None:
     """cancel_run returns False when no process is tracked."""
     assert WorktreeRunner.cancel_run("nonexistent-run") is False
+
+
+def test_cancel_run_kills_active_process_group_and_removes_run_dir(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """cancel_run cleans both process tracking and the per-run directory."""
+    rid = "run-worktree-cancel-cleanup"
+    run_dir = tmp_path / "worktree-run-dir"
+    run_dir.mkdir()
+
+    class _FakeProc:
+        pid = 4321
+
+        def wait(self, timeout: int | None = None) -> int:
+            del timeout
+            return 0
+
+    with WorktreeRunner._active_lock:  # type: ignore[attr-defined]
+        WorktreeRunner._active_proc[rid] = _FakeProc()  # type: ignore[attr-defined]
+        WorktreeRunner._active_run_dir[rid] = str(run_dir)  # type: ignore[attr-defined]
+
+    killpg_calls: list[tuple[int, int]] = []
+    monkeypatch.setattr("os.killpg", lambda pid, sig: killpg_calls.append((pid, sig)))
+    monkeypatch.setattr(WorktreeRunner, "_cancel_grace_seconds", classmethod(lambda cls: 0))
+
+    try:
+        ok = WorktreeRunner.cancel_run(rid)
+    finally:
+        with WorktreeRunner._active_lock:  # type: ignore[attr-defined]
+            WorktreeRunner._active_proc.pop(rid, None)  # type: ignore[attr-defined]
+            WorktreeRunner._active_run_dir.pop(rid, None)  # type: ignore[attr-defined]
+            WorktreeRunner._cancelled_runs.discard(rid)  # type: ignore[attr-defined]
+
+    assert ok is True
+    assert killpg_calls == [(4321, signal.SIGTERM)]
+    assert not run_dir.exists()
+    with WorktreeRunner._active_lock:  # type: ignore[attr-defined]
+        assert rid not in WorktreeRunner._active_proc  # type: ignore[attr-defined]
+        assert rid not in WorktreeRunner._active_run_dir  # type: ignore[attr-defined]
 
 
 # ---------------------------------------------------------------------------

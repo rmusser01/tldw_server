@@ -101,6 +101,65 @@ def test_bulk_candidate_user_id_log_omits_raw_exception() -> None:
 
 
 @pytest.mark.asyncio
+async def test_list_user_profiles_includes_canonical_page_pagination(monkeypatch: pytest.MonkeyPatch) -> None:
+    from tldw_Server_API.app.services import admin_profiles_service as profiles_service
+
+    class _ProfileService:
+        def __init__(self, _db_pool):
+            pass
+
+        def parse_sections(self, _sections):
+            return {"identity"}
+
+        def _get_metrics_registry(self):
+            return None
+
+    async def _empty_candidates(**_kwargs):
+        return []
+
+    async def _db_pool():
+        return object()
+
+    async def _api_key_manager():
+        return object()
+
+    async def _repo_from_pool():
+        return object()
+
+    monkeypatch.setattr(profiles_service, "_load_bulk_user_candidates", _empty_candidates)
+    monkeypatch.setattr(profiles_service, "get_db_pool", _db_pool)
+    monkeypatch.setattr(profiles_service, "get_api_key_manager", _api_key_manager)
+    monkeypatch.setattr(profiles_service, "UserProfileService", _ProfileService)
+    monkeypatch.setattr(profiles_service, "AuthnzUsersRepo", SimpleNamespace(from_pool=_repo_from_pool))
+
+    response, _audit = await profiles_service.list_user_profiles(
+        principal=object(),
+        sections=None,
+        include_sources=False,
+        include_raw=False,
+        mask_secrets=True,
+        user_ids=None,
+        org_id=None,
+        team_id=None,
+        role=None,
+        is_active=None,
+        search=None,
+        page=1,
+        limit=10,
+        session_manager=object(),
+    )
+
+    assert response.pagination.model_dump(mode="json") == {
+        "mode": "page",
+        "page": 1,
+        "per_page": 10,
+        "total": 0,
+        "total_pages": 0,
+        "has_more": False,
+    }
+
+
+@pytest.mark.asyncio
 async def test_profile_batch_telemetry_log_omits_raw_exception(monkeypatch: pytest.MonkeyPatch) -> None:
     from tldw_Server_API.app.services import admin_profiles_service as profiles_service
 

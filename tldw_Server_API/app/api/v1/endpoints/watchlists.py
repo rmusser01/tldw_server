@@ -2055,7 +2055,19 @@ async def _build_source_preview_response(
         )
 
     total = len(preview_items)
-    return PreviewResponse(items=preview_items, total=total, ingestable=total, filtered=0)
+    return PreviewResponse(
+        items=preview_items,
+        total=total,
+        pagination=build_offset_pagination_meta(
+            limit=limit,
+            offset=0,
+            total=total,
+            count=total,
+            has_more=False,
+        ),
+        ingestable=total,
+        filtered=0,
+    )
 
 
 @router.post("/sources/test", response_model=PreviewResponse, summary="Test draft source and preview items")
@@ -3059,7 +3071,20 @@ async def preview_job(
                 )
             )
 
-    return PreviewResponse(items=items, total=len(items), ingestable=total_ingestable, filtered=total_filtered)
+    total = len(items)
+    return PreviewResponse(
+        items=items,
+        total=total,
+        pagination=build_offset_pagination_meta(
+            limit=limit,
+            offset=0,
+            total=total,
+            count=total,
+            has_more=False,
+        ),
+        ingestable=total_ingestable,
+        filtered=total_filtered,
+    )
 
 
 @router.get("/jobs", response_model=JobsListResponse, summary="List jobs")

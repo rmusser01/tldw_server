@@ -509,6 +509,15 @@ class AudiobookChapterListResponse(BaseModel):
 
     project_id: str = Field(..., description="Project identifier")
     chapters: list[AudiobookChapterInfo] = Field(..., description="Chapter list")
+    limit: int = Field(..., description="Applied page limit")
+    offset: int = Field(..., description="Applied page offset")
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+    pagination: OffsetPaginationMeta = Field(..., description="Canonical pagination metadata")
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self) -> AudiobookChapterListResponse:
+        return _default_offset_pagination_aliases(self)
 
     model_config = {
         "json_schema_extra": {
@@ -526,6 +535,16 @@ class AudiobookChapterListResponse(BaseModel):
                         "metadata": {"chapter_id": "ch_001", "item_index": 0},
                     }
                 ],
+                "limit": 200,
+                "offset": 0,
+                "pagination": {
+                    "mode": "offset",
+                    "total": None,
+                    "limit": 200,
+                    "offset": 0,
+                    "has_more": False,
+                    "next_offset": None,
+                },
             }
         }
     }
@@ -547,6 +566,15 @@ class AudiobookArtifactsResponse(BaseModel):
 
     project_id: str = Field(..., description="Project identifier")
     artifacts: list[ArtifactInfo] = Field(..., description="Artifact list")
+    limit: int = Field(..., description="Applied page limit")
+    offset: int = Field(..., description="Applied page offset")
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+    pagination: OffsetPaginationMeta = Field(..., description="Canonical pagination metadata")
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self) -> AudiobookArtifactsResponse:
+        return _default_offset_pagination_aliases(self)
 
     model_config = {
         "json_schema_extra": {
@@ -578,6 +606,16 @@ class AudiobookArtifactsResponse(BaseModel):
                         "download_url": "/api/v1/outputs/790/download",
                     },
                 ],
+                "limit": 200,
+                "offset": 0,
+                "pagination": {
+                    "mode": "offset",
+                    "total": None,
+                    "limit": 200,
+                    "offset": 0,
+                    "has_more": False,
+                    "next_offset": None,
+                },
             }
         }
     }

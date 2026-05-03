@@ -104,6 +104,71 @@ def _make_structured_prompt_definition_exceeding_total_runtime_limit() -> dict:
         },
     }
 
+
+@pytest.mark.asyncio
+async def test_list_evaluations_honors_non_multiple_offset() -> None:
+    """Prompt Studio evaluation listing starts at the exact requested offset."""
+    from tldw_Server_API.app.api.v1.endpoints.prompt_studio.prompt_studio_evaluations import list_evaluations
+
+    rows = [
+        {
+            "id": idx,
+            "uuid": f"00000000-0000-0000-0000-{idx + 1:012d}",
+            "prompt_id": 10,
+            "prompt_name": f"Evaluation {idx}",
+            "status": "completed",
+            "created_at": "2026-01-01T00:00:00Z",
+            "completed_at": None,
+            "aggregate_metrics": None,
+        }
+        for idx in range(10)
+    ]
+
+    class _FakePromptStudioDB:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, int | None]] = []
+
+        def list_evaluations(self, *, project_id, prompt_id=None, status=None, page=1, per_page=20):
+            self.calls.append(
+                {
+                    "project_id": project_id,
+                    "prompt_id": prompt_id,
+                    "page": page,
+                    "per_page": per_page,
+                }
+            )
+            start = (page - 1) * per_page
+            return {
+                "evaluations": rows[start:start + per_page],
+                "pagination": {
+                    "page": page,
+                    "per_page": per_page,
+                    "total": len(rows),
+                    "total_pages": (len(rows) + per_page - 1) // per_page,
+                },
+            }
+
+    db = _FakePromptStudioDB()
+
+    response = await list_evaluations(
+        request=None,
+        project_id=1,
+        prompt_id=None,
+        limit=3,
+        offset=4,
+        db=db,
+        user_context={},
+    )
+
+    assert [item.id for item in response["evaluations"]] == [4, 5, 6]
+    assert response["total"] == 10
+    assert response["pagination"].offset == 4
+    assert db.calls == [
+        {"project_id": 1, "prompt_id": None, "page": 2, "per_page": 3},
+        {"project_id": 1, "prompt_id": None, "page": 3, "per_page": 3},
+    ]
+
+
 @pytest.fixture
 def client(mock_user, test_db):
     """Create a test client for the FastAPI app with mocked authentication."""
@@ -179,6 +244,107 @@ async def test_list_prompts_safely_defaults_missing_pagination() -> None:
     assert response.metadata.per_page == 10
     assert response.metadata.total == 0
     assert response.pagination.page == 2
+    assert response.pagination.has_more is False
+
+
+@pytest.mark.asyncio
+async def test_list_projects_safely_defaults_missing_pagination() -> None:
+    """Project listing preserves legacy aliases when storage omits pagination metadata."""
+    from tldw_Server_API.app.api.v1.endpoints.prompt_studio import prompt_studio_projects
+
+    class _ProjectDbWithoutPagination:
+        def list_projects(self, *_args, **_kwargs):
+            return {"projects": []}
+
+    response = await prompt_studio_projects.list_projects(
+        page=2,
+        per_page=10,
+        status_filter=None,
+        include_deleted=False,
+        search=None,
+        user_context={"user_id": "test-user", "is_admin": False},
+        db=_ProjectDbWithoutPagination(),
+    )
+
+    assert response["metadata"] == {
+        "page": 2,
+        "per_page": 10,
+        "total": 0,
+        "total_pages": 0,
+    }
+    assert response["pagination"] == {
+        "mode": "page",
+        "page": 2,
+        "per_page": 10,
+        "total": 0,
+        "total_pages": 0,
+        "has_more": False,
+    }
+    assert response["projects"] == []
+
+
+@pytest.mark.asyncio
+async def test_list_optimizations_safely_defaults_missing_pagination() -> None:
+    """Optimization listing adds canonical pagination when storage omits metadata."""
+    from tldw_Server_API.app.api.v1.endpoints.prompt_studio import prompt_studio_optimization
+
+    class _OptimizationDbWithoutPagination:
+        def list_optimizations(self, *_args, **_kwargs):
+            return {"optimizations": []}
+
+    response = await prompt_studio_optimization.list_optimizations(
+        project_id=123,
+        page=2,
+        per_page=10,
+        status_filter=None,
+        _=True,
+        db=_OptimizationDbWithoutPagination(),
+    )
+
+    assert response.metadata.page == 2
+    assert response.metadata.per_page == 10
+    assert response.metadata.total == 0
+    assert response.pagination.mode == "page"
+    assert response.pagination.page == 2
+    assert response.pagination.has_more is False
+
+
+@pytest.mark.asyncio
+async def test_list_optimization_iterations_safely_defaults_missing_pagination() -> None:
+    """Optimization iteration listing preserves its wrapper and adds pagination."""
+    from tldw_Server_API.app.api.v1.endpoints.prompt_studio import prompt_studio_optimization
+
+    class _OptimizationIterationsDbWithoutPagination:
+        def get_optimization(self, optimization_id):
+            return {"id": optimization_id, "project_id": 123, "deleted": False}
+
+        def get_project(self, project_id):
+            return {"id": project_id, "user_id": "tester"}
+
+        def list_optimization_iterations(self, *_args, **_kwargs):
+            return {"iterations": []}
+
+    response = await prompt_studio_optimization.list_optimization_iterations(
+        optimization_id=456,
+        page=2,
+        per_page=10,
+        db=_OptimizationIterationsDbWithoutPagination(),
+        user_context={"user_id": "tester", "is_admin": False},
+    )
+
+    assert response.success is True
+    assert response.data == {"iterations": []}
+    assert response.metadata == {
+        "page": 2,
+        "per_page": 10,
+        "total": 0,
+        "total_pages": 0,
+    }
+    assert response.pagination.mode == "page"
+    assert response.pagination.page == 2
+    assert response.pagination.per_page == 10
+    assert response.pagination.total == 0
+    assert response.pagination.total_pages == 0
     assert response.pagination.has_more is False
 
 ########################################################################################################################
@@ -1156,12 +1322,12 @@ class TestEvaluationEndpoints:
             detail = response.json().get("detail", {})
             assert detail.get("error_code") == "missing_provider_credentials"
 
-    def test_list_evaluations(self, client, auth_headers, mock_user):
+    def test_list_evaluations(self, client, auth_headers, mock_user) -> None:
 
         """Test listing evaluations."""
         with patch('tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps.get_current_active_user', return_value=mock_user):
             response = client.get(
-                "/api/v1/prompt-studio/evaluations?project_id=1",
+                "/api/v1/prompt-studio/evaluations?project_id=1&limit=10&offset=0",
                 headers=auth_headers
             )
 
@@ -1169,6 +1335,18 @@ class TestEvaluationEndpoints:
             data = response.json()
             assert "evaluations" in data
             assert isinstance(data["evaluations"], list)
+            assert data["limit"] == 10
+            assert data["offset"] == 0
+            assert data["has_more"] is False
+            assert data["next_offset"] is None
+            assert data["pagination"] == {
+                "mode": "offset",
+                "total": data["total"],
+                "limit": 10,
+                "offset": 0,
+                "has_more": False,
+                "next_offset": None,
+            }
 
     def test_create_evaluation_uses_test_runner_path(self, client, auth_headers, mock_user, test_db):
 

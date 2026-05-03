@@ -1,0 +1,90 @@
+"""Contracts for public sandbox runtime support documentation."""
+
+from pathlib import Path
+
+import pytest
+
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+
+PUBLIC_API_DOCS = (
+    REPO_ROOT / "Docs/API-related/Sandbox_API.md",
+    REPO_ROOT / "Docs/Published/API-related/Sandbox_API.md",
+)
+
+
+def _text(path: Path) -> str:
+    return path.read_text(encoding="utf-8")
+
+
+def _normalized_text(path: Path) -> str:
+    return " ".join(_text(path).split())
+
+
+def _require(condition: bool, message: str) -> None:
+    if not condition:
+        pytest.fail(message)
+
+
+@pytest.mark.parametrize("doc_path", PUBLIC_API_DOCS)
+def test_public_sandbox_api_docs_reference_runtime_contract_docs(doc_path: Path) -> None:
+    """Public API guides should point callers at the current runtime contracts."""
+    text = _text(doc_path)
+
+    for contract_path in (
+        "Docs/Sandbox/sandbox-runtime-capability-inventory.md",
+        "Docs/Sandbox/sandbox-security-policy-matrix.md",
+    ):
+        _require(
+            contract_path in text,
+            f"{doc_path} should reference {contract_path}",
+        )
+
+
+@pytest.mark.parametrize("doc_path", PUBLIC_API_DOCS)
+def test_public_sandbox_api_docs_do_not_overclaim_runtime_support(doc_path: Path) -> None:
+    """Public API guides should name current runtimes without overstating guarantees."""
+    text = _text(doc_path)
+
+    for runtime in (
+        "docker",
+        "firecracker",
+        "lima",
+        "vz_linux",
+        "vz_macos",
+        "seatbelt",
+        "worktree",
+    ):
+        _require(runtime in text, f"{doc_path} should mention runtime {runtime}")
+
+    for host_local_runtime in ("seatbelt", "worktree"):
+        _require(
+            f"`{host_local_runtime}` is host-local" in text,
+            f"{doc_path} should describe {host_local_runtime} as host-local",
+        )
+        _require(
+            f"`{host_local_runtime}` is not `untrusted`-eligible" in text,
+            f"{doc_path} should not classify {host_local_runtime} as untrusted-eligible",
+        )
+
+    _require(
+        "`vz_macos` real execution is not implemented" in text,
+        f"{doc_path} should state vz_macos real execution is not implemented",
+    )
+
+
+def test_code_interpreter_prd_reconciles_current_runtime_status() -> None:
+    """Historical product PRD should defer current runtime status to contract docs."""
+    text = _normalized_text(
+        REPO_ROOT / "Docs/Product/Sandbox/Code_Interpreter_Sandbox_PRD.md"
+    )
+
+    for snippet in (
+        "Current Runtime Reconciliation",
+        "Docs/Sandbox/sandbox-runtime-capability-inventory.md",
+        "Docs/Sandbox/sandbox-security-policy-matrix.md",
+        "`seatbelt` and `worktree` are host-local",
+        "`seatbelt` and `worktree` are not `untrusted`-eligible",
+        "`vz_macos` real execution is not implemented",
+    ):
+        _require(snippet in text, f"Sandbox PRD should include: {snippet}")

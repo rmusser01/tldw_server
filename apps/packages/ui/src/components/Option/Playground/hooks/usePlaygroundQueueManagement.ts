@@ -9,6 +9,10 @@ import {
   IMAGE_GENERATION_ASSISTANT_MESSAGE_TYPE,
   IMAGE_GENERATION_USER_MESSAGE_TYPE
 } from "@/utils/image-generation-chat"
+import {
+  throwIfChatSubmitUnsuccessful,
+  type ChatSubmitResult
+} from "@/hooks/chat/chat-action-utils"
 import { projectTokenBudget } from "../usage-metrics"
 import type { QueuedRequest } from "@/utils/chat-request-queue"
 import type { ChatDocuments } from "@/models/ChatTypes"
@@ -83,7 +87,7 @@ export interface UsePlaygroundQueueManagementDeps {
     models: string[],
     capability: string
   ) => boolean
-  sendMessage: (payload: Record<string, any>) => Promise<void>
+  sendMessage: (payload: Record<string, any>) => Promise<ChatSubmitResult | void>
   stopStreamingRequest: (options?: { discardTurn?: boolean }) => void
   form: {
     setFieldError: (field: string, error: string) => void
@@ -339,7 +343,7 @@ export function usePlaygroundQueueManagement(
       }
 
       setLastSubmittedContext(currentContextSnapshot)
-      await sendMessage({
+      const submitResult = await sendMessage({
         image: sourceContext?.isImageCommand ? "" : item.image,
         message: item.promptText,
         docs: sourceContext?.isImageCommand ? [] : documents,
@@ -368,6 +372,7 @@ export function usePlaygroundQueueManagement(
           ? "slash-command"
           : undefined
       })
+      throwIfChatSubmitUnsuccessful(submitResult)
     },
     [
       conversationTokenCount,

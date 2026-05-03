@@ -2476,9 +2476,20 @@ async def acp_session_events(
         session_id=session_id,
         metadata={"limit": int(limit), "offset": int(offset)},
     )
+    pagination = build_offset_pagination_meta(
+        total=total,
+        limit=limit,
+        offset=offset,
+        count=len(sliced),
+    )
     return {
         "session_id": session_id,
         "total": total,
+        "limit": limit,
+        "offset": offset,
+        "pagination": pagination.model_dump(mode="json"),
+        "has_more": pagination.has_more,
+        "next_offset": pagination.next_offset,
         "events": sliced,
     }
 
@@ -2865,7 +2876,7 @@ async def list_acp_runs(
     """Query ACP run history with optional filters."""
     _acp_enforce_control_rate_limit(user_id=int(user.id), action="list_runs")
     store = await get_acp_session_store()
-    return await store.list_runs(
+    result = await store.list_runs(
         user_id=int(user.id),
         status=status_filter,
         agent_type=agent_type,
@@ -2874,6 +2885,25 @@ async def list_acp_runs(
         limit=limit,
         offset=offset,
     )
+    items = result.get("items", [])
+    total = int(result.get("total", len(items)))
+    page_limit = int(result.get("limit", limit))
+    page_offset = int(result.get("offset", offset))
+    pagination = build_offset_pagination_meta(
+        total=total,
+        limit=page_limit,
+        offset=page_offset,
+        count=len(items),
+    )
+    return {
+        **result,
+        "total": total,
+        "limit": page_limit,
+        "offset": page_offset,
+        "pagination": pagination.model_dump(mode="json"),
+        "has_more": pagination.has_more,
+        "next_offset": pagination.next_offset,
+    }
 
 
 @router.get(

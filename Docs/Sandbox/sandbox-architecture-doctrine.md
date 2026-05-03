@@ -82,6 +82,14 @@ The current evaluation record is:
 
 - `Docs/Design/2026-05-02-apple-containerization-evaluation.md`
 
+The current cross-runtime support inventory is:
+
+- `Docs/Sandbox/sandbox-runtime-capability-inventory.md`
+
+The current cross-runtime security policy matrix is:
+
+- `Docs/Sandbox/sandbox-security-policy-matrix.md`
+
 ## Non-Negotiable Boundaries
 
 ### Trusted Control Plane vs Untrusted Compute

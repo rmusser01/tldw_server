@@ -51,6 +51,14 @@ Trust-level rules:
   `Docs/superpowers/specs/2026-05-02-sandbox-module-roadmap-design.md`.
   It sequences remaining work across API, orchestrator, runtimes, security,
   admin, and CI without treating every runtime as equally mature.
+- The runtime capability inventory lives in
+  `Docs/Sandbox/sandbox-runtime-capability-inventory.md`. It classifies each
+  runtime's current trust, network, lifecycle, recovery, diagnostics, and CI
+  support states without treating host availability as a security guarantee.
+- The sandbox security policy matrix lives in
+  `Docs/Sandbox/sandbox-security-policy-matrix.md`. It records the trust,
+  network, workspace, user, artifact, helper/request allowlisting, and audit
+  contracts that policy admission and future runtime work should preserve.
 - macOS scaffolding currently includes:
   - a Unix-socket helper client plus protocol models in `macos_virtualization/`
   - frozen helper contract docs in `tools/macos-vz-helper/`
@@ -98,6 +106,10 @@ Current limitations:
 - `vz_linux` admin diagnostics now also project an additive
   `startup_warning_summary` field from the app-owned startup warning registry;
   low-level diagnostics collection remains app-agnostic.
+- `vz_linux` admin diagnostics include a read-only `observability` block with
+  helper stdout/stderr log pointers, per-VM serial log pointers, guest readiness
+  details, and helper-provided resource counters when available. Diagnostics
+  report file existence and byte sizes only; they do not read log contents.
 - `vz_linux` repair is explicit and admin-only through `POST /api/v1/sandbox/admin/macos-reconciliation/repair`; diagnostics do not mutate state.
 - `vz_linux` repair defaults to dry-run, skips active sessions, can delete stale or unhealthy inactive persisted session-control rows when requested, and can terminate orphan helper VMs only when `terminate_orphaned_vms=true` is explicitly requested, helper metadata proves `owner=tldw` and `runtime=vz_linux`, and the ownership record remains eligibility-complete. Eligibility-complete means `run_id` and `created_at` are present, and `session_id` is also present when `session_mode=true`.
 - `vz_linux` orphan VM diagnostics split live unreferenced helper VMs into `owned_orphaned_vm`, `unknown_orphaned_vm`, and `foreign_orphaned_vm`. Only ownership-eligible `owned_orphaned_vm` records can be terminated automatically; unknown, foreign, and legacy generic orphan records are reported but skipped by automated repair.
@@ -137,6 +149,11 @@ Current limitations:
   `TLDW_SANDBOX_MACOS_HELPER_SOCKET=<socket>`, `SANDBOX_ENABLE_EXECUTION=1`,
   and `SANDBOX_BACKGROUND_EXECUTION=0`.
 - Real helper-daemon smoke coverage is opt-in through `tldw_Server_API/tests/sandbox/test_macos_virtualization_helper_daemon_host_gated.py` and requires `TLDW_SANDBOX_MACOS_HELPER_DAEMON_SMOKE=1`.
+- The host-gated CI acceptance policy for real `vz_linux` smoke lives in
+  `Docs/Sandbox/vz-linux-host-gated-ci-acceptance-policy.md`. It defines
+  manual/nightly gates, expected skips, artifact upload expectations, branch
+  allowlisting, and blocking regression criteria for prepared Apple silicon
+  runners.
 
 ## Operations And Development
 
@@ -154,13 +171,18 @@ Current limitations:
   - `/api/v1/sandbox/runs`
 
 `/api/v1/sandbox/runtimes` is the summarized discovery surface used by clients and ACP.
+Each runtime entry includes `available` for current host truth and
+`implementation_state` for roadmap maturity (`supported`, `unsupported`,
+`scaffold`, `host_gated`, or `not_applicable`), so clients do not infer security
+or maturity guarantees from availability alone.
 `/api/v1/sandbox/admin/macos-diagnostics` is an admin-only diagnostics surface for
 operator troubleshooting and exposes helper/template readiness details that are not
 included in the public discovery payload, plus reconciliation data for persisted
 `vz_linux` session-control rows versus live helper VM state, and image-store
 correlation for persisted run manifests and dry-run GC candidates. It is
-read-only and now includes a compact `startup_warning_summary` field projected from the
-current-process startup warning registry.
+read-only and now includes helper/serial log observability plus a compact
+`startup_warning_summary` field projected from the current-process startup
+warning registry.
 `/api/v1/admin/startup-warnings` is the generic admin-only companion surface for
 the same startup records and returns full current-process warning items plus
 grouped counts.
@@ -185,6 +207,7 @@ Selected configuration knobs:
   - `SANDBOX_MAX_ARTIFACT_TOTAL_BYTES`
 - macOS scaffolding:
   - `TLDW_SANDBOX_MACOS_HELPER_SOCKET`
+  - `TLDW_SANDBOX_MACOS_HELPER_LOG_DIR`
   - `TLDW_SANDBOX_MACOS_HELPER_READY`
   - `TLDW_SANDBOX_MACOS_HELPER_PATH`
   - `TLDW_SANDBOX_IMAGE_STORE_ROOT`

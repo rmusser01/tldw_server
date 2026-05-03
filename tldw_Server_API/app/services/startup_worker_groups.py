@@ -138,18 +138,21 @@ async def start_worker_groups(
         owned_job_pollers=owned_job_pollers,
         register_owned_job_poller=register_owned_job_poller,
         should_start_worker=_should_start_worker,
+        worker_inventory=worker_inventory,
     )
     sidecar_owned_jobs_poller_handles = await _start_sidecar_owned_jobs_pollers(
         app=app,
         owned_job_pollers=owned_job_pollers,
         register_owned_job_poller=register_owned_job_poller,
         sidecar_mode=sidecar_mode,
+        worker_inventory=worker_inventory,
     )
     notifications_abtest_startup_handles = await _start_notifications_abtest_workers(
         app=app,
         owned_job_pollers=owned_job_pollers,
         register_owned_job_poller=register_owned_job_poller,
         sidecar_mode=sidecar_mode,
+        worker_inventory=worker_inventory,
     )
     return StartupWorkerGroupHandles(
         cleanup_task=cleanup_worker_handles.cleanup_task,

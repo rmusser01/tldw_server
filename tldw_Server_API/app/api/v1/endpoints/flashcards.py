@@ -119,6 +119,7 @@ from tldw_Server_API.app.core.Utils.image_validation import (
 from tldw_Server_API.app.core.Workflows.adapters.content import run_flashcard_generate_adapter
 
 router = APIRouter(prefix="/flashcards", tags=["flashcards"])
+MAX_STUDY_PACK_JOBS_OFFSET = 10_000
 _FLASHCARDS_INT_PARSE_EXCEPTIONS: tuple[type[BaseException], ...] = (
     TypeError,
     ValueError,
@@ -684,12 +685,14 @@ def create_deck(payload: DeckCreate, db: CharactersRAGDB = Depends(get_chacha_db
         _ensure_workspace_exists(db, payload.workspace_id)
         visibility = payload.visibility if "visibility" in payload.model_fields_set else None
         review_prompt_side = payload.review_prompt_side if "review_prompt_side" in payload.model_fields_set else None
+        parent_deck_id = payload.parent_deck_id if "parent_deck_id" in payload.model_fields_set else ...
         deck_id = db.add_deck(
             payload.name,
             payload.description,
             payload.scheduler_settings.model_dump() if payload.scheduler_settings else None,
             scheduler_type=payload.scheduler_type,
             workspace_id=payload.workspace_id,
+            parent_deck_id=parent_deck_id,
             visibility=visibility,
             review_prompt_side=review_prompt_side,
         )
@@ -703,6 +706,7 @@ def create_deck(payload: DeckCreate, db: CharactersRAGDB = Depends(get_chacha_db
             "name": payload.name,
             "description": payload.description,
             "workspace_id": payload.workspace_id,
+            "parent_deck_id": None if parent_deck_id is ... else parent_deck_id,
             "visibility": visibility or "private",
             "review_prompt_side": payload.review_prompt_side,
             "created_at": None,
@@ -760,6 +764,7 @@ def update_deck(
     review_prompt_side = data.pop("review_prompt_side", None)
     visibility = data.pop("visibility", None)
     workspace_id = data.pop("workspace_id", ...)
+    parent_deck_id = data.pop("parent_deck_id", ...)
     try:
         if workspace_id is not ...:
             _ensure_workspace_exists(db, workspace_id)
@@ -772,6 +777,7 @@ def update_deck(
             scheduler_settings=scheduler_settings,
             scheduler_type=scheduler_type,
             workspace_id=workspace_id,
+            parent_deck_id=parent_deck_id,
             expected_version=expected_version,
         )
         if not ok:
@@ -2018,17 +2024,19 @@ def create_study_pack_job(
 def list_study_pack_jobs(
     status: Optional[str] = Query(None),
     limit: int = Query(100, ge=1, le=1000),
+    offset: int = Query(0, ge=0, le=MAX_STUDY_PACK_JOBS_OFFSET),
     current_user: User = Depends(get_request_user),
     principal: AuthPrincipal = Depends(get_auth_principal),
     jm: JobManager = Depends(get_job_manager),
 ) -> StudyPackJobListResponse:
+    fetch_limit = limit + offset
     jobs = jm.list_jobs(
         domain=STUDY_PACKS_DOMAIN,
         queue=study_pack_jobs_queue(),
         status=status,
         owner_user_id=str(current_user.id),
         job_type=STUDY_PACKS_JOB_TYPE,
-        limit=limit,
+        limit=fetch_limit,
         sort_by="created_at",
         sort_order="desc",
     )
@@ -2036,6 +2044,7 @@ def list_study_pack_jobs(
     for job in jobs:
         _ensure_study_pack_job_access(job, current_user=current_user, principal=principal)
         visible_jobs.append(_serialize_study_pack_job(job))
+    paged_jobs = visible_jobs[offset:offset + limit]
     total = jm.count_jobs(
         domain=STUDY_PACKS_DOMAIN,
         queue=study_pack_jobs_queue(),
@@ -2043,7 +2052,13 @@ def list_study_pack_jobs(
         owner_user_id=str(current_user.id),
         job_type=STUDY_PACKS_JOB_TYPE,
     )
-    return StudyPackJobListResponse(jobs=visible_jobs, total=total)
+    pagination = build_offset_pagination_meta(
+        limit=limit,
+        offset=offset,
+        total=total,
+        count=len(paged_jobs),
+    )
+    return StudyPackJobListResponse(jobs=paged_jobs, total=total, pagination=pagination)
 
 
 @router.get("/study-packs/jobs/{job_id}", response_model=StudyPackJobStatusResponse)

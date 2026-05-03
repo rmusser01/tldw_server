@@ -290,8 +290,9 @@ class TestWebhookDeliveryRecording:
                 success=True,
             )
 
-        deliveries = service.list_webhook_deliveries(webhook_id=webhook["id"])
+        deliveries, total = service.list_webhook_deliveries(webhook_id=webhook["id"])
 
+        assert total == 5
         assert len(deliveries) == 5
         # Newest first
         assert deliveries[0]["response_time_ms"] == 54
@@ -326,9 +327,11 @@ class TestWebhookDeliveryRecording:
                 success=True,
             )
 
-        deliveries_1 = service.list_webhook_deliveries(webhook_id=wh1["id"])
-        deliveries_2 = service.list_webhook_deliveries(webhook_id=wh2["id"])
+        deliveries_1, total_1 = service.list_webhook_deliveries(webhook_id=wh1["id"])
+        deliveries_2, total_2 = service.list_webhook_deliveries(webhook_id=wh2["id"])
 
+        assert total_1 == 3
+        assert total_2 == 2
         assert len(deliveries_1) == 3
         assert len(deliveries_2) == 2
 
@@ -354,11 +357,12 @@ class TestWebhookDeliveryRecording:
                 success=True,
             )
 
-        deliveries = service.list_webhook_deliveries(
+        deliveries, total = service.list_webhook_deliveries(
             webhook_id=webhook["id"],
             limit=cap + 100,
         )
 
+        assert total == cap
         assert len(deliveries) <= cap
 
     def test_delivery_record_fields(self, monkeypatch, tmp_path):
@@ -412,6 +416,59 @@ class TestWebhookDeliveryRecording:
         assert record["error"] == "Internal Server Error"
 
 
+class TestAdminOpsWebhookDeliveryPagination:
+    """Direct endpoint tests for admin_ops webhook delivery pagination."""
+
+    @pytest.mark.asyncio
+    async def test_list_webhook_deliveries_includes_canonical_pagination(self, monkeypatch):
+        from tldw_Server_API.app.api.v1.endpoints.admin import admin_ops
+
+        monkeypatch.setattr(admin_ops, "_require_platform_admin", lambda _: None)
+
+        def _fake_deliveries(*, webhook_id: str, limit: int, offset: int) -> tuple[list[dict[str, Any]], int]:
+            assert webhook_id == "wh_1"
+            assert limit == 2
+            assert offset == 1
+            items = [
+                {
+                    "id": f"wd_{idx}",
+                    "webhook_id": "wh_1",
+                    "event_type": "webhook.test",
+                    "status_code": 200,
+                    "response_time_ms": idx,
+                    "success": True,
+                    "error": None,
+                    "attempted_at": f"2026-01-01T00:00:0{idx}Z",
+                    "payload_preview": None,
+                }
+                for idx in range(5)
+            ]
+            return items[offset:offset + limit], len(items)
+
+        monkeypatch.setattr(admin_ops, "svc_list_webhook_deliveries", _fake_deliveries)
+
+        response = await admin_ops.list_webhook_deliveries(
+            webhook_id="wh_1",
+            limit=2,
+            offset=1,
+            principal=mock.MagicMock(),
+        )
+
+        payload = response.model_dump(mode="json")
+        assert payload["total"] == 5
+        assert [item["id"] for item in payload["items"]] == ["wd_1", "wd_2"]
+        assert payload["pagination"] == {
+            "mode": "offset",
+            "limit": 2,
+            "offset": 1,
+            "total": 5,
+            "has_more": True,
+            "next_offset": 3,
+        }
+        assert payload["has_more"] is True
+        assert payload["next_offset"] == 3
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # 6. Webhook Test Send — mock HTTP, verify delivery recorded
 # ═══════════════════════════════════════════════════════════════════════════
@@ -456,7 +513,8 @@ class TestWebhookTestSend:
         assert delivery["webhook_id"] == webhook["id"]
 
         # Verify delivery was also recorded in the store
-        deliveries = service.list_webhook_deliveries(webhook_id=webhook["id"])
+        deliveries, total = service.list_webhook_deliveries(webhook_id=webhook["id"])
+        assert total == 1
         assert len(deliveries) == 1
 
     def test_send_test_webhook_http_error(self, monkeypatch, tmp_path):

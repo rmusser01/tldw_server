@@ -768,14 +768,15 @@ async def search_by_metadata(
                 except _MEDIA_LISTING_COERCE_EXCEPTIONS:
                     r["safe_metadata"] = None
 
+        total_pages = (total + per_page - 1) // per_page
         payload: dict[str, Any] = {
             "results": rows,
-            "pagination": {
-                "page": page,
-                "per_page": per_page,
-                "total": total,
-                "total_pages": (total + per_page - 1) // per_page,
-            },
+            "pagination": build_page_pagination_meta(
+                page=page,
+                per_page=per_page,
+                total=total,
+                total_pages=total_pages,
+            ).model_dump(),
         }
 
         etag = generate_etag(payload)

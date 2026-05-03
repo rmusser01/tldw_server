@@ -16,6 +16,7 @@ from tldw_Server_API.app.api.v1.schemas.api_key_schemas import (
     APIKeyRotateRequest,
     APIKeyUpdateRequest,
 )
+from tldw_Server_API.app.api.v1.utils.pagination import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.schemas.org_team_schemas import VirtualKeyCreateRequest
 from tldw_Server_API.app.core.Audit.unified_audit_service import MandatoryAuditWriteError
 from tldw_Server_API.app.core.AuthNZ.api_key_manager import get_api_key_manager
@@ -387,6 +388,10 @@ async def get_api_key_audit_log(
             raise HTTPException(status_code=404, detail="API key not found")
         await admin_scope_service.enforce_admin_user_scope(principal, int(key_owner), require_hierarchy=False)
         if is_pg:
+            total = await db.fetchval(
+                "SELECT COUNT(*) FROM api_key_audit_log WHERE api_key_id = $1",
+                key_id,
+            )
             rows = await db.fetch(
                 """
                 SELECT id, api_key_id, action, user_id, ip_address, user_agent, details, created_at
@@ -398,6 +403,12 @@ async def get_api_key_audit_log(
                 key_id, limit, offset
             )
         else:
+            count_cursor = await db.execute(
+                "SELECT COUNT(*) FROM api_key_audit_log WHERE api_key_id = ?",
+                (key_id,),
+            )
+            count_row = await count_cursor.fetchone()
+            total = count_row[0] if count_row and count_row[0] is not None else 0
             cursor = await db.execute(
                 """
                 SELECT id, api_key_id, action, user_id, ip_address, user_agent, details, created_at
@@ -418,7 +429,20 @@ async def get_api_key_audit_log(
                 items.append(APIKeyAuditEntry(
                     id=r[0], api_key_id=r[1], action=r[2], user_id=r[3], ip_address=r[4], user_agent=r[5], details=r[6], created_at=r[7]
                 ))
-        return APIKeyAuditListResponse(key_id=key_id, items=items)
+        total_count = int(total or 0)
+        return APIKeyAuditListResponse(
+            key_id=key_id,
+            items=items,
+            total=total_count,
+            limit=limit,
+            offset=offset,
+            pagination=build_offset_pagination_meta(
+                total=total_count,
+                limit=limit,
+                offset=offset,
+                count=len(items),
+            ),
+        )
     except HTTPException:
         raise
     except _ADMIN_API_KEYS_NONCRITICAL_EXCEPTIONS as e:

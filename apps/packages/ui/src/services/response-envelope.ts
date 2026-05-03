@@ -1,5 +1,43 @@
 export type ApiEnvelopeMetadata = Record<string, unknown>
 
+export type OffsetPaginationMeta = {
+  mode: "offset"
+  limit: number
+  offset: number
+  total?: number | null
+  has_more: boolean
+  next_offset?: number | null
+}
+
+export type PagePaginationMeta = {
+  mode: "page"
+  page: number
+  per_page: number
+  total?: number | null
+  total_pages?: number | null
+  has_more: boolean
+}
+
+export type CursorPaginationMeta = {
+  mode: "cursor"
+  limit: number
+  cursor?: string | null
+  next_cursor?: string | null
+  has_more: boolean
+}
+
+export type ApiPaginationMeta =
+  | OffsetPaginationMeta
+  | PagePaginationMeta
+  | CursorPaginationMeta
+
+export type ApiPaginatedPayload<
+  T,
+  TPagination extends ApiPaginationMeta = ApiPaginationMeta
+> = T & {
+  pagination: TPagination
+}
+
 export type ApiResponseEnvelope<T> = {
   success: boolean
   data?: T | null

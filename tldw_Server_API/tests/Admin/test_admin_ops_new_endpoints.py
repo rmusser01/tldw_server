@@ -819,6 +819,56 @@ class TestAdminOpsErrorSanitization:
         assert exc_info.value.detail == "Failed to list email deliveries"
 
     @pytest.mark.asyncio
+    async def test_list_email_deliveries_returns_canonical_pagination(self, monkeypatch):
+        from tldw_Server_API.app.api.v1.endpoints.admin import admin_ops
+
+        monkeypatch.setattr(
+            "tldw_Server_API.app.api.v1.endpoints.admin.admin_ops._require_platform_admin",
+            lambda _: None,
+        )
+
+        def _list_deliveries(*, limit: int, offset: int, status: str | None):
+            assert limit == 2
+            assert offset == 1
+            assert status == "failed"
+            return ([{"id": "delivery-2"}], 3)
+
+        monkeypatch.setattr(admin_ops, "svc_list_email_deliveries", _list_deliveries)
+
+        response = await admin_ops.list_email_deliveries(
+            limit=2,
+            offset=1,
+            status="failed",
+            principal=mock.MagicMock(),
+        )
+        payload = response.model_dump(mode="json")
+
+        assert payload["items"] == [
+            {
+                "id": "delivery-2",
+                "recipient": "",
+                "subject": "",
+                "template": None,
+                "status": "",
+                "error": None,
+                "sent_at": None,
+            }
+        ]
+        assert payload["total"] == 3
+        assert payload["limit"] == 2
+        assert payload["offset"] == 1
+        assert payload["pagination"] == {
+            "mode": "offset",
+            "limit": 2,
+            "offset": 1,
+            "total": 3,
+            "has_more": True,
+            "next_offset": 3,
+        }
+        assert payload["has_more"] is True
+        assert payload["next_offset"] == 3
+
+    @pytest.mark.asyncio
     async def test_reload_llm_pricing_catalog_sanitizes_backend_error_log(self, monkeypatch):
         from tldw_Server_API.app.api.v1.endpoints.admin import admin_ops
 

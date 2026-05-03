@@ -10,6 +10,7 @@ import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 WORKFLOW_PATH = REPO_ROOT / ".github" / "workflows" / "vz-linux-host-gated.yml"
+POLICY_PATH = REPO_ROOT / "Docs" / "Sandbox" / "vz-linux-host-gated-ci-acceptance-policy.md"
 
 
 def _load_workflow() -> dict[str, Any]:
@@ -31,6 +32,7 @@ def test_vz_linux_host_gated_workflow_is_manual_and_nightly() -> None:
     workflow = _load_workflow()
     triggers = _workflow_triggers(workflow)
 
+    assert set(triggers) == {"workflow_dispatch", "schedule"}  # nosec B101
     assert "workflow_dispatch" in triggers  # nosec B101
     assert "schedule" in triggers  # nosec B101
     assert triggers["workflow_dispatch"]["inputs"]["bundle_path"]["required"] is False  # nosec B101
@@ -68,6 +70,15 @@ def test_vz_linux_host_gated_workflow_rejects_untrusted_refs() -> None:
     assert "github.ref" in job["if"]  # nosec B101
 
 
+def test_vz_linux_host_gated_workflow_schedule_requires_repo_opt_in() -> None:
+    """Nightly host-gated runs should require an explicit repository variable."""
+    workflow = _load_workflow()
+    job = workflow["jobs"]["vz-linux-host-gated-smoke"]
+
+    assert "github.event_name == 'workflow_dispatch'" in job["if"]  # nosec B101
+    assert "vars.TLDW_SANDBOX_VZ_LINUX_HOST_GATED_NIGHTLY == '1'" in job["if"]  # nosec B101
+
+
 def test_vz_linux_host_gated_workflow_uses_operator_smoke_script() -> None:
     """The workflow should delegate real VM work to the repo's operator smoke script."""
     workflow = _load_workflow()
@@ -89,3 +100,29 @@ def test_vz_linux_host_gated_workflow_pins_external_actions() -> None:
 
     assert "actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd" in uses_entries  # nosec B101
     assert "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a" in uses_entries  # nosec B101
+
+
+def test_vz_linux_host_gated_workflow_uses_minimal_permissions_and_uploads_logs() -> None:
+    """Self-hosted VZ runs should use minimal repo permissions and preserve helper logs."""
+    workflow = _load_workflow()
+    steps = workflow["jobs"]["vz-linux-host-gated-smoke"]["steps"]
+    upload_steps = [
+        step
+        for step in steps
+        if str(step.get("uses", "")).startswith("actions/upload-artifact@")
+    ]
+
+    assert workflow["permissions"] == {"contents": "read"}  # nosec B101
+    assert len(upload_steps) == 1  # nosec B101
+    assert upload_steps[0]["if"] == "always()"  # nosec B101
+    assert upload_steps[0]["with"]["if-no-files-found"] == "ignore"  # nosec B101
+    assert "${{ runner.temp }}/tldw-vz-helper-ci/**" in upload_steps[0]["with"]["path"]  # nosec B101
+
+
+def test_vz_linux_host_gated_acceptance_policy_doc_exists_and_references_workflow() -> None:
+    """The host-gated workflow should have an operator-facing acceptance policy."""
+    policy = POLICY_PATH.read_text(encoding="utf-8")
+
+    assert ".github/workflows/vz-linux-host-gated.yml" in policy  # nosec B101
+    assert "TLDW_SANDBOX_VZ_LINUX_HOST_GATED_NIGHTLY" in policy  # nosec B101
+    assert "blocking regression" in policy.lower()  # nosec B101

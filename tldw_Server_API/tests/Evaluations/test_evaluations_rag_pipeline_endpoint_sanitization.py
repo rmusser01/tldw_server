@@ -67,6 +67,23 @@ class _CleanupItemService:
         self.db = _CleanupItemDB()
 
 
+class _PresetListDB:
+    def list_pipeline_presets(self, **kwargs: object) -> tuple[list[dict[str, object]], int]:
+        assert kwargs == {"limit": 2, "offset": 0, "user_id": "tenant-user"}
+        return (
+            [
+                {"name": "preset_one", "config": {"retriever": {"top_k": 4}}},
+                {"name": "preset_two", "config": {"retriever": {"top_k": 8}}},
+            ],
+            3,
+        )
+
+
+class _PresetListService:
+    def __init__(self):
+        self.db = _PresetListDB()
+
+
 class _CleanupItemAdapter:
     async def initialize(self) -> None:
         return None
@@ -154,6 +171,34 @@ async def test_list_pipeline_presets_sanitizes_backend_fallback_log(monkeypatch:
         "Failed to list presets: An error occurred during list_presets",
     )
     _assert_sanitized_log(logger_stub, "Failed to list presets")
+
+
+async def test_list_pipeline_presets_includes_canonical_pagination(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        evaluations_rag_pipeline,
+        "get_unified_evaluation_service_for_user",
+        lambda _user_id: _PresetListService(),
+    )
+
+    response = await evaluations_rag_pipeline.list_pipeline_presets(
+        limit=2,
+        offset=0,
+        current_user=_user(),
+    )
+
+    assert response.total == 3
+    assert response.limit == 2
+    assert response.offset == 0
+    assert response.pagination.model_dump(mode="json") == {
+        "mode": "offset",
+        "limit": 2,
+        "offset": 0,
+        "total": 3,
+        "has_more": True,
+        "next_offset": 2,
+    }
+    assert response.has_more is True
+    assert response.next_offset == 2
 
 
 async def test_get_pipeline_preset_sanitizes_backend_fallback_log(monkeypatch: pytest.MonkeyPatch) -> None:

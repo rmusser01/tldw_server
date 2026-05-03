@@ -300,6 +300,105 @@ def test_deck_workspace_id_contract_and_scope_filters(
     assert any(item["id"] == deck_id for item in general_list.json())
 
 
+def test_deck_parent_id_contract_create_list_and_patch(
+    client_with_flashcards_db: TestClient,
+):
+    parent_response = client_with_flashcards_db.post(
+        "/api/v1/flashcards/decks",
+        json={"name": "Parent Deck"},
+        headers=AUTH_HEADERS,
+    )
+    assert parent_response.status_code == 200
+    parent = parent_response.json()
+
+    child_response = client_with_flashcards_db.post(
+        "/api/v1/flashcards/decks",
+        json={"name": "Child Deck", "parent_deck_id": parent["id"]},
+        headers=AUTH_HEADERS,
+    )
+    assert child_response.status_code == 200
+    child = child_response.json()
+    assert child["parent_deck_id"] == parent["id"]
+
+    listed_response = client_with_flashcards_db.get("/api/v1/flashcards/decks", headers=AUTH_HEADERS)
+    assert listed_response.status_code == 200
+    listed_child = next(deck for deck in listed_response.json() if deck["id"] == child["id"])
+    assert listed_child["parent_deck_id"] == parent["id"]
+
+    clear_response = client_with_flashcards_db.patch(
+        f"/api/v1/flashcards/decks/{child['id']}",
+        json={"parent_deck_id": None, "expected_version": child["version"]},
+        headers=AUTH_HEADERS,
+    )
+    assert clear_response.status_code == 200
+    assert clear_response.json()["parent_deck_id"] is None
+
+
+def test_deck_parent_id_rejects_missing_parent(client_with_flashcards_db: TestClient):
+    response = client_with_flashcards_db.post(
+        "/api/v1/flashcards/decks",
+        json={"name": "Orphan Deck", "parent_deck_id": 999999},
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Parent deck not found"
+
+
+def test_deck_parent_id_rejects_self_parent(client_with_flashcards_db: TestClient):
+    create_response = client_with_flashcards_db.post(
+        "/api/v1/flashcards/decks",
+        json={"name": "Self Parent Deck"},
+        headers=AUTH_HEADERS,
+    )
+    assert create_response.status_code == 200
+    deck = create_response.json()
+
+    response = client_with_flashcards_db.patch(
+        f"/api/v1/flashcards/decks/{deck['id']}",
+        json={"parent_deck_id": deck["id"], "expected_version": deck["version"]},
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Deck cannot be its own parent"
+
+
+def test_deck_parent_id_rejects_cycles(client_with_flashcards_db: TestClient):
+    grandparent_response = client_with_flashcards_db.post(
+        "/api/v1/flashcards/decks",
+        json={"name": "Grandparent Deck"},
+        headers=AUTH_HEADERS,
+    )
+    assert grandparent_response.status_code == 200
+    grandparent = grandparent_response.json()
+
+    parent_response = client_with_flashcards_db.post(
+        "/api/v1/flashcards/decks",
+        json={"name": "Parent Cycle Deck", "parent_deck_id": grandparent["id"]},
+        headers=AUTH_HEADERS,
+    )
+    assert parent_response.status_code == 200
+    parent = parent_response.json()
+
+    child_response = client_with_flashcards_db.post(
+        "/api/v1/flashcards/decks",
+        json={"name": "Child Cycle Deck", "parent_deck_id": parent["id"]},
+        headers=AUTH_HEADERS,
+    )
+    assert child_response.status_code == 200
+    child = child_response.json()
+
+    response = client_with_flashcards_db.patch(
+        f"/api/v1/flashcards/decks/{grandparent['id']}",
+        json={"parent_deck_id": child["id"], "expected_version": grandparent["version"]},
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Deck parent would create a cycle"
+
+
 def test_deck_share_endpoints_manage_user_roles(
     client_with_flashcards_db: TestClient,
 ):
@@ -890,7 +989,8 @@ def test_deck_endpoints_reject_unknown_workspace_ids(
     assert "missing-ws" in update_response.json()["detail"]
 
 
-def test_list_study_pack_jobs_returns_current_user_jobs(client_with_flashcards_db: TestClient):
+def test_list_study_pack_jobs_returns_current_user_jobs(client_with_flashcards_db: TestClient) -> None:
+    """Study-pack job listing preserves total while exposing canonical offset metadata."""
     class StubJobManager:
         def __init__(self):
             self.calls = []
@@ -899,6 +999,14 @@ def test_list_study_pack_jobs_returns_current_user_jobs(client_with_flashcards_d
         def list_jobs(self, **kwargs):
             self.calls.append(kwargs)
             return [
+                {
+                    "id": 43,
+                    "status": "queued",
+                    "domain": STUDY_PACKS_DOMAIN,
+                    "queue": study_pack_jobs_queue(),
+                    "job_type": STUDY_PACKS_JOB_TYPE,
+                    "owner_user_id": "1",
+                },
                 {
                     "id": 42,
                     "status": "queued",
@@ -918,7 +1026,7 @@ def test_list_study_pack_jobs_returns_current_user_jobs(client_with_flashcards_d
 
     response = client_with_flashcards_db.get(
         "/api/v1/flashcards/study-packs/jobs",
-        params={"status": "queued", "limit": 25},
+        params={"status": "queued", "limit": 1, "offset": 1},
         headers=AUTH_HEADERS,
     )
 
@@ -934,6 +1042,14 @@ def test_list_study_pack_jobs_returns_current_user_jobs(client_with_flashcards_d
             }
         ],
         "total": 3,
+        "pagination": {
+            "mode": "offset",
+            "limit": 1,
+            "offset": 1,
+            "total": 3,
+            "has_more": True,
+            "next_offset": 2,
+        },
     }
     assert stub.calls == [
         {
@@ -942,7 +1058,7 @@ def test_list_study_pack_jobs_returns_current_user_jobs(client_with_flashcards_d
             "status": "queued",
             "owner_user_id": "1",
             "job_type": STUDY_PACKS_JOB_TYPE,
-            "limit": 25,
+            "limit": 2,
             "sort_by": "created_at",
             "sort_order": "desc",
         }

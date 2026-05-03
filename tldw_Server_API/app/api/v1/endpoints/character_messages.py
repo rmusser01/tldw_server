@@ -621,12 +621,23 @@ async def get_chat_messages(
                         # No tools: append base message as-is
                         formatted_messages.append(base_message)
 
+                pagination = build_offset_pagination_meta(
+                    total=total_count,
+                    limit=limit,
+                    offset=offset,
+                    count=len(paginated),
+                )
                 resp_obj: dict[str, Any] = {
                     "character_name": character.get('name') if character else None,
                     "character_id": character_id,
                     "chat_id": chat_id,
                     "messages": formatted_messages,
                     "total": total_count,
+                    "limit": limit,
+                    "offset": offset,
+                    "pagination": pagination.model_dump(mode="json"),
+                    "has_more": pagination.has_more,
+                    "next_offset": pagination.next_offset,
                     "usage_instructions": "Use these messages with POST /api/v1/chat/completions"
                 }
                 if include_metadata and metadata_extra_map:

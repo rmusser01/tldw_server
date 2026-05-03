@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
+import pytest
 import tldw_Server_API.app.core.Sandbox.macos_diagnostics as diagnostics_module
 import tldw_Server_API.app.core.Sandbox.vz_reconciliation as reconciliation_module
 from tldw_Server_API.app.core.Sandbox.image_store import SandboxImageStore
 from tldw_Server_API.app.core.Sandbox.macos_virtualization.helper_client import (
     MacOSVirtualizationHelperProtocolError,
+    MacOSVirtualizationHelperUnavailable,
 )
 from tldw_Server_API.app.core.Sandbox.macos_virtualization.models import (
     HelperPingReply,
@@ -118,6 +121,48 @@ def _sample_diagnostics_payload() -> dict:
                 }
             ],
             "items": [],
+            "reasons": [],
+        },
+        "observability": {
+            "configured": True,
+            "serial_log_dir": "/tmp/vz-serial",
+            "helper_log_dir": "/tmp/helper-logs",
+            "helper_log_dir_source": "env",
+            "helper_logs": {
+                "stdout": {
+                    "path": "/tmp/helper-logs/helper.stdout.log",
+                    "exists": False,
+                    "size_bytes": None,
+                },
+                "stderr": {
+                    "path": "/tmp/helper-logs/helper.stderr.log",
+                    "exists": False,
+                    "size_bytes": None,
+                },
+            },
+            "live_vms": 1,
+            "vms": [
+                {
+                    "vm_id": "vm-live",
+                    "state": "running",
+                    "healthy": True,
+                    "run_id": "run-live",
+                    "session_id": "sess-live",
+                    "session_mode": True,
+                    "serial_log": {
+                        "path": "/tmp/vz-serial/vm-live.serial.log",
+                        "exists": False,
+                        "size_bytes": None,
+                    },
+                    "guest": {
+                        "version": "1.0.0",
+                        "workspace_root": "/workspace",
+                        "capabilities_known": True,
+                        "capabilities": ["exec", "output_cap_v1"],
+                    },
+                    "resource_snapshot": {"cpu_time_sec": 1},
+                }
+            ],
             "reasons": [],
         },
     }
@@ -370,6 +415,11 @@ def test_admin_schema_accepts_macos_diagnostics_payload() -> None:
     assert model.image_store is not None
     assert model.image_store.templates[0].artifact_format == "tldw_bundle"
     assert model.image_store.templates[0].provenance == {"suite": "bookworm"}
+    assert model.observability is not None
+    assert model.observability.live_vms == 1
+    assert model.observability.vms[0].serial_log.path == "/tmp/vz-serial/vm-live.serial.log"
+    assert model.observability.vms[0].guest.capabilities == ["exec", "output_cap_v1"]
+    assert model.observability.vms[0].resource_snapshot == {"cpu_time_sec": 1}
 
 
 def test_admin_schema_accepts_startup_warning_summary() -> None:
@@ -729,3 +779,203 @@ def test_probe_image_store_reports_oci_template_metadata(monkeypatch, tmp_path) 
     assert templates[template_id]["registry"] == "registry.example"
     assert templates[template_id]["imported_at"] == "2026-05-02T00:00:00+00:00"
     assert templates[template_id]["provenance"] == {"suite": "bookworm"}
+
+
+def test_probe_vz_linux_observability_reports_log_pointers_and_vm_resources(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    helper_log_dir = tmp_path / "helper-logs"
+    serial_log_dir = helper_log_dir / "serial"
+    helper_log_dir.mkdir()
+    serial_log_dir.mkdir()
+    (helper_log_dir / "helper.stdout.log").write_bytes(b"helper stdout")
+    (helper_log_dir / "helper.stderr.log").write_bytes(b"helper stderr")
+    (serial_log_dir / "vm_serial_log.serial.log").write_bytes(b"boot log")
+    monkeypatch.setenv("TLDW_SANDBOX_MACOS_HELPER_LOG_DIR", str(helper_log_dir))
+    monkeypatch.setenv("TLDW_SANDBOX_VZ_LINUX_SERIAL_LOG_DIR", str(serial_log_dir))
+
+    class _FakeHelper:
+        def list_vms(self) -> HelperVMListReply:
+            return HelperVMListReply(
+                protocol_version="1",
+                helper_version="0.1.0",
+                vms=[
+                    HelperVMStatusReply(
+                        protocol_version="1",
+                        helper_version="0.1.0",
+                        vm_id="vm/serial log",
+                        state="running",
+                        healthy=True,
+                        metadata=HelperVMMetadata(
+                            owner="tldw",
+                            runtime="vz_linux",
+                            run_id="run-live",
+                            session_id="sess-live",
+                            session_mode=True,
+                        ),
+                        details={
+                            "guest_version": "1.0.0",
+                            "guest_workspace_root": "/workspace",
+                            "guest_capabilities_known": "true",
+                            "guest_capabilities": "exec,output_cap_v1",
+                            "cpu_time_sec": "7",
+                            "peak_rss_mb": 128,
+                            "disk_read_bytes": "2048",
+                            "unexpected_detail": "not surfaced",
+                        },
+                    )
+                ],
+            )
+
+    monkeypatch.setattr(diagnostics_module, "MacOSVirtualizationHelperClient", _FakeHelper)
+
+    data = diagnostics_module.probe_vz_linux_observability()
+
+    assert data["configured"] is True
+    assert data["serial_log_dir"] == str(serial_log_dir)
+    assert data["helper_log_dir"] == str(helper_log_dir)
+    assert data["helper_logs"]["stdout"]["path"] == str(helper_log_dir / "helper.stdout.log")
+    assert data["helper_logs"]["stdout"]["exists"] is True
+    assert data["helper_logs"]["stdout"]["size_bytes"] == len(b"helper stdout")
+    assert data["helper_logs"]["stderr"]["path"] == str(helper_log_dir / "helper.stderr.log")
+    assert data["helper_logs"]["stderr"]["exists"] is True
+    assert data["live_vms"] == 1
+    assert data["reasons"] == []
+
+    vm = data["vms"][0]
+    assert vm["vm_id"] == "vm/serial log"
+    assert vm["run_id"] == "run-live"
+    assert vm["session_id"] == "sess-live"
+    assert vm["serial_log"]["path"] == str(serial_log_dir / "vm_serial_log.serial.log")
+    assert vm["serial_log"]["exists"] is True
+    assert vm["serial_log"]["size_bytes"] == len(b"boot log")
+    assert vm["guest"] == {
+        "version": "1.0.0",
+        "workspace_root": "/workspace",
+        "capabilities_known": True,
+        "capabilities": ["exec", "output_cap_v1"],
+    }
+    assert vm["resource_snapshot"] == {
+        "cpu_time_sec": 7,
+        "peak_rss_mb": 128,
+        "disk_read_bytes": 2048,
+    }
+
+
+def test_probe_vz_linux_observability_handles_helper_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _UnavailableHelper:
+        def list_vms(self) -> HelperVMListReply:
+            raise MacOSVirtualizationHelperUnavailable("helper down")
+
+    monkeypatch.setattr(diagnostics_module, "MacOSVirtualizationHelperClient", _UnavailableHelper)
+
+    data = diagnostics_module.probe_vz_linux_observability()
+
+    assert data["live_vms"] == 0
+    assert data["vms"] == []
+    assert data["reasons"] == ["macos_virtualization_helper_unavailable"]
+
+
+def test_probe_vz_linux_observability_default_log_dir_is_not_configured(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("TLDW_SANDBOX_MACOS_HELPER_LOG_DIR", raising=False)
+    monkeypatch.delenv("TLDW_SANDBOX_VZ_LINUX_SERIAL_LOG_DIR", raising=False)
+
+    class _FakeHelper:
+        def list_vms(self) -> HelperVMListReply:
+            return HelperVMListReply(protocol_version="1", helper_version="0.1.0", vms=[])
+
+    monkeypatch.setattr(diagnostics_module, "MacOSVirtualizationHelperClient", _FakeHelper)
+
+    data = diagnostics_module.probe_vz_linux_observability()
+
+    assert data["configured"] is False
+    assert data["helper_log_dir_source"] == "default"
+    assert data["live_vms"] == 0
+    assert data["reasons"] == []
+
+
+def test_collect_macos_diagnostics_fetches_live_vms_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_macos_host(monkeypatch)
+    monkeypatch.delenv("TEST_MODE", raising=False)
+    monkeypatch.setenv("TLDW_SANDBOX_VZ_LINUX_TEMPLATE_SOURCE", "/tmp/vz-linux.img")
+
+    class _FakeHelper:
+        list_calls = 0
+
+        def ping(self) -> HelperPingReply:
+            return HelperPingReply(
+                protocol_version="1",
+                helper_version="0.1.0",
+                status="ok",
+                details={"transport": "unix"},
+            )
+
+        def validate_template(self, request: dict[str, object]) -> dict[str, object]:
+            return {
+                "template_id": "vz_linux:ubuntu-24.04",
+                "source": request["template"],
+                "ready": True,
+                "reasons": [],
+            }
+
+        def list_vms(self) -> HelperVMListReply:
+            _FakeHelper.list_calls += 1
+            return HelperVMListReply(
+                protocol_version="1",
+                helper_version="0.1.0",
+                vms=[
+                    HelperVMStatusReply(
+                        protocol_version="1",
+                        helper_version="0.1.0",
+                        vm_id="vm-live",
+                        state="running",
+                        healthy=True,
+                    )
+                ],
+            )
+
+    class _FakeOrchestrator:
+        def list_vz_session_controls(self) -> list[dict[str, str]]:
+            return [{"id": "sess-live", "vm_id": "vm-live"}]
+
+    monkeypatch.setattr(diagnostics_module, "MacOSVirtualizationHelperClient", _FakeHelper)
+    monkeypatch.setattr(
+        diagnostics_module,
+        "collect_runtime_preflights",
+        lambda network_policy="deny_all": {
+            RuntimeType.vz_linux: RuntimePreflightResult(
+                runtime=RuntimeType.vz_linux,
+                available=True,
+                reasons=[],
+                execution_mode="real",
+            ),
+            RuntimeType.vz_macos: RuntimePreflightResult(
+                runtime=RuntimeType.vz_macos,
+                available=False,
+                reasons=["macos_virtualization_helper_unavailable"],
+                execution_mode="none",
+            ),
+            RuntimeType.seatbelt: RuntimePreflightResult(
+                runtime=RuntimeType.seatbelt,
+                available=False,
+                reasons=["seatbelt_unavailable"],
+                execution_mode="none",
+                supported_trust_levels=["trusted"],
+            ),
+        },
+    )
+
+    data = diagnostics_module.collect_macos_diagnostics(_FakeOrchestrator())
+
+    assert _FakeHelper.list_calls == 1
+    assert data["reconciliation"]["live_vms"] == 1
+    assert data["observability"]["live_vms"] == 1
+
+
+def test_observability_path_parser_rejects_embedded_nul() -> None:
+    assert diagnostics_module._path_from_text("bad\x00path") is None

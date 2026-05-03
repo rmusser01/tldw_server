@@ -6,6 +6,7 @@ import pytest
 
 from tldw_Server_API.app.api.v1.endpoints import items
 from tldw_Server_API.app.api.v1.schemas.items_schemas import ItemsBulkRequest
+from tldw_Server_API.app.core.DB_Management.Collections_DB import ContentItemRow
 
 
 class _LoggerStub:
@@ -19,6 +20,78 @@ class _LoggerStub:
 class _FailingCollectionsDb:
     def update_content_item(self, *_args: Any, **_kwargs: Any) -> None:
         raise RuntimeError("items backend exploded at /private/items.db")
+
+
+class _ListingCollectionsDb:
+    def list_content_items(self, **kwargs: Any) -> tuple[list[ContentItemRow], int]:
+        assert kwargs["page"] == 2
+        assert kwargs["size"] == 1
+        return (
+            [
+                ContentItemRow(
+                    id=42,
+                    user_id="1",
+                    origin="reading",
+                    origin_type=None,
+                    origin_id=None,
+                    url="https://example.test/item",
+                    canonical_url=None,
+                    domain="example.test",
+                    title="Example Item",
+                    summary=None,
+                    notes=None,
+                    content_hash=None,
+                    word_count=None,
+                    published_at=None,
+                    status="saved",
+                    favorite=False,
+                    metadata_json=None,
+                    media_id=None,
+                    job_id=None,
+                    run_id=None,
+                    source_id=None,
+                    read_at=None,
+                    created_at="2026-05-02T00:00:00+00:00",
+                    updated_at="2026-05-02T00:00:00+00:00",
+                    tags=[],
+                )
+            ],
+            3,
+        )
+
+
+@pytest.mark.asyncio
+async def test_list_items_includes_canonical_page_pagination() -> None:
+    response = await items.list_items(
+        ids=None,
+        q=None,
+        tags=None,
+        domain=None,
+        date_from=None,
+        date_to=None,
+        status_filter=None,
+        favorite=None,
+        origin=None,
+        job_id=None,
+        run_id=None,
+        page=2,
+        size=1,
+        current_user=object(),
+        db=object(),
+        collections_db=_ListingCollectionsDb(),
+    )
+
+    assert response.page == 2
+    assert response.size == 1
+    assert response.total == 3
+    assert response.pagination.model_dump(mode="json") == {
+        "mode": "page",
+        "page": 2,
+        "per_page": 1,
+        "total": 3,
+        "total_pages": 3,
+        "has_more": True,
+    }
 
 
 @pytest.mark.asyncio

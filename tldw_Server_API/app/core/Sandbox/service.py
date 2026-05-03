@@ -55,7 +55,11 @@ from .runners.seatbelt_runner import SeatbeltRunner
 from .runners.vz_linux_runner import VZLinuxRunner
 from .runners.vz_macos_runner import VZMacOSRunner
 from .runners.worktree_runner import WorktreeRunner, worktree_available
-from .runtime_capabilities import RuntimePreflightResult, collect_runtime_preflights
+from .runtime_capabilities import (
+    RuntimePreflightResult,
+    collect_runtime_preflights,
+    runtime_implementation_state,
+)
 from .snapshots import SnapshotManager
 from .store import get_store_mode
 from .streams import get_hub
@@ -857,6 +861,7 @@ class SandboxService:
         vz_linux_preflight = runtime_preflights.get(RuntimeType.vz_linux)
         vz_macos_preflight = runtime_preflights.get(RuntimeType.vz_macos)
         seatbelt_preflight = runtime_preflights.get(RuntimeType.seatbelt)
+        worktree_preflight = runtime_preflights.get(RuntimeType.worktree)
         lima_enforcement_ready = dict((lima_preflight.enforcement_ready if lima_preflight else {}) or {})
         # Allowlist enforcement is not implemented for Lima runtime execution.
         lima_enforcement_ready["allowlist"] = False
@@ -877,6 +882,7 @@ class SandboxService:
         return [
             {
                 "name": "docker",
+                "implementation_state": runtime_implementation_state(RuntimeType.docker),
                 "available": bool(docker_preflight.available) if docker_preflight is not None else bool(docker_available()),
                 "default_images": images,
                 "max_cpu": max_cpu,
@@ -909,6 +915,7 @@ class SandboxService:
             },
             {
                 "name": "firecracker",
+                "implementation_state": runtime_implementation_state(RuntimeType.firecracker),
                 "available": bool(firecracker_preflight.available) if firecracker_preflight is not None else bool(firecracker_available()),
                 "default_images": images,  # firecracker images will differ; placeholder for UX
                 "max_cpu": max_cpu,
@@ -948,6 +955,7 @@ class SandboxService:
             },
             {
                 "name": "lima",
+                "implementation_state": runtime_implementation_state(RuntimeType.lima),
                 "available": bool(lima_preflight.available) if lima_preflight is not None else bool(lima_available()),
                 "default_images": ["ubuntu:24.04"],  # Lima uses distro images
                 "max_cpu": max_cpu,
@@ -972,6 +980,7 @@ class SandboxService:
             },
             {
                 "name": "vz_linux",
+                "implementation_state": runtime_implementation_state(RuntimeType.vz_linux),
                 "default_images": ["ubuntu-24.04"],
                 "max_cpu": max_cpu,
                 "max_mem_mb": max_mem_mb,
@@ -992,6 +1001,7 @@ class SandboxService:
             },
             {
                 "name": "vz_macos",
+                "implementation_state": runtime_implementation_state(RuntimeType.vz_macos),
                 "default_images": ["macos-15"],
                 "max_cpu": max_cpu,
                 "max_mem_mb": max_mem_mb,
@@ -1012,6 +1022,7 @@ class SandboxService:
             },
             {
                 "name": "seatbelt",
+                "implementation_state": runtime_implementation_state(RuntimeType.seatbelt),
                 "default_images": ["host-local"],
                 "max_cpu": max_cpu,
                 "max_mem_mb": max_mem_mb,
@@ -1029,6 +1040,31 @@ class SandboxService:
                 "store_mode": store_mode,
                 "notes": "Host-local seatbelt process isolation for trusted macOS workflows with best-effort deny-all networking; not VM-grade isolation",
                 **_preflight_fields(seatbelt_preflight),
+            },
+            {
+                "name": "worktree",
+                "implementation_state": runtime_implementation_state(RuntimeType.worktree),
+                "default_images": ["host-local"],
+                "max_cpu": max_cpu,
+                "max_mem_mb": max_mem_mb,
+                "max_upload_mb": max_upload_mb,
+                "max_log_bytes": max_log_bytes,
+                "max_artifact_file_bytes": max_artifact_file_bytes,
+                "max_artifact_total_bytes": max_artifact_total_bytes,
+                "queue_max_length": queue_max_length,
+                "queue_ttl_sec": queue_ttl_sec,
+                "workspace_cap_mb": workspace_cap_mb,
+                "artifact_ttl_hours": artifact_ttl_hours,
+                "supported_spec_versions": supported_spec_versions,
+                "interactive_supported": False,
+                "egress_allowlist_supported": False,
+                "store_mode": store_mode,
+                "notes": (
+                    "Host-local git worktree isolation for trusted and standard "
+                    "workflows; not VM-grade isolation and not suitable for "
+                    "untrusted workloads"
+                ),
+                **_preflight_fields(worktree_preflight),
             },
         ]
 

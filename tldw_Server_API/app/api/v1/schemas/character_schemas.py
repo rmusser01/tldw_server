@@ -342,6 +342,7 @@ class CharacterExemplarSearchRequest(BaseModel):
 class CharacterExemplarSearchResponse(BaseModel):
     items: list[CharacterExemplarResponse]
     total: int = Field(default=0, ge=0)
+    pagination: OffsetPaginationMeta
 
 
 class CharacterExemplarSelectionConfig(BaseModel):

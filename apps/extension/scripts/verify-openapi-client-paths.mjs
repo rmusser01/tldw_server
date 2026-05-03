@@ -465,15 +465,15 @@ function extractClientPaths() {
   return [...new Set(paths)]
 }
 
-export function extractFallbackFieldNamesFromSource(src) {
-  const astNames = extractFallbackFieldNamesFromTypeScript(src)
-  if (astNames.length > 0) return astNames
+export function extractFallbackFieldNamesFromFallbackSource(src) {
+  const marker = /\bexport\s+const\s+MEDIA_ADD_SCHEMA_FALLBACK\b/m
+  const match = marker.exec(src)
+  if (!match) return []
 
-  const marker = 'export const MEDIA_ADD_SCHEMA_FALLBACK'
-  const start = src.indexOf(marker)
-  if (start === -1) return []
+  const initializerStart = src.indexOf('=', match.index)
+  if (initializerStart === -1) return []
 
-  const arrStart = src.indexOf('[', start)
+  const arrStart = src.indexOf('[', initializerStart)
   if (arrStart === -1) return []
 
   const arrEnd = findBalancedArrayLiteralEnd(src, arrStart)
@@ -487,6 +487,13 @@ export function extractFallbackFieldNamesFromSource(src) {
   }
 
   return names
+}
+
+export function extractFallbackFieldNamesFromSource(src) {
+  const astNames = extractFallbackFieldNamesFromTypeScript(src)
+  if (astNames.length > 0) return astNames
+
+  return extractFallbackFieldNamesFromFallbackSource(src)
 }
 
 function extractFallbackFieldNames() {

@@ -27,6 +27,9 @@ export type ChatModeOverrides = {
   useOCR?: boolean;
   webSearch?: boolean;
   imageEventSyncPolicy?: ImageGenerationEventSyncPolicy;
+  ragMediaIds?: number[] | null;
+  fileRetrievalEnabled?: boolean;
+  selectedKnowledge?: unknown;
 } & Record<string, unknown>;
 
 export type SaveMessagePayload = Omit<SaveMessageData, "setHistoryId"> & {
@@ -58,9 +61,125 @@ export type TldwChatMeta =
   | null
   | undefined;
 
+export type ChatSubmitResult =
+  | { status: "submitted" }
+  | { status: "failed"; errorMessage: string }
+  | { status: "skipped"; reason: string };
+
+export const chatSubmitSubmitted = (): ChatSubmitResult => ({
+  status: "submitted",
+});
+
+export const chatSubmitFailed = (errorMessage: string): ChatSubmitResult => ({
+  status: "failed",
+  errorMessage,
+});
+
+export const chatSubmitSkipped = (reason: string): ChatSubmitResult => ({
+  status: "skipped",
+  reason,
+});
+
+export const isChatSubmitSuccess = (result: ChatSubmitResult) =>
+  result.status === "submitted";
+
+export const normalizeChatSubmitResult = (
+  result: ChatSubmitResult | void | undefined,
+): ChatSubmitResult => result ?? chatSubmitSubmitted();
+
+export const getChatSubmitIssueMessage = (result: ChatSubmitResult): string => {
+  if (result.status === "failed") return result.errorMessage;
+  if (result.status === "skipped") return result.reason;
+  return "";
+};
+
+export const throwIfChatSubmitUnsuccessful = (
+  result: ChatSubmitResult | void | undefined,
+) => {
+  const normalized = normalizeChatSubmitResult(result);
+  if (isChatSubmitSuccess(normalized)) return;
+  throw new Error(getChatSubmitIssueMessage(normalized));
+};
+
+export const aggregateChatSubmitResults = (
+  results: ChatSubmitResult[],
+): ChatSubmitResult => {
+  if (results.some(isChatSubmitSuccess)) {
+    return chatSubmitSubmitted();
+  }
+
+  const failedResult = results.find(
+    (result): result is Extract<ChatSubmitResult, { status: "failed" }> =>
+      result.status === "failed",
+  );
+  if (failedResult) {
+    return failedResult;
+  }
+
+  const skippedResult = results.find(
+    (result): result is Extract<ChatSubmitResult, { status: "skipped" }> =>
+      result.status === "skipped",
+  );
+  if (skippedResult) {
+    return skippedResult;
+  }
+
+  return chatSubmitSkipped("No chat submissions completed");
+};
+
 // ---------------------------------------------------------------------------
 // Pure utility functions
 // ---------------------------------------------------------------------------
+
+const normalizeRagMediaIds = (value: unknown): number[] | null => {
+  if (!Array.isArray(value)) return null;
+  return value.filter(
+    (mediaId): mediaId is number =>
+      typeof mediaId === "number" && Number.isFinite(mediaId),
+  );
+};
+
+export const resolveTurnRagMediaIds = ({
+  requestOverrides,
+  ragMediaIds,
+}: {
+  requestOverrides?: Pick<ChatModeOverrides, "ragMediaIds"> | null;
+  ragMediaIds: number[] | null;
+}): number[] | null => {
+  const hasExplicitOverride =
+    requestOverrides != null &&
+    Object.prototype.hasOwnProperty.call(requestOverrides, "ragMediaIds") &&
+    requestOverrides.ragMediaIds !== undefined;
+
+  if (hasExplicitOverride) {
+    return normalizeRagMediaIds(requestOverrides?.ragMediaIds);
+  }
+
+  return normalizeRagMediaIds(ragMediaIds);
+};
+
+export const resolveTurnFileRetrievalEnabled = ({
+  requestOverrides,
+  fileRetrievalEnabled,
+}: {
+  requestOverrides?: Pick<ChatModeOverrides, "fileRetrievalEnabled"> | null;
+  fileRetrievalEnabled: boolean;
+}): boolean =>
+  typeof requestOverrides?.fileRetrievalEnabled === "boolean"
+    ? requestOverrides.fileRetrievalEnabled
+    : fileRetrievalEnabled;
+
+export const shouldUseRagForTurn = ({
+  selectedKnowledge,
+  fileRetrievalEnabled,
+  ragMediaIds,
+}: {
+  selectedKnowledge: unknown;
+  fileRetrievalEnabled: boolean;
+  ragMediaIds: number[] | null;
+}) =>
+  Boolean(selectedKnowledge) ||
+  (fileRetrievalEnabled && Array.isArray(ragMediaIds) && ragMediaIds.length > 0);
 
 export const attemptCharacterStreamRecoveryPersist = async ({
   chatId,

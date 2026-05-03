@@ -656,6 +656,13 @@ class KeywordStore:
         cursor = self._db.execute_query(query, (conversation_id,))
         return [dict(row) for row in cursor.fetchall()]
 
+    def count_conversation_keyword_links(self) -> int:
+        cursor = self._db.execute_query("SELECT COUNT(*) AS total FROM conversation_keywords")
+        row = cursor.fetchone()
+        if row is None:
+            return 0
+        return int(row["total"] if isinstance(row, dict) else row[0])
+
     def get_keywords_for_conversations(self, conversation_ids: list[str]) -> dict[str, list[dict[str, Any]]]:
         """Fetch keywords for multiple conversations in a single query."""
         if not conversation_ids:
@@ -732,6 +739,13 @@ class KeywordStore:
                 """.format_map(locals())  # nosec B608
         cursor = self._db.execute_query(query, (collection_id,))
         return [dict(row) for row in cursor.fetchall()]
+
+    def count_collection_keyword_links(self) -> int:
+        cursor = self._db.execute_query("SELECT COUNT(*) AS total FROM collection_keywords")
+        row = cursor.fetchone()
+        if row is None:
+            return 0
+        return int(row["total"] if isinstance(row, dict) else row[0])
 
     def get_collections_for_keyword(self, keyword_id: int, limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
         order_clause = self._db._case_insensitive_order_clause("kc.name")

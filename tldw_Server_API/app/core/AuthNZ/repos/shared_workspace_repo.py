@@ -96,12 +96,11 @@ class SharedWorkspaceRepo:
         try:
             return dict(row)
         except Exception:
-            pass
-        try:
-            keys = row.keys()
-            return {key: row[key] for key in keys}
-        except Exception:
-            return {}
+            try:
+                keys = row.keys()
+                return {key: row[key] for key in keys}
+            except Exception:
+                return {}
 
     @staticmethod
     def _normalize_share_row(row: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -462,6 +461,32 @@ class SharedWorkspaceRepo:
             result.append(d)
         return result
 
+    async def count_audit_events(
+        self,
+        *,
+        owner_user_id: int | None = None,
+        resource_type: str | None = None,
+        resource_id: str | None = None,
+    ) -> int:
+        row = await self.db_pool.fetchone(
+            """
+            SELECT COUNT(*) AS cnt
+            FROM share_audit_log
+            WHERE (? IS NULL OR owner_user_id = ?)
+              AND (? IS NULL OR resource_type = ?)
+              AND (? IS NULL OR resource_id = ?)
+            """,
+            (
+                owner_user_id,
+                owner_user_id,
+                resource_type,
+                resource_type,
+                resource_id,
+                resource_id,
+            ),
+        )
+        return int(self._row_to_dict(row).get("cnt", 0)) if row else 0
+
     async def list_legacy_audit_events_for_migration(
         self,
         *,
@@ -560,3 +585,16 @@ class SharedWorkspaceRepo:
                 (limit, offset),
             )
         return [self._normalize_share_row(self._row_to_dict(r)) or {} for r in rows]
+
+    async def count_all_shares(self, *, include_revoked: bool = False) -> int:
+        if include_revoked:
+            row = await self.db_pool.fetchone(
+                "SELECT COUNT(*) AS cnt FROM shared_workspaces",
+                (),
+            )
+        else:
+            row = await self.db_pool.fetchone(
+                "SELECT COUNT(*) AS cnt FROM shared_workspaces WHERE revoked_at IS NULL",
+                (),
+            )
+        return int(self._row_to_dict(row).get("cnt", 0)) if row else 0

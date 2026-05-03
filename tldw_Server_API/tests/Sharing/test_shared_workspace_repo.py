@@ -340,3 +340,53 @@ async def test_list_all_shares_pagination(repo):
     page2 = await repo.list_all_shares(limit=2, offset=2)
     assert len(page1) == 2
     assert len(page2) == 2
+
+
+@pytest.mark.asyncio
+async def test_count_all_shares_respects_revoked_filter(repo):
+    """Admin share counts should reflect the full filtered result set."""
+    revoked = await repo.create_share(
+        workspace_id="ws-revoked-count",
+        owner_user_id=1,
+        share_scope_type="team",
+        share_scope_id=201,
+        created_by=1,
+    )
+    await repo.create_share(
+        workspace_id="ws-active-count",
+        owner_user_id=1,
+        share_scope_type="team",
+        share_scope_id=202,
+        created_by=1,
+    )
+    await repo.revoke_share(revoked["id"])
+
+    assert await repo.count_all_shares(include_revoked=False) == 1
+    assert await repo.count_all_shares(include_revoked=True) == 2
+
+
+@pytest.mark.asyncio
+async def test_count_audit_events_applies_query_filters(repo):
+    """Admin audit counts should use the same filters as audit listing."""
+    await repo.log_audit_event(
+        event_type="share.created",
+        resource_type="workspace",
+        resource_id="ws-count-1",
+        owner_user_id=1,
+    )
+    await repo.log_audit_event(
+        event_type="token.created",
+        resource_type="chatbook",
+        resource_id="cb-count-1",
+        owner_user_id=1,
+    )
+    await repo.log_audit_event(
+        event_type="share.created",
+        resource_type="workspace",
+        resource_id="ws-count-2",
+        owner_user_id=2,
+    )
+
+    assert await repo.count_audit_events(owner_user_id=1) == 2
+    assert await repo.count_audit_events(resource_type="workspace") == 2
+    assert await repo.count_audit_events(resource_id="ws-count-1") == 1

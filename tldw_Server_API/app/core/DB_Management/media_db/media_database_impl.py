@@ -284,6 +284,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_search_ops i
     search_claims,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_review_metrics_ops import (
+    count_claims_review_extractor_metrics_daily,
     get_claims_review_extractor_metrics_daily,
     list_claims_review_extractor_metrics_daily,
     list_claims_review_user_ids,
@@ -1894,6 +1895,9 @@ MediaDatabase.upsert_claims_review_extractor_metrics_daily = (
 )
 MediaDatabase.list_claims_review_extractor_metrics_daily = (
     list_claims_review_extractor_metrics_daily
+)
+MediaDatabase.count_claims_review_extractor_metrics_daily = (
+    count_claims_review_extractor_metrics_daily
 )
 MediaDatabase.list_claims_review_user_ids = list_claims_review_user_ids
 MediaDatabase.get_claim_clusters_by_ids = get_claim_clusters_by_ids

@@ -34,11 +34,11 @@ Measurement handoff packet:
 
 **Tests:** Existing coverage-required command only.
 
-**Status:** Not Started
+**Status:** Complete - measured 2026-05-03
 
-- [ ] Create a clean worktree from the accepted base.
-- [ ] Activate the virtual environment.
-- [ ] Run the current CI-equivalent command:
+- [x] Create a clean worktree from the accepted base.
+- [x] Activate the virtual environment.
+- [x] Run the current CI-equivalent command:
 
 ```bash
 source .venv/bin/activate
@@ -49,9 +49,9 @@ python3 -m pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyn
   --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-fail-under=0
 ```
 
-- [ ] Record the coverage percentage.
-- [ ] Record failed or skipped behavior if the command does not complete.
-- [ ] Do not change the CI floor in this stage.
+- [x] Record the coverage percentage.
+- [x] Record failed or skipped behavior if the command does not complete.
+- [x] Do not change the CI floor in this stage.
 
 ## Stage 2: Measure Frontend Baseline
 
@@ -61,17 +61,19 @@ python3 -m pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyn
 
 **Tests:** Existing frontend coverage script.
 
-**Status:** Not Started
+**Status:** Complete with blockers - measured 2026-05-03
 
-- [ ] Run WebUI coverage:
+- [x] Run WebUI coverage:
 
 ```bash
 cd apps/tldw-frontend
 bun run test:coverage
 ```
 
-- [ ] Decide whether `apps/packages/ui` needs a separate coverage script.
-- [ ] Do not merge frontend and backend percentages into a single threshold.
+- [x] Decide whether `apps/packages/ui` needs a separate coverage script.
+- [x] Do not merge frontend and backend percentages into a single threshold.
+
+Result: WebUI coverage required adding `@vitest/coverage-v8@4.0.18`; after that, the full suite exposed broad unrelated frontend failures and eventually hit a Node heap OOM before producing a reliable coverage percentage. Frontend ratcheting remains blocked on separate test-suite stabilization or sharding.
 
 ## Stage 3: Define Ratchet Policy
 
@@ -81,7 +83,7 @@ bun run test:coverage
 
 **Tests:** None.
 
-**Status:** Not Started
+**Status:** Complete - first ratchet recorded 2026-05-03
 
 Recommended policy:
 
@@ -112,12 +114,12 @@ source .venv/bin/activate
 python3 -m pytest tldw_Server_API/tests/CI/test_required_workflow_contracts.py -v
 ```
 
-**Status:** Not Started
+**Status:** Complete - first backend floor update
 
-- [ ] Update `.github/workflows/coverage-required.yml`.
-- [ ] Update `test_coverage_required_uses_documented_global_floor`.
-- [ ] Add a dated note explaining why the new floor is reachable.
-- [ ] Keep threshold-only PRs separate from runtime refactors.
+- [x] Update `.github/workflows/coverage-required.yml`.
+- [x] Update `test_coverage_required_uses_documented_global_floor`.
+- [x] Add a dated note explaining why the new floor is reachable.
+- [x] Keep threshold-only PRs separate from runtime refactors.
 
 ## Stage 5: Prepare 25% Follow-Up
 

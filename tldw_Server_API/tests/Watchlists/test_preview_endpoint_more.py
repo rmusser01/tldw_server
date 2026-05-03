@@ -188,3 +188,71 @@ def test_preview_accepts_tldw_test_mode_y(client_with_user: TestClient, monkeypa
     data = r.json()
     assert data["total"] >= 1
     assert data["ingestable"] >= 1
+
+
+def _assert_preview_offset_pagination(data: dict, *, limit: int) -> None:
+    assert "items" in data
+    assert "total" in data
+    assert "ingestable" in data
+    assert "filtered" in data
+    offset = int(data["pagination"]["offset"])
+    total = int(data["total"])
+    expected_has_more = offset + limit < total
+    expected_next_offset = offset + limit if expected_has_more else None
+    assert data["pagination"] == {
+        "mode": "offset",
+        "limit": limit,
+        "offset": offset,
+        "total": data["total"],
+        "has_more": expected_has_more,
+        "next_offset": expected_next_offset,
+    }
+
+
+def test_preview_job_includes_canonical_pagination(client_with_user: TestClient) -> None:
+    """Job preview keeps legacy counters and adds a canonical pagination object."""
+    c = client_with_user
+    s = c.post(
+        "/api/v1/watchlists/sources",
+        json={"name": "Feed Paginated", "url": "https://example.com/rss.xml", "source_type": "rss"},
+    )
+    assert s.status_code == 200, s.text
+    sid = s.json()["id"]
+
+    j = c.post(
+        "/api/v1/watchlists/jobs",
+        json={"name": "Preview Pagination", "scope": {"sources": [sid]}, "job_filters": {"filters": []}},
+    )
+    assert j.status_code == 200, j.text
+    jid = j.json()["id"]
+
+    r = c.post(f"/api/v1/watchlists/jobs/{jid}/preview", params={"limit": 5, "per_source": 5})
+    assert r.status_code == 200, r.text
+    _assert_preview_offset_pagination(r.json(), limit=5)
+
+
+def test_preview_source_test_includes_canonical_pagination(client_with_user: TestClient) -> None:
+    """Stored-source preview exposes canonical metadata without changing legacy fields."""
+    c = client_with_user
+    s = c.post(
+        "/api/v1/watchlists/sources",
+        json={"name": "Stored Source", "url": "https://example.com/", "source_type": "site"},
+    )
+    assert s.status_code == 200, s.text
+    sid = s.json()["id"]
+
+    r = c.post(f"/api/v1/watchlists/sources/{sid}/test", params={"limit": 4})
+    assert r.status_code == 200, r.text
+    _assert_preview_offset_pagination(r.json(), limit=4)
+
+
+def test_preview_source_draft_includes_canonical_pagination(client_with_user: TestClient) -> None:
+    """Draft-source preview exposes canonical metadata without changing legacy fields."""
+    c = client_with_user
+    r = c.post(
+        "/api/v1/watchlists/sources/test",
+        params={"limit": 3},
+        json={"url": "https://example.com/", "source_type": "site"},
+    )
+    assert r.status_code == 200, r.text
+    _assert_preview_offset_pagination(r.json(), limit=3)

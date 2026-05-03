@@ -23,7 +23,7 @@
 **Goal:** Confirm what is allowed to change before prose edits.
 **Success Criteria:** Maintainers accept the source/published flow and the first deployment-mode slice.
 **Tests:** None.
-**Status:** Not Started
+**Status:** Complete
 
 - [ ] Confirm `Docs/Getting_Started/` and `Docs/Deployment/` are canonical source docs.
 - [ ] Confirm `Docs/Published/` should be regenerated with `Helper_Scripts/refresh_docs_published.sh`, not edited by hand except for preserved `index.md` files.
@@ -34,12 +34,14 @@
   - alternate: `Docs/Deployment/First_Time_Production_Setup.md` production checklist
   - alternate: `Docs/Deployment/horizontal-scaling.md` plus HA guide alignment
 
+Status note: maintainer continuation accepted the docs-only Phase 4.2 slice. This tranche uses `Docs/Getting_Started/README.md` as the source edit and preserves the existing HA and Monitoring publishing decisions without changing them.
+
 ## Stage 2: Source-Only Refresh
 
 **Goal:** Make one small source-doc improvement without touching runtime behavior.
 **Success Criteria:** One deployment-mode slice is clearer and still matches current commands.
 **Tests:** Static command/path checks from Stage 4.
-**Status:** Not Started
+**Status:** Complete
 
 Recommended first edit:
 
@@ -68,7 +70,7 @@ Implementation constraints:
 **Goal:** Refresh generated/curated published docs from source after source edits.
 **Success Criteria:** Generated published changes are intentional and limited to the selected docs slice.
 **Tests:** Refresh script exits 0.
-**Status:** Not Started
+**Status:** Complete
 
 Run:
 
@@ -83,12 +85,14 @@ Review:
 - confirm Monitoring is under `Docs/Published/Monitoring`
 - confirm no private or draft-only docs were promoted accidentally
 
+Status note: `Helper_Scripts/refresh_docs_published.sh` exits 0, but the full refresh currently surfaces unrelated source/published drift. This PR keeps only the matching `Docs/Published/Getting_Started/README.md` mirror for the selected source slice; the broader refresh drift remains out of scope.
+
 ## Stage 4: Local Docs Gate
 
 **Goal:** Reproduce the required onboarding docs gate locally.
 **Success Criteria:** Docs refresh, boundary checks, docs tests, and MkDocs build pass.
 **Tests:** Commands below.
-**Status:** Not Started
+**Status:** Complete
 
 Run:
 
@@ -111,12 +115,14 @@ python Helper_Scripts/docs/check_readme_docs_path_hygiene.py
 python Helper_Scripts/docs/check_docs_index_path_hygiene.py
 ```
 
+Status note: required docs checks pass when the repo-root virtual environment is on `PATH`; direct venv Python without `PATH` fails two docs tests that spawn `python`. `mkdocs build -f Docs/mkdocs.yml` exits 0 with existing nav/link warnings. Optional public/private and path-hygiene checks pass.
+
 ## Stage 5: Owner Review Packet
 
 **Goal:** Make docs review easy for the owner.
 **Success Criteria:** PR description explains source edits, generated published changes, validation, and open owner decisions.
 **Tests:** None.
-**Status:** Not Started
+**Status:** In Progress
 
 Include in handoff:
 

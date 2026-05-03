@@ -54,25 +54,42 @@ def _append_scope_filters(
         conditions.append("(" + " OR ".join(visibility_parts) + ")")
 
 
+def _count_from_row(row: Any) -> int:
+    if row is None:
+        return 0
+    try:
+        value = row["total"]
+    except (KeyError, TypeError, IndexError):
+        value = row[0]
+    return int(value if value is not None else 0)
+
+
 def search_claims(
     self,
     query: str,
     *,
     limit: int = 20,
+    offset: int = 0,
     fallback_to_like: bool = True,
     owner_user_id: int | None = None,
-) -> list[dict[str, Any]]:
+    include_total: bool = False,
+) -> list[dict[str, Any]] | tuple[list[dict[str, Any]], int]:
     """Search claims using the configured backend."""
     cleaned_query = (query or "").strip()
     if not cleaned_query:
-        return []
+        return ([], 0) if include_total else []
 
     try:
         limit = max(1, int(limit))
     except (TypeError, ValueError):
         limit = 20
+    try:
+        offset = max(0, int(offset))
+    except (TypeError, ValueError):
+        offset = 0
 
     results: list[dict[str, Any]] = []
+    total_matches = 0
     try:
         scope = get_scope()
     except _MEDIA_NONCRITICAL_EXCEPTIONS as scope_err:
@@ -98,9 +115,19 @@ def search_claims(
                     "FROM claims_fts JOIN Claims c ON claims_fts.rowid = c.id "
                     "JOIN Media m ON c.media_id = m.id "
                     f"WHERE claims_fts MATCH ? AND {' AND '.join(conditions)} "
-                    "ORDER BY relevance_score ASC LIMIT ?"
+                    "ORDER BY relevance_score ASC LIMIT ? OFFSET ?"
                 )
-                rows = self._fetchall_with_connection(conn, sql, (cleaned_query, *params, limit))
+                count_sql = (
+                    "SELECT COUNT(*) AS total "  # nosec B608
+                    "FROM claims_fts JOIN Claims c ON claims_fts.rowid = c.id "
+                    "JOIN Media m ON c.media_id = m.id "
+                    f"WHERE claims_fts MATCH ? AND {' AND '.join(conditions)}"
+                )
+                if include_total:
+                    total_matches = _count_from_row(
+                        self._fetchone_with_connection(conn, count_sql, (cleaned_query, *params))
+                    )
+                rows = self._fetchall_with_connection(conn, sql, (cleaned_query, *params, limit, offset))
                 results.extend(dict(row) for row in rows)
             elif self.backend_type == BackendType.POSTGRESQL:
                 tsquery = FTSQueryTranslator.normalize_query(cleaned_query, "postgresql")
@@ -117,16 +144,26 @@ def search_claims(
                         "       ts_rank(c.claims_fts_tsv, to_tsquery('english', ?)) AS relevance_score "
                         "FROM claims c JOIN media m ON c.media_id = m.id "
                         f"WHERE c.claims_fts_tsv @@ to_tsquery('english', ?) AND {' AND '.join(conditions)} "
-                        "ORDER BY relevance_score DESC LIMIT ?"
+                        "ORDER BY relevance_score DESC LIMIT ? OFFSET ?"
                     )
-                    rows = self._fetchall_with_connection(conn, sql, (tsquery, tsquery, *params, limit))
+                    count_sql = (
+                        "SELECT COUNT(*) AS total "  # nosec B608
+                        "FROM claims c JOIN media m ON c.media_id = m.id "
+                        f"WHERE c.claims_fts_tsv @@ to_tsquery('english', ?) AND {' AND '.join(conditions)}"
+                    )
+                    if include_total:
+                        total_matches = _count_from_row(
+                            self._fetchone_with_connection(conn, count_sql, (tsquery, *params))
+                        )
+                    rows = self._fetchall_with_connection(conn, sql, (tsquery, tsquery, *params, limit, offset))
                     results.extend(dict(row) for row in rows)
             else:
                 raise NotImplementedError(
                     f"Claims search not implemented for backend {self.backend_type}"
                 )
 
-            if fallback_to_like and not results:
+            has_fts_matches = total_matches > 0 if include_total else bool(results)
+            if fallback_to_like and not has_fts_matches:
                 like_conditions: list[str] = []
                 like_params: list[Any] = []
                 if owner_user_id is not None:
@@ -142,7 +179,13 @@ def search_claims(
                         "FROM claims c JOIN media m ON c.media_id = m.id "
                         "WHERE c.deleted IS FALSE AND c.claim_text ILIKE ?"
                         + like_clause
-                        + " LIMIT ?"
+                        + " LIMIT ? OFFSET ?"
+                    )
+                    like_count_sql = (
+                        "SELECT COUNT(*) AS total "  # nosec B608
+                        "FROM claims c JOIN media m ON c.media_id = m.id "
+                        "WHERE c.deleted IS FALSE AND c.claim_text ILIKE ?"
+                        + like_clause
                     )
                 else:
                     like_sql = (
@@ -150,12 +193,22 @@ def search_claims(
                         "FROM Claims c JOIN Media m ON c.media_id = m.id "
                         "WHERE c.deleted = 0 AND c.claim_text LIKE ?"
                         + like_clause
-                        + " LIMIT ?"
+                        + " LIMIT ? OFFSET ?"
+                    )
+                    like_count_sql = (
+                        "SELECT COUNT(*) AS total "  # nosec B608
+                        "FROM Claims c JOIN Media m ON c.media_id = m.id "
+                        "WHERE c.deleted = 0 AND c.claim_text LIKE ?"
+                        + like_clause
+                    )
+                if include_total:
+                    total_matches = _count_from_row(
+                        self._fetchone_with_connection(conn, like_count_sql, (like_pattern, *like_params))
                     )
                 fallback_rows = self._fetchall_with_connection(
                     conn,
                     like_sql,
-                    (like_pattern, *like_params, limit),
+                    (like_pattern, *like_params, limit, offset),
                 )
                 for row in fallback_rows:
                     row_dict = dict(row)
@@ -163,6 +216,6 @@ def search_claims(
                     results.append(row_dict)
     except _MEDIA_NONCRITICAL_EXCEPTIONS as exc:
         logger.exception("Failed to search claims: {}", exc)
-        return []
+        return ([], 0) if include_total else []
 
-    return results
+    return (results, total_matches) if include_total else results

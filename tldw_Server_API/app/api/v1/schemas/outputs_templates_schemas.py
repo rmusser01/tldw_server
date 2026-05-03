@@ -5,7 +5,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
-from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
+from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta, default_offset_pagination_aliases
 
 TemplateType = Literal[
     "newsletter_markdown",
@@ -16,14 +16,6 @@ TemplateType = Literal[
 ]
 
 TemplateFormat = Literal["md", "html", "mp3"]
-
-
-def _default_offset_pagination_aliases(response):
-    if response.has_more is None:
-        response.has_more = response.pagination.has_more
-    if response.next_offset is None:
-        response.next_offset = response.pagination.next_offset
-    return response
 
 
 class OutputTemplateCreate(BaseModel):
@@ -87,7 +79,7 @@ class OutputTemplateList(BaseModel):
 
     @model_validator(mode="after")
     def _default_pagination_aliases(self) -> "OutputTemplateList":
-        return _default_offset_pagination_aliases(self)
+        return default_offset_pagination_aliases(self)
 
 
 class TemplatePreviewRequest(BaseModel):

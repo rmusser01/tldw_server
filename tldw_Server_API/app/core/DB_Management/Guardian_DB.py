@@ -1911,6 +1911,27 @@ class GuardianDB:
             finally:
                 conn.close()
 
+    def count_self_monitoring_alerts(
+        self,
+        user_id: str,
+        rule_id: str | None = None,
+        unread_only: bool = False,
+    ) -> int:
+        with self._lock:
+            conn = self._connect()
+            try:
+                query = "SELECT COUNT(*) as cnt FROM self_monitoring_alerts WHERE user_id = ?"
+                params: list[Any] = [str(user_id)]
+                if rule_id:
+                    query += " AND rule_id = ?"
+                    params.append(rule_id)
+                if unread_only:
+                    query += " AND is_read = 0"
+                row = conn.execute(query, params).fetchone()
+                return int(row["cnt"]) if row else 0
+            finally:
+                conn.close()
+
     def mark_alerts_read(self, user_id: str, alert_ids: list[str]) -> int:
         if not alert_ids:
             return 0

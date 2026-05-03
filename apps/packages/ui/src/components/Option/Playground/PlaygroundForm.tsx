@@ -157,6 +157,10 @@ import { ComposerToolbar } from "./ComposerToolbar";
 import { MentionsDropdown } from "./MentionsDropdown";
 import { getPresetByKey } from "./ParameterPresets";
 import { PlaygroundComposerNotices } from "./PlaygroundComposerNotices";
+import {
+  PlaygroundChatErrorBanner,
+  usePlaygroundChatErrorBanner,
+} from "./PlaygroundChatErrorBanner";
 import { PlaygroundKnowledgeSection } from "./PlaygroundKnowledgeSection";
 import { PlaygroundMcpControl } from "./PlaygroundMcpControl";
 import { PlaygroundModeLauncher } from "./PlaygroundModeLauncher";
@@ -2526,10 +2530,19 @@ export const PlaygroundForm = ({
   const invalidateServerChatHistory = React.useCallback(() => {
     queryClient.invalidateQueries({ queryKey: ["serverChatHistory"] });
   }, [queryClient]);
+  const {
+    visibleError: chatErrorBanner,
+    dismissError: dismissChatErrorBanner,
+    dismissAfterSuccessfulSubmit: dismissChatErrorAfterSuccessfulSubmit,
+  } = usePlaygroundChatErrorBanner(messages);
 
   const { mutateAsync: sendMessage } = useMutation({
     mutationFn: onSubmit,
-    onSuccess: () => {
+    onMutate: () => ({
+      errorKeyToDismiss: chatErrorBanner?.key ?? null,
+    }),
+    onSuccess: (_data, _variables, context) => {
+      dismissChatErrorAfterSuccessfulSubmit(context?.errorKeyToDismiss ?? null);
       void trackOnboardingChatSubmitSuccess(
         typeof window !== "undefined" ? window.location.pathname : "/chat",
       );
@@ -4368,6 +4381,17 @@ export const PlaygroundForm = ({
                           : ""
                       }`}
                     >
+                      <PlaygroundChatErrorBanner
+                        error={chatErrorBanner}
+                        diagnosticsLabel={
+                          t(
+                            "playground:composer.errorBanner.openDiagnostics",
+                            "View in Health & Diagnostics",
+                          ) as string
+                        }
+                        dismissLabel={t("common:close", "Dismiss") as string}
+                        onDismiss={dismissChatErrorBanner}
+                      />
                       {showFollowUpResearchButton ? (
                         <div className="mb-2 flex flex-wrap items-center gap-2">
                           <Button

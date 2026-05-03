@@ -429,6 +429,7 @@ class PreviewItem(BaseModel):
 class PreviewResponse(BaseModel):
     items: list[PreviewItem]
     total: int
+    pagination: OffsetPaginationMeta
     ingestable: int
     filtered: int
 

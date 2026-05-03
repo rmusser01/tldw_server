@@ -49,6 +49,10 @@ See `Docs/Design/2026-05-02-apple-containerization-evaluation.md` for the
 current adopt/defer/reject evaluation before changing image-store, helper,
 networking, or guest-agent implementation.
 
+See `Docs/Sandbox/sandbox-security-policy-matrix.md` before changing runtime
+trust eligibility, network-policy semantics, workspace mounts, artifact
+exposure, helper/request allowlisting, or audit behavior.
+
 ## Trust-Level Policy
 
 - `untrusted`:
@@ -220,6 +224,7 @@ item and reports `live_vm_matches_blocked_cleanup` instead of deleting files.
   - `vz_linux`
   - `vz_macos`
   - `seatbelt`
+  - `worktree`
 - `vz_linux` session-mode reuse exists now and reuses a persisted VM for later commands in the same sandbox session.
 - `vz_macos` still has no warm-session optimization.
 
@@ -243,6 +248,9 @@ It is admin-only and returns:
 - reconciliation data comparing persisted VZ session rows with live helper VM state
 - image-store correlation showing persisted run manifests, dry-run GC candidate
   classification, and any matching reconciliation/helper VM records
+- read-only observability for `vz_linux` helper stdout/stderr log pointers,
+  per-VM serial log pointers, guest readiness metadata, and helper-provided
+  resource counters when available
 - an additive image-store cleanup plan endpoint and a default-dry-run cleanup
   mutation endpoint for explicit operator action
 - additive `startup_warning_summary` showing whether current-process startup
@@ -258,6 +266,8 @@ is not cluster-wide or persisted across restarts.
 Use the admin endpoint when you are validating host setup or trying to explain why a
 runtime is unavailable. Use `/api/v1/sandbox/runtimes` for client-facing discovery;
 that payload stays summarized and does not expose helper/template internals.
+The diagnostics observability block reports log paths, existence, and byte
+sizes only; it does not read or return log contents.
 
 ACP sandbox session creation now performs runtime preflight validation before calling the sandbox service, and converts failures into `ACPResponseError` instead of leaking raw sandbox exceptions.
 
@@ -330,6 +340,28 @@ Current diagnostics are mixed-mode:
 - fake helper/template env flags still drive test-mode scaffolding
 - `vz_linux` reports `execution_mode=real` only when the helper-backed path is reachable and the template validates
 - `vz_macos` reports `execution_mode=fake` only when `TLDW_SANDBOX_VZ_MACOS_FAKE_EXEC=1`
+
+## Cleanup Contract Coverage
+
+Portable unit coverage asserts cleanup bookkeeping and temporary-directory
+removal without requiring Docker, `sandbox-exec`, or a real VM host. The
+hostless cleanup contract currently covers:
+
+- Docker container lifecycle paths that create a container and then complete,
+  hit startup timeout, or hit execution timeout; these must remove the container
+  and clear active cancellation/egress bookkeeping.
+- `seatbelt` and `worktree` cancellation paths; these must terminate the active
+  process group, clear active process/run-directory bookkeeping, and remove the
+  per-run directory.
+- `vz_linux` helper-execution failure after VM creation; this must terminate
+  the helper VM, clear active VM/run-directory bookkeeping, and remove the
+  auto-created workspace.
+
+Real Virtualization.framework cleanup remains host-gated. The portable tests do
+not prove that a prepared Apple silicon host releases every VM process,
+virtiofs resource, serial log handle, or helper-side run clone. Operators should
+use the real host smoke below for VM process lifecycle coverage, including
+ephemeral VM teardown and same-session VM reuse.
 
 ## Real Host E2E Smoke
 
@@ -431,6 +463,10 @@ The self-hosted job is branch-gated to `main` and `dev` so a manual dispatch
 does not accidentally execute arbitrary feature-branch code on the prepared
 host. External actions in this workflow are pinned to immutable SHAs because
 they execute on the self-hosted runner.
+
+The acceptance policy for when this workflow should run, what counts as an
+expected skip, and what counts as a blocking `vz_linux` regression lives in
+`Docs/Sandbox/vz-linux-host-gated-ci-acceptance-policy.md`.
 
 The workflow calls the same operator smoke script documented above:
 

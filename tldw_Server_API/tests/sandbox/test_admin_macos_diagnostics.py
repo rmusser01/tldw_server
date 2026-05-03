@@ -174,6 +174,7 @@ def test_admin_macos_diagnostics_returns_structured_payload(monkeypatch) -> None
         "runtimes",
         "reconciliation",
         "image_store",
+        "observability",
         "startup_warning_summary",
     }
     assert body["host"]["supported"] is True
@@ -186,6 +187,7 @@ def test_admin_macos_diagnostics_returns_structured_payload(monkeypatch) -> None
     assert body["reconciliation"]["items"] == []
     assert body["image_store"]["configured"] is False
     assert body["image_store"]["items"] == []
+    assert body["observability"] is None
     assert body["startup_warning_summary"] == {
         "present": True,
         "blocking": False,

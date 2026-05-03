@@ -68,7 +68,7 @@ def test_coverage_required_uses_documented_global_floor() -> None:
     workflow = _load(".github/workflows/coverage-required.yml")
     steps = workflow["jobs"]["coverage-required"]["steps"]
     coverage_step = _get_step(steps, "Run global coverage floor")
-    assert "--cov-fail-under=4" in coverage_step["run"]
+    assert "--cov-fail-under=5" in coverage_step["run"]
 
 
 def test_frontend_required_lane_exists() -> None:

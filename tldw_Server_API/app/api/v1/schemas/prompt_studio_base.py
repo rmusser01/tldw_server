@@ -107,6 +107,12 @@ class PageListResponse(ListResponse):
 
     pagination: PagePaginationMeta
 
+
+class PageStandardResponse(StandardResponse):
+    """Standard Prompt Studio response with canonical page pagination metadata."""
+
+    pagination: PagePaginationMeta
+
 ########################################################################################################################
 # Security Shim
 

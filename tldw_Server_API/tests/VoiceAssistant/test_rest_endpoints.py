@@ -6,6 +6,7 @@ import builtins
 import importlib
 import json
 import uuid
+from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 import pytest
@@ -550,6 +551,54 @@ class TestVoiceSessionsEndpoint:
         data = response.json()
         assert data["total"] == 1
         assert len(data["sessions"]) == 1
+
+    def test_list_sessions_includes_canonical_pagination(self, client_with_user, mock_user) -> None:
+        """Voice session listing preserves total while exposing canonical offset pagination."""
+        client, _, _, db = client_with_user
+        now = datetime.utcnow()
+        sessions = [
+            VoiceSessionContext(
+                session_id="voice-session-newest",
+                user_id=mock_user.id,
+                state=VoiceSessionState.IDLE,
+                last_activity=now,
+            ),
+            VoiceSessionContext(
+                session_id="voice-session-middle",
+                user_id=mock_user.id,
+                state=VoiceSessionState.IDLE,
+                last_activity=now - timedelta(minutes=1),
+            ),
+            VoiceSessionContext(
+                session_id="voice-session-oldest",
+                user_id=mock_user.id,
+                state=VoiceSessionState.IDLE,
+                last_activity=now - timedelta(minutes=2),
+            ),
+        ]
+        for session in sessions:
+            save_voice_session(db, session)
+
+        response = client.get(
+            "/api/v1/voice/sessions",
+            params={"active_only": False, "limit": 1, "offset": 1},
+        )
+
+        if response.status_code == 404:
+            pytest.skip("Voice assistant routes not available")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert [session["session_id"] for session in data["sessions"]] == ["voice-session-middle"]
+        assert data["total"] == 3
+        assert data["pagination"] == {
+            "mode": "offset",
+            "limit": 1,
+            "offset": 1,
+            "total": 3,
+            "has_more": True,
+            "next_offset": 2,
+        }
 
 
 class TestVoiceSessionDeleteEndpoint:

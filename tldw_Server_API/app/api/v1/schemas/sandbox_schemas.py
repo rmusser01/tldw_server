@@ -11,8 +11,17 @@ except ImportError:  # pragma: no cover - pydantic v1 fallback
     from pydantic import root_validator as model_validator  # type: ignore
 
 from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
+from tldw_Server_API.app.core.Sandbox.runtime_capabilities import RuntimeImplementationState
 
-RuntimeType = Literal["docker", "firecracker", "lima", "vz_linux", "vz_macos", "seatbelt"]
+RuntimeType = Literal[
+    "docker",
+    "firecracker",
+    "lima",
+    "vz_linux",
+    "vz_macos",
+    "seatbelt",
+    "worktree",
+]
 TrustLevelType = Literal["trusted", "standard", "untrusted"]
 
 
@@ -25,6 +34,13 @@ def _default_offset_pagination_aliases(response):
 class SandboxRuntimeInfo(BaseModel):
     name: RuntimeType
     available: bool = Field(description="Whether this runtime is detected/usable on host")
+    implementation_state: RuntimeImplementationState | None = Field(
+        default=None,
+        description=(
+            "Roadmap maturity label for this runtime independent of current host availability: "
+            "supported, unsupported, scaffold, host_gated, or not_applicable"
+        ),
+    )
     reasons: list[str] | None = Field(default=None, description="Preflight reasons when the runtime is unavailable or constrained")
     supported_trust_levels: list[TrustLevelType] | None = Field(default=None, description="Trust levels supported by this runtime under current host policy")
     default_images: list[str] = Field(default_factory=list)
@@ -420,6 +436,57 @@ class SandboxAdminMacOSImageStoreDiagnostics(BaseModel):
     reasons: list[str] = Field(default_factory=list)
 
 
+class SandboxAdminMacOSLogPointer(BaseModel):
+    """Read-only pointer to a host log file without exposing file contents."""
+
+    path: str | None = None
+    exists: bool = False
+    size_bytes: int | None = None
+
+
+class SandboxAdminMacOSHelperLogPointers(BaseModel):
+    """Pointers to the managed VZ helper stdout and stderr logs."""
+
+    stdout: SandboxAdminMacOSLogPointer
+    stderr: SandboxAdminMacOSLogPointer
+
+
+class SandboxAdminMacOSGuestObservability(BaseModel):
+    """Guest-agent readiness metadata reported by the helper for a live VM."""
+
+    version: str | None = None
+    workspace_root: str | None = None
+    capabilities_known: bool | None = None
+    capabilities: list[str] = Field(default_factory=list)
+
+
+class SandboxAdminMacOSVMObservability(BaseModel):
+    """Per-VM boot-log, guest, and resource diagnostics for VZ Linux."""
+
+    vm_id: str
+    state: str | None = None
+    healthy: bool
+    run_id: str | None = None
+    session_id: str | None = None
+    session_mode: bool = False
+    serial_log: SandboxAdminMacOSLogPointer
+    guest: SandboxAdminMacOSGuestObservability
+    resource_snapshot: dict[str, int] = Field(default_factory=dict)
+
+
+class SandboxAdminMacOSObservabilityDiagnostics(BaseModel):
+    """Aggregated read-only VZ Linux observability block for admin diagnostics."""
+
+    configured: bool
+    serial_log_dir: str | None = None
+    helper_log_dir: str | None = None
+    helper_log_dir_source: str | None = None
+    helper_logs: SandboxAdminMacOSHelperLogPointers
+    live_vms: int = 0
+    vms: list[SandboxAdminMacOSVMObservability] = Field(default_factory=list)
+    reasons: list[str] = Field(default_factory=list)
+
+
 class SandboxAdminStartupWarningSummary(BaseModel):
     """Compact startup warning summary projected into sandbox diagnostics."""
 
@@ -437,6 +504,7 @@ class SandboxAdminMacOSDiagnosticsResponse(BaseModel):
     runtimes: dict[str, SandboxAdminMacOSRuntimeDiagnostics] = Field(default_factory=dict)
     reconciliation: SandboxAdminMacOSReconciliationDiagnostics | None = None
     image_store: SandboxAdminMacOSImageStoreDiagnostics | None = None
+    observability: SandboxAdminMacOSObservabilityDiagnostics | None = None
     startup_warning_summary: SandboxAdminStartupWarningSummary | None = None
 
 

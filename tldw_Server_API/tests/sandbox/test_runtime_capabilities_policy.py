@@ -5,7 +5,7 @@ import pytest
 import tldw_Server_API.app.core.Sandbox.policy as policy_module
 import tldw_Server_API.app.core.Sandbox.service as service_module
 
-from tldw_Server_API.app.core.Sandbox.models import RunSpec, RuntimeType
+from tldw_Server_API.app.core.Sandbox.models import RunSpec, RuntimeType, TrustLevel
 from tldw_Server_API.app.core.Sandbox.policy import SandboxPolicy, SandboxPolicyConfig
 from tldw_Server_API.app.core.Sandbox.runtime_capabilities import RuntimePreflightResult
 from tldw_Server_API.app.core.Sandbox.service import SandboxService
@@ -34,6 +34,29 @@ def test_policy_prefers_shared_runtime_preflight_over_legacy_booleans() -> None:
         )
 
     assert exc.value.reasons == ["shared_preflight_unavailable"]
+
+
+def test_policy_rejects_worktree_for_untrusted_without_preflight_metadata() -> None:
+    policy = SandboxPolicy(SandboxPolicyConfig(default_runtime=RuntimeType.docker))
+    spec = RunSpec(
+        session_id=None,
+        runtime=RuntimeType.worktree,
+        base_image=None,
+        command=["echo", "ok"],
+        trust_level=TrustLevel.untrusted,
+    )
+
+    with pytest.raises(SandboxPolicy.PolicyUnsupported) as exc:
+        policy.apply_to_run(
+            spec,
+            firecracker_available=True,
+            lima_available=True,
+            runtime_preflights=None,
+        )
+
+    assert exc.value.runtime == RuntimeType.worktree
+    assert exc.value.requirement == "untrusted_requires_vm_runtime"
+    assert "trust_level_requires_vm_runtime" in exc.value.reasons
 
 
 def test_service_start_run_passes_shared_runtime_preflight_to_policy(monkeypatch) -> None:

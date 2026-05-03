@@ -5,10 +5,13 @@ Job-poller shutdown handoff helper extracted from the application lifespan.
 from __future__ import annotations
 
 import os as _env_os
+from collections.abc import Awaitable
 from dataclasses import dataclass, field
-from typing import Any, Awaitable, Callable
+from typing import Any, Callable
 
 from loguru import logger
+
+from tldw_Server_API.app.services.lifecycle_workers import ShutdownPhase
 
 
 @dataclass
@@ -30,10 +33,11 @@ async def shutdown_job_poller_handoff(
     """Quiesce owned job pollers and return the late-stop gating predicate."""
     wait_for_leases_sec = _resolve_wait_for_leases_sec(startup_guard_exceptions)
     count_active_processing = _build_count_active_processing(import_exceptions)
+    job_poller_handles = _filter_job_poller_quiesce_handles(owned_job_pollers)
 
     await quiesce_owned_job_pollers_for_shutdown(
         app,
-        owned_job_pollers,
+        job_poller_handles,
         wait_for_leases_sec=wait_for_leases_sec,
         count_active_processing=count_active_processing,
     )
@@ -45,6 +49,18 @@ async def shutdown_job_poller_handoff(
         early_quiesced_job_poller_names=early_quiesced_job_poller_names,
         should_run_late_stop=_build_should_run_late_stop(early_quiesced_job_poller_names),
     )
+
+
+def _filter_job_poller_quiesce_handles(handles: list[Any]) -> list[Any]:
+    """Return task-backed workers owned by the job-poller quiesce phase."""
+
+    return [
+        handle
+        for handle in handles
+        if getattr(handle, "task", None) is not None
+        and getattr(handle, "shutdown_phase", ShutdownPhase.JOB_POLLER_QUIESCE)
+        == ShutdownPhase.JOB_POLLER_QUIESCE
+    ]
 
 
 async def run_shutdown_job_poller_handoff(

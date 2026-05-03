@@ -5,7 +5,13 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from tldw_Server_API.app.api.v1.schemas.pagination import (
+    OffsetPaginationMeta,
+    default_offset_pagination_aliases,
+    validate_offset_pagination_aliases,
+)
 
 # ── Guardian Relationship Schemas ────────────────────────────
 
@@ -117,7 +123,20 @@ class SupervisionAuditResponse(BaseModel):
 
 class SupervisionAuditList(BaseModel):
     items: list[SupervisionAuditResponse]
-    total: int
+    total: int = Field(..., ge=0)
+    limit: int = Field(..., ge=1)
+    offset: int = Field(..., ge=0)
+    pagination: OffsetPaginationMeta
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self) -> "SupervisionAuditList":
+        return default_offset_pagination_aliases(self)
+
+    @model_validator(mode="after")
+    def _validate_pagination_aliases(self) -> "SupervisionAuditList":
+        return validate_offset_pagination_aliases(self)
 
 
 # ── Governance Policy Schemas ────────────────────────────────
@@ -314,7 +333,20 @@ class SelfMonitoringAlertResponse(BaseModel):
 
 class SelfMonitoringAlertList(BaseModel):
     items: list[SelfMonitoringAlertResponse]
-    total: int
+    total: int = Field(..., ge=0)
+    limit: int = Field(..., ge=1)
+    offset: int = Field(..., ge=0)
+    pagination: OffsetPaginationMeta
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self) -> "SelfMonitoringAlertList":
+        return default_offset_pagination_aliases(self)
+
+    @model_validator(mode="after")
+    def _validate_pagination_aliases(self) -> "SelfMonitoringAlertList":
+        return validate_offset_pagination_aliases(self)
 
 
 class MarkAlertsReadRequest(BaseModel):

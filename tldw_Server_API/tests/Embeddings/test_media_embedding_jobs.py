@@ -1,5 +1,7 @@
 import os
 import time
+from types import SimpleNamespace
+
 import pytest
 from fastapi.testclient import TestClient
 import redis
@@ -36,6 +38,46 @@ class _FakeRedisClient:
 
     async def aclose(self):
         return None
+
+
+@pytest.mark.asyncio
+async def test_list_media_embedding_jobs_includes_canonical_overfetch_pagination(monkeypatch):
+    from tldw_Server_API.app.api.v1.endpoints import media_embeddings as media_embeddings_endpoint
+
+    class _FakeJobsAdapter:
+        def list_jobs(self, *, user_id, status=None, limit=50, offset=0):
+            assert user_id == "1"
+            assert status == "queued"
+            assert limit in {2, 3}
+            assert offset == 0
+            rows = [
+                {"id": "job-1", "status": "queued"},
+                {"id": "job-2", "status": "queued"},
+                {"id": "job-3", "status": "queued"},
+            ]
+            return rows[:limit]
+
+    monkeypatch.setattr(media_embeddings_endpoint, "EmbeddingsJobsAdapter", _FakeJobsAdapter)
+
+    response = await media_embeddings_endpoint.list_media_embedding_jobs(
+        current_user=SimpleNamespace(id=1),
+        status="queued",
+        limit=2,
+        offset=0,
+    )
+
+    assert [row["id"] for row in response["data"]] == ["job-1", "job-2"]
+    assert response["pagination"] == {
+        "mode": "offset",
+        "limit": 2,
+        "offset": 0,
+        "total": None,
+        "has_more": True,
+        "next_offset": 2,
+        "count": 2,
+    }
+    assert response["has_more"] is True
+    assert response["next_offset"] == 2
 
 
 @pytest.fixture(autouse=True)

@@ -1494,6 +1494,12 @@ async def export_notes(
             "total": total,
             "limit": limit,
             "offset": offset,
+            "pagination": build_offset_pagination_meta(
+                limit=limit,
+                offset=offset,
+                total=total,
+                count=len(notes_data),
+            ),
             "exported_at": __import__("datetime").datetime.utcnow().isoformat()
         }
     except _NOTES_NONCRITICAL_EXCEPTIONS as e:
@@ -2026,7 +2032,23 @@ async def list_collection_keyword_links_endpoint(
             }
             for row in rows
         ]
-        return {"links": links}
+        total = int(db.count_collection_keyword_links())
+        pagination = build_offset_pagination_meta(
+            limit=limit,
+            offset=offset,
+            total=total,
+            count=len(links),
+        )
+        return {
+            "links": links,
+            "count": len(links),
+            "limit": limit,
+            "offset": offset,
+            "total": total,
+            "pagination": pagination,
+            "has_more": pagination.has_more,
+            "next_offset": pagination.next_offset,
+        }
     except _NOTES_NONCRITICAL_EXCEPTIONS as e:
         handle_db_errors(e, "collection")
 
@@ -2322,6 +2344,8 @@ async def list_conversation_keyword_links_endpoint(
                             "keyword_id": int(kw_id),
                         }
                     )
+            total = len(links)
+            links = links[offset: offset + limit]
         else:
             cursor = db.execute_query(
                 "SELECT conversation_id, keyword_id FROM conversation_keywords ORDER BY conversation_id ASC, keyword_id ASC LIMIT ? OFFSET ?",
@@ -2335,7 +2359,23 @@ async def list_conversation_keyword_links_endpoint(
                 }
                 for row in rows
             ]
-        return {"links": links}
+            total = int(db.count_conversation_keyword_links())
+        pagination = build_offset_pagination_meta(
+            limit=limit,
+            offset=offset,
+            total=total,
+            count=len(links),
+        )
+        return {
+            "links": links,
+            "count": len(links),
+            "limit": limit,
+            "offset": offset,
+            "total": total,
+            "pagination": pagination,
+            "has_more": pagination.has_more,
+            "next_offset": pagination.next_offset,
+        }
     except _NOTES_NONCRITICAL_EXCEPTIONS as e:
         handle_db_errors(e, "conversation-keyword link")
 
@@ -4317,7 +4357,23 @@ async def get_notes_for_keyword_endpoint(
                                 detail=f"Keyword with ID '{keyword_id}' not found.")
 
         notes_list = db.get_notes_for_keyword(keyword_id=keyword_id, limit=limit, offset=offset)
-        return NotesForKeywordResponse(keyword_id=keyword_id, notes=notes_list)
+        note_counts = db.get_note_counts_for_keywords([keyword_id])
+        total = int(note_counts.get(int(keyword_id), len(notes_list)))
+        pagination = build_offset_pagination_meta(
+            limit=limit,
+            offset=offset,
+            total=total,
+            count=len(notes_list),
+        )
+        return NotesForKeywordResponse(
+            keyword_id=keyword_id,
+            notes=notes_list,
+            count=len(notes_list),
+            limit=limit,
+            offset=offset,
+            total=total,
+            pagination=pagination,
+        )
     except HTTPException:
         raise
     except _NOTES_NONCRITICAL_EXCEPTIONS as e:

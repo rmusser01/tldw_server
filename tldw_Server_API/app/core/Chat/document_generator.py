@@ -795,7 +795,8 @@ class DocumentGeneratorService:
         self,
         conversation_id: Optional[Union[str, int]] = None,
         document_type: Optional[DocumentType] = None,
-        limit: int = 50
+        limit: int = 50,
+        offset: int = 0,
     ) -> list[dict[str, Any]]:
         """
         Get previously generated documents.
@@ -804,6 +805,7 @@ class DocumentGeneratorService:
             conversation_id: Optional conversation ID filter
             document_type: Optional document type filter
             limit: Maximum number of documents to return
+            offset: Number of matching documents to skip
 
         Returns:
             List of document dictionaries
@@ -822,8 +824,10 @@ class DocumentGeneratorService:
                     query += " AND document_type = ?"
                     params.append(document_type.value)
 
-                query += " ORDER BY created_at DESC LIMIT ?"
-                params.append(limit)
+                normalized_limit = max(1, int(limit))
+                normalized_offset = max(0, int(offset))
+                query += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
+                params.extend([normalized_limit, normalized_offset])
 
                 cursor = conn.execute(query, params)
                 documents = []
@@ -850,6 +854,42 @@ class DocumentGeneratorService:
         except _DOCGEN_NONCRITICAL_EXCEPTIONS as e:
             logger.error(f"Failed to get generated documents: {e}")
             return []
+
+    def count_generated_documents(
+        self,
+        conversation_id: Optional[Union[str, int]] = None,
+        document_type: Optional[DocumentType] = None,
+    ) -> int:
+        """
+        Count previously generated documents matching optional filters.
+
+        Args:
+            conversation_id: Optional conversation ID filter
+            document_type: Optional document type filter
+
+        Returns:
+            Total number of matching generated documents
+        """
+        try:
+            with self.db.get_connection() as conn:
+                query = "SELECT COUNT(*) FROM generated_documents WHERE 1=1"
+                params = []
+
+                normalized_conversation_id = self._normalize_conversation_id(conversation_id)
+                if normalized_conversation_id:
+                    query += " AND conversation_id = ?"
+                    params.append(normalized_conversation_id)
+
+                if document_type:
+                    query += " AND document_type = ?"
+                    params.append(document_type.value)
+
+                cursor = conn.execute(query, params)
+                return int(cursor.fetchone()[0])
+
+        except _DOCGEN_NONCRITICAL_EXCEPTIONS as e:
+            logger.error(f"Failed to count generated documents: {e}")
+            return 0
 
     def get_generated_document_by_id(self, document_id: int) -> Optional[dict[str, Any]]:
         """

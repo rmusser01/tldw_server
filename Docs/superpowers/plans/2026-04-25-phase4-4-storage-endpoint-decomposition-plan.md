@@ -70,11 +70,11 @@ Special behavior:
 **Goal:** Record current behavior before moving routes.
 **Success Criteria:** Focused storage tests pass on the accepted base, and OpenAPI path set is captured.
 **Tests:** Focused storage endpoint/admin tests and OpenAPI path guard.
-**Status:** Not Started
+**Status:** Complete
 
-- [ ] Create a clean worktree from the accepted base.
-- [ ] Confirm no active dirty work exists in `storage.py`.
-- [ ] Run focused backend tests:
+- [x] Create a clean worktree from the accepted base.
+- [x] Confirm no active dirty work exists in `storage.py`.
+- [x] Run focused backend tests:
 
 ```bash
 source .venv/bin/activate
@@ -85,22 +85,27 @@ python3 -m pytest \
   -v
 ```
 
-- [ ] Run OpenAPI guard from the UI package if dependencies are installed:
+- [x] Run OpenAPI guard from the UI package if dependencies are installed:
 
 ```bash
-cd apps/packages/ui
+cd apps/extension
 bun run verify:openapi
 ```
 
-- [ ] Record whether `/api/v1/storage/*` paths are currently part of any client guard.
-- [ ] Do not edit runtime code in this stage.
+- [x] Record whether `/api/v1/storage/*` paths are currently part of any client guard.
+- [x] Do not edit runtime code in this stage.
+
+Notes:
+
+- Focused storage/admin baseline passed after #1220 was merged into `dev`: `43 passed, 6 warnings`.
+- `bun run verify:openapi` passed from `apps/extension`, verifying 256 client paths and 46 media fallback fields with the reviewed OSS exceptions unchanged.
 
 ## Stage 2: Extract Storage Endpoint Helpers
 
 **Goal:** Move pure helpers out of `storage.py` before moving any routes.
 **Success Criteria:** `storage.py` still exposes the same router and helper behavior; focused tests pass.
 **Tests:** Focused storage endpoint/admin tests.
-**Status:** Not Started
+**Status:** Complete
 
 Candidate helper module:
 
@@ -121,12 +126,19 @@ Implementation constraints:
 - Do not move routes in this stage.
 - Do not alter datetime parsing fallback behavior.
 
+Notes:
+
+- Extracted `_principal_is_storage_admin`, `_to_generated_file`, `_resolve_storage_base_dir`, `_parse_datetime`, and `_to_quota_status` to `storage_helpers.py`.
+- Added direct helper coverage in `test_storage_helpers.py` for admin claim compatibility, datetime parsing, generated-file conversion, base directory selection, and quota conversion.
+- Preserved the `storage.DatabasePaths` monkeypatch seam for existing download tests while keeping route behavior unchanged.
+- Focused helper/storage/admin suite passed: `53 passed, 6 warnings`.
+
 ## Stage 3: Extract User-Owned JSON File And Folder Routes
 
 **Goal:** Move only user-owned JSON routes into sidecar route modules while keeping public paths unchanged.
 **Success Criteria:** `storage.router` still registers the same paths, methods, response models, and dependency behavior.
 **Tests:** Focused storage endpoint tests and OpenAPI path guard.
-**Status:** Not Started
+**Status:** Complete
 
 Candidate modules:
 
@@ -153,12 +165,22 @@ Implementation constraints:
 - Preserve ownership checks and status codes.
 - Do not change response shapes or introduce Phase 3 envelopes.
 
+Notes:
+
+- Moved user-owned file routes to `storage_user_files.py` and folder routes to `storage_user_folders.py`.
+- Preserved the existing `storage._get_service` monkeypatch seam through a dynamic sidecar resolver and re-exported moved handler functions from `storage.py` for direct-test compatibility.
+- Added route-level regression coverage proving `GET /api/v1/storage/files/least-accessed` is no longer captured by `GET /files/{file_id}`.
+- Added canonical pagination metadata to the least-accessed response to satisfy the existing generated list response schema.
+- Focused storage/admin suite passed after route movement: `44 passed, 6 warnings`.
+- OpenAPI verifier passed from `apps/extension`.
+- Touched-scope Bandit passed with zero findings.
+
 ## Stage 4: Extract Usage And Trash JSON Routes
 
 **Goal:** Move usage and trash route groups after file/folder route extraction is stable.
 **Success Criteria:** Usage counters, restore behavior, and trash response models remain unchanged.
 **Tests:** Focused storage endpoint tests.
-**Status:** Not Started
+**Status:** Complete
 
 Candidate modules:
 
@@ -179,12 +201,21 @@ Implementation constraints:
 - Preserve restore quota counter updates for user, org, and team usage.
 - Preserve trash permanent-delete status behavior.
 
+Notes:
+
+- Moved usage routes to `storage_usage.py` and trash routes to `storage_trash.py`.
+- Added route-level characterization coverage for `/usage`, `/usage/breakdown`, `/trash`, `/trash/restore/{file_id}`, and `/trash/{file_id}` before extraction.
+- Preserved the existing `storage._get_service` monkeypatch seam through dynamic sidecar resolvers and re-exported moved handler functions from `storage.py`.
+- Focused storage/admin suite passed after route movement: `49 passed, 6 warnings`.
+- OpenAPI verifier passed from `apps/extension`.
+- Touched-scope Bandit passed with zero findings.
+
 ## Stage 5: Plan Download And Admin Splits Separately
 
 **Goal:** Avoid mixing special route behavior into the first decomposition PR.
 **Success Criteria:** Download and admin route movement have their own accepted plan before any move.
 **Tests:** Download path traversal tests and admin claim tests.
-**Status:** Not Started
+**Status:** Complete
 
 Download route requirements:
 
@@ -199,6 +230,21 @@ Admin quota route requirements:
 - Preserve legacy `is_admin` compatibility.
 - Preserve 401 behavior when principal dependency is unavailable in tests.
 - Preserve 403 detail for non-admin principals.
+
+Notes:
+
+- Admin quota routes were split into `storage_admin_quotas.py` as a conservative JSON-only tranche.
+- Admin quota tests now patch the sidecar service dependency directly, avoiding a circular import back into `storage.py`.
+- Re-exported admin quota handlers and `require_storage_admin` from `storage.py` for direct import compatibility.
+- Added direct compatibility coverage for storage/admin sidecar re-exports.
+- Focused storage/admin suite passed after admin route movement: `57 passed, 6 warnings`.
+- Download route was split into `storage_download.py` as a separate `FileResponse` tranche.
+- Download tests now patch the sidecar service dependency directly, avoiding a circular import back into `storage.py`.
+- Re-exported `download_file` from `storage.py` for direct import compatibility.
+- Added direct compatibility coverage for the storage/download sidecar re-export.
+- Focused storage/admin suite passed after download route movement: `58 passed, 6 warnings`.
+- OpenAPI verifier passed from `apps/extension`.
+- Touched-scope Bandit passed with zero findings.
 
 ## Verification
 
@@ -216,7 +262,7 @@ python3 -m pytest \
 OpenAPI guard:
 
 ```bash
-cd apps/packages/ui
+cd apps/extension
 bun run verify:openapi
 ```
 
@@ -224,7 +270,7 @@ Touched-scope Bandit:
 
 ```bash
 source .venv/bin/activate
-python3 -m bandit -r tldw_Server_API/app/api/v1/endpoints/storage.py tldw_Server_API/app/api/v1/endpoints/storage_helpers.py tldw_Server_API/app/api/v1/endpoints/storage_user_files.py tldw_Server_API/app/api/v1/endpoints/storage_user_folders.py tldw_Server_API/app/api/v1/endpoints/storage_usage.py tldw_Server_API/app/api/v1/endpoints/storage_trash.py -f json -o /tmp/bandit_phase4_4_storage_endpoint.json
+python3 -m bandit -r tldw_Server_API/app/api/v1/endpoints/storage.py tldw_Server_API/app/api/v1/endpoints/storage_admin_quotas.py tldw_Server_API/app/api/v1/endpoints/storage_download.py tldw_Server_API/app/api/v1/endpoints/storage_helpers.py tldw_Server_API/app/api/v1/endpoints/storage_user_files.py tldw_Server_API/app/api/v1/endpoints/storage_user_folders.py tldw_Server_API/app/api/v1/endpoints/storage_usage.py tldw_Server_API/app/api/v1/endpoints/storage_trash.py -f json -o /tmp/bandit_phase4_4_storage_endpoint.json
 ```
 
 ## Out Of Scope
@@ -239,9 +285,11 @@ python3 -m bandit -r tldw_Server_API/app/api/v1/endpoints/storage.py tldw_Server
 
 ## Handoff Checklist
 
-- [ ] Maintainers accept `storage.py` user-owned JSON routes as the first Phase 4.4 endpoint target.
-- [ ] Clean worktree from accepted base exists.
-- [ ] Stage 1 focused tests pass before route movement.
-- [ ] OpenAPI path set is captured before route movement.
-- [ ] File download and admin quota routes remain excluded from the first route split.
-- [ ] Bandit is run on touched source before PR handoff.
+- [x] Maintainers accept `storage.py` user-owned JSON routes as the first Phase 4.4 endpoint target.
+- [x] Clean worktree from accepted base exists.
+- [x] Stage 1 focused tests pass before route movement.
+- [x] OpenAPI path set is captured before route movement.
+- [x] File download and admin quota routes remain excluded from the first route split.
+- [x] Admin quota routes are extracted in their own conservative tranche.
+- [x] File download route is extracted in its own conservative tranche.
+- [x] Bandit is run on touched source before PR handoff.

@@ -686,7 +686,9 @@ async def get_audiobook_job_artifacts(
     if not owner_user_id or str(owner_user_id) != str(current_user_id):
         raise HTTPException(status_code=404, detail="job_not_found")
 
-    rows, _total = collections_db.list_output_artifacts(job_id=int(job_id), limit=200, offset=0)
+    limit = 200
+    offset = 0
+    rows, total = collections_db.list_output_artifacts(job_id=int(job_id), limit=limit, offset=offset)
     artifacts: list[ArtifactInfo] = []
     type_map = {
         "audiobook_audio": "audio",
@@ -718,7 +720,18 @@ async def get_audiobook_job_artifacts(
                 download_url=download_url,
             )
         )
-    return AudiobookArtifactsResponse(project_id=project_id, artifacts=artifacts)
+    return AudiobookArtifactsResponse(
+        project_id=project_id,
+        artifacts=artifacts,
+        limit=limit,
+        offset=offset,
+        pagination=build_offset_pagination_meta(
+            total=total,
+            limit=limit,
+            offset=offset,
+            count=len(artifacts),
+        ),
+    )
 
 
 @router.get(
@@ -791,7 +804,7 @@ async def list_audiobook_project_chapters(
         project_row = _resolve_project_row(collections_db, project_ref)
         chapter_rows = collections_db.list_audiobook_chapters(
             project_id=int(project_row.id),
-            limit=limit,
+            limit=limit + 1,
             offset=offset,
         )
     except KeyError as exc:
@@ -800,7 +813,8 @@ async def list_audiobook_project_chapters(
         logger.exception("Failed to list audiobook chapters")
         raise HTTPException(status_code=500, detail="audiobook_chapters_list_failed") from exc
     chapters: list[AudiobookChapterInfo] = []
-    for row in chapter_rows:
+    has_more = len(chapter_rows) > limit
+    for row in chapter_rows[:limit]:
         metadata = _safe_json_loads(row.metadata_json)
         chapters.append(
             AudiobookChapterInfo(
@@ -815,7 +829,19 @@ async def list_audiobook_project_chapters(
             )
         )
     project_id = _project_row_project_id(project_row, project_ref)
-    return AudiobookChapterListResponse(project_id=project_id, chapters=chapters)
+    return AudiobookChapterListResponse(
+        project_id=project_id,
+        chapters=chapters,
+        limit=limit,
+        offset=offset,
+        pagination=build_offset_pagination_meta(
+            total=None,
+            limit=limit,
+            offset=offset,
+            count=len(chapters),
+            has_more=has_more,
+        ),
+    )
 
 
 @router.get(
@@ -835,7 +861,7 @@ async def list_audiobook_project_artifacts(
         project_row = _resolve_project_row(collections_db, project_ref)
         artifact_rows = collections_db.list_audiobook_artifacts(
             project_id=int(project_row.id),
-            limit=limit,
+            limit=limit + 1,
             offset=offset,
         )
     except KeyError as exc:
@@ -844,7 +870,8 @@ async def list_audiobook_project_artifacts(
         logger.exception("Failed to list audiobook artifacts")
         raise HTTPException(status_code=500, detail="audiobook_artifacts_list_failed") from exc
     artifacts: list[ArtifactInfo] = []
-    for row in artifact_rows:
+    has_more = len(artifact_rows) > limit
+    for row in artifact_rows[:limit]:
         metadata = _safe_json_loads(row.metadata_json)
         artifacts.append(
             ArtifactInfo(
@@ -857,7 +884,19 @@ async def list_audiobook_project_artifacts(
             )
         )
     project_id = _project_row_project_id(project_row, project_ref)
-    return AudiobookArtifactsResponse(project_id=project_id, artifacts=artifacts)
+    return AudiobookArtifactsResponse(
+        project_id=project_id,
+        artifacts=artifacts,
+        limit=limit,
+        offset=offset,
+        pagination=build_offset_pagination_meta(
+            total=None,
+            limit=limit,
+            offset=offset,
+            count=len(artifacts),
+            has_more=has_more,
+        ),
+    )
 
 
 @router.post(
