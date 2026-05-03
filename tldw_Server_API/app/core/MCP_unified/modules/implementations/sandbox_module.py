@@ -234,8 +234,12 @@ class SandboxModule(BaseModule):
 
     def _coerce_runtime(self, value: Any) -> SbxRuntimeType | None:
         runtime_raw = (str(value).strip().lower() if value is not None else "")
-        if runtime_raw in ("docker", "firecracker", "lima", "vz_linux", "vz_macos", "seatbelt"):
+        if not runtime_raw:
+            return None
+        try:
             return SbxRuntimeType(runtime_raw)
+        except ValueError:
+            pass
         return None
 
     def _coerce_trust_level(self, value: Any) -> TrustLevel | None:
@@ -290,15 +294,11 @@ class SandboxModule(BaseModule):
         if (isinstance(sess, str) and sess) and (isinstance(img, str) and img):
             raise ValueError("Provide only one of session_id or base_image, not both")
         rt = arguments.get("runtime")
-        if rt is not None and str(rt).lower() not in {
-            "docker",
-            "firecracker",
-            "lima",
-            "vz_linux",
-            "vz_macos",
-            "seatbelt",
-        }:
-            raise ValueError("runtime must be docker|firecracker|lima|vz_linux|vz_macos|seatbelt when provided")
+        runtime_values = tuple(runtime.value for runtime in SbxRuntimeType)
+        if rt is not None and str(rt).strip().lower() not in runtime_values:
+            raise ValueError(
+                f"runtime must be {'|'.join(runtime_values)} when provided"
+            )
         if arguments.get("timeout_sec") is not None:
             try:
                 ts = int(arguments.get("timeout_sec"))

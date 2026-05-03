@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import pytest
+
 from tldw_Server_API.app.core.Sandbox.models import RuntimeType
 from tldw_Server_API.app.core.Sandbox.service import SandboxService
 
 
-def test_feature_discovery_covers_all_core_runtime_types(monkeypatch) -> None:
+def test_feature_discovery_covers_all_core_runtime_types(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setenv("SANDBOX_STORE_BACKEND", "memory")
 
     discovery = SandboxService().feature_discovery()
@@ -13,7 +17,9 @@ def test_feature_discovery_covers_all_core_runtime_types(monkeypatch) -> None:
     assert discovered == {runtime.value for runtime in RuntimeType}
 
 
-def test_worktree_discovery_reports_host_local_limits(monkeypatch) -> None:
+def test_worktree_discovery_reports_host_local_limits(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setenv("SANDBOX_STORE_BACKEND", "memory")
     monkeypatch.setenv("TLDW_SANDBOX_WORKTREE_AVAILABLE", "1")
 
