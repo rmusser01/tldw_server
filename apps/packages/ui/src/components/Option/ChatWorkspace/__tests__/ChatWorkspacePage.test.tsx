@@ -1,5 +1,5 @@
 import React from "react"
-import { fireEvent, render, screen, within } from "@testing-library/react"
+import { act, fireEvent, render, screen, within } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { ChatWorkspacePage } from "../ChatWorkspacePage"
@@ -31,6 +31,9 @@ const connectionState = vi.hoisted(() => ({
     serverUrl: "http://127.0.0.1:8000"
   }
 }))
+const chatPanelClearHandlers = vi.hoisted(
+  () => new Map<string, () => void>()
+)
 
 vi.mock("@/store/chat-surface-coordinator", () => ({
   useChatSurfaceCoordinatorStore: (selector: any) =>
@@ -50,12 +53,18 @@ vi.mock("../WorkspaceChatPanel", () => ({
   WorkspaceChatPanel: ({
     stagedSources,
     workspaceId,
+    onClearStagedSources,
     onRuntimeStateChange
   }: {
     stagedSources: unknown[]
     workspaceId?: string | null
+    onClearStagedSources: () => void
     onRuntimeStateChange?: (state: unknown) => void
   }) => {
+    if (workspaceId) {
+      chatPanelClearHandlers.set(workspaceId, onClearStagedSources)
+    }
+
     React.useEffect(() => {
       onRuntimeStateChange?.({
         backendAvailable: chatPanelRuntimeState.backendAvailable,
@@ -96,6 +105,7 @@ describe("ChatWorkspacePage", () => {
       isConnected: true,
       serverUrl: "http://127.0.0.1:8000"
     }
+    chatPanelClearHandlers.clear()
   })
 
   it("sets chat surface route context and renders the console regions", () => {
@@ -214,5 +224,45 @@ describe("ChatWorkspacePage", () => {
       "workspace:workspace-2"
     )
     expect(screen.queryByText("Context staged")).not.toBeInTheDocument()
+  })
+
+  it("ignores stale clear callbacks from a previous workspace", () => {
+    const { rerender } = render(<ChatWorkspacePage />)
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Stage Operator Notes for chat" })
+    )
+    expect(screen.getByTestId("workspace-chat-panel")).toHaveTextContent("staged:1")
+    const clearWorkspaceOne = chatPanelClearHandlers.get("workspace-1")
+    expect(clearWorkspaceOne).toBeDefined()
+
+    workspaceState.value = {
+      workspaceId: "workspace-2",
+      workspaceName: "Second workspace",
+      sources: [
+        {
+          id: "source-2",
+          mediaId: 202,
+          title: "Second Notes",
+          type: "document",
+          status: "ready",
+          addedAt: new Date("2026-05-03T00:00:00Z")
+        }
+      ]
+    }
+    rerender(<ChatWorkspacePage />)
+    fireEvent.click(
+      screen.getByRole("button", { name: "Stage Second Notes for chat" })
+    )
+    expect(screen.getByTestId("workspace-chat-panel")).toHaveTextContent("staged:1")
+
+    act(() => {
+      clearWorkspaceOne?.()
+    })
+
+    expect(screen.getByTestId("workspace-chat-panel")).toHaveTextContent("staged:1")
+    expect(screen.getByTestId("workspace-chat-panel")).toHaveTextContent(
+      "workspace:workspace-2"
+    )
   })
 })

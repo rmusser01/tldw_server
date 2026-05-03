@@ -93,6 +93,38 @@ describe("WorkspaceChatPanel", () => {
     expect(onClearStagedSources).toHaveBeenCalledTimes(1)
   })
 
+  it("clears inserted draft context when the workspace changes", () => {
+    const onClearStagedSources = vi.fn()
+
+    const { rerender } = render(
+      <WorkspaceChatPanel
+        stagedSources={staged}
+        onClearStagedSources={onClearStagedSources}
+        backendAvailable
+        workspaceId="workspace-1"
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Insert context summary" }))
+    expect(
+      (screen.getByRole("textbox", {
+        name: "Chat workspace message"
+      }) as HTMLTextAreaElement).value
+    ).toContain("Operator Notes")
+
+    rerender(
+      <WorkspaceChatPanel
+        stagedSources={[]}
+        onClearStagedSources={onClearStagedSources}
+        backendAvailable
+        workspaceId="workspace-2"
+      />
+    )
+
+    expect(screen.getByRole("textbox", { name: "Chat workspace message" }))
+      .toHaveValue("")
+  })
+
   it("sends with staged context through the shared chat path", async () => {
     const onClearStagedSources = vi.fn()
 

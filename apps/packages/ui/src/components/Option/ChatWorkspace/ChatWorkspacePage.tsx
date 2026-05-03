@@ -107,12 +107,15 @@ export const ChatWorkspacePage = () => {
   )
 
   const handleClearStagedSources = React.useCallback(() => {
-    setWorkspaceContext((current) => ({
-      workspaceId,
-      browsedSourceId:
-        current.workspaceId === workspaceId ? current.browsedSourceId : null,
-      stagedSources: []
-    }))
+    setWorkspaceContext((current) =>
+      current.workspaceId === workspaceId
+        ? {
+            workspaceId,
+            browsedSourceId: current.browsedSourceId,
+            stagedSources: []
+          }
+        : current
+    )
   }, [workspaceId])
 
   const handleRuntimeStateChange = React.useCallback(

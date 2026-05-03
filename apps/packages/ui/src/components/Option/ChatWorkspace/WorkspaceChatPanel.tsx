@@ -80,6 +80,11 @@ export const WorkspaceChatPanel = ({
   } = useMessageOption({ scope })
 
   React.useEffect(() => {
+    setDraft("")
+    setSendError(null)
+  }, [workspaceId])
+
+  React.useEffect(() => {
     onRuntimeStateChange?.({
       backendAvailable,
       streaming,
