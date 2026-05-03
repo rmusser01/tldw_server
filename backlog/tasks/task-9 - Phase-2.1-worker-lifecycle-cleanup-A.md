@@ -4,7 +4,7 @@ title: Phase 2.1 worker lifecycle cleanup A
 status: Done
 assignee: []
 created_date: '2026-05-03 18:51'
-updated_date: '2026-05-03 18:58'
+updated_date: '2026-05-03 20:09'
 labels:
   - phase-2
   - issue-1116
@@ -49,6 +49,8 @@ Verification completed:
 - Full/adjacent: startup_cleanup_workers 15 passed; shutdown_pre_worker_cleanup 12 passed; lifecycle_workers 14 passed; lifespan_shutdown_sequence 1 passed; shutdown_coordinated_legacy_components 6 passed; shutdown_transition_handoff 4 passed; main_lifecycle_contract 55 passed.
 - Bandit touched source: 0 findings in /tmp/bandit_phase2_1_lifecycle_cleanup_a.json.
 - git diff --check passed.
+
+PR opened: https://github.com/rmusser01/tldw_server/pull/1241
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
