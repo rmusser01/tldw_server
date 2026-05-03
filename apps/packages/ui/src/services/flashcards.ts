@@ -1048,7 +1048,8 @@ export async function exportFlashcards(params: FlashcardsExportParams = {}): Pro
   return await bgRequest<string, AllowedPath, "GET">({
     path,
     method: "GET",
-    headers: { Accept: "text/plain, text/csv, application/octet-stream, application/json;q=0.5" }
+    headers: { Accept: "text/plain, text/csv, application/octet-stream, application/json;q=0.5" },
+    responseType: "text"
   })
 }
 

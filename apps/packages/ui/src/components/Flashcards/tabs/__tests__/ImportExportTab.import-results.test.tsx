@@ -765,7 +765,7 @@ describe("ImportExportTab import result details", () => {
     expect(screen.queryByText("Confirm large import")).not.toBeInTheDocument()
   })
 
-  it("maps export options and filters to export params", async () => {
+  it("maps export options and normalized tag filters to preview and export params", async () => {
     vi.mocked(useDecksQuery).mockReturnValue({
       data: [
         {
@@ -794,7 +794,7 @@ describe("ImportExportTab import result details", () => {
     fireEvent.click(biologyOptions[biologyOptions.length - 1])
 
     fireEvent.change(screen.getByTestId("flashcards-export-tag"), {
-      target: { value: "chapter-1" }
+      target: { value: "Chapter-1" }
     })
     fireEvent.change(screen.getByTestId("flashcards-export-query"), {
       target: { value: "mitosis" }
@@ -815,6 +815,16 @@ describe("ImportExportTab import result details", () => {
         "42 cards from Biology"
       )
     })
+    const exportPreviewQuery = useQueryMock.mock.calls
+      .map(([options]) => options as any)
+      .findLast((options) => options.queryKey?.[0] === "flashcards:export-preview-count")
+    expect(exportPreviewQuery.queryKey[2]).toBe("chapter-1")
+    await exportPreviewQuery.queryFn()
+    expect(listFlashcards).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tag: "chapter-1"
+      })
+    )
 
     fireEvent.click(screen.getByTestId("flashcards-export-button"))
 
@@ -833,6 +843,33 @@ describe("ImportExportTab import result details", () => {
     })
   })
 
+  it("serializes object payloads before creating JSON export blobs", async () => {
+    const jsonPayload = {
+      cards: [
+        {
+          front: "Question",
+          back: "Answer"
+        }
+      ]
+    }
+    vi.mocked(exportFlashcards).mockResolvedValue(jsonPayload as any)
+    const createObjectURLMock = vi.fn((_blob: Blob | MediaSource) => "blob:mock")
+    ;(URL as any).createObjectURL = createObjectURLMock
+
+    render(<ImportExportTab />)
+
+    const formatSelect = screen.getByTestId("flashcards-export-format")
+    fireEvent.mouseDown(formatSelect.querySelector(".ant-select-selector") ?? formatSelect)
+    fireEvent.click(screen.getByText("JSON"))
+    fireEvent.click(screen.getByTestId("flashcards-export-button"))
+
+    await waitFor(() => {
+      expect(createObjectURLMock).toHaveBeenCalledTimes(1)
+    })
+    const blob = createObjectURLMock.mock.calls[0][0] as Blob
+    await expect(blob.text()).resolves.toBe(JSON.stringify(jsonPayload, null, 2))
+  })
+
   it("renders transfer summary cards for formats, limits, and last action", () => {
     vi.mocked(useImportLimitsQuery).mockReturnValue({
       data: {
@@ -845,7 +882,7 @@ describe("ImportExportTab import result details", () => {
 
     expect(screen.getByTestId("flashcards-transfer-summary")).toBeInTheDocument()
     expect(screen.getByTestId("flashcards-transfer-summary-formats")).toHaveTextContent(
-      "Import: CSV, TSV, JSON, JSONL, Structured Q&A, APKG · Author: Generate, Image Occlusion · Export: TSV, CSV, APKG"
+      "Import: CSV, TSV, JSON, JSONL, Structured Q&A, APKG · Author: Generate, Image Occlusion · Export: TSV, CSV, JSON, APKG"
     )
     expect(screen.getByTestId("flashcards-transfer-summary-limits")).toHaveTextContent(
       "500 cards · 1048576 bytes"

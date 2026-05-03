@@ -100,7 +100,7 @@ exports[`ImportExportTab import result details > matches baseline snapshot for i
   <span
     class="ant-typography ant-typography-secondary css-dev-only-do-not-override-3uaqrl css-var-root"
   >
-    Import: CSV, TSV, JSON, JSONL, Structured Q&A, APKG · Author: Generate, Image Occlusion · Export: TSV, CSV, APKG
+    Import: CSV, TSV, JSON, JSONL, Structured Q&A, APKG · Author: Generate, Image Occlusion · Export: TSV, CSV, JSON, APKG
   </span>
 </div>
 `;
