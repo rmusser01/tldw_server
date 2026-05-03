@@ -80,6 +80,16 @@ def _resolve_storage_base_dir(user_id: int, record: dict) -> PathlibPath:
     return DatabasePaths.get_user_outputs_dir(user_id)
 
 
+def _normalize_folder_tag(folder_tag: str | None) -> str | None:
+    """Normalize optional virtual folder tags using the storage folder rules."""
+    if folder_tag is None:
+        return None
+    name = folder_tag.strip()
+    if not name or "/" in name or "\\" in name:
+        raise ValueError("Invalid folder name")
+    return name
+
+
 def _to_quota_status(data: dict) -> QuotaStatus:
     """Convert quota service data to an API schema."""
     return QuotaStatus(

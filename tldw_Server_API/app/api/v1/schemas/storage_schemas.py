@@ -137,6 +137,13 @@ class BulkDeleteResponse(BaseModel):
     file_ids: list[int]
 
 
+class StorageDeleteResponse(BaseModel):
+    """Response for deleting a generated storage file."""
+    success: bool
+    file_id: int
+    hard_delete: bool
+
+
 class BulkMoveRequest(BaseModel):
     """Request for bulk move to folder."""
     file_ids: list[int] = Field(min_length=1, max_length=100, description="File IDs to move")
