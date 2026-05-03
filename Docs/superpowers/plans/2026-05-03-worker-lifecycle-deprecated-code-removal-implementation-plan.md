@@ -208,7 +208,7 @@ git commit -m "test: document worker lifecycle ownership"
 - Modify: `tldw_Server_API/tests/Services/test_main_lifecycle_contract.py`
 - Modify: `tldw_Server_API/tests/Services/test_worker_lifecycle_ownership_matrix.py`
 
-- [ ] **Step 1: Write failing tests for cleanup direct-stop removal**
+- [x] **Step 1: Write failing tests for cleanup direct-stop removal**
 
 Change or add tests that assert `shutdown_pre_worker_cleanup` no longer directly cancels or stops registry-owned worker handles:
 
@@ -265,7 +265,7 @@ Keep or add a separate test proving finalizers still run:
 assert reset_calls == ["cleanup", "storage", "auth"]
 ```
 
-- [ ] **Step 2: Run tests and verify the new deletion expectation fails**
+- [x] **Step 2: Run tests and verify the new deletion expectation fails**
 
 Run:
 
@@ -275,7 +275,7 @@ python -m pytest tldw_Server_API/tests/Services/test_shutdown_pre_worker_cleanup
 
 Expected before implementation: at least one failure showing the helper still performs a direct stop or returns obsolete handles.
 
-- [ ] **Step 3: Remove direct worker stop responsibility from `shutdown_pre_worker_cleanup.py`**
+- [x] **Step 3: Remove direct worker stop responsibility from `shutdown_pre_worker_cleanup.py`**
 
 Keep:
 
@@ -293,7 +293,7 @@ Remove or bypass:
 
 Only keep a direct stop path if the ownership matrix marks that worker as not registry-owned.
 
-- [ ] **Step 4: Stop passing cleanup worker handles once consumers are gone**
+- [x] **Step 4: Stop passing cleanup worker handles once consumers are gone**
 
 After tests prove finalizers no longer need worker handles, update:
 
@@ -303,7 +303,7 @@ After tests prove finalizers no longer need worker handles, update:
 
 Do not remove a field until `rg` shows no active shutdown consumer besides tests and startup return compatibility.
 
-- [ ] **Step 5: Run cleanup shutdown and lifecycle contract tests**
+- [x] **Step 5: Run cleanup shutdown and lifecycle contract tests**
 
 Run:
 
@@ -318,7 +318,7 @@ python -m pytest \
 
 Expected: pass.
 
-- [ ] **Step 6: Commit Task 2**
+- [x] **Step 6: Commit Task 2**
 
 ```bash
 git add tldw_Server_API/app/services/shutdown_pre_worker_cleanup.py \

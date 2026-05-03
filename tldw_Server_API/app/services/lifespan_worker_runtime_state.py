@@ -14,10 +14,6 @@ class LifespanWorkerRuntimeState:
 
     worker_inventory: Any | None = None
     owned_job_pollers: list[Any] = field(default_factory=list)
-    cleanup_task: Any | None = None
-    chatbooks_cleanup_task: Any | None = None
-    chatbooks_cleanup_stop_event: Any | None = None
-    storage_cleanup_service: Any | None = None
     core_jobs_stop_event: Any | None = None
     core_jobs_task: Any | None = None
     files_jobs_stop_event: Any | None = None

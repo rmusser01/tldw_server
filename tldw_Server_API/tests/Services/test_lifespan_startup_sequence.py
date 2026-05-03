@@ -5,7 +5,6 @@ from types import SimpleNamespace
 import pytest
 from fastapi import FastAPI
 
-
 pytestmark = pytest.mark.unit
 
 
@@ -13,9 +12,7 @@ pytestmark = pytest.mark.unit
 async def test_run_lifespan_startup_sequence_runs_helpers_in_order_and_updates_runtime(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from tldw_Server_API.app.services import startup_core_initialization
-    from tldw_Server_API.app.services import startup_pre_core
-    from tldw_Server_API.app.services import startup_worker_bootstrap
+    from tldw_Server_API.app.services import startup_core_initialization, startup_pre_core, startup_worker_bootstrap
     from tldw_Server_API.app.services.lifespan_startup_sequence import (
         run_lifespan_startup_sequence,
     )
@@ -106,7 +103,7 @@ async def test_run_lifespan_startup_sequence_runs_helpers_in_order_and_updates_r
     assert handles.session_manager == "session-manager"
     assert handles.heavy_startup_handles == "heavy-handles"
     assert worker_runtime.owned_job_pollers == ["poller-a"]
-    assert worker_runtime.cleanup_task == "cleanup-task"
+    assert not hasattr(worker_runtime, "cleanup_task")
     assert worker_runtime.core_jobs_task == "core-task"
     assert worker_runtime.audio_jobs_stop_event == "audio-stop"
     assert worker_runtime.jobs_metrics_task == "jobs-metrics-task"
@@ -118,10 +115,12 @@ async def test_run_lifespan_startup_sequence_runs_helpers_in_order_and_updates_r
 async def test_startup_initializes_registry_and_runs_sandbox_producer(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from tldw_Server_API.app.services import startup_core_initialization
-    from tldw_Server_API.app.services import startup_pre_core
-    from tldw_Server_API.app.services import startup_warning_sandbox
-    from tldw_Server_API.app.services import startup_worker_bootstrap
+    from tldw_Server_API.app.services import (
+        startup_core_initialization,
+        startup_pre_core,
+        startup_warning_sandbox,
+        startup_worker_bootstrap,
+    )
     from tldw_Server_API.app.services.lifespan_startup_sequence import (
         run_lifespan_startup_sequence,
     )
@@ -210,10 +209,12 @@ async def test_startup_initializes_registry_and_runs_sandbox_producer(
 async def test_startup_blocks_on_protocol_mismatch_warning(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from tldw_Server_API.app.services import startup_core_initialization
-    from tldw_Server_API.app.services import startup_pre_core
-    from tldw_Server_API.app.services import startup_warning_sandbox
-    from tldw_Server_API.app.services import startup_worker_bootstrap
+    from tldw_Server_API.app.services import (
+        startup_core_initialization,
+        startup_pre_core,
+        startup_warning_sandbox,
+        startup_worker_bootstrap,
+    )
     from tldw_Server_API.app.services.lifespan_startup_sequence import (
         run_lifespan_startup_sequence,
     )
@@ -306,10 +307,12 @@ async def test_startup_blocks_on_protocol_mismatch_warning(
 async def test_startup_warning_registry_is_available_on_app_state(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from tldw_Server_API.app.services import startup_core_initialization
-    from tldw_Server_API.app.services import startup_pre_core
-    from tldw_Server_API.app.services import startup_warning_sandbox
-    from tldw_Server_API.app.services import startup_worker_bootstrap
+    from tldw_Server_API.app.services import (
+        startup_core_initialization,
+        startup_pre_core,
+        startup_warning_sandbox,
+        startup_worker_bootstrap,
+    )
     from tldw_Server_API.app.services.lifespan_startup_sequence import (
         run_lifespan_startup_sequence,
     )

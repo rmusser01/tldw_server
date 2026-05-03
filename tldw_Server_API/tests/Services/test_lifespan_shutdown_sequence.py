@@ -33,11 +33,7 @@ async def test_run_lifespan_shutdown_sequence_runs_wrappers_in_order_and_updates
         usage_task="usage-start",
         llm_usage_task="llm-start",
         authnz_scheduler_started=True,
-        chatbooks_cleanup_task="chatbooks-start",
-        chatbooks_cleanup_stop_event="chatbooks-stop-start",
-        storage_cleanup_service="storage-start",
         owned_job_pollers=["poller-a"],
-        cleanup_task="cleanup-start",
         core_jobs_task="core-start",
         core_jobs_stop_event="core-stop-start",
         prompt_studio_jobs_task="prompt-start",
@@ -136,17 +132,7 @@ async def test_run_lifespan_shutdown_sequence_runs_wrappers_in_order_and_updates
 
     async def _fake_pre_worker_cleanup(**kwargs):
         calls.append(("pre", kwargs))
-        assert kwargs["stopped_background_worker_names"] == {
-            "authnz_scheduler",
-            "chatbooks_cleanup",
-            "ephemeral_cleanup_task",
-        }
-        return SimpleNamespace(
-            cleanup_task="cleanup-after",
-            chatbooks_cleanup_task="chatbooks-after",
-            chatbooks_cleanup_stop_event="chatbooks-stop-after",
-            storage_cleanup_service="storage-after",
-        )
+        return SimpleNamespace()
 
     async def _fake_primary_late_stop(**kwargs):
         calls.append(("primary", kwargs))
@@ -258,16 +244,18 @@ async def test_run_lifespan_shutdown_sequence_runs_wrappers_in_order_and_updates
     ]
     assert calls[0][1]["segment_name"] == "transition_handoff"
     assert calls[1][1]["usage_task"] == "usage-start"
+    assert "chatbooks_cleanup_task" not in calls[1][1]
+    assert "chatbooks_cleanup_stop_event" not in calls[1][1]
+    assert "storage_cleanup_service" not in calls[1][1]
     assert calls[2][1]["owned_job_pollers"] == ["poller-a"]
     assert calls[3][1]["segment_name"] == "background_worker_shutdown"
     assert calls[4][1]["stopped_names_attr"] == "_tldw_shutdown_stopped_background_worker_names"
     assert calls[5][1]["legacy_shutdown_plan"] == ["transition-plan"]
-    assert calls[6][1]["coordinated_legacy_component_names"] == {"usage_aggregator"}
-    assert calls[6][1]["stopped_background_worker_names"] == {
-        "authnz_scheduler",
-        "chatbooks_cleanup",
-        "ephemeral_cleanup_task",
-    }
+    assert "coordinated_legacy_component_names" not in calls[6][1]
+    assert "cleanup_task" not in calls[6][1]
+    assert "chatbooks_cleanup_task" not in calls[6][1]
+    assert "chatbooks_cleanup_stop_event" not in calls[6][1]
+    assert "storage_cleanup_service" not in calls[6][1]
     assert calls[7][1]["should_run_late_stop"] is True
     assert calls[8][1]["should_run_late_stop"] is True
     assert calls[9][1]["claims_task"] == "claims-start"
@@ -282,9 +270,9 @@ async def test_run_lifespan_shutdown_sequence_runs_wrappers_in_order_and_updates
     assert calls[10][1]["heavy_startup_handles"] == "heavy-handles"
     assert calls[10][1]["in_pytest_for_db_pool_shutdown"] is True
     assert calls[10][1]["in_pytest_for_tts_shutdown"] is True
-    assert worker_runtime.cleanup_task == "cleanup-after"
-    assert worker_runtime.chatbooks_cleanup_task == "chatbooks-after"
-    assert worker_runtime.storage_cleanup_service == "storage-after"
+    assert not hasattr(worker_runtime, "cleanup_task")
+    assert not hasattr(worker_runtime, "chatbooks_cleanup_task")
+    assert not hasattr(worker_runtime, "storage_cleanup_service")
     assert worker_runtime.core_jobs_task == "core-after"
     assert worker_runtime.prompt_studio_jobs_stop_event == "prompt-stop-after"
     assert worker_runtime.media_ingest_jobs_task == "media-after"

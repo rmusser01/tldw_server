@@ -23,7 +23,7 @@ WORKER_OWNERSHIP_MATRIX = (
         issue_name="Ephemeral cleanup loop",
         managed_name="ephemeral_cleanup_task",
         task_name="ephemeral_cleanup_task",
-        runtime_field="cleanup_task",
+        runtime_field=None,
         stopped_name_key="ephemeral_cleanup_task",
         legacy_helper="shutdown_pre_worker_cleanup",
         category="cleanup",
@@ -34,7 +34,7 @@ WORKER_OWNERSHIP_MATRIX = (
         issue_name="Chatbooks cleanup",
         managed_name="chatbooks_cleanup",
         task_name="chatbooks_cleanup_task",
-        runtime_field="chatbooks_cleanup_task",
+        runtime_field=None,
         stopped_name_key="chatbooks_cleanup",
         legacy_helper="shutdown_pre_worker_cleanup",
         category="cleanup",
@@ -45,7 +45,7 @@ WORKER_OWNERSHIP_MATRIX = (
         issue_name="Storage cleanup service",
         managed_name="storage_cleanup_service",
         task_name=None,
-        runtime_field="storage_cleanup_service",
+        runtime_field=None,
         stopped_name_key="storage_cleanup_service",
         legacy_helper="shutdown_pre_worker_cleanup",
         category="cleanup",
@@ -140,3 +140,22 @@ def test_worker_ownership_matrix_rows_have_operational_ownership_fields() -> Non
         assert row.category
         assert row.shutdown_phase == "background_worker_shutdown"
         assert row.target_state
+
+
+@pytest.mark.unit
+def test_cleanup_rows_no_longer_advertise_runtime_shutdown_fields() -> None:
+    cleanup_worker_names = {
+        "ephemeral_cleanup_task",
+        "chatbooks_cleanup",
+        "storage_cleanup_service",
+    }
+
+    assert {
+        row.managed_name: row.runtime_field
+        for row in WORKER_OWNERSHIP_MATRIX
+        if row.managed_name in cleanup_worker_names
+    } == {
+        "ephemeral_cleanup_task": None,
+        "chatbooks_cleanup": None,
+        "storage_cleanup_service": None,
+    }

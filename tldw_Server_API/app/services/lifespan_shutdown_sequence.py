@@ -59,9 +59,6 @@ async def run_lifespan_shutdown_sequence(
             usage_task=worker_runtime.usage_task,
             llm_usage_task=worker_runtime.llm_usage_task,
             authnz_scheduler_started=worker_runtime.authnz_scheduler_started,
-            chatbooks_cleanup_task=worker_runtime.chatbooks_cleanup_task,
-            chatbooks_cleanup_stop_event=worker_runtime.chatbooks_cleanup_stop_event,
-            storage_cleanup_service=worker_runtime.storage_cleanup_service,
             build_legacy_shutdown_context=build_legacy_shutdown_context,
             apply_shutdown_transition_gate=apply_shutdown_transition_gate,
             startup_guard_exceptions=startup_guard_exceptions,
@@ -114,13 +111,7 @@ async def run_lifespan_shutdown_sequence(
 
     pre_worker_cleanup_handles = await run_shutdown_pre_worker_cleanup(
         app=app,
-        cleanup_task=worker_runtime.cleanup_task,
-        chatbooks_cleanup_task=worker_runtime.chatbooks_cleanup_task,
-        chatbooks_cleanup_stop_event=worker_runtime.chatbooks_cleanup_stop_event,
-        storage_cleanup_service=worker_runtime.storage_cleanup_service,
-        coordinated_legacy_component_names=coordinated_legacy_component_names,
         guard_exceptions=startup_guard_exceptions,
-        stopped_background_worker_names=stopped_background_worker_names,
     )
     worker_runtime.apply_pre_worker_cleanup_handles(pre_worker_cleanup_handles)
 

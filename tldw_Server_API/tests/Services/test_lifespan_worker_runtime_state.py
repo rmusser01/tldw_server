@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import pytest
 
-
 pytestmark = pytest.mark.unit
 
 
@@ -35,7 +34,7 @@ def test_apply_startup_worker_bootstrap_handles_copies_known_fields() -> None:
     runtime.apply_startup_worker_bootstrap_handles(startup_handles)
 
     assert runtime.owned_job_pollers == ["poller-a", "poller-b"]
-    assert runtime.cleanup_task == "cleanup-task"
+    assert not hasattr(runtime, "cleanup_task")
     assert runtime.core_jobs_task == "core-jobs-task"
     assert runtime.audio_jobs_stop_event == "audio-stop"
     assert runtime.jobs_metrics_task == "jobs-metrics-task"
@@ -65,13 +64,7 @@ def test_shutdown_apply_methods_copy_known_fields() -> None:
 
     runtime = LifespanWorkerRuntimeState()
 
-    runtime.apply_pre_worker_cleanup_handles(
-        PreWorkerCleanupHandles(
-            cleanup_task="cleanup-task",
-            chatbooks_cleanup_task="chatbooks-task",
-            storage_cleanup_service="storage-service",
-        )
-    )
+    runtime.apply_pre_worker_cleanup_handles(PreWorkerCleanupHandles())
     runtime.apply_primary_late_stop_worker_handles(
         PrimaryLateStopWorkerHandles(
             core_jobs_task="core-jobs-task",
@@ -95,9 +88,9 @@ def test_shutdown_apply_methods_copy_known_fields() -> None:
         CleanupTimedShutdownHandles(authnz_scheduler_started=False)
     )
 
-    assert runtime.cleanup_task == "cleanup-task"
-    assert runtime.chatbooks_cleanup_task == "chatbooks-task"
-    assert runtime.storage_cleanup_service == "storage-service"
+    assert not hasattr(runtime, "cleanup_task")
+    assert not hasattr(runtime, "chatbooks_cleanup_task")
+    assert not hasattr(runtime, "storage_cleanup_service")
     assert runtime.core_jobs_task == "core-jobs-task"
     assert runtime.prompt_studio_jobs_stop_event == "prompt-stop"
     assert runtime.media_ingest_jobs_task == "media-task"

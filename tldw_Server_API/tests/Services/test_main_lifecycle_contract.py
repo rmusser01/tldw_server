@@ -92,18 +92,12 @@ def test_build_legacy_shutdown_context_uses_explicit_fields() -> None:
     readiness_state = {"ready": True}
     usage_task = object()
     llm_usage_task = object()
-    chatbooks_cleanup_task = object()
-    chatbooks_cleanup_stop_event = object()
-    storage_cleanup_service = object()
 
     context = _build_legacy_shutdown_context(
         readiness_state=readiness_state,
         usage_task=usage_task,
         llm_usage_task=llm_usage_task,
         authnz_scheduler_started=True,
-        chatbooks_cleanup_task=chatbooks_cleanup_task,
-        chatbooks_cleanup_stop_event=chatbooks_cleanup_stop_event,
-        storage_cleanup_service=storage_cleanup_service,
     )
 
     assert isinstance(context, LegacyShutdownContext)
@@ -111,9 +105,6 @@ def test_build_legacy_shutdown_context_uses_explicit_fields() -> None:
     assert context.usage_task is usage_task
     assert context.llm_usage_task is llm_usage_task
     assert context.authnz_scheduler_started is True
-    assert context.chatbooks_cleanup_task is chatbooks_cleanup_task
-    assert context.chatbooks_cleanup_stop_event is chatbooks_cleanup_stop_event
-    assert context.storage_cleanup_service is storage_cleanup_service
 
 
 def test_main_source_does_not_define_legacy_display_startup_info_helper() -> None:
@@ -1377,10 +1368,6 @@ def test_lifespan_shutdown_delegates_pre_worker_cleanup(
     from tldw_Server_API.app.services import startup_cleanup_workers
 
     app = main_module.app
-    fake_cleanup_task = object()
-    fake_chatbooks_cleanup_task = object()
-    fake_chatbooks_cleanup_stop_event = object()
-    fake_storage_cleanup_service = object()
     recorded_calls: list[dict[str, object]] = []
 
     async def _fake_start_cleanup_workers(
@@ -1391,21 +1378,11 @@ def test_lifespan_shutdown_delegates_pre_worker_cleanup(
     ) -> startup_cleanup_workers.CleanupWorkerHandles:
         del app_settings, test_mode
         assert worker_inventory is not None
-        return startup_cleanup_workers.CleanupWorkerHandles(
-            cleanup_task=fake_cleanup_task,
-            chatbooks_cleanup_task=fake_chatbooks_cleanup_task,
-            chatbooks_cleanup_stop_event=fake_chatbooks_cleanup_stop_event,
-            storage_cleanup_service=fake_storage_cleanup_service,
-        )
+        return startup_cleanup_workers.CleanupWorkerHandles()
 
     async def _fake_run_shutdown_pre_worker_cleanup(**kwargs):
         recorded_calls.append(kwargs)
-        return shutdown_cleanup.PreWorkerCleanupHandles(
-            cleanup_task=kwargs["cleanup_task"],
-            chatbooks_cleanup_task=kwargs["chatbooks_cleanup_task"],
-            chatbooks_cleanup_stop_event=kwargs["chatbooks_cleanup_stop_event"],
-            storage_cleanup_service=kwargs["storage_cleanup_service"],
-        )
+        return shutdown_cleanup.PreWorkerCleanupHandles()
 
     monkeypatch.setattr(
         startup_cleanup_workers,
@@ -1423,13 +1400,6 @@ def test_lifespan_shutdown_delegates_pre_worker_cleanup(
 
     assert len(recorded_calls) == 1
     assert recorded_calls[0]["app"] is app
-    assert recorded_calls[0]["cleanup_task"] is fake_cleanup_task
-    assert recorded_calls[0]["chatbooks_cleanup_task"] is fake_chatbooks_cleanup_task
-    assert recorded_calls[0]["chatbooks_cleanup_stop_event"] is fake_chatbooks_cleanup_stop_event
-    assert recorded_calls[0]["storage_cleanup_service"] is fake_storage_cleanup_service
-    assert isinstance(recorded_calls[0]["coordinated_legacy_component_names"], set)
-    assert isinstance(recorded_calls[0]["stopped_background_worker_names"], set)
-    assert "chatbooks_cleanup" not in recorded_calls[0]["stopped_background_worker_names"]
     assert recorded_calls[0]["guard_exceptions"] == main_module._STARTUP_GUARD_EXCEPTIONS
 
 
@@ -1445,9 +1415,6 @@ def test_lifespan_shutdown_delegates_transition_handoff(
     app = main_module.app
     fake_usage_task = object()
     fake_llm_usage_task = object()
-    fake_chatbooks_cleanup_task = object()
-    fake_chatbooks_cleanup_stop_event = object()
-    fake_storage_cleanup_service = object()
     recorded_calls: list[dict[str, object]] = []
 
     async def _fake_start_auxiliary_services(_app_settings, **kwargs):
@@ -1466,11 +1433,7 @@ def test_lifespan_shutdown_delegates_transition_handoff(
     ) -> startup_cleanup_workers.CleanupWorkerHandles:
         del app_settings, test_mode
         assert worker_inventory is not None
-        return startup_cleanup_workers.CleanupWorkerHandles(
-            chatbooks_cleanup_task=fake_chatbooks_cleanup_task,
-            chatbooks_cleanup_stop_event=fake_chatbooks_cleanup_stop_event,
-            storage_cleanup_service=fake_storage_cleanup_service,
-        )
+        return startup_cleanup_workers.CleanupWorkerHandles()
 
     async def _fake_shutdown_transition_handoff(**kwargs):
         recorded_calls.append(kwargs)
@@ -1505,9 +1468,6 @@ def test_lifespan_shutdown_delegates_transition_handoff(
     assert recorded_calls[0]["usage_task"] is fake_usage_task
     assert recorded_calls[0]["llm_usage_task"] is fake_llm_usage_task
     assert isinstance(recorded_calls[0]["authnz_scheduler_started"], bool)
-    assert recorded_calls[0]["chatbooks_cleanup_task"] is fake_chatbooks_cleanup_task
-    assert recorded_calls[0]["chatbooks_cleanup_stop_event"] is fake_chatbooks_cleanup_stop_event
-    assert recorded_calls[0]["storage_cleanup_service"] is fake_storage_cleanup_service
     assert recorded_calls[0]["build_legacy_shutdown_context"] is main_module._build_legacy_shutdown_context
     assert recorded_calls[0]["apply_shutdown_transition_gate"] is main_module._apply_shutdown_transition_gate
     assert recorded_calls[0]["startup_guard_exceptions"] == main_module._STARTUP_GUARD_EXCEPTIONS
@@ -2540,11 +2500,7 @@ def test_shutdown_migrated_legacy_slice_uses_prod_drain_profile(
     if hasattr(app.state, "_tldw_lifecycle_state"):
         delattr(app.state, "_tldw_lifecycle_state")
 
-    expected_migrated_names = [
-        component.name
-        for component in _fake_build_legacy_shutdown_plan(None, None)
-        if component.name != "lifecycle_gate"
-    ]
+    expected_migrated_names = ["usage_aggregator"]
 
     with TestClient(app) as client:
         assert client.get("/health").status_code == 200

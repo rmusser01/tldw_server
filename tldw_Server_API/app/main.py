@@ -156,9 +156,6 @@ def _build_legacy_shutdown_context(
     usage_task: Any = None,
     llm_usage_task: Any = None,
     authnz_scheduler_started: bool = False,
-    chatbooks_cleanup_task: Any = None,
-    chatbooks_cleanup_stop_event: Any = None,
-    storage_cleanup_service: Any = None,
 ) -> "LegacyShutdownContext":
     """Collect the explicit shutdown dependencies used by legacy adapters."""
     from tldw_Server_API.app.services.shutdown_legacy_adapters import LegacyShutdownContext
@@ -168,9 +165,6 @@ def _build_legacy_shutdown_context(
         usage_task=usage_task,
         llm_usage_task=llm_usage_task,
         authnz_scheduler_started=authnz_scheduler_started,
-        chatbooks_cleanup_task=chatbooks_cleanup_task,
-        chatbooks_cleanup_stop_event=chatbooks_cleanup_stop_event,
-        storage_cleanup_service=storage_cleanup_service,
     )
 
 
