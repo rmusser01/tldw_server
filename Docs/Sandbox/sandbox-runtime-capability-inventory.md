@@ -35,6 +35,10 @@ concepts:
 - `available`: current host/preflight truth.
 - `implementation_state`: roadmap maturity label independent of whether this
   specific host has the required binaries, helper, VM support, or feature flags.
+- `reasons`: raw runtime/operator reason strings preserved for diagnostics.
+- `normalized_reasons`: stable client-facing reason codes derived from raw
+  reasons so clients can group failures without runtime-specific string
+  matching.
 
 | Runtime | `implementation_state` | Discovery source |
 | --- | --- | --- |
@@ -49,6 +53,30 @@ concepts:
 Discovery is intentionally summarized. Admin/operator diagnostics can expose
 helper, template, reconciliation, and image-store details that should not be
 duplicated into the public discovery payload.
+
+## Normalized Reason Codes
+
+Runtime discovery preserves raw `reasons` for operator diagnostics and exposes
+additive `normalized_reasons` for client logic. The normalized vocabulary is
+centralized in `runtime_capabilities.py`.
+
+| Normalized reason | Meaning |
+| --- | --- |
+| `runtime_unavailable` | The runtime itself is not available on the current host. |
+| `unsupported_os` | The runtime requires a different host operating system. |
+| `unsupported_arch` | The runtime requires a different host CPU architecture. |
+| `helper_unavailable` | A required helper daemon or helper connection is unavailable. |
+| `helper_protocol_mismatch` | A helper protocol or version check failed. |
+| `helper_missing` | A configured helper binary/path is missing or unusable. |
+| `template_missing` | A required VM image/template artifact is missing. |
+| `template_unconfigured` | No template or image source has been configured. |
+| `network_policy_unsupported` | The requested network policy is not supported by the runtime. |
+| `trust_policy_denied` | Trust-level policy denies this runtime or request shape. |
+| `host_prerequisite_missing` | A required host binary, device, or capability is missing. |
+| `host_permission_denied` | Host permissions block a required enforcement check. |
+| `feature_not_implemented` | Runtime shape exists, but the requested feature is not implemented. |
+| `image_store_unavailable` | Image-store configuration or probing failed. |
+| `unknown` | A raw reason has no stable normalized mapping yet. |
 
 ## Trust-Level Support
 
@@ -112,9 +140,9 @@ an equally clear ownership model.
 
 | Gap | Runtime(s) | Follow-up phase |
 | --- | --- | --- |
-| Public discovery lacks normalized state labels and reason taxonomy. | all | Phase 3 |
 | Host-local runtimes need clearer docs/API warnings that they are not VM-grade. | `seatbelt`, `worktree` | Phase 2 |
 | Allowlist support is inconsistent and often scaffold-only. | all except host-local unsupported paths | Phase 2 |
+| Common run status/error taxonomy is not normalized across runtimes. | all | Phase 3 |
 | Session semantics are not normalized across warm VM, container, and host-local reuse. | all | Phase 4 |
 | Recovery/repair ownership exists only for `vz_linux`. | all except `vz_linux` | Phase 4 |
 | CI has no single cross-runtime capability gate. | all | Phase 5 |

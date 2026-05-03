@@ -58,6 +58,7 @@ from .runners.worktree_runner import WorktreeRunner, worktree_available
 from .runtime_capabilities import (
     RuntimePreflightResult,
     collect_runtime_preflights,
+    normalize_runtime_reasons,
     runtime_implementation_state,
 )
 from .snapshots import SnapshotManager
@@ -869,9 +870,11 @@ class SandboxService:
 
         def _preflight_fields(preflight: RuntimePreflightResult | None) -> dict[str, object]:
             enforcement_ready = dict((preflight.enforcement_ready if preflight else {}) or {})
+            reasons = list((preflight.reasons if preflight else []) or [])
             return {
                 "available": bool(preflight.available) if preflight is not None else False,
-                "reasons": list((preflight.reasons if preflight else []) or []),
+                "reasons": reasons,
+                "normalized_reasons": normalize_runtime_reasons(reasons),
                 "supported_trust_levels": list((preflight.supported_trust_levels if preflight else []) or []),
                 "strict_deny_all_supported": bool(enforcement_ready.get("deny_all")),
                 "strict_allowlist_supported": bool(enforcement_ready.get("allowlist")),
@@ -883,6 +886,7 @@ class SandboxService:
             {
                 "name": "docker",
                 "implementation_state": runtime_implementation_state(RuntimeType.docker),
+                **_preflight_fields(docker_preflight),
                 "available": bool(docker_preflight.available) if docker_preflight is not None else bool(docker_available()),
                 "default_images": images,
                 "max_cpu": max_cpu,
@@ -916,6 +920,7 @@ class SandboxService:
             {
                 "name": "firecracker",
                 "implementation_state": runtime_implementation_state(RuntimeType.firecracker),
+                **_preflight_fields(firecracker_preflight),
                 "available": bool(firecracker_preflight.available) if firecracker_preflight is not None else bool(firecracker_available()),
                 "default_images": images,  # firecracker images will differ; placeholder for UX
                 "max_cpu": max_cpu,
@@ -956,6 +961,7 @@ class SandboxService:
             {
                 "name": "lima",
                 "implementation_state": runtime_implementation_state(RuntimeType.lima),
+                **_preflight_fields(lima_preflight),
                 "available": bool(lima_preflight.available) if lima_preflight is not None else bool(lima_available()),
                 "default_images": ["ubuntu:24.04"],  # Lima uses distro images
                 "max_cpu": max_cpu,
