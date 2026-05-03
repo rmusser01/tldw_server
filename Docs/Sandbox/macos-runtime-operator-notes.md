@@ -49,6 +49,10 @@ See `Docs/Design/2026-05-02-apple-containerization-evaluation.md` for the
 current adopt/defer/reject evaluation before changing image-store, helper,
 networking, or guest-agent implementation.
 
+See `Docs/Sandbox/sandbox-security-policy-matrix.md` before changing runtime
+trust eligibility, network-policy semantics, workspace mounts, artifact
+exposure, helper/request allowlisting, or audit behavior.
+
 ## Trust-Level Policy
 
 - `untrusted`:
