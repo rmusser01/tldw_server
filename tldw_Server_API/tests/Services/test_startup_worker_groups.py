@@ -139,12 +139,17 @@ async def test_start_worker_groups_runs_helpers_in_order_and_returns_handles(
 
     async def _record_sidecar_owned_jobs_pollers(
         *,
-        app,
-        owned_job_pollers,
-        register_owned_job_poller,
-        sidecar_mode,
-    ):
+        app: object,
+        owned_job_pollers: list[object],
+        register_owned_job_poller: object,
+        sidecar_mode: bool,
+        worker_inventory: object | None,
+    ) -> SimpleNamespace:
+        """Record the sidecar-owned jobs startup group call."""
+
+        del app, owned_job_pollers, register_owned_job_poller
         assert sidecar_mode is False
+        assert worker_inventory is worker_inventory_ref
         calls.append("sidecar")
         return SimpleNamespace(
             reminder_jobs_stop_event="reminder-stop",

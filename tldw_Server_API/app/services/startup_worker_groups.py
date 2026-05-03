@@ -145,6 +145,7 @@ async def start_worker_groups(
         owned_job_pollers=owned_job_pollers,
         register_owned_job_poller=register_owned_job_poller,
         sidecar_mode=sidecar_mode,
+        worker_inventory=worker_inventory,
     )
     notifications_abtest_startup_handles = await _start_notifications_abtest_workers(
         app=app,
