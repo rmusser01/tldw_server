@@ -19,7 +19,6 @@ from tldw_Server_API.app.services.lifecycle_workers import (
     publish_worker_inventory,
 )
 
-
 DEFAULT_GUARD_EXCEPTIONS = (
     AttributeError,
     OSError,
@@ -201,19 +200,22 @@ async def stop_registered_job_pollers(
     """Stop registered job pollers, preferring explicit stop events."""
 
     async def _await_job_poller_shutdown(handle: ManagedJobPoller) -> bool:
+        task = handle.task
+        if task is None:
+            return True
         try:
-            await asyncio_module.wait_for(asyncio_module.shield(handle.task), timeout=handle.timeout_sec)
+            await asyncio_module.wait_for(asyncio_module.shield(task), timeout=handle.timeout_sec)
         except asyncio.CancelledError:
-            return bool(handle.task.done())
+            return bool(task.done())
         except asyncio.TimeoutError:
             logger_obj.warning(
                 "App Shutdown: Timed out waiting for job poller {} after {}s; cancelling",
                 handle.name,
                 handle.timeout_sec,
             )
-            handle.task.cancel()
+            task.cancel()
             try:
-                await asyncio_module.wait_for(handle.task, timeout=1.0)
+                await asyncio_module.wait_for(task, timeout=1.0)
             except asyncio.CancelledError:
                 pass
             except asyncio.TimeoutError:
@@ -221,7 +223,7 @@ async def stop_registered_job_pollers(
                     "App Shutdown: Job poller {} did not cancel within 1.0s after timeout",
                     handle.name,
                 )
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - worker failures must not block shutdown.
                 logger_obj.warning(
                     "App Shutdown: Job poller {} raised after cancellation: {}",
                     handle.name,
@@ -233,18 +235,18 @@ async def stop_registered_job_pollers(
                 handle.name,
                 exc,
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - worker failures must not block shutdown.
             logger_obj.warning(
                 "App Shutdown: Job poller {} exited during shutdown: {}",
                 handle.name,
                 exc,
             )
-        return bool(handle.task.done())
+        return bool(task.done())
 
     for handle in handles:
         if handle.stop_event is not None:
             handle.stop_event.set()
-        else:
+        elif handle.task is not None:
             with suppress(*guard_exceptions):
                 handle.task.cancel()
 

@@ -8,7 +8,6 @@ from contextlib import contextmanager
 import pytest
 from fastapi import FastAPI
 
-
 pytestmark = pytest.mark.unit
 
 
@@ -44,7 +43,7 @@ async def test_register_owned_job_poller_publishes_lifecycle_worker_inventory() 
         handle = handles[0]
         assert isinstance(handle, ManagedWorker)
         assert handle.shutdown_phase is ShutdownPhase.JOB_POLLER_QUIESCE
-        assert getattr(app.state, "_tldw_shutdown_worker_inventory") == [
+        assert app.state._tldw_shutdown_worker_inventory == [
             {
                 "name": "core_jobs_task",
                 "task_name": "core-jobs-task",
@@ -54,7 +53,7 @@ async def test_register_owned_job_poller_publishes_lifecycle_worker_inventory() 
                 "shutdown_phase": "job_poller_quiesce",
             }
         ]
-        assert getattr(app.state, "_tldw_shutdown_job_poller_inventory") == [
+        assert app.state._tldw_shutdown_job_poller_inventory == [
             {
                 "name": "core_jobs_task",
                 "task_name": "core-jobs-task",
@@ -160,7 +159,7 @@ def test_register_and_replace_owned_job_poller_inventory_refreshes_app_state() -
         )
 
         assert [handle.name for handle in handles] == ["second"]
-        assert getattr(app.state, "_tldw_shutdown_job_poller_inventory") == [
+        assert app.state._tldw_shutdown_job_poller_inventory == [
             {
                 "name": "second",
                 "task_name": "second-task",
@@ -212,7 +211,7 @@ async def test_quiesce_owned_job_pollers_waits_then_calls_stop_callback() -> Non
 
     assert observed_sleeps == [0.5, 0.5]
     assert stop_calls == ["stop"]
-    segments = getattr(app.state, "_tldw_shutdown_timing_segments")
+    segments = app.state._tldw_shutdown_timing_segments
     assert segments[0]["segment"] == "optional_lease_wait"
     assert segments[0]["skipped"] is False
     assert segments[0]["initial_active"] == 2
@@ -287,3 +286,25 @@ async def test_stop_registered_job_pollers_logs_task_cancel_failure_at_warning()
     assert task.cancelled is True
     assert not any("Job poller cancel guard triggered" in message for message in debug_messages)
     assert any("raised after cancellation" in message for message in warning_messages)
+
+
+@pytest.mark.asyncio
+async def test_stop_registered_job_pollers_handles_taskless_worker_without_crashing() -> None:
+    shutdown_pollers = _import_shutdown_owned_job_pollers()
+    app = FastAPI()
+
+    await shutdown_pollers.stop_registered_job_pollers(
+        app,
+        [
+            shutdown_pollers.ManagedJobPoller(
+                name="callback_only_worker",
+                task=None,
+                stop_event=None,
+                timeout_sec=0.01,
+            )
+        ],
+    )
+
+    assert app.state._tldw_shutdown_quiesced_job_poller_names == [
+        "callback_only_worker"
+    ]

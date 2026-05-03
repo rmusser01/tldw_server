@@ -46,7 +46,9 @@ async def test_start_content_jobs_pollers_combines_handles_in_order(
         calls.append("reading-digest")
         return ("reading-stop", "reading-task")
 
-    async def _record_vn_asset(**kwargs):
+    async def _record_vn_asset(**kwargs: object) -> tuple[str, str, str, str]:
+        """Record that the VN asset worker starter ran."""
+
         del kwargs
         calls.append("vn-asset")
         return ("vn-asset-stop", "vn-asset-task", "vn-generation-stop", "vn-generation-task")

@@ -1,9 +1,22 @@
 from __future__ import annotations
 
+import asyncio
+from contextlib import suppress
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 from fastapi import FastAPI
+
+
+def _make_job_poller(name: str) -> SimpleNamespace:
+    from tldw_Server_API.app.services.lifecycle_workers import ShutdownPhase
+
+    return SimpleNamespace(
+        name=name,
+        task=object(),
+        shutdown_phase=ShutdownPhase.JOB_POLLER_QUIESCE,
+    )
 
 
 @pytest.mark.unit
@@ -15,7 +28,7 @@ async def test_shutdown_job_poller_handoff_uses_env_and_job_manager_when_availab
 
     app = FastAPI()
     recorded: dict[str, Any] = {}
-    owned_job_pollers = [object()]
+    owned_job_pollers = [_make_job_poller("poller")]
 
     class _FakeJobManager:
         def count_active_processing(self) -> int:
@@ -45,12 +58,78 @@ async def test_shutdown_job_poller_handoff_uses_env_and_job_manager_when_availab
     )
 
     assert recorded["app"] is app
-    assert recorded["poller_handles"] is owned_job_pollers
+    assert recorded["poller_handles"] == owned_job_pollers
     assert recorded["wait_for_leases_sec"] == 12
     assert recorded["active_processing"] == 7
     assert handles.early_quiesced_job_poller_names == set()
     assert handles.should_run_late_stop("media_ingest_jobs_task", object()) is True
     assert handles.should_run_late_stop("media_ingest_jobs_task", None) is False
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_shutdown_job_poller_handoff_filters_to_tasked_job_poller_phase(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.services import shutdown_job_poller_handoff as handoff_module
+    from tldw_Server_API.app.services.lifecycle_workers import (
+        ManagedWorker,
+        ShutdownPhase,
+    )
+
+    app = FastAPI()
+    recorded: dict[str, Any] = {}
+    poller_stop_event = asyncio.Event()
+    poller_task = asyncio.create_task(poller_stop_event.wait(), name="content-poller")
+    owned_job_pollers = [
+        ManagedWorker(
+            name="authnz_scheduler",
+            task=None,
+            stop_event=None,
+            shutdown_callback=lambda: asyncio.sleep(0),
+            shutdown_phase=ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN,
+        ),
+        ManagedWorker(
+            name="content_jobs_task",
+            task=poller_task,
+            stop_event=poller_stop_event,
+            shutdown_phase=ShutdownPhase.JOB_POLLER_QUIESCE,
+        ),
+    ]
+
+    async def _fake_quiesce(
+        current_app: FastAPI,
+        poller_handles: list[ManagedWorker],
+        *,
+        wait_for_leases_sec: int,
+        count_active_processing,
+    ) -> None:
+        del wait_for_leases_sec, count_active_processing
+        recorded["app"] = current_app
+        recorded["poller_handles"] = poller_handles
+        current_app.state._tldw_shutdown_quiesced_job_poller_names = [
+            handle.name for handle in poller_handles
+        ]
+
+    monkeypatch.setattr(handoff_module._env_os, "getenv", lambda *_args, **_kwargs: "0")
+
+    try:
+        handles = await handoff_module.shutdown_job_poller_handoff(
+            app=app,
+            owned_job_pollers=owned_job_pollers,
+            quiesce_owned_job_pollers_for_shutdown=_fake_quiesce,
+            startup_guard_exceptions=(ValueError,),
+            import_exceptions=(ImportError,),
+        )
+    finally:
+        poller_stop_event.set()
+        poller_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await poller_task
+
+    assert recorded["app"] is app
+    assert recorded["poller_handles"] == [owned_job_pollers[1]]
+    assert handles.early_quiesced_job_poller_names == {"content_jobs_task"}
 
 
 @pytest.mark.unit
@@ -62,7 +141,10 @@ async def test_shutdown_job_poller_handoff_falls_back_on_invalid_env_and_import_
 
     app = FastAPI()
     recorded: dict[str, Any] = {}
-    owned_job_pollers = [object(), object()]
+    owned_job_pollers = [
+        _make_job_poller("files_jobs_task"),
+        _make_job_poller("audio_jobs_task"),
+    ]
 
     async def _fake_quiesce(
         current_app: FastAPI,
@@ -95,7 +177,7 @@ async def test_shutdown_job_poller_handoff_falls_back_on_invalid_env_and_import_
     )
 
     assert recorded["app"] is app
-    assert recorded["poller_handles"] is owned_job_pollers
+    assert recorded["poller_handles"] == owned_job_pollers
     assert recorded["wait_for_leases_sec"] == 0
     assert recorded["active_processing"] == 0
     assert handles.early_quiesced_job_poller_names == {
