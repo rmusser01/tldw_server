@@ -1702,7 +1702,7 @@ class CharacterStore:
         include_deleted: bool = False,
     ) -> dict[str, Any] | None:
         """Fetch a character exemplar by ID."""
-        deleted_clause = "" if include_deleted else "AND is_deleted = 0"
+        deleted_clause = "" if include_deleted else f"AND is_deleted = {self._deleted_literal(False)}"
         query = """
             SELECT *
             FROM character_exemplars
@@ -1721,12 +1721,15 @@ class CharacterStore:
         query = """
             SELECT *
             FROM character_exemplars
-            WHERE character_id = ? AND is_deleted = 0
+            WHERE character_id = ? AND is_deleted = ?
             ORDER BY updated_at DESC, created_at DESC
             LIMIT ? OFFSET ?
         """
         try:
-            cursor = self.execute_query(query, (character_id, limit, offset))
+            cursor = self.execute_query(
+                query,
+                (character_id, self._deleted_value(False), limit, offset),
+            )
             rows = cursor.fetchall()
             return [self._normalize_character_exemplar_row(row) for row in rows if row]
         except CharactersRAGDBError:

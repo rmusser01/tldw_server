@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
+    BackendType,
     CharactersRAGDB,
     InputError,
     ConflictError,
@@ -260,3 +261,54 @@ class TestCharacterStoreSearch:
         renamed = store.get_character_card_by_id(card_id)
         assert renamed is not None
         assert renamed["tags"] == ["new-tag"]
+
+
+class _FakeCursor:
+    def __init__(self, rows=None):
+        self._rows = rows or []
+
+    def fetchone(self):
+        return self._rows[0] if self._rows else None
+
+    def fetchall(self):
+        return list(self._rows)
+
+
+def test_get_character_exemplar_by_id_uses_backend_safe_deleted_literal(store, monkeypatch):
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(
+        type(store._db),
+        "backend_type",
+        property(lambda self: BackendType.POSTGRESQL),
+    )
+
+    def _fake_execute_query(query, params):
+        captured["query"] = query
+        captured["params"] = params
+        return _FakeCursor()
+
+    monkeypatch.setattr(store, "execute_query", _fake_execute_query)
+
+    assert store.get_character_exemplar_by_id(11, "ex-1") is None
+    assert "is_deleted = FALSE" in captured["query"]
+    assert captured["params"] == ("ex-1", 11)
+
+
+def test_list_character_exemplars_uses_backend_safe_deleted_value(store, monkeypatch):
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(
+        type(store._db),
+        "backend_type",
+        property(lambda self: BackendType.POSTGRESQL),
+    )
+
+    def _fake_execute_query(query, params):
+        captured["query"] = query
+        captured["params"] = params
+        return _FakeCursor()
+
+    monkeypatch.setattr(store, "execute_query", _fake_execute_query)
+
+    assert store.list_character_exemplars(22, limit=5, offset=3) == []
+    assert "WHERE character_id = ? AND is_deleted = ?" in captured["query"]
+    assert captured["params"] == (22, False, 5, 3)
