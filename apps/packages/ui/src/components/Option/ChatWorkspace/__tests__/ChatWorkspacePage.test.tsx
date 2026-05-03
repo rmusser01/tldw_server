@@ -8,6 +8,29 @@ const setRouteContext = vi.fn()
 const chatPanelRuntimeState = vi.hoisted(() => ({
   backendAvailable: true
 }))
+const workspaceState = vi.hoisted(() => ({
+  value: {
+    workspaceId: "workspace-1",
+    workspaceName: "Default workspace",
+    sources: [
+      {
+        id: "source-1",
+        mediaId: 101,
+        title: "Operator Notes",
+        type: "document",
+        status: "ready",
+        addedAt: new Date("2026-05-03T00:00:00Z")
+      }
+    ]
+  }
+}))
+const connectionState = vi.hoisted(() => ({
+  value: {
+    phase: "connected",
+    isConnected: true,
+    serverUrl: "http://127.0.0.1:8000"
+  }
+}))
 
 vi.mock("@/store/chat-surface-coordinator", () => ({
   useChatSurfaceCoordinatorStore: (selector: any) =>
@@ -16,28 +39,11 @@ vi.mock("@/store/chat-surface-coordinator", () => ({
 
 vi.mock("@/store/workspace", () => ({
   useWorkspaceStore: (selector: any) =>
-    selector({
-      workspaceId: "workspace-1",
-      workspaceName: "Default workspace",
-      sources: [
-        {
-          id: "source-1",
-          mediaId: 101,
-          title: "Operator Notes",
-          type: "document",
-          status: "ready",
-          addedAt: new Date("2026-05-03T00:00:00Z")
-        }
-      ]
-    })
+    selector(workspaceState.value)
 }))
 
 vi.mock("@/hooks/useConnectionState", () => ({
-  useConnectionState: () => ({
-    phase: "connected",
-    isConnected: true,
-    serverUrl: "http://127.0.0.1:8000"
-  })
+  useConnectionState: () => connectionState.value
 }))
 
 vi.mock("../WorkspaceChatPanel", () => ({
@@ -71,6 +77,25 @@ describe("ChatWorkspacePage", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     chatPanelRuntimeState.backendAvailable = true
+    workspaceState.value = {
+      workspaceId: "workspace-1",
+      workspaceName: "Default workspace",
+      sources: [
+        {
+          id: "source-1",
+          mediaId: 101,
+          title: "Operator Notes",
+          type: "document",
+          status: "ready",
+          addedAt: new Date("2026-05-03T00:00:00Z")
+        }
+      ]
+    }
+    connectionState.value = {
+      phase: "connected",
+      isConnected: true,
+      serverUrl: "http://127.0.0.1:8000"
+    }
   })
 
   it("sets chat surface route context and renders the console regions", () => {
@@ -134,5 +159,60 @@ describe("ChatWorkspacePage", () => {
         "Server unavailable"
       )
     ).toBeInTheDocument()
+  })
+
+  it("updates backend availability when the connection state changes", async () => {
+    const { rerender } = render(<ChatWorkspacePage />)
+
+    expect(
+      within(screen.getByLabelText("Chat workspace status")).getByText("Streaming")
+    ).toBeInTheDocument()
+
+    connectionState.value = {
+      phase: "error",
+      isConnected: false,
+      serverUrl: "http://127.0.0.1:8000"
+    }
+    rerender(<ChatWorkspacePage />)
+
+    expect(
+      await within(screen.getByLabelText("Chat workspace status")).findByText(
+        "Server unavailable"
+      )
+    ).toBeInTheDocument()
+  })
+
+  it("clears browsed and staged sources when the workspace changes", () => {
+    const { rerender } = render(<ChatWorkspacePage />)
+
+    fireEvent.click(screen.getByRole("button", { name: "Browse Operator Notes" }))
+    fireEvent.click(
+      screen.getByRole("button", { name: "Stage Operator Notes for chat" })
+    )
+    expect(screen.getByTestId("workspace-chat-panel")).toHaveTextContent("staged:1")
+
+    workspaceState.value = {
+      workspaceId: "workspace-2",
+      workspaceName: "Second workspace",
+      sources: [
+        {
+          id: "source-2",
+          mediaId: 202,
+          title: "Second Notes",
+          type: "document",
+          status: "ready",
+          addedAt: new Date("2026-05-03T00:00:00Z")
+        }
+      ]
+    }
+    rerender(<ChatWorkspacePage />)
+
+    expect(screen.getByTestId("workspace-chat-panel")).toHaveTextContent(
+      "staged:0"
+    )
+    expect(screen.getByTestId("workspace-chat-panel")).toHaveTextContent(
+      "workspace:workspace-2"
+    )
+    expect(screen.queryByText("Context staged")).not.toBeInTheDocument()
   })
 })

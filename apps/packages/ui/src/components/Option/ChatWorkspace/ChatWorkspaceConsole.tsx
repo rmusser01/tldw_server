@@ -15,10 +15,10 @@ export type ChatWorkspaceConsoleProps = {
   sources: WorkspaceSource[]
   browsedSourceId: string | null
   stagedSources: StagedWorkspaceSource[]
-  stagedSourceIds: string[]
   selectedModelLabel: string
   selectedPersonaLabel: string | null
   backendAvailable: boolean
+  chatBackendAvailable: boolean
   streaming: boolean
   onBrowseSource: (sourceId: string) => void
   onStageSources: (sourceIds: string[]) => void
@@ -32,16 +32,17 @@ export const ChatWorkspaceConsole = ({
   sources,
   browsedSourceId,
   stagedSources,
-  stagedSourceIds,
   selectedModelLabel,
   selectedPersonaLabel,
   backendAvailable,
+  chatBackendAvailable,
   streaming,
   onBrowseSource,
   onStageSources,
   onClearStagedSources,
   onRuntimeStateChange
 }: ChatWorkspaceConsoleProps) => {
+  const stagedSourceIds = stagedSources.map((source) => source.sourceId)
   const stagedSourceTitles = stagedSources.map((source) => source.title)
   const inspectorSources = stagedSources.map((source) => ({
     sourceId: source.sourceId,
@@ -53,46 +54,48 @@ export const ChatWorkspaceConsole = ({
       data-testid="chat-workspace-console"
       className="grid h-full min-h-0 w-full grid-cols-1 overflow-hidden border border-border bg-background text-text lg:grid-cols-[minmax(260px,320px)_minmax(0,1fr)_minmax(280px,340px)]"
     >
-      <div className="order-2 min-h-0 overflow-y-auto border-t border-border bg-surface2/30 p-2 lg:order-1 lg:border-r lg:border-t-0">
-        <WorkspaceRail
-          workspaceName={workspaceName}
-          sources={sources}
-          browsedSourceId={browsedSourceId}
-          stagedSourceIds={stagedSourceIds}
-          onBrowseSource={onBrowseSource}
-          onStageSources={onStageSources}
-        />
-      </div>
-
-      <main className="order-1 flex min-h-[520px] min-w-0 flex-col overflow-hidden bg-background lg:order-2 lg:min-h-0">
-        <div className="min-h-0 flex-1 overflow-hidden">
-          <WorkspaceChatPanel
-            workspaceId={workspaceId}
+      <div className="flex h-full min-h-0 flex-col overflow-y-auto lg:contents">
+        <div className="order-2 min-h-0 overflow-y-auto border-t border-border bg-surface2/30 p-2 lg:order-1 lg:border-r lg:border-t-0">
+          <WorkspaceRail
             workspaceName={workspaceName}
-            stagedSources={stagedSources}
-            onClearStagedSources={onClearStagedSources}
-            backendAvailable={backendAvailable}
-            onRuntimeStateChange={onRuntimeStateChange}
+            sources={sources}
+            browsedSourceId={browsedSourceId}
+            stagedSourceIds={stagedSourceIds}
+            onBrowseSource={onBrowseSource}
+            onStageSources={onStageSources}
           />
         </div>
-        <WorkspaceStatusStrip
-          backendAvailable={backendAvailable}
-          streaming={streaming}
-          stagedSourceCount={stagedSources.length}
-        />
-      </main>
 
-      <div className="order-3 min-h-0 overflow-y-auto border-t border-border bg-surface2/30 p-2 lg:border-l lg:border-t-0">
-        <InspectorRail
-          scopeLabel={workspaceName}
-          stagedSourceCount={stagedSources.length}
-          stagedSourceTitles={stagedSourceTitles}
-          stagedSources={inspectorSources}
-          selectedModelLabel={selectedModelLabel}
-          selectedPersonaLabel={selectedPersonaLabel}
-          backendAvailable={backendAvailable}
-          streaming={streaming}
-        />
+        <main className="order-1 flex min-h-[520px] min-w-0 flex-col overflow-hidden bg-background lg:order-2 lg:min-h-0">
+          <div className="min-h-0 flex-1 overflow-hidden">
+            <WorkspaceChatPanel
+              workspaceId={workspaceId}
+              workspaceName={workspaceName}
+              stagedSources={stagedSources}
+              onClearStagedSources={onClearStagedSources}
+              backendAvailable={chatBackendAvailable}
+              onRuntimeStateChange={onRuntimeStateChange}
+            />
+          </div>
+          <WorkspaceStatusStrip
+            backendAvailable={backendAvailable}
+            streaming={streaming}
+            stagedSourceCount={stagedSources.length}
+          />
+        </main>
+
+        <div className="order-3 min-h-0 overflow-y-auto border-t border-border bg-surface2/30 p-2 lg:border-l lg:border-t-0">
+          <InspectorRail
+            scopeLabel={workspaceName}
+            stagedSourceCount={stagedSources.length}
+            stagedSourceTitles={stagedSourceTitles}
+            stagedSources={inspectorSources}
+            selectedModelLabel={selectedModelLabel}
+            selectedPersonaLabel={selectedPersonaLabel}
+            backendAvailable={backendAvailable}
+            streaming={streaming}
+          />
+        </div>
       </div>
     </div>
   )

@@ -122,6 +122,33 @@ describe("WorkspaceChatPanel", () => {
     expect(onClearStagedSources).toHaveBeenCalledTimes(1)
   })
 
+  it("sends the composer draft with Ctrl+Enter", async () => {
+    const onClearStagedSources = vi.fn()
+
+    render(
+      <WorkspaceChatPanel
+        stagedSources={[]}
+        onClearStagedSources={onClearStagedSources}
+        backendAvailable
+        workspaceId="workspace-1"
+      />
+    )
+
+    const composer = screen.getByRole("textbox", { name: "Chat workspace message" })
+    fireEvent.change(composer, { target: { value: "Keyboard send" } })
+    fireEvent.keyDown(composer, { key: "Enter", ctrlKey: true })
+
+    await waitFor(() => expect(chatHookState.onSubmit).toHaveBeenCalledTimes(1))
+    expect(chatHookState.onSubmit.mock.calls[0][0]).toMatchObject({
+      message: "Keyboard send",
+      requestOverrides: expect.objectContaining({
+        ragMediaIds: [],
+        fileRetrievalEnabled: false,
+        chatMode: "normal"
+      })
+    })
+  })
+
   it("includes staged source summary in the submitted message when no ready media ids can carry it", async () => {
     const onClearStagedSources = vi.fn()
 

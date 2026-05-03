@@ -12,6 +12,12 @@ import type {
   StagedWorkspaceSource
 } from "./types"
 
+type WorkspaceContextState = {
+  workspaceId: string
+  browsedSourceId: string | null
+  stagedSources: StagedWorkspaceSource[]
+}
+
 const createInitialRuntimeState = (
   backendAvailable: boolean
 ): ChatWorkspaceRuntimeState => ({
@@ -33,16 +39,26 @@ export const ChatWorkspacePage = () => {
     connectionState.isConnected &&
     connectionState.phase === ConnectionPhase.CONNECTED
 
-  const [browsedSourceId, setBrowsedSourceId] = React.useState<string | null>(null)
-  const [stagedSources, setStagedSources] = React.useState<StagedWorkspaceSource[]>(
-    []
-  )
+  const [workspaceContext, setWorkspaceContext] =
+    React.useState<WorkspaceContextState>(() => ({
+      workspaceId,
+      browsedSourceId: null,
+      stagedSources: []
+    }))
   const [runtimeState, setRuntimeState] =
     React.useState<ChatWorkspaceRuntimeState>(() =>
       createInitialRuntimeState(backendAvailable)
     )
 
   const scopeLabel = workspaceName || "Workspace"
+  const contextMatchesWorkspace = workspaceContext.workspaceId === workspaceId
+  const browsedSourceId = contextMatchesWorkspace
+    ? workspaceContext.browsedSourceId
+    : null
+  const stagedSources = contextMatchesWorkspace
+    ? workspaceContext.stagedSources
+    : []
+  const renderedBackendAvailable = backendAvailable && runtimeState.backendAvailable
 
   React.useEffect(() => {
     setRouteContext({
@@ -51,28 +67,53 @@ export const ChatWorkspacePage = () => {
     })
   }, [setRouteContext])
 
-  const stagedSourceIds = React.useMemo(
-    () => stagedSources.map((source) => source.sourceId),
-    [stagedSources]
-  )
+  React.useEffect(() => {
+    if (!contextMatchesWorkspace) {
+      setWorkspaceContext({
+        workspaceId,
+        browsedSourceId: null,
+        stagedSources: []
+      })
+    }
+  }, [contextMatchesWorkspace, workspaceId])
 
-  const handleBrowseSource = React.useCallback((sourceId: string) => {
-    setBrowsedSourceId(sourceId)
-  }, [])
+  const handleBrowseSource = React.useCallback(
+    (sourceId: string) => {
+      setWorkspaceContext((current) => ({
+        workspaceId,
+        browsedSourceId: sourceId,
+        stagedSources:
+          current.workspaceId === workspaceId ? current.stagedSources : []
+      }))
+    },
+    [workspaceId]
+  )
 
   const handleStageSources = React.useCallback(
     (sourceIds: string[]) => {
       const selected = sources.filter((source) => sourceIds.includes(source.id))
-      setStagedSources((current) =>
-        stageWorkspaceSources(current, selected, scopeLabel)
-      )
+      setWorkspaceContext((current) => ({
+        workspaceId,
+        browsedSourceId:
+          current.workspaceId === workspaceId ? current.browsedSourceId : null,
+        stagedSources: stageWorkspaceSources(
+          current.workspaceId === workspaceId ? current.stagedSources : [],
+          selected,
+          scopeLabel
+        )
+      }))
     },
-    [scopeLabel, sources]
+    [scopeLabel, sources, workspaceId]
   )
 
   const handleClearStagedSources = React.useCallback(() => {
-    setStagedSources([])
-  }, [])
+    setWorkspaceContext((current) => ({
+      workspaceId,
+      browsedSourceId:
+        current.workspaceId === workspaceId ? current.browsedSourceId : null,
+      stagedSources: []
+    }))
+  }, [workspaceId])
 
   const handleRuntimeStateChange = React.useCallback(
     (state: ChatWorkspaceRuntimeState) => {
@@ -89,10 +130,10 @@ export const ChatWorkspacePage = () => {
         sources={sources}
         browsedSourceId={browsedSourceId}
         stagedSources={stagedSources}
-        stagedSourceIds={stagedSourceIds}
         selectedModelLabel={runtimeState.selectedModelLabel}
         selectedPersonaLabel={runtimeState.selectedPersonaLabel}
-        backendAvailable={runtimeState.backendAvailable}
+        backendAvailable={renderedBackendAvailable}
+        chatBackendAvailable={backendAvailable}
         streaming={runtimeState.streaming}
         onBrowseSource={handleBrowseSource}
         onStageSources={handleStageSources}

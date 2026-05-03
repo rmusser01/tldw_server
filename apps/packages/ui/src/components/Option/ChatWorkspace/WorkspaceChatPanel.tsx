@@ -168,6 +168,16 @@ export const WorkspaceChatPanel = ({
     [submitMessage]
   )
 
+  const handleComposerKeyDown = React.useCallback(
+    (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+        event.preventDefault()
+        void submitMessage()
+      }
+    },
+    [submitMessage]
+  )
+
   return (
     <section
       aria-label="Chat workspace panel"
@@ -259,6 +269,7 @@ export const WorkspaceChatPanel = ({
             className="min-h-[88px] resize-y rounded-md border border-border bg-background px-3 py-2 text-sm text-text outline-none transition-colors placeholder:text-text-muted focus:border-primary focus:ring-2 focus:ring-focus"
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={handleComposerKeyDown}
             placeholder="Ask about this workspace"
           />
           <div className="flex justify-end">
