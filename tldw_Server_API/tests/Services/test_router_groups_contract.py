@@ -56,6 +56,7 @@ def _first_router_path(router: APIRouter | Callable[[], APIRouter]) -> str:
 def test_append_imported_router_spec_preserves_metadata(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Verify imported router specs retain the metadata used for registration."""
     from tldw_Server_API.app.api.v1.router_groups.conditional import (
         ImportedRouterSpec,
         append_imported_router_spec,
@@ -91,6 +92,7 @@ def test_append_imported_router_spec_preserves_metadata(
 def test_append_imported_router_spec_defers_router_attr_lookup_until_resolution(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Verify router attribute lookup stays lazy until RouterSpec resolution."""
     from tldw_Server_API.app.api.v1.router_groups.conditional import (
         ImportedRouterSpec,
         append_imported_router_spec,
@@ -129,6 +131,95 @@ def test_append_imported_router_spec_defers_router_attr_lookup_until_resolution(
     assert access_count["router"] == 0
     assert _first_router_path(specs[0].router) == "/lazy/router"
     assert access_count["router"] == 1
+
+
+def test_append_imported_router_spec_skips_optional_import_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify unavailable optional router modules are skipped during import."""
+    from tldw_Server_API.app.api.v1.router_groups.conditional import (
+        ImportedRouterSpec,
+        append_imported_router_spec,
+    )
+
+    def _raise_import_error(_import_path: str) -> ModuleType:
+        raise ModuleNotFoundError("optional router is unavailable")
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.router_groups.conditional.importlib.import_module",
+        _raise_import_error,
+    )
+    specs: list[RouterSpec] = []
+
+    append_imported_router_spec(
+        specs,
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.optional_missing",
+            log_name="optional-missing",
+        ),
+    )
+
+    assert specs == []
+
+
+def test_append_imported_router_spec_propagates_unexpected_import_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify unexpected import-time failures are not hidden as optional routers."""
+    from tldw_Server_API.app.api.v1.router_groups.conditional import (
+        ImportedRouterSpec,
+        append_imported_router_spec,
+    )
+
+    def _raise_runtime_error(_import_path: str) -> ModuleType:
+        raise RuntimeError("router module crashed during import")
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.router_groups.conditional.importlib.import_module",
+        _raise_runtime_error,
+    )
+    specs: list[RouterSpec] = []
+
+    with pytest.raises(RuntimeError, match="router module crashed"):
+        append_imported_router_spec(
+            specs,
+            ImportedRouterSpec(
+                import_path="tldw_Server_API.app.api.v1.endpoints.crashing_router",
+                log_name="crashing-router",
+            ),
+        )
+
+    assert specs == []
+
+
+def test_append_imported_router_spec_missing_attr_skips_at_registration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify missing router attributes are skipped through lazy registration."""
+    from tldw_Server_API.app.api.v1.router_groups.conditional import (
+        ImportedRouterSpec,
+        append_imported_router_spec,
+    )
+
+    module_name = "tldw_Server_API.app.api.v1.endpoints.missing_router_attr"
+    monkeypatch.setitem(sys.modules, module_name, ModuleType(module_name))
+    specs: list[RouterSpec] = []
+
+    append_imported_router_spec(
+        specs,
+        ImportedRouterSpec(
+            import_path=module_name,
+            log_name="missing-router-attr",
+            prefix="/api/v1",
+            tags=("missing-router-attr",),
+        ),
+    )
+
+    app = FastAPI()
+
+    assert len(specs) == 1
+    assert register_router_specs(app, specs) == 0
+    assert "/api/v1/missing-router-attr" not in {route.path for route in app.routes}
 
 
 def test_register_router_specs_respects_route_policy(monkeypatch: pytest.MonkeyPatch) -> None:
