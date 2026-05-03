@@ -34,6 +34,16 @@ _DELEGATED_CHARACTER_METHODS = {
     "_check_json_support",
     "_search_cards_by_tags_json",
     "_search_cards_by_tags_fallback",
+    "_estimate_text_token_count",
+    "_normalize_exemplar_enum",
+    "_normalize_exemplar_string_list",
+    "_normalize_character_exemplar_row",
+    "add_character_exemplar",
+    "get_character_exemplar_by_id",
+    "list_character_exemplars",
+    "update_character_exemplar",
+    "soft_delete_character_exemplar",
+    "search_character_exemplars",
 }
 
 
@@ -78,6 +88,17 @@ def test_character_store_owns_delegated_methods_without_monolith_duplicates(db, 
 
     assert db.add_character_card({"name": "Delegated Character"}) == 987
     assert captured["card_data"] == {"name": "Delegated Character"}
+
+    def _fake_add_character_exemplar(character_id, exemplar_data):
+        captured["character_id"] = character_id
+        captured["exemplar_data"] = exemplar_data
+        return {"id": "exemplar-from-store"}
+
+    monkeypatch.setattr(db.character_store, "add_character_exemplar", _fake_add_character_exemplar)
+
+    assert db.add_character_exemplar(123, {"text": "Delegated exemplar"}) == {"id": "exemplar-from-store"}
+    assert captured["character_id"] == 123
+    assert captured["exemplar_data"] == {"text": "Delegated exemplar"}
 
 
 class TestCharacterStoreAdd:
