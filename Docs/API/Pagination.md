@@ -13,6 +13,10 @@ Canonical backend schema names are `OffsetPaginationMeta`,
 matching `OffsetPaginationMeta`, `PagePaginationMeta`, `CursorPaginationMeta`,
 and `ApiPaginationMeta` TypeScript types from `response-envelope.ts`.
 
+When a route opts into the canonical response envelope, the nested envelope
+location is `metadata.pagination`. For default legacy-shaped `v1` route bodies,
+the additive nested field remains `pagination`.
+
 ## Offset Pagination
 
 Offset-based endpoints use `limit` and `offset` request parameters and return
@@ -116,10 +120,14 @@ Clients must treat `null` totals as "unknown", not zero.
 
 - Preserve legacy top-level pagination aliases on migrated endpoints.
 - Prefer `pagination` for new client code when it exists.
+- Prefer `metadata.pagination` when consuming canonical envelope responses.
 - Do not infer a missing `pagination` object means more data exists.
 - Do not alter provider-compatible payloads only to add canonical metadata.
 - Do not add response-body pagination to raw-list endpoints without a versioned
   object-envelope route.
+- Do not change the default body shape of a `v1` route merely to move
+  pagination into an envelope; use a sibling route or `/api/v2/` for
+  default-breaking migrations.
 - Keep streaming, file export, and binary download continuation in their stream,
   file, header, or query contract rather than inventing a JSON pagination body.
 
@@ -137,3 +145,7 @@ Current exemption categories:
 - Operation results and aggregate counts: not list pagination.
 - Detail and nested subresource routes: only paginate if they expose direct
   list/search/history/job/event semantics.
+
+See [API Versioning Strategy](api-versioning-strategy.md)
+for the rule that default-breaking shape changes should move to a sibling route
+or `/api/v2/`.
