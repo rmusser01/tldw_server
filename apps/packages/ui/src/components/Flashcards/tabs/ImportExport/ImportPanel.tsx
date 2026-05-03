@@ -1388,7 +1388,3 @@ export const ImportPanel: React.FC<TransferActionReporterProps> = ({ onTransferA
     </div>
   )
 }
-
-/**
- * Export panel for CSV/JSON/APKG export.
- */

@@ -11,6 +11,13 @@ import { type TransferActionReporterProps } from "./shared"
 
 const { Text } = Typography
 
+const toJsonExportText = (payload: unknown): string => {
+  if (typeof payload === "string") {
+    return payload
+  }
+  return JSON.stringify(payload, null, 2) ?? ""
+}
+
 export const ExportPanel: React.FC<TransferActionReporterProps> = ({ onTransferAction }) => {
   const { t } = useTranslation(["option", "common"])
   const message = useAntdMessage()
@@ -26,19 +33,20 @@ export const ExportPanel: React.FC<TransferActionReporterProps> = ({ onTransferA
   const [isExporting, setIsExporting] = React.useState(false)
 
   const normalizedExportTag = exportTag.trim()
+  const normalizedExportTagLower = normalizedExportTag.toLowerCase()
   const normalizedExportQuery = exportQueryText.trim()
 
   const exportPreviewCountQuery = useQuery({
     queryKey: [
       "flashcards:export-preview-count",
       exportDeckId ?? null,
-      normalizedExportTag.toLowerCase(),
+      normalizedExportTagLower,
       normalizedExportQuery
     ],
     queryFn: async () => {
       const response = await listFlashcards({
         deck_id: exportDeckId ?? undefined,
-        tag: normalizedExportTag || undefined,
+        tag: normalizedExportTagLower || undefined,
         q: normalizedExportQuery || undefined,
         due_status: "all",
         limit: 1,
@@ -65,7 +73,7 @@ export const ExportPanel: React.FC<TransferActionReporterProps> = ({ onTransferA
     try {
       const exportParams = {
         deck_id: exportDeckId ?? undefined,
-        tag: normalizedExportTag || undefined,
+        tag: normalizedExportTagLower || undefined,
         q: normalizedExportQuery || undefined,
         include_reverse: exportIncludeReverse || undefined
       }
@@ -77,11 +85,11 @@ export const ExportPanel: React.FC<TransferActionReporterProps> = ({ onTransferA
           format: "apkg"
         })
       } else if (exportFormat === "json") {
-        const text = await exportFlashcards({
+        const payload = await exportFlashcards({
           ...exportParams,
           format: "json"
         })
-        blob = new Blob([text], {
+        blob = new Blob([toJsonExportText(payload)], {
           type: "application/json;charset=utf-8"
         })
       } else {
