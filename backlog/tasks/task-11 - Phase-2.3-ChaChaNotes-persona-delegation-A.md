@@ -4,7 +4,7 @@ title: Phase 2.3 ChaChaNotes persona delegation A
 status: Done
 assignee: []
 created_date: '2026-05-03 19:04'
-updated_date: '2026-05-03 19:11'
+updated_date: '2026-05-03 19:45'
 labels:
   - phase-2
   - issue-1116
@@ -45,6 +45,8 @@ Conservative Phase 2.3 follow-up tranche for #1116. Select one small covered per
 Selected the persona exemplar normalization helper family after confirming direct persona CRUD/session/memory/exemplar methods were already delegated out of CharactersRAGDB. Added public facade coverage proving create_persona_exemplar normalizes kind, tone, scenario_tags, capability_tags, and source_type without falling through to monolith exemplar helpers. Moved persona tag normalization into PersonaStateStore and removed _normalize_persona_exemplar_tags from ChaChaNotes_DB.py; character exemplar helpers remain unchanged.
 
 Verification: red focused test failed on monolith fallback AssertionError before implementation. Green runs: test_chacha_persona_state_store.py (7 passed), test_character_exemplars_db.py (3 passed), test_persona_persistence_db.py (6 passed), test_persona_profiles_api.py (20 passed), test_persona_sessions.py (8 passed), Bandit touched source results 0, git diff --check passed.
+
+PR opened: https://github.com/rmusser01/tldw_server/pull/1240
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

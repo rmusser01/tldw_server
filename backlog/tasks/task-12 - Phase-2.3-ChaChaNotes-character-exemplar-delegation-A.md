@@ -4,7 +4,7 @@ title: Phase 2.3 ChaChaNotes character exemplar delegation A
 status: Done
 assignee: []
 created_date: '2026-05-03 19:11'
-updated_date: '2026-05-03 19:14'
+updated_date: '2026-05-03 19:45'
 labels:
   - phase-2
   - issue-1116
@@ -46,6 +46,8 @@ Existing test_character_exemplars_db.py already covered public CharactersRAGDB f
 Red verification: test_chacha_character_store.py -k owns_delegated_methods failed because character exemplar methods still appeared as CharactersRAGDB class methods. Implementation moved the exact character exemplar helper/CRUD/search block into CharacterStore, added CharacterStore.__getattr__ for parent DB compatibility helpers, and added CharactersRAGDB facade delegation entries.
 
 Green verification: test_chacha_character_store.py (19 passed), test_character_exemplars_db.py (3 passed), test_chacha_persona_state_store.py (7 passed), Bandit touched source results 0, git diff --check passed.
+
+PR opened: https://github.com/rmusser01/tldw_server/pull/1240
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
