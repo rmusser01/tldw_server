@@ -1,111 +1,103 @@
-import React from "react";
+import React from "react"
 import {
   buildAvailableChatModelIds,
   findUnavailableChatModel,
-  normalizeChatModelId,
-} from "@/utils/chat-model-availability";
-import { useComposerQueue } from "@/components/Chat/composer/hooks/useComposerQueue";
+  normalizeChatModelId
+} from "@/utils/chat-model-availability"
+import { useComposerQueue } from "@/components/Chat/composer/hooks/useComposerQueue"
 import {
   IMAGE_GENERATION_ASSISTANT_MESSAGE_TYPE,
-  IMAGE_GENERATION_USER_MESSAGE_TYPE,
-} from "@/utils/image-generation-chat";
-import {
-  throwIfChatSubmitUnsuccessful,
-  type ChatSubmitResult,
-} from "@/hooks/chat/chat-action-utils";
-import { projectTokenBudget } from "../usage-metrics";
-import type { QueuedRequest } from "@/utils/chat-request-queue";
-import type { ChatDocuments } from "@/models/ChatTypes";
+  IMAGE_GENERATION_USER_MESSAGE_TYPE
+} from "@/utils/image-generation-chat"
+import { projectTokenBudget } from "../usage-metrics"
+import type { QueuedRequest } from "@/utils/chat-request-queue"
+import type { ChatDocuments } from "@/models/ChatTypes"
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
 type PlaygroundQueuedSourceContext = {
-  documents?: ChatDocuments;
-  imageBackendOverride?: string;
-  isImageCommand?: boolean;
-};
+  documents?: ChatDocuments
+  imageBackendOverride?: string
+  isImageCommand?: boolean
+}
 
 type SubmissionIntent = {
-  message: string;
-  isImageCommand: boolean;
-  imageBackendOverride?: string;
-  handled?: boolean;
-  invalidImageCommand?: boolean;
-  imageCommandMissingProvider?: boolean;
-};
+  message: string
+  isImageCommand: boolean
+  imageBackendOverride?: string
+  handled?: boolean
+  invalidImageCommand?: boolean
+  imageCommandMissingProvider?: boolean
+}
 
 // ---------------------------------------------------------------------------
 // Deps interface
 // ---------------------------------------------------------------------------
 
 export interface UsePlaygroundQueueManagementDeps {
-  composerModels: unknown[] | undefined;
-  isConnectionReady: boolean;
-  isSending: boolean;
-  selectedModel: string | null;
-  chatMode: string;
-  webSearch: boolean;
-  compareMode: boolean;
-  compareModeActive: boolean;
-  compareSelectedModels: string[];
-  selectedSystemPrompt: string;
-  selectedQuickPrompt: string | null;
-  toolChoice: string;
-  useOCR: boolean;
+  composerModels: unknown[] | undefined
+  isConnectionReady: boolean
+  isSending: boolean
+  selectedModel: string | null
+  chatMode: string
+  webSearch: boolean
+  compareMode: boolean
+  compareModeActive: boolean
+  compareSelectedModels: string[]
+  selectedSystemPrompt: string
+  selectedQuickPrompt: string | null
+  toolChoice: string
+  useOCR: boolean
   selectedDocuments: Array<{
-    id: string;
-    title?: string;
-    url?: string;
-    favIconUrl?: string;
-  }>;
-  uploadedFiles: any[];
-  contextFiles: any[];
-  documentContext: any[];
-  queuedMessages: QueuedRequest[];
-  setQueuedMessages: (
-    value: QueuedRequest[] | ((prev: QueuedRequest[]) => QueuedRequest[]),
-  ) => void;
-  historyId: string | null;
-  serverChatId: string | null;
-  conversationTokenCount: number;
-  resolvedMaxContext: number;
-  estimateTokensForText: (text: string) => number;
-  characterContextTokenEstimate: number;
-  pinnedSourceTokenEstimate: number;
-  currentContextSnapshot: Record<string, any>;
-  setLastSubmittedContext: (value: Record<string, any>) => void;
-  setSelectedModel: (model: string) => void;
-  setChatMode: (mode: string) => void;
-  setWebSearch: (value: boolean) => void;
-  setCompareMode: (value: boolean) => void;
-  setCompareSelectedModels: (models: string[]) => void;
-  setSelectedSystemPrompt: (value: string) => void;
-  setSelectedQuickPrompt: (value: string | null) => void;
-  setToolChoice: (value: string) => void;
-  setUseOCR: (value: boolean) => void;
+    id: string
+    title?: string
+    url?: string
+    favIconUrl?: string
+  }>
+  uploadedFiles: any[]
+  contextFiles: any[]
+  documentContext: any[]
+  queuedMessages: QueuedRequest[]
+  setQueuedMessages: (value: QueuedRequest[] | ((prev: QueuedRequest[]) => QueuedRequest[])) => void
+  historyId: string | null
+  serverChatId: string | null
+  conversationTokenCount: number
+  resolvedMaxContext: number
+  estimateTokensForText: (text: string) => number
+  characterContextTokenEstimate: number
+  pinnedSourceTokenEstimate: number
+  currentContextSnapshot: Record<string, any>
+  setLastSubmittedContext: (value: Record<string, any>) => void
+  setSelectedModel: (model: string) => void
+  setChatMode: (mode: string) => void
+  setWebSearch: (value: boolean) => void
+  setCompareMode: (value: boolean) => void
+  setCompareSelectedModels: (models: string[]) => void
+  setSelectedSystemPrompt: (value: string) => void
+  setSelectedQuickPrompt: (value: string | null) => void
+  setToolChoice: (value: string) => void
+  setUseOCR: (value: boolean) => void
   compareModelsSupportCapability: (
     models: string[],
-    capability: string,
-  ) => boolean;
-  sendMessage: (
-    payload: Record<string, any>,
-  ) => Promise<ChatSubmitResult | void>;
-  stopStreamingRequest: (options?: { discardTurn?: boolean }) => void;
+    capability: string
+  ) => boolean
+  sendMessage: (payload: Record<string, any>) => Promise<void>
+  stopStreamingRequest: (options?: { discardTurn?: boolean }) => void
   form: {
-    setFieldError: (field: string, error: string) => void;
-    reset: () => void;
-  };
-  clearSelectedDocuments: () => void;
-  clearUploadedFiles: () => void;
-  textAreaFocus: () => void;
+    setFieldError: (field: string, error: string) => void
+    reset: () => void
+  }
+  clearSelectedDocuments: () => void
+  clearUploadedFiles: () => void
+  textAreaFocus: () => void
   notificationApi: {
-    error: (opts: Record<string, any>) => void;
-    warning: (opts: Record<string, any>) => void;
-    info: (opts: Record<string, any>) => void;
-  };
-  t: (key: string, defaultValueOrOptions?: any, options?: any) => string;
+    error: (opts: Record<string, any>) => void
+    warning: (opts: Record<string, any>) => void
+    info: (opts: Record<string, any>) => void
+  }
+  t: (key: string, defaultValueOrOptions?: any, options?: any) => string
 }
 
 // ---------------------------------------------------------------------------
@@ -113,7 +105,7 @@ export interface UsePlaygroundQueueManagementDeps {
 // ---------------------------------------------------------------------------
 
 export function usePlaygroundQueueManagement(
-  deps: UsePlaygroundQueueManagementDeps,
+  deps: UsePlaygroundQueueManagementDeps
 ) {
   const {
     composerModels,
@@ -158,16 +150,16 @@ export function usePlaygroundQueueManagement(
     clearUploadedFiles,
     textAreaFocus,
     notificationApi,
-    t,
-  } = deps;
+    t
+  } = deps
 
   const availableChatModelIds = React.useMemo(
     () =>
       buildAvailableChatModelIds(
-        Array.isArray(composerModels) ? (composerModels as any[]) : [],
+        Array.isArray(composerModels) ? (composerModels as any[]) : []
       ),
-    [composerModels],
-  );
+    [composerModels]
+  )
 
   const buildQueuedDocuments = React.useCallback(
     (): ChatDocuments =>
@@ -176,10 +168,10 @@ export function usePlaygroundQueueManagement(
         tabId: doc.id,
         title: doc.title,
         url: doc.url,
-        favIconUrl: doc.favIconUrl,
+        favIconUrl: doc.favIconUrl
       })),
-    [selectedDocuments],
-  );
+    [selectedDocuments]
+  )
 
   const buildQueuedRequestSnapshot = React.useCallback(
     () => ({
@@ -191,7 +183,7 @@ export function usePlaygroundQueueManagement(
       selectedSystemPrompt,
       selectedQuickPrompt,
       toolChoice,
-      useOCR,
+      useOCR
     }),
     [
       chatMode,
@@ -202,47 +194,47 @@ export function usePlaygroundQueueManagement(
       selectedSystemPrompt,
       toolChoice,
       useOCR,
-      webSearch,
-    ],
-  );
+      webSearch
+    ]
+  )
 
   const isQueuedDispatchBlockedByComposerState = React.useMemo(
     () =>
       uploadedFiles.length > 0 ||
       contextFiles.length > 0 ||
       (Array.isArray(documentContext) && documentContext.length > 0),
-    [contextFiles.length, documentContext, uploadedFiles.length],
-  );
+    [contextFiles.length, documentContext, uploadedFiles.length]
+  )
 
   const validateQueuedRequest = React.useCallback(
     (item: QueuedRequest) => {
       if (isQueuedDispatchBlockedByComposerState) {
         return t(
           "playground:composer.queue.currentDraftAttachmentConflict",
-          "Clear the current draft attachments/context before sending queued requests.",
-        );
+          "Clear the current draft attachments/context before sending queued requests."
+        )
       }
 
       const sourceContext = (item.sourceContext ??
-        null) as PlaygroundQueuedSourceContext | null;
+        null) as PlaygroundQueuedSourceContext | null
 
       if (!sourceContext?.isImageCommand) {
         if (!item.snapshot.compareMode) {
           const normalizedSelectedModel = normalizeChatModelId(
-            item.snapshot.selectedModel,
-          );
+            item.snapshot.selectedModel
+          )
           if (!normalizedSelectedModel) {
-            return t("formError.noModel");
+            return t("formError.noModel")
           }
           const unavailableModel = findUnavailableChatModel(
             [normalizedSelectedModel],
-            availableChatModelIds,
-          );
+            availableChatModelIds
+          )
           if (unavailableModel) {
             return t(
               "playground:composer.validationModelUnavailableInline",
-              "Selected model is not available on this server. Refresh models or choose a different model.",
-            );
+              "Selected model is not available on this server. Refresh models or choose a different model."
+            )
           }
         } else if (
           !item.snapshot.compareSelectedModels ||
@@ -250,18 +242,18 @@ export function usePlaygroundQueueManagement(
         ) {
           return t(
             "playground:composer.validationCompareMinModelsInline",
-            "Select at least two models for Compare mode.",
-          );
+            "Select at least two models for Compare mode."
+          )
         } else {
           const unavailableModel = findUnavailableChatModel(
             item.snapshot.compareSelectedModels,
-            availableChatModelIds,
-          );
+            availableChatModelIds
+          )
           if (unavailableModel) {
             return t(
               "playground:composer.validationModelUnavailableInline",
-              "Selected model is not available on this server. Refresh models or choose a different model.",
-            );
+              "Selected model is not available on this server. Refresh models or choose a different model."
+            )
           }
         }
 
@@ -270,61 +262,61 @@ export function usePlaygroundQueueManagement(
           item.image.length > 0 &&
           !compareModelsSupportCapability(
             item.snapshot.compareSelectedModels,
-            "vision",
+            "vision"
           )
         ) {
           return t(
             "playground:composer.validationCompareVisionInline",
-            "One or more selected compare models do not support image input.",
-          );
+            "One or more selected compare models do not support image input."
+          )
         }
       }
 
-      return null;
+      return null
     },
     [
       availableChatModelIds,
       compareModelsSupportCapability,
       isQueuedDispatchBlockedByComposerState,
-      t,
-    ],
-  );
+      t
+    ]
+  )
 
   const sendQueuedRequest = React.useCallback(
     async (item: QueuedRequest) => {
-      const validationError = validateQueuedRequest(item);
+      const validationError = validateQueuedRequest(item)
       if (validationError) {
-        form.setFieldError("message", validationError);
-        throw new Error(validationError);
+        form.setFieldError("message", validationError)
+        throw new Error(validationError)
       }
 
-      setSelectedModel(item.snapshot.selectedModel);
-      setChatMode(item.snapshot.chatMode);
-      setWebSearch(item.snapshot.webSearch);
-      setCompareMode(item.snapshot.compareMode);
-      setCompareSelectedModels(item.snapshot.compareSelectedModels);
-      setSelectedSystemPrompt(item.snapshot.selectedSystemPrompt ?? "");
-      setSelectedQuickPrompt(item.snapshot.selectedQuickPrompt ?? "");
+      setSelectedModel(item.snapshot.selectedModel)
+      setChatMode(item.snapshot.chatMode)
+      setWebSearch(item.snapshot.webSearch)
+      setCompareMode(item.snapshot.compareMode)
+      setCompareSelectedModels(item.snapshot.compareSelectedModels)
+      setSelectedSystemPrompt(item.snapshot.selectedSystemPrompt ?? "")
+      setSelectedQuickPrompt(item.snapshot.selectedQuickPrompt ?? "")
       if (
         item.snapshot.toolChoice === "auto" ||
         item.snapshot.toolChoice === "required" ||
         item.snapshot.toolChoice === "none"
       ) {
-        setToolChoice(item.snapshot.toolChoice);
+        setToolChoice(item.snapshot.toolChoice)
       }
-      setUseOCR(item.snapshot.useOCR);
+      setUseOCR(item.snapshot.useOCR)
 
       const sourceContext = (item.sourceContext ??
-        null) as PlaygroundQueuedSourceContext | null;
+        null) as PlaygroundQueuedSourceContext | null
       const documents = Array.isArray(sourceContext?.documents)
         ? sourceContext.documents
-        : [];
+        : []
 
       const projectedForSubmission = projectTokenBudget({
         conversationTokens: conversationTokenCount,
         draftTokens: estimateTokensForText(item.promptText),
-        maxTokens: resolvedMaxContext,
-      });
+        maxTokens: resolvedMaxContext
+      })
       if (
         projectedForSubmission.isOverLimit ||
         projectedForSubmission.isNearLimit
@@ -332,22 +324,22 @@ export function usePlaygroundQueueManagement(
         notificationApi.warning({
           message: t(
             "playground:tokens.preSendWarningTitle",
-            "Context budget warning",
+            "Context budget warning"
           ),
           description: projectedForSubmission.isOverLimit
             ? t(
                 "playground:tokens.preSendOverLimit",
-                "Projected send exceeds the model context window. Consider trimming prompt/context before sending.",
+                "Projected send exceeds the model context window. Consider trimming prompt/context before sending."
               )
             : t(
                 "playground:tokens.preSendNearLimit",
-                "Projected send is near the context window limit.",
-              ),
-        });
+                "Projected send is near the context window limit."
+              )
+        })
       }
 
-      setLastSubmittedContext(currentContextSnapshot);
-      const submitResult = await sendMessage({
+      setLastSubmittedContext(currentContextSnapshot)
+      await sendMessage({
         image: sourceContext?.isImageCommand ? "" : item.image,
         message: item.promptText,
         docs: sourceContext?.isImageCommand ? [] : documents,
@@ -361,7 +353,7 @@ export function usePlaygroundQueueManagement(
               ? item.snapshot.toolChoice
               : undefined,
           useOCR: item.snapshot.useOCR,
-          webSearch: item.snapshot.webSearch,
+          webSearch: item.snapshot.webSearch
         },
         imageBackendOverride: sourceContext?.isImageCommand
           ? sourceContext.imageBackendOverride
@@ -374,9 +366,8 @@ export function usePlaygroundQueueManagement(
           : undefined,
         imageGenerationSource: sourceContext?.isImageCommand
           ? "slash-command"
-          : undefined,
-      });
-      throwIfChatSubmitUnsuccessful(submitResult);
+          : undefined
+      })
     },
     [
       conversationTokenCount,
@@ -397,46 +388,49 @@ export function usePlaygroundQueueManagement(
       setUseOCR,
       setWebSearch,
       t,
-      validateQueuedRequest,
-    ],
-  );
+      validateQueuedRequest
+    ]
+  )
 
   const resolveConversationId = React.useCallback(
     () => historyId ?? serverChatId ?? null,
-    [historyId, serverChatId],
-  );
+    [historyId, serverChatId]
+  )
 
   const handleEnqueueBlocked = React.useCallback(() => {
     notificationApi.warning({
       message: t(
         "playground:composer.queue.attachmentsNeedManualRepairTitle",
-        "Queue needs a simpler draft",
+        "Queue needs a simpler draft"
       ),
       description: t(
         "playground:composer.queue.attachmentsNeedManualRepairBody",
-        "Queued requests currently support text, images, and tab mentions. Clear attached files/context before queueing this draft.",
-      ),
-    });
-  }, [notificationApi, t]);
+        "Queued requests currently support text, images, and tab mentions. Clear attached files/context before queueing this draft."
+      )
+    })
+  }, [notificationApi, t])
 
   const handleEnqueueSuccess = React.useCallback(
     (isStreamingAtEnqueue: boolean) => {
-      form.reset();
-      clearSelectedDocuments();
-      clearUploadedFiles();
-      textAreaFocus();
+      form.reset()
+      clearSelectedDocuments()
+      clearUploadedFiles()
+      textAreaFocus()
       notificationApi.info({
-        message: t("playground:composer.queue.requestQueued", "Request queued"),
+        message: t(
+          "playground:composer.queue.requestQueued",
+          "Request queued"
+        ),
         description: isStreamingAtEnqueue
           ? t(
               "playground:composer.queue.requestQueuedWhileBusy",
-              "We'll run it after the current response finishes.",
+              "We'll run it after the current response finishes."
             )
           : t(
               "playground:composer.queue.requestQueuedWhileOffline",
-              "We'll send it when your tldw server reconnects.",
-            ),
-      });
+              "We'll send it when your tldw server reconnects."
+            )
+      })
     },
     [
       clearSelectedDocuments,
@@ -444,17 +438,17 @@ export function usePlaygroundQueueManagement(
       form,
       notificationApi,
       t,
-      textAreaFocus,
-    ],
-  );
+      textAreaFocus
+    ]
+  )
 
   const cancelCurrentAndRunDisabledReasonText =
     isSending && serverChatId
       ? t(
           "playground:composer.queue.cancelAndRunDisabled",
-          "Cancel current & run now is not available for server-backed turns yet.",
+          "Cancel current & run now is not available for server-backed turns yet."
         )
-      : null;
+      : null
 
   const queue = useComposerQueue({
     isConnectionReady,
@@ -469,20 +463,20 @@ export function usePlaygroundQueueManagement(
     isQueuedDispatchBlocked: isQueuedDispatchBlockedByComposerState,
     onEnqueueBlocked: handleEnqueueBlocked,
     onEnqueueSuccess: handleEnqueueSuccess,
-    cancelCurrentAndRunDisabledReasonText,
-  });
+    cancelCurrentAndRunDisabledReasonText
+  })
 
   const queueSubmission = React.useCallback(
     ({
       promptText,
       image,
-      intent,
+      intent
     }: {
-      promptText: string;
-      image: string;
-      intent: SubmissionIntent;
+      promptText: string
+      image: string
+      intent: SubmissionIntent
     }) => {
-      const documents = buildQueuedDocuments();
+      const documents = buildQueuedDocuments()
       return queue.enqueue({
         promptText,
         image: intent.isImageCommand ? "" : image,
@@ -492,34 +486,34 @@ export function usePlaygroundQueueManagement(
           imageBackendOverride: intent.isImageCommand
             ? intent.imageBackendOverride
             : undefined,
-          isImageCommand: intent.isImageCommand,
+          isImageCommand: intent.isImageCommand
         },
         blockedReason: isQueuedDispatchBlockedByComposerState
           ? "draft-attachments-conflict"
-          : null,
-      });
+          : null
+      })
     },
-    [buildQueuedDocuments, isQueuedDispatchBlockedByComposerState, queue],
-  );
+    [buildQueuedDocuments, isQueuedDispatchBlockedByComposerState, queue]
+  )
 
   const validateSelectedChatModelsAvailability = React.useCallback(
     (modelsToCheck: string[]) => {
       const unavailableModel = findUnavailableChatModel(
         modelsToCheck,
-        availableChatModelIds,
-      );
-      if (!unavailableModel) return true;
+        availableChatModelIds
+      )
+      if (!unavailableModel) return true
       form.setFieldError(
         "message",
         t(
           "playground:composer.validationModelUnavailableInline",
-          "Selected model is not available on this server. Refresh models or choose a different model.",
-        ),
-      );
-      return false;
+          "Selected model is not available on this server. Refresh models or choose a different model."
+        )
+      )
+      return false
     },
-    [availableChatModelIds, form, t],
-  );
+    [availableChatModelIds, form, t]
+  )
 
   return {
     availableChatModelIds,
@@ -532,10 +526,10 @@ export function usePlaygroundQueueManagement(
     validateSelectedChatModelsAvailability,
     validateQueuedRequest,
     buildQueuedDocuments,
-    buildQueuedRequestSnapshot,
-  };
+    buildQueuedRequestSnapshot
+  }
 }
 
 export type UsePlaygroundQueueManagementReturn = ReturnType<
   typeof usePlaygroundQueueManagement
->;
+>

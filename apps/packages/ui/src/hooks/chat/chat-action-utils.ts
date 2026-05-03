@@ -1,5 +1,7 @@
 import { isAbortLikeError } from "@/hooks/chat/abort-turn-cleanup";
-import { isImageGenerationMessageType } from "@/utils/image-generation-chat";
+import {
+  isImageGenerationMessageType,
+} from "@/utils/image-generation-chat";
 import type { ImageGenerationEventSyncPolicy } from "@/utils/image-generation-chat";
 import type { Message } from "@/store/option";
 import type { ToolChoice } from "@/store/option";
@@ -80,50 +82,6 @@ export const chatSubmitSkipped = (reason: string): ChatSubmitResult => ({
 export const isChatSubmitSuccess = (result: ChatSubmitResult) =>
   result.status === "submitted";
 
-export const normalizeChatSubmitResult = (
-  result: ChatSubmitResult | void | undefined,
-): ChatSubmitResult => result ?? chatSubmitSubmitted();
-
-export const getChatSubmitIssueMessage = (result: ChatSubmitResult): string => {
-  if (result.status === "failed") return result.errorMessage;
-  if (result.status === "skipped") return result.reason;
-  return "";
-};
-
-export const throwIfChatSubmitUnsuccessful = (
-  result: ChatSubmitResult | void | undefined,
-) => {
-  const normalized = normalizeChatSubmitResult(result);
-  if (isChatSubmitSuccess(normalized)) return;
-  throw new Error(getChatSubmitIssueMessage(normalized));
-};
-
-export const aggregateChatSubmitResults = (
-  results: ChatSubmitResult[],
-): ChatSubmitResult => {
-  if (results.some(isChatSubmitSuccess)) {
-    return chatSubmitSubmitted();
-  }
-
-  const failedResult = results.find(
-    (result): result is Extract<ChatSubmitResult, { status: "failed" }> =>
-      result.status === "failed",
-  );
-  if (failedResult) {
-    return failedResult;
-  }
-
-  const skippedResult = results.find(
-    (result): result is Extract<ChatSubmitResult, { status: "skipped" }> =>
-      result.status === "skipped",
-  );
-  if (skippedResult) {
-    return skippedResult;
-  }
-
-  return chatSubmitSkipped("No chat submissions completed");
-};
-
 // ---------------------------------------------------------------------------
 // Pure utility functions
 // ---------------------------------------------------------------------------
@@ -164,9 +122,7 @@ export const shouldUseRagForTurn = ({
   ragMediaIds: number[] | null;
 }) =>
   Boolean(selectedKnowledge) ||
-  (fileRetrievalEnabled &&
-    Array.isArray(ragMediaIds) &&
-    ragMediaIds.length > 0);
+  (fileRetrievalEnabled && Array.isArray(ragMediaIds) && ragMediaIds.length > 0);
 
 export const attemptCharacterStreamRecoveryPersist = async ({
   chatId,
@@ -218,10 +174,14 @@ export const shouldIncludeMessageForModel = (
   return messageModel === modelId;
 };
 
-export const getCompareUserMessageId = (items: Message[], clusterId: string) =>
+export const getCompareUserMessageId = (
+  items: Message[],
+  clusterId: string,
+) =>
   items.find(
     (message) =>
-      message.messageType === "compare:user" && message.clusterId === clusterId,
+      message.messageType === "compare:user" &&
+      message.clusterId === clusterId,
   )?.id || null;
 
 export const getLastThreadMessageId = (
@@ -245,7 +205,8 @@ export const getCompareBranchMessageIds = (
 ) => {
   const userIndex = items.findIndex(
     (message) =>
-      message.messageType === "compare:user" && message.clusterId === clusterId,
+      message.messageType === "compare:user" &&
+      message.clusterId === clusterId,
   );
   if (userIndex === -1) {
     return [];
