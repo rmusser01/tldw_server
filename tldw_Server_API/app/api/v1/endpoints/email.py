@@ -11,6 +11,7 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     get_db_transaction,
 )
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.DB_Management.media_db.errors import (
@@ -222,14 +223,18 @@ async def search_email_messages(
             offset=offset,
         )
         total_pages = ceil(total / limit) if limit > 0 and total > 0 else 0
+        pagination = build_offset_pagination_meta(
+            limit=limit,
+            offset=offset,
+            total=total,
+            count=len(rows),
+        ).model_dump(mode="json")
+        pagination["total_pages"] = int(total_pages)
         return {
             "items": rows,
-            "pagination": {
-                "offset": int(offset),
-                "limit": int(limit),
-                "total": int(total),
-                "total_pages": int(total_pages),
-            },
+            "pagination": pagination,
+            "has_more": pagination["has_more"],
+            "next_offset": pagination["next_offset"],
         }
     except (InputError, DatabaseError) as exc:
         if isinstance(exc, DatabaseError):
