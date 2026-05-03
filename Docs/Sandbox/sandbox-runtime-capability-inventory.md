@@ -78,6 +78,31 @@ centralized in `runtime_capabilities.py`.
 | `image_store_unavailable` | Image-store configuration or probing failed. |
 | `unknown` | A raw reason has no stable normalized mapping yet. |
 
+## Normalized Run Status Reason Codes
+
+Sandbox run status responses preserve raw `phase`, `message`, and `exit_code`
+while adding a derived `status_reason_code` for client grouping. The code is
+computed from existing status data and aggregate limit counters; it is not a
+separate persisted state machine.
+
+| Status reason code | Meaning |
+| --- | --- |
+| `queued` | The run is queued and has not started. |
+| `starting` | The run has been admitted and is starting. |
+| `running` | The runtime is executing the run. |
+| `completed` | The run completed without a non-zero exit or known limit signal. |
+| `limits_applied` | The run completed but output or artifact limits were applied. |
+| `nonzero_exit` | The runtime process completed with a non-zero exit code. |
+| `policy_failed` | Runtime or network/trust policy admission failed. |
+| `runtime_unavailable` | A runtime prerequisite was unavailable or missing. |
+| `startup_timeout` | Provisioning/startup timed out before execution completed. |
+| `execution_timeout` | Command execution exceeded the configured timeout. |
+| `canceled_by_user` | A cancellation request moved the run to killed state. |
+| `killed` | The run was killed without a more specific cancellation reason. |
+| `queue_ttl_expired` | The run expired while queued. |
+| `runtime_error` | The runtime failed without a more specific normalized reason. |
+| `unknown` | Existing status data does not map to a known reason code. |
+
 ## Trust-Level Support
 
 | Runtime | `trusted` | `standard` | `untrusted` | Notes |
@@ -142,7 +167,7 @@ an equally clear ownership model.
 | --- | --- | --- |
 | Host-local runtimes need clearer docs/API warnings that they are not VM-grade. | `seatbelt`, `worktree` | Phase 2 |
 | Allowlist support is inconsistent and often scaffold-only. | all except host-local unsupported paths | Phase 2 |
-| Common run status/error taxonomy is not normalized across runtimes. | all | Phase 3 |
+| Detailed runner-internal error strings still vary by runtime behind `runtime_error`. | all | Phase 3 |
 | Session semantics are not normalized across warm VM, container, and host-local reuse. | all | Phase 4 |
 | Recovery/repair ownership exists only for `vz_linux`. | all except `vz_linux` | Phase 4 |
 | CI has no single cross-runtime capability gate. | all | Phase 5 |

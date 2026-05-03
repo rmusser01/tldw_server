@@ -178,6 +178,10 @@ or maturity guarantees from availability alone.
 Runtime entries also preserve raw preflight `reasons` for operator diagnostics
 and expose additive `normalized_reasons` for stable client grouping across
 runtime-specific failures.
+Run status responses preserve raw `phase`, `message`, and `exit_code` while
+adding additive `status_reason_code` for stable client grouping of queued,
+completed, timeout, cancellation, policy, runtime-unavailable, nonzero-exit, and
+limit-applied outcomes.
 `/api/v1/sandbox/admin/macos-diagnostics` is an admin-only diagnostics surface for
 operator troubleshooting and exposes helper/template readiness details that are not
 included in the public discovery payload, plus reconciliation data for persisted

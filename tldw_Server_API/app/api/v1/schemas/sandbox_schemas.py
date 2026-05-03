@@ -15,6 +15,7 @@ from tldw_Server_API.app.core.Sandbox.runtime_capabilities import (
     RuntimeImplementationState,
     RuntimeReasonCode,
 )
+from tldw_Server_API.app.core.Sandbox.run_status_taxonomy import RunStatusReasonCode
 
 RuntimeType = Literal[
     "docker",
@@ -200,6 +201,13 @@ class SandboxRunStatus(BaseModel):
         "killed",
         "timed_out",
     ]
+    status_reason_code: RunStatusReasonCode | None = Field(
+        default=None,
+        description=(
+            "Stable client-facing reason code derived from phase, message, exit_code, "
+            "and aggregate limit counters. Existing phase/message fields remain raw."
+        ),
+    )
     exit_code: int | None = None
     started_at: datetime | None = None
     finished_at: datetime | None = None
@@ -249,6 +257,10 @@ class SandboxAdminRunSummary(BaseModel):
         "killed",
         "timed_out",
     ]
+    status_reason_code: RunStatusReasonCode | None = Field(
+        default=None,
+        description="Stable client-facing reason code derived from the run status summary",
+    )
     exit_code: int | None = None
     started_at: datetime | None = None
     finished_at: datetime | None = None

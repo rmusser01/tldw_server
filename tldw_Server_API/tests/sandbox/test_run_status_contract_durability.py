@@ -44,6 +44,8 @@ def test_queued_post_run_status_has_no_started_or_finished_markers(monkeypatch) 
             pytest.fail(f"Queued run should not include finished_at marker, got {data['finished_at']!r}")
         if data["exit_code"] is not None:
             pytest.fail(f"Queued run should not include exit_code, got {data['exit_code']!r}")
+        if data.get("status_reason_code") != "queued":
+            pytest.fail(f"Queued run should expose status_reason_code='queued', got {data.get('status_reason_code')!r}")
 
 
 def test_post_run_response_fields_are_persisted_consistently_for_get(monkeypatch) -> None:
@@ -74,6 +76,7 @@ def test_post_run_response_fields_are_persisted_consistently_for_get(monkeypatch
             "spec_version",
             "runtime",
             "phase",
+            "status_reason_code",
             "exit_code",
             "started_at",
             "finished_at",

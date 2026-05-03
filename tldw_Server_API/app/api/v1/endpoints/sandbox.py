@@ -77,6 +77,7 @@ from tldw_Server_API.app.core.Metrics import increment_counter, observe_histogra
 from tldw_Server_API.app.core.Sandbox.models import RunSpec, SessionSpec
 from tldw_Server_API.app.core.Sandbox.models import RuntimeType as CoreRuntimeType
 from tldw_Server_API.app.core.Sandbox.models import TrustLevel as CoreTrustLevel
+from tldw_Server_API.app.core.Sandbox.run_status_taxonomy import normalize_run_status_reason
 from tldw_Server_API.app.core.Sandbox.orchestrator import (
     IdempotencyConflict,
     QueueFull,
@@ -164,6 +165,21 @@ class SandboxArtifactGuardRoute(APIRoute):
 router = APIRouter(prefix="/sandbox", tags=["sandbox"], route_class=SandboxArtifactGuardRoute)
 
 _service = SandboxService(enable_background_tasks=False)
+
+
+def _status_reason_code(
+    *,
+    phase,
+    message: str | None,
+    exit_code: int | str | None,
+    resource_usage,
+) -> str:
+    return normalize_run_status_reason(
+        phase=phase,
+        message=message,
+        exit_code=exit_code,
+        resource_usage=resource_usage if isinstance(resource_usage, dict) else None,
+    )
 
 
 @router.on_event("startup")
@@ -1576,6 +1592,12 @@ async def start_run(
         image_digest=status.image_digest,
         policy_hash=status.policy_hash,
         phase=status.phase.value,
+        status_reason_code=_status_reason_code(
+            phase=status.phase,
+            message=status.message,
+            exit_code=status.exit_code,
+            resource_usage=status.resource_usage,
+        ),
         exit_code=status.exit_code,
         started_at=status.started_at,
         finished_at=status.finished_at,
@@ -1609,6 +1631,12 @@ async def get_run_status(
         image_digest=st.image_digest,
         policy_hash=st.policy_hash,
         phase=st.phase.value,
+        status_reason_code=_status_reason_code(
+            phase=st.phase,
+            message=st.message,
+            exit_code=st.exit_code,
+            resource_usage=st.resource_usage,
+        ),
         exit_code=st.exit_code,
         started_at=st.started_at,
         finished_at=st.finished_at,
@@ -2349,6 +2377,12 @@ async def admin_list_runs(
                 image_digest=r.get("image_digest"),
                 policy_hash=r.get("policy_hash"),
                 phase=r.get("phase"),
+                status_reason_code=_status_reason_code(
+                    phase=r.get("phase"),
+                    message=r.get("message"),
+                    exit_code=r.get("exit_code"),
+                    resource_usage=r.get("resource_usage"),
+                ),
                 exit_code=r.get("exit_code"),
                 started_at=(r.get("started_at") if isinstance(r.get("started_at"), str) else r.get("started_at")),
                 finished_at=(r.get("finished_at") if isinstance(r.get("finished_at"), str) else r.get("finished_at")),

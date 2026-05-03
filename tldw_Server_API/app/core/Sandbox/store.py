@@ -844,6 +844,7 @@ class InMemoryStore(SandboxStore):
                     "message": st.message,
                     "image_digest": st.image_digest,
                     "policy_hash": st.policy_hash,
+                    "resource_usage": st.resource_usage,
                 })
         def _key(r: dict):
             return r.get("started_at") or ""
@@ -2020,7 +2021,7 @@ class SQLiteStore(SandboxStore):
             where.append("started_at <= ?")
             params.append(started_at_to)
         sql = (
-            "SELECT id,user_id,spec_version,runtime,runtime_version,base_image,session_id,persona_id,workspace_id,workspace_group_id,scope_snapshot_id,phase,exit_code,started_at,finished_at,message,image_digest,policy_hash "  # nosec B608
+            "SELECT id,user_id,spec_version,runtime,runtime_version,base_image,session_id,persona_id,workspace_id,workspace_group_id,scope_snapshot_id,phase,exit_code,started_at,finished_at,message,image_digest,policy_hash,resource_usage "  # nosec B608
             f"FROM sandbox_runs WHERE {' AND '.join(where)} ORDER BY started_at {order} LIMIT ? OFFSET ?"
         )
         params.extend([int(limit), int(offset)])
@@ -2029,6 +2030,13 @@ class SQLiteStore(SandboxStore):
             items: list[dict] = []
             for row in cur.fetchall():
                 row_dict = dict(row)
+                resource_usage = None
+                if row_dict.get("resource_usage"):
+                    try:
+                        loaded = json.loads(row_dict.get("resource_usage"))
+                        resource_usage = loaded if isinstance(loaded, dict) else None
+                    except _SANDBOX_STORE_NONCRITICAL_EXCEPTIONS:
+                        resource_usage = None
                 items.append({
                     "id": row_dict.get("id"),
                     "user_id": row_dict.get("user_id"),
@@ -2048,6 +2056,7 @@ class SQLiteStore(SandboxStore):
                     "message": row_dict.get("message"),
                     "image_digest": row_dict.get("image_digest"),
                     "policy_hash": row_dict.get("policy_hash"),
+                    "resource_usage": resource_usage,
                 })
             return items
 
@@ -3300,7 +3309,7 @@ class PostgresStore(SandboxStore):
             where.append("started_at <= %s")
             params.append(started_at_to)
         sql = (
-            "SELECT id,user_id,spec_version,runtime,runtime_version,base_image,session_id,persona_id,workspace_id,workspace_group_id,scope_snapshot_id,phase,exit_code,started_at,finished_at,message,image_digest,policy_hash "  # nosec B608
+            "SELECT id,user_id,spec_version,runtime,runtime_version,base_image,session_id,persona_id,workspace_id,workspace_group_id,scope_snapshot_id,phase,exit_code,started_at,finished_at,message,image_digest,policy_hash,resource_usage "  # nosec B608
             f"FROM sandbox_runs WHERE {' AND '.join(where)} ORDER BY started_at {order} LIMIT %s OFFSET %s"
         )
         params.extend([int(limit), int(offset)])
@@ -3308,6 +3317,15 @@ class PostgresStore(SandboxStore):
             cur.execute(sql, tuple(params))
             items: list[dict] = []
             for row in cur.fetchall() or []:
+                resource_usage = row.get("resource_usage")
+                if isinstance(resource_usage, str):
+                    try:
+                        loaded = json.loads(resource_usage)
+                        resource_usage = loaded if isinstance(loaded, dict) else None
+                    except _SANDBOX_STORE_NONCRITICAL_EXCEPTIONS:
+                        resource_usage = None
+                elif not isinstance(resource_usage, dict):
+                    resource_usage = None
                 items.append({
                     "id": row.get("id"),
                     "user_id": row.get("user_id"),
@@ -3327,6 +3345,7 @@ class PostgresStore(SandboxStore):
                     "message": row.get("message"),
                     "image_digest": row.get("image_digest"),
                     "policy_hash": row.get("policy_hash"),
+                    "resource_usage": resource_usage,
                 })
             return items
 
