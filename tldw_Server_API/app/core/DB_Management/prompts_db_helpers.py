@@ -37,7 +37,7 @@ def deserialize_prompt_record(prompt_data: Optional[dict[str, Any]]) -> Optional
         try:
             record["prompt_definition"] = json.loads(prompt_definition_payload)
         except json.JSONDecodeError:
-            record["prompt_definition"] = None
+            record["prompt_definition"] = prompt_definition_payload
     else:
         record["prompt_definition"] = None
     return record
