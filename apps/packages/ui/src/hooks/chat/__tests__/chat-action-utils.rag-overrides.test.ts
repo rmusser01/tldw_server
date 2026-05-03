@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 
 import {
+  resolveTurnFileRetrievalEnabled,
   resolveTurnRagMediaIds,
   shouldUseRagForTurn
 } from "../chat-action-utils"
@@ -34,6 +35,22 @@ describe("turn-level RAG media overrides", () => {
         selectedKnowledge: null,
         fileRetrievalEnabled: true,
         ragMediaIds: resolved
+      })
+    ).toBe(true)
+  })
+
+  it("uses an explicit file retrieval override for the turn", () => {
+    const fileRetrievalEnabled = resolveTurnFileRetrievalEnabled({
+      requestOverrides: { fileRetrievalEnabled: true },
+      fileRetrievalEnabled: false
+    })
+
+    expect(fileRetrievalEnabled).toBe(true)
+    expect(
+      shouldUseRagForTurn({
+        selectedKnowledge: null,
+        fileRetrievalEnabled,
+        ragMediaIds: [7, 9]
       })
     ).toBe(true)
   })

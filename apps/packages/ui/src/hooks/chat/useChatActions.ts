@@ -97,6 +97,7 @@ import {
   chatSubmitFailed,
   chatSubmitSkipped,
   normalizeChatSubmitResult,
+  resolveTurnFileRetrievalEnabled,
   resolveTurnRagMediaIds,
   shouldUseRagForTurn,
   type ChatSubmitResult
@@ -149,6 +150,7 @@ type ChatModeOverrides = {
   imageEventSyncPolicy?: ImageGenerationEventSyncPolicy
   researchContext?: ChatResearchContext
   ragMediaIds?: number[] | null
+  fileRetrievalEnabled?: boolean
   selectedKnowledge?: Knowledge | null
 } & Record<string, unknown>
 
@@ -2188,6 +2190,10 @@ export const useChatActions = ({
       requestOverrides,
       ragMediaIds
     })
+    const turnFileRetrievalEnabled = resolveTurnFileRetrievalEnabled({
+      requestOverrides,
+      fileRetrievalEnabled
+    })
     const turnSelectedKnowledge = Object.prototype.hasOwnProperty.call(
       requestOverrides ?? {},
       "selectedKnowledge"
@@ -2389,7 +2395,7 @@ export const useChatActions = ({
 
       const shouldUseRag = shouldUseRagForTurn({
         selectedKnowledge: turnSelectedKnowledge,
-        fileRetrievalEnabled,
+        fileRetrievalEnabled: turnFileRetrievalEnabled,
         ragMediaIds: turnRagMediaIds
       })
       if (shouldUseRag) {

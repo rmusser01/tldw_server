@@ -93,6 +93,7 @@ describe("chat submit result contract", () => {
 
     expect(source).toMatch(/Promise<ChatSubmitResult>/)
     expect(source).toContain("resolveTurnRagMediaIds")
+    expect(source).toContain("resolveTurnFileRetrievalEnabled")
     expect(source).toContain("shouldUseRagForTurn")
     expect(source).toContain("const characterResult = await characterChatMode")
     expect(source).toContain("aggregateChatSubmitResults(compareResults)")

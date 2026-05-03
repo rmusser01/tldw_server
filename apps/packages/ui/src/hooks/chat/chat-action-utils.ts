@@ -28,6 +28,7 @@ export type ChatModeOverrides = {
   webSearch?: boolean;
   imageEventSyncPolicy?: ImageGenerationEventSyncPolicy;
   ragMediaIds?: number[] | null;
+  fileRetrievalEnabled?: boolean;
   selectedKnowledge?: unknown;
 } & Record<string, unknown>;
 
@@ -155,6 +156,17 @@ export const resolveTurnRagMediaIds = ({
 
   return normalizeRagMediaIds(ragMediaIds);
 };
+
+export const resolveTurnFileRetrievalEnabled = ({
+  requestOverrides,
+  fileRetrievalEnabled,
+}: {
+  requestOverrides?: Pick<ChatModeOverrides, "fileRetrievalEnabled"> | null;
+  fileRetrievalEnabled: boolean;
+}): boolean =>
+  typeof requestOverrides?.fileRetrievalEnabled === "boolean"
+    ? requestOverrides.fileRetrievalEnabled
+    : fileRetrievalEnabled;
 
 export const shouldUseRagForTurn = ({
   selectedKnowledge,
