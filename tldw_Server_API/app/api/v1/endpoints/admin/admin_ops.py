@@ -1012,14 +1012,25 @@ async def delete_webhook(
 async def list_webhook_deliveries(
     webhook_id: str,
     limit: int = Query(default=50, ge=1, le=1000),
+    offset: int = Query(default=0, ge=0),
     principal: AuthPrincipal = Depends(get_auth_principal),
 ) -> WebhookDeliveryListResponse:
     """List delivery history for a webhook, newest first."""
     _require_platform_admin(principal)
-    items = svc_list_webhook_deliveries(webhook_id=webhook_id, limit=limit)
+    all_items = svc_list_webhook_deliveries(webhook_id=webhook_id, limit=1000)
+    items = all_items[offset:offset + limit]
+    total = len(all_items)
     return WebhookDeliveryListResponse(
         items=[WebhookDeliveryItem(**item) for item in items],
-        total=len(items),
+        total=total,
+        limit=limit,
+        offset=offset,
+        pagination=build_offset_pagination_meta(
+            total=total,
+            limit=limit,
+            offset=offset,
+            count=len(items),
+        ),
     )
 
 
