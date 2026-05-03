@@ -890,7 +890,8 @@ def test_deck_endpoints_reject_unknown_workspace_ids(
     assert "missing-ws" in update_response.json()["detail"]
 
 
-def test_list_study_pack_jobs_returns_current_user_jobs(client_with_flashcards_db: TestClient):
+def test_list_study_pack_jobs_returns_current_user_jobs(client_with_flashcards_db: TestClient) -> None:
+    """Study-pack job listing preserves total while exposing canonical offset metadata."""
     class StubJobManager:
         def __init__(self):
             self.calls = []
@@ -899,6 +900,14 @@ def test_list_study_pack_jobs_returns_current_user_jobs(client_with_flashcards_d
         def list_jobs(self, **kwargs):
             self.calls.append(kwargs)
             return [
+                {
+                    "id": 43,
+                    "status": "queued",
+                    "domain": STUDY_PACKS_DOMAIN,
+                    "queue": study_pack_jobs_queue(),
+                    "job_type": STUDY_PACKS_JOB_TYPE,
+                    "owner_user_id": "1",
+                },
                 {
                     "id": 42,
                     "status": "queued",
@@ -918,7 +927,7 @@ def test_list_study_pack_jobs_returns_current_user_jobs(client_with_flashcards_d
 
     response = client_with_flashcards_db.get(
         "/api/v1/flashcards/study-packs/jobs",
-        params={"status": "queued", "limit": 25},
+        params={"status": "queued", "limit": 1, "offset": 1},
         headers=AUTH_HEADERS,
     )
 
@@ -934,6 +943,14 @@ def test_list_study_pack_jobs_returns_current_user_jobs(client_with_flashcards_d
             }
         ],
         "total": 3,
+        "pagination": {
+            "mode": "offset",
+            "limit": 1,
+            "offset": 1,
+            "total": 3,
+            "has_more": True,
+            "next_offset": 2,
+        },
     }
     assert stub.calls == [
         {
@@ -942,7 +959,7 @@ def test_list_study_pack_jobs_returns_current_user_jobs(client_with_flashcards_d
             "status": "queued",
             "owner_user_id": "1",
             "job_type": STUDY_PACKS_JOB_TYPE,
-            "limit": 25,
+            "limit": 2,
             "sort_by": "created_at",
             "sort_order": "desc",
         }
