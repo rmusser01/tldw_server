@@ -21,6 +21,9 @@ export const ContextStagingCard = ({
   onInsert,
   onSend
 }: ContextStagingCardProps) => {
+  const hasSources = sources.length > 0
+  const sendDisabled = isSending || !hasSources
+
   return (
     <section
       aria-label="Staged context"
@@ -32,33 +35,45 @@ export const ContextStagingCard = ({
           <p className="text-xs text-text-muted">
             {isSending
               ? "Sending with staged context"
-              : `${sources.length} source${sources.length === 1 ? "" : "s"} staged`}
+              : hasSources
+                ? `${sources.length} source${sources.length === 1 ? "" : "s"} staged`
+                : "No context staged"}
           </p>
         </div>
 
-        <ul className="space-y-2">
-          {sources.map((source) => (
-            <li
-              key={source.sourceId}
-              className="flex flex-col gap-1 rounded-md border border-border bg-surface2/50 px-2 py-1.5"
-            >
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="font-medium text-text">{source.title}</span>
-                <span className="rounded-full border border-border bg-surface px-2 py-0.5 text-[11px] font-medium text-text-muted">
-                  {source.availability}
-                </span>
-              </div>
-              <div className="flex flex-wrap gap-x-2 gap-y-1 text-xs text-text-muted">
-                <span>{source.scopeLabel}</span>
-                <span aria-hidden="true">/</span>
-                <span>{source.type}</span>
-              </div>
-              {source.statusMessage ? (
-                <p className="text-xs text-text-muted">{source.statusMessage}</p>
-              ) : null}
-            </li>
-          ))}
-        </ul>
+        {hasSources ? (
+          <ul className="space-y-2">
+            {sources.map((source) => (
+              <li
+                key={source.sourceId}
+                className="flex min-w-0 flex-col gap-1 rounded-md border border-border bg-surface2/50 px-2 py-1.5"
+              >
+                <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
+                  <span className="min-w-0 break-words font-medium text-text">
+                    {source.title}
+                  </span>
+                  <span className="rounded-full border border-border bg-surface px-2 py-0.5 text-[11px] font-medium text-text-muted">
+                    {source.availability}
+                  </span>
+                </div>
+                <div className="flex min-w-0 flex-wrap gap-x-2 gap-y-1 text-xs text-text-muted">
+                  <span className="min-w-0 break-words">{source.scopeLabel}</span>
+                  <span aria-hidden="true">/</span>
+                  <span>{source.type}</span>
+                </div>
+                {source.statusMessage ? (
+                  <p className="min-w-0 break-words text-xs text-text-muted">
+                    {source.statusMessage}
+                  </p>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="rounded-md border border-dashed border-border bg-surface2/40 px-2 py-1.5 text-xs text-text-muted">
+            Stage sources from the workspace before sending with staged context.
+          </p>
+        )}
 
         <div className="flex flex-wrap justify-end gap-2">
           <button
@@ -81,7 +96,7 @@ export const ContextStagingCard = ({
             type="button"
             className={primaryButtonClass}
             onClick={onSend}
-            disabled={isSending}
+            disabled={sendDisabled}
             aria-label="Send with staged context"
           >
             Send with staged context
