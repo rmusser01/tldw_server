@@ -55,7 +55,11 @@ from .runners.seatbelt_runner import SeatbeltRunner
 from .runners.vz_linux_runner import VZLinuxRunner
 from .runners.vz_macos_runner import VZMacOSRunner
 from .runners.worktree_runner import WorktreeRunner, worktree_available
-from .runtime_capabilities import RuntimePreflightResult, collect_runtime_preflights
+from .runtime_capabilities import (
+    RuntimePreflightResult,
+    collect_runtime_preflights,
+    runtime_implementation_state,
+)
 from .snapshots import SnapshotManager
 from .store import get_store_mode
 from .streams import get_hub
@@ -878,6 +882,7 @@ class SandboxService:
         return [
             {
                 "name": "docker",
+                "implementation_state": runtime_implementation_state(RuntimeType.docker),
                 "available": bool(docker_preflight.available) if docker_preflight is not None else bool(docker_available()),
                 "default_images": images,
                 "max_cpu": max_cpu,
@@ -910,6 +915,7 @@ class SandboxService:
             },
             {
                 "name": "firecracker",
+                "implementation_state": runtime_implementation_state(RuntimeType.firecracker),
                 "available": bool(firecracker_preflight.available) if firecracker_preflight is not None else bool(firecracker_available()),
                 "default_images": images,  # firecracker images will differ; placeholder for UX
                 "max_cpu": max_cpu,
@@ -949,6 +955,7 @@ class SandboxService:
             },
             {
                 "name": "lima",
+                "implementation_state": runtime_implementation_state(RuntimeType.lima),
                 "available": bool(lima_preflight.available) if lima_preflight is not None else bool(lima_available()),
                 "default_images": ["ubuntu:24.04"],  # Lima uses distro images
                 "max_cpu": max_cpu,
@@ -973,6 +980,7 @@ class SandboxService:
             },
             {
                 "name": "vz_linux",
+                "implementation_state": runtime_implementation_state(RuntimeType.vz_linux),
                 "default_images": ["ubuntu-24.04"],
                 "max_cpu": max_cpu,
                 "max_mem_mb": max_mem_mb,
@@ -993,6 +1001,7 @@ class SandboxService:
             },
             {
                 "name": "vz_macos",
+                "implementation_state": runtime_implementation_state(RuntimeType.vz_macos),
                 "default_images": ["macos-15"],
                 "max_cpu": max_cpu,
                 "max_mem_mb": max_mem_mb,
@@ -1013,6 +1022,7 @@ class SandboxService:
             },
             {
                 "name": "seatbelt",
+                "implementation_state": runtime_implementation_state(RuntimeType.seatbelt),
                 "default_images": ["host-local"],
                 "max_cpu": max_cpu,
                 "max_mem_mb": max_mem_mb,
@@ -1033,6 +1043,7 @@ class SandboxService:
             },
             {
                 "name": "worktree",
+                "implementation_state": runtime_implementation_state(RuntimeType.worktree),
                 "default_images": ["host-local"],
                 "max_cpu": max_cpu,
                 "max_mem_mb": max_mem_mb,

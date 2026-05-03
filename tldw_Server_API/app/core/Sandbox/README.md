@@ -171,6 +171,10 @@ Current limitations:
   - `/api/v1/sandbox/runs`
 
 `/api/v1/sandbox/runtimes` is the summarized discovery surface used by clients and ACP.
+Each runtime entry includes `available` for current host truth and
+`implementation_state` for roadmap maturity (`supported`, `unsupported`,
+`scaffold`, `host_gated`, or `not_applicable`), so clients do not infer security
+or maturity guarantees from availability alone.
 `/api/v1/sandbox/admin/macos-diagnostics` is an admin-only diagnostics surface for
 operator troubleshooting and exposes helper/template readiness details that are not
 included in the public discovery payload, plus reconciliation data for persisted

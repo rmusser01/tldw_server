@@ -11,6 +11,7 @@ except ImportError:  # pragma: no cover - pydantic v1 fallback
     from pydantic import root_validator as model_validator  # type: ignore
 
 from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
+from tldw_Server_API.app.core.Sandbox.runtime_capabilities import RuntimeImplementationState
 
 RuntimeType = Literal[
     "docker",
@@ -33,6 +34,13 @@ def _default_offset_pagination_aliases(response):
 class SandboxRuntimeInfo(BaseModel):
     name: RuntimeType
     available: bool = Field(description="Whether this runtime is detected/usable on host")
+    implementation_state: RuntimeImplementationState | None = Field(
+        default=None,
+        description=(
+            "Roadmap maturity label for this runtime independent of current host availability: "
+            "supported, unsupported, scaffold, host_gated, or not_applicable"
+        ),
+    )
     reasons: list[str] | None = Field(default=None, description="Preflight reasons when the runtime is unavailable or constrained")
     supported_trust_levels: list[TrustLevelType] | None = Field(default=None, description="Trust levels supported by this runtime under current host policy")
     default_images: list[str] = Field(default_factory=list)
