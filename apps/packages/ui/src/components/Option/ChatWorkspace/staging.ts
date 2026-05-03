@@ -33,18 +33,22 @@ export const stageWorkspaceSources = (
   return Array.from(byId.values())
 }
 
-const formatSourceTitleForInsert = (title: string): string => {
-  const firstLine = title.split(/\r?\n/)[0] ?? ""
+const formatRowValueForInsert = (
+  value: string,
+  fallback: string,
+  maxLength = 96
+): string => {
+  const firstLine = value.split(/\r?\n/)[0] ?? ""
   const collapsed = firstLine
     .replace(/[`*_#[\]()>|{}]/g, "")
     .replace(/\s+/g, " ")
     .trim()
 
-  if (collapsed.length <= 96) {
-    return collapsed || "Untitled source"
+  if (collapsed.length <= maxLength) {
+    return collapsed || fallback
   }
 
-  return `${collapsed.slice(0, 93).trimEnd()}...`
+  return `${collapsed.slice(0, maxLength - 3).trimEnd()}...`
 }
 
 export const formatStagedSourceInsertText = (
@@ -53,8 +57,9 @@ export const formatStagedSourceInsertText = (
   if (sources.length === 0) return ""
   const lines = sources.map((source, index) => {
     const state = source.availability === "ready" ? "" : ` (${source.availability})`
-    const title = formatSourceTitleForInsert(source.title)
-    return `${index + 1}. ${title} [${source.type}, scope: ${source.scopeLabel}]${state}`
+    const title = formatRowValueForInsert(source.title, "Untitled source")
+    const scopeLabel = formatRowValueForInsert(source.scopeLabel, "Unknown scope", 64)
+    return `${index + 1}. ${title} [${source.type}, scope: ${scopeLabel}]${state}`
   })
   return `Context sources:\n${lines.join("\n")}\n\n`
 }
