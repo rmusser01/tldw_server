@@ -2538,8 +2538,11 @@ export const PlaygroundForm = ({
 
   const { mutateAsync: sendMessage } = useMutation({
     mutationFn: onSubmit,
-    onSuccess: () => {
-      dismissChatErrorAfterSuccessfulSubmit();
+    onMutate: () => ({
+      errorKeyToDismiss: chatErrorBanner?.key ?? null,
+    }),
+    onSuccess: (_data, _variables, context) => {
+      dismissChatErrorAfterSuccessfulSubmit(context?.errorKeyToDismiss ?? null);
       void trackOnboardingChatSubmitSuccess(
         typeof window !== "undefined" ? window.location.pathname : "/chat",
       );

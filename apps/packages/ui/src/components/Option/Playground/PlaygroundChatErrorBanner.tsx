@@ -4,11 +4,14 @@ import { Link } from "react-router-dom"
 
 import {
   decodeChatErrorPayload,
+  TLDW_ERROR_BUBBLE_PREFIX,
   type ChatErrorPayload
 } from "@/utils/chat-error-message"
 
 type ChatErrorMessageCandidate = {
   id?: string | number | null
+  serverMessageId?: string | number | null
+  server_message_id?: string | number | null
   isBot?: boolean
   role?: string
   message?: unknown
@@ -18,27 +21,69 @@ export type PlaygroundChatErrorBannerEntry = ChatErrorPayload & {
   key: string
 }
 
+const isAssistantLikeMessage = (
+  entry: ChatErrorMessageCandidate | undefined
+) => {
+  const role = typeof entry?.role === "string" ? entry.role.toLowerCase() : ""
+  return (
+    entry?.isBot === true ||
+    role === "assistant" ||
+    (!role && entry?.isBot !== false)
+  )
+}
+
+const getMessageIdentifier = (
+  entry: ChatErrorMessageCandidate | undefined,
+  index: number
+) => {
+  const identifier =
+    entry?.id ?? entry?.serverMessageId ?? entry?.server_message_id ?? index
+  return String(identifier)
+}
+
+const hashString = (value: string) => {
+  let hash = 0x811c9dc5
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index)
+    hash = Math.imul(hash, 0x01000193)
+  }
+  return (hash >>> 0).toString(36)
+}
+
+export const getChatErrorBannerScanSignature = (
+  messages: readonly ChatErrorMessageCandidate[]
+) => {
+  const lastIndex = messages.length - 1
+  const lastEntry = lastIndex >= 0 ? messages[lastIndex] : undefined
+  const lastMessage =
+    typeof lastEntry?.message === "string" ? lastEntry.message : ""
+  const lastEntryIsError =
+    isAssistantLikeMessage(lastEntry) &&
+    lastMessage.startsWith(TLDW_ERROR_BUBBLE_PREFIX)
+
+  return [
+    messages.length,
+    getMessageIdentifier(lastEntry, lastIndex),
+    lastEntryIsError ? "error" : "not-error",
+    lastEntryIsError ? hashString(lastMessage) : ""
+  ].join(":")
+}
+
 export const getLatestChatErrorBannerEntry = (
   messages: readonly ChatErrorMessageCandidate[]
 ): PlaygroundChatErrorBannerEntry | null => {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const entry = messages[index]
-    const role = typeof entry?.role === "string" ? entry.role.toLowerCase() : ""
-    const assistantLike =
-      entry?.isBot === true ||
-      role === "assistant" ||
-      (!role && entry?.isBot !== false)
-    if (!assistantLike || typeof entry?.message !== "string") {
+    if (!isAssistantLikeMessage(entry) || typeof entry?.message !== "string") {
       continue
     }
     const payload = decodeChatErrorPayload(entry.message)
     if (!payload) {
       continue
     }
-    const id = entry.id != null ? String(entry.id) : String(index)
     return {
       ...payload,
-      key: `${id}:${entry.message}`
+      key: `${getMessageIdentifier(entry, index)}:${hashString(entry.message)}`
     }
   }
   return null
@@ -47,9 +92,12 @@ export const getLatestChatErrorBannerEntry = (
 export const usePlaygroundChatErrorBanner = (
   messages: readonly ChatErrorMessageCandidate[]
 ) => {
+  const scanSignature = getChatErrorBannerScanSignature(messages)
+  const messagesRef = React.useRef(messages)
+  messagesRef.current = messages
   const latestError = React.useMemo(
-    () => getLatestChatErrorBannerEntry(messages),
-    [messages]
+    () => getLatestChatErrorBannerEntry(messagesRef.current),
+    [scanSignature]
   )
   const latestErrorRef = React.useRef<PlaygroundChatErrorBannerEntry | null>(
     latestError
@@ -75,12 +123,15 @@ export const usePlaygroundChatErrorBanner = (
     }
   }, [])
 
-  const dismissAfterSuccessfulSubmit = React.useCallback(() => {
-    const resolvedKey = latestErrorRef.current?.key ?? null
-    if (resolvedKey) {
-      setDismissedErrorKey(resolvedKey)
-    }
-  }, [])
+  const dismissAfterSuccessfulSubmit = React.useCallback(
+    (key?: string | null) => {
+      const resolvedKey = key ?? latestErrorRef.current?.key ?? null
+      if (resolvedKey) {
+        setDismissedErrorKey(resolvedKey)
+      }
+    },
+    []
+  )
 
   return {
     latestError,
