@@ -211,39 +211,32 @@ def iter_core_router_specs() -> Iterable[RouterSpec]:
         logger.debug(f"Skipping sync router: {e}")
 
     # Chat endpoints
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.chat import router as chat_router
-
-        specs.append(RouterSpec(
-            router=chat_router,
+    for chat_spec in (
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.chat",
+            log_name="chat",
             prefix=f"{API_V1_PREFIX}/chat",
             route_key="chat",
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping chat router: {e}")
-
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.chat_loop import router as chat_loop_router
-
-        specs.append(RouterSpec(
-            router=chat_loop_router,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.chat_loop",
+            log_name="chat_loop",
             prefix=f"{API_V1_PREFIX}",
             route_key="chat",
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping chat_loop router: {e}")
-
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.chat import conversations_alias_router
-
-        specs.append(RouterSpec(
-            router=conversations_alias_router,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.chat",
+            log_name="conversations_alias",
             prefix=f"{API_V1_PREFIX}/chats",
             tags=("chat",),
             route_key="chat",
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping conversations_alias router: {e}")
+            attr_name="conversations_alias_router",
+        ),
+    ):
+        try:
+            append_imported_router_spec(specs, chat_spec)
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"Skipping {chat_spec.log_name} router: {e}")
 
     # Tools endpoint
     try:
