@@ -37,7 +37,10 @@ async def download_file(
     if file_record.get("is_deleted"):
         raise HTTPException(status_code=410, detail="File has been deleted")
 
-    storage_path = file_record.get("storage_path", "")
+    storage_path = file_record.get("storage_path")
+    if not isinstance(storage_path, str) or not storage_path.strip():
+        raise HTTPException(status_code=404, detail="File not found")
+
     base_dir = _resolve_storage_base_dir(user.id, file_record)
     full_path = base_dir / storage_path
 
@@ -49,7 +52,7 @@ async def download_file(
     except ValueError:
         raise HTTPException(status_code=403, detail="Invalid file path") from None
 
-    if not full_path.exists():
+    if not full_path.is_file():
         raise HTTPException(status_code=404, detail="File not found on disk")
 
     await files_repo.update_accessed_at(file_id)
