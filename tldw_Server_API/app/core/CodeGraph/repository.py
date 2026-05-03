@@ -286,6 +286,9 @@ def _delete_file_rows(conn: sqlite3.Connection, paths: list[str]) -> None:
 
 
 def _delete_dangling_edges(conn: sqlite3.Connection) -> None:
+    # Stage 1 only stores bounded foreground inventories, so this cleanup favors
+    # straightforward correctness; if graph volume grows, switch to a join/exists
+    # form or staged node-id table to avoid repeated full-node scans.
     conn.execute(  # nosec B608 - static cleanup query with no user-controlled input
         """
         DELETE FROM edges
