@@ -84,6 +84,19 @@ def test_runtime_reason_normalization_treats_none_as_empty() -> None:
     assert normalize_runtime_reasons(None) == []  # type: ignore[arg-type]
 
 
+def test_runtime_reason_normalization_groups_helper_protocol_variants() -> None:
+    """Helper protocol failures should share one stable client-facing code."""
+
+    assert normalize_runtime_reasons(  # nosec B101
+        [
+            "macos_virtualization_helper_protocol_mismatch",
+            "macos_virtualization_helper_protocol_error",
+            "macos_virtualization_helper_empty_response",
+            "macos_virtualization_helper_invalid_json",
+        ]
+    ) == ["helper_protocol_mismatch"]
+
+
 def test_feature_discovery_preserves_raw_reasons_and_adds_normalized_codes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

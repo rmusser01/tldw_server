@@ -91,6 +91,13 @@ def normalize_runtime_reason(reason: str) -> RuntimeReasonCode:
     normalized = str(reason or "").strip()
     if not normalized:
         return "unknown"
+    if normalized.startswith("macos_virtualization_helper_protocol_"):
+        return "helper_protocol_mismatch"
+    if normalized in {
+        "macos_virtualization_helper_empty_response",
+        "macos_virtualization_helper_invalid_json",
+    }:
+        return "helper_protocol_mismatch"
     if normalized.startswith("image_store_unavailable"):
         return "image_store_unavailable"
     return _RUNTIME_REASON_CODE_MAP.get(normalized, "unknown")
