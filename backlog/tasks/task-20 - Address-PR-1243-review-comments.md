@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@Codex'
 created_date: '2026-05-03 22:50'
-updated_date: '2026-05-03 22:54'
+updated_date: '2026-05-03 23:06'
 labels:
   - worker-registry
   - pr-review
@@ -33,15 +33,13 @@ priority: medium
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-Verified PR comments: startup_service_groups still allowed worker_inventory=None while dropping registry-owned worker handles; telemetry guarded-exception test lacked a hook-invocation sentinel; post-worker shutdown helper keys currently match both strict production signatures; Qodo TODO comment targets a phase2-followup plan file that is absent from current HEAD.
-
-Red/green: added test_start_service_groups_requires_worker_inventory_before_starting_registry_owned_workers and confirmed it failed before the guard, then passed after start_service_groups now fails fast when worker_inventory is None. Added telemetry sentinel assertion and a post-worker helper/signature contract test. Verification: pytest tldw_Server_API/tests/Services/test_startup_service_groups.py tldw_Server_API/tests/Services/test_shutdown_telemetry_services.py tldw_Server_API/tests/Services/test_shutdown_post_worker_services.py -q -> 16 passed, 5 warnings; pytest tldw_Server_API/tests/Services/test_startup_service_tail.py -q -> 1 passed, 5 warnings; Bandit on tldw_Server_API/app/services/startup_service_groups.py -> 0 findings; git diff --check -> clean.
+Verified PR comments: startup_service_groups still allowed worker_inventory=None while dropping registry-owned worker handles; telemetry guarded-exception test lacked a hook-invocation sentinel; post-worker shutdown helper keys currently match both strict production signatures; Qodo TODO comment targets a phase2-followup plan file that is absent from current HEAD. Red/green: added test_start_service_groups_requires_worker_inventory_before_starting_registry_owned_workers and confirmed it failed before the guard, then passed after start_service_groups now fails fast when worker_inventory is None. Added telemetry sentinel assertion and a post-worker helper/signature contract test. Verification: pytest startup_service_groups + shutdown_telemetry_services + shutdown_post_worker_services -q -> 16 passed, 5 warnings; pytest startup_service_tail -q -> 1 passed, 5 warnings; Bandit on startup_service_groups.py -> 0 findings; git diff --check -> clean. Follow-up CodeRabbit comments after push addressed: wrapped `_base_shutdown_kwargs` in Backlog final summary markdown and converted the post-worker failure stub to async. Verification: pytest test_shutdown_post_worker_services.py -q -> 10 passed, 5 warnings; git diff --check -> clean.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Addressed PR #1243 review follow-ups by enforcing lifecycle WorkerRegistry ownership in start_service_groups before registry-owned worker helpers can start, adding regression coverage for the missing worker_inventory path, proving the telemetry guarded-exception hook is invoked, and adding a contract test that _base_shutdown_kwargs matches the strict post-worker shutdown signatures. Verified the Qodo TODO comment targets a phase2-followup plan file that is not present in current HEAD, so no doc edit was needed for that stale comment.
+Addressed PR #1243 review follow-ups by enforcing lifecycle WorkerRegistry ownership in start_service_groups before registry-owned worker helpers can start, adding regression coverage for the missing worker_inventory path, proving the telemetry guarded-exception hook is invoked, and adding a contract test that `_base_shutdown_kwargs` matches the strict post-worker shutdown signatures. Verified the Qodo TODO comment targets a phase2-followup plan file that is not present in current HEAD, so no doc edit was needed for that stale comment.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

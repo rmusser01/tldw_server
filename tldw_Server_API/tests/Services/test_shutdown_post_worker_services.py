@@ -389,7 +389,7 @@ async def test_run_shutdown_post_worker_services_guard_failure_suppresses_stoppe
 ) -> None:
     from tldw_Server_API.app.services import shutdown_post_worker_services as shutdown_services
 
-    def _fail(*args, **kwargs):
+    async def _fail(*args, **kwargs):
         del args, kwargs
         raise RuntimeError("post-worker boom")
 
