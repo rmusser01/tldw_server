@@ -15,6 +15,8 @@ from tldw_Server_API.app.api.v1.endpoints._pagination_utils import (
     build_offset_pagination_meta,
 )
 from tldw_Server_API.app.api.v1.schemas.admin_schemas import (
+    EmailDeliveryItem,
+    EmailDeliveryListResponse,
     FeatureFlagItem,
     FeatureFlagsResponse,
     FeatureFlagUpsertRequest,
@@ -1017,9 +1019,11 @@ async def list_webhook_deliveries(
 ) -> WebhookDeliveryListResponse:
     """List delivery history for a webhook, newest first."""
     _require_platform_admin(principal)
-    all_items = svc_list_webhook_deliveries(webhook_id=webhook_id, limit=1000)
-    items = all_items[offset:offset + limit]
-    total = len(all_items)
+    items, total = svc_list_webhook_deliveries(
+        webhook_id=webhook_id,
+        limit=limit,
+        offset=offset,
+    )
     return WebhookDeliveryListResponse(
         items=[WebhookDeliveryItem(**item) for item in items],
         total=total,
@@ -1521,13 +1525,13 @@ async def get_dependency_uptime(
 # ──────────────────────────────────────────────────────────────────────────────
 
 
-@router.get("/email/deliveries")
+@router.get("/email/deliveries", response_model=EmailDeliveryListResponse)
 async def list_email_deliveries(
     limit: int = Query(default=50, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
     status: str | None = Query(default=None),
     principal: AuthPrincipal = Depends(get_auth_principal),
-) -> dict[str, Any]:
+) -> EmailDeliveryListResponse:
     """List email delivery log entries with optional status filter and pagination."""
     _require_platform_admin(principal)
     try:
@@ -1540,15 +1544,13 @@ async def list_email_deliveries(
         offset=offset,
         count=len(items),
     )
-    return {
-        "items": items,
-        "total": total,
-        "limit": limit,
-        "offset": offset,
-        "pagination": pagination.model_dump(mode="json"),
-        "has_more": pagination.has_more,
-        "next_offset": pagination.next_offset,
-    }
+    return EmailDeliveryListResponse(
+        items=[EmailDeliveryItem(**item) for item in items],
+        total=total,
+        limit=limit,
+        offset=offset,
+        pagination=pagination,
+    )
 
 
 # ──────────────────────────────────────────────────────────────────────────────

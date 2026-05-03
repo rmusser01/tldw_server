@@ -43,6 +43,7 @@ from tldw_Server_API.app.services.app_lifecycle import assert_may_start_work
 router = APIRouter()
 
 MAX_CACHED_JOB_MANAGER_INSTANCES = 4
+MAX_MEDIA_INGEST_JOBS_OFFSET = 10_000
 _job_manager_cache: LRUCache = LRUCache(maxsize=MAX_CACHED_JOB_MANAGER_INSTANCES)
 _job_manager_lock = threading.Lock()
 _ADMIN_CLAIM_PERMISSIONS = frozenset({"*", "system.configure"})
@@ -599,7 +600,7 @@ async def get_media_ingest_job(
 async def list_media_ingest_jobs(
     batch_id: str = Query(..., min_length=1, description="Batch identifier from submit response"),
     limit: int = Query(100, ge=1, le=500),
-    offset: int = Query(0, ge=0),
+    offset: int = Query(0, ge=0, le=MAX_MEDIA_INGEST_JOBS_OFFSET),
     current_user: User = Depends(get_request_user),
     principal: AuthPrincipal = Depends(get_auth_principal),
     _: None = Depends(check_rate_limit),

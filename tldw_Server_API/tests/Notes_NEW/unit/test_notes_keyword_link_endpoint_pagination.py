@@ -26,10 +26,6 @@ class _KeywordLinkDB:
     client_id = "test-client"
 
     def execute_query(self, sql: str, params: tuple[object, ...] = ()) -> _Cursor:
-        if "COUNT(*)" in sql and "collection_keywords" in sql:
-            return _Cursor([{"total": 3}])
-        if "COUNT(*)" in sql and "conversation_keywords" in sql:
-            return _Cursor([{"total": 3}])
         if "collection_keywords" in sql:
             return _Cursor(
                 [
@@ -45,6 +41,12 @@ class _KeywordLinkDB:
                 ]
             )
         raise AssertionError(f"Unexpected SQL: {sql}")
+
+    def count_collection_keyword_links(self) -> int:
+        return 3
+
+    def count_conversation_keyword_links(self) -> int:
+        return 3
 
 
 class _NotesForKeywordDB:

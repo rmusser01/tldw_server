@@ -1502,6 +1502,41 @@ class IncidentNotifyResponse(BaseModel):
 
 #######################################################################################################################
 #
+# Email Delivery Schemas
+
+
+class EmailDeliveryItem(BaseModel):
+    """A single email delivery log entry."""
+    id: str
+    recipient: str = ""
+    subject: str = ""
+    template: str | None = None
+    status: str = ""
+    error: str | None = None
+    sent_at: str | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class EmailDeliveryListResponse(BaseModel):
+    """Response for email delivery log listing."""
+    items: list[EmailDeliveryItem]
+    total: int
+    limit: int
+    offset: int
+    pagination: OffsetPaginationMeta
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self):
+        return _default_offset_pagination_aliases(self)
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+#######################################################################################################################
+#
 # Webhook Schemas
 
 

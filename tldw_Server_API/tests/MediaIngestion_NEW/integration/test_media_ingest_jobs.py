@@ -168,6 +168,8 @@ def test_media_ingest_jobs_list_by_batch_returns_canonical_offset_pagination(
     body = resp.json()
     batch_id = body.get("batch_id")
     assert batch_id
+    submitted_ids = {job["id"] for job in body["jobs"]}
+    assert len(submitted_ids) == 2
 
     list_resp = test_client.get(
         f"/api/v1/media/ingest/jobs?batch_id={batch_id}&limit=1&offset=0",
@@ -178,6 +180,7 @@ def test_media_ingest_jobs_list_by_batch_returns_canonical_offset_pagination(
     assert list_body["limit"] == 1
     assert list_body["offset"] == 0
     assert len(list_body["jobs"]) == 1
+    first_page_ids = {job["id"] for job in list_body["jobs"]}
     assert list_body["pagination"] == {
         "mode": "offset",
         "limit": 1,
@@ -194,6 +197,9 @@ def test_media_ingest_jobs_list_by_batch_returns_canonical_offset_pagination(
     assert second_page_resp.status_code == 200, second_page_resp.text
     second_page_body = second_page_resp.json()
     assert len(second_page_body["jobs"]) == 1
+    second_page_ids = {job["id"] for job in second_page_body["jobs"]}
+    assert first_page_ids.isdisjoint(second_page_ids)
+    assert first_page_ids | second_page_ids == submitted_ids
     assert second_page_body["pagination"] == {
         "mode": "offset",
         "limit": 1,

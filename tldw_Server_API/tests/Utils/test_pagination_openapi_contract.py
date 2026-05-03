@@ -6,6 +6,7 @@ from pathlib import Path
 MATRIX_PATH = Path("Docs/Design/Pagination_Completion_Matrix.md")
 UNRESOLVED_STATUSES = {"migration-candidate", "needs-confirmation"}
 CANONICAL_STATUS = "canonical-present-or-custom-pagination"
+HTTP_METHODS = ("GET", "POST", "PUT", "PATCH", "DELETE")
 
 
 def _clean_cell(value: str) -> str:
@@ -15,7 +16,7 @@ def _clean_cell(value: str) -> str:
 def _matrix_rows() -> list[dict[str, str]]:
     rows: list[dict[str, str]] = []
     for line in MATRIX_PATH.read_text().splitlines():
-        if not line.startswith("| `GET`"):
+        if not line.startswith(tuple(f"| `{method}`" for method in HTTP_METHODS)):
             continue
         columns = [column.strip() for column in line.strip().strip("|").split("|")]
         if len(columns) < 12:

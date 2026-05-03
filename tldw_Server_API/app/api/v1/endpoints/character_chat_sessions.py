@@ -6211,6 +6211,11 @@ async def export_chat_history(
                     export_data["message_metadata_extra"] = message_metadata_extra
 
             # Add pagination info to JSON export
+            if total_messages is None:
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="Unable to compute canonical pagination metadata for export",
+                )
             export_data["pagination"] = {
                 "mode": "page",
                 "page": page,

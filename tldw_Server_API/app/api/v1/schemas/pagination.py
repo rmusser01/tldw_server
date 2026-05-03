@@ -56,20 +56,26 @@ def _declares_field(response: Any, field_name: str) -> bool:
 
 def _default_pagination_aliases(response: Any, aliases: tuple[tuple[str, str], ...]) -> Any:
     """Populate declared top-level aliases from canonical pagination metadata."""
+    pagination = getattr(response, "pagination", None)
+    if pagination is None:
+        return response
     for alias_name, metadata_name in aliases:
         if not _declares_field(response, alias_name):
             continue
         if getattr(response, alias_name, None) is None:
-            setattr(response, alias_name, getattr(response.pagination, metadata_name, None))
+            setattr(response, alias_name, getattr(pagination, metadata_name, None))
     return response
 
 
 def _validate_pagination_aliases(response: Any, aliases: tuple[tuple[str, str], ...]) -> Any:
     """Populate missing aliases and reject aliases that drift from metadata."""
+    pagination = getattr(response, "pagination", None)
+    if pagination is None:
+        return response
     for alias_name, metadata_name in aliases:
         if not _declares_field(response, alias_name):
             continue
-        expected = getattr(response.pagination, metadata_name, None)
+        expected = getattr(pagination, metadata_name, None)
         actual = getattr(response, alias_name, None)
         if actual is None:
             setattr(response, alias_name, expected)
@@ -122,4 +128,3 @@ def default_page_pagination_aliases(response: Any) -> Any:
 def default_cursor_pagination_aliases(response: Any) -> Any:
     """Populate legacy top-level cursor aliases from canonical metadata."""
     return _default_pagination_aliases(response, _CURSOR_ALIAS_FIELDS)
-    return response

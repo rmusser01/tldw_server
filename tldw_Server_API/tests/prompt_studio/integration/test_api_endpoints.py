@@ -104,6 +104,71 @@ def _make_structured_prompt_definition_exceeding_total_runtime_limit() -> dict:
         },
     }
 
+
+@pytest.mark.asyncio
+async def test_list_evaluations_honors_non_multiple_offset() -> None:
+    """Prompt Studio evaluation listing starts at the exact requested offset."""
+    from tldw_Server_API.app.api.v1.endpoints.prompt_studio.prompt_studio_evaluations import list_evaluations
+
+    rows = [
+        {
+            "id": idx,
+            "uuid": f"00000000-0000-0000-0000-{idx + 1:012d}",
+            "prompt_id": 10,
+            "prompt_name": f"Evaluation {idx}",
+            "status": "completed",
+            "created_at": "2026-01-01T00:00:00Z",
+            "completed_at": None,
+            "aggregate_metrics": None,
+        }
+        for idx in range(10)
+    ]
+
+    class _FakePromptStudioDB:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, int | None]] = []
+
+        def list_evaluations(self, *, project_id, prompt_id=None, status=None, page=1, per_page=20):
+            self.calls.append(
+                {
+                    "project_id": project_id,
+                    "prompt_id": prompt_id,
+                    "page": page,
+                    "per_page": per_page,
+                }
+            )
+            start = (page - 1) * per_page
+            return {
+                "evaluations": rows[start:start + per_page],
+                "pagination": {
+                    "page": page,
+                    "per_page": per_page,
+                    "total": len(rows),
+                    "total_pages": (len(rows) + per_page - 1) // per_page,
+                },
+            }
+
+    db = _FakePromptStudioDB()
+
+    response = await list_evaluations(
+        request=None,
+        project_id=1,
+        prompt_id=None,
+        limit=3,
+        offset=4,
+        db=db,
+        user_context={},
+    )
+
+    assert [item.id for item in response["evaluations"]] == [4, 5, 6]
+    assert response["total"] == 10
+    assert response["pagination"].offset == 4
+    assert db.calls == [
+        {"project_id": 1, "prompt_id": None, "page": 2, "per_page": 3},
+        {"project_id": 1, "prompt_id": None, "page": 3, "per_page": 3},
+    ]
+
+
 @pytest.fixture
 def client(mock_user, test_db):
     """Create a test client for the FastAPI app with mocked authentication."""

@@ -6,6 +6,7 @@ from tldw_Server_API.app.api.v1.endpoints._pagination_utils import (
     build_offset_pagination_meta,
     build_page_pagination_meta,
     build_pagination_link_header,
+    resolve_page_pagination_metadata,
 )
 from tldw_Server_API.app.api.v1.schemas.admin_schemas import WebhookListResponse
 from tldw_Server_API.app.api.v1.schemas.character_schemas import CharacterListQueryResponse
@@ -74,6 +75,27 @@ class CursorAliasResponse(BaseModel):
         return pagination_schemas.default_cursor_pagination_aliases(self)
 
 
+class OptionalPaginationAliasResponse(BaseModel):
+    """Test-only response proving alias helpers tolerate missing metadata."""
+
+    items: list[int]
+    has_more: bool | None = None
+    next_offset: int | None = Field(default=None, ge=0)
+    pagination: OffsetPaginationMeta | None = None
+
+    @model_validator(mode="after")
+    def default_aliases(self) -> "OptionalPaginationAliasResponse":
+        return pagination_schemas.default_offset_pagination_aliases(self)
+
+
+class StrictOptionalPaginationAliasResponse(OptionalPaginationAliasResponse):
+    """Test-only response proving strict helper also tolerates missing metadata."""
+
+    @model_validator(mode="after")
+    def validate_aliases(self) -> "StrictOptionalPaginationAliasResponse":
+        return pagination_schemas.validate_offset_pagination_aliases(self)
+
+
 def test_build_offset_pagination_meta_computes_has_more_and_next_offset() -> None:
     """Offset metadata reports a next page when returned count does not exhaust total."""
     pagination = build_offset_pagination_meta(
@@ -110,6 +132,28 @@ def test_build_page_pagination_meta_derives_has_more_from_total() -> None:
 
     assert pagination.has_more is True
     assert pagination.total_pages is None
+
+
+def test_resolve_page_pagination_metadata_safely_defaults_bad_numbers() -> None:
+    """Page pagination normalization does not raise on malformed storage metadata."""
+    metadata = resolve_page_pagination_metadata(
+        {
+            "page": "not-a-number",
+            "per_page": "0",
+            "total": "-5",
+            "total_pages": "also-bad",
+        },
+        page=2,
+        per_page=10,
+        item_count=7,
+    )
+
+    assert metadata == {
+        "page": 2,
+        "per_page": 1,
+        "total": 0,
+        "total_pages": 0,
+    }
 
 
 def test_pagination_meta_modes_are_fixed_discriminators() -> None:
@@ -219,6 +263,17 @@ def test_shared_offset_alias_validator_rejects_contradictory_aliases() -> None:
 
     with pytest.raises(ValidationError, match="limit alias mismatch"):
         StrictOffsetAliasResponse(items=[], limit=5, pagination=pagination)
+
+
+def test_shared_alias_helpers_skip_missing_canonical_pagination() -> None:
+    """Shared alias helpers remain compatibility-safe when metadata is absent."""
+    defaulted = OptionalPaginationAliasResponse(items=[])
+    strict = StrictOptionalPaginationAliasResponse(items=[])
+
+    assert defaulted.has_more is None
+    assert defaulted.next_offset is None
+    assert strict.has_more is None
+    assert strict.next_offset is None
 
 
 def test_shared_page_alias_helper_defaults_all_present_alias_fields() -> None:

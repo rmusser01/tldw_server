@@ -206,12 +206,12 @@ def test_claims_cluster_links_and_search():
             assert r_page.status_code == 200, r_page.text
             page_data = r_page.json()
             assert len(page_data["results"]) == 2
-            assert page_data["total"] == 2
+            assert page_data["total"] == 4
             assert page_data["pagination"] == {
                 "mode": "offset",
                 "limit": 2,
                 "offset": 0,
-                "total": None,
+                "total": 4,
                 "has_more": True,
                 "next_offset": 2,
             }

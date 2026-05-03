@@ -444,6 +444,7 @@ class EvaluationListResponse(ListResponse):
     limit: int | None = Field(default=None, ge=1)
     cursor: Optional[str] = None
     next_cursor: Optional[str] = None
+    has_more: bool | None = Field(default=None)
     pagination: CursorPaginationMeta | None = None
 
     @model_validator(mode="after")
@@ -459,6 +460,7 @@ class RunListResponse(ListResponse):
     limit: int | None = Field(default=None, ge=1)
     cursor: Optional[str] = None
     next_cursor: Optional[str] = None
+    has_more: bool | None = Field(default=None)
     pagination: CursorPaginationMeta | None = None
 
     @model_validator(mode="after")

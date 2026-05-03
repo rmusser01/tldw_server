@@ -835,14 +835,25 @@ class TestAdminOpsErrorSanitization:
 
         monkeypatch.setattr(admin_ops, "svc_list_email_deliveries", _list_deliveries)
 
-        payload = await admin_ops.list_email_deliveries(
+        response = await admin_ops.list_email_deliveries(
             limit=2,
             offset=1,
             status="failed",
             principal=mock.MagicMock(),
         )
+        payload = response.model_dump(mode="json")
 
-        assert payload["items"] == [{"id": "delivery-2"}]
+        assert payload["items"] == [
+            {
+                "id": "delivery-2",
+                "recipient": "",
+                "subject": "",
+                "template": None,
+                "status": "",
+                "error": None,
+                "sent_at": None,
+            }
+        ]
         assert payload["total"] == 3
         assert payload["limit"] == 2
         assert payload["offset"] == 1

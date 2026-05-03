@@ -139,13 +139,20 @@ def resolve_page_pagination_metadata(
 ) -> dict[str, int]:
     """Normalize page pagination data from storage, defaulting missing totals safely."""
     pagination = pagination_data or {}
-    page_value = int(pagination.get("page") or page)
-    per_page_value = int(pagination.get("per_page") or pagination.get("limit") or per_page)
-    total_value = int(pagination.get("total") if pagination.get("total") is not None else item_count)
+
+    def _as_int(value: Any, default: int) -> int:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return default
+
+    page_value = max(1, _as_int(pagination.get("page"), page))
+    per_page_value = max(1, _as_int(pagination.get("per_page") or pagination.get("limit"), per_page))
+    total_value = max(0, _as_int(pagination.get("total"), item_count))
     total_pages_value = pagination.get("total_pages")
     if total_pages_value is None:
         total_pages_value = (total_value + per_page_value - 1) // per_page_value if total_value else 0
-    total_pages_value = int(total_pages_value)
+    total_pages_value = max(0, _as_int(total_pages_value, 0))
 
     return {
         "page": page_value,

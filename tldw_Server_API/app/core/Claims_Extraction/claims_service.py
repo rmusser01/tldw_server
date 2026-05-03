@@ -1939,29 +1939,26 @@ def search_claims(
     ) as (target_db, owner_filter):
         normalized_limit = max(1, int(limit))
         normalized_offset = max(0, int(offset))
-        window_end = normalized_offset + normalized_limit
-        fetch_limit = window_end + 1
-        rows = target_db.search_claims(
+        rows, total = target_db.search_claims(
             query,
-            limit=fetch_limit,
+            limit=normalized_limit,
+            offset=normalized_offset,
             owner_user_id=owner_filter,
+            include_total=True,
         )
         normalized = [_normalize_search_row(dict(r)) for r in rows]
-        total = min(len(normalized), window_end)
-        sliced = normalized[normalized_offset:window_end]
         pagination = build_offset_pagination_meta(
             limit=normalized_limit,
             offset=normalized_offset,
-            total=None,
-            count=len(sliced),
-            has_more=len(normalized) > window_end,
+            total=total,
+            count=len(normalized),
         )
         if not group_by_cluster:
             return {
                 "query": query,
                 "group_by_cluster": False,
                 "total": total,
-                "results": sliced,
+                "results": normalized,
                 "clusters": None,
                 "orphaned": None,
                 "pagination": pagination,
@@ -1970,7 +1967,7 @@ def search_claims(
         clusters: list[dict[str, Any]] = []
         orphaned: list[dict[str, Any]] = []
         cluster_ids: list[int] = []
-        for row in sliced:
+        for row in normalized:
             cluster_id = row.get("claim_cluster_id")
             if cluster_id is None:
                 orphaned.append(row)
@@ -1983,7 +1980,7 @@ def search_claims(
             if c.get("id") is not None
         }
         cluster_hits: dict[int, dict[str, Any]] = {}
-        for row in sliced:
+        for row in normalized:
             cluster_id = row.get("claim_cluster_id")
             if cluster_id is None:
                 continue
@@ -2041,18 +2038,36 @@ def list_claim_notifications(
         target_user = str(user_id) if user_id is not None else str(current_user.id)
         if not _principal_has_platform_admin_claims(principal) and target_user_id is not None and str(target_user_id) != str(principal.user_id):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized")
-        rows = target_db.list_claim_notifications(
-            user_id=target_user,
-            kind=kind,
-            target_user_id=str(target_user_id) if target_user_id is not None else None,
-            target_review_group=str(target_review_group) if target_review_group else None,
-            resource_type=str(resource_type) if resource_type else None,
-            resource_id=str(resource_id) if resource_id else None,
-            delivered=delivered,
-            limit=limit,
-            offset=offset,
-        )
-        filtered = _filter_notifications_for_principal(principal, rows)
+        normalized_limit = max(1, int(limit))
+        normalized_offset = max(0, int(offset))
+        filtered: list[dict[str, Any]] = []
+        skipped_visible = 0
+        db_offset = 0
+        batch_size = min(1000, max(50, normalized_limit * 2, normalized_limit + 1))
+        while len(filtered) < normalized_limit:
+            rows = target_db.list_claim_notifications(
+                user_id=target_user,
+                kind=kind,
+                target_user_id=str(target_user_id) if target_user_id is not None else None,
+                target_review_group=str(target_review_group) if target_review_group else None,
+                resource_type=str(resource_type) if resource_type else None,
+                resource_id=str(resource_id) if resource_id else None,
+                delivered=delivered,
+                limit=batch_size,
+                offset=db_offset,
+            )
+            if not rows:
+                break
+            for row in _filter_notifications_for_principal(principal, rows):
+                if skipped_visible < normalized_offset:
+                    skipped_visible += 1
+                    continue
+                filtered.append(row)
+                if len(filtered) >= normalized_limit:
+                    break
+            db_offset += len(rows)
+            if len(rows) < batch_size:
+                break
         return [_normalize_notification_row(row) for row in filtered]
 
 
@@ -2109,18 +2124,34 @@ def claim_notifications_digest(
         target_user = str(user_id) if user_id is not None else str(current_user.id)
         normalized_limit = max(1, int(limit))
         normalized_offset = max(0, int(offset))
-        rows = target_db.list_claim_notifications(
-            user_id=target_user,
-            kind=kind,
-            target_user_id=str(target_user_id) if target_user_id is not None else None,
-            target_review_group=str(target_review_group) if target_review_group else None,
-            resource_type=str(resource_type) if resource_type else None,
-            resource_id=str(resource_id) if resource_id else None,
-            delivered=delivered,
-            limit=normalized_limit + 1,
-            offset=normalized_offset,
-        )
-        filtered = _filter_notifications_for_principal(principal, rows)
+        filtered: list[dict[str, Any]] = []
+        skipped_visible = 0
+        db_offset = 0
+        batch_size = min(1000, max(50, normalized_limit * 2, normalized_limit + 1))
+        while len(filtered) <= normalized_limit:
+            rows = target_db.list_claim_notifications(
+                user_id=target_user,
+                kind=kind,
+                target_user_id=str(target_user_id) if target_user_id is not None else None,
+                target_review_group=str(target_review_group) if target_review_group else None,
+                resource_type=str(resource_type) if resource_type else None,
+                resource_id=str(resource_id) if resource_id else None,
+                delivered=delivered,
+                limit=batch_size,
+                offset=db_offset,
+            )
+            if not rows:
+                break
+            for row in _filter_notifications_for_principal(principal, rows):
+                if skipped_visible < normalized_offset:
+                    skipped_visible += 1
+                    continue
+                filtered.append(row)
+                if len(filtered) > normalized_limit:
+                    break
+            db_offset += len(rows)
+            if len(rows) < batch_size:
+                break
         has_more = len(filtered) > normalized_limit
         counts_by_kind: dict[str, int] = {}
         counts_by_target_user: dict[str, int] = {}
@@ -3622,7 +3653,7 @@ def list_claim_clusters(
         updated_since=updated_since,
         keyword=keyword,
         min_size=min_size,
-        watchlisted=None,
+        watchlisted=watchlisted,
     )
     counts = _load_watchlist_cluster_counts(target_user_id, [int(c.get("id")) for c in clusters if c.get("id")])
     if counts:
@@ -3632,10 +3663,6 @@ def list_claim_clusters(
             except _CLAIMS_NONCRITICAL_EXCEPTIONS:
                 continue
             cluster["watchlist_count"] = int(counts.get(cluster_id, 0))
-    if watchlisted is not None:
-        clusters = [
-            c for c in clusters if (int(c.get("watchlist_count") or 0) > 0) == bool(watchlisted)
-        ]
     if not envelope:
         return clusters
     items = clusters[:normalized_limit]

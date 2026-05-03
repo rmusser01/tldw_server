@@ -290,8 +290,9 @@ class TestWebhookDeliveryRecording:
                 success=True,
             )
 
-        deliveries = service.list_webhook_deliveries(webhook_id=webhook["id"])
+        deliveries, total = service.list_webhook_deliveries(webhook_id=webhook["id"])
 
+        assert total == 5
         assert len(deliveries) == 5
         # Newest first
         assert deliveries[0]["response_time_ms"] == 54
@@ -326,9 +327,11 @@ class TestWebhookDeliveryRecording:
                 success=True,
             )
 
-        deliveries_1 = service.list_webhook_deliveries(webhook_id=wh1["id"])
-        deliveries_2 = service.list_webhook_deliveries(webhook_id=wh2["id"])
+        deliveries_1, total_1 = service.list_webhook_deliveries(webhook_id=wh1["id"])
+        deliveries_2, total_2 = service.list_webhook_deliveries(webhook_id=wh2["id"])
 
+        assert total_1 == 3
+        assert total_2 == 2
         assert len(deliveries_1) == 3
         assert len(deliveries_2) == 2
 
@@ -354,11 +357,12 @@ class TestWebhookDeliveryRecording:
                 success=True,
             )
 
-        deliveries = service.list_webhook_deliveries(
+        deliveries, total = service.list_webhook_deliveries(
             webhook_id=webhook["id"],
             limit=cap + 100,
         )
 
+        assert total == cap
         assert len(deliveries) <= cap
 
     def test_delivery_record_fields(self, monkeypatch, tmp_path):
@@ -421,10 +425,11 @@ class TestAdminOpsWebhookDeliveryPagination:
 
         monkeypatch.setattr(admin_ops, "_require_platform_admin", lambda _: None)
 
-        def _fake_deliveries(*, webhook_id: str, limit: int) -> list[dict[str, Any]]:
+        def _fake_deliveries(*, webhook_id: str, limit: int, offset: int) -> tuple[list[dict[str, Any]], int]:
             assert webhook_id == "wh_1"
-            assert limit == 1000
-            return [
+            assert limit == 2
+            assert offset == 1
+            items = [
                 {
                     "id": f"wd_{idx}",
                     "webhook_id": "wh_1",
@@ -438,6 +443,7 @@ class TestAdminOpsWebhookDeliveryPagination:
                 }
                 for idx in range(5)
             ]
+            return items[offset:offset + limit], len(items)
 
         monkeypatch.setattr(admin_ops, "svc_list_webhook_deliveries", _fake_deliveries)
 
@@ -507,7 +513,8 @@ class TestWebhookTestSend:
         assert delivery["webhook_id"] == webhook["id"]
 
         # Verify delivery was also recorded in the store
-        deliveries = service.list_webhook_deliveries(webhook_id=webhook["id"])
+        deliveries, total = service.list_webhook_deliveries(webhook_id=webhook["id"])
+        assert total == 1
         assert len(deliveries) == 1
 
     def test_send_test_webhook_http_error(self, monkeypatch, tmp_path):

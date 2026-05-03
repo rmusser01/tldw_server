@@ -87,7 +87,7 @@ def test_document_generate_streams_as_sse(authenticated_client, auth_token):
             )
             return doc_id
 
-        def get_generated_documents(self, conversation_id=None, document_type=None, limit=50):
+        def get_generated_documents(self, conversation_id=None, document_type=None, limit=50, offset=0):
 
             docs = list(StreamingStubService.stored_docs)
             if conversation_id is not None:
@@ -96,7 +96,7 @@ def test_document_generate_streams_as_sse(authenticated_client, auth_token):
                 dtype = document_type.value if hasattr(document_type, "value") else document_type
                 docs = [doc for doc in docs if doc["document_type"] == dtype]
             docs.sort(key=lambda item: item["id"], reverse=True)
-            return docs[:limit]
+            return docs[offset:offset + limit]
 
     authenticated_client.app.dependency_overrides[get_document_generator_service] = lambda: StreamingStubService
     StreamingStubService.stored_docs = []
@@ -224,15 +224,16 @@ def test_document_list_includes_canonical_pagination(authenticated_client) -> No
         def __init__(self, db):
             self._db = db
 
-        def get_generated_documents(self, conversation_id=None, document_type=None, limit=50):
+        def get_generated_documents(self, conversation_id=None, document_type=None, limit=50, offset=0):
             calls["list"].append(
                 {
                     "conversation_id": conversation_id,
                     "document_type": document_type,
                     "limit": limit,
+                    "offset": offset,
                 }
             )
-            return [
+            docs = [
                 {
                     "id": 12,
                     "conversation_id": conversation_id,
@@ -260,6 +261,7 @@ def test_document_list_includes_canonical_pagination(authenticated_client) -> No
                     "metadata": {},
                 },
             ]
+            return docs[offset:offset + limit]
 
         def count_generated_documents(self, conversation_id=None, document_type=None):
             calls["count"].append(
@@ -295,7 +297,8 @@ def test_document_list_includes_canonical_pagination(authenticated_client) -> No
         {
             "conversation_id": "chat-42",
             "document_type": DocumentType.SUMMARY,
-            "limit": 2,
+            "limit": 1,
+            "offset": 1,
         }
     ]
     assert calls["count"] == [
@@ -558,7 +561,7 @@ def test_document_generate_uses_configured_api_key(monkeypatch, authenticated_cl
             captured["provider"] = kwargs.get("provider")
             return "Generated content"
 
-        def get_generated_documents(self, conversation_id=None, document_type=None, limit=50):
+        def get_generated_documents(self, conversation_id=None, document_type=None, limit=50, offset=0):
 
             return [
                 {

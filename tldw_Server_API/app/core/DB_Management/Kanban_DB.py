@@ -2176,7 +2176,7 @@ END;
                 if board_id is not None:
                     sql += " AND c.board_id = ?"
                     params.append(board_id)
-                sql += " ORDER BY s.lease_expires_at ASC LIMIT ? OFFSET ?"
+                sql += " ORDER BY s.lease_expires_at ASC, s.card_id ASC LIMIT ? OFFSET ?"
                 params.extend([limit, offset])
                 rows = conn.execute(sql, params).fetchall()
 

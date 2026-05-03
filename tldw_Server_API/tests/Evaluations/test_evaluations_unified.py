@@ -33,10 +33,23 @@ from tldw_Server_API.app.core.Evaluations.unified_evaluation_service import (
 )
 from tldw_Server_API.app.core.Evaluations.evaluation_manager import EvaluationManager
 from tldw_Server_API.app.core.Evaluations.eval_runner import EvaluationRunner
+from tldw_Server_API.app.api.v1.schemas.evaluation_schemas_unified import EvaluationListResponse, RunListResponse
+from tldw_Server_API.app.api.v1.schemas.pagination import CursorPaginationMeta
 
 # Use configuration from test_config
 DEFAULT_API_KEY = test_config.TEST_API_KEY
 TEST_SK_KEY = test_config.TEST_SK_KEY
+
+
+def test_cursor_list_responses_backfill_has_more_from_pagination() -> None:
+    """Evaluation cursor list aliases should reflect canonical pagination metadata."""
+    pagination = CursorPaginationMeta(limit=10, cursor=None, next_cursor="next", has_more=True)
+
+    evaluations = EvaluationListResponse(data=[], pagination=pagination)
+    runs = RunListResponse(data=[], pagination=pagination)
+
+    assert evaluations.has_more is True
+    assert runs.has_more is True
 
 
 @pytest.fixture(scope="function")

@@ -4,14 +4,36 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
+from tldw_Server_API.app.api.v1.schemas.pagination import (
+    OffsetPaginationMeta,
+    validate_offset_pagination_aliases,
+)
 
 
 def _default_offset_pagination_aliases(response):
-    if response.has_more is None:
-        response.has_more = response.pagination.has_more
-    if response.next_offset is None:
-        response.next_offset = response.pagination.next_offset
+    return validate_offset_pagination_aliases(response)
+
+
+def _default_offset_pagination_navigation_aliases(response):
+    pagination = getattr(response, "pagination", None)
+    if pagination is None:
+        return response
+    for alias_name, metadata_name in (
+        ("has_more", "has_more"),
+        ("next_offset", "next_offset"),
+    ):
+        if not hasattr(response, alias_name):
+            continue
+        expected = getattr(pagination, metadata_name, None)
+        actual = getattr(response, alias_name, None)
+        if actual is None:
+            setattr(response, alias_name, expected)
+            continue
+        if actual != expected:
+            raise ValueError(
+                f"{alias_name} alias mismatch: {alias_name}={actual} "
+                f"pagination.{metadata_name}={expected}"
+            )
     return response
 
 
@@ -330,7 +352,7 @@ class ClaimNotificationsDigestResponse(BaseModel):
 
     @model_validator(mode="after")
     def _default_pagination_aliases(self):
-        return _default_offset_pagination_aliases(self)
+        return _default_offset_pagination_navigation_aliases(self)
 
 
 class ClaimReviewRequest(BaseModel):

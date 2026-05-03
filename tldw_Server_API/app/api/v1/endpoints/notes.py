@@ -2032,9 +2032,7 @@ async def list_collection_keyword_links_endpoint(
             }
             for row in rows
         ]
-        count_cursor = db.execute_query("SELECT COUNT(*) AS total FROM collection_keywords")
-        total_rows = count_cursor.fetchall()
-        total = int(total_rows[0]["total"]) if total_rows else len(links)
+        total = int(db.count_collection_keyword_links())
         pagination = build_offset_pagination_meta(
             limit=limit,
             offset=offset,
@@ -2361,9 +2359,7 @@ async def list_conversation_keyword_links_endpoint(
                 }
                 for row in rows
             ]
-            count_cursor = db.execute_query("SELECT COUNT(*) AS total FROM conversation_keywords")
-            total_rows = count_cursor.fetchall()
-            total = int(total_rows[0]["total"]) if total_rows else len(links)
+            total = int(db.count_conversation_keyword_links())
         pagination = build_offset_pagination_meta(
             limit=limit,
             offset=offset,

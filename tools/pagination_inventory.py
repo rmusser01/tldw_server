@@ -219,7 +219,7 @@ def _is_schema_class(node: ast.ClassDef) -> bool:
         base_name = _name_of(base)
         if base_name.endswith("BaseModel") or base_name.endswith("Response") or base_name.endswith("Schema"):
             return True
-    return True
+    return False
 
 
 def collect_schemas() -> dict[str, SchemaInfo]:
@@ -411,7 +411,7 @@ def _test_files() -> list[Path]:
 
 def _tokens_for_path(path: Path) -> list[str]:
     tokens = re.split(r"[_/\-.]+", path.with_suffix("").as_posix().lower())
-    ignored = {"app", "api", "v1", "endpoints", "endpoint", "endpoints", "test", "tests", "py"}
+    ignored = {"app", "api", "v1", "endpoints", "endpoint", "test", "tests", "py"}
     return [token for token in tokens if len(token) >= 4 and token not in ignored]
 
 

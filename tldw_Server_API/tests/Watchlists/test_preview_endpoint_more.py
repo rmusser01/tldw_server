@@ -195,13 +195,17 @@ def _assert_preview_offset_pagination(data: dict, *, limit: int) -> None:
     assert "total" in data
     assert "ingestable" in data
     assert "filtered" in data
+    offset = int(data["pagination"]["offset"])
+    total = int(data["total"])
+    expected_has_more = offset + limit < total
+    expected_next_offset = offset + limit if expected_has_more else None
     assert data["pagination"] == {
         "mode": "offset",
         "limit": limit,
-        "offset": 0,
+        "offset": offset,
         "total": data["total"],
-        "has_more": False,
-        "next_offset": None,
+        "has_more": expected_has_more,
+        "next_offset": expected_next_offset,
     }
 
 

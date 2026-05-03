@@ -795,7 +795,8 @@ class DocumentGeneratorService:
         self,
         conversation_id: Optional[Union[str, int]] = None,
         document_type: Optional[DocumentType] = None,
-        limit: int = 50
+        limit: int = 50,
+        offset: int = 0,
     ) -> list[dict[str, Any]]:
         """
         Get previously generated documents.
@@ -804,6 +805,7 @@ class DocumentGeneratorService:
             conversation_id: Optional conversation ID filter
             document_type: Optional document type filter
             limit: Maximum number of documents to return
+            offset: Number of matching documents to skip
 
         Returns:
             List of document dictionaries
@@ -822,8 +824,10 @@ class DocumentGeneratorService:
                     query += " AND document_type = ?"
                     params.append(document_type.value)
 
-                query += " ORDER BY created_at DESC LIMIT ?"
-                params.append(limit)
+                normalized_limit = max(1, int(limit))
+                normalized_offset = max(0, int(offset))
+                query += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
+                params.extend([normalized_limit, normalized_offset])
 
                 cursor = conn.execute(query, params)
                 documents = []

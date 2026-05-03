@@ -10,7 +10,7 @@ import json
 import os
 from typing import Annotated, Any, Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi import status as http_status
 from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field
@@ -35,6 +35,7 @@ router = APIRouter(prefix="/media", tags=["media-embeddings"])
 DEFAULT_EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 DEFAULT_EMBEDDING_PROVIDER = "huggingface"
 FALLBACK_EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
+MAX_MEDIA_EMBEDDING_JOBS_OFFSET = 10_000
 
 _MEDIA_EMBEDDINGS_PARSE_EXCEPTIONS = (TypeError, ValueError, UnicodeError, json.JSONDecodeError)
 _MEDIA_EMBEDDINGS_NONCRITICAL_EXCEPTIONS = (
@@ -1020,8 +1021,8 @@ async def get_media_embedding_job(
 async def list_media_embedding_jobs(
     current_user: Annotated[User, Depends(get_request_user)],
     status: Optional[str] = None,
-    limit: int = 50,
-    offset: int = 0,
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0, le=MAX_MEDIA_EMBEDDING_JOBS_OFFSET),
 ):
     user_id = resolve_user_id_for_request(
         current_user,

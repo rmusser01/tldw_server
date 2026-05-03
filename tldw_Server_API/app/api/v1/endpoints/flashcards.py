@@ -119,6 +119,7 @@ from tldw_Server_API.app.core.Utils.image_validation import (
 from tldw_Server_API.app.core.Workflows.adapters.content import run_flashcard_generate_adapter
 
 router = APIRouter(prefix="/flashcards", tags=["flashcards"])
+MAX_STUDY_PACK_JOBS_OFFSET = 10_000
 _FLASHCARDS_INT_PARSE_EXCEPTIONS: tuple[type[BaseException], ...] = (
     TypeError,
     ValueError,
@@ -2018,7 +2019,7 @@ def create_study_pack_job(
 def list_study_pack_jobs(
     status: Optional[str] = Query(None),
     limit: int = Query(100, ge=1, le=1000),
-    offset: int = Query(0, ge=0),
+    offset: int = Query(0, ge=0, le=MAX_STUDY_PACK_JOBS_OFFSET),
     current_user: User = Depends(get_request_user),
     principal: AuthPrincipal = Depends(get_auth_principal),
     jm: JobManager = Depends(get_job_manager),

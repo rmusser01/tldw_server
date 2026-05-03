@@ -4730,12 +4730,12 @@ class CollectionsDatabase:
         if not include_archived:
             where += " AND archived_at IS NULL AND dismissed_at IS NULL"
         row = self.backend.execute(
-            f"SELECT COUNT(*) AS cnt FROM user_notifications WHERE {where}",  # nosec B608
+            f"SELECT COUNT(*) AS total FROM user_notifications WHERE {where}",  # nosec B608
             tuple(params),
-        ).fetchone()
+        ).first
         if row is None:
             return 0
-        return int(row["cnt"] if isinstance(row, dict) else row[0])
+        return _count_row_total(row)
 
     def list_user_dismissed_notifications(
         self,
