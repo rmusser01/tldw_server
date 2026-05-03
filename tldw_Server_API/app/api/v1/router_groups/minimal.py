@@ -5,8 +5,7 @@ integration tests working without importing the broader endpoint surface.
 """
 from __future__ import annotations
 
-import importlib
-from typing import Any, Iterable
+from typing import Iterable
 
 from loguru import logger
 
@@ -23,23 +22,6 @@ from tldw_Server_API.app.core.testing import (
 )
 
 API_V1_PREFIX = "/api/v1"
-
-
-def _try_add_spec(
-    specs: list[RouterSpec],
-    import_path: str,
-    *,
-    log_name: str,
-    attr_name: str = "router",
-    **spec_kwargs: Any,
-) -> None:
-    try:
-        module = importlib.import_module(import_path)
-        specs.append(RouterSpec(router=getattr(module, attr_name), **spec_kwargs))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping {log_name} router in minimal test app: {e}")
-
-
 def iter_minimal_test_router_specs() -> Iterable[RouterSpec]:
     """Yield the always-included minimal-test router specs."""
     from tldw_Server_API.app.api.v1.endpoints.auth import router as auth_router
@@ -91,19 +73,25 @@ def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
     """Yield optional minimal-test router specs, skipping unavailable imports."""
     specs: list[RouterSpec] = []
 
-    _try_add_spec(
+    append_imported_router_spec(
         specs,
-        "tldw_Server_API.app.api.v1.endpoints.llm_providers",
-        log_name="llm providers",
-        prefix=f"{API_V1_PREFIX}",
-        tags=("llm",),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.llm_providers",
+            log_name="llm providers",
+            prefix=f"{API_V1_PREFIX}",
+            tags=("llm",),
+            skip_context="in minimal test app",
+        ),
     )
-    _try_add_spec(
+    append_imported_router_spec(
         specs,
-        "tldw_Server_API.app.api.v1.endpoints.mlx",
-        log_name="mlx",
-        prefix=f"{API_V1_PREFIX}",
-        tags=("llm",),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.mlx",
+            log_name="mlx",
+            prefix=f"{API_V1_PREFIX}",
+            tags=("llm",),
+            skip_context="in minimal test app",
+        ),
     )
 
     try:

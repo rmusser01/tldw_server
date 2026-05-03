@@ -88,6 +88,49 @@ def test_append_imported_router_spec_preserves_metadata(
     assert specs[0].default_stable is False
 
 
+def test_append_imported_router_spec_defers_router_attr_lookup_until_resolution(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.api.v1.router_groups.conditional import (
+        ImportedRouterSpec,
+        append_imported_router_spec,
+    )
+
+    module_name = "tldw_Server_API.app.api.v1.endpoints.lazy_router"
+    access_count = {"router": 0}
+    fake_module = ModuleType(module_name)
+    router = APIRouter()
+
+    @router.get("/lazy/router")
+    def _lazy_router() -> dict[str, str]:
+        return {"status": "ok"}
+
+    def _module_getattr(name: str) -> APIRouter:
+        if name != "router":
+            raise AttributeError(name)
+        access_count["router"] += 1
+        return router
+
+    fake_module.__getattr__ = _module_getattr  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, module_name, fake_module)
+
+    specs: list[RouterSpec] = []
+    append_imported_router_spec(
+        specs,
+        ImportedRouterSpec(
+            import_path=module_name,
+            log_name="lazy-router",
+            prefix="/api/v1",
+            tags=("lazy-router",),
+        ),
+    )
+
+    assert len(specs) == 1
+    assert access_count["router"] == 0
+    assert _first_router_path(specs[0].router) == "/lazy/router"
+    assert access_count["router"] == 1
+
+
 def test_register_router_specs_respects_route_policy(monkeypatch: pytest.MonkeyPatch) -> None:
     app = FastAPI()
     router = APIRouter()

@@ -30,9 +30,13 @@ def append_imported_router_spec(
     """Append an optional imported router spec, preserving existing skip logging."""
     try:
         module = importlib.import_module(definition.import_path)
+
+        def _router_factory():
+            return getattr(module, definition.attr_name)
+
         specs.append(
             RouterSpec(
-                router=getattr(module, definition.attr_name),
+                router=_router_factory,
                 prefix=definition.prefix,
                 tags=definition.tags,
                 route_key=definition.route_key,

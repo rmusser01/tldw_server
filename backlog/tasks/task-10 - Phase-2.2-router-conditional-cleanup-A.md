@@ -48,6 +48,11 @@ Verification completed:
 - Full/adjacent: router_groups_contract 33 passed; main_router_contract 6 passed; openapi_phase4_contract 5 passed.
 - Bandit router group scope: 0 findings in /tmp/bandit_phase2_2_router_conditionals_a.json.
 - git diff --check passed.
+- Review follow-up:
+  - RED: `test_append_imported_router_spec_defers_router_attr_lookup_until_resolution` failed with eager router attribute access.
+  - GREEN/focused: `test_router_groups_contract.py -k "append_imported_router_spec or populates_llm_specs"` passed 3 selected tests.
+  - Full/adjacent: `test_router_groups_contract.py -q` passed 34 tests.
+  - Bandit review-follow-up scope: 0 findings in `/tmp/bandit_pr1242_router_groups.json`.
 
 PR opened: https://github.com/rmusser01/tldw_server/pull/1242
 <!-- SECTION:NOTES:END -->
@@ -56,6 +61,8 @@ PR opened: https://github.com/rmusser01/tldw_server/pull/1242
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Added a shared conditional router import helper and used it for the covered ACP and sandbox RouterSpec families in core, admin, and minimal router groups. The change preserves existing prefixes, tags, route keys, default stability, and skip logging while removing repeated optional import-to-RouterSpec blocks.
+
+Review follow-up: `append_imported_router_spec()` now preserves that metadata while deferring router attribute lookup until `RouterSpec.resolve_router()`, and `minimal.py` now reuses the shared helper for the covered `llm_providers` and `mlx` optional imports instead of keeping a duplicate local helper.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
