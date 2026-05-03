@@ -11,7 +11,10 @@ except ImportError:  # pragma: no cover - pydantic v1 fallback
     from pydantic import root_validator as model_validator  # type: ignore
 
 from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
-from tldw_Server_API.app.core.Sandbox.runtime_capabilities import RuntimeImplementationState
+from tldw_Server_API.app.core.Sandbox.runtime_capabilities import (
+    RuntimeImplementationState,
+    RuntimeReasonCode,
+)
 
 RuntimeType = Literal[
     "docker",
@@ -42,6 +45,13 @@ class SandboxRuntimeInfo(BaseModel):
         ),
     )
     reasons: list[str] | None = Field(default=None, description="Preflight reasons when the runtime is unavailable or constrained")
+    normalized_reasons: list[RuntimeReasonCode] | None = Field(
+        default=None,
+        description=(
+            "Stable, client-facing reason codes derived from raw runtime preflight reasons; "
+            "raw reasons are preserved for operator diagnostics"
+        ),
+    )
     supported_trust_levels: list[TrustLevelType] | None = Field(default=None, description="Trust levels supported by this runtime under current host policy")
     default_images: list[str] = Field(default_factory=list)
     max_cpu: float | None = Field(default=None, description="Max CPU (cores) per run")

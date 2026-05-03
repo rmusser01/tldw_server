@@ -28,6 +28,7 @@ Recommendation:
 
 - Public opt-in mechanism: `X-TLDW-Response-Envelope: v1`.
 - Query opt-in, if implemented, should be test-only or internal until maintainers approve it as public API.
+- This header is transitional inside `v1`; it does not replace path-based major versioning.
 - Provider-compatible, streaming, file, webhook, WebSocket, and `204 No Content` routes stay exempt unless explicitly approved route-by-route.
 
 Reason:
@@ -40,7 +41,7 @@ Reason:
 Recommendation:
 
 - Keep existing `page`, `per_page`, `results_per_page`, `count`, `total`, `limit`, `offset`, and cursor aliases where routes already expose them.
-- Add canonical pagination metadata only as an opt-in envelope `meta.pagination` field during the pilot.
+- Add canonical pagination metadata as `metadata.pagination` for canonical envelope responses during the pilot.
 - Add non-envelope nested pagination metadata only after route-family approval.
 
 Reason:
@@ -71,6 +72,23 @@ Reason:
 
 - Current project docs define path-based versioning.
 - Path-based versioning keeps Swagger/OpenAPI and client code generation simpler.
+
+### Decision 6: Frontend And Client Boundaries Stay Domain-Shaped By Default
+
+Recommendation:
+
+- Shared client/service layers may send opt-in headers and unwrap canonical
+  envelopes or transitional wrappers.
+- UI/domain consumers should continue receiving stable domain-shaped data by
+  default instead of raw transport envelopes.
+- Route-family migration work is not complete until backend docs, OpenAPI
+  treatment, and client unwrap/typing behavior are all defined together.
+
+Reason:
+
+- This preserves the Phase 3 boundary that transport concerns live in shared
+  client layers, not scattered UI components.
+- It avoids accidental frontend lock-in to temporary transport shapes.
 
 ## Proposed Policy Text
 
@@ -129,11 +147,13 @@ Open question:
 - Is `X-TLDW-Response-Envelope: v1` the public opt-in mechanism?
 - Is query opt-in test-only during the pilot?
 - Are provider-compatible routes permanently exempt?
-- Should a future `v2` be planned now, or deferred until after the `skills` pilot?
+- Should a future `v2` be planned now, or deferred until a route family has an approved default-breaking migration?
+- Do maintainers accept that client/service layers own opt-in and unwrap behavior while domain consumers remain legacy-shaped by default?
 
 ## Handoff Checklist
 
 - [ ] Maintainers accept or amend the five recommended decisions.
+- [ ] Maintainers accept or amend the frontend/client boundary decision.
 - [ ] `Docs/API/api-versioning-strategy.md` is updated only after acceptance.
 - [ ] OpenAPI owner decides how opt-in envelope variants should be documented.
 - [ ] Frontend owner confirms whether any client should send the opt-in header during the pilot.
