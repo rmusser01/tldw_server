@@ -429,17 +429,23 @@ class SandboxAdminMacOSImageStoreDiagnostics(BaseModel):
 
 
 class SandboxAdminMacOSLogPointer(BaseModel):
+    """Read-only pointer to a host log file without exposing file contents."""
+
     path: str | None = None
     exists: bool = False
     size_bytes: int | None = None
 
 
 class SandboxAdminMacOSHelperLogPointers(BaseModel):
+    """Pointers to the managed VZ helper stdout and stderr logs."""
+
     stdout: SandboxAdminMacOSLogPointer
     stderr: SandboxAdminMacOSLogPointer
 
 
 class SandboxAdminMacOSGuestObservability(BaseModel):
+    """Guest-agent readiness metadata reported by the helper for a live VM."""
+
     version: str | None = None
     workspace_root: str | None = None
     capabilities_known: bool | None = None
@@ -447,6 +453,8 @@ class SandboxAdminMacOSGuestObservability(BaseModel):
 
 
 class SandboxAdminMacOSVMObservability(BaseModel):
+    """Per-VM boot-log, guest, and resource diagnostics for VZ Linux."""
+
     vm_id: str
     state: str | None = None
     healthy: bool
@@ -459,6 +467,8 @@ class SandboxAdminMacOSVMObservability(BaseModel):
 
 
 class SandboxAdminMacOSObservabilityDiagnostics(BaseModel):
+    """Aggregated read-only VZ Linux observability block for admin diagnostics."""
+
     configured: bool
     serial_log_dir: str | None = None
     helper_log_dir: str | None = None

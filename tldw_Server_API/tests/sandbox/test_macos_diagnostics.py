@@ -796,7 +796,7 @@ def test_probe_vz_linux_observability_reports_log_pointers_and_vm_resources(
     monkeypatch.setenv("TLDW_SANDBOX_VZ_LINUX_SERIAL_LOG_DIR", str(serial_log_dir))
 
     class _FakeHelper:
-        def list_vms(self):
+        def list_vms(self) -> HelperVMListReply:
             return HelperVMListReply(
                 protocol_version="1",
                 helper_version="0.1.0",
@@ -867,7 +867,7 @@ def test_probe_vz_linux_observability_handles_helper_unavailable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     class _UnavailableHelper:
-        def list_vms(self):
+        def list_vms(self) -> HelperVMListReply:
             raise MacOSVirtualizationHelperUnavailable("helper down")
 
     monkeypatch.setattr(diagnostics_module, "MacOSVirtualizationHelperClient", _UnavailableHelper)
@@ -877,6 +877,104 @@ def test_probe_vz_linux_observability_handles_helper_unavailable(
     assert data["live_vms"] == 0
     assert data["vms"] == []
     assert data["reasons"] == ["macos_virtualization_helper_unavailable"]
+
+
+def test_probe_vz_linux_observability_default_log_dir_is_not_configured(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("TLDW_SANDBOX_MACOS_HELPER_LOG_DIR", raising=False)
+    monkeypatch.delenv("TLDW_SANDBOX_VZ_LINUX_SERIAL_LOG_DIR", raising=False)
+
+    class _FakeHelper:
+        def list_vms(self) -> HelperVMListReply:
+            return HelperVMListReply(protocol_version="1", helper_version="0.1.0", vms=[])
+
+    monkeypatch.setattr(diagnostics_module, "MacOSVirtualizationHelperClient", _FakeHelper)
+
+    data = diagnostics_module.probe_vz_linux_observability()
+
+    assert data["configured"] is False
+    assert data["helper_log_dir_source"] == "default"
+    assert data["live_vms"] == 0
+    assert data["reasons"] == []
+
+
+def test_collect_macos_diagnostics_fetches_live_vms_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_macos_host(monkeypatch)
+    monkeypatch.delenv("TEST_MODE", raising=False)
+    monkeypatch.setenv("TLDW_SANDBOX_VZ_LINUX_TEMPLATE_SOURCE", "/tmp/vz-linux.img")
+
+    class _FakeHelper:
+        list_calls = 0
+
+        def ping(self) -> HelperPingReply:
+            return HelperPingReply(
+                protocol_version="1",
+                helper_version="0.1.0",
+                status="ok",
+                details={"transport": "unix"},
+            )
+
+        def validate_template(self, request: dict[str, object]) -> dict[str, object]:
+            return {
+                "template_id": "vz_linux:ubuntu-24.04",
+                "source": request["template"],
+                "ready": True,
+                "reasons": [],
+            }
+
+        def list_vms(self) -> HelperVMListReply:
+            _FakeHelper.list_calls += 1
+            return HelperVMListReply(
+                protocol_version="1",
+                helper_version="0.1.0",
+                vms=[
+                    HelperVMStatusReply(
+                        protocol_version="1",
+                        helper_version="0.1.0",
+                        vm_id="vm-live",
+                        state="running",
+                        healthy=True,
+                    )
+                ],
+            )
+
+    class _FakeOrchestrator:
+        def list_vz_session_controls(self) -> list[dict[str, str]]:
+            return [{"id": "sess-live", "vm_id": "vm-live"}]
+
+    monkeypatch.setattr(diagnostics_module, "MacOSVirtualizationHelperClient", _FakeHelper)
+    monkeypatch.setattr(
+        diagnostics_module,
+        "collect_runtime_preflights",
+        lambda network_policy="deny_all": {
+            RuntimeType.vz_linux: RuntimePreflightResult(
+                runtime=RuntimeType.vz_linux,
+                available=True,
+                reasons=[],
+                execution_mode="real",
+            ),
+            RuntimeType.vz_macos: RuntimePreflightResult(
+                runtime=RuntimeType.vz_macos,
+                available=False,
+                reasons=["macos_virtualization_helper_unavailable"],
+                execution_mode="none",
+            ),
+            RuntimeType.seatbelt: RuntimePreflightResult(
+                runtime=RuntimeType.seatbelt,
+                available=False,
+                reasons=["seatbelt_unavailable"],
+                execution_mode="none",
+                supported_trust_levels=["trusted"],
+            ),
+        },
+    )
+
+    data = diagnostics_module.collect_macos_diagnostics(_FakeOrchestrator())
+
+    assert _FakeHelper.list_calls == 1
+    assert data["reconciliation"]["live_vms"] == 1
+    assert data["observability"]["live_vms"] == 1
 
 
 def test_observability_path_parser_rejects_embedded_nul() -> None:
