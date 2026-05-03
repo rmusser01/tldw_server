@@ -3,6 +3,23 @@ import { describe, expect, it } from "vitest"
 import { extractFallbackFieldNamesFromSource } from "../../scripts/verify-openapi-client-paths.mjs"
 
 describe("extractFallbackFieldNamesFromSource", () => {
+  it("parses typed fallback declarations without treating annotation brackets as the array", () => {
+    const src = `
+      export const MEDIA_ADD_SCHEMA_FALLBACK: Array<{
+        name: string
+        enum?: unknown[]
+      }> = [
+        { name: "typed-field" },
+        { name: 'second-field' }
+      ]
+    `
+
+    expect(extractFallbackFieldNamesFromSource(src)).toEqual([
+      "typed-field",
+      "second-field",
+    ])
+  })
+
   it("ignores brackets inside strings and comments while parsing the fallback array", () => {
     const src = `
       export const MEDIA_ADD_SCHEMA_FALLBACK = [
