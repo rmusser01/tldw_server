@@ -428,6 +428,57 @@ class SandboxAdminMacOSImageStoreDiagnostics(BaseModel):
     reasons: list[str] = Field(default_factory=list)
 
 
+class SandboxAdminMacOSLogPointer(BaseModel):
+    """Read-only pointer to a host log file without exposing file contents."""
+
+    path: str | None = None
+    exists: bool = False
+    size_bytes: int | None = None
+
+
+class SandboxAdminMacOSHelperLogPointers(BaseModel):
+    """Pointers to the managed VZ helper stdout and stderr logs."""
+
+    stdout: SandboxAdminMacOSLogPointer
+    stderr: SandboxAdminMacOSLogPointer
+
+
+class SandboxAdminMacOSGuestObservability(BaseModel):
+    """Guest-agent readiness metadata reported by the helper for a live VM."""
+
+    version: str | None = None
+    workspace_root: str | None = None
+    capabilities_known: bool | None = None
+    capabilities: list[str] = Field(default_factory=list)
+
+
+class SandboxAdminMacOSVMObservability(BaseModel):
+    """Per-VM boot-log, guest, and resource diagnostics for VZ Linux."""
+
+    vm_id: str
+    state: str | None = None
+    healthy: bool
+    run_id: str | None = None
+    session_id: str | None = None
+    session_mode: bool = False
+    serial_log: SandboxAdminMacOSLogPointer
+    guest: SandboxAdminMacOSGuestObservability
+    resource_snapshot: dict[str, int] = Field(default_factory=dict)
+
+
+class SandboxAdminMacOSObservabilityDiagnostics(BaseModel):
+    """Aggregated read-only VZ Linux observability block for admin diagnostics."""
+
+    configured: bool
+    serial_log_dir: str | None = None
+    helper_log_dir: str | None = None
+    helper_log_dir_source: str | None = None
+    helper_logs: SandboxAdminMacOSHelperLogPointers
+    live_vms: int = 0
+    vms: list[SandboxAdminMacOSVMObservability] = Field(default_factory=list)
+    reasons: list[str] = Field(default_factory=list)
+
+
 class SandboxAdminStartupWarningSummary(BaseModel):
     """Compact startup warning summary projected into sandbox diagnostics."""
 
@@ -445,6 +496,7 @@ class SandboxAdminMacOSDiagnosticsResponse(BaseModel):
     runtimes: dict[str, SandboxAdminMacOSRuntimeDiagnostics] = Field(default_factory=dict)
     reconciliation: SandboxAdminMacOSReconciliationDiagnostics | None = None
     image_store: SandboxAdminMacOSImageStoreDiagnostics | None = None
+    observability: SandboxAdminMacOSObservabilityDiagnostics | None = None
     startup_warning_summary: SandboxAdminStartupWarningSummary | None = None
 
 

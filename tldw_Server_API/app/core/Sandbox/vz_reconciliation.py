@@ -151,11 +151,15 @@ def collect_vz_reconciliation(
     *,
     helper_client: Any | None = None,
     active_session_checker: Callable[[str], bool] | None = None,
+    live: Any | None = None,
+    live_failure_reason: str | None = None,
 ) -> dict[str, object]:
     """Compare persisted VZ session-control rows with live helper VM state.
 
     This collector is intentionally read-only: it only lists persisted rows and
     live VMs, then reports mismatches for later explicit repair paths.
+    Callers that already fetched helper VM state can pass ``live`` or
+    ``live_failure_reason`` to avoid duplicate helper RPCs.
     """
 
     report = _empty_report()
@@ -177,23 +181,27 @@ def collect_vz_reconciliation(
 
     report["persisted_sessions"] = len(persisted_rows)
 
-    client = helper_client if helper_client is not None else MacOSVirtualizationHelperClient()
-    try:
-        live = client.list_vms()
-    except MacOSVirtualizationHelperUnavailable:
-        report["reasons"] = [REASON_HELPER_UNAVAILABLE]
+    if live_failure_reason:
+        report["reasons"] = [live_failure_reason]
         return report
-    except MacOSVirtualizationHelperProtocolError:
-        report["reasons"] = [REASON_PROTOCOL_MISMATCH]
-        return report
-    except MacOSVirtualizationHelperFailure as exc:
-        logger.debug("VZ helper returned failure for reconciliation: {}", exc.error_code)
-        report["reasons"] = [REASON_HELPER_FAILURE]
-        return report
-    except Exception as exc:
-        logger.debug("Unable to collect VZ helper VM list for reconciliation: {}", exc)
-        report["reasons"] = [REASON_RECONCILIATION_UNAVAILABLE]
-        return report
+    if live is None:
+        client = helper_client if helper_client is not None else MacOSVirtualizationHelperClient()
+        try:
+            live = client.list_vms()
+        except MacOSVirtualizationHelperUnavailable:
+            report["reasons"] = [REASON_HELPER_UNAVAILABLE]
+            return report
+        except MacOSVirtualizationHelperProtocolError:
+            report["reasons"] = [REASON_PROTOCOL_MISMATCH]
+            return report
+        except MacOSVirtualizationHelperFailure as exc:
+            logger.debug("VZ helper returned failure for reconciliation: {}", exc.error_code)
+            report["reasons"] = [REASON_HELPER_FAILURE]
+            return report
+        except Exception as exc:
+            logger.debug("Unable to collect VZ helper VM list for reconciliation: {}", exc)
+            report["reasons"] = [REASON_RECONCILIATION_UNAVAILABLE]
+            return report
 
     live_vm_by_id = {
         vm_id: vm
