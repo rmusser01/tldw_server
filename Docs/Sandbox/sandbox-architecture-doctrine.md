@@ -82,6 +82,10 @@ The current evaluation record is:
 
 - `Docs/Design/2026-05-02-apple-containerization-evaluation.md`
 
+The current cross-runtime support inventory is:
+
+- `Docs/Sandbox/sandbox-runtime-capability-inventory.md`
+
 ## Non-Negotiable Boundaries
 
 ### Trusted Control Plane vs Untrusted Compute

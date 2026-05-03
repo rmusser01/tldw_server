@@ -51,6 +51,10 @@ Trust-level rules:
   `Docs/superpowers/specs/2026-05-02-sandbox-module-roadmap-design.md`.
   It sequences remaining work across API, orchestrator, runtimes, security,
   admin, and CI without treating every runtime as equally mature.
+- The runtime capability inventory lives in
+  `Docs/Sandbox/sandbox-runtime-capability-inventory.md`. It classifies each
+  runtime's current trust, network, lifecycle, recovery, diagnostics, and CI
+  support states without treating host availability as a security guarantee.
 - macOS scaffolding currently includes:
   - a Unix-socket helper client plus protocol models in `macos_virtualization/`
   - frozen helper contract docs in `tools/macos-vz-helper/`

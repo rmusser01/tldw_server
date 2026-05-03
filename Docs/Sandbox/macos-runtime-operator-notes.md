@@ -220,6 +220,7 @@ item and reports `live_vm_matches_blocked_cleanup` instead of deleting files.
   - `vz_linux`
   - `vz_macos`
   - `seatbelt`
+  - `worktree`
 - `vz_linux` session-mode reuse exists now and reuses a persisted VM for later commands in the same sandbox session.
 - `vz_macos` still has no warm-session optimization.
 
