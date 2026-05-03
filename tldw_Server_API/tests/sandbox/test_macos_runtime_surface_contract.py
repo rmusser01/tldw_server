@@ -42,13 +42,7 @@ async def test_mcp_tool_schema_lists_new_macos_runtimes() -> None:
     tool = next(item for item in tools if item["name"] == "sandbox.run")
 
     assert tool["inputSchema"]["properties"]["runtime"]["enum"] == [
-        "docker",
-        "firecracker",
-        "lima",
-        "vz_linux",
-        "vz_macos",
-        "seatbelt",
-        "worktree",
+        runtime.value for runtime in RuntimeType
     ]
 
 

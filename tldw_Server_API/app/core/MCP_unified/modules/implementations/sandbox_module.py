@@ -26,6 +26,10 @@ from ....Sandbox.service import SandboxService
 from ..base import BaseModule
 
 
+def _runtime_values() -> list[str]:
+    return [runtime.value for runtime in SbxRuntimeType]
+
+
 class SandboxModule(BaseModule):
     async def on_initialize(self) -> None:
         logger.info(f"Initializing Sandbox module: {self.name}")
@@ -50,15 +54,7 @@ class SandboxModule(BaseModule):
                     "properties": {
                         "runtime": {
                             "type": "string",
-                            "enum": [
-                                "docker",
-                                "firecracker",
-                                "lima",
-                                "vz_linux",
-                                "vz_macos",
-                                "seatbelt",
-                                "worktree",
-                            ],
+                            "enum": _runtime_values(),
                         },
                         "session_id": {"type": "string"},
                         "base_image": {"type": "string"},
@@ -294,7 +290,7 @@ class SandboxModule(BaseModule):
         if (isinstance(sess, str) and sess) and (isinstance(img, str) and img):
             raise ValueError("Provide only one of session_id or base_image, not both")
         rt = arguments.get("runtime")
-        runtime_values = tuple(runtime.value for runtime in SbxRuntimeType)
+        runtime_values = tuple(_runtime_values())
         if rt is not None and str(rt).strip().lower() not in runtime_values:
             raise ValueError(
                 f"runtime must be {'|'.join(runtime_values)} when provided"
