@@ -29,16 +29,21 @@ avoid overclaiming isolation, networking, recovery, or CI coverage.
 ## Discovery Contract
 
 `/api/v1/sandbox/runtimes` is the summarized client-facing discovery surface.
-It should include every value from `RuntimeType`:
+It should include every value from `RuntimeType` and expose two separate
+concepts:
 
-| Runtime | Discovery entry | Source |
+- `available`: current host/preflight truth.
+- `implementation_state`: roadmap maturity label independent of whether this
+  specific host has the required binaries, helper, VM support, or feature flags.
+
+| Runtime | `implementation_state` | Discovery source |
 | --- | --- | --- |
 | `docker` | `supported` | `SandboxService.feature_discovery()` plus `docker_available()` |
-| `firecracker` | `supported` | `SandboxService.feature_discovery()` plus `firecracker_available()` |
-| `lima` | `supported` | `LimaRunner.preflight()` |
-| `vz_linux` | `supported` | `VZLinuxRunner.preflight()` |
-| `vz_macos` | `supported` | `VZMacOSRunner.preflight()` |
-| `seatbelt` | `supported` | `SeatbeltRunner.preflight()` |
+| `firecracker` | `host_gated` | `SandboxService.feature_discovery()` plus `firecracker_available()` |
+| `lima` | `host_gated` | `LimaRunner.preflight()` |
+| `vz_linux` | `host_gated` | `VZLinuxRunner.preflight()` |
+| `vz_macos` | `scaffold` | `VZMacOSRunner.preflight()` |
+| `seatbelt` | `host_gated` | `SeatbeltRunner.preflight()` |
 | `worktree` | `supported` | `WorktreeRunner.preflight()` |
 
 Discovery is intentionally summarized. Admin/operator diagnostics can expose

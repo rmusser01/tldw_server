@@ -1,9 +1,32 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal, Mapping
 
 from .models import RuntimeType
+
+RuntimeImplementationState = Literal[
+    "supported",
+    "unsupported",
+    "scaffold",
+    "host_gated",
+    "not_applicable",
+]
+
+RUNTIME_IMPLEMENTATION_STATES: Mapping[RuntimeType, RuntimeImplementationState] = {
+    RuntimeType.docker: "supported",
+    RuntimeType.firecracker: "host_gated",
+    RuntimeType.lima: "host_gated",
+    RuntimeType.vz_linux: "host_gated",
+    RuntimeType.vz_macos: "scaffold",
+    RuntimeType.seatbelt: "host_gated",
+    RuntimeType.worktree: "supported",
+}
+
+
+def runtime_implementation_state(runtime: RuntimeType) -> RuntimeImplementationState:
+    """Return the roadmap maturity label for a runtime, independent of host availability."""
+    return RUNTIME_IMPLEMENTATION_STATES.get(runtime, "unsupported")
 
 
 @dataclass
