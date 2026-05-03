@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import importlib
 import sys
+from collections.abc import Callable
 
 import pytest
-
 
 pytestmark = pytest.mark.unit
 
@@ -21,27 +21,37 @@ async def test_start_sidecar_owned_jobs_pollers_combines_handles_in_order(
     startup_pollers = _import_startup_sidecar_owned_jobs_pollers()
     calls: list[str] = []
 
-    async def _record_reminder(**kwargs):
+    async def _record_reminder(**kwargs: object) -> tuple[str, str]:
+        """Record that the reminder worker starter ran."""
+
         del kwargs
         calls.append("reminder")
         return ("reminder-stop", "reminder-task")
 
-    async def _record_admin_backup(**kwargs):
+    async def _record_admin_backup(**kwargs: object) -> tuple[str, str]:
+        """Record that the admin backup worker starter ran."""
+
         del kwargs
         calls.append("admin-backup")
         return ("admin-backup-stop", "admin-backup-task")
 
-    async def _record_admin_byok(**kwargs):
+    async def _record_admin_byok(**kwargs: object) -> tuple[str, str]:
+        """Record that the admin BYOK worker starter ran."""
+
         del kwargs
         calls.append("admin-byok")
         return ("admin-byok-stop", "admin-byok-task")
 
-    async def _record_admin_maintenance(**kwargs):
+    async def _record_admin_maintenance(**kwargs: object) -> tuple[str, str]:
+        """Record that the admin maintenance worker starter ran."""
+
         del kwargs
         calls.append("admin-maintenance")
         return ("admin-maintenance-stop", "admin-maintenance-task")
 
-    async def _record_recipe(**kwargs):
+    async def _record_recipe(**kwargs: object) -> tuple[str, str]:
+        """Record that the recipe-run worker starter ran."""
+
         del kwargs
         calls.append("recipe")
         return ("recipe-stop", "recipe-task")
@@ -74,6 +84,138 @@ async def test_start_sidecar_owned_jobs_pollers_combines_handles_in_order(
     assert handles.admin_maintenance_rotation_jobs_task == "admin-maintenance-task"
     assert handles.recipe_run_jobs_stop_event == "recipe-stop"
     assert handles.recipe_run_jobs_task == "recipe-task"
+
+
+@pytest.mark.asyncio
+async def test_start_sidecar_owned_jobs_pollers_passes_inventory_to_workers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_pollers = _import_startup_sidecar_owned_jobs_pollers()
+    worker_inventory = object()
+    captured_kwargs_by_worker: dict[str, dict[str, object]] = {}
+
+    def _record_worker(label: str) -> Callable[..., object]:
+        """Build a starter stub that captures kwargs for one worker label."""
+
+        async def _record(**kwargs: object) -> tuple[str, str]:
+            """Capture worker startup kwargs and return deterministic handles."""
+
+            captured_kwargs_by_worker[label] = kwargs
+            return (f"{label}-stop", f"{label}-task")
+
+        return _record
+
+    monkeypatch.setattr(startup_pollers, "_start_reminder_jobs_worker", _record_worker("reminder"))
+    monkeypatch.setattr(startup_pollers, "_start_admin_backup_jobs_worker", _record_worker("admin-backup"))
+    monkeypatch.setattr(startup_pollers, "_start_admin_byok_validation_jobs_worker", _record_worker("admin-byok"))
+    monkeypatch.setattr(
+        startup_pollers,
+        "_start_admin_maintenance_rotation_jobs_worker",
+        _record_worker("admin-maintenance"),
+    )
+    monkeypatch.setattr(startup_pollers, "_start_recipe_run_jobs_worker", _record_worker("recipe"))
+
+    await startup_pollers.start_sidecar_owned_jobs_pollers(
+        app="app",
+        owned_job_pollers=[],
+        register_owned_job_poller=lambda *args, **kwargs: None,
+        sidecar_mode=False,
+        worker_inventory=worker_inventory,
+    )
+
+    assert {
+        worker: kwargs["worker_inventory"]
+        for worker, kwargs in captured_kwargs_by_worker.items()
+    } == {
+        "reminder": worker_inventory,
+        "admin-backup": worker_inventory,
+        "admin-byok": worker_inventory,
+        "admin-maintenance": worker_inventory,
+        "recipe": worker_inventory,
+    }
+
+
+@pytest.mark.parametrize(
+    (
+        "starter_name",
+        "registered_name",
+        "service_name",
+    ),
+    [
+        (
+            "_start_reminder_jobs_worker",
+            "reminder_jobs_task",
+            "_start_reminder_jobs_worker_service",
+        ),
+        (
+            "_start_admin_backup_jobs_worker",
+            "admin_backup_jobs_task",
+            "_start_admin_backup_jobs_worker_service",
+        ),
+        (
+            "_start_admin_byok_validation_jobs_worker",
+            "admin_byok_validation_jobs_task",
+            "_start_admin_byok_validation_jobs_worker_service",
+        ),
+        (
+            "_start_admin_maintenance_rotation_jobs_worker",
+            "admin_maintenance_rotation_jobs_task",
+            "_start_admin_maintenance_rotation_jobs_worker_service",
+        ),
+        (
+            "_start_recipe_run_jobs_worker",
+            "recipe_run_jobs_task",
+            "_start_recipe_run_jobs_worker_service",
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_sidecar_owned_jobs_worker_registers_with_worker_inventory_when_task_created(
+    monkeypatch: pytest.MonkeyPatch,
+    starter_name: str,
+    registered_name: str,
+    service_name: str,
+) -> None:
+    startup_pollers = _import_startup_sidecar_owned_jobs_pollers()
+    registrations: list[object] = []
+
+    class _FakeWorkerInventory:
+        """Test double that records lifecycle inventory registrations."""
+
+        def register(self, worker: object) -> object:
+            """Capture the registered worker and return it."""
+
+            registrations.append(worker)
+            return worker
+
+    monkeypatch.setattr(startup_pollers, "_make_event", lambda: f"{registered_name}-stop")
+    monkeypatch.setattr(
+        startup_pollers,
+        service_name,
+        lambda *, stop_event: f"{registered_name}-task",
+    )
+
+    def _register_owned_job_poller(*args: object, **kwargs: object) -> None:
+        raise AssertionError("legacy poller registration should not run")
+
+    stop_event, task = await getattr(startup_pollers, starter_name)(
+        app="app",
+        owned_job_pollers=[],
+        register_owned_job_poller=_register_owned_job_poller,
+        sidecar_mode=False,
+        worker_inventory=_FakeWorkerInventory(),
+    )
+
+    assert stop_event == f"{registered_name}-stop"
+    assert task == f"{registered_name}-task"
+    assert len(registrations) == 1
+    worker = registrations[0]
+    assert worker.name == registered_name
+    assert worker.task == f"{registered_name}-task"
+    assert worker.stop_event == f"{registered_name}-stop"
+    assert worker.timeout_sec == 5.0
+    assert worker.category == "jobs"
+    assert worker.shutdown_phase == startup_pollers.ShutdownPhase.JOB_POLLER_QUIESCE
 
 
 @pytest.mark.asyncio

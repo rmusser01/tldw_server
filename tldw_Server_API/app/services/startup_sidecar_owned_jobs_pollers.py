@@ -11,6 +11,12 @@ from typing import Any, Callable
 
 from loguru import logger
 
+from tldw_Server_API.app.services.lifecycle_workers import (
+    ManagedWorker,
+    ShutdownPhase,
+    WorkerRegistry,
+)
+
 _STARTUP_GUARD_EXCEPTIONS = (
     AttributeError,
     ImportError,
@@ -43,6 +49,7 @@ async def start_sidecar_owned_jobs_pollers(
     owned_job_pollers: list[Any],
     register_owned_job_poller: Callable[..., None],
     sidecar_mode: bool,
+    worker_inventory: WorkerRegistry | None = None,
 ) -> SidecarOwnedJobsPollerHandles:
     """Start sidecar-gated owned jobs pollers and return their handles."""
 
@@ -51,12 +58,14 @@ async def start_sidecar_owned_jobs_pollers(
         owned_job_pollers=owned_job_pollers,
         register_owned_job_poller=register_owned_job_poller,
         sidecar_mode=sidecar_mode,
+        worker_inventory=worker_inventory,
     )
     admin_backup_jobs_stop_event, admin_backup_jobs_task = await _start_admin_backup_jobs_worker(
         app=app,
         owned_job_pollers=owned_job_pollers,
         register_owned_job_poller=register_owned_job_poller,
         sidecar_mode=sidecar_mode,
+        worker_inventory=worker_inventory,
     )
     (
         admin_byok_validation_jobs_stop_event,
@@ -66,6 +75,7 @@ async def start_sidecar_owned_jobs_pollers(
         owned_job_pollers=owned_job_pollers,
         register_owned_job_poller=register_owned_job_poller,
         sidecar_mode=sidecar_mode,
+        worker_inventory=worker_inventory,
     )
     (
         admin_maintenance_rotation_jobs_stop_event,
@@ -75,12 +85,14 @@ async def start_sidecar_owned_jobs_pollers(
         owned_job_pollers=owned_job_pollers,
         register_owned_job_poller=register_owned_job_poller,
         sidecar_mode=sidecar_mode,
+        worker_inventory=worker_inventory,
     )
     recipe_run_jobs_stop_event, recipe_run_jobs_task = await _start_recipe_run_jobs_worker(
         app=app,
         owned_job_pollers=owned_job_pollers,
         register_owned_job_poller=register_owned_job_poller,
         sidecar_mode=sidecar_mode,
+        worker_inventory=worker_inventory,
     )
     return SidecarOwnedJobsPollerHandles(
         reminder_jobs_stop_event=reminder_jobs_stop_event,
@@ -106,12 +118,63 @@ async def _resolve_result(result: Any) -> Any:
     return result
 
 
+def _safe_cancel_task(task: Any) -> None:
+    """Best-effort cancel a started worker after startup registration rollback."""
+
+    cancel = getattr(task, "cancel", None)
+    if cancel is None:
+        return
+    try:
+        cancel()
+    except _STARTUP_GUARD_EXCEPTIONS as exc:
+        logger.debug(f"Failed to cancel sidecar-owned Jobs worker during startup rollback: {exc}")
+
+
+def _register_started_jobs_worker(
+    *,
+    app: Any,
+    owned_job_pollers: list[Any],
+    register_owned_job_poller: Callable[..., None],
+    worker_inventory: WorkerRegistry | None,
+    name: str,
+    task: Any,
+    stop_event: Any,
+) -> None:
+    """Register an already-started sidecar-owned jobs poller."""
+
+    if worker_inventory is not None:
+        try:
+            worker_inventory.register(
+                ManagedWorker(
+                    name=name,
+                    task=task,
+                    stop_event=stop_event,
+                    timeout_sec=5.0,
+                    category="jobs",
+                    shutdown_phase=ShutdownPhase.JOB_POLLER_QUIESCE,
+                )
+            )
+        except _STARTUP_GUARD_EXCEPTIONS:
+            _safe_cancel_task(task)
+            raise
+        return
+
+    register_owned_job_poller(
+        app,
+        owned_job_pollers,
+        name=name,
+        task=task,
+        stop_event=stop_event,
+    )
+
+
 async def _start_reminder_jobs_worker(
     *,
     app: Any,
     owned_job_pollers: list[Any],
     register_owned_job_poller: Callable[..., None],
     sidecar_mode: bool,
+    worker_inventory: WorkerRegistry | None = None,
 ) -> tuple[Any | None, Any | None]:
     try:
         if sidecar_mode:
@@ -122,9 +185,11 @@ async def _start_reminder_jobs_worker(
         task = await _resolve_result(_start_reminder_jobs_worker_service(stop_event=stop_event))
         if task:
             logger.info("Reminder Jobs worker started")
-            register_owned_job_poller(
-                app,
-                owned_job_pollers,
+            _register_started_jobs_worker(
+                app=app,
+                owned_job_pollers=owned_job_pollers,
+                register_owned_job_poller=register_owned_job_poller,
+                worker_inventory=worker_inventory,
                 name="reminder_jobs_task",
                 task=task,
                 stop_event=stop_event,
@@ -143,6 +208,7 @@ async def _start_admin_backup_jobs_worker(
     owned_job_pollers: list[Any],
     register_owned_job_poller: Callable[..., None],
     sidecar_mode: bool,
+    worker_inventory: WorkerRegistry | None = None,
 ) -> tuple[Any | None, Any | None]:
     try:
         if sidecar_mode:
@@ -153,9 +219,11 @@ async def _start_admin_backup_jobs_worker(
         task = await _resolve_result(_start_admin_backup_jobs_worker_service(stop_event=stop_event))
         if task:
             logger.info("Admin backup Jobs worker started")
-            register_owned_job_poller(
-                app,
-                owned_job_pollers,
+            _register_started_jobs_worker(
+                app=app,
+                owned_job_pollers=owned_job_pollers,
+                register_owned_job_poller=register_owned_job_poller,
+                worker_inventory=worker_inventory,
                 name="admin_backup_jobs_task",
                 task=task,
                 stop_event=stop_event,
@@ -174,6 +242,7 @@ async def _start_admin_byok_validation_jobs_worker(
     owned_job_pollers: list[Any],
     register_owned_job_poller: Callable[..., None],
     sidecar_mode: bool,
+    worker_inventory: WorkerRegistry | None = None,
 ) -> tuple[Any | None, Any | None]:
     try:
         if sidecar_mode:
@@ -184,9 +253,11 @@ async def _start_admin_byok_validation_jobs_worker(
         task = await _resolve_result(_start_admin_byok_validation_jobs_worker_service(stop_event=stop_event))
         if task:
             logger.info("Admin BYOK validation Jobs worker started")
-            register_owned_job_poller(
-                app,
-                owned_job_pollers,
+            _register_started_jobs_worker(
+                app=app,
+                owned_job_pollers=owned_job_pollers,
+                register_owned_job_poller=register_owned_job_poller,
+                worker_inventory=worker_inventory,
                 name="admin_byok_validation_jobs_task",
                 task=task,
                 stop_event=stop_event,
@@ -208,6 +279,7 @@ async def _start_admin_maintenance_rotation_jobs_worker(
     owned_job_pollers: list[Any],
     register_owned_job_poller: Callable[..., None],
     sidecar_mode: bool,
+    worker_inventory: WorkerRegistry | None = None,
 ) -> tuple[Any | None, Any | None]:
     try:
         if sidecar_mode:
@@ -218,9 +290,11 @@ async def _start_admin_maintenance_rotation_jobs_worker(
         task = await _resolve_result(_start_admin_maintenance_rotation_jobs_worker_service(stop_event=stop_event))
         if task:
             logger.info("Admin maintenance rotation Jobs worker started")
-            register_owned_job_poller(
-                app,
-                owned_job_pollers,
+            _register_started_jobs_worker(
+                app=app,
+                owned_job_pollers=owned_job_pollers,
+                register_owned_job_poller=register_owned_job_poller,
+                worker_inventory=worker_inventory,
                 name="admin_maintenance_rotation_jobs_task",
                 task=task,
                 stop_event=stop_event,
@@ -242,6 +316,7 @@ async def _start_recipe_run_jobs_worker(
     owned_job_pollers: list[Any],
     register_owned_job_poller: Callable[..., None],
     sidecar_mode: bool,
+    worker_inventory: WorkerRegistry | None = None,
 ) -> tuple[Any | None, Any | None]:
     try:
         if sidecar_mode:
@@ -252,9 +327,11 @@ async def _start_recipe_run_jobs_worker(
         task = await _resolve_result(_start_recipe_run_jobs_worker_service(stop_event=stop_event))
         if task:
             logger.info("Evaluation recipe-run Jobs worker started")
-            register_owned_job_poller(
-                app,
-                owned_job_pollers,
+            _register_started_jobs_worker(
+                app=app,
+                owned_job_pollers=owned_job_pollers,
+                register_owned_job_poller=register_owned_job_poller,
+                worker_inventory=worker_inventory,
                 name="recipe_run_jobs_task",
                 task=task,
                 stop_event=stop_event,
