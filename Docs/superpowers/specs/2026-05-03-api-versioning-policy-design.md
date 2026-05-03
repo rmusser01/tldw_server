@@ -16,21 +16,21 @@ This design is policy-first. It does not approve immediate runtime migrations.
 
 ## Current Constraints
 
-Current versioning documentation in [Docs/API/api-versioning-strategy.md](/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/phase4-5-api-versioning-policy/Docs/API/api-versioning-strategy.md)
+Current versioning documentation in [Docs/API/api-versioning-strategy.md](../../API/api-versioning-strategy.md)
 already defines path-based `/api/v1/` versioning and treats response-field
 removal, error-format changes, auth changes, and path changes as breaking.
 
 Current shared helper surfaces already exist:
 
 - Backend canonical envelope schema uses `metadata`, not `meta`:
-  [response_envelope.py](/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/phase4-5-api-versioning-policy/tldw_Server_API/app/api/v1/schemas/response_envelope.py)
+  [response_envelope.py](../../../tldw_Server_API/app/api/v1/schemas/response_envelope.py)
 - Backend envelope builders and detection also use `metadata`:
-  [response_envelope.py](/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/phase4-5-api-versioning-policy/tldw_Server_API/app/api/v1/utils/response_envelope.py)
+  [response_envelope.py](../../../tldw_Server_API/app/api/v1/utils/response_envelope.py)
 - Frontend shared unwrap helpers use the same `metadata` contract:
-  [response-envelope.ts](/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/phase4-5-api-versioning-policy/apps/packages/ui/src/services/response-envelope.ts)
+  [response-envelope.ts](../../../apps/packages/ui/src/services/response-envelope.ts)
 - Canonical pagination docs currently describe additive nested `pagination`
   objects in `v1`:
-  [Pagination.md](/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/phase4-5-api-versioning-policy/Docs/API/Pagination.md)
+  [Pagination.md](../../API/Pagination.md)
 
 The older Phase 3 / Phase 4 planning notes are directionally useful but stale
 in one important way: they refer to `meta.pagination`, which no longer matches

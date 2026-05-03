@@ -146,6 +146,6 @@ Current exemption categories:
 - Detail and nested subresource routes: only paginate if they expose direct
   list/search/history/job/event semantics.
 
-See [API Versioning Strategy](/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/phase4-5-api-versioning-policy/Docs/API/api-versioning-strategy.md)
+See [API Versioning Strategy](api-versioning-strategy.md)
 for the rule that default-breaking shape changes should move to a sibling route
 or `/api/v2/`.
