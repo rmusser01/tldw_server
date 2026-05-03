@@ -24,6 +24,7 @@ from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import (
     get_chacha_db_for_user,
     get_chacha_db_for_user_id,
 )
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.schemas.voice_assistant_schemas import (
     VoiceActionType,
     VoiceAnalytics,
@@ -71,6 +72,7 @@ from tldw_Server_API.app.core.VoiceAssistant import (
     VoiceCommand,
     VoiceCommandRouter,
     VoiceSessionManager,
+    count_user_voice_sessions,
     get_active_voice_session_count,
     get_user_voice_sessions,
     get_voice_analytics_summary_stats,
@@ -720,21 +722,29 @@ async def delete_voice_command(
 async def list_voice_sessions(
     active_only: bool = Query(True, description="Only return active sessions"),
     limit: int = Query(100, ge=1, le=1000, description="Maximum sessions to return"),
+    offset: int = Query(0, ge=0, description="Zero-based pagination offset"),
     current_user: User = Depends(get_request_user),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> VoiceSessionListResponse:
     """List active voice sessions."""
+    active_after = None
+    if active_only:
+        from datetime import datetime, timedelta
+
+        active_after = datetime.utcnow() - timedelta(seconds=VoiceSessionManager.SESSION_TIMEOUT)
+
     sessions = get_user_voice_sessions(
         db,
         user_id=current_user.id,
         limit=limit,
+        offset=offset,
+        active_after=active_after,
     )
-
-    if active_only:
-        from datetime import datetime, timedelta
-
-        cutoff = datetime.utcnow() - timedelta(seconds=VoiceSessionManager.SESSION_TIMEOUT)
-        sessions = [s for s in sessions if s.last_activity >= cutoff]
+    total = count_user_voice_sessions(
+        db,
+        user_id=current_user.id,
+        active_after=active_after,
+    )
 
     session_infos = [
         VoiceSessionInfo(
@@ -747,10 +757,17 @@ async def list_voice_sessions(
         )
         for session in sessions
     ]
+    pagination = build_offset_pagination_meta(
+        limit=limit,
+        offset=offset,
+        total=total,
+        count=len(session_infos),
+    )
 
     return VoiceSessionListResponse(
         sessions=session_infos,
-        total=len(session_infos),
+        total=total,
+        pagination=pagination,
     )
 
 
