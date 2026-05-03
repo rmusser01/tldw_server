@@ -70,6 +70,7 @@ describe("chat submit result contract", () => {
     expect(source).toMatch(/Promise<ChatSubmitResult>/)
     expect(source).toContain("return chatSubmitSubmitted()")
     expect(source).toContain("return chatSubmitFailed(interruptionReason)")
+    expect(source).toContain("return chatSubmitSkipped(")
   })
 
   it("requires chat mode wrappers to return pipeline results", () => {
@@ -94,10 +95,21 @@ describe("chat submit result contract", () => {
     expect(source).toMatch(/Promise<ChatSubmitResult>/)
     expect(source).toContain("resolveTurnRagMediaIds")
     expect(source).toContain("resolveTurnFileRetrievalEnabled")
+    expect(source).toMatch(
+      /buildChatModeParams\(\{[\s\S]*ragMediaIds:\s*turnRagMediaIds[\s\S]*fileRetrievalEnabled:\s*turnFileRetrievalEnabled[\s\S]*selectedKnowledge:\s*turnSelectedKnowledge/
+    )
     expect(source).toContain("shouldUseRagForTurn")
     expect(source).toContain("const characterResult = await characterChatMode")
     expect(source).toContain("aggregateChatSubmitResults(compareResults)")
     expect(source).toContain("return chatSubmitFailed(errorMessage)")
     expect(source).toContain("return chatSubmitSkipped(")
+  })
+
+  it("only rolls continue output back into the composer after submitted results", () => {
+    const source = readUiSource("hooks/chat/useChatActions.ts")
+
+    expect(source).toMatch(
+      /const shouldApplyComposerRollback[\s\S]*continueResult\.status === "submitted"[\s\S]*continueOutputTarget === "composer_input"[\s\S]*if \(shouldApplyComposerRollback\)/
+    )
   })
 })

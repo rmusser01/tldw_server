@@ -24,6 +24,11 @@ const routePathsSource = loadSource(
   "../packages/ui/src/routes/route-paths.ts",
   "apps/packages/ui/src/routes/route-paths.ts"
 )
+const optionRouteVisibilitySource = loadSource(
+  "option route visibility",
+  "../packages/ui/src/routes/option-route-visibility.ts",
+  "apps/packages/ui/src/routes/option-route-visibility.ts"
+)
 const uiSettingsSource = loadSource(
   "ui settings",
   "../packages/ui/src/services/settings/ui-settings.ts",
@@ -72,10 +77,37 @@ const getHeaderShortcutIndex = (id: string) =>
   getHeaderShortcutAssignments().find((assignment) => assignment.id === id)
     ?.shortcutIndex
 
+const getDefaultSidebarShortcutSelectionLength = () => {
+  const match = uiSettingsSource.match(
+    /export const DEFAULT_SIDEBAR_SHORTCUT_SELECTION:\s*SidebarShortcutId\[\]\s*=\s*\[([\s\S]*?)\]/
+  )
+  if (!match) {
+    throw new Error("Missing DEFAULT_SIDEBAR_SHORTCUT_SELECTION")
+  }
+
+  return Array.from(match[1].matchAll(/"[^"]+"/g)).length
+}
+
+const getSidebarShortcutMaxCount = () => {
+  const match = uiSettingsSource.match(/SIDEBAR_SHORTCUT_MAX_COUNT\s*=\s*(\d+)/)
+  if (!match) {
+    throw new Error("Missing SIDEBAR_SHORTCUT_MAX_COUNT")
+  }
+
+  return Number(match[1])
+}
+
 describe("chat workspace route registry parity", () => {
   it("registers the shared chat workspace route using the shared path constant", () => {
     expect(sharedRouteRegistrySource).toContain("CHAT_WORKSPACE_PATH")
     expect(sharedRouteRegistrySource).toMatch(/path:\s*CHAT_WORKSPACE_PATH/)
+  })
+
+  it("keeps the chat workspace route visible in hosted mode", () => {
+    expect(optionRouteVisibilitySource).toContain("CHAT_WORKSPACE_PATH")
+    expect(headerShortcutItemsSource).toMatch(
+      /HOSTED_VISIBLE_SHORTCUT_PATHS[\s\S]*CHAT_WORKSPACE_PATH/
+    )
   })
 
   it("registers the extension chat workspace route and navigation metadata", () => {
@@ -112,10 +144,14 @@ describe("chat workspace route registry parity", () => {
       /DEFAULT_SIDEBAR_SHORTCUT_SELECTION[\s\S]*"chat",\s*"chat-workspace"/
     )
     expect(headerShortcutItemsSource).toContain('id: "chat-workspace"')
+    expect(headerShortcutItemsSource).toContain("to: CHAT_WORKSPACE_PATH")
     expect(headerShortcutItemsSource).toContain(
       'labelKey: "option:header.chatWorkspace"'
     )
     expect(headerShortcutItemsSource).toContain('labelDefault: "Chat Workspace"')
+    expect(headerShortcutItemsSource).toMatch(
+      /descriptionDefault:\s*"Chat-first workspace with staged sources and runtime context"/
+    )
     expect(headerShortcutItemsSource).toMatch(
       /id:\s*"chat-workspace"[\s\S]*shortcutIndex:\s*2/
     )
@@ -134,5 +170,11 @@ describe("chat workspace route registry parity", () => {
     expect(getHeaderShortcutIndex("chat-workspace")).toBe(2)
     expect(getHeaderShortcutIndex("prompt-studio")).toBe(3)
     expect(new Set(assignedIndexes).size).toBe(assignedIndexes.length)
+  })
+
+  it("keeps the default sidebar shortcut selection within the persisted maximum", () => {
+    expect(getDefaultSidebarShortcutSelectionLength()).toBeLessThanOrEqual(
+      getSidebarShortcutMaxCount()
+    )
   })
 })

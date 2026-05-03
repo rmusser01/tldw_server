@@ -2203,6 +2203,8 @@ export const useChatActions = ({
     const chatModeParams = await buildChatModeParams({
       ...(requestOverrides ?? {}),
       ragMediaIds: turnRagMediaIds,
+      fileRetrievalEnabled: turnFileRetrievalEnabled,
+      selectedKnowledge: turnSelectedKnowledge,
       selectedModel: effectiveSelectedModel,
       messageSteering: messageSteeringForTurn,
       userMessageType,
@@ -2262,7 +2264,11 @@ export const useChatActions = ({
           chatModeParams
         )
 
-        if (continueOutputTarget === "composer_input") {
+        const shouldApplyComposerRollback =
+          continueResult.status === "submitted" &&
+          continueOutputTarget === "composer_input"
+
+        if (shouldApplyComposerRollback) {
           const currentMessages = messagesRef.current
           const continuedMessage = continueTargetMessage?.id
             ? currentMessages.find((entry) => entry.id === continueTargetMessage.id)

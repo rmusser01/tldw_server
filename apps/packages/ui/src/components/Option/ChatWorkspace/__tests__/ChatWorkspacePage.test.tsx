@@ -54,11 +54,13 @@ vi.mock("../WorkspaceChatPanel", () => ({
     stagedSources,
     workspaceId,
     onClearStagedSources,
+    backendAvailable,
     onRuntimeStateChange
   }: {
     stagedSources: unknown[]
     workspaceId?: string | null
     onClearStagedSources: () => void
+    backendAvailable: boolean
     onRuntimeStateChange?: (state: unknown) => void
   }) => {
     const [mountedWorkspaceId] = React.useState(workspaceId)
@@ -79,7 +81,7 @@ vi.mock("../WorkspaceChatPanel", () => ({
     return (
       <section data-testid="workspace-chat-panel">
         staged:{stagedSources.length}; workspace:{workspaceId}; mounted:
-        {mountedWorkspaceId}
+        {mountedWorkspaceId}; backend:{String(backendAvailable)}
       </section>
     )
   }
@@ -157,21 +159,22 @@ describe("ChatWorkspacePage", () => {
     ).toBeInTheDocument()
   })
 
-  it("renders backend availability from chat runtime state", async () => {
+  it("keeps rail backend availability sourced from the connection state", async () => {
     chatPanelRuntimeState.backendAvailable = false
 
     render(<ChatWorkspacePage />)
 
     expect(
-      await within(
+      within(
         screen.getByRole("complementary", { name: /workspace inspector/i })
-      ).findByText("Server unavailable")
+      ).getByText("Streaming")
     ).toBeInTheDocument()
     expect(
-      within(screen.getByLabelText("Chat workspace status")).getByText(
-        "Server unavailable"
-      )
+      within(screen.getByLabelText("Chat workspace status")).getByText("Streaming")
     ).toBeInTheDocument()
+    expect(screen.getByTestId("workspace-chat-panel")).toHaveTextContent(
+      "backend:true"
+    )
   })
 
   it("updates backend availability when the connection state changes", async () => {

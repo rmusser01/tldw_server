@@ -3,7 +3,8 @@ import React from "react"
 import { PlaygroundMessage } from "@/components/Common/Playground/Message"
 import {
   type ChatSubmitResult,
-  isChatSubmitSuccess
+  isChatSubmitSuccess,
+  normalizeChatSubmitResult
 } from "@/hooks/chat/chat-action-utils"
 import type { Message } from "@/store/option"
 import { useMessageOption } from "@/hooks/useMessageOption"
@@ -108,7 +109,8 @@ export const WorkspaceChatPanel = ({
       source.mediaId <= 0
   )
   const trimmedDraft = draft.trim()
-  const sendDisabled = isSending || (!trimmedDraft && !hasStagedContext)
+  const sendDisabled =
+    !backendAvailable || isSending || (!trimmedDraft && !hasStagedContext)
   const conversationInstanceId = workspaceId ?? "workspace-chat"
 
   const insertStagedSummary = React.useCallback(() => {
@@ -125,6 +127,7 @@ export const WorkspaceChatPanel = ({
 
   const submitMessage = React.useCallback(async () => {
     if (sendDisabled) return
+    if (!backendAvailable) return
 
     setSendError(null)
     const fallbackContext = formatStagedSourceInsertText(stagedSources).trim()
@@ -134,27 +137,34 @@ export const WorkspaceChatPanel = ({
         : trimmedDraft || fallbackContext
 
     try {
-      const result = (await onSubmit({
-        message: sendMessage,
-        image: "",
-        requestOverrides: {
-          ragMediaIds: readyMediaIds,
-          fileRetrievalEnabled: hasReadyMedia,
-          chatMode: hasReadyMedia ? "rag" : "normal"
-        }
-      })) as ChatSubmitResult | undefined
+      const result = normalizeChatSubmitResult(
+        (await onSubmit({
+          message: sendMessage,
+          image: "",
+          requestOverrides: {
+            ragMediaIds: readyMediaIds,
+            fileRetrievalEnabled: hasReadyMedia,
+            chatMode: hasReadyMedia ? "rag" : "normal"
+          }
+        })) as ChatSubmitResult | undefined
+      )
 
-      if (result && isChatSubmitSuccess(result)) {
+      if (isChatSubmitSuccess(result)) {
         setDraft("")
         onClearStagedSources()
         return
       }
 
-      setSendError("Send failed")
+      if (result.status === "skipped") {
+        return
+      }
+
+      setSendError(result.errorMessage || "Send failed")
     } catch {
       setSendError("Send failed")
     }
   }, [
+    backendAvailable,
     hasReadyMedia,
     hasUncarriedStagedContext,
     onClearStagedSources,

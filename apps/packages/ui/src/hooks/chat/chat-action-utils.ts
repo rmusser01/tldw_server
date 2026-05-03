@@ -148,7 +148,8 @@ export const resolveTurnRagMediaIds = ({
 }): number[] | null => {
   const hasExplicitOverride =
     requestOverrides != null &&
-    Object.prototype.hasOwnProperty.call(requestOverrides, "ragMediaIds");
+    Object.prototype.hasOwnProperty.call(requestOverrides, "ragMediaIds") &&
+    requestOverrides.ragMediaIds !== undefined;
 
   if (hasExplicitOverride) {
     return normalizeRagMediaIds(requestOverrides?.ragMediaIds);

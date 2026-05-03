@@ -31,7 +31,9 @@ export const ContextStagingCard = ({
     >
       <div className="flex flex-col gap-3">
         <div className="flex flex-col gap-1">
-          <h2 className="text-sm font-semibold">Context staged - not sent</h2>
+          <h2 className="text-sm font-semibold">
+            {isSending ? "Sending staged context" : "Context staged - not sent"}
+          </h2>
           <p className="text-xs text-text-muted">
             {isSending
               ? "Sending with staged context"

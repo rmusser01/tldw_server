@@ -1,4 +1,6 @@
 import { render, screen } from "@testing-library/react"
+import { readFileSync } from "node:fs"
+import { resolve } from "node:path"
 import { describe, expect, it } from "vitest"
 import { InspectorRail } from "../InspectorRail"
 
@@ -8,7 +10,10 @@ describe("InspectorRail", () => {
       <InspectorRail
         scopeLabel="Default workspace"
         stagedSourceCount={2}
-        stagedSourceTitles={["Operator Notes", "Research Clip"]}
+        stagedSources={[
+          { sourceId: "source-1", title: "Operator Notes" },
+          { sourceId: "source-2", title: "Research Clip" }
+        ]}
         selectedModelLabel="gpt-test"
         selectedPersonaLabel="Analyst"
         backendAvailable
@@ -27,7 +32,7 @@ describe("InspectorRail", () => {
       <InspectorRail
         scopeLabel="No workspace"
         stagedSourceCount={0}
-        stagedSourceTitles={[]}
+        stagedSources={[]}
         selectedModelLabel="No model selected"
         selectedPersonaLabel={null}
         backendAvailable={false}
@@ -45,7 +50,6 @@ describe("InspectorRail", () => {
       <InspectorRail
         scopeLabel="Default workspace"
         stagedSourceCount={2}
-        stagedSourceTitles={[]}
         stagedSources={[
           { sourceId: "source-1", title: "Meeting Notes" },
           { sourceId: "source-2", title: "Meeting Notes" }
@@ -58,5 +62,11 @@ describe("InspectorRail", () => {
     )
 
     expect(screen.getAllByText("Meeting Notes")).toHaveLength(2)
+  })
+
+  it("keeps the inspector API structured without title-only fallbacks", () => {
+    const source = readFileSync(resolve(__dirname, "../InspectorRail.tsx"), "utf8")
+
+    expect(source).not.toContain("stagedSourceTitles")
   })
 })

@@ -43,7 +43,6 @@ export const ChatWorkspaceConsole = ({
   onRuntimeStateChange
 }: ChatWorkspaceConsoleProps) => {
   const stagedSourceIds = stagedSources.map((source) => source.sourceId)
-  const stagedSourceTitles = stagedSources.map((source) => source.title)
   const inspectorSources = stagedSources.map((source) => ({
     sourceId: source.sourceId,
     title: source.title
@@ -89,7 +88,6 @@ export const ChatWorkspaceConsole = ({
           <InspectorRail
             scopeLabel={workspaceName}
             stagedSourceCount={stagedSources.length}
-            stagedSourceTitles={stagedSourceTitles}
             stagedSources={inspectorSources}
             selectedModelLabel={selectedModelLabel}
             selectedPersonaLabel={selectedPersonaLabel}

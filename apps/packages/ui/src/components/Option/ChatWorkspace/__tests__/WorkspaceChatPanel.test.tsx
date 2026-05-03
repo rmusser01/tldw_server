@@ -296,6 +296,30 @@ describe("WorkspaceChatPanel", () => {
     expect(chatHookState.onSubmit).not.toHaveBeenCalled()
   })
 
+  it("does not submit while the backend is unavailable", () => {
+    const onClearStagedSources = vi.fn()
+
+    render(
+      <WorkspaceChatPanel
+        stagedSources={[]}
+        onClearStagedSources={onClearStagedSources}
+        backendAvailable={false}
+        workspaceId="workspace-1"
+      />
+    )
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Chat workspace message" }), {
+      target: { value: "Do not send offline" }
+    })
+
+    const sendButton = screen.getByRole("button", { name: "Send message" })
+    expect(sendButton).toBeDisabled()
+    fireEvent.click(sendButton)
+
+    expect(chatHookState.onSubmit).not.toHaveBeenCalled()
+    expect(onClearStagedSources).not.toHaveBeenCalled()
+  })
+
   it("preserves draft and staged context when submit returns a failed result", async () => {
     chatHookState.onSubmit.mockResolvedValueOnce({
       status: "failed",
@@ -317,16 +341,16 @@ describe("WorkspaceChatPanel", () => {
     })
     fireEvent.click(screen.getByRole("button", { name: "Send with staged context" }))
 
-    await screen.findByText("Send failed")
+    await screen.findByText("network")
     expect(screen.getByRole("textbox", { name: "Chat workspace message" })).toHaveValue("Keep this draft")
     expect(onClearStagedSources).not.toHaveBeenCalled()
   })
 
-  it.each([
-    { label: "skipped", result: { status: "skipped", reason: "empty" } },
-    { label: "undefined", result: undefined }
-  ])("preserves draft and staged context when submit returns $label", async ({ result }) => {
-    chatHookState.onSubmit.mockResolvedValueOnce(result)
+  it("preserves draft and staged context without an error when submit is skipped", async () => {
+    chatHookState.onSubmit.mockResolvedValueOnce({
+      status: "skipped",
+      reason: "empty"
+    })
     const onClearStagedSources = vi.fn()
 
     render(
@@ -343,7 +367,8 @@ describe("WorkspaceChatPanel", () => {
     })
     fireEvent.click(screen.getByRole("button", { name: "Send with staged context" }))
 
-    await screen.findByText("Send failed")
+    await waitFor(() => expect(chatHookState.onSubmit).toHaveBeenCalledTimes(1))
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument()
     expect(screen.getByRole("textbox", { name: "Chat workspace message" })).toHaveValue("Keep this draft")
     expect(onClearStagedSources).not.toHaveBeenCalled()
   })

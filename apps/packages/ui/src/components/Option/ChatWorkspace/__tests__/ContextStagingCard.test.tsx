@@ -103,6 +103,7 @@ describe("ContextStagingCard", () => {
     })
 
     expect(sendButton).toBeDisabled()
+    expect(screen.getByText("Sending staged context")).toBeInTheDocument()
     expect(screen.getByText("Sending with staged context")).toBeInTheDocument()
 
     fireEvent.click(sendButton)

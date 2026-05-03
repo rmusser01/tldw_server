@@ -71,6 +71,22 @@ describe("turn-level RAG media overrides", () => {
     ).toBe(true)
   })
 
+  it("falls back to inherited media ids when an optional override is undefined", () => {
+    const resolved = resolveTurnRagMediaIds({
+      requestOverrides: { ragMediaIds: undefined },
+      ragMediaIds: [3]
+    })
+
+    expect(resolved).toEqual([3])
+    expect(
+      shouldUseRagForTurn({
+        selectedKnowledge: null,
+        fileRetrievalEnabled: true,
+        ragMediaIds: resolved
+      })
+    ).toBe(true)
+  })
+
   it("uses RAG when selectedKnowledge is set without media ids", () => {
     expect(
       shouldUseRagForTurn({

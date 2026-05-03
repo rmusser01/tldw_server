@@ -92,7 +92,8 @@ const BASE_HEADER_SHORTCUT_GROUPS: HeaderShortcutGroup[] = [
         labelDefault: "Chat Workspace",
         shortcutIndex: 2,
         descriptionKey: "option:header.chatWorkspaceDesc",
-        descriptionDefault: "Terminal-literal workspace for chat sessions"
+        descriptionDefault:
+          "Chat-first workspace with staged sources and runtime context"
       },
       {
         id: "prompts",
@@ -507,6 +508,7 @@ const BASE_HEADER_SHORTCUT_GROUPS: HeaderShortcutGroup[] = [
 
 const HOSTED_VISIBLE_SHORTCUT_PATHS = new Set([
   "/chat",
+  CHAT_WORKSPACE_PATH,
   "/knowledge",
   "/media",
   "/collections",
