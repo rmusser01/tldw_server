@@ -135,7 +135,7 @@ async def test_start_sidecar_owned_jobs_pollers_passes_inventory_to_workers(
     }
 
 
-`@pytest.mark.asyncio`
+@pytest.mark.asyncio
 async def test_sidecar_owned_jobs_worker_cancels_task_when_inventory_registration_fails(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -143,11 +143,20 @@ async def test_sidecar_owned_jobs_worker_cancels_task_when_inventory_registratio
     cancelled: list[bool] = []
 
     class _FakeTask:
+        """Started task double that records cancellation requests."""
+
         def cancel(self) -> None:
+            """Record that rollback requested task cancellation."""
+
             cancelled.append(True)
 
     class _FailingWorkerInventory:
+        """Lifecycle inventory double that fails worker registration."""
+
         def register(self, worker: object) -> None:
+            """Simulate a guarded inventory registration failure."""
+
+            del worker
             raise RuntimeError("boom")
 
     monkeypatch.setattr(startup_pollers, "_make_event", lambda: "reminder-stop")
@@ -157,10 +166,13 @@ async def test_sidecar_owned_jobs_worker_cancels_task_when_inventory_registratio
         lambda *, stop_event: _FakeTask(),
     )
 
+    def _register_owned_job_poller(*args: object, **kwargs: object) -> None:
+        raise AssertionError("legacy poller registration should not run")
+
     stop_event, task = await startup_pollers._start_reminder_jobs_worker(
         app="app",
         owned_job_pollers=[],
-        register_owned_job_poller=lambda *args, **kwargs: None,
+        register_owned_job_poller=_register_owned_job_poller,
         sidecar_mode=False,
         worker_inventory=_FailingWorkerInventory(),
     )
@@ -168,6 +180,7 @@ async def test_sidecar_owned_jobs_worker_cancels_task_when_inventory_registratio
     assert cancelled == [True]
     assert stop_event is None
     assert task is None
+
 
 @pytest.mark.asyncio
 async def test_start_reminder_jobs_worker_skips_in_sidecar_mode(
