@@ -5,6 +5,7 @@ import {
   type ChatSubmitResult,
   isChatSubmitSuccess
 } from "@/hooks/chat/chat-action-utils"
+import type { Message } from "@/store/option"
 import { useMessageOption } from "@/hooks/useMessageOption"
 import type { ChatScope } from "@/types/chat-scope"
 
@@ -29,14 +30,20 @@ export type WorkspaceChatPanelProps = {
 
 const noop = () => undefined
 
-const getMessageText = (message: any): string => {
+type WorkspacePanelMessage = Message &
+  Partial<{
+    content: string
+    text: string
+  }>
+
+const getMessageText = (message: WorkspacePanelMessage): string => {
   if (typeof message?.message === "string") return message.message
   if (typeof message?.content === "string") return message.content
   if (typeof message?.text === "string") return message.text
   return ""
 }
 
-const getMessageRole = (message: any): "user" | "assistant" | "system" => {
+const getMessageRole = (message: WorkspacePanelMessage): "user" | "assistant" | "system" => {
   if (message?.role === "user" || message?.isBot === false) return "user"
   if (message?.role === "system") return "system"
   return "assistant"
@@ -109,7 +116,10 @@ export const WorkspaceChatPanel = ({
 
     setSendError(null)
     const fallbackContext = formatStagedSourceInsertText(stagedSources).trim()
-    const sendMessage = trimmedDraft || fallbackContext
+    const sendMessage =
+      trimmedDraft && hasStagedContext && !hasReadyMedia && fallbackContext
+        ? `${trimmedDraft}\n\n${fallbackContext}`
+        : trimmedDraft || fallbackContext
 
     try {
       const result = (await onSubmit({
@@ -163,7 +173,7 @@ export const WorkspaceChatPanel = ({
 
       <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 py-3">
         {Array.isArray(messages) && messages.length > 0 ? (
-          messages.map((message: any, index: number) => {
+          messages.map((message: WorkspacePanelMessage, index: number) => {
             const role = getMessageRole(message)
             const messageText = getMessageText(message)
             const messageId =

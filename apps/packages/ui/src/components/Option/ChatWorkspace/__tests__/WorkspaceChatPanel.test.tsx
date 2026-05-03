@@ -40,6 +40,17 @@ const staged: StagedWorkspaceSource[] = [
   }
 ]
 
+const stagedWithoutReadyMedia: StagedWorkspaceSource[] = [
+  {
+    sourceId: "source-processing",
+    mediaId: 202,
+    title: "Indexing Notes",
+    type: "document",
+    scopeLabel: "Default workspace",
+    availability: "processing"
+  }
+]
+
 describe("WorkspaceChatPanel", () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -96,6 +107,38 @@ describe("WorkspaceChatPanel", () => {
         fileRetrievalEnabled: true
       })
     })
+    expect(onClearStagedSources).toHaveBeenCalledTimes(1)
+  })
+
+  it("includes staged source summary in the submitted message when no ready media ids can carry it", async () => {
+    const onClearStagedSources = vi.fn()
+
+    render(
+      <WorkspaceChatPanel
+        stagedSources={stagedWithoutReadyMedia}
+        onClearStagedSources={onClearStagedSources}
+        backendAvailable
+        workspaceId="workspace-1"
+      />
+    )
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Chat workspace message" }), {
+      target: { value: "Draft instruction" }
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Send with staged context" }))
+
+    await waitFor(() => expect(chatHookState.onSubmit).toHaveBeenCalledTimes(1))
+    expect(chatHookState.onSubmit.mock.calls[0][0]).toMatchObject({
+      message: expect.stringContaining("Draft instruction"),
+      requestOverrides: expect.objectContaining({
+        ragMediaIds: [],
+        fileRetrievalEnabled: false,
+        chatMode: "normal"
+      })
+    })
+    expect(chatHookState.onSubmit.mock.calls[0][0].message).toEqual(
+      expect.stringContaining("Indexing Notes")
+    )
     expect(onClearStagedSources).toHaveBeenCalledTimes(1)
   })
 
