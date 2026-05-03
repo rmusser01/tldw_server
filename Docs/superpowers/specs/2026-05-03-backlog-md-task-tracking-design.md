@@ -2,7 +2,7 @@
 
 Date: 2026-05-03
 Owner: Codex collaboration session
-Status: Approved in conversation, pending spec review and implementation planning
+Status: Approved after user review, pending implementation planning
 
 ## Summary
 
@@ -63,7 +63,7 @@ The repo instructions should follow Backlog.md's official MCP-first advice:
 4. If MCP is not configured but the CLI is installed, use CLI commands as the fallback.
 5. If neither MCP nor CLI is available, pause before repo file edits unless the user explicitly approves a temporary exception.
 
-The initial `AGENTS.md` wording should not attempt to reproduce the entire official Backlog.md workflow. It should direct agents to the official workflow resource first, then document this repo's additional requirements.
+The initial `AGENTS.md` wording should not attempt to reproduce the entire official Backlog.md workflow. It should direct agents to the official workflow resource first, then document this repo's additional requirements. Current Backlog.md docs reference `backlog://workflow/overview` in the agent guidance and `backlog://docs/task-workflow` in the README; the implementation should follow whichever resource the installed Backlog.md MCP server exposes, then fall back to `backlog.get_backlog_instructions()` if needed.
 
 ## CLI Fallback
 
@@ -101,11 +101,13 @@ Preferred setup:
   - acceptance criteria satisfied
   - tests or verification recorded
   - docs updated when relevant
-  - security check considered for touched code
+  - Bandit run for touched code when applicable, or non-code/environment skip documented
   - final summary added
   - known skips or blockers documented
 
 If MCP client registration needs to edit user-level Codex configuration outside the repo, the implementation should request approval or provide the exact manual setup step instead of silently changing external files.
+
+The Backlog.md instruction updater is known to update all supported agent instruction files, including `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, and `.github/copilot-instructions.md`. Because this task only asked for root `AGENTS.md`, implementation should prefer a manual `AGENTS.md` edit unless the user explicitly approves synchronizing all agent instruction files.
 
 ## AGENTS.md Placement
 
@@ -119,6 +121,7 @@ The section should say:
 - Search first, then create only if no matching task exists.
 - Keep status, notes, plan links, verification, and final summary current.
 - Use CLI fallback only when MCP is unavailable.
+- Creating or updating Backlog.md task records is the tracking mechanism itself and does not require a separate recursive task.
 - Do not manually edit task markdown except under explicit exception.
 - Commit Backlog.md task changes with the related work unless the user asks otherwise.
 
@@ -133,6 +136,8 @@ The section should say:
 7. Agent moves the task through the board and appends useful notes as work proceeds.
 8. Agent records verification and final summary before marking the task done.
 9. Git commits include the relevant Backlog.md task changes alongside the related work.
+
+For this initial adoption, the already-approved design spec plus the first setup commit are the bootstrap exception. After Backlog.md is initialized, the implementation should create or update the Backlog.md adoption task before making non-Backlog follow-up edits.
 
 ## Error Handling
 
@@ -175,12 +180,12 @@ For future development tasks:
 - Record known skips or environment blockers in the task.
 - Add a final summary before marking the task done.
 
-## Open Implementation Questions
+## Resolved Implementation Decisions
 
-1. Whether `backlog init` can be run non-interactively with the exact preferred settings in this environment.
-2. Whether MCP client registration can be completed from this repo session or requires user-level config approval.
-3. Whether Backlog.md's instruction updater would touch only root `AGENTS.md` or also `CLAUDE.md`, `.github/copilot-instructions.md`, or other files.
-4. Whether the initial adoption task should create one Backlog.md task for itself after initialization or treat this spec and the first setup commit as the bootstrap exception.
+1. `backlog init` should be treated as scriptable/non-interactive in this environment.
+2. MCP client registration may require user-level config approval; the implementation must verify this instead of assuming it can silently complete registration.
+3. Backlog.md's instruction updater touches all supported agent instruction files, so this task should update root `AGENTS.md` manually unless broader synchronization is explicitly approved.
+4. This spec and the first setup commit are the bootstrap exception. Once Backlog.md exists, the adoption task should be represented in Backlog.md before non-Backlog follow-up edits continue.
 
 ## Acceptance Criteria
 
