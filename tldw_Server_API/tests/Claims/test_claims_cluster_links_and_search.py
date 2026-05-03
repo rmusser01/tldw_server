@@ -21,7 +21,7 @@ def _seed_cluster_search_db() -> Tuple[str, int, int]:
     db_path = os.path.join(tmpdir, "media.db")
     db = MediaDatabase(db_path=db_path, client_id="1")
     db.initialize_db()
-    content = "Alpha claim. Beta claim. Gamma claim."
+    content = "Alpha claim. Beta claim. Gamma claim. Delta claim."
     media_id, _, _ = db.add_media_with_keywords(title="Doc", media_type="text", content=content, keywords=None)
     chunk_hash = hashlib.sha256(content.encode()).hexdigest()
     db.upsert_claims([
@@ -31,6 +31,17 @@ def _seed_cluster_search_db() -> Tuple[str, int, int]:
             "span_start": None,
             "span_end": None,
             "claim_text": "Alpha claim",
+            "confidence": 0.8,
+            "extractor": "heuristic",
+            "extractor_version": "v1",
+            "chunk_hash": chunk_hash,
+        },
+        {
+            "media_id": media_id,
+            "chunk_index": 0,
+            "span_start": None,
+            "span_end": None,
+            "claim_text": "Delta claim",
             "confidence": 0.8,
             "extractor": "heuristic",
             "extractor_version": "v1",
@@ -82,9 +93,36 @@ def _seed_cluster_search_db() -> Tuple[str, int, int]:
         similarity_score=1.0,
     )
     db.add_claim_to_cluster(
+        cluster_id=cluster_a_id,
+        claim_id=claim_ids["Gamma claim"],
+        similarity_score=0.9,
+    )
+    db.add_claim_to_cluster(
         cluster_id=cluster_b_id,
         claim_id=claim_ids["Beta claim"],
         similarity_score=1.0,
+    )
+    db.execute_query(
+        "UPDATE claim_cluster_membership SET cluster_joined_at = ? "
+        "WHERE cluster_id = ? AND claim_id = ?",
+        ("2026-01-01 00:00:00", cluster_a_id, claim_ids["Alpha claim"]),
+        commit=True,
+    )
+    db.execute_query(
+        "UPDATE claim_cluster_membership SET cluster_joined_at = ? "
+        "WHERE cluster_id = ? AND claim_id = ?",
+        ("2026-01-02 00:00:00", cluster_a_id, claim_ids["Gamma claim"]),
+        commit=True,
+    )
+    db.execute_query(
+        "UPDATE Claims SET review_status = ? WHERE id = ?",
+        ("approved", claim_ids["Alpha claim"]),
+        commit=True,
+    )
+    db.execute_query(
+        "UPDATE Claims SET review_status = ? WHERE id = ?",
+        ("rejected", claim_ids["Gamma claim"]),
+        commit=True,
     )
     for index in range(3):
         db.insert_claim_notification(
@@ -232,6 +270,75 @@ def test_claims_cluster_links_and_search():
             }
             assert clusters_page["has_more"] is True
             assert clusters_page["next_offset"] == 1
+
+            r_members_legacy = client.get(
+                f"/api/v1/claims/clusters/{cluster_a_id}/members?limit=1&offset=0"
+            )
+            assert r_members_legacy.status_code == 200, r_members_legacy.text
+            assert isinstance(r_members_legacy.json(), list)
+
+            r_members = client.get(
+                f"/api/v1/claims/clusters/{cluster_a_id}/members?limit=1&offset=0&envelope=true"
+            )
+            assert r_members.status_code == 200, r_members.text
+            members_page = r_members.json()
+            assert len(members_page["items"]) == 1
+            assert members_page["pagination"] == {
+                "mode": "offset",
+                "limit": 1,
+                "offset": 0,
+                "total": None,
+                "has_more": True,
+                "next_offset": 1,
+            }
+            assert members_page["has_more"] is True
+            assert members_page["next_offset"] == 1
+
+            r_timeline_legacy = client.get(
+                f"/api/v1/claims/clusters/{cluster_a_id}/timeline?limit=1&offset=0"
+            )
+            assert r_timeline_legacy.status_code == 200, r_timeline_legacy.text
+            assert "pagination" not in r_timeline_legacy.json()
+
+            r_timeline = client.get(
+                f"/api/v1/claims/clusters/{cluster_a_id}/timeline?limit=1&offset=0&envelope=true"
+            )
+            assert r_timeline.status_code == 200, r_timeline.text
+            timeline_page = r_timeline.json()
+            assert len(timeline_page["timeline"]) == 1
+            assert timeline_page["pagination"] == {
+                "mode": "offset",
+                "limit": 1,
+                "offset": 0,
+                "total": None,
+                "has_more": True,
+                "next_offset": 1,
+            }
+            assert timeline_page["has_more"] is True
+            assert timeline_page["next_offset"] == 1
+
+            r_evidence_legacy = client.get(
+                f"/api/v1/claims/clusters/{cluster_a_id}/evidence?limit=1&offset=0"
+            )
+            assert r_evidence_legacy.status_code == 200, r_evidence_legacy.text
+            assert "pagination" not in r_evidence_legacy.json()
+
+            r_evidence = client.get(
+                f"/api/v1/claims/clusters/{cluster_a_id}/evidence?limit=1&offset=0&envelope=true"
+            )
+            assert r_evidence.status_code == 200, r_evidence.text
+            evidence_page = r_evidence.json()
+            assert sum(evidence_page["counts"].values()) == 1
+            assert evidence_page["pagination"] == {
+                "mode": "offset",
+                "limit": 1,
+                "offset": 0,
+                "total": None,
+                "has_more": True,
+                "next_offset": 1,
+            }
+            assert evidence_page["has_more"] is True
+            assert evidence_page["next_offset"] == 1
 
             r_search = client.get("/api/v1/claims/search?q=claim&group_by_cluster=true&limit=10")
             assert r_search.status_code == 200, r_search.text

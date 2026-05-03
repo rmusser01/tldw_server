@@ -3857,18 +3857,41 @@ def list_claim_cluster_members(
     cluster_id: int,
     limit: int,
     offset: int,
+    envelope: bool,
     principal: AuthPrincipal,
     current_user: User,
     db: MediaDatabase,
-) -> list[dict[str, Any]]:
+) -> Any:
     _ensure_claims_review(principal)
     cluster = db.get_claim_cluster(int(cluster_id))
     if not cluster:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cluster not found")
     if not _principal_has_platform_admin_claims(principal) and str(cluster.get("user_id")) != str(current_user.id):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized")
-    rows = db.list_claim_cluster_members(int(cluster_id), limit=limit, offset=offset)
-    return [_normalize_claim_row(dict(r)) for r in rows]
+    normalized_limit = max(1, int(limit))
+    normalized_offset = max(0, int(offset))
+    rows = db.list_claim_cluster_members(
+        int(cluster_id),
+        limit=normalized_limit + 1 if envelope else limit,
+        offset=normalized_offset if envelope else offset,
+    )
+    normalized = [_normalize_claim_row(dict(r)) for r in rows]
+    if not envelope:
+        return normalized
+    items = normalized[:normalized_limit]
+    pagination = build_offset_pagination_meta(
+        limit=normalized_limit,
+        offset=normalized_offset,
+        total=None,
+        count=len(items),
+        has_more=len(normalized) > normalized_limit,
+    )
+    return {
+        "items": items,
+        "has_more": pagination.has_more,
+        "next_offset": pagination.next_offset,
+        "pagination": pagination,
+    }
 
 
 def evaluate_watchlist_cluster_notifications(
@@ -3895,6 +3918,7 @@ def claim_cluster_timeline(
     cluster_id: int,
     limit: int,
     offset: int,
+    envelope: bool,
     principal: AuthPrincipal,
     current_user: User,
     db: MediaDatabase,
@@ -3905,14 +3929,36 @@ def claim_cluster_timeline(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cluster not found")
     if not _principal_has_platform_admin_claims(principal) and str(cluster.get("user_id")) != str(current_user.id):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized")
+    normalized_limit = max(1, int(limit))
+    normalized_offset = max(0, int(offset))
     rows = db.execute_query(
         "SELECT DATE(cluster_joined_at) AS day, COUNT(*) AS count "
         "FROM claim_cluster_membership WHERE cluster_id = ? "
         "GROUP BY day ORDER BY day ASC LIMIT ? OFFSET ?",
-        (int(cluster_id), int(limit), int(offset)),
+        (
+            int(cluster_id),
+            normalized_limit + 1 if envelope else int(limit),
+            normalized_offset if envelope else int(offset),
+        ),
     ).fetchall()
     timeline = [{"day": r[0], "count": int(r[1])} for r in rows if r]
-    return {"cluster_id": int(cluster_id), "timeline": timeline}
+    if not envelope:
+        return {"cluster_id": int(cluster_id), "timeline": timeline}
+    items = timeline[:normalized_limit]
+    pagination = build_offset_pagination_meta(
+        limit=normalized_limit,
+        offset=normalized_offset,
+        total=None,
+        count=len(items),
+        has_more=len(timeline) > normalized_limit,
+    )
+    return {
+        "cluster_id": int(cluster_id),
+        "timeline": items,
+        "has_more": pagination.has_more,
+        "next_offset": pagination.next_offset,
+        "pagination": pagination,
+    }
 
 
 def claim_cluster_evidence(
@@ -3920,6 +3966,7 @@ def claim_cluster_evidence(
     cluster_id: int,
     limit: int,
     offset: int,
+    envelope: bool,
     principal: AuthPrincipal,
     current_user: User,
     db: MediaDatabase,
@@ -3931,9 +3978,16 @@ def claim_cluster_evidence(
     if not _principal_has_platform_admin_claims(principal) and str(cluster.get("user_id")) != str(current_user.id):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized")
 
-    members = db.list_claim_cluster_members(int(cluster_id), limit=limit, offset=offset)
+    normalized_limit = max(1, int(limit))
+    normalized_offset = max(0, int(offset))
+    members = db.list_claim_cluster_members(
+        int(cluster_id),
+        limit=normalized_limit + 1 if envelope else limit,
+        offset=normalized_offset if envelope else offset,
+    )
+    visible_members = members[:normalized_limit] if envelope else members
     buckets = {"supported": [], "refuted": [], "nei": []}
-    for row in members:
+    for row in visible_members:
         status_val = str(row.get("review_status") or "pending").lower()
         if status_val == "approved":
             buckets["supported"].append(_normalize_claim_row(dict(row)))
@@ -3943,10 +3997,26 @@ def claim_cluster_evidence(
             buckets["nei"].append(_normalize_claim_row(dict(row)))
 
     counts = {k: len(v) for k, v in buckets.items()}
+    if not envelope:
+        return {
+            "cluster_id": int(cluster_id),
+            "counts": counts,
+            "evidence": buckets,
+        }
+    pagination = build_offset_pagination_meta(
+        limit=normalized_limit,
+        offset=normalized_offset,
+        total=None,
+        count=len(visible_members),
+        has_more=len(members) > normalized_limit,
+    )
     return {
         "cluster_id": int(cluster_id),
         "counts": counts,
         "evidence": buckets,
+        "has_more": pagination.has_more,
+        "next_offset": pagination.next_offset,
+        "pagination": pagination,
     }
 
 
