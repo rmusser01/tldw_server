@@ -37,7 +37,7 @@
 **Goal:** Record behavior before moving code.
 **Success Criteria:** Focused tests pass on the accepted base, and the current public import surface is documented.
 **Tests:** Prompt DB focused suite and import checks.
-**Status:** Not Started
+**Status:** Complete
 
 - [ ] Create a clean worktree from the accepted base.
 - [ ] Confirm no active dirty work exists in `Prompts_DB.py`.
@@ -62,12 +62,20 @@ python3 -m pytest tldw_Server_API/tests/Prompt_Management_NEW/property/test_prom
 
 - [ ] Do not edit runtime code in this stage.
 
+Status note: clean worktree `codex/phase4-3-prompts-db-decomposition` was created from `origin/dev` at `1016a3b056`. Baseline focused prompt DB tests passed (`28 passed, 2 warnings`), and optional property tests passed (`14 passed, 5 warnings`) before code movement.
+
+Public import surface to preserve:
+
+- `PromptsDatabase`, `DatabaseError`, `InputError`, and `ConflictError` from `Prompts_DB.py`.
+- Standalone helpers `add_or_update_prompt`, `load_prompt_details_for_ui`, `export_prompt_keywords_to_csv`, `view_prompt_keywords_markdown`, and `export_prompts_formatted` from `Prompts_DB.py`.
+- Compatibility class attributes used by tests, including schema SQL constants and private helper names such as `_serialize_prompt_definition`, `_deserialize_prompt_record`, `build_structured_prompt_searchable_text`, `_normalize_keyword`, and `_normalize_text_for_search`.
+
 ## Stage 2: Extract Pure Prompt Helper Functions
 
 **Goal:** Move serialization, deserialization, searchable-text, and normalization helpers out of the large DB class without changing behavior.
 **Success Criteria:** `PromptsDatabase` keeps compatibility methods or aliases, and focused tests still pass.
 **Tests:** Prompt DB focused suite from Stage 1.
-**Status:** Not Started
+**Status:** Complete
 
 Candidate helper module:
 
@@ -87,6 +95,8 @@ Implementation constraints:
 - Do not change JSON output for structured prompt definitions.
 - Do not change keyword normalization or FTS searchable text.
 - Do not move SQL execution or transaction boundaries in this stage.
+
+Status note: extracted pure helpers to `prompts_db_helpers.py` and kept `PromptsDatabase` compatibility aliases. Added direct helper coverage in `test_prompts_db_helpers.py`; helper tests, the original focused prompt DB suite, optional property tests, and touched-scope Bandit pass after extraction.
 
 ## Stage 3: Extract Schema Constants And Migration Helpers
 
@@ -197,8 +207,8 @@ python3 -m bandit -r tldw_Server_API/app/core/DB_Management/Prompts_DB.py tldw_S
 
 ## Handoff Checklist
 
-- [ ] Maintainers accept `Prompts_DB.py` as the first Phase 4.3 DB decomposition target.
-- [ ] Clean worktree from accepted base exists.
-- [ ] Stage 1 focused tests pass before code movement.
-- [ ] Public import compatibility is preserved after each stage.
-- [ ] Bandit is run on touched source before PR handoff.
+- [x] Maintainers accept `Prompts_DB.py` as the first Phase 4.3 DB decomposition target.
+- [x] Clean worktree from accepted base exists.
+- [x] Stage 1 focused tests pass before code movement.
+- [x] Public import compatibility is preserved after each stage.
+- [x] Bandit is run on touched source before PR handoff.
