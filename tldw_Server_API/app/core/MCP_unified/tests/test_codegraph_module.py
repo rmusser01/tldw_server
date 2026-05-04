@@ -28,7 +28,16 @@ class _FakeWorkspaceRootResolver:
 class _CodeGraphRegistry:
     def __init__(self, module: CodeGraphModule) -> None:
         self.module = module
-        self._tool_names = {"codegraph.status", "codegraph.index", "codegraph.sync", "codegraph.files"}
+        self._tool_names = {
+            "codegraph.status",
+            "codegraph.index",
+            "codegraph.sync",
+            "codegraph.files",
+            "codegraph.search",
+            "codegraph.node",
+            "codegraph.callers",
+            "codegraph.callees",
+        }
 
     async def find_module_for_tool(self, tool_name: str):  # noqa: ANN001
         if tool_name in self._tool_names:
@@ -66,7 +75,7 @@ def _module(tmp_path: Path, workspace_root: Path) -> CodeGraphModule:
 
 
 @pytest.mark.asyncio
-async def test_codegraph_exposes_stage1_tools_only(tmp_path: Path) -> None:
+async def test_codegraph_exposes_stage2_tools(tmp_path: Path) -> None:
     workspace_root = tmp_path / "workspace"
     workspace_root.mkdir()
     module = _module(tmp_path, workspace_root)
@@ -74,9 +83,22 @@ async def test_codegraph_exposes_stage1_tools_only(tmp_path: Path) -> None:
     tools = await module.get_tools()
     by_name = {tool["name"]: tool for tool in tools}
 
-    assert set(by_name) == {"codegraph.status", "codegraph.index", "codegraph.sync", "codegraph.files"}  # nosec B101
+    assert set(by_name) == {  # nosec B101
+        "codegraph.status",
+        "codegraph.index",
+        "codegraph.sync",
+        "codegraph.files",
+        "codegraph.search",
+        "codegraph.node",
+        "codegraph.callers",
+        "codegraph.callees",
+    }
     assert by_name["codegraph.status"]["metadata"]["readOnlyHint"] is True  # nosec B101
     assert by_name["codegraph.files"]["metadata"]["readOnlyHint"] is True  # nosec B101
+    assert by_name["codegraph.search"]["metadata"]["readOnlyHint"] is True  # nosec B101
+    assert by_name["codegraph.node"]["metadata"]["readOnlyHint"] is True  # nosec B101
+    assert by_name["codegraph.callers"]["metadata"]["readOnlyHint"] is True  # nosec B101
+    assert by_name["codegraph.callees"]["metadata"]["readOnlyHint"] is True  # nosec B101
     assert by_name["codegraph.index"]["metadata"]["category"] == "management"  # nosec B101
     assert by_name["codegraph.sync"]["metadata"]["category"] == "management"  # nosec B101
 
@@ -89,6 +111,7 @@ async def test_codegraph_exposes_stage1_tools_only(tmp_path: Path) -> None:
     assert by_name["codegraph.index"]["metadata"]["path_argument_hints"] == []  # nosec B101
     assert by_name["codegraph.sync"]["metadata"]["path_argument_hints"] == []  # nosec B101
     assert by_name["codegraph.files"]["metadata"]["path_argument_hints"] == ["path"]  # nosec B101
+    assert by_name["codegraph.search"]["metadata"]["path_argument_hints"] == []  # nosec B101
 
 
 @pytest.mark.asyncio
@@ -134,6 +157,56 @@ async def test_codegraph_index_and_files_roundtrip(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_codegraph_search_node_callers_and_callees_roundtrip(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir()
+    (workspace_root / "app.py").write_text(
+        """
+class Greeter:
+    def greet(self, name):
+        return helper(name)
+
+
+def helper(value):
+    return value.upper()
+""",
+        encoding="utf-8",
+    )
+    module = _module(tmp_path, workspace_root)
+
+    await module.execute_tool(
+        "codegraph.index",
+        {"mode": "foreground", "force": True, "max_files": 10},
+        context=_context(),
+    )
+    search = await module.execute_tool(
+        "codegraph.search",
+        {"query": " helper ", "kind": " function ", "limit": 10},
+        context=_context(),
+    )
+    node = await module.execute_tool("codegraph.node", {"symbol": " helper "}, context=_context())
+    callers = await module.execute_tool("codegraph.callers", {"symbol": " helper "}, context=_context())
+    callees = await module.execute_tool("codegraph.callees", {"symbol": " Greeter.greet "}, context=_context())
+
+    assert [item["qualified_name"] for item in search["results"]] == ["helper"]  # nosec B101
+    assert node["node"]["qualified_name"] == "helper"  # nosec B101
+    assert [item["source"]["qualified_name"] for item in callers["relationships"]] == ["Greeter.greet"]  # nosec B101
+    assert [item["target"]["qualified_name"] for item in callees["relationships"]] == ["helper"]  # nosec B101
+
+
+def test_codegraph_rejects_ambiguous_node_selectors(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir()
+    module = _module(tmp_path, workspace_root)
+
+    with pytest.raises(ValueError, match="node_id and symbol are mutually exclusive"):
+        module.validate_tool_arguments(
+            "codegraph.node",
+            {"node_id": "node_helper", "symbol": "helper"},
+        )
+
+
+@pytest.mark.asyncio
 async def test_codegraph_offloads_blocking_repository_work(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -152,9 +225,10 @@ async def test_codegraph_offloads_blocking_repository_work(
 
     await module.execute_tool("codegraph.index", {"mode": "foreground"}, context=_context())
     await module.execute_tool("codegraph.files", {}, context=_context())
+    await module.execute_tool("codegraph.search", {"query": "app"}, context=_context())
     await module.execute_tool("codegraph.sync", {"mode": "foreground"}, context=_context())
 
-    assert len(offloaded) >= 3  # nosec B101
+    assert len(offloaded) >= 4  # nosec B101
 
 
 @pytest.mark.asyncio
@@ -180,5 +254,32 @@ async def test_protocol_rejects_unknown_codegraph_index_arguments(tmp_path: Path
     with pytest.raises(InvalidParamsException, match="Unknown parameters"):
         await protocol._handle_tools_call(
             {"name": "codegraph.index", "arguments": {"mode": "foreground", "unknown": "boom"}},
+            _context(),
+        )
+
+
+@pytest.mark.asyncio
+async def test_protocol_rejects_unknown_codegraph_search_arguments(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir()
+    module = _module(tmp_path, workspace_root)
+
+    protocol = MCPProtocol()
+    protocol.module_registry = _CodeGraphRegistry(module)
+
+    async def _resolve_effective_policy(_context):
+        return {"enabled": True, "allowed_tools": ["codegraph.search"], "policy_document": {"path_scope_mode": "none"}}
+
+    async def _allow(*_args, **_kwargs) -> bool:
+        return True
+
+    protocol._resolve_effective_tool_policy = _resolve_effective_policy  # type: ignore[method-assign]
+    protocol._has_module_permission = _allow  # type: ignore[method-assign]
+    protocol._has_tool_permission = _allow  # type: ignore[method-assign]
+    protocol._is_tool_allowed_by_context = lambda *_args, **_kwargs: True  # type: ignore[method-assign]
+
+    with pytest.raises(InvalidParamsException, match="Unknown parameters"):
+        await protocol._handle_tools_call(
+            {"name": "codegraph.search", "arguments": {"query": "helper", "unknown": "boom"}},
             _context(),
         )

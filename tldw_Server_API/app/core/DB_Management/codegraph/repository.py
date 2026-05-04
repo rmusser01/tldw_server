@@ -1,3 +1,5 @@
+"""SQLite persistence helpers for native CodeGraph indexes."""
+
 from __future__ import annotations
 
 from contextlib import closing, contextmanager
@@ -10,7 +12,13 @@ from typing import Any
 
 from loguru import logger
 
-from tldw_Server_API.app.core.CodeGraph.models import IndexedFile, IndexRunSummary
+from tldw_Server_API.app.core.CodeGraph.models import (
+    CodeGraphEdge,
+    CodeGraphNode,
+    CodeGraphUnresolvedRef,
+    IndexedFile,
+    IndexRunSummary,
+)
 from tldw_Server_API.app.core.DB_Management.sqlite_policy import configure_sqlite_connection
 
 
@@ -18,9 +26,11 @@ class CodeGraphRepository:
     """SQLite repository for the native CodeGraph index."""
 
     def __init__(self, db_path: str | Path) -> None:
+        """Store the target SQLite database path without creating it."""
         self.db_path = Path(db_path)
 
     def initialize(self) -> None:
+        """Create parent directories, schema tables, and optional FTS structures."""
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         schema = Path(__file__).with_name("schema.sql").read_text(encoding="utf-8")
         with self._connection() as conn:
@@ -29,6 +39,7 @@ class CodeGraphRepository:
             conn.commit()
 
     def counts(self) -> dict[str, int]:
+        """Return row counts for graph inventory tables."""
         with self._connection() as conn:
             return {
                 "files": self._count(conn, "files"),
@@ -38,6 +49,7 @@ class CodeGraphRepository:
             }
 
     def record_index_run_start(self, *, workspace_key: str, mode: str) -> str:
+        """Insert a running index-run row and return its generated run id."""
         run_id = f"run_{uuid.uuid4().hex}"
         with self._connection() as conn:
             conn.execute(
@@ -66,6 +78,7 @@ class CodeGraphRepository:
         counters: dict[str, int],
         error_summary: list[str] | tuple[str, ...],
     ) -> None:
+        """Mark an index run complete with counters and error summary."""
         with self._connection() as conn:
             conn.execute(
                 """
@@ -95,34 +108,20 @@ class CodeGraphRepository:
         errors: list[str] | tuple[str, ...],
         node_count: int = 0,
     ) -> None:
+        """Insert or update a workspace-relative file inventory row."""
         if Path(path).is_absolute():
             raise ValueError("file path must be workspace-relative")
         with self._connection() as conn:
-            conn.execute(
-                """
-                INSERT INTO files(path, language, size, content_hash, modified_at, indexed_at, node_count, status, errors)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(path) DO UPDATE SET
-                    language = excluded.language,
-                    size = excluded.size,
-                    content_hash = excluded.content_hash,
-                    modified_at = excluded.modified_at,
-                    indexed_at = excluded.indexed_at,
-                    node_count = excluded.node_count,
-                    status = excluded.status,
-                    errors = excluded.errors
-                """,
-                (
-                    path,
-                    language,
-                    int(size),
-                    content_hash,
-                    float(modified_at),
-                    _utc_now(),
-                    int(node_count),
-                    status,
-                    json.dumps(list(errors)),
-                ),
+            _upsert_file(
+                conn,
+                path=path,
+                language=language,
+                size=size,
+                content_hash=content_hash,
+                modified_at=modified_at,
+                status=status,
+                errors=errors,
+                node_count=node_count,
             )
             conn.commit()
 
@@ -133,6 +132,7 @@ class CodeGraphRepository:
         path_prefix: str | None = None,
         path_pattern: str | None = None,
     ) -> list[IndexedFile]:
+        """List indexed files with optional path prefix and glob filtering."""
         sql = """
             SELECT path, language, size, content_hash, modified_at, indexed_at, node_count, status, errors
             FROM files
@@ -155,6 +155,7 @@ class CodeGraphRepository:
         return [_indexed_file_from_row(row) for row in rows]
 
     def last_index_run(self) -> IndexRunSummary | None:
+        """Return the most recent index run if the database has any run history."""
         with self._connection() as conn:
             row = conn.execute(
                 """
@@ -167,6 +168,7 @@ class CodeGraphRepository:
         return _index_run_from_row(row) if row else None
 
     def delete_missing_files(self, current_paths: set[str]) -> int:
+        """Remove files and graph rows not present in the current discovery set."""
         existing = {item.path for item in self.list_files(limit=1_000_000)}
         removed = sorted(existing - set(current_paths))
         if not removed:
@@ -177,14 +179,244 @@ class CodeGraphRepository:
         return len(removed)
 
     def delete_file(self, path: str) -> None:
+        """Delete one file inventory row and its dependent graph rows."""
         with self._connection() as conn:
             _delete_file_rows(conn, [path])
             conn.commit()
 
     def prepare_file_replacement(self, path: str) -> None:
+        """Clear graph rows for a file before writing a replacement graph."""
         with self._connection() as conn:
             self._prepare_file_replacement(conn, path)
             conn.commit()
+
+    def replace_file_graph(
+        self,
+        *,
+        path: str,
+        nodes: list[CodeGraphNode] | tuple[CodeGraphNode, ...],
+        edges: list[CodeGraphEdge] | tuple[CodeGraphEdge, ...],
+        unresolved_refs: list[CodeGraphUnresolvedRef] | tuple[CodeGraphUnresolvedRef, ...],
+    ) -> None:
+        """Replace all graph rows for one workspace-relative file atomically."""
+        if Path(path).is_absolute():
+            raise ValueError("file path must be workspace-relative")
+        with self._connection() as conn:
+            self._prepare_file_replacement(conn, path)
+            _insert_nodes(conn, nodes)
+            _insert_edges(conn, edges)
+            _insert_unresolved_refs(conn, unresolved_refs)
+            _delete_dangling_edges(conn)
+            conn.commit()
+
+    def upsert_file_and_replace_graph(
+        self,
+        *,
+        path: str,
+        language: str,
+        size: int,
+        content_hash: str,
+        modified_at: float,
+        status: str,
+        errors: list[str] | tuple[str, ...],
+        node_count: int,
+        nodes: list[CodeGraphNode] | tuple[CodeGraphNode, ...],
+        edges: list[CodeGraphEdge] | tuple[CodeGraphEdge, ...],
+        unresolved_refs: list[CodeGraphUnresolvedRef] | tuple[CodeGraphUnresolvedRef, ...],
+    ) -> None:
+        """Persist file inventory and replacement graph rows in one transaction."""
+        if Path(path).is_absolute():
+            raise ValueError("file path must be workspace-relative")
+        with self._connection() as conn:
+            _upsert_file(
+                conn,
+                path=path,
+                language=language,
+                size=size,
+                content_hash=content_hash,
+                modified_at=modified_at,
+                status=status,
+                errors=errors,
+                node_count=node_count,
+            )
+            self._prepare_file_replacement(conn, path)
+            _insert_nodes(conn, nodes)
+            _insert_edges(conn, edges)
+            _insert_unresolved_refs(conn, unresolved_refs)
+            _delete_dangling_edges(conn)
+            conn.commit()
+
+    def search_nodes(
+        self,
+        query: str,
+        *,
+        limit: int = 10,
+        kind: str | None = None,
+        language: str | None = None,
+    ) -> list[CodeGraphNode]:
+        """Search indexed nodes by exact or fuzzy symbol text with optional filters."""
+        text = query.strip()
+        if not text:
+            return []
+
+        like = f"%{_escape_like_literal(text)}%"
+        prefix_like = f"{_escape_like_literal(text)}%"
+        params: list[Any] = [
+            text,
+            text,
+            like,
+            like,
+            like,
+            like,
+            kind,
+            kind,
+            language,
+            language,
+            text,
+            text,
+            prefix_like,
+            max(1, int(limit)),
+        ]
+        with self._connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT *
+                FROM nodes
+                WHERE
+                    (
+                        lower(name) = lower(?)
+                        OR lower(qualified_name) = lower(?)
+                        OR name LIKE ? ESCAPE '\\'
+                        OR qualified_name LIKE ? ESCAPE '\\'
+                        OR signature LIKE ? ESCAPE '\\'
+                        OR docstring LIKE ? ESCAPE '\\'
+                    )
+                    AND (? IS NULL OR kind = ?)
+                    AND (? IS NULL OR language = ?)
+                ORDER BY
+                    CASE
+                        WHEN lower(qualified_name) = lower(?) THEN 0
+                        WHEN lower(name) = lower(?) THEN 1
+                        WHEN name LIKE ? ESCAPE '\\' THEN 2
+                        ELSE 3
+                    END,
+                    file_path,
+                    COALESCE(start_line, 0),
+                    qualified_name
+                LIMIT ?
+                """,
+                params,
+            ).fetchall()
+        return [_node_from_row(row) for row in rows]
+
+    def get_node(self, node_id: str) -> CodeGraphNode | None:
+        """Fetch one graph node by stable node id."""
+        with self._connection() as conn:
+            row = conn.execute("SELECT * FROM nodes WHERE id = ?", (node_id,)).fetchone()
+        return _node_from_row(row) if row else None
+
+    def find_node_by_symbol(self, symbol: str) -> CodeGraphNode | None:
+        """Resolve a symbol name or qualified name to the best matching node."""
+        text = symbol.strip()
+        if not text:
+            return None
+        with self._connection() as conn:
+            row = conn.execute(
+                """
+                SELECT *
+                FROM nodes
+                WHERE lower(qualified_name) = lower(?) OR lower(name) = lower(?)
+                ORDER BY
+                    CASE WHEN lower(qualified_name) = lower(?) THEN 0 ELSE 1 END,
+                    file_path,
+                    COALESCE(start_line, 0)
+                LIMIT 1
+                """,
+                (text, text, text),
+            ).fetchone()
+        return _node_from_row(row) if row else None
+
+    def list_callers(self, node_id: str, *, limit: int = 10) -> list[dict[str, Any]]:
+        """List call edges whose target is the requested node."""
+        with self._connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                    e.id AS edge_id,
+                    e.kind AS edge_kind,
+                    e.file_path AS edge_file_path,
+                    e.line AS edge_line,
+                    e.column AS edge_column,
+                    e.metadata AS edge_metadata,
+                    e.provenance AS edge_provenance,
+                    source_node.*,
+                    target_node.id AS target_id,
+                    target_node.identity_key AS target_identity_key,
+                    target_node.kind AS target_kind,
+                    target_node.name AS target_name,
+                    target_node.qualified_name AS target_qualified_name,
+                    target_node.file_path AS target_file_path,
+                    target_node.language AS target_language,
+                    target_node.start_line AS target_start_line,
+                    target_node.end_line AS target_end_line,
+                    target_node.start_column AS target_start_column,
+                    target_node.end_column AS target_end_column,
+                    target_node.signature AS target_signature,
+                    target_node.docstring AS target_docstring,
+                    target_node.visibility AS target_visibility,
+                    target_node.flags AS target_flags,
+                    target_node.metadata AS target_metadata
+                FROM edges e
+                JOIN nodes source_node ON source_node.id = e.source
+                JOIN nodes target_node ON target_node.id = e.target
+                WHERE e.target = ?
+                ORDER BY e.file_path, COALESCE(e.line, 0), source_node.qualified_name
+                LIMIT ?
+                """,
+                (node_id, max(1, int(limit))),
+            ).fetchall()
+        return [_relationship_from_joined_row(row) for row in rows]
+
+    def list_callees(self, node_id: str, *, limit: int = 10) -> list[dict[str, Any]]:
+        """List call edges whose source is the requested node."""
+        with self._connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                    e.id AS edge_id,
+                    e.kind AS edge_kind,
+                    e.file_path AS edge_file_path,
+                    e.line AS edge_line,
+                    e.column AS edge_column,
+                    e.metadata AS edge_metadata,
+                    e.provenance AS edge_provenance,
+                    source_node.*,
+                    target_node.id AS target_id,
+                    target_node.identity_key AS target_identity_key,
+                    target_node.kind AS target_kind,
+                    target_node.name AS target_name,
+                    target_node.qualified_name AS target_qualified_name,
+                    target_node.file_path AS target_file_path,
+                    target_node.language AS target_language,
+                    target_node.start_line AS target_start_line,
+                    target_node.end_line AS target_end_line,
+                    target_node.start_column AS target_start_column,
+                    target_node.end_column AS target_end_column,
+                    target_node.signature AS target_signature,
+                    target_node.docstring AS target_docstring,
+                    target_node.visibility AS target_visibility,
+                    target_node.flags AS target_flags,
+                    target_node.metadata AS target_metadata
+                FROM edges e
+                JOIN nodes source_node ON source_node.id = e.source
+                JOIN nodes target_node ON target_node.id = e.target
+                WHERE e.source = ?
+                ORDER BY e.file_path, COALESCE(e.line, 0), target_node.qualified_name
+                LIMIT ?
+                """,
+                (node_id, max(1, int(limit))),
+            ).fetchall()
+        return [_relationship_from_joined_row(row) for row in rows]
 
     def seed_graph_rows_for_test(
         self,
@@ -193,6 +425,7 @@ class CodeGraphRepository:
         edges: list[dict[str, Any]],
         unresolved_refs: list[dict[str, Any]],
     ) -> None:
+        """Insert raw graph rows for repository regression tests."""
         with self._connection() as conn:
             for node in nodes:
                 conn.execute(
@@ -247,10 +480,12 @@ class CodeGraphRepository:
 
     @contextmanager
     def _connection(self):  # type: ignore[no-untyped-def]
+        """Yield a managed SQLite connection for one repository operation."""
         with closing(self._connect()) as conn:
             yield conn
 
     def _connect(self) -> sqlite3.Connection:
+        """Open a SQLite connection using the shared project SQLite policy."""
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         configure_sqlite_connection(conn)
@@ -258,6 +493,7 @@ class CodeGraphRepository:
 
     @staticmethod
     def _count(conn: sqlite3.Connection, table: str) -> int:
+        """Return the count for a whitelisted repository table."""
         count_sql = {
             "files": "SELECT COUNT(*) AS count FROM files",
             "nodes": "SELECT COUNT(*) AS count FROM nodes",
@@ -269,6 +505,7 @@ class CodeGraphRepository:
 
     @staticmethod
     def _prepare_file_replacement(conn: sqlite3.Connection, path: str) -> None:
+        """Delete graph rows for a file and clear edges left without endpoints."""
         conn.execute("DELETE FROM unresolved_refs WHERE file_path = ?", (path,))
         conn.execute("DELETE FROM edges WHERE file_path = ?", (path,))
         conn.execute("DELETE FROM nodes WHERE file_path = ?", (path,))
@@ -276,6 +513,7 @@ class CodeGraphRepository:
 
 
 def _delete_file_rows(conn: sqlite3.Connection, paths: list[str]) -> None:
+    """Delete files and all graph rows that belong to the provided paths."""
     params = [(path,) for path in paths]
     conn.executemany("DELETE FROM unresolved_refs WHERE file_path = ?", params)
     conn.executemany("DELETE FROM edges WHERE file_path = ?", params)
@@ -284,11 +522,147 @@ def _delete_file_rows(conn: sqlite3.Connection, paths: list[str]) -> None:
     _delete_dangling_edges(conn)
 
 
+def _upsert_file(
+    conn: sqlite3.Connection,
+    *,
+    path: str,
+    language: str,
+    size: int,
+    content_hash: str,
+    modified_at: float,
+    status: str,
+    errors: list[str] | tuple[str, ...],
+    node_count: int = 0,
+) -> None:
+    """Insert or update a file row using an existing transaction."""
+    conn.execute(
+        """
+        INSERT INTO files(path, language, size, content_hash, modified_at, indexed_at, node_count, status, errors)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(path) DO UPDATE SET
+            language = excluded.language,
+            size = excluded.size,
+            content_hash = excluded.content_hash,
+            modified_at = excluded.modified_at,
+            indexed_at = excluded.indexed_at,
+            node_count = excluded.node_count,
+            status = excluded.status,
+            errors = excluded.errors
+        """,
+        (
+            path,
+            language,
+            int(size),
+            content_hash,
+            float(modified_at),
+            _utc_now(),
+            int(node_count),
+            status,
+            json.dumps(list(errors)),
+        ),
+    )
+
+
+def _insert_nodes(
+    conn: sqlite3.Connection,
+    nodes: list[CodeGraphNode] | tuple[CodeGraphNode, ...],
+) -> None:
+    """Bulk insert extracted graph nodes."""
+    conn.executemany(
+        """
+        INSERT INTO nodes(
+            id, identity_key, kind, name, qualified_name, file_path, language,
+            start_line, end_line, start_column, end_column, signature, docstring,
+            visibility, flags, metadata
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        [
+            (
+                node.id,
+                node.identity_key,
+                node.kind,
+                node.name,
+                node.qualified_name,
+                node.file_path,
+                node.language,
+                node.start_line,
+                node.end_line,
+                node.start_column,
+                node.end_column,
+                node.signature,
+                node.docstring,
+                node.visibility,
+                json.dumps(list(node.flags)),
+                json.dumps(node.metadata, sort_keys=True),
+            )
+            for node in nodes
+        ],
+    )
+
+
+def _insert_edges(
+    conn: sqlite3.Connection,
+    edges: list[CodeGraphEdge] | tuple[CodeGraphEdge, ...],
+) -> None:
+    """Bulk insert extracted graph edges."""
+    conn.executemany(
+        """
+        INSERT INTO edges(id, source, target, kind, file_path, line, column, metadata, provenance)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        [
+            (
+                edge.id,
+                edge.source,
+                edge.target,
+                edge.kind,
+                edge.file_path,
+                edge.line,
+                edge.column,
+                json.dumps(edge.metadata, sort_keys=True),
+                edge.provenance,
+            )
+            for edge in edges
+        ],
+    )
+
+
+def _insert_unresolved_refs(
+    conn: sqlite3.Connection,
+    unresolved_refs: list[CodeGraphUnresolvedRef] | tuple[CodeGraphUnresolvedRef, ...],
+) -> None:
+    """Bulk insert unresolved references captured by extractors."""
+    conn.executemany(
+        """
+        INSERT INTO unresolved_refs(
+            from_node_id, reference_name, reference_kind, file_path, line, column, candidates, language
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        [
+            (
+                ref.from_node_id,
+                ref.reference_name,
+                ref.reference_kind,
+                ref.file_path,
+                ref.line,
+                ref.column,
+                json.dumps(list(ref.candidates)),
+                ref.language,
+            )
+            for ref in unresolved_refs
+        ],
+    )
+
+
 def _escape_like_literal(value: str) -> str:
+    """Escape user text before using it inside a SQLite LIKE pattern."""
     return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
 def _delete_dangling_edges(conn: sqlite3.Connection) -> None:
+    """Remove edges whose source or target node no longer exists."""
     # Stage 1 only stores bounded foreground inventories, so this cleanup favors
     # straightforward correctness; if graph volume grows, switch to a join/exists
     # form or staged node-id table to avoid repeated full-node scans.
@@ -302,6 +676,7 @@ def _delete_dangling_edges(conn: sqlite3.Connection) -> None:
 
 
 def _create_optional_fts(conn: sqlite3.Connection) -> None:
+    """Create the optional nodes FTS table when SQLite was built with FTS5."""
     try:
         conn.execute(
             """
@@ -323,10 +698,12 @@ def _create_optional_fts(conn: sqlite3.Connection) -> None:
 
 
 def _utc_now() -> str:
+    """Return the current UTC timestamp in the repository's stored format."""
     return datetime.now(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z")
 
 
 def _indexed_file_from_row(row: sqlite3.Row) -> IndexedFile:
+    """Convert a files table row to an IndexedFile value object."""
     return IndexedFile(
         path=str(row["path"]),
         language=str(row["language"]),
@@ -340,7 +717,90 @@ def _indexed_file_from_row(row: sqlite3.Row) -> IndexedFile:
     )
 
 
+def _node_from_row(row: sqlite3.Row) -> CodeGraphNode:
+    """Convert a nodes table row to a CodeGraphNode value object."""
+    return CodeGraphNode(
+        id=str(row["id"]),
+        identity_key=str(row["identity_key"]),
+        kind=str(row["kind"]),
+        name=str(row["name"]),
+        qualified_name=str(row["qualified_name"] or row["name"]),
+        file_path=str(row["file_path"]),
+        language=str(row["language"] or ""),
+        start_line=int(row["start_line"]) if row["start_line"] is not None else None,
+        end_line=int(row["end_line"]) if row["end_line"] is not None else None,
+        start_column=int(row["start_column"]) if row["start_column"] is not None else None,
+        end_column=int(row["end_column"]) if row["end_column"] is not None else None,
+        signature=str(row["signature"]) if row["signature"] is not None else None,
+        docstring=str(row["docstring"]) if row["docstring"] is not None else None,
+        visibility=str(row["visibility"]) if row["visibility"] is not None else None,
+        flags=tuple(json.loads(row["flags"] or "[]")),
+        metadata=dict(json.loads(row["metadata"] or "{}")),
+    )
+
+
+def _node_to_dict(node: CodeGraphNode) -> dict[str, Any]:
+    """Serialize a CodeGraphNode for relationship payloads."""
+    return {
+        "id": node.id,
+        "kind": node.kind,
+        "name": node.name,
+        "qualified_name": node.qualified_name,
+        "file_path": node.file_path,
+        "language": node.language,
+        "start_line": node.start_line,
+        "end_line": node.end_line,
+        "start_column": node.start_column,
+        "end_column": node.end_column,
+        "signature": node.signature,
+        "docstring": node.docstring,
+        "visibility": node.visibility,
+        "flags": list(node.flags),
+        "metadata": dict(node.metadata),
+    }
+
+
+def _target_node_from_joined_row(row: sqlite3.Row) -> CodeGraphNode:
+    """Convert target-node aliases from a relationship join row."""
+    return CodeGraphNode(
+        id=str(row["target_id"]),
+        identity_key=str(row["target_identity_key"]),
+        kind=str(row["target_kind"]),
+        name=str(row["target_name"]),
+        qualified_name=str(row["target_qualified_name"] or row["target_name"]),
+        file_path=str(row["target_file_path"]),
+        language=str(row["target_language"] or ""),
+        start_line=int(row["target_start_line"]) if row["target_start_line"] is not None else None,
+        end_line=int(row["target_end_line"]) if row["target_end_line"] is not None else None,
+        start_column=int(row["target_start_column"]) if row["target_start_column"] is not None else None,
+        end_column=int(row["target_end_column"]) if row["target_end_column"] is not None else None,
+        signature=str(row["target_signature"]) if row["target_signature"] is not None else None,
+        docstring=str(row["target_docstring"]) if row["target_docstring"] is not None else None,
+        visibility=str(row["target_visibility"]) if row["target_visibility"] is not None else None,
+        flags=tuple(json.loads(row["target_flags"] or "[]")),
+        metadata=dict(json.loads(row["target_metadata"] or "{}")),
+    )
+
+
+def _relationship_from_joined_row(row: sqlite3.Row) -> dict[str, Any]:
+    """Serialize a joined edge/source/target row into API-ready shape."""
+    source = _node_from_row(row)
+    target = _target_node_from_joined_row(row)
+    return {
+        "id": str(row["edge_id"]),
+        "kind": str(row["edge_kind"]),
+        "file_path": str(row["edge_file_path"]),
+        "line": int(row["edge_line"]) if row["edge_line"] is not None else None,
+        "column": int(row["edge_column"]) if row["edge_column"] is not None else None,
+        "metadata": dict(json.loads(row["edge_metadata"] or "{}")),
+        "provenance": str(row["edge_provenance"]) if row["edge_provenance"] else None,
+        "source": _node_to_dict(source),
+        "target": _node_to_dict(target),
+    }
+
+
 def _index_run_from_row(row: sqlite3.Row) -> IndexRunSummary:
+    """Convert an index_runs table row to an IndexRunSummary."""
     return IndexRunSummary(
         run_id=str(row["run_id"]),
         workspace_key=str(row["workspace_key"]),

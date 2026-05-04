@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from tldw_Server_API.app.core.CodeGraph.models import CodeGraphEdge, CodeGraphNode, CodeGraphUnresolvedRef
 from tldw_Server_API.app.core.DB_Management.codegraph.repository import CodeGraphRepository, _create_optional_fts
 
 
@@ -133,3 +134,214 @@ def test_repository_replacing_file_removes_owned_graph_rows_and_dangling_edges(t
     assert repo.counts()["nodes"] == 1
     assert repo.counts()["edges"] == 0
     assert repo.counts()["unresolved_refs"] == 0
+
+
+def test_repository_persists_searches_and_fetches_graph_relationships(tmp_path: Path) -> None:
+    repo = CodeGraphRepository(tmp_path / "codegraph.db")
+    repo.initialize()
+    repo.upsert_file(
+        path="pkg/sample.py",
+        language="python",
+        size=128,
+        content_hash="hash",
+        modified_at=1.0,
+        status="indexed",
+        errors=[],
+        node_count=3,
+    )
+    module = CodeGraphNode(
+        id="node_module",
+        identity_key="module",
+        kind="module",
+        name="sample",
+        qualified_name="pkg.sample",
+        file_path="pkg/sample.py",
+        language="python",
+        start_line=1,
+        end_line=12,
+    )
+    caller = CodeGraphNode(
+        id="node_caller",
+        identity_key="caller",
+        kind="method",
+        name="greet",
+        qualified_name="Greeter.greet",
+        file_path="pkg/sample.py",
+        language="python",
+        start_line=6,
+        end_line=7,
+    )
+    callee = CodeGraphNode(
+        id="node_callee",
+        identity_key="callee",
+        kind="function",
+        name="helper",
+        qualified_name="helper",
+        file_path="pkg/sample.py",
+        language="python",
+        start_line=10,
+        end_line=12,
+    )
+    edge = CodeGraphEdge(
+        id="edge_call",
+        source="node_caller",
+        target="node_callee",
+        kind="calls",
+        file_path="pkg/sample.py",
+        line=7,
+        column=15,
+    )
+    unresolved = CodeGraphUnresolvedRef(
+        from_node_id="node_callee",
+        reference_name="external_call",
+        reference_kind="call",
+        file_path="pkg/sample.py",
+        line=11,
+        column=4,
+        language="python",
+    )
+
+    repo.replace_file_graph(
+        path="pkg/sample.py",
+        nodes=[module, caller, callee],
+        edges=[edge],
+        unresolved_refs=[unresolved],
+    )
+
+    search_results = repo.search_nodes("helper", limit=10)
+    fetched = repo.get_node("node_callee")
+    callers = repo.list_callers("node_callee", limit=10)
+    callees = repo.list_callees("node_caller", limit=10)
+
+    assert [node.id for node in search_results] == ["node_callee"]
+    assert fetched is not None
+    assert fetched.qualified_name == "helper"
+    assert [relationship["source"]["id"] for relationship in callers] == ["node_caller"]
+    assert [relationship["target"]["id"] for relationship in callees] == ["node_callee"]
+    assert callees[0]["kind"] == "calls"
+
+
+def test_repository_replacement_removes_stale_symbols_from_search(tmp_path: Path) -> None:
+    repo = CodeGraphRepository(tmp_path / "codegraph.db")
+    repo.initialize()
+    repo.upsert_file(
+        path="pkg/sample.py",
+        language="python",
+        size=128,
+        content_hash="hash",
+        modified_at=1.0,
+        status="indexed",
+        errors=[],
+        node_count=1,
+    )
+    repo.replace_file_graph(
+        path="pkg/sample.py",
+        nodes=[
+            CodeGraphNode(
+                id="node_old",
+                identity_key="old",
+                kind="function",
+                name="old_helper",
+                qualified_name="old_helper",
+                file_path="pkg/sample.py",
+                language="python",
+            )
+        ],
+        edges=[],
+        unresolved_refs=[],
+    )
+
+    repo.replace_file_graph(
+        path="pkg/sample.py",
+        nodes=[
+            CodeGraphNode(
+                id="node_new",
+                identity_key="new",
+                kind="function",
+                name="new_helper",
+                qualified_name="new_helper",
+                file_path="pkg/sample.py",
+                language="python",
+            )
+        ],
+        edges=[],
+        unresolved_refs=[],
+    )
+
+    assert repo.search_nodes("old_helper", limit=10) == []
+    assert [node.id for node in repo.search_nodes("new_helper", limit=10)] == ["node_new"]
+
+
+def test_repository_atomic_file_and_graph_replacement_rolls_back_on_graph_error(tmp_path: Path) -> None:
+    repo = CodeGraphRepository(tmp_path / "codegraph.db")
+    repo.initialize()
+    repo.upsert_file(
+        path="pkg/sample.py",
+        language="python",
+        size=128,
+        content_hash="old_hash",
+        modified_at=1.0,
+        status="indexed",
+        errors=[],
+        node_count=1,
+    )
+    repo.replace_file_graph(
+        path="pkg/sample.py",
+        nodes=[
+            CodeGraphNode(
+                id="node_old",
+                identity_key="old",
+                kind="function",
+                name="old_helper",
+                qualified_name="old_helper",
+                file_path="pkg/sample.py",
+                language="python",
+            )
+        ],
+        edges=[],
+        unresolved_refs=[],
+    )
+    repo.seed_graph_rows_for_test(
+        nodes=[
+            {
+                "id": "node_conflict",
+                "identity_key": "conflict",
+                "kind": "function",
+                "name": "other_helper",
+                "file_path": "pkg/other.py",
+            }
+        ],
+        edges=[],
+        unresolved_refs=[],
+    )
+
+    with pytest.raises(sqlite3.IntegrityError):
+        repo.upsert_file_and_replace_graph(
+            path="pkg/sample.py",
+            language="python",
+            size=256,
+            content_hash="new_hash",
+            modified_at=2.0,
+            status="indexed",
+            errors=[],
+            node_count=1,
+            nodes=[
+                CodeGraphNode(
+                    id="node_conflict",
+                    identity_key="new",
+                    kind="function",
+                    name="new_helper",
+                    qualified_name="new_helper",
+                    file_path="pkg/sample.py",
+                    language="python",
+                )
+            ],
+            edges=[],
+            unresolved_refs=[],
+        )
+
+    file_row = repo.list_files(limit=10)[0]
+
+    assert file_row.content_hash == "old_hash"
+    assert repo.get_node("node_old") is not None
+    assert repo.search_nodes("new_helper", limit=10) == []

@@ -1,3 +1,5 @@
+"""Bounded foreground indexing orchestration for native CodeGraph."""
+
 from __future__ import annotations
 
 import hashlib
@@ -12,11 +14,15 @@ from loguru import logger
 from tldw_Server_API.app.core.DB_Management.codegraph.repository import CodeGraphRepository
 
 from .config import CodeGraphSettings
+from .extractors.python_extractor import PythonAstExtractor
 from .language_registry import CodeGraphLanguageRegistry
+from .models import ExtractionResult
 
 
 @dataclass(frozen=True)
 class IndexingResult:
+    """Result returned by foreground index and sync operations."""
+
     status: str
     counters: dict[str, int] = field(default_factory=dict)
     errors: tuple[str, ...] = ()
@@ -24,6 +30,8 @@ class IndexingResult:
 
 @dataclass(frozen=True)
 class _Candidate:
+    """Discovered workspace-relative file with language and size metadata."""
+
     path: Path
     relative_path: str
     language_id: str
@@ -34,6 +42,8 @@ class _Candidate:
 
 @dataclass(frozen=True)
 class _DiscoveryResult:
+    """Candidate discovery output with an optional early terminal status."""
+
     candidates: list[_Candidate]
     status: str | None = None
 
@@ -48,9 +58,11 @@ class CodeGraphIndexer:
         registry: CodeGraphLanguageRegistry,
         monotonic: Callable[[], float] | None = None,
     ) -> None:
+        """Create an indexer using settings, language metadata, and time source."""
         self._settings = settings
         self._registry = registry
         self._monotonic = monotonic or time.monotonic
+        self._extractors = {"python": PythonAstExtractor()}
 
     def index_workspace(
         self,
@@ -62,6 +74,7 @@ class CodeGraphIndexer:
         languages: list[str] | tuple[str, ...] | None,
         max_files: int | None,
     ) -> IndexingResult:
+        """Run a bounded foreground full workspace index."""
         return self._run(
             workspace_root,
             workspace_key,
@@ -81,6 +94,7 @@ class CodeGraphIndexer:
         languages: list[str] | tuple[str, ...] | None,
         max_files: int | None,
     ) -> IndexingResult:
+        """Run a bounded foreground sync for the current workspace state."""
         return self._run(
             workspace_root,
             workspace_key,
@@ -102,6 +116,7 @@ class CodeGraphIndexer:
         languages: list[str] | tuple[str, ...] | None,
         max_files: int | None,
     ) -> IndexingResult:
+        """Execute shared index or sync flow with size and wall-clock safeguards."""
         del force  # Stage 1 records file inventory only; extraction cache comes later.
         repository.initialize()
         run_id = repository.record_index_run_start(workspace_key=workspace_key, mode=mode)
@@ -152,20 +167,30 @@ class CodeGraphIndexer:
                     counters["files_too_large"] += 1
                     counters["files_skipped"] += 1
                     continue
-                if self._is_binary(candidate.path):
+                source = candidate.path.read_bytes()
+                if self._is_binary(source):
                     counters["files_skipped"] += 1
                     continue
 
-                content_hash = self._hash_file(candidate.path)
-                repository.prepare_file_replacement(candidate.relative_path)
-                repository.upsert_file(
+                content_hash = self._hash_bytes(source)
+                extraction = self._extract(candidate, workspace_key, source)
+                file_status = "indexed"
+                if extraction.errors:
+                    counters["errors"] += len(extraction.errors)
+                    file_status = "extraction_failed"
+                    errors.append(f"{candidate.relative_path}: {'; '.join(extraction.errors[:3])}")
+                repository.upsert_file_and_replace_graph(
                     path=candidate.relative_path,
                     language=candidate.language_id,
                     size=candidate.size,
                     content_hash=content_hash,
                     modified_at=candidate.modified_at,
-                    status="indexed",
-                    errors=[],
+                    status=file_status,
+                    errors=extraction.errors,
+                    node_count=len(extraction.nodes),
+                    nodes=extraction.nodes,
+                    edges=extraction.edges,
+                    unresolved_refs=extraction.unresolved_refs,
                 )
                 indexed_paths.add(candidate.relative_path)
                 counters["files_indexed"] += 1
@@ -199,6 +224,7 @@ class CodeGraphIndexer:
         counters: dict[str, int],
         max_files: int,
     ) -> _DiscoveryResult:
+        """Walk the workspace and collect supported-language candidate files."""
         root = workspace_root.expanduser().resolve(strict=False)
         selected_languages = set(languages or [])
         candidates: list[_Candidate] = []
@@ -260,21 +286,30 @@ class CodeGraphIndexer:
                         return _DiscoveryResult(candidates=candidates, status="index_too_large_for_foreground")
         return _DiscoveryResult(candidates=candidates)
 
-    @staticmethod
-    def _hash_file(path: Path) -> str:
-        digest = hashlib.sha256()
-        with path.open("rb") as handle:
-            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-                digest.update(chunk)
-        return digest.hexdigest()
+    def _extract(self, candidate: _Candidate, workspace_key: str, source: bytes) -> ExtractionResult:
+        """Run the language extractor for a candidate when one is implemented."""
+        extractor = self._extractors.get(candidate.language_id)
+        if extractor is None:
+            return ExtractionResult()
+        return extractor.extract(
+            workspace_key=workspace_key,
+            file_path=candidate.relative_path,
+            source=source,
+        )
 
     @staticmethod
-    def _is_binary(path: Path) -> bool:
-        with path.open("rb") as handle:
-            return b"\x00" in handle.read(4096)
+    def _hash_bytes(source: bytes) -> str:
+        """Return a SHA-256 content hash for indexed file bytes."""
+        return hashlib.sha256(source).hexdigest()
+
+    @staticmethod
+    def _is_binary(source: bytes) -> bool:
+        """Detect obvious binary files from the leading byte window."""
+        return b"\x00" in source[:4096]
 
 
 def _empty_counters() -> dict[str, int]:
+    """Return a fresh counter map for a single index run."""
     return {
         "files_seen": 0,
         "files_indexed": 0,
