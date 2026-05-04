@@ -309,7 +309,7 @@ git commit -m "feat: wire codegraph js ts extractors"
 **Files:**
 - Modify: `backlog/tasks/task-38 - Implement-native-CodeGraph-JS-TS-extractor-slice.md`
 
-- [ ] **Step 1: Run focused regression tests**
+- [x] **Step 1: Run focused regression tests**
 
 ```bash
 source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate
@@ -318,7 +318,7 @@ python -m pytest tldw_Server_API/tests/CodeGraph \
   tldw_Server_API/app/core/MCP_unified/tests/test_dynamic_module_catalog.py -q
 ```
 
-- [ ] **Step 2: Run Ruff on touched files**
+- [x] **Step 2: Run Ruff on touched files**
 
 ```bash
 python -m ruff check tldw_Server_API/app/core/CodeGraph \
@@ -326,7 +326,7 @@ python -m ruff check tldw_Server_API/app/core/CodeGraph \
   tldw_Server_API/app/core/MCP_unified/tests/test_codegraph_module.py
 ```
 
-- [ ] **Step 3: Run Bandit on touched production scope**
+- [x] **Step 3: Run Bandit on touched production scope**
 
 ```bash
 python -m bandit -r tldw_Server_API/app/core/CodeGraph \
@@ -337,17 +337,17 @@ python -m bandit -r tldw_Server_API/app/core/CodeGraph \
 
 Expected: `results 0`, `errors 0`, or documented pre-existing/non-actionable findings outside touched code.
 
-- [ ] **Step 4: Run whitespace check**
+- [x] **Step 4: Run whitespace check**
 
 ```bash
 git diff --check
 ```
 
-- [ ] **Step 5: Update Backlog task**
+- [x] **Step 5: Update Backlog task**
 
 Mark acceptance criteria and Definition of Done items complete, record verification output, and add a final summary.
 
-- [ ] **Step 6: Commit closeout**
+- [x] **Step 6: Commit closeout**
 
 ```bash
 git add backlog/tasks/task-38\ -\ Implement-native-CodeGraph-JS-TS-extractor-slice.md

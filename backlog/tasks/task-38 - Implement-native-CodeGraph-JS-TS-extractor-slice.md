@@ -1,11 +1,11 @@
 ---
 id: TASK-38
 title: Implement native CodeGraph JS/TS extractor slice
-status: In Progress
+status: Done
 assignee:
   - Codex
 created_date: '2026-05-04 05:48'
-updated_date: '2026-05-04 06:12'
+updated_date: '2026-05-04 06:15'
 labels:
   - codegraph
   - mcp
@@ -29,12 +29,12 @@ Implement the next native CodeGraph epic slice after PR #1258: JavaScript/TypeSc
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 JavaScript and TypeScript files index symbol nodes for functions, arrow-function variables, classes, methods, React-like components, interfaces, type aliases, and enums where supported by the parser.
-- [ ] #2 JS/TS import and re-export declarations create import nodes and unresolved refs for external package imports.
-- [ ] #3 Same-file calls by identifier or member expression are resolved conservatively or recorded as unresolved refs without false cross-file claims.
-- [ ] #4 Relative import targets and trusted tsconfig/jsconfig path aliases are resolved under the workspace root; escaping aliases are ignored with a clear unresolved reason.
-- [ ] #5 Indexer wires JS/TS extractors so TS/TSX/JS/JSX files no longer remain inventory-only when parser dependencies are available.
-- [ ] #6 Focused extractor, indexer, repository/MCP regression tests plus Ruff, Bandit, and git diff checks pass.
+- [x] #1 JavaScript and TypeScript files index symbol nodes for functions, arrow-function variables, classes, methods, React-like components, interfaces, type aliases, and enums where supported by the parser.
+- [x] #2 JS/TS import and re-export declarations create import nodes and unresolved refs for external package imports.
+- [x] #3 Same-file calls by identifier or member expression are resolved conservatively or recorded as unresolved refs without false cross-file claims.
+- [x] #4 Relative import targets and trusted tsconfig/jsconfig path aliases are resolved under the workspace root; escaping aliases are ignored with a clear unresolved reason.
+- [x] #5 Indexer wires JS/TS extractors so TS/TSX/JS/JSX files no longer remain inventory-only when parser dependencies are available.
+- [x] #6 Focused extractor, indexer, repository/MCP regression tests plus Ruff, Bandit, and git diff checks pass.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -59,14 +59,22 @@ Task 3 red-green complete: added JavaScript extractor tests for modules, imports
 Task 4 red-green complete: added TypeScript/TSX extractor tests for interface, type alias, enum, imports, function/class/method calls, TSX component detection, and deterministic IDs; verified 3 passed.
 
 Task 5 red-green complete: indexer now wires optional JS/TS extractors, registry reports dependency-aware symbol extraction, MCP search finds indexed TSX components, and focused CodeGraph/MCP tests verified 72 passed.
+
+Final verification: focused CodeGraph/MCP regression suite passed with 72 passed and 5 warnings; Ruff passed; Bandit JSON reported errors 0 and results 0; git diff --check passed.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Implemented the native CodeGraph JavaScript/TypeScript extractor slice. Added optional Tree-sitter loader, JS/TS import resolver with workspace-bounded path alias handling, JavaScript and TypeScript/TSX extractors, dependency-aware language metadata, and indexer/MCP wiring so JS/TS symbols are searchable. Verification: focused CodeGraph/MCP tests 72 passed, Ruff passed, Bandit reported errors 0/results 0, and git diff --check passed.
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
