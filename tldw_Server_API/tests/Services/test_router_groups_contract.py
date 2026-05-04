@@ -556,6 +556,125 @@ def test_iter_core_router_specs_defers_llm_provider_router_attr_lookup(
     }
 
 
+def test_iter_core_router_specs_defers_infrastructure_router_attr_lookup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify covered core infrastructure specs keep router attr lookup lazy."""
+    router_definitions = (
+        {
+            "module_name": "tldw_Server_API.app.api.v1.endpoints.health",
+            "path": "/health",
+            "prefix": "/api/v1",
+            "tags": ("health",),
+            "route_key": "health",
+        },
+        {
+            "module_name": "tldw_Server_API.app.api.v1.endpoints.moderation",
+            "path": "/moderation/check",
+            "prefix": "/api/v1",
+            "tags": ("moderation",),
+            "route_key": "moderation",
+        },
+        {
+            "module_name": "tldw_Server_API.app.api.v1.endpoints.monitoring",
+            "path": "/monitoring/status",
+            "prefix": "/api/v1",
+            "tags": ("monitoring",),
+            "route_key": "monitoring",
+        },
+        {
+            "module_name": "tldw_Server_API.app.api.v1.endpoints.metrics",
+            "path": "/metrics/text",
+            "prefix": "/api/v1",
+            "tags": ("metrics",),
+            "route_key": "metrics",
+        },
+        {
+            "module_name": "tldw_Server_API.app.api.v1.endpoints.audit",
+            "path": "/audit/events",
+            "prefix": "/api/v1",
+            "tags": ("audit",),
+            "route_key": "audit",
+        },
+        {
+            "module_name": "tldw_Server_API.app.api.v1.endpoints.consent",
+            "path": "/consent/status",
+            "prefix": "/api/v1",
+            "tags": ("consent",),
+            "route_key": "consent",
+        },
+        {
+            "module_name": "tldw_Server_API.app.api.v1.endpoints.setup",
+            "path": "/setup/status",
+            "prefix": "/api/v1",
+            "tags": ("setup",),
+            "route_key": "setup",
+        },
+        {
+            "module_name": "tldw_Server_API.app.api.v1.endpoints.tools",
+            "path": "/tools",
+            "prefix": "/api/v1",
+            "tags": ("tools",),
+            "route_key": "tools",
+            "default_stable": False,
+        },
+    )
+    access_count = {
+        str(definition["module_name"]): 0
+        for definition in router_definitions
+    }
+
+    for definition in router_definitions:
+        module_name = str(definition["module_name"])
+        router = APIRouter()
+
+        @router.get(str(definition["path"]))
+        def _endpoint() -> dict[str, str]:
+            return {"status": "ok"}
+
+        fake_module = ModuleType(module_name)
+
+        def _module_getattr(
+            name: str,
+            *,
+            module_name: str = module_name,
+            router: APIRouter = router,
+        ) -> APIRouter:
+            if name != "router":
+                raise AttributeError(name)
+            access_count[module_name] += 1
+            return router
+
+        fake_module.__getattr__ = _module_getattr  # type: ignore[attr-defined]
+        monkeypatch.setitem(sys.modules, module_name, fake_module)
+
+    specs = list(iter_core_router_specs())
+    assert access_count == {
+        str(definition["module_name"]): 0
+        for definition in router_definitions
+    }
+
+    selected_route_keys = {
+        str(definition["route_key"])
+        for definition in router_definitions
+    }
+    selected_specs = [
+        spec for spec in specs if spec.route_key in selected_route_keys
+    ]
+    by_first_path = {_first_router_path(spec.router): spec for spec in selected_specs}
+    for definition in router_definitions:
+        spec = by_first_path[str(definition["path"])]
+        assert spec.prefix == definition["prefix"]
+        assert spec.tags == definition["tags"]
+        assert spec.route_key == definition["route_key"]
+        assert spec.default_stable is definition.get("default_stable", True)
+
+    assert access_count == {
+        str(definition["module_name"]): 1
+        for definition in router_definitions
+    }
+
+
 def test_iter_admin_router_specs_defers_selected_router_attr_lookup(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -27,96 +27,59 @@ def iter_core_router_specs() -> Iterable[RouterSpec]:
     """
     specs: list[RouterSpec] = []
 
-    # Health endpoints
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.health import router as health_router
-
-        specs.append(RouterSpec(
-            router=health_router,
+    # Basic infrastructure endpoints
+    for infrastructure_spec in (
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.health",
+            log_name="health",
             prefix=f"{API_V1_PREFIX}",
             tags=("health",),
             route_key="health",
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping health router: {e}")
-
-    # Moderation endpoints
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.moderation import router as moderation_router
-
-        specs.append(RouterSpec(
-            router=moderation_router,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.moderation",
+            log_name="moderation",
             prefix=f"{API_V1_PREFIX}",
             tags=("moderation",),
             route_key="moderation",
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping moderation router: {e}")
-
-    # Monitoring endpoints
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.monitoring import router as monitoring_router
-
-        specs.append(RouterSpec(
-            router=monitoring_router,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.monitoring",
+            log_name="monitoring",
             prefix=f"{API_V1_PREFIX}",
             tags=("monitoring",),
             route_key="monitoring",
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping monitoring router: {e}")
-
-    # Metrics endpoints
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.metrics import router as metrics_router
-
-        specs.append(RouterSpec(
-            router=metrics_router,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.metrics",
+            log_name="metrics",
             prefix=f"{API_V1_PREFIX}",
             tags=("metrics",),
             route_key="metrics",
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping metrics router: {e}")
-
-    # Audit endpoints
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.audit import router as audit_router
-
-        specs.append(RouterSpec(
-            router=audit_router,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.audit",
+            log_name="audit",
             prefix=f"{API_V1_PREFIX}",
             tags=("audit",),
             route_key="audit",
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping audit router: {e}")
-
-    # Consent endpoints
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.consent import router as consent_router
-
-        specs.append(RouterSpec(
-            router=consent_router,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.consent",
+            log_name="consent",
             prefix=f"{API_V1_PREFIX}",
             tags=("consent",),
             route_key="consent",
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping consent router: {e}")
-
-    # Setup endpoints
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.setup import router as setup_router
-
-        specs.append(RouterSpec(
-            router=setup_router,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.setup",
+            log_name="setup",
             prefix=f"{API_V1_PREFIX}",
             tags=("setup",),
             route_key="setup",
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping setup router: {e}")
+        ),
+    ):
+        append_imported_router_spec(specs, infrastructure_spec)
 
     # Authentication endpoints
     try:
@@ -235,19 +198,17 @@ def iter_core_router_specs() -> Iterable[RouterSpec]:
     ):
         append_imported_router_spec(specs, chat_spec)
 
-    # Tools endpoint
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.tools import router as tools_router
-
-        specs.append(RouterSpec(
-            router=tools_router,
+    append_imported_router_spec(
+        specs,
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.tools",
+            log_name="tools",
             prefix=f"{API_V1_PREFIX}",
             tags=("tools",),
             route_key="tools",
             default_stable=False,
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping tools router: {e}")
+        ),
+    )
 
     # Agent Client Protocol (ACP) endpoints
     for acp_spec in (
