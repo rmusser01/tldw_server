@@ -4,7 +4,7 @@ title: Address PR 1253 Qodo follow-up review
 status: Done
 assignee: []
 created_date: '2026-05-04 04:03'
-updated_date: '2026-05-04 04:07'
+updated_date: '2026-05-04 04:48'
 labels:
   - codegraph
   - mcp
@@ -13,6 +13,7 @@ dependencies:
   - TASK-31
 references:
   - 'https://github.com/rmusser01/tldw_server/pull/1253'
+  - 'https://github.com/rmusser01/tldw_server/pull/1258'
 priority: medium
 ---
 
@@ -39,6 +40,8 @@ Verified PR #1253 is merged. Open follow-up branch codex/codegraph-qodo-followup
 Implemented Qodo follow-up fixes: Python AST parsing catches ValueError; indexer converts extractor ValueError into per-file extraction_failed rows; codegraph.files limit is clamped by max_search_results; inventory-only files use a binary probe and streaming file hash instead of full read_bytes; extractor package now has a module docstring; test policy helpers have type hints.
 
 Verification: focused CodeGraph/MCP suite passed with 51 passed and 5 warnings; Ruff check on touched files passed; Bandit touched scope wrote /tmp/bandit_codegraph_qodo_followup.json with 0 results and 0 errors; git diff --check passed.
+
+Opened draft follow-up PR #1258 against dev for the Qodo review fixes. PR remains draft pending a human-authored Change summary.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
