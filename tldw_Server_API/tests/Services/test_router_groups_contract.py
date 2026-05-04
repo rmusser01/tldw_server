@@ -870,6 +870,49 @@ def test_iter_content_router_specs_uses_canonical_rag_key_and_single_web_scrapin
     assert web_scraping_specs[0].prefix == "/api/v1"
 
 
+def test_iter_content_router_specs_defers_discovery_router_attr_lookup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify covered content discovery specs keep router attr lookup lazy."""
+    router_definitions = {
+        "tldw_Server_API.app.api.v1.endpoints.rag_health": "/rag/health",
+        "tldw_Server_API.app.api.v1.endpoints.research": "/research/search",
+        "tldw_Server_API.app.api.v1.endpoints.research_runs": "/research-runs",
+        "tldw_Server_API.app.api.v1.endpoints.paper_search": "/paper-search",
+    }
+    access_count = {module_name: 0 for module_name in router_definitions}
+
+    for module_name, path in router_definitions.items():
+        router = APIRouter()
+
+        @router.get(path)
+        def _endpoint() -> dict[str, str]:
+            return {"status": "ok"}
+
+        fake_module = ModuleType(module_name)
+
+        def _module_getattr(
+            name: str,
+            *,
+            module_name: str = module_name,
+            router: APIRouter = router,
+        ) -> APIRouter:
+            if name != "router":
+                raise AttributeError(name)
+            access_count[module_name] += 1
+            return router
+
+        fake_module.__getattr__ = _module_getattr  # type: ignore[attr-defined]
+        monkeypatch.setitem(sys.modules, module_name, fake_module)
+
+    specs = list(iter_content_router_specs())
+    assert access_count == {module_name: 0 for module_name in router_definitions}
+
+    by_first_path = {_first_router_path(spec.router): spec for spec in specs}
+    assert set(router_definitions.values()).issubset(by_first_path)
+    assert access_count == {module_name: 1 for module_name in router_definitions}
+
+
 def test_qodo_reviewed_router_policy_regressions(monkeypatch: pytest.MonkeyPatch) -> None:
     _install_fake_router_module(
         monkeypatch,

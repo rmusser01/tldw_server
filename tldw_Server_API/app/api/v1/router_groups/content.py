@@ -9,6 +9,10 @@ from typing import Iterable
 
 from loguru import logger
 
+from tldw_Server_API.app.api.v1.router_groups.conditional import (
+    ImportedRouterSpec,
+    append_imported_router_spec,
+)
 from tldw_Server_API.app.api.v1.router_groups.factories import evaluations_router_factory
 from tldw_Server_API.app.api.v1.router_groups.spec import RouterSpec
 from tldw_Server_API.app.core.testing import audio_imports_enabled_for_runtime
@@ -35,54 +39,40 @@ def iter_content_router_specs() -> Iterable[RouterSpec]:
     except ImportError as e:
         logger.debug(f"Skipping rag_unified router: {e}")
 
-    # RAG health endpoints
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.rag_health import router as rag_health_router
-
-        specs.append(RouterSpec(
-            router=rag_health_router,
+    # RAG health and research discovery endpoints
+    for discovery_spec in (
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.rag_health",
+            log_name="rag_health",
             tags=("rag-health",),
             route_key="rag-health",
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping rag_health router: {e}")
-
-    # Research endpoints
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.research import router as research_router
-
-        specs.append(RouterSpec(
-            router=research_router,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.research",
+            log_name="research",
             prefix=f"{API_V1_PREFIX}/research",
             tags=("research",),
             route_key="research",
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping research router: {e}")
-
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.research_runs import router as research_runs_router
-
-        specs.append(RouterSpec(
-            router=research_runs_router,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.research_runs",
+            log_name="research_runs",
             prefix=f"{API_V1_PREFIX}",
             tags=("research-runs",),
             route_key="research",
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping research_runs router: {e}")
-
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.paper_search import router as paper_search_router
-
-        specs.append(RouterSpec(
-            router=paper_search_router,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.paper_search",
+            log_name="paper_search",
             prefix=f"{API_V1_PREFIX}/paper-search",
             tags=("paper-search",),
             route_key="paper-search",
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping paper_search router: {e}")
+        ),
+    ):
+        try:
+            append_imported_router_spec(specs, discovery_spec)
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"Skipping {discovery_spec.log_name} router: {e}")
 
     # Embeddings (OpenAI-compatible)
     try:
