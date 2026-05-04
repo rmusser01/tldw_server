@@ -1043,6 +1043,81 @@ def test_iter_content_router_specs_defers_discovery_router_attr_lookup(
     assert access_count == {module_name: 1 for module_name in router_definitions}
 
 
+def test_iter_content_router_specs_defers_media_audio_router_attr_lookup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify covered media/audio specs keep router attr lookup lazy."""
+    monkeypatch.setenv("PYTEST_CURRENT_TEST", "test_media_audio")
+    monkeypatch.setenv("MINIMAL_TEST_INCLUDE_AUDIO", "1")
+    module_paths = {
+        "tldw_Server_API.app.api.v1.endpoints.media": {"router": "/media/list"},
+        "tldw_Server_API.app.api.v1.endpoints.audio.audio": {
+            "router": "/transcriptions",
+            "ws_router": "/stream/transcribe",
+        },
+        "tldw_Server_API.app.api.v1.endpoints.audio.audio_jobs": {"router": "/audio/jobs"},
+    }
+    access_count = {
+        f"{module_name}.{attr_name}": 0
+        for module_name, attrs in module_paths.items()
+        for attr_name in attrs
+    }
+
+    for module_name, attr_paths in module_paths.items():
+        fake_module = ModuleType(module_name)
+        routers: dict[str, APIRouter] = {}
+        for attr_name, path in attr_paths.items():
+            router = APIRouter()
+
+            @router.get(path)
+            def _endpoint() -> dict[str, str]:
+                return {"status": "ok"}
+
+            routers[attr_name] = router
+
+        def _module_getattr(
+            name: str,
+            *,
+            module_name: str = module_name,
+            routers: dict[str, APIRouter] = routers,
+        ) -> APIRouter:
+            if name not in routers:
+                raise AttributeError(name)
+            access_count[f"{module_name}.{name}"] += 1
+            return routers[name]
+
+        fake_module.__getattr__ = _module_getattr  # type: ignore[attr-defined]
+        monkeypatch.setitem(sys.modules, module_name, fake_module)
+
+    specs = list(iter_content_router_specs())
+    assert access_count == {
+        f"{module_name}.{attr_name}": 0
+        for module_name, attrs in module_paths.items()
+        for attr_name in attrs
+    }
+
+    selected_specs = [
+        spec
+        for spec in specs
+        if spec.route_key in {"media", "audio", "audio-websocket", "audio-jobs"}
+    ]
+    by_first_path = {_first_router_path(spec.router): spec for spec in selected_specs}
+
+    assert by_first_path["/media/list"].prefix == "/api/v1/media"
+    assert by_first_path["/media/list"].tags == ("media",)
+    assert by_first_path["/transcriptions"].prefix == "/api/v1/audio"
+    assert by_first_path["/transcriptions"].tags == ("audio",)
+    assert by_first_path["/stream/transcribe"].prefix == "/api/v1/audio"
+    assert by_first_path["/stream/transcribe"].tags == ("audio-websocket",)
+    assert by_first_path["/audio/jobs"].prefix == "/api/v1/audio"
+    assert by_first_path["/audio/jobs"].tags == ("audio-jobs",)
+    assert access_count == {
+        f"{module_name}.{attr_name}": 1
+        for module_name, attrs in module_paths.items()
+        for attr_name in attrs
+    }
+
+
 def test_qodo_reviewed_router_policy_regressions(monkeypatch: pytest.MonkeyPatch) -> None:
     _install_fake_router_module(
         monkeypatch,
