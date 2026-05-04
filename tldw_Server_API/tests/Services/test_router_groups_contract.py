@@ -325,6 +325,72 @@ def test_iter_core_router_specs_defers_chat_router_attr_lookup(
     }
 
 
+def test_iter_admin_router_specs_defers_selected_router_attr_lookup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify covered admin specs keep router attr lookup lazy."""
+    import importlib
+
+    sandbox_module_name = "tldw_Server_API.app.api.v1.endpoints.sandbox"
+    router_definitions = {
+        "tldw_Server_API.app.api.v1.endpoints.admin": "/admin/status",
+        "tldw_Server_API.app.api.v1.endpoints.family_wizard": "/guardian/family-wizard",
+        "tldw_Server_API.app.api.v1.endpoints.guardian_controls": "/guardian/controls",
+        "tldw_Server_API.app.api.v1.endpoints.self_monitoring": "/self-monitoring/status",
+        sandbox_module_name: "/sandbox/status",
+        "tldw_Server_API.app.api.v1.endpoints.billing": "/billing/status",
+        "tldw_Server_API.app.api.v1.endpoints.benchmark_api": "/benchmarks/status",
+        "tldw_Server_API.app.api.v1.endpoints.mcp_catalogs_manage": "/mcp/catalogs",
+        "tldw_Server_API.app.api.v1.endpoints.mcp_hub_management": "/mcp/hub",
+        "tldw_Server_API.app.api.v1.endpoints.orgs": "/orgs",
+        "tldw_Server_API.app.api.v1.endpoints.shared_keys_scoped": "/shared-keys/scoped",
+        "tldw_Server_API.app.api.v1.endpoints.privileges": "/privileges",
+        "tldw_Server_API.app.api.v1.endpoints.config_admin": "/admin/config/effective",
+        "tldw_Server_API.app.api.v1.endpoints.resource_governor": "/resource-governor/status",
+        "tldw_Server_API.app.api.v1.endpoints.jobs_admin": "/jobs/status",
+        "tldw_Server_API.app.api.v1.endpoints.org_invites": "/orgs/invites",
+    }
+    access_count = {module_name: 0 for module_name in router_definitions}
+    real_import_module = importlib.import_module
+
+    def _guarded_import_module(module_name: str, package: str | None = None) -> ModuleType:
+        if module_name == sandbox_module_name and module_name not in sys.modules:
+            raise AssertionError("sandbox router was imported without a test stub")
+        return real_import_module(module_name, package)
+
+    monkeypatch.setattr(importlib, "import_module", _guarded_import_module)
+
+    for module_name, path in router_definitions.items():
+        router = APIRouter()
+
+        @router.get(path)
+        def _endpoint() -> dict[str, str]:
+            return {"status": "ok"}
+
+        fake_module = ModuleType(module_name)
+
+        def _module_getattr(
+            name: str,
+            *,
+            module_name: str = module_name,
+            router: APIRouter = router,
+        ) -> APIRouter:
+            if name != "router":
+                raise AttributeError(name)
+            access_count[module_name] += 1
+            return router
+
+        fake_module.__getattr__ = _module_getattr  # type: ignore[attr-defined]
+        monkeypatch.setitem(sys.modules, module_name, fake_module)
+
+    specs = list(iter_admin_router_specs())
+    assert access_count == {module_name: 0 for module_name in router_definitions}
+
+    by_first_path = {_first_router_path(spec.router): spec for spec in specs}
+    assert set(router_definitions.values()).issubset(by_first_path)
+    assert access_count == {module_name: 1 for module_name in router_definitions}
+
+
 def test_iter_core_router_specs_skips_crashing_chat_import(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
