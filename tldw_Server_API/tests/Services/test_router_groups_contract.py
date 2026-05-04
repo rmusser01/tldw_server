@@ -1118,6 +1118,59 @@ def test_iter_content_router_specs_defers_media_audio_router_attr_lookup(
     }
 
 
+def test_iter_content_router_specs_defers_workflow_router_attr_lookup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify covered workflow specs keep router attr lookup lazy."""
+    monkeypatch.setenv("PYTEST_CURRENT_TEST", "test_workflow_routers")
+    module_paths = {
+        "tldw_Server_API.app.api.v1.endpoints.workflows": "/workflows",
+        "tldw_Server_API.app.api.v1.endpoints.chat_workflows": "/chat/workflows",
+        "tldw_Server_API.app.api.v1.endpoints.scheduler_workflows": "/scheduler/workflows",
+    }
+    access_count = {module_name: 0 for module_name in module_paths}
+
+    for module_name, path in module_paths.items():
+        router = APIRouter()
+
+        @router.get(path)
+        def _endpoint() -> dict[str, str]:
+            return {"status": "ok"}
+
+        fake_module = ModuleType(module_name)
+
+        def _module_getattr(
+            name: str,
+            *,
+            module_name: str = module_name,
+            router: APIRouter = router,
+        ) -> APIRouter:
+            if name != "router":
+                raise AttributeError(name)
+            access_count[module_name] += 1
+            return router
+
+        fake_module.__getattr__ = _module_getattr  # type: ignore[attr-defined]
+        monkeypatch.setitem(sys.modules, module_name, fake_module)
+
+    specs = list(iter_content_router_specs())
+    assert access_count == {module_name: 0 for module_name in module_paths}
+
+    by_first_path = {_first_router_path(spec.router): spec for spec in specs}
+    assert by_first_path["/workflows"].prefix == ""
+    assert by_first_path["/workflows"].tags == ("workflows",)
+    assert by_first_path["/workflows"].route_key == ""
+    assert by_first_path["/workflows"].default_stable is False
+    assert by_first_path["/chat/workflows"].prefix == ""
+    assert by_first_path["/chat/workflows"].tags == ("chat-workflows",)
+    assert by_first_path["/chat/workflows"].route_key == ""
+    assert by_first_path["/scheduler/workflows"].prefix == ""
+    assert by_first_path["/scheduler/workflows"].tags == ("scheduler",)
+    assert by_first_path["/scheduler/workflows"].route_key == ""
+    assert by_first_path["/scheduler/workflows"].default_stable is False
+    assert access_count == {module_name: 1 for module_name in module_paths}
+
+
 def test_qodo_reviewed_router_policy_regressions(monkeypatch: pytest.MonkeyPatch) -> None:
     _install_fake_router_module(
         monkeypatch,
