@@ -101,6 +101,31 @@ def test_indexer_keeps_javascript_typescript_as_inventory_only_until_extractor_s
     assert [node.file_path for node in repo.search_nodes("helper", limit=10)] == ["app.py"]
 
 
+def test_indexer_marks_python_extraction_errors_without_claiming_indexed_status(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "broken.py").write_text("def broken(:\n    pass\n", encoding="utf-8")
+    repo = CodeGraphRepository(tmp_path / "codegraph.db")
+    indexer = CodeGraphIndexer(settings=CodeGraphSettings.from_mapping({}), registry=CodeGraphLanguageRegistry())
+
+    result = indexer.index_workspace(
+        workspace_root=workspace,
+        workspace_key="ws_test",
+        repository=repo,
+        force=True,
+        languages=None,
+        max_files=10,
+    )
+    file_row = repo.list_files(limit=10)[0]
+
+    assert result.status == "complete"
+    assert result.counters["errors"] > 0
+    assert any(error.startswith("broken.py:") for error in result.errors)
+    assert file_row.status == "extraction_failed"
+    assert file_row.node_count == 0
+    assert file_row.errors
+
+
 def test_indexer_rejects_over_limit_foreground_workspace(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()

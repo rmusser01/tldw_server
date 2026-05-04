@@ -1,8 +1,8 @@
 """
 Workspace-bounded native CodeGraph MCP module.
 
-Stage 1 exposes bounded foreground indexing and file inventory only. Symbol
-extraction and graph queries are intentionally deferred.
+This module exposes bounded foreground indexing, file inventory, Python symbol
+search, and same-file call relationship queries for trusted workspace roots.
 """
 
 from __future__ import annotations
@@ -37,6 +37,7 @@ class CodeGraphModule(BaseModule):
         config: ModuleConfig,
         workspace_root_resolver: WorkspaceRootResolver | None = None,
     ) -> None:
+        """Create module-scoped settings, dependency probes, and workspace resolver."""
         super().__init__(config)
         self._settings = CodeGraphSettings.from_mapping(config.settings)
         self._dependency_health = probe_codegraph_dependencies()
@@ -44,12 +45,15 @@ class CodeGraphModule(BaseModule):
         self._workspace = CodeGraphWorkspaceResolver(workspace_root_resolver, self._settings)
 
     async def on_initialize(self) -> None:
+        """Log CodeGraph module initialization."""
         logger.info(f"Initializing CodeGraph module: {self.name}")
 
     async def on_shutdown(self) -> None:
+        """Log CodeGraph module shutdown."""
         logger.info(f"Shutting down CodeGraph module: {self.name}")
 
     async def check_health(self) -> dict[str, bool]:
+        """Return lightweight module health flags for MCP status reporting."""
         return {
             "initialized": True,
             "workspace_root_resolver": self._workspace is not None,
@@ -57,6 +61,7 @@ class CodeGraphModule(BaseModule):
         }
 
     async def get_tools(self) -> list[dict[str, Any]]:
+        """Return MCP tool definitions for native CodeGraph operations."""
         shared_metadata = {
             "uses_filesystem": True,
             "path_boundable": True,
@@ -222,6 +227,7 @@ class CodeGraphModule(BaseModule):
         return [status_tool, index_tool, sync_tool, files_tool, search_tool, node_tool, callers_tool, callees_tool]
 
     async def execute_tool(self, tool_name: str, arguments: dict[str, Any], context: Any | None = None) -> Any:
+        """Validate and dispatch one CodeGraph MCP tool invocation."""
         args = self.sanitize_input(arguments or {})
         self.validate_tool_arguments(tool_name, args)
 
@@ -300,6 +306,7 @@ class CodeGraphModule(BaseModule):
         raise ValueError(f"Unknown tool: {tool_name}")
 
     def validate_tool_arguments(self, tool_name: str, arguments: dict[str, Any]) -> None:
+        """Validate the input shape for a supported CodeGraph tool."""
         if tool_name == "codegraph.status":
             self._reject_unknown(arguments, allowed=set())
             return
@@ -343,10 +350,13 @@ class CodeGraphModule(BaseModule):
             query = arguments.get("query")
             if not isinstance(query, str) or not query.strip():
                 raise ValueError("query must be a non-empty string")
+            arguments["query"] = query.strip()
             kind = arguments.get("kind")
             language = arguments.get("language")
             if kind is not None and (not isinstance(kind, str) or not kind.strip()):
                 raise ValueError("kind must be a non-empty string")
+            if isinstance(kind, str):
+                arguments["kind"] = kind.strip()
             if language is not None:
                 if not isinstance(language, str) or language not in self._language_registry.known_language_ids():
                     raise ValueError("language must be a known language id")
@@ -370,6 +380,7 @@ class CodeGraphModule(BaseModule):
         raise ValueError(f"Unknown tool: {tool_name}")
 
     async def _status(self, resolution: WorkspaceResolution) -> dict[str, Any]:
+        """Build a read-only status payload without creating the index database."""
         if resolution.index_db_path.exists():
             counts, last_run = await asyncio.to_thread(self._read_status_from_repository, resolution)
             index_present = True
@@ -396,6 +407,7 @@ class CodeGraphModule(BaseModule):
         self,
         resolution: WorkspaceResolution,
     ) -> tuple[dict[str, int], IndexRunSummary | None]:
+        """Read status details from an existing index repository."""
         repository = CodeGraphRepository(resolution.index_db_path)
         return repository.counts(), repository.last_index_run()
 
@@ -406,6 +418,7 @@ class CodeGraphModule(BaseModule):
         languages: list[str] | None,
         max_files: int | None,
     ) -> dict[str, Any]:
+        """Run foreground indexing and serialize the result."""
         repository = CodeGraphRepository(resolution.index_db_path)
         indexer = self._new_indexer()
         result = indexer.index_workspace(
@@ -424,6 +437,7 @@ class CodeGraphModule(BaseModule):
         languages: list[str] | None,
         max_files: int | None,
     ) -> dict[str, Any]:
+        """Run foreground sync and serialize the result."""
         repository = CodeGraphRepository(resolution.index_db_path)
         indexer = self._new_indexer()
         result = indexer.sync_workspace(
@@ -444,6 +458,7 @@ class CodeGraphModule(BaseModule):
         include_metadata: bool,
         limit: int | None,
     ) -> dict[str, Any]:
+        """List indexed files without mutating absent index storage."""
         if not resolution.index_db_path.exists():
             return {
                 "workspace_key": resolution.workspace_key,
@@ -480,6 +495,7 @@ class CodeGraphModule(BaseModule):
         language: str | None,
         limit: int | None,
     ) -> dict[str, Any]:
+        """Search indexed graph nodes for one workspace."""
         effective_limit = self._bounded_limit(limit)
         if not resolution.index_db_path.exists():
             return {
@@ -506,6 +522,7 @@ class CodeGraphModule(BaseModule):
         symbol: str | None,
         include_code: bool,
     ) -> dict[str, Any]:
+        """Fetch one indexed graph node by id or symbol selector."""
         if not resolution.index_db_path.exists():
             return {"workspace_key": resolution.workspace_key, "index_present": False, "node": None}
         repository = CodeGraphRepository(resolution.index_db_path)
@@ -527,6 +544,7 @@ class CodeGraphModule(BaseModule):
         symbol: str | None,
         limit: int | None,
     ) -> dict[str, Any]:
+        """List callers or callees for one indexed graph node selector."""
         effective_limit = self._bounded_limit(limit)
         if not resolution.index_db_path.exists():
             return {
@@ -560,15 +578,18 @@ class CodeGraphModule(BaseModule):
         }
 
     def _new_indexer(self) -> CodeGraphIndexer:
+        """Create a fresh indexer for a blocking foreground operation."""
         return CodeGraphIndexer(settings=self._settings, registry=self._language_registry)
 
     @staticmethod
     def _reject_unknown(arguments: dict[str, Any], *, allowed: set[str]) -> None:
+        """Reject argument names outside a tool-specific allowlist."""
         unknown = sorted(set(arguments) - allowed)
         if unknown:
             raise ValueError(f"unknown arguments: {', '.join(unknown)}")
 
     def _validate_languages(self, languages: Any) -> None:
+        """Validate optional language filters against the registry."""
         if languages is None:
             return
         if not isinstance(languages, list) or not all(isinstance(item, str) for item in languages):
@@ -579,11 +600,13 @@ class CodeGraphModule(BaseModule):
 
     @staticmethod
     def _validate_foreground_mode(mode: Any) -> None:
+        """Ensure Stage 1 callers only request foreground execution."""
         if mode is not None and mode != _FOREGROUND_MODE:
             raise ValueError("only foreground mode is supported")
 
     @staticmethod
     def _validate_positive_int(value: Any, field_name: str) -> None:
+        """Validate optional positive integer tool arguments."""
         if value is None:
             return
         if not isinstance(value, int) or isinstance(value, bool) or value < 1:
@@ -591,6 +614,7 @@ class CodeGraphModule(BaseModule):
 
     @staticmethod
     def _validate_node_selector(arguments: dict[str, Any]) -> None:
+        """Require a non-empty node id or symbol selector."""
         node_id = arguments.get("node_id")
         symbol = arguments.get("symbol")
         if node_id is None and symbol is None:
@@ -599,12 +623,20 @@ class CodeGraphModule(BaseModule):
             raise ValueError("node_id must be a non-empty string")
         if symbol is not None and (not isinstance(symbol, str) or not symbol.strip()):
             raise ValueError("symbol must be a non-empty string")
+        if node_id is not None and symbol is not None:
+            raise ValueError("node_id and symbol are mutually exclusive")
+        if isinstance(node_id, str):
+            arguments["node_id"] = node_id.strip()
+        if isinstance(symbol, str):
+            arguments["symbol"] = symbol.strip()
 
     def _bounded_limit(self, limit: int | None) -> int:
+        """Clamp user-provided result limits to configured maximums."""
         return min(max(1, int(limit or 10)), self._settings.max_search_results)
 
 
 def _normalize_path_prefix(path: str | None) -> str | None:
+    """Normalize an optional workspace-relative path prefix."""
     if path is None or not path.strip() or path.strip() == ".":
         return None
     raw = Path(path)
@@ -614,6 +646,7 @@ def _normalize_path_prefix(path: str | None) -> str | None:
 
 
 def _indexed_file_to_dict(file: IndexedFile, *, include_metadata: bool) -> dict[str, Any]:
+    """Serialize an indexed file row for MCP responses."""
     result: dict[str, Any] = {
         "path": file.path,
         "language": file.language,
@@ -634,6 +667,7 @@ def _indexed_file_to_dict(file: IndexedFile, *, include_metadata: bool) -> dict[
 
 
 def _node_to_dict(node: CodeGraphNode) -> dict[str, Any]:
+    """Serialize a graph node for MCP responses."""
     return {
         "id": node.id,
         "kind": node.kind,
@@ -654,6 +688,7 @@ def _node_to_dict(node: CodeGraphNode) -> dict[str, Any]:
 
 
 def _index_run_to_dict(run: IndexRunSummary | None) -> dict[str, Any] | None:
+    """Serialize an index run summary or preserve a missing run as None."""
     if run is None:
         return None
     return {
@@ -669,6 +704,7 @@ def _index_run_to_dict(run: IndexRunSummary | None) -> dict[str, Any] | None:
 
 
 def _index_result_to_dict(result: Any, resolution: WorkspaceResolution) -> dict[str, Any]:
+    """Serialize an indexer result with workspace identity and database path."""
     return {
         "workspace_key": resolution.workspace_key,
         "index_db_path": str(resolution.index_db_path),

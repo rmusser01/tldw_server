@@ -179,15 +179,31 @@ def helper(value):
         {"mode": "foreground", "force": True, "max_files": 10},
         context=_context(),
     )
-    search = await module.execute_tool("codegraph.search", {"query": "helper", "limit": 10}, context=_context())
-    node = await module.execute_tool("codegraph.node", {"symbol": "helper"}, context=_context())
-    callers = await module.execute_tool("codegraph.callers", {"symbol": "helper"}, context=_context())
-    callees = await module.execute_tool("codegraph.callees", {"symbol": "Greeter.greet"}, context=_context())
+    search = await module.execute_tool(
+        "codegraph.search",
+        {"query": " helper ", "kind": " function ", "limit": 10},
+        context=_context(),
+    )
+    node = await module.execute_tool("codegraph.node", {"symbol": " helper "}, context=_context())
+    callers = await module.execute_tool("codegraph.callers", {"symbol": " helper "}, context=_context())
+    callees = await module.execute_tool("codegraph.callees", {"symbol": " Greeter.greet "}, context=_context())
 
     assert [item["qualified_name"] for item in search["results"]] == ["helper"]  # nosec B101
     assert node["node"]["qualified_name"] == "helper"  # nosec B101
     assert [item["source"]["qualified_name"] for item in callers["relationships"]] == ["Greeter.greet"]  # nosec B101
     assert [item["target"]["qualified_name"] for item in callees["relationships"]] == ["helper"]  # nosec B101
+
+
+def test_codegraph_rejects_ambiguous_node_selectors(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir()
+    module = _module(tmp_path, workspace_root)
+
+    with pytest.raises(ValueError, match="node_id and symbol are mutually exclusive"):
+        module.validate_tool_arguments(
+            "codegraph.node",
+            {"node_id": "node_helper", "symbol": "helper"},
+        )
 
 
 @pytest.mark.asyncio

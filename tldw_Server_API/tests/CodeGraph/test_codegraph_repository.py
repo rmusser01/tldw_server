@@ -270,3 +270,78 @@ def test_repository_replacement_removes_stale_symbols_from_search(tmp_path: Path
 
     assert repo.search_nodes("old_helper", limit=10) == []
     assert [node.id for node in repo.search_nodes("new_helper", limit=10)] == ["node_new"]
+
+
+def test_repository_atomic_file_and_graph_replacement_rolls_back_on_graph_error(tmp_path: Path) -> None:
+    repo = CodeGraphRepository(tmp_path / "codegraph.db")
+    repo.initialize()
+    repo.upsert_file(
+        path="pkg/sample.py",
+        language="python",
+        size=128,
+        content_hash="old_hash",
+        modified_at=1.0,
+        status="indexed",
+        errors=[],
+        node_count=1,
+    )
+    repo.replace_file_graph(
+        path="pkg/sample.py",
+        nodes=[
+            CodeGraphNode(
+                id="node_old",
+                identity_key="old",
+                kind="function",
+                name="old_helper",
+                qualified_name="old_helper",
+                file_path="pkg/sample.py",
+                language="python",
+            )
+        ],
+        edges=[],
+        unresolved_refs=[],
+    )
+    repo.seed_graph_rows_for_test(
+        nodes=[
+            {
+                "id": "node_conflict",
+                "identity_key": "conflict",
+                "kind": "function",
+                "name": "other_helper",
+                "file_path": "pkg/other.py",
+            }
+        ],
+        edges=[],
+        unresolved_refs=[],
+    )
+
+    with pytest.raises(sqlite3.IntegrityError):
+        repo.upsert_file_and_replace_graph(
+            path="pkg/sample.py",
+            language="python",
+            size=256,
+            content_hash="new_hash",
+            modified_at=2.0,
+            status="indexed",
+            errors=[],
+            node_count=1,
+            nodes=[
+                CodeGraphNode(
+                    id="node_conflict",
+                    identity_key="new",
+                    kind="function",
+                    name="new_helper",
+                    qualified_name="new_helper",
+                    file_path="pkg/sample.py",
+                    language="python",
+                )
+            ],
+            edges=[],
+            unresolved_refs=[],
+        )
+
+    file_row = repo.list_files(limit=10)[0]
+
+    assert file_row.content_hash == "old_hash"
+    assert repo.get_node("node_old") is not None
+    assert repo.search_nodes("new_helper", limit=10) == []

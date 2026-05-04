@@ -55,3 +55,32 @@ def test_python_extractor_uses_deterministic_node_ids() -> None:
 
     assert [node.id for node in first.nodes] == [node.id for node in second.nodes]
     assert [edge.id for edge in first.edges] == [edge.id for edge in second.edges]
+
+
+def test_python_extractor_does_not_link_external_attribute_calls_to_same_file_symbols() -> None:
+    source = b"""
+def save():
+    return True
+
+
+def persist(external_client):
+    external_client.save()
+"""
+    extractor = PythonAstExtractor()
+
+    result = extractor.extract(workspace_key="ws_test", file_path="pkg/sample.py", source=source)
+
+    by_qualified = {node.qualified_name: node for node in result.nodes}
+    save = by_qualified["save"]
+    persist = by_qualified["persist"]
+
+    assert not any(
+        edge.kind == "calls" and edge.source == persist.id and edge.target == save.id
+        for edge in result.edges
+    )
+    assert any(
+        ref.from_node_id == persist.id
+        and ref.reference_name == "external_client.save"
+        and ref.reference_kind == "call"
+        for ref in result.unresolved_refs
+    )

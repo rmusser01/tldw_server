@@ -50,11 +50,11 @@ Plan: Docs/superpowers/plans/2026-05-04-native-codegraph-python-search-implement
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 RED/GREEN evidence: extractor/repository tests first failed on missing CodeGraphNode/CodeGraphEdge/CodeGraphUnresolvedRef and missing PythonAstExtractor, then passed after implementation. Indexer tests first failed because Python files still had 0 graph nodes, then passed after wiring Python AST extraction. MCP tests first failed on missing Stage 2 tools, then passed after adding read tools and validation.
 
 Verification: python -m pytest tldw_Server_API/tests/CodeGraph tldw_Server_API/app/core/MCP_unified/tests/test_codegraph_module.py tldw_Server_API/app/core/MCP_unified/tests/test_dynamic_module_catalog.py -q passed with 43 passed, 5 warnings. Bandit touched scope wrote /tmp/bandit_codegraph_python_search.json with 0 results and 0 errors. git diff --check passed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
@@ -74,6 +74,6 @@ Implemented the native CodeGraph Python extractor/search slice: Python files now
 
 ## Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:BASELINE_NOTES:BEGIN -->
 - Baseline before Stage 2 edits: `python -m pytest tldw_Server_API/tests/CodeGraph tldw_Server_API/app/core/MCP_unified/tests/test_codegraph_module.py -q` passed with `31 passed`.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:BASELINE_NOTES:END -->
