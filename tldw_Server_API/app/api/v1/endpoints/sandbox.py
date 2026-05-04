@@ -10,6 +10,8 @@ import os
 import tempfile
 import threading
 import time
+from collections.abc import Mapping
+from typing import Any
 
 from fastapi import (
     APIRouter,
@@ -28,21 +30,21 @@ from fastapi import (
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from fastapi.routing import APIRoute
 from loguru import logger
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, RequireRole, User
 
 from tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps import get_audit_service_for_user
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import RequireRole, User, get_request_user
 from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.schemas.sandbox_schemas import (
-    SandboxAdminMacOSDiagnosticsResponse,
-    SandboxAdminMacOSImageStoreCleanupRequest,
-    SandboxAdminMacOSImageStoreCleanupResponse,
-    SandboxAdminMacOSImageStoreCleanupPlanResponse,
-    SandboxAdminMacOSReconciliationRepairRequest,
-    SandboxAdminMacOSReconciliationRepairResponse,
     ArtifactListResponse,
     CancelResponse,
     SandboxAdminIdempotencyItem,
     SandboxAdminIdempotencyListResponse,
+    SandboxAdminMacOSDiagnosticsResponse,
+    SandboxAdminMacOSImageStoreCleanupPlanResponse,
+    SandboxAdminMacOSImageStoreCleanupRequest,
+    SandboxAdminMacOSImageStoreCleanupResponse,
+    SandboxAdminMacOSReconciliationRepairRequest,
+    SandboxAdminMacOSReconciliationRepairResponse,
     SandboxAdminRunDetails,
     SandboxAdminRunListResponse,
     SandboxAdminRunSummary,
@@ -74,7 +76,7 @@ from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
 from tldw_Server_API.app.core.config import settings as app_settings
 from tldw_Server_API.app.core.Metrics import increment_counter, observe_histogram
-from tldw_Server_API.app.core.Sandbox.models import RunSpec, SessionSpec
+from tldw_Server_API.app.core.Sandbox.models import RunPhase, RunSpec, SessionSpec
 from tldw_Server_API.app.core.Sandbox.models import RuntimeType as CoreRuntimeType
 from tldw_Server_API.app.core.Sandbox.models import TrustLevel as CoreTrustLevel
 from tldw_Server_API.app.core.Sandbox.orchestrator import (
@@ -83,6 +85,7 @@ from tldw_Server_API.app.core.Sandbox.orchestrator import (
     SessionActiveRunsConflict,
 )
 from tldw_Server_API.app.core.Sandbox.policy import SandboxPolicy
+from tldw_Server_API.app.core.Sandbox.run_status_taxonomy import normalize_run_status_reason
 from tldw_Server_API.app.core.Sandbox.service import (
     SandboxImageStoreCleanupError,
     SandboxReconciliationRepairError,
@@ -164,6 +167,21 @@ class SandboxArtifactGuardRoute(APIRoute):
 router = APIRouter(prefix="/sandbox", tags=["sandbox"], route_class=SandboxArtifactGuardRoute)
 
 _service = SandboxService(enable_background_tasks=False)
+
+
+def _status_reason_code(
+    *,
+    phase: RunPhase | str | None,
+    message: str | None,
+    exit_code: int | str | None,
+    resource_usage: Mapping[str, Any] | None,
+) -> str:
+    return normalize_run_status_reason(
+        phase=phase,
+        message=message,
+        exit_code=exit_code,
+        resource_usage=resource_usage if isinstance(resource_usage, dict) else None,
+    )
 
 
 @router.on_event("startup")
@@ -1576,6 +1594,12 @@ async def start_run(
         image_digest=status.image_digest,
         policy_hash=status.policy_hash,
         phase=status.phase.value,
+        status_reason_code=_status_reason_code(
+            phase=status.phase,
+            message=status.message,
+            exit_code=status.exit_code,
+            resource_usage=status.resource_usage,
+        ),
         exit_code=status.exit_code,
         started_at=status.started_at,
         finished_at=status.finished_at,
@@ -1609,6 +1633,12 @@ async def get_run_status(
         image_digest=st.image_digest,
         policy_hash=st.policy_hash,
         phase=st.phase.value,
+        status_reason_code=_status_reason_code(
+            phase=st.phase,
+            message=st.message,
+            exit_code=st.exit_code,
+            resource_usage=st.resource_usage,
+        ),
         exit_code=st.exit_code,
         started_at=st.started_at,
         finished_at=st.finished_at,
@@ -2349,6 +2379,12 @@ async def admin_list_runs(
                 image_digest=r.get("image_digest"),
                 policy_hash=r.get("policy_hash"),
                 phase=r.get("phase"),
+                status_reason_code=_status_reason_code(
+                    phase=r.get("phase"),
+                    message=r.get("message"),
+                    exit_code=r.get("exit_code"),
+                    resource_usage=r.get("resource_usage"),
+                ),
                 exit_code=r.get("exit_code"),
                 started_at=(r.get("started_at") if isinstance(r.get("started_at"), str) else r.get("started_at")),
                 finished_at=(r.get("finished_at") if isinstance(r.get("finished_at"), str) else r.get("finished_at")),
