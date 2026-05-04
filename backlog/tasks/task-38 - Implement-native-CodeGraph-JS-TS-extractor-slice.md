@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - Codex
 created_date: '2026-05-04 05:48'
-updated_date: '2026-05-04 06:06'
+updated_date: '2026-05-04 06:08'
 labels:
   - codegraph
   - mcp
@@ -55,6 +55,8 @@ Task 1 red-green complete: added tree_sitter_loader tests, confirmed ModuleNotFo
 Task 2 red-green complete: added resolver tests for relative imports, nearest config loading, frontend-style aliases, escaping aliases, and external package classification; verified 6 passed.
 
 Task 3 red-green complete: added JavaScript extractor tests for modules, imports, re-exports, functions, arrow functions, classes, methods, JSX components, same-file calls, member-call unresolved refs, parse errors, and deterministic IDs; verified 3 passed.
+
+Task 4 red-green complete: added TypeScript/TSX extractor tests for interface, type alias, enum, imports, function/class/method calls, TSX component detection, and deterministic IDs; verified 3 passed.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

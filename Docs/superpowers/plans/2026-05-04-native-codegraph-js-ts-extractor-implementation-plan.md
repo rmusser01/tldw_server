@@ -234,7 +234,7 @@ git commit -m "feat: add codegraph javascript extractor"
 - Create: `tldw_Server_API/app/core/CodeGraph/extractors/typescript_extractor.py`
 - Test: `tldw_Server_API/tests/CodeGraph/test_codegraph_typescript_extractor.py`
 
-- [ ] **Step 1: Write RED TypeScript tests**
+- [x] **Step 1: Write RED TypeScript tests**
 
 Cover:
 
@@ -244,17 +244,17 @@ Cover:
 - Import/export capture.
 - Deterministic IDs.
 
-- [ ] **Step 2: Run tests and verify RED**
+- [x] **Step 2: Run tests and verify RED**
 
 ```bash
 python -m pytest tldw_Server_API/tests/CodeGraph/test_codegraph_typescript_extractor.py -q
 ```
 
-- [ ] **Step 3: Implement TypeScript extractor**
+- [x] **Step 3: Implement TypeScript extractor**
 
 Reuse JavaScript traversal where possible. Keep TS-specific declarations small and explicit. Do not attempt type resolution.
 
-- [ ] **Step 4: Run tests and commit**
+- [x] **Step 4: Run tests and commit**
 
 ```bash
 python -m pytest tldw_Server_API/tests/CodeGraph/test_codegraph_typescript_extractor.py -q
