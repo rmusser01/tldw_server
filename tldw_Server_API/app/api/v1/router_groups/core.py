@@ -294,94 +294,65 @@ def iter_core_router_specs() -> Iterable[RouterSpec]:
     ):
         append_imported_router_spec(specs, acp_spec)
 
-    # LLM Providers listing
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.llm_providers import router as llm_providers_router
-
-        specs.append(RouterSpec(
-            router=llm_providers_router,
+    # LLM/provider endpoints
+    for provider_spec in (
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.llm_providers",
+            log_name="llm_providers",
             prefix=f"{API_V1_PREFIX}",
             tags=("llm",),
             route_key="llm",
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping llm_providers router: {e}")
-
-    # MLX endpoints
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.mlx import router as mlx_router
-
-        specs.append(RouterSpec(
-            router=mlx_router,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.mlx",
+            log_name="mlx",
             prefix=f"{API_V1_PREFIX}",
             tags=("llm",),
             route_key="llm",
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping mlx router: {e}")
-
-    # Message endpoints
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.messages import public_router as messages_public_router
-        from tldw_Server_API.app.api.v1.endpoints.messages import router as messages_router
-
-        specs.append(RouterSpec(
-            router=messages_router,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.messages",
+            log_name="messages",
             prefix=f"{API_V1_PREFIX}",
             tags=("messages",),
             route_key="llm",
-        ))
-        specs.append(RouterSpec(
-            router=messages_public_router,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.messages",
+            log_name="messages_public",
             tags=("messages",),
             route_key="llm",
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping messages routers: {e}")
-
-    # llama.cpp endpoints
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.llamacpp import public_router as llamacpp_public_router
-        from tldw_Server_API.app.api.v1.endpoints.llamacpp import router as llamacpp_router
-
-        specs.append(RouterSpec(
-            router=llamacpp_router,
+            attr_name="public_router",
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.llamacpp",
+            log_name="llamacpp",
             prefix=f"{API_V1_PREFIX}",
             tags=("llamacpp",),
             route_key="llamacpp",
-        ))
-        specs.append(RouterSpec(
-            router=llamacpp_public_router,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.llamacpp",
+            log_name="llamacpp_public",
             tags=("llamacpp",),
             route_key="llamacpp",
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping llamacpp routers: {e}")
-
-    # VLM backends listing
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.vlm import router as vlm_router
-
-        specs.append(RouterSpec(
-            router=vlm_router,
+            attr_name="public_router",
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.vlm",
+            log_name="vlm",
             prefix=f"{API_V1_PREFIX}",
             tags=("vlm",),
             route_key="vlm",
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping vlm router: {e}")
-
-    # MCP unified endpoints
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.mcp_unified_endpoint import router as mcp_unified_router
-
-        specs.append(RouterSpec(
-            router=mcp_unified_router,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.mcp_unified_endpoint",
+            log_name="mcp_unified",
             prefix=f"{API_V1_PREFIX}",
             tags=("mcp-unified",),
             route_key="mcp-unified",
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping mcp_unified router: {e}")
+        ),
+    ):
+        append_imported_router_spec(specs, provider_spec)
 
     return specs
