@@ -326,7 +326,9 @@ def test_append_imported_router_spec_skips_static_missing_attr_at_registration(
 
     assert len(specs) == 1
     assert register_router_specs(FastAPI(), specs) == 0
-    assert debug_messages == ["Skipping missing-router-attr router: router"]
+    assert debug_messages == [
+        f"Skipping missing-router-attr router: {module_name}.router"
+    ]
 
 
 def test_append_imported_router_spec_logs_missing_lazy_attr_once(
@@ -363,7 +365,9 @@ def test_append_imported_router_spec_logs_missing_lazy_attr_once(
 
     assert len(specs) == 1
     assert register_router_specs(FastAPI(), specs) == 0
-    assert debug_messages == ["Skipping missing-lazy-router-attr router: router"]
+    assert debug_messages == [
+        f"Skipping missing-lazy-router-attr router: {module_name}.router"
+    ]
 
 
 def test_iter_core_router_specs_defers_chat_router_attr_lookup(
@@ -1241,6 +1245,71 @@ def test_iter_content_router_specs_defers_processing_router_attr_lookup(
     assert by_first_path["/prompts"].prefix == "/api/v1/prompts"
     assert by_first_path["/prompts"].tags == ("prompts",)
     assert by_first_path["/prompts"].route_key == "prompts"
+    assert access_count == {
+        f"{module_name}.{attr_name}": 1
+        for module_name, attrs in module_paths.items()
+        for attr_name in attrs
+    }
+
+
+def test_iter_content_router_specs_defers_embedding_router_attr_lookup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify covered embedding specs keep router attr lookup lazy."""
+    module_paths = {
+        "tldw_Server_API.app.api.v1.endpoints.embeddings_v5_production_enhanced": {
+            "router": "/embeddings",
+        },
+        "tldw_Server_API.app.api.v1.endpoints.media_embeddings": {
+            "router": "/media_embeddings",
+        },
+    }
+    access_count = {
+        f"{module_name}.{attr_name}": 0
+        for module_name, attrs in module_paths.items()
+        for attr_name in attrs
+    }
+
+    for module_name, attr_paths in module_paths.items():
+        fake_module = ModuleType(module_name)
+        routers: dict[str, APIRouter] = {}
+        for attr_name, path in attr_paths.items():
+            router = APIRouter()
+
+            @router.get(path)
+            def _endpoint() -> dict[str, str]:
+                return {"status": "ok"}
+
+            routers[attr_name] = router
+
+        def _module_getattr(
+            name: str,
+            *,
+            module_name: str = module_name,
+            routers: dict[str, APIRouter] = routers,
+        ) -> APIRouter:
+            if name not in routers:
+                raise AttributeError(name)
+            access_count[f"{module_name}.{name}"] += 1
+            return routers[name]
+
+        fake_module.__getattr__ = _module_getattr  # type: ignore[attr-defined]
+        monkeypatch.setitem(sys.modules, module_name, fake_module)
+
+    specs = list(iter_content_router_specs())
+    assert access_count == {
+        f"{module_name}.{attr_name}": 0
+        for module_name, attrs in module_paths.items()
+        for attr_name in attrs
+    }
+
+    by_first_path = {_first_router_path(spec.router): spec for spec in specs}
+    assert by_first_path["/embeddings"].prefix == "/api/v1"
+    assert by_first_path["/embeddings"].tags == ("embeddings",)
+    assert by_first_path["/embeddings"].route_key == "embeddings"
+    assert by_first_path["/media_embeddings"].prefix == "/api/v1"
+    assert by_first_path["/media_embeddings"].tags == ("media-embeddings",)
+    assert by_first_path["/media_embeddings"].route_key == "media-embeddings"
     assert access_count == {
         f"{module_name}.{attr_name}": 1
         for module_name, attrs in module_paths.items()
