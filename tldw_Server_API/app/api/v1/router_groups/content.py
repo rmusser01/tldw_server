@@ -218,44 +218,31 @@ def iter_content_router_specs() -> Iterable[RouterSpec]:
     ):
         append_imported_router_spec(specs, workflow_spec)
 
-    # Claims
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.claims import router as claims_router
-
-        specs.append(RouterSpec(
-            router=claims_router,
+    # Claims, Text2SQL, and email search routers
+    for knowledge_spec in (
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.claims",
+            log_name="claims",
             prefix=f"{API_V1_PREFIX}",
             tags=("claims",),
             route_key="claims",
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping claims router: {e}")
-
-    # Text2SQL
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.text2sql import router as text2sql_router
-
-        specs.append(RouterSpec(
-            router=text2sql_router,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.text2sql",
+            log_name="text2sql",
             prefix=f"{API_V1_PREFIX}",
             tags=("text2sql",),
             route_key="text2sql",
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping text2sql router: {e}")
-
-    # Email search
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.email import router as email_router
-
-        specs.append(RouterSpec(
-            router=email_router,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.email",
+            log_name="email",
             prefix=f"{API_V1_PREFIX}/email",
             tags=("email",),
             route_key="email",
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping email router: {e}")
+        ),
+    ):
+        append_imported_router_spec(specs, knowledge_spec)
 
     # Outputs and output templates
     try:
