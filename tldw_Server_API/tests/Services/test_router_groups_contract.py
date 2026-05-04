@@ -329,11 +329,15 @@ def test_iter_admin_router_specs_defers_selected_router_attr_lookup(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Verify covered admin specs keep router attr lookup lazy."""
+    import importlib
+
+    sandbox_module_name = "tldw_Server_API.app.api.v1.endpoints.sandbox"
     router_definitions = {
         "tldw_Server_API.app.api.v1.endpoints.admin": "/admin/status",
         "tldw_Server_API.app.api.v1.endpoints.family_wizard": "/guardian/family-wizard",
         "tldw_Server_API.app.api.v1.endpoints.guardian_controls": "/guardian/controls",
         "tldw_Server_API.app.api.v1.endpoints.self_monitoring": "/self-monitoring/status",
+        sandbox_module_name: "/sandbox/status",
         "tldw_Server_API.app.api.v1.endpoints.billing": "/billing/status",
         "tldw_Server_API.app.api.v1.endpoints.benchmark_api": "/benchmarks/status",
         "tldw_Server_API.app.api.v1.endpoints.mcp_catalogs_manage": "/mcp/catalogs",
@@ -347,6 +351,14 @@ def test_iter_admin_router_specs_defers_selected_router_attr_lookup(
         "tldw_Server_API.app.api.v1.endpoints.org_invites": "/orgs/invites",
     }
     access_count = {module_name: 0 for module_name in router_definitions}
+    real_import_module = importlib.import_module
+
+    def _guarded_import_module(module_name: str, package: str | None = None) -> ModuleType:
+        if module_name == sandbox_module_name and module_name not in sys.modules:
+            raise AssertionError("sandbox router was imported without a test stub")
+        return real_import_module(module_name, package)
+
+    monkeypatch.setattr(importlib, "import_module", _guarded_import_module)
 
     for module_name, path in router_definitions.items():
         router = APIRouter()
