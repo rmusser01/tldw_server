@@ -71,7 +71,7 @@ def iter_content_router_specs() -> Iterable[RouterSpec]:
     ):
         append_imported_router_spec(specs, discovery_spec)
 
-    # Embeddings and content processing routers
+    # Embedding routers
     for processing_spec in (
         ImportedRouterSpec(
             import_path="tldw_Server_API.app.api.v1.endpoints.embeddings_v5_production_enhanced",
