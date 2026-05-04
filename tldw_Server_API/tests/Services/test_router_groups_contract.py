@@ -2178,6 +2178,132 @@ def test_iter_content_router_specs_defers_workspace_character_router_attr_lookup
     }
 
 
+def test_iter_content_router_specs_defers_audio_voice_router_attr_lookup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify audiobook and voice specs keep import and attr lookup lazy."""
+    import importlib
+
+    router_definitions = [
+        {
+            "module_name": "tldw_Server_API.app.api.v1.endpoints.audio.audiobooks",
+            "expected_name": "audiobooks",
+            "attr_name": "router",
+            "path": "/audiobooks/create",
+            "prefix": "/api/v1",
+            "tags": ("audiobooks",),
+            "route_key": "audiobooks",
+            "default_stable": False,
+        },
+        {
+            "module_name": "tldw_Server_API.app.api.v1.endpoints.voice_assistant",
+            "expected_name": "voice_assistant",
+            "attr_name": "router",
+            "path": "/sessions",
+            "prefix": "/api/v1/voice",
+            "tags": ("voice-assistant",),
+            "route_key": "voice-assistant",
+            "default_stable": True,
+        },
+        {
+            "module_name": "tldw_Server_API.app.api.v1.endpoints.voice_assistant",
+            "expected_name": "voice_assistant_ws",
+            "attr_name": "ws_router",
+            "path": "/ws",
+            "prefix": "/api/v1/voice",
+            "tags": ("voice-assistant-ws",),
+            "route_key": "voice-assistant-ws",
+            "default_stable": True,
+        },
+    ]
+    routers_by_module: dict[str, dict[str, APIRouter]] = {}
+    access_count = {
+        f"{definition['module_name']}.{definition['attr_name']}": 0
+        for definition in router_definitions
+    }
+    import_calls: list[str] = []
+
+    for definition in router_definitions:
+        module_name = str(definition["module_name"])
+        attr_name = str(definition["attr_name"])
+        router = APIRouter()
+
+        @router.get(str(definition["path"]))
+        def _endpoint() -> dict[str, str]:
+            """Return a deterministic response for the fake audio/voice router."""
+            return {"status": "ok"}
+
+        routers_by_module.setdefault(module_name, {})[attr_name] = router
+
+    for module_name, routers in routers_by_module.items():
+        fake_module = ModuleType(module_name)
+
+        def _module_getattr(
+            name: str,
+            *,
+            module_name: str = module_name,
+            routers: dict[str, APIRouter] = routers,
+        ) -> APIRouter:
+            """Track lazy router attribute resolution for the fake module."""
+            if name not in routers:
+                raise AttributeError(name)
+            access_count[f"{module_name}.{name}"] += 1
+            return routers[name]
+
+        fake_module.__getattr__ = _module_getattr  # type: ignore[attr-defined]
+        monkeypatch.setitem(sys.modules, module_name, fake_module)
+
+    real_import_module = importlib.import_module
+
+    def _import_module(module_name: str, package: str | None = None) -> ModuleType:
+        """Track lazy module imports for selected audio/voice routers."""
+        if module_name in routers_by_module:
+            import_calls.append(module_name)
+        return real_import_module(module_name, package)
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.router_groups.conditional.importlib.import_module",
+        _import_module,
+    )
+
+    specs = list(iter_content_router_specs())
+    assert access_count == {
+        f"{definition['module_name']}.{definition['attr_name']}": 0
+        for definition in router_definitions
+    }
+    assert import_calls == []
+
+    selected_specs = [
+        spec
+        for spec in specs
+        if spec.route_key
+        in {
+            "audiobooks",
+            "voice-assistant",
+            "voice-assistant-ws",
+        }
+    ]
+    assert len(selected_specs) == len(router_definitions)
+
+    by_first_path = {_first_router_path(spec.router): spec for spec in selected_specs}
+    for definition in router_definitions:
+        spec = by_first_path[str(definition["path"])]
+        assert spec.prefix == definition["prefix"]
+        assert spec.tags == definition["tags"]
+        assert spec.route_key == definition["route_key"]
+        assert spec.name == definition["expected_name"]
+        assert spec.default_stable is definition["default_stable"]
+
+    assert import_calls == [
+        str(definition["module_name"])
+        for definition in router_definitions
+    ]
+    assert access_count == {
+        f"{definition['module_name']}.{definition['attr_name']}": 1
+        for definition in router_definitions
+    }
+
+
 def test_qodo_reviewed_router_policy_regressions(monkeypatch: pytest.MonkeyPatch) -> None:
     _install_fake_router_module(
         monkeypatch,
