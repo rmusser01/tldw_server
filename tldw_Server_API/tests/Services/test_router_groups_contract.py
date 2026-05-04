@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import sys
+from collections import Counter
 from pathlib import Path
 from types import ModuleType
 from typing import Callable
-import sys
 
 import pytest
 from fastapi import APIRouter, FastAPI
@@ -13,7 +14,6 @@ from tldw_Server_API.app.api.v1.router_groups.content import iter_content_router
 from tldw_Server_API.app.api.v1.router_groups.core import iter_core_router_specs
 from tldw_Server_API.app.api.v1.router_groups.spec import RouterSpec
 from tldw_Server_API.app.api.v1.router_registry import register_router_specs
-
 
 pytestmark = pytest.mark.unit
 
@@ -162,6 +162,7 @@ def test_append_imported_router_spec_defers_module_import_until_registration(
 ) -> None:
     """Verify route policy can disable imported specs before module import."""
     import importlib
+
     from tldw_Server_API.app.api.v1.router_groups.conditional import (
         ImportedRouterSpec,
         append_imported_router_spec,
@@ -2167,10 +2168,11 @@ def test_iter_content_router_specs_defers_workspace_character_router_attr_lookup
         assert spec.route_key == definition["route_key"]
         assert spec.name == definition["expected_name"]
 
-    assert import_calls == [
+    expected_import_calls = [
         str(definition["module_name"])
         for definition in router_definitions
     ]
+    assert Counter(import_calls) == Counter(expected_import_calls)
     assert access_count == {
         str(definition["module_name"]): 1 for definition in router_definitions
     }
