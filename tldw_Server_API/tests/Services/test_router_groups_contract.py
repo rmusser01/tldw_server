@@ -1709,6 +1709,121 @@ def test_iter_content_router_specs_defers_collections_reading_router_attr_lookup
     }
 
 
+def test_iter_content_router_specs_defers_prompt_studio_router_attr_lookup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify Prompt Studio specs keep import and attr lookup lazy."""
+    import importlib
+
+    router_definitions = [
+        {
+            "module_name": "tldw_Server_API.app.api.v1.endpoints.prompt_studio.prompt_studio_projects",
+            "expected_name": "prompt_studio_projects",
+            "path": "/api/v1/prompt-studio/projects",
+        },
+        {
+            "module_name": "tldw_Server_API.app.api.v1.endpoints.prompt_studio.prompt_studio_prompts",
+            "expected_name": "prompt_studio_prompts",
+            "path": "/api/v1/prompt-studio/prompts",
+        },
+        {
+            "module_name": "tldw_Server_API.app.api.v1.endpoints.prompt_studio.prompt_studio_test_cases",
+            "expected_name": "prompt_studio_test_cases",
+            "path": "/api/v1/prompt-studio/test-cases",
+        },
+        {
+            "module_name": "tldw_Server_API.app.api.v1.endpoints.prompt_studio.prompt_studio_optimization",
+            "expected_name": "prompt_studio_optimization",
+            "path": "/api/v1/prompt-studio/optimizations",
+        },
+        {
+            "module_name": "tldw_Server_API.app.api.v1.endpoints.prompt_studio.prompt_studio_status",
+            "expected_name": "prompt_studio_status",
+            "path": "/api/v1/prompt-studio/status",
+        },
+        {
+            "module_name": "tldw_Server_API.app.api.v1.endpoints.prompt_studio.prompt_studio_evaluations",
+            "expected_name": "prompt_studio_evaluations",
+            "path": "/api/v1/prompt-studio/evaluations",
+        },
+        {
+            "module_name": "tldw_Server_API.app.api.v1.endpoints.prompt_studio.prompt_studio_websocket",
+            "expected_name": "prompt_studio_websocket",
+            "path": "/api/v1/prompt-studio/ws",
+        },
+    ]
+    access_count = {str(definition["module_name"]): 0 for definition in router_definitions}
+    import_calls: list[str] = []
+
+    for definition in router_definitions:
+        module_name = str(definition["module_name"])
+        router = APIRouter()
+
+        @router.get(str(definition["path"]))
+        def _endpoint() -> dict[str, str]:
+            """Return a deterministic response for the fake Prompt Studio router."""
+            return {"status": "ok"}
+
+        fake_module = ModuleType(module_name)
+
+        def _module_getattr(
+            name: str,
+            *,
+            module_name: str = module_name,
+            router: APIRouter = router,
+        ) -> APIRouter:
+            """Track lazy router attribute resolution for the fake module."""
+            if name != "router":
+                raise AttributeError(name)
+            access_count[module_name] += 1
+            return router
+
+        fake_module.__getattr__ = _module_getattr  # type: ignore[attr-defined]
+        monkeypatch.setitem(sys.modules, module_name, fake_module)
+
+    real_import_module = importlib.import_module
+
+    def _import_module(module_name: str, package: str | None = None) -> ModuleType:
+        """Track lazy module imports for selected Prompt Studio router modules."""
+        if module_name in access_count:
+            import_calls.append(module_name)
+        return real_import_module(module_name, package)
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.router_groups.conditional.importlib.import_module",
+        _import_module,
+    )
+
+    specs = list(iter_content_router_specs())
+    assert access_count == {
+        str(definition["module_name"]): 0 for definition in router_definitions
+    }
+    assert import_calls == []
+
+    selected_specs = [
+        spec
+        for spec in specs
+        if spec.name and spec.name.startswith("prompt_studio_")
+    ]
+    assert len(selected_specs) == len(router_definitions)
+
+    by_first_path = {_first_router_path(spec.router): spec for spec in selected_specs}
+    for definition in router_definitions:
+        spec = by_first_path[str(definition["path"])]
+        assert spec.prefix == ""
+        assert spec.tags == ("prompt-studio",)
+        assert spec.route_key == "prompt-studio"
+        assert spec.name == definition["expected_name"]
+
+    assert import_calls == [
+        str(definition["module_name"])
+        for definition in router_definitions
+    ]
+    assert access_count == {
+        str(definition["module_name"]): 1 for definition in router_definitions
+    }
+
+
 def test_qodo_reviewed_router_policy_regressions(monkeypatch: pytest.MonkeyPatch) -> None:
     _install_fake_router_module(
         monkeypatch,

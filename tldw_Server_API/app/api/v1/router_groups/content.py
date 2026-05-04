@@ -324,38 +324,51 @@ def iter_content_router_specs() -> Iterable[RouterSpec]:
         append_imported_router_spec(specs, collections_spec)
 
     # Prompt Studio endpoints
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.prompt_studio.prompt_studio_evaluations import (
-            router as prompt_studio_evaluations_router,
-        )
-        from tldw_Server_API.app.api.v1.endpoints.prompt_studio.prompt_studio_optimization import (
-            router as prompt_studio_optimization_router,
-        )
-        from tldw_Server_API.app.api.v1.endpoints.prompt_studio.prompt_studio_projects import (
-            router as prompt_studio_projects_router,
-        )
-        from tldw_Server_API.app.api.v1.endpoints.prompt_studio.prompt_studio_prompts import (
-            router as prompt_studio_prompts_router,
-        )
-        from tldw_Server_API.app.api.v1.endpoints.prompt_studio.prompt_studio_status import (
-            router as prompt_studio_status_router,
-        )
-        from tldw_Server_API.app.api.v1.endpoints.prompt_studio.prompt_studio_test_cases import (
-            router as prompt_studio_test_cases_router,
-        )
-        from tldw_Server_API.app.api.v1.endpoints.prompt_studio.prompt_studio_websocket import (
-            router as prompt_studio_websocket_router,
-        )
-
-        specs.append(RouterSpec(router=prompt_studio_projects_router, tags=("prompt-studio",), route_key="prompt-studio"))
-        specs.append(RouterSpec(router=prompt_studio_prompts_router, tags=("prompt-studio",), route_key="prompt-studio"))
-        specs.append(RouterSpec(router=prompt_studio_test_cases_router, tags=("prompt-studio",), route_key="prompt-studio"))
-        specs.append(RouterSpec(router=prompt_studio_optimization_router, tags=("prompt-studio",), route_key="prompt-studio"))
-        specs.append(RouterSpec(router=prompt_studio_status_router, tags=("prompt-studio",), route_key="prompt-studio"))
-        specs.append(RouterSpec(router=prompt_studio_evaluations_router, tags=("prompt-studio",), route_key="prompt-studio"))
-        specs.append(RouterSpec(router=prompt_studio_websocket_router, tags=("prompt-studio",), route_key="prompt-studio"))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping prompt_studio routers: {e}")
+    for prompt_studio_spec in (
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.prompt_studio.prompt_studio_projects",
+            log_name="prompt_studio_projects",
+            tags=("prompt-studio",),
+            route_key="prompt-studio",
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.prompt_studio.prompt_studio_prompts",
+            log_name="prompt_studio_prompts",
+            tags=("prompt-studio",),
+            route_key="prompt-studio",
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.prompt_studio.prompt_studio_test_cases",
+            log_name="prompt_studio_test_cases",
+            tags=("prompt-studio",),
+            route_key="prompt-studio",
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.prompt_studio.prompt_studio_optimization",
+            log_name="prompt_studio_optimization",
+            tags=("prompt-studio",),
+            route_key="prompt-studio",
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.prompt_studio.prompt_studio_status",
+            log_name="prompt_studio_status",
+            tags=("prompt-studio",),
+            route_key="prompt-studio",
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.prompt_studio.prompt_studio_evaluations",
+            log_name="prompt_studio_evaluations",
+            tags=("prompt-studio",),
+            route_key="prompt-studio",
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.prompt_studio.prompt_studio_websocket",
+            log_name="prompt_studio_websocket",
+            tags=("prompt-studio",),
+            route_key="prompt-studio",
+        ),
+    ):
+        append_imported_router_spec(specs, prompt_studio_spec)
 
     # Workspace endpoints
     try:
