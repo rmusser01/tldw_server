@@ -223,7 +223,38 @@ class CodeGraphModule(BaseModule):
         )
         callees_tool["inputSchema"]["additionalProperties"] = False
 
-        return [status_tool, index_tool, sync_tool, files_tool, search_tool, node_tool, callers_tool, callees_tool]
+        impact_tool = create_tool_definition(
+            name="codegraph.impact",
+            description="Traverse a bounded incoming or outgoing CodeGraph relationship neighborhood.",
+            parameters={
+                "properties": {
+                    "node_id": {"type": "string"},
+                    "symbol": {"type": "string"},
+                    "depth": {"type": "integer"},
+                    "direction": {"type": "string", "description": "incoming, outgoing, or both"},
+                    "limit": {"type": "integer"},
+                },
+            },
+            metadata={
+                "category": "retrieval",
+                "readOnlyHint": True,
+                "capabilities": ["codegraph.read"],
+                **workspace_metadata,
+            },
+        )
+        impact_tool["inputSchema"]["additionalProperties"] = False
+
+        return [
+            status_tool,
+            index_tool,
+            sync_tool,
+            files_tool,
+            search_tool,
+            node_tool,
+            callers_tool,
+            callees_tool,
+            impact_tool,
+        ]
 
     async def execute_tool(self, tool_name: str, arguments: dict[str, Any], context: Any | None = None) -> Any:
         """Validate and dispatch one CodeGraph MCP tool invocation."""
@@ -302,6 +333,17 @@ class CodeGraphModule(BaseModule):
                 args.get("limit"),
             )
 
+        if tool_name == "codegraph.impact":
+            return await asyncio.to_thread(
+                self._impact,
+                resolution,
+                args.get("node_id"),
+                args.get("symbol"),
+                str(args.get("direction") or "both"),
+                args.get("depth"),
+                args.get("limit"),
+            )
+
         raise ValueError(f"Unknown tool: {tool_name}")
 
     def validate_tool_arguments(self, tool_name: str, arguments: dict[str, Any]) -> None:
@@ -373,6 +415,18 @@ class CodeGraphModule(BaseModule):
         if tool_name in {"codegraph.callers", "codegraph.callees"}:
             self._reject_unknown(arguments, allowed={"node_id", "symbol", "limit"})
             self._validate_node_selector(arguments)
+            self._validate_positive_int(arguments.get("limit"), "limit")
+            return
+
+        if tool_name == "codegraph.impact":
+            self._reject_unknown(arguments, allowed={"node_id", "symbol", "depth", "direction", "limit"})
+            self._validate_node_selector(arguments)
+            direction = arguments.get("direction")
+            if direction is not None and direction not in {"incoming", "outgoing", "both"}:
+                raise ValueError("direction must be incoming, outgoing, or both")
+            self._validate_positive_int(arguments.get("depth"), "depth")
+            if arguments.get("depth") is not None and int(arguments["depth"]) > 4:
+                raise ValueError("depth must be between 1 and 4")
             self._validate_positive_int(arguments.get("limit"), "limit")
             return
 
@@ -574,6 +628,61 @@ class CodeGraphModule(BaseModule):
             "node": _node_to_dict(node),
             "relationships": rows[:effective_limit],
             "truncated": truncated,
+        }
+
+    def _impact(
+        self,
+        resolution: WorkspaceResolution,
+        node_id: str | None,
+        symbol: str | None,
+        direction: str,
+        depth: int | None,
+        limit: int | None,
+    ) -> dict[str, Any]:
+        """Traverse an indexed graph neighborhood for a node selector."""
+        effective_depth = min(max(1, int(depth or 2)), 4)
+        effective_limit = self._bounded_limit(limit)
+        if not resolution.index_db_path.exists():
+            return {
+                "workspace_key": resolution.workspace_key,
+                "index_present": False,
+                "root": None,
+                "nodes": [],
+                "relationships": [],
+                "depth": effective_depth,
+                "direction": direction,
+                "truncated": False,
+            }
+
+        repository = CodeGraphRepository(resolution.index_db_path)
+        node = repository.get_node(node_id) if node_id else repository.find_node_by_symbol(str(symbol))
+        if node is None:
+            return {
+                "workspace_key": resolution.workspace_key,
+                "index_present": True,
+                "root": None,
+                "nodes": [],
+                "relationships": [],
+                "depth": effective_depth,
+                "direction": direction,
+                "truncated": False,
+            }
+
+        impact = repository.traverse_impact(
+            node.id,
+            depth=effective_depth,
+            direction=direction,
+            limit=effective_limit,
+        )
+        return {
+            "workspace_key": resolution.workspace_key,
+            "index_present": True,
+            "root": _node_to_dict(node),
+            "nodes": [_node_to_dict(item) for item in impact.nodes],
+            "relationships": list(impact.relationships),
+            "depth": effective_depth,
+            "direction": direction,
+            "truncated": impact.truncated,
         }
 
     def _new_indexer(self) -> CodeGraphIndexer:

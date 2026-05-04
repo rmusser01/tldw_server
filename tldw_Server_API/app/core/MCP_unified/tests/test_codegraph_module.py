@@ -35,6 +35,7 @@ class _CodeGraphRegistry:
             "codegraph.node",
             "codegraph.callers",
             "codegraph.callees",
+            "codegraph.impact",
         }
 
     async def find_module_for_tool(self, tool_name: str):  # noqa: ANN001
@@ -99,6 +100,7 @@ async def test_codegraph_exposes_stage2_tools(tmp_path: Path) -> None:
         "codegraph.node",
         "codegraph.callers",
         "codegraph.callees",
+        "codegraph.impact",
     }
     assert by_name["codegraph.status"]["metadata"]["readOnlyHint"] is True  # nosec B101
     assert by_name["codegraph.files"]["metadata"]["readOnlyHint"] is True  # nosec B101
@@ -106,6 +108,7 @@ async def test_codegraph_exposes_stage2_tools(tmp_path: Path) -> None:
     assert by_name["codegraph.node"]["metadata"]["readOnlyHint"] is True  # nosec B101
     assert by_name["codegraph.callers"]["metadata"]["readOnlyHint"] is True  # nosec B101
     assert by_name["codegraph.callees"]["metadata"]["readOnlyHint"] is True  # nosec B101
+    assert by_name["codegraph.impact"]["metadata"]["readOnlyHint"] is True  # nosec B101
     assert by_name["codegraph.index"]["metadata"]["category"] == "management"  # nosec B101
     assert by_name["codegraph.sync"]["metadata"]["category"] == "management"  # nosec B101
 
@@ -119,6 +122,7 @@ async def test_codegraph_exposes_stage2_tools(tmp_path: Path) -> None:
     assert by_name["codegraph.sync"]["metadata"]["path_argument_hints"] == []  # nosec B101
     assert by_name["codegraph.files"]["metadata"]["path_argument_hints"] == ["path"]  # nosec B101
     assert by_name["codegraph.search"]["metadata"]["path_argument_hints"] == []  # nosec B101
+    assert by_name["codegraph.impact"]["metadata"]["path_argument_hints"] == []  # nosec B101
 
 
 @pytest.mark.asyncio
@@ -258,6 +262,77 @@ def test_codegraph_rejects_ambiguous_node_selectors(tmp_path: Path) -> None:
         )
 
 
+def test_codegraph_impact_rejects_invalid_arguments(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir()
+    module = _module(tmp_path, workspace_root)
+
+    with pytest.raises(ValueError, match="unknown arguments"):
+        module.validate_tool_arguments("codegraph.impact", {"symbol": "helper", "unknown": True})
+    with pytest.raises(ValueError, match="direction"):
+        module.validate_tool_arguments("codegraph.impact", {"symbol": "helper", "direction": "sideways"})
+    with pytest.raises(ValueError, match="depth"):
+        module.validate_tool_arguments("codegraph.impact", {"symbol": "helper", "depth": 5})
+    with pytest.raises(ValueError, match="limit"):
+        module.validate_tool_arguments("codegraph.impact", {"symbol": "helper", "limit": 0})
+
+
+@pytest.mark.asyncio
+async def test_codegraph_impact_missing_index_is_read_only(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir()
+    index_base = tmp_path / "indexes"
+    module = _module(tmp_path, workspace_root)
+
+    result = await module.execute_tool("codegraph.impact", {"symbol": "helper"}, context=_context())
+
+    assert result["index_present"] is False  # nosec B101
+    assert result["root"] is None  # nosec B101
+    assert result["nodes"] == []  # nosec B101
+    assert result["relationships"] == []  # nosec B101
+    assert not index_base.exists()  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_codegraph_impact_returns_bounded_relationship_neighborhood(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir()
+    (workspace_root / "app.py").write_text(
+        """
+class Greeter:
+    def greet(self, name):
+        return helper(name)
+
+
+def helper(value):
+    return value.upper()
+""",
+        encoding="utf-8",
+    )
+    module = _module(tmp_path, workspace_root)
+
+    await module.execute_tool(
+        "codegraph.index",
+        {"mode": "foreground", "force": True, "max_files": 10},
+        context=_context(),
+    )
+    result = await module.execute_tool(
+        "codegraph.impact",
+        {"symbol": " helper ", "direction": "incoming", "depth": 1, "limit": 10},
+        context=_context(),
+    )
+
+    assert result["index_present"] is True  # nosec B101
+    assert result["root"]["qualified_name"] == "helper"  # nosec B101
+    assert result["depth"] == 1  # nosec B101
+    assert result["direction"] == "incoming"  # nosec B101
+    assert [node["qualified_name"] for node in result["nodes"]] == ["Greeter.greet", "helper"]  # nosec B101
+    assert [relationship["source"]["qualified_name"] for relationship in result["relationships"]] == [
+        "Greeter.greet"
+    ]  # nosec B101
+    assert result["truncated"] is False  # nosec B101
+
+
 @pytest.mark.asyncio
 async def test_codegraph_offloads_blocking_repository_work(
     tmp_path: Path,
@@ -279,8 +354,9 @@ async def test_codegraph_offloads_blocking_repository_work(
     await module.execute_tool("codegraph.files", {}, context=_context())
     await module.execute_tool("codegraph.search", {"query": "app"}, context=_context())
     await module.execute_tool("codegraph.sync", {"mode": "foreground"}, context=_context())
+    await module.execute_tool("codegraph.impact", {"symbol": "app"}, context=_context())
 
-    assert len(offloaded) >= 4  # nosec B101
+    assert "_impact" in offloaded  # nosec B101
 
 
 @pytest.mark.asyncio
