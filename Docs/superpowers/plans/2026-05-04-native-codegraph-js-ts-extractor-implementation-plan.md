@@ -137,7 +137,7 @@ git commit -m "test: add codegraph tree-sitter loader"
 - Create: `tldw_Server_API/app/core/CodeGraph/extractors/js_ts_imports.py`
 - Test: `tldw_Server_API/tests/CodeGraph/test_codegraph_js_ts_imports.py`
 
-- [ ] **Step 1: Write RED resolver tests**
+- [x] **Step 1: Write RED resolver tests**
 
 Cover:
 
@@ -148,13 +148,13 @@ Cover:
 - Alias targets that escape the workspace root are ignored and reported as unresolved.
 - External packages like `react` are classified as external/unresolved, not resolved into `node_modules`.
 
-- [ ] **Step 2: Run tests and verify RED**
+- [x] **Step 2: Run tests and verify RED**
 
 ```bash
 python -m pytest tldw_Server_API/tests/CodeGraph/test_codegraph_js_ts_imports.py -q
 ```
 
-- [ ] **Step 3: Implement resolver**
+- [x] **Step 3: Implement resolver**
 
 Implement focused helpers:
 
@@ -165,7 +165,7 @@ Implement focused helpers:
 
 Use JSON parsing only. Strip JSONC comments only if tests require real repo config parsing; otherwise start with valid JSON fixtures and document JSONC as follow-up if needed.
 
-- [ ] **Step 4: Run resolver tests and commit**
+- [x] **Step 4: Run resolver tests and commit**
 
 ```bash
 python -m pytest tldw_Server_API/tests/CodeGraph/test_codegraph_js_ts_imports.py -q

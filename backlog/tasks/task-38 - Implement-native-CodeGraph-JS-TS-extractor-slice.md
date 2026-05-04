@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - Codex
 created_date: '2026-05-04 05:48'
-updated_date: '2026-05-04 05:59'
+updated_date: '2026-05-04 06:02'
 labels:
   - codegraph
   - mcp
@@ -51,6 +51,8 @@ Created implementation plan at Docs/superpowers/plans/2026-05-04-native-codegrap
 Installed pinned CodeGraph parser dependency set directly after .[codegraph] resolver conflict blocked full extra installation.
 
 Task 1 red-green complete: added tree_sitter_loader tests, confirmed ModuleNotFoundError RED, implemented dynamic optional parser loader, and verified 5 passed.
+
+Task 2 red-green complete: added resolver tests for relative imports, nearest config loading, frontend-style aliases, escaping aliases, and external package classification; verified 6 passed.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
