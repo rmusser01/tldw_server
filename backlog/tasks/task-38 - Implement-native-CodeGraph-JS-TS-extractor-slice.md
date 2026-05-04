@@ -1,0 +1,60 @@
+---
+id: TASK-38
+title: Implement native CodeGraph JS/TS extractor slice
+status: In Progress
+assignee:
+  - Codex
+created_date: '2026-05-04 05:48'
+updated_date: '2026-05-04 05:50'
+labels:
+  - codegraph
+  - mcp
+  - javascript
+  - typescript
+dependencies:
+  - TASK-35
+references:
+  - 'https://github.com/rmusser01/tldw_server/issues/1259'
+documentation:
+  - >-
+    Docs/superpowers/plans/2026-05-04-native-codegraph-js-ts-extractor-implementation-plan.md
+priority: medium
+---
+
+## Description
+
+<!-- SECTION:DESCRIPTION:BEGIN -->
+Implement the next native CodeGraph epic slice after PR #1258: JavaScript/TypeScript/TSX extraction with conservative symbols, imports, exports, same-file calls, and trusted-workspace tsconfig/jsconfig path-alias resolution. Keep the slice focused: no context/impact tools, no Jobs mode, no C/C++/C#/Java/Kotlin extractors, and no full TypeScript compiler/type-check dependency.
+<!-- SECTION:DESCRIPTION:END -->
+
+## Acceptance Criteria
+<!-- AC:BEGIN -->
+- [ ] #1 JavaScript and TypeScript files index symbol nodes for functions, arrow-function variables, classes, methods, React-like components, interfaces, type aliases, and enums where supported by the parser.
+- [ ] #2 JS/TS import and re-export declarations create import nodes and unresolved refs for external package imports.
+- [ ] #3 Same-file calls by identifier or member expression are resolved conservatively or recorded as unresolved refs without false cross-file claims.
+- [ ] #4 Relative import targets and trusted tsconfig/jsconfig path aliases are resolved under the workspace root; escaping aliases are ignored with a clear unresolved reason.
+- [ ] #5 Indexer wires JS/TS extractors so TS/TSX/JS/JSX files no longer remain inventory-only when parser dependencies are available.
+- [ ] #6 Focused extractor, indexer, repository/MCP regression tests plus Ruff, Bandit, and git diff checks pass.
+<!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+1. Confirm current Stage 3 requirements from the approved CodeGraph design and baseline tests. 2. Add RED extractor tests for JS, TS, TSX components, imports/exports, same-file calls, and parse failures. 3. Add RED resolver tests for relative imports and trusted/escaping tsconfig/jsconfig path aliases. 4. Implement a small parser loader plus JS/TS extractor modules using optional Tree-sitter dependencies with dependency-aware skip/error behavior. 5. Wire extractors into CodeGraphIndexer only when dependencies are available. 6. Add indexer/MCP regression coverage proving JS/TS files produce graph nodes/search results. 7. Run focused CodeGraph/MCP tests, Ruff touched files, Bandit touched CodeGraph/MCP scope, and git diff --check.
+<!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Created implementation plan at Docs/superpowers/plans/2026-05-04-native-codegraph-js-ts-extractor-implementation-plan.md. Baseline focused CodeGraph/MCP tests passed with 53 passed and 5 warnings before Stage 3 work. Current shared venv is missing optional tree-sitter parser packages, so the plan explicitly gates implementation on installing/verifying .[codegraph] parser dependencies.
+<!-- SECTION:NOTES:END -->
+
+## Definition of Done
+<!-- DOD:BEGIN -->
+- [ ] #1 Acceptance criteria completed
+- [ ] #2 Tests or verification recorded
+- [ ] #3 Documentation updated when relevant
+- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [ ] #5 Final summary added
+- [ ] #6 Known skips or blockers documented
+<!-- DOD:END -->
