@@ -31,7 +31,7 @@ def append_imported_router_spec(
         try:
             return getattr(module, definition.attr_name)
         except AttributeError as e:
-            raise AttributeError(definition.attr_name) from e
+            raise AttributeError(f"{definition.import_path}.{definition.attr_name}") from e
 
     specs.append(
         RouterSpec(

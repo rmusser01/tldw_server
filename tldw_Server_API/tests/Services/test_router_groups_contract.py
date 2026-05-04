@@ -326,7 +326,9 @@ def test_append_imported_router_spec_skips_static_missing_attr_at_registration(
 
     assert len(specs) == 1
     assert register_router_specs(FastAPI(), specs) == 0
-    assert debug_messages == ["Skipping missing-router-attr router: router"]
+    assert debug_messages == [
+        f"Skipping missing-router-attr router: {module_name}.router"
+    ]
 
 
 def test_append_imported_router_spec_logs_missing_lazy_attr_once(
@@ -363,7 +365,9 @@ def test_append_imported_router_spec_logs_missing_lazy_attr_once(
 
     assert len(specs) == 1
     assert register_router_specs(FastAPI(), specs) == 0
-    assert debug_messages == ["Skipping missing-lazy-router-attr router: router"]
+    assert debug_messages == [
+        f"Skipping missing-lazy-router-attr router: {module_name}.router"
+    ]
 
 
 def test_iter_core_router_specs_defers_chat_router_attr_lookup(
