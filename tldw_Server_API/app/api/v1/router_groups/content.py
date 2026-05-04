@@ -306,11 +306,12 @@ def iter_content_router_specs() -> Iterable[RouterSpec]:
         ),
         ImportedRouterSpec(
             import_path="tldw_Server_API.app.api.v1.endpoints.collections_websub",
-            log_name="collections_websub",
+            log_name="collections_websub_callback",
             prefix=f"{API_V1_PREFIX}",
             tags=("collections-websub",),
             route_key="collections-websub",
             attr_name="callback_router",
+            skip_context="(callback_router)",
         ),
         ImportedRouterSpec(
             import_path="tldw_Server_API.app.api.v1.endpoints.reading",

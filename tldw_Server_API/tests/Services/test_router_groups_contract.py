@@ -1588,6 +1588,8 @@ def test_iter_content_router_specs_defers_collections_reading_router_attr_lookup
         {
             "module_name": "tldw_Server_API.app.api.v1.endpoints.collections_feeds",
             "attr_name": "router",
+            "expected_name": "collections_feeds",
+            "expected_skip_context": "",
             "path": "/collections/feeds",
             "prefix": "/api/v1",
             "tags": ("collections-feeds",),
@@ -1596,6 +1598,8 @@ def test_iter_content_router_specs_defers_collections_reading_router_attr_lookup
         {
             "module_name": "tldw_Server_API.app.api.v1.endpoints.collections_websub",
             "attr_name": "router",
+            "expected_name": "collections_websub",
+            "expected_skip_context": "",
             "path": "/collections/feeds/{feed_id}/websub/subscribe",
             "prefix": "/api/v1",
             "tags": ("collections-websub",),
@@ -1604,6 +1608,8 @@ def test_iter_content_router_specs_defers_collections_reading_router_attr_lookup
         {
             "module_name": "tldw_Server_API.app.api.v1.endpoints.collections_websub",
             "attr_name": "callback_router",
+            "expected_name": "collections_websub_callback",
+            "expected_skip_context": "(callback_router)",
             "path": "/websub/callback/{user_id}/{callback_token}",
             "prefix": "/api/v1",
             "tags": ("collections-websub",),
@@ -1612,6 +1618,8 @@ def test_iter_content_router_specs_defers_collections_reading_router_attr_lookup
         {
             "module_name": "tldw_Server_API.app.api.v1.endpoints.reading",
             "attr_name": "router",
+            "expected_name": "reading",
+            "expected_skip_context": "",
             "path": "/reading/items",
             "prefix": "/api/v1",
             "tags": ("reading",),
@@ -1688,6 +1696,8 @@ def test_iter_content_router_specs_defers_collections_reading_router_attr_lookup
         assert spec.prefix == definition["prefix"]
         assert spec.tags == definition["tags"]
         assert spec.route_key == definition["route_key"]
+        assert spec.name == definition["expected_name"]
+        assert spec.skip_context == definition["expected_skip_context"]
 
     assert import_calls == [
         str(definition["module_name"])
