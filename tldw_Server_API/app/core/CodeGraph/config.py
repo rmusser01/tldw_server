@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping
-
+from typing import Any
 
 DEFAULT_EXCLUDE_DIRS = (
     ".git",
@@ -36,7 +36,7 @@ class CodeGraphSettings:
     exclude_dirs: tuple[str, ...] = DEFAULT_EXCLUDE_DIRS
 
     @classmethod
-    def from_mapping(cls, values: Mapping[str, Any] | None) -> "CodeGraphSettings":
+    def from_mapping(cls, values: Mapping[str, Any] | None) -> CodeGraphSettings:
         raw = dict(values or {})
         defaults = cls()
 

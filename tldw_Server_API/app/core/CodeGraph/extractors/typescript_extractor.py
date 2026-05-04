@@ -6,8 +6,8 @@ from pathlib import Path
 from typing import Any
 
 from tldw_Server_API.app.core.CodeGraph.extractors.javascript_extractor import (
-    _JavaScriptGraphBuilder,
     _direct_named_child_of_type,
+    _JavaScriptGraphBuilder,
     _node_text,
     _qualified_name,
 )

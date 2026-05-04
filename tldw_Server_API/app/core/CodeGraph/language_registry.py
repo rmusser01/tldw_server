@@ -5,7 +5,6 @@ from pathlib import Path
 from .dependencies import DependencyHealth, probe_codegraph_dependencies
 from .models import LanguageInfo
 
-
 _PLANNED_LANGUAGES = (
     LanguageInfo(
         language_id="c",

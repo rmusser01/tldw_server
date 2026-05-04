@@ -3,7 +3,6 @@ from __future__ import annotations
 import importlib.util
 from dataclasses import dataclass
 
-
 _REQUIRED_MODULES = (
     "tree_sitter",
     "tree_sitter_python",

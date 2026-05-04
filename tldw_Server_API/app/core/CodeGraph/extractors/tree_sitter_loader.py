@@ -47,7 +47,7 @@ def load_parser(language_id: str) -> ParserLoadResult:
     try:
         language = tree_sitter.module.Language(getattr(language_module.module, language_function)())
         parser = tree_sitter.module.Parser(language)
-    except Exception as exc:  # pragma: no cover - defensive boundary for optional native packages.
+    except (AttributeError, TypeError, ValueError) as exc:  # pragma: no cover - optional native package boundary.
         return ParserLoadResult(error=str(exc))
 
     return ParserLoadResult(parser=parser)
