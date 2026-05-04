@@ -14,7 +14,10 @@ from loguru import logger
 from tldw_Server_API.app.core.DB_Management.codegraph.repository import CodeGraphRepository
 
 from .config import CodeGraphSettings
+from .extractors.javascript_extractor import JavaScriptTreeSitterExtractor
 from .extractors.python_extractor import PythonAstExtractor
+from .extractors.tree_sitter_loader import load_parser
+from .extractors.typescript_extractor import TypeScriptTreeSitterExtractor
 from .language_registry import CodeGraphLanguageRegistry
 from .models import ExtractionResult
 
@@ -72,6 +75,10 @@ class CodeGraphIndexer:
         self._registry = registry
         self._monotonic = monotonic or time.monotonic
         self._extractors = {"python": PythonAstExtractor()}
+        if load_parser("javascript").available:
+            self._extractors["javascript"] = JavaScriptTreeSitterExtractor()
+        if load_parser("typescript").available and load_parser("tsx").available:
+            self._extractors["typescript"] = TypeScriptTreeSitterExtractor()
 
     def index_workspace(
         self,
@@ -206,7 +213,7 @@ class CodeGraphIndexer:
                     continue
 
                 if has_extractor:
-                    extraction = self._extract(candidate, workspace_key, content.source or b"")
+                    extraction = self._extract(workspace_root, candidate, workspace_key, content.source or b"")
                 else:
                     extraction = ExtractionResult()
                 file_status = "indexed"
@@ -321,17 +328,20 @@ class CodeGraphIndexer:
                         return _DiscoveryResult(candidates=candidates, status="index_too_large_for_foreground")
         return _DiscoveryResult(candidates=candidates)
 
-    def _extract(self, candidate: _Candidate, workspace_key: str, source: bytes) -> ExtractionResult:
+    def _extract(self, workspace_root: Path, candidate: _Candidate, workspace_key: str, source: bytes) -> ExtractionResult:
         """Run the language extractor for a candidate when one is implemented."""
         extractor = self._extractors.get(candidate.language_id)
         if extractor is None:
             return ExtractionResult()
         try:
-            return extractor.extract(
-                workspace_key=workspace_key,
-                file_path=candidate.relative_path,
-                source=source,
-            )
+            kwargs = {
+                "workspace_key": workspace_key,
+                "file_path": candidate.relative_path,
+                "source": source,
+            }
+            if candidate.language_id in {"javascript", "typescript"}:
+                kwargs["workspace_root"] = workspace_root
+            return extractor.extract(**kwargs)
         except ValueError as exc:
             logger.warning(f"CodeGraph extractor failed for {candidate.relative_path}: {exc}")
             return ExtractionResult(errors=(str(exc),))

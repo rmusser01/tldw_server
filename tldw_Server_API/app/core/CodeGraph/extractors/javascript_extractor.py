@@ -36,7 +36,14 @@ class JavaScriptTreeSitterExtractor:
     def __init__(self, *, workspace_root: Path | None = None) -> None:
         self.workspace_root = workspace_root
 
-    def extract(self, *, workspace_key: str, file_path: str, source: bytes) -> ExtractionResult:
+    def extract(
+        self,
+        *,
+        workspace_key: str,
+        file_path: str,
+        source: bytes,
+        workspace_root: Path | None = None,
+    ) -> ExtractionResult:
         """Parse one JavaScript/JSX file and return symbols, calls, unresolved refs, and errors."""
         parser_result = load_parser("javascript")
         if parser_result.missing:
@@ -55,7 +62,7 @@ class JavaScriptTreeSitterExtractor:
 
         builder = _JavaScriptGraphBuilder(
             workspace_key=workspace_key,
-            workspace_root=self.workspace_root,
+            workspace_root=workspace_root or self.workspace_root,
             file_path=file_path,
             source=source,
             source_text=text,

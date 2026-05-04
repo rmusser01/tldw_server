@@ -271,7 +271,7 @@ git commit -m "feat: add codegraph typescript extractor"
 - Modify: `tldw_Server_API/tests/CodeGraph/test_codegraph_indexer.py`
 - Modify: `tldw_Server_API/app/core/MCP_unified/tests/test_codegraph_module.py`
 
-- [ ] **Step 1: Write RED indexer tests**
+- [x] **Step 1: Write RED indexer tests**
 
 Cover:
 
@@ -280,18 +280,18 @@ Cover:
 - JS/TS extraction failure becomes `extraction_failed` without aborting indexing.
 - Missing parser dependencies keep module importable and status truthful.
 
-- [ ] **Step 2: Run tests and verify RED**
+- [x] **Step 2: Run tests and verify RED**
 
 ```bash
 python -m pytest tldw_Server_API/tests/CodeGraph/test_codegraph_indexer.py \
   tldw_Server_API/app/core/MCP_unified/tests/test_codegraph_module.py -q
 ```
 
-- [ ] **Step 3: Wire extractors**
+- [x] **Step 3: Wire extractors**
 
 Instantiate JS/TS extractors in `CodeGraphIndexer.__init__` only when loader health says the parser is available. Pass workspace root to the extractor or resolver through an explicit extraction context rather than global state.
 
-- [ ] **Step 4: Run focused tests and commit**
+- [x] **Step 4: Run focused tests and commit**
 
 ```bash
 python -m pytest tldw_Server_API/tests/CodeGraph \

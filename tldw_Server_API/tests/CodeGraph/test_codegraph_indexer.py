@@ -77,11 +77,15 @@ def helper(value):
     ]
 
 
-def test_indexer_keeps_javascript_typescript_as_inventory_only_until_extractor_slice(tmp_path: Path) -> None:
+def test_indexer_extracts_javascript_typescript_graph_rows_during_index(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     (workspace / "app.py").write_text("def helper():\n    return 1\n", encoding="utf-8")
     (workspace / "ui.ts").write_text("export function helper() { return 1; }\n", encoding="utf-8")
+    (workspace / "Card.tsx").write_text(
+        "export function Card() { return <div />; }\n",
+        encoding="utf-8",
+    )
     repo = CodeGraphRepository(tmp_path / "codegraph.db")
     indexer = CodeGraphIndexer(settings=CodeGraphSettings.from_mapping({}), registry=CodeGraphLanguageRegistry())
 
@@ -98,8 +102,10 @@ def test_indexer_keeps_javascript_typescript_as_inventory_only_until_extractor_s
 
     assert result.status == "complete"
     assert files["app.py"].node_count > 0
-    assert files["ui.ts"].node_count == 0
-    assert [node.file_path for node in repo.search_nodes("helper", limit=10)] == ["app.py"]
+    assert files["ui.ts"].node_count > 0
+    assert files["Card.tsx"].node_count > 0
+    assert sorted(node.file_path for node in repo.search_nodes("helper", limit=10)) == ["app.py", "ui.ts"]
+    assert [node.file_path for node in repo.search_nodes("Card", kind="component", limit=10)] == ["Card.tsx"]
 
 
 def test_indexer_marks_python_extraction_errors_without_claiming_indexed_status(tmp_path: Path) -> None:

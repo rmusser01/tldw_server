@@ -23,7 +23,14 @@ class TypeScriptTreeSitterExtractor:
     def __init__(self, *, workspace_root: Path | None = None) -> None:
         self.workspace_root = workspace_root
 
-    def extract(self, *, workspace_key: str, file_path: str, source: bytes) -> ExtractionResult:
+    def extract(
+        self,
+        *,
+        workspace_key: str,
+        file_path: str,
+        source: bytes,
+        workspace_root: Path | None = None,
+    ) -> ExtractionResult:
         """Parse one TypeScript/TSX file and return symbols, calls, unresolved refs, and errors."""
         parser_language = "tsx" if file_path.endswith(".tsx") else "typescript"
         parser_result = load_parser(parser_language)
@@ -43,7 +50,7 @@ class TypeScriptTreeSitterExtractor:
 
         builder = _TypeScriptGraphBuilder(
             workspace_key=workspace_key,
-            workspace_root=self.workspace_root,
+            workspace_root=workspace_root or self.workspace_root,
             file_path=file_path,
             source=source,
             source_text=text,

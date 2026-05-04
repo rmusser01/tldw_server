@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - Codex
 created_date: '2026-05-04 05:48'
-updated_date: '2026-05-04 06:08'
+updated_date: '2026-05-04 06:12'
 labels:
   - codegraph
   - mcp
@@ -57,6 +57,8 @@ Task 2 red-green complete: added resolver tests for relative imports, nearest co
 Task 3 red-green complete: added JavaScript extractor tests for modules, imports, re-exports, functions, arrow functions, classes, methods, JSX components, same-file calls, member-call unresolved refs, parse errors, and deterministic IDs; verified 3 passed.
 
 Task 4 red-green complete: added TypeScript/TSX extractor tests for interface, type alias, enum, imports, function/class/method calls, TSX component detection, and deterministic IDs; verified 3 passed.
+
+Task 5 red-green complete: indexer now wires optional JS/TS extractors, registry reports dependency-aware symbol extraction, MCP search finds indexed TSX components, and focused CodeGraph/MCP tests verified 72 passed.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

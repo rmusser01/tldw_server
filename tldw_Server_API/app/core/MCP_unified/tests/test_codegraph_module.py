@@ -220,6 +220,32 @@ def helper(value):
     assert [item["target"]["qualified_name"] for item in callees["relationships"]] == ["helper"]  # nosec B101
 
 
+@pytest.mark.asyncio
+async def test_codegraph_search_finds_typescript_component_after_index(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir()
+    (workspace_root / "Card.tsx").write_text(
+        "export function Card() { return <div />; }\n",
+        encoding="utf-8",
+    )
+    module = _module(tmp_path, workspace_root)
+
+    index_result = await module.execute_tool(
+        "codegraph.index",
+        {"mode": "foreground", "force": True, "max_files": 10},
+        context=_context(),
+    )
+    search = await module.execute_tool(
+        "codegraph.search",
+        {"query": "Card", "kind": "component", "language": "typescript", "limit": 10},
+        context=_context(),
+    )
+
+    assert index_result["status"] == "complete"  # nosec B101
+    assert [item["qualified_name"] for item in search["results"]] == ["Card"]  # nosec B101
+    assert [item["file_path"] for item in search["results"]] == ["Card.tsx"]  # nosec B101
+
+
 def test_codegraph_rejects_ambiguous_node_selectors(tmp_path: Path) -> None:
     workspace_root = tmp_path / "workspace"
     workspace_root.mkdir()

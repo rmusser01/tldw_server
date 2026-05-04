@@ -6,27 +6,6 @@ from .dependencies import DependencyHealth, probe_codegraph_dependencies
 from .models import LanguageInfo
 
 
-_FOUNDATION_LANGUAGES = (
-    LanguageInfo(
-        language_id="python",
-        display_name="Python",
-        extensions=(".py", ".pyi"),
-        stage="foundation",
-    ),
-    LanguageInfo(
-        language_id="javascript",
-        display_name="JavaScript",
-        extensions=(".js", ".jsx", ".mjs", ".cjs"),
-        stage="foundation",
-    ),
-    LanguageInfo(
-        language_id="typescript",
-        display_name="TypeScript",
-        extensions=(".ts", ".tsx"),
-        stage="foundation",
-    ),
-)
-
 _PLANNED_LANGUAGES = (
     LanguageInfo(
         language_id="c",
@@ -66,7 +45,7 @@ class CodeGraphLanguageRegistry:
 
     def __init__(self, dependency_health: DependencyHealth | None = None) -> None:
         self.dependency_health = dependency_health or probe_codegraph_dependencies()
-        self._languages = (*_FOUNDATION_LANGUAGES, *_PLANNED_LANGUAGES)
+        self._languages = (*_foundation_languages(self.dependency_health), *_PLANNED_LANGUAGES)
         self._by_extension = {
             extension: language
             for language in self._languages
@@ -89,3 +68,38 @@ class CodeGraphLanguageRegistry:
             for language in self._languages
             if language.stage == "foundation"
         }
+
+
+def _foundation_languages(dependency_health: DependencyHealth) -> tuple[LanguageInfo, ...]:
+    missing = set(dependency_health.missing)
+    javascript_missing = _missing_dependencies(missing, ("tree_sitter", "tree_sitter_javascript"))
+    typescript_missing = _missing_dependencies(missing, ("tree_sitter", "tree_sitter_typescript"))
+    return (
+        LanguageInfo(
+            language_id="python",
+            display_name="Python",
+            extensions=(".py", ".pyi"),
+            stage="foundation",
+            symbol_extraction=True,
+        ),
+        LanguageInfo(
+            language_id="javascript",
+            display_name="JavaScript",
+            extensions=(".js", ".jsx", ".mjs", ".cjs"),
+            stage="foundation",
+            dependency_missing=javascript_missing,
+            symbol_extraction=not javascript_missing,
+        ),
+        LanguageInfo(
+            language_id="typescript",
+            display_name="TypeScript",
+            extensions=(".ts", ".tsx"),
+            stage="foundation",
+            dependency_missing=typescript_missing,
+            symbol_extraction=not typescript_missing,
+        ),
+    )
+
+
+def _missing_dependencies(missing: set[str], dependencies: tuple[str, ...]) -> tuple[str, ...]:
+    return tuple(dependency for dependency in dependencies if dependency in missing)
