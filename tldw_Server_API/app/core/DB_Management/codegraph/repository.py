@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from contextlib import closing, contextmanager
-from dataclasses import dataclass
 import json
 import sqlite3
 import uuid
+from contextlib import closing, contextmanager
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -596,20 +596,10 @@ def _select_relationships_for_nodes(
     anchor_file_path: str,
 ) -> list[sqlite3.Row]:
     """Select joined relationships touching a set of node ids in deterministic order."""
-    placeholders = ",".join("?" for _ in node_ids)
-    ids = sorted(node_ids)
-    if direction == "incoming":
-        predicate = f"e.target IN ({placeholders})"
-        params = ids
-    elif direction == "outgoing":
-        predicate = f"e.source IN ({placeholders})"
-        params = ids
-    else:
-        predicate = f"(e.source IN ({placeholders}) OR e.target IN ({placeholders}))"
-        params = [*ids, *ids]
+    ids_json = json.dumps(sorted(node_ids))
 
     return conn.execute(
-        f"""
+        """
         SELECT
             e.id AS edge_id,
             e.kind AS edge_kind,
@@ -638,7 +628,9 @@ def _select_relationships_for_nodes(
         FROM edges e
         JOIN nodes source_node ON source_node.id = e.source
         JOIN nodes target_node ON target_node.id = e.target
-        WHERE {predicate}
+        WHERE
+            (? IN ('incoming', 'both') AND e.target IN (SELECT value FROM json_each(?)))
+            OR (? IN ('outgoing', 'both') AND e.source IN (SELECT value FROM json_each(?)))
         ORDER BY
             CASE WHEN e.file_path = ? THEN 0 ELSE 1 END,
             e.file_path,
@@ -647,7 +639,7 @@ def _select_relationships_for_nodes(
             target_node.qualified_name,
             e.id
         """,
-        [*params, anchor_file_path],
+        (direction, ids_json, direction, ids_json, anchor_file_path),
     ).fetchall()
 
 
@@ -658,12 +650,11 @@ def _select_nodes_by_ids(
     anchor_file_path: str,
 ) -> list[sqlite3.Row]:
     """Select nodes by id in stable source-location order."""
-    placeholders = ",".join("?" for _ in node_ids)
     return conn.execute(
-        f"""
+        """
         SELECT *
         FROM nodes
-        WHERE id IN ({placeholders})
+        WHERE id IN (SELECT value FROM json_each(?))
         ORDER BY
             CASE WHEN file_path = ? THEN 0 ELSE 1 END,
             file_path,
@@ -671,7 +662,7 @@ def _select_nodes_by_ids(
             qualified_name,
             id
         """,
-        [*sorted(node_ids), anchor_file_path],
+        (json.dumps(sorted(node_ids)), anchor_file_path),
     ).fetchall()
 
 
