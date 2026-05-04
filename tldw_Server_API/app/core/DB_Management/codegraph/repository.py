@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from contextlib import closing, contextmanager
+from dataclasses import dataclass
 import json
 import sqlite3
 import uuid
@@ -20,6 +21,15 @@ from tldw_Server_API.app.core.CodeGraph.models import (
     IndexRunSummary,
 )
 from tldw_Server_API.app.core.DB_Management.sqlite_policy import configure_sqlite_connection
+
+
+@dataclass(frozen=True)
+class ImpactTraversal:
+    """Bounded graph traversal result for CodeGraph impact queries."""
+
+    nodes: tuple[CodeGraphNode, ...]
+    relationships: tuple[dict[str, Any], ...]
+    truncated: bool
 
 
 class CodeGraphRepository:
@@ -418,6 +428,62 @@ class CodeGraphRepository:
             ).fetchall()
         return [_relationship_from_joined_row(row) for row in rows]
 
+    def traverse_impact(
+        self,
+        node_id: str,
+        *,
+        depth: int = 2,
+        direction: str = "both",
+        limit: int = 10,
+    ) -> ImpactTraversal:
+        """Traverse a bounded incoming/outgoing relationship neighborhood."""
+        if direction not in {"incoming", "outgoing", "both"}:
+            raise ValueError("direction must be incoming, outgoing, or both")
+
+        effective_depth = max(1, int(depth))
+        effective_limit = max(1, int(limit))
+        with self._connection() as conn:
+            root = conn.execute("SELECT * FROM nodes WHERE id = ?", (node_id,)).fetchone()
+            if root is None:
+                return ImpactTraversal(nodes=(), relationships=(), truncated=False)
+            anchor_file_path = str(root["file_path"])
+
+            seen_node_ids = {node_id}
+            frontier = {node_id}
+            relationships: list[dict[str, Any]] = []
+            seen_relationship_ids: set[str] = set()
+            truncated = False
+
+            for _level in range(effective_depth):
+                if not frontier or truncated:
+                    break
+                rows = _select_relationships_for_nodes(conn, frontier, direction, anchor_file_path=anchor_file_path)
+                next_frontier: set[str] = set()
+                for row in rows:
+                    edge_id = str(row["edge_id"])
+                    if edge_id in seen_relationship_ids:
+                        continue
+                    if len(relationships) >= effective_limit:
+                        truncated = True
+                        break
+                    relationship = _relationship_from_joined_row(row)
+                    relationships.append(relationship)
+                    seen_relationship_ids.add(edge_id)
+                    for endpoint in (relationship["source"], relationship["target"]):
+                        endpoint_id = str(endpoint["id"])
+                        if endpoint_id not in seen_node_ids:
+                            seen_node_ids.add(endpoint_id)
+                            next_frontier.add(endpoint_id)
+                frontier = next_frontier
+
+            node_rows = _select_nodes_by_ids(conn, seen_node_ids, anchor_file_path=anchor_file_path)
+
+        return ImpactTraversal(
+            nodes=tuple(_node_from_row(row) for row in node_rows),
+            relationships=tuple(relationships),
+            truncated=truncated,
+        )
+
     def seed_graph_rows_for_test(
         self,
         *,
@@ -520,6 +586,93 @@ def _delete_file_rows(conn: sqlite3.Connection, paths: list[str]) -> None:
     conn.executemany("DELETE FROM nodes WHERE file_path = ?", params)
     conn.executemany("DELETE FROM files WHERE path = ?", params)
     _delete_dangling_edges(conn)
+
+
+def _select_relationships_for_nodes(
+    conn: sqlite3.Connection,
+    node_ids: set[str],
+    direction: str,
+    *,
+    anchor_file_path: str,
+) -> list[sqlite3.Row]:
+    """Select joined relationships touching a set of node ids in deterministic order."""
+    placeholders = ",".join("?" for _ in node_ids)
+    ids = sorted(node_ids)
+    if direction == "incoming":
+        predicate = f"e.target IN ({placeholders})"
+        params = ids
+    elif direction == "outgoing":
+        predicate = f"e.source IN ({placeholders})"
+        params = ids
+    else:
+        predicate = f"(e.source IN ({placeholders}) OR e.target IN ({placeholders}))"
+        params = [*ids, *ids]
+
+    return conn.execute(
+        f"""
+        SELECT
+            e.id AS edge_id,
+            e.kind AS edge_kind,
+            e.file_path AS edge_file_path,
+            e.line AS edge_line,
+            e.column AS edge_column,
+            e.metadata AS edge_metadata,
+            e.provenance AS edge_provenance,
+            source_node.*,
+            target_node.id AS target_id,
+            target_node.identity_key AS target_identity_key,
+            target_node.kind AS target_kind,
+            target_node.name AS target_name,
+            target_node.qualified_name AS target_qualified_name,
+            target_node.file_path AS target_file_path,
+            target_node.language AS target_language,
+            target_node.start_line AS target_start_line,
+            target_node.end_line AS target_end_line,
+            target_node.start_column AS target_start_column,
+            target_node.end_column AS target_end_column,
+            target_node.signature AS target_signature,
+            target_node.docstring AS target_docstring,
+            target_node.visibility AS target_visibility,
+            target_node.flags AS target_flags,
+            target_node.metadata AS target_metadata
+        FROM edges e
+        JOIN nodes source_node ON source_node.id = e.source
+        JOIN nodes target_node ON target_node.id = e.target
+        WHERE {predicate}
+        ORDER BY
+            CASE WHEN e.file_path = ? THEN 0 ELSE 1 END,
+            e.file_path,
+            COALESCE(e.line, 0),
+            source_node.qualified_name,
+            target_node.qualified_name,
+            e.id
+        """,
+        [*params, anchor_file_path],
+    ).fetchall()
+
+
+def _select_nodes_by_ids(
+    conn: sqlite3.Connection,
+    node_ids: set[str],
+    *,
+    anchor_file_path: str,
+) -> list[sqlite3.Row]:
+    """Select nodes by id in stable source-location order."""
+    placeholders = ",".join("?" for _ in node_ids)
+    return conn.execute(
+        f"""
+        SELECT *
+        FROM nodes
+        WHERE id IN ({placeholders})
+        ORDER BY
+            CASE WHEN file_path = ? THEN 0 ELSE 1 END,
+            file_path,
+            COALESCE(start_line, 0),
+            qualified_name,
+            id
+        """,
+        [*sorted(node_ids), anchor_file_path],
+    ).fetchall()
 
 
 def _upsert_file(

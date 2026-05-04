@@ -345,3 +345,97 @@ def test_repository_atomic_file_and_graph_replacement_rolls_back_on_graph_error(
     assert file_row.content_hash == "old_hash"
     assert repo.get_node("node_old") is not None
     assert repo.search_nodes("new_helper", limit=10) == []
+
+
+def test_repository_traverses_bounded_impact_graph(tmp_path: Path) -> None:
+    repo = CodeGraphRepository(tmp_path / "codegraph.db")
+    repo.initialize()
+    _seed_impact_graph(repo)
+
+    impact = repo.traverse_impact("node_helper", depth=1, direction="both", limit=10)
+
+    assert [node.id for node in impact.nodes] == [
+        "node_entry",
+        "node_helper",
+        "node_leaf",
+        "node_other",
+    ]
+    assert [relationship["id"] for relationship in impact.relationships] == [
+        "edge_entry_helper",
+        "edge_helper_leaf",
+        "edge_other_helper",
+    ]
+    assert impact.truncated is False
+
+
+def test_repository_impact_traversal_reports_truncation(tmp_path: Path) -> None:
+    repo = CodeGraphRepository(tmp_path / "codegraph.db")
+    repo.initialize()
+    _seed_impact_graph(repo)
+
+    impact = repo.traverse_impact("node_helper", depth=2, direction="both", limit=1)
+
+    assert [relationship["id"] for relationship in impact.relationships] == ["edge_entry_helper"]
+    assert impact.truncated is True
+
+
+def _seed_impact_graph(repo: CodeGraphRepository) -> None:
+    repo.seed_graph_rows_for_test(
+        nodes=[
+            {
+                "id": "node_entry",
+                "identity_key": "entry",
+                "kind": "function",
+                "name": "entry",
+                "file_path": "pkg/sample.py",
+            },
+            {
+                "id": "node_helper",
+                "identity_key": "helper",
+                "kind": "function",
+                "name": "helper",
+                "file_path": "pkg/sample.py",
+            },
+            {
+                "id": "node_leaf",
+                "identity_key": "leaf",
+                "kind": "function",
+                "name": "leaf",
+                "file_path": "pkg/sample.py",
+            },
+            {
+                "id": "node_other",
+                "identity_key": "other",
+                "kind": "function",
+                "name": "other",
+                "file_path": "pkg/other.py",
+            },
+        ],
+        edges=[
+            {
+                "id": "edge_entry_helper",
+                "source": "node_entry",
+                "target": "node_helper",
+                "kind": "calls",
+                "file_path": "pkg/sample.py",
+                "line": 2,
+            },
+            {
+                "id": "edge_helper_leaf",
+                "source": "node_helper",
+                "target": "node_leaf",
+                "kind": "calls",
+                "file_path": "pkg/sample.py",
+                "line": 6,
+            },
+            {
+                "id": "edge_other_helper",
+                "source": "node_other",
+                "target": "node_helper",
+                "kind": "calls",
+                "file_path": "pkg/other.py",
+                "line": 3,
+            },
+        ],
+        unresolved_refs=[],
+    )
