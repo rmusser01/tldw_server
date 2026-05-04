@@ -1317,22 +1317,51 @@ def test_iter_content_router_specs_defers_embedding_router_attr_lookup(
     }
 
 
-def test_iter_content_router_specs_defers_knowledge_router_attr_lookup(
+def test_iter_content_router_specs_defers_utility_router_attr_lookup(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Verify covered knowledge/query specs keep router attr lookup lazy."""
-    module_paths = {
-        "tldw_Server_API.app.api.v1.endpoints.claims": "/claims",
-        "tldw_Server_API.app.api.v1.endpoints.text2sql": "/text2sql",
-        "tldw_Server_API.app.api.v1.endpoints.email": "/email/search",
-    }
-    access_count = {module_name: 0 for module_name in module_paths}
+    """Verify covered utility content specs keep import and attr lookup lazy."""
+    import importlib
 
-    for module_name, path in module_paths.items():
+    router_definitions = {
+        "claims": {
+            "module_name": "tldw_Server_API.app.api.v1.endpoints.claims",
+            "path": "/claims",
+            "prefix": "/api/v1",
+            "tags": ("claims",),
+        },
+        "text2sql": {
+            "module_name": "tldw_Server_API.app.api.v1.endpoints.text2sql",
+            "path": "/text2sql/query",
+            "prefix": "/api/v1",
+            "tags": ("text2sql",),
+        },
+        "email": {
+            "module_name": "tldw_Server_API.app.api.v1.endpoints.email",
+            "path": "/email/search",
+            "prefix": "/api/v1/email",
+            "tags": ("email",),
+        },
+        "outputs-templates": {
+            "module_name": "tldw_Server_API.app.api.v1.endpoints.outputs_templates",
+            "path": "/outputs/templates",
+            "prefix": "/api/v1",
+            "tags": ("outputs-templates",),
+        },
+    }
+    access_count = {
+        str(definition["module_name"]): 0
+        for definition in router_definitions.values()
+    }
+    import_calls: list[str] = []
+
+    for definition in router_definitions.values():
+        module_name = str(definition["module_name"])
         router = APIRouter()
 
-        @router.get(path)
+        @router.get(str(definition["path"]))
         def _endpoint() -> dict[str, str]:
+            """Return a deterministic response for the fake utility router."""
             return {"status": "ok"}
 
         fake_module = ModuleType(module_name)
@@ -1343,6 +1372,7 @@ def test_iter_content_router_specs_defers_knowledge_router_attr_lookup(
             module_name: str = module_name,
             router: APIRouter = router,
         ) -> APIRouter:
+            """Track lazy router attribute resolution for the fake module."""
             if name != "router":
                 raise AttributeError(name)
             access_count[module_name] += 1
@@ -1351,20 +1381,47 @@ def test_iter_content_router_specs_defers_knowledge_router_attr_lookup(
         fake_module.__getattr__ = _module_getattr  # type: ignore[attr-defined]
         monkeypatch.setitem(sys.modules, module_name, fake_module)
 
-    specs = list(iter_content_router_specs())
-    assert access_count == {module_name: 0 for module_name in module_paths}
+    real_import_module = importlib.import_module
 
-    by_first_path = {_first_router_path(spec.router): spec for spec in specs}
-    assert by_first_path["/claims"].prefix == "/api/v1"
-    assert by_first_path["/claims"].tags == ("claims",)
-    assert by_first_path["/claims"].route_key == "claims"
-    assert by_first_path["/text2sql"].prefix == "/api/v1"
-    assert by_first_path["/text2sql"].tags == ("text2sql",)
-    assert by_first_path["/text2sql"].route_key == "text2sql"
-    assert by_first_path["/email/search"].prefix == "/api/v1/email"
-    assert by_first_path["/email/search"].tags == ("email",)
-    assert by_first_path["/email/search"].route_key == "email"
-    assert access_count == {module_name: 1 for module_name in module_paths}
+    def _import_module(module_name: str, package: str | None = None) -> ModuleType:
+        """Track lazy module imports for selected utility router modules."""
+        if module_name in access_count:
+            import_calls.append(module_name)
+        return real_import_module(module_name, package)
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.router_groups.conditional.importlib.import_module",
+        _import_module,
+    )
+
+    specs = list(iter_content_router_specs())
+    assert access_count == {
+        str(definition["module_name"]): 0
+        for definition in router_definitions.values()
+    }
+    assert import_calls == []
+
+    utility_specs = {
+        spec.route_key: spec
+        for spec in specs
+        if spec.route_key in router_definitions
+    }
+    assert set(utility_specs) == set(router_definitions)
+
+    for route_key, spec in utility_specs.items():
+        definition = router_definitions[route_key]
+        assert spec.prefix == definition["prefix"]
+        assert spec.tags == definition["tags"]
+        assert _first_router_path(spec.router) == definition["path"]
+
+    assert import_calls == [
+        str(router_definitions[route_key]["module_name"])
+        for route_key in utility_specs
+    ]
+    assert access_count == {
+        str(definition["module_name"]): 1
+        for definition in router_definitions.values()
+    }
 
 
 def test_qodo_reviewed_router_policy_regressions(monkeypatch: pytest.MonkeyPatch) -> None:

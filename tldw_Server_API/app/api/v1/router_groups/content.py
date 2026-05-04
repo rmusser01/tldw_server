@@ -218,8 +218,8 @@ def iter_content_router_specs() -> Iterable[RouterSpec]:
     ):
         append_imported_router_spec(specs, workflow_spec)
 
-    # Claims, Text2SQL, and email search routers
-    for knowledge_spec in (
+    # Utility/content routers
+    for utility_spec in (
         ImportedRouterSpec(
             import_path="tldw_Server_API.app.api.v1.endpoints.claims",
             log_name="claims",
@@ -241,21 +241,15 @@ def iter_content_router_specs() -> Iterable[RouterSpec]:
             tags=("email",),
             route_key="email",
         ),
-    ):
-        append_imported_router_spec(specs, knowledge_spec)
-
-    # Outputs and output templates
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.outputs_templates import router as outputs_templates_router
-
-        specs.append(RouterSpec(
-            router=outputs_templates_router,
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.outputs_templates",
+            log_name="outputs_templates",
             prefix=f"{API_V1_PREFIX}",
             tags=("outputs-templates",),
             route_key="outputs-templates",
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping outputs_templates router: {e}")
+        ),
+    ):
+        append_imported_router_spec(specs, utility_spec)
 
     # Slack integration endpoints
     try:
