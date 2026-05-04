@@ -167,13 +167,17 @@ class CodeGraphIndexer:
                     counters["files_too_large"] += 1
                     counters["files_skipped"] += 1
                     continue
-                source = candidate.path.read_bytes()
-                if self._is_binary(source):
+                if self._is_binary_path(candidate.path):
                     counters["files_skipped"] += 1
                     continue
 
-                content_hash = self._hash_bytes(source)
-                extraction = self._extract(candidate, workspace_key, source)
+                if candidate.language_id in self._extractors:
+                    source = candidate.path.read_bytes()
+                    content_hash = self._hash_bytes(source)
+                    extraction = self._extract(candidate, workspace_key, source)
+                else:
+                    content_hash = self._hash_file(candidate.path)
+                    extraction = ExtractionResult()
                 file_status = "indexed"
                 if extraction.errors:
                     counters["errors"] += len(extraction.errors)
@@ -291,16 +295,35 @@ class CodeGraphIndexer:
         extractor = self._extractors.get(candidate.language_id)
         if extractor is None:
             return ExtractionResult()
-        return extractor.extract(
-            workspace_key=workspace_key,
-            file_path=candidate.relative_path,
-            source=source,
-        )
+        try:
+            return extractor.extract(
+                workspace_key=workspace_key,
+                file_path=candidate.relative_path,
+                source=source,
+            )
+        except ValueError as exc:
+            logger.warning(f"CodeGraph extractor failed for {candidate.relative_path}: {exc}")
+            return ExtractionResult(errors=(str(exc),))
+
+    @staticmethod
+    def _hash_file(path: Path) -> str:
+        """Return a streaming SHA-256 content hash for a file path."""
+        digest = hashlib.sha256()
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
 
     @staticmethod
     def _hash_bytes(source: bytes) -> str:
         """Return a SHA-256 content hash for indexed file bytes."""
         return hashlib.sha256(source).hexdigest()
+
+    @staticmethod
+    def _is_binary_path(path: Path) -> bool:
+        """Detect obvious binary files from a small leading byte probe."""
+        with path.open("rb") as handle:
+            return CodeGraphIndexer._is_binary(handle.read(4096))
 
     @staticmethod
     def _is_binary(source: bytes) -> bool:

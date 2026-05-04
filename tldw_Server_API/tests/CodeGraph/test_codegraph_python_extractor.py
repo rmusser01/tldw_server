@@ -84,3 +84,12 @@ def persist(external_client):
         and ref.reference_kind == "call"
         for ref in result.unresolved_refs
     )
+
+
+def test_python_extractor_reports_value_error_parse_failures() -> None:
+    extractor = PythonAstExtractor()
+
+    result = extractor.extract(workspace_key="ws_test", file_path="pkg/broken.py", source=b"def broken():\n\x00\n")
+
+    assert result.nodes == ()
+    assert result.errors

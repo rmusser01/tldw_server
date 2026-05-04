@@ -10,9 +10,7 @@ from tldw_Server_API.app.core.MCP_unified.modules.base import ModuleConfig
 from tldw_Server_API.app.core.MCP_unified.modules.implementations.codegraph_module import (
     CodeGraphModule,
 )
-from tldw_Server_API.app.core.MCP_unified.protocol import InvalidParamsException
-from tldw_Server_API.app.core.MCP_unified.protocol import MCPProtocol
-from tldw_Server_API.app.core.MCP_unified.protocol import RequestContext
+from tldw_Server_API.app.core.MCP_unified.protocol import InvalidParamsException, MCPProtocol, RequestContext
 
 
 class _FakeWorkspaceRootResolver:
@@ -60,6 +58,14 @@ def _context() -> RequestContext:
 
 
 def _module(tmp_path: Path, workspace_root: Path) -> CodeGraphModule:
+    return _module_with_settings(tmp_path, workspace_root, {})
+
+
+def _module_with_settings(
+    tmp_path: Path,
+    workspace_root: Path,
+    settings: dict[str, Any],
+) -> CodeGraphModule:
     resolver = _FakeWorkspaceRootResolver(
         {
             "workspace_root": str(workspace_root),
@@ -68,8 +74,9 @@ def _module(tmp_path: Path, workspace_root: Path) -> CodeGraphModule:
             "reason": None,
         }
     )
+    module_settings = {"index_base_dir": str(tmp_path / "indexes"), **settings}
     return CodeGraphModule(
-        ModuleConfig(name="CodeGraph", settings={"index_base_dir": str(tmp_path / "indexes")}),
+        ModuleConfig(name="CodeGraph", settings=module_settings),
         workspace_root_resolver=resolver,
     )
 
@@ -157,6 +164,25 @@ async def test_codegraph_index_and_files_roundtrip(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_codegraph_files_clamps_large_limits_to_configured_max(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir()
+    for index in range(3):
+        (workspace_root / f"file_{index}.py").write_text("x = 1\n", encoding="utf-8")
+    module = _module_with_settings(tmp_path, workspace_root, {"max_search_results": 2})
+
+    await module.execute_tool(
+        "codegraph.index",
+        {"mode": "foreground", "force": True, "max_files": 10},
+        context=_context(),
+    )
+    files_result = await module.execute_tool("codegraph.files", {"limit": 999}, context=_context())
+
+    assert len(files_result["files"]) == 2  # nosec B101
+    assert files_result["truncated"] is True  # nosec B101
+
+
+@pytest.mark.asyncio
 async def test_codegraph_search_node_callers_and_callees_roundtrip(tmp_path: Path) -> None:
     workspace_root = tmp_path / "workspace"
     workspace_root.mkdir()
@@ -240,7 +266,7 @@ async def test_protocol_rejects_unknown_codegraph_index_arguments(tmp_path: Path
     protocol = MCPProtocol()
     protocol.module_registry = _CodeGraphRegistry(module)
 
-    async def _resolve_effective_policy(_context):
+    async def _resolve_effective_policy(_context: RequestContext) -> dict[str, Any]:
         return {"enabled": True, "allowed_tools": ["codegraph.index"], "policy_document": {"path_scope_mode": "none"}}
 
     async def _allow(*_args, **_kwargs) -> bool:
@@ -267,7 +293,7 @@ async def test_protocol_rejects_unknown_codegraph_search_arguments(tmp_path: Pat
     protocol = MCPProtocol()
     protocol.module_registry = _CodeGraphRegistry(module)
 
-    async def _resolve_effective_policy(_context):
+    async def _resolve_effective_policy(_context: RequestContext) -> dict[str, Any]:
         return {"enabled": True, "allowed_tools": ["codegraph.search"], "policy_document": {"path_scope_mode": "none"}}
 
     async def _allow(*_args, **_kwargs) -> bool:

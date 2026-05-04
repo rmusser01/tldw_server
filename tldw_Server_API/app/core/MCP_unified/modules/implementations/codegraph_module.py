@@ -24,7 +24,6 @@ from tldw_Server_API.app.core.DB_Management.codegraph.repository import CodeGrap
 
 from ..base import BaseModule, ModuleConfig, create_tool_definition
 
-
 _EMPTY_COUNTS = {"files": 0, "nodes": 0, "edges": 0, "unresolved_refs": 0}
 _FOREGROUND_MODE = "foreground"
 
@@ -469,7 +468,7 @@ class CodeGraphModule(BaseModule):
             }
 
         repository = CodeGraphRepository(resolution.index_db_path)
-        effective_limit = max(1, int(limit or 100))
+        effective_limit = self._bounded_limit(limit, default=100)
         path_prefix = _normalize_path_prefix(path)
         rows = repository.list_files(
             limit=effective_limit + 1,
@@ -630,9 +629,9 @@ class CodeGraphModule(BaseModule):
         if isinstance(symbol, str):
             arguments["symbol"] = symbol.strip()
 
-    def _bounded_limit(self, limit: int | None) -> int:
+    def _bounded_limit(self, limit: int | None, *, default: int = 10) -> int:
         """Clamp user-provided result limits to configured maximums."""
-        return min(max(1, int(limit or 10)), self._settings.max_search_results)
+        return min(max(1, int(limit or default)), self._settings.max_search_results)
 
 
 def _normalize_path_prefix(path: str | None) -> str | None:
