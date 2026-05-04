@@ -18,6 +18,18 @@ RuntimeBoundaryClass = Literal[
     "vm_grade",
     "vm_grade_scaffold",
 ]
+RuntimeNetworkPolicySupportState = Literal[
+    "supported",
+    "unsupported",
+    "scaffold",
+    "host_gated",
+    "not_applicable",
+]
+RuntimeNetworkPolicyReadinessSource = Literal[
+    "runtime_preflight",
+    "config",
+    "not_applicable",
+]
 RuntimeReasonCode = Literal[
     "runtime_unavailable",
     "unsupported_os",
@@ -54,6 +66,36 @@ class RuntimeIsolationMetadata:
     boundary_class: RuntimeBoundaryClass
     vm_grade_isolation: bool
     untrusted_eligible: bool
+
+
+@dataclass(frozen=True)
+class RuntimeNetworkPolicyModeMetadata:
+    """Static network policy posture for one runtime policy mode."""
+
+    support_state: RuntimeNetworkPolicySupportState
+    strict_enforcement: bool
+    readiness_source: RuntimeNetworkPolicyReadinessSource
+
+    def as_dict(self) -> dict[str, str | bool]:
+        return {
+            "support_state": self.support_state,
+            "strict_enforcement": self.strict_enforcement,
+            "readiness_source": self.readiness_source,
+        }
+
+
+@dataclass(frozen=True)
+class RuntimeNetworkPolicyMetadata:
+    """Machine-readable network policy contract for runtime discovery."""
+
+    deny_all: RuntimeNetworkPolicyModeMetadata
+    allowlist: RuntimeNetworkPolicyModeMetadata
+
+    def as_dict(self) -> dict[str, dict[str, str | bool]]:
+        return {
+            "deny_all": self.deny_all.as_dict(),
+            "allowlist": self.allowlist.as_dict(),
+        }
 
 
 RUNTIME_ISOLATION_METADATA: Mapping[RuntimeType, RuntimeIsolationMetadata] = {
@@ -95,6 +137,94 @@ RUNTIME_ISOLATION_METADATA: Mapping[RuntimeType, RuntimeIsolationMetadata] = {
 }
 
 
+RUNTIME_NETWORK_POLICY_METADATA: Mapping[RuntimeType, RuntimeNetworkPolicyMetadata] = {
+    RuntimeType.docker: RuntimeNetworkPolicyMetadata(
+        deny_all=RuntimeNetworkPolicyModeMetadata(
+            support_state="supported",
+            strict_enforcement=True,
+            readiness_source="config",
+        ),
+        allowlist=RuntimeNetworkPolicyModeMetadata(
+            support_state="host_gated",
+            strict_enforcement=True,
+            readiness_source="config",
+        ),
+    ),
+    RuntimeType.firecracker: RuntimeNetworkPolicyMetadata(
+        deny_all=RuntimeNetworkPolicyModeMetadata(
+            support_state="host_gated",
+            strict_enforcement=True,
+            readiness_source="runtime_preflight",
+        ),
+        allowlist=RuntimeNetworkPolicyModeMetadata(
+            support_state="scaffold",
+            strict_enforcement=False,
+            readiness_source="runtime_preflight",
+        ),
+    ),
+    RuntimeType.lima: RuntimeNetworkPolicyMetadata(
+        deny_all=RuntimeNetworkPolicyModeMetadata(
+            support_state="host_gated",
+            strict_enforcement=True,
+            readiness_source="runtime_preflight",
+        ),
+        allowlist=RuntimeNetworkPolicyModeMetadata(
+            support_state="unsupported",
+            strict_enforcement=False,
+            readiness_source="not_applicable",
+        ),
+    ),
+    RuntimeType.vz_linux: RuntimeNetworkPolicyMetadata(
+        deny_all=RuntimeNetworkPolicyModeMetadata(
+            support_state="host_gated",
+            strict_enforcement=True,
+            readiness_source="runtime_preflight",
+        ),
+        allowlist=RuntimeNetworkPolicyModeMetadata(
+            support_state="unsupported",
+            strict_enforcement=False,
+            readiness_source="not_applicable",
+        ),
+    ),
+    RuntimeType.vz_macos: RuntimeNetworkPolicyMetadata(
+        deny_all=RuntimeNetworkPolicyModeMetadata(
+            support_state="scaffold",
+            strict_enforcement=False,
+            readiness_source="runtime_preflight",
+        ),
+        allowlist=RuntimeNetworkPolicyModeMetadata(
+            support_state="unsupported",
+            strict_enforcement=False,
+            readiness_source="not_applicable",
+        ),
+    ),
+    RuntimeType.seatbelt: RuntimeNetworkPolicyMetadata(
+        deny_all=RuntimeNetworkPolicyModeMetadata(
+            support_state="unsupported",
+            strict_enforcement=False,
+            readiness_source="not_applicable",
+        ),
+        allowlist=RuntimeNetworkPolicyModeMetadata(
+            support_state="unsupported",
+            strict_enforcement=False,
+            readiness_source="not_applicable",
+        ),
+    ),
+    RuntimeType.worktree: RuntimeNetworkPolicyMetadata(
+        deny_all=RuntimeNetworkPolicyModeMetadata(
+            support_state="unsupported",
+            strict_enforcement=False,
+            readiness_source="not_applicable",
+        ),
+        allowlist=RuntimeNetworkPolicyModeMetadata(
+            support_state="unsupported",
+            strict_enforcement=False,
+            readiness_source="not_applicable",
+        ),
+    ),
+}
+
+
 def _validate_runtime_isolation_metadata_map() -> None:
     expected = set(RuntimeType)
     actual = set(RUNTIME_ISOLATION_METADATA)
@@ -107,7 +237,20 @@ def _validate_runtime_isolation_metadata_map() -> None:
         )
 
 
+def _validate_runtime_network_policy_metadata_map() -> None:
+    expected = set(RuntimeType)
+    actual = set(RUNTIME_NETWORK_POLICY_METADATA)
+    missing = sorted(runtime.value for runtime in expected - actual)
+    extra = sorted(str(runtime) for runtime in actual - expected)
+    if missing or extra:
+        raise RuntimeError(
+            "Runtime network policy metadata map is incomplete: "
+            f"missing={missing}, extra={extra}"
+        )
+
+
 _validate_runtime_isolation_metadata_map()
+_validate_runtime_network_policy_metadata_map()
 
 
 _RUNTIME_REASON_CODE_MAP: Mapping[str, RuntimeReasonCode] = {
@@ -165,6 +308,19 @@ def runtime_isolation_metadata(runtime: RuntimeType) -> RuntimeIsolationMetadata
     metadata = RUNTIME_ISOLATION_METADATA.get(runtime_key)
     if metadata is None:
         raise ValueError(f"No isolation metadata configured for runtime {runtime!r}")
+    return metadata
+
+
+def runtime_network_policy_metadata(runtime: RuntimeType) -> RuntimeNetworkPolicyMetadata:
+    """Return stable network policy posture metadata, independent of host availability."""
+    try:
+        runtime_key = runtime if isinstance(runtime, RuntimeType) else RuntimeType(runtime)
+    except ValueError as exc:
+        raise ValueError(f"No network policy metadata configured for runtime {runtime!r}") from exc
+
+    metadata = RUNTIME_NETWORK_POLICY_METADATA.get(runtime_key)
+    if metadata is None:
+        raise ValueError(f"No network policy metadata configured for runtime {runtime!r}")
     return metadata
 
 

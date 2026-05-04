@@ -61,6 +61,7 @@ from .runtime_capabilities import (
     normalize_runtime_reasons,
     runtime_isolation_metadata,
     runtime_implementation_state,
+    runtime_network_policy_metadata,
 )
 from .snapshots import SnapshotManager
 from .store import get_store_mode
@@ -876,6 +877,7 @@ class SandboxService:
             enforcement_ready = dict((preflight.enforcement_ready if preflight else {}) or {})
             reasons = list((preflight.reasons if preflight else []) or [])
             isolation = runtime_isolation_metadata(runtime)
+            network_contract = runtime_network_policy_metadata(runtime)
             return {
                 "available": bool(preflight.available) if preflight is not None else False,
                 "reasons": reasons,
@@ -888,6 +890,7 @@ class SandboxService:
                 "boundary_class": isolation.boundary_class,
                 "vm_grade_isolation": isolation.vm_grade_isolation,
                 "untrusted_eligible": isolation.untrusted_eligible,
+                "network_policy_contract": network_contract.as_dict(),
             }
 
         return [

@@ -14,6 +14,8 @@ from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
 from tldw_Server_API.app.core.Sandbox.runtime_capabilities import (
     RuntimeBoundaryClass,
     RuntimeImplementationState,
+    RuntimeNetworkPolicyReadinessSource,
+    RuntimeNetworkPolicySupportState,
     RuntimeReasonCode,
 )
 from tldw_Server_API.app.core.Sandbox.run_status_taxonomy import RunStatusReasonCode
@@ -28,6 +30,35 @@ RuntimeType = Literal[
     "worktree",
 ]
 TrustLevelType = Literal["trusted", "standard", "untrusted"]
+
+
+class SandboxRuntimeNetworkPolicyModeInfo(BaseModel):
+    support_state: RuntimeNetworkPolicySupportState = Field(
+        ...,
+        description=(
+            "Static support state for this runtime/network-policy pair: "
+            "supported, unsupported, scaffold, host_gated, or not_applicable"
+        ),
+    )
+    strict_enforcement: bool = Field(
+        ...,
+        description=(
+            "Whether the runtime can provide strict enforcement for this policy "
+            "when its support and readiness requirements are satisfied"
+        ),
+    )
+    readiness_source: RuntimeNetworkPolicyReadinessSource = Field(
+        ...,
+        description=(
+            "Where current readiness should be read from: runtime_preflight, "
+            "config, or not_applicable"
+        ),
+    )
+
+
+class SandboxRuntimeNetworkPolicyContract(BaseModel):
+    deny_all: SandboxRuntimeNetworkPolicyModeInfo
+    allowlist: SandboxRuntimeNetworkPolicyModeInfo
 
 
 def _default_offset_pagination_aliases(response):
@@ -85,6 +116,13 @@ class SandboxRuntimeInfo(BaseModel):
         description=(
             "Whether policy may admit this runtime for untrusted workloads when "
             "preflight and host readiness also pass"
+        ),
+    )
+    network_policy_contract: SandboxRuntimeNetworkPolicyContract = Field(
+        ...,
+        description=(
+            "Static runtime network policy posture; current host readiness remains "
+            "in enforcement_ready and runtime preflight reasons"
         ),
     )
     supported_spec_versions: list[str] = Field(default_factory=lambda: ["1.0"], description="Supported spec versions (e.g., ['1.0','1.1'] when 1.1 features are enabled)")
