@@ -1361,6 +1361,7 @@ def test_iter_content_router_specs_defers_utility_router_attr_lookup(
 
         @router.get(str(definition["path"]))
         def _endpoint() -> dict[str, str]:
+            """Return a deterministic response for the fake utility router."""
             return {"status": "ok"}
 
         fake_module = ModuleType(module_name)
@@ -1371,6 +1372,7 @@ def test_iter_content_router_specs_defers_utility_router_attr_lookup(
             module_name: str = module_name,
             router: APIRouter = router,
         ) -> APIRouter:
+            """Track lazy router attribute resolution for the fake module."""
             if name != "router":
                 raise AttributeError(name)
             access_count[module_name] += 1
@@ -1382,6 +1384,7 @@ def test_iter_content_router_specs_defers_utility_router_attr_lookup(
     real_import_module = importlib.import_module
 
     def _import_module(module_name: str, package: str | None = None) -> ModuleType:
+        """Track lazy module imports for selected utility router modules."""
         if module_name in access_count:
             import_calls.append(module_name)
         return real_import_module(module_name, package)

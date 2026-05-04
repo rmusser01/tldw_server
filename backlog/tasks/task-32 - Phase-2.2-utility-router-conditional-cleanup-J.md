@@ -54,8 +54,9 @@ Move only the covered utility/content router specs onto the shared lazy Imported
 <!-- SECTION:NOTES:BEGIN -->
 - Red check: `python -m pytest tldw_Server_API/tests/Services/test_router_groups_contract.py -k "utility_router_attr_lookup" -q` failed before implementation because the selected utility/content router attributes were resolved during spec construction.
 - Green focused check: `python -m pytest tldw_Server_API/tests/Services/test_router_groups_contract.py -k "utility_router_attr_lookup" -q` passed with `1 passed`.
-- Green full/adjacent checks after rebasing onto #1250: `python -m pytest tldw_Server_API/tests/Services/test_router_groups_contract.py -q` passed with `50 passed`; `python -m pytest tldw_Server_API/tests/Services/test_main_router_contract.py -q` passed with `6 passed`; `python -m pytest tldw_Server_API/tests/Services/test_openapi_contracts.py -q` passed with `69 passed`.
-- Security and hygiene: `python -m bandit -r tldw_Server_API/app/api/v1/router_groups/content.py -f json -o /tmp/bandit_phase2_2_utility_router_conditionals_i_rebased.json` reported `0 results` and `0 errors`; `git diff --check HEAD~1..HEAD` passed.
+- Review follow-up focused check: `python -m pytest tldw_Server_API/tests/Services/test_router_groups_contract.py -k "utility_router_attr_lookup or skips_static_missing_attr or logs_missing_lazy_attr" -q` passed with `3 passed`, after strengthening the utility regression to assert module imports are deferred until selected specs are resolved. The missing-router context finding was verified against current `conditional.py` and existing tests that assert skip logs include `{module_name}.router`.
+- Green full/adjacent checks after rebasing onto #1255: `python -m pytest tldw_Server_API/tests/Services/test_router_groups_contract.py -q` passed with `50 passed`; `python -m pytest tldw_Server_API/tests/Services/test_main_router_contract.py -q` passed with `6 passed`; `python -m pytest tldw_Server_API/tests/Services/test_openapi_contracts.py -q` passed with `69 passed`.
+- Security and hygiene: `python -m bandit -r tldw_Server_API/app/api/v1/router_groups/content.py -f json -o /tmp/bandit_phase2_2_utility_router_review_fix_rebased_1255.json` reported `0 results` and `0 errors`; `git diff --check origin/dev..HEAD` passed.
 - Documentation: no user-facing docs required for this internal router registration refactor.
 - Known skips or blockers: none.
 <!-- SECTION:NOTES:END -->
@@ -63,5 +64,5 @@ Move only the covered utility/content router specs onto the shared lazy Imported
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Moved the covered `claims`, `text2sql`, `email`, and `outputs-templates` registrations to the shared lazy `ImportedRouterSpec` helper while preserving route prefixes, tags, route keys, and ordering. Added regression coverage proving selected utility/content router attributes are not resolved until the selected `RouterSpec` objects are used, then verified the full router group contract, adjacent main/OpenAPI contract tests, Bandit touched-source scope, and whitespace checks.
+Moved the covered `claims`, `text2sql`, `email`, and `outputs-templates` registrations to the shared lazy `ImportedRouterSpec` helper while preserving route prefixes, tags, route keys, and ordering. Added regression coverage proving selected utility/content router modules and router attributes are not resolved until the selected `RouterSpec` objects are used, then verified the full router group contract, adjacent main/OpenAPI contract tests, Bandit touched-source scope, and whitespace checks. Review follow-up confirmed missing-router skip logs already retain module context through the current shared helper.
 <!-- SECTION:FINAL_SUMMARY:END -->
