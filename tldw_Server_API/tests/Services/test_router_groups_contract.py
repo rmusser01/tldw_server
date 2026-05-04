@@ -1248,6 +1248,71 @@ def test_iter_content_router_specs_defers_processing_router_attr_lookup(
     }
 
 
+def test_iter_content_router_specs_defers_embedding_router_attr_lookup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify covered embedding specs keep router attr lookup lazy."""
+    module_paths = {
+        "tldw_Server_API.app.api.v1.endpoints.embeddings_v5_production_enhanced": {
+            "router": "/embeddings",
+        },
+        "tldw_Server_API.app.api.v1.endpoints.media_embeddings": {
+            "router": "/media_embeddings",
+        },
+    }
+    access_count = {
+        f"{module_name}.{attr_name}": 0
+        for module_name, attrs in module_paths.items()
+        for attr_name in attrs
+    }
+
+    for module_name, attr_paths in module_paths.items():
+        fake_module = ModuleType(module_name)
+        routers: dict[str, APIRouter] = {}
+        for attr_name, path in attr_paths.items():
+            router = APIRouter()
+
+            @router.get(path)
+            def _endpoint() -> dict[str, str]:
+                return {"status": "ok"}
+
+            routers[attr_name] = router
+
+        def _module_getattr(
+            name: str,
+            *,
+            module_name: str = module_name,
+            routers: dict[str, APIRouter] = routers,
+        ) -> APIRouter:
+            if name not in routers:
+                raise AttributeError(name)
+            access_count[f"{module_name}.{name}"] += 1
+            return routers[name]
+
+        fake_module.__getattr__ = _module_getattr  # type: ignore[attr-defined]
+        monkeypatch.setitem(sys.modules, module_name, fake_module)
+
+    specs = list(iter_content_router_specs())
+    assert access_count == {
+        f"{module_name}.{attr_name}": 0
+        for module_name, attrs in module_paths.items()
+        for attr_name in attrs
+    }
+
+    by_first_path = {_first_router_path(spec.router): spec for spec in specs}
+    assert by_first_path["/embeddings"].prefix == "/api/v1"
+    assert by_first_path["/embeddings"].tags == ("embeddings",)
+    assert by_first_path["/embeddings"].route_key == "embeddings"
+    assert by_first_path["/media_embeddings"].prefix == "/api/v1"
+    assert by_first_path["/media_embeddings"].tags == ("media-embeddings",)
+    assert by_first_path["/media_embeddings"].route_key == "media-embeddings"
+    assert access_count == {
+        f"{module_name}.{attr_name}": 1
+        for module_name, attrs in module_paths.items()
+        for attr_name in attrs
+    }
+
+
 def test_qodo_reviewed_router_policy_regressions(monkeypatch: pytest.MonkeyPatch) -> None:
     _install_fake_router_module(
         monkeypatch,

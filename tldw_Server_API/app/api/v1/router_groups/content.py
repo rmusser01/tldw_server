@@ -71,35 +71,24 @@ def iter_content_router_specs() -> Iterable[RouterSpec]:
     ):
         append_imported_router_spec(specs, discovery_spec)
 
-    # Embeddings (OpenAI-compatible)
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.embeddings_v5_production_enhanced import (
-            router as embeddings_router,
-        )
-
-        specs.append(RouterSpec(
-            router=embeddings_router,
+    # Embeddings and content processing routers
+    for processing_spec in (
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.embeddings_v5_production_enhanced",
+            log_name="embeddings",
             prefix=f"{API_V1_PREFIX}",
             tags=("embeddings",),
             route_key="embeddings",
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping embeddings router: {e}")
-
-    # Media embeddings
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.media_embeddings import (
-            router as media_embeddings_router,
-        )
-
-        specs.append(RouterSpec(
-            router=media_embeddings_router,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.media_embeddings",
+            log_name="media_embeddings",
             prefix=f"{API_V1_PREFIX}",
             tags=("media-embeddings",),
             route_key="media-embeddings",
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping media_embeddings router: {e}")
+        ),
+    ):
+        append_imported_router_spec(specs, processing_spec)
 
     # Evaluations and OCR are lazy so route policy can disable them before
     # importing modules with heavier optional dependencies.
