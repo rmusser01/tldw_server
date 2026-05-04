@@ -180,7 +180,7 @@ git commit -m "feat: add codegraph js ts import resolver"
 - Create: `tldw_Server_API/app/core/CodeGraph/extractors/javascript_extractor.py`
 - Test: `tldw_Server_API/tests/CodeGraph/test_codegraph_javascript_extractor.py`
 
-- [ ] **Step 1: Write RED extractor tests**
+- [x] **Step 1: Write RED extractor tests**
 
 Cover:
 
@@ -194,13 +194,13 @@ Cover:
 - Member expression call unresolved ref, not false-linked to a same-file symbol.
 - Parse errors return `ExtractionResult(errors=...)`.
 
-- [ ] **Step 2: Run tests and verify RED**
+- [x] **Step 2: Run tests and verify RED**
 
 ```bash
 python -m pytest tldw_Server_API/tests/CodeGraph/test_codegraph_javascript_extractor.py -q
 ```
 
-- [ ] **Step 3: Implement conservative graph builder**
+- [x] **Step 3: Implement conservative graph builder**
 
 Use Tree-sitter named nodes and a small traversal wrapper. Prefer node type checks over broad text regex. Use stable IDs with `make_node_id()` and `make_edge_id()`, matching Python extractor conventions.
 
@@ -219,7 +219,7 @@ Minimum edge/ref kinds:
 - unresolved `call`
 - unresolved `import`
 
-- [ ] **Step 4: Run tests and commit**
+- [x] **Step 4: Run tests and commit**
 
 ```bash
 python -m pytest tldw_Server_API/tests/CodeGraph/test_codegraph_javascript_extractor.py -q

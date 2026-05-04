@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - Codex
 created_date: '2026-05-04 05:48'
-updated_date: '2026-05-04 06:02'
+updated_date: '2026-05-04 06:06'
 labels:
   - codegraph
   - mcp
@@ -53,6 +53,8 @@ Installed pinned CodeGraph parser dependency set directly after .[codegraph] res
 Task 1 red-green complete: added tree_sitter_loader tests, confirmed ModuleNotFoundError RED, implemented dynamic optional parser loader, and verified 5 passed.
 
 Task 2 red-green complete: added resolver tests for relative imports, nearest config loading, frontend-style aliases, escaping aliases, and external package classification; verified 6 passed.
+
+Task 3 red-green complete: added JavaScript extractor tests for modules, imports, re-exports, functions, arrow functions, classes, methods, JSX components, same-file calls, member-call unresolved refs, parse errors, and deterministic IDs; verified 3 passed.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
