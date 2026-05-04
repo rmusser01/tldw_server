@@ -6,7 +6,7 @@ from tldw_Server_API.app.core.CodeGraph.config import CodeGraphSettings
 from tldw_Server_API.app.core.CodeGraph.indexer import CodeGraphIndexer
 from tldw_Server_API.app.core.CodeGraph.models import LanguageInfo
 from tldw_Server_API.app.core.CodeGraph.language_registry import CodeGraphLanguageRegistry
-from tldw_Server_API.app.core.CodeGraph.repository import CodeGraphRepository
+from tldw_Server_API.app.core.DB_Management.codegraph.repository import CodeGraphRepository
 
 
 def test_indexer_indexes_supported_file_inventory_and_skips_excluded_dirs(tmp_path: Path) -> None:

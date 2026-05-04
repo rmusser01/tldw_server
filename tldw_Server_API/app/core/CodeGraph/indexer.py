@@ -9,9 +9,10 @@ from typing import Callable
 
 from loguru import logger
 
+from tldw_Server_API.app.core.DB_Management.codegraph.repository import CodeGraphRepository
+
 from .config import CodeGraphSettings
 from .language_registry import CodeGraphLanguageRegistry
-from .repository import CodeGraphRepository
 
 
 @dataclass(frozen=True)

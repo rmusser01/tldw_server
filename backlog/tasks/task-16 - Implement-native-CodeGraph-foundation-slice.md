@@ -61,6 +61,14 @@ Verified parser dependency matrix in /private/tmp/codegraph-matrix-venv: tree-si
 Verification: pytest tldw_Server_API/tests/CodeGraph tldw_Server_API/app/core/MCP_unified/tests/test_codegraph_module.py -q => 24 passed; pytest test_filesystem_module.py test_dynamic_module_catalog.py -q => 16 passed; Bandit touched CodeGraph scope => 0 results; git diff --check => clean.
 
 PR opened against dev: https://github.com/rmusser01/tldw_server/pull/1244
+
+2026-05-04 PR #1244 second review pass: verified GitHub reviewThreads had 0 unresolved items. Addressed Qodo's remaining literal-prefix and DB placement comments by moving the SQL-backed repository/schema under `tldw_Server_API/app/core/DB_Management/codegraph`, leaving a compatibility export at `app/core/CodeGraph/repository.py`, and adding a regression test proving `%` and `_` in `path_prefix` are treated literally.
+
+Verification: source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/tests/CodeGraph tldw_Server_API/app/core/MCP_unified/tests/test_codegraph_module.py tldw_Server_API/app/core/MCP_unified/tests/test_dynamic_module_catalog.py tldw_Server_API/app/core/MCP_unified/tests/test_filesystem_module.py -q -> 47 passed.
+
+Verification: source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m bandit -r tldw_Server_API/app/core/CodeGraph tldw_Server_API/app/core/DB_Management/codegraph tldw_Server_API/app/core/MCP_unified/modules/implementations/codegraph_module.py -f json -o /tmp/bandit_codegraph_1244_second_pass.json -> 0 results.
+
+Verification: git diff --check -> clean.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

@@ -63,9 +63,9 @@ Create:
   - Extension mapping, planned languages, dependency probe summary.
 - `tldw_Server_API/app/core/CodeGraph/dependencies.py`
   - Optional dependency probe using `importlib.util.find_spec`; no hard Tree-sitter imports at module import time.
-- `tldw_Server_API/app/core/CodeGraph/repository.py`
+- `tldw_Server_API/app/core/DB_Management/codegraph/repository.py`
   - SQLite connection setup, schema migration, file/run CRUD, counts, stale cleanup for file rows.
-- `tldw_Server_API/app/core/CodeGraph/schema.sql`
+- `tldw_Server_API/app/core/DB_Management/codegraph/schema.sql`
   - Stage 1 schema with future graph tables present but not populated.
 - `tldw_Server_API/app/core/CodeGraph/indexer.py`
   - File discovery, exclude matching, symlink safety, hashing, foreground bounds, index/sync orchestration.
@@ -474,8 +474,8 @@ git commit -m "feat: add codegraph workspace resolver"
 
 **Files:**
 
-- Create: `tldw_Server_API/app/core/CodeGraph/schema.sql`
-- Create: `tldw_Server_API/app/core/CodeGraph/repository.py`
+- Create: `tldw_Server_API/app/core/DB_Management/codegraph/schema.sql`
+- Create: `tldw_Server_API/app/core/DB_Management/codegraph/repository.py`
 - Test: `tldw_Server_API/tests/CodeGraph/test_codegraph_repository.py`
 
 - [ ] **Step 1: Write failing repository initialization test**
@@ -483,7 +483,7 @@ git commit -m "feat: add codegraph workspace resolver"
 ```python
 from pathlib import Path
 
-from tldw_Server_API.app.core.CodeGraph.repository import CodeGraphRepository
+from tldw_Server_API.app.core.DB_Management.codegraph.repository import CodeGraphRepository
 
 
 def test_repository_initializes_schema_and_counts_empty_graph(tmp_path: Path) -> None:
@@ -609,8 +609,8 @@ Expected: PASS.
 - [ ] **Step 7: Commit checkpoint**
 
 ```bash
-git add tldw_Server_API/app/core/CodeGraph/schema.sql \
-  tldw_Server_API/app/core/CodeGraph/repository.py \
+git add tldw_Server_API/app/core/DB_Management/codegraph/schema.sql \
+  tldw_Server_API/app/core/DB_Management/codegraph/repository.py \
   tldw_Server_API/tests/CodeGraph/test_codegraph_repository.py
 git commit -m "feat: add codegraph sqlite repository"
 ```
@@ -630,7 +630,7 @@ from pathlib import Path
 from tldw_Server_API.app.core.CodeGraph.config import CodeGraphSettings
 from tldw_Server_API.app.core.CodeGraph.indexer import CodeGraphIndexer
 from tldw_Server_API.app.core.CodeGraph.language_registry import CodeGraphLanguageRegistry
-from tldw_Server_API.app.core.CodeGraph.repository import CodeGraphRepository
+from tldw_Server_API.app.core.DB_Management.codegraph.repository import CodeGraphRepository
 
 
 def test_indexer_indexes_supported_file_inventory_and_skips_excluded_dirs(tmp_path: Path) -> None:

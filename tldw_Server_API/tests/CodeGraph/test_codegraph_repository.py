@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from tldw_Server_API.app.core.CodeGraph.repository import CodeGraphRepository, _create_optional_fts
+from tldw_Server_API.app.core.DB_Management.codegraph.repository import CodeGraphRepository, _create_optional_fts
 
 
 def test_repository_initializes_schema_and_counts_empty_graph(tmp_path: Path) -> None:
@@ -42,6 +42,27 @@ def test_repository_upserts_files_and_records_runs(tmp_path: Path) -> None:
 
     assert last_run is not None
     assert last_run.status == "complete"
+
+
+def test_repository_list_files_treats_path_prefix_as_literal(tmp_path: Path) -> None:
+    repo = CodeGraphRepository(tmp_path / "codegraph.db")
+    repo.initialize()
+    for path in ("src/pkg_1.py", "src/pkgA.py", "src/pkg%literal.py", "src/pkg-other.py"):
+        repo.upsert_file(
+            path=path,
+            language="python",
+            size=12,
+            content_hash=path,
+            modified_at=1.5,
+            status="indexed",
+            errors=[],
+        )
+
+    underscore_matches = repo.list_files(limit=10, path_prefix="src/pkg_")
+    percent_matches = repo.list_files(limit=10, path_prefix="src/pkg%")
+
+    assert [item.path for item in underscore_matches] == ["src/pkg_1.py"]
+    assert [item.path for item in percent_matches] == ["src/pkg%literal.py"]
 
 
 def test_create_optional_fts_ignores_missing_fts5() -> None:

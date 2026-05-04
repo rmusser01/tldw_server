@@ -19,8 +19,8 @@ from tldw_Server_API.app.core.CodeGraph.dependencies import probe_codegraph_depe
 from tldw_Server_API.app.core.CodeGraph.indexer import CodeGraphIndexer
 from tldw_Server_API.app.core.CodeGraph.language_registry import CodeGraphLanguageRegistry
 from tldw_Server_API.app.core.CodeGraph.models import IndexedFile, IndexRunSummary, WorkspaceResolution
-from tldw_Server_API.app.core.CodeGraph.repository import CodeGraphRepository
 from tldw_Server_API.app.core.CodeGraph.workspace import CodeGraphWorkspaceResolver, WorkspaceRootResolver
+from tldw_Server_API.app.core.DB_Management.codegraph.repository import CodeGraphRepository
 
 from ..base import BaseModule, ModuleConfig, create_tool_definition
 
