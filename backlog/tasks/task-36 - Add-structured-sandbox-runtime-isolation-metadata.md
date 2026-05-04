@@ -4,7 +4,7 @@ title: Add structured sandbox runtime isolation metadata
 status: Done
 assignee: []
 created_date: '2026-05-04 05:19'
-updated_date: '2026-05-04 06:01'
+updated_date: '2026-05-04 06:07'
 labels:
   - sandbox
   - runtime-discovery
@@ -46,6 +46,8 @@ PR #1261 review follow-up: Qodo identified two valid contract issues. The runtim
 PR #1261 review fixes applied: runtime_isolation_metadata() now validates the metadata map at import time and raises a clear ValueError for unknown runtimes instead of leaking KeyError. SandboxRuntimeInfo now makes boundary_class, vm_grade_isolation, and untrusted_eligible required/non-nullable to match the implementation contract.
 
 Review-fix verification passed: python -m pytest tldw_Server_API/tests/sandbox/test_runtime_inventory_contract.py tldw_Server_API/tests/Docs/test_sandbox_public_docs_contract.py -q --timeout=60 -> 15 passed; Bandit on touched Python files -> 0 results; git diff --check -> no output.
+
+Follow-up after refreshed Qodo state: runtime_isolation_metadata() now avoids direct dictionary indexing entirely by using .get(...) plus an explicit missing-metadata ValueError after runtime coercion.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

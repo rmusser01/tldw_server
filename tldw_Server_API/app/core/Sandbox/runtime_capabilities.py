@@ -159,9 +159,13 @@ def runtime_isolation_metadata(runtime: RuntimeType) -> RuntimeIsolationMetadata
     """Return stable isolation posture metadata, independent of host availability."""
     try:
         runtime_key = runtime if isinstance(runtime, RuntimeType) else RuntimeType(runtime)
-        return RUNTIME_ISOLATION_METADATA[runtime_key]
-    except (KeyError, ValueError) as exc:
+    except ValueError as exc:
         raise ValueError(f"No isolation metadata configured for runtime {runtime!r}") from exc
+
+    metadata = RUNTIME_ISOLATION_METADATA.get(runtime_key)
+    if metadata is None:
+        raise ValueError(f"No isolation metadata configured for runtime {runtime!r}")
+    return metadata
 
 
 def normalize_runtime_reason(reason: str) -> RuntimeReasonCode:
