@@ -4,7 +4,7 @@ title: Phase 2.2 prompt studio router conditional cleanup M
 status: Done
 assignee: []
 created_date: '2026-05-04 05:40'
-updated_date: '2026-05-04 05:44'
+updated_date: '2026-05-04 05:47'
 labels: []
 dependencies: []
 references:
@@ -37,6 +37,8 @@ Verification: router group contract 54 passed; main router contract 6 passed; Op
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Converted the Prompt Studio content router block to lazy ImportedRouterSpec entries and added covered contract coverage proving router attribute lookup is deferred until resolution while preserving existing route metadata.
+
+PR: https://github.com/rmusser01/tldw_server/pull/1262
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
