@@ -123,50 +123,50 @@ def iter_content_router_specs() -> Iterable[RouterSpec]:
     ))
 
     # Media endpoints
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.media import router as media_router
-
-        specs.append(RouterSpec(
-            router=media_router,
+    append_imported_router_spec(
+        specs,
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.media",
+            log_name="media",
             prefix=f"{API_V1_PREFIX}/media",
             tags=("media",),
             route_key="media",
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping media router: {e}")
+        ),
+    )
 
     # Audio endpoints can import heavyweight optional transcriber dependencies.
     if audio_imports_enabled_for_runtime():
-        try:
-            from tldw_Server_API.app.api.v1.endpoints.audio.audio import router as audio_router
-            from tldw_Server_API.app.api.v1.endpoints.audio.audio import ws_router as audio_ws_router
-
-            specs.append(RouterSpec(
-                router=audio_router,
+        append_imported_router_spec(
+            specs,
+            ImportedRouterSpec(
+                import_path="tldw_Server_API.app.api.v1.endpoints.audio.audio",
+                log_name="audio",
                 prefix=f"{API_V1_PREFIX}/audio",
                 tags=("audio",),
                 route_key="audio",
-            ))
-            specs.append(RouterSpec(
-                router=audio_ws_router,
+            ),
+        )
+        append_imported_router_spec(
+            specs,
+            ImportedRouterSpec(
+                import_path="tldw_Server_API.app.api.v1.endpoints.audio.audio",
+                log_name="audio_websocket",
                 prefix=f"{API_V1_PREFIX}/audio",
                 tags=("audio-websocket",),
                 route_key="audio-websocket",
-            ))
-        except Exception as e:  # noqa: BLE001
-            logger.debug(f"Skipping audio routers: {e}")
-
-        try:
-            from tldw_Server_API.app.api.v1.endpoints.audio.audio_jobs import router as audio_jobs_router
-
-            specs.append(RouterSpec(
-                router=audio_jobs_router,
+                attr_name="ws_router",
+            ),
+        )
+        append_imported_router_spec(
+            specs,
+            ImportedRouterSpec(
+                import_path="tldw_Server_API.app.api.v1.endpoints.audio.audio_jobs",
+                log_name="audio_jobs",
                 prefix=f"{API_V1_PREFIX}/audio",
                 tags=("audio-jobs",),
                 route_key="audio-jobs",
-            ))
-        except Exception as e:  # noqa: BLE001
-            logger.debug(f"Skipping audio_jobs router: {e}")
+            ),
+        )
     else:
         logger.info("Skipping audio router imports in pytest (set MINIMAL_TEST_INCLUDE_AUDIO=1 to enable)")
 
