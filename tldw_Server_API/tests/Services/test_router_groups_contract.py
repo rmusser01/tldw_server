@@ -453,6 +453,109 @@ def test_iter_core_router_specs_defers_chat_router_attr_lookup(
     }
 
 
+def test_iter_core_router_specs_defers_llm_provider_router_attr_lookup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify covered core LLM/provider specs keep router attr lookup lazy."""
+    module_paths = {
+        "tldw_Server_API.app.api.v1.endpoints.llm_providers": {
+            "router": "/llm/providers",
+        },
+        "tldw_Server_API.app.api.v1.endpoints.mlx": {
+            "router": "/mlx/health",
+        },
+        "tldw_Server_API.app.api.v1.endpoints.messages": {
+            "router": "/messages/send",
+            "public_router": "/messages/public/send",
+        },
+        "tldw_Server_API.app.api.v1.endpoints.llamacpp": {
+            "router": "/llamacpp/completions",
+            "public_router": "/llamacpp/public/completions",
+        },
+        "tldw_Server_API.app.api.v1.endpoints.vlm": {
+            "router": "/vlm/models",
+        },
+        "tldw_Server_API.app.api.v1.endpoints.mcp_unified_endpoint": {
+            "router": "/mcp/status",
+        },
+    }
+    access_count = {
+        f"{module_name}.{attr_name}": 0
+        for module_name, attrs in module_paths.items()
+        for attr_name in attrs
+    }
+
+    for module_name, attr_paths in module_paths.items():
+        fake_module = ModuleType(module_name)
+        routers: dict[str, APIRouter] = {}
+        for attr_name, path in attr_paths.items():
+            router = APIRouter()
+
+            @router.get(path)
+            def _endpoint() -> dict[str, str]:
+                return {"status": "ok"}
+
+            routers[attr_name] = router
+
+        def _module_getattr(
+            name: str,
+            *,
+            module_name: str = module_name,
+            routers: dict[str, APIRouter] = routers,
+        ) -> APIRouter:
+            if name not in routers:
+                raise AttributeError(name)
+            access_count[f"{module_name}.{name}"] += 1
+            return routers[name]
+
+        fake_module.__getattr__ = _module_getattr  # type: ignore[attr-defined]
+        monkeypatch.setitem(sys.modules, module_name, fake_module)
+
+    specs = list(iter_core_router_specs())
+    assert access_count == {
+        f"{module_name}.{attr_name}": 0
+        for module_name, attrs in module_paths.items()
+        for attr_name in attrs
+    }
+
+    selected_specs = [
+        spec
+        for spec in specs
+        if spec.route_key in {"llm", "llamacpp", "vlm", "mcp-unified"}
+    ]
+    by_first_path = {_first_router_path(spec.router): spec for spec in selected_specs}
+
+    assert by_first_path["/llm/providers"].prefix == "/api/v1"
+    assert by_first_path["/llm/providers"].tags == ("llm",)
+    assert by_first_path["/llm/providers"].route_key == "llm"
+    assert by_first_path["/mlx/health"].prefix == "/api/v1"
+    assert by_first_path["/mlx/health"].tags == ("llm",)
+    assert by_first_path["/mlx/health"].route_key == "llm"
+    assert by_first_path["/messages/send"].prefix == "/api/v1"
+    assert by_first_path["/messages/send"].tags == ("messages",)
+    assert by_first_path["/messages/send"].route_key == "llm"
+    assert by_first_path["/messages/public/send"].prefix == ""
+    assert by_first_path["/messages/public/send"].tags == ("messages",)
+    assert by_first_path["/messages/public/send"].route_key == "llm"
+    assert by_first_path["/llamacpp/completions"].prefix == "/api/v1"
+    assert by_first_path["/llamacpp/completions"].tags == ("llamacpp",)
+    assert by_first_path["/llamacpp/completions"].route_key == "llamacpp"
+    assert by_first_path["/llamacpp/public/completions"].prefix == ""
+    assert by_first_path["/llamacpp/public/completions"].tags == ("llamacpp",)
+    assert by_first_path["/llamacpp/public/completions"].route_key == "llamacpp"
+    assert by_first_path["/vlm/models"].prefix == "/api/v1"
+    assert by_first_path["/vlm/models"].tags == ("vlm",)
+    assert by_first_path["/vlm/models"].route_key == "vlm"
+    assert by_first_path["/mcp/status"].prefix == "/api/v1"
+    assert by_first_path["/mcp/status"].tags == ("mcp-unified",)
+    assert by_first_path["/mcp/status"].route_key == "mcp-unified"
+    assert access_count == {
+        f"{module_name}.{attr_name}": 1
+        for module_name, attrs in module_paths.items()
+        for attr_name in attrs
+    }
+
+
 def test_iter_admin_router_specs_defers_selected_router_attr_lookup(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
