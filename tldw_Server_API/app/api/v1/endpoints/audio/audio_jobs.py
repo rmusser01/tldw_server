@@ -366,7 +366,17 @@ async def get_audio_job(
         raise HTTPException(status_code=500, detail="Failed to fetch job") from None
 
 
-@router.get("/jobs/{job_id}/progress/stream", summary="Stream audio job progress (SSE)")
+@router.get(
+    "/jobs/{job_id}/progress/stream",
+    summary="Stream audio job progress (SSE)",
+    response_class=StreamingResponse,
+    responses={
+        200: {
+            "description": "Server-sent events stream of audio job progress",
+            "content": {"text/event-stream": {}},
+        },
+    },
+)
 async def stream_audio_job_progress(
     job_id: int,
     current_user: Annotated[User, Depends(get_request_user)],

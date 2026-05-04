@@ -1038,6 +1038,19 @@ async def summarize_reading_item(
 @router.post(
     "/items/{item_id}/tts",
     response_class=StreamingResponse,
+    responses={
+        200: {
+            "description": "Generated reading item audio.",
+            "content": {
+                "audio/aac": {},
+                "audio/flac": {},
+                "audio/L16": {},
+                "audio/mpeg": {},
+                "audio/opus": {},
+                "audio/wav": {},
+            },
+        },
+    },
     summary="Generate TTS audio for a reading item",
     dependencies=[Depends(rbac_rate_limit("reading.tts"))],
 )
@@ -1348,6 +1361,15 @@ async def create_reading_archive(
 @router.get(
     "/export",
     response_class=StreamingResponse,
+    responses={
+        200: {
+            "description": "Reading item export download.",
+            "content": {
+                "application/x-ndjson": {},
+                "application/zip": {},
+            },
+        },
+    },
     summary="Export reading list items",
     dependencies=[Depends(rbac_rate_limit("reading.export"))],
 )

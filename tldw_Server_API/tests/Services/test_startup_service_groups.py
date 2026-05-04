@@ -15,6 +15,100 @@ def _import_startup_service_groups():
 
 
 @pytest.mark.asyncio
+async def test_start_service_groups_requires_worker_inventory_before_starting_registry_owned_workers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_groups = _import_startup_service_groups()
+    calls: list[str] = []
+
+    async def _record_runtime_monitors() -> SimpleNamespace:
+        calls.append("runtime")
+        return SimpleNamespace(
+            jobs_metrics_stop_event=None,
+            jobs_metrics_task=None,
+            loop_lag_stop_event=None,
+            loop_lag_task=None,
+        )
+
+    async def _record_optional_workers() -> SimpleNamespace:
+        calls.append("optional")
+        return SimpleNamespace(
+            jobs_metrics_reconcile_stop=None,
+            jobs_metrics_reconcile_task=None,
+            jobs_crypto_rotate_stop_event=None,
+            jobs_crypto_rotate_task=None,
+            jobs_webhooks_stop_event=None,
+            jobs_webhooks_task=None,
+            meetings_webhook_dlq_stop_event=None,
+            meetings_webhook_dlq_task=None,
+            workflows_dlq_stop_event=None,
+            workflows_dlq_task=None,
+            workflows_gc_stop_event=None,
+            workflows_gc_task=None,
+            workflows_maint_stop_event=None,
+            workflows_maint_task=None,
+            jobs_integrity_stop_event=None,
+            jobs_integrity_task=None,
+        )
+
+    async def _record_claims_rebuild_worker(_app_settings: object) -> None:
+        calls.append("claims")
+
+    async def _record_auxiliary_services(_app_settings: object) -> SimpleNamespace:
+        calls.append("auxiliary")
+        return SimpleNamespace(
+            claims_alerts_task=None,
+            claims_review_metrics_task=None,
+        )
+
+    async def _record_infra_services(**_kwargs: object) -> SimpleNamespace:
+        calls.append("infra")
+        return SimpleNamespace(
+            tts_history_cleanup_task=None,
+            tts_history_cleanup_stop_event=None,
+        )
+
+    async def _record_maintenance_schedulers(
+        *,
+        worker_inventory: object | None = None,
+    ) -> SimpleNamespace:
+        assert worker_inventory is None
+        calls.append("maintenance")
+        return SimpleNamespace()
+
+    async def _record_connectors_startup(**_kwargs: object) -> SimpleNamespace:
+        calls.append("connectors")
+        return SimpleNamespace(
+            connectors_jobs_task=None,
+            connectors_jobs_stop_event=None,
+        )
+
+    monkeypatch.setattr(startup_groups, "_start_runtime_monitors", _record_runtime_monitors)
+    monkeypatch.setattr(startup_groups, "_start_optional_workers", _record_optional_workers)
+    monkeypatch.setattr(startup_groups, "_start_claims_rebuild_worker", _record_claims_rebuild_worker)
+    monkeypatch.setattr(startup_groups, "_start_auxiliary_services", _record_auxiliary_services)
+    monkeypatch.setattr(startup_groups, "_start_infra_services", _record_infra_services)
+    monkeypatch.setattr(
+        startup_groups,
+        "_start_maintenance_schedulers",
+        _record_maintenance_schedulers,
+    )
+    monkeypatch.setattr(startup_groups, "_start_connectors_startup", _record_connectors_startup)
+
+    with pytest.raises(RuntimeError, match="worker_inventory is required"):
+        await startup_groups.start_service_groups(
+            app=object(),
+            app_settings={},
+            run_pg_rls_auto_ensure=object(),
+            owned_job_pollers=[],
+            register_owned_job_poller=object(),
+            worker_inventory=None,
+        )
+
+    assert calls == []
+
+
+@pytest.mark.asyncio
 async def test_start_service_groups_runs_helpers_in_order_and_returns_handles(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -79,8 +173,6 @@ async def test_start_service_groups_runs_helpers_in_order_and_returns_handles(
         return SimpleNamespace(
             claims_alerts_task="claims-alerts-task",
             claims_review_metrics_task="claims-review-task",
-            usage_task="usage-task",
-            llm_usage_task="llm-usage-task",
         )
 
     async def _record_infra_services(
@@ -102,16 +194,7 @@ async def test_start_service_groups_runs_helpers_in_order_and_returns_handles(
     ) -> SimpleNamespace:
         assert worker_inventory is worker_inventory_ref
         calls.append("maintenance")
-        return SimpleNamespace(
-            quality_eval_task="quality-task",
-            outputs_purge_task="purge-task",
-            kanban_activity_cleanup_task="kanban-cleanup-task",
-            ingestion_sources_cleanup_task="ingestion-task",
-            kanban_purge_task="kanban-purge-task",
-            files_export_gc_task="files-gc-task",
-            notifications_prune_task="notifications-prune-task",
-            jobs_prune_task="jobs-prune-task",
-        )
+        return SimpleNamespace()
 
     async def _record_connectors_startup(
         *,
@@ -166,10 +249,10 @@ async def test_start_service_groups_runs_helpers_in_order_and_returns_handles(
     ]
     assert handles.jobs_metrics_task == "jobs-metrics-task"
     assert handles.jobs_integrity_task == "integrity-task"
-    assert handles.claims_task == "claims-task"
-    assert handles.usage_task == "usage-task"
+    assert not hasattr(handles, "claims_task")
+    assert not hasattr(handles, "usage_task")
     assert handles.tts_history_cleanup_task == "tts-history-task"
-    assert handles.jobs_prune_task == "jobs-prune-task"
+    assert not hasattr(handles, "jobs_prune_task")
     assert handles.connectors_jobs_task == "connectors-task"
 
 
@@ -222,8 +305,6 @@ async def test_start_service_groups_passes_worker_inventory_to_maintenance_sched
         return SimpleNamespace(
             claims_alerts_task=None,
             claims_review_metrics_task=None,
-            usage_task=None,
-            llm_usage_task=None,
         )
 
     async def _record_infra_services(**_kwargs: object) -> SimpleNamespace:
@@ -234,16 +315,7 @@ async def test_start_service_groups_passes_worker_inventory_to_maintenance_sched
 
     async def _record_maintenance_schedulers(**kwargs: object) -> SimpleNamespace:
         maintenance_kwargs.update(kwargs)
-        return SimpleNamespace(
-            quality_eval_task=None,
-            outputs_purge_task=None,
-            kanban_activity_cleanup_task=None,
-            ingestion_sources_cleanup_task=None,
-            kanban_purge_task=None,
-            files_export_gc_task=None,
-            notifications_prune_task=None,
-            jobs_prune_task=None,
-        )
+        return SimpleNamespace()
 
     async def _record_connectors_startup(**_kwargs: object) -> SimpleNamespace:
         return SimpleNamespace(

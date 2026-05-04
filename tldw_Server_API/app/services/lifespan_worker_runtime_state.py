@@ -14,10 +14,6 @@ class LifespanWorkerRuntimeState:
 
     worker_inventory: Any | None = None
     owned_job_pollers: list[Any] = field(default_factory=list)
-    cleanup_task: Any | None = None
-    chatbooks_cleanup_task: Any | None = None
-    chatbooks_cleanup_stop_event: Any | None = None
-    storage_cleanup_service: Any | None = None
     core_jobs_stop_event: Any | None = None
     core_jobs_task: Any | None = None
     files_jobs_stop_event: Any | None = None
@@ -32,9 +28,6 @@ class LifespanWorkerRuntimeState:
     study_suggestions_jobs_task: Any | None = None
     privilege_snapshot_stop_event: Any | None = None
     privilege_snapshot_task: Any | None = None
-    embeddings_compactor_stop_event: Any | None = None
-    embeddings_compactor_task: Any | None = None
-    websub_renewal_task: Any | None = None
     audio_jobs_stop_event: Any | None = None
     audio_jobs_task: Any | None = None
     audiobook_jobs_stop_event: Any | None = None
@@ -86,30 +79,12 @@ class LifespanWorkerRuntimeState:
     workflows_maint_task: Any | None = None
     jobs_integrity_stop_event: Any | None = None
     jobs_integrity_task: Any | None = None
-    claims_task: Any | None = None
     claims_alerts_task: Any | None = None
     claims_review_metrics_task: Any | None = None
-    usage_task: Any | None = None
-    llm_usage_task: Any | None = None
     tts_history_cleanup_task: Any | None = None
     tts_history_cleanup_stop_event: Any | None = None
-    quality_eval_task: Any | None = None
-    outputs_purge_task: Any | None = None
-    kanban_activity_cleanup_task: Any | None = None
-    ingestion_sources_cleanup_task: Any | None = None
-    kanban_purge_task: Any | None = None
-    files_export_gc_task: Any | None = None
-    notifications_prune_task: Any | None = None
-    jobs_prune_task: Any | None = None
     connectors_jobs_task: Any | None = None
     connectors_jobs_stop_event: Any | None = None
-    authnz_scheduler_started: bool = False
-    workflows_sched_task: Any | None = None
-    reading_digest_sched_task: Any | None = None
-    admin_backup_sched_task: Any | None = None
-    companion_reflection_sched_task: Any | None = None
-    reminders_sched_task: Any | None = None
-    connectors_sync_sched_task: Any | None = None
 
     def apply_startup_worker_bootstrap_handles(self, handles: Any) -> None:
         self.worker_inventory = getattr(handles, "worker_inventory", None)

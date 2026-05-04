@@ -370,7 +370,16 @@ async def get_bundle_metadata(
 # ---------------------------------------------------------------------------
 # Route 5: GET /backups/bundles/{bundle_id}/download
 # ---------------------------------------------------------------------------
-@router.get("/backups/bundles/{bundle_id}/download")
+@router.get(
+    "/backups/bundles/{bundle_id}/download",
+    response_class=FileResponse,
+    responses={
+        200: {
+            "description": "Backup bundle zip file",
+            "content": {"application/zip": {}},
+        },
+    },
+)
 async def download_bundle(
     bundle_id: str,
     request: Request,

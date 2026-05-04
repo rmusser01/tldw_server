@@ -20,12 +20,6 @@ StopCallable = Callable[[], Awaitable[None] | None]
 @dataclass(frozen=True, slots=True)
 class LegacyShutdownContext:
     readiness_state: MutableMapping[str, Any] | None = None
-    usage_task: Any = None
-    llm_usage_task: Any = None
-    authnz_scheduler_started: bool = False
-    chatbooks_cleanup_task: Any = None
-    chatbooks_cleanup_stop_event: Any = None
-    storage_cleanup_service: Any = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,12 +61,7 @@ def register_legacy_shutdown_components(
     coordinator: Any,
     plan: list[ShutdownComponent],
     *,
-    component_names: tuple[str, ...] = (
-        "chatbooks_cleanup",
-        "usage_aggregator",
-        "llm_usage_aggregator",
-        "storage_cleanup_service",
-    ),
+    component_names: tuple[str, ...] = (),
     phase_overrides: Mapping[str, ShutdownPhase | str] | None = None,
 ) -> list[ShutdownComponent]:
     """Register the selected legacy shutdown components with a coordinator."""
@@ -139,82 +128,6 @@ def _transition_stop(app: Any, context: LegacyShutdownContext) -> StopCallable:
     return _stop
 
 
-def _usage_enabled(context: LegacyShutdownContext) -> bool:
-    return context.usage_task is not None
-
-
-def _usage_stop(_: Any, context: LegacyShutdownContext) -> StopCallable:
-    usage_task = context.usage_task
-
-    async def _stop() -> None:
-        if usage_task is not None:
-            from tldw_Server_API.app.services.usage_aggregator import stop_usage_aggregator
-
-            await stop_usage_aggregator(usage_task)
-
-    return _stop
-
-
-def _llm_usage_enabled(context: LegacyShutdownContext) -> bool:
-    return context.llm_usage_task is not None
-
-
-def _llm_usage_stop(_: Any, context: LegacyShutdownContext) -> StopCallable:
-    llm_usage_task = context.llm_usage_task
-
-    async def _stop() -> None:
-        if llm_usage_task is not None:
-            from tldw_Server_API.app.services.llm_usage_aggregator import stop_llm_usage_aggregator
-
-            await stop_llm_usage_aggregator(llm_usage_task)
-
-    return _stop
-
-
-def _authnz_enabled(context: LegacyShutdownContext) -> bool:
-    return bool(context.authnz_scheduler_started)
-
-
-def _authnz_stop(_: Any, __: LegacyShutdownContext) -> StopCallable:
-    async def _stop() -> None:
-        from tldw_Server_API.app.core.AuthNZ.scheduler import stop_authnz_scheduler
-
-        await stop_authnz_scheduler()
-
-    return _stop
-
-
-def _chatbooks_enabled(context: LegacyShutdownContext) -> bool:
-    return context.chatbooks_cleanup_task is not None or context.chatbooks_cleanup_stop_event is not None
-
-
-def _chatbooks_stop(_: Any, context: LegacyShutdownContext) -> StopCallable:
-    stop_event = context.chatbooks_cleanup_stop_event
-    task = context.chatbooks_cleanup_task
-
-    async def _stop() -> None:
-        if stop_event is not None:
-            stop_event.set()
-        if task is not None:
-            task.cancel()
-
-    return _stop
-
-
-def _storage_enabled(context: LegacyShutdownContext) -> bool:
-    return context.storage_cleanup_service is not None
-
-
-def _storage_stop(_: Any, context: LegacyShutdownContext) -> StopCallable:
-    storage_cleanup_service = context.storage_cleanup_service
-
-    async def _stop() -> None:
-        if storage_cleanup_service is not None:
-            await storage_cleanup_service.stop()
-
-    return _stop
-
-
 _LEGACY_SHUTDOWN_SPECS: tuple[_LegacyShutdownSpec, ...] = (
     _LegacyShutdownSpec(
         name="lifecycle_gate",
@@ -223,46 +136,6 @@ _LEGACY_SHUTDOWN_SPECS: tuple[_LegacyShutdownSpec, ...] = (
         default_timeout_ms=1000,
         enabled=_transition_enabled,
         stop=_transition_stop,
-    ),
-    _LegacyShutdownSpec(
-        name="chatbooks_cleanup",
-        phase=ShutdownPhase.WORKERS,
-        policy=ShutdownPolicy.PROD_DRAIN,
-        default_timeout_ms=5000,
-        enabled=_chatbooks_enabled,
-        stop=_chatbooks_stop,
-    ),
-    _LegacyShutdownSpec(
-        name="usage_aggregator",
-        phase=ShutdownPhase.RESOURCES,
-        policy=ShutdownPolicy.BEST_EFFORT,
-        default_timeout_ms=1000,
-        enabled=_usage_enabled,
-        stop=_usage_stop,
-    ),
-    _LegacyShutdownSpec(
-        name="llm_usage_aggregator",
-        phase=ShutdownPhase.RESOURCES,
-        policy=ShutdownPolicy.BEST_EFFORT,
-        default_timeout_ms=1000,
-        enabled=_llm_usage_enabled,
-        stop=_llm_usage_stop,
-    ),
-    _LegacyShutdownSpec(
-        name="storage_cleanup_service",
-        phase=ShutdownPhase.FINALIZERS,
-        policy=ShutdownPolicy.PROD_DRAIN,
-        default_timeout_ms=5000,
-        enabled=_storage_enabled,
-        stop=_storage_stop,
-    ),
-    _LegacyShutdownSpec(
-        name="authnz_scheduler",
-        phase=ShutdownPhase.FINALIZERS,
-        policy=ShutdownPolicy.PROD_DRAIN,
-        default_timeout_ms=5000,
-        enabled=_authnz_enabled,
-        stop=_authnz_stop,
     ),
 )
 

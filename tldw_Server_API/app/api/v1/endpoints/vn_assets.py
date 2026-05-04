@@ -331,7 +331,21 @@ async def review_item(
         raise _handle_value_error(exc) from exc
 
 
-@router.get("/packs/{pack_id}/items/{item_id}/content")
+@router.get(
+    "/packs/{pack_id}/items/{item_id}/content",
+    response_class=FileResponse,
+    responses={
+        200: {
+            "description": "VN asset item content.",
+            "content": {
+                "image/jpeg": {},
+                "image/png": {},
+                "image/webp": {},
+                "application/octet-stream": {},
+            },
+        },
+    },
+)
 async def get_item_content(
     pack_id: int,
     item_id: int,

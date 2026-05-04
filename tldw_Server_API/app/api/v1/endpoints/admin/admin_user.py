@@ -186,7 +186,18 @@ async def list_users(
         ) from e
 
 
-@router.get("/users/export")
+@router.get(
+    "/users/export",
+    responses={
+        200: {
+            "description": "User export as JSON or CSV.",
+            "content": {
+                "application/json": {},
+                "text/csv": {},
+            },
+        },
+    },
+)
 async def export_users(
     role: str | None = None,
     is_active: bool | None = None,

@@ -339,6 +339,15 @@ async def patch_preferences(
 
 @router.get(
     "/stream",
+    response_class=StreamingResponse,
+    responses={
+        200: {
+            "description": "Notification event stream.",
+            "content": {
+                "text/event-stream": {},
+            },
+        },
+    },
     dependencies=[Depends(rbac_rate_limit("notifications.read"))],
 )
 async def stream_notifications(

@@ -26,6 +26,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
 from tldw_Server_API.app.core.DB_Management.backends.base import (
     DatabaseError as BackendDatabaseError,
 )
+from tldw_Server_API.app.core.DB_Management.chacha import exemplar_normalization
 
 if TYPE_CHECKING:
     from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
@@ -1501,3 +1502,516 @@ class CharacterStore:
         except _CHACHA_NONCRITICAL_EXCEPTIONS as e:
             logger.error(f"Unexpected error in fallback tag search: {e}")
             raise CharactersRAGDBError(f"Fallback tag search failed: {e}") from e  # noqa: TRY003
+
+    # --- Character Exemplar Methods ---
+    @staticmethod
+    def _estimate_text_token_count(text: str) -> int:
+        """Estimate token count from text with a lightweight fallback heuristic."""
+        if not text:
+            return 1
+        return max(1, len(text.split()))
+
+    def _normalize_exemplar_enum(
+        self,
+        value: Any,
+        *,
+        allowed: tuple[str, ...],
+        field_name: str,
+        default: str,
+    ) -> str:
+        """Normalize and validate enum-like exemplar fields."""
+        return exemplar_normalization.normalize_exemplar_enum(
+            value,
+            allowed=allowed,
+            field_name=field_name,
+            default=default,
+        )
+
+    def _normalize_exemplar_string_list(self, value: Any, field_name: str) -> list[str]:
+        """Normalize list-like exemplar metadata to a string list."""
+        return exemplar_normalization.normalize_exemplar_string_list(value, field_name)
+
+    def _normalize_character_exemplar_row(self, row: sqlite3.Row | dict[str, Any] | None) -> dict[str, Any] | None:
+        """Deserialize exemplar JSON fields and normalize bool-like values."""
+        if not row:
+            return None
+        item = self._db._deserialize_row_fields(row, self._db._CHARACTER_EXEMPLAR_JSON_FIELDS)
+        if not item:
+            return None
+        if 'rights_public_figure' in item:
+            item['rights_public_figure'] = bool(item['rights_public_figure'])
+        if 'is_deleted' in item:
+            item['is_deleted'] = bool(item['is_deleted'])
+        return item
+
+    def add_character_exemplar(self, character_id: int, exemplar_data: dict[str, Any]) -> dict[str, Any]:
+        """Create a character-scoped exemplar."""
+        if not self.get_character_card_by_id(character_id):
+            raise InputError(f"Character ID {character_id} not found.")  # noqa: TRY003
+
+        text = self._db._normalize_nullable_text(exemplar_data.get('text'))
+        if not text:
+            raise InputError("Exemplar text is required.")  # noqa: TRY003
+
+        source_type = self._normalize_exemplar_enum(
+            exemplar_data.get('source_type'),
+            allowed=self._db._ALLOWED_EXEMPLAR_SOURCE_TYPES,
+            field_name='source_type',
+            default='other',
+        )
+        novelty_hint = self._normalize_exemplar_enum(
+            exemplar_data.get('novelty_hint'),
+            allowed=self._db._ALLOWED_EXEMPLAR_NOVELTY_HINTS,
+            field_name='novelty_hint',
+            default='unknown',
+        )
+        emotion = self._normalize_exemplar_enum(
+            exemplar_data.get('emotion'),
+            allowed=self._db._ALLOWED_EXEMPLAR_EMOTIONS,
+            field_name='emotion',
+            default='other',
+        )
+        scenario = self._normalize_exemplar_enum(
+            exemplar_data.get('scenario'),
+            allowed=self._db._ALLOWED_EXEMPLAR_SCENARIOS,
+            field_name='scenario',
+            default='other',
+        )
+
+        rhetorical = self._normalize_exemplar_string_list(exemplar_data.get('rhetorical'), 'rhetorical')
+        safety_allowed = self._normalize_exemplar_string_list(exemplar_data.get('safety_allowed'), 'safety_allowed')
+        safety_blocked = self._normalize_exemplar_string_list(exemplar_data.get('safety_blocked'), 'safety_blocked')
+
+        requested_length = exemplar_data.get('length_tokens')
+        if requested_length is None:
+            length_tokens = self._estimate_text_token_count(text)
+        else:
+            try:
+                length_tokens = int(requested_length)
+            except (TypeError, ValueError) as exc:
+                raise InputError("length_tokens must be an integer >= 1.") from exc  # noqa: TRY003
+            if length_tokens < 1:
+                raise InputError("length_tokens must be >= 1.")  # noqa: TRY003
+
+        exemplar_id = self._db._normalize_nullable_text(exemplar_data.get('id')) or self._db._generate_uuid()
+        now = self._db._get_current_utc_timestamp_iso()
+
+        query = """
+            INSERT INTO character_exemplars (
+                id, character_id, text, source_type, source_url_or_id, source_date,
+                novelty_hint, emotion, scenario, rhetorical, register, safety_allowed,
+                safety_blocked, rights_public_figure, rights_notes, length_tokens,
+                created_at, updated_at, is_deleted
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """
+        if self._db.backend_type == BackendType.POSTGRESQL:
+            rights_public_figure = bool(exemplar_data.get('rights_public_figure', True))
+        else:
+            rights_public_figure = 1 if exemplar_data.get('rights_public_figure', True) else 0
+        is_deleted = self._deleted_value(False)
+
+        params = (
+            exemplar_id,
+            character_id,
+            text,
+            source_type,
+            self._db._normalize_nullable_text(exemplar_data.get('source_url_or_id')),
+            self._db._normalize_nullable_text(exemplar_data.get('source_date')),
+            novelty_hint,
+            emotion,
+            scenario,
+            self._db._ensure_json_string(rhetorical) or "[]",
+            self._db._normalize_nullable_text(exemplar_data.get('register')),
+            self._db._ensure_json_string(safety_allowed) or "[]",
+            self._db._ensure_json_string(safety_blocked) or "[]",
+            rights_public_figure,
+            self._db._normalize_nullable_text(exemplar_data.get('rights_notes')),
+            length_tokens,
+            now,
+            now,
+            is_deleted,
+        )
+
+        try:
+            with self._db.transaction() as conn:
+                prepared_query, prepared_params = self._db._prepare_backend_statement(query, params)
+                conn.execute(prepared_query, prepared_params)
+        except sqlite3.IntegrityError as exc:
+            msg = str(exc).lower()
+            if "unique constraint failed: character_exemplars.id" in msg:
+                raise ConflictError(  # noqa: TRY003
+                    f"Character exemplar with ID '{exemplar_id}' already exists.",
+                    entity="character_exemplars",
+                    entity_id=exemplar_id,
+                ) from exc
+            raise CharactersRAGDBError(f"Database integrity error adding character exemplar: {exc}") from exc  # noqa: TRY003
+        except BackendDatabaseError as exc:
+            if self._db._is_unique_violation(exc):
+                raise ConflictError(  # noqa: TRY003
+                    f"Character exemplar with ID '{exemplar_id}' already exists.",
+                    entity="character_exemplars",
+                    entity_id=exemplar_id,
+                ) from exc
+            raise CharactersRAGDBError(f"Backend error adding character exemplar: {exc}") from exc  # noqa: TRY003
+
+        created = self.get_character_exemplar_by_id(character_id, exemplar_id)
+        if not created:
+            raise CharactersRAGDBError("Created character exemplar could not be retrieved.")  # noqa: TRY003
+        return created
+
+    def get_character_exemplar_by_id(
+        self,
+        character_id: int,
+        exemplar_id: str,
+        *,
+        include_deleted: bool = False,
+    ) -> dict[str, Any] | None:
+        """Fetch a character exemplar by ID."""
+        query = """
+            SELECT *
+            FROM character_exemplars
+            WHERE id = ? AND character_id = ?
+        """
+        params: list[Any] = [exemplar_id, character_id]
+        if not include_deleted:
+            query += " AND is_deleted = ?"
+            params.append(self._deleted_value(False))
+        query += " LIMIT 1"
+        try:
+            cursor = self._db.execute_query(query, tuple(params))
+            row = cursor.fetchone()
+            return self._normalize_character_exemplar_row(row)
+        except CharactersRAGDBError:
+            raise
+
+    def list_character_exemplars(self, character_id: int, limit: int = 100, offset: int = 0) -> list[dict[str, Any]]:
+        """List non-deleted exemplars for a character."""
+        query = """
+            SELECT *
+            FROM character_exemplars
+            WHERE character_id = ? AND is_deleted = ?
+            ORDER BY updated_at DESC, created_at DESC
+            LIMIT ? OFFSET ?
+        """
+        try:
+            cursor = self._db.execute_query(
+                query,
+                (character_id, self._deleted_value(False), limit, offset),
+            )
+            rows = cursor.fetchall()
+            return [self._normalize_character_exemplar_row(row) for row in rows if row]
+        except CharactersRAGDBError:
+            raise
+
+    def update_character_exemplar(
+        self,
+        character_id: int,
+        exemplar_id: str,
+        update_data: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        """Update mutable fields for a character exemplar."""
+        existing = self.get_character_exemplar_by_id(character_id, exemplar_id)
+        if not existing:
+            return None
+
+        if not update_data:
+            return existing
+
+        set_clauses: list[str] = []
+        params: list[Any] = []
+
+        if 'text' in update_data:
+            text = self._db._normalize_nullable_text(update_data.get('text'))
+            if not text:
+                raise InputError("Exemplar text cannot be empty.")  # noqa: TRY003
+            set_clauses.append("text = ?")
+            params.append(text)
+            if 'length_tokens' not in update_data:
+                set_clauses.append("length_tokens = ?")
+                params.append(self._estimate_text_token_count(text))
+
+        if 'source_type' in update_data:
+            source_type = self._normalize_exemplar_enum(
+                update_data.get('source_type'),
+                allowed=self._db._ALLOWED_EXEMPLAR_SOURCE_TYPES,
+                field_name='source_type',
+                default='other',
+            )
+            set_clauses.append("source_type = ?")
+            params.append(source_type)
+
+        if 'source_url_or_id' in update_data:
+            set_clauses.append("source_url_or_id = ?")
+            params.append(self._db._normalize_nullable_text(update_data.get('source_url_or_id')))
+
+        if 'source_date' in update_data:
+            set_clauses.append("source_date = ?")
+            params.append(self._db._normalize_nullable_text(update_data.get('source_date')))
+
+        if 'novelty_hint' in update_data:
+            novelty_hint = self._normalize_exemplar_enum(
+                update_data.get('novelty_hint'),
+                allowed=self._db._ALLOWED_EXEMPLAR_NOVELTY_HINTS,
+                field_name='novelty_hint',
+                default='unknown',
+            )
+            set_clauses.append("novelty_hint = ?")
+            params.append(novelty_hint)
+
+        if 'emotion' in update_data:
+            emotion = self._normalize_exemplar_enum(
+                update_data.get('emotion'),
+                allowed=self._db._ALLOWED_EXEMPLAR_EMOTIONS,
+                field_name='emotion',
+                default='other',
+            )
+            set_clauses.append("emotion = ?")
+            params.append(emotion)
+
+        if 'scenario' in update_data:
+            scenario = self._normalize_exemplar_enum(
+                update_data.get('scenario'),
+                allowed=self._db._ALLOWED_EXEMPLAR_SCENARIOS,
+                field_name='scenario',
+                default='other',
+            )
+            set_clauses.append("scenario = ?")
+            params.append(scenario)
+
+        if 'rhetorical' in update_data:
+            rhetorical = self._normalize_exemplar_string_list(update_data.get('rhetorical'), 'rhetorical')
+            set_clauses.append("rhetorical = ?")
+            params.append(self._db._ensure_json_string(rhetorical) or "[]")
+
+        if 'register' in update_data:
+            set_clauses.append("register = ?")
+            params.append(self._db._normalize_nullable_text(update_data.get('register')))
+
+        if 'safety_allowed' in update_data:
+            safety_allowed = self._normalize_exemplar_string_list(update_data.get('safety_allowed'), 'safety_allowed')
+            set_clauses.append("safety_allowed = ?")
+            params.append(self._db._ensure_json_string(safety_allowed) or "[]")
+
+        if 'safety_blocked' in update_data:
+            safety_blocked = self._normalize_exemplar_string_list(update_data.get('safety_blocked'), 'safety_blocked')
+            set_clauses.append("safety_blocked = ?")
+            params.append(self._db._ensure_json_string(safety_blocked) or "[]")
+
+        if 'rights_public_figure' in update_data:
+            set_clauses.append("rights_public_figure = ?")
+            if self._db.backend_type == BackendType.POSTGRESQL:
+                params.append(bool(update_data.get('rights_public_figure')))
+            else:
+                params.append(1 if update_data.get('rights_public_figure') else 0)
+
+        if 'rights_notes' in update_data:
+            set_clauses.append("rights_notes = ?")
+            params.append(self._db._normalize_nullable_text(update_data.get('rights_notes')))
+
+        if 'length_tokens' in update_data:
+            try:
+                length_tokens = int(update_data.get('length_tokens'))
+            except (TypeError, ValueError) as exc:
+                raise InputError("length_tokens must be an integer >= 1.") from exc  # noqa: TRY003
+            if length_tokens < 1:
+                raise InputError("length_tokens must be >= 1.")  # noqa: TRY003
+            set_clauses.append("length_tokens = ?")
+            params.append(length_tokens)
+
+        if not set_clauses:
+            return existing
+
+        set_clauses.append("updated_at = ?")
+        params.append(self._db._get_current_utc_timestamp_iso())
+
+        set_clause_sql = ", ".join(set_clauses)
+        query = (
+            "UPDATE character_exemplars "
+            + "SET "
+            + set_clause_sql
+            + " WHERE id = ? AND character_id = ? AND is_deleted = ?"
+        )  # nosec B608
+        params.extend(
+            [
+                exemplar_id,
+                character_id,
+                self._deleted_value(False),
+            ]
+        )
+        try:
+            with self._db.transaction() as conn:
+                prepared_query, prepared_params = self._db._prepare_backend_statement(query, tuple(params))
+                cursor = conn.cursor()
+                cursor.execute(prepared_query, prepared_params)
+                if cursor.rowcount == 0:
+                    return None
+        except (sqlite3.Error, BackendDatabaseError) as exc:
+            raise CharactersRAGDBError(f"Error updating character exemplar '{exemplar_id}': {exc}") from exc  # noqa: TRY003
+
+        return self.get_character_exemplar_by_id(character_id, exemplar_id)
+
+    def soft_delete_character_exemplar(self, character_id: int, exemplar_id: str) -> bool:
+        """Soft-delete a character exemplar (idempotent)."""
+        query = """
+            UPDATE character_exemplars
+            SET is_deleted = ?, updated_at = ?
+            WHERE id = ? AND character_id = ? AND is_deleted = ?
+        """
+        now = self._db._get_current_utc_timestamp_iso()
+        set_deleted = self._deleted_value(True)
+        active_flag = self._deleted_value(False)
+
+        try:
+            with self._db.transaction() as conn:
+                prepared_query, prepared_params = self._db._prepare_backend_statement(
+                    query,
+                    (set_deleted, now, exemplar_id, character_id, active_flag),
+                )
+                cursor = conn.cursor()
+                cursor.execute(prepared_query, prepared_params)
+                if cursor.rowcount > 0:
+                    return True
+
+                check_query, check_params = self._db._prepare_backend_statement(
+                    "SELECT is_deleted FROM character_exemplars WHERE id = ? AND character_id = ?",
+                    (exemplar_id, character_id),
+                )
+                check_row = conn.execute(check_query, check_params).fetchone()
+                return bool(check_row and bool(check_row['is_deleted']))  # noqa: TRY300
+        except (sqlite3.Error, BackendDatabaseError) as exc:
+            raise CharactersRAGDBError(f"Error deleting character exemplar '{exemplar_id}': {exc}") from exc  # noqa: TRY003
+
+    def search_character_exemplars(
+        self,
+        character_id: int,
+        *,
+        query: str | None = None,
+        emotion: str | None = None,
+        scenario: str | None = None,
+        rhetorical: list[str] | None = None,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> tuple[list[dict[str, Any]], int]:
+        """Search exemplars for a character via FTS + structured filters."""
+        emotion_filter = None
+        if emotion is not None:
+            emotion_filter = self._normalize_exemplar_enum(
+                emotion,
+                allowed=self._db._ALLOWED_EXEMPLAR_EMOTIONS,
+                field_name='emotion',
+                default='other',
+            )
+
+        scenario_filter = None
+        if scenario is not None:
+            scenario_filter = self._normalize_exemplar_enum(
+                scenario,
+                allowed=self._db._ALLOWED_EXEMPLAR_SCENARIOS,
+                field_name='scenario',
+                default='other',
+            )
+
+        rhetorical_filter = {
+            item.strip().lower()
+            for item in (rhetorical or [])
+            if isinstance(item, str) and item.strip()
+        }
+
+        filter_params: list[Any] = [
+            character_id,
+            self._deleted_value(False),
+            emotion_filter,
+            emotion_filter,
+            scenario_filter,
+            scenario_filter,
+        ]
+        normalized_query = (query or "").strip()
+
+        if normalized_query and self._db.backend_type == BackendType.POSTGRESQL:
+            tsquery = FTSQueryTranslator.normalize_query(normalized_query, 'postgresql')
+            if tsquery:
+                sql = """
+                    SELECT ce.*, ts_rank(ce.character_exemplars_fts_tsv, to_tsquery('english', ?)) AS rank
+                    FROM character_exemplars ce
+                    WHERE ce.character_id = ?
+                      AND ce.is_deleted = ?
+                      AND (? IS NULL OR ce.emotion = ?)
+                      AND (? IS NULL OR ce.scenario = ?)
+                      AND ce.character_exemplars_fts_tsv @@ to_tsquery('english', ?)
+                    ORDER BY rank DESC, ce.updated_at DESC
+                """
+                query_params = [tsquery] + filter_params + [tsquery]
+            else:
+                sql = """
+                    SELECT ce.*
+                    FROM character_exemplars ce
+                    WHERE ce.character_id = ?
+                      AND ce.is_deleted = ?
+                      AND (? IS NULL OR ce.emotion = ?)
+                      AND (? IS NULL OR ce.scenario = ?)
+                      AND ce.text ILIKE ?
+                    ORDER BY ce.updated_at DESC
+                """
+                query_params = filter_params + [f"%{normalized_query}%"]
+        elif normalized_query:
+            safe_literal = normalized_query.replace('"', '""')
+            safe_fts = f'"{safe_literal}"'
+            sql = """
+                SELECT ce.*, bm25(character_exemplars_fts) AS bm25_score
+                FROM character_exemplars_fts
+                JOIN character_exemplars ce ON character_exemplars_fts.rowid = ce.rowid
+                WHERE character_exemplars_fts MATCH ?
+                  AND ce.character_id = ?
+                  AND ce.is_deleted = ?
+                  AND (? IS NULL OR ce.emotion = ?)
+                  AND (? IS NULL OR ce.scenario = ?)
+                ORDER BY bm25_score, ce.updated_at DESC
+            """
+            query_params = [safe_fts] + filter_params
+        else:
+            sql = """
+                SELECT ce.*
+                FROM character_exemplars ce
+                WHERE ce.character_id = ?
+                  AND ce.is_deleted = ?
+                  AND (? IS NULL OR ce.emotion = ?)
+                  AND (? IS NULL OR ce.scenario = ?)
+                ORDER BY ce.updated_at DESC
+            """
+            query_params = filter_params
+
+        try:
+            cursor = self._db.execute_query(sql, tuple(query_params))
+            rows = cursor.fetchall()
+        except CharactersRAGDBError as exc:
+            logger.error(
+                "Error searching character exemplars for character_id={} query='{}': {}",
+                character_id,
+                normalized_query,
+                exc,
+            )
+            raise
+
+        results = [self._normalize_character_exemplar_row(row) for row in rows if row]
+
+        if rhetorical_filter:
+            filtered_results: list[dict[str, Any]] = []
+            for item in results:
+                values = item.get('rhetorical') or []
+                if isinstance(values, str):
+                    try:
+                        values = json.loads(values)
+                    except json.JSONDecodeError:
+                        values = []
+                normalized_values = {
+                    str(entry).strip().lower()
+                    for entry in values
+                    if str(entry).strip()
+                }
+                if rhetorical_filter.issubset(normalized_values):
+                    filtered_results.append(item)
+            results = filtered_results
+
+        total = len(results)
+        paginated = results[offset:offset + limit]
+        return paginated, total

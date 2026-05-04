@@ -179,6 +179,16 @@ async def encode_audio_tokenizer(
 @router.post(
     "/tokenizer/decode",
     summary="Decode Qwen3-TTS tokens into audio",
+    response_class=Response,
+    responses={
+        200: {
+            "description": "Decoded audio bytes from tokenizer tokens.",
+            "content": {
+                "audio/wav": {},
+                "application/octet-stream": {},
+            },
+        },
+    },
     dependencies=[
         Depends(check_rate_limit),
         Depends(

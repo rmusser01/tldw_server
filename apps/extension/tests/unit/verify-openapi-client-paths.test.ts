@@ -59,4 +59,21 @@ describe("extractFallbackFieldNamesFromSource", () => {
       "final-field",
     ])
   })
+
+  it("skips type annotation brackets before the fallback initializer", () => {
+    const src = `
+      export const MEDIA_ADD_SCHEMA_FALLBACK: Array<{
+        name: string
+        enum?: unknown[]
+      }> = [
+        { name: "api_name" },
+        { name: "chunk_method", enum: ["semantic", "tokens"] }
+      ]
+    `
+
+    expect(extractFallbackFieldNamesFromSource(src)).toEqual([
+      "api_name",
+      "chunk_method",
+    ])
+  })
 })

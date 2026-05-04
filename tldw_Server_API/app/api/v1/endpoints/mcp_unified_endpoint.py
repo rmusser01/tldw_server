@@ -734,7 +734,15 @@ async def websocket_endpoint(
 # HTTP endpoints
 
 
-@router.post("/request", response_model=MCPResponse)
+@router.post(
+    "/request",
+    response_model=MCPResponse,
+    responses={
+        status.HTTP_204_NO_CONTENT: {
+            "description": "MCP request acknowledged with no response body.",
+        },
+    },
+)
 async def mcp_request(
     request: MCPRequest,
     http_request: Request,
@@ -954,7 +962,16 @@ async def get_server_metrics(
     return ServerMetricsResponse(**metrics)
 
 
-@router.get("/metrics/prometheus")
+@router.get(
+    "/metrics/prometheus",
+    response_class=Response,
+    responses={
+        status.HTTP_200_OK: {
+            "description": "Prometheus text-format MCP metrics",
+            "content": {"text/plain; version=0.0.4; charset=utf-8": {}},
+        },
+    },
+)
 async def get_prometheus_metrics(
     _principal: AuthPrincipal = Depends(RequirePermission(SYSTEM_LOGS)),
     _guard: None = Depends(enforce_http_security),

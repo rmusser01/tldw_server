@@ -183,6 +183,56 @@ async def test_start_chatbooks_cleanup_worker_registers_background_inventory(
 
 
 @pytest.mark.asyncio
+async def test_start_chatbooks_cleanup_worker_has_single_background_registry_owner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_cleanup = _import_startup_cleanup_workers()
+    from tldw_Server_API.app.services.worker_registry import WorkerRegistry
+
+    monkeypatch.setenv("CHATBOOKS_CLEANUP_INTERVAL_SEC", "30")
+    runner_started = asyncio.Event()
+
+    async def _fake_runner(stop_event: asyncio.Event) -> None:
+        runner_started.set()
+        await stop_event.wait()
+
+    app = FastAPI()
+    worker_inventory = WorkerRegistry(app)
+    monkeypatch.setattr(startup_cleanup, "_run_chatbooks_cleanup_loop", _fake_runner)
+
+    task, stop_event = await startup_cleanup._start_chatbooks_cleanup_worker(
+        worker_inventory=worker_inventory,
+    )
+    try:
+        await asyncio.wait_for(runner_started.wait(), timeout=1.0)
+
+        handles = worker_inventory.handles_for_phase(
+            startup_cleanup.ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN
+        )
+        assert [handle.name for handle in handles].count("chatbooks_cleanup") == 1
+        assert app.state._tldw_shutdown_job_poller_inventory == []
+        assert [
+            item
+            for item in app.state._tldw_shutdown_worker_inventory
+            if item["name"] == "chatbooks_cleanup"
+        ] == [
+            {
+                "name": "chatbooks_cleanup",
+                "task_name": "chatbooks_cleanup_task",
+                "has_stop_event": True,
+                "timeout_sec": 5.0,
+                "category": "cleanup",
+                "shutdown_phase": "background_worker_shutdown",
+            }
+        ]
+    finally:
+        if stop_event is not None:
+            stop_event.set()
+        if task is not None:
+            await asyncio.wait_for(task, timeout=1.0)
+
+
+@pytest.mark.asyncio
 async def test_start_chatbooks_cleanup_worker_skips_when_interval_zero(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

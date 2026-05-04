@@ -4,7 +4,6 @@ from types import SimpleNamespace
 
 import pytest
 
-
 pytestmark = pytest.mark.unit
 
 
@@ -39,36 +38,17 @@ async def test_initialize_startup_service_tail_runs_helpers_in_order_and_returns
             workflows_maint_task="workflows-maint-task",
             jobs_integrity_stop_event="integrity-stop",
             jobs_integrity_task="integrity-task",
-            claims_task="claims-task",
             claims_alerts_task="claims-alerts-task",
             claims_review_metrics_task="claims-review-task",
-            usage_task="usage-task",
-            llm_usage_task="llm-usage-task",
             tts_history_cleanup_task="tts-history-task",
             tts_history_cleanup_stop_event="tts-history-stop",
-            quality_eval_task="quality-task",
-            outputs_purge_task="purge-task",
-            kanban_activity_cleanup_task="kanban-cleanup-task",
-            ingestion_sources_cleanup_task="ingestion-sources-task",
-            kanban_purge_task="kanban-purge-task",
-            files_export_gc_task="files-gc-task",
-            notifications_prune_task="notifications-task",
-            jobs_prune_task="jobs-prune-task",
             connectors_jobs_task="connectors-task",
             connectors_jobs_stop_event="connectors-stop",
         )
 
     async def _record_finalize_startup_tail(**kwargs):
         calls.append(("finalize", kwargs))
-        return SimpleNamespace(
-            authnz_scheduler_started=True,
-            workflows_sched_task="workflows-sched-task",
-            reading_digest_sched_task="reading-digest-sched-task",
-            admin_backup_sched_task="admin-backup-sched-task",
-            companion_reflection_sched_task="companion-sched-task",
-            reminders_sched_task="reminders-sched-task",
-            connectors_sync_sched_task="connectors-sync-sched-task",
-        )
+        return SimpleNamespace()
 
     async def _record_report_startup_environment(**kwargs):
         calls.append(("report", kwargs))
@@ -113,8 +93,8 @@ async def test_initialize_startup_service_tail_runs_helpers_in_order_and_returns
     assert calls[2][1]["startup_guard_exceptions"] == (RuntimeError,)
     assert calls[2][1]["import_exceptions"] == (ImportError,)
     assert handles.jobs_metrics_task == "jobs-metrics-task"
-    assert handles.claims_task == "claims-task"
+    assert not hasattr(handles, "claims_task")
     assert handles.connectors_jobs_task == "connectors-task"
-    assert handles.authnz_scheduler_started is True
-    assert handles.workflows_sched_task == "workflows-sched-task"
-    assert handles.connectors_sync_sched_task == "connectors-sync-sched-task"
+    assert not hasattr(handles, "authnz_scheduler_started")
+    assert not hasattr(handles, "workflows_sched_task")
+    assert not hasattr(handles, "connectors_sync_sched_task")

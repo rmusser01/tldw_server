@@ -118,7 +118,13 @@ def _parse_range_header(range_header: str, file_size: int) -> tuple[int, int] | 
                 "application/octet-stream": {},
             },
         },
-        206: {"description": "Partial content (Range request)"},
+        206: {
+            "description": "Partial content (Range request)",
+            "content": {
+                "application/pdf": {},
+                "application/octet-stream": {},
+            },
+        },
         304: {"description": "Not modified (ETag match)"},
         404: {"description": "Media item or file not found"},
         416: {"description": "Range not satisfiable"},

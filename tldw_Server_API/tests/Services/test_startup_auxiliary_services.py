@@ -195,6 +195,95 @@ async def test_start_auxiliary_services_registers_claims_schedulers_with_worker_
 
 
 @pytest.mark.asyncio
+async def test_start_auxiliary_services_registers_usage_aggregators_with_worker_inventory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_aux = _import_startup_auxiliary_services()
+    from tldw_Server_API.app.services import llm_usage_aggregator, usage_aggregator
+    from tldw_Server_API.app.services.lifecycle_workers import (
+        ShutdownPhase,
+        WorkerRegistry,
+    )
+
+    app = FastAPI()
+    worker_inventory = WorkerRegistry(app)
+
+    class _Settings:
+        USAGE_LOG_ENABLED = True
+        USAGE_AGGREGATOR_INTERVAL_MINUTES = 60
+        LLM_USAGE_AGGREGATOR_ENABLED = True
+        LLM_USAGE_AGGREGATOR_INTERVAL_MINUTES = 60
+
+    async def _noop_aggregate(*_args: object, **_kwargs: object) -> None:
+        return None
+
+    async def _fake_claims_alerts(**kwargs: object) -> None:
+        assert kwargs == {"worker_inventory": worker_inventory}
+        return None
+
+    async def _fake_claims_review(**kwargs: object) -> None:
+        assert kwargs == {"worker_inventory": worker_inventory}
+        return None
+
+    async def _fake_personalization(_app_settings: object) -> None:
+        return None
+
+    monkeypatch.setattr(usage_aggregator, "get_settings", lambda: _Settings())
+    monkeypatch.setattr(usage_aggregator, "aggregate_usage_daily", _noop_aggregate)
+    monkeypatch.setattr(llm_usage_aggregator, "get_settings", lambda: _Settings())
+    monkeypatch.setattr(llm_usage_aggregator, "aggregate_llm_usage_daily", _noop_aggregate)
+    monkeypatch.setattr(startup_aux, "_env_flag_enabled", lambda _key: False)
+    monkeypatch.setattr(startup_aux, "_start_claims_alerts_scheduler", _fake_claims_alerts)
+    monkeypatch.setattr(startup_aux, "_start_claims_review_metrics_scheduler", _fake_claims_review)
+    monkeypatch.setattr(startup_aux, "_start_personalization_consolidation", _fake_personalization)
+
+    handles = await startup_aux.start_auxiliary_services(
+        {},
+        worker_inventory=worker_inventory,
+    )
+
+    try:
+        await asyncio.sleep(0)
+
+        assert handles.usage_task is not None
+        assert handles.llm_usage_task is not None
+        assert [handle.name for handle in worker_inventory.handles] == [
+            "usage_aggregator",
+            "llm_usage_aggregator",
+        ]
+        assert [handle.task for handle in worker_inventory.handles] == [
+            handles.usage_task,
+            handles.llm_usage_task,
+        ]
+        assert [handle.stop_event is not None for handle in worker_inventory.handles] == [
+            True,
+            True,
+        ]
+        assert [handle.category for handle in worker_inventory.handles] == [
+            "usage",
+            "usage",
+        ]
+        assert [
+            handle.shutdown_phase for handle in worker_inventory.handles
+        ] == [
+            ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN,
+            ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN,
+        ]
+        assert app.state._tldw_shutdown_job_poller_inventory == []
+    finally:
+        tasks = [
+            handle.task
+            for handle in worker_inventory.handles
+            if isinstance(handle.task, asyncio.Task)
+        ]
+        for handle in worker_inventory.handles:
+            if handle.stop_event is not None:
+                handle.stop_event.set()
+        if tasks:
+            await asyncio.wait_for(asyncio.gather(*tasks), timeout=1)
+
+
+@pytest.mark.asyncio
 async def test_register_auxiliary_task_preserves_registration_error_when_rollback_fails(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

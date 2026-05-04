@@ -30,14 +30,7 @@ async def test_run_lifespan_shutdown_sequence_runs_wrappers_in_order_and_updates
 
     app = FastAPI()
     worker_runtime = LifespanWorkerRuntimeState(
-        usage_task="usage-start",
-        llm_usage_task="llm-start",
-        authnz_scheduler_started=True,
-        chatbooks_cleanup_task="chatbooks-start",
-        chatbooks_cleanup_stop_event="chatbooks-stop-start",
-        storage_cleanup_service="storage-start",
         owned_job_pollers=["poller-a"],
-        cleanup_task="cleanup-start",
         core_jobs_task="core-start",
         core_jobs_stop_event="core-stop-start",
         prompt_studio_jobs_task="prompt-start",
@@ -53,20 +46,7 @@ async def test_run_lifespan_shutdown_sequence_runs_wrappers_in_order_and_updates
         recipe_run_jobs_stop_event="recipe-stop-start",
         evals_abtest_jobs_task="abtest-start",
         evals_abtest_jobs_stop_event="abtest-stop-start",
-        claims_task="claims-start",
-        jobs_prune_task="jobs-prune-start",
-        files_export_gc_task="files-gc-start",
-        notifications_prune_task="notifications-start",
         jobs_notifications_bridge_task="bridge-start",
-        embeddings_compactor_task="compactor-start",
-        embeddings_compactor_stop_event="compactor-stop-start",
-        websub_renewal_task="websub-start",
-        workflows_sched_task="workflows-sched-start",
-        reading_digest_sched_task="reading-sched-start",
-        admin_backup_sched_task="admin-backup-sched-start",
-        companion_reflection_sched_task="companion-sched-start",
-        reminders_sched_task="reminders-sched-start",
-        connectors_sync_sched_task="connectors-sched-start",
         jobs_metrics_task="metrics-start",
         jobs_metrics_stop_event="metrics-stop-start",
         loop_lag_task="loop-lag-start",
@@ -136,17 +116,7 @@ async def test_run_lifespan_shutdown_sequence_runs_wrappers_in_order_and_updates
 
     async def _fake_pre_worker_cleanup(**kwargs):
         calls.append(("pre", kwargs))
-        assert kwargs["stopped_background_worker_names"] == {
-            "authnz_scheduler",
-            "chatbooks_cleanup",
-            "ephemeral_cleanup_task",
-        }
-        return SimpleNamespace(
-            cleanup_task="cleanup-after",
-            chatbooks_cleanup_task="chatbooks-after",
-            chatbooks_cleanup_stop_event="chatbooks-stop-after",
-            storage_cleanup_service="storage-after",
-        )
+        return SimpleNamespace()
 
     async def _fake_primary_late_stop(**kwargs):
         calls.append(("primary", kwargs))
@@ -165,18 +135,12 @@ async def test_run_lifespan_shutdown_sequence_runs_wrappers_in_order_and_updates
     async def _fake_post_worker_services(**kwargs):
         calls.append(("post", kwargs))
         return SimpleNamespace(
-            claims_task="claims-after",
             jobs_metrics_task="metrics-after",
-            files_export_gc_task="files-gc-after",
-            notifications_prune_task="notifications-after",
         )
 
     async def _fake_final_cleanup(**kwargs):
         calls.append(("final", kwargs))
-        return SimpleNamespace(
-            authnz_scheduler_started=False,
-            files_export_gc_task="files-gc-final",
-        )
+        return SimpleNamespace()
 
     monkeypatch.setattr(
         shutdown_transition_handoff,
@@ -257,42 +221,60 @@ async def test_run_lifespan_shutdown_sequence_runs_wrappers_in_order_and_updates
         "final",
     ]
     assert calls[0][1]["segment_name"] == "transition_handoff"
-    assert calls[1][1]["usage_task"] == "usage-start"
+    assert "usage_task" not in calls[1][1]
+    assert "llm_usage_task" not in calls[1][1]
+    assert "chatbooks_cleanup_task" not in calls[1][1]
+    assert "chatbooks_cleanup_stop_event" not in calls[1][1]
+    assert "storage_cleanup_service" not in calls[1][1]
     assert calls[2][1]["owned_job_pollers"] == ["poller-a"]
     assert calls[3][1]["segment_name"] == "background_worker_shutdown"
     assert calls[4][1]["stopped_names_attr"] == "_tldw_shutdown_stopped_background_worker_names"
     assert calls[5][1]["legacy_shutdown_plan"] == ["transition-plan"]
-    assert calls[6][1]["coordinated_legacy_component_names"] == {"usage_aggregator"}
-    assert calls[6][1]["stopped_background_worker_names"] == {
-        "authnz_scheduler",
-        "chatbooks_cleanup",
-        "ephemeral_cleanup_task",
-    }
+    assert "coordinated_legacy_component_names" not in calls[6][1]
+    assert "cleanup_task" not in calls[6][1]
+    assert "chatbooks_cleanup_task" not in calls[6][1]
+    assert "chatbooks_cleanup_stop_event" not in calls[6][1]
+    assert "storage_cleanup_service" not in calls[6][1]
     assert calls[7][1]["should_run_late_stop"] is True
     assert calls[8][1]["should_run_late_stop"] is True
-    assert calls[9][1]["claims_task"] == "claims-start"
-    assert calls[10][1]["authnz_scheduler_started"] is True
-    assert calls[10][1]["stopped_background_worker_names"] == {
-        "authnz_scheduler",
-        "chatbooks_cleanup",
-        "ephemeral_cleanup_task",
-    }
+    assert "claims_task" not in calls[9][1]
+    assert "embeddings_compactor_task" not in calls[9][1]
+    assert "embeddings_compactor_stop_event" not in calls[9][1]
+    assert "websub_renewal_task" not in calls[9][1]
+    assert "usage_task" not in calls[9][1]
+    assert "llm_usage_task" not in calls[9][1]
+    assert "jobs_prune_task" not in calls[9][1]
+    assert "files_export_gc_task" not in calls[9][1]
+    assert "notifications_prune_task" not in calls[9][1]
+    assert "workflows_sched_task" not in calls[9][1]
+    assert "reading_digest_sched_task" not in calls[9][1]
+    assert "admin_backup_sched_task" not in calls[9][1]
+    assert "companion_reflection_sched_task" not in calls[9][1]
+    assert "reminders_sched_task" not in calls[9][1]
+    assert "connectors_sync_sched_task" not in calls[9][1]
+    assert "authnz_scheduler_started" not in calls[10][1]
+    assert "stopped_background_worker_names" not in calls[10][1]
     assert calls[10][1]["db_pool"] == "db-pool"
     assert calls[10][1]["session_manager"] == "session-manager"
     assert calls[10][1]["heavy_startup_handles"] == "heavy-handles"
     assert calls[10][1]["in_pytest_for_db_pool_shutdown"] is True
     assert calls[10][1]["in_pytest_for_tts_shutdown"] is True
-    assert worker_runtime.cleanup_task == "cleanup-after"
-    assert worker_runtime.chatbooks_cleanup_task == "chatbooks-after"
-    assert worker_runtime.storage_cleanup_service == "storage-after"
+    assert not hasattr(worker_runtime, "cleanup_task")
+    assert not hasattr(worker_runtime, "chatbooks_cleanup_task")
+    assert not hasattr(worker_runtime, "storage_cleanup_service")
+    assert not hasattr(worker_runtime, "claims_task")
+    assert not hasattr(worker_runtime, "embeddings_compactor_task")
+    assert not hasattr(worker_runtime, "embeddings_compactor_stop_event")
+    assert not hasattr(worker_runtime, "websub_renewal_task")
+    assert not hasattr(worker_runtime, "usage_task")
+    assert not hasattr(worker_runtime, "llm_usage_task")
+    assert not hasattr(worker_runtime, "authnz_scheduler_started")
+    assert not hasattr(worker_runtime, "files_export_gc_task")
+    assert not hasattr(worker_runtime, "notifications_prune_task")
     assert worker_runtime.core_jobs_task == "core-after"
     assert worker_runtime.prompt_studio_jobs_stop_event == "prompt-stop-after"
     assert worker_runtime.media_ingest_jobs_task == "media-after"
     assert worker_runtime.reminder_jobs_task == "reminder-after"
-    assert worker_runtime.claims_task == "claims-after"
     assert worker_runtime.jobs_metrics_task == "metrics-after"
-    assert worker_runtime.notifications_prune_task == "notifications-after"
-    assert worker_runtime.files_export_gc_task == "files-gc-final"
-    assert worker_runtime.authnz_scheduler_started is False
     assert app.state._tldw_shutdown_timing_segments == []
     assert recorded_totals == [250]

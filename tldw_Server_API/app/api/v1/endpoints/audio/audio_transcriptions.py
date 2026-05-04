@@ -96,6 +96,19 @@ _AUDIO_TRANSCRIPTIONS_NONCRITICAL_EXCEPTIONS = (
     UnicodeDecodeError,
     ValueError,
 )
+_OPENAI_AUDIO_TRANSCRIPT_RESPONSE_CONTENT = {
+    "application/json": {},
+    "application/x-subrip": {},
+    "text/plain": {},
+    "text/vtt": {},
+}
+_OPENAI_AUDIO_TRANSCRIPT_RESPONSES = {
+    status.HTTP_200_OK: {
+        "description": "OpenAI-compatible transcript response in JSON, plain text, SRT, or VTT format.",
+        "content": _OPENAI_AUDIO_TRANSCRIPT_RESPONSE_CONTENT,
+    },
+    status.HTTP_402_PAYMENT_REQUIRED: {"description": "Billing limit exceeded. Upgrade plan to continue."},
+}
 
 _AUDIO_UPLOAD_SUFFIX_BY_CONTENT_TYPE: dict[str, str] = {
     "audio/wav": ".wav",
@@ -429,9 +442,7 @@ def _dictation_error_detail(
 @router.post(
     "/transcriptions",
     summary="Transcribes audio into text (OpenAI Compatible)",
-    responses={
-        status.HTTP_402_PAYMENT_REQUIRED: {"description": "Billing limit exceeded. Upgrade plan to continue."},
-    },
+    responses=_OPENAI_AUDIO_TRANSCRIPT_RESPONSES,
     dependencies=[
         Depends(check_rate_limit),
         Depends(
@@ -1159,7 +1170,7 @@ async def create_transcription(
             else:
                 srt_content = f"1\n00:00:00,000 --> 00:00:10,000\n{transcribed_text}\n"
             _emit_success_metrics(redaction_outcome=redaction_outcome)
-            return Response(content=srt_content, media_type="text/plain")
+            return Response(content=srt_content, media_type="application/x-subrip")
 
         if response_format == "vtt":
             _raise_on_transcription_error(transcribed_text)
@@ -1333,9 +1344,7 @@ async def create_transcription(
 @router.post(
     "/translations",
     summary="Translates audio into English (OpenAI Compatible)",
-    responses={
-        status.HTTP_402_PAYMENT_REQUIRED: {"description": "Billing limit exceeded. Upgrade plan to continue."},
-    },
+    responses=_OPENAI_AUDIO_TRANSCRIPT_RESPONSES,
     dependencies=[
         Depends(check_rate_limit),
         Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="audio.translations", count_as="call")),

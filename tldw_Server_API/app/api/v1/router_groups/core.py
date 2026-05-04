@@ -9,6 +9,10 @@ from typing import Iterable
 
 from loguru import logger
 
+from tldw_Server_API.app.api.v1.router_groups.conditional import (
+    ImportedRouterSpec,
+    append_imported_router_spec,
+)
 from tldw_Server_API.app.api.v1.router_groups.spec import RouterSpec
 from tldw_Server_API.app.core.testing import is_explicit_pytest_runtime as _is_explicit_pytest_runtime
 
@@ -207,39 +211,32 @@ def iter_core_router_specs() -> Iterable[RouterSpec]:
         logger.debug(f"Skipping sync router: {e}")
 
     # Chat endpoints
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.chat import router as chat_router
-
-        specs.append(RouterSpec(
-            router=chat_router,
+    for chat_spec in (
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.chat",
+            log_name="chat",
             prefix=f"{API_V1_PREFIX}/chat",
             route_key="chat",
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping chat router: {e}")
-
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.chat_loop import router as chat_loop_router
-
-        specs.append(RouterSpec(
-            router=chat_loop_router,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.chat_loop",
+            log_name="chat_loop",
             prefix=f"{API_V1_PREFIX}",
             route_key="chat",
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping chat_loop router: {e}")
-
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.chat import conversations_alias_router
-
-        specs.append(RouterSpec(
-            router=conversations_alias_router,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.chat",
+            log_name="conversations_alias",
             prefix=f"{API_V1_PREFIX}/chats",
             tags=("chat",),
             route_key="chat",
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping conversations_alias router: {e}")
+            attr_name="conversations_alias_router",
+        ),
+    ):
+        try:
+            append_imported_router_spec(specs, chat_spec)
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"Skipping {chat_spec.log_name} router: {e}")
 
     # Tools endpoint
     try:
@@ -256,70 +253,49 @@ def iter_core_router_specs() -> Iterable[RouterSpec]:
         logger.debug(f"Skipping tools router: {e}")
 
     # Agent Client Protocol (ACP) endpoints
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.agent_client_protocol import router as acp_router
-
-        specs.append(RouterSpec(
-            router=acp_router,
+    for acp_spec in (
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.agent_client_protocol",
+            log_name="acp",
             prefix=f"{API_V1_PREFIX}",
             tags=("acp",),
             route_key="acp",
             default_stable=False,
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping acp router: {e}")
-
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.acp_schedules import router as acp_schedules_router
-
-        specs.append(RouterSpec(
-            router=acp_schedules_router,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.acp_schedules",
+            log_name="acp_schedules",
             prefix=f"{API_V1_PREFIX}",
             tags=("acp-schedules",),
             route_key="acp",
             default_stable=False,
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping acp_schedules router: {e}")
-
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.acp_triggers import router as acp_triggers_router
-
-        specs.append(RouterSpec(
-            router=acp_triggers_router,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.acp_triggers",
+            log_name="acp_triggers",
             prefix=f"{API_V1_PREFIX}",
             tags=("acp-triggers",),
             route_key="acp",
             default_stable=False,
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping acp_triggers router: {e}")
-
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.acp_permissions import router as acp_permissions_router
-
-        specs.append(RouterSpec(
-            router=acp_permissions_router,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.acp_permissions",
+            log_name="acp_permissions",
             prefix=f"{API_V1_PREFIX}",
             tags=("acp-permissions",),
             route_key="acp",
             default_stable=False,
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping acp_permissions router: {e}")
-
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.acp_multiplex import router as acp_multiplex_router
-
-        specs.append(RouterSpec(
-            router=acp_multiplex_router,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.acp_multiplex",
+            log_name="acp_multiplex",
             prefix=f"{API_V1_PREFIX}",
             tags=("acp-multiplex",),
             route_key="acp",
             default_stable=False,
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping acp_multiplex router: {e}")
+        ),
+    ):
+        append_imported_router_spec(specs, acp_spec)
 
     # LLM Providers listing
     try:

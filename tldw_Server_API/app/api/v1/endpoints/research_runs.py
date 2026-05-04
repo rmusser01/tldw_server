@@ -132,7 +132,17 @@ async def delete_research_run(
     return ResearchRunDeleteResponse(deleted=bool(deleted))
 
 
-@router.get("/runs/{session_id}/events/stream", summary="Stream live deep research run events")
+@router.get(
+    "/runs/{session_id}/events/stream",
+    summary="Stream live deep research run events",
+    response_class=StreamingResponse,
+    responses={
+        200: {
+            "description": "Server-sent events stream of research run updates",
+            "content": {"text/event-stream": {}},
+        },
+    },
+)
 async def stream_research_run_events(
     session_id: str = Path(..., min_length=1),
     after_id: int = Query(0, ge=0),

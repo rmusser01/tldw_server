@@ -15,7 +15,6 @@ from tldw_Server_API.app.services.shutdown_models import (
     ShutdownSummary,
 )
 
-
 pytestmark = pytest.mark.unit
 
 
@@ -148,12 +147,6 @@ async def test_shutdown_transition_handoff_returns_plan_and_skips_direct_drain_w
     handles = await shutdown_handoff.shutdown_transition_handoff(
         app=app,
         readiness_state="ready-state",
-        usage_task="usage-task",
-        llm_usage_task="llm-usage-task",
-        authnz_scheduler_started=True,
-        chatbooks_cleanup_task="chatbooks-task",
-        chatbooks_cleanup_stop_event="chatbooks-stop",
-        storage_cleanup_service="storage-service",
         build_legacy_shutdown_context=_fake_build_context,
         apply_shutdown_transition_gate=_fake_apply_transition_gate,
         startup_guard_exceptions=(RuntimeError,),
@@ -162,12 +155,9 @@ async def test_shutdown_transition_handoff_returns_plan_and_skips_direct_drain_w
 
     assert len(build_context_calls) == 1
     assert build_context_calls[0]["readiness_state"] == "ready-state"
-    assert build_context_calls[0]["usage_task"] == "usage-task"
-    assert build_context_calls[0]["llm_usage_task"] == "llm-usage-task"
-    assert build_context_calls[0]["authnz_scheduler_started"] is True
-    assert build_context_calls[0]["chatbooks_cleanup_task"] == "chatbooks-task"
-    assert build_context_calls[0]["chatbooks_cleanup_stop_event"] == "chatbooks-stop"
-    assert build_context_calls[0]["storage_cleanup_service"] == "storage-service"
+    assert "usage_task" not in build_context_calls[0]
+    assert "llm_usage_task" not in build_context_calls[0]
+    assert "authnz_scheduler_started" not in build_context_calls[0]
     assert created_profiles == ["dev_fast"]
     assert [component.name for component in coordinator.registered] == ["lifecycle_gate"]
     assert coordinator.shutdown_calls == 1
@@ -218,12 +208,6 @@ async def test_shutdown_transition_handoff_applies_direct_drain_when_transition_
     handles = await shutdown_handoff.shutdown_transition_handoff(
         app=app,
         readiness_state="ready-state",
-        usage_task=None,
-        llm_usage_task=None,
-        authnz_scheduler_started=False,
-        chatbooks_cleanup_task=None,
-        chatbooks_cleanup_stop_event=None,
-        storage_cleanup_service=None,
         build_legacy_shutdown_context=lambda **kwargs: kwargs,
         apply_shutdown_transition_gate=lambda app_obj, readiness_state: apply_calls.append((app_obj, readiness_state)),
         startup_guard_exceptions=(RuntimeError,),
@@ -257,12 +241,6 @@ async def test_shutdown_transition_handoff_applies_direct_drain_when_plan_build_
     handles = await shutdown_handoff.shutdown_transition_handoff(
         app=app,
         readiness_state="ready-state",
-        usage_task=None,
-        llm_usage_task=None,
-        authnz_scheduler_started=False,
-        chatbooks_cleanup_task=None,
-        chatbooks_cleanup_stop_event=None,
-        storage_cleanup_service=None,
         build_legacy_shutdown_context=lambda **kwargs: kwargs,
         apply_shutdown_transition_gate=lambda app_obj, readiness_state: apply_calls.append((app_obj, readiness_state)),
         startup_guard_exceptions=(RuntimeError,),
@@ -303,12 +281,6 @@ async def test_shutdown_transition_handoff_applies_direct_drain_without_running_
     handles = await shutdown_handoff.shutdown_transition_handoff(
         app=app,
         readiness_state="ready-state",
-        usage_task=None,
-        llm_usage_task=None,
-        authnz_scheduler_started=False,
-        chatbooks_cleanup_task=None,
-        chatbooks_cleanup_stop_event=None,
-        storage_cleanup_service=None,
         build_legacy_shutdown_context=lambda **kwargs: kwargs,
         apply_shutdown_transition_gate=lambda app_obj, readiness_state: apply_calls.append((app_obj, readiness_state)),
         startup_guard_exceptions=(RuntimeError,),

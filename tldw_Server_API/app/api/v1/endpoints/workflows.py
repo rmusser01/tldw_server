@@ -3174,6 +3174,17 @@ async def verify_artifacts_batch(
 
 @router.get(
     "/artifacts/{artifact_id}/download",
+    response_class=FileResponse,
+    responses={
+        200: {
+            "description": "Workflow artifact file download.",
+            "content": {"application/octet-stream": {}},
+        },
+        206: {
+            "description": "Partial workflow artifact file download.",
+            "content": {"application/octet-stream": {}},
+        },
+    },
     dependencies=[
         Depends(RequirePermission(WORKFLOWS_RUNS_READ)),
     ],
@@ -3358,6 +3369,13 @@ async def download_artifact(
 
 @router.get(
     "/runs/{run_id}/artifacts/download",
+    response_class=StreamingResponse,
+    responses={
+        200: {
+            "description": "Workflow run artifacts ZIP download.",
+            "content": {"application/zip": {}},
+        },
+    },
     dependencies=[
         Depends(RequirePermission(WORKFLOWS_RUNS_READ)),
     ],

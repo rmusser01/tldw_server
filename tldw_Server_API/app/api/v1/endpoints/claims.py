@@ -598,7 +598,18 @@ def list_claims_analytics_exports(
     )
 
 
-@router.get("/analytics/export/{export_id}")
+@router.get(
+    "/analytics/export/{export_id}",
+    responses={
+        200: {
+            "description": "Prepared claims analytics export as JSON or CSV.",
+            "content": {
+                "application/json": {},
+                "text/csv": {},
+            },
+        },
+    },
+)
 def download_claims_analytics_export(
     export_id: str,
     principal: AuthPrincipal = Depends(get_auth_principal),

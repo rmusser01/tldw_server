@@ -5,11 +5,14 @@ integration tests working without importing the broader endpoint surface.
 """
 from __future__ import annotations
 
-import importlib
-from typing import Any, Iterable
+from typing import Iterable
 
 from loguru import logger
 
+from tldw_Server_API.app.api.v1.router_groups.conditional import (
+    ImportedRouterSpec,
+    append_imported_router_spec,
+)
 from tldw_Server_API.app.api.v1.router_groups.factories import evaluations_router_factory
 from tldw_Server_API.app.api.v1.router_groups.spec import RouterSpec
 from tldw_Server_API.app.core.testing import (
@@ -19,23 +22,6 @@ from tldw_Server_API.app.core.testing import (
 )
 
 API_V1_PREFIX = "/api/v1"
-
-
-def _try_add_spec(
-    specs: list[RouterSpec],
-    import_path: str,
-    *,
-    log_name: str,
-    attr_name: str = "router",
-    **spec_kwargs: Any,
-) -> None:
-    try:
-        module = importlib.import_module(import_path)
-        specs.append(RouterSpec(router=getattr(module, attr_name), **spec_kwargs))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping {log_name} router in minimal test app: {e}")
-
-
 def iter_minimal_test_router_specs() -> Iterable[RouterSpec]:
     """Yield the always-included minimal-test router specs."""
     from tldw_Server_API.app.api.v1.endpoints.auth import router as auth_router
@@ -87,19 +73,25 @@ def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
     """Yield optional minimal-test router specs, skipping unavailable imports."""
     specs: list[RouterSpec] = []
 
-    _try_add_spec(
+    append_imported_router_spec(
         specs,
-        "tldw_Server_API.app.api.v1.endpoints.llm_providers",
-        log_name="llm providers",
-        prefix=f"{API_V1_PREFIX}",
-        tags=("llm",),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.llm_providers",
+            log_name="llm providers",
+            prefix=f"{API_V1_PREFIX}",
+            tags=("llm",),
+            skip_context="in minimal test app",
+        ),
     )
-    _try_add_spec(
+    append_imported_router_spec(
         specs,
-        "tldw_Server_API.app.api.v1.endpoints.mlx",
-        log_name="mlx",
-        prefix=f"{API_V1_PREFIX}",
-        tags=("llm",),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.mlx",
+            log_name="mlx",
+            prefix=f"{API_V1_PREFIX}",
+            tags=("llm",),
+            skip_context="in minimal test app",
+        ),
     )
 
     try:
@@ -985,60 +977,44 @@ def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
     except Exception as e:  # noqa: BLE001
         logger.debug(f"Skipping tools router in minimal test app: {e}")
 
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.agent_client_protocol import router as acp_router
-
-        specs.append(RouterSpec(
-            router=acp_router,
+    for acp_spec in (
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.agent_client_protocol",
+            log_name="ACP",
             prefix=f"{API_V1_PREFIX}",
             tags=("acp",),
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping ACP router in minimal test app: {e}")
-
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.acp_schedules import router as acp_schedules_router
-
-        specs.append(RouterSpec(
-            router=acp_schedules_router,
+            skip_context="in minimal test app",
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.acp_schedules",
+            log_name="ACP schedules",
             prefix=f"{API_V1_PREFIX}",
             tags=("acp-schedules",),
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping ACP schedules router in minimal test app: {e}")
-
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.acp_triggers import router as acp_triggers_router
-
-        specs.append(RouterSpec(
-            router=acp_triggers_router,
+            skip_context="in minimal test app",
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.acp_triggers",
+            log_name="ACP triggers",
             prefix=f"{API_V1_PREFIX}",
             tags=("acp-triggers",),
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping ACP triggers router in minimal test app: {e}")
-
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.acp_permissions import router as acp_permissions_router
-
-        specs.append(RouterSpec(
-            router=acp_permissions_router,
+            skip_context="in minimal test app",
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.acp_permissions",
+            log_name="ACP permissions",
             prefix=f"{API_V1_PREFIX}",
             tags=("acp-permissions",),
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping ACP permissions router in minimal test app: {e}")
-
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.acp_multiplex import router as acp_multiplex_router
-
-        specs.append(RouterSpec(
-            router=acp_multiplex_router,
+            skip_context="in minimal test app",
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.acp_multiplex",
+            log_name="ACP multiplex",
             prefix=f"{API_V1_PREFIX}",
             tags=("acp-multiplex",),
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping ACP multiplex router in minimal test app: {e}")
+            skip_context="in minimal test app",
+        ),
+    ):
+        append_imported_router_spec(specs, acp_spec)
 
     try:
         from tldw_Server_API.app.api.v1.endpoints.agent_orchestration import router as orch_router
@@ -1084,15 +1060,15 @@ def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
     except Exception as e:  # noqa: BLE001
         logger.debug(f"Skipping authnz_debug router in tests: {e}")
 
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.sandbox import router as sandbox_router
-
-        specs.append(RouterSpec(
-            router=sandbox_router,
+    append_imported_router_spec(
+        specs,
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.sandbox",
+            log_name="sandbox",
             prefix=f"{API_V1_PREFIX}",
             tags=("sandbox",),
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping sandbox router in minimal test app: {e}")
+            skip_context="in minimal test app",
+        ),
+    )
 
     return specs

@@ -193,6 +193,16 @@ def _sanitize_filename(name: str, default_name: str) -> str:
 
 @router.get(
     "/audit/export",
+    responses={
+        200: {
+            "description": "Audit export as JSON, NDJSON, or CSV.",
+            "content": {
+                "application/json": {},
+                "application/x-ndjson": {},
+                "text/csv": {},
+            },
+        },
+    },
     summary="Export audit events (JSON/JSONL/CSV)",
     dependencies=[Depends(RequirePermission(SYSTEM_LOGS))],
 )

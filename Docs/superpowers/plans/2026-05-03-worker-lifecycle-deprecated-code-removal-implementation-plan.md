@@ -70,7 +70,7 @@ Primary test files:
 - Modify: `tldw_Server_API/tests/Services/test_lifecycle_workers.py`
 - Modify: startup helper tests for any matrix entry whose inventory coverage is missing
 
-- [ ] **Step 1: Write the ownership matrix test file**
+- [x] **Step 1: Write the ownership matrix test file**
 
 Create a test-owned matrix. Keep it in tests so implementation and closeout can import or inspect one canonical source without adding production surface.
 
@@ -132,7 +132,7 @@ def test_worker_ownership_matrix_has_unique_managed_names() -> None:
 
 Start with the first three rows, then add rows for `claims_rebuild`, `embeddings_compactor_task`, `websub_renewal_task`, `usage_aggregator`, `llm_usage_aggregator`, recurring schedulers, and maintenance schedulers before deleting code for each group.
 
-- [ ] **Step 2: Run the new matrix test**
+- [x] **Step 2: Run the new matrix test**
 
 Run:
 
@@ -142,7 +142,7 @@ python -m pytest tldw_Server_API/tests/Services/test_worker_lifecycle_ownership_
 
 Expected: pass after the matrix file is created.
 
-- [ ] **Step 3: Add registry stop contract coverage if missing**
+- [x] **Step 3: Add registry stop contract coverage if missing**
 
 In `test_lifecycle_workers.py`, verify these cases already exist or add them:
 
@@ -153,7 +153,7 @@ In `test_lifecycle_workers.py`, verify these cases already exist or add them:
 
 Use existing tests where possible instead of duplicating.
 
-- [ ] **Step 4: Add startup inventory assertions for the Phase 2 deletion candidates**
+- [x] **Step 4: Add startup inventory assertions for the Phase 2 deletion candidates**
 
 Update focused startup helper tests so each Phase 2 worker proves its managed name and phase:
 
@@ -170,7 +170,7 @@ assert handle.shutdown_phase is ShutdownPhase.BACKGROUND_WORKER_SHUTDOWN
 assert app.state._tldw_shutdown_job_poller_inventory == []
 ```
 
-- [ ] **Step 5: Run Phase 1 focused tests**
+- [x] **Step 5: Run Phase 1 focused tests**
 
 Run:
 
@@ -186,7 +186,7 @@ python -m pytest \
 
 Expected: pass.
 
-- [ ] **Step 6: Commit Task 1**
+- [x] **Step 6: Commit Task 1**
 
 ```bash
 git add tldw_Server_API/tests/Services/test_worker_lifecycle_ownership_matrix.py \
@@ -208,7 +208,7 @@ git commit -m "test: document worker lifecycle ownership"
 - Modify: `tldw_Server_API/tests/Services/test_main_lifecycle_contract.py`
 - Modify: `tldw_Server_API/tests/Services/test_worker_lifecycle_ownership_matrix.py`
 
-- [ ] **Step 1: Write failing tests for cleanup direct-stop removal**
+- [x] **Step 1: Write failing tests for cleanup direct-stop removal**
 
 Change or add tests that assert `shutdown_pre_worker_cleanup` no longer directly cancels or stops registry-owned worker handles:
 
@@ -265,7 +265,7 @@ Keep or add a separate test proving finalizers still run:
 assert reset_calls == ["cleanup", "storage", "auth"]
 ```
 
-- [ ] **Step 2: Run tests and verify the new deletion expectation fails**
+- [x] **Step 2: Run tests and verify the new deletion expectation fails**
 
 Run:
 
@@ -275,7 +275,7 @@ python -m pytest tldw_Server_API/tests/Services/test_shutdown_pre_worker_cleanup
 
 Expected before implementation: at least one failure showing the helper still performs a direct stop or returns obsolete handles.
 
-- [ ] **Step 3: Remove direct worker stop responsibility from `shutdown_pre_worker_cleanup.py`**
+- [x] **Step 3: Remove direct worker stop responsibility from `shutdown_pre_worker_cleanup.py`**
 
 Keep:
 
@@ -293,7 +293,7 @@ Remove or bypass:
 
 Only keep a direct stop path if the ownership matrix marks that worker as not registry-owned.
 
-- [ ] **Step 4: Stop passing cleanup worker handles once consumers are gone**
+- [x] **Step 4: Stop passing cleanup worker handles once consumers are gone**
 
 After tests prove finalizers no longer need worker handles, update:
 
@@ -303,7 +303,7 @@ After tests prove finalizers no longer need worker handles, update:
 
 Do not remove a field until `rg` shows no active shutdown consumer besides tests and startup return compatibility.
 
-- [ ] **Step 5: Run cleanup shutdown and lifecycle contract tests**
+- [x] **Step 5: Run cleanup shutdown and lifecycle contract tests**
 
 Run:
 
@@ -318,7 +318,7 @@ python -m pytest \
 
 Expected: pass.
 
-- [ ] **Step 6: Commit Task 2**
+- [x] **Step 6: Commit Task 2**
 
 ```bash
 git add tldw_Server_API/app/services/shutdown_pre_worker_cleanup.py \
@@ -349,7 +349,7 @@ git commit -m "refactor: remove legacy cleanup worker stops"
 - Modify: `tldw_Server_API/tests/Services/test_startup_auxiliary_services.py`
 - Modify: `tldw_Server_API/tests/Services/test_worker_lifecycle_ownership_matrix.py`
 
-- [ ] **Step 1: Write failing tests for claims/compactor/WebSub/usage direct-stop removal**
+- [x] **Step 1: Write failing tests for claims/compactor/WebSub/usage direct-stop removal**
 
 Add tests that pass these workers as already stopped through background registry:
 
@@ -370,7 +370,7 @@ assert handles.usage_task is None
 assert handles.llm_usage_task is None
 ```
 
-- [ ] **Step 2: Run targeted shutdown tests and verify failures**
+- [x] **Step 2: Run targeted shutdown tests and verify failures**
 
 Run:
 
@@ -385,7 +385,7 @@ python -m pytest \
 
 Expected before implementation: failures for legacy direct-stop behavior that still runs without registry ownership suppression.
 
-- [ ] **Step 3: Remove direct-stop calls for registry-owned custom background workers**
+- [x] **Step 3: Remove direct-stop calls for registry-owned custom background workers**
 
 Implementation targets:
 
@@ -396,7 +396,7 @@ Implementation targets:
 
 Keep unrelated shutdown behavior for workers not yet proven registry-owned.
 
-- [ ] **Step 4: Remove obsolete runtime fields in a second pass**
+- [x] **Step 4: Remove obsolete runtime fields in a second pass**
 
 After helper signatures no longer use the handles, remove corresponding `LifespanWorkerRuntimeState` fields and startup-tail handle pass-through only when `rg` proves they are no longer read by active shutdown:
 
@@ -407,7 +407,7 @@ rg -n "claims_task|embeddings_compactor_task|websub_renewal_task|usage_task|llm_
 
 Do not remove fields still needed for startup tests, diagnostics, or issue closeout until the consuming test is updated to behavior-based assertions.
 
-- [ ] **Step 5: Run custom-worker focused tests**
+- [x] **Step 5: Run custom-worker focused tests**
 
 Run:
 
@@ -426,7 +426,7 @@ python -m pytest \
 
 Expected: pass.
 
-- [ ] **Step 6: Commit Task 3**
+- [x] **Step 6: Commit Task 3**
 
 ```bash
 git add tldw_Server_API/app/services/shutdown_post_worker_services.py \
@@ -456,7 +456,7 @@ git commit -m "refactor: remove legacy custom worker stops"
 - Modify: `tldw_Server_API/tests/Services/test_shutdown_telemetry_services.py`
 - Modify: `tldw_Server_API/tests/Services/test_worker_lifecycle_ownership_matrix.py`
 
-- [ ] **Step 1: Add scheduler rows to the ownership matrix**
+- [x] **Step 1: Add scheduler rows to the ownership matrix**
 
 Rows should cover:
 
@@ -469,7 +469,7 @@ Rows should cover:
 - `connectors_sync_sched_task`
 - maintenance scheduler task names currently registered in `startup_maintenance_schedulers.py`
 
-- [ ] **Step 2: Write failing tests for duplicate scheduler stop removal**
+- [x] **Step 2: Write failing tests for duplicate scheduler stop removal**
 
 In `test_shutdown_recurring_schedulers.py` and related shutdown tests, prove registry callback-owned schedulers are not sent through duplicate direct-stop helpers after `background_worker_shutdown` has already stopped them.
 
@@ -485,7 +485,7 @@ await run_shutdown_post_worker_services(
 assert stop_calls == []
 ```
 
-- [ ] **Step 3: Decide whether `register_scheduler(...)` is needed**
+- [x] **Step 3: Decide whether `register_scheduler(...)` is needed**
 
 Before implementation, inspect duplication in recurring and maintenance scheduler registration.
 
@@ -495,7 +495,7 @@ Use this decision rule:
 - If at least three registrations repeat the same task/callback/rollback pattern, add a small helper in `lifecycle_workers.py` or a scheduler startup helper module.
 - Do not add a new registry class.
 
-- [ ] **Step 4: Remove duplicate scheduler direct-stop plumbing**
+- [x] **Step 4: Remove duplicate scheduler direct-stop plumbing**
 
 For callback-owned recurring schedulers, prefer registry callback ownership. Remove or bypass direct stop calls in:
 
@@ -505,7 +505,7 @@ For callback-owned recurring schedulers, prefer registry callback ownership. Rem
 
 Keep final cleanup behavior that is not a scheduler task stop.
 
-- [ ] **Step 5: Run scheduler tests**
+- [x] **Step 5: Run scheduler tests**
 
 Run:
 
@@ -522,7 +522,7 @@ python -m pytest \
 
 Expected: pass.
 
-- [ ] **Step 6: Commit Task 4**
+- [x] **Step 6: Commit Task 4**
 
 ```bash
 git add tldw_Server_API/app/services/startup_recurring_schedulers.py \
@@ -546,7 +546,7 @@ git commit -m "refactor: consolidate scheduler shutdown ownership"
 - Modify: behavior tests that asserted implementation detail handles
 - Modify: `tldw_Server_API/tests/Services/test_worker_lifecycle_ownership_matrix.py`
 
-- [ ] **Step 1: Audit remaining runtime-state fields**
+- [x] **Step 1: Audit remaining runtime-state fields**
 
 Run:
 
@@ -562,7 +562,7 @@ Mark each field as:
 - diagnostics only
 - removable
 
-- [ ] **Step 2: Write tests that assert behavior instead of handle plumbing**
+- [x] **Step 2: Write tests that assert behavior instead of handle plumbing**
 
 Where tests currently assert specific handle pass-through, replace with:
 
@@ -571,7 +571,7 @@ Where tests currently assert specific handle pass-through, replace with:
 - finalizer still ran
 - direct-stop helper was not called
 
-- [ ] **Step 3: Remove removable fields and dataclass members**
+- [x] **Step 3: Remove removable fields and dataclass members**
 
 Remove fields only when Step 1 marks them removable and tests no longer depend on them.
 
@@ -582,7 +582,7 @@ Likely targets after Tasks 2-4:
 - recurring scheduler direct-stop handles
 - maintenance scheduler direct-stop handles
 
-- [ ] **Step 4: Preserve documented diagnostics**
+- [x] **Step 4: Preserve documented diagnostics**
 
 Keep:
 
@@ -591,7 +591,7 @@ Keep:
 
 Do not remove stopped-name state until all duplicate fallback logic has been removed or a test proves it is only diagnostic.
 
-- [ ] **Step 5: Run lifecycle service test set**
+- [x] **Step 5: Run lifecycle service test set**
 
 Run:
 
@@ -607,7 +607,7 @@ python -m pytest \
 
 Expected: pass.
 
-- [ ] **Step 6: Commit Task 5**
+- [x] **Step 6: Commit Task 5**
 
 ```bash
 git add tldw_Server_API/app/services tldw_Server_API/tests/Services
@@ -622,7 +622,7 @@ git commit -m "refactor: prune legacy lifecycle handle plumbing"
 - Modify: `Docs/superpowers/plans/2026-05-03-worker-lifecycle-deprecated-code-removal-implementation-plan.md` only for checklist status if this plan is used as execution tracker
 - GitHub issue: `https://github.com/rmusser01/tldw_server/issues/1114`
 
-- [ ] **Step 1: Run focused lifecycle tests**
+- [x] **Step 1: Run focused lifecycle tests**
 
 Run:
 
@@ -645,7 +645,7 @@ python -m pytest \
 
 Expected: pass.
 
-- [ ] **Step 2: Run lint and security checks on touched Python files**
+- [x] **Step 2: Run lint and security checks on touched Python files**
 
 Run:
 
@@ -661,7 +661,7 @@ Expected:
 - Bandit JSON has no new findings in touched production files.
 - `git diff --check` passes.
 
-- [ ] **Step 3: Update issue #1114 with final migration/deprecation table**
+- [x] **Step 3: Update issue #1114 with final migration/deprecation table**
 
 Use the ownership matrix to post a concise closeout comment:
 
@@ -678,7 +678,7 @@ The comment should include:
 - retained compatibility state, if any
 - follow-up issue link, if any
 
-- [ ] **Step 4: Commit final docs or closeout updates**
+- [x] **Step 4: Commit final docs or closeout updates**
 
 If any docs or plan checklist statuses changed:
 
@@ -688,7 +688,7 @@ git add Docs/superpowers/specs/2026-05-03-worker-lifecycle-deprecated-code-remov
 git commit -m "docs: close worker lifecycle cleanup plan"
 ```
 
-- [ ] **Step 5: Open or update PR**
+- [x] **Step 5: Open or update PR**
 
 ```bash
 git push -u origin codex/worker-lifecycle-cleanup-1114

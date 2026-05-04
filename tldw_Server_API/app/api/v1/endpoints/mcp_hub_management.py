@@ -2657,7 +2657,16 @@ async def list_governance_audit_findings(
     )
 
 
-@router.get("/events/stream")
+@router.get(
+    "/events/stream",
+    response_class=StreamingResponse,
+    responses={
+        200: {
+            "description": "MCP Hub governance event stream.",
+            "content": {"text/event-stream": {}},
+        },
+    },
+)
 async def stream_mcp_hub_events(
     request: Request,
     after_event_id: str | None = Query(

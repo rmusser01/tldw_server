@@ -16,14 +16,10 @@ from loguru import logger
 class CleanupTimedShutdownHandles:
     """Updated handles produced by the cleanup/timed-segment shutdown tail."""
 
-    authnz_scheduler_started: bool
-
 
 async def shutdown_cleanup_timed_segments(
     *,
     app: Any,
-    authnz_scheduler_started: bool,
-    coordinated_legacy_component_names: set[str],
     db_pool: Any | None,
     session_manager: Any | None,
     heavy_startup_handles: Any | None,
@@ -70,15 +66,11 @@ async def shutdown_cleanup_timed_segments(
         )
 
     with timed_shutdown_segment(app, "telemetry_shutdown"):
-        authnz_scheduler_started = await _shutdown_telemetry_services(
-            authnz_scheduler_started=authnz_scheduler_started,
-            coordinated_legacy_component_names=coordinated_legacy_component_names,
+        await _shutdown_telemetry_services(
             import_exceptions=import_exceptions,
         )
 
-    return CleanupTimedShutdownHandles(
-        authnz_scheduler_started=authnz_scheduler_started,
-    )
+    return CleanupTimedShutdownHandles()
 
 
 async def _shutdown_auth_db_pool(**kwargs) -> None:
@@ -123,7 +115,7 @@ async def _shutdown_cpu_pools(**kwargs) -> None:
     await shutdown_cpu_pools(**kwargs)
 
 
-async def _shutdown_telemetry_services(**kwargs) -> bool:
+async def _shutdown_telemetry_services(**kwargs) -> None:
     from tldw_Server_API.app.services.shutdown_telemetry_services import (
         shutdown_telemetry_services,
     )

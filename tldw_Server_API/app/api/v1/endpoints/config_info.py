@@ -14,7 +14,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any, Optional
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 from loguru import logger
 from pydantic import BaseModel, Field
@@ -361,7 +361,27 @@ async def get_jobs_config_info():
     }
 
 
-@router.get("/config/quickstart")
+@router.get(
+    "/config/quickstart",
+    response_class=HTMLResponse,
+    responses={
+        status.HTTP_200_OK: {
+            "description": "Fallback quickstart HTML page when redirect resolution fails.",
+            "content": {
+                "text/html": {},
+            },
+        },
+        status.HTTP_307_TEMPORARY_REDIRECT: {
+            "description": "Redirect to the configured quickstart destination.",
+            "headers": {
+                "location": {
+                    "description": "Quickstart destination URL.",
+                    "schema": {"type": "string"},
+                },
+            },
+        },
+    },
+)
 async def get_quickstart_redirect():
     """
     Redirect to a Quickstart URL defined in config.txt or environment.

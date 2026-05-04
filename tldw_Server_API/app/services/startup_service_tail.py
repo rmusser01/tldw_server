@@ -32,30 +32,12 @@ class StartupServiceTailHandles:
     workflows_maint_task: Any | None = None
     jobs_integrity_stop_event: Any | None = None
     jobs_integrity_task: Any | None = None
-    claims_task: Any | None = None
     claims_alerts_task: Any | None = None
     claims_review_metrics_task: Any | None = None
-    usage_task: Any | None = None
-    llm_usage_task: Any | None = None
     tts_history_cleanup_task: Any | None = None
     tts_history_cleanup_stop_event: Any | None = None
-    quality_eval_task: Any | None = None
-    outputs_purge_task: Any | None = None
-    kanban_activity_cleanup_task: Any | None = None
-    ingestion_sources_cleanup_task: Any | None = None
-    kanban_purge_task: Any | None = None
-    files_export_gc_task: Any | None = None
-    notifications_prune_task: Any | None = None
-    jobs_prune_task: Any | None = None
     connectors_jobs_task: Any | None = None
     connectors_jobs_stop_event: Any | None = None
-    authnz_scheduler_started: bool = False
-    workflows_sched_task: Any | None = None
-    reading_digest_sched_task: Any | None = None
-    admin_backup_sched_task: Any | None = None
-    companion_reflection_sched_task: Any | None = None
-    reminders_sched_task: Any | None = None
-    connectors_sync_sched_task: Any | None = None
 
 
 async def initialize_startup_service_tail(
@@ -84,7 +66,7 @@ async def initialize_startup_service_tail(
         worker_inventory=worker_inventory,
         register_owned_job_poller=register_owned_job_poller,
     )
-    recurring_scheduler_handles = await _finalize_startup_tail(
+    await _finalize_startup_tail(
         app=app,
         owned_job_pollers=owned_job_pollers,
         startup_worker_group_handles=startup_worker_group_handles,
@@ -122,30 +104,12 @@ async def initialize_startup_service_tail(
         workflows_maint_task=startup_service_group_handles.workflows_maint_task,
         jobs_integrity_stop_event=startup_service_group_handles.jobs_integrity_stop_event,
         jobs_integrity_task=startup_service_group_handles.jobs_integrity_task,
-        claims_task=startup_service_group_handles.claims_task,
         claims_alerts_task=startup_service_group_handles.claims_alerts_task,
         claims_review_metrics_task=startup_service_group_handles.claims_review_metrics_task,
-        usage_task=startup_service_group_handles.usage_task,
-        llm_usage_task=startup_service_group_handles.llm_usage_task,
         tts_history_cleanup_task=startup_service_group_handles.tts_history_cleanup_task,
         tts_history_cleanup_stop_event=startup_service_group_handles.tts_history_cleanup_stop_event,
-        quality_eval_task=startup_service_group_handles.quality_eval_task,
-        outputs_purge_task=startup_service_group_handles.outputs_purge_task,
-        kanban_activity_cleanup_task=startup_service_group_handles.kanban_activity_cleanup_task,
-        ingestion_sources_cleanup_task=startup_service_group_handles.ingestion_sources_cleanup_task,
-        kanban_purge_task=startup_service_group_handles.kanban_purge_task,
-        files_export_gc_task=startup_service_group_handles.files_export_gc_task,
-        notifications_prune_task=startup_service_group_handles.notifications_prune_task,
-        jobs_prune_task=startup_service_group_handles.jobs_prune_task,
         connectors_jobs_task=startup_service_group_handles.connectors_jobs_task,
         connectors_jobs_stop_event=startup_service_group_handles.connectors_jobs_stop_event,
-        authnz_scheduler_started=recurring_scheduler_handles.authnz_scheduler_started,
-        workflows_sched_task=recurring_scheduler_handles.workflows_sched_task,
-        reading_digest_sched_task=recurring_scheduler_handles.reading_digest_sched_task,
-        admin_backup_sched_task=recurring_scheduler_handles.admin_backup_sched_task,
-        companion_reflection_sched_task=recurring_scheduler_handles.companion_reflection_sched_task,
-        reminders_sched_task=recurring_scheduler_handles.reminders_sched_task,
-        connectors_sync_sched_task=recurring_scheduler_handles.connectors_sync_sched_task,
     )
 
 

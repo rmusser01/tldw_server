@@ -82,7 +82,18 @@ async def run_usage_aggregate(day: str | None = Query(None, description="YYYY-MM
         ) from exc
 
 
-@router.get("/usage/daily/export.csv", response_class=PlainTextResponse)
+@router.get(
+    "/usage/daily/export.csv",
+    response_class=PlainTextResponse,
+    responses={
+        200: {
+            "description": "Daily usage export as CSV.",
+            "content": {
+                "text/csv": {},
+            },
+        },
+    },
+)
 async def export_usage_daily_csv(
     user_id: int | None = None,
     start: str | None = Query(None, description="YYYY-MM-DD inclusive"),
@@ -111,7 +122,18 @@ async def export_usage_daily_csv(
     return resp
 
 
-@router.get("/usage/top/export.csv", response_class=PlainTextResponse)
+@router.get(
+    "/usage/top/export.csv",
+    response_class=PlainTextResponse,
+    responses={
+        200: {
+            "description": "Top usage export as CSV.",
+            "content": {
+                "text/csv": {},
+            },
+        },
+    },
+)
 async def export_usage_top_csv(
     start: str | None = Query(None, description="YYYY-MM-DD inclusive"),
     end: str | None = Query(None, description="YYYY-MM-DD inclusive"),
@@ -245,7 +267,18 @@ async def get_llm_top_spenders(
     )
 
 
-@router.get("/llm-usage/export.csv", response_class=PlainTextResponse)
+@router.get(
+    "/llm-usage/export.csv",
+    response_class=PlainTextResponse,
+    responses={
+        200: {
+            "description": "LLM usage export as CSV.",
+            "content": {
+                "text/csv": {},
+            },
+        },
+    },
+)
 async def export_llm_usage_csv(
     user_id: int | None = None,
     provider: str | None = None,

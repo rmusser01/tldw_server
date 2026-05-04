@@ -13,143 +13,53 @@ from loguru import logger
 
 @dataclass
 class PreWorkerCleanupHandles:
-    """Updated cleanup-related handles after pre-worker shutdown processing."""
-
-    cleanup_task: Any | None = None
-    chatbooks_cleanup_task: Any | None = None
-    chatbooks_cleanup_stop_event: Any | None = None
-    storage_cleanup_service: Any | None = None
+    """Pre-worker cleanup results after finalizers have run."""
 
 
 async def shutdown_pre_worker_cleanup(
     *,
     app: Any,
-    cleanup_task: Any | None,
-    chatbooks_cleanup_task: Any | None,
-    chatbooks_cleanup_stop_event: Any | None,
-    storage_cleanup_service: Any | None,
-    coordinated_legacy_component_names: set[str],
     guard_exceptions: tuple[type[BaseException], ...],
-    stopped_background_worker_names: set[str] | None = None,
 ) -> PreWorkerCleanupHandles:
     """Run the cleanup/reset shutdown slice that precedes the worker helpers."""
-    stopped_background_worker_names = stopped_background_worker_names or set()
-    cleanup_task_for_shutdown = _unless_background_stopped(
-        "ephemeral_cleanup_task",
-        cleanup_task,
-        stopped_background_worker_names,
-    )
     await _shutdown_pre_worker_cleanup(
         app=app,
-        cleanup_task=cleanup_task_for_shutdown,
-        chatbooks_cleanup_task=chatbooks_cleanup_task,
-        chatbooks_cleanup_stop_event=chatbooks_cleanup_stop_event,
-        storage_cleanup_service=storage_cleanup_service,
-        coordinated_legacy_component_names=coordinated_legacy_component_names,
         guard_exceptions=guard_exceptions,
-        stopped_background_worker_names=stopped_background_worker_names,
     )
-    return PreWorkerCleanupHandles(
-        cleanup_task=cleanup_task_for_shutdown,
-        chatbooks_cleanup_task=chatbooks_cleanup_task,
-        chatbooks_cleanup_stop_event=chatbooks_cleanup_stop_event,
-        storage_cleanup_service=storage_cleanup_service,
-    )
+    return PreWorkerCleanupHandles()
 
 
 async def run_shutdown_pre_worker_cleanup(
     *,
     app: Any,
-    cleanup_task: Any | None,
-    chatbooks_cleanup_task: Any | None,
-    chatbooks_cleanup_stop_event: Any | None,
-    storage_cleanup_service: Any | None,
-    coordinated_legacy_component_names: set[str],
     guard_exceptions: tuple[type[BaseException], ...],
-    stopped_background_worker_names: set[str] | None = None,
 ) -> PreWorkerCleanupHandles:
     """Run pre-worker cleanup with main-lifespan fallback behavior."""
-    stopped_background_worker_names = stopped_background_worker_names or set()
     try:
         return await shutdown_pre_worker_cleanup(
             app=app,
-            cleanup_task=cleanup_task,
-            chatbooks_cleanup_task=chatbooks_cleanup_task,
-            chatbooks_cleanup_stop_event=chatbooks_cleanup_stop_event,
-            storage_cleanup_service=storage_cleanup_service,
-            coordinated_legacy_component_names=coordinated_legacy_component_names,
             guard_exceptions=guard_exceptions,
-            stopped_background_worker_names=stopped_background_worker_names,
         )
     except guard_exceptions as exc:
         logger.debug(f"Pre-worker cleanup skipped: {exc}")
-        return PreWorkerCleanupHandles(
-            cleanup_task=_unless_background_stopped(
-                "ephemeral_cleanup_task",
-                cleanup_task,
-                stopped_background_worker_names,
-            ),
-            chatbooks_cleanup_task=chatbooks_cleanup_task,
-            chatbooks_cleanup_stop_event=chatbooks_cleanup_stop_event,
-            storage_cleanup_service=storage_cleanup_service,
-        )
+        return PreWorkerCleanupHandles()
 
 
 async def _shutdown_pre_worker_cleanup(
     *,
     app: Any,
-    cleanup_task: Any | None,
-    chatbooks_cleanup_task: Any | None,
-    chatbooks_cleanup_stop_event: Any | None,
-    storage_cleanup_service: Any | None,
-    coordinated_legacy_component_names: set[str],
     guard_exceptions: tuple[type[BaseException], ...],
-    stopped_background_worker_names: set[str] | None = None,
 ) -> None:
-    stopped_background_worker_names = stopped_background_worker_names or set()
     await _cancel_deferred_startup_task(
         app=app,
         guard_exceptions=guard_exceptions,
     )
-    if cleanup_task:
-        cleanup_task.cancel()
-    if (
-        "chatbooks_cleanup" not in coordinated_legacy_component_names
-        and "chatbooks_cleanup" not in stopped_background_worker_names
-    ):
-        if chatbooks_cleanup_stop_event:
-            chatbooks_cleanup_stop_event.set()
-        if chatbooks_cleanup_task:
-            chatbooks_cleanup_task.cancel()
-    storage_cleanup_stopped_by_background = "storage_cleanup_service" in stopped_background_worker_names
-    if (
-        storage_cleanup_service
-        and "storage_cleanup_service" not in coordinated_legacy_component_names
-        and not storage_cleanup_stopped_by_background
-    ):
-        try:
-            await storage_cleanup_service.stop()
-            logger.info("Storage cleanup worker stopped")
-        except guard_exceptions:
-            pass
-    if "storage_cleanup_service" not in coordinated_legacy_component_names:
-        await _reset_storage_service_singletons(
-            guard_exceptions=guard_exceptions,
-        )
+    await _reset_storage_service_singletons(
+        guard_exceptions=guard_exceptions,
+    )
     await _reset_authnz_rate_limiter_singleton(
         guard_exceptions=guard_exceptions,
     )
-
-
-def _unless_background_stopped(
-    name: str,
-    value: Any | None,
-    stopped_background_worker_names: set[str],
-) -> Any | None:
-    """Suppress legacy handles already stopped by the background-worker registry."""
-    if name in stopped_background_worker_names:
-        return None
-    return value
 
 
 async def _cancel_deferred_startup_task(
