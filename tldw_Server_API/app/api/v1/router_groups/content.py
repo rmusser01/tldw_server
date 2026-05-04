@@ -584,17 +584,16 @@ def iter_content_router_specs() -> Iterable[RouterSpec]:
     except Exception as e:  # noqa: BLE001
         logger.debug(f"Skipping reading_highlights router: {e}")
 
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.outputs import router as outputs_router
-
-        specs.append(RouterSpec(
-            router=outputs_router,
+    append_imported_router_spec(
+        specs,
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.outputs",
+            log_name="outputs",
             prefix=f"{API_V1_PREFIX}",
             tags=("outputs",),
             route_key="outputs",
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping outputs router: {e}")
+        ),
+    )
 
     # Notes graph routes must be registered before generic notes routes so
     # /graph is not shadowed by /{note_id}.
