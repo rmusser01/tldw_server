@@ -12,7 +12,9 @@ from loguru import logger
 from tldw_Server_API.app.core.DB_Management.codegraph.repository import CodeGraphRepository
 
 from .config import CodeGraphSettings
+from .extractors.python_extractor import PythonAstExtractor
 from .language_registry import CodeGraphLanguageRegistry
+from .models import ExtractionResult
 
 
 @dataclass(frozen=True)
@@ -51,6 +53,7 @@ class CodeGraphIndexer:
         self._settings = settings
         self._registry = registry
         self._monotonic = monotonic or time.monotonic
+        self._extractors = {"python": PythonAstExtractor()}
 
     def index_workspace(
         self,
@@ -152,12 +155,15 @@ class CodeGraphIndexer:
                     counters["files_too_large"] += 1
                     counters["files_skipped"] += 1
                     continue
-                if self._is_binary(candidate.path):
+                source = candidate.path.read_bytes()
+                if self._is_binary(source):
                     counters["files_skipped"] += 1
                     continue
 
-                content_hash = self._hash_file(candidate.path)
-                repository.prepare_file_replacement(candidate.relative_path)
+                content_hash = self._hash_bytes(source)
+                extraction = self._extract(candidate, workspace_key, source)
+                if extraction.errors:
+                    counters["errors"] += len(extraction.errors)
                 repository.upsert_file(
                     path=candidate.relative_path,
                     language=candidate.language_id,
@@ -165,7 +171,14 @@ class CodeGraphIndexer:
                     content_hash=content_hash,
                     modified_at=candidate.modified_at,
                     status="indexed",
-                    errors=[],
+                    errors=extraction.errors,
+                    node_count=len(extraction.nodes),
+                )
+                repository.replace_file_graph(
+                    path=candidate.relative_path,
+                    nodes=extraction.nodes,
+                    edges=extraction.edges,
+                    unresolved_refs=extraction.unresolved_refs,
                 )
                 indexed_paths.add(candidate.relative_path)
                 counters["files_indexed"] += 1
@@ -260,18 +273,23 @@ class CodeGraphIndexer:
                         return _DiscoveryResult(candidates=candidates, status="index_too_large_for_foreground")
         return _DiscoveryResult(candidates=candidates)
 
-    @staticmethod
-    def _hash_file(path: Path) -> str:
-        digest = hashlib.sha256()
-        with path.open("rb") as handle:
-            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-                digest.update(chunk)
-        return digest.hexdigest()
+    def _extract(self, candidate: _Candidate, workspace_key: str, source: bytes) -> ExtractionResult:
+        extractor = self._extractors.get(candidate.language_id)
+        if extractor is None:
+            return ExtractionResult()
+        return extractor.extract(
+            workspace_key=workspace_key,
+            file_path=candidate.relative_path,
+            source=source,
+        )
 
     @staticmethod
-    def _is_binary(path: Path) -> bool:
-        with path.open("rb") as handle:
-            return b"\x00" in handle.read(4096)
+    def _hash_bytes(source: bytes) -> str:
+        return hashlib.sha256(source).hexdigest()
+
+    @staticmethod
+    def _is_binary(source: bytes) -> bool:
+        return b"\x00" in source[:4096]
 
 
 def _empty_counters() -> dict[str, int]:

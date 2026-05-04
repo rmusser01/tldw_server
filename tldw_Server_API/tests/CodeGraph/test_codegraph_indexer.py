@@ -37,6 +37,70 @@ def test_indexer_indexes_supported_file_inventory_and_skips_excluded_dirs(tmp_pa
     assert repo.list_files(limit=10)[0].path == "app.py"
 
 
+def test_indexer_extracts_python_graph_rows_during_index(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "app.py").write_text(
+        """
+class Greeter:
+    def greet(self, name):
+        return helper(name)
+
+
+def helper(value):
+    return value.upper()
+""",
+        encoding="utf-8",
+    )
+    repo = CodeGraphRepository(tmp_path / "codegraph.db")
+    indexer = CodeGraphIndexer(settings=CodeGraphSettings.from_mapping({}), registry=CodeGraphLanguageRegistry())
+
+    result = indexer.index_workspace(
+        workspace_root=workspace,
+        workspace_key="ws_test",
+        repository=repo,
+        force=True,
+        languages=None,
+        max_files=10,
+    )
+
+    helper = repo.find_node_by_symbol("helper")
+
+    assert result.status == "complete"
+    assert repo.counts()["nodes"] >= 4
+    assert repo.counts()["edges"] == 1
+    assert repo.list_files(limit=10)[0].node_count >= 4
+    assert helper is not None
+    assert [relationship["source"]["qualified_name"] for relationship in repo.list_callers(helper.id, limit=10)] == [
+        "Greeter.greet"
+    ]
+
+
+def test_indexer_keeps_javascript_typescript_as_inventory_only_until_extractor_slice(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "app.py").write_text("def helper():\n    return 1\n", encoding="utf-8")
+    (workspace / "ui.ts").write_text("export function helper() { return 1; }\n", encoding="utf-8")
+    repo = CodeGraphRepository(tmp_path / "codegraph.db")
+    indexer = CodeGraphIndexer(settings=CodeGraphSettings.from_mapping({}), registry=CodeGraphLanguageRegistry())
+
+    result = indexer.index_workspace(
+        workspace_root=workspace,
+        workspace_key="ws_test",
+        repository=repo,
+        force=True,
+        languages=None,
+        max_files=10,
+    )
+
+    files = {item.path: item for item in repo.list_files(limit=10)}
+
+    assert result.status == "complete"
+    assert files["app.py"].node_count > 0
+    assert files["ui.ts"].node_count == 0
+    assert [node.file_path for node in repo.search_nodes("helper", limit=10)] == ["app.py"]
+
+
 def test_indexer_rejects_over_limit_foreground_workspace(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()

@@ -10,7 +10,13 @@ from typing import Any
 
 from loguru import logger
 
-from tldw_Server_API.app.core.CodeGraph.models import IndexedFile, IndexRunSummary
+from tldw_Server_API.app.core.CodeGraph.models import (
+    CodeGraphEdge,
+    CodeGraphNode,
+    CodeGraphUnresolvedRef,
+    IndexedFile,
+    IndexRunSummary,
+)
 from tldw_Server_API.app.core.DB_Management.sqlite_policy import configure_sqlite_connection
 
 
@@ -186,6 +192,185 @@ class CodeGraphRepository:
             self._prepare_file_replacement(conn, path)
             conn.commit()
 
+    def replace_file_graph(
+        self,
+        *,
+        path: str,
+        nodes: list[CodeGraphNode] | tuple[CodeGraphNode, ...],
+        edges: list[CodeGraphEdge] | tuple[CodeGraphEdge, ...],
+        unresolved_refs: list[CodeGraphUnresolvedRef] | tuple[CodeGraphUnresolvedRef, ...],
+    ) -> None:
+        if Path(path).is_absolute():
+            raise ValueError("file path must be workspace-relative")
+        with self._connection() as conn:
+            self._prepare_file_replacement(conn, path)
+            _insert_nodes(conn, nodes)
+            _insert_edges(conn, edges)
+            _insert_unresolved_refs(conn, unresolved_refs)
+            _delete_dangling_edges(conn)
+            conn.commit()
+
+    def search_nodes(
+        self,
+        query: str,
+        *,
+        limit: int = 10,
+        kind: str | None = None,
+        language: str | None = None,
+    ) -> list[CodeGraphNode]:
+        text = query.strip()
+        if not text:
+            return []
+
+        filters = [
+            """
+            (
+                lower(name) = lower(?)
+                OR lower(qualified_name) = lower(?)
+                OR name LIKE ? ESCAPE '\\'
+                OR qualified_name LIKE ? ESCAPE '\\'
+                OR signature LIKE ? ESCAPE '\\'
+                OR docstring LIKE ? ESCAPE '\\'
+            )
+            """
+        ]
+        like = f"%{_escape_like_literal(text)}%"
+        params: list[Any] = [text, text, like, like, like, like]
+        if kind:
+            filters.append("kind = ?")
+            params.append(kind)
+        if language:
+            filters.append("language = ?")
+            params.append(language)
+
+        params.extend([text, text, f"{_escape_like_literal(text)}%", max(1, int(limit))])
+        with self._connection() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT *
+                FROM nodes
+                WHERE {' AND '.join(filters)}
+                ORDER BY
+                    CASE
+                        WHEN lower(qualified_name) = lower(?) THEN 0
+                        WHEN lower(name) = lower(?) THEN 1
+                        WHEN name LIKE ? ESCAPE '\\' THEN 2
+                        ELSE 3
+                    END,
+                    file_path,
+                    COALESCE(start_line, 0),
+                    qualified_name
+                LIMIT ?
+                """,
+                params,
+            ).fetchall()
+        return [_node_from_row(row) for row in rows]
+
+    def get_node(self, node_id: str) -> CodeGraphNode | None:
+        with self._connection() as conn:
+            row = conn.execute("SELECT * FROM nodes WHERE id = ?", (node_id,)).fetchone()
+        return _node_from_row(row) if row else None
+
+    def find_node_by_symbol(self, symbol: str) -> CodeGraphNode | None:
+        text = symbol.strip()
+        if not text:
+            return None
+        with self._connection() as conn:
+            row = conn.execute(
+                """
+                SELECT *
+                FROM nodes
+                WHERE lower(qualified_name) = lower(?) OR lower(name) = lower(?)
+                ORDER BY
+                    CASE WHEN lower(qualified_name) = lower(?) THEN 0 ELSE 1 END,
+                    file_path,
+                    COALESCE(start_line, 0)
+                LIMIT 1
+                """,
+                (text, text, text),
+            ).fetchone()
+        return _node_from_row(row) if row else None
+
+    def list_callers(self, node_id: str, *, limit: int = 10) -> list[dict[str, Any]]:
+        with self._connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                    e.id AS edge_id,
+                    e.kind AS edge_kind,
+                    e.file_path AS edge_file_path,
+                    e.line AS edge_line,
+                    e.column AS edge_column,
+                    e.metadata AS edge_metadata,
+                    e.provenance AS edge_provenance,
+                    source_node.*,
+                    target_node.id AS target_id,
+                    target_node.identity_key AS target_identity_key,
+                    target_node.kind AS target_kind,
+                    target_node.name AS target_name,
+                    target_node.qualified_name AS target_qualified_name,
+                    target_node.file_path AS target_file_path,
+                    target_node.language AS target_language,
+                    target_node.start_line AS target_start_line,
+                    target_node.end_line AS target_end_line,
+                    target_node.start_column AS target_start_column,
+                    target_node.end_column AS target_end_column,
+                    target_node.signature AS target_signature,
+                    target_node.docstring AS target_docstring,
+                    target_node.visibility AS target_visibility,
+                    target_node.flags AS target_flags,
+                    target_node.metadata AS target_metadata
+                FROM edges e
+                JOIN nodes source_node ON source_node.id = e.source
+                JOIN nodes target_node ON target_node.id = e.target
+                WHERE e.target = ?
+                ORDER BY e.file_path, COALESCE(e.line, 0), source_node.qualified_name
+                LIMIT ?
+                """,
+                (node_id, max(1, int(limit))),
+            ).fetchall()
+        return [_relationship_from_joined_row(row) for row in rows]
+
+    def list_callees(self, node_id: str, *, limit: int = 10) -> list[dict[str, Any]]:
+        with self._connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                    e.id AS edge_id,
+                    e.kind AS edge_kind,
+                    e.file_path AS edge_file_path,
+                    e.line AS edge_line,
+                    e.column AS edge_column,
+                    e.metadata AS edge_metadata,
+                    e.provenance AS edge_provenance,
+                    source_node.*,
+                    target_node.id AS target_id,
+                    target_node.identity_key AS target_identity_key,
+                    target_node.kind AS target_kind,
+                    target_node.name AS target_name,
+                    target_node.qualified_name AS target_qualified_name,
+                    target_node.file_path AS target_file_path,
+                    target_node.language AS target_language,
+                    target_node.start_line AS target_start_line,
+                    target_node.end_line AS target_end_line,
+                    target_node.start_column AS target_start_column,
+                    target_node.end_column AS target_end_column,
+                    target_node.signature AS target_signature,
+                    target_node.docstring AS target_docstring,
+                    target_node.visibility AS target_visibility,
+                    target_node.flags AS target_flags,
+                    target_node.metadata AS target_metadata
+                FROM edges e
+                JOIN nodes source_node ON source_node.id = e.source
+                JOIN nodes target_node ON target_node.id = e.target
+                WHERE e.source = ?
+                ORDER BY e.file_path, COALESCE(e.line, 0), target_node.qualified_name
+                LIMIT ?
+                """,
+                (node_id, max(1, int(limit))),
+            ).fetchall()
+        return [_relationship_from_joined_row(row) for row in rows]
+
     def seed_graph_rows_for_test(
         self,
         *,
@@ -284,6 +469,96 @@ def _delete_file_rows(conn: sqlite3.Connection, paths: list[str]) -> None:
     _delete_dangling_edges(conn)
 
 
+def _insert_nodes(
+    conn: sqlite3.Connection,
+    nodes: list[CodeGraphNode] | tuple[CodeGraphNode, ...],
+) -> None:
+    conn.executemany(
+        """
+        INSERT INTO nodes(
+            id, identity_key, kind, name, qualified_name, file_path, language,
+            start_line, end_line, start_column, end_column, signature, docstring,
+            visibility, flags, metadata
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        [
+            (
+                node.id,
+                node.identity_key,
+                node.kind,
+                node.name,
+                node.qualified_name,
+                node.file_path,
+                node.language,
+                node.start_line,
+                node.end_line,
+                node.start_column,
+                node.end_column,
+                node.signature,
+                node.docstring,
+                node.visibility,
+                json.dumps(list(node.flags)),
+                json.dumps(node.metadata, sort_keys=True),
+            )
+            for node in nodes
+        ],
+    )
+
+
+def _insert_edges(
+    conn: sqlite3.Connection,
+    edges: list[CodeGraphEdge] | tuple[CodeGraphEdge, ...],
+) -> None:
+    conn.executemany(
+        """
+        INSERT INTO edges(id, source, target, kind, file_path, line, column, metadata, provenance)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        [
+            (
+                edge.id,
+                edge.source,
+                edge.target,
+                edge.kind,
+                edge.file_path,
+                edge.line,
+                edge.column,
+                json.dumps(edge.metadata, sort_keys=True),
+                edge.provenance,
+            )
+            for edge in edges
+        ],
+    )
+
+
+def _insert_unresolved_refs(
+    conn: sqlite3.Connection,
+    unresolved_refs: list[CodeGraphUnresolvedRef] | tuple[CodeGraphUnresolvedRef, ...],
+) -> None:
+    conn.executemany(
+        """
+        INSERT INTO unresolved_refs(
+            from_node_id, reference_name, reference_kind, file_path, line, column, candidates, language
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        [
+            (
+                ref.from_node_id,
+                ref.reference_name,
+                ref.reference_kind,
+                ref.file_path,
+                ref.line,
+                ref.column,
+                json.dumps(list(ref.candidates)),
+                ref.language,
+            )
+            for ref in unresolved_refs
+        ],
+    )
+
+
 def _escape_like_literal(value: str) -> str:
     return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
@@ -338,6 +613,84 @@ def _indexed_file_from_row(row: sqlite3.Row) -> IndexedFile:
         status=str(row["status"]),
         errors=tuple(json.loads(row["errors"] or "[]")),
     )
+
+
+def _node_from_row(row: sqlite3.Row) -> CodeGraphNode:
+    return CodeGraphNode(
+        id=str(row["id"]),
+        identity_key=str(row["identity_key"]),
+        kind=str(row["kind"]),
+        name=str(row["name"]),
+        qualified_name=str(row["qualified_name"] or row["name"]),
+        file_path=str(row["file_path"]),
+        language=str(row["language"] or ""),
+        start_line=int(row["start_line"]) if row["start_line"] is not None else None,
+        end_line=int(row["end_line"]) if row["end_line"] is not None else None,
+        start_column=int(row["start_column"]) if row["start_column"] is not None else None,
+        end_column=int(row["end_column"]) if row["end_column"] is not None else None,
+        signature=str(row["signature"]) if row["signature"] is not None else None,
+        docstring=str(row["docstring"]) if row["docstring"] is not None else None,
+        visibility=str(row["visibility"]) if row["visibility"] is not None else None,
+        flags=tuple(json.loads(row["flags"] or "[]")),
+        metadata=dict(json.loads(row["metadata"] or "{}")),
+    )
+
+
+def _node_to_dict(node: CodeGraphNode) -> dict[str, Any]:
+    return {
+        "id": node.id,
+        "kind": node.kind,
+        "name": node.name,
+        "qualified_name": node.qualified_name,
+        "file_path": node.file_path,
+        "language": node.language,
+        "start_line": node.start_line,
+        "end_line": node.end_line,
+        "start_column": node.start_column,
+        "end_column": node.end_column,
+        "signature": node.signature,
+        "docstring": node.docstring,
+        "visibility": node.visibility,
+        "flags": list(node.flags),
+        "metadata": dict(node.metadata),
+    }
+
+
+def _target_node_from_joined_row(row: sqlite3.Row) -> CodeGraphNode:
+    return CodeGraphNode(
+        id=str(row["target_id"]),
+        identity_key=str(row["target_identity_key"]),
+        kind=str(row["target_kind"]),
+        name=str(row["target_name"]),
+        qualified_name=str(row["target_qualified_name"] or row["target_name"]),
+        file_path=str(row["target_file_path"]),
+        language=str(row["target_language"] or ""),
+        start_line=int(row["target_start_line"]) if row["target_start_line"] is not None else None,
+        end_line=int(row["target_end_line"]) if row["target_end_line"] is not None else None,
+        start_column=int(row["target_start_column"]) if row["target_start_column"] is not None else None,
+        end_column=int(row["target_end_column"]) if row["target_end_column"] is not None else None,
+        signature=str(row["target_signature"]) if row["target_signature"] is not None else None,
+        docstring=str(row["target_docstring"]) if row["target_docstring"] is not None else None,
+        visibility=str(row["target_visibility"]) if row["target_visibility"] is not None else None,
+        flags=tuple(json.loads(row["target_flags"] or "[]")),
+        metadata=dict(json.loads(row["target_metadata"] or "{}")),
+    )
+
+
+def _relationship_from_joined_row(row: sqlite3.Row) -> dict[str, Any]:
+    source = _node_from_row(row)
+    target = _target_node_from_joined_row(row)
+    return {
+        "id": str(row["edge_id"]),
+        "kind": str(row["edge_kind"]),
+        "file_path": str(row["edge_file_path"]),
+        "line": int(row["edge_line"]) if row["edge_line"] is not None else None,
+        "column": int(row["edge_column"]) if row["edge_column"] is not None else None,
+        "metadata": dict(json.loads(row["edge_metadata"] or "{}")),
+        "provenance": str(row["edge_provenance"]) if row["edge_provenance"] else None,
+        "source": _node_to_dict(source),
+        "target": _node_to_dict(target),
+    }
 
 
 def _index_run_from_row(row: sqlite3.Row) -> IndexRunSummary:

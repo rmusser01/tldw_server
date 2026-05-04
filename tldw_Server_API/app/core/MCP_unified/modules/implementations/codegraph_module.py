@@ -18,7 +18,7 @@ from tldw_Server_API.app.core.CodeGraph.config import CodeGraphSettings
 from tldw_Server_API.app.core.CodeGraph.dependencies import probe_codegraph_dependencies
 from tldw_Server_API.app.core.CodeGraph.indexer import CodeGraphIndexer
 from tldw_Server_API.app.core.CodeGraph.language_registry import CodeGraphLanguageRegistry
-from tldw_Server_API.app.core.CodeGraph.models import IndexedFile, IndexRunSummary, WorkspaceResolution
+from tldw_Server_API.app.core.CodeGraph.models import CodeGraphNode, IndexedFile, IndexRunSummary, WorkspaceResolution
 from tldw_Server_API.app.core.CodeGraph.workspace import CodeGraphWorkspaceResolver, WorkspaceRootResolver
 from tldw_Server_API.app.core.DB_Management.codegraph.repository import CodeGraphRepository
 
@@ -141,7 +141,85 @@ class CodeGraphModule(BaseModule):
         )
         files_tool["inputSchema"]["additionalProperties"] = False
 
-        return [status_tool, index_tool, sync_tool, files_tool]
+        search_tool = create_tool_definition(
+            name="codegraph.search",
+            description="Search indexed CodeGraph symbols for the active workspace.",
+            parameters={
+                "properties": {
+                    "query": {"type": "string"},
+                    "kind": {"type": "string"},
+                    "language": {"type": "string"},
+                    "limit": {"type": "integer"},
+                },
+                "required": ["query"],
+            },
+            metadata={
+                "category": "retrieval",
+                "readOnlyHint": True,
+                "capabilities": ["codegraph.read"],
+                **workspace_metadata,
+            },
+        )
+        search_tool["inputSchema"]["additionalProperties"] = False
+
+        node_tool = create_tool_definition(
+            name="codegraph.node",
+            description="Fetch one indexed CodeGraph symbol by node id or exact symbol name.",
+            parameters={
+                "properties": {
+                    "node_id": {"type": "string"},
+                    "symbol": {"type": "string"},
+                    "include_code": {"type": "boolean"},
+                },
+            },
+            metadata={
+                "category": "retrieval",
+                "readOnlyHint": True,
+                "capabilities": ["codegraph.read"],
+                **workspace_metadata,
+            },
+        )
+        node_tool["inputSchema"]["additionalProperties"] = False
+
+        callers_tool = create_tool_definition(
+            name="codegraph.callers",
+            description="List indexed call relationships that target a symbol.",
+            parameters={
+                "properties": {
+                    "node_id": {"type": "string"},
+                    "symbol": {"type": "string"},
+                    "limit": {"type": "integer"},
+                },
+            },
+            metadata={
+                "category": "retrieval",
+                "readOnlyHint": True,
+                "capabilities": ["codegraph.read"],
+                **workspace_metadata,
+            },
+        )
+        callers_tool["inputSchema"]["additionalProperties"] = False
+
+        callees_tool = create_tool_definition(
+            name="codegraph.callees",
+            description="List indexed call relationships emitted by a symbol.",
+            parameters={
+                "properties": {
+                    "node_id": {"type": "string"},
+                    "symbol": {"type": "string"},
+                    "limit": {"type": "integer"},
+                },
+            },
+            metadata={
+                "category": "retrieval",
+                "readOnlyHint": True,
+                "capabilities": ["codegraph.read"],
+                **workspace_metadata,
+            },
+        )
+        callees_tool["inputSchema"]["additionalProperties"] = False
+
+        return [status_tool, index_tool, sync_tool, files_tool, search_tool, node_tool, callers_tool, callees_tool]
 
     async def execute_tool(self, tool_name: str, arguments: dict[str, Any], context: Any | None = None) -> Any:
         args = self.sanitize_input(arguments or {})
@@ -177,6 +255,45 @@ class CodeGraphModule(BaseModule):
                 args.get("pattern"),
                 str(args.get("format") or "flat"),
                 bool(args.get("include_metadata", True)),
+                args.get("limit"),
+            )
+
+        if tool_name == "codegraph.search":
+            return await asyncio.to_thread(
+                self._search_nodes,
+                resolution,
+                str(args["query"]),
+                args.get("kind"),
+                args.get("language"),
+                args.get("limit"),
+            )
+
+        if tool_name == "codegraph.node":
+            return await asyncio.to_thread(
+                self._get_node,
+                resolution,
+                args.get("node_id"),
+                args.get("symbol"),
+                bool(args.get("include_code", False)),
+            )
+
+        if tool_name == "codegraph.callers":
+            return await asyncio.to_thread(
+                self._list_relationships,
+                resolution,
+                "callers",
+                args.get("node_id"),
+                args.get("symbol"),
+                args.get("limit"),
+            )
+
+        if tool_name == "codegraph.callees":
+            return await asyncio.to_thread(
+                self._list_relationships,
+                resolution,
+                "callees",
+                args.get("node_id"),
+                args.get("symbol"),
                 args.get("limit"),
             )
 
@@ -218,6 +335,35 @@ class CodeGraphModule(BaseModule):
                 raise ValueError("format must be flat, tree, or grouped")
             if include_metadata is not None and not isinstance(include_metadata, bool):
                 raise ValueError("include_metadata must be a boolean")
+            self._validate_positive_int(arguments.get("limit"), "limit")
+            return
+
+        if tool_name == "codegraph.search":
+            self._reject_unknown(arguments, allowed={"query", "kind", "language", "limit"})
+            query = arguments.get("query")
+            if not isinstance(query, str) or not query.strip():
+                raise ValueError("query must be a non-empty string")
+            kind = arguments.get("kind")
+            language = arguments.get("language")
+            if kind is not None and (not isinstance(kind, str) or not kind.strip()):
+                raise ValueError("kind must be a non-empty string")
+            if language is not None:
+                if not isinstance(language, str) or language not in self._language_registry.known_language_ids():
+                    raise ValueError("language must be a known language id")
+            self._validate_positive_int(arguments.get("limit"), "limit")
+            return
+
+        if tool_name == "codegraph.node":
+            self._reject_unknown(arguments, allowed={"node_id", "symbol", "include_code"})
+            self._validate_node_selector(arguments)
+            include_code = arguments.get("include_code")
+            if include_code is not None and not isinstance(include_code, bool):
+                raise ValueError("include_code must be a boolean")
+            return
+
+        if tool_name in {"codegraph.callers", "codegraph.callees"}:
+            self._reject_unknown(arguments, allowed={"node_id", "symbol", "limit"})
+            self._validate_node_selector(arguments)
             self._validate_positive_int(arguments.get("limit"), "limit")
             return
 
@@ -326,6 +472,93 @@ class CodeGraphModule(BaseModule):
             "truncated": truncated,
         }
 
+    def _search_nodes(
+        self,
+        resolution: WorkspaceResolution,
+        query: str,
+        kind: str | None,
+        language: str | None,
+        limit: int | None,
+    ) -> dict[str, Any]:
+        effective_limit = self._bounded_limit(limit)
+        if not resolution.index_db_path.exists():
+            return {
+                "workspace_key": resolution.workspace_key,
+                "index_present": False,
+                "results": [],
+                "truncated": False,
+            }
+        repository = CodeGraphRepository(resolution.index_db_path)
+        rows = repository.search_nodes(query, limit=effective_limit + 1, kind=kind, language=language)
+        truncated = len(rows) > effective_limit
+        return {
+            "workspace_key": resolution.workspace_key,
+            "index_present": True,
+            "query": query,
+            "results": [_node_to_dict(row) for row in rows[:effective_limit]],
+            "truncated": truncated,
+        }
+
+    def _get_node(
+        self,
+        resolution: WorkspaceResolution,
+        node_id: str | None,
+        symbol: str | None,
+        include_code: bool,
+    ) -> dict[str, Any]:
+        if not resolution.index_db_path.exists():
+            return {"workspace_key": resolution.workspace_key, "index_present": False, "node": None}
+        repository = CodeGraphRepository(resolution.index_db_path)
+        node = repository.get_node(node_id) if node_id else repository.find_node_by_symbol(str(symbol))
+        node_dict = _node_to_dict(node) if node is not None else None
+        if node_dict is not None and include_code:
+            node_dict["code_available"] = False
+        return {
+            "workspace_key": resolution.workspace_key,
+            "index_present": True,
+            "node": node_dict,
+        }
+
+    def _list_relationships(
+        self,
+        resolution: WorkspaceResolution,
+        direction: str,
+        node_id: str | None,
+        symbol: str | None,
+        limit: int | None,
+    ) -> dict[str, Any]:
+        effective_limit = self._bounded_limit(limit)
+        if not resolution.index_db_path.exists():
+            return {
+                "workspace_key": resolution.workspace_key,
+                "index_present": False,
+                "node": None,
+                "relationships": [],
+                "truncated": False,
+            }
+        repository = CodeGraphRepository(resolution.index_db_path)
+        node = repository.get_node(node_id) if node_id else repository.find_node_by_symbol(str(symbol))
+        if node is None:
+            return {
+                "workspace_key": resolution.workspace_key,
+                "index_present": True,
+                "node": None,
+                "relationships": [],
+                "truncated": False,
+            }
+        if direction == "callers":
+            rows = repository.list_callers(node.id, limit=effective_limit + 1)
+        else:
+            rows = repository.list_callees(node.id, limit=effective_limit + 1)
+        truncated = len(rows) > effective_limit
+        return {
+            "workspace_key": resolution.workspace_key,
+            "index_present": True,
+            "node": _node_to_dict(node),
+            "relationships": rows[:effective_limit],
+            "truncated": truncated,
+        }
+
     def _new_indexer(self) -> CodeGraphIndexer:
         return CodeGraphIndexer(settings=self._settings, registry=self._language_registry)
 
@@ -356,6 +589,20 @@ class CodeGraphModule(BaseModule):
         if not isinstance(value, int) or isinstance(value, bool) or value < 1:
             raise ValueError(f"{field_name} must be a positive integer")
 
+    @staticmethod
+    def _validate_node_selector(arguments: dict[str, Any]) -> None:
+        node_id = arguments.get("node_id")
+        symbol = arguments.get("symbol")
+        if node_id is None and symbol is None:
+            raise ValueError("node_id or symbol is required")
+        if node_id is not None and (not isinstance(node_id, str) or not node_id.strip()):
+            raise ValueError("node_id must be a non-empty string")
+        if symbol is not None and (not isinstance(symbol, str) or not symbol.strip()):
+            raise ValueError("symbol must be a non-empty string")
+
+    def _bounded_limit(self, limit: int | None) -> int:
+        return min(max(1, int(limit or 10)), self._settings.max_search_results)
+
 
 def _normalize_path_prefix(path: str | None) -> str | None:
     if path is None or not path.strip() or path.strip() == ".":
@@ -384,6 +631,26 @@ def _indexed_file_to_dict(file: IndexedFile, *, include_metadata: bool) -> dict[
             }
         )
     return result
+
+
+def _node_to_dict(node: CodeGraphNode) -> dict[str, Any]:
+    return {
+        "id": node.id,
+        "kind": node.kind,
+        "name": node.name,
+        "qualified_name": node.qualified_name,
+        "file_path": node.file_path,
+        "language": node.language,
+        "start_line": node.start_line,
+        "end_line": node.end_line,
+        "start_column": node.start_column,
+        "end_column": node.end_column,
+        "signature": node.signature,
+        "docstring": node.docstring,
+        "visibility": node.visibility,
+        "flags": list(node.flags),
+        "metadata": dict(node.metadata),
+    }
 
 
 def _index_run_to_dict(run: IndexRunSummary | None) -> dict[str, Any] | None:

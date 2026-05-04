@@ -89,6 +89,59 @@ class IndexedFile:
 
 
 @dataclass(frozen=True)
+class CodeGraphNode:
+    id: str
+    identity_key: str
+    kind: str
+    name: str
+    qualified_name: str
+    file_path: str
+    language: str
+    start_line: int | None = None
+    end_line: int | None = None
+    start_column: int | None = None
+    end_column: int | None = None
+    signature: str | None = None
+    docstring: str | None = None
+    visibility: str | None = None
+    flags: tuple[str, ...] = ()
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class CodeGraphEdge:
+    id: str
+    source: str
+    target: str | None
+    kind: str
+    file_path: str
+    line: int | None = None
+    column: int | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+    provenance: str | None = None
+
+
+@dataclass(frozen=True)
+class CodeGraphUnresolvedRef:
+    from_node_id: str
+    reference_name: str
+    reference_kind: str
+    file_path: str
+    line: int | None = None
+    column: int | None = None
+    candidates: tuple[str, ...] = ()
+    language: str | None = None
+
+
+@dataclass(frozen=True)
+class ExtractionResult:
+    nodes: tuple[CodeGraphNode, ...] = ()
+    edges: tuple[CodeGraphEdge, ...] = ()
+    unresolved_refs: tuple[CodeGraphUnresolvedRef, ...] = ()
+    errors: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class IndexRunSummary:
     run_id: str
     workspace_key: str
