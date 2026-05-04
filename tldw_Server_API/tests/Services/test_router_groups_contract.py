@@ -1424,6 +1424,52 @@ def test_iter_content_router_specs_defers_utility_router_attr_lookup(
     }
 
 
+def test_iter_content_router_specs_defers_output_router_attr_lookup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify covered output specs keep router attr lookup lazy."""
+    module_paths = {
+        "tldw_Server_API.app.api.v1.endpoints.outputs_templates": "/outputs/templates",
+        "tldw_Server_API.app.api.v1.endpoints.outputs": "/outputs",
+    }
+    access_count = {module_name: 0 for module_name in module_paths}
+
+    for module_name, path in module_paths.items():
+        router = APIRouter()
+
+        @router.get(path)
+        def _endpoint() -> dict[str, str]:
+            return {"status": "ok"}
+
+        fake_module = ModuleType(module_name)
+
+        def _module_getattr(
+            name: str,
+            *,
+            module_name: str = module_name,
+            router: APIRouter = router,
+        ) -> APIRouter:
+            if name != "router":
+                raise AttributeError(name)
+            access_count[module_name] += 1
+            return router
+
+        fake_module.__getattr__ = _module_getattr  # type: ignore[attr-defined]
+        monkeypatch.setitem(sys.modules, module_name, fake_module)
+
+    specs = list(iter_content_router_specs())
+    assert access_count == {module_name: 0 for module_name in module_paths}
+
+    by_first_path = {_first_router_path(spec.router): spec for spec in specs}
+    assert by_first_path["/outputs/templates"].prefix == "/api/v1"
+    assert by_first_path["/outputs/templates"].tags == ("outputs-templates",)
+    assert by_first_path["/outputs/templates"].route_key == "outputs-templates"
+    assert by_first_path["/outputs"].prefix == "/api/v1"
+    assert by_first_path["/outputs"].tags == ("outputs",)
+    assert by_first_path["/outputs"].route_key == "outputs"
+    assert access_count == {module_name: 1 for module_name in module_paths}
+
+
 def test_qodo_reviewed_router_policy_regressions(monkeypatch: pytest.MonkeyPatch) -> None:
     _install_fake_router_module(
         monkeypatch,
