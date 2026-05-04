@@ -2,12 +2,22 @@ import fs from "node:fs"
 import path from "node:path"
 import { describe, expect, it } from "vitest"
 
+const resolveAppsRoot = () => {
+  const cwd = process.cwd()
+  if (fs.existsSync(path.resolve(cwd, "packages/ui"))) return cwd
+  if (fs.existsSync(path.resolve(cwd, "../packages/ui"))) return path.resolve(cwd, "..")
+  if (fs.existsSync(path.resolve(cwd, "../../tldw-frontend"))) return path.resolve(cwd, "../..")
+  throw new Error(`Unable to resolve apps root from ${cwd}`)
+}
+
+const appsRoot = resolveAppsRoot()
+
 const sharedCss = fs.readFileSync(
-  path.resolve(process.cwd(), "src/assets/tailwind-shared.css"),
+  path.resolve(appsRoot, "packages/ui/src/assets/tailwind-shared.css"),
   "utf8"
 )
 const frontendTailwindConfig = fs.readFileSync(
-  path.resolve(process.cwd(), "../../tldw-frontend/tailwind.config.js"),
+  path.resolve(appsRoot, "tldw-frontend/tailwind.config.js"),
   "utf8"
 )
 

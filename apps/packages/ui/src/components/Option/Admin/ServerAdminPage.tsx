@@ -40,6 +40,8 @@ import {
 const { Title, Text } = Typography
 const SYSTEM_STATS_TIMEOUT_MS = 10_000
 const LEGACY_STORAGE_MAX_REASONABLE_MB = 10 * 1024 * 1024
+const TLDW_SERVER_DOCUMENTATION_URL =
+  "https://github.com/rmusser01/tldw_server#documentation--resources"
 
 const formatBytesForAdmin = (value: number | null | undefined): string => {
   if (typeof value !== "number" || !Number.isFinite(value)) return "–"
@@ -117,6 +119,9 @@ export const ServerAdminPage: React.FC = () => {
   const [deletingRoleId, setDeletingRoleId] = React.useState<number | null>(null)
   const [roleForm] = Form.useForm()
   const initialLoadRef = React.useRef(false)
+  const openAdminDocumentation = React.useCallback(() => {
+    window.open(TLDW_SERVER_DOCUMENTATION_URL, "_blank", "noopener,noreferrer")
+  }, [])
 
   const markAdminGuardFromError = React.useCallback((err: any) => {
     const guardState = deriveAdminGuardFromError(err)
@@ -453,12 +458,13 @@ export const ServerAdminPage: React.FC = () => {
                 label: t(
                   "settings:admin.adminGuardRequestAccess",
                   "Request access"
-                )
+                ),
+                onClick: openAdminDocumentation
               }}
             >
               <span>
                 <a
-                  href="https://github.com/rmusser01/tldw_server#documentation--resources"
+                  href={TLDW_SERVER_DOCUMENTATION_URL}
                   target="_blank"
                   rel="noreferrer">
                   {t(
@@ -484,11 +490,12 @@ export const ServerAdminPage: React.FC = () => {
                 label: t(
                   "settings:admin.adminGuardEnableApis",
                   "Review server configuration"
-                )
+                ),
+                onClick: openAdminDocumentation
               }}
             >
               <a
-                href="https://github.com/rmusser01/tldw_server#documentation--resources"
+                href={TLDW_SERVER_DOCUMENTATION_URL}
                 target="_blank"
                 rel="noreferrer">
                 {t(

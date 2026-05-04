@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import React from "react"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import ServerAdminPage from "../ServerAdminPage"
 
@@ -105,13 +105,20 @@ const resolveBaseAdminCalls = () => {
 }
 
 describe("ServerAdminPage design-system states", () => {
+  const docsUrl = "https://github.com/rmusser01/tldw_server#documentation--resources"
+
   beforeEach(() => {
     vi.clearAllMocks()
     mockMatchMedia()
     resolveBaseAdminCalls()
+    vi.spyOn(window, "open").mockImplementation(() => null)
   })
 
-  it("uses PermissionNotice for forbidden admin APIs", async () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it("uses PermissionNotice with an actionable recovery path for forbidden admin APIs", async () => {
     apiMock.listAdminUsers.mockRejectedValueOnce(
       Object.assign(new Error("Request failed: 403 Forbidden"), { status: 403 })
     )
@@ -119,7 +126,30 @@ describe("ServerAdminPage design-system states", () => {
     render(<ServerAdminPage />)
 
     expect(await screen.findByText("Permission denied")).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Request access" })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Request access" }))
+
+    expect(window.open).toHaveBeenCalledWith(
+      docsUrl,
+      "_blank",
+      "noopener,noreferrer"
+    )
+  })
+
+  it("uses a blocked callout with an actionable recovery path when admin APIs are missing", async () => {
+    apiMock.listAdminUsers.mockRejectedValueOnce(
+      Object.assign(new Error("Request failed: 404 Not Found"), { status: 404 })
+    )
+
+    render(<ServerAdminPage />)
+
+    expect(await screen.findByText("Blocked")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Review server configuration" }))
+
+    expect(window.open).toHaveBeenCalledWith(
+      docsUrl,
+      "_blank",
+      "noopener,noreferrer"
+    )
   })
 
   it("uses an Error state panel with a retry path for system stats failures", async () => {

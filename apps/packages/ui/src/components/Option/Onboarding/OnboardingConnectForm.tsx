@@ -976,8 +976,17 @@ export function OnboardingConnectForm({ onFinish }: Props) {
   const unavailableState = getDesignSystemState("unavailable")
   const retryingState = getDesignSystemState("retrying")
   const readyState = getDesignSystemState("ready")
+  const loadingState = getDesignSystemState("loading")
   const activeErrorState =
     errorKind === "auth_invalid" ? authRequiredState : unavailableState
+  const progressHeaderState = isConnecting
+    ? retryingState
+    : errorKind
+      ? activeErrorState
+      : progress.serverReachable === "success" &&
+          progress.authentication === "success"
+        ? readyState
+        : loadingState
   const primarySourcePreview = useMemo(() => {
     const label = quickIngestLastRun.primarySourceLabel
     if (!label) return null
@@ -1911,7 +1920,7 @@ export function OnboardingConnectForm({ onFinish }: Props) {
           >
             <div className="mb-2 flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-primary">
               {isConnecting && <Loader2 className="size-3 animate-spin" />}
-              <span>{retryingState.label}</span>
+              <span>{progressHeaderState.label}</span>
               <span aria-hidden="true">·</span>
               {t("settings:onboarding.progress.title", "Connection Status")}
             </div>
