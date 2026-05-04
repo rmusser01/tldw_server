@@ -233,10 +233,7 @@ def iter_core_router_specs() -> Iterable[RouterSpec]:
             attr_name="conversations_alias_router",
         ),
     ):
-        try:
-            append_imported_router_spec(specs, chat_spec)
-        except Exception as e:  # noqa: BLE001
-            logger.debug(f"Skipping {chat_spec.log_name} router: {e}")
+        append_imported_router_spec(specs, chat_spec)
 
     # Tools endpoint
     try:
