@@ -4,8 +4,6 @@ from __future__ import annotations
 import importlib
 from dataclasses import dataclass
 
-from loguru import logger
-
 from tldw_Server_API.app.api.v1.router_groups.spec import RouterSpec
 
 
@@ -27,29 +25,13 @@ def append_imported_router_spec(
     specs: list[RouterSpec],
     definition: ImportedRouterSpec,
 ) -> None:
-    """Append an optional imported router spec, preserving existing skip logging."""
-    try:
+    """Append an imported router spec without importing until registration."""
+    def _router_factory():
         module = importlib.import_module(definition.import_path)
-        module_attrs = vars(module)
-        if definition.attr_name in module_attrs:
-            router = module_attrs[definition.attr_name]
-
-            def _router_factory():
-                return router
-        elif "__getattr__" in module_attrs:
-            def _router_factory():
-                try:
-                    return getattr(module, definition.attr_name)
-                except AttributeError as e:
-                    context = f" {definition.skip_context}" if definition.skip_context else ""
-                    logger.debug(f"Skipping {definition.log_name} router{context}: {e}")
-                    raise
-        else:
-            raise AttributeError(definition.attr_name)
-    except (ImportError, AttributeError) as e:
-        context = f" {definition.skip_context}" if definition.skip_context else ""
-        logger.debug(f"Skipping {definition.log_name} router{context}: {e}")
-        return
+        try:
+            return getattr(module, definition.attr_name)
+        except AttributeError as e:
+            raise AttributeError(definition.attr_name) from e
 
     specs.append(
         RouterSpec(
@@ -59,5 +41,6 @@ def append_imported_router_spec(
             route_key=definition.route_key,
             default_stable=definition.default_stable,
             name=definition.log_name,
+            skip_context=definition.skip_context,
         )
     )

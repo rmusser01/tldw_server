@@ -69,10 +69,7 @@ def iter_content_router_specs() -> Iterable[RouterSpec]:
             route_key="paper-search",
         ),
     ):
-        try:
-            append_imported_router_spec(specs, discovery_spec)
-        except Exception as e:  # noqa: BLE001
-            logger.debug(f"Skipping {discovery_spec.log_name} router: {e}")
+        append_imported_router_spec(specs, discovery_spec)
 
     # Embeddings (OpenAI-compatible)
     try:

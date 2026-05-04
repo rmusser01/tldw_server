@@ -3,8 +3,6 @@ from __future__ import annotations
 
 from typing import Iterable
 
-from loguru import logger
-
 from tldw_Server_API.app.api.v1.router_groups.conditional import (
     ImportedRouterSpec,
     append_imported_router_spec,
@@ -151,9 +149,6 @@ def iter_admin_router_specs() -> Iterable[RouterSpec]:
             route_key="org-invites",
         ),
     ):
-        try:
-            append_imported_router_spec(specs, admin_spec)
-        except Exception as e:  # noqa: BLE001
-            logger.debug(f"Skipping {admin_spec.log_name} router: {e}")
+        append_imported_router_spec(specs, admin_spec)
 
     return specs

@@ -157,10 +157,80 @@ def test_append_imported_router_spec_defers_router_attr_lookup_until_resolution(
     assert access_count["router"] == 1
 
 
-def test_append_imported_router_spec_skips_optional_import_error(
+def test_append_imported_router_spec_defers_module_import_until_registration(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Verify unavailable optional router modules are skipped during import."""
+    """Verify route policy can disable imported specs before module import."""
+    import importlib
+    from tldw_Server_API.app.api.v1.router_groups.conditional import (
+        ImportedRouterSpec,
+        append_imported_router_spec,
+    )
+
+    module_name = "tldw_Server_API.app.api.v1.endpoints.policy_gated_router"
+    import_count = 0
+    router = APIRouter()
+    fake_module = ModuleType(module_name)
+
+    @router.get("/policy-gated")
+    def _policy_gated() -> dict[str, str]:
+        return {"status": "ok"}
+
+    fake_module.router = router  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, module_name, fake_module)
+
+    real_import_module = importlib.import_module
+
+    def _import_module(import_path: str) -> ModuleType:
+        nonlocal import_count
+        if import_path == module_name:
+            import_count += 1
+        return real_import_module(import_path)
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.router_groups.conditional.importlib.import_module",
+        _import_module,
+    )
+    specs: list[RouterSpec] = []
+
+    append_imported_router_spec(
+        specs,
+        ImportedRouterSpec(
+            import_path=module_name,
+            log_name="policy-gated",
+            prefix="/api/v1",
+            tags=("policy-gated",),
+            route_key="policy-gated",
+        ),
+    )
+
+    assert len(specs) == 1
+    assert import_count == 0
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.config.route_enabled",
+        lambda route_key, default_stable=True: route_key != "policy-gated",
+    )
+
+    disabled_app = FastAPI()
+    assert register_router_specs(disabled_app, specs) == 0
+    assert import_count == 0
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.config.route_enabled",
+        lambda *_args, **_kwargs: True,
+    )
+
+    enabled_app = FastAPI()
+    assert register_router_specs(enabled_app, specs) == 1
+    assert import_count == 1
+    assert "/api/v1/policy-gated" in {route.path for route in enabled_app.routes}
+
+
+def test_append_imported_router_spec_skips_optional_import_error_at_registration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify unavailable optional router modules are skipped during registration."""
     from tldw_Server_API.app.api.v1.router_groups.conditional import (
         ImportedRouterSpec,
         append_imported_router_spec,
@@ -174,22 +244,30 @@ def test_append_imported_router_spec_skips_optional_import_error(
         _raise_import_error,
     )
     specs: list[RouterSpec] = []
+    debug_messages: list[str] = []
 
     append_imported_router_spec(
         specs,
         ImportedRouterSpec(
             import_path="tldw_Server_API.app.api.v1.endpoints.optional_missing",
             log_name="optional-missing",
+            skip_context="in minimal test app",
         ),
     )
 
-    assert specs == []
+    monkeypatch.setattr("loguru.logger.debug", debug_messages.append)
+
+    assert len(specs) == 1
+    assert register_router_specs(FastAPI(), specs) == 0
+    assert debug_messages == [
+        "Skipping optional-missing router in minimal test app: optional router is unavailable"
+    ]
 
 
-def test_append_imported_router_spec_propagates_unexpected_import_error(
+def test_append_imported_router_spec_logs_unexpected_import_error_at_registration(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Verify unexpected import-time failures are not hidden as optional routers."""
+    """Verify unexpected import-time failures are logged by registration."""
     from tldw_Server_API.app.api.v1.router_groups.conditional import (
         ImportedRouterSpec,
         append_imported_router_spec,
@@ -203,23 +281,27 @@ def test_append_imported_router_spec_propagates_unexpected_import_error(
         _raise_runtime_error,
     )
     specs: list[RouterSpec] = []
+    debug_messages: list[str] = []
 
-    with pytest.raises(RuntimeError, match="router module crashed"):
-        append_imported_router_spec(
-            specs,
-            ImportedRouterSpec(
-                import_path="tldw_Server_API.app.api.v1.endpoints.crashing_router",
-                log_name="crashing-router",
-            ),
-        )
+    append_imported_router_spec(
+        specs,
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.crashing_router",
+            log_name="crashing-router",
+        ),
+    )
 
-    assert specs == []
+    monkeypatch.setattr("loguru.logger.debug", debug_messages.append)
+
+    assert len(specs) == 1
+    assert register_router_specs(FastAPI(), specs) == 0
+    assert debug_messages == ["Skipping crashing-router router: router module crashed during import"]
 
 
-def test_append_imported_router_spec_skips_static_missing_attr(
+def test_append_imported_router_spec_skips_static_missing_attr_at_registration(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Verify static modules missing router attrs are skipped before registration."""
+    """Verify static modules missing router attrs are skipped during registration."""
     from tldw_Server_API.app.api.v1.router_groups.conditional import (
         ImportedRouterSpec,
         append_imported_router_spec,
@@ -228,6 +310,7 @@ def test_append_imported_router_spec_skips_static_missing_attr(
     module_name = "tldw_Server_API.app.api.v1.endpoints.missing_router_attr"
     monkeypatch.setitem(sys.modules, module_name, ModuleType(module_name))
     specs: list[RouterSpec] = []
+    debug_messages: list[str] = []
 
     append_imported_router_spec(
         specs,
@@ -239,7 +322,48 @@ def test_append_imported_router_spec_skips_static_missing_attr(
         ),
     )
 
-    assert specs == []
+    monkeypatch.setattr("loguru.logger.debug", debug_messages.append)
+
+    assert len(specs) == 1
+    assert register_router_specs(FastAPI(), specs) == 0
+    assert debug_messages == ["Skipping missing-router-attr router: router"]
+
+
+def test_append_imported_router_spec_logs_missing_lazy_attr_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify lazy attr misses produce one registry-owned skip log."""
+    from tldw_Server_API.app.api.v1.router_groups.conditional import (
+        ImportedRouterSpec,
+        append_imported_router_spec,
+    )
+
+    module_name = "tldw_Server_API.app.api.v1.endpoints.missing_lazy_router_attr"
+    fake_module = ModuleType(module_name)
+    debug_messages: list[str] = []
+
+    def _module_getattr(name: str) -> APIRouter:
+        raise AttributeError(name)
+
+    fake_module.__getattr__ = _module_getattr  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, module_name, fake_module)
+
+    specs: list[RouterSpec] = []
+    append_imported_router_spec(
+        specs,
+        ImportedRouterSpec(
+            import_path=module_name,
+            log_name="missing-lazy-router-attr",
+            prefix="/api/v1",
+            tags=("missing-lazy-router-attr",),
+        ),
+    )
+
+    monkeypatch.setattr("loguru.logger.debug", debug_messages.append)
+
+    assert len(specs) == 1
+    assert register_router_specs(FastAPI(), specs) == 0
+    assert debug_messages == ["Skipping missing-lazy-router-attr router: router"]
 
 
 def test_iter_core_router_specs_defers_chat_router_attr_lookup(
@@ -394,9 +518,10 @@ def test_iter_admin_router_specs_defers_selected_router_attr_lookup(
 def test_iter_core_router_specs_skips_crashing_chat_import(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Verify chat import crashes skip only the affected chat router spec."""
+    """Verify chat import crashes skip only the affected router at registration."""
     import importlib
 
+    app = FastAPI()
     chat_module_name = "tldw_Server_API.app.api.v1.endpoints.chat"
     chat_loop_module_name = "tldw_Server_API.app.api.v1.endpoints.chat_loop"
     chat_module = ModuleType(chat_module_name)
@@ -428,7 +553,11 @@ def test_iter_core_router_specs_skips_crashing_chat_import(
         _import_module,
     )
     monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.router_groups.core.logger.debug",
+        "tldw_Server_API.app.core.config.route_enabled",
+        lambda *_args, **_kwargs: True,
+    )
+    monkeypatch.setattr(
+        "loguru.logger.debug",
         debug_messages.append,
     )
 
@@ -438,12 +567,13 @@ def test_iter_core_router_specs_skips_crashing_chat_import(
         for spec in specs
         if spec.route_key == "chat"
     ]
-    chat_paths = {
-        _first_router_path(spec.router)
-        for spec in chat_specs
-    }
+    count = register_router_specs(app, chat_specs)
+    chat_paths = {route.path for route in app.routes}
 
-    assert chat_paths == {"/chat/completions", "/conversations"}
+    assert count == 2
+    assert "/api/v1/chat/chat/completions" in chat_paths
+    assert "/api/v1/chats/conversations" in chat_paths
+    assert "/api/v1/chat/loop/start" not in chat_paths
     assert "Skipping chat_loop router: chat loop crashed during import" in debug_messages
 
 
@@ -933,7 +1063,11 @@ def test_qodo_reviewed_router_policy_regressions(monkeypatch: pytest.MonkeyPatch
     content_specs = list(iter_content_router_specs())
     core_specs = list(iter_core_router_specs())
     by_content_path = {_first_router_path(spec.router): spec for spec in content_specs}
-    by_core_path = {_first_router_path(spec.router): spec for spec in core_specs}
+    by_core_path = {
+        _first_router_path(spec.router): spec
+        for spec in core_specs
+        if spec.tags in {("llm",), ("vlm",)} and spec.prefix == "/api/v1"
+    }
     main_source = _main_source_text()
 
     assert by_content_path["/api/v1/rag/search"].route_key == "rag-unified"
@@ -963,13 +1097,25 @@ def test_iter_admin_router_specs_keeps_independent_guardian_imports(
     )
 
     specs = list(iter_admin_router_specs())
-    by_first_path = {_first_router_path(spec.router): spec for spec in specs}
+    guardian_specs = {
+        spec.name: spec
+        for spec in specs
+        if spec.name in {"family_wizard", "guardian_controls", "self_monitoring"}
+    }
+    by_first_path = {
+        _first_router_path(spec.router): spec
+        for spec in (
+            guardian_specs["family_wizard"],
+            guardian_specs["self_monitoring"],
+        )
+    }
 
     assert by_first_path["/family-wizard"].prefix == "/api/v1/guardian"
     assert by_first_path["/family-wizard"].route_key == "guardian"
     assert by_first_path["/self-monitoring/status"].prefix == "/api/v1/self-monitoring"
     assert by_first_path["/self-monitoring/status"].route_key == "self-monitoring"
-    assert "/controls" not in by_first_path
+    with pytest.raises(AttributeError, match="router"):
+        guardian_specs["guardian_controls"].resolve_router()
 
 
 def test_iter_admin_router_specs_uses_policy_key_for_sandbox_in_pytest(
