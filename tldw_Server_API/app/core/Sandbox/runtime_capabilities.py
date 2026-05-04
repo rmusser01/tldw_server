@@ -12,6 +12,12 @@ RuntimeImplementationState = Literal[
     "host_gated",
     "not_applicable",
 ]
+RuntimeBoundaryClass = Literal[
+    "container",
+    "host_local",
+    "vm_grade",
+    "vm_grade_scaffold",
+]
 RuntimeReasonCode = Literal[
     "runtime_unavailable",
     "unsupported_os",
@@ -38,6 +44,54 @@ RUNTIME_IMPLEMENTATION_STATES: Mapping[RuntimeType, RuntimeImplementationState] 
     RuntimeType.vz_macos: "scaffold",
     RuntimeType.seatbelt: "host_gated",
     RuntimeType.worktree: "supported",
+}
+
+
+@dataclass(frozen=True)
+class RuntimeIsolationMetadata:
+    """Machine-readable isolation posture for runtime discovery."""
+
+    boundary_class: RuntimeBoundaryClass
+    vm_grade_isolation: bool
+    untrusted_eligible: bool
+
+
+RUNTIME_ISOLATION_METADATA: Mapping[RuntimeType, RuntimeIsolationMetadata] = {
+    RuntimeType.docker: RuntimeIsolationMetadata(
+        boundary_class="container",
+        vm_grade_isolation=False,
+        untrusted_eligible=True,
+    ),
+    RuntimeType.firecracker: RuntimeIsolationMetadata(
+        boundary_class="vm_grade",
+        vm_grade_isolation=True,
+        untrusted_eligible=True,
+    ),
+    RuntimeType.lima: RuntimeIsolationMetadata(
+        boundary_class="vm_grade",
+        vm_grade_isolation=True,
+        untrusted_eligible=True,
+    ),
+    RuntimeType.vz_linux: RuntimeIsolationMetadata(
+        boundary_class="vm_grade",
+        vm_grade_isolation=True,
+        untrusted_eligible=True,
+    ),
+    RuntimeType.vz_macos: RuntimeIsolationMetadata(
+        boundary_class="vm_grade_scaffold",
+        vm_grade_isolation=False,
+        untrusted_eligible=False,
+    ),
+    RuntimeType.seatbelt: RuntimeIsolationMetadata(
+        boundary_class="host_local",
+        vm_grade_isolation=False,
+        untrusted_eligible=False,
+    ),
+    RuntimeType.worktree: RuntimeIsolationMetadata(
+        boundary_class="host_local",
+        vm_grade_isolation=False,
+        untrusted_eligible=False,
+    ),
 }
 
 _RUNTIME_REASON_CODE_MAP: Mapping[str, RuntimeReasonCode] = {
@@ -83,6 +137,11 @@ _RUNTIME_REASON_CODE_MAP: Mapping[str, RuntimeReasonCode] = {
 def runtime_implementation_state(runtime: RuntimeType) -> RuntimeImplementationState:
     """Return the roadmap maturity label for a runtime, independent of host availability."""
     return RUNTIME_IMPLEMENTATION_STATES.get(runtime, "unsupported")
+
+
+def runtime_isolation_metadata(runtime: RuntimeType) -> RuntimeIsolationMetadata:
+    """Return stable isolation posture metadata, independent of host availability."""
+    return RUNTIME_ISOLATION_METADATA[runtime]
 
 
 def normalize_runtime_reason(reason: str) -> RuntimeReasonCode:

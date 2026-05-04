@@ -38,6 +38,42 @@ def test_worktree_discovery_reports_host_local_limits(
     assert "not VM-grade" in str(worktree["notes"])
 
 
+def test_feature_discovery_reports_structured_isolation_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SANDBOX_STORE_BACKEND", "memory")
+
+    discovery = {
+        str(item.get("name")): item
+        for item in SandboxService().feature_discovery()
+    }
+
+    assert set(discovery) == {runtime.value for runtime in RuntimeType}
+    for runtime in RuntimeType:
+        info = discovery[runtime.value]
+        assert "boundary_class" in info
+        assert "vm_grade_isolation" in info
+        assert "untrusted_eligible" in info
+
+    assert discovery["docker"]["boundary_class"] == "container"
+    assert discovery["docker"]["vm_grade_isolation"] is False
+    assert discovery["docker"]["untrusted_eligible"] is True
+
+    for vm_runtime in ("firecracker", "lima", "vz_linux"):
+        assert discovery[vm_runtime]["boundary_class"] == "vm_grade"
+        assert discovery[vm_runtime]["vm_grade_isolation"] is True
+        assert discovery[vm_runtime]["untrusted_eligible"] is True
+
+    assert discovery["vz_macos"]["boundary_class"] == "vm_grade_scaffold"
+    assert discovery["vz_macos"]["vm_grade_isolation"] is False
+    assert discovery["vz_macos"]["untrusted_eligible"] is False
+
+    for host_local_runtime in ("seatbelt", "worktree"):
+        assert discovery[host_local_runtime]["boundary_class"] == "host_local"
+        assert discovery[host_local_runtime]["vm_grade_isolation"] is False
+        assert discovery[host_local_runtime]["untrusted_eligible"] is False
+
+
 def test_runtime_reason_normalization_maps_raw_runtime_reasons() -> None:
     """Verify raw runtime-specific reasons collapse into stable discovery codes."""
 

@@ -59,6 +59,7 @@ from .runtime_capabilities import (
     RuntimePreflightResult,
     collect_runtime_preflights,
     normalize_runtime_reasons,
+    runtime_isolation_metadata,
     runtime_implementation_state,
 )
 from .snapshots import SnapshotManager
@@ -868,9 +869,13 @@ class SandboxService:
         lima_enforcement_ready["allowlist"] = False
         lima_host = dict((lima_preflight.host if lima_preflight else {}) or {})
 
-        def _preflight_fields(preflight: RuntimePreflightResult | None) -> dict[str, object]:
+        def _preflight_fields(
+            runtime: RuntimeType,
+            preflight: RuntimePreflightResult | None,
+        ) -> dict[str, object]:
             enforcement_ready = dict((preflight.enforcement_ready if preflight else {}) or {})
             reasons = list((preflight.reasons if preflight else []) or [])
+            isolation = runtime_isolation_metadata(runtime)
             return {
                 "available": bool(preflight.available) if preflight is not None else False,
                 "reasons": reasons,
@@ -880,13 +885,16 @@ class SandboxService:
                 "strict_allowlist_supported": bool(enforcement_ready.get("allowlist")),
                 "enforcement_ready": enforcement_ready,
                 "host": dict((preflight.host if preflight else {}) or {}),
+                "boundary_class": isolation.boundary_class,
+                "vm_grade_isolation": isolation.vm_grade_isolation,
+                "untrusted_eligible": isolation.untrusted_eligible,
             }
 
         return [
             {
                 "name": "docker",
                 "implementation_state": runtime_implementation_state(RuntimeType.docker),
-                **_preflight_fields(docker_preflight),
+                **_preflight_fields(RuntimeType.docker, docker_preflight),
                 "available": bool(docker_preflight.available) if docker_preflight is not None else bool(docker_available()),
                 "default_images": images,
                 "max_cpu": max_cpu,
@@ -920,7 +928,7 @@ class SandboxService:
             {
                 "name": "firecracker",
                 "implementation_state": runtime_implementation_state(RuntimeType.firecracker),
-                **_preflight_fields(firecracker_preflight),
+                **_preflight_fields(RuntimeType.firecracker, firecracker_preflight),
                 "available": bool(firecracker_preflight.available) if firecracker_preflight is not None else bool(firecracker_available()),
                 "default_images": images,  # firecracker images will differ; placeholder for UX
                 "max_cpu": max_cpu,
@@ -961,7 +969,7 @@ class SandboxService:
             {
                 "name": "lima",
                 "implementation_state": runtime_implementation_state(RuntimeType.lima),
-                **_preflight_fields(lima_preflight),
+                **_preflight_fields(RuntimeType.lima, lima_preflight),
                 "available": bool(lima_preflight.available) if lima_preflight is not None else bool(lima_available()),
                 "default_images": ["ubuntu:24.04"],  # Lima uses distro images
                 "max_cpu": max_cpu,
@@ -1003,7 +1011,7 @@ class SandboxService:
                 "egress_allowlist_supported": False,
                 "store_mode": store_mode,
                 "notes": "Linux guest VM via Virtualization.framework on Apple silicon hosts",
-                **_preflight_fields(vz_linux_preflight),
+                **_preflight_fields(RuntimeType.vz_linux, vz_linux_preflight),
             },
             {
                 "name": "vz_macos",
@@ -1024,7 +1032,7 @@ class SandboxService:
                 "egress_allowlist_supported": False,
                 "store_mode": store_mode,
                 "notes": "macOS guest VM via Virtualization.framework on Apple silicon hosts",
-                **_preflight_fields(vz_macos_preflight),
+                **_preflight_fields(RuntimeType.vz_macos, vz_macos_preflight),
             },
             {
                 "name": "seatbelt",
@@ -1045,7 +1053,7 @@ class SandboxService:
                 "egress_allowlist_supported": False,
                 "store_mode": store_mode,
                 "notes": "Host-local seatbelt process isolation for trusted macOS workflows with best-effort deny-all networking; not VM-grade isolation",
-                **_preflight_fields(seatbelt_preflight),
+                **_preflight_fields(RuntimeType.seatbelt, seatbelt_preflight),
             },
             {
                 "name": "worktree",
@@ -1070,7 +1078,7 @@ class SandboxService:
                     "workflows; not VM-grade isolation and not suitable for "
                     "untrusted workloads"
                 ),
-                **_preflight_fields(worktree_preflight),
+                **_preflight_fields(RuntimeType.worktree, worktree_preflight),
             },
         ]
 

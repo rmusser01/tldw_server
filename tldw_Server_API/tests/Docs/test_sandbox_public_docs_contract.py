@@ -57,6 +57,16 @@ def test_public_sandbox_api_docs_do_not_overclaim_runtime_support(doc_path: Path
     ):
         _require(runtime in text, f"{doc_path} should mention runtime {runtime}")
 
+    for field_name in (
+        "boundary_class",
+        "vm_grade_isolation",
+        "untrusted_eligible",
+    ):
+        _require(
+            field_name in text,
+            f"{doc_path} should document runtime discovery field {field_name}",
+        )
+
     for host_local_runtime in ("seatbelt", "worktree"):
         _require(
             f"`{host_local_runtime}` is host-local" in text,

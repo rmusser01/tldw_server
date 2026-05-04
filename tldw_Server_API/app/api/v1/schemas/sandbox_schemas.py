@@ -12,6 +12,7 @@ except ImportError:  # pragma: no cover - pydantic v1 fallback
 
 from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
 from tldw_Server_API.app.core.Sandbox.runtime_capabilities import (
+    RuntimeBoundaryClass,
     RuntimeImplementationState,
     RuntimeReasonCode,
 )
@@ -65,6 +66,27 @@ class SandboxRuntimeInfo(BaseModel):
     queue_ttl_sec: int | None = Field(default=None, description="Maximum time a run may remain queued before being dropped")
     workspace_cap_mb: int | None = Field(default=None, description="Default workspace size cap (MB)")
     artifact_ttl_hours: int | None = Field(default=None, description="Default artifact retention (hours)")
+    boundary_class: RuntimeBoundaryClass | None = Field(
+        default=None,
+        description=(
+            "Machine-readable runtime boundary category: container, host_local, "
+            "vm_grade, or vm_grade_scaffold"
+        ),
+    )
+    vm_grade_isolation: bool | None = Field(
+        default=None,
+        description=(
+            "Whether the runtime boundary is VM-grade for isolation claims; "
+            "independent of current host availability"
+        ),
+    )
+    untrusted_eligible: bool | None = Field(
+        default=None,
+        description=(
+            "Whether policy may admit this runtime for untrusted workloads when "
+            "preflight and host readiness also pass"
+        ),
+    )
     supported_spec_versions: list[str] = Field(default_factory=lambda: ["1.0"], description="Supported spec versions (e.g., ['1.0','1.1'] when 1.1 features are enabled)")
     interactive_supported: bool | None = Field(default=None, description="Whether stdin-over-WS interactive runs are supported")
     egress_allowlist_supported: bool | None = Field(default=None, description="Whether egress allowlisting is supported by the runtime")

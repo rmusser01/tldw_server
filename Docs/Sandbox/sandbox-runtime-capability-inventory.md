@@ -39,6 +39,11 @@ concepts:
 - `normalized_reasons`: stable client-facing reason codes derived from raw
   reasons so clients can group failures without runtime-specific string
   matching.
+- `boundary_class`: machine-readable isolation boundary category.
+- `vm_grade_isolation`: whether the runtime boundary is VM-grade for isolation
+  claims, independent of current host availability.
+- `untrusted_eligible`: whether policy may admit this runtime for `untrusted`
+  workloads when preflight and host readiness also pass.
 
 | Runtime | `implementation_state` | Discovery source |
 | --- | --- | --- |
@@ -53,6 +58,23 @@ concepts:
 Discovery is intentionally summarized. Admin/operator diagnostics can expose
 helper, template, reconciliation, and image-store details that should not be
 duplicated into the public discovery payload.
+
+## Runtime Isolation Metadata
+
+Isolation posture is exposed as structured discovery metadata so clients do not
+parse human-readable notes for security decisions. `untrusted_eligible` is a
+policy eligibility signal, not a statement that the runtime is available or
+healthy on the current host.
+
+| Runtime | `boundary_class` | `vm_grade_isolation` | `untrusted_eligible` | Notes |
+| --- | --- | --- | --- | --- |
+| `docker` | `container` | `false` | `true` | Compatibility path; not VM-grade. |
+| `firecracker` | `vm_grade` | `true` | `true` | Linux/KVM host-gated VM runtime. |
+| `lima` | `vm_grade` | `true` | `true` | macOS/Linux VM runtime when host preflight passes. |
+| `vz_linux` | `vm_grade` | `true` | `true` | Primary Apple silicon Linux VM path. |
+| `vz_macos` | `vm_grade_scaffold` | `false` | `false` | Runtime identity exists, but real execution is scaffolded. |
+| `seatbelt` | `host_local` | `false` | `false` | Host-local macOS process isolation only. |
+| `worktree` | `host_local` | `false` | `false` | Host-local VCS/workspace isolation only. |
 
 ## Normalized Reason Codes
 
