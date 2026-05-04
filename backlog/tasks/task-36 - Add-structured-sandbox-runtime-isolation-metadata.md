@@ -4,7 +4,7 @@ title: Add structured sandbox runtime isolation metadata
 status: Done
 assignee: []
 created_date: '2026-05-04 05:19'
-updated_date: '2026-05-04 05:33'
+updated_date: '2026-05-04 06:01'
 labels:
   - sandbox
   - runtime-discovery
@@ -40,12 +40,20 @@ Implementation added structured runtime isolation metadata fields to sandbox run
 Verification passed: python -m pytest tldw_Server_API/tests/sandbox/test_runtime_inventory_contract.py tldw_Server_API/tests/Docs/test_sandbox_public_docs_contract.py -q --timeout=60; Bandit on touched Python files reported 0 findings; git diff --check produced no output.
 
 Known verification note: tldw_Server_API/tests/sandbox/test_feature_discovery_flags.py timed out in existing FastAPI TestClient teardown / background worker shutdown when run alone and in the combined suite. The timeout occurred in TestClient context manager exit after startup/background jobs, not in the new metadata assertions; no pytest process remained afterward.
+
+PR #1261 review follow-up: Qodo identified two valid contract issues. The runtime isolation metadata helper should fail clearly if the map is incomplete or called with an unknown runtime, and the new schema fields should be required/non-nullable because feature_discovery always emits them.
+
+PR #1261 review fixes applied: runtime_isolation_metadata() now validates the metadata map at import time and raises a clear ValueError for unknown runtimes instead of leaking KeyError. SandboxRuntimeInfo now makes boundary_class, vm_grade_isolation, and untrusted_eligible required/non-nullable to match the implementation contract.
+
+Review-fix verification passed: python -m pytest tldw_Server_API/tests/sandbox/test_runtime_inventory_contract.py tldw_Server_API/tests/Docs/test_sandbox_public_docs_contract.py -q --timeout=60 -> 15 passed; Bandit on touched Python files -> 0 results; git diff --check -> no output.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Added additive, machine-readable sandbox runtime isolation posture metadata so clients can distinguish container, VM-grade, scaffold, and host-local runtimes without parsing prose notes. Updated public and internal sandbox docs, schema, focused contract tests, and the Backlog task record.
+
+PR review follow-up tightened the runtime metadata contract by adding explicit map completeness/unknown-runtime handling and making the new response fields required in OpenAPI/schema output.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

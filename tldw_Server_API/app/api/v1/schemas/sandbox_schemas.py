@@ -66,22 +66,22 @@ class SandboxRuntimeInfo(BaseModel):
     queue_ttl_sec: int | None = Field(default=None, description="Maximum time a run may remain queued before being dropped")
     workspace_cap_mb: int | None = Field(default=None, description="Default workspace size cap (MB)")
     artifact_ttl_hours: int | None = Field(default=None, description="Default artifact retention (hours)")
-    boundary_class: RuntimeBoundaryClass | None = Field(
-        default=None,
+    boundary_class: RuntimeBoundaryClass = Field(
+        ...,
         description=(
             "Machine-readable runtime boundary category: container, host_local, "
             "vm_grade, or vm_grade_scaffold"
         ),
     )
-    vm_grade_isolation: bool | None = Field(
-        default=None,
+    vm_grade_isolation: bool = Field(
+        ...,
         description=(
             "Whether the runtime boundary is VM-grade for isolation claims; "
             "independent of current host availability"
         ),
     )
-    untrusted_eligible: bool | None = Field(
-        default=None,
+    untrusted_eligible: bool = Field(
+        ...,
         description=(
             "Whether policy may admit this runtime for untrusted workloads when "
             "preflight and host readiness also pass"

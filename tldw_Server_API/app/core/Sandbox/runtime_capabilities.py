@@ -94,6 +94,22 @@ RUNTIME_ISOLATION_METADATA: Mapping[RuntimeType, RuntimeIsolationMetadata] = {
     ),
 }
 
+
+def _validate_runtime_isolation_metadata_map() -> None:
+    expected = set(RuntimeType)
+    actual = set(RUNTIME_ISOLATION_METADATA)
+    missing = sorted(runtime.value for runtime in expected - actual)
+    extra = sorted(str(runtime) for runtime in actual - expected)
+    if missing or extra:
+        raise RuntimeError(
+            "Runtime isolation metadata map is incomplete: "
+            f"missing={missing}, extra={extra}"
+        )
+
+
+_validate_runtime_isolation_metadata_map()
+
+
 _RUNTIME_REASON_CODE_MAP: Mapping[str, RuntimeReasonCode] = {
     "/dev/kvm_missing": "host_prerequisite_missing",
     "apple_silicon_required": "unsupported_arch",
@@ -141,7 +157,11 @@ def runtime_implementation_state(runtime: RuntimeType) -> RuntimeImplementationS
 
 def runtime_isolation_metadata(runtime: RuntimeType) -> RuntimeIsolationMetadata:
     """Return stable isolation posture metadata, independent of host availability."""
-    return RUNTIME_ISOLATION_METADATA[runtime]
+    try:
+        runtime_key = runtime if isinstance(runtime, RuntimeType) else RuntimeType(runtime)
+        return RUNTIME_ISOLATION_METADATA[runtime_key]
+    except (KeyError, ValueError) as exc:
+        raise ValueError(f"No isolation metadata configured for runtime {runtime!r}") from exc
 
 
 def normalize_runtime_reason(reason: str) -> RuntimeReasonCode:

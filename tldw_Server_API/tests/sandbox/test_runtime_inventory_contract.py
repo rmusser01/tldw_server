@@ -4,8 +4,10 @@ import pytest
 
 from tldw_Server_API.app.core.Sandbox.models import RuntimeType
 from tldw_Server_API.app.core.Sandbox.runtime_capabilities import (
+    RUNTIME_ISOLATION_METADATA,
     RuntimePreflightResult,
     normalize_runtime_reasons,
+    runtime_isolation_metadata,
 )
 from tldw_Server_API.app.core.Sandbox.service import SandboxService
 
@@ -72,6 +74,15 @@ def test_feature_discovery_reports_structured_isolation_metadata(
         assert discovery[host_local_runtime]["boundary_class"] == "host_local"
         assert discovery[host_local_runtime]["vm_grade_isolation"] is False
         assert discovery[host_local_runtime]["untrusted_eligible"] is False
+
+
+def test_runtime_isolation_metadata_contract_covers_runtime_enum() -> None:
+    assert set(RUNTIME_ISOLATION_METADATA) == set(RuntimeType)
+
+
+def test_runtime_isolation_metadata_rejects_unknown_runtime() -> None:
+    with pytest.raises(ValueError, match="No isolation metadata configured"):
+        runtime_isolation_metadata("future_runtime")  # type: ignore[arg-type]
 
 
 def test_runtime_reason_normalization_maps_raw_runtime_reasons() -> None:
