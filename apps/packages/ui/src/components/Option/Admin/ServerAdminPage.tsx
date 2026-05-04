@@ -31,6 +31,11 @@ import {
   sanitizeAdminErrorMessage
 } from "./admin-error-utils"
 import { AdminAudioInstallerCard } from "./AdminAudioInstallerCard"
+import {
+  PermissionNotice,
+  RecoveryCallout,
+  StatePanel
+} from "@/components/ui/state"
 
 const { Title, Text } = Typography
 const SYSTEM_STATS_TIMEOUT_MS = 10_000
@@ -433,32 +438,25 @@ export const ServerAdminPage: React.FC = () => {
     <PageShell>
       <Space orientation="vertical" size="large" className="w-full py-6">
         {adminGuard && (
-          <Alert
-            type="warning"
-            showIcon
-            className="mb-4"
-            title={
-              adminGuard === "forbidden"
-                ? t(
-                    "settings:admin.adminGuardForbiddenTitle",
-                    "Admin access required for these controls"
-                  )
-                : t(
-                    "settings:admin.adminGuardNotFoundTitle",
-                    "Admin APIs are not available on this server"
-                  )
-            }
-            description={
+          adminGuard === "forbidden" ? (
+            <PermissionNotice
+              className="mb-4"
+              title={t(
+                "settings:admin.adminGuardForbiddenTitle",
+                "Admin access required for these controls"
+              )}
+              message={t(
+                "settings:admin.adminGuardForbiddenBody",
+                "Sign in as an admin user on your tldw server to view and manage users, roles, and system statistics."
+              )}
+              primaryAction={{
+                label: t(
+                  "settings:admin.adminGuardRequestAccess",
+                  "Request access"
+                )
+              }}
+            >
               <span>
-                {adminGuard === "forbidden"
-                  ? t(
-                      "settings:admin.adminGuardForbiddenBody",
-                      "Sign in as an admin user on your tldw server to view and manage users, roles, and system statistics."
-                    )
-                  : t(
-                      "settings:admin.adminGuardNotFoundBody",
-                      "This tldw server does not expose the /admin endpoints, or they are disabled. Upgrade or reconfigure the server to enable these views."
-                    )}{" "}
                 <a
                   href="https://github.com/rmusser01/tldw_server#documentation--resources"
                   target="_blank"
@@ -469,8 +467,37 @@ export const ServerAdminPage: React.FC = () => {
                   )}
                 </a>
               </span>
-            }
-          />
+            </PermissionNotice>
+          ) : (
+            <RecoveryCallout
+              state="blocked"
+              className="mb-4"
+              title={t(
+                "settings:admin.adminGuardNotFoundTitle",
+                "Admin APIs are not available on this server"
+              )}
+              message={t(
+                "settings:admin.adminGuardNotFoundBody",
+                "This tldw server does not expose the /admin endpoints, or they are disabled. Upgrade or reconfigure the server to enable these views."
+              )}
+              primaryAction={{
+                label: t(
+                  "settings:admin.adminGuardEnableApis",
+                  "Review server configuration"
+                )
+              }}
+            >
+              <a
+                href="https://github.com/rmusser01/tldw_server#documentation--resources"
+                target="_blank"
+                rel="noreferrer">
+                {t(
+                  "settings:admin.adminGuardLearnMore",
+                  "Learn more in the tldw server documentation."
+                )}
+              </a>
+            </RecoveryCallout>
+          )
         )}
         {adminGuard && (
           <Text type="secondary">
@@ -524,17 +551,16 @@ export const ServerAdminPage: React.FC = () => {
                 </Button>
               }>
               {error && (
-                <Alert
-                  type="error"
+                <StatePanel
+                  state="error"
                   title={t("settings:admin.systemStatsError", "Unable to load system statistics")}
-                  description={error}
-                  showIcon
-                  className="mb-3"
-                  action={
-                    <Button size="small" onClick={handleRefresh} disabled={loading}>
-                      {t("common:retry", "Retry")}
-                    </Button>
-                  }
+                  message={error}
+                  className="ant-alert mb-3"
+                  primaryAction={{
+                    label: t("common:retry", "Retry"),
+                    onClick: handleRefresh,
+                    disabled: loading
+                  }}
                 />
               )}
               {stats ? (
@@ -586,9 +612,18 @@ export const ServerAdminPage: React.FC = () => {
                   </Descriptions>
                 </Space>
               ) : !loading && !error ? (
-                <Text type="secondary">
-                  {t("settings:admin.systemStatsEmpty", "No system statistics available yet.")}
-                </Text>
+                <StatePanel
+                  state="empty"
+                  title={t(
+                    "settings:admin.systemStatsEmptyTitle",
+                    "No system statistics"
+                  )}
+                  message={t("settings:admin.systemStatsEmpty", "No system statistics available yet.")}
+                  primaryAction={{
+                    label: t("common:refresh", "Refresh"),
+                    onClick: handleRefresh
+                  }}
+                />
               ) : null}
             </Card>
 
@@ -669,6 +704,26 @@ export const ServerAdminPage: React.FC = () => {
                   }}
                   onChange={handleUserTableChange}
                 />
+                {!usersLoading && (usersData?.users || []).length === 0 && (
+                  <StatePanel
+                    state="empty"
+                    title={t("settings:admin.users.emptyTitle", "No users found")}
+                    message={t(
+                      "settings:admin.users.empty",
+                      "No user diagnostics match the current filters."
+                    )}
+                    primaryAction={{
+                      label: t("common:refresh", "Refresh"),
+                      onClick: () =>
+                        loadUsers(
+                          usersPage,
+                          usersPageSize,
+                          userRoleFilter,
+                          userActiveFilter
+                        )
+                    }}
+                  />
+                )}
 
                 <Divider />
 
@@ -892,12 +947,29 @@ export const ServerAdminPage: React.FC = () => {
                     </Descriptions.Item>
                   </Descriptions>
                 ) : (
-                  <Text type="secondary">
-                    {t(
+                  <StatePanel
+                    state="empty"
+                    title={t(
+                      "settings:admin.mediaBudget.emptyTitle",
+                      "No media budget diagnostics"
+                    )}
+                    message={t(
                       "settings:admin.mediaBudget.empty",
                       "Select a user to inspect media ingestion limits and usage."
                     )}
-                  </Text>
+                    primaryAction={{
+                      label: t("common:refresh", "Refresh"),
+                      onClick: () => {
+                        if (mediaBudgetUserId !== null) {
+                          void loadMediaBudget(
+                            mediaBudgetUserId,
+                            mediaBudgetPolicyId
+                          )
+                        }
+                      },
+                      disabled: mediaBudgetUserId === null
+                    }}
+                  />
                 )}
               </Space>
             </Card>

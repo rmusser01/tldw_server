@@ -54,6 +54,7 @@ import { HEADER_SHORTCUT_SELECTION_SETTING } from "@/services/settings/ui-settin
 import { getDefaultShortcutsForPersona } from "@/components/Layouts/header-shortcut-items"
 import { isExtensionRuntime } from "@/utils/browser-runtime"
 import { getProviderDisplayName, normalizeProviderKey } from "@/utils/provider-registry"
+import { getDesignSystemState } from "@/design-system"
 import {
   trackOnboardingFirstIngestSuccess,
   trackOnboardingSuccessReached
@@ -970,6 +971,13 @@ export function OnboardingConnectForm({ onFinish }: Props) {
     quickIngestLastRun.status === "success" && quickIngestLastRun.successCount > 0
   const hasFailedIngest = quickIngestLastRun.status === "error"
   const shouldPrioritizeMedia = hasSuccessfulIngest
+  const setupState = getDesignSystemState("setup_required")
+  const authRequiredState = getDesignSystemState("auth_required")
+  const unavailableState = getDesignSystemState("unavailable")
+  const retryingState = getDesignSystemState("retrying")
+  const readyState = getDesignSystemState("ready")
+  const activeErrorState =
+    errorKind === "auth_invalid" ? authRequiredState : unavailableState
   const primarySourcePreview = useMemo(() => {
     const label = quickIngestLastRun.primarySourceLabel
     if (!label) return null
@@ -1015,6 +1023,11 @@ export function OnboardingConnectForm({ onFinish }: Props) {
         data-ingest-status={quickIngestLastRun.status}
       >
         <div className="mb-8 text-center">
+          <div className="mb-3 flex justify-center">
+            <span className="inline-flex rounded-full border border-state-ready/30 bg-state-ready/10 px-2 py-0.5 text-xs font-semibold text-state-ready">
+              {readyState.label}
+            </span>
+          </div>
           <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-success/10">
             <Check className="size-7 text-success" />
           </div>
@@ -1436,6 +1449,9 @@ export function OnboardingConnectForm({ onFinish }: Props) {
     <div className="mx-auto w-full max-w-2xl rounded-3xl border border-border/70 bg-surface/95 p-8 shadow-lg shadow-black/5 backdrop-blur">
       {/* Header */}
       <div className="mb-8">
+        <span className="mb-3 inline-flex rounded-full border border-state-setupRequired/30 bg-state-setupRequired/10 px-2 py-0.5 text-xs font-semibold text-state-setupRequired">
+          {setupState.label}
+        </span>
         <h2 className="text-2xl font-semibold text-text tracking-tight">
           {t("settings:onboarding.title", "Welcome to tldw Assistant")}
         </h2>
@@ -1895,6 +1911,8 @@ export function OnboardingConnectForm({ onFinish }: Props) {
           >
             <div className="mb-2 flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-primary">
               {isConnecting && <Loader2 className="size-3 animate-spin" />}
+              <span>{retryingState.label}</span>
+              <span aria-hidden="true">·</span>
               {t("settings:onboarding.progress.title", "Connection Status")}
             </div>
             <ProgressItem
@@ -1932,6 +1950,9 @@ export function OnboardingConnectForm({ onFinish }: Props) {
             <div className="flex items-start gap-2">
               <AlertCircle className="mt-0.5 size-4 shrink-0 text-danger" />
               <div>
+                <div className="mb-1 inline-flex rounded-full border border-danger/30 bg-danger/10 px-2 py-0.5 text-xs font-semibold text-danger">
+                  {activeErrorState.label}
+                </div>
                 <div className="text-sm font-medium text-danger">
                   {t("settings:onboarding.connectionFailed", "Connection failed")}
                 </div>
