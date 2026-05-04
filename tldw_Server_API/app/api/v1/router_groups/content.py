@@ -170,57 +170,39 @@ def iter_content_router_specs() -> Iterable[RouterSpec]:
     else:
         logger.info("Skipping audio router imports in pytest (set MINIMAL_TEST_INCLUDE_AUDIO=1 to enable)")
 
-    # Chunking operations
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.chunking import chunking_router
-
-        specs.append(RouterSpec(
-            router=chunking_router,
+    # Chunking, vector stores, and prompt operations
+    for processing_spec in (
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.chunking",
+            log_name="chunking",
             prefix=f"{API_V1_PREFIX}/chunking",
             tags=("chunking",),
             route_key="chunking",
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping chunking router: {e}")
-
-    # Vector stores (OpenAI-compatible)
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.vector_stores_openai import router as vector_stores_router
-
-        specs.append(RouterSpec(
-            router=vector_stores_router,
+            attr_name="chunking_router",
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.vector_stores_openai",
+            log_name="vector_stores",
             prefix=f"{API_V1_PREFIX}",
             tags=("vector-stores",),
             route_key="vector-stores",
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping vector-stores router: {e}")
-
-    # Chunking templates
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.chunking_templates import router as chunking_templates_router
-
-        specs.append(RouterSpec(
-            router=chunking_templates_router,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.chunking_templates",
+            log_name="chunking_templates",
             prefix=f"{API_V1_PREFIX}",
             tags=("chunking-templates",),
             route_key="chunking-templates",
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping chunking_templates router: {e}")
-
-    # Prompts
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.prompts import router as prompt_router
-
-        specs.append(RouterSpec(
-            router=prompt_router,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.prompts",
+            log_name="prompts",
             prefix=f"{API_V1_PREFIX}/prompts",
             tags=("prompts",),
             route_key="prompts",
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping prompts router: {e}")
+        ),
+    ):
+        append_imported_router_spec(specs, processing_spec)
 
     # Workflow routers are force-included in explicit pytest runtime for unit coverage.
     for workflow_spec in (
