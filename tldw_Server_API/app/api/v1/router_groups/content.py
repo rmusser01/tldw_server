@@ -251,61 +251,42 @@ def iter_content_router_specs() -> Iterable[RouterSpec]:
     ):
         append_imported_router_spec(specs, utility_spec)
 
-    # Slack integration endpoints
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.slack import router as slack_router
-
-        specs.append(RouterSpec(
-            router=slack_router,
+    # Integration endpoints
+    for integration_spec in (
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.slack",
+            log_name="slack",
             prefix=f"{API_V1_PREFIX}",
             tags=("slack",),
             route_key="slack",
             default_stable=False,
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping slack router: {e}")
-
-    # Discord integration endpoints
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.discord import router as discord_router
-
-        specs.append(RouterSpec(
-            router=discord_router,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.discord",
+            log_name="discord",
             prefix=f"{API_V1_PREFIX}",
             tags=("discord",),
             route_key="discord",
             default_stable=False,
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping discord router: {e}")
-
-    # Telegram integration endpoints
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.telegram import router as telegram_router
-
-        specs.append(RouterSpec(
-            router=telegram_router,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.telegram",
+            log_name="telegram",
             prefix=f"{API_V1_PREFIX}",
             tags=("telegram",),
             route_key="telegram",
             default_stable=False,
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping telegram router: {e}")
-
-    # Meetings endpoints
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.meetings import router as meetings_router
-
-        specs.append(RouterSpec(
-            router=meetings_router,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.meetings",
+            log_name="meetings",
             prefix=f"{API_V1_PREFIX}",
             tags=("meetings",),
             route_key="meetings",
             default_stable=False,
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping meetings router: {e}")
+        ),
+    ):
+        append_imported_router_spec(specs, integration_spec)
 
     # Collections feeds endpoints
     try:

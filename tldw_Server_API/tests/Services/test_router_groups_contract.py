@@ -1470,6 +1470,114 @@ def test_iter_content_router_specs_defers_output_router_attr_lookup(
     assert access_count == {module_name: 1 for module_name in module_paths}
 
 
+def test_iter_content_router_specs_defers_integration_router_attr_lookup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify covered integration specs keep import and attr lookup lazy."""
+    import importlib
+
+    router_definitions = {
+        "slack": {
+            "module_name": "tldw_Server_API.app.api.v1.endpoints.slack",
+            "path": "/slack/events",
+            "prefix": "/api/v1",
+            "tags": ("slack",),
+        },
+        "discord": {
+            "module_name": "tldw_Server_API.app.api.v1.endpoints.discord",
+            "path": "/discord/events",
+            "prefix": "/api/v1",
+            "tags": ("discord",),
+        },
+        "telegram": {
+            "module_name": "tldw_Server_API.app.api.v1.endpoints.telegram",
+            "path": "/telegram/events",
+            "prefix": "/api/v1",
+            "tags": ("telegram",),
+        },
+        "meetings": {
+            "module_name": "tldw_Server_API.app.api.v1.endpoints.meetings",
+            "path": "/meetings/health",
+            "prefix": "/api/v1",
+            "tags": ("meetings",),
+        },
+    }
+    access_count = {
+        str(definition["module_name"]): 0
+        for definition in router_definitions.values()
+    }
+    import_calls: list[str] = []
+
+    for definition in router_definitions.values():
+        module_name = str(definition["module_name"])
+        router = APIRouter()
+
+        @router.get(str(definition["path"]))
+        def _endpoint() -> dict[str, str]:
+            """Return a deterministic response for the fake integration router."""
+            return {"status": "ok"}
+
+        fake_module = ModuleType(module_name)
+
+        def _module_getattr(
+            name: str,
+            *,
+            module_name: str = module_name,
+            router: APIRouter = router,
+        ) -> APIRouter:
+            """Track lazy router attribute resolution for the fake module."""
+            if name != "router":
+                raise AttributeError(name)
+            access_count[module_name] += 1
+            return router
+
+        fake_module.__getattr__ = _module_getattr  # type: ignore[attr-defined]
+        monkeypatch.setitem(sys.modules, module_name, fake_module)
+
+    real_import_module = importlib.import_module
+
+    def _import_module(module_name: str, package: str | None = None) -> ModuleType:
+        """Track lazy module imports for selected integration router modules."""
+        if module_name in access_count:
+            import_calls.append(module_name)
+        return real_import_module(module_name, package)
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.router_groups.conditional.importlib.import_module",
+        _import_module,
+    )
+
+    specs = list(iter_content_router_specs())
+    assert access_count == {
+        str(definition["module_name"]): 0
+        for definition in router_definitions.values()
+    }
+    assert import_calls == []
+
+    integration_specs = {
+        spec.route_key: spec
+        for spec in specs
+        if spec.route_key in router_definitions
+    }
+    assert set(integration_specs) == set(router_definitions)
+
+    for route_key, spec in integration_specs.items():
+        definition = router_definitions[route_key]
+        assert spec.prefix == definition["prefix"]
+        assert spec.tags == definition["tags"]
+        assert spec.default_stable is False
+        assert _first_router_path(spec.router) == definition["path"]
+
+    assert import_calls == [
+        str(router_definitions[route_key]["module_name"])
+        for route_key in integration_specs
+    ]
+    assert access_count == {
+        str(definition["module_name"]): 1
+        for definition in router_definitions.values()
+    }
+
+
 def test_qodo_reviewed_router_policy_regressions(monkeypatch: pytest.MonkeyPatch) -> None:
     _install_fake_router_module(
         monkeypatch,
