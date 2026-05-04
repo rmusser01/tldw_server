@@ -370,76 +370,45 @@ def iter_content_router_specs() -> Iterable[RouterSpec]:
     ):
         append_imported_router_spec(specs, prompt_studio_spec)
 
-    # Workspace endpoints
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.workspaces import router as workspaces_router
-
-        specs.append(RouterSpec(
-            router=workspaces_router,
+    # Workspace and character endpoints
+    for character_spec in (
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.workspaces",
+            log_name="workspaces",
             prefix=f"{API_V1_PREFIX}/workspaces",
             tags=("workspaces",),
             route_key="workspaces",
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping workspaces router: {e}")
-
-    # Character chat session endpoints
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.character_chat_sessions import (
-            router as character_chat_sessions_router,
-        )
-
-        specs.append(RouterSpec(
-            router=character_chat_sessions_router,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.character_chat_sessions",
+            log_name="character_chat_sessions",
             prefix=f"{API_V1_PREFIX}/chats",
             tags=("character-chat-sessions",),
             route_key="character-chat-sessions",
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping character_chat_sessions router: {e}")
-
-    # Character memory endpoints
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.character_memory import (
-            router as character_memory_router,
-        )
-
-        specs.append(RouterSpec(
-            router=character_memory_router,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.character_memory",
+            log_name="character_memory",
             prefix=f"{API_V1_PREFIX}/characters",
             tags=("character-memory",),
             route_key="character-memory",
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping character_memory router: {e}")
-
-    # Character endpoints
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.characters_endpoint import (
-            router as character_router,
-        )
-
-        specs.append(RouterSpec(
-            router=character_router,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.characters_endpoint",
+            log_name="characters",
             prefix=f"{API_V1_PREFIX}/characters",
             tags=("characters",),
             route_key="characters",
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping characters router: {e}")
-
-    # Character message endpoints
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.character_messages import router as character_messages_router
-
-        specs.append(RouterSpec(
-            router=character_messages_router,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.character_messages",
+            log_name="character_messages",
             prefix=f"{API_V1_PREFIX}",
             tags=("character-messages",),
             route_key="character-messages",
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping character_messages router: {e}")
+        ),
+    ):
+        append_imported_router_spec(specs, character_spec)
 
     # Audiobooks endpoints
     try:
