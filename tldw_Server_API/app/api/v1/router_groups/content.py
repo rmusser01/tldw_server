@@ -288,51 +288,40 @@ def iter_content_router_specs() -> Iterable[RouterSpec]:
     ):
         append_imported_router_spec(specs, integration_spec)
 
-    # Collections feeds endpoints
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.collections_feeds import router as collections_feeds_router
-
-        specs.append(RouterSpec(
-            router=collections_feeds_router,
+    # Collections and reading endpoints
+    for collections_spec in (
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.collections_feeds",
+            log_name="collections_feeds",
             prefix=f"{API_V1_PREFIX}",
             tags=("collections-feeds",),
             route_key="collections-feeds",
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping collections_feeds router: {e}")
-
-    # Collections WebSub endpoints
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.collections_websub import callback_router as websub_callback_router
-        from tldw_Server_API.app.api.v1.endpoints.collections_websub import router as collections_websub_router
-
-        specs.append(RouterSpec(
-            router=collections_websub_router,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.collections_websub",
+            log_name="collections_websub",
             prefix=f"{API_V1_PREFIX}",
             tags=("collections-websub",),
             route_key="collections-websub",
-        ))
-        specs.append(RouterSpec(
-            router=websub_callback_router,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.collections_websub",
+            log_name="collections_websub_callback",
             prefix=f"{API_V1_PREFIX}",
             tags=("collections-websub",),
             route_key="collections-websub",
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping collections_websub router: {e}")
-
-    # Reading endpoints
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.reading import router as reading_router
-
-        specs.append(RouterSpec(
-            router=reading_router,
+            attr_name="callback_router",
+            skip_context="(callback_router)",
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.reading",
+            log_name="reading",
             prefix=f"{API_V1_PREFIX}",
             tags=("reading",),
             route_key="reading",
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping reading router: {e}")
+        ),
+    ):
+        append_imported_router_spec(specs, collections_spec)
 
     # Prompt Studio endpoints
     try:
