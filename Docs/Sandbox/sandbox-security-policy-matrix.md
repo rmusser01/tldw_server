@@ -31,6 +31,11 @@ specific runtime today.
 | `strict allowlist` | Runtime networking permits only explicitly configured destinations and blocks all others. |
 | `scaffold` | Shape exists, but the guarantee is not ready for normal operator use. |
 
+Public runtime discovery exposes these concepts through `boundary_class`,
+`vm_grade_isolation`, and `untrusted_eligible`. Those fields describe policy
+posture and boundary category; they do not replace current-host `available`,
+`reasons`, or runtime preflight checks.
+
 ## Trust-Level Eligibility
 
 `trusted` and `standard` workloads may use VM-backed or host-local runtimes

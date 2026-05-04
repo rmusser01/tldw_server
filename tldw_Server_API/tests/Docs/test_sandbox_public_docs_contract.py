@@ -4,6 +4,8 @@ from pathlib import Path
 
 import pytest
 
+from tldw_Server_API.app.api.v1.schemas.sandbox_schemas import SandboxRuntimeInfo
+
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
@@ -57,6 +59,16 @@ def test_public_sandbox_api_docs_do_not_overclaim_runtime_support(doc_path: Path
     ):
         _require(runtime in text, f"{doc_path} should mention runtime {runtime}")
 
+    for field_name in (
+        "boundary_class",
+        "vm_grade_isolation",
+        "untrusted_eligible",
+    ):
+        _require(
+            field_name in text,
+            f"{doc_path} should document runtime discovery field {field_name}",
+        )
+
     for host_local_runtime in ("seatbelt", "worktree"):
         _require(
             f"`{host_local_runtime}` is host-local" in text,
@@ -88,3 +100,24 @@ def test_code_interpreter_prd_reconciles_current_runtime_status() -> None:
         "`vz_macos` real execution is not implemented",
     ):
         _require(snippet in text, f"Sandbox PRD should include: {snippet}")
+
+
+def test_sandbox_runtime_isolation_schema_fields_are_required() -> None:
+    schema = SandboxRuntimeInfo.model_json_schema()
+    required = set(schema.get("required", []))
+
+    for field_name in (
+        "boundary_class",
+        "vm_grade_isolation",
+        "untrusted_eligible",
+    ):
+        _require(
+            field_name in required,
+            f"SandboxRuntimeInfo should require {field_name}",
+        )
+        field_schema = schema["properties"][field_name]
+        serialized = str(field_schema)
+        _require(
+            "'type': 'null'" not in serialized,
+            f"SandboxRuntimeInfo field {field_name} should not be nullable",
+        )

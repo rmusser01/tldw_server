@@ -19,6 +19,9 @@ contract is maintained in `Docs/Sandbox/sandbox-security-policy-matrix.md`.
 Current runtime identities are `docker`, `firecracker`, `lima`, `vz_linux`,
 `vz_macos`, `seatbelt`, and `worktree`. Availability does not imply a security
 guarantee:
+- Runtime discovery includes machine-readable `boundary_class`,
+  `vm_grade_isolation`, and `untrusted_eligible` fields. Use those fields for
+  client decisions instead of parsing prose notes.
 - `seatbelt` is host-local. `seatbelt` is not `untrusted`-eligible.
 - `worktree` is host-local. `worktree` is not `untrusted`-eligible.
 - `vz_macos` real execution is not implemented; it is a scaffold/preflight
@@ -130,6 +133,9 @@ Response (example):
       "queue_ttl_sec": 120,
       "workspace_cap_mb": 256,
       "artifact_ttl_hours": 24,
+      "boundary_class": "container",
+      "vm_grade_isolation": false,
+      "untrusted_eligible": true,
       "supported_spec_versions": ["1.0", "1.1"],
       "interactive_supported": false,
       "egress_allowlist_supported": false,
@@ -138,6 +144,26 @@ Response (example):
   ]
 }
 ```
+Runtime isolation fields mean:
+- `boundary_class`: `container`, `host_local`, `vm_grade`, or
+  `vm_grade_scaffold`.
+- `vm_grade_isolation`: whether the runtime boundary is VM-grade for isolation
+  claims, independent of current host availability.
+- `untrusted_eligible`: whether policy may admit this runtime for `untrusted`
+  workloads when preflight and host readiness also pass.
+
+Current posture mapping:
+
+| Runtime | `boundary_class` | `vm_grade_isolation` | `untrusted_eligible` |
+| --- | --- | --- | --- |
+| `docker` | `container` | `false` | `true` |
+| `firecracker` | `vm_grade` | `true` | `true` |
+| `lima` | `vm_grade` | `true` | `true` |
+| `vz_linux` | `vm_grade` | `true` | `true` |
+| `vz_macos` | `vm_grade_scaffold` | `false` | `false` |
+| `seatbelt` | `host_local` | `false` | `false` |
+| `worktree` | `host_local` | `false` | `false` |
+
 For `lima`, runtime discovery also includes:
 - `strict_deny_all_supported`
 - `strict_allowlist_supported`
