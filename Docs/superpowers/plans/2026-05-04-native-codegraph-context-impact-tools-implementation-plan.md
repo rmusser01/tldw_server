@@ -123,7 +123,7 @@ The initial query can be the first useful task phrase after trimming. Keep it si
 - Modify `tldw_Server_API/app/core/DB_Management/codegraph/repository.py`
 - Test `tldw_Server_API/tests/CodeGraph/test_codegraph_repository.py`
 
-- [ ] **Step 1: Write failing repository traversal tests**
+ **Step 1: Write failing repository traversal tests**
 
 Add tests that seed a graph `entry -> helper -> leaf`, plus an incoming caller to `helper`, then assert:
 
@@ -142,7 +142,7 @@ assert impact.truncated is True
 assert len(impact.relationships) == 1
 ```
 
-- [ ] **Step 2: Run RED test**
+ **Step 2: Run RED test**
 
 Run:
 
@@ -155,7 +155,7 @@ Run:
 
 Expected: fail because `traverse_impact` does not exist.
 
-- [ ] **Step 3: Implement minimal repository helper**
+ **Step 3: Implement minimal repository helper**
 
 Add a small frozen dataclass or dict return value near repository helpers:
 
@@ -179,11 +179,11 @@ Rules:
 - Stop once `limit + 1` relationships are collected so truncation can be reported
 - Reuse `_relationship_from_joined_row()` style payloads for consistency
 
-- [ ] **Step 4: Run GREEN test**
+ **Step 4: Run GREEN test**
 
 Run the two repository tests again. Expected: pass.
 
-- [ ] **Step 5: Commit**
+ **Step 5: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/DB_Management/codegraph/repository.py \
@@ -198,7 +198,7 @@ git commit -m "feat: add codegraph impact traversal"
 - Create `tldw_Server_API/app/core/CodeGraph/context.py`
 - Test `tldw_Server_API/tests/CodeGraph/test_codegraph_context.py`
 
-- [ ] **Step 1: Write failing context builder tests**
+ **Step 1: Write failing context builder tests**
 
 Add tests for:
 
@@ -224,7 +224,7 @@ assert "def helper" in result["files"][0]["snippets"][0]["text"]
 assert result["truncation"]["truncated"] is False
 ```
 
-- [ ] **Step 2: Run RED test**
+ **Step 2: Run RED test**
 
 Run:
 
@@ -235,7 +235,7 @@ Run:
 
 Expected: fail because `context.py` does not exist.
 
-- [ ] **Step 3: Implement context builder**
+ **Step 3: Implement context builder**
 
 Create `CodeGraphContextBuilder` with:
 
@@ -268,11 +268,11 @@ Snippet rules:
 - Stop appending snippet text when `max_context_chars` would be exceeded.
 - Return `truncation.used_chars`, `truncation.max_context_chars`, and `truncation.truncated`.
 
-- [ ] **Step 4: Run GREEN test**
+ **Step 4: Run GREEN test**
 
 Run the context builder tests. Expected: pass.
 
-- [ ] **Step 5: Commit**
+ **Step 5: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/CodeGraph/context.py \
@@ -287,7 +287,7 @@ git commit -m "feat: add codegraph context builder"
 - Modify `tldw_Server_API/app/core/MCP_unified/modules/implementations/codegraph_module.py`
 - Test `tldw_Server_API/app/core/MCP_unified/tests/test_codegraph_module.py`
 
-- [ ] **Step 1: Write failing MCP impact tests**
+ **Step 1: Write failing MCP impact tests**
 
 Add tests asserting:
 
@@ -298,7 +298,7 @@ Add tests asserting:
 - indexed fixture returns root, nodes, relationships, and truncation status
 - `execute_tool("codegraph.impact", ...)` uses `asyncio.to_thread`
 
-- [ ] **Step 2: Run RED test**
+ **Step 2: Run RED test**
 
 Run:
 
@@ -310,7 +310,7 @@ Run:
 
 Expected: fail because the tool is not registered.
 
-- [ ] **Step 3: Implement MCP impact wiring**
+ **Step 3: Implement MCP impact wiring**
 
 Update `CodeGraphModule`:
 
@@ -322,11 +322,11 @@ Update `CodeGraphModule`:
 - call `repository.traverse_impact(...)`
 - serialize root via `_node_to_dict`
 
-- [ ] **Step 4: Run GREEN MCP impact tests**
+ **Step 4: Run GREEN MCP impact tests**
 
 Run the impact-specific tests. Expected: pass.
 
-- [ ] **Step 5: Commit**
+ **Step 5: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/MCP_unified/modules/implementations/codegraph_module.py \
@@ -342,7 +342,7 @@ git commit -m "feat: expose codegraph impact tool"
 - Modify `tldw_Server_API/app/core/CodeGraph/context.py` if integration needs small builder changes
 - Test `tldw_Server_API/app/core/MCP_unified/tests/test_codegraph_module.py`
 
-- [ ] **Step 1: Write failing MCP context tests**
+ **Step 1: Write failing MCP context tests**
 
 Add tests asserting:
 
@@ -353,7 +353,7 @@ Add tests asserting:
 - `include_code=False` returns file/node metadata without snippet text
 - `execute_tool("codegraph.context", ...)` uses `asyncio.to_thread`
 
-- [ ] **Step 2: Run RED test**
+ **Step 2: Run RED test**
 
 Run:
 
@@ -365,7 +365,7 @@ Run:
 
 Expected: fail because the tool is not registered.
 
-- [ ] **Step 3: Implement MCP context wiring**
+ **Step 3: Implement MCP context wiring**
 
 Update `CodeGraphModule`:
 
@@ -377,11 +377,11 @@ Update `CodeGraphModule`:
 - include bounded callers/callees for selected nodes
 - call `CodeGraphContextBuilder.build(...)`
 
-- [ ] **Step 4: Run GREEN MCP context tests**
+ **Step 4: Run GREEN MCP context tests**
 
 Run the context-specific tests. Expected: pass.
 
-- [ ] **Step 5: Commit**
+ **Step 5: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/MCP_unified/modules/implementations/codegraph_module.py \
@@ -396,7 +396,7 @@ git commit -m "feat: expose codegraph context tool"
 
 - Modify `backlog/tasks/task-46 - Implement-native-CodeGraph-context-and-impact-tools.md`
 
-- [ ] **Step 1: Run focused regression suite**
+ **Step 1: Run focused regression suite**
 
 Run:
 
@@ -410,7 +410,7 @@ Run:
 
 Expected: all pass.
 
-- [ ] **Step 2: Run Ruff**
+ **Step 2: Run Ruff**
 
 Run:
 
@@ -424,7 +424,7 @@ Run:
 
 Expected: `All checks passed!`
 
-- [ ] **Step 3: Run Bandit**
+ **Step 3: Run Bandit**
 
 Run:
 
@@ -438,7 +438,7 @@ Run:
 
 Expected: JSON reports `errors: []` and no results for touched scope.
 
-- [ ] **Step 4: Run whitespace check**
+ **Step 4: Run whitespace check**
 
 Run:
 
@@ -448,7 +448,7 @@ git diff --check
 
 Expected: no output.
 
-- [ ] **Step 5: Update task and commit final verification**
+ **Step 5: Update task and commit final verification**
 
 Update TASK-46 acceptance criteria, notes, DoD, and final summary.
 
