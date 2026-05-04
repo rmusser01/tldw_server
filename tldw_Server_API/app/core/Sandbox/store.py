@@ -2035,7 +2035,12 @@ class SQLiteStore(SandboxStore):
                     try:
                         loaded = json.loads(row_dict.get("resource_usage"))
                         resource_usage = loaded if isinstance(loaded, dict) else None
-                    except _SANDBOX_STORE_NONCRITICAL_EXCEPTIONS:
+                    except (TypeError, ValueError) as exc:
+                        logger.debug(
+                            "SQLiteStore.list_runs ignored malformed resource_usage for run_id={}: {}",
+                            row_dict.get("id"),
+                            exc,
+                        )
                         resource_usage = None
                 items.append({
                     "id": row_dict.get("id"),
@@ -3322,7 +3327,12 @@ class PostgresStore(SandboxStore):
                     try:
                         loaded = json.loads(resource_usage)
                         resource_usage = loaded if isinstance(loaded, dict) else None
-                    except _SANDBOX_STORE_NONCRITICAL_EXCEPTIONS:
+                    except (TypeError, ValueError) as exc:
+                        logger.debug(
+                            "PostgresStore.list_runs ignored malformed resource_usage for run_id={}: {}",
+                            row.get("id"),
+                            exc,
+                        )
                         resource_usage = None
                 elif not isinstance(resource_usage, dict):
                     resource_usage = None

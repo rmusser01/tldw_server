@@ -2,15 +2,15 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from tldw_Server_API.app.core.Sandbox.models import RunPhase, RunStatus, RuntimeType
-from tldw_Server_API.app.core.Sandbox.store import SQLiteStore
 from tldw_Server_API.app.api.v1.schemas.sandbox_schemas import (
     SandboxAdminRunSummary,
     SandboxRunStatus,
 )
+from tldw_Server_API.app.core.Sandbox.models import RunPhase, RunStatus, RuntimeType
 from tldw_Server_API.app.core.Sandbox.run_status_taxonomy import (
     normalize_run_status_reason,
 )
+from tldw_Server_API.app.core.Sandbox.store import SQLiteStore
 
 
 def test_run_status_reason_taxonomy_maps_common_status_shapes() -> None:
@@ -77,6 +77,51 @@ def test_run_status_reason_taxonomy_reports_limit_signals() -> None:
         exit_code=0,
         resource_usage={"artifact_files_skipped": 2},
     ) == "limits_applied"
+    assert normalize_run_status_reason(
+        phase=RunPhase.failed,
+        message="Docker execution failed (exit=2)",
+        exit_code=2,
+        resource_usage={"stdout_truncated": 1},
+    ) == "limits_applied"
+    assert normalize_run_status_reason(
+        phase=RunPhase.timed_out,
+        message="execution_timeout",
+        exit_code=None,
+        resource_usage={"artifact_skip_total_limit": 1},
+    ) == "limits_applied"
+
+
+def test_run_status_reason_taxonomy_distinguishes_runtime_unavailable() -> None:
+    assert normalize_run_status_reason(
+        phase=RunPhase.failed,
+        message="vz_linux_policy_failed",
+        exit_code=None,
+        resource_usage=None,
+    ) == "runtime_unavailable"
+    assert normalize_run_status_reason(
+        phase=RunPhase.failed,
+        message="vz_macos_policy_failed",
+        exit_code=None,
+        resource_usage=None,
+    ) == "runtime_unavailable"
+    assert normalize_run_status_reason(
+        phase=RunPhase.failed,
+        message="runtime provisioning template missing",
+        exit_code=None,
+        resource_usage=None,
+    ) == "runtime_unavailable"
+    assert normalize_run_status_reason(
+        phase=RunPhase.failed,
+        message="command not found in PATH: python",
+        exit_code=None,
+        resource_usage=None,
+    ) == "runtime_error"
+    assert normalize_run_status_reason(
+        phase=RunPhase.failed,
+        message="artifact manifest missing",
+        exit_code=None,
+        resource_usage=None,
+    ) == "runtime_error"
 
 
 def test_run_status_reason_taxonomy_accepts_string_phase_values() -> None:
