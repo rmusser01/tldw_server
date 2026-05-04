@@ -1,6 +1,7 @@
 import React from "react"
 
 import { resolvePublicApiOrigin, type DeploymentEnv } from "@web/lib/api-base"
+import { StatePanel } from "@tldw/ui/components/ui/state"
 
 const _env: DeploymentEnv = {
   NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE: process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE,
@@ -83,32 +84,27 @@ export const ServerReadinessGate: React.FC<{
     return <>{children}</>
   }
 
+  const isRetrying = gate === "waiting"
+  const state = isRetrying ? "retrying" : "loading"
+  const title = isRetrying ? "Retrying server readiness" : "Checking server readiness"
+  const message = isRetrying
+    ? "The WebUI is retrying the health check before opening the app."
+    : "The WebUI is checking the API health endpoint before opening the app."
+
   return (
-    <div
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        justifyContent: "center",
-        minHeight: "100vh",
-        fontFamily: "system-ui, -apple-system, sans-serif",
-        color: "#666",
-        gap: "12px"
-      }}
+    <main
+      className="flex min-h-screen items-center justify-center bg-bg px-4 py-10 text-text"
+      role="status"
+      aria-live="polite"
     >
-      <div
-        style={{
-          width: "32px",
-          height: "32px",
-          border: "3px solid #e0e0e0",
-          borderTopColor: "#666",
-          borderRadius: "50%",
-          animation: "tldw-spin 0.8s linear infinite"
-        }}
+      <StatePanel
+        state={state}
+        title={title}
+        message={message}
+        primaryAction={{ label: "Waiting", disabled: true }}
+        className="w-full max-w-lg"
       />
-      <p style={{ margin: 0, fontSize: "14px" }}>Waiting for server...</p>
-      <style>{`@keyframes tldw-spin { to { transform: rotate(360deg); } }`}</style>
-    </div>
+    </main>
   )
 }
 

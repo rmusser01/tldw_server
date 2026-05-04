@@ -2,6 +2,12 @@ import { act, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 describe("ServerReadinessGate", () => {
+  const expectReadinessStatus = () => {
+    const status = screen.getByRole("status")
+    expect(status).toHaveTextContent(/Checking server readiness|Retrying server readiness/)
+    expect(status).toHaveTextContent(/Loading|Retrying/)
+  }
+
   afterEach(() => {
     vi.restoreAllMocks()
     vi.useRealTimers()
@@ -50,7 +56,7 @@ describe("ServerReadinessGate", () => {
       </ServerReadinessGate>
     )
 
-    expect(screen.getByText("Waiting for server...")).toBeInTheDocument()
+    expectReadinessStatus()
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(16_000)
@@ -76,7 +82,7 @@ describe("ServerReadinessGate", () => {
       )
     })
 
-    expect(screen.getByText("Waiting for server...")).toBeInTheDocument()
+    expectReadinessStatus()
     expect(screen.queryByText("App ready")).toBeNull()
   })
 
