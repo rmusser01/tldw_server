@@ -472,59 +472,40 @@ def iter_content_router_specs() -> Iterable[RouterSpec]:
     except ImportError as e:
         logger.debug(f"Kanban endpoints unavailable; skipping import: {e}")
 
-    # Connectors endpoints
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.connectors import router as connectors_router
-
-        specs.append(RouterSpec(
-            router=connectors_router,
+    # Ingestion and adapter endpoints
+    for adapter_spec in (
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.connectors",
+            log_name="connectors",
             prefix=f"{API_V1_PREFIX}",
             tags=("connectors",),
             route_key="connectors",
             default_stable=False,
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping connectors router: {e}")
-
-    # Ingestion sources endpoints
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.ingestion_sources import router as ingestion_sources_router
-
-        specs.append(RouterSpec(
-            router=ingestion_sources_router,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.ingestion_sources",
+            log_name="ingestion_sources",
             prefix=f"{API_V1_PREFIX}",
             tags=("ingestion-sources",),
             route_key="ingestion-sources",
             default_stable=False,
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping ingestion_sources router: {e}")
-
-    # Web scraping endpoints
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.web_scraping import router as web_scraping_router
-
-        specs.append(RouterSpec(
-            router=web_scraping_router,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.web_scraping",
+            log_name="web_scraping",
             prefix=f"{API_V1_PREFIX}",
             tags=("web-scraping",),
             route_key="web-scraping",
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping web_scraping router: {e}")
-
-    # Reading highlights endpoints
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.reading_highlights import router as reading_highlights_router
-
-        specs.append(RouterSpec(
-            router=reading_highlights_router,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.reading_highlights",
+            log_name="reading_highlights",
             prefix=f"{API_V1_PREFIX}",
             tags=("reading-highlights",),
             route_key="reading-highlights",
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping reading_highlights router: {e}")
+        ),
+    ):
+        append_imported_router_spec(specs, adapter_spec)
 
     append_imported_router_spec(
         specs,
