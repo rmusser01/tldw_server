@@ -48,6 +48,15 @@ class _DiscoveryResult:
     status: str | None = None
 
 
+@dataclass(frozen=True)
+class _CandidateContent:
+    """Opened file content or hash derived from a single file stream."""
+
+    content_hash: str
+    source: bytes | None = None
+    is_binary: bool = False
+
+
 class CodeGraphIndexer:
     """Bounded foreground file-inventory indexer."""
 
@@ -167,13 +176,39 @@ class CodeGraphIndexer:
                     counters["files_too_large"] += 1
                     counters["files_skipped"] += 1
                     continue
-                source = candidate.path.read_bytes()
-                if self._is_binary(source):
+
+                has_extractor = candidate.language_id in self._extractors
+                try:
+                    content = self._read_candidate_content(candidate, needs_source=has_extractor)
+                except OSError as exc:
+                    message = str(exc)
+                    logger.warning(f"CodeGraph skipped unreadable path during indexing: {candidate.path} ({message})")
+                    counters["errors"] += 1
+                    counters["files_skipped"] += 1
+                    errors.append(f"{candidate.relative_path}: {message}")
+                    repository.upsert_file_and_replace_graph(
+                        path=candidate.relative_path,
+                        language=candidate.language_id,
+                        size=candidate.size,
+                        content_hash="",
+                        modified_at=candidate.modified_at,
+                        status="extraction_failed",
+                        errors=(message,),
+                        node_count=0,
+                        nodes=(),
+                        edges=(),
+                        unresolved_refs=(),
+                    )
+                    continue
+
+                if content.is_binary:
                     counters["files_skipped"] += 1
                     continue
 
-                content_hash = self._hash_bytes(source)
-                extraction = self._extract(candidate, workspace_key, source)
+                if has_extractor:
+                    extraction = self._extract(candidate, workspace_key, content.source or b"")
+                else:
+                    extraction = ExtractionResult()
                 file_status = "indexed"
                 if extraction.errors:
                     counters["errors"] += len(extraction.errors)
@@ -183,7 +218,7 @@ class CodeGraphIndexer:
                     path=candidate.relative_path,
                     language=candidate.language_id,
                     size=candidate.size,
-                    content_hash=content_hash,
+                    content_hash=content.content_hash,
                     modified_at=candidate.modified_at,
                     status=file_status,
                     errors=extraction.errors,
@@ -291,11 +326,36 @@ class CodeGraphIndexer:
         extractor = self._extractors.get(candidate.language_id)
         if extractor is None:
             return ExtractionResult()
-        return extractor.extract(
-            workspace_key=workspace_key,
-            file_path=candidate.relative_path,
-            source=source,
-        )
+        try:
+            return extractor.extract(
+                workspace_key=workspace_key,
+                file_path=candidate.relative_path,
+                source=source,
+            )
+        except ValueError as exc:
+            logger.warning(f"CodeGraph extractor failed for {candidate.relative_path}: {exc}")
+            return ExtractionResult(errors=(str(exc),))
+
+    @staticmethod
+    def _read_candidate_content(candidate: _Candidate, *, needs_source: bool) -> _CandidateContent:
+        """Read or hash one candidate from a single open stream."""
+        digest = hashlib.sha256()
+        with candidate.path.open("rb") as handle:
+            probe = handle.read(4096)
+            if CodeGraphIndexer._is_binary(probe):
+                return _CandidateContent(content_hash="", is_binary=True)
+
+            if needs_source:
+                source = probe + handle.read()
+                return _CandidateContent(
+                    content_hash=CodeGraphIndexer._hash_bytes(source),
+                    source=source,
+                )
+
+            digest.update(probe)
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+            return _CandidateContent(content_hash=digest.hexdigest())
 
     @staticmethod
     def _hash_bytes(source: bytes) -> str:

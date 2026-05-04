@@ -36,7 +36,7 @@ class PythonAstExtractor:
         try:
             text = source.decode("utf-8")
             tree = ast.parse(text, filename=file_path)
-        except (SyntaxError, UnicodeDecodeError) as exc:
+        except (SyntaxError, UnicodeDecodeError, ValueError) as exc:
             return ExtractionResult(errors=(str(exc),))
 
         builder = _PythonGraphBuilder(workspace_key=workspace_key, file_path=file_path, source=text)
