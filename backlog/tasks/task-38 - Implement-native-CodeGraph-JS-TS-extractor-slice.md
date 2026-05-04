@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - Codex
 created_date: '2026-05-04 05:48'
-updated_date: '2026-05-04 05:50'
+updated_date: '2026-05-04 05:59'
 labels:
   - codegraph
   - mcp
@@ -47,6 +47,10 @@ Implement the next native CodeGraph epic slice after PR #1258: JavaScript/TypeSc
 
 <!-- SECTION:NOTES:BEGIN -->
 Created implementation plan at Docs/superpowers/plans/2026-05-04-native-codegraph-js-ts-extractor-implementation-plan.md. Baseline focused CodeGraph/MCP tests passed with 53 passed and 5 warnings before Stage 3 work. Current shared venv is missing optional tree-sitter parser packages, so the plan explicitly gates implementation on installing/verifying .[codegraph] parser dependencies.
+
+Installed pinned CodeGraph parser dependency set directly after .[codegraph] resolver conflict blocked full extra installation.
+
+Task 1 red-green complete: added tree_sitter_loader tests, confirmed ModuleNotFoundError RED, implemented dynamic optional parser loader, and verified 5 passed.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

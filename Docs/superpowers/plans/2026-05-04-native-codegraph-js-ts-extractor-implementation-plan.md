@@ -90,7 +90,7 @@ If installation is unavailable in the environment, stop and report the blocker r
 - Create: `tldw_Server_API/app/core/CodeGraph/extractors/tree_sitter_loader.py`
 - Test: `tldw_Server_API/tests/CodeGraph/test_codegraph_tree_sitter_loader.py`
 
-- [ ] **Step 1: Write RED tests for dependency-aware parser loading**
+- [x] **Step 1: Write RED tests for dependency-aware parser loading**
 
 Test cases:
 
@@ -99,7 +99,7 @@ Test cases:
 - TypeScript parser can parse `interface User { id: string }`.
 - TSX parser can parse `export function Card() { return <div />; }`.
 
-- [ ] **Step 2: Run tests and verify RED**
+- [x] **Step 2: Run tests and verify RED**
 
 ```bash
 source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate
@@ -108,7 +108,7 @@ python -m pytest tldw_Server_API/tests/CodeGraph/test_codegraph_tree_sitter_load
 
 Expected: fails because `tree_sitter_loader.py` does not exist.
 
-- [ ] **Step 3: Implement loader**
+- [x] **Step 3: Implement loader**
 
 Create small value objects such as:
 
@@ -122,7 +122,7 @@ class ParserLoadResult:
 
 Use dynamic imports inside functions so normal CodeGraph imports work without `.[codegraph]`.
 
-- [ ] **Step 4: Run loader tests and commit**
+- [x] **Step 4: Run loader tests and commit**
 
 ```bash
 python -m pytest tldw_Server_API/tests/CodeGraph/test_codegraph_tree_sitter_loader.py -q
