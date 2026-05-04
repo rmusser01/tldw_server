@@ -77,7 +77,7 @@ class CodeGraphIndexer:
         self._extractors = {"python": PythonAstExtractor()}
         if load_parser("javascript").available:
             self._extractors["javascript"] = JavaScriptTreeSitterExtractor()
-        if load_parser("typescript").available and load_parser("tsx").available:
+        if load_parser("typescript").available:
             self._extractors["typescript"] = TypeScriptTreeSitterExtractor()
 
     def index_workspace(
@@ -342,8 +342,8 @@ class CodeGraphIndexer:
             if candidate.language_id in {"javascript", "typescript"}:
                 kwargs["workspace_root"] = workspace_root
             return extractor.extract(**kwargs)
-        except ValueError as exc:
-            logger.warning(f"CodeGraph extractor failed for {candidate.relative_path}: {exc}")
+        except (ValueError, OSError, ImportError, AttributeError, TypeError, RuntimeError) as exc:
+            logger.opt(exception=exc).warning(f"CodeGraph extractor failed for {candidate.relative_path}: {exc}")
             return ExtractionResult(errors=(str(exc),))
 
     @staticmethod

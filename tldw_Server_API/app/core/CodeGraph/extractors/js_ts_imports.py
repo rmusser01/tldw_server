@@ -66,10 +66,25 @@ def resolve_js_ts_import(workspace_root: Path, source_path: str | Path, specifie
     if source_abs is None:
         return ImportResolution(specifier=specifier, resolution_kind="unresolved", reason="source_outside_workspace")
 
+    config = load_js_ts_project_config(workspace, source_abs)
+    return resolve_js_ts_import_with_config(workspace, source_abs, specifier, config)
+
+
+def resolve_js_ts_import_with_config(
+    workspace_root: Path,
+    source_path: str | Path,
+    specifier: str,
+    config: JsTsProjectConfig | None,
+) -> ImportResolution:
+    """Resolve an import using a caller-supplied project config cache entry."""
+    workspace = workspace_root.resolve()
+    source_abs = _resolve_under_workspace(workspace, source_path)
+    if source_abs is None:
+        return ImportResolution(specifier=specifier, resolution_kind="unresolved", reason="source_outside_workspace")
+
     if specifier.startswith(("./", "../")):
         return resolve_relative_import(workspace, source_abs, specifier)
 
-    config = load_js_ts_project_config(workspace, source_path)
     if config is not None:
         alias_result = resolve_path_alias_import(workspace, config, specifier)
         if alias_result is not None:
@@ -144,11 +159,17 @@ def resolve_path_alias_import(
 
 
 def _read_project_config(workspace_root: Path, config_path: Path) -> JsTsProjectConfig:
+    """Read a tsconfig/jsconfig file and normalize the subset needed for import aliases."""
     raw = config_path.read_text(encoding="utf-8")
     try:
         parsed: dict[str, Any] = json.loads(raw)
     except json.JSONDecodeError:
-        parsed = json.loads(_strip_jsonc_comments(raw))
+        try:
+            parsed = json.loads(_strip_jsonc_comments(raw))
+        except json.JSONDecodeError:
+            parsed = {}
+    if not isinstance(parsed, dict):
+        parsed = {}
 
     compiler_options = parsed.get("compilerOptions", {})
     if not isinstance(compiler_options, dict):
@@ -183,6 +204,7 @@ def _matching_path_aliases(
     paths: dict[str, tuple[str, ...]],
     specifier: str,
 ) -> tuple[tuple[str, str | None], ...]:
+    """Return alias targets whose pattern matches a specifier, longest prefix first."""
     matches: list[tuple[int, tuple[str, str | None]]] = []
     for pattern, targets in paths.items():
         wildcard_value = _match_alias_pattern(pattern, specifier)
@@ -195,6 +217,7 @@ def _matching_path_aliases(
 
 
 def _match_alias_pattern(pattern: str, specifier: str) -> str | None:
+    """Return the wildcard text for a matching paths pattern, or None when unmatched."""
     if "*" not in pattern:
         return "" if pattern == specifier else None
     prefix, suffix = pattern.split("*", 1)
@@ -205,6 +228,7 @@ def _match_alias_pattern(pattern: str, specifier: str) -> str | None:
 
 
 def _resolve_source_candidate(workspace_root: Path, candidate_base: Path) -> Path | None:
+    """Resolve a file or index-file candidate under the workspace, if it exists."""
     candidates: list[Path]
     if candidate_base.suffix:
         candidates = [candidate_base]
@@ -220,6 +244,7 @@ def _resolve_source_candidate(workspace_root: Path, candidate_base: Path) -> Pat
 
 
 def _candidate_strings(workspace_root: Path, candidate_base: Path) -> tuple[str, ...]:
+    """Return workspace-relative candidate paths considered for a missing import."""
     if not _is_under_workspace(workspace_root, candidate_base):
         return ()
     if candidate_base.suffix:
@@ -230,6 +255,7 @@ def _candidate_strings(workspace_root: Path, candidate_base: Path) -> tuple[str,
 
 
 def _resolve_under_workspace(workspace_root: Path, path: str | Path) -> Path | None:
+    """Resolve a path only when the result remains inside the workspace root."""
     candidate = Path(path)
     if not candidate.is_absolute():
         candidate = workspace_root / candidate
@@ -240,16 +266,19 @@ def _resolve_under_workspace(workspace_root: Path, path: str | Path) -> Path | N
 
 
 def _is_under_workspace(workspace_root: Path, path: Path) -> bool:
+    """Return whether path is the workspace root or a descendant of it."""
     resolved_workspace = workspace_root.resolve()
     resolved_path = path.resolve()
     return resolved_path == resolved_workspace or resolved_workspace in resolved_path.parents
 
 
 def _workspace_relative(workspace_root: Path, path: Path) -> str:
+    """Render a resolved path as a POSIX workspace-relative path."""
     return path.resolve().relative_to(workspace_root.resolve()).as_posix()
 
 
 def _strip_jsonc_comments(text: str) -> str:
+    """Remove JSONC line and block comments while preserving string literal contents."""
     result: list[str] = []
     in_string = False
     escape = False
@@ -293,6 +322,7 @@ __all__ = [
     "JsTsProjectConfig",
     "load_js_ts_project_config",
     "resolve_js_ts_import",
+    "resolve_js_ts_import_with_config",
     "resolve_path_alias_import",
     "resolve_relative_import",
 ]

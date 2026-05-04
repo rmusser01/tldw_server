@@ -18,7 +18,7 @@ def test_load_parser_reports_missing_optional_dependency(monkeypatch) -> None:
     )
     real_import_module = loader.importlib.import_module
 
-    def fake_import_module(name: str):
+    def fake_import_module(name: str) -> ModuleType:
         if name == "tree_sitter_javascript":
             raise ModuleNotFoundError("No module named 'tree_sitter_javascript'")
         return real_import_module(name)
@@ -30,6 +30,26 @@ def test_load_parser_reports_missing_optional_dependency(monkeypatch) -> None:
     assert result.parser is None
     assert result.missing == ("tree_sitter_javascript",)
     assert result.error is None
+
+
+def test_load_parser_reports_optional_import_errors(monkeypatch) -> None:
+    loader = importlib.import_module(
+        "tldw_Server_API.app.core.CodeGraph.extractors.tree_sitter_loader"
+    )
+    real_import_module = loader.importlib.import_module
+
+    def fake_import_module(name: str) -> ModuleType:
+        if name == "tree_sitter_javascript":
+            raise OSError("bad native extension")
+        return real_import_module(name)
+
+    monkeypatch.setattr(loader.importlib, "import_module", fake_import_module)
+
+    result = loader.load_parser("javascript")
+
+    assert result.parser is None
+    assert result.missing == ()
+    assert result.error == "Failed to import tree_sitter_javascript: bad native extension"
 
 
 def test_javascript_parser_can_parse_exported_function() -> None:

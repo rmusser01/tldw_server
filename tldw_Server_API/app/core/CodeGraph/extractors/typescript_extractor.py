@@ -6,10 +6,10 @@ from pathlib import Path
 from typing import Any
 
 from tldw_Server_API.app.core.CodeGraph.extractors.javascript_extractor import (
-    _direct_named_child_of_type,
-    _JavaScriptGraphBuilder,
-    _node_text,
-    _qualified_name,
+    JavaScriptGraphBuilder,
+    first_named_child_of_type,
+    node_text,
+    qualified_name,
 )
 from tldw_Server_API.app.core.CodeGraph.extractors.tree_sitter_loader import load_parser
 from tldw_Server_API.app.core.CodeGraph.models import ExtractionResult
@@ -59,7 +59,7 @@ class TypeScriptTreeSitterExtractor:
         return builder.build(tree.root_node)
 
 
-class _TypeScriptGraphBuilder(_JavaScriptGraphBuilder):
+class _TypeScriptGraphBuilder(JavaScriptGraphBuilder):
     """JS-family graph builder with TypeScript declaration support."""
 
     _TYPE_DECLARATION_KINDS = {
@@ -78,17 +78,17 @@ class _TypeScriptGraphBuilder(_JavaScriptGraphBuilder):
     def _visit_type_declaration(self, node: Any, *, kind: str, exported: bool) -> None:
         name_node = (
             node.child_by_field_name("name")
-            or _direct_named_child_of_type(node, "type_identifier")
-            or _direct_named_child_of_type(node, "identifier")
+            or first_named_child_of_type(node, "type_identifier")
+            or first_named_child_of_type(node, "identifier")
         )
-        name = _node_text(self.source, name_node)
+        name = node_text(self.source, name_node)
         if not name:
             return
         self.nodes.append(
             self._make_node(
                 kind=kind,
                 name=name,
-                qualified_name=_qualified_name((*self._class_stack, name)),
+                qualified_name=qualified_name((*self._class_stack, name)),
                 node=node,
                 flags=("exported",) if exported else (),
             )

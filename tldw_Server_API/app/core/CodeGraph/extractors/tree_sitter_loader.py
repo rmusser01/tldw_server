@@ -38,11 +38,15 @@ def load_parser(language_id: str) -> ParserLoadResult:
     tree_sitter = _import_optional("tree_sitter")
     if tree_sitter.missing:
         return ParserLoadResult(missing=tree_sitter.missing)
+    if tree_sitter.error:
+        return ParserLoadResult(error=tree_sitter.error)
 
     module_name, language_function = parser_package
     language_module = _import_optional(module_name)
     if language_module.missing:
         return ParserLoadResult(missing=language_module.missing)
+    if language_module.error:
+        return ParserLoadResult(error=language_module.error)
 
     try:
         language = tree_sitter.module.Language(getattr(language_module.module, language_function)())
@@ -59,14 +63,19 @@ class _ImportResult:
 
     module: Any | None = None
     missing: tuple[str, ...] = ()
+    error: str | None = None
 
 
 def _import_optional(module_name: str) -> _ImportResult:
-    """Import an optional module and report missing modules without raising."""
+    """Import an optional module and report optional dependency failures without raising."""
     try:
         return _ImportResult(module=importlib.import_module(module_name))
-    except ModuleNotFoundError:
-        return _ImportResult(missing=(module_name,))
+    except ModuleNotFoundError as exc:
+        if exc.name in {None, module_name}:
+            return _ImportResult(missing=(module_name,))
+        return _ImportResult(error=f"Failed to import {module_name}: {exc}")
+    except (ImportError, OSError) as exc:
+        return _ImportResult(error=f"Failed to import {module_name}: {exc}")
 
 
 __all__ = ["ParserLoadResult", "load_parser"]

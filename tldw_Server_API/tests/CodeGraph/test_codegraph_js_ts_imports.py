@@ -119,6 +119,30 @@ def test_project_config_loads_nearest_tsconfig(tmp_path: Path) -> None:
     assert config.paths == {"@web/*": ("src/*",)}
 
 
+def test_invalid_jsonc_project_config_does_not_abort_resolution(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    (workspace / "src").mkdir(parents=True)
+    (workspace / "src" / "app.ts").write_text("import Button from '@/Button';\n", encoding="utf-8")
+    (workspace / "tsconfig.json").write_text(
+        """
+{
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/*"],
+    },
+  },
+}
+""",
+        encoding="utf-8",
+    )
+
+    result = resolve_js_ts_import(workspace, "src/app.ts", "@/Button")
+
+    assert result.resolution_kind == "external"
+    assert result.reason == "external_package"
+
+
 def test_alias_targets_escaping_workspace_are_not_resolved(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     _write_json(

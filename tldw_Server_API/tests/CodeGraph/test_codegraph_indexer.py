@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
+import tldw_Server_API.app.core.CodeGraph.indexer as indexer_module
 from tldw_Server_API.app.core.CodeGraph.config import CodeGraphSettings
 from tldw_Server_API.app.core.CodeGraph.indexer import CodeGraphIndexer, _Candidate, _DiscoveryResult
 from tldw_Server_API.app.core.CodeGraph.language_registry import CodeGraphLanguageRegistry
@@ -160,6 +162,50 @@ def test_indexer_converts_extractor_exceptions_to_file_errors(tmp_path: Path) ->
     assert result.counters["errors"] == 1
     assert file_row.status == "extraction_failed"
     assert file_row.errors == ("source code string cannot contain null bytes",)
+
+
+def test_indexer_converts_non_value_extractor_exceptions_to_file_errors(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "broken.py").write_text("x = 1\n", encoding="utf-8")
+    (workspace / "healthy.py").write_text("y = 2\n", encoding="utf-8")
+    repo = CodeGraphRepository(tmp_path / "codegraph.db")
+    indexer = CodeGraphIndexer(settings=CodeGraphSettings.from_mapping({}), registry=CodeGraphLanguageRegistry())
+
+    class _RaisingExtractor:
+        def extract(self, *, workspace_key: str, file_path: str, source: bytes) -> ExtractionResult:
+            if file_path == "broken.py":
+                raise OSError("bad tsconfig")
+            return ExtractionResult()
+
+    indexer._extractors["python"] = _RaisingExtractor()  # noqa: SLF001
+
+    result = indexer.index_workspace(
+        workspace_root=workspace,
+        workspace_key="ws_test",
+        repository=repo,
+        force=True,
+        languages=None,
+        max_files=10,
+    )
+    files = {item.path: item for item in repo.list_files(limit=10)}
+
+    assert result.status == "complete"
+    assert result.counters["errors"] == 1
+    assert files["broken.py"].status == "extraction_failed"
+    assert files["broken.py"].errors == ("bad tsconfig",)
+    assert files["healthy.py"].status == "indexed"
+
+
+def test_indexer_registers_typescript_extractor_when_ts_parser_exists_without_tsx(monkeypatch) -> None:
+    def fake_load_parser(language_id: str) -> SimpleNamespace:
+        return SimpleNamespace(available=language_id == "typescript")
+
+    monkeypatch.setattr(indexer_module, "load_parser", fake_load_parser)
+
+    indexer = CodeGraphIndexer(settings=CodeGraphSettings.from_mapping({}), registry=CodeGraphLanguageRegistry())
+
+    assert "typescript" in indexer._extractors  # noqa: SLF001
 
 
 def test_indexer_does_not_read_full_inventory_only_file_into_memory(tmp_path: Path) -> None:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from tldw_Server_API.app.core.CodeGraph.extractors import js_ts_imports
 from tldw_Server_API.app.core.CodeGraph.extractors.javascript_extractor import (
     JavaScriptTreeSitterExtractor,
 )
@@ -84,6 +85,34 @@ def test_javascript_extractor_marks_parse_errors() -> None:
     )
 
     assert result == ExtractionResult(errors=("JavaScript parse error",))
+
+
+def test_javascript_extractor_loads_project_config_once_per_file(tmp_path: Path, monkeypatch) -> None:
+    workspace = tmp_path / "workspace"
+    (workspace / "src").mkdir(parents=True)
+    calls: list[tuple[Path, str | Path]] = []
+
+    def fake_load_js_ts_project_config(
+        workspace_root: Path,
+        source_path: str | Path,
+    ) -> js_ts_imports.JsTsProjectConfig | None:
+        calls.append((workspace_root, source_path))
+        return None
+
+    monkeypatch.setattr(js_ts_imports, "load_js_ts_project_config", fake_load_js_ts_project_config)
+
+    result = JavaScriptTreeSitterExtractor(workspace_root=workspace).extract(
+        workspace_key="ws",
+        file_path="src/app.jsx",
+        source=b"""
+import React from "react";
+import { helper } from "@web/helper";
+export { Card } from "@tldw/ui/Card";
+""",
+    )
+
+    assert result.errors == ()
+    assert calls == [(workspace.resolve(), "src/app.jsx")]
 
 
 def test_javascript_extractor_uses_deterministic_node_ids() -> None:

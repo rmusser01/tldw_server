@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from tldw_Server_API.app.core.CodeGraph.extractors.js_ts_imports import resolve_js_ts_import
+import tldw_Server_API.app.core.CodeGraph.extractors.js_ts_imports as js_ts_imports
 from tldw_Server_API.app.core.CodeGraph.extractors.tree_sitter_loader import load_parser
 from tldw_Server_API.app.core.CodeGraph.models import (
     CodeGraphEdge,
@@ -60,7 +60,7 @@ class JavaScriptTreeSitterExtractor:
         if tree.root_node.has_error:
             return ExtractionResult(errors=("JavaScript parse error",))
 
-        builder = _JavaScriptGraphBuilder(
+        builder = JavaScriptGraphBuilder(
             workspace_key=workspace_key,
             workspace_root=workspace_root or self.workspace_root,
             file_path=file_path,
@@ -71,7 +71,7 @@ class JavaScriptTreeSitterExtractor:
         return builder.build(tree.root_node)
 
 
-class _JavaScriptGraphBuilder:
+class JavaScriptGraphBuilder:
     """Stateful Tree-sitter visitor for one JS-family source file."""
 
     def __init__(
@@ -85,11 +85,16 @@ class _JavaScriptGraphBuilder:
         language_id: str,
     ) -> None:
         self.workspace_key = workspace_key
-        self.workspace_root = workspace_root
+        self.workspace_root = workspace_root.resolve() if workspace_root is not None else None
         self.file_path = file_path
         self.source = source
         self.source_text = source_text
         self.language_id = language_id
+        self.project_config = (
+            js_ts_imports.load_js_ts_project_config(self.workspace_root, self.file_path)
+            if self.workspace_root is not None
+            else None
+        )
         self.nodes: list[CodeGraphNode] = []
         self.edges: list[CodeGraphEdge] = []
         self.unresolved_refs: list[CodeGraphUnresolvedRef] = []
@@ -159,11 +164,11 @@ class _JavaScriptGraphBuilder:
 
         source_node = node.child_by_field_name("source")
         source_specifier = _string_literal_value(self.source, source_node)
-        export_clause = _first_named_child_of_type(node, "export_clause")
+        export_clause = first_named_child_of_type(node, "export_clause")
         if source_specifier and export_clause is not None:
             for specifier_node in _named_descendants_of_type(export_clause, "export_specifier"):
-                imported = _node_text(self.source, specifier_node.child_by_field_name("name"))
-                local = _node_text(self.source, specifier_node.child_by_field_name("alias")) or imported
+                imported = node_text(self.source, specifier_node.child_by_field_name("name"))
+                local = node_text(self.source, specifier_node.child_by_field_name("alias")) or imported
                 self._add_import_node(
                     node=specifier_node,
                     name=local,
@@ -179,7 +184,7 @@ class _JavaScriptGraphBuilder:
         if not source_specifier:
             return
 
-        import_clause = _first_named_child_of_type(node, "import_clause")
+        import_clause = first_named_child_of_type(node, "import_clause")
         if import_clause is None:
             self._add_import_node(
                 node=node,
@@ -191,11 +196,11 @@ class _JavaScriptGraphBuilder:
             )
             return
 
-        default_name = _direct_named_child_of_type(import_clause, "identifier")
+        default_name = first_named_child_of_type(import_clause, "identifier")
         if default_name is not None:
             self._add_import_node(
                 node=default_name,
-                name=_node_text(self.source, default_name),
+                name=node_text(self.source, default_name),
                 source_specifier=source_specifier,
                 imported="default",
                 alias=None,
@@ -203,8 +208,8 @@ class _JavaScriptGraphBuilder:
             )
 
         for specifier_node in _named_descendants_of_type(import_clause, "import_specifier"):
-            imported = _node_text(self.source, specifier_node.child_by_field_name("name"))
-            local = _node_text(self.source, specifier_node.child_by_field_name("alias")) or imported
+            imported = node_text(self.source, specifier_node.child_by_field_name("name"))
+            local = node_text(self.source, specifier_node.child_by_field_name("alias")) or imported
             self._add_import_node(
                 node=specifier_node,
                 name=local,
@@ -214,7 +219,7 @@ class _JavaScriptGraphBuilder:
                 is_re_export=False,
             )
 
-        namespace_import = _first_named_child_of_type(import_clause, "namespace_import")
+        namespace_import = first_named_child_of_type(import_clause, "namespace_import")
         if namespace_import is not None:
             local_name = _last_identifier_text(namespace_import)
             if local_name:
@@ -228,15 +233,15 @@ class _JavaScriptGraphBuilder:
                 )
 
     def _visit_function_declaration(self, node: Any, *, exported: bool = False) -> None:
-        name_node = node.child_by_field_name("name") or _direct_named_child_of_type(node, "identifier")
-        name = _node_text(self.source, name_node)
+        name_node = node.child_by_field_name("name") or first_named_child_of_type(node, "identifier")
+        name = node_text(self.source, name_node)
         if not name:
             return
         kind = "component" if _is_component_name(name) and _contains_jsx(node) else "function"
         function_node = self._make_node(
             kind=kind,
             name=name,
-            qualified_name=_qualified_name((*self._class_stack, name)),
+            qualified_name=qualified_name((*self._class_stack, name)),
             node=node,
             flags=("exported",) if exported else (),
         )
@@ -257,14 +262,14 @@ class _JavaScriptGraphBuilder:
                 self._visit(child, exported=exported)
             return
 
-        name = _node_text(self.source, name_node)
+        name = node_text(self.source, name_node)
         if not name:
             return
         kind = "component" if _is_component_name(name) and _contains_jsx(value_node) else "function"
         function_node = self._make_node(
             kind=kind,
             name=name,
-            qualified_name=_qualified_name((*self._class_stack, name)),
+            qualified_name=qualified_name((*self._class_stack, name)),
             node=node,
             flags=("exported", "arrow") if exported else ("arrow",),
         )
@@ -276,14 +281,14 @@ class _JavaScriptGraphBuilder:
         self._scope_stack.pop()
 
     def _visit_class_declaration(self, node: Any, *, exported: bool = False) -> None:
-        name_node = node.child_by_field_name("name") or _direct_named_child_of_type(node, "identifier")
-        name = _node_text(self.source, name_node)
+        name_node = node.child_by_field_name("name") or first_named_child_of_type(node, "identifier")
+        name = node_text(self.source, name_node)
         if not name:
             return
         class_node = self._make_node(
             kind="class",
             name=name,
-            qualified_name=_qualified_name((*self._class_stack, name)),
+            qualified_name=qualified_name((*self._class_stack, name)),
             node=node,
             flags=("exported",) if exported else (),
         )
@@ -292,7 +297,7 @@ class _JavaScriptGraphBuilder:
 
         self._scope_stack.append(class_node)
         self._class_stack.append(name)
-        body = node.child_by_field_name("body") or _first_named_child_of_type(node, "class_body")
+        body = node.child_by_field_name("body") or first_named_child_of_type(node, "class_body")
         if body is not None:
             for child in body.named_children:
                 self._visit(child)
@@ -301,13 +306,13 @@ class _JavaScriptGraphBuilder:
 
     def _visit_method_definition(self, node: Any) -> None:
         name_node = node.child_by_field_name("name")
-        name = _node_text(self.source, name_node)
+        name = node_text(self.source, name_node)
         if not name:
             return
         method_node = self._make_node(
             kind="method",
             name=name,
-            qualified_name=_qualified_name((*self._class_stack, name)),
+            qualified_name=qualified_name((*self._class_stack, name)),
             node=node,
         )
         self.nodes.append(method_node)
@@ -327,7 +332,7 @@ class _JavaScriptGraphBuilder:
                 self._call_sites.append(
                     _CallSite(
                         source_node_id=current_scope.id,
-                        reference_name=_node_text(self.source, function_node),
+                        reference_name=node_text(self.source, function_node),
                         line=_line(node),
                         column=_column(node),
                     )
@@ -361,7 +366,12 @@ class _JavaScriptGraphBuilder:
         is_re_export: bool,
     ) -> None:
         resolution = (
-            resolve_js_ts_import(self.workspace_root, self.file_path, source_specifier)
+            js_ts_imports.resolve_js_ts_import_with_config(
+                self.workspace_root,
+                self.file_path,
+                source_specifier,
+                self.project_config,
+            )
             if self.workspace_root is not None
             else None
         )
@@ -494,7 +504,8 @@ class _JavaScriptGraphBuilder:
             )
 
 
-def _node_text(source: bytes, node: Any | None) -> str:
+def node_text(source: bytes, node: Any | None) -> str:
+    """Return a node's UTF-8 source slice, or an empty string for missing nodes."""
     if node is None:
         return ""
     return source[node.start_byte : node.end_byte].decode("utf-8")
@@ -505,19 +516,13 @@ def _string_literal_value(source: bytes, node: Any | None) -> str:
         return ""
     for child in node.named_children:
         if child.type == "string_fragment":
-            return _node_text(source, child)
-    value = _node_text(source, node)
+            return node_text(source, child)
+    value = node_text(source, node)
     return value[1:-1] if len(value) >= 2 and value[0] in {'"', "'"} else value
 
 
-def _first_named_child_of_type(node: Any, node_type: str) -> Any | None:
-    for child in node.named_children:
-        if child.type == node_type:
-            return child
-    return None
-
-
-def _direct_named_child_of_type(node: Any, node_type: str) -> Any | None:
+def first_named_child_of_type(node: Any, node_type: str) -> Any | None:
+    """Return the first direct named child with the requested Tree-sitter node type."""
     for child in node.named_children:
         if child.type == node_type:
             return child
@@ -545,11 +550,14 @@ def _last_identifier_text(node: Any) -> str:
 def _member_reference_name(source: bytes, node: Any) -> str:
     object_node = node.child_by_field_name("object")
     property_node = node.child_by_field_name("property")
-    object_name = _member_reference_name(source, object_node) if object_node and object_node.type == "member_expression" else _node_text(source, object_node)
-    property_name = _node_text(source, property_node)
+    if object_node is not None and object_node.type == "member_expression":
+        object_name = _member_reference_name(source, object_node)
+    else:
+        object_name = node_text(source, object_node)
+    property_name = node_text(source, property_node)
     if object_name and property_name:
         return f"{object_name}.{property_name}"
-    return _node_text(source, node)
+    return node_text(source, node)
 
 
 def _contains_jsx(node: Any) -> bool:
@@ -562,7 +570,8 @@ def _is_component_name(name: str) -> bool:
     return bool(name) and name[0].isupper()
 
 
-def _qualified_name(parts: tuple[str, ...]) -> str:
+def qualified_name(parts: tuple[str, ...]) -> str:
+    """Join qualified-name parts while dropping empty segments."""
     return ".".join(part for part in parts if part)
 
 
@@ -587,4 +596,10 @@ def _end_column(node: Any) -> int:
     return int(node.end_point.column) + 1
 
 
-__all__ = ["JavaScriptTreeSitterExtractor"]
+__all__ = [
+    "JavaScriptGraphBuilder",
+    "JavaScriptTreeSitterExtractor",
+    "first_named_child_of_type",
+    "node_text",
+    "qualified_name",
+]
