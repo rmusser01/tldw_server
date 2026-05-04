@@ -223,30 +223,29 @@ def iter_content_router_specs() -> Iterable[RouterSpec]:
         logger.debug(f"Skipping prompts router: {e}")
 
     # Workflow routers are force-included in explicit pytest runtime for unit coverage.
-    try:
-        from tldw_Server_API.app.api.v1.endpoints.chat_workflows import router as chat_workflows_router
-        from tldw_Server_API.app.api.v1.endpoints.scheduler_workflows import router as scheduler_workflows_router
-        from tldw_Server_API.app.api.v1.endpoints.workflows import router as workflows_router
-
-        specs.append(RouterSpec(
-            router=workflows_router,
+    for workflow_spec in (
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.workflows",
+            log_name="workflows",
             tags=("workflows",),
             route_key="" if _is_explicit_pytest_runtime() else "workflows",
             default_stable=False,
-        ))
-        specs.append(RouterSpec(
-            router=chat_workflows_router,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.chat_workflows",
+            log_name="chat_workflows",
             tags=("chat-workflows",),
             route_key="" if _is_explicit_pytest_runtime() else "chat-workflows",
-        ))
-        specs.append(RouterSpec(
-            router=scheduler_workflows_router,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.scheduler_workflows",
+            log_name="scheduler_workflows",
             tags=("scheduler",),
             route_key="" if _is_explicit_pytest_runtime() else "scheduler",
             default_stable=False,
-        ))
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Skipping workflow routers: {e}")
+        ),
+    ):
+        append_imported_router_spec(specs, workflow_spec)
 
     # Claims
     try:
