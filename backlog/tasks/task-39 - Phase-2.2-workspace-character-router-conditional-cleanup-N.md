@@ -4,6 +4,7 @@ title: Phase 2.2 workspace character router conditional cleanup N
 status: Done
 assignee: []
 created_date: '2026-05-04 06:00'
+updated_date: '2026-05-04 06:50'
 labels: []
 dependencies: []
 references:
@@ -23,6 +24,12 @@ Continue #1116 Phase 2.2 by deferring workspace and character-family content rou
 - [x] #2 Existing prefix, tags, route_key, and default_stable behavior for workspace and character-family routes remain unchanged.
 - [x] #3 Focused/full router contract tests, main router/OpenAPI contracts, Bandit touched source scan, and git diff hygiene are run before commit.
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+PR #1263 review follow-up: split the overlong access_count dict-comprehension in the workspace/character router laziness test. Verification rerun: focused workspace_character_router_attr_lookup 1 passed; full router_groups_contract 55 passed; git diff --check clean.
+<!-- SECTION:NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
@@ -51,6 +58,11 @@ Continue #1116 Phase 2.2 by deferring workspace and character-family content rou
   - `result_count: 0`
 - Diff hygiene: `git diff --check`
   - Passed with no output.
+- PR #1263 review follow-up:
+  - Split the overlong `access_count` dict-comprehension flagged by Qodo.
+  - Reran focused `workspace_character_router_attr_lookup`: `1 passed, 54 deselected`.
+  - Reran full router group contract: `55 passed`.
+  - Reran `git diff --check`: passed with no output.
 <!-- SECTION:VERIFICATION:END -->
 
 ## Summary

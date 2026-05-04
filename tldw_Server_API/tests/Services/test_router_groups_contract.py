@@ -1974,7 +1974,10 @@ def test_iter_content_router_specs_defers_prompt_studio_router_attr_lookup(
             "path": "/api/v1/prompt-studio/ws",
         },
     ]
-    access_count = {str(definition["module_name"]): 0 for definition in router_definitions}
+    access_count = {
+        str(definition["module_name"]): 0
+        for definition in router_definitions
+    }
     import_calls: list[str] = []
 
     for definition in router_definitions:
