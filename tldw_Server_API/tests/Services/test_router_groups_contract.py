@@ -1171,6 +1171,83 @@ def test_iter_content_router_specs_defers_workflow_router_attr_lookup(
     assert access_count == {module_name: 1 for module_name in module_paths}
 
 
+def test_iter_content_router_specs_defers_processing_router_attr_lookup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify covered processing/prompt specs keep router attr lookup lazy."""
+    module_paths = {
+        "tldw_Server_API.app.api.v1.endpoints.chunking": {
+            "chunking_router": "/chunk",
+        },
+        "tldw_Server_API.app.api.v1.endpoints.vector_stores_openai": {
+            "router": "/vector_stores",
+        },
+        "tldw_Server_API.app.api.v1.endpoints.chunking_templates": {
+            "router": "/chunking/templates",
+        },
+        "tldw_Server_API.app.api.v1.endpoints.prompts": {
+            "router": "/prompts",
+        },
+    }
+    access_count = {
+        f"{module_name}.{attr_name}": 0
+        for module_name, attrs in module_paths.items()
+        for attr_name in attrs
+    }
+
+    for module_name, attr_paths in module_paths.items():
+        fake_module = ModuleType(module_name)
+        routers: dict[str, APIRouter] = {}
+        for attr_name, path in attr_paths.items():
+            router = APIRouter()
+
+            @router.get(path)
+            def _endpoint() -> dict[str, str]:
+                return {"status": "ok"}
+
+            routers[attr_name] = router
+
+        def _module_getattr(
+            name: str,
+            *,
+            module_name: str = module_name,
+            routers: dict[str, APIRouter] = routers,
+        ) -> APIRouter:
+            if name not in routers:
+                raise AttributeError(name)
+            access_count[f"{module_name}.{name}"] += 1
+            return routers[name]
+
+        fake_module.__getattr__ = _module_getattr  # type: ignore[attr-defined]
+        monkeypatch.setitem(sys.modules, module_name, fake_module)
+
+    specs = list(iter_content_router_specs())
+    assert access_count == {
+        f"{module_name}.{attr_name}": 0
+        for module_name, attrs in module_paths.items()
+        for attr_name in attrs
+    }
+
+    by_first_path = {_first_router_path(spec.router): spec for spec in specs}
+    assert by_first_path["/chunk"].prefix == "/api/v1/chunking"
+    assert by_first_path["/chunk"].tags == ("chunking",)
+    assert by_first_path["/chunk"].route_key == "chunking"
+    assert by_first_path["/vector_stores"].prefix == "/api/v1"
+    assert by_first_path["/vector_stores"].tags == ("vector-stores",)
+    assert by_first_path["/vector_stores"].route_key == "vector-stores"
+    assert by_first_path["/chunking/templates"].prefix == "/api/v1"
+    assert by_first_path["/chunking/templates"].tags == ("chunking-templates",)
+    assert by_first_path["/chunking/templates"].route_key == "chunking-templates"
+    assert by_first_path["/prompts"].prefix == "/api/v1/prompts"
+    assert by_first_path["/prompts"].tags == ("prompts",)
+    assert by_first_path["/prompts"].route_key == "prompts"
+    assert access_count == {
+        f"{module_name}.{attr_name}": 1
+        for module_name, attrs in module_paths.items()
+        for attr_name in attrs
+    }
+
+
 def test_qodo_reviewed_router_policy_regressions(monkeypatch: pytest.MonkeyPatch) -> None:
     _install_fake_router_module(
         monkeypatch,
