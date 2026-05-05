@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 import pytest
+
 import tldw_Server_API.app.core.Sandbox.macos_diagnostics as diagnostics_module
 import tldw_Server_API.app.core.Sandbox.vz_reconciliation as reconciliation_module
 from tldw_Server_API.app.core.Sandbox.image_store import SandboxImageStore
@@ -164,6 +165,28 @@ def _sample_diagnostics_payload() -> dict:
                 }
             ],
             "reasons": [],
+        },
+        "recovery_summary": {
+            "status": "healthy",
+            "severity": "ok",
+            "codes": [],
+            "counts": {
+                "persisted_session_controls": 1,
+                "healthy_session_controls": 1,
+                "stale_session_controls": 0,
+                "unhealthy_session_controls": 0,
+                "skipped_active_session_controls": 0,
+                "orphaned_vms": 0,
+                "owned_orphaned_vms": 0,
+                "unknown_orphaned_vms": 0,
+                "foreign_orphaned_vms": 0,
+                "image_store_gc_candidates": 0,
+                "live_vms": 1,
+            },
+            "recommended_action": "No recovery action needed.",
+            "repair_endpoint": None,
+            "cleanup_plan_endpoint": None,
+            "notes": [],
         },
     }
 
@@ -420,6 +443,159 @@ def test_admin_schema_accepts_macos_diagnostics_payload() -> None:
     assert model.observability.vms[0].serial_log.path == "/tmp/vz-serial/vm-live.serial.log"
     assert model.observability.vms[0].guest.capabilities == ["exec", "output_cap_v1"]
     assert model.observability.vms[0].resource_snapshot == {"cpu_time_sec": 1}
+    assert model.recovery_summary is not None
+    assert model.recovery_summary.status == "healthy"
+    assert model.recovery_summary.severity == "ok"
+    assert model.recovery_summary.counts["healthy_session_controls"] == 1
+
+
+def test_recovery_summary_reports_healthy_when_no_issues() -> None:
+    summary = diagnostics_module.summarize_recovery(
+        reconciliation={
+            "computed": True,
+            "persisted_sessions": 1,
+            "live_vms": 1,
+            "healthy_session_ids": ["sess-live"],
+            "stale_session_ids": [],
+            "unhealthy_session_ids": [],
+            "skipped_active_session_ids": [],
+            "orphaned_vm_ids": [],
+            "owned_orphaned_vm_ids": [],
+            "unknown_orphaned_vm_ids": [],
+            "foreign_orphaned_vm_ids": [],
+            "items": [],
+            "reasons": [],
+        },
+        image_store={"gc_candidates": 0, "reasons": []},
+        observability={"live_vms": 1, "reasons": []},
+    )
+
+    assert summary["status"] == "healthy"
+    assert summary["severity"] == "ok"
+    assert summary["codes"] == []
+    assert summary["counts"]["healthy_session_controls"] == 1
+    assert summary["recommended_action"] == "No recovery action needed."
+    assert summary["repair_endpoint"] is None
+    assert summary["cleanup_plan_endpoint"] is None
+
+
+def test_recovery_summary_keeps_observability_only_failure_healthy() -> None:
+    summary = diagnostics_module.summarize_recovery(
+        reconciliation={
+            "computed": True,
+            "persisted_sessions": 1,
+            "live_vms": 1,
+            "healthy_session_ids": ["sess-live"],
+            "stale_session_ids": [],
+            "unhealthy_session_ids": [],
+            "skipped_active_session_ids": [],
+            "orphaned_vm_ids": [],
+            "owned_orphaned_vm_ids": [],
+            "unknown_orphaned_vm_ids": [],
+            "foreign_orphaned_vm_ids": [],
+            "items": [],
+            "reasons": [],
+        },
+        image_store={"gc_candidates": 0, "reasons": []},
+        observability={"live_vms": 1, "reasons": ["serial_log_dir_not_configured"]},
+    )
+
+    assert summary["status"] == "healthy"
+    assert summary["severity"] == "ok"
+    assert summary["codes"] == []
+    assert summary["recommended_action"] == "No recovery action needed."
+    assert summary["repair_endpoint"] is None
+    assert summary["cleanup_plan_endpoint"] is None
+    assert summary["notes"] == ["Observability reasons: serial_log_dir_not_configured."]
+
+
+def test_recovery_summary_reports_unavailable_when_reconciliation_uncomputed() -> None:
+    summary = diagnostics_module.summarize_recovery(
+        reconciliation={
+            "computed": False,
+            "persisted_sessions": 0,
+            "live_vms": 0,
+            "healthy_session_ids": [],
+            "stale_session_ids": [],
+            "unhealthy_session_ids": [],
+            "skipped_active_session_ids": [],
+            "orphaned_vm_ids": [],
+            "owned_orphaned_vm_ids": [],
+            "unknown_orphaned_vm_ids": [],
+            "foreign_orphaned_vm_ids": [],
+            "items": [],
+            "reasons": ["macos_virtualization_helper_unavailable"],
+        },
+        image_store={"gc_candidates": 0, "reasons": []},
+        observability=None,
+    )
+
+    assert summary["status"] == "unavailable"
+    assert summary["severity"] == "error"
+    assert "vz_recovery_unavailable" in summary["codes"]
+    assert summary["repair_endpoint"] is None
+    assert summary["cleanup_plan_endpoint"] is None
+
+
+def test_recovery_summary_recommends_repair_for_stale_unhealthy_and_owned_orphans() -> None:
+    summary = diagnostics_module.summarize_recovery(
+        reconciliation={
+            "computed": True,
+            "persisted_sessions": 4,
+            "live_vms": 3,
+            "healthy_session_ids": ["sess-live"],
+            "stale_session_ids": ["sess-stale"],
+            "unhealthy_session_ids": ["sess-unhealthy"],
+            "skipped_active_session_ids": [],
+            "orphaned_vm_ids": ["vm-owned"],
+            "owned_orphaned_vm_ids": ["vm-owned"],
+            "unknown_orphaned_vm_ids": [],
+            "foreign_orphaned_vm_ids": [],
+            "items": [],
+            "reasons": [],
+        },
+        image_store={"gc_candidates": 0, "reasons": []},
+        observability={"live_vms": 3, "reasons": []},
+    )
+
+    assert summary["status"] == "action_recommended"
+    assert summary["severity"] == "warning"
+    assert "vz_stale_session_controls" in summary["codes"]
+    assert "vz_unhealthy_session_controls" in summary["codes"]
+    assert "vz_owned_orphaned_vms" in summary["codes"]
+    assert summary["counts"]["stale_session_controls"] == 1
+    assert summary["counts"]["unhealthy_session_controls"] == 1
+    assert summary["counts"]["owned_orphaned_vms"] == 1
+    assert summary["repair_endpoint"] == "/api/v1/sandbox/admin/macos-reconciliation/repair"
+
+
+def test_recovery_summary_recommends_cleanup_plan_for_image_store_candidates() -> None:
+    summary = diagnostics_module.summarize_recovery(
+        reconciliation={
+            "computed": True,
+            "persisted_sessions": 0,
+            "live_vms": 0,
+            "healthy_session_ids": [],
+            "stale_session_ids": [],
+            "unhealthy_session_ids": [],
+            "skipped_active_session_ids": [],
+            "orphaned_vm_ids": [],
+            "owned_orphaned_vm_ids": [],
+            "unknown_orphaned_vm_ids": [],
+            "foreign_orphaned_vm_ids": [],
+            "items": [],
+            "reasons": [],
+        },
+        image_store={"gc_candidates": 2, "reasons": []},
+        observability={"live_vms": 0, "reasons": []},
+    )
+
+    assert summary["status"] == "action_recommended"
+    assert summary["severity"] == "warning"
+    assert summary["codes"] == ["vz_image_store_gc_candidates"]
+    assert summary["counts"]["image_store_gc_candidates"] == 2
+    assert summary["repair_endpoint"] is None
+    assert summary["cleanup_plan_endpoint"] == "/api/v1/sandbox/admin/macos-image-store/cleanup-plan"
 
 
 def test_admin_schema_accepts_startup_warning_summary() -> None:
@@ -877,6 +1053,44 @@ def test_probe_vz_linux_observability_handles_helper_unavailable(
     assert data["live_vms"] == 0
     assert data["vms"] == []
     assert data["reasons"] == ["macos_virtualization_helper_unavailable"]
+
+
+def test_collect_macos_diagnostics_maps_unexpected_helper_list_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_macos_host(monkeypatch)
+
+    class _BuggyListHelper:
+        def ping(self) -> HelperPingReply:
+            return HelperPingReply(
+                protocol_version="1",
+                helper_version="0.1.0",
+                status="ok",
+                details={"transport": "unix"},
+            )
+
+        def list_vms(self) -> HelperVMListReply:
+            raise KeyError("unexpected helper payload shape")
+
+    monkeypatch.setattr(diagnostics_module, "MacOSVirtualizationHelperClient", _BuggyListHelper)
+    monkeypatch.setattr(
+        diagnostics_module,
+        "collect_runtime_preflights",
+        lambda network_policy="deny_all": {
+            RuntimeType.vz_linux: RuntimePreflightResult(
+                runtime=RuntimeType.vz_linux,
+                available=False,
+                reasons=["vz_reconciliation_unavailable"],
+                execution_mode="none",
+            ),
+        },
+    )
+
+    data = diagnostics_module.collect_macos_diagnostics()
+
+    assert data["reconciliation"]["reasons"] == ["vz_reconciliation_unavailable"]
+    assert data["observability"]["reasons"] == ["vz_linux_observability_unavailable"]
+    assert data["recovery_summary"]["status"] == "unavailable"
 
 
 def test_probe_vz_linux_observability_default_log_dir_is_not_configured(

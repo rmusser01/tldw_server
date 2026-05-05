@@ -122,15 +122,37 @@ def _diagnostics_payload() -> dict:
             "items": [],
             "reasons": [],
         },
+        "recovery_summary": {
+            "status": "unavailable",
+            "severity": "error",
+            "codes": ["vz_recovery_unavailable"],
+            "counts": {
+                "persisted_session_controls": 0,
+                "healthy_session_controls": 0,
+                "stale_session_controls": 0,
+                "unhealthy_session_controls": 0,
+                "skipped_active_session_controls": 0,
+                "orphaned_vms": 0,
+                "owned_orphaned_vms": 0,
+                "unknown_orphaned_vms": 0,
+                "foreign_orphaned_vms": 0,
+                "image_store_gc_candidates": 0,
+                "live_vms": 0,
+            },
+            "recommended_action": "Fix helper and runtime diagnostics before running repair.",
+            "repair_endpoint": None,
+            "cleanup_plan_endpoint": None,
+            "notes": ["Reconciliation did not compute."],
+        },
     }
 
 
 def test_admin_macos_diagnostics_returns_structured_payload(monkeypatch) -> None:
-    from tldw_Server_API.app.services.startup_warning_registry import (
-        StartupWarningRegistry,
-    )
     from tldw_Server_API.app.services.startup_warning_models import (
         StartupWarningRecord,
+    )
+    from tldw_Server_API.app.services.startup_warning_registry import (
+        StartupWarningRegistry,
     )
 
     fake_service = SimpleNamespace(macos_diagnostics=lambda: _diagnostics_payload())
@@ -175,6 +197,7 @@ def test_admin_macos_diagnostics_returns_structured_payload(monkeypatch) -> None
         "reconciliation",
         "image_store",
         "observability",
+        "recovery_summary",
         "startup_warning_summary",
     }
     assert body["host"]["supported"] is True
@@ -188,6 +211,8 @@ def test_admin_macos_diagnostics_returns_structured_payload(monkeypatch) -> None
     assert body["image_store"]["configured"] is False
     assert body["image_store"]["items"] == []
     assert body["observability"] is None
+    assert body["recovery_summary"]["status"] == "unavailable"
+    assert body["recovery_summary"]["codes"] == ["vz_recovery_unavailable"]
     assert body["startup_warning_summary"] == {
         "present": True,
         "blocking": False,
@@ -239,6 +264,28 @@ def test_admin_macos_diagnostics_allows_real_vz_linux_execution_mode(monkeypatch
             "matched_reconciliation_status": "healthy",
         }
     ]
+    payload["recovery_summary"] = {
+        "status": "healthy",
+        "severity": "ok",
+        "codes": [],
+        "counts": {
+            "persisted_session_controls": 1,
+            "healthy_session_controls": 1,
+            "stale_session_controls": 0,
+            "unhealthy_session_controls": 0,
+            "skipped_active_session_controls": 0,
+            "orphaned_vms": 0,
+            "owned_orphaned_vms": 0,
+            "unknown_orphaned_vms": 0,
+            "foreign_orphaned_vms": 0,
+            "image_store_gc_candidates": 0,
+            "live_vms": 1,
+        },
+        "recommended_action": "No recovery action needed.",
+        "repair_endpoint": None,
+        "cleanup_plan_endpoint": None,
+        "notes": [],
+    }
 
     fake_service = SimpleNamespace(macos_diagnostics=lambda: payload)
     monkeypatch.setattr(sandbox_mod, "_service", fake_service, raising=True)
@@ -259,3 +306,4 @@ def test_admin_macos_diagnostics_allows_real_vz_linux_execution_mode(monkeypatch
     assert body["reconciliation"]["items"][0]["status"] == "healthy"
     assert body["image_store"]["configured"] is True
     assert body["image_store"]["items"][0]["matched_vm_id"] == "vm-live"
+    assert body["recovery_summary"]["status"] == "healthy"

@@ -243,9 +243,9 @@ VM reuse.
 | `worktree` | `supported` | `scaffold` | `unsupported` | `supported` | `supported` |
 
 `vz_linux` currently has the deepest operator path: helper diagnostics,
-image-store correlation, reconciliation, dry-run repair, and host-gated real VM
-smoke. Those details are intentionally not generalized until other runtimes have
-an equally clear ownership model.
+image-store correlation, reconciliation, read-only recovery-summary projection,
+dry-run repair, and host-gated real VM smoke. Those details are intentionally
+not generalized until other runtimes have an equally clear ownership model.
 
 ## Current Gaps
 

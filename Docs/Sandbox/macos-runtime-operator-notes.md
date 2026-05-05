@@ -251,6 +251,9 @@ It is admin-only and returns:
 - read-only observability for `vz_linux` helper stdout/stderr log pointers,
   per-VM serial log pointers, guest readiness metadata, and helper-provided
   resource counters when available
+- read-only `recovery_summary` metadata derived from reconciliation,
+  image-store, and observability blocks, including recovery posture, stable
+  issue codes, counts, and existing dry-run-first admin endpoint pointers
 - an additive image-store cleanup plan endpoint and a default-dry-run cleanup
   mutation endpoint for explicit operator action
 - additive `startup_warning_summary` showing whether current-process startup
@@ -268,6 +271,10 @@ runtime is unavailable. Use `/api/v1/sandbox/runtimes` for client-facing discove
 that payload stays summarized and does not expose helper/template internals.
 The diagnostics observability block reports log paths, existence, and byte
 sizes only; it does not read or return log contents.
+The diagnostics `recovery_summary` block is also read-only. It summarizes
+already-collected diagnostics as `healthy`, `action_recommended`, or
+`unavailable`; it does not re-query the helper, scan the image store, or perform
+repair.
 
 ACP sandbox session creation now performs runtime preflight validation before calling the sandbox service, and converts failures into `ACPResponseError` instead of leaking raw sandbox exceptions.
 
@@ -276,6 +283,9 @@ ACP sandbox session creation now performs runtime preflight validation before ca
 `/api/v1/sandbox/admin/macos-diagnostics` is read-only. Its reconciliation block
 compares persisted VZ session-control rows with helper live VM state and reports
 healthy, stale, unhealthy, active, and orphan facts without changing either side.
+Its `recovery_summary` block points operators at the existing repair and cleanup
+plan endpoints when relevant, but the actual repair endpoint remains separate,
+admin-only, explicit, and dry-run-first.
 
 `POST /api/v1/sandbox/admin/macos-reconciliation/repair` is the explicit
 admin-only repair endpoint. Repair defaults to dry-run, skips active sessions,

@@ -32,6 +32,8 @@ from .vz_reconciliation import (
 _VZ_LINUX_TEMPLATE_MISSING_REASON = "vz_linux_template_missing"
 _VZ_MACOS_TEMPLATE_MISSING_REASON = "macos_template_missing"
 _VZ_LINUX_OBSERVABILITY_UNAVAILABLE_REASON = "vz_linux_observability_unavailable"
+_MACOS_RECONCILIATION_REPAIR_ENDPOINT = "/api/v1/sandbox/admin/macos-reconciliation/repair"
+_MACOS_IMAGE_STORE_CLEANUP_PLAN_ENDPOINT = "/api/v1/sandbox/admin/macos-image-store/cleanup-plan"
 _HELPER_LOG_DIR_ENV = "TLDW_SANDBOX_MACOS_HELPER_LOG_DIR"
 _VZ_LINUX_SERIAL_LOG_DIR_ENV = "TLDW_SANDBOX_VZ_LINUX_SERIAL_LOG_DIR"
 _VZ_LINUX_RESOURCE_DETAIL_KEYS = (
@@ -196,6 +198,144 @@ def _resource_snapshot(details: dict[str, object]) -> dict[str, int]:
         if value is not None:
             snapshot[key] = value
     return snapshot
+
+
+def _count_list(payload: dict[str, object], key: str) -> int:
+    """Return a count for list-like diagnostics fields."""
+
+    value = payload.get(key)
+    if isinstance(value, list | tuple | set):
+        return len(value)
+    return 0
+
+
+def _count_int(payload: dict[str, object], key: str) -> int:
+    """Return a non-negative integer for diagnostics count fields."""
+
+    value = payload.get(key)
+    if isinstance(value, bool):
+        return 0
+    try:
+        return max(0, int(value or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def summarize_recovery(
+    *,
+    reconciliation: dict[str, object] | None,
+    image_store: dict[str, object] | None,
+    observability: dict[str, object] | None,
+) -> dict[str, object]:
+    """Summarize already-collected diagnostics into operator recovery posture."""
+
+    reconciliation_payload = dict(reconciliation or {})
+    image_store_payload = dict(image_store or {})
+    observability_payload = dict(observability or {})
+    reasons = [
+        str(reason).strip()
+        for reason in list(reconciliation_payload.get("reasons") or [])
+        if str(reason).strip()
+    ]
+    counts = {
+        "persisted_session_controls": _count_int(reconciliation_payload, "persisted_sessions"),
+        "healthy_session_controls": _count_list(reconciliation_payload, "healthy_session_ids"),
+        "stale_session_controls": _count_list(reconciliation_payload, "stale_session_ids"),
+        "unhealthy_session_controls": _count_list(reconciliation_payload, "unhealthy_session_ids"),
+        "skipped_active_session_controls": _count_list(reconciliation_payload, "skipped_active_session_ids"),
+        "orphaned_vms": _count_list(reconciliation_payload, "orphaned_vm_ids"),
+        "owned_orphaned_vms": _count_list(reconciliation_payload, "owned_orphaned_vm_ids"),
+        "unknown_orphaned_vms": _count_list(reconciliation_payload, "unknown_orphaned_vm_ids"),
+        "foreign_orphaned_vms": _count_list(reconciliation_payload, "foreign_orphaned_vm_ids"),
+        "image_store_gc_candidates": _count_int(image_store_payload, "gc_candidates"),
+        "live_vms": _count_int(reconciliation_payload, "live_vms"),
+    }
+    notes: list[str] = []
+    if not bool(reconciliation_payload.get("computed")) or reasons:
+        if reasons:
+            notes.append(f"Reconciliation reasons: {', '.join(reasons[:3])}.")
+        else:
+            notes.append("Reconciliation did not compute.")
+        return {
+            "status": "unavailable",
+            "severity": "error",
+            "codes": ["vz_recovery_unavailable"],
+            "counts": counts,
+            "recommended_action": "Fix helper and runtime diagnostics before running repair.",
+            "repair_endpoint": None,
+            "cleanup_plan_endpoint": None,
+            "notes": notes,
+        }
+
+    codes: list[str] = []
+    if counts["stale_session_controls"] > 0:
+        codes.append("vz_stale_session_controls")
+    if counts["unhealthy_session_controls"] > 0:
+        codes.append("vz_unhealthy_session_controls")
+    if counts["skipped_active_session_controls"] > 0:
+        codes.append("vz_active_session_controls_skipped")
+        notes.append("Active sessions were skipped by reconciliation and should not be repaired automatically.")
+    if counts["owned_orphaned_vms"] > 0:
+        codes.append("vz_owned_orphaned_vms")
+    if counts["unknown_orphaned_vms"] > 0:
+        codes.append("vz_unknown_orphaned_vms")
+        notes.append("Unknown orphan VM ownership requires manual inspection before termination.")
+    if counts["foreign_orphaned_vms"] > 0:
+        codes.append("vz_foreign_orphaned_vms")
+        notes.append("Foreign orphan VMs are reported for visibility only.")
+    if counts["image_store_gc_candidates"] > 0:
+        codes.append("vz_image_store_gc_candidates")
+
+    observability_reasons = [
+        str(reason).strip()
+        for reason in list(observability_payload.get("reasons") or [])
+        if str(reason).strip()
+    ]
+    if observability_reasons:
+        notes.append(f"Observability reasons: {', '.join(observability_reasons[:3])}.")
+
+    repair_needed = any(
+        counts[key] > 0
+        for key in (
+            "stale_session_controls",
+            "unhealthy_session_controls",
+            "owned_orphaned_vms",
+        )
+    )
+    cleanup_needed = counts["image_store_gc_candidates"] > 0
+    inspect_needed = any(
+        counts[key] > 0
+        for key in (
+            "unknown_orphaned_vms",
+            "foreign_orphaned_vms",
+            "skipped_active_session_controls",
+        )
+    )
+    actionable_recovery_issue = repair_needed or cleanup_needed or inspect_needed
+
+    if not actionable_recovery_issue:
+        recommended_action = "No recovery action needed."
+    elif repair_needed and cleanup_needed:
+        recommended_action = "Run macOS reconciliation repair in dry-run mode, then inspect the image-store cleanup plan."
+    elif repair_needed:
+        recommended_action = "Run macOS reconciliation repair in dry-run mode and inspect planned actions."
+    elif cleanup_needed:
+        recommended_action = "Inspect the macOS image-store cleanup plan before deleting candidates."
+    elif inspect_needed:
+        recommended_action = "Inspect orphan VM ownership before taking manual action."
+    else:
+        recommended_action = "Review macOS sandbox diagnostics before taking recovery action."
+
+    return {
+        "status": "action_recommended" if actionable_recovery_issue else "healthy",
+        "severity": "warning" if actionable_recovery_issue else "ok",
+        "codes": codes,
+        "counts": counts,
+        "recommended_action": recommended_action,
+        "repair_endpoint": _MACOS_RECONCILIATION_REPAIR_ENDPOINT if repair_needed else None,
+        "cleanup_plan_endpoint": _MACOS_IMAGE_STORE_CLEANUP_PLAN_ENDPOINT if cleanup_needed else None,
+        "notes": notes,
+    }
 
 
 def probe_host() -> dict[str, object]:
@@ -386,7 +526,8 @@ def _fetch_live_vms_for_diagnostics() -> tuple[Any | None, str | None, str | Non
     except MacOSVirtualizationHelperFailure as exc:
         logger.debug("VZ helper returned failure while listing VMs for diagnostics: {}", exc.error_code)
         return None, REASON_HELPER_FAILURE, REASON_HELPER_FAILURE
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
+        # Diagnostics must remain best-effort when helper payload parsing changes unexpectedly.
         logger.debug("Unable to collect VZ helper VM list for diagnostics: {}", exc)
         return None, REASON_RECONCILIATION_UNAVAILABLE, _VZ_LINUX_OBSERVABILITY_UNAVAILABLE_REASON
 
@@ -667,6 +808,11 @@ def collect_macos_diagnostics(orchestrator: Any | None = None) -> dict[str, Any]
         live=live,
         live_failure_reason=observability_live_failure,
     )
+    recovery_summary = summarize_recovery(
+        reconciliation=reconciliation,
+        image_store=image_store,
+        observability=observability,
+    )
     return {
         "host": host,
         "helper": helper,
@@ -675,4 +821,5 @@ def collect_macos_diagnostics(orchestrator: Any | None = None) -> dict[str, Any]
         "reconciliation": reconciliation,
         "image_store": image_store,
         "observability": observability,
+        "recovery_summary": recovery_summary,
     }
