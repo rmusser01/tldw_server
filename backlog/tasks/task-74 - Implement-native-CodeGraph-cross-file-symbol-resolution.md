@@ -4,7 +4,7 @@ title: Implement native CodeGraph cross-file symbol resolution
 status: Done
 assignee: []
 created_date: '2026-05-05 14:55'
-updated_date: '2026-05-05 15:06'
+updated_date: '2026-05-05 16:28'
 labels:
   - codegraph
   - mcp
@@ -53,12 +53,22 @@ Verification: bandit touched production scopes -> zero findings in /tmp/bandit_c
 Verification: git diff --check -> clean.
 
 Known skips/blockers: none for this focused slice. TypeScript alias tests use existing parser availability guards when tree-sitter TypeScript is unavailable.
+
+PR #1308 review-fix pass: addressing unresolved Qodo/Gemini comments on resolver bounds, case-sensitive lookups, batched writes, read-only list helpers, NULL-safe stale cleanup, and binding lookup complexity.
+
+PR #1308 review fixes implemented: bounded resolver source scopes/deadlines/item caps, exact-case resolution lookups, batched edge/reference writes, read-only reference listing, O(1) direct binding lookup, and explicit NULL handling for resolved_edge stale cleanup/counting.
+
+Review-fix verification: targeted regression tests for repository/resolver/indexer review issues -> 8 passed, 5 warnings.
+
+Review-fix verification: focused CodeGraph/MCP suite -> 160 passed, 5 warnings.
+
+Review-fix verification: Ruff touched scopes -> All checks passed; Bandit touched production scopes -> zero findings; git diff --check -> clean.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Added conservative same-workspace cross-file CodeGraph resolution. The repository now tracks resolved reference state and clears stale resolutions; the resolver turns import-bound Python and JS/TS calls into deterministic calls/imports edges; the indexer runs resolution after successful indexing; MCP callers/callees/impact/context now have test coverage for cross-file relationships. Focused tests, Ruff, Bandit, and whitespace checks passed.
+Added conservative same-workspace cross-file CodeGraph resolution and addressed PR #1308 review feedback. The resolver now runs within explicit foreground bounds, batches SQLite writes, uses exact-case resolution lookups, keeps listing read-only, handles NULL resolved_edge stale state, and exposes truncation/scan counters. Focused CodeGraph/MCP tests, Ruff, Bandit, and whitespace checks passed.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

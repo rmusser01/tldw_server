@@ -217,6 +217,55 @@ def test_indexer_resolves_typescript_path_alias_import_call(tmp_path: Path) -> N
     ]
 
 
+def test_indexer_passes_foreground_bounds_to_resolver(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "app.py").write_text("def helper():\n    return 1\n", encoding="utf-8")
+    captured: dict[str, Any] = {}
+
+    class _FakeResolver:
+        def __init__(self, _repository: CodeGraphRepository) -> None:
+            pass
+
+        def resolve(self, **kwargs: Any) -> SimpleNamespace:
+            captured.update(kwargs)
+            return SimpleNamespace(
+                resolved_calls=0,
+                resolved_imports=0,
+                stale_resolutions_cleared=0,
+                truncated=False,
+                import_nodes_scanned=0,
+                references_scanned=0,
+            )
+
+    monkeypatch.setattr(indexer_module, "CodeGraphReferenceResolver", _FakeResolver)
+    repo = CodeGraphRepository(tmp_path / "codegraph.db")
+    indexer = CodeGraphIndexer(
+        settings=CodeGraphSettings.from_mapping({"max_index_seconds": 20}),
+        registry=CodeGraphLanguageRegistry(),
+        monotonic=lambda: 5.0,
+    )
+
+    result = indexer.index_workspace(
+        workspace_root=workspace,
+        workspace_key="ws_test",
+        repository=repo,
+        force=True,
+        languages=None,
+        max_files=10,
+    )
+
+    assert result.status == "complete"
+    assert captured["source_file_paths"] == {"app.py"}
+    assert captured["max_import_nodes"] > 0
+    assert captured["max_refs"] > 0
+    assert captured["deadline_monotonic"] == 25.0
+    assert captured["monotonic"]() == 5.0
+
+
 def test_indexer_extracts_javascript_typescript_graph_rows_during_index(tmp_path: Path) -> None:
     _require_typescript_parsers()
     workspace = tmp_path / "workspace"

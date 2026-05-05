@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from tldw_Server_API.app.core.CodeGraph.models import CodeGraphNode, CodeGraphUnresolvedRef
 from tldw_Server_API.app.core.CodeGraph.resolver import CodeGraphReferenceResolver
 from tldw_Server_API.app.core.DB_Management.codegraph.repository import CodeGraphRepository
@@ -65,13 +67,9 @@ def test_resolver_keeps_unmatched_external_references_unresolved(tmp_path: Path)
     assert repo.counts()["unresolved_refs"] == 1
 
 
-def _seed_python_import_workspace(
-    repo: CodeGraphRepository,
-    *,
-    import_local_name: str,
-    reference_name: str,
-    import_alias: str | None = None,
-) -> None:
+def test_resolver_matches_case_sensitive_python_symbols_exactly(tmp_path: Path) -> None:
+    repo = CodeGraphRepository(tmp_path / "codegraph.db")
+    repo.initialize()
     repo.upsert_file_and_replace_graph(
         path="pkg/util.py",
         language="python",
@@ -80,14 +78,110 @@ def _seed_python_import_workspace(
         modified_at=1.0,
         status="indexed",
         errors=[],
-        node_count=2,
+        node_count=3,
         nodes=[
             _node("node_util_module", "module", "util", "pkg.util", "pkg/util.py", "python"),
-            _node("node_util_helper", "function", "helper", "helper", "pkg/util.py", "python"),
+            _node("node_upper_helper", "function", "Helper", "Helper", "pkg/util.py", "python"),
+            _node("node_lower_helper", "function", "helper", "helper", "pkg/util.py", "python"),
         ],
         edges=[],
         unresolved_refs=[],
     )
+    _seed_python_import_workspace(repo, import_local_name="helper", reference_name="helper", include_target=False)
+
+    result = CodeGraphReferenceResolver(repo).resolve()
+
+    assert result.resolved_calls == 1
+    assert [relationship["target"]["id"] for relationship in repo.list_callees("node_app_entry", limit=10)] == [
+        "node_lower_helper"
+    ]
+
+
+def test_resolver_batches_persistence_writes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = CodeGraphRepository(tmp_path / "codegraph.db")
+    repo.initialize()
+    _seed_python_import_workspace(repo, import_local_name="helper", reference_name="helper")
+
+    def _fail_single_write(*_args, **_kwargs) -> None:
+        raise AssertionError("resolver should use repository batch write helpers")
+
+    monkeypatch.setattr(repo, "mark_reference_resolved", _fail_single_write)
+    monkeypatch.setattr(repo, "upsert_edge", _fail_single_write)
+
+    result = CodeGraphReferenceResolver(repo).resolve()
+
+    assert result.resolved_calls == 1
+    assert result.resolved_imports == 1
+
+
+def test_resolver_respects_reference_limit(tmp_path: Path) -> None:
+    repo = CodeGraphRepository(tmp_path / "codegraph.db")
+    repo.initialize()
+    _seed_python_import_workspace(repo, import_local_name="helper", reference_name="helper")
+    repo.seed_graph_rows_for_test(
+        nodes=[],
+        edges=[],
+        unresolved_refs=[
+            {
+                "from_node_id": "node_app_entry",
+                "reference_name": "helper",
+                "reference_kind": "call",
+                "file_path": "pkg/app.py",
+                "line": 5,
+                "column": 12,
+                "language": "python",
+            }
+        ],
+    )
+
+    result = CodeGraphReferenceResolver(repo).resolve(max_refs=1)
+
+    assert result.resolved_calls == 1
+    assert result.truncated is True
+    assert repo.counts()["unresolved_refs"] == 1
+
+
+def test_resolver_respects_expired_deadline(tmp_path: Path) -> None:
+    repo = CodeGraphRepository(tmp_path / "codegraph.db")
+    repo.initialize()
+    _seed_python_import_workspace(repo, import_local_name="helper", reference_name="helper")
+
+    result = CodeGraphReferenceResolver(repo).resolve(deadline_monotonic=1.0, monotonic=lambda: 2.0)
+
+    assert result.resolved_calls == 0
+    assert result.resolved_imports == 0
+    assert result.truncated is True
+    assert repo.counts()["unresolved_refs"] == 1
+
+
+def _seed_python_import_workspace(
+    repo: CodeGraphRepository,
+    *,
+    import_local_name: str,
+    reference_name: str,
+    import_alias: str | None = None,
+    include_target: bool = True,
+) -> None:
+    if include_target:
+        repo.upsert_file_and_replace_graph(
+            path="pkg/util.py",
+            language="python",
+            size=64,
+            content_hash="util",
+            modified_at=1.0,
+            status="indexed",
+            errors=[],
+            node_count=2,
+            nodes=[
+                _node("node_util_module", "module", "util", "pkg.util", "pkg/util.py", "python"),
+                _node("node_util_helper", "function", "helper", "helper", "pkg/util.py", "python"),
+            ],
+            edges=[],
+            unresolved_refs=[],
+        )
     repo.upsert_file_and_replace_graph(
         path="pkg/app.py",
         language="python",

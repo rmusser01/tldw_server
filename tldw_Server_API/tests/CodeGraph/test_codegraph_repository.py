@@ -339,6 +339,89 @@ def test_repository_clears_stale_reference_resolution_when_target_file_is_delete
     assert references[0].resolved_edge is None
 
 
+def test_repository_counts_and_clears_resolution_with_null_edge(tmp_path: Path) -> None:
+    db_path = tmp_path / "codegraph.db"
+    repo = CodeGraphRepository(db_path)
+    repo.initialize()
+    _seed_cross_file_resolution_graph(repo)
+    repo.upsert_edge(
+        CodeGraphEdge(
+            id="edge_unrelated",
+            source="node_entry",
+            target="node_helper",
+            kind="calls",
+            file_path="pkg/app.py",
+        )
+    )
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            UPDATE unresolved_refs
+            SET resolved_target = ?, resolved_edge = NULL, resolution_kind = ?
+            WHERE reference_name = ?
+            """,
+            ("node_helper", "test_fixture", "helper"),
+        )
+        conn.commit()
+
+    cleared = repo.clear_stale_reference_resolutions()
+    references = repo.list_references_for_resolution(include_resolved=True)
+
+    assert cleared == 1
+    assert repo.counts()["unresolved_refs"] == 1
+    assert references[0].resolved_target is None
+    assert references[0].resolved_edge is None
+
+
+def test_repository_list_references_for_resolution_is_read_only(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = CodeGraphRepository(tmp_path / "codegraph.db")
+    repo.initialize()
+    _seed_cross_file_resolution_graph(repo)
+
+    def _fail_stale_cleanup(_conn: sqlite3.Connection) -> int:
+        raise AssertionError("list_references_for_resolution must not mutate stale state")
+
+    monkeypatch.setattr(repository_module, "_clear_stale_reference_resolutions", _fail_stale_cleanup)
+
+    references = repo.list_references_for_resolution()
+
+    assert [reference.reference_name for reference in references] == ["helper"]
+
+
+def test_repository_batches_resolved_references_and_edges(tmp_path: Path) -> None:
+    repo = CodeGraphRepository(tmp_path / "codegraph.db")
+    repo.initialize()
+    _seed_cross_file_resolution_graph(repo)
+    reference = repo.list_references_for_resolution()[0]
+
+    repo.mark_references_resolved(
+        (
+            (
+                reference.id,
+                CodeGraphEdge(
+                    id="edge_cross_file_call",
+                    source="node_entry",
+                    target="node_helper",
+                    kind="calls",
+                    file_path="pkg/app.py",
+                    line=4,
+                    column=12,
+                    provenance="codegraph_resolver",
+                ),
+                "python_import",
+            ),
+        )
+    )
+
+    assert repo.counts()["unresolved_refs"] == 0
+    assert [relationship["target"]["id"] for relationship in repo.list_callees("node_entry", limit=10)] == [
+        "node_helper"
+    ]
+
+
 def test_repository_atomic_file_and_graph_replacement_rolls_back_on_graph_error(tmp_path: Path) -> None:
     repo = CodeGraphRepository(tmp_path / "codegraph.db")
     repo.initialize()

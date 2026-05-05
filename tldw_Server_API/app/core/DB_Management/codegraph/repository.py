@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import uuid
+from collections.abc import Sequence
 from contextlib import closing, contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -359,7 +360,7 @@ class CodeGraphRepository:
                 """
                 SELECT *
                 FROM nodes
-                WHERE kind = 'module' AND lower(qualified_name) = lower(?)
+                WHERE kind = 'module' AND qualified_name = ?
                 ORDER BY file_path, COALESCE(start_line, 0)
                 LIMIT 1
                 """,
@@ -380,9 +381,9 @@ class CodeGraphRepository:
                 SELECT *
                 FROM nodes
                 WHERE file_path = ?
-                  AND (lower(name) = lower(?) OR lower(qualified_name) = lower(?))
+                  AND (name = ? OR qualified_name = ?)
                 ORDER BY
-                    CASE WHEN lower(name) = lower(?) THEN 0 ELSE 1 END,
+                    CASE WHEN name = ? THEN 0 ELSE 1 END,
                     CASE WHEN kind = 'module' THEN 1 ELSE 0 END,
                     COALESCE(start_line, 0),
                     qualified_name,
@@ -407,17 +408,27 @@ class CodeGraphRepository:
             ).fetchone()
         return _node_from_row(row) if row else None
 
-    def list_import_nodes(self) -> list[CodeGraphNode]:
+    def list_import_nodes(
+        self,
+        *,
+        file_paths: set[str] | frozenset[str] | None = None,
+        limit: int | None = None,
+    ) -> list[CodeGraphNode]:
         """Return import nodes for cross-file reference resolution."""
-        with self._connection() as conn:
-            rows = conn.execute(
-                """
+        file_scope = _file_path_scope_json(file_paths)
+        sql = """
                 SELECT *
                 FROM nodes
                 WHERE kind = 'import'
+                  AND (? IS NULL OR file_path IN (SELECT value FROM json_each(?)))
                 ORDER BY file_path, COALESCE(start_line, 0), COALESCE(start_column, 0), id
                 """
-            ).fetchall()
+        params: list[Any] = [file_scope, file_scope]
+        if limit is not None:
+            sql += " LIMIT ?"
+            params.append(max(1, int(limit)))
+        with self._connection() as conn:
+            rows = conn.execute(sql, params).fetchall()
         return [_node_from_row(row) for row in rows]
 
     def list_callers(self, node_id: str, *, limit: int = 10) -> list[dict[str, Any]]:
@@ -506,21 +517,30 @@ class CodeGraphRepository:
         self,
         *,
         include_resolved: bool = False,
+        file_paths: set[str] | frozenset[str] | None = None,
+        limit: int | None = None,
     ) -> list[StoredCodeGraphReference]:
         """List unresolved reference rows used by cross-file resolution."""
-        with self._connection() as conn:
-            stale_count = _clear_stale_reference_resolutions(conn)
-            if stale_count:
-                conn.commit()
-            sql = """
+        file_scope = _file_path_scope_json(file_paths)
+        sql = """
                 SELECT *
                 FROM unresolved_refs
                 WHERE from_node_id IN (SELECT id FROM nodes)
+                  AND (? OR (
+                      resolved_target IS NULL
+                      OR resolved_target NOT IN (SELECT id FROM nodes)
+                      OR resolved_edge IS NULL
+                      OR resolved_edge NOT IN (SELECT id FROM edges)
+                  ))
+                  AND (? IS NULL OR file_path IN (SELECT value FROM json_each(?)))
+                ORDER BY file_path, COALESCE(line, 0), COALESCE(column, 0), id
             """
-            if not include_resolved:
-                sql += " AND resolved_target IS NULL"
-            sql += " ORDER BY file_path, COALESCE(line, 0), COALESCE(column, 0), id"
-            rows = conn.execute(sql).fetchall()
+        params: list[Any] = [int(include_resolved), file_scope, file_scope]
+        if limit is not None:
+            sql += " LIMIT ?"
+            params.append(max(1, int(limit)))
+        with self._connection() as conn:
+            rows = conn.execute(sql, params).fetchall()
         return [_reference_from_row(row) for row in rows]
 
     def mark_reference_resolved(
@@ -531,32 +551,57 @@ class CodeGraphRepository:
         resolution_kind: str,
     ) -> None:
         """Persist a resolved edge and mark the source reference as resolved."""
-        if edge.target is None:
-            raise ValueError("resolved reference edge must have a target")
+        self.mark_references_resolved(((ref_id, edge, resolution_kind),))
+
+    def mark_references_resolved(
+        self,
+        resolutions: Sequence[tuple[int, CodeGraphEdge, str]],
+    ) -> None:
+        """Persist resolved edges and reference markers in one transaction."""
+        items = tuple(resolutions)
+        if not items:
+            return
+        for _ref_id, edge, _resolution_kind in items:
+            if edge.target is None:
+                raise ValueError("resolved reference edge must have a target")
+        resolved_at = _utc_now()
         with self._connection() as conn:
-            _upsert_edge(conn, edge)
-            conn.execute(
+            for _ref_id, edge, _resolution_kind in items:
+                _upsert_edge(conn, edge)
+            conn.executemany(
                 """
                 UPDATE unresolved_refs
                 SET resolved_target = ?, resolved_edge = ?, resolution_kind = ?, resolved_at = ?
                 WHERE id = ?
                 """,
-                (edge.target, edge.id, resolution_kind, _utc_now(), int(ref_id)),
+                [
+                    (edge.target, edge.id, resolution_kind, resolved_at, int(ref_id))
+                    for ref_id, edge, resolution_kind in items
+                ],
             )
             conn.commit()
 
     def upsert_edge(self, edge: CodeGraphEdge) -> None:
         """Insert or replace one deterministic graph edge."""
-        if edge.target is None:
-            raise ValueError("persisted edge must have a target")
+        self.upsert_edges((edge,))
+
+    def upsert_edges(self, edges: Sequence[CodeGraphEdge]) -> None:
+        """Insert or replace deterministic graph edges in one transaction."""
+        items = tuple(edges)
+        if not items:
+            return
+        for edge in items:
+            if edge.target is None:
+                raise ValueError("persisted edge must have a target")
         with self._connection() as conn:
-            _upsert_edge(conn, edge)
+            for edge in items:
+                _upsert_edge(conn, edge)
             conn.commit()
 
-    def clear_stale_reference_resolutions(self) -> int:
+    def clear_stale_reference_resolutions(self, *, file_paths: set[str] | frozenset[str] | None = None) -> int:
         """Clear resolved-reference markers whose target node or edge is gone."""
         with self._connection() as conn:
-            cleared = _clear_stale_reference_resolutions(conn)
+            cleared = _clear_stale_reference_resolutions(conn, file_paths=file_paths)
             conn.commit()
         return cleared
 
@@ -728,6 +773,7 @@ class CodeGraphRepository:
                 FROM unresolved_refs
                 WHERE resolved_target IS NULL
                    OR resolved_target NOT IN (SELECT id FROM nodes)
+                   OR resolved_edge IS NULL
                    OR resolved_edge NOT IN (SELECT id FROM edges)
             """,
         }
@@ -769,8 +815,13 @@ def _ensure_schema_compat(conn: sqlite3.Connection) -> None:
             conn.execute(statement)
 
 
-def _clear_stale_reference_resolutions(conn: sqlite3.Connection) -> int:
+def _clear_stale_reference_resolutions(
+    conn: sqlite3.Connection,
+    *,
+    file_paths: set[str] | frozenset[str] | None = None,
+) -> int:
     """Clear resolved-reference markers when their target node or edge disappeared."""
+    file_scope = _file_path_scope_json(file_paths)
     cursor = conn.execute(
         """
         UPDATE unresolved_refs
@@ -781,11 +832,21 @@ def _clear_stale_reference_resolutions(conn: sqlite3.Connection) -> int:
         WHERE resolved_target IS NOT NULL
           AND (
               resolved_target NOT IN (SELECT id FROM nodes)
+              OR resolved_edge IS NULL
               OR resolved_edge NOT IN (SELECT id FROM edges)
           )
-        """
+          AND (? IS NULL OR file_path IN (SELECT value FROM json_each(?)))
+        """,
+        (file_scope, file_scope),
     )
     return int(cursor.rowcount or 0)
+
+
+def _file_path_scope_json(file_paths: set[str] | frozenset[str] | None) -> str | None:
+    """Serialize an optional file-path scope for constant SQL predicates."""
+    if file_paths is None:
+        return None
+    return json.dumps(sorted(file_paths))
 
 
 def _select_relationships_for_nodes(

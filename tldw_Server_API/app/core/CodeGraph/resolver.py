@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -21,6 +23,9 @@ class ResolutionResult:
     resolved_calls: int = 0
     resolved_imports: int = 0
     stale_resolutions_cleared: int = 0
+    truncated: bool = False
+    import_nodes_scanned: int = 0
+    references_scanned: int = 0
 
 
 @dataclass(frozen=True)
@@ -33,20 +38,68 @@ class _ImportBinding:
     target_file_path: str | None
 
 
+@dataclass(frozen=True)
+class _BindingIndex:
+    """Import bindings grouped for direct and namespace lookup."""
+
+    by_file: dict[str, list[_ImportBinding]]
+    by_local_name: dict[str, dict[str, _ImportBinding]]
+
+
 class CodeGraphReferenceResolver:
     """Resolve import-driven references against already indexed workspace nodes."""
 
     def __init__(self, repository: CodeGraphRepository) -> None:
         self._repository = repository
 
-    def resolve(self) -> ResolutionResult:
+    def resolve(
+        self,
+        *,
+        source_file_paths: set[str] | frozenset[str] | None = None,
+        max_import_nodes: int | None = None,
+        max_refs: int | None = None,
+        deadline_monotonic: float | None = None,
+        monotonic: Callable[[], float] | None = None,
+    ) -> ResolutionResult:
         """Resolve currently unresolved refs and write deterministic graph edges."""
-        stale = self._repository.clear_stale_reference_resolutions()
-        bindings = self._build_import_bindings()
-        resolved_imports = self._write_import_edges(bindings)
-        resolved_calls = 0
+        clock = monotonic or time.monotonic
+        if _deadline_expired(deadline_monotonic, clock):
+            return ResolutionResult(truncated=True)
 
-        for reference in self._repository.list_references_for_resolution():
+        stale = self._repository.clear_stale_reference_resolutions(file_paths=source_file_paths)
+        import_nodes = self._repository.list_import_nodes(
+            file_paths=source_file_paths,
+            limit=_limit_plus_one(max_import_nodes),
+        )
+        truncated = _over_limit(import_nodes, max_import_nodes)
+        if max_import_nodes is not None:
+            import_nodes = import_nodes[:max_import_nodes]
+        bindings = self._build_import_bindings(import_nodes, deadline_monotonic=deadline_monotonic, monotonic=clock)
+        if bindings is None:
+            return ResolutionResult(stale_resolutions_cleared=stale, truncated=True)
+
+        import_edges, import_truncated = self._collect_import_edges(
+            bindings,
+            deadline_monotonic=deadline_monotonic,
+            monotonic=clock,
+        )
+        truncated = truncated or import_truncated
+        if import_edges:
+            self._repository.upsert_edges(import_edges)
+
+        references = self._repository.list_references_for_resolution(
+            file_paths=source_file_paths,
+            limit=_limit_plus_one(max_refs),
+        )
+        truncated = truncated or _over_limit(references, max_refs)
+        if max_refs is not None:
+            references = references[:max_refs]
+
+        resolved_references: list[tuple[int, CodeGraphEdge, str]] = []
+        for reference in references:
+            if _deadline_expired(deadline_monotonic, clock):
+                truncated = True
+                break
             if reference.reference_kind != "call":
                 continue
             target = self._resolve_call_reference(reference, bindings)
@@ -65,24 +118,39 @@ class CodeGraphReferenceResolver:
                 metadata={"resolved_by": "import_binding"},
                 provenance="codegraph_resolver",
             )
-            self._repository.mark_reference_resolved(reference.id, edge=edge, resolution_kind="import_binding")
-            resolved_calls += 1
+            resolved_references.append((reference.id, edge, "import_binding"))
+
+        if resolved_references:
+            self._repository.mark_references_resolved(resolved_references)
 
         return ResolutionResult(
-            resolved_calls=resolved_calls,
-            resolved_imports=resolved_imports,
+            resolved_calls=len(resolved_references),
+            resolved_imports=len(import_edges),
             stale_resolutions_cleared=stale,
+            truncated=truncated,
+            import_nodes_scanned=len(import_nodes),
+            references_scanned=len(references),
         )
 
-    def _build_import_bindings(self) -> dict[str, list[_ImportBinding]]:
+    def _build_import_bindings(
+        self,
+        import_nodes: list[CodeGraphNode],
+        *,
+        deadline_monotonic: float | None,
+        monotonic: Callable[[], float],
+    ) -> _BindingIndex | None:
         """Build local import bindings grouped by source file."""
         by_file: dict[str, list[_ImportBinding]] = {}
-        for import_node in self._repository.list_import_nodes():
+        by_local_name: dict[str, dict[str, _ImportBinding]] = {}
+        for import_node in import_nodes:
+            if _deadline_expired(deadline_monotonic, monotonic):
+                return None
             binding = self._binding_for_import_node(import_node)
             if binding is None:
                 continue
             by_file.setdefault(import_node.file_path, []).append(binding)
-        return by_file
+            by_local_name.setdefault(import_node.file_path, {})[binding.local_name] = binding
+        return _BindingIndex(by_file=by_file, by_local_name=by_local_name)
 
     def _binding_for_import_node(self, import_node: CodeGraphNode) -> _ImportBinding | None:
         metadata = dict(import_node.metadata)
@@ -165,12 +233,20 @@ class CodeGraphReferenceResolver:
                 return node
         return None
 
-    def _write_import_edges(self, bindings: dict[str, list[_ImportBinding]]) -> int:
-        """Persist import dependency edges for impact/context traversal."""
-        resolved = 0
+    def _collect_import_edges(
+        self,
+        bindings: _BindingIndex,
+        *,
+        deadline_monotonic: float | None,
+        monotonic: Callable[[], float],
+    ) -> tuple[list[CodeGraphEdge], bool]:
+        """Build import dependency edges for impact/context traversal."""
+        edges: list[CodeGraphEdge] = []
         seen: set[str] = set()
-        for file_bindings in bindings.values():
+        for file_bindings in bindings.by_file.values():
             for binding in file_bindings:
+                if _deadline_expired(deadline_monotonic, monotonic):
+                    return edges, True
                 target = binding.target_node
                 if target is None:
                     continue
@@ -189,24 +265,41 @@ class CodeGraphReferenceResolver:
                 )
                 if edge.id in seen:
                     continue
-                self._repository.upsert_edge(edge)
+                edges.append(edge)
                 seen.add(edge.id)
-                resolved += 1
-        return resolved
+        return edges, False
 
     def _resolve_call_reference(
         self,
         reference: StoredCodeGraphReference,
-        bindings: dict[str, list[_ImportBinding]],
+        bindings: _BindingIndex,
     ) -> CodeGraphNode | None:
-        for binding in bindings.get(reference.file_path, ()):
-            if reference.reference_name == binding.local_name:
-                return binding.target_node if binding.target_node is not None and binding.target_node.kind != "module" else None
+        binding = bindings.by_local_name.get(reference.file_path, {}).get(reference.reference_name)
+        if binding is not None:
+            return binding.target_node if binding.target_node is not None and binding.target_node.kind != "module" else None
+        for binding in bindings.by_file.get(reference.file_path, ()):
             prefix = f"{binding.local_name}."
             if reference.reference_name.startswith(prefix) and binding.target_file_path:
                 symbol_name = reference.reference_name[len(prefix) :].rsplit(".", 1)[-1]
                 return self._resolve_target_in_file(binding.target_file_path, symbol_name)
         return None
+
+
+def _deadline_expired(deadline_monotonic: float | None, monotonic: Callable[[], float]) -> bool:
+    """Return whether a caller-provided foreground time budget is exhausted."""
+    return deadline_monotonic is not None and monotonic() >= deadline_monotonic
+
+
+def _limit_plus_one(limit: int | None) -> int | None:
+    """Return a SQLite row cap that lets callers detect deterministic truncation."""
+    if limit is None:
+        return None
+    return max(1, int(limit)) + 1
+
+
+def _over_limit(items: list[object], limit: int | None) -> bool:
+    """Return whether a result list includes the extra row used to detect truncation."""
+    return limit is not None and len(items) > max(1, int(limit))
 
 
 __all__ = ["CodeGraphReferenceResolver", "ResolutionResult"]
