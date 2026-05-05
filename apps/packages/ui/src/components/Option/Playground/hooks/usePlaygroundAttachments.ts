@@ -10,7 +10,7 @@ export interface UsePlaygroundAttachmentsDeps {
   /** Form helpers */
   setFieldValue: (field: string, value: any) => void
   /** File upload handler from useMessageOption */
-  handleFileUpload: (file: File) => Promise<void>
+  handleFileUpload: (file: File) => Promise<unknown>
   /** Notification for disabled image */
   notifyImageAttachmentDisabled: () => void
 }
@@ -38,7 +38,9 @@ export function usePlaygroundAttachments(deps: UsePlaygroundAttachmentsDeps) {
   return useComposerAttachments({
     chatMode,
     setImageField: (base64) => setFieldValue("image", base64),
-    onDocumentUpload: handleFileUpload,
+    onDocumentUpload: async (file) => {
+      await handleFileUpload(file)
+    },
     ragBlocksImages: true,
     onImageBlockedInRagMode: notifyImageAttachmentDisabled,
     onUnsupportedType: (file) => {

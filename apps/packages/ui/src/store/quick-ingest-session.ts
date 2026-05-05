@@ -106,6 +106,11 @@ type QuickIngestSessionPersistedState = {
   session: QuickIngestSessionRecord | null
 }
 
+const isCustomBasePreset = (
+  value: unknown
+): value is Exclude<IngestPreset, "custom"> =>
+  typeof value === "string" && value in DEFAULT_PRESETS
+
 type QuickIngestSessionState = QuickIngestSessionPersistedState & {
   triggerSummary: QuickIngestTriggerSummary
   createDraftSession: (
@@ -152,7 +157,6 @@ const createSessionStorage = (): StateStorage => {
   if (typeof window === "undefined") {
     return createMemoryStorage()
   }
-
   return {
     getItem: (name: string): string | null => {
       try {
@@ -434,6 +438,10 @@ const sanitizeSession = (
       ? session.updatedAt
       : createdAt
 
+  const customBasePreset = isCustomBasePreset(session.customBasePreset)
+    ? session.customBasePreset
+    : DEFAULT_PRESET
+
   return {
     id: session.id || generateSessionId(),
     visibility: session.visibility === "hidden" ? "hidden" : "visible",
@@ -441,10 +449,7 @@ const sanitizeSession = (
     currentStep: session.currentStep || 1,
     queueItems: sanitizeQueueItems(session.queueItems),
     selectedPreset: session.selectedPreset || DEFAULT_PRESET,
-    customBasePreset:
-      session.customBasePreset && session.customBasePreset !== "custom"
-        ? session.customBasePreset
-        : DEFAULT_PRESET,
+    customBasePreset,
     presetConfig: session.presetConfig || DEFAULT_PRESETS[DEFAULT_PRESET],
     customOptions: session.customOptions || {},
     processingState: session.processingState || { ...INITIAL_PROCESSING_STATE },

@@ -64,6 +64,9 @@ type MemberInput = {
   accountMode: AccountMode
 }
 
+const normalizeAccountMode = (value: unknown): AccountMode =>
+  value === "invite_new" ? "invite_new" : "existing_account"
+
 type EntryMode = "card" | "bulk"
 type DependentEntryMode = EntryMode | "table"
 
@@ -639,7 +642,9 @@ export function FamilyGuardrailsWizard({
       const dependentDraft = dependentDraftByKey[dependent.key]
       const relationship = relationshipByDependentKey[dependent.key]
       const plan = planByDependentKey[dependent.key]
-      const accountMode = dependentDraft?.account_mode ?? dependent.accountMode
+      const accountMode = normalizeAccountMode(
+        dependentDraft?.account_mode ?? dependent.accountMode
+      )
       const inviteAction =
         accountMode === "invite_new" && !dependentDraft?.user_id
           ? ["provision_invite"]
@@ -863,7 +868,7 @@ export function FamilyGuardrailsWizard({
     const dependentMembers = memberDrafts.filter((member) => member.role === "dependent")
 
     const fallbackPreset = inferHouseholdPreset(household.mode, guardianMembers.length)
-    const nextGuardians =
+    const nextGuardians: MemberInput[] =
       guardianMembers.length > 0
         ? guardianMembers.map((member) => ({
             key: member.id,
@@ -873,14 +878,14 @@ export function FamilyGuardrailsWizard({
             accountMode: "existing_account"
           }))
         : createGuardianMembersForPreset(fallbackPreset)
-    const nextDependents =
+    const nextDependents: MemberInput[] =
       dependentMembers.length > 0
         ? dependentMembers.map((member) => ({
             key: member.id,
             displayName: member.display_name,
             userId: member.user_id ?? "",
             email: member.email ?? "",
-            accountMode: member.account_mode ?? "existing_account"
+            accountMode: normalizeAccountMode(member.account_mode)
           }))
         : createDependents(DEFAULT_DEPENDENT_COUNT)
 
@@ -2119,7 +2124,7 @@ export function FamilyGuardrailsWizard({
                           value={dependent.accountMode}
                           onChange={(event) =>
                             updateDependentMember(dependent.key, {
-                              accountMode: event.target.value as AccountMode
+                              accountMode: normalizeAccountMode(event.target.value)
                             })
                           }
                         >
@@ -2251,7 +2256,7 @@ export function FamilyGuardrailsWizard({
                           value={dependent.accountMode}
                           onChange={(event) =>
                             updateDependentMember(dependent.key, {
-                              accountMode: event.target.value as AccountMode
+                              accountMode: normalizeAccountMode(event.target.value)
                             })
                           }
                         >

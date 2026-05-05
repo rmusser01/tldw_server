@@ -49,7 +49,11 @@ const isSavedDegradedCharacterPersistError = (error: unknown): boolean => {
               !Array.isArray(candidate.details)
           ? candidate.details
           : null
-  return detail?.code === "persist_validation_degraded" && detail?.saved === true
+  const detailRecord = detail as Record<string, unknown> | null
+  return (
+    detailRecord?.code === "persist_validation_degraded" &&
+    detailRecord?.saved === true
+  )
 }
 
 const buildSanitizedRagSearchError = (
@@ -422,7 +426,7 @@ export const chatRagMethods = {
     params?: Record<string, any>,
     options?: { signal?: AbortSignal; scope?: ChatScope }
   ): Promise<ServerChatSummary[]> {
-    const query = buildQuery({ ...toChatScopeParams(options?.scope), ...params })
+    const query = buildQuery({ ...params, ...toChatScopeParams(options?.scope) })
     const data = await bgRequest<any>({
       path: `/api/v1/chats/${query}`,
       method: "GET",
@@ -454,7 +458,7 @@ export const chatRagMethods = {
     params?: Record<string, any>,
     options?: { signal?: AbortSignal; scope?: ChatScope }
   ): Promise<{ chats: ServerChatSummary[]; total: number }> {
-    const query = buildQuery({ ...toChatScopeParams(options?.scope), ...params })
+    const query = buildQuery({ ...params, ...toChatScopeParams(options?.scope) })
     const data = await bgRequest<any>({
       path: `/api/v1/chats/${query}`,
       method: "GET",
@@ -496,7 +500,7 @@ export const chatRagMethods = {
     params?: Record<string, any>,
     options?: { signal?: AbortSignal; scope?: ChatScope }
   ): Promise<{ chats: ServerChatSummary[]; total: number }> {
-    const query = buildQuery({ ...toChatScopeParams(options?.scope), ...params })
+    const query = buildQuery({ ...params, ...toChatScopeParams(options?.scope) })
     const data = await bgRequest<any>({
       path: `/api/v1/chats/conversations${query}`,
       method: "GET",
@@ -540,7 +544,7 @@ export const chatRagMethods = {
       path: "/api/v1/chats/",
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: { ...toChatScopeParams(options?.scope), ...payload }
+      body: { ...payload, ...toChatScopeParams(options?.scope) }
     })
     return this.normalizeChatSummary(res)
   },
@@ -617,6 +621,74 @@ export const chatRagMethods = {
       path: `/api/v1/chats/${cid}/diagnostics/lorebook${query}`,
       method: "GET"
     })
+  },
+
+  async getLatestChatVersion(
+    this: TldwApiClientCore,
+    chat_id: string | number,
+    options?: { scope?: ChatScope }
+  ): Promise<number | undefined> {
+    const cid = String(chat_id)
+    const current = await this.getChat(cid, { scope: options?.scope })
+    return typeof current?.version === "number" ? current.version : undefined
+  },
+
+  isVersionConflictError(this: TldwApiClientCore, error: unknown): boolean {
+    const candidate = error as
+      | {
+          status?: unknown
+          statusCode?: unknown
+          response?: {
+            status?: unknown
+            data?: {
+              code?: unknown
+              error?: { code?: unknown }
+            }
+          }
+          data?: { code?: unknown; error?: { code?: unknown } }
+          details?: { code?: unknown }
+          body?: { code?: unknown }
+          message?: unknown
+          code?: unknown
+        }
+      | null
+      | undefined
+    const rawStatus =
+      candidate?.status ?? candidate?.statusCode ?? candidate?.response?.status
+    const status =
+      typeof rawStatus === "number"
+        ? rawStatus
+        : typeof rawStatus === "string"
+          ? Number(rawStatus)
+          : Number.NaN
+    const structuredCodes = [
+      candidate?.code,
+      candidate?.response?.data?.code,
+      candidate?.response?.data?.error?.code,
+      candidate?.data?.code,
+      candidate?.data?.error?.code,
+      candidate?.details?.code,
+      candidate?.body?.code
+    ].map((value) => String(value ?? "").toLowerCase())
+    const hasStructuredConflictCode = structuredCodes.some((code) =>
+      [
+        "version_conflict",
+        "expected_version_mismatch",
+        "stale_version",
+        "conflict",
+        "precondition_failed"
+      ].includes(code)
+    )
+    const message = String(candidate?.message ?? candidate?.code ?? "")
+      .toLowerCase()
+    return (
+      status === 409 ||
+      status === 412 ||
+      hasStructuredConflictCode ||
+      message.includes("version conflict") ||
+      message.includes("expected_version") ||
+      message.includes("stale")
+    )
   },
 
   async updateChat(

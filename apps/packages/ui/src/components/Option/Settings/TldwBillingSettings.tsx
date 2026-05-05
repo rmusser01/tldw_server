@@ -7,7 +7,7 @@ import {
   Tag
 } from "antd"
 import React from "react"
-import type { TFunction } from "react-i18next"
+import type { TFunction } from "i18next"
 
 export type BillingPlan = {
   name: string

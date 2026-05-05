@@ -226,10 +226,12 @@ export const ModelPlaygroundChat: React.FC = () => {
               isProcessing={isProcessing}
               isSearchingInternet={false}
               sources={msg.sources}
-              onEditFormSubmit={(idx, value, isUser, isSend) => {
-                editMessage(idx, value, isUser, isSend)
+              onEditFormSubmit={(value, isSend) => {
+                editMessage(block.index, value, !msg.isBot, isSend)
               }}
-              onDeleteMessage={(idx) => deleteMessage(idx)}
+              onDeleteMessage={() => {
+                void deleteMessage(block.index)
+              }}
               isTTSEnabled={ttsEnabled}
               generationInfo={msg?.generationInfo}
               toolCalls={msg?.toolCalls}
@@ -241,7 +243,7 @@ export const ModelPlaygroundChat: React.FC = () => {
               temporaryChat={false}
               onStopStreaming={stopStreamingRequest}
               onContinue={() => {
-                onSubmit({ image: "", message: "", isContinue: true })
+                void onSubmit({ image: "", message: "", isContinue: true })
               }}
               documents={msg?.documents}
               messageId={msg.id}
@@ -277,10 +279,12 @@ export const ModelPlaygroundChat: React.FC = () => {
               isProcessing={isProcessing}
               isSearchingInternet={false}
               sources={userMessage.sources}
-              onEditFormSubmit={(idx, value, isUser, isSend) => {
-                editMessage(idx, value, isUser, isSend)
+              onEditFormSubmit={(value, isSend) => {
+                editMessage(block.userIndex, value, !userMessage.isBot, isSend)
               }}
-              onDeleteMessage={(idx) => deleteMessage(idx)}
+              onDeleteMessage={() => {
+                void deleteMessage(block.userIndex)
+              }}
               isTTSEnabled={ttsEnabled}
               generationInfo={userMessage?.generationInfo}
               toolCalls={userMessage?.toolCalls}
@@ -332,10 +336,12 @@ export const ModelPlaygroundChat: React.FC = () => {
                       isProcessing={isProcessing}
                       isSearchingInternet={false}
                       sources={replyMsg.sources}
-                      onEditFormSubmit={(idx, value, isUser, isSend) => {
-                        editMessage(idx, value, isUser, isSend)
+                      onEditFormSubmit={(value, isSend) => {
+                        editMessage(index, value, !replyMsg.isBot, isSend)
                       }}
-                      onDeleteMessage={(idx) => deleteMessage(idx)}
+                      onDeleteMessage={() => {
+                        void deleteMessage(index)
+                      }}
                       isTTSEnabled={ttsEnabled}
                       generationInfo={replyMsg?.generationInfo}
                       toolCalls={replyMsg?.toolCalls}

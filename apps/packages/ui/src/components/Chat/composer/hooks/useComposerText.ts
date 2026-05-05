@@ -1,6 +1,9 @@
 import React from "react"
 import { useSimpleForm } from "@/hooks/useSimpleForm"
-import { useDraftPersistence } from "@/hooks/useDraftPersistence"
+import {
+  useDraftPersistence,
+  type DraftMetadataObject
+} from "@/hooks/useDraftPersistence"
 
 /**
  * Shared composer text primitive consumed by both Playground and Sidepanel.
@@ -34,12 +37,12 @@ export interface UseComposerTextOptions {
    * Optional hook into draft-restore to carry surface-specific metadata
    * (e.g., Playground's `collapsedRange` + `wasExpanded`).
    */
-  getDraftMetadata?: () => Record<string, unknown> | undefined
+  getDraftMetadata?: () => DraftMetadataObject | undefined
   /**
    * Called by `useDraftPersistence` when a stored draft is restored with
    * metadata. Callers override when they need to restore collapse state etc.
    */
-  restoreWithMetadata?: (value: string, metadata?: Record<string, unknown>) => void
+  restoreWithMetadata?: (value: string, metadata?: DraftMetadataObject) => void
   /** Disable draft persistence entirely. Default true. */
   draftEnabled?: boolean
 }
@@ -87,7 +90,7 @@ export function useComposerText(
   )
 
   const restoreMessage = React.useCallback(
-    (value: string, metadata?: Record<string, unknown>) => {
+    (value: string, metadata?: DraftMetadataObject) => {
       form.setFieldValue("message", value)
       restoreWithMetadata?.(value, metadata)
     },

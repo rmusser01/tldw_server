@@ -1,6 +1,5 @@
 import React from "react"
 import { KnowledgePanel, type KnowledgeTab } from "@/components/Knowledge"
-import type { TFunction } from "i18next"
 
 export type PlaygroundKnowledgeSectionProps = {
   contextToolsOpen: boolean
@@ -25,8 +24,8 @@ export type PlaygroundKnowledgeSectionProps = {
   onRemoveFile: (file: any) => void
   onClearFiles: () => void
   onFileRetrievalChange: (enabled: boolean) => void
-  wrapComposerProfile: (id: string, element: React.ReactElement) => React.ReactElement
-  t: TFunction
+  wrapComposerProfile: (id: string, element: React.ReactNode) => React.ReactNode
+  t: (key: string, defaultValueOrOptions?: any, options?: any) => string
 }
 
 export const PlaygroundKnowledgeSection = React.memo(

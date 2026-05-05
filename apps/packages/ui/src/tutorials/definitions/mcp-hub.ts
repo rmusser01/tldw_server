@@ -23,7 +23,7 @@ const mcpHubBasics: TutorialDefinition = {
       contentKey: "tutorials:mcpHub.basics.welcomeContent",
       contentFallback:
         "MCP Hub manages external AI tools. Start here to see what tools are available and connect new servers.",
-      placement: "center",
+      placement: "bottom",
       disableBeacon: true
     },
     {

@@ -91,6 +91,7 @@ export interface CommandPaletteProps {
   onSearchHistory?: () => void
   onSwitchChat?: (chatId: string) => void
   sidepanelChats?: { id: string; label: string }[]
+  onQueryChange?: (query: string) => void
   scope?: "global" | "sidepanel"
   openSignal?: number
   registerGlobalOpenShortcut?: boolean
@@ -108,6 +109,7 @@ export function CommandPalette({
   onSearchHistory,
   onSwitchChat,
   sidepanelChats,
+  onQueryChange,
   scope = "global",
   openSignal,
   registerGlobalOpenShortcut = true,
@@ -562,6 +564,10 @@ export function CommandPalette({
   useEffect(() => {
     setSelectedIndex(0)
   }, [query])
+
+  useEffect(() => {
+    onQueryChange?.(query)
+  }, [onQueryChange, query])
 
   // Focus input when opened
   useEffect(() => {

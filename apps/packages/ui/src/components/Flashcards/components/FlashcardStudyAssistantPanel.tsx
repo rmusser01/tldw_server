@@ -126,23 +126,23 @@ const ACTION_LABELS: Record<StudyAssistantAction, string> = {
 }
 
 type RemediationCitationLike = {
-  citation_text?: unknown
-  quote?: unknown
-  label?: unknown
-  source_type?: unknown
-  source_id?: unknown
-  locator?: unknown
+  citation_text?: string | null
+  quote?: string | null
+  label?: string | null
+  source_type?: string
+  source_id?: string
+  locator?: string | null
   ordinal?: unknown
 }
 
 type RemediationDeepDiveTargetLike = {
-  source_type?: unknown
-  source_id?: unknown
+  source_type?: string
+  source_id?: string
   citation_ordinal?: unknown
-  route_kind?: unknown
-  route?: unknown
-  available?: unknown
-  fallback_reason?: unknown
+  route_kind?: string | null
+  route?: string | null
+  available?: boolean
+  fallback_reason?: string | null
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>

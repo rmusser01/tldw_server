@@ -130,9 +130,11 @@ export interface WorkspaceStudyArtifactData {
   sourceMediaIds?: number[]
   sourceBundle?: WorkspaceStudyArtifactSource[]
   questions?: Array<{
-    question: string
+    question?: string
+    question_text?: string
     options: string[]
-    answer: string
+    answer?: string
+    correct_answer?: string
     explanation?: string
     sourceMediaId?: number
   }>

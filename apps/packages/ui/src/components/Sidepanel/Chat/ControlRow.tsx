@@ -73,6 +73,9 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
 }) => {
   const { t } = useTranslation(["sidepanel", "playground", "common"])
   const [moreOpen, setMoreOpen] = React.useState(false)
+  const [systemPromptOverride, setSystemPromptOverride] = React.useState<
+    string | undefined
+  >(undefined)
   const moreBtnRef = React.useRef<HTMLButtonElement>(null)
   const { capabilities } = useServerCapabilities()
   const {
@@ -212,6 +215,10 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
   // Track if hints have been seen
   const knowledgeHintSeen = useFeatureHintSeen("knowledge-search")
   const moreToolsHintSeen = useFeatureHintSeen("more-tools")
+
+  React.useEffect(() => {
+    setSystemPromptOverride(undefined)
+  }, [selectedSystemPrompt])
 
   const openQuickIngest = () => {
     requestQuickIngestOpen()
@@ -662,7 +669,9 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
         {/* Prompt, Model & Character selectors */}
         <PromptSelect
           selectedSystemPrompt={selectedSystemPrompt}
+          systemPrompt={systemPromptOverride}
           setSelectedSystemPrompt={setSelectedSystemPrompt}
+          setSystemPrompt={setSystemPromptOverride}
           setSelectedQuickPrompt={setSelectedQuickPrompt}
           iconClassName="size-4"
           className="px-2 text-text-muted hover:text-text"

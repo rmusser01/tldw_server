@@ -765,9 +765,7 @@ export function ConversationTab({
     await updateSettings({ turnTakingMode: value })
   }
   const persistParticipantCharacterIds = async (values: string[]) => {
-    const normalized = normalizeParticipantCharacterIds(values).map((id) =>
-      /^\d+$/.test(id) ? Number.parseInt(id, 10) : id
-    )
+    const normalized = normalizeParticipantCharacterIds(values)
     await updateSettings({ participantCharacterIds: normalized })
   }
   const persistDirectedCharacterId = async (value: string | null) => {

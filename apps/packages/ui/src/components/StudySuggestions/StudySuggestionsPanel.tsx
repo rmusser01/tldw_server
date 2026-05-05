@@ -119,7 +119,7 @@ const buildTopicsFromSnapshot = (
   }
 
   return rawTopics
-    .map((topic, index) => {
+    .map((topic, index): TopicBuilderTopic | null => {
       if (!topic || typeof topic !== "object") {
         return null
       }

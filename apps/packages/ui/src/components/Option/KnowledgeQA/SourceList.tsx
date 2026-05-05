@@ -727,7 +727,7 @@ export function SourceList({ className, layout = "main" }: SourceListProps) {
   const density: "compact" | "default" | "full" =
     results.length <= 3 ? "compact" : results.length <= 9 ? "default" : "full"
   const showFilters = density === "full" || showFiltersOverride
-  const showExtendedFilters = density === "full" || (showFiltersOverride && density !== "full")
+  const showExtendedFilters = density === "full" || showFiltersOverride
 
   // Reset filter override when results count changes
   useEffect(() => {

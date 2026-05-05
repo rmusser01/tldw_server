@@ -48,9 +48,7 @@ export const WebhooksTab: React.FC = () => {
   const registerMutation = useRegisterWebhook()
   const deleteMutation = useDeleteWebhook()
 
-  const webhooks = Array.isArray(webhooksResp?.data)
-    ? webhooksResp.data
-    : webhooksResp?.data?.data || []
+  const webhooks = Array.isArray(webhooksResp?.data) ? webhooksResp.data : []
 
   const handleRegister = async () => {
     try {

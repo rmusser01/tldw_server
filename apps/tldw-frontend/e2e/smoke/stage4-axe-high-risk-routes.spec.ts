@@ -275,10 +275,11 @@ test.describe("Stage 4 Axe high-risk routes", () => {
         mayRedirectWhenUnavailable: route.mayRedirectWhenUnavailable
       })
       if (preScanDisposition.shouldSkip) {
-        test.skip(preScanDisposition.message)
+        test.skip(true, preScanDisposition.message)
       }
       if (route.mayRedirectWhenUnavailable && !acceptablePaths.includes(finalPath)) {
         test.skip(
+          true,
           `Route ${route.path} redirected to ${finalPath}; feature is unavailable in this runtime`
         )
       }
@@ -300,7 +301,8 @@ test.describe("Stage 4 Axe high-risk routes", () => {
         route.mayRedirectWhenUnavailable
       )
       if (analysis.type === "skip") {
-        test.skip(analysis.message)
+        test.skip(true, analysis.message)
+        return
       }
       const results = analysis.results
 

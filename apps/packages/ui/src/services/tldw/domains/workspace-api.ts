@@ -3,6 +3,7 @@ import { buildQuery } from "../client-utils"
 import { appendPathQuery } from "../path-utils"
 import type { AllowedPath } from "@/services/tldw/openapi-guard"
 import type { OffsetPaginationMeta } from "@/services/response-envelope"
+import type { SkillsListResponse } from "@/types/skill"
 
 /**
  * Minimal interface for the TldwApiClient methods referenced via `this`.
@@ -15,21 +16,7 @@ export interface TldwApiClientCore {
   buildQuery(params?: Record<string, any>): string
 }
 
-type SkillSummary = {
-  name: string
-  description?: string | null
-  argument_hint?: string | null
-  user_invocable: boolean
-  disable_model_invocation: boolean
-  context: "inline" | "fork"
-}
-
-type SkillsListPayload = {
-  skills: SkillSummary[]
-  count: number
-  total: number
-  limit: number
-  offset: number
+type SkillsListPayload = SkillsListResponse & {
   pagination?: OffsetPaginationMeta
 }
 

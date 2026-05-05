@@ -42,6 +42,7 @@ import type {
   ItemProgress,
   ItemProgressStatus,
   PersistedQuickIngestTracking,
+  ReattachedQuickIngestJob,
   TypeDefaults,
   WizardQueueItem,
   WizardResultItem,
@@ -678,7 +679,7 @@ const buildResultsFromReattachedJobs = (
 
 const buildProgressFromReattachedJobs = (
   items: WizardQueueItem[],
-  jobs: Array<{ jobId: number; status: string; error?: string; sourceItemId?: string }>,
+  jobs: ReattachedQuickIngestJob[],
   tracking?: PersistedQuickIngestTracking
 ): ItemProgress[] =>
   jobs.map((job, index) => {

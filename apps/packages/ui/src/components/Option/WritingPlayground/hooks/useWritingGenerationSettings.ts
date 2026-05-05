@@ -7,6 +7,7 @@
 
 import React from "react"
 import { useQuery } from "@tanstack/react-query"
+import type { TFunction } from "i18next"
 import {
   getWritingCapabilities,
   type WritingExtraBodyCompat
@@ -57,7 +58,7 @@ export interface UseWritingGenerationSettingsDeps {
   setExtraBodyJsonDraft: React.Dispatch<React.SetStateAction<string>>
   extraBodyJsonError: string | null
   setExtraBodyJsonError: React.Dispatch<React.SetStateAction<string | null>>
-  t: (key: string, fallback?: string, opts?: Record<string, unknown>) => string
+  t: TFunction
 }
 
 export function useWritingGenerationSettings(deps: UseWritingGenerationSettingsDeps) {

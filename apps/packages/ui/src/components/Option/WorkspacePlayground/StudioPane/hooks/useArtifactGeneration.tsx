@@ -15,8 +15,10 @@ import {
   createFlashcardsBulk,
   generateFlashcards as generateFlashcardDrafts,
   listDecks,
-  type FlashcardCreate
+  type FlashcardCreate,
+  type FlashcardsGenerateRequest
 } from "@/services/flashcards"
+import type { TFunction } from "i18next"
 import type {
   ArtifactType,
   GeneratedArtifact,
@@ -244,7 +246,7 @@ const normalizeGeneratedQuizQuestions = (
   }
 
   return rawQuestions
-    .map((candidate) => {
+    .map((candidate): GeneratedQuizQuestionDraft | null => {
       if (!isRecord(candidate)) {
         return null
       }
@@ -1269,7 +1271,7 @@ async function generateFlashcards(
     throw buildMissingContentError("flashcard")
   }
 
-  const generationRequest = {
+  const generationRequest: FlashcardsGenerateRequest = {
     text: sourceText,
     num_cards: 12,
     difficulty: "mixed",
@@ -1826,7 +1828,7 @@ export interface UseArtifactGenerationDeps {
   // RAG
   ragAdvancedOptions: Record<string, unknown>
   // i18n
-  t: (key: string, fallback?: string, opts?: Record<string, any>) => string
+  t: TFunction
 }
 
 export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {

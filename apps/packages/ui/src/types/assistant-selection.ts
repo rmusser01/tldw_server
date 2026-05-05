@@ -9,6 +9,7 @@ export type AssistantKind = "character" | "persona"
 export type AssistantSelection = {
   kind: AssistantKind
   id: string
+  slug?: string | null
   name: string
   avatar_url?: string | null
   greeting?: string | null
@@ -74,6 +75,7 @@ export const normalizeAssistantSelection = (
     ...rest,
     kind,
     id,
+    slug: normalizeOptionalText(candidate.slug),
     name,
     avatar_url: normalizeOptionalText(candidate.avatar_url),
     greeting: normalizeOptionalText(candidate.greeting),

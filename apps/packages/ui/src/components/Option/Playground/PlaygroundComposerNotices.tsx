@@ -14,7 +14,6 @@ import type {
   ModelRecommendationAction
 } from "./model-recommendations"
 import { toText } from "./hooks/utils"
-import type { TFunction } from "i18next"
 
 const CHAT_NUDGE_DISMISSED_KEY = "assistant_nudge_dismissed_chat"
 
@@ -86,8 +85,8 @@ export type PlaygroundComposerNoticesProps = {
   handleModelRecommendationAction: (action: ModelRecommendationAction) => void
   dismissModelRecommendation: (id: string) => void
   getModelRecommendationActionLabel: (action: ModelRecommendationAction) => string
-  wrapComposerProfile: (id: string, element: React.ReactElement) => React.ReactElement
-  t: TFunction
+  wrapComposerProfile: (id: string, element: React.ReactNode) => React.ReactNode
+  t: (key: string, defaultValueOrOptions?: any, options?: any) => string
 }
 
 /**

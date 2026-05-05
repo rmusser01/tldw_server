@@ -78,6 +78,7 @@ const resolveActivePersonaSelection = ({
     | {
         surface_active: boolean
         active_persona_id: string | null
+        persona_source?: string | null
         buddy_summary?: PersonaBuddySummary | null
       }
     | null

@@ -6,6 +6,7 @@
  */
 
 import React from "react"
+import type { TFunction } from "i18next"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import type { JSONContent } from "@tiptap/react"
 import type { MessageInstance } from "antd/es/message/interface"
@@ -58,7 +59,7 @@ export interface UseWritingSessionManagementDeps {
   apiProviderOverride: string | undefined
   setApiProvider: (provider: string) => void
   isGenerating: boolean
-  t: (key: string, fallback?: string, opts?: Record<string, unknown>) => string
+  t: TFunction
 }
 
 type PromptSelection = { start: number; end: number }

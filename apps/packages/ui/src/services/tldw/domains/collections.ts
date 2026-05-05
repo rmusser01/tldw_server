@@ -126,7 +126,7 @@ export const collectionsMethods = {
       "/api/v1/prompts",
       "/api/v1/prompts/"
     ])
-    return await bgRequest<any>({ path, method: "GET" })
+    return await bgRequest<any>({ path: path as any, method: "GET" })
   },
 
   async searchPrompts(query: string): Promise<any> {
@@ -162,7 +162,7 @@ export const collectionsMethods = {
       "/api/v1/prompts/"
     ])
     return await bgRequest<any>({
-      path,
+      path: path as any,
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: normalized

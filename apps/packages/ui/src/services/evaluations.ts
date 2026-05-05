@@ -37,8 +37,13 @@ export type EvaluationListResponse = {
 }
 
 export type DatasetSample = {
-  input: any
+  input?: any
   expected?: any
+  sample_id?: string
+  query?: string
+  expected_behavior?: any
+  reference_answer?: string
+  sample_payload?: Record<string, any>
   metadata?: Record<string, any>
 }
 

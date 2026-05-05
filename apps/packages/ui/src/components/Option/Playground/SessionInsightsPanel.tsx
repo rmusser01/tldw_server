@@ -1,5 +1,4 @@
 import React from "react"
-import type { TFunction } from "i18next"
 import { formatCost } from "@/utils/model-pricing"
 import type {
   SessionInsights,
@@ -7,7 +6,7 @@ import type {
 } from "./session-insights"
 
 type Props = {
-  t: TFunction
+  t: (key: string, defaultValueOrOptions?: any, options?: any) => string
   insights: SessionInsights
 }
 

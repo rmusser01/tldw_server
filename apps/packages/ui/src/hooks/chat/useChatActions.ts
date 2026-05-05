@@ -81,6 +81,7 @@ import {
   type ChatResearchContext,
   type ConversationState
 } from "@/services/tldw/TldwApiClient"
+import type { ChatScope } from "@/types/chat-scope"
 import { getServerCapabilities } from "@/services/tldw/server-capabilities"
 import { generateTitle } from "@/services/title"
 import { trackCompareMetric } from "@/utils/compare-metrics"
@@ -263,6 +264,7 @@ type UseChatActionsOptions = {
   serverChatClusterId: string | null
   serverChatSource: string | null
   serverChatExternalRef: string | null
+  scope?: ChatScope
   setServerChatId: (id: string | null) => void
   setServerChatTitle: (title: string | null) => void
   setServerChatCharacterId: (id: string | number | null) => void

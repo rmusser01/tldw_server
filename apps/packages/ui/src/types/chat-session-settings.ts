@@ -58,6 +58,9 @@ export type ChatSettingsRecord = {
   authorNotePosition?: AuthorNotePosition | null
   characterMemoryById?: Record<string, CharacterMemoryEntry>
   chatGenerationOverride?: ChatGenerationOverride | null
+  generationOverrides?: ChatGenerationOverride | null
+  turnTakingMode?: "single" | "round_robin"
+  participantCharacterIds?: string[]
   summary?: ChatSummary | null
   imageEventSyncMode?: "off" | "on"
   deepResearchAttachment?: DeepResearchAttachment | null

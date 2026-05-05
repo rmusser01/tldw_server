@@ -929,21 +929,19 @@ export const DocumentWorkspacePage: React.FC = () => {
     if (alreadyOpen) {
       // Just clear the param
       autoOpenHandledRef.current = true
-      setSearchParams((prev) => {
-        prev.delete("open")
-        return prev
-      }, { replace: true })
+      const nextParams = new URLSearchParams(searchParams)
+      nextParams.delete("open")
+      setSearchParams(nextParams, { replace: true })
       return
     }
 
     autoOpenHandledRef.current = true
     // Remove the param from the URL first so it doesn't re-trigger
-    setSearchParams((prev) => {
-      prev.delete("open")
-      return prev
-    }, { replace: true })
+    const nextParams = new URLSearchParams(searchParams)
+    nextParams.delete("open")
+    setSearchParams(nextParams, { replace: true })
     void openDocumentById(mediaId)
-  }, [autoOpenId, loadingDocumentId, openDocuments, openDocumentById, setSearchParams])
+  }, [autoOpenId, loadingDocumentId, openDocuments, openDocumentById, searchParams, setSearchParams])
 
   const loadingAlert =
     loadingDocumentId !== null ? (

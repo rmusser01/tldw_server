@@ -11,7 +11,6 @@ import {
   projectTokenBudget
 } from "../usage-metrics"
 import { useComposerSubmit } from "@/components/Chat/composer/hooks/useComposerSubmit"
-import type { TFunction } from "i18next"
 import type { ChatResearchContext } from "@/services/tldw/TldwApiClient"
 
 export type UsePlaygroundSubmitDeps = {
@@ -44,7 +43,7 @@ export type UsePlaygroundSubmitDeps = {
   validateSelectedChatModelsAvailability: (models: string[]) => boolean
   compareModelsSupportCapability: (models: string[], cap: string) => boolean
   notificationApi: any
-  t: TFunction
+  t: (key: string, defaultValueOrOptions?: any, options?: any) => string
 }
 
 export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {

@@ -2618,6 +2618,7 @@ export const useMessage = () => {
     index: number,
     message: string,
     isHuman: boolean,
+    isSend = true,
   ) => {
     const newHistory = history;
 
@@ -2626,6 +2627,35 @@ export const useMessage = () => {
       const updatedMessages = messages.map((msg, idx) =>
         idx === index ? { ...msg, message } : msg,
       );
+      if (!isSend) {
+        setMessages(updatedMessages);
+        const updatedHistory = newHistory.map((item, idx) =>
+          idx === index ? { ...item, content: message } : item,
+        );
+        setHistory(updatedHistory);
+        await updateMessageByIndex(historyId, index, message);
+        if (
+          serverChatId &&
+          (selectedCharacter?.id || serverChatAssistantKind === "persona") &&
+          currentHumanMessage?.serverMessageId
+        ) {
+          try {
+            const srv = await tldwClient.getMessage(
+              currentHumanMessage.serverMessageId,
+            );
+            const ver = srv?.version;
+            if (ver != null) {
+              await tldwClient.editMessage(
+                currentHumanMessage.serverMessageId,
+                message,
+                Number(ver),
+                serverChatId ?? undefined,
+              );
+            }
+          } catch {}
+        }
+        return;
+      }
       const previousMessages = updatedMessages.slice(0, index + 1);
       setMessages(previousMessages);
       const previousHistory = newHistory.slice(0, index);
