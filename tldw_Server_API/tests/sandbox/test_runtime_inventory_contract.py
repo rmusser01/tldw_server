@@ -2,8 +2,12 @@ from __future__ import annotations
 
 import pytest
 
-from tldw_Server_API.app.core.Sandbox.models import RuntimeType
+from tldw_Server_API.app.api.v1.schemas.sandbox_schemas import (
+    SandboxRuntimeInfo,
+    SandboxRuntimesResponse,
+)
 from tldw_Server_API.app.core.Sandbox import runtime_capabilities as runtime_caps
+from tldw_Server_API.app.core.Sandbox.models import RuntimeType
 from tldw_Server_API.app.core.Sandbox.runtime_capabilities import (
     RUNTIME_ISOLATION_METADATA,
     RuntimePreflightResult,
@@ -263,6 +267,88 @@ def test_runtime_network_policy_metadata_rejects_unknown_runtime() -> None:
     assert hasattr(runtime_caps, "runtime_network_policy_metadata")
     with pytest.raises(ValueError, match="No network policy metadata configured"):
         runtime_caps.runtime_network_policy_metadata("future_runtime")
+
+
+def test_feature_discovery_reports_structured_session_contract(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SANDBOX_STORE_BACKEND", "memory")
+
+    discovery = {
+        str(item.get("name")): item
+        for item in SandboxService().feature_discovery()
+    }
+
+    assert set(discovery) == {runtime.value for runtime in RuntimeType}
+    for runtime in RuntimeType:
+        contract = discovery[runtime.value]["session_contract"]
+        assert set(contract) == {
+            "support_state",
+            "reuse_model",
+            "requires_live_health_check",
+            "recovery_state",
+            "repair_state",
+        }
+
+    assert discovery["docker"]["session_contract"] == {
+        "support_state": "supported",
+        "reuse_model": "workspace_only",
+        "requires_live_health_check": False,
+        "recovery_state": "unsupported",
+        "repair_state": "unsupported",
+    }
+    assert discovery["vz_linux"]["session_contract"] == {
+        "support_state": "host_gated",
+        "reuse_model": "warm_vm",
+        "requires_live_health_check": True,
+        "recovery_state": "host_gated",
+        "repair_state": "host_gated",
+    }
+
+    for runtime_name in ("firecracker", "lima", "vz_macos"):
+        assert discovery[runtime_name]["session_contract"]["support_state"] == "scaffold"
+        assert discovery[runtime_name]["session_contract"]["reuse_model"] == "scaffold"
+        assert (
+            discovery[runtime_name]["session_contract"]["requires_live_health_check"]
+            is False
+        )
+
+    for runtime_name in ("seatbelt", "worktree"):
+        assert discovery[runtime_name]["session_contract"] == {
+            "support_state": "scaffold",
+            "reuse_model": "workspace_only",
+            "requires_live_health_check": False,
+            "recovery_state": "unsupported",
+            "repair_state": "unsupported",
+        }
+
+
+def test_runtime_session_contract_metadata_contract_covers_runtime_enum() -> None:
+    assert set(runtime_caps.RUNTIME_SESSION_CONTRACT_METADATA) == set(RuntimeType)
+
+
+def test_runtime_session_contract_metadata_rejects_unknown_runtime() -> None:
+    with pytest.raises(ValueError, match="No session contract metadata configured"):
+        runtime_caps.runtime_session_contract_metadata("future_runtime")
+
+
+def test_runtime_info_schema_exposes_session_contract() -> None:
+    schema = SandboxRuntimeInfo.model_json_schema()
+
+    assert "session_contract" in schema["properties"]
+
+
+def test_feature_discovery_validates_against_runtime_response_schema(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SANDBOX_STORE_BACKEND", "memory")
+
+    response = SandboxRuntimesResponse(
+        runtimes=SandboxService().feature_discovery(),
+    )
+
+    assert response.runtimes
+    assert response.runtimes[0].session_contract is not None
 
 
 def test_runtime_reason_normalization_maps_raw_runtime_reasons() -> None:

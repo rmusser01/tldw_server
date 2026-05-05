@@ -18,6 +18,7 @@ from tldw_Server_API.app.core.Sandbox.runtime_capabilities import (
     RuntimeNetworkPolicyReadinessSource,
     RuntimeNetworkPolicySupportState,
     RuntimeReasonCode,
+    RuntimeSessionReuseModel,
 )
 from tldw_Server_API.app.core.Sandbox.run_status_taxonomy import RunStatusReasonCode
 
@@ -64,6 +65,40 @@ class SandboxRuntimeNetworkPolicyContract(BaseModel):
 
     deny_all: SandboxRuntimeNetworkPolicyModeInfo
     allowlist: SandboxRuntimeNetworkPolicyModeInfo
+
+
+class SandboxRuntimeSessionContract(BaseModel):
+    """Static session semantics for a runtime."""
+
+    support_state: RuntimeImplementationState = Field(
+        ...,
+        description=(
+            "Static support state for session participation: supported, "
+            "unsupported, scaffold, host_gated, or not_applicable"
+        ),
+    )
+    reuse_model: RuntimeSessionReuseModel = Field(
+        ...,
+        description=(
+            "Runtime reuse model for session-backed runs: none, workspace_only, "
+            "warm_vm, or scaffold"
+        ),
+    )
+    requires_live_health_check: bool = Field(
+        ...,
+        description=(
+            "Whether safe session reuse depends on checking live runtime state "
+            "before reusing the session runtime"
+        ),
+    )
+    recovery_state: RuntimeImplementationState = Field(
+        ...,
+        description="Static support state for cross-restart session recovery semantics",
+    )
+    repair_state: RuntimeImplementationState = Field(
+        ...,
+        description="Static support state for explicit operator/admin session repair semantics",
+    )
 
 
 def _default_offset_pagination_aliases(response):
@@ -135,6 +170,13 @@ class SandboxRuntimeInfo(BaseModel):
         description=(
             "Static runtime network policy posture; current host readiness remains "
             "in enforcement_ready and runtime preflight reasons"
+        ),
+    )
+    session_contract: SandboxRuntimeSessionContract = Field(
+        ...,
+        description=(
+            "Static runtime session semantics; current host readiness remains "
+            "in available, reasons, and admin diagnostics"
         ),
     )
     supported_spec_versions: list[str] = Field(default_factory=lambda: ["1.0"], description="Supported spec versions (e.g., ['1.0','1.1'] when 1.1 features are enabled)")

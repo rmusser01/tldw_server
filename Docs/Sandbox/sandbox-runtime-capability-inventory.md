@@ -49,6 +49,9 @@ concepts:
   preflight, or diagnostics.
 - `network_policy_contract`: static posture for `deny_all` and `allowlist`
   support, strict enforcement, and current-readiness source.
+- `session_contract`: static posture for session participation, reuse model,
+  live-health-check expectations, and recovery/repair posture. Current host
+  truth remains in `available`, raw `reasons`, and admin diagnostics.
 
 | Runtime | `implementation_state` | Discovery source |
 | --- | --- | --- |
@@ -193,6 +196,23 @@ sets experimental flags.
 | `seatbelt` | `false` | `not_applicable` | `false` | `not_applicable` |
 | `worktree` | `false` | `not_applicable` | `false` | `not_applicable` |
 
+## Session Semantics Contract
+
+Runtime discovery exposes `session_contract` as static posture metadata. It
+does not replace session create/run APIs or runtime diagnostics. `support_state`
+describes the maturity of session participation, while `reuse_model` describes
+what can actually be reused across session-backed runs.
+
+| Runtime | `support_state` | `reuse_model` | Live health check required | `recovery_state` | `repair_state` | Notes |
+| --- | --- | --- | --- | --- | --- | --- |
+| `docker` | `supported` | `workspace_only` | `false` | `unsupported` | `unsupported` | Session-backed runs share a control-plane workspace, not a warm container. |
+| `firecracker` | `scaffold` | `scaffold` | `false` | `unsupported` | `unsupported` | Session shape exists, but warm VM/session ownership is not normalized. |
+| `lima` | `scaffold` | `scaffold` | `false` | `unsupported` | `unsupported` | Session shape exists, but warm VM/session ownership is not normalized. |
+| `vz_linux` | `host_gated` | `warm_vm` | `true` | `host_gated` | `host_gated` | Same-session VM reuse requires helper VM health checks; repair is explicit/admin-only. |
+| `vz_macos` | `scaffold` | `scaffold` | `false` | `scaffold` | `scaffold` | Runtime identity exists, but real execution and session reuse are scaffolded. |
+| `seatbelt` | `scaffold` | `workspace_only` | `false` | `unsupported` | `unsupported` | Host-local workspace participation only; no warm runtime reuse. |
+| `worktree` | `scaffold` | `workspace_only` | `false` | `unsupported` | `unsupported` | Host-local workspace participation only; no warm runtime reuse. |
+
 ## Execution And Lifecycle Support
 
 | Runtime | Real execution | Interactivity | Sessions | Cancellation/timeouts | Artifacts |
@@ -234,7 +254,7 @@ an equally clear ownership model.
 | Host-local runtimes need clearer docs/API warnings that they are not VM-grade. | `seatbelt`, `worktree` | Phase 2 |
 | Additional real allowlist implementations remain limited beyond Docker granular enforcement. | all except unsupported paths | Future |
 | Rich structured error metadata beyond the first normalized alias pass remains incomplete. | all | Phase 3 |
-| Session semantics are not normalized across warm VM, container, and host-local reuse. | all | Phase 4 |
+| Cross-runtime session behavior contract tests and recovery flows remain incomplete beyond the discovery-level `session_contract`. | all | Phase 4 |
 | Recovery/repair ownership exists only for `vz_linux`. | all except `vz_linux` | Phase 4 |
 | CI has no single cross-runtime capability gate. | all | Phase 5 |
 
@@ -246,6 +266,8 @@ an equally clear ownership model.
 - Do not classify `seatbelt` or `worktree` as `untrusted`-eligible.
 - Add network policy metadata for every runtime and keep it separate from
   current `enforcement_ready` host/preflight truth.
+- Add session contract metadata for every runtime and keep it separate from
+  current host availability and admin diagnostics.
 - Prefer `unsupported` over ambiguous wording when a guarantee cannot be
   proven.
 - Update this document before expanding `vz_macos`, Apple `containerization`,
