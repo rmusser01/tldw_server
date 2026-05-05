@@ -9,12 +9,15 @@ from tldw_Server_API.app.core.CodeGraph.jobs import (
     CODEGRAPH_INDEX_JOB_TYPE,
     build_codegraph_index_job_payload,
 )
-from tldw_Server_API.app.core.CodeGraph.jobs_worker import (
-    CodeGraphJobError,
-    handle_codegraph_index_job,
-)
+from tldw_Server_API.app.core.CodeGraph.jobs_worker import handle_codegraph_index_job
 from tldw_Server_API.app.core.CodeGraph.models import WorkspaceResolution
 from tldw_Server_API.app.core.DB_Management.codegraph.repository import CodeGraphRepository
+from tldw_Server_API.app.core.exceptions import CodeGraphJobError
+
+
+@pytest.fixture(autouse=True)
+def _worker_index_base_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CODEGRAPH_JOBS_INDEX_BASE_DIR", str(tmp_path / "indexes"))
 
 
 def _resolution(tmp_path: Path) -> WorkspaceResolution:
@@ -146,6 +149,22 @@ async def test_codegraph_jobs_worker_rejects_unsafe_index_path(tmp_path: Path) -
 
     assert excinfo.value.retryable is False
     assert "index_db_path_outside_index_base" in str(excinfo.value)
+
+
+@pytest.mark.asyncio
+async def test_codegraph_jobs_worker_rejects_spoofed_payload_index_base(tmp_path: Path) -> None:
+    payload = _payload(tmp_path, operation="index")
+    settings_payload = payload["settings"]
+    assert isinstance(settings_payload, dict)
+    settings = dict(settings_payload)
+    settings["index_base_dir"] = "/"
+    payload["settings"] = settings
+
+    with pytest.raises(CodeGraphJobError) as excinfo:
+        await handle_codegraph_index_job({"job_type": CODEGRAPH_INDEX_JOB_TYPE, "payload": payload})
+
+    assert excinfo.value.retryable is False
+    assert "index_base_dir_mismatch" in str(excinfo.value)
 
 
 @pytest.mark.asyncio

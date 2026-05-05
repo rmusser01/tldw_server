@@ -12,6 +12,7 @@ from typing import Any
 from loguru import logger
 
 from tldw_Server_API.app.core.DB_Management.codegraph.repository import CodeGraphRepository
+from tldw_Server_API.app.core.exceptions import CodeGraphJobError
 from tldw_Server_API.app.core.Jobs.worker_sdk import WorkerConfig, WorkerSDK
 from tldw_Server_API.app.core.Jobs.worker_utils import coerce_int as _coerce_int
 from tldw_Server_API.app.core.Jobs.worker_utils import jobs_manager_from_env as _jobs_manager
@@ -20,14 +21,6 @@ from .config import CodeGraphSettings
 from .indexer import CodeGraphIndexer, IndexingResult
 from .jobs import CODEGRAPH_INDEX_JOB_TYPE, CODEGRAPH_JOBS_DOMAIN, codegraph_jobs_queue
 from .language_registry import CodeGraphLanguageRegistry
-
-
-class CodeGraphJobError(RuntimeError):
-    """Non-retryable CodeGraph Jobs validation or execution error."""
-
-    def __init__(self, message: str, *, retryable: bool = False) -> None:
-        super().__init__(message)
-        self.retryable = retryable
 
 
 async def handle_codegraph_index_job(job: dict[str, Any]) -> dict[str, Any]:
@@ -51,9 +44,12 @@ def _handle_codegraph_index_job_sync(job: dict[str, Any]) -> dict[str, Any]:
     if not workspace_key:
         raise CodeGraphJobError("missing workspace_key", retryable=False)
 
-    settings = CodeGraphSettings.from_mapping(_coerce_mapping(payload.get("settings"), "settings"))
+    settings_payload = _coerce_mapping(payload.get("settings"), "settings")
+    index_base_dir = _local_index_base_dir()
+    _validate_payload_index_base(settings_payload, index_base_dir)
+    settings = CodeGraphSettings.from_mapping({**settings_payload, "index_base_dir": str(index_base_dir)})
     index_db_path = _required_path(payload, "index_db_path").resolve(strict=False)
-    _validate_index_path(index_db_path=index_db_path, settings=settings)
+    _validate_index_path(index_db_path=index_db_path, index_base_dir=index_base_dir)
 
     repository = CodeGraphRepository(index_db_path)
     indexer = CodeGraphIndexer(settings=settings, registry=CodeGraphLanguageRegistry())
@@ -154,10 +150,26 @@ def _required_path(payload: dict[str, Any], field_name: str) -> Path:
     return Path(value).expanduser()
 
 
-def _validate_index_path(*, index_db_path: Path, settings: CodeGraphSettings) -> None:
+def _local_index_base_dir() -> Path:
+    """Return the trusted local CodeGraph index base for worker path checks."""
+    index_base_override = os.getenv("CODEGRAPH_JOBS_INDEX_BASE_DIR") or os.getenv("CODEGRAPH_INDEX_BASE_DIR")
+    values = {"index_base_dir": index_base_override} if index_base_override else {}
+    return CodeGraphSettings.from_mapping(values).index_base_dir.expanduser().resolve(strict=False)
+
+
+def _validate_payload_index_base(settings_payload: dict[str, Any], index_base_dir: Path) -> None:
+    """Reject jobs whose payload index base does not match trusted local worker config."""
+    raw_payload_base = settings_payload.get("index_base_dir")
+    if not isinstance(raw_payload_base, str) or not raw_payload_base.strip():
+        raise CodeGraphJobError("missing index_base_dir", retryable=False)
+    payload_index_base = Path(raw_payload_base).expanduser().resolve(strict=False)
+    if payload_index_base != index_base_dir:
+        raise CodeGraphJobError("index_base_dir_mismatch", retryable=False)
+
+
+def _validate_index_path(*, index_db_path: Path, index_base_dir: Path) -> None:
     """Ensure the job can only write below the configured CodeGraph index base."""
-    index_base = settings.index_base_dir.expanduser().resolve(strict=False)
-    if index_base not in index_db_path.parents:
+    if index_base_dir not in index_db_path.parents:
         raise CodeGraphJobError("index_db_path_outside_index_base", retryable=False)
 
 

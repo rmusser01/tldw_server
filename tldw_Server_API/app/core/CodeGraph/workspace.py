@@ -88,7 +88,8 @@ class CodeGraphWorkspaceResolver:
             trust_source=source,
             workspace_root=workspace_root,
         )
-        index_db_path = self._settings.index_base_dir / workspace_key / "codegraph.db"
+        index_base_dir = self._settings.index_base_dir.expanduser().resolve(strict=False)
+        index_db_path = index_base_dir / workspace_key / "codegraph.db"
         return WorkspaceResolution(
             workspace_root=workspace_root,
             workspace_key=workspace_key,

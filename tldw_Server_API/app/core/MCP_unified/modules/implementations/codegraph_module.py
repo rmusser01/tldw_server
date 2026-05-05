@@ -302,44 +302,19 @@ class CodeGraphModule(BaseModule):
             return await self._status(resolution)
 
         if tool_name == "codegraph.index":
-            mode = str(args.get("mode") or _FOREGROUND_MODE)
-            if mode in _JOB_MODES:
-                return await asyncio.to_thread(
-                    self._enqueue_index_job,
-                    resolution,
-                    "index",
-                    mode,
-                    bool(args.get("force", False)),
-                    args.get("languages"),
-                    args.get("max_files"),
-                    self._owner_user_id(context),
-                )
-            return await asyncio.to_thread(
-                self._run_index,
+            return await self._execute_write_tool(
                 resolution,
-                bool(args.get("force", False)),
-                args.get("languages"),
-                args.get("max_files"),
+                args,
+                context,
+                operation="index",
             )
 
         if tool_name == "codegraph.sync":
-            mode = str(args.get("mode") or _FOREGROUND_MODE)
-            if mode in _JOB_MODES:
-                return await asyncio.to_thread(
-                    self._enqueue_index_job,
-                    resolution,
-                    "sync",
-                    mode,
-                    False,
-                    args.get("languages"),
-                    args.get("max_files"),
-                    self._owner_user_id(context),
-                )
-            return await asyncio.to_thread(
-                self._run_sync,
+            return await self._execute_write_tool(
                 resolution,
-                args.get("languages"),
-                args.get("max_files"),
+                args,
+                context,
+                operation="sync",
             )
 
         if tool_name == "codegraph.files":
@@ -586,6 +561,45 @@ class CodeGraphModule(BaseModule):
             max_files=max_files,
         )
         return _index_result_to_dict(result, resolution)
+
+    async def _execute_write_tool(
+        self,
+        resolution: WorkspaceResolution,
+        args: dict[str, Any],
+        context: Any | None,
+        *,
+        operation: str,
+    ) -> dict[str, Any]:
+        """Execute or enqueue a CodeGraph index/sync write operation."""
+        mode = str(args.get("mode") or _FOREGROUND_MODE)
+        languages = args.get("languages")
+        max_files = args.get("max_files")
+        force = bool(args.get("force", False)) if operation == "index" else False
+        if mode in _JOB_MODES:
+            return await asyncio.to_thread(
+                self._enqueue_index_job,
+                resolution,
+                operation,
+                mode,
+                force,
+                languages,
+                max_files,
+                self._owner_user_id(context),
+            )
+        if operation == "index":
+            return await asyncio.to_thread(
+                self._run_index,
+                resolution,
+                force,
+                languages,
+                max_files,
+            )
+        return await asyncio.to_thread(
+            self._run_sync,
+            resolution,
+            languages,
+            max_files,
+        )
 
     def _enqueue_index_job(
         self,

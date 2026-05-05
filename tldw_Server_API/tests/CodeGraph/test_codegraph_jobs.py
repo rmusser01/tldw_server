@@ -53,6 +53,36 @@ def test_codegraph_job_payload_is_json_safe(tmp_path: Path) -> None:
     assert isinstance(payload["settings"]["exclude_dirs"], list)
 
 
+def test_codegraph_job_payload_serializes_absolute_paths(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    workspace_root = Path("workspace")
+    index_db_path = Path("indexes") / "ws_test" / "codegraph.db"
+    resolution = WorkspaceResolution(
+        workspace_root=workspace_root,
+        workspace_key="ws_test",
+        index_db_path=index_db_path,
+        workspace_id="workspace-1",
+        source="test",
+    )
+    settings = CodeGraphSettings.from_mapping({"index_base_dir": "indexes"})
+
+    payload = build_codegraph_index_job_payload(
+        resolution=resolution,
+        settings=settings,
+        operation="index",
+        force=False,
+        languages=None,
+        max_files=None,
+    )
+
+    assert payload["workspace_root"] == str((tmp_path / "workspace").resolve(strict=False))
+    assert payload["index_db_path"] == str((tmp_path / "indexes" / "ws_test" / "codegraph.db").resolve(strict=False))
+    assert payload["settings"]["index_base_dir"] == str((tmp_path / "indexes").resolve(strict=False))
+
+
 def test_enqueue_codegraph_index_job_uses_codegraph_domain_queue_and_owner(
     tmp_path: Path,
     monkeypatch,

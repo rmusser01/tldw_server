@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@Codex'
 created_date: '2026-05-05 14:15'
-updated_date: '2026-05-05 14:24'
+updated_date: '2026-05-05 14:41'
 labels:
   - codegraph
   - mcp
@@ -42,6 +42,29 @@ Verification passed:
 - /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m ruff check tldw_Server_API/app/core/CodeGraph/jobs.py tldw_Server_API/app/core/CodeGraph/jobs_worker.py tldw_Server_API/app/core/MCP_unified/modules/implementations/codegraph_module.py tldw_Server_API/tests/CodeGraph/test_codegraph_jobs.py tldw_Server_API/tests/CodeGraph/test_codegraph_jobs_worker.py tldw_Server_API/app/core/MCP_unified/tests/test_codegraph_module.py
 - /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -r tldw_Server_API/app/core/CodeGraph/jobs.py tldw_Server_API/app/core/CodeGraph/jobs_worker.py tldw_Server_API/app/core/MCP_unified/modules/implementations/codegraph_module.py -f json -o /tmp/bandit_codegraph_jobs_indexing.json (0 findings)
 - git diff --check
+
+PR review follow-up opened after #1304 review comments:
+
+- Fix worker index-base spoofing by enforcing path containment against local worker/server configuration instead of trusting payload settings.
+- Ensure job payload paths are absolute across MCP/worker process boundaries.
+- Move CodeGraphJobError to shared core exceptions while preserving WorkerSDK retryable semantics.
+- Reduce duplicated MCP job-mode enqueue dispatch.
+- Reply to the Gemini index_base self-path comment with the stricter DB-path contract; index_db_path must be a descendant database file path, not the base directory itself.
+
+PR review fixes implemented:
+
+- Worker now validates index_db_path containment against local worker config from CODEGRAPH_JOBS_INDEX_BASE_DIR or CODEGRAPH_INDEX_BASE_DIR instead of trusting payload settings.
+- Worker rejects mismatched payload settings.index_base_dir before opening SQLite while preserving non-security tuning from the payload after the local boundary check.
+- Jobs payloads now serialize workspace_root, index_db_path, and settings.index_base_dir as absolute paths.
+- CodeGraphJobError now lives in tldw_Server_API.app.core.exceptions.
+- MCP index/sync write dispatch now uses a shared helper for foreground and queued modes.
+
+Review-fix verification passed:
+
+- /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/CodeGraph/test_codegraph_jobs.py tldw_Server_API/tests/CodeGraph/test_codegraph_jobs_worker.py tldw_Server_API/tests/CodeGraph/test_codegraph_indexer.py tldw_Server_API/app/core/MCP_unified/tests/test_codegraph_module.py -q (60 passed)
+- /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m ruff check tldw_Server_API/app/core/exceptions.py tldw_Server_API/app/core/CodeGraph/jobs.py tldw_Server_API/app/core/CodeGraph/jobs_worker.py tldw_Server_API/app/core/CodeGraph/workspace.py tldw_Server_API/app/core/MCP_unified/modules/implementations/codegraph_module.py tldw_Server_API/tests/CodeGraph/test_codegraph_jobs.py tldw_Server_API/tests/CodeGraph/test_codegraph_jobs_worker.py tldw_Server_API/app/core/MCP_unified/tests/test_codegraph_module.py
+- /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -r tldw_Server_API/app/core/exceptions.py tldw_Server_API/app/core/CodeGraph/jobs.py tldw_Server_API/app/core/CodeGraph/jobs_worker.py tldw_Server_API/app/core/CodeGraph/workspace.py tldw_Server_API/app/core/MCP_unified/modules/implementations/codegraph_module.py -f json -o /tmp/bandit_codegraph_jobs_review_fixes.json (0 findings)
+- git diff --check
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
@@ -60,4 +83,6 @@ Verification passed:
 Added a Jobs-backed execution path for native CodeGraph index and sync work while preserving bounded foreground behavior. codegraph.index and codegraph.sync now accept mode="job" or mode="background" to enqueue core Jobs rows with a JSON-safe workspace/index payload and owner id, and a new CodeGraph Jobs worker entrypoint validates and executes those jobs through the existing CodeGraphIndexer. No file watching, Scheduler integration, or automatic worker startup was added in this slice.
 
 No known blockers. Automatic worker deployment/startup remains intentionally out of scope for this task.
+
+Review follow-up addressed Qodo and Gemini comments on PR #1304. The worker now uses a local index-base boundary, payload paths are absolute across process boundaries, CodeGraphJobError is centralized, and duplicate MCP write-mode dispatch is factored through a helper.
 <!-- SECTION:FINAL_SUMMARY:END -->

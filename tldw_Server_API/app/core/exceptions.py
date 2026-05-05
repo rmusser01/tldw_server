@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.responses import JSONResponse
@@ -51,6 +51,14 @@ class RecipeEnqueueError(RuntimeError):
     ) -> None:
         super().__init__(message)
         self.error_code = error_code
+
+
+class CodeGraphJobError(RuntimeError):
+    """Raised when a CodeGraph Jobs worker rejects or fails a job."""
+
+    def __init__(self, message: str, *, retryable: bool = False) -> None:
+        super().__init__(message)
+        self.retryable = retryable
 
 
 class AuditLogError(RuntimeError):
@@ -352,7 +360,7 @@ class AdapterInitializationError(FileArtifactsError):
 class ResourceNotFoundError(Exception):
     """Generic resource-not-found error for domain-level lookups."""
 
-    def __init__(self, resource: str, identifier: Optional[str] = None, detail: Optional[str] = None):
+    def __init__(self, resource: str, identifier: str | None = None, detail: str | None = None):
         message = f"{resource} not found"
         if identifier:
             message = f"{message}: {identifier}"
@@ -379,7 +387,7 @@ class ServiceInitializationTimeoutError(ServiceInitializationError):
 class DataTablesJobError(RuntimeError):
     """Raised for data table job processing failures."""
 
-    def __init__(self, message: str, *, retryable: bool = False, backoff_seconds: Optional[int] = None) -> None:
+    def __init__(self, message: str, *, retryable: bool = False, backoff_seconds: int | None = None) -> None:
         super().__init__(message)
         self.retryable = retryable
         if backoff_seconds is not None:
@@ -389,7 +397,7 @@ class DataTablesJobError(RuntimeError):
 class FileArtifactsJobError(RuntimeError):
     """Raised for file artifact job processing failures."""
 
-    def __init__(self, message: str, *, retryable: bool = False, backoff_seconds: Optional[int] = None) -> None:
+    def __init__(self, message: str, *, retryable: bool = False, backoff_seconds: int | None = None) -> None:
         super().__init__(message)
         self.retryable = retryable
         if backoff_seconds is not None:
@@ -399,7 +407,7 @@ class FileArtifactsJobError(RuntimeError):
 class ReadingDigestJobError(RuntimeError):
     """Raised for reading digest job processing failures."""
 
-    def __init__(self, message: str, *, retryable: bool = False, backoff_seconds: Optional[int] = None) -> None:
+    def __init__(self, message: str, *, retryable: bool = False, backoff_seconds: int | None = None) -> None:
         super().__init__(message)
         self.retryable = retryable
         if backoff_seconds is not None:

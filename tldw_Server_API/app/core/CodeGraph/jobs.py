@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import Any
 
 from tldw_Server_API.app.core.Jobs.manager import JobManager
@@ -35,11 +36,11 @@ def build_codegraph_index_job_payload(
         raise ValueError("operation must be index or sync")
     return {
         "operation": normalized_operation,
-        "workspace_root": str(resolution.workspace_root),
+        "workspace_root": _resolved_path(resolution.workspace_root),
         "workspace_key": resolution.workspace_key,
         "workspace_id": resolution.workspace_id,
         "workspace_source": resolution.source,
-        "index_db_path": str(resolution.index_db_path),
+        "index_db_path": _resolved_path(resolution.index_db_path),
         "settings": _settings_payload(settings),
         "force": bool(force),
         "languages": list(languages) if languages is not None else None,
@@ -82,7 +83,7 @@ def enqueue_codegraph_index_job(
 def _settings_payload(settings: CodeGraphSettings) -> dict[str, Any]:
     """Return JSON-safe CodeGraph settings for a Jobs payload."""
     return {
-        "index_base_dir": str(settings.index_base_dir),
+        "index_base_dir": _resolved_path(settings.index_base_dir),
         "max_file_size_bytes": settings.max_file_size_bytes,
         "foreground_max_files": settings.foreground_max_files,
         "foreground_max_bytes": settings.foreground_max_bytes,
@@ -91,3 +92,8 @@ def _settings_payload(settings: CodeGraphSettings) -> dict[str, Any]:
         "max_search_results": settings.max_search_results,
         "exclude_dirs": list(settings.exclude_dirs),
     }
+
+
+def _resolved_path(path: Path) -> str:
+    """Return a stable absolute path string for cross-process Jobs payloads."""
+    return str(path.expanduser().resolve(strict=False))
