@@ -1,0 +1,64 @@
+---
+id: TASK-49
+title: Implement native CodeGraph Java/Kotlin extractor slice
+status: In Progress
+assignee:
+  - '@Codex'
+created_date: '2026-05-05 00:52'
+updated_date: '2026-05-05 00:54'
+labels:
+  - codegraph
+  - mcp
+  - java
+  - kotlin
+dependencies: []
+references:
+  - 'https://github.com/rmusser01/tldw_server/pull/1270'
+  - Docs/superpowers/specs/2026-05-03-native-codegraph-mcp-module-design.md
+documentation:
+  - Docs/superpowers/specs/2026-05-03-native-codegraph-mcp-module-design.md
+  - >-
+    Docs/superpowers/plans/2026-05-05-native-codegraph-java-kotlin-extractor-implementation-plan.md
+priority: medium
+---
+
+## Description
+
+<!-- SECTION:DESCRIPTION:BEGIN -->
+Add the next Stage 5 native CodeGraph language slice after the merged context/impact tools: Java and Kotlin extractor support with conservative package/class/function/method/import symbols, same-file call edges, dependency-aware registry/indexer wiring, and focused MCP search coverage. Keep the slice narrow: no C#, no C/C++, no Jobs mode, no full type resolution or build-system-aware classpath analysis.
+<!-- SECTION:DESCRIPTION:END -->
+
+## Acceptance Criteria
+<!-- AC:BEGIN -->
+- [ ] #1 Java files index package, class/interface, method/constructor, and import nodes with deterministic IDs and conservative same-file call or unresolved references.
+- [ ] #2 Kotlin files index package, class/object/interface, function, and import nodes with deterministic IDs and conservative same-file call or unresolved references.
+- [ ] #3 Language registry and indexer expose Java/Kotlin as symbol-extraction capable only when optional Tree-sitter dependencies are available; otherwise they remain visible with dependency_missing metadata and safe skip/failure behavior.
+- [ ] #4 Focused extractor, loader, registry, indexer, and MCP search tests cover Java/Kotlin behavior and dependency-missing paths.
+- [ ] #5 Focused CodeGraph/MCP tests, Ruff, Bandit on touched production scope, and git diff --check pass before PR.
+<!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+1. Write a focused Java/Kotlin implementation plan under Docs/superpowers/plans and verify current parser dependency state.
+2. Add RED loader/registry tests for Java/Kotlin optional parser support and dependency-missing metadata.
+3. Add RED extractor tests for conservative Java and Kotlin symbols/imports/calls.
+4. Implement shared JVM-family helper code plus Java/Kotlin extractors using Tree-sitter when dependencies are present.
+5. Wire registry/indexer/MCP search behavior and run focused verification before PR.
+<!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Created focused Stage 5 implementation plan at Docs/superpowers/plans/2026-05-05-native-codegraph-java-kotlin-extractor-implementation-plan.md. Local venv currently has tree_sitter but not tree_sitter_java/tree_sitter_kotlin; dependency install/verification is the first implementation gate.
+<!-- SECTION:NOTES:END -->
+
+## Definition of Done
+<!-- DOD:BEGIN -->
+- [ ] #1 Acceptance criteria completed
+- [ ] #2 Tests or verification recorded
+- [ ] #3 Documentation updated when relevant
+- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [ ] #5 Final summary added
+- [ ] #6 Known skips or blockers documented
+<!-- DOD:END -->
