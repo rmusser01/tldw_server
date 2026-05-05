@@ -112,6 +112,7 @@ def test_append_imported_router_spec_preserves_metadata(
     assert specs[0].tags == ("acp-schedules",)
     assert specs[0].route_key == "acp"
     assert specs[0].default_stable is False
+    assert specs[0].skip_exceptions == (ImportError, AttributeError)
 
 
 def test_append_imported_router_spec_defers_router_attr_lookup_until_resolution(
@@ -266,10 +267,10 @@ def test_append_imported_router_spec_skips_optional_import_error_at_registration
     ]
 
 
-def test_append_imported_router_spec_logs_unexpected_import_error_at_registration(
+def test_append_imported_router_spec_raises_unexpected_import_error_at_registration(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Verify unexpected import-time failures are logged by registration."""
+    """Verify unexpected import-time failures are not silently skipped."""
     from tldw_Server_API.app.api.v1.router_groups.conditional import (
         ImportedRouterSpec,
         append_imported_router_spec,
@@ -296,8 +297,9 @@ def test_append_imported_router_spec_logs_unexpected_import_error_at_registratio
     monkeypatch.setattr("loguru.logger.debug", debug_messages.append)
 
     assert len(specs) == 1
-    assert register_router_specs(FastAPI(), specs) == 0
-    assert debug_messages == ["Skipping crashing-router router: router module crashed during import"]
+    with pytest.raises(RuntimeError, match="router module crashed during import"):
+        register_router_specs(FastAPI(), specs)
+    assert debug_messages == []
 
 
 def test_append_imported_router_spec_skips_static_missing_attr_at_registration(
@@ -855,10 +857,10 @@ def test_iter_admin_router_specs_defers_selected_router_attr_lookup(
     assert access_count == {module_name: 1 for module_name in router_definitions}
 
 
-def test_iter_core_router_specs_skips_crashing_chat_import(
+def test_iter_core_router_specs_raises_crashing_chat_import(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Verify chat import crashes skip only the affected router at registration."""
+    """Verify unexpected chat import crashes are not silently skipped."""
     import importlib
 
     app = FastAPI()
@@ -907,14 +909,15 @@ def test_iter_core_router_specs_skips_crashing_chat_import(
         for spec in specs
         if spec.route_key == "chat"
     ]
-    count = register_router_specs(app, chat_specs)
+    with pytest.raises(RuntimeError, match="chat loop crashed during import"):
+        register_router_specs(app, chat_specs)
+
     chat_paths = {route.path for route in app.routes}
 
-    assert count == 2
     assert "/api/v1/chat/chat/completions" in chat_paths
-    assert "/api/v1/chats/conversations" in chat_paths
+    assert "/api/v1/chats/conversations" not in chat_paths
     assert "/api/v1/chat/loop/start" not in chat_paths
-    assert "Skipping chat_loop router: chat loop crashed during import" in debug_messages
+    assert debug_messages == []
 
 
 def test_register_router_specs_respects_route_policy(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -981,14 +984,48 @@ def test_register_router_specs_resolves_lazy_router_after_route_policy(
     assert "/api/v1/lazy" in {route.path for route in app.routes}
 
 
-def test_register_router_specs_logs_spec_name_for_resolution_failures(
+def test_register_router_specs_raises_unexpected_resolution_failures(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Verify unexpected lazy router failures fail closed."""
     app = FastAPI()
     debug_messages: list[str] = []
 
     def router_factory() -> APIRouter:
         raise RuntimeError("lazy router failed")
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.config.route_enabled",
+        lambda *_args, **_kwargs: True,
+    )
+    monkeypatch.setattr("loguru.logger.debug", debug_messages.append)
+
+    with pytest.raises(RuntimeError, match="lazy router failed"):
+        register_router_specs(
+            app,
+            [
+                RouterSpec(
+                    router=router_factory,
+                    prefix="/api/v1",
+                    tags=("lazy",),
+                    route_key="chat",
+                    name="chat_loop",
+                ),
+            ],
+        )
+
+    assert debug_messages == []
+
+
+def test_register_router_specs_skips_configured_resolution_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify router specs can explicitly opt into skippable failures."""
+    app = FastAPI()
+    debug_messages: list[str] = []
+
+    def router_factory() -> APIRouter:
+        raise RuntimeError("lazy optional router failed")
 
     monkeypatch.setattr(
         "tldw_Server_API.app.core.config.route_enabled",
@@ -1005,12 +1042,13 @@ def test_register_router_specs_logs_spec_name_for_resolution_failures(
                 tags=("lazy",),
                 route_key="chat",
                 name="chat_loop",
+                skip_exceptions=(RuntimeError,),
             ),
         ],
     )
 
     assert count == 0
-    assert debug_messages == ["Skipping chat_loop router: lazy router failed"]
+    assert debug_messages == ["Skipping chat_loop router: lazy optional router failed"]
 
 
 def test_register_router_specs_fails_closed_when_route_policy_errors(
@@ -4389,6 +4427,178 @@ def test_iter_minimal_optional_router_specs_defers_collections_social_attr_looku
     ]
     assert access_count == {
         f"{definition['module_name']}.{definition['attr_name']}": 1
+        for definition in router_definitions
+    }
+
+
+def test_iter_minimal_optional_router_specs_defers_data_resource_attr_lookup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify minimal data/resource specs keep router attr lookup lazy."""
+    import builtins
+    import importlib
+
+    from tldw_Server_API.app.api.v1.router_groups.minimal import (
+        iter_minimal_optional_router_specs,
+    )
+
+    router_definitions = (
+        {
+            "module_name": "tldw_Server_API.app.api.v1.endpoints.files",
+            "expected_name": "files",
+            "path": "/files",
+            "prefix": "/api/v1",
+            "tags": ("files",),
+        },
+        {
+            "module_name": "tldw_Server_API.app.api.v1.endpoints.storage",
+            "expected_name": "storage",
+            "path": "/storage",
+            "prefix": "/api/v1",
+            "tags": ("storage",),
+        },
+        {
+            "module_name": "tldw_Server_API.app.api.v1.endpoints.data_tables",
+            "expected_name": "data_tables",
+            "path": "/data-tables",
+            "prefix": "/api/v1",
+            "tags": ("data-tables",),
+        },
+        {
+            "module_name": "tldw_Server_API.app.api.v1.endpoints.reading_highlights",
+            "expected_name": "reading_highlights",
+            "path": "/reading-highlights",
+            "prefix": "/api/v1",
+            "tags": ("reading-highlights",),
+        },
+        {
+            "module_name": "tldw_Server_API.app.api.v1.endpoints.items",
+            "expected_name": "items",
+            "path": "/items",
+            "prefix": "/api/v1",
+            "tags": ("items",),
+        },
+        {
+            "module_name": "tldw_Server_API.app.api.v1.endpoints.reminders",
+            "expected_name": "reminders",
+            "path": "/reminders",
+            "prefix": "/api/v1",
+            "tags": ("tasks",),
+        },
+    )
+    definitions_by_module = {
+        str(definition["module_name"]): definition
+        for definition in router_definitions
+    }
+    access_count = {
+        f"{definition['module_name']}.router": 0
+        for definition in router_definitions
+    }
+    import_calls: list[str] = []
+
+    for module_name, definition in definitions_by_module.items():
+        fake_module = ModuleType(module_name)
+        router = APIRouter()
+
+        @router.get(str(definition["path"]))
+        def _endpoint() -> dict[str, str]:
+            """Return a deterministic response for the fake minimal router."""
+            return {"status": "ok"}
+
+        def _module_getattr(
+            name: str,
+            *,
+            module_name: str = module_name,
+            router: APIRouter = router,
+        ) -> APIRouter:
+            """Track lazy router attribute resolution for the fake module."""
+            if name != "router":
+                raise AttributeError(name)
+            access_count[f"{module_name}.router"] += 1
+            return router
+
+        fake_module.__getattr__ = _module_getattr  # type: ignore[attr-defined]
+        monkeypatch.setitem(sys.modules, module_name, fake_module)
+
+    endpoints_package = "tldw_Server_API.app.api.v1.endpoints."
+    real_import = builtins.__import__
+
+    def _fake_endpoint_import(
+        name: str,
+        globals: dict[str, object] | None = None,
+        locals: dict[str, object] | None = None,
+        fromlist: tuple[str, ...] = (),
+        level: int = 0,
+    ) -> ModuleType:
+        """Return fake routers for unrelated eager minimal optional imports."""
+        if (
+            level == 0
+            and name.startswith(endpoints_package)
+            and name not in definitions_by_module
+        ):
+            attrs = tuple(attr for attr in fromlist if attr != "*") or ("router",)
+            for attr_name in attrs:
+                _install_fake_router_module(
+                    monkeypatch,
+                    name,
+                    path="/minimal-unrelated-data-resource-fake",
+                    attr_name=attr_name,
+                )
+            return sys.modules[name]
+        return real_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", _fake_endpoint_import)
+
+    real_import_module = importlib.import_module
+
+    def _import_module(module_name: str, package: str | None = None) -> ModuleType:
+        """Track lazy module imports for selected minimal data/resource routers."""
+        if module_name in definitions_by_module:
+            import_calls.append(module_name)
+        return real_import_module(module_name, package)
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.router_groups.conditional.importlib.import_module",
+        _import_module,
+    )
+    fake_main = ModuleType("tldw_Server_API.app.main")
+    fake_main.app = FastAPI()  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "tldw_Server_API.app.main", fake_main)
+
+    specs = list(iter_minimal_optional_router_specs())
+    assert access_count == {
+        f"{definition['module_name']}.router": 0
+        for definition in router_definitions
+    }
+    assert import_calls == []
+
+    selected_specs = {
+        spec.name: spec
+        for spec in specs
+        if spec.name in {
+            str(definition["expected_name"])
+            for definition in router_definitions
+        }
+    }
+    assert set(selected_specs) == {
+        str(definition["expected_name"])
+        for definition in router_definitions
+    }
+
+    for definition in router_definitions:
+        spec = selected_specs[str(definition["expected_name"])]
+        assert spec.prefix == definition["prefix"]
+        assert spec.tags == definition["tags"]
+        assert spec.route_key == ""
+        assert spec.skip_context == "in minimal test app"
+        assert _first_router_path(spec.router) == definition["path"]
+
+    assert import_calls == [
+        str(definition["module_name"])
+        for definition in router_definitions
+    ]
+    assert access_count == {
+        f"{definition['module_name']}.router": 1
         for definition in router_definitions
     }
 

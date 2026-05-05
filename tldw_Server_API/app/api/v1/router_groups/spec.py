@@ -20,6 +20,7 @@ class RouterSpec:
         default_stable: Passed to route_enabled() as default_stable kwarg.
         name: Optional display name for diagnostics; falls back to route_key.
         skip_context: Optional extra diagnostic context for skip logs.
+        skip_exceptions: Resolution exceptions that should skip registration.
     """
     router: APIRouter | RouterFactory
     prefix: str = ""
@@ -28,6 +29,7 @@ class RouterSpec:
     default_stable: bool = True
     name: str = ""
     skip_context: str = ""
+    skip_exceptions: tuple[type[Exception], ...] = (ImportError, AttributeError)
     _resolved_router: APIRouter | None = field(default=None, init=False, repr=False, compare=False)
 
     def resolve_router(self) -> APIRouter:
