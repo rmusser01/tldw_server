@@ -5,12 +5,14 @@ status: Done
 assignee:
   - '@Codex'
 created_date: '2026-05-04 17:49'
-updated_date: '2026-05-04 20:28'
+updated_date: '2026-05-05 00:05'
 labels:
   - frontend
   - design-system
   - implementation
 dependencies: []
+references:
+  - 'https://github.com/rmusser01/tldw_server/pull/1272'
 documentation:
   - Docs/Design/tldw_web_design_system_contract.md
   - >-
@@ -47,6 +49,8 @@ Final executed plan: 1) Preserve the approved contract and implementation plan w
 Worker 3 started Task 5 in .worktrees/tldw-web-design-system-proof-surface on branch codex/tldw-web-design-system-proof-surface. Shared state primitives and design-system registry are already present; this slice will only touch the owned setup/onboarding/health/admin files.
 
 Final verification recorded on 2026-05-04: focused proof-surface Vitest suite passed from apps/tldw-frontend with 12 files / 38 tests; admin media-budget regression passed with 1 file / 3 tests; git diff --check passed. WebUI compile passed with NEXT_PUBLIC_API_URL=http://127.0.0.1:8000 and token sync OK. Extension Chrome dev build passed with token sync OK; extension bun run compile is blocked before touched code by existing wxt.config.ts missing a declaration for ./scripts/post-build-tasks.mjs. Browser smoke opened http://localhost:18081/settings/health; canonical Degraded and Unavailable states rendered. Console errors were expected missing local backend/API key requests. Bandit skipped because this task touched frontend TypeScript/TSX/docs/task files only and no Python code.
+
+Draft PR opened on 2026-05-04: https://github.com/rmusser01/tldw_server/pull/1272
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
