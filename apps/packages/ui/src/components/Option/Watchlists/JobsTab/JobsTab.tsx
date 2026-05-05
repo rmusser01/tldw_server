@@ -307,6 +307,7 @@ export const JobsTab: React.FC = () => {
       okText: t("common:delete", "Delete"),
       okButtonProps: { danger: true },
       cancelText: t("common:cancel", "Cancel"),
+      onCancel: () => undefined,
       onOk: () => executeDelete(job.id)
     })
   }
