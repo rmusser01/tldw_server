@@ -346,6 +346,7 @@ class _CFamilyGraphBuilder:
 
 
 def _node_name(source: bytes, node: Any) -> str:
+    """Return the declared name for a C-family type or namespace node."""
     name_node = node.child_by_field_name("name")
     if name_node is not None:
         return node_text(source, name_node)
@@ -356,6 +357,7 @@ def _node_name(source: bytes, node: Any) -> str:
 
 
 def _function_name(source: bytes, node: Any) -> str:
+    """Return the declared function name from a C-family function definition."""
     declarator = node.child_by_field_name("declarator")
     if declarator is None:
         return ""
@@ -363,6 +365,7 @@ def _function_name(source: bytes, node: Any) -> str:
 
 
 def _declarator_name(source: bytes, node: Any) -> str:
+    """Walk nested declarator nodes to find the identifier that names a callable."""
     name_node = node.child_by_field_name("name")
     if name_node is not None:
         return node_text(source, name_node)
