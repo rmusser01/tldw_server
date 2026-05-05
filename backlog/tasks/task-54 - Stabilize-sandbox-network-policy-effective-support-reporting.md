@@ -4,7 +4,7 @@ title: Stabilize sandbox network policy effective support reporting
 status: Done
 assignee: []
 created_date: '2026-05-05 02:11'
-updated_date: '2026-05-05 02:30'
+updated_date: '2026-05-05 02:34'
 labels:
   - sandbox
   - network-policy
@@ -49,6 +49,10 @@ Implemented network policy effective support gating. RED: Docker allowlist admis
 PR review follow-up: verifying and fixing Qodo findings for _settings_flag() observability and missing-preflight SandboxPolicy admission compatibility.
 
 PR review fixes completed. Added regression coverage for missing-preflight Docker deny_all admission and _settings_flag() observability. Implemented static supported-only fallback for direct SandboxPolicy callers without preflights and warning logging for readiness flag read failures. Verification: 44 sandbox policy/discovery tests passed, py_compile passed, Bandit reported 0 findings for touched Sandbox modules, and git diff --check passed.
+
+Additional PR review follow-up: verifying Gemini cleanup suggestions for shared noncritical exceptions, _settings_flag() signature redundancy, and redundant service effective-support calculations.
+
+Additional Gemini review fixes completed. Centralized the shared config noncritical exception tuple for policy/runtime capability config parsing, simplified _settings_flag() to a single setting name, and reused _preflight_fields() results for Docker/Firecracker/Lima effective support in feature discovery. Verification rerun: 44 sandbox policy/discovery tests passed, py_compile passed, Bandit reported 0 findings for touched Sandbox modules, and git diff --check passed.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
@@ -57,6 +61,8 @@ PR review fixes completed. Added regression coverage for missing-preflight Docke
 Centralized sandbox network-policy effective support so discovery and admission use the same static contract plus current readiness calculation. Docker allowlist now requires granular egress enforcement readiness; scaffold/unsupported allowlist paths remain fail-closed and cannot be over-advertised through legacy discovery booleans. Updated network-policy docs and focused tests.
 
 PR review follow-up: fixed Qodo findings by adding operator-visible logging for readiness flag read failures and preserving no-preflight direct SandboxPolicy callers for statically supported Docker deny_all while keeping host-gated/scaffold policies fail-closed.
+
+Additional PR review follow-up: addressed Gemini cleanup comments by centralizing shared config exception handling, simplifying readiness flag lookup, and removing redundant service effective-support calculations.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

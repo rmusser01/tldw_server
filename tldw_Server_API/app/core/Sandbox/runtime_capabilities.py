@@ -9,15 +9,8 @@ from loguru import logger
 from tldw_Server_API.app.core.config import settings as app_settings
 from tldw_Server_API.app.core.testing import is_truthy
 
+from .exceptions import SANDBOX_CONFIG_NONCRITICAL_EXCEPTIONS
 from .models import RuntimeType
-
-_RUNTIME_CAPABILITIES_NONCRITICAL_EXCEPTIONS = (
-    AttributeError,
-    OSError,
-    RuntimeError,
-    TypeError,
-    ValueError,
-)
 
 RuntimeImplementationState = Literal[
     "supported",
@@ -366,19 +359,18 @@ def runtime_network_policy_metadata(
     return metadata
 
 
-def _settings_flag(env_name: str, setting_name: str) -> bool:
+def _settings_flag(name: str) -> bool:
     """Read a boolean readiness flag, failing closed with operator-visible logs."""
 
     try:
-        raw = os.getenv(env_name)
+        raw = os.getenv(name)
         if raw is None:
-            raw = getattr(app_settings, setting_name, "")
+            raw = getattr(app_settings, name, "")
         return is_truthy(str(raw).strip().lower())
-    except _RUNTIME_CAPABILITIES_NONCRITICAL_EXCEPTIONS as exc:
+    except SANDBOX_CONFIG_NONCRITICAL_EXCEPTIONS as exc:
         logger.warning(
-            "Failed to read sandbox readiness flag env={} setting={}: {}",
-            env_name,
-            setting_name,
+            "Failed to read sandbox readiness flag {}: {}",
+            name,
             exc,
         )
         return False
@@ -387,14 +379,8 @@ def _settings_flag(env_name: str, setting_name: str) -> bool:
 def docker_network_policy_readiness(docker_available: bool) -> dict[str, bool]:
     """Return Docker network readiness facts used by discovery and admission."""
 
-    egress_enforced = _settings_flag(
-        "SANDBOX_EGRESS_ENFORCEMENT",
-        "SANDBOX_EGRESS_ENFORCEMENT",
-    )
-    granular_enforced = _settings_flag(
-        "SANDBOX_EGRESS_GRANULAR_ENFORCEMENT",
-        "SANDBOX_EGRESS_GRANULAR_ENFORCEMENT",
-    )
+    egress_enforced = _settings_flag("SANDBOX_EGRESS_ENFORCEMENT")
+    granular_enforced = _settings_flag("SANDBOX_EGRESS_GRANULAR_ENFORCEMENT")
     return {
         "deny_all": bool(docker_available),
         "allowlist": bool(docker_available and egress_enforced and granular_enforced),

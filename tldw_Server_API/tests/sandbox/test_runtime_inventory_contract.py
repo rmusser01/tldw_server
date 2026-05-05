@@ -247,10 +247,9 @@ def test_settings_flag_logs_read_failures(
     monkeypatch.setattr(runtime_caps, "app_settings", BrokenSettings())
     monkeypatch.setattr(runtime_caps, "logger", logger, raising=False)
 
-    assert runtime_caps._settings_flag(  # noqa: SLF001
-        "SANDBOX_EGRESS_ENFORCEMENT",
-        "SANDBOX_EGRESS_ENFORCEMENT",
-    ) is False
+    assert (  # noqa: SLF001
+        runtime_caps._settings_flag("SANDBOX_EGRESS_ENFORCEMENT") is False
+    )
     assert logger.warnings
     assert "Failed to read sandbox readiness flag" in str(logger.warnings[0][0][0])
 

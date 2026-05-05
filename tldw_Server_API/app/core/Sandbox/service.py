@@ -870,7 +870,18 @@ class SandboxService:
         lima_enforcement_ready = dict((lima_preflight.enforcement_ready if lima_preflight else {}) or {})
         # Allowlist enforcement is not implemented for Lima runtime execution.
         lima_enforcement_ready["allowlist"] = False
-        lima_host = dict((lima_preflight.host if lima_preflight else {}) or {})
+        if lima_preflight is not None:
+            lima_preflight = RuntimePreflightResult(
+                runtime=lima_preflight.runtime,
+                available=lima_preflight.available,
+                reasons=list(lima_preflight.reasons or []),
+                execution_mode=lima_preflight.execution_mode,
+                supported_trust_levels=list(
+                    lima_preflight.supported_trust_levels or []
+                ),
+                host=dict(lima_preflight.host or {}),
+                enforcement_ready=lima_enforcement_ready,
+            )
 
         def _preflight_fields(
             runtime: RuntimeType,
@@ -900,24 +911,18 @@ class SandboxService:
                 "network_policy_contract": network_contract.as_dict(),
             }
 
-        docker_effective_network_support = runtime_network_policy_effective_support(
-            RuntimeType.docker,
-            docker_preflight.enforcement_ready if docker_preflight else None,
-        )
-        firecracker_effective_network_support = runtime_network_policy_effective_support(
+        docker_fields = _preflight_fields(RuntimeType.docker, docker_preflight)
+        firecracker_fields = _preflight_fields(
             RuntimeType.firecracker,
-            firecracker_preflight.enforcement_ready if firecracker_preflight else None,
+            firecracker_preflight,
         )
-        lima_effective_network_support = runtime_network_policy_effective_support(
-            RuntimeType.lima,
-            lima_enforcement_ready,
-        )
+        lima_fields = _preflight_fields(RuntimeType.lima, lima_preflight)
 
         return [
             {
                 "name": "docker",
                 "implementation_state": runtime_implementation_state(RuntimeType.docker),
-                **_preflight_fields(RuntimeType.docker, docker_preflight),
+                **docker_fields,
                 "available": bool(docker_preflight.available) if docker_preflight is not None else bool(docker_available()),
                 "default_images": images,
                 "max_cpu": max_cpu,
@@ -940,11 +945,11 @@ class SandboxService:
                         else bool(docker_available())
                     )
                 ),
-                "egress_allowlist_supported": bool(docker_effective_network_support["allowlist"]),
+                "egress_allowlist_supported": bool(docker_fields["strict_allowlist_supported"]),
                 "store_mode": store_mode,
                 "notes": (
                     "Granular egress allowlist (CIDR, hostname) enforced via host iptables (DOCKER-USER) with DNS pinning"
-                    if bool(docker_effective_network_support["allowlist"] and granular)
+                    if bool(docker_fields["strict_allowlist_supported"] and granular)
                     else (
                         "Docker allowlist enforcement is configured without granular enforcement; "
                         "allowlist is not advertised because execution would fall back to deny-all"
@@ -956,7 +961,7 @@ class SandboxService:
             {
                 "name": "firecracker",
                 "implementation_state": runtime_implementation_state(RuntimeType.firecracker),
-                **_preflight_fields(RuntimeType.firecracker, firecracker_preflight),
+                **firecracker_fields,
                 "available": bool(firecracker_preflight.available) if firecracker_preflight is not None else bool(firecracker_available()),
                 "default_images": images,  # firecracker images will differ; placeholder for UX
                 "max_cpu": max_cpu,
@@ -971,14 +976,14 @@ class SandboxService:
                 "artifact_ttl_hours": artifact_ttl_hours,
                 "supported_spec_versions": supported_spec_versions,
                 "interactive_supported": False,
-                "egress_allowlist_supported": bool(firecracker_effective_network_support["allowlist"]),
+                "egress_allowlist_supported": bool(firecracker_fields["strict_allowlist_supported"]),
                 "store_mode": store_mode,
                 "notes": "Allowlist enforcement is scaffold/planned and is not advertised as effective support",
             },
             {
                 "name": "lima",
                 "implementation_state": runtime_implementation_state(RuntimeType.lima),
-                **_preflight_fields(RuntimeType.lima, lima_preflight),
+                **lima_fields,
                 "available": bool(lima_preflight.available) if lima_preflight is not None else bool(lima_available()),
                 "default_images": ["ubuntu:24.04"],  # Lima uses distro images
                 "max_cpu": max_cpu,
@@ -993,11 +998,7 @@ class SandboxService:
                 "artifact_ttl_hours": artifact_ttl_hours,
                 "supported_spec_versions": supported_spec_versions,
                 "interactive_supported": False,  # Not implemented for Lima yet
-                "egress_allowlist_supported": bool(lima_effective_network_support["allowlist"]),
-                "strict_deny_all_supported": bool(lima_effective_network_support["deny_all"]),
-                "strict_allowlist_supported": bool(lima_effective_network_support["allowlist"]),
-                "enforcement_ready": lima_enforcement_ready,
-                "host": lima_host,
+                "egress_allowlist_supported": bool(lima_fields["strict_allowlist_supported"]),
                 "store_mode": store_mode,
                 "notes": "Full VM isolation via Lima; recommended for macOS",
             },
