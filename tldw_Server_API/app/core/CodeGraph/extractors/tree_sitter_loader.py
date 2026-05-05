@@ -26,6 +26,8 @@ _LANGUAGE_MODULES: dict[str, tuple[str, str]] = {
     "jsx": ("tree_sitter_javascript", "language"),
     "typescript": ("tree_sitter_typescript", "language_typescript"),
     "tsx": ("tree_sitter_typescript", "language_tsx"),
+    "java": ("tree_sitter_java", "language"),
+    "kotlin": ("tree_sitter_kotlin", "language"),
 }
 
 

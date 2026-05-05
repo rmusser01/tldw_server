@@ -92,3 +92,58 @@ def test_tsx_parser_can_parse_component() -> None:
     assert result.error is None
     assert tree.root_node.type == "program"
     assert not tree.root_node.has_error
+
+
+def test_java_parser_can_parse_class() -> None:
+    """Load the optional Java parser and parse a compact class fixture."""
+    loader = importlib.import_module(
+        "tldw_Server_API.app.core.CodeGraph.extractors.tree_sitter_loader"
+    )
+
+    result = loader.load_parser("java")
+    tree = result.parser.parse(b"class Greeter { String greet() { return helper(); } }")
+
+    assert result.missing == ()
+    assert result.error is None
+    assert tree.root_node.type == "program"
+    assert not tree.root_node.has_error
+
+
+def test_kotlin_parser_can_parse_class() -> None:
+    """Load the optional Kotlin parser and parse a compact class fixture."""
+    loader = importlib.import_module(
+        "tldw_Server_API.app.core.CodeGraph.extractors.tree_sitter_loader"
+    )
+
+    result = loader.load_parser("kotlin")
+    tree = result.parser.parse(b"class Greeter {\n fun greet(): String { return helper() }\n}")
+
+    assert result.missing == ()
+    assert result.error is None
+    assert tree.root_node.type == "source_file"
+    assert not tree.root_node.has_error
+
+
+def test_load_parser_reports_missing_java_kotlin_optional_dependencies(monkeypatch) -> None:
+    """Report missing JVM parser packages without raising import errors."""
+    loader = importlib.import_module(
+        "tldw_Server_API.app.core.CodeGraph.extractors.tree_sitter_loader"
+    )
+    real_import_module = loader.importlib.import_module
+
+    def fake_import_module(name: str) -> ModuleType:
+        if name in {"tree_sitter_java", "tree_sitter_kotlin"}:
+            raise ModuleNotFoundError(f"No module named '{name}'")
+        return real_import_module(name)
+
+    monkeypatch.setattr(loader.importlib, "import_module", fake_import_module)
+
+    java = loader.load_parser("java")
+    kotlin = loader.load_parser("kotlin")
+
+    assert java.parser is None
+    assert java.missing == ("tree_sitter_java",)
+    assert java.error is None
+    assert kotlin.parser is None
+    assert kotlin.missing == ("tree_sitter_kotlin",)
+    assert kotlin.error is None
