@@ -194,7 +194,10 @@ def test_append_imported_router_spec_preserves_metadata(
     assert specs[0].tags == ("acp-schedules",)
     assert specs[0].route_key == "acp"
     assert specs[0].default_stable is False
-    assert specs[0].skip_exceptions == (ImportError, AttributeError)
+    assert [exc.__name__ for exc in specs[0].skip_exceptions] == [
+        "OptionalRouterMissingModule",
+        "OptionalRouterMissingAttribute",
+    ]
 
 
 def test_append_imported_router_spec_defers_router_attr_lookup_until_resolution(
@@ -321,8 +324,8 @@ def test_append_imported_router_spec_skips_optional_import_error_at_registration
         append_imported_router_spec,
     )
 
-    def _raise_import_error(_import_path: str) -> ModuleType:
-        raise ModuleNotFoundError("optional router is unavailable")
+    def _raise_import_error(import_path: str) -> ModuleType:
+        raise ModuleNotFoundError("optional router is unavailable", name=import_path)
 
     monkeypatch.setattr(
         "tldw_Server_API.app.api.v1.router_groups.conditional.importlib.import_module",
@@ -347,6 +350,77 @@ def test_append_imported_router_spec_skips_optional_import_error_at_registration
     assert debug_messages == [
         "Skipping optional-missing router in minimal test app: optional router is unavailable"
     ]
+
+
+def test_append_imported_router_spec_raises_nested_module_not_found_at_registration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify internal missing dependencies are not treated as missing optional routers."""
+    from tldw_Server_API.app.api.v1.router_groups.conditional import (
+        ImportedRouterSpec,
+        append_imported_router_spec,
+    )
+
+    def _raise_internal_missing_dependency(_import_path: str) -> ModuleType:
+        raise ModuleNotFoundError("internal dependency is unavailable", name="internal_dependency")
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.router_groups.conditional.importlib.import_module",
+        _raise_internal_missing_dependency,
+    )
+    specs: list[RouterSpec] = []
+    debug_messages: list[str] = []
+
+    append_imported_router_spec(
+        specs,
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.internal_missing",
+            log_name="internal-missing",
+            skip_context="in minimal test app",
+        ),
+    )
+
+    monkeypatch.setattr("loguru.logger.debug", debug_messages.append)
+
+    assert len(specs) == 1
+    with pytest.raises(ModuleNotFoundError, match="internal dependency is unavailable"):
+        register_router_specs(FastAPI(), specs)
+    assert debug_messages == []
+
+
+def test_append_imported_router_spec_raises_import_time_attribute_error_at_registration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify import-time AttributeError defects are not treated as missing router attrs."""
+    from tldw_Server_API.app.api.v1.router_groups.conditional import (
+        ImportedRouterSpec,
+        append_imported_router_spec,
+    )
+
+    def _raise_import_time_attr_error(_import_path: str) -> ModuleType:
+        raise AttributeError("module initialization bug")
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.router_groups.conditional.importlib.import_module",
+        _raise_import_time_attr_error,
+    )
+    specs: list[RouterSpec] = []
+    debug_messages: list[str] = []
+
+    append_imported_router_spec(
+        specs,
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.import_time_attr_error",
+            log_name="import-time-attr-error",
+        ),
+    )
+
+    monkeypatch.setattr("loguru.logger.debug", debug_messages.append)
+
+    assert len(specs) == 1
+    with pytest.raises(AttributeError, match="module initialization bug"):
+        register_router_specs(FastAPI(), specs)
+    assert debug_messages == []
 
 
 def test_append_imported_router_spec_raises_unexpected_import_error_at_registration(
@@ -6508,7 +6582,10 @@ def test_iter_minimal_optional_router_specs_defers_persona_notes_attr_lookup(
         assert spec.route_key == ""
         assert spec.skip_context == "in minimal test app"
         assert spec.default_stable is True
-        assert spec.skip_exceptions == (ImportError, AttributeError)
+        assert [exc.__name__ for exc in spec.skip_exceptions] == [
+            "OptionalRouterMissingModule",
+            "OptionalRouterMissingAttribute",
+        ]
         assert _first_router_path(spec.router) == definition["path"]
 
     assert import_calls == [
@@ -6553,7 +6630,7 @@ def test_iter_minimal_optional_router_specs_skips_persona_notes_missing_import_f
     def _import_module(module_name: str, package: str | None = None) -> ModuleType:
         """Fail only the selected persona/notes router imports at registration."""
         if module_name in persona_notes_modules:
-            raise ImportError(f"{module_name} missing during import")
+            raise ModuleNotFoundError(f"{module_name} missing during import", name=module_name)
         return real_import_module(module_name, package)
 
     monkeypatch.setattr(
@@ -6570,6 +6647,40 @@ def test_iter_minimal_optional_router_specs_skips_persona_notes_missing_import_f
         f"{module_name} missing during import"
         for module_name, expected_name, _prefix, _tags, _path in PERSONA_NOTES_ROUTER_DEFINITION_DATA
     ]
+
+
+def test_iter_minimal_optional_router_specs_propagates_persona_notes_internal_import_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify internal missing dependencies are not silently skipped for persona/notes."""
+    import importlib
+
+    from tldw_Server_API.app.api.v1.router_groups.minimal import (
+        iter_minimal_optional_router_specs,
+    )
+
+    module_name = "tldw_Server_API.app.api.v1.endpoints.persona"
+    specs = list(iter_minimal_optional_router_specs())
+    selected_spec = next(spec for spec in specs if spec.name == "persona")
+
+    real_import_module = importlib.import_module
+
+    def _import_module(import_name: str, package: str | None = None) -> ModuleType:
+        """Raise a nested missing dependency only for one selected persona router import."""
+        if import_name == module_name:
+            raise ModuleNotFoundError(
+                "persona internal dependency missing",
+                name="persona_internal_dependency",
+            )
+        return real_import_module(import_name, package)
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.router_groups.conditional.importlib.import_module",
+        _import_module,
+    )
+
+    with pytest.raises(ModuleNotFoundError, match="persona internal dependency missing"):
+        register_router_specs(FastAPI(), (selected_spec,))
 
 
 def test_iter_minimal_optional_router_specs_propagates_persona_notes_runtime_import_failures(
