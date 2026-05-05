@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from types import SimpleNamespace
+from typing import Any
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from starlette.requests import Request
@@ -217,6 +220,171 @@ def test_admin_macos_diagnostics_returns_structured_payload(monkeypatch) -> None
         "present": True,
         "blocking": False,
         "codes": ["vz_stale_session_controls_detected"],
+    }
+
+
+def test_admin_runtime_diagnostics_returns_structured_payload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.services.startup_warning_models import (
+        StartupWarningRecord,
+    )
+    from tldw_Server_API.app.services.startup_warning_registry import (
+        StartupWarningRegistry,
+    )
+
+    fake_service = SimpleNamespace(
+        runtime_diagnostics_summary=lambda: {
+            "source": "feature_discovery",
+            "summary": {
+                "total": 2,
+                "ready": 1,
+                "unavailable": 1,
+                "host_gated": 1,
+                "scaffold": 0,
+                "host_local_warning_runtimes": [],
+                "repair_supported_runtimes": ["vz_linux"],
+            },
+            "runtimes": [
+                {
+                    "name": "docker",
+                    "available": True,
+                    "implementation_state": "supported",
+                    "readiness": "ready",
+                    "reasons": [],
+                    "normalized_reasons": [],
+                    "boundary_class": "container",
+                    "vm_grade_isolation": False,
+                    "untrusted_eligible": True,
+                    "isolation_warnings": [],
+                    "strict_deny_all_supported": True,
+                    "strict_allowlist_supported": False,
+                    "session_reuse_model": "workspace_only",
+                    "requires_live_health_check": False,
+                    "repair_supported": False,
+                    "recommended_action": "none",
+                },
+                {
+                    "name": "vz_linux",
+                    "available": False,
+                    "implementation_state": "host_gated",
+                    "readiness": "host_gated",
+                    "reasons": ["macos_virtualization_helper_unavailable"],
+                    "normalized_reasons": ["helper_unavailable"],
+                    "boundary_class": "vm_grade",
+                    "vm_grade_isolation": True,
+                    "untrusted_eligible": True,
+                    "isolation_warnings": [],
+                    "strict_deny_all_supported": False,
+                    "strict_allowlist_supported": False,
+                    "session_reuse_model": "warm_vm",
+                    "requires_live_health_check": True,
+                    "repair_supported": True,
+                    "recommended_action": "check_helper",
+                },
+            ],
+        }
+    )
+    monkeypatch.setattr(sandbox_mod, "_service", fake_service, raising=True)
+
+    app = _build_app_with_overrides(_make_principal(is_admin=True))
+    registry = StartupWarningRegistry(startup_id="boot-1")
+    registry.add_warning(
+        StartupWarningRecord(
+            component="sandbox.vz_linux",
+            severity="warning",
+            startup_action="warn",
+            code="vz_stale_session_controls_detected",
+            summary="stale sessions detected",
+            remediation="review diagnostics",
+            details={"stale_session_controls": 1},
+        )
+    )
+    app.state.startup_warning_registry = registry
+
+    with TestClient(app) as client:
+        resp = client.get("/api/v1/sandbox/admin/runtime-diagnostics")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["source"] == "feature_discovery"
+    assert body["summary"]["repair_supported_runtimes"] == ["vz_linux"]
+    assert [row["name"] for row in body["runtimes"]] == ["docker", "vz_linux"]
+    assert body["runtimes"][1]["recommended_action"] == "check_helper"
+    assert body["startup_warning_summary"] == {
+        "present": True,
+        "blocking": False,
+        "codes": ["vz_stale_session_controls_detected"],
+    }
+
+
+def test_admin_runtime_diagnostics_offloads_runtime_discovery(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+
+    async def fake_to_thread(
+        func: Callable[..., Any],
+        *args: Any,
+        **kwargs: Any,
+    ) -> Any:
+        calls.append(getattr(func, "__name__", "unknown"))
+        return func(*args, **kwargs)
+
+    fake_service = SimpleNamespace(
+        runtime_diagnostics_summary=lambda: {
+            "source": "feature_discovery",
+            "summary": {
+                "total": 0,
+                "ready": 0,
+                "unavailable": 0,
+                "host_gated": 0,
+                "scaffold": 0,
+                "host_local_warning_runtimes": [],
+                "repair_supported_runtimes": [],
+            },
+            "runtimes": [],
+        }
+    )
+    monkeypatch.setattr(sandbox_mod, "_service", fake_service, raising=True)
+    monkeypatch.setattr(sandbox_mod.asyncio, "to_thread", fake_to_thread)
+
+    app = _build_app_with_overrides(_make_principal(is_admin=True))
+    with TestClient(app) as client:
+        resp = client.get("/api/v1/sandbox/admin/runtime-diagnostics")
+
+    assert resp.status_code == 200
+    assert calls == ["<lambda>"]
+
+
+def test_sandbox_startup_warning_summary_fails_open_without_registry() -> None:
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace()))
+
+    assert sandbox_mod._sandbox_startup_warning_summary(request) == {
+        "present": False,
+        "blocking": False,
+        "codes": [],
+    }
+
+
+def test_sandbox_startup_warning_summary_fails_open_on_registry_error() -> None:
+    class BrokenRegistry:
+        def list_warnings(self, *, component_prefix: str) -> list[object]:
+            raise RuntimeError("registry unavailable")
+
+        def summary(self, *, component_prefix: str) -> dict[str, object]:
+            raise RuntimeError("registry unavailable")
+
+    request = SimpleNamespace(
+        app=SimpleNamespace(
+            state=SimpleNamespace(startup_warning_registry=BrokenRegistry())
+        )
+    )
+
+    assert sandbox_mod._sandbox_startup_warning_summary(request) == {
+        "present": False,
+        "blocking": False,
+        "codes": [],
     }
 
 

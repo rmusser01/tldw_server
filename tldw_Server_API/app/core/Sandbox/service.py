@@ -1095,6 +1095,106 @@ class SandboxService:
             },
         ]
 
+    def runtime_diagnostics_summary(self) -> dict[str, object]:
+        """Return a read-only operator summary derived from runtime discovery."""
+        runtime_rows = [self._runtime_diagnostics_item(row) for row in self.feature_discovery()]
+        ready = [row for row in runtime_rows if row["readiness"] == "ready"]
+        host_gated = [row for row in runtime_rows if row["readiness"] == "host_gated"]
+        scaffold = [row for row in runtime_rows if row["readiness"] == "scaffold"]
+        unavailable = [
+            row
+            for row in runtime_rows
+            if row["readiness"] in {"unavailable", "unsupported", "not_applicable"}
+        ]
+        host_local_warning_runtimes = [
+            str(row["name"])
+            for row in runtime_rows
+            if "host_local_boundary" in set(row.get("isolation_warnings") or [])
+        ]
+        repair_supported_runtimes = [
+            str(row["name"])
+            for row in runtime_rows
+            if bool(row.get("repair_supported"))
+        ]
+        return {
+            "source": "feature_discovery",
+            "summary": {
+                "total": len(runtime_rows),
+                "ready": len(ready),
+                "unavailable": len(unavailable),
+                "host_gated": len(host_gated),
+                "scaffold": len(scaffold),
+                "host_local_warning_runtimes": sorted(host_local_warning_runtimes),
+                "repair_supported_runtimes": sorted(repair_supported_runtimes),
+            },
+            "runtimes": runtime_rows,
+        }
+
+    @staticmethod
+    def _runtime_diagnostics_item(row: dict[str, object]) -> dict[str, object]:
+        """Project one discovery row into the admin diagnostics shape."""
+
+        session_contract = dict(row.get("session_contract") or {})
+        normalized_reasons = [str(reason) for reason in row.get("normalized_reasons") or []]
+        readiness = SandboxService._runtime_readiness(row)
+        repair_state = str(session_contract.get("repair_state") or "").strip().lower()
+        return {
+            "name": str(row.get("name") or ""),
+            "available": bool(row.get("available")),
+            "implementation_state": row.get("implementation_state"),
+            "readiness": readiness,
+            "reasons": [str(reason) for reason in row.get("reasons") or []],
+            "normalized_reasons": normalized_reasons,
+            "boundary_class": row.get("boundary_class"),
+            "vm_grade_isolation": bool(row.get("vm_grade_isolation")),
+            "untrusted_eligible": bool(row.get("untrusted_eligible")),
+            "isolation_warnings": [str(warning) for warning in row.get("isolation_warnings") or []],
+            "strict_deny_all_supported": bool(row.get("strict_deny_all_supported")),
+            "strict_allowlist_supported": bool(row.get("strict_allowlist_supported")),
+            "session_reuse_model": session_contract.get("reuse_model"),
+            "requires_live_health_check": bool(session_contract.get("requires_live_health_check")),
+            "repair_supported": repair_state in {"supported", "host_gated"},
+            "recommended_action": SandboxService._runtime_recommended_action(
+                readiness,
+                normalized_reasons,
+            ),
+        }
+
+    @staticmethod
+    def _runtime_readiness(row: dict[str, object]) -> str:
+        """Classify current runtime readiness from availability and roadmap state."""
+
+        if bool(row.get("available")):
+            return "ready"
+        implementation_state = str(row.get("implementation_state") or "").strip().lower()
+        if implementation_state in {"host_gated", "scaffold", "unsupported", "not_applicable"}:
+            return implementation_state
+        return "unavailable"
+
+    @staticmethod
+    def _runtime_recommended_action(readiness: str, normalized_reasons: list[str]) -> str:
+        """Map normalized readiness reasons to an operator next action."""
+
+        reasons = set(normalized_reasons)
+        if readiness == "ready":
+            return "none"
+        if reasons & {"helper_unavailable", "helper_missing", "helper_protocol_mismatch"}:
+            return "check_helper"
+        if reasons & {"template_missing", "template_unconfigured"}:
+            return "configure_template"
+        if reasons & {
+            "host_prerequisite_missing",
+            "host_permission_denied",
+            "unsupported_os",
+            "unsupported_arch",
+        }:
+            return "prepare_host"
+        if reasons & {"network_policy_unsupported", "trust_policy_denied"}:
+            return "adjust_request_policy"
+        if readiness in {"scaffold", "unsupported", "not_applicable"}:
+            return "use_different_runtime"
+        return "inspect_reasons"
+
     def macos_diagnostics(self) -> dict[str, object]:
         return collect_macos_diagnostics(self._orch)
 
