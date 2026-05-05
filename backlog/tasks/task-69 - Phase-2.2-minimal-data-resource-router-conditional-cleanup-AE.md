@@ -4,7 +4,7 @@ title: Phase 2.2 minimal data/resource router conditional cleanup AE
 status: Done
 assignee: []
 created_date: '2026-05-05 14:00'
-updated_date: '2026-05-05 14:03'
+updated_date: '2026-05-05 14:12'
 labels:
   - phase2.2
   - router-cleanup
@@ -33,13 +33,13 @@ Continue issue #1116 Phase 2.2 by converting the next remaining minimal-test opt
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-Implemented a narrow minimal data/resource router tranche. Added red/green router-group coverage that proves files, storage, data_tables, reading_highlights, items, and reminders defer module import and router attribute access until ImportedRouterSpec resolution. Replaced only those eager try/import RouterSpec blocks in minimal.py.
+Addressed PR #1301 review feedback by introducing data_resource_skip_context for the shared data/resource ImportedRouterSpec skip context.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Converted the selected minimal data/resource optional router registrations to ImportedRouterSpec while preserving prefixes and tags. Verification: focused red/green test, full router_groups contract suite, main router contract suite, OpenAPI contracts, Bandit on minimal.py, and git diff --check.
+Converted the selected minimal data/resource optional router registrations to ImportedRouterSpec while preserving prefixes and tags. Review feedback addressed by centralizing the repeated data/resource skip_context value. Verification: focused red/green test, focused review-fix rerun, full router_groups contract suite, main router contract suite, OpenAPI contracts, Bandit on minimal.py, and git diff --check.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

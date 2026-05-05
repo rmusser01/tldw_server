@@ -348,48 +348,49 @@ def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
     ):
         append_imported_router_spec(specs, collections_social_spec)
 
+    data_resource_skip_context = "in minimal test app"
     for data_resource_spec in (
         ImportedRouterSpec(
             import_path="tldw_Server_API.app.api.v1.endpoints.files",
             log_name="files",
             prefix=f"{API_V1_PREFIX}",
             tags=("files",),
-            skip_context="in minimal test app",
+            skip_context=data_resource_skip_context,
         ),
         ImportedRouterSpec(
             import_path="tldw_Server_API.app.api.v1.endpoints.storage",
             log_name="storage",
             prefix=f"{API_V1_PREFIX}",
             tags=("storage",),
-            skip_context="in minimal test app",
+            skip_context=data_resource_skip_context,
         ),
         ImportedRouterSpec(
             import_path="tldw_Server_API.app.api.v1.endpoints.data_tables",
             log_name="data_tables",
             prefix=f"{API_V1_PREFIX}",
             tags=("data-tables",),
-            skip_context="in minimal test app",
+            skip_context=data_resource_skip_context,
         ),
         ImportedRouterSpec(
             import_path="tldw_Server_API.app.api.v1.endpoints.reading_highlights",
             log_name="reading_highlights",
             prefix=f"{API_V1_PREFIX}",
             tags=("reading-highlights",),
-            skip_context="in minimal test app",
+            skip_context=data_resource_skip_context,
         ),
         ImportedRouterSpec(
             import_path="tldw_Server_API.app.api.v1.endpoints.items",
             log_name="items",
             prefix=f"{API_V1_PREFIX}",
             tags=("items",),
-            skip_context="in minimal test app",
+            skip_context=data_resource_skip_context,
         ),
         ImportedRouterSpec(
             import_path="tldw_Server_API.app.api.v1.endpoints.reminders",
             log_name="reminders",
             prefix=f"{API_V1_PREFIX}",
             tags=("tasks",),
-            skip_context="in minimal test app",
+            skip_context=data_resource_skip_context,
         ),
     ):
         append_imported_router_spec(specs, data_resource_spec)
