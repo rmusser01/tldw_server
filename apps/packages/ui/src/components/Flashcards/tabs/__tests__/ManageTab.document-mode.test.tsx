@@ -11,6 +11,7 @@ import {
   useManageQuery,
   useResetFlashcardSchedulingMutation,
   useTagSuggestionsQuery,
+  useUpdateDeckMutation,
   useUpdateFlashcardsBulkMutation,
   useUpdateFlashcardMutation
 } from "../../hooks"
@@ -92,6 +93,7 @@ vi.mock("../../hooks", () => ({
   useManageQuery: vi.fn(),
   useFlashcardDocumentQuery: vi.fn(),
   useTagSuggestionsQuery: vi.fn(),
+  useUpdateDeckMutation: vi.fn(),
   useUpdateFlashcardMutation: vi.fn(),
   useUpdateFlashcardsBulkMutation: vi.fn(),
   useResetFlashcardSchedulingMutation: vi.fn(),
@@ -102,6 +104,7 @@ vi.mock("../../hooks", () => ({
 }))
 
 vi.mock("../../components", () => ({
+  FlashcardMarkdownSnippet: ({ content }: { content: string }) => <div>{content}</div>,
   MarkdownWithBoundary: ({ content }: { content: string }) => <div>{content}</div>,
   FlashcardActionsMenu: ({ onEdit }: { onEdit: () => void }) => (
     <button onClick={onEdit}>Action Edit</button>
@@ -235,6 +238,10 @@ describe("ManageTab document mode", () => {
     } as any)
 
     vi.mocked(useUpdateFlashcardMutation).mockReturnValue({
+      mutateAsync: vi.fn(),
+      isPending: false
+    } as any)
+    vi.mocked(useUpdateDeckMutation).mockReturnValue({
       mutateAsync: vi.fn(),
       isPending: false
     } as any)
