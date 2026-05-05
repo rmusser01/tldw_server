@@ -237,7 +237,7 @@ git commit -m "feat: add codegraph java extractor"
 - Create: `tldw_Server_API/tests/CodeGraph/test_codegraph_kotlin_extractor.py`
 - Modify: `tldw_Server_API/app/core/CodeGraph/extractors/jvm_common.py` only for genuinely shared needs.
 
-- [ ] **Step 1: Write RED Kotlin extractor test**
+- [x] **Step 1: Write RED Kotlin extractor test**
 
 Test source:
 
@@ -279,7 +279,7 @@ Expected relationships:
 - `greet` has a resolved same-file call edge to `helper`.
 - `create` may leave `Greeter` constructor call unresolved unless constructor nodes are explicitly modeled for Kotlin in this slice.
 
-- [ ] **Step 2: Run RED Kotlin test**
+- [x] **Step 2: Run RED Kotlin test**
 
 Run:
 
@@ -289,7 +289,7 @@ Run:
 
 Expected: fail because `KotlinTreeSitterExtractor` does not exist.
 
-- [ ] **Step 3: Implement minimal Kotlin extractor**
+- [x] **Step 3: Implement minimal Kotlin extractor**
 
 Implement:
 
@@ -302,15 +302,15 @@ Implement:
 
 Do not model Kotlin overloads, extensions, generics, delegated properties, or compiler semantics.
 
-- [ ] **Step 4: Run GREEN Kotlin test**
+- [x] **Step 4: Run GREEN Kotlin test**
 
 Run the same pytest command. Expected: pass.
 
-- [ ] **Step 5: Add deterministic ID test**
+- [x] **Step 5: Add deterministic ID test**
 
 Add one test extracting the same Kotlin source twice and assert node IDs are identical.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/CodeGraph/extractors/kotlin_extractor.py \

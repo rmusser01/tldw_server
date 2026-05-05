@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@Codex'
 created_date: '2026-05-05 00:52'
-updated_date: '2026-05-05 01:04'
+updated_date: '2026-05-05 01:06'
 labels:
   - codegraph
   - mcp
@@ -55,6 +55,8 @@ Created focused Stage 5 implementation plan at Docs/superpowers/plans/2026-05-05
 Task 1 dependency gate complete: installed tree-sitter-java 0.23.5 and tree-sitter-kotlin 1.1.0 into the shared venv, verified both expose language(), added loader mappings and optional dependency bounds, and loader tests pass with 9 passed.
 
 Task 3 Java extractor complete: added shared JVM helpers plus Java Tree-sitter extraction for package/import/type/method/constructor nodes, same-file bare method call resolution, unresolved imports/receiver calls, parse errors, and deterministic node IDs. Verified with python -m pytest tldw_Server_API/tests/CodeGraph/test_codegraph_java_extractor.py -q (3 passed).
+
+Task 4 Kotlin extractor complete: added Kotlin Tree-sitter extraction for package/import/class/object/interface/function nodes, same-file simple function call resolution, unresolved imports/receiver calls, parse errors, and deterministic node IDs. Verified with python -m pytest tldw_Server_API/tests/CodeGraph/test_codegraph_kotlin_extractor.py -q (3 passed).
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
