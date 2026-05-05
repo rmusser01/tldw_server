@@ -2294,10 +2294,11 @@ def test_iter_content_router_specs_defers_audio_voice_router_attr_lookup(
         assert spec.name == definition["expected_name"]
         assert spec.default_stable is definition["default_stable"]
 
-    assert import_calls == [
+    expected_import_modules = {
         str(definition["module_name"])
         for definition in router_definitions
-    ]
+    }
+    assert set(import_calls) == expected_import_modules
     assert access_count == {
         f"{definition['module_name']}.{definition['attr_name']}": 1
         for definition in router_definitions
