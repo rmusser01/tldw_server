@@ -1,7 +1,32 @@
 from __future__ import annotations
 
 import importlib
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
+from typing import Any
+
+import pytest
+
+
+def _require_parser(loader: Any, language_id: str) -> Any:
+    result = loader.load_parser(language_id)
+    if result.available:
+        return result
+    if result.missing:
+        pytest.skip(f"{language_id} parser dependencies are not available: {', '.join(result.missing)}")
+    pytest.skip(f"{language_id} parser is not available: {result.error or 'unknown error'}")
+
+
+def test_require_parser_skips_when_optional_dependency_is_missing() -> None:
+    loader = SimpleNamespace(
+        load_parser=lambda language_id: SimpleNamespace(
+            available=False,
+            missing=(f"tree_sitter_{language_id}",),
+            error=None,
+        )
+    )
+
+    with pytest.raises(pytest.skip.Exception):
+        _require_parser(loader, "java")
 
 
 def test_loader_module_imports_without_eager_parser_imports() -> None:
@@ -57,7 +82,7 @@ def test_javascript_parser_can_parse_exported_function() -> None:
         "tldw_Server_API.app.core.CodeGraph.extractors.tree_sitter_loader"
     )
 
-    result = loader.load_parser("javascript")
+    result = _require_parser(loader, "javascript")
     tree = result.parser.parse(b"export function helper() { return 1; }")
 
     assert result.missing == ()
@@ -71,7 +96,7 @@ def test_typescript_parser_can_parse_interface() -> None:
         "tldw_Server_API.app.core.CodeGraph.extractors.tree_sitter_loader"
     )
 
-    result = loader.load_parser("typescript")
+    result = _require_parser(loader, "typescript")
     tree = result.parser.parse(b"interface User { id: string }")
 
     assert result.missing == ()
@@ -85,7 +110,7 @@ def test_tsx_parser_can_parse_component() -> None:
         "tldw_Server_API.app.core.CodeGraph.extractors.tree_sitter_loader"
     )
 
-    result = loader.load_parser("tsx")
+    result = _require_parser(loader, "tsx")
     tree = result.parser.parse(b"export function Card() { return <div />; }")
 
     assert result.missing == ()
@@ -100,7 +125,7 @@ def test_java_parser_can_parse_class() -> None:
         "tldw_Server_API.app.core.CodeGraph.extractors.tree_sitter_loader"
     )
 
-    result = loader.load_parser("java")
+    result = _require_parser(loader, "java")
     tree = result.parser.parse(b"class Greeter { String greet() { return helper(); } }")
 
     assert result.missing == ()
@@ -115,7 +140,7 @@ def test_kotlin_parser_can_parse_class() -> None:
         "tldw_Server_API.app.core.CodeGraph.extractors.tree_sitter_loader"
     )
 
-    result = loader.load_parser("kotlin")
+    result = _require_parser(loader, "kotlin")
     tree = result.parser.parse(b"class Greeter {\n fun greet(): String { return helper() }\n}")
 
     assert result.missing == ()
@@ -130,7 +155,7 @@ def test_csharp_parser_can_parse_class() -> None:
         "tldw_Server_API.app.core.CodeGraph.extractors.tree_sitter_loader"
     )
 
-    result = loader.load_parser("csharp")
+    result = _require_parser(loader, "csharp")
     tree = result.parser.parse(b"class Greeter { string Greet() { return Helper(); } }")
 
     assert result.missing == ()
@@ -145,7 +170,7 @@ def test_c_parser_can_parse_function() -> None:
         "tldw_Server_API.app.core.CodeGraph.extractors.tree_sitter_loader"
     )
 
-    result = loader.load_parser("c")
+    result = _require_parser(loader, "c")
     tree = result.parser.parse(b"int helper(int value) { return value + 1; }")
 
     assert result.missing == ()
@@ -160,7 +185,7 @@ def test_cpp_parser_can_parse_class() -> None:
         "tldw_Server_API.app.core.CodeGraph.extractors.tree_sitter_loader"
     )
 
-    result = loader.load_parser("cpp")
+    result = _require_parser(loader, "cpp")
     tree = result.parser.parse(b"class Greeter { int helper() { return 1; } };")
 
     assert result.missing == ()
