@@ -4,6 +4,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+import pytest
+
 import tldw_Server_API.app.core.CodeGraph.indexer as indexer_module
 from tldw_Server_API.app.core.CodeGraph.config import CodeGraphSettings
 from tldw_Server_API.app.core.CodeGraph.dependencies import DependencyHealth
@@ -210,7 +212,7 @@ public class Greeter {
 
 def test_indexer_does_not_count_non_extractable_jvm_files_against_foreground_limits(
     tmp_path: Path,
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     def fake_load_parser(language_id: str) -> SimpleNamespace:
         return SimpleNamespace(available=language_id not in {"java", "kotlin"})
@@ -247,7 +249,7 @@ def test_indexer_does_not_count_non_extractable_jvm_files_against_foreground_lim
 
 def test_indexer_does_not_count_non_extractable_csharp_files_against_foreground_limits(
     tmp_path: Path,
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     def fake_load_parser(language_id: str) -> SimpleNamespace:
         return SimpleNamespace(available=language_id != "csharp")

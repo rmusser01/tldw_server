@@ -139,16 +139,17 @@ class _CSharpGraphBuilder:
         )
 
     def _visit_namespace_declaration(self, node: Any) -> None:
-        name = node_text(self.source, node.child_by_field_name("name"))
-        if not name:
+        local_name = node_text(self.source, node.child_by_field_name("name"))
+        if not local_name:
             return
         previous_namespace = self._namespace_name
-        self._namespace_name = name
+        namespace_name = qualified_name(previous_namespace, local_name)
+        self._namespace_name = namespace_name
         self.nodes.append(
             self._make_node(
                 kind="namespace",
-                name=name,
-                qualified_name_value=name,
+                name=local_name,
+                qualified_name_value=namespace_name,
                 node=node,
             )
         )
@@ -156,11 +157,13 @@ class _CSharpGraphBuilder:
         body = first_named_child_of_type(node, "declaration_list")
         if body is not None:
             for child in body.named_children:
-                if child.type in _TYPE_KINDS:
+                if child.type == "using_directive":
+                    self._visit_using_directive(child)
+                elif child.type in _TYPE_KINDS:
                     self._visit_type_declaration(child)
                 elif child.type in {"file_scoped_namespace_declaration", "namespace_declaration"}:
                     self._visit_namespace_declaration(child)
-        self._namespace_name = previous_namespace if node.type == "namespace_declaration" else name
+        self._namespace_name = previous_namespace if node.type == "namespace_declaration" else namespace_name
 
     def _visit_type_declaration(self, node: Any) -> None:
         name_node = node.child_by_field_name("name")
@@ -259,11 +262,20 @@ class _CSharpGraphBuilder:
         if function_node is None:
             return
 
-        if function_node.type == "identifier":
+        if function_node.type in {"identifier", "generic_name"}:
+            if function_node.type == "generic_name":
+                name_node = function_node.child_by_field_name("name") or first_named_child_of_type(
+                    function_node, "identifier"
+                )
+            else:
+                name_node = function_node
+            reference_name = node_text(self.source, name_node)
+            if not reference_name:
+                return
             self._call_sites.append(
                 JvmCallSite(
                     source_node_id=current_scope.id,
-                    reference_name=node_text(self.source, function_node),
+                    reference_name=reference_name,
                     line=line(node),
                     column=column(node),
                 )

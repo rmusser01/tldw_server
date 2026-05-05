@@ -41,6 +41,24 @@ public enum Mode {
 }
 """
 
+CSHARP_BLOCK_NAMESPACE_FIXTURE = b"""
+namespace Outer {
+    using InternalThing = Example.Internal.Tooling;
+
+    namespace Inner {
+        public class GenericGreeter {
+            public string Greet(string name) {
+                return Transform<string>(name);
+            }
+
+            private string Transform<T>(string value) {
+                return value.Trim();
+            }
+        }
+    }
+}
+"""
+
 
 def test_csharp_extractor_records_namespaces_imports_types_members_and_calls() -> None:
     """Extract conservative C# symbols and same-file method calls."""
@@ -99,6 +117,42 @@ def test_csharp_extractor_records_namespaces_imports_types_members_and_calls() -
     )
     assert any(
         ref.reference_kind == "import" and ref.reference_name == "Collections = System.Collections.Generic"
+        for ref in result.unresolved_refs
+    )
+    assert result.errors == ()
+
+
+def test_csharp_extractor_handles_block_namespaces_usings_and_generic_calls() -> None:
+    """Handle common block-scoped namespace layouts without losing scope or calls."""
+    result = CSharpTreeSitterExtractor().extract(
+        workspace_key="ws",
+        file_path="src/Outer/Inner/GenericGreeter.cs",
+        source=CSHARP_BLOCK_NAMESPACE_FIXTURE,
+    )
+
+    nodes_by_kind_name = {(node.kind, node.name): node for node in result.nodes}
+
+    outer_namespace = nodes_by_kind_name[("namespace", "Outer")]
+    inner_namespace = nodes_by_kind_name[("namespace", "Inner")]
+    import_node = nodes_by_kind_name[("import", "InternalThing = Example.Internal.Tooling")]
+    greeter = nodes_by_kind_name[("class", "GenericGreeter")]
+    greet = nodes_by_kind_name[("method", "Greet")]
+    transform = nodes_by_kind_name[("method", "Transform")]
+
+    assert outer_namespace.qualified_name == "Outer"
+    assert inner_namespace.qualified_name == "Outer.Inner"
+    assert greeter.qualified_name == "Outer.Inner.GenericGreeter"
+    assert greet.qualified_name == "Outer.Inner.GenericGreeter.Greet"
+    assert transform.qualified_name == "Outer.Inner.GenericGreeter.Transform"
+    assert (greet.id, transform.id) in {(edge.source, edge.target) for edge in result.edges}
+    assert any(
+        ref.reference_kind == "import"
+        and ref.reference_name == "InternalThing = Example.Internal.Tooling"
+        and ref.from_node_id == import_node.id
+        for ref in result.unresolved_refs
+    )
+    assert any(
+        ref.reference_kind == "call" and ref.reference_name == "value.Trim" and ref.from_node_id == transform.id
         for ref in result.unresolved_refs
     )
     assert result.errors == ()

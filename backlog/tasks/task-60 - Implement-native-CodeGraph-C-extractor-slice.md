@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@Codex'
 created_date: '2026-05-05 03:25'
-updated_date: '2026-05-05 03:38'
+updated_date: '2026-05-05 04:00'
 labels:
   - codegraph
   - mcp
@@ -35,6 +35,12 @@ Add the next Stage 5 native CodeGraph language slice after the merged Java/Kotli
 - [x] #5 Focused loader, registry, extractor, indexer, and MCP tests cover C# behavior plus dependency-missing paths, with Ruff, Bandit on touched production scope, and git diff --check passing before PR.
 <!-- AC:END -->
 
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+PR #1288 review-fix pass: add extractor regression coverage for nested block namespaces, namespace-scoped using directives, and generic method invocations; annotate the new C# indexer monkeypatch fixture; update C# namespace/call visitor behavior narrowly; rerun focused CodeGraph tests plus Ruff, Bandit, and git diff --check; then push and resolve the addressed review threads.
+<!-- SECTION:PLAN:END -->
+
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
@@ -43,6 +49,10 @@ Implemented focused C# CodeGraph slice. Verified tree-sitter-c-sharp 0.23.5 expo
 Added optional dependency probing, parser loader mapping, csharp foundation metadata, CodeGraphIndexer registration, CSharpTreeSitterExtractor, extractor/indexer/registry/loader/MCP search tests, and implementation plan Docs/superpowers/plans/2026-05-05-native-codegraph-csharp-extractor-implementation-plan.md.
 
 Verification: focused RED tests failed for unsupported csharp or missing extractor before implementation; focused C# regression set passed with 9 passed; full CodeGraph plus MCP focused suite passed with 117 passed and 5 warnings; Ruff passed on touched CodeGraph/MCP/test scope; Bandit JSON at /tmp/bandit_codegraph_csharp.json reported results 0 and errors 0; git diff --check passed.
+
+Reopened for PR #1288 review comments from Gemini and Qodo: nested namespace qualification, generic method invocations, namespace-scoped using extraction, and monkeypatch typing.
+
+PR #1288 review-fix verification: focused review tests passed for block namespaces/usings/generic calls and C# dependency-missing indexer path; full CodeGraph plus MCP focused suite passed with 118 passed and 5 warnings; Ruff passed on touched CodeGraph/MCP/test scope; Bandit JSON at /tmp/bandit_codegraph_csharp_review_fixes.json reported errors 0 and results 0; git diff --check passed.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
@@ -51,6 +61,8 @@ Verification: focused RED tests failed for unsupported csharp or missing extract
 Implemented the native CodeGraph C# extractor slice. C# is now a dependency-aware foundation language backed by optional tree-sitter-c-sharp, with conservative extraction for using directives, namespaces, classes, interfaces, structs, records, enums, constructors, methods, properties, same-file simple calls, and unresolved external/receiver references. Known limits remain intentional: no Roslyn project model, project/solution analysis, partial type merging, overload/type inference, inheritance, extension-method, or cross-file semantic resolution.
 
 PR: https://github.com/rmusser01/tldw_server/pull/1288
+
+PR #1288 review follow-up: fixed nested block-scoped namespace qualification, namespace-scoped using extraction, generic same-file method invocation resolution, and pytest MonkeyPatch typing in the touched indexer tests.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
