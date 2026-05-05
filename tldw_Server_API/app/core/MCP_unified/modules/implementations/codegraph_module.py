@@ -16,7 +16,11 @@ from typing import Any
 from loguru import logger
 
 from tldw_Server_API.app.core.CodeGraph.config import CodeGraphSettings
-from tldw_Server_API.app.core.CodeGraph.context import CodeGraphContextBuilder
+from tldw_Server_API.app.core.CodeGraph.context import (
+    CodeGraphContextBuilder,
+    context_search_terms,
+    rank_context_nodes,
+)
 from tldw_Server_API.app.core.CodeGraph.dependencies import probe_codegraph_dependencies
 from tldw_Server_API.app.core.CodeGraph.indexer import CodeGraphIndexer
 from tldw_Server_API.app.core.CodeGraph.jobs import enqueue_codegraph_index_job
@@ -36,6 +40,7 @@ from ..base import BaseModule, ModuleConfig, create_tool_definition
 _EMPTY_COUNTS = {"files": 0, "nodes": 0, "edges": 0, "unresolved_refs": 0}
 _FOREGROUND_MODE = "foreground"
 _JOB_MODES = {"job", "background"}
+_MAX_CONTEXT_CANDIDATE_SEARCH_TERMS = 16
 
 
 class CodeGraphModule(BaseModule):
@@ -844,7 +849,24 @@ class CodeGraphModule(BaseModule):
             }
 
         repository = CodeGraphRepository(resolution.index_db_path)
-        nodes = tuple(repository.search_nodes(query, limit=effective_max_nodes + 1)[:effective_max_nodes])
+        candidate_limit = min(
+            self._settings.max_search_results,
+            max(effective_max_nodes * 4, effective_max_nodes + 8),
+        )
+        candidate_nodes = _context_candidate_nodes(
+            repository,
+            query,
+            limit=candidate_limit,
+        )
+        candidate_relationships = tuple(
+            _relationship_neighborhood(
+                repository,
+                candidate_nodes,
+                limit=self._settings.max_search_results,
+            )
+        )
+        ranking_relationships = _relationships_between_nodes(candidate_relationships, candidate_nodes)
+        nodes = rank_context_nodes(task, candidate_nodes, relationships=ranking_relationships)[:effective_max_nodes]
         relationships = tuple(_relationship_neighborhood(repository, nodes, limit=self._settings.max_search_results))
         builder = CodeGraphContextBuilder(
             workspace_root=resolution.workspace_root,
@@ -953,6 +975,64 @@ def _normalize_path_prefix(path: str | None) -> str | None:
 def _context_query(task: str) -> str:
     """Derive the first-pass symbol search query from a task description."""
     return task.strip()
+
+
+def _context_candidate_nodes(
+    repository: CodeGraphRepository,
+    query: str,
+    *,
+    limit: int,
+) -> tuple[CodeGraphNode, ...]:
+    """Collect deduplicated context candidates from whole-task and token searches."""
+    normalized_limit = max(1, int(limit))
+    terms = _context_candidate_search_terms(query)
+    if not terms:
+        return ()
+
+    per_term_limit = max(1, (normalized_limit + len(terms) - 1) // len(terms))
+    by_id: dict[str, CodeGraphNode] = {}
+    for term in terms:
+        for node in repository.search_nodes(term, limit=per_term_limit):
+            by_id.setdefault(node.id, node)
+    return tuple(by_id.values())
+
+
+def _context_candidate_search_terms(query: str) -> tuple[str, ...]:
+    """Return bounded search terms while preserving later specific task tokens."""
+    terms = context_search_terms(query)
+    if len(terms) <= _MAX_CONTEXT_CANDIDATE_SEARCH_TERMS:
+        return terms
+
+    full_query, *tokens = terms
+    selected_tokens = sorted(
+        enumerate(tokens),
+        key=lambda item: (-len(item[1]), item[0]),
+    )[: _MAX_CONTEXT_CANDIDATE_SEARCH_TERMS - 1]
+    return (full_query, *(token for _index, token in sorted(selected_tokens)))
+
+
+def _relationships_between_nodes(
+    relationships: tuple[dict[str, Any], ...],
+    nodes: tuple[CodeGraphNode, ...],
+) -> tuple[dict[str, Any], ...]:
+    """Filter relationship dictionaries to edges whose endpoints are both candidate nodes."""
+    node_ids = {node.id for node in nodes}
+    return tuple(
+        relationship
+        for relationship in relationships
+        if _relationship_endpoint_id(relationship, "source") in node_ids
+        and _relationship_endpoint_id(relationship, "target") in node_ids
+    )
+
+
+def _relationship_endpoint_id(relationship: dict[str, Any], endpoint_name: str) -> str | None:
+    endpoint = relationship.get(endpoint_name)
+    if not isinstance(endpoint, dict):
+        return None
+    node_id = endpoint.get("id")
+    if not isinstance(node_id, str) or not node_id:
+        return None
+    return node_id
 
 
 def _empty_truncation(max_context_chars: int) -> dict[str, Any]:

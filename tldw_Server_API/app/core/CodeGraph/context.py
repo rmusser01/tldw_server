@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
 from tldw_Server_API.app.core.CodeGraph.models import CodeGraphNode, codegraph_node_to_dict
 
 _SNIPPET_CONTEXT_LINES = 3
+_TOKEN_RE = re.compile(r"[a-zA-Z0-9_]+")
 
 
 class CodeGraphContextBuilder:
@@ -135,11 +137,117 @@ def _group_nodes_by_file(
     return list(grouped.items())
 
 
+def rank_context_nodes(
+    task: str,
+    nodes: tuple[CodeGraphNode, ...],
+    *,
+    relationships: tuple[dict[str, Any], ...],
+) -> tuple[CodeGraphNode, ...]:
+    """Return context nodes ordered by task-token relevance and graph proximity."""
+    tokens = _task_tokens(task)
+    candidate_ids = {node.id for node in nodes}
+    relationship_counts = _relationship_endpoint_counts(relationships, candidate_ids=candidate_ids)
+    indexed_nodes = tuple(enumerate(nodes))
+
+    return tuple(
+        node
+        for _index, node in sorted(
+            indexed_nodes,
+            key=lambda item: _ranking_key(item[0], item[1], tokens, relationship_counts),
+        )
+    )
+
+
+def context_search_terms(task: str) -> tuple[str, ...]:
+    """Return a deterministic sequence of search terms for a context task."""
+    stripped = task.strip()
+    terms: dict[str, None] = {}
+    if stripped:
+        terms[stripped] = None
+    for token in _task_tokens(stripped):
+        terms.setdefault(token, None)
+    return tuple(terms)
+
+
 def _dominant_language(nodes: list[CodeGraphNode]) -> str | None:
     for node in nodes:
         if node.language:
             return node.language
     return None
+
+
+def _task_tokens(task: str) -> tuple[str, ...]:
+    """Tokenize a task string into deterministic lowercase search terms."""
+    seen: dict[str, None] = {}
+    for match in _TOKEN_RE.finditer(task.lower()):
+        token = match.group(0).strip("_")
+        if len(token) >= 2:
+            seen.setdefault(token, None)
+    return tuple(seen)
+
+
+def _relationship_endpoint_counts(
+    relationships: tuple[dict[str, Any], ...],
+    *,
+    candidate_ids: set[str],
+) -> dict[str, int]:
+    """Count candidate ids that participate in candidate-to-candidate relationships."""
+    counts: dict[str, int] = {}
+    for relationship in relationships:
+        source_id = _relationship_endpoint_id(relationship, "source")
+        target_id = _relationship_endpoint_id(relationship, "target")
+        if source_id not in candidate_ids or target_id not in candidate_ids:
+            continue
+        counts[source_id] = counts.get(source_id, 0) + 1
+        counts[target_id] = counts.get(target_id, 0) + 1
+    return counts
+
+
+def _relationship_endpoint_id(relationship: dict[str, Any], endpoint_name: str) -> str | None:
+    endpoint = relationship.get(endpoint_name)
+    if not isinstance(endpoint, dict):
+        return None
+    node_id = endpoint.get("id")
+    if not isinstance(node_id, str) or not node_id:
+        return None
+    return node_id
+
+
+def _ranking_key(
+    original_index: int,
+    node: CodeGraphNode,
+    tokens: tuple[str, ...],
+    relationship_counts: dict[str, int],
+) -> tuple[int, int, int]:
+    """Build a stable sort key where lower values represent more relevant context."""
+    relevance_score = _node_relevance_score(node, tokens)
+    relationship_score = relationship_counts.get(node.id, 0)
+    return (
+        -relevance_score,
+        -relationship_score,
+        original_index,
+    )
+
+
+def _node_relevance_score(node: CodeGraphNode, tokens: tuple[str, ...]) -> int:
+    """Score a node by exact and partial task-token matches in public identity fields."""
+    if not tokens:
+        return 0
+    fields = (
+        node.name.lower(),
+        node.qualified_name.lower(),
+        node.file_path.lower(),
+    )
+    score = 0
+    for token in tokens:
+        for field in fields:
+            if field == token:
+                score += 8
+            elif field.endswith(f".{token}") or field.endswith(f"/{token}") or f"/{token}." in field:
+                score += 5
+            elif token in field:
+                score += 2
+    return score
 
 
 def _make_snippet(node: CodeGraphNode, lines: list[str]) -> dict[str, Any]:
